@@ -9,6 +9,9 @@ import {
   resolveSamplePlaybackUrlForRuntime,
 } from '~/lib/renderer-api-url'
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
+import { createAudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
+import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
+import { ResumableAudioUploadHttpError, uploadAudioFile } from '~/lib/resumable-audio-uploader'
 
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -112,6 +115,7 @@ export type UploadToR2 = (
   assetKey: string,
   file: File,
   durationSec?: number,
+  signal?: AbortSignal,
 ) => Promise<UploadToR2Result>
 
 type ClipBufferOptions = {
@@ -119,6 +123,7 @@ type ClipBufferOptions = {
   projectId: Accessor<string>
   tracks: Accessor<Track[]>
   onBufferChange: () => void
+  resolveAudioSource?: AudioPcmSourceResolver
 }
 
 type ClipBufferControls = ClipBuffers & {
@@ -127,13 +132,6 @@ type ClipBufferControls = ClipBuffers & {
   loadCapturedMedia: (reference: CapturedClipMediaReference, signal?: AbortSignal) => Promise<CapturedClipBufferLoadResult>
 }
 
-type UploadedAssetPayload = { url?: unknown; assetKey?: unknown }
-
-const isUploadedAssetPayload = (cause: unknown): cause is UploadedAssetPayload => (
-  typeof cause === 'object' && cause !== null
-)
-
-const isString = (cause: unknown): cause is string => typeof cause === 'string'
 
 export const createAudioAssetRef = (assetId: string, buffer: AudioBuffer): AudioAssetRef => ({
   version: audioCoreContractVersion,
@@ -160,6 +158,10 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
     decode: (data, targetSampleRate) => audioEngine.decodeAudioData(data, targetSampleRate),
     resolveSampleUrl,
   })
+  const resolveAudioSource = options.resolveAudioSource ?? createAudioPcmSourceResolver({
+    projectId: options.projectId,
+  })
+  audioEngine.setAudioSourceResolver(resolveAudioSource)
   let cacheGeneration = 0
   const registeredAssetIds = new Set<string>()
 
@@ -177,22 +179,20 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
     publishBufferUpdate()
   }
 
-  const uploadToR2: UploadToR2 = async (room, assetKey, file, durationSec) => {
+  const uploadToR2: UploadToR2 = async (room, assetKey, file, durationSec, signal) => {
     try {
-      const fd = new FormData()
-      fd.append('projectId', room)
-      fd.append('assetKey', assetKey)
-      fd.append('file', file, file.name)
-      if (durationSec !== undefined && Number.isFinite(durationSec)) {
-        fd.append('duration', String(durationSec))
-      }
-      const res = await fetch('/api/samples', { method: 'POST', body: fd })
-      if (!res.ok) return null
-      const data = await res.json().catch(() => null)
-      return isUploadedAssetPayload(data) && isString(data.url) && isString(data.assetKey)
-        ? { assetKey: data.assetKey, url: data.url }
-        : null
-    } catch {
+      signal?.throwIfAborted()
+      return await uploadAudioFile({
+        projectId: room,
+        idempotencyKey: `browser-${assetKey}`,
+        assetKey,
+        file,
+        durationSec,
+        signal,
+      })
+    } catch (error) {
+      if (signal?.aborted) throw error
+      if (error instanceof ResumableAudioUploadHttpError && error.status === 413) throw error
       return null
     }
   }
@@ -360,6 +360,7 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
     audioBufferCache.clear()
     sampleBufferLoader.clear()
     clearWaveformAssetCache()
+    audioEngine.invalidateAudioSourceCache()
   }
 
   const writer: ClipBufferWriter = {

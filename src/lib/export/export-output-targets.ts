@@ -29,7 +29,6 @@ export type StemOutputTarget = {
 export type ExportOutputTargetFactory = {
   resourceLimits?: {
     maximumFiles: number
-    maximumBytes: number
     streaming: true
   }
   createMixdownTarget: (input: {

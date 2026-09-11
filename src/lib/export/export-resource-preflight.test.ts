@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test"
-import { nativeAudioHostMaximumInMemoryPcmBytes } from "@daw-browser/desktop-protocol/native-audio-host"
 import { preflightExportResources } from "~/lib/export/export-resource-preflight"
 import type { ExportEncodingSettings, ExportRenderSettings } from "~/lib/export/export-settings"
 
@@ -16,7 +15,6 @@ const encoding: ExportEncodingSettings = {
 const tracks = [{ clips: [{ startSec: 0, duration: 1 }] }]
 const desktopLimits = {
   maximumFiles: 1_024,
-  maximumBytes: 8 * 1024 * 1024 * 1024,
   streaming: true as const,
 }
 
@@ -92,8 +90,8 @@ test("preflight accounts for the automatic tail maximum and unique formats", () 
   expect(result.outputCount).toBe(6)
 })
 
-test("desktop preflight rejects raw render buffers beyond the host envelope", () => {
-  expect(() => preflightExportResources({
+test("desktop preflight accepts a logical render beyond the former host envelope", () => {
+  expect(preflightExportResources({
     tracks,
     range: { mode: "custom", startSec: 0, endSec: 12_000 },
     formats: ["mp3"],
@@ -101,40 +99,25 @@ test("desktop preflight rejects raw render buffers beyond the host envelope", ()
     encoding,
     stemCount: 1,
     resourceLimits: desktopLimits,
-  })).toThrow("render buffer")
+  }).aggregateBytes).toBeGreaterThan(0)
 })
 
-test("native preflight accepts the exact in-memory PCM boundary", () => {
-  const totalFrames = nativeAudioHostMaximumInMemoryPcmBytes
-    / (2 * Float32Array.BYTES_PER_ELEMENT)
-  const endSec = (totalFrames - 0.5) / 96_000
-  expect(preflightExportResources({
-    tracks,
-    range: { mode: "custom", startSec: 0, endSec },
-    formats: ["mp3"],
-    render: { ...render, sampleRate: 96_000 },
-    encoding,
-    stemCount: 1,
-    maximumInMemoryPcmBytes: nativeAudioHostMaximumInMemoryPcmBytes,
-  }).renderEndSec).toBe(endSec)
-})
-
-test("native preflight rejects one frame beyond the in-memory PCM boundary", () => {
-  const totalFrames = nativeAudioHostMaximumInMemoryPcmBytes
+test("native preflight admits a logical render beyond the former in-memory PCM boundary", () => {
+  const totalFrames = 512 * 1024 * 1024
     / (2 * Float32Array.BYTES_PER_ELEMENT) + 1
   const endSec = (totalFrames + 0.5) / 96_000
-  expect(() => preflightExportResources({
+  const result = preflightExportResources({
     tracks,
     range: { mode: "custom", startSec: 0, endSec },
     formats: ["mp3"],
     render: { ...render, sampleRate: 96_000 },
     encoding,
     stemCount: 1,
-    maximumInMemoryPcmBytes: nativeAudioHostMaximumInMemoryPcmBytes,
-  })).toThrow("512 MiB in-memory PCM")
+  })
+  expect(result.renderEndSec).toBe(endSec)
 })
-test("desktop preflight rejects a conservative aggregate output estimate", () => {
-  expect(() => preflightExportResources({
+test("desktop preflight reports a conservative aggregate output estimate without rejecting it", () => {
+  expect(preflightExportResources({
     tracks,
     range: { mode: "whole" },
     formats: ["flac"],
@@ -142,7 +125,7 @@ test("desktop preflight rejects a conservative aggregate output estimate", () =>
     encoding,
     stemCount: 1_024,
     resourceLimits: desktopLimits,
-  })).toThrow("desktop output")
+  }).aggregateBytes).toBeGreaterThan(0)
 })
 
 test("lossy estimates use the selected bitrate metadata", () => {

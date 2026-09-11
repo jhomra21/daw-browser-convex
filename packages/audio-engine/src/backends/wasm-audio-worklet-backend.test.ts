@@ -1,6 +1,10 @@
 import { expect, test } from 'bun:test'
 import { audioCoreContractVersion } from '../../../audio-core-contract/src'
-import { audioCoreWasmAbiVersion, audioCoreWasmArtifactVersion } from '../../../audio-core-wasm/src'
+import {
+  audioCoreWasmAbiVersion,
+  audioCoreWasmArtifactVersion,
+  audioCoreWasmPagedAbiVersion,
+} from '../../../audio-core-wasm/src'
 import {
   selectPortableWasmAudioWorkletBackend,
   type PortableWasmCapability,
@@ -23,6 +27,7 @@ const capability = (): Extract<PortableWasmCapability, { available: true }> => (
     manifest: {
       version: audioCoreWasmArtifactVersion,
       abiVersion: audioCoreWasmAbiVersion,
+      pagedAbi: audioCoreWasmPagedAbiVersion,
       contractVersion: audioCoreContractVersion,
       contractHash: 'test',
       fixedMemory: true,

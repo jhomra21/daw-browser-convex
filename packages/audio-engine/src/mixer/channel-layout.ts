@@ -58,7 +58,14 @@ export function propagateMixerGraphLayouts(graph: ResolvedMixerGraph): ResolvedM
     visiting.add(channelId)
     const entry = assertDefined(channelById.get(channelId), `Missing mixer channel ${channelId}`)
     const upstream = (incoming.get(channelId) ?? []).map((sourceId) => visit(sourceId).output)
-    const input = upstream.length > 0 ? mergeLayouts(upstream) : entry.sourceLayout ?? 'stereo'
+    // Source assets retain their decoded channel count, but every ordinary
+    // track enters the mixer as a stereo bus. Explicit mono effects can still
+    // collapse the bus later in the chain.
+    const input = upstream.length > 0
+      ? mergeLayouts(upstream)
+      : entry.channel.role === 'track'
+        ? 'stereo'
+        : entry.sourceLayout ?? 'stereo'
     const output = propagateEffects(input, entry.fx ?? { instances: [] })
     const result = { input, output }
     resolved.set(channelId, result)

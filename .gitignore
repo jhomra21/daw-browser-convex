@@ -20,7 +20,9 @@ app.config.timestamp_*.js
 /node_modules
 /native/build
 /native/audio-core/build
-/public/audio-core
+/public/audio-core/*
+!/public/audio-core/daw-audio-core.wasm
+!/public/audio-core/daw-audio-core.manifest.json
 
 # IDEs and editors
 /.idea

@@ -140,10 +140,22 @@ const recoveryAssetSchemaV1 = z.union([
   cloudRecoveryAssetSchemaV1,
   localRecoveryAssetSchemaV1,
 ])
+export const cloudRecoveryAssetSchemaV2 = cloudRecoveryAssetSchemaV1.extend({
+  sizeBytes: z.number().int().positive().safe(),
+}).strict()
+export const localRecoveryAssetSchemaV2 = localRecoveryAssetSchemaV1.extend({
+  sizeBytes: z.number().int().positive().safe(),
+}).strict()
+export const recoveryAssetSchemaV2 = z.union([
+  cloudRecoveryAssetSchemaV2,
+  localRecoveryAssetSchemaV2,
+])
 export type CloudRecoveryOwnershipV1 = z.infer<typeof cloudRecoveryOwnershipSchemaV1>
 export type RecoveryOwnershipV1 = z.infer<typeof recoveryOwnershipSchemaV1>
 export type CloudRecoveryAssetV1 = z.infer<typeof cloudRecoveryAssetSchemaV1>
 export type RecoveryAssetV1 = z.infer<typeof recoveryAssetSchemaV1>
+export type CloudRecoveryAssetV2 = z.infer<typeof cloudRecoveryAssetSchemaV2>
+export type RecoveryAssetV2 = z.infer<typeof recoveryAssetSchemaV2>
 export const isCloudRecoveryOwnershipV1 = (
   ownership: RecoveryOwnershipV1,
 ): ownership is CloudRecoveryOwnershipV1 => 'ownerUserId' in ownership
@@ -400,7 +412,7 @@ export const recoveryPayloadSchemaV2 = z.discriminatedUnion('kind', [
     clip: recoveryClipSchemaV2, clipId: stableIdSchema, ownership: recoveryOwnershipSchemaV1,
   }).strict() }).strict(),
   z.object({ version: z.literal(2), kind: z.literal('asset.delete'), data: z.object({
-    asset: recoveryAssetSchemaV1, assetId: stableIdSchema,
+    asset: recoveryAssetSchemaV2, assetId: stableIdSchema,
   }).strict() }).strict(),
   z.object({ version: z.literal(2), kind: z.literal('automation.delete'), data: z.object({
     automation: recoveryAutomationSchemaV1, automationId: stableIdSchema,
@@ -509,7 +521,7 @@ export const recoveryCapturedPayloadSchemaV2 = z.discriminatedUnion('kind', [
     clip: recoveryCapturedClipSchemaV2, clipId: stableIdSchema, ownership: recoveryOwnershipSchemaV1,
   }).strict() }).strict(),
   z.object({ version: z.literal(2), kind: z.literal('asset.delete'), data: z.object({
-    asset: recoveryAssetSchemaV1, assetId: stableIdSchema,
+    asset: recoveryAssetSchemaV2, assetId: stableIdSchema,
   }).strict() }).strict(),
   z.object({ version: z.literal(2), kind: z.literal('automation.delete'), data: z.object({
     automation: recoveryAutomationSchemaV1, automationId: stableIdSchema,

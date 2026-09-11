@@ -3,7 +3,8 @@ import { batch, createSignal, onCleanup, type Accessor } from 'solid-js'
 import { createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
 import type { ClipCreateSnapshot } from '@daw-browser/shared'
 import type { ClipBufferWriter } from '~/lib/clip-buffer-cache'
-import { createAudioAssetKey, getAudioSourceMetadata } from '~/lib/audio-source'
+import { createAudioAssetKey } from '~/lib/audio-source'
+import type { AudioSourceMetadata } from '~/lib/audio-source'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { createLocalAsset, deleteLocalAsset, LocalAssetWriteError } from '~/lib/local-assets'
 import { trackColorForClip } from '~/lib/clip-color'
@@ -14,9 +15,7 @@ import { publishSharedTimelineOperation } from '~/lib/shared-timeline-operations
 import {
   acquireTrackRecordingLock,
   cleanupRecordingSession,
-  createStopPromise,
   ensureRecordingAudioContext,
-  getRecordingSupport,
   getProductionRecordingSupport,
   haltRecordingPreview,
   releaseTrackRecordingLock,
@@ -26,7 +25,10 @@ import {
 } from '~/lib/track-recording-session'
 import { createRecordingTransport } from '~/lib/recording/recording-transport'
 import { resetRecordingDiagnostics, updateRecordingDiagnostics } from '~/lib/recording/recording-diagnostics'
-import { createRecordingTempStorage } from '~/lib/recording/recording-temp-storage'
+import {
+  createRecordingTempStorage,
+  isRecordingTempStorageSupported,
+} from '~/lib/recording/recording-temp-storage'
 import { encodeRecordingWav } from '~/lib/recording/encode-recording-wav'
 import {
   createDesktopAudioLifecycleReconciler,
@@ -369,7 +371,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     const isLocalProject = ctx.isLocalProject
     const discardRecording = async (message: string) => {
       emit(message)
-      if (ctx.savedAudioSource === 'worklet-pcm-f32') {
+      if (ctx.engineCaptureActive) {
         await createRecordingTempStorage().remove(ctx.engineCaptureSessionId).catch(() => undefined)
       }
       await cleanupRecording()
@@ -381,10 +383,9 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     }
 
     let file: File
-    let sourceMetadata: ReturnType<typeof getAudioSourceMetadata>
-    let decoded: AudioBuffer | undefined
+    let sourceMetadata: AudioSourceMetadata
     let removeTemp = async () => {}
-    if (ctx.savedAudioSource === 'worklet-pcm-f32') {
+    if (ctx.engineCaptureActive) {
       const descriptor = await createRecordingTempStorage().open(ctx.engineCaptureSessionId)
       if (!descriptor || descriptor.capturedFrames === 0) {
         await discardRecording('Recording contained no audio data.')
@@ -405,21 +406,8 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         return
       }
     } else {
-      const blob = new Blob(ctx.chunks, { type: ctx.mimeType || 'audio/webm' })
-      if (!blob.size) {
-        await discardRecording('Recording contained no audio data.')
-        return
-      }
-      const extension = blob.type.includes('ogg') ? 'ogg' : blob.type.includes('mp4') ? 'm4a' : 'webm'
-      file = new File([blob], `recording-${Date.now()}.${extension}`, { type: blob.type })
-      try {
-        decoded = await audioEngine.decodeAudioData(await file.arrayBuffer())
-        sourceMetadata = getAudioSourceMetadata(decoded)
-      } catch (err) {
-        console.error('[useTrackRecording] decodeAudioData failed', err)
-        await discardRecording('Failed to decode recorded audio; skipping clip creation.')
-        return
-      }
+      await discardRecording('Recording did not produce a bounded PCM file.')
+      return
     }
 
     const existingTracks = projectId() === ctx.projectId ? tracks() : ctx.tracks
@@ -451,7 +439,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
           trackRef: getTrackHistoryRef(targetTrack),
           startSec: nonOverlapStart,
           fileName: file.name,
-          decoded,
           durationSec: baseDuration,
           source: sourceMetadata,
           sourceAssetKey: asset.id,
@@ -494,7 +481,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         trackRef: getTrackHistoryRef(targetTrack),
         startSec: nonOverlapStart,
         file,
-        decoded,
         durationSec: baseDuration,
         source: sourceMetadata,
         sourceAssetKey,
@@ -583,8 +569,10 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       emit('Track is locked by another collaborator.')
       return { ok: false, reason: 'Track locked' }
     }
-
-    const recordingSupport = getRecordingSupport()
+    if (!isRecordingTempStorageSupported()) {
+      emit('Recording requires origin-private storage and Web Locks.')
+      return { ok: false, reason: 'Recording storage unsupported' }
+    }
     const productionSupported = getProductionRecordingSupport()
     let nativeRequested = requiresNativeAudio || isNativeRecordingLifecycleEligible(
       audioLifecycleState,
@@ -595,9 +583,9 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       emit('Native audio recording is unavailable.')
       return { ok: false, reason: 'Native recorder unavailable' }
     }
-    if (!requiresNativeAudio && !nativeRequested && !portableRequested && !productionSupported && !recordingSupport.supported) {
-      emit('Recording is not supported in this browser.')
-      return { ok: false, reason: 'Recorder unsupported' }
+    if (!requiresNativeAudio && !nativeRequested && !portableRequested && !productionSupported) {
+      emit('Bounded PCM audio recording is unavailable.')
+      return { ok: false, reason: 'Bounded PCM recorder unavailable' }
     }
 
     if (!isLocalProject) {
@@ -623,27 +611,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       return stream
     }
 
-    const mimeType = recordingSupport.mimeType
-    let recorder: MediaRecorder | null = null
-    const chunks: BlobPart[] = []
-    const stopCompletion = createStopPromise()
-    const onDataAvailable = (event: BlobEvent) => {
-      if (event.data?.size) chunks.push(event.data)
-    }
-    const onStop = () => {
-      void (async () => {
-        try {
-          await finalizeRecording()
-          stopCompletion.resolve()
-        } catch (error) {
-          console.error('[useTrackRecording] finalize recording failed', error)
-          try {
-            await cleanupRecording()
-          } catch {}
-          stopCompletion.reject(error)
-        }
-      })()
-    }
     let startSec = Math.max(0, playheadSec())
 
     let engineCaptureActive = false
@@ -736,7 +703,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       }
     }
 
-    if (!nativeCaptureActive && !requiresNativeAudio) try {
+    if (!nativeCaptureActive && !requiresNativeAudio && (portableRequested || productionSupported)) try {
       stream = await acquireStream()
       const trackSampleRate = stream.getAudioTracks()[0]?.getSettings().sampleRate
       if (Number.isFinite(trackSampleRate) && trackSampleRate !== undefined) sampleRate = trackSampleRate
@@ -816,7 +783,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       portableCaptureActive = true
       engineCaptureActive = true
     } catch (err) {
-      console.warn('[useTrackRecording] portable PCM capture unavailable; using compatibility fallback', err)
+      console.warn('[useTrackRecording] portable PCM capture unavailable; trying AudioWorklet PCM', err)
       if (!isStartCurrent()) {
         stream?.getTracks().forEach((mediaTrack) => mediaTrack.stop())
         await releaseTrackLock(trackId, uid, isLocalProject)
@@ -872,7 +839,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       })
       engineCaptureActive = true
     } catch (err) {
-      console.warn('[useTrackRecording] production PCM capture unavailable; using compressed fallback', err)
+      console.warn('[useTrackRecording] AudioWorklet PCM capture unavailable', err)
       if (!isStartCurrent()) {
         stream?.getTracks().forEach((mediaTrack) => mediaTrack.stop())
         await releaseTrackLock(trackId, uid, isLocalProject)
@@ -895,32 +862,11 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         await releaseTrackLock(trackId, uid, isLocalProject)
         return { ok: false, reason: 'Capture failed' }
       }
-      const requestedSampleRate = audioPreferences().sampleRate
-      updateRecordingDiagnostics({
-        requestedFormat: 'pcm',
-        activeFormat: 'compressed',
-        requestedLayout: requestedSettings.layout,
-        activeChannels: stream.getAudioTracks()[0]?.getSettings().channelCount ?? null,
-        requestedSampleRate: requestedSampleRate === 'default' ? null : requestedSampleRate,
-        activeSampleRate: stream.getAudioTracks()[0]?.getSettings().sampleRate ?? null,
-        transport: null,
-      })
-      if (!recordingSupport.supported) {
-        stream.getTracks().forEach(track => track.stop())
-        await releaseTrackLock(trackId, uid, isLocalProject)
-        return { ok: false, reason: 'Recorder unsupported' }
-      }
-      try {
-        recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
-      } catch (err) {
-        console.error('[useTrackRecording] failed to create MediaRecorder', err)
-        stream.getTracks().forEach(track => track.stop())
-        await releaseTrackLock(trackId, uid, isLocalProject)
-        return { ok: false, reason: 'Recorder unsupported' }
-      }
+      stream.getTracks().forEach(track => track.stop())
+      await releaseTrackLock(trackId, uid, isLocalProject)
+      emit('Bounded PCM audio recording is unavailable.')
+      return { ok: false, reason: 'Bounded PCM recorder unavailable' }
     }
-    recorder?.addEventListener('dataavailable', onDataAvailable)
-    recorder?.addEventListener('stop', onStop)
 
     activeCtx = {
       projectId: rid,
@@ -931,15 +877,11 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       createdTrack,
       startSec,
       stream,
-      recorder,
-      chunks,
-      mimeType: mimeType || recorder?.mimeType || '',
       lockedByUserId: uid ?? '',
       engineCaptureActive,
       portableCaptureActive,
       nativeCaptureActive,
       engineCaptureSessionId,
-      savedAudioSource: engineCaptureActive ? 'worklet-pcm-f32' : 'media-recorder-compressed',
       sampleRate,
       recordingOffsetFrames: resolveRecordingOffsetFrames(
         requestedSettings.calibrations,
@@ -953,10 +895,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         },
         requestedSettings.manualOffsetFrames,
       ).frames,
-      onDataAvailable,
-      onStop,
-      stopPromise: stopCompletion.promise,
-      rejectStopPromise: stopCompletion.reject,
     }
     if (!isStartCurrent()) {
       await cleanupRecording()
@@ -973,15 +911,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
           console.warn('[useTrackRecording] failed to refresh track lock', error)
         },
       })
-    }
-
-    try {
-      recorder?.start()
-    } catch (err) {
-      console.error('[useTrackRecording] recorder.start failed', err)
-      emit('Failed to start recording.')
-      await cleanupRecording()
-      return { ok: false, reason: 'Recorder failed to start' }
     }
 
     setIsRecordingInternal(true)
@@ -1004,9 +933,6 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     if (!activeCtx) return
     const ctx = activeCtx
     try {
-      if (ctx.recorder && ctx.recorder.state !== 'inactive') {
-        ctx.recorder.stop()
-      }
       if (ctx.engineCaptureActive) {
         if (ctx.nativeCaptureActive) {
           await nativeRecording?.controller.stop()
@@ -1020,17 +946,11 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         return
       }
     } catch (err) {
-      console.error('[useTrackRecording] recorder.stop failed', err)
-      ctx.rejectStopPromise(err)
+      console.error('[useTrackRecording] PCM recording stop failed', err)
       await cleanupRecording()
       await handleAutoCreatedTrackFailure(ctx.createdTrack, ctx)
     }
     haltLivePreview()
-    try {
-      await ctx.stopPromise
-    } catch (err) {
-      console.error('[useTrackRecording] finalize recording failed', err)
-    }
   }
 
   const toggleRecording = async (): Promise<StartRecordingResult> => {

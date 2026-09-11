@@ -10,6 +10,7 @@ import {
   normalizeLegacyMidiClip,
   type AutomationTarget,
   type AudioEffectKind,
+  type AudioSourceKind,
   type JsonObject,
   type JsonValue,
 } from '@daw-browser/shared'
@@ -85,12 +86,22 @@ export const parseLocalProjectStoredJsonValue = (
 const stringField = (value: JsonObject | undefined, key: string) => (
   isJsonString(value?.[key]) ? value[key] : undefined
 )
+const numberField = (value: JsonObject | undefined, key: string) => (
+  isJsonNumber(value?.[key]) ? value[key] : undefined
+)
 const timeField = (value: JsonObject | undefined, key: string, fallback: number) => (
   isJsonNumber(value?.[key]) ? value[key] : fallback
 )
 const isAudioEffectKind = (kind: string): kind is AudioEffectKind => (
   AUDIO_EFFECT_ORDER.some((effect) => effect === kind)
 )
+const isAudioSourceKind = (kind: string): kind is AudioSourceKind => (
+  kind === 'upload' || kind === 'url' || kind === 'recording'
+)
+const audioSourceKindField = (value: JsonObject | undefined) => {
+  const kind = stringField(value, 'sourceKind')
+  return kind !== undefined && isAudioSourceKind(kind) ? kind : undefined
+}
 const localProcessorKind = (
   target: ProjectSnapshotV2['processors'][number]['target'],
   kind: string,
@@ -208,6 +219,19 @@ export const materializeLocalControlSnapshot = (
     const existingValue = clips.get(item.id)?.value
     const existing = isJsonObject(existingValue) ? existingValue : undefined
     const source = item.source
+    // V2 intentionally omits unavailable clip sources from the public
+    // snapshot. That omission is not a source removal for the local model:
+    // the entity row remains authoritative for local asset/capability
+    // bindings and their metadata.
+    const preserveExistingSource = source === undefined && item.midi === undefined
+    const sourceAssetKey = source?.assetId
+      ?? (preserveExistingSource
+        ? stringField(existing, 'sourceAssetKey') ?? stringField(existing, 'sourceAssetId')
+        : undefined)
+    const sourceAssetId = source?.assetId
+      ?? (preserveExistingSource
+        ? stringField(existing, 'sourceAssetId') ?? stringField(existing, 'sourceAssetKey')
+        : undefined)
     const sourceChanged = source !== undefined
       && stringField(existing, 'sourceAssetKey') !== source.assetId
     const row: TimelineClipRow = {
@@ -220,12 +244,12 @@ export const materializeLocalControlSnapshot = (
       duration: item.duration,
       color: item.color ?? (item.midi ? 'clip-midi' : 'clip-audio'),
       controlColorExplicit: item.color !== undefined,
-      sourceAssetKey: source?.assetId,
-      sourceAssetId: source?.assetId,
-      sourceKind: source?.sourceKind,
-      sourceDurationSec: source?.durationSec,
-      sourceSampleRate: source?.sampleRate,
-      sourceChannelCount: source?.channelCount,
+      sourceAssetKey,
+      sourceAssetId,
+      sourceKind: source?.sourceKind ?? (preserveExistingSource ? audioSourceKindField(existing) : undefined),
+      sourceDurationSec: source?.durationSec ?? (preserveExistingSource ? numberField(existing, 'sourceDurationSec') : undefined),
+      sourceSampleRate: source?.sampleRate ?? (preserveExistingSource ? numberField(existing, 'sourceSampleRate') : undefined),
+      sourceChannelCount: source?.channelCount ?? (preserveExistingSource ? numberField(existing, 'sourceChannelCount') : undefined),
       sampleUrl: sourceChanged ? undefined : stringField(existing, 'sampleUrl') ?? sampleUrlFallbacks.get(item.id),
       leftPadSec: item.leftPadSec,
       bufferOffsetSec: item.bufferOffsetSec,

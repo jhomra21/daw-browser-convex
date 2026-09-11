@@ -56,11 +56,22 @@ if(DAW_AUDIO_CORE_BUILD_WASM OR DAW_AUDIO_CORE_BUILD_WASM_HARNESS)
     _daw_audio_core_wasm_graph_process_planar
     _daw_audio_core_wasm_graph_set_transport
     _daw_audio_core_wasm_graph_schedule_sample_source
+    _daw_audio_core_wasm_graph_replace_sample_sources
+    _daw_audio_core_wasm_graph_reset_sample_sources
     _daw_audio_core_wasm_graph_register_pcm_asset
     _daw_audio_core_wasm_graph_release_asset
     _daw_audio_core_wasm_graph_configure_synth
     _daw_audio_core_wasm_graph_configure_sampler
     _daw_audio_core_wasm_graph_configure_granular
+    _daw_audio_core_wasm_graph_create_paged_asset
+    _daw_audio_core_wasm_graph_write_paged_asset_page
+    _daw_audio_core_wasm_graph_prepare_paged_asset
+    _daw_audio_core_wasm_graph_schedule_prepared_sample_source
+    _daw_audio_core_wasm_graph_release_paged_preparation
+    _daw_audio_core_wasm_graph_trim_paged_asset
+    _daw_audio_core_wasm_graph_paged_sub_abi_version
+    _daw_audio_core_wasm_graph_paged_page_frames
+    _daw_audio_core_wasm_graph_paged_slot_count
     _daw_audio_core_wasm_recording_capture_initialize
     _daw_audio_core_wasm_recording_capture_process
     _daw_audio_core_wasm_recording_capture_process_monitor

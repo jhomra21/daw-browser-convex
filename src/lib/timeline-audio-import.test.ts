@@ -30,13 +30,17 @@ const createAssetStorage = () => {
     getFileHandle: async (name: string) => ({
       getFile: async () => files.get(name) ?? new File([], name),
       createWritable: async () => {
-        let written: File | undefined
+        const chunks: Uint8Array[] = []
         return {
-          write: async (file: File) => {
-            written = file
-          },
+          write: async (chunk: Uint8Array) => { chunks.push(chunk) },
           close: async () => {
-            if (written) files.set(name, written)
+            const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
+            let offset = 0
+            for (const chunk of chunks) {
+              bytes.set(chunk, offset)
+              offset += chunk.byteLength
+            }
+            files.set(name, new File([bytes], name))
           },
           abort: async () => undefined,
         }
@@ -126,4 +130,72 @@ test('host audio import persists bytes and the canonical local asset identity', 
     if (storage) Object.defineProperty(navigator, 'storage', storage)
     else Reflect.deleteProperty(navigator, 'storage')
   }
+})
+
+test('rethrows an aborted cloud upload instead of converting it to a failed import', async () => {
+  const controller = new AbortController()
+  const track: Track = {
+    id: 'cloud-track',
+    historyRef: 'cloud-track',
+    name: 'Cloud track',
+    volume: 1,
+    clips: [],
+  }
+  const inserted: Clip[] = []
+  const removed: string[] = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = Object.assign(
+    async () => {
+      controller.abort(new DOMException('Import canceled.', 'AbortError'))
+      return new Response('request canceled', { status: 500 })
+    },
+    { preconnect: originalFetch.preconnect },
+  )
+  try {
+    const transaction = createAudioImportTransaction({
+      project: {
+        projectId: () => 'cloud-project',
+        userId: () => 'user-1',
+        tracks: () => [track],
+        isActiveProjectTrack: () => true,
+      },
+      clips: {
+        buffers: {
+          writer: {
+            storeBuffer: () => undefined,
+            storeBuffers: () => undefined,
+            removeBuffer: (clipId) => removed.push(clipId),
+          },
+          getBuffer: () => undefined,
+          getMediaStatus: () => undefined,
+          preload: async () => undefined,
+        },
+        insertLocalClip: (_trackId, clip) => inserted.push(clip),
+        removeLocalClips: (clipIds) => removed.push(...clipIds),
+        selectClip: () => undefined,
+        pushTrackClipCreateHistory: () => undefined,
+      },
+      cloud: {
+        uploadToR2: async () => ({ assetKey: 'asset-1', url: 'https://example.test/asset-1.wav' }),
+      },
+      rollback: {
+        removeLocalTrack: async () => undefined,
+        removeCloudTrack: async () => undefined,
+      },
+    })
+
+    await expect(transaction.createUploadedFileClip({
+      file: new File(['audio'], 'clip.wav', { type: 'audio/wav' }),
+      source: { durationSec: 1, sampleRate: 44_100, channelCount: 1 },
+      track,
+      startSec: 0,
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: 'AbortError' })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  expect(inserted).toHaveLength(1)
+  expect(inserted[0]?.id).toStartWith('pending:')
+  expect(removed.some((clipId) => clipId.startsWith('pending:'))).toBe(true)
 })

@@ -19,6 +19,7 @@ import schema from "./schema";
 const modules = {
   "./_generated/api.ts": () => import("./_generated/api"),
   "./assets.ts": () => import("./assets"),
+  "./resumableAssetUploads.ts": () => import("./resumableAssetUploads"),
   "./control.ts": () => import("./control"),
   "./projects.ts": () => import("./projects"),
   "./r2Deletes.ts": () => import("./r2Deletes"),
@@ -1803,7 +1804,7 @@ test("a finalized uploaded asset supplies trusted metadata to canonical clip cre
   const t = await setup();
   const audio = await addTrack(t, { name: "Uploaded audio", index: 0 });
   const contentSha256 = "c".repeat(64);
-  const begun = await t.withIdentity({ subject: owner }).mutation(api.assets.beginUpload, {
+  const begun = await t.withIdentity({ subject: owner }).mutation(api.resumableAssetUploads.beginUpload, {
     projectId,
     idempotencyKey: "uploaded-asset-1",
     contentSha256,
@@ -1814,7 +1815,7 @@ test("a finalized uploaded asset supplies trusted metadata to canonical clip cre
     sampleRate: 44_100,
     channelCount: 2,
   });
-  const finalized = await t.withIdentity({ subject: owner }).mutation(api.assets.finalizeUpload, {
+  const finalized = await t.withIdentity({ subject: owner }).mutation(api.resumableAssetUploads.finalizeUpload, {
     projectId,
     idempotencyKey: "uploaded-asset-1",
     contentSha256,

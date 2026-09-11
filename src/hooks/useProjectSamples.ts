@@ -154,7 +154,7 @@ const readAudioSourceKind = (cause: unknown): AudioSourceKind | undefined => {
   return isString(cause) ? sanitizeAudioSourceKind(cause) : undefined
 }
 
-const readAudioSourceMetadata = (cause: unknown): AudioSourceMetadata | undefined => {
+export const readAudioSourceMetadata = (cause: unknown): AudioSourceMetadata | undefined => {
   if (!isProjectSamplePayload(cause)) return undefined
   const durationSec = readFiniteNumber(cause.durationSec)
   const sampleRate = readFiniteNumber(cause.sampleRate)
@@ -469,13 +469,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
         const items: ProjectSampleListItem[] = []
         for (const asset of assets) {
           if (maxSamples && maxSamples > 0 && items.length >= maxSamples) break
-          const source = asset.durationSec && asset.sampleRate
-            ? {
-                durationSec: asset.durationSec,
-                sampleRate: asset.sampleRate,
-                channelCount: 2,
-              }
-            : undefined
+          const source = readAudioSourceMetadata(asset)
           if (!source) continue
           const usages = usagesByAsset.get(asset.id) ?? []
           const earliest = usages.reduce<ProjectSampleUsage | undefined>((current, candidate) => {

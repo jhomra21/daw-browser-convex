@@ -329,7 +329,6 @@ RenderResult Render(const bool active, const bool instrument, const std::vector<
   assert(host.SetTransport(1, false, 0));
   assert(host.StartDiagnosticMode());
   assert(host.SetTransport(1, true, 0));
-  std::this_thread::sleep_for(std::chrono::milliseconds(500));
   constexpr std::size_t kBlocks = 32;
   const std::size_t total_frames = kFrames * kBlocks;
   std::vector<float> output(total_frames * 2);

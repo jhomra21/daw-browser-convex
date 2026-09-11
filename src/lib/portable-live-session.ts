@@ -3,11 +3,14 @@ import {
   compilePreparedPortableSession,
   type PortableAssetRegistryInput,
 } from '@daw-browser/audio-engine/portable-session-compiler'
+import type { PortablePreparedStretchAsset } from "@daw-browser/audio-engine/portable-stretch-preparation"
+import type { PortablePagedStretchAsset } from "@daw-browser/audio-engine/portable-stretch-paging"
 import type { LivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
 import {
   compilePortableFrameSchedule,
   type PortableFrameScheduleAdapterInput,
 } from '~/lib/portable-frame-schedule'
+import type { LoopTransport } from '@daw-browser/audio-engine/loop-frame-schedule'
 
 /**
  * App boundary only: the engine receives portable data and never imports the
@@ -30,6 +33,7 @@ export const compilePortableLiveFrameSchedule = (
   tracks: snapshot.tracks,
   automationEnvelopes: snapshot.mixer.automationEnvelopes,
   arpeggiators: new Map(Object.entries(snapshot.mixer.fx.trackFx ?? {}).map(([trackId, fx]) => [trackId, fx.arp])),
+  loop: snapshot.transport,
 })
 
 type PortableLiveSessionAdapterInput = Omit<
@@ -37,7 +41,10 @@ type PortableLiveSessionAdapterInput = Omit<
   'revision' | 'bpm' | 'tracks' | 'automationEnvelopes' | 'arpeggiators'
 > & {
   assetRegistry: PortableAssetRegistryInput
+  preparedStretchAssets?: ReadonlyMap<string, PortablePreparedStretchAsset | PortablePagedStretchAsset>
   sourceFirstSequence: number
+  sourceRangeStartSec?: number
+  loop?: LoopTransport
 }
 
 /**
@@ -53,11 +60,14 @@ export const compilePreparedPortableLiveSession = (
   automationEnvelopes: snapshot.mixer.automationEnvelopes,
   tracks: snapshot.tracks,
   assetRegistry: input.assetRegistry,
+  preparedStretchAssets: input.preparedStretchAssets,
   revision: snapshot.revision,
   sampleRateHz: input.sampleRateHz,
   bpm: snapshot.bpm,
   sidechainRoutes: snapshot.mixer.sidechainRoutes,
   sourceRangeEndSec: input.rangeEndSec,
+  sourceRangeStartSec: input.sourceRangeStartSec,
+  loop: input.loop,
   schedule: compilePortableLiveFrameSchedule(snapshot, input),
   sourceFirstSequence: input.sourceFirstSequence,
 })

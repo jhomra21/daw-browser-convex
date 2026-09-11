@@ -1,15 +1,37 @@
-import { expect, test } from "bun:test"
+import { expect, spyOn, test } from "bun:test"
 import "fake-indexeddb/auto"
-import { createDefaultDrumRackParams } from "@daw-browser/shared"
+import { createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams } from "@daw-browser/shared"
 import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
+import * as exportMixdown from "@daw-browser/audio-engine/export-mixdown"
+import type { StreamTargetChunk } from "mediabunny"
+
+if (!globalThis.navigator?.locks) {
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      ...globalThis.navigator,
+      locks: {
+        request: async <Value>(
+          name: string,
+          _options: { ifAvailable?: boolean; mode?: 'shared' | 'exclusive' },
+          callback: (lock: { name: string } | null) => Promise<Value>,
+        ) => callback({ name }),
+      },
+    },
+  })
+}
+import type { SampledInstrumentBuffer } from "@daw-browser/audio-engine/sampled-instrument-region"
+import { sampledInstrumentRegion, sampledInstrumentRegionBytes, sampledInstrumentRegionIdentity } from "@daw-browser/audio-engine/sampled-instrument-region"
 
 import { createLocalProject, deleteLocalProject } from "~/lib/local-project-db"
 import { createLocalAsset, deleteLocalAsset } from "~/lib/local-assets"
 import { loadInstrumentExportBuffers, runStemExport, runTimelineExport } from "~/lib/export/run-export-job"
-import { NativeOfflineRenderError } from "~/lib/export/desktop-native-offline-renderer"
+import { NativeOfflineRenderError } from "~/lib/export/desktop-native-offline-pcm-renderer"
 import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
 import type { ExportEncodingSettings, ExportRenderSettings } from "~/lib/export/export-settings"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
+import { createSampledInstrumentRegionBudget } from "~/lib/sampled-instrument-region-budget"
+import * as nativeOfflinePcmSpool from "~/lib/export/native-offline-pcm-spool"
 
 const render: ExportRenderSettings = {
   sampleRate: 44_100,
@@ -27,8 +49,29 @@ const renderStateSnapshot = {
 }
 const desktopLimits: NonNullable<ExportOutputTargetFactory["resourceLimits"]> = {
   maximumFiles: 1_024,
-  maximumBytes: 8 * 1024 * 1024 * 1024,
   streaming: true,
+}
+
+const createSilentWav = (channelCount = 2, sampleRate = 48_000, frameCount = sampleRate): ArrayBuffer => {
+  const bytes = new ArrayBuffer(44 + frameCount * channelCount * 2)
+  const view = new DataView(bytes)
+  const writeAscii = (offset: number, value: string) => {
+    for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index))
+  }
+  writeAscii(0, "RIFF")
+  view.setUint32(4, bytes.byteLength - 8, true)
+  writeAscii(8, "WAVE")
+  writeAscii(12, "fmt ")
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, channelCount, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * channelCount * 2, true)
+  view.setUint16(32, channelCount * 2, true)
+  view.setUint16(34, 16, true)
+  writeAscii(36, "data")
+  view.setUint32(40, bytes.byteLength - 44, true)
+  return bytes
 }
 
 const outputTargets = (opened: () => void): ExportOutputTargetFactory => ({
@@ -59,7 +102,7 @@ const aliasLocalProject = async (source: Awaited<ReturnType<typeof createLocalPr
   db.close()
 }
 
-test("mixdown preflight runs before output target creation and clip hydration", async () => {
+test("unsupported portable mixdown does not hydrate whole-buffer clips", async () => {
   let targetOpened = false
   let bufferHydrated = false
   const outcome = await runTimelineExport({
@@ -98,7 +141,7 @@ test("mixdown preflight runs before output target creation and clip hydration", 
   })
 
   expect(outcome.type).toBe("error")
-  expect(targetOpened).toBeFalse()
+  expect(targetOpened).toBeTrue()
   expect(bufferHydrated).toBeFalse()
 })
 
@@ -109,13 +152,24 @@ test("stem export preloads local sampled instruments for a cloud-shaped local pr
   const files = new Map<string, File>()
   const assets = {
     getFileHandle: async (name: string) => ({
-      createWritable: async () => ({
-        write: async (file: File) => {
-          files.set(name, file)
-        },
-        close: async () => undefined,
-        abort: async () => undefined,
-      }),
+      createWritable: async () => {
+        const chunks: Uint8Array[] = []
+        return {
+          write: async (chunk: Uint8Array) => {
+            chunks.push(chunk)
+          },
+          close: async () => {
+            const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
+            let offset = 0
+            for (const chunk of chunks) {
+              bytes.set(chunk, offset)
+              offset += chunk.byteLength
+            }
+            files.set(name, new File([bytes], name))
+          },
+          abort: async () => undefined,
+        }
+      },
       getFile: async () => {
         const file = files.get(name)
         if (!file) throw new Error(`Missing retained file ${name}`)
@@ -146,7 +200,7 @@ test("stem export preloads local sampled instruments for a cloud-shaped local pr
   await aliasLocalProject(sourceProject, projectId)
   const asset = await createLocalAsset({
     projectId,
-    file: new File(["stem"], "sample.wav", { type: "audio/wav" }),
+    file: new File([createSilentWav(1)], "sample.wav", { type: "audio/wav" }),
   })
   const drumRack = createDefaultDrumRackParams()
   const firstPad = drumRack.pads[0]
@@ -227,7 +281,7 @@ test("stem export preloads local sampled instruments for a cloud-shaped local pr
 
     expect(outcome.type).toBe("error")
     expect(fetchCalls).toEqual([])
-    expect(TestOfflineAudioContext.decodeCalls).toBe(1)
+    expect(TestOfflineAudioContext.decodeCalls).toBe(0)
   } finally {
     globalThis.fetch = originalFetch
     if (originalStorage) Object.defineProperty(navigator, "storage", originalStorage)
@@ -397,24 +451,34 @@ class TestDecodedAudioBuffer implements AudioBuffer {
   readonly length: number
   readonly numberOfChannels: number
   readonly sampleRate: number
+  private readonly channels: Float32Array<ArrayBuffer>[]
 
   constructor(length = 48_000, sampleRate = 48_000, numberOfChannels = 2) {
     this.length = length
     this.sampleRate = sampleRate
     this.numberOfChannels = numberOfChannels
     this.duration = length / sampleRate
+    this.channels = Array.from(
+      { length: numberOfChannels },
+      () => new Float32Array(length),
+    )
   }
 
-  copyFromChannel(destination: Float32Array) {
-    destination.fill(0)
+  copyFromChannel(destination: Float32Array, channel: number, bufferOffset = 0) {
+    destination.set(this.getChannelData(channel).subarray(bufferOffset, bufferOffset + destination.length))
   }
 
-  copyToChannel() {}
+  copyToChannel(source: Float32Array, channel: number, bufferOffset = 0) {
+    this.getChannelData(channel).set(source, bufferOffset)
+  }
 
-  getChannelData() {
-    return new Float32Array(this.length)
+  getChannelData(channel: number) {
+    const data = this.channels[channel]
+    if (!data) throw new Error("Missing channel")
+    return data
   }
 }
+const sampled = (value: AudioBuffer): SampledInstrumentBuffer => ({ buffer: value, sourceStartFrame: 0 })
 
 class TestOfflineAudioContext {
   static decodeCalls = 0
@@ -424,11 +488,177 @@ class TestOfflineAudioContext {
     this.sampleRate = sampleRate
   }
 
+  createBuffer(_channels: number, _length: number, _sampleRate: number) {
+    return new TestDecodedAudioBuffer()
+  }
+
   async decodeAudioData(_data: ArrayBuffer) {
     TestOfflineAudioContext.decodeCalls += 1
     return new TestDecodedAudioBuffer()
   }
 }
+
+const createStemSpoolProbe = (events: string[]) => {
+  let removed = 0
+  const source = new TestDecodedAudioBuffer(4, 44_100, 2)
+  const session: nativeOfflinePcmSpool.NativeOfflinePcmSpoolSession = {
+    append: async () => {
+      events.push("append")
+    },
+    finalize: async () => ({
+      sessionId: "stem-probe",
+      sampleRate: 44_100,
+      channelCount: 2,
+      totalFrames: 4,
+      byteLength: 32,
+      samplePeak: 0,
+    }),
+    replay: async function* () {
+      events.push("replay")
+      yield source
+    },
+    remove: async () => {
+      removed += 1
+      events.push("remove")
+    },
+    abort: async () => undefined,
+  }
+  return { session, removed: () => removed }
+}
+
+const runStemSpoolProbe = async (input: {
+  events: string[]
+  controller: AbortController
+  failEncoding?: boolean
+  cancelEncoding?: boolean
+}) => {
+  const probe = createStemSpoolProbe(input.events)
+  const createSpool = spyOn(nativeOfflinePcmSpool, "createNativeOfflinePcmSpool").mockImplementation(() => ({
+    createSession: async () => probe.session,
+  }))
+  const renderPortable = spyOn(exportMixdown, "renderPortableMixdownChunks").mockImplementation(async (_request, onChunk) => {
+    await onChunk(0, 0, {
+      frameCount: 4,
+      planes: [new Float32Array(4), new Float32Array(4)],
+    })
+    return {
+      frameCount: 4,
+      sampleRate: 44_100,
+      numberOfChannels: 2,
+      cleanup: async () => undefined,
+    }
+  })
+  let encodes = 0
+  const encode = spyOn(exportMixdown, "encodeAudioChunks").mockImplementation(async (chunks) => {
+    for await (const _chunk of chunks) input.events.push(`encode-${encodes}`)
+    encodes += 1
+    if (input.cancelEncoding) {
+      input.controller.abort()
+      input.controller.signal.throwIfAborted()
+    }
+    if (input.failEncoding) throw new Error("encoder failed")
+    return {
+      blob: undefined,
+      format: "wav",
+      durationSec: 4 / 44_100,
+      sampleRate: 44_100,
+      sizeBytes: 8,
+    }
+  })
+  try {
+    const outcome = await runStemExport({
+      getTracks: () => [{
+        id: "track-spool",
+        name: "Spool",
+        volume: 1,
+        clips: [{
+          id: "clip-spool",
+          name: "Spool clip",
+          color: "#fff",
+          startSec: 0,
+          duration: 4 / 44_100,
+          sourceAssetKey: "asset:spool",
+          sourceDurationSec: 4 / 44_100,
+          sourceSampleRate: 44_100,
+          sourceChannelCount: 2,
+        }],
+      }],
+      bpm: 120,
+      projectGeneration: 1,
+      masterVolume: 1,
+      range: { mode: "whole" },
+      formats: ["wav", "flac"],
+      render,
+      encoding,
+      projectId: undefined,
+      userId: undefined,
+      sidechainRoutes: [],
+      loadCapturedClipBuffer: async () => undefined,
+      resolveAudioSource: async () => {
+        throw new Error("mock portable renderer must not resolve source pages")
+      },
+      signal: input.controller.signal,
+      outputTargets: {
+        resourceLimits: desktopLimits,
+        async createMixdownTarget() {
+          throw new Error("unexpected mixdown target")
+        },
+        async createStemTarget() {
+          return {
+            openFile: async (name) => ({
+              name,
+              target: {
+                mode: "stream",
+                writable: new WritableStream<StreamTargetChunk>(),
+              },
+              commit: async () => ({ byteLength: 8 }),
+              abort: async () => {
+                input.events.push("abort")
+              },
+            }),
+          }
+        },
+      },
+      renderStateSnapshot,
+      stemSelection: "all-tracks",
+      stemMode: "dry-source",
+    })
+    return { outcome, removed: probe.removed() }
+  } finally {
+    encode.mockRestore()
+    renderPortable.mockRestore()
+    createSpool.mockRestore()
+  }
+}
+
+test("multi-format stems replay their lazy spool before removing it after every format", async () => {
+  const events: string[] = []
+  const result = await runStemSpoolProbe({ events, controller: new AbortController() })
+
+  expect(result.outcome.type).toBe("success")
+  expect(events.filter((event) => event === "replay")).toHaveLength(3)
+  expect(events.filter((event) => event.startsWith("encode-"))).toEqual(["encode-0", "encode-1"])
+  expect(events.at(-1)).toBe("remove")
+  expect(result.removed).toBe(1)
+})
+
+test("stem encoder failure and cancellation each remove their lazy spool once", async () => {
+  const modes: readonly ("failure" | "cancel")[] = ["failure", "cancel"]
+  for (const mode of modes) {
+    const events: string[] = []
+    const result = await runStemSpoolProbe({
+      events,
+      controller: new AbortController(),
+      failEncoding: mode === "failure",
+      cancelEncoding: mode === "cancel",
+    })
+
+    expect(result.outcome.type).toBe(mode === "cancel" ? "canceled" : "error")
+    expect(events.filter((event) => event === "remove")).toHaveLength(1)
+    expect(events.filter((event) => event === "abort")).toHaveLength(1)
+    expect(result.removed).toBe(1)
+  }
+})
 
 test("instrument export preload reads local-asset bytes with the project context", async () => {
   const originalStorage = Object.getOwnPropertyDescriptor(navigator, "storage")
@@ -437,13 +667,24 @@ test("instrument export preload reads local-asset bytes with the project context
   const files = new Map<string, File>()
   const assets = {
     getFileHandle: async (name: string) => ({
-      createWritable: async () => ({
-        write: async (file: File) => {
-          files.set(name, file)
-        },
-        close: async () => undefined,
-        abort: async () => undefined,
-      }),
+      createWritable: async () => {
+        const chunks: Uint8Array[] = []
+        return {
+          write: async (chunk: Uint8Array) => {
+            chunks.push(chunk)
+          },
+          close: async () => {
+            const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
+            let offset = 0
+            for (const chunk of chunks) {
+              bytes.set(chunk, offset)
+              offset += chunk.byteLength
+            }
+            files.set(name, new File([bytes], name))
+          },
+          abort: async () => undefined,
+        }
+      },
       getFile: async () => {
         const file = files.get(name)
         if (!file) throw new Error(`Missing retained file ${name}`)
@@ -466,11 +707,11 @@ test("instrument export preload reads local-asset bytes with the project context
   TestOfflineAudioContext.decodeCalls = 0
   globalThis.fetch = Object.assign(async (input: RequestInfo | URL, _init?: RequestInit) => {
     fetchCalls.push(String(input))
-    return new Response("remote", { status: 200 })
+    return new Response(createSilentWav(), { status: 200 })
   }, { preconnect: originalFetch.preconnect })
 
   const project = await createLocalProject(`Export ${crypto.randomUUID()}`)
-  const file = new File(["retained"], "sample.wav", { type: "audio/wav" })
+  const file = new File([createSilentWav()], "sample.wav", { type: "audio/wav" })
   const asset = await createLocalAsset({ projectId: project.id, file })
   const drumRack = createDefaultDrumRackParams()
   const firstPad = drumRack.pads[0]
@@ -505,9 +746,9 @@ test("instrument export preload reads local-asset bytes with the project context
 
   try {
     await loadInstrumentExportBuffers(fx, new AbortController().signal, undefined, project.id)
-    expect(fx.trackFx?.["track-local"]?.drumRackBuffers?.get(firstPad.id)).toBeInstanceOf(TestDecodedAudioBuffer)
+    expect(fx.trackFx?.["track-local"]?.drumRackBuffers?.get(firstPad.id)?.buffer).toBeDefined()
     expect(fetchCalls).toEqual([])
-    expect(TestOfflineAudioContext.decodeCalls).toBe(1)
+    expect(TestOfflineAudioContext.decodeCalls).toBe(0)
 
     const entry = fx.trackFx?.["track-local"]
     if (!entry || entry.instrument?.kind !== "drum-rack") throw new Error("Expected the local drum-rack export entry.")
@@ -537,13 +778,24 @@ test("instrument export preload reads local-asset bytes with the project context
         }, ...entry.instrument.params.pads.slice(2)],
       },
     }
-    entry.drumRackBuffers = new Map([[firstPad.id, hydratedBuffer]])
+    const hydratedSample = entry.instrument.params.pads[0]?.sample
+    if (!hydratedSample) throw new Error("Expected a hydrated sample.")
+    entry.drumRackBuffers = new Map([[
+      firstPad.id,
+      {
+        ...sampled(hydratedBuffer),
+        sourceIdentity: sampledInstrumentRegionIdentity(
+          hydratedSample,
+          sampledInstrumentRegion(hydratedSample.source, 0, hydratedSample.source.durationSec),
+        ),
+      },
+    ]])
     await deleteLocalAsset(project.id, asset.id)
     await loadInstrumentExportBuffers(fx, new AbortController().signal, undefined, project.id)
-    expect(entry.drumRackBuffers?.get(firstPad.id)).toBe(hydratedBuffer)
-    expect(entry.drumRackBuffers?.get(secondPad.id)).toBeInstanceOf(TestDecodedAudioBuffer)
+    expect(entry.drumRackBuffers?.get(firstPad.id)?.buffer).toBe(hydratedBuffer)
+    expect(entry.drumRackBuffers?.get(secondPad.id)?.buffer).toBeDefined()
     expect(fetchCalls).toEqual(["https://samples.example/missing.wav"])
-    expect(TestOfflineAudioContext.decodeCalls).toBe(2)
+    expect(TestOfflineAudioContext.decodeCalls).toBe(0)
 
     let nativeAssetCount = 0
     const nativeOutcome = await runTimelineExport({
@@ -592,7 +844,7 @@ test("instrument export preload reads local-asset bytes with the project context
         fx,
         automationEnvelopes: [],
       },
-      nativeOfflineRenderer: async (plan) => {
+      nativeOfflinePcmRenderer: async (plan) => {
         nativeAssetCount = plan.assets.length
         throw new NativeOfflineRenderError("render reached with the captured sampled buffer")
       },
@@ -605,7 +857,7 @@ test("instrument export preload reads local-asset bytes with the project context
     })
     expect(nativeAssetCount).toBeGreaterThan(0)
     expect(fetchCalls).toEqual(["https://samples.example/missing.wav"])
-    expect(TestOfflineAudioContext.decodeCalls).toBe(2)
+    expect(TestOfflineAudioContext.decodeCalls).toBe(0)
   } finally {
     globalThis.fetch = originalFetch
     if (originalStorage) Object.defineProperty(navigator, "storage", originalStorage)
@@ -616,12 +868,266 @@ test("instrument export preload reads local-asset bytes with the project context
   }
 })
 
-test("native export prepares Stretch after hydration and normalizes its PCM", async () => {
+test("instrument export reuses leased buffers at the exact cap and reserves only missing regions", async () => {
+  const source = { durationSec: 1, sampleRate: 48_000, channelCount: 2 }
+  const firstSample = {
+    assetKey: "asset:leased",
+    url: "https://samples.example/leased.wav",
+    sourceKind: "url" as const,
+    source,
+  }
+  const secondSample = {
+    assetKey: "asset:missing",
+    url: "https://samples.example/missing.wav",
+    sourceKind: "url" as const,
+    source,
+  }
+  const firstZone = {
+    id: "zone-leased",
+    sample: firstSample,
+    keyLow: 0,
+    keyHigh: 127,
+    velocityLow: 1,
+    velocityHigh: 127,
+    rootNote: 60,
+    tuneCents: 0,
+    gain: 1,
+    pan: 0,
+    roundRobinGroup: 0,
+    roundRobinIndex: 0,
+    playbackMode: "one-shot" as const,
+    startSec: 0,
+    crossfadeSec: 0,
+    chokeGroup: 0,
+  }
+  const secondZone = { ...firstZone, id: "zone-missing", sample: secondSample }
+  const bytes = sampledInstrumentRegionBytes(
+    sampledInstrumentRegion(source, 0, source.durationSec),
+    source.channelCount,
+  )
+  const leasedBuffer = new TestDecodedAudioBuffer(48_000, 48_000, 2)
+  const identity = sampledInstrumentRegionIdentity(
+    firstSample,
+    sampledInstrumentRegion(source, 0, source.durationSec),
+  )
+  const exactCapBudget = createSampledInstrumentRegionBudget(bytes)
+  const exactCapScope = exactCapBudget.createScope("exact-cap")
+  const leased = exactCapScope.lease([{ key: identity, buffer: leasedBuffer, bytes }])
+  const exactCapFx: ExportFx = {
+    trackFx: {
+      "track-exact-cap": {
+        instances: [],
+        instrument: {
+          kind: "sampler",
+          instanceId: "sampler-exact-cap",
+          params: { ...createDefaultSamplerParams(), zones: [firstZone] },
+        },
+        samplerBuffers: new Map([[
+          firstZone.id,
+          { buffer: leasedBuffer, sourceStartFrame: 0, sourceIdentity: identity },
+        ]]),
+      },
+    },
+    masterFxInstances: [],
+    masterVolume: 1,
+  }
+  await loadInstrumentExportBuffers(
+    exactCapFx,
+    new AbortController().signal,
+    undefined,
+    undefined,
+    exactCapScope,
+  )
+  expect(exactCapBudget.totalBytes()).toBe(bytes)
+  expect(exactCapFx.trackFx?.["track-exact-cap"]?.samplerBuffers?.get(firstZone.id)?.buffer).toBe(leasedBuffer)
+  leased.release()
+  exactCapScope.release()
+  expect(exactCapBudget.totalBytes()).toBe(0)
+
+  const originalFetch = globalThis.fetch
+  const offlineAudioContextDescriptor = Object.getOwnPropertyDescriptor(globalThis, "OfflineAudioContext")
+  const fetchDescriptor = Object.getOwnPropertyDescriptor(globalThis, "fetch")
+  const mixedBudget = createSampledInstrumentRegionBudget(bytes * 2)
+  const mixedScope = mixedBudget.createScope("mixed")
+  const mixedLease = mixedScope.lease([{ key: identity, buffer: leasedBuffer, bytes }])
+  const mixedFx: ExportFx = {
+    trackFx: {
+      "track-mixed": {
+        instances: [],
+        instrument: {
+          kind: "sampler",
+          instanceId: "sampler-mixed",
+          params: { ...createDefaultSamplerParams(), zones: [firstZone, secondZone] },
+        },
+        samplerBuffers: new Map([[
+          firstZone.id,
+          { buffer: leasedBuffer, sourceStartFrame: 0, sourceIdentity: identity },
+        ]]),
+      },
+    },
+    masterFxInstances: [],
+    masterVolume: 1,
+  }
+  Object.defineProperty(globalThis, "OfflineAudioContext", {
+    configurable: true,
+    value: TestOfflineAudioContext,
+  })
+  globalThis.fetch = Object.assign(async () => new Response(createSilentWav(2, 48_000)), {
+    preconnect: originalFetch.preconnect,
+  })
+  try {
+    await loadInstrumentExportBuffers(
+      mixedFx,
+      new AbortController().signal,
+      undefined,
+      undefined,
+      mixedScope,
+    )
+    expect(mixedBudget.totalBytes()).toBe(bytes * 2)
+    expect(mixedFx.trackFx?.["track-mixed"]?.samplerBuffers?.get(firstZone.id)?.buffer).toBe(leasedBuffer)
+    expect(mixedFx.trackFx?.["track-mixed"]?.samplerBuffers?.get(secondZone.id)?.buffer).toBeDefined()
+  } finally {
+    mixedLease.release()
+    mixedScope.release()
+    if (offlineAudioContextDescriptor) Object.defineProperty(globalThis, "OfflineAudioContext", offlineAudioContextDescriptor)
+    else Reflect.deleteProperty(globalThis, "OfflineAudioContext")
+    if (fetchDescriptor) Object.defineProperty(globalThis, "fetch", fetchDescriptor)
+    else Reflect.deleteProperty(globalThis, "fetch")
+  }
+  expect(mixedBudget.totalBytes()).toBe(0)
+})
+
+test("granular export charges its decoded buffer and worklet PCM mirror at the exact cap", async () => {
+  const source = { durationSec: 1, sampleRate: 48_000, channelCount: 2 }
+  const sample = {
+    assetKey: "asset:granular-exact",
+    url: "https://samples.example/granular-exact.wav",
+    sourceKind: "url" as const,
+    source,
+  }
+  const zone = {
+    id: "zone-granular-exact",
+    sample,
+    keyLow: 0,
+    keyHigh: 127,
+    velocityLow: 1,
+    velocityHigh: 127,
+    rootNote: 60,
+    tuneCents: 0,
+    gain: 1,
+    pan: 0,
+    roundRobinGroup: 0,
+    roundRobinIndex: 0,
+    playbackMode: "one-shot" as const,
+    startSec: 0,
+    crossfadeSec: 0,
+    chokeGroup: 0,
+  }
+  const buffer = new TestDecodedAudioBuffer(48_000, 48_000, 2)
+  const region = sampledInstrumentRegion(source, 0, source.durationSec)
+  const decodedBytes = sampledInstrumentRegionBytes(region, source.channelCount)
+  const identity = sampledInstrumentRegionIdentity(sample, region)
+  const budget = createSampledInstrumentRegionBudget(decodedBytes * 2)
+  const scope = budget.createScope("granular-exact")
+  const fx: ExportFx = {
+    trackFx: {
+      "track-granular-exact": {
+        instances: [],
+        instrument: {
+          kind: "granular",
+          instanceId: "granular-exact",
+          params: { ...createDefaultGranularParams(), zone },
+        },
+        granularBuffer: { assetKey: identity, buffer, sourceStartFrame: 0, sourceIdentity: identity },
+      },
+    },
+    masterFxInstances: [],
+    masterVolume: 1,
+  }
+
+  try {
+    await loadInstrumentExportBuffers(fx, new AbortController().signal, undefined, undefined, scope)
+    expect(budget.totalBytes()).toBe(decodedBytes * 2)
+  } finally {
+    scope.release()
+  }
+  expect(budget.totalBytes()).toBe(0)
+})
+
+test("shared sampler and granular export consumers charge one physical region at the granular weight", async () => {
+  const source = { durationSec: 1, sampleRate: 48_000, channelCount: 2 }
+  const sample = {
+    assetKey: "asset:shared-granular",
+    url: "https://samples.example/shared-granular.wav",
+    sourceKind: "url" as const,
+    source,
+  }
+  const zone = {
+    id: "zone-shared-granular",
+    sample,
+    keyLow: 0,
+    keyHigh: 127,
+    velocityLow: 1,
+    velocityHigh: 127,
+    rootNote: 60,
+    tuneCents: 0,
+    gain: 1,
+    pan: 0,
+    roundRobinGroup: 0,
+    roundRobinIndex: 0,
+    playbackMode: "one-shot" as const,
+    startSec: 0,
+    crossfadeSec: 0,
+    chokeGroup: 0,
+  }
+  const buffer = new TestDecodedAudioBuffer(48_000, 48_000, 2)
+  const region = sampledInstrumentRegion(source, 0, source.durationSec)
+  const decodedBytes = sampledInstrumentRegionBytes(region, source.channelCount)
+  const identity = sampledInstrumentRegionIdentity(sample, region)
+  const budget = createSampledInstrumentRegionBudget(decodedBytes * 2)
+  const scope = budget.createScope("shared-granular")
+  const fx: ExportFx = {
+    trackFx: {
+      "track-shared-sampler": {
+        instances: [],
+        instrument: {
+          kind: "sampler",
+          instanceId: "sampler-shared",
+          params: { ...createDefaultSamplerParams(), zones: [zone] },
+        },
+        samplerBuffers: new Map([[zone.id, { buffer, sourceStartFrame: 0, sourceIdentity: identity }]]),
+      },
+      "track-shared-granular": {
+        instances: [],
+        instrument: {
+          kind: "granular",
+          instanceId: "granular-shared",
+          params: { ...createDefaultGranularParams(), zone },
+        },
+        granularBuffer: { assetKey: identity, buffer, sourceStartFrame: 0, sourceIdentity: identity },
+      },
+    },
+    masterFxInstances: [],
+    masterVolume: 1,
+  }
+
+  try {
+    await loadInstrumentExportBuffers(fx, new AbortController().signal, undefined, undefined, scope)
+    expect(budget.totalBytes()).toBe(decodedBytes * 2)
+    expect(fx.trackFx?.["track-shared-sampler"]?.samplerBuffers?.get(zone.id)?.buffer).toBe(buffer)
+    expect(fx.trackFx?.["track-shared-granular"]?.granularBuffer?.buffer).toBe(buffer)
+  } finally {
+    scope.release()
+  }
+  expect(budget.totalBytes()).toBe(0)
+})
+
+test("native export prepares Stretch after hydration as a mapped artifact", async () => {
   const originalAudioBuffer = Object.getOwnPropertyDescriptor(globalThis, "AudioBuffer")
   let preparedAsset: {
     sampleRateHz: number
     frameCount: number
-    planarPcm: Uint8Array
+    preparedStretchArtifactId: string | undefined
   } | undefined
   const source = new TestDecodedAudioBuffer()
   try {
@@ -669,13 +1175,13 @@ test("native export prepares Stretch after hydration and normalizes its PCM", as
       },
       renderStateSnapshot,
       createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
-      nativeOfflineRenderer: async (plan) => {
-        const asset = plan.assets[0]
+      nativeOfflinePcmRenderer: async (plan) => {
+        const asset = plan.mappedAssets?.[0]
         if (asset) {
           preparedAsset = {
             sampleRateHz: asset.sampleRateHz,
             frameCount: asset.frameCount,
-            planarPcm: asset.planarPcm,
+            preparedStretchArtifactId: asset.preparedStretchArtifactId,
           }
         }
         throw new NativeOfflineRenderError("stop after native Stretch planning")
@@ -688,9 +1194,9 @@ test("native export prepares Stretch after hydration and normalizes its PCM", as
       failureOwner: "native",
       outputs: [],
     })
-    expect(preparedAsset?.sampleRateHz).toBe(render.sampleRate)
-    expect(preparedAsset?.frameCount).toBe(render.sampleRate)
-    expect(preparedAsset?.planarPcm.byteLength).toBe(render.sampleRate * 2 * Float32Array.BYTES_PER_ELEMENT)
+    expect(preparedAsset?.sampleRateHz).toBe(source.sampleRate)
+    expect(preparedAsset?.frameCount).toBe(source.length)
+    expect(preparedAsset?.preparedStretchArtifactId).toBeTruthy()
   } finally {
     if (originalAudioBuffer) Object.defineProperty(globalThis, "AudioBuffer", originalAudioBuffer)
     else Reflect.deleteProperty(globalThis, "AudioBuffer")
@@ -749,7 +1255,7 @@ test("native Stretch preparation hydrates first and surfaces structured diagnost
     },
     renderStateSnapshot,
     createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
-    nativeOfflineRenderer: async () => {
+    nativeOfflinePcmRenderer: async () => {
       throw new Error("native renderer should not run")
     },
   })
@@ -758,7 +1264,7 @@ test("native Stretch preparation hydrates first and surfaces structured diagnost
   expect(opened).toBe(false)
   expect(outcome).toMatchObject({
     type: "error",
-    message: "clip-stretch-diagnostic: Stretch source audio must be mono or stereo.",
+    message: "clip-stretch-diagnostic: only mono and stereo assets are supported.",
   })
 })
 
@@ -820,7 +1326,7 @@ test("native custom-range export ignores out-of-range Stretch preparation", asyn
     },
     renderStateSnapshot,
     createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
-    nativeOfflineRenderer: async () => {
+    nativeOfflinePcmRenderer: async () => {
       throw new NativeOfflineRenderError("stop after native custom-range planning")
     },
   })
@@ -834,26 +1340,92 @@ test("native custom-range export ignores out-of-range Stretch preparation", asyn
   })
 })
 
+test("native Main mixdown reports metadata-only ordinary clips without a resolver", async () => {
+  let loaderCalls = 0
+  const outcome = await runTimelineExport({
+    nativeRendererRequired: true,
+    getTracks: () => [{
+      id: "track-ordinary",
+      name: "Ordinary",
+      volume: 1,
+      clips: [{
+        id: "clip-ordinary",
+        name: "Ordinary clip",
+        color: "#fff",
+        startSec: 0,
+        duration: 1,
+        sourceAssetKey: "asset:ordinary",
+        sourceDurationSec: 9,
+        sourceSampleRate: 48_000,
+        sourceChannelCount: 2,
+        buffer: null,
+      }],
+    }],
+    bpm: 120,
+    projectGeneration: 1,
+    getProjectGeneration: () => 1,
+    masterVolume: 1,
+    range: { mode: "whole" },
+    formats: ["wav"],
+    render,
+    encoding,
+    projectId: "project:ordinary",
+    userId: undefined,
+    sidechainRoutes: [],
+    loadCapturedClipBuffer: async () => {
+      loaderCalls += 1
+      throw new Error("ordinary clips must not require whole-buffer hydration")
+    },
+    signal: new AbortController().signal,
+    outputTargets: {
+      resourceLimits: desktopLimits,
+      async createMixdownTarget() {
+        return {
+          openFile: async () => undefined,
+          saveBuffer: async () => ({ destination: "local", name: "unused.wav" }),
+        }
+      },
+      async createStemTarget() {
+        throw new Error("unexpected stem target")
+      },
+    },
+    renderStateSnapshot,
+    nativeOfflinePcmRenderer: async () => {
+      throw new NativeOfflineRenderError("native renderer should not run")
+    },
+  })
+
+  expect(loaderCalls).toBe(0)
+  expect(outcome).toEqual({
+    type: "error",
+    message: "Native export metadata-only mapped audio requires a PCM source resolver.",
+    outputs: [],
+  })
+})
+
 test("native export rejects a stale project generation after Stretch preparation", async () => {
   const source = new TestDecodedAudioBuffer(48_000, 48_000, 2)
   let generation = 7
   const outcome = await runTimelineExport({
     nativeRendererRequired: true,
-    getTracks: () => [{
-      id: "track-stretch-stale",
-      name: "Stretch",
-      volume: 1,
-      clips: [{
-        id: "clip-stretch-stale",
-        name: "Stretch clip",
-        color: "#fff",
-        startSec: 0,
-        duration: 1,
-        sourceAssetKey: "asset:stretch",
-        audioWarp: { enabled: true, mode: "stretch", sourceBpm: 120 },
-        buffer: source,
-      }],
-    }],
+    getTracks: () => {
+      generation = 8
+      return [{
+        id: "track-stretch-stale",
+        name: "Stretch",
+        volume: 1,
+        clips: [{
+          id: "clip-stretch-stale",
+          name: "Stretch clip",
+          color: "#fff",
+          startSec: 0,
+          duration: 1,
+          sourceAssetKey: "asset:stretch",
+          audioWarp: { enabled: true, mode: "stretch", sourceBpm: 120 },
+          buffer: source,
+        }],
+      }]
+    },
     bpm: 120,
     projectGeneration: 7,
     getProjectGeneration: () => generation,
@@ -877,11 +1449,8 @@ test("native export rejects a stale project generation after Stretch preparation
       },
     },
     renderStateSnapshot,
-    createBuffer: (channels, frames, sampleRate) => {
-      generation = 8
-      return new TestDecodedAudioBuffer(frames, sampleRate, channels)
-    },
-    nativeOfflineRenderer: async () => {
+    createBuffer: (channels, frames, sampleRate) => new TestDecodedAudioBuffer(frames, sampleRate, channels),
+    nativeOfflinePcmRenderer: async () => {
       throw new Error("native renderer should not run")
     },
   })

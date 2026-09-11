@@ -3,11 +3,11 @@ import { observeResource, type ResourceObserver } from './runtime-diagnostics'
 import { loadWorkletModule } from './worklet-loader'
 import { granularWorklet, resolveWorkletModuleUrl } from './worklet-manifest'
 import { scheduleAutomationEnvelope } from './automation'
+import type { SampledInstrumentBuffer } from './sampled-instrument-region'
 
 export type GranularInstalledBuffer = {
   assetKey: string
-  buffer: AudioBuffer
-}
+} & SampledInstrumentBuffer
 
 export type GranularWorkletControlMessage =
   | { type: 'install'; version: 1; generation: number; assetKey: string; sampleRate: number; channels: readonly Float32Array[] }
@@ -145,7 +145,7 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
 
   return {
     node,
-    installSample: ({ assetKey, buffer }: GranularInstalledBuffer): Promise<void> => {
+    installSample: ({ assetKey, buffer, sourceStartFrame }: GranularInstalledBuffer): Promise<void> => {
       if (closed) return Promise.reject(new Error('Granular runtime is closed.'))
       if (buffer === installedBuffer && assetKey === installedAssetKey) return Promise.resolve()
       const bytes = bufferBytes(buffer)
@@ -173,7 +173,7 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
         type: 'install',
         version: 1,
         generation: requestGeneration,
-        assetKey,
+        assetKey: `${assetKey}:${sourceStartFrame}:${buffer.length}`,
         sampleRate: buffer.sampleRate,
         channels,
       }, transfer)

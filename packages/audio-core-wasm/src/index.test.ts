@@ -1,11 +1,17 @@
 import { expect, test } from 'bun:test'
 import { audioCoreContractVersion } from '../../audio-core-contract/src/index'
 import { processorContractHash } from '../../audio-core-contract/src/generated/processor-contract-metadata'
-import { audioCoreWasmAbiVersion, audioCoreWasmArtifactVersion, loadAudioCoreWasmArtifact } from './index'
+import {
+  audioCoreWasmAbiVersion,
+  audioCoreWasmArtifactVersion,
+  audioCoreWasmPagedAbiVersion,
+  loadAudioCoreWasmArtifact,
+} from './index'
 
 const manifest = {
   version: audioCoreWasmArtifactVersion,
   abiVersion: audioCoreWasmAbiVersion,
+  pagedAbi: audioCoreWasmPagedAbiVersion,
   contractVersion: audioCoreContractVersion,
   contractHash: processorContractHash,
   fixedMemory: true,

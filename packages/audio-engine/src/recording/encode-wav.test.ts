@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { encodePlanarFloat32Wav, type PlanarAudioBlock, type WavOutputSink } from './encode-wav'
+import {
+  createWavOutputFormat,
+  encodePlanarFloat32Wav,
+  getWavContainerKind,
+  type PlanarAudioBlock,
+  type WavOutputSink,
+} from './encode-wav'
 
 const outputSink = () => {
   let bytes = new Uint8Array()
@@ -42,6 +48,35 @@ const wavSamples = (bytes: Uint8Array) => {
 }
 
 describe('planar float32 WAV encoder', () => {
+  test('selects RIFF below the safe container threshold and RF64 at the edge', () => {
+    const bytesPerFrame = Float32Array.BYTES_PER_ELEMENT
+    const riffFrames = Math.floor((2 ** 32 - 44 - 1) / bytesPerFrame)
+    expect(getWavContainerKind({ channelCount: 1, capturedFrames: riffFrames })).toBe('riff')
+    expect(getWavContainerKind({ channelCount: 1, capturedFrames: riffFrames + 1 })).toBe('rf64')
+    expect(getWavContainerKind({ channelCount: 2, capturedFrames: 2 ** 31 })).toBe('rf64')
+    expect(createWavOutputFormat({ channelCount: 1, capturedFrames: riffFrames })).toBeDefined()
+    expect(createWavOutputFormat({ channelCount: 1, capturedFrames: riffFrames + 1 })).toBeDefined()
+  })
+
+  test('rejects invalid logical PCM size arithmetic without allocating a take', () => {
+    expect(() => getWavContainerKind({ channelCount: 0, capturedFrames: 1 })).toThrow('size arithmetic')
+    expect(() => getWavContainerKind({ channelCount: 1, capturedFrames: Number.MAX_SAFE_INTEGER + 1 })).toThrow('size arithmetic')
+    expect(() => createWavOutputFormat({ channelCount: Number.NaN, capturedFrames: 1 })).toThrow('size arithmetic')
+  })
+
+  test('writes an RF64 header before rejecting an incomplete synthetic large take', async () => {
+    const output = outputSink()
+    await expect(encodePlanarFloat32Wav({
+      sampleRate: 48000,
+      channelCount: 2,
+      capturedFrames: 2 ** 31,
+      blocks: blocks([{ frameCount: 1, channels: [Float32Array.of(1), Float32Array.of(2)] }]),
+      sink: output.sink,
+    })).rejects.toThrow('frame count changed')
+    expect(new TextDecoder().decode(output.bytes().subarray(0, 4))).toBe('RF64')
+    expect(new TextDecoder().decode(output.bytes().subarray(8, 12))).toBe('WAVE')
+  })
+
   test('encodes mono samples with canonical timing and duration headers', async () => {
     const output = outputSink()
     await encodePlanarFloat32Wav({

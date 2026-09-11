@@ -31,7 +31,7 @@ import {
   removeTrackFromHistoryModel,
 } from '~/lib/undo/history-model'
 import type { Track } from '@daw-browser/timeline-core/types'
-import { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
+import type { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
 import {
   attachClipDeletionRecoveriesToHistory,
   flushPendingSharedOutboxHistoryUpdates,
@@ -53,6 +53,7 @@ type UseTimelineHistoryOptions = {
   grantClipWrite: (clipId: string | null | undefined, scope?: OptimisticGrantScope | null) => void
   persistLocalMix: (projectId: string, trackId: Track['id'], patch: LocalMixPatch) => void
   getActions: () => TimelineHistoryActions
+  drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>
 }
 
 type UseTimelineHistoryReturn = {
@@ -66,7 +67,6 @@ type HistoryScopeContext = {
   tracks: Track[]
   pendingRun: Promise<void>
   pendingLocalHistorySave: Promise<void>
-  drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>
   unregisterLocalHistoryFlusher?: () => void
   hydratedFromLocalDb?: boolean
   pendingLocalHistoryState?: PersistedHistory
@@ -150,10 +150,6 @@ export function useTimelineHistory(
       tracks: [],
       pendingRun: Promise.resolve(),
       pendingLocalHistorySave: Promise.resolve(),
-      drumRackBufferSync: createDrumRackBufferSync({
-        projectId: () => scope.projectId,
-        isCurrentProject: () => readCurrentScopeKey() === scopeKey,
-      }),
     }
     scopeContexts.set(scopeKey, context)
     if (localProject) {
@@ -366,7 +362,7 @@ export function useTimelineHistory(
           audioEngine: options.audioEngine,
           isCurrentScope: () => readCurrentScopeKey() === scopeKey,
           replayInstanceEffectParams: options.replayInstanceEffectParams,
-          drumRackBufferSync: context.drumRackBufferSync,
+          drumRackBufferSync: options.drumRackBufferSync,
           ensureClipBuffer: options.ensureClipBuffer,
           grantTrackWrite: options.grantTrackWrite,
           grantClipWrite: options.grantClipWrite,
@@ -414,7 +410,6 @@ export function useTimelineHistory(
   onCleanup(() => {
     for (const context of scopeContexts.values()) {
       context.unregisterLocalHistoryFlusher?.()
-      context.drumRackBufferSync.dispose()
     }
   })
 

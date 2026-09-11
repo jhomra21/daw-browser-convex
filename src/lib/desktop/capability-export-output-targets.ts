@@ -29,7 +29,6 @@ const capabilityCommitErrorSchema = z.object({
 
 export const desktopExportResourceLimits = {
   maximumFiles: 1_024,
-  maximumBytes: 8 * 1024 * 1024 * 1024,
   streaming: true,
 } satisfies NonNullable<ExportOutputTargetFactory["resourceLimits"]>
 

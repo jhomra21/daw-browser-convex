@@ -1,7 +1,7 @@
 const PROTOCOL_VERSION = 1
 import { graphEnvelope, stableId, writeId } from './daw-portable-graph-envelope-v3.js'
 
-const ABI_VERSION = 3
+const ABI_VERSION = 4
 const GRAPH_ENVELOPE_VERSION = 3
 const GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY = 4
 const SUPPORTED_GRAPH_ENVELOPE_VERSIONS = new Set([
@@ -18,6 +18,7 @@ const isCallable = (value) => value instanceof Function
 const isRecord = (value) => value !== null && Object(value) === value && !isCallable(value)
 const isString = (value) => Object(value) !== value && String(value) === value
 const isBoolean = (value) => value === true || value === false
+const safeNumberFromUint64 = (value) => value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : null
 
 const writeProcessorId = (view, offset, id) => view.setBigUint64(offset, BigInt(id), true)
 
@@ -140,6 +141,8 @@ export class DawPortableAudioCoreHost {
     this.samplerConfigure = null
     this.granularConfigure = null
     this.sourceSchedule = null
+    this.sourceReplace = null
+    this.sourceReset = null
     this.recordingCaptureInitialize = null
     this.recordingCaptureProcess = null
     this.recordingCaptureProcessMonitor = null
@@ -379,6 +382,14 @@ export class DawPortableAudioCoreHost {
       this.scheduleSources(message)
       return
     }
+    if (message.type === 'replace-sources') {
+      this.replaceSources(message)
+      return
+    }
+    if (message.type === 'reset-sources') {
+      this.resetSources(message)
+      return
+    }
     if (message.type === 'register-asset') {
       this.registerAsset(message)
       return
@@ -426,6 +437,7 @@ export class DawPortableAudioCoreHost {
         exports.daw_audio_core_wasm_graph_process_planar,
         exports.daw_audio_core_wasm_graph_set_transport,
         exports.daw_audio_core_wasm_graph_schedule_sample_source,
+        exports.daw_audio_core_wasm_graph_replace_sample_sources,
         exports.daw_audio_core_wasm_graph_register_pcm_asset,
         exports.daw_audio_core_wasm_graph_release_asset,
         exports.daw_audio_core_wasm_graph_configure_synth,
@@ -460,6 +472,9 @@ export class DawPortableAudioCoreHost {
         ? exports.daw_audio_core_wasm_graph_cancel : null
       this.graphSetTransport = exports.daw_audio_core_wasm_graph_set_transport
       this.sourceSchedule = exports.daw_audio_core_wasm_graph_schedule_sample_source
+      this.sourceReplace = exports.daw_audio_core_wasm_graph_replace_sample_sources
+      this.sourceReset = isCallable(exports.daw_audio_core_wasm_graph_reset_sample_sources)
+        ? exports.daw_audio_core_wasm_graph_reset_sample_sources : null
       this.assetRegister = exports.daw_audio_core_wasm_graph_register_pcm_asset
       this.assetRelease = exports.daw_audio_core_wasm_graph_release_asset
       this.synthConfigure = exports.daw_audio_core_wasm_graph_configure_synth
@@ -491,7 +506,7 @@ export class DawPortableAudioCoreHost {
       this.outputPointers[0] = this.leftOutput.byteOffset
       this.outputPointers[1] = this.rightOutput.byteOffset
       const captureScratch = exports.malloc(
-        56 + 48 + 64
+        56 + 64 + 64
         + CHANNEL_COUNT * Uint32Array.BYTES_PER_ELEMENT
         + CHANNEL_COUNT * 2048 * Float32Array.BYTES_PER_ELEMENT
         + CHANNEL_COUNT * Uint32Array.BYTES_PER_ELEMENT
@@ -503,7 +518,7 @@ export class DawPortableAudioCoreHost {
       }
       this.recordingCaptureConfigOffset = captureScratch
       this.recordingCaptureBlockOffset = captureScratch + 56
-      this.recordingCaptureDiagnosticsOffset = this.recordingCaptureBlockOffset + 48
+      this.recordingCaptureDiagnosticsOffset = this.recordingCaptureBlockOffset + 64
       this.recordingCaptureDiagnosticsView = new DataView(exports.memory.buffer, this.recordingCaptureDiagnosticsOffset, 64)
       this.recordingCaptureOutputPointerOffset = this.recordingCaptureDiagnosticsOffset + 64
       const capturePlanes = this.recordingCaptureOutputPointerOffset + CHANNEL_COUNT * Uint32Array.BYTES_PER_ELEMENT
@@ -977,6 +992,98 @@ export class DawPortableAudioCoreHost {
     this.sourceScheduleResult(message, 'scheduled')
   }
 
+  sourcesReplacedResult(message, result) {
+    this.postMessage({
+      version: PROTOCOL_VERSION,
+      type: 'sources-replaced',
+      requestId: message.requestId,
+      revision: message.revision,
+      epoch: message.epoch,
+      result,
+    })
+  }
+
+  replaceSources(message) {
+    const events = Array.isArray(message.ordinary) ? [...message.ordinary].sort((left, right) => left.sequence - right.sequence) : []
+    if (!this.ready || !this.sourceReplace || message.revision !== this.revision
+      || message.epoch !== this.transportEpoch || !Array.isArray(message.prepared)
+      || message.prepared.length !== 0 || events.length > 256) {
+      return this.sourcesReplacedResult(message, 'rejected')
+    }
+    let previousSequence = 0
+    const handles = []
+    for (const event of events) {
+      if (!event || event.version !== 1 || event.epoch !== message.epoch || !Number.isSafeInteger(event.sequence)
+        || event.sequence <= previousSequence || !isString(event.sourceNodeId) || event.sourceNodeId.length === 0
+        || !isString(event.assetId) || !this.assets.has(event.assetId)
+        || !Number.isSafeInteger(event.startFrame) || !Number.isSafeInteger(event.stopFrame) || event.stopFrame <= event.startFrame
+        || !Number.isSafeInteger(event.sourceOffsetFrame) || event.sourceOffsetFrame < 0
+        || !Number.isSafeInteger(event.sourceFrameCount) || event.sourceFrameCount < 1 || !Number.isFinite(event.gain)
+        || !Number.isSafeInteger(event.fadeInStartFrame) || !Number.isSafeInteger(event.fadeInEndFrame) || event.fadeInEndFrame < event.fadeInStartFrame
+        || !Number.isSafeInteger(event.fadeOutStartFrame) || !Number.isSafeInteger(event.fadeOutEndFrame) || event.fadeOutEndFrame < event.fadeOutStartFrame
+        || event.sourceOffsetFraction !== undefined && (!Number.isFinite(event.sourceOffsetFraction) || event.sourceOffsetFraction < 0 || event.sourceOffsetFraction >= 1)
+        || event.fadeInCurve !== undefined && (!Number.isFinite(event.fadeInCurve) || event.fadeInCurve < -1 || event.fadeInCurve > 1)
+        || event.fadeInCurvePosition !== undefined && (!Number.isFinite(event.fadeInCurvePosition) || event.fadeInCurvePosition < 0 || event.fadeInCurvePosition > 1)
+        || event.fadeOutCurve !== undefined && (!Number.isFinite(event.fadeOutCurve) || event.fadeOutCurve < -1 || event.fadeOutCurve > 1)
+        || event.fadeOutCurvePosition !== undefined && (!Number.isFinite(event.fadeOutCurvePosition) || event.fadeOutCurvePosition < 0 || event.fadeOutCurvePosition > 1)) {
+        return this.sourcesReplacedResult(message, 'rejected')
+      }
+      handles.push({ event, handle: this.assets.get(event.assetId).handle.value })
+      previousSequence = event.sequence
+    }
+    const bytes = new ArrayBuffer(4 + events.length * 120)
+    const view = new DataView(bytes)
+    view.setUint32(0, events.length, true)
+    let offset = 4
+    for (const { event, handle } of handles) {
+      view.setUint32(offset, 0, true)
+      view.setUint32(offset + 4, 0, true)
+      view.setBigUint64(offset + 8, BigInt(event.sequence), true)
+      view.setBigUint64(offset + 16, stableId(event.sourceNodeId), true)
+      view.setBigUint64(offset + 24, handle, true)
+      view.setBigInt64(offset + 32, BigInt(event.startFrame), true)
+      view.setBigInt64(offset + 40, BigInt(event.stopFrame), true)
+      view.setBigUint64(offset + 48, BigInt(event.sourceOffsetFrame), true)
+      view.setBigUint64(offset + 56, BigInt(event.sourceFrameCount), true)
+      view.setFloat32(offset + 64, event.gain, true)
+      view.setBigInt64(offset + 68, BigInt(event.fadeInStartFrame), true)
+      view.setBigInt64(offset + 76, BigInt(event.fadeInEndFrame), true)
+      view.setBigInt64(offset + 84, BigInt(event.fadeOutStartFrame), true)
+      view.setBigInt64(offset + 92, BigInt(event.fadeOutEndFrame), true)
+      view.setFloat32(offset + 100, event.sourceOffsetFraction || 0, true)
+      view.setFloat32(offset + 104, event.fadeInCurve || 0, true)
+      view.setFloat32(offset + 108, event.fadeInCurvePosition ?? 0.5, true)
+      view.setFloat32(offset + 112, event.fadeOutCurve || 0, true)
+      view.setFloat32(offset + 116, event.fadeOutCurvePosition ?? 0.5, true)
+      offset += 120
+    }
+    const allocation = this.malloc(bytes.byteLength)
+    if (!allocation) return this.sourcesReplacedResult(message, 'rejected')
+    new Uint8Array(this.memory.buffer, allocation, bytes.byteLength).set(new Uint8Array(bytes))
+    const result = this.sourceReplace(message.revision, message.epoch, allocation, bytes.byteLength)
+    this.free(allocation)
+    return this.sourcesReplacedResult(message, result === CORE_OK ? 'replaced' : 'rejected')
+  }
+
+  resetSources(message) {
+    const result = this.ready && this.sourceReset
+      && Number.isInteger(message.requestId)
+      && Number.isInteger(message.revision)
+      && message.revision === this.revision
+      && Number.isInteger(message.epoch)
+      && message.epoch === this.transportEpoch
+      ? this.sourceReset(message.revision, message.epoch)
+      : 1
+    this.postMessage({
+      version: PROTOCOL_VERSION,
+      type: 'sources-reset',
+      requestId: message.requestId,
+      revision: message.revision,
+      epoch: message.epoch,
+      result: result === 0 ? 'reset' : 'rejected',
+    })
+  }
+
   sourceScheduleResult(message, result) {
     if (Number.isInteger(message && message.requestId)) this.postMessage({
       version: PROTOCOL_VERSION,
@@ -1038,10 +1145,13 @@ export class DawPortableAudioCoreHost {
   drainRecordingCapture() {
     if (!this.ready || !this.memory || !this.recordingCaptureDequeue || !this.recordingCaptureDiagnostics
       || !this.recordingCaptureOutputPlanes) return this.fault('initialization-failed')
-    const metadata = new DataView(this.memory.buffer, this.recordingCaptureBlockOffset, 48)
+    const metadata = new DataView(this.memory.buffer, this.recordingCaptureBlockOffset, 64)
     if (this.recordingCaptureDequeue(this.recordingCaptureOutputPointerOffset, this.recordingCaptureBlockOffset) === 0) {
-      const channelCount = metadata.getUint32(28, true)
-      const frameCount = metadata.getUint32(24, true)
+      const channelCount = metadata.getUint32(32, true)
+      const frameCount = metadata.getUint32(28, true)
+      const sessionId = safeNumberFromUint64(metadata.getBigUint64(8, true))
+      const sequence = safeNumberFromUint64(metadata.getBigUint64(16, true))
+      if (sessionId === null || sequence === null) return this.fault('core-error')
       const planes = []
       for (let channel = 0; channel < channelCount; channel += 1) {
         planes.push(this.recordingCaptureOutputPlanes[channel].slice(0, frameCount))
@@ -1050,13 +1160,13 @@ export class DawPortableAudioCoreHost {
         version: PROTOCOL_VERSION,
         type: 'recording-capture-block',
         generation: metadata.getUint32(0, true),
-        sessionId: Number(metadata.getBigUint64(8, true)),
-        sequence: metadata.getUint32(16, true),
+        sessionId,
+        sequence,
         frameCount,
         channelCount,
         planes,
-        rms: metadata.getFloat32(40, true),
-        peak: metadata.getFloat32(44, true),
+        rms: metadata.getFloat32(44, true),
+        peak: metadata.getFloat32(48, true),
       })
     }
     this.recordingCaptureNotificationPending = false
@@ -1079,13 +1189,17 @@ export class DawPortableAudioCoreHost {
       || this.recordingCaptureDiagnostics(this.recordingCaptureDiagnosticsOffset) !== 0) return this.fault('core-error')
     const diagnostics = this.recordingCaptureDiagnosticsView
     if (!diagnostics) return this.fault('initialization-failed')
+    const sessionId = safeNumberFromUint64(diagnostics.getBigUint64(8, true))
+    const capturedFrames = safeNumberFromUint64(diagnostics.getBigUint64(16, true))
+    const droppedFrames = safeNumberFromUint64(diagnostics.getBigUint64(24, true))
+    if (sessionId === null || capturedFrames === null || droppedFrames === null) return this.fault('core-error')
     this.postMessage({
       version: PROTOCOL_VERSION,
       type: 'recording-capture-diagnostics',
       generation: diagnostics.getUint32(0, true),
-      sessionId: Number(diagnostics.getBigUint64(8, true)),
-      capturedFrames: Number(diagnostics.getBigUint64(16, true)),
-      droppedFrames: Number(diagnostics.getBigUint64(24, true)),
+      sessionId,
+      capturedFrames,
+      droppedFrames,
       droppedBlocks: diagnostics.getUint32(32, true),
       availableBlocks: diagnostics.getUint32(36, true),
       queuedBlocks: diagnostics.getUint32(40, true),

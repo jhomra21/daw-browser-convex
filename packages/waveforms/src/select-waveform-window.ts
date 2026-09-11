@@ -1,7 +1,7 @@
 import { ensurePeakAsset, loadPeakChunkData } from './asset-store'
-import { SILENCE_BYTE } from './extract-peaks'
+import { getPeakChunkRecord, SILENCE_BYTE } from './extract-peaks'
 import { resamplePeakPairs } from './resample-peak-pairs'
-import type { PeakAssetRecord, PeakChunkRecord, PeakLevelRecord, WaveformSliceRequest } from './types'
+import type { PeakAssetRecord, PeakLevelRecord, WaveformSliceRequest } from './types'
 
 type WaveformWindow = {
   startSec: number
@@ -34,22 +34,35 @@ function getWaveformWindow(level: PeakLevelRecord, record: PeakAssetRecord, requ
   }
 }
 
-function getWindowStartOffset(chunk: PeakChunkRecord, windowStartSec: number, peaksPerSecond: number) {
+function getWindowStartOffset(chunk: ReturnType<typeof getPeakChunkRecord>, windowStartSec: number, peaksPerSecond: number) {
   return Math.max(0, Math.floor((windowStartSec - chunk.startSec) * peaksPerSecond))
 }
 
-function getWindowEndOffset(chunk: PeakChunkRecord, windowEndSec: number, peaksPerSecond: number) {
+function getWindowEndOffset(chunk: ReturnType<typeof getPeakChunkRecord>, windowEndSec: number, peaksPerSecond: number) {
   return Math.min(chunk.peakCount, Math.ceil((windowEndSec - chunk.startSec) * peaksPerSecond))
 }
 
-async function loadWindowSourceData(level: PeakLevelRecord, window: WaveformWindow) {
+async function loadWindowSourceData(
+  level: PeakLevelRecord,
+  record: PeakAssetRecord,
+  window: WaveformWindow,
+  signal?: AbortSignal,
+) {
   const source = new Uint8Array(window.peakCount * 2)
   source.fill(SILENCE_BYTE)
   if (window.endSec <= window.startSec) return source
 
-  for (const chunk of level.chunks) {
+  const firstChunkIndex = Math.max(0, Math.floor(window.startSec / level.chunkDurationSec))
+  const lastChunkIndex = Math.min(
+    level.chunkCount - 1,
+    Math.ceil(window.endSec / level.chunkDurationSec) - 1,
+  )
+  for (let chunkIndex = firstChunkIndex; chunkIndex <= lastChunkIndex; chunkIndex++) {
+    signal?.throwIfAborted()
+    const chunk = getPeakChunkRecord(record.assetKey, level, record, chunkIndex)
     if (chunk.endSec <= window.startSec || chunk.startSec >= window.endSec) continue
     const data = await loadPeakChunkData(chunk.chunkKey)
+    signal?.throwIfAborted()
     if (!data) continue
     const overlapStartSec = Math.max(window.startSec, chunk.startSec)
     const overlapEndSec = Math.min(window.endSec, chunk.endSec)
@@ -81,6 +94,6 @@ export async function getWaveformSlice(request: WaveformSliceRequest): Promise<U
   const level = selectPeakLevel(record, request, startSec, endSec)
   if (!level) return null
   const window = getWaveformWindow(level, record, request)
-  const source = await loadWindowSourceData(level, window)
+  const source = await loadWindowSourceData(level, record, window, request.signal)
   return resampleWindow(source, request.bins)
 }

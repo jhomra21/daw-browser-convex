@@ -7,10 +7,11 @@ import {
 } from "@daw-browser/plugin-host-protocol"
 import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import { serializeNativeGraph } from "@daw-browser/audio-engine/native-host-wire"
-import type {
-  NativeAudioHostSupervisor,
-  NativeWorkerNotification,
-  ResolvedVst3Attachment,
+import {
+  NativeAudioHostCommandError,
+  type NativeAudioHostSupervisor,
+  type NativeWorkerNotification,
+  type ResolvedVst3Attachment,
 } from "./audio-host"
 import type { PluginCatalogData } from "./plugin-catalog"
 import { resolveVst3Attachment } from "./vst3-attachment"
@@ -746,7 +747,8 @@ export const coordinateNativeVst3Attachments = async (input: {
       )
     }
     return { ok: true, attached: resolved.length }
-  } catch {
+  } catch (error) {
+    if (error instanceof NativeAudioHostCommandError) throw error
     return { ok: false, code: "native-transaction-failed", message: "The native VST3 attachment transaction failed." }
   }
 }

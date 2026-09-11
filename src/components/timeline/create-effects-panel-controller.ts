@@ -8,8 +8,8 @@ import { createEffectsPanelInstrumentDevice } from "~/components/timeline/create
 import type { AddMidiClipOptions, TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import { useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync";
 import { useEffectsPanelTarget } from "~/hooks/useEffectsPanelTarget";
-import { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
-import { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
+import type { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
+import type { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
 import { convexApi, useConvexQuery } from "~/lib/convex";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import type { EffectParamsByEffect, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
@@ -71,6 +71,8 @@ type EffectsPanelControllerOptions = {
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
   onExportSnapshotChange?: (snapshot: EffectsPanelExportSnapshot | undefined) => void;
   spectrumProvider?: Accessor<((targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void) | undefined>;
+  samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
+  drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>;
 };
 
 const deviceInsertActionsEqual = (
@@ -107,10 +109,8 @@ const deviceInsertActionsEqual = (
 );
 
 export function createEffectsPanelController(options: EffectsPanelControllerOptions) {
-  const samplerBufferSync = createSamplerBufferSync({ projectId: options.projectId });
-  const drumRackBufferSync = createDrumRackBufferSync({ projectId: options.projectId });
-  onCleanup(samplerBufferSync.dispose);
-  onCleanup(drumRackBufferSync.dispose);
+  const samplerBufferSync = options.samplerBufferSync;
+  const drumRackBufferSync = options.drumRackBufferSync;
   const target = useEffectsPanelTarget({
     selectedFXTarget: options.selectedFXTarget,
     tracks: options.tracks,

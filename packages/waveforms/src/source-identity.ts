@@ -10,6 +10,7 @@ function nearlyEqual(left: number | undefined, right: number | undefined) {
 export function createWaveformSourceIdentity(input: WaveformSourceIdentity): WaveformSourceIdentity {
   return {
     assetKey: input.assetKey,
+    identity: input.identity,
     durationSec: input.durationSec,
     sampleRate: input.sampleRate,
     channelCount: input.channelCount,
@@ -22,6 +23,9 @@ export function peakAssetMatchesSourceIdentity(
 ) {
   if (!identity) return true
   if (record.assetKey !== identity.assetKey) return false
+  if (record.sourceIdentity?.identity !== undefined
+    && identity.identity !== undefined
+    && record.sourceIdentity.identity !== identity.identity) return false
   if (!nearlyEqual(record.durationSec, identity.durationSec)) return false
   if (identity.sampleRate !== undefined && record.sampleRate !== identity.sampleRate) return false
   if (identity.channelCount !== undefined && record.channelCount !== identity.channelCount) return false

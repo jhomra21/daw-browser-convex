@@ -1,12 +1,14 @@
 import { audioCoreContractVersion } from '../../audio-core-contract/src/index'
 import { processorContractHash } from '../../audio-core-contract/src/generated/processor-contract-metadata'
 
-export const audioCoreWasmAbiVersion = 3
-export const audioCoreWasmArtifactVersion = 2
+export const audioCoreWasmAbiVersion = 4
+export const audioCoreWasmArtifactVersion = 4
+export const audioCoreWasmPagedAbiVersion = 1
 
 export type AudioCoreWasmArtifactManifest = {
   version: typeof audioCoreWasmArtifactVersion
   abiVersion: typeof audioCoreWasmAbiVersion
+  pagedAbi: typeof audioCoreWasmPagedAbiVersion
   contractVersion: typeof audioCoreContractVersion
   contractHash: string
   fixedMemory: true
@@ -139,6 +141,7 @@ export async function loadAudioCoreWasmArtifact(
   if (!isRecord(unknownManifest)
     || unknownManifest.version !== audioCoreWasmArtifactVersion
     || !isNumber(unknownManifest.abiVersion)
+    || unknownManifest.pagedAbi !== audioCoreWasmPagedAbiVersion
     || !isNumber(unknownManifest.contractVersion)
     || !isString(unknownManifest.contractHash)
     || !isBoolean(unknownManifest.fixedMemory)
@@ -157,6 +160,7 @@ export async function loadAudioCoreWasmArtifact(
   const manifest: AudioCoreWasmArtifactManifest = {
     version: audioCoreWasmArtifactVersion,
     abiVersion: audioCoreWasmAbiVersion,
+    pagedAbi: audioCoreWasmPagedAbiVersion,
     contractVersion: audioCoreContractVersion,
     contractHash: unknownManifest.contractHash,
     fixedMemory: true,
@@ -169,6 +173,7 @@ export async function loadAudioCoreWasmArtifact(
     manifestUrl,
     manifest.version,
     manifest.abiVersion,
+    manifest.pagedAbi,
     manifest.contractVersion,
     manifest.contractHash,
     manifest.memoryBytes,

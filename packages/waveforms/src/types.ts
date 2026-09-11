@@ -1,5 +1,8 @@
+import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
+
 export type PeakChunkRecord = {
   chunkKey: string
+  chunkIndex: number
   startSec: number
   endSec: number
   peakCount: number
@@ -8,7 +11,7 @@ export type PeakChunkRecord = {
 export type PeakLevelRecord = {
   peaksPerSecond: number
   chunkDurationSec: number
-  chunks: PeakChunkRecord[]
+  chunkCount: number
 }
 
 export type PeakAssetRecord = {
@@ -22,6 +25,7 @@ export type PeakAssetRecord = {
 
 export type WaveformSourceIdentity = {
   assetKey: string
+  identity?: string
   durationSec?: number
   sampleRate?: number
   channelCount?: number
@@ -30,8 +34,9 @@ export type WaveformSourceIdentity = {
 export type EnsureWaveformAssetOptions = {
   assetKey: string
   sourceIdentity?: WaveformSourceIdentity
-  sampleUrl?: string
+  source?: AudioPcmSourceDescriptor
   buffer?: AudioBuffer | null
+  signal?: AbortSignal
 }
 
 export type WaveformSliceRequest = EnsureWaveformAssetOptions & {

@@ -23,6 +23,8 @@ import {
   desktopHostExportStatusSchemaV1,
   desktopHostImportInputSchemaV1,
   desktopHostImportResultSchemaV1,
+  desktopHostImportStatusSchemaV1,
+  desktopHostImportCancelInputSchemaV1,
   desktopHostStatusSchemaV1,
   desktopHostVstInstancesInputSchemaV1,
   desktopHostVstInstancesResultSchemaV1,
@@ -178,6 +180,12 @@ export const startControlMcp = async () => {
       "host.import.audio",
       desktopHostImportInputSchemaV1.parse(input),
       desktopHostImportResultSchemaV1.parse,
+    ),
+    importStatus: async () => requestHostTool("host.import.status", {}, desktopHostImportStatusSchemaV1.parse),
+    importCancel: async (input: Parameters<typeof desktopHostImportCancelInputSchemaV1.parse>[0]) => requestHostTool(
+      "host.import.cancel",
+      desktopHostImportCancelInputSchemaV1.parse(input),
+      desktopHostImportStatusSchemaV1.parse,
     ),
     exportRun: async (input: Parameters<typeof desktopHostExportRunInputSchemaV1.parse>[0]) => requestHostTool(
       "host.export.run",

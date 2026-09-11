@@ -139,3 +139,86 @@ test('keeps same-frame caller order, excludes a block end boundary, and invalida
   expect(isPortableFrameScheduleCurrent(schedule, { revision: 7, transportEpoch: 3 })).toBe(true)
   expect(isPortableFrameScheduleCurrent(schedule, { revision: 7, transportEpoch: 4 })).toBe(false)
 })
+
+test('keeps a spanning note identity stable across logical loop windows', () => {
+  const spanningTrack: RuntimeTrack = {
+    ...track,
+    clips: [{
+      ...track.clips[0]!,
+      duration: 8,
+      midi: {
+        ...track.clips[0]!.midi!,
+        notes: [{ id: 'long-note', beat: 0, length: 8, pitch: 60, velocity: 0.7 }],
+      },
+    }],
+  }
+  const first = compilePortableFrameSchedule({
+    ...input,
+    tracks: [spanningTrack],
+    rangeEndSec: 2,
+    stableNoteIds: true,
+    clipSpanningNoteOn: true,
+  })
+  const second = compilePortableFrameSchedule({
+    ...input,
+    timeOrigin: { timelineSec: 2, frame: 96_000 },
+    tracks: [spanningTrack],
+    rangeEndSec: 4,
+    stableNoteIds: true,
+    clipSpanningNoteOn: true,
+  })
+  const firstNote = first.events.find((event) => event.type === 'note-on')
+  const secondNote = second.events.find((event) => event.type === 'note-on')
+  expect(firstNote?.noteId).toBe(secondNote?.noteId)
+  expect(secondNote?.frame).toBe(96_000)
+})
+
+test('emits release and retrigger events instead of collapsing adjacent notes', () => {
+  const adjacentTrack: RuntimeTrack = {
+    ...track,
+    clips: [{
+      ...track.clips[0]!,
+      midi: {
+        ...track.clips[0]!.midi!,
+        notes: [
+          { id: 'first', beat: 0, length: 1, pitch: 60, velocity: 0.5 },
+          { id: 'second', beat: 1, length: 1, pitch: 60, velocity: 0.8 },
+        ],
+      },
+    }],
+  }
+  const events = compilePortableFrameSchedule({
+    ...input,
+    tracks: [adjacentTrack],
+    automationEnvelopes: [],
+  }).events.filter((event) => event.type === 'note-on' || event.type === 'note-off')
+  expect(events.map((event) => event.type)).toEqual(['note-on', 'note-off', 'note-on', 'note-off'])
+  expect(events.map((event) => event.noteId)).toEqual([1, 1, 2, 2])
+})
+
+test('releases active voices at a loop boundary before retriggering the next iteration', () => {
+  const longTrack: RuntimeTrack = {
+    ...track,
+    clips: [{
+      ...track.clips[0]!,
+      midi: {
+        ...track.clips[0]!.midi!,
+        notes: [{ id: 'boundary-note', beat: 0, length: 2, pitch: 60, velocity: 0.7 }],
+      },
+    }],
+  }
+  const events = compilePortableFrameSchedule({
+    ...input,
+    tracks: [longTrack],
+    automationEnvelopes: [],
+    rangeEndSec: 2,
+    loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 },
+  }).events.filter((event) => event.type === 'note-on' || event.type === 'note-off')
+  expect(events.map((event) => [event.frame, event.type])).toEqual([
+    [0, 'note-on'],
+    [48_000, 'note-off'],
+    [48_000, 'note-on'],
+    [96_000, 'note-off'],
+  ])
+  expect(events[1]?.noteId).not.toBe(events[2]?.noteId)
+})

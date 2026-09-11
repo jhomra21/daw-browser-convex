@@ -38,6 +38,7 @@ const legacyDynamicsWorkletUrls = {
 const wasmArtifactManifestSchema = z.object({
   artifactKind: z.string(),
   abiVersion: z.number(),
+  pagedAbi: z.number(),
   buildType: z.string(),
   lto: z.boolean(),
   fixedMemory: z.boolean(),
@@ -542,8 +543,10 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
   const exports = instance.instance.exports
 
   expect(manifest).toMatchObject({
+    version: 4,
     artifactKind: 'production',
-    abiVersion: 3,
+    abiVersion: 4,
+    pagedAbi: 1,
     buildType: 'Release',
     lto: true,
     fixedMemory: true,
@@ -569,7 +572,16 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
     || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_publish)
     || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_process)
     || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_process_planar)
-    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_schedule_sample_source)) {
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_schedule_sample_source)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_create_paged_asset)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_write_paged_asset_page)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_prepare_paged_asset)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_schedule_prepared_sample_source)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_release_paged_preparation)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_trim_paged_asset)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_paged_sub_abi_version)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_paged_page_frames)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_paged_slot_count)) {
     throw new Error('The Wasm artifact does not expose the stable portable C ABI.')
   }
 
@@ -584,7 +596,7 @@ test('the fixed-memory Wasm artifact matches the Utility fixture vector', async 
     || !isWasmFunctionExport(headroomExports.free)) {
     throw new Error('The Wasm artifact does not expose the headroom regression ABI.')
   }
-  expect(headroomExports.daw_audio_core_wasm_graph_initialize_planar(48_000, 128, 2, 2, 64)).toBe(0)
+  expect(headroomExports.daw_audio_core_wasm_graph_initialize_planar(48_000, 128, 2, 8, 64)).toBe(0)
   const postInitializeAsset = headroomExports.malloc(16_000_000)
   if (postInitializeAsset === 0) {
     throw new Error('The fixed-memory Wasm artifact could not allocate ordinary PCM asset headroom after graph initialization.')
@@ -637,16 +649,16 @@ test('the Wasm recording capture bridge keeps bounded block output and diagnosti
     || !isWasmFunctionExport(exports.daw_audio_core_wasm_recording_capture_get_diagnostics)) {
     throw new Error('The recording capture Wasm bridge exports are unavailable.')
   }
-  const allocation = exports.malloc(56 + 8 + 3 * Float32Array.BYTES_PER_ELEMENT + 48 + 64)
+  const allocation = exports.malloc(56 + 8 + 3 * Float32Array.BYTES_PER_ELEMENT + 56 + 60)
   if (allocation === 0) throw new Error('Could not allocate recording capture fixture.')
   try {
     const config = allocation
     const pointers = config + 56
     const input = pointers + 8
     const block = input + 3 * Float32Array.BYTES_PER_ELEMENT
-    const diagnostics = block + 48
+    const diagnostics = block + 56
     const view = new DataView(exports.memory.buffer)
-    view.setUint32(config, 3, true)
+    view.setUint32(config, 4, true)
     view.setUint32(config + 4, 3, true)
     view.setBigUint64(config + 8, 11n, true)
     view.setUint32(config + 16, 1, true)
@@ -663,7 +675,9 @@ test('the Wasm recording capture bridge keeps bounded block output and diagnosti
     expect(exports.daw_audio_core_wasm_recording_capture_process(pointers, 1, 3, 0n)).toBe(0)
     expect(exports.daw_audio_core_wasm_recording_capture_finalize(3n)).toBe(0)
     expect(exports.daw_audio_core_wasm_recording_capture_dequeue(pointers, block)).toBe(0)
-    expect(view.getUint32(block + 24, true)).toBe(2)
+    expect(view.getUint32(block + 28, true)).toBe(2)
+    expect(view.getFloat32(block + 44, true)).toBeCloseTo(Math.sqrt((1 ** 2 + 1.5 ** 2) / 2), 5)
+    expect(view.getFloat32(block + 48, true)).toBeCloseTo(1.5, 5)
     expect(view.getFloat32(input, true)).toBeCloseTo(-1, 6)
     expect(view.getFloat32(input + 4, true)).toBeCloseTo(-1.5, 6)
     expect(exports.daw_audio_core_wasm_recording_capture_get_diagnostics(diagnostics)).toBe(0)
@@ -814,6 +828,98 @@ test('the planar graph bridge validates bounded buses and forwards epoch-scoped 
     expect(exports.daw_audio_core_wasm_graph_process_planar(1, 3, 2, pointers, pointers + 4 * 4, 1, 0, 0, 0, 0, 0, 0)).toBe(3)
     view.setUint32(events + 28, 0, true)
     expect(exports.daw_audio_core_wasm_graph_process_planar(1, 2, 2, pointers, pointers + 4 * 4, 1, 0, 0, 0, 0, events, 52)).toBe(1)
+  } finally {
+    exports.free(allocation)
+  }
+})
+
+test('the planar graph bridge preserves eager channels above the paged ABI limit', async () => {
+  const bytes = await Bun.file(artifactUrl).arrayBuffer()
+  const instance = await WebAssembly.instantiate(bytes)
+  const exports = instance.instance.exports
+  if (!(exports.memory instanceof WebAssembly.Memory)
+    || !isWasmFunctionExport(exports.malloc)
+    || !isWasmFunctionExport(exports.free)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_initialize_planar)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_prepare)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_publish)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_register_pcm_asset)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_release_asset)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_create_paged_asset)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_schedule_sample_source)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_set_transport)
+    || !isWasmFunctionExport(exports.daw_audio_core_wasm_graph_process_planar)) {
+    throw new Error('The planar eager-asset graph bridge exports are unavailable.')
+  }
+  expect(exports.daw_audio_core_wasm_graph_initialize_planar(48_000, 1, 1, 3, 2)).toBe(0)
+
+  const graph = new Uint8Array(24 + 2 * 28 + 48)
+  const graphView = new DataView(graph.buffer)
+  graphView.setUint32(0, 1, true)
+  graphView.setUint32(4, 1, true)
+  graphView.setUint32(8, 2, true)
+  graphView.setUint32(12, 1, true)
+  graphView.setBigUint64(24, 1n, true)
+  graphView.setUint32(32, 1, true)
+  graphView.setUint32(36, 2, true)
+  graphView.setUint32(40, 2, true)
+  graphView.setBigUint64(52, 2n, true)
+  graphView.setUint32(60, 6, true)
+  graphView.setUint32(64, 2, true)
+  graphView.setUint32(68, 2, true)
+  graphView.setBigUint64(80, 3n, true)
+  graphView.setBigUint64(88, 1n, true)
+  graphView.setBigUint64(96, 2n, true)
+  graphView.setFloat32(112, 1, true)
+  graphView.setUint32(116, 3, true)
+
+  const allocation = exports.malloc(graph.byteLength + 3 * 4 + 3 * 4 + 8 + 3 * 4 + 3 * 4)
+  if (allocation === 0) throw new Error('Could not allocate planar eager-asset buffers.')
+  try {
+    const graphOffset = allocation
+    const asset0Offset = graphOffset + graph.byteLength
+    const asset1Offset = asset0Offset + 4
+    const asset2Offset = asset1Offset + 4
+    const assetPointersOffset = asset2Offset + 4
+    const assetHandleOffset = assetPointersOffset + 3 * 4
+    const outputPointersOffset = assetHandleOffset + 8
+    const output0Offset = outputPointersOffset + 3 * 4
+    const output1Offset = output0Offset + 4
+    const output2Offset = output1Offset + 4
+    const view = new DataView(exports.memory.buffer)
+    new Uint8Array(exports.memory.buffer, graphOffset, graph.byteLength).set(graph)
+    view.setFloat32(asset0Offset, 0.25, true)
+    view.setFloat32(asset1Offset, -0.5, true)
+    view.setFloat32(asset2Offset, 3, true)
+    view.setUint32(assetPointersOffset, asset0Offset, true)
+    view.setUint32(assetPointersOffset + 4, asset1Offset, true)
+    view.setUint32(assetPointersOffset + 8, asset2Offset, true)
+    view.setUint32(outputPointersOffset, output0Offset, true)
+    view.setUint32(outputPointersOffset + 4, output1Offset, true)
+    view.setUint32(outputPointersOffset + 8, output2Offset, true)
+
+    expect(exports.daw_audio_core_wasm_graph_prepare(graphOffset, graph.byteLength)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_publish(1)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_register_pcm_asset(
+      1, 48_000, 3, assetPointersOffset, assetHandleOffset,
+    )).toBe(0)
+    const asset = view.getBigUint64(assetHandleOffset, true)
+    expect(exports.daw_audio_core_wasm_graph_create_paged_asset(
+      1n, 48_000, 3, assetHandleOffset,
+    )).toBe(1)
+    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 1, 0n)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_schedule_sample_source(
+      1, 1n, 1n, asset, 0n, 1n, 0n, 1n, 1, 0n, 0n, 1n, 1n, 0,
+      0, 0.5, 0, 0.5,
+    )).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_process_planar(
+      1, 0, 3, 0, outputPointersOffset, 1, 0, 0, 0, 0, 0, 0,
+    )).toBe(0)
+    expect(view.getFloat32(output0Offset, true)).toBeCloseTo(0.25, 6)
+    expect(view.getFloat32(output1Offset, true)).toBeCloseTo(-0.5, 6)
+    expect(view.getFloat32(output2Offset, true)).toBeCloseTo(-0.5, 6)
+    expect(exports.daw_audio_core_wasm_graph_set_transport(2, 0, 0n)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_release_asset(asset)).toBe(0)
   } finally {
     exports.free(allocation)
   }
@@ -1027,6 +1133,11 @@ test('the Wasm graph bridge exports the fixed granular configuration ABI', async
   const exports = instance.instance.exports
   expect(isWasmFunctionExport(exports.daw_audio_core_wasm_graph_configure_synth)).toBe(true)
   expect(isWasmFunctionExport(exports.daw_audio_core_wasm_graph_configure_granular)).toBe(true)
+  expect(isWasmFunctionExport(exports.daw_audio_core_wasm_graph_configure_paged_assets)).toBe(false)
+  expect(isWasmFunctionExport(exports.daw_audio_core_wasm_graph_paged_sub_abi_version)).toBe(true)
+  expect(exports.daw_audio_core_wasm_graph_paged_sub_abi_version()).toBe(1)
+  expect(exports.daw_audio_core_wasm_graph_paged_page_frames()).toBe(16_384)
+  expect(exports.daw_audio_core_wasm_graph_paged_slot_count()).toBe(128)
 })
 
 test('the shared graph fixtures execute through the bounded Wasm runner', async () => {

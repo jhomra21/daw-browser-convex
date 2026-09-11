@@ -38,6 +38,8 @@ import Sampler from "~/components/effects/Sampler";
 import Granular from "~/components/effects/Granular";
 import type { AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
+import type { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
+import type { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
 import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import TimelineBottomPanelShell, { type TimelineBottomPanelShellControls } from "~/components/timeline/TimelineBottomPanelShell";
 import TimelineBottomPanelFooter from "~/components/timeline/TimelineBottomPanelFooter";
@@ -136,6 +138,8 @@ type EffectsPanelProps = {
   onMixedReorderCommitted?: (intent?: TimelinePlaybackRebuildIntent) => void;
   enqueueNativeVstParameter?: NativeVstParameterQueue["enqueue"];
   spectrumProvider?: (targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void;
+  samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
+  drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>;
 };
 
 const EffectsPanelClosedFooter: Component<{
@@ -278,6 +282,8 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
             onPreviewNote={props.onPreviewNote}
             canWrite={props.instrument.canWrite}
             onAssignSampleToPad={props.instrument.state.drumRack.assignSampleToPad}
+            buffers={() => props.instrument.state.drumRack.buffers(props.targetId, params())}
+            subscribeBuffers={props.instrument.state.drumRack.subscribeBuffers}
             onReset={props.instrument.state.drumRack.reset}
             onUpdatePad={props.instrument.state.drumRack.updatePad}
           />
@@ -1076,6 +1082,8 @@ const EffectsPanelEmptyState: Component<EffectsPanelEmptyStateProps> = (props) =
 );
 
 const EffectsPanel: Component<EffectsPanelProps> = (props) => {
+  const samplerBufferSync = untrack(() => props.samplerBufferSync);
+  const drumRackBufferSync = untrack(() => props.drumRackBufferSync);
   const controller = createEffectsPanelController({
     isOpen: () => props.isOpen,
     selectedFXTarget: () => props.selectedFXTarget,
@@ -1101,6 +1109,8 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     onDeviceInsertActionsChange: (actions) => props.onDeviceInsertActionsChange?.(actions),
     onExportSnapshotChange: (snapshot) => props.onExportSnapshotChange?.(snapshot),
     spectrumProvider: () => props.spectrumProvider,
+    samplerBufferSync,
+    drumRackBufferSync,
   });
   const { target, devices, spectrum, canWriteCurrentTargetEffects, isCurrentTargetReadOnly } = controller;
   const { instrument, audioEffects } = devices;

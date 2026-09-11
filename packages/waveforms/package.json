@@ -15,5 +15,8 @@
   },
   "scripts": {
     "check": "bun --bun tsc --noEmit"
+  },
+  "dependencies": {
+    "@daw-browser/audio-engine": "workspace:*"
   }
 }

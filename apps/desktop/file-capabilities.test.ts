@@ -1,6 +1,9 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 import { execFile } from "node:child_process"
-import { mkdtemp, mkdir, readFile, realpath, readdir, rm, symlink, writeFile } from "node:fs/promises"
+import * as nodeFileSystem from "node:fs/promises"
+import { mkdtemp, mkdir, open, readFile, realpath, readdir, rm, symlink, writeFile } from "node:fs/promises"
+import { constants, type BigIntStats, type PathLike, type StatOptions, type Stats } from "node:fs"
+import type { FileHandle } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
@@ -153,9 +156,9 @@ describe("desktop file capability manager", () => {
       mime: "audio/wav",
     })
     expect(descriptor.token).toMatch(/^[0-9a-f]{64}$/)
-    expect(await manager.readFile(scope, descriptor.token)).toEqual(Buffer.from(contents))
+    expect(await manager.readFile(scope, descriptor.token, 0, contents.byteLength)).toEqual(Buffer.from(contents))
     await expectCapabilityError(
-      manager.readFile({ ...scope, requestId: "request-2" }, descriptor.token),
+      manager.readFile({ ...scope, requestId: "request-2" }, descriptor.token, 0, contents.byteLength),
       "invalid-scope",
     )
     await expectCapabilityError(
@@ -164,21 +167,18 @@ describe("desktop file capability manager", () => {
     )
   })
 
-  test("rejects unsupported, oversized, and symbolic-link read selections", async () => {
+  test("rejects unsupported and symbolic-link read selections", async () => {
     const directory = await createTemporaryDirectory()
     const unsupportedPath = path.join(directory, "notes.txt")
-    const oversizedPath = path.join(directory, "long.wav")
     const targetPath = path.join(directory, "target.wav")
     const symbolicPath = path.join(directory, "symbolic.wav")
     await writeFile(unsupportedPath, "notes")
-    await writeFile(oversizedPath, new Uint8Array(10 * 1024 * 1024 + 1))
     await writeFile(targetPath, "audio")
     await symlink(targetPath, symbolicPath)
 
     const manager = createFileCapabilityManager({
       dialog: createDialog([
         { canceled: false, filePaths: [unsupportedPath] },
-        { canceled: false, filePaths: [oversizedPath] },
         { canceled: false, filePaths: [symbolicPath] },
       ]),
       randomBytes: createDeterministicRandom(),
@@ -186,8 +186,74 @@ describe("desktop file capability manager", () => {
 
     await expectCapabilityError(manager.pickReadFiles(scope), "unsupported-file")
     await expectCapabilityError(manager.pickReadFiles(scope), "unsupported-file")
-    await expectCapabilityError(manager.pickReadFiles(scope), "unsupported-file")
     expect(manager.activeCapabilityCount()).toBe(0)
+  })
+
+  test("grants sparse files larger than 10 MiB and reads bounded chunks", async () => {
+    const directory = await createTemporaryDirectory()
+    const filePath = path.join(directory, "long.wav")
+    const byteLength = 10 * 1024 * 1024 + 1
+    const handle = await open(filePath, "w")
+    await handle.truncate(byteLength)
+    await handle.close()
+    const manager = createFileCapabilityManager({
+      dialog: createDialog(),
+      randomBytes: createDeterministicRandom(),
+    })
+
+    const capability = await manager.grantReadFile(scope, filePath)
+
+    expect(capability.byteLength).toBe(byteLength)
+    expect(await manager.readFile(scope, capability.token, 0, 1)).toEqual(Buffer.from([0]))
+    expect(await manager.readFile(scope, capability.token, byteLength - 1, 1)).toEqual(Buffer.from([0]))
+    await expectCapabilityError(
+      manager.readFile(scope, capability.token, 0, 1024 * 1024 + 1),
+      "invalid-chunk",
+    )
+  })
+
+  test("slides a read capability lease after a validated chunk", async () => {
+    const directory = await createTemporaryDirectory()
+    const filePath = path.join(directory, "sliding.wav")
+    await writeFile(filePath, "audio")
+    let now = 100
+    const manager = createFileCapabilityManager({
+      dialog: createDialog(),
+      now: () => now,
+      randomBytes: createDeterministicRandom(),
+    })
+    const capability = await manager.grantReadFile(scope, filePath)
+
+    now += 4 * 60 * 60 * 1_000 - 1
+    await manager.readFile(scope, capability.token, 0, 1)
+    now += 1
+    await manager.readFile(scope, capability.token, 1, 1)
+  })
+
+  test("rejects unsafe file sizes before granting a capability", async () => {
+    const directory = await createTemporaryDirectory()
+    const filePath = path.join(directory, "unsafe.wav")
+    await writeFile(filePath, "audio")
+    function unsafeStat(targetPath: PathLike, options?: StatOptions & { bigint?: false }): Promise<Stats>
+    function unsafeStat(targetPath: PathLike, options: StatOptions & { bigint: true }): Promise<BigIntStats>
+    function unsafeStat(targetPath: PathLike, options?: StatOptions): Promise<Stats | BigIntStats>
+    async function unsafeStat(targetPath: PathLike, options?: StatOptions): Promise<Stats | BigIntStats> {
+      if (options?.bigint === true) return nodeFileSystem.stat(targetPath, options)
+      const status = await nodeFileSystem.stat(targetPath)
+      status.size = Number.MAX_SAFE_INTEGER + 1
+      return status
+    }
+    const fileSystem: NonNullable<Parameters<typeof createNativeFileCapabilityManager>[0]["fileSystem"]> = {
+      ...nodeFileSystem,
+      stat: unsafeStat,
+    }
+    const manager = createFileCapabilityManager({
+      dialog: createDialog(),
+      fileSystem,
+      randomBytes: createDeterministicRandom(),
+    })
+
+    await expectCapabilityError(manager.grantReadFile(scope, filePath), "unsupported-file")
   })
 
   test("expires capabilities after four hours and enforces the active limit", async () => {
@@ -220,7 +286,7 @@ describe("desktop file capability manager", () => {
     await expectCapabilityError(manager.grantReadFile(scope, filePaths[16]), "capacity-exceeded")
 
     now += 4 * 60 * 60 * 1_000
-    await expectCapabilityError(manager.readFile({ ...scope, requestId: "request-0" }, first[0].token), "expired")
+    await expectCapabilityError(manager.readFile({ ...scope, requestId: "request-0" }, first[0].token, 0, 1), "expired")
 
     await manager.grantReadFile(scope, filePaths[16])
     expect(manager.activeCapabilityCount()).toBe(1)
@@ -268,6 +334,128 @@ describe("desktop file capability manager", () => {
     })
     expect(await readFile(outputPath)).toEqual(Buffer.from([1, 2, 9, 4, 5]))
     expect(await readdir(directory)).toEqual(["mix.flac"])
+  })
+
+  test("streams sequential sparse output beyond 8 GiB without allocating the hole", async () => {
+    const directory = await createTemporaryDirectory()
+    const outputPath = path.join(directory, "large.wav")
+    const chunkSize = 1024 * 1024
+    const formerLimit = 8 * 1024 * 1024 * 1024
+    const finalOffset = formerLimit + 2 * chunkSize
+    const writes: { offset: number; length: number }[] = []
+    const temporaryFileFlags = constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0)
+    const fileSystem: NonNullable<Parameters<typeof createNativeFileCapabilityManager>[0]["fileSystem"]> = {
+      ...nodeFileSystem,
+      open: async (
+        filePath: Parameters<typeof nodeFileSystem.open>[0],
+        flags: Parameters<typeof nodeFileSystem.open>[1],
+        mode?: Parameters<typeof nodeFileSystem.open>[2],
+      ): Promise<FileHandle> => {
+        if (flags === temporaryFileFlags) {
+          const backing = await open("/dev/null", "r+")
+          const write = async <TBuffer extends NodeJS.ArrayBufferView>(
+            buffer: TBuffer,
+            offset?: number | null,
+            length?: number | null,
+            position?: number | null,
+          ) => {
+            const bytesWritten = length ?? buffer.byteLength - (offset ?? 0)
+            if (position !== null) writes.push({ offset: position ?? 0, length: bytesWritten })
+            return { buffer, bytesWritten }
+          }
+          return new Proxy(backing, {
+            get: (target, property) => {
+              if (property === "write") return write
+              if (property === "close") return target.close.bind(target)
+              if (property === "sync") return target.sync.bind(target)
+              return undefined
+            },
+          })
+        }
+        return await nodeFileSystem.open(filePath, flags, mode)
+      },
+    }
+    const manager = createFileCapabilityManager({
+      dialog: createDialog(),
+      fileSystem,
+      randomBytes: createDeterministicRandom(),
+    })
+    const capability = await manager.grantOutputFile(scope, outputPath)
+    const writer = await manager.beginWrite(scope, capability.token)
+    const chunk = new Uint8Array(chunkSize)
+    try {
+      for (let offset = 0; offset < finalOffset; offset += chunkSize) {
+        await manager.writeChunk(scope, writer.writerId, offset, chunk)
+      }
+      expect(writes.at(-1)).toEqual({ offset: finalOffset - chunkSize, length: chunkSize })
+      expect(writes).toHaveLength(finalOffset / chunkSize)
+      expect(await readdir(directory)).toEqual([])
+    } finally {
+      await manager.abortWrite(scope, writer.writerId)
+    }
+  })
+
+  test("rejects unsafe, empty, oversized, holed, and revoked output chunks", async () => {
+    const directory = await createTemporaryDirectory()
+    const manager = createFileCapabilityManager({
+      dialog: createDialog(),
+      randomBytes: createDeterministicRandom(),
+    })
+    const expectInvalidChunk = async (offset: number, chunk: Uint8Array) => {
+      const capability = await manager.grantOutputFile(
+        { ...scope, requestId: `chunk-${offset}-${chunk.byteLength}` },
+        path.join(directory, `invalid-${Math.abs(offset)}-${chunk.byteLength}.wav`),
+      )
+      const writer = await manager.beginWrite(
+        { ...scope, requestId: `chunk-${offset}-${chunk.byteLength}` },
+        capability.token,
+      )
+      await expectCapabilityError(
+        manager.writeChunk(
+          { ...scope, requestId: `chunk-${offset}-${chunk.byteLength}` },
+          writer.writerId,
+          offset,
+          chunk,
+        ),
+        "invalid-chunk",
+      )
+      await manager.abortWrite(
+        { ...scope, requestId: `chunk-${offset}-${chunk.byteLength}` },
+        writer.writerId,
+      )
+    }
+
+    await expectInvalidChunk(-1, new Uint8Array([1]))
+    await expectInvalidChunk(Number.MAX_SAFE_INTEGER + 1, new Uint8Array([1]))
+    await expectInvalidChunk(0, new Uint8Array(0))
+    await expectInvalidChunk(0, new Uint8Array(1024 * 1024 + 1))
+    await expectInvalidChunk(1, new Uint8Array([1]))
+
+    const revokedRequestId = "revoked-chunk"
+    const capability = await manager.grantOutputFile(
+      { ...scope, requestId: revokedRequestId },
+      path.join(directory, "revoked-chunk.wav"),
+    )
+    const writer = await manager.beginWrite(
+      { ...scope, requestId: revokedRequestId },
+      capability.token,
+    )
+    await manager.writeChunk(
+      { ...scope, requestId: revokedRequestId },
+      writer.writerId,
+      0,
+      new Uint8Array([1]),
+    )
+    await manager.revoke(capability.token)
+    await expectCapabilityError(
+      manager.writeChunk(
+        { ...scope, requestId: revokedRequestId },
+        writer.writerId,
+        1,
+        new Uint8Array([2]),
+      ),
+      "invalid-capability",
+    )
   })
 
   test("confines directory outputs and removes partial files on abort and revoke", async () => {
@@ -450,7 +638,7 @@ describe("desktop file capability manager", () => {
     const capability = await manager.grantReadFile(scope, filePath)
     await rm(filePath)
     await symlink(targetPath, filePath)
-    await expectCapabilityError(manager.readFile(scope, capability.token), "unsupported-file")
+    await expectCapabilityError(manager.readFile(scope, capability.token, 0, 1), "unsupported-file")
   })
 
   test("fails a no-replace commit race without overwriting the destination", async () => {

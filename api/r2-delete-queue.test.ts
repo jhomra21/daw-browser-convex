@@ -87,6 +87,7 @@ test("project prefix drain paginates and keeps failed prefix rows independent", 
     delete: async (keys: string[]) => {
       for (const key of keys) deletedObjects.add(key);
     },
+    resumeMultipartUpload: () => ({ abort: async () => undefined }),
   };
   const worker = t.withIdentity({ subject: "worker", tokenIdentifier: "token", dawWorker: true });
   const result = await drainR2DeleteRows({
@@ -120,4 +121,36 @@ test("project prefix drain paginates and keeps failed prefix rows independent", 
     expect(row?.claimToken).toBeUndefined();
     expect(row?.claimedAt).toBeUndefined();
   }
+});
+
+test("multipart abort rows use the retained upload identity", async () => {
+  const t = convexTest(schema, modules);
+  const now = Date.now();
+  const rowId = await t.run(async (ctx) => await ctx.db.insert("r2DeleteQueue", {
+    projectId: "project-1",
+    r2Key: "asset-namespaces/namespace-1/sample",
+    kind: "multipart-abort",
+    multipartUploadId: "upload-1",
+    attempts: 0,
+    nextAttemptAt: now,
+    status: "pending",
+    createdAt: now,
+    updatedAt: now,
+  }));
+  const calls: string[] = [];
+  const worker = t.withIdentity({ subject: "worker", tokenIdentifier: "token", dawWorker: true });
+  const result = await drainR2DeleteRows({
+    convex: worker,
+    bucket: {
+      list: async () => ({ objects: [], truncated: false }),
+      delete: async () => undefined,
+      resumeMultipartUpload: (key, uploadId) => ({
+        abort: async () => { calls.push(`${key}:${uploadId}`) },
+      }),
+    },
+    rows: await t.run(async (ctx) => await ctx.db.query("r2DeleteQueue").collect()),
+  });
+  expect(result).toMatchObject({ processed: 1, deleted: 1 });
+  expect(calls).toEqual(["asset-namespaces/namespace-1/sample:upload-1"]);
+  expect(await t.run(async (ctx) => (await ctx.db.get(rowId))?.status)).toBe("deleted");
 });

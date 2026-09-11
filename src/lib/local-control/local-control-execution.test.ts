@@ -23,6 +23,10 @@ import { projectLocalControlSnapshotV1, projectLocalControlSnapshotV2 } from './
 import { executeLocalControlRequestV1 } from './local-control-execution'
 import { withLocalControlTransaction } from './local-control-state'
 import { parseLocalProjectStoredJsonValue } from './local-control-model'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
+import { toLocalTimelineClip, toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
+import { compileLivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
+import { compileLiveNativeProjection } from '@daw-browser/audio-engine/live-native-projection'
 
 const storedJsonObject = (value: Parameters<typeof parseLocalProjectStoredJsonValue>[0]) => {
   const parsed = parseLocalProjectStoredJsonValue(value)
@@ -1133,4 +1137,100 @@ test('keeps mixed external parameter edits and unrelated VST deletion recovery a
   expect((await snapshot(projectId)).processors.some((processor) => (
     processor.id === `external-plugin:${sourceExternalInstanceId}`
   ))).toBe(true)
+})
+
+test('preserves unavailable long local audio metadata across an external parameter commit and reload', async () => {
+  const { projectId, ids } = await seedActionFixture()
+  const audioClipId = ids['audio-clip']
+  const targetTrackId = ids.target
+  const externalId = ids.external
+  const assetId = ids.asset
+  if (!audioClipId || !targetTrackId || !externalId || !assetId) throw new Error('Expected VST audio fixture IDs.')
+
+  const db = await openLocalProjectDb(projectId)
+  const clipRow = await db.get('entities', ['clip', audioClipId])
+  const clipValue = clipRow ? storedJsonObject(clipRow.value) : undefined
+  if (!clipRow || !clipValue) throw new Error('Expected persisted audio clip metadata.')
+  await db.put('entities', {
+    ...clipRow,
+    value: {
+      ...clipValue,
+      duration: 7_200,
+      sourceDurationSec: 7_200,
+      sourceSampleRate: 48_000,
+      sourceChannelCount: 2,
+    },
+  })
+  const asset = await db.get('assets', assetId)
+  if (!asset) throw new Error('Expected persisted local audio asset.')
+  await db.put('assets', {
+    ...asset,
+    missing: true,
+    storagePath: '/private/local/secret-long-media.wav',
+    durationSec: 7_200,
+  })
+
+  const redacted = await snapshotV2(projectId)
+  expect(redacted.clips.find((clip) => clip.id === audioClipId)?.source).toBeUndefined()
+  expect(JSON.stringify(redacted)).not.toContain('/private/local/secret-long-media.wav')
+  expect(JSON.stringify(redacted)).not.toContain('storagePath')
+  expect(JSON.stringify(redacted)).not.toContain('discoveredPath')
+
+  await executeLocalControlRequestV1({
+    projectId,
+    actions: [{
+      kind: 'external-plugin.parameters.set',
+      target: trackTarget(targetTrackId),
+      processor: persisted(externalId),
+      changes: [{ parameterId: 1, normalizedValue: 0.75 }],
+    }],
+  })
+  expect((await snapshotV2(projectId)).processors.find((processor) => processor.id === externalId)
+    ?.processor).toMatchObject({
+    kind: 'external-vst3',
+    params: { parameterOverrides: { '1': 0.75 } },
+  })
+
+  const reloaded = await createLocalTimelineRepository(projectId).loadSnapshot()
+  const reloadedClip = reloaded.clips.find((clip) => clip.id === audioClipId)
+  expect(reloadedClip).toMatchObject({
+    sourceAssetKey: assetId,
+    sourceAssetId: assetId,
+    sourceKind: 'upload',
+    sourceDurationSec: 7_200,
+    sourceSampleRate: 48_000,
+    sourceChannelCount: 2,
+  })
+  if (!reloadedClip) throw new Error('Expected reloaded audio clip.')
+
+  const reloadedTracks = reloaded.tracks.map((track) => ({
+    ...toLocalTimelineTrack(track),
+    clips: reloaded.clips
+      .filter((clip) => clip.trackId === track.id)
+      .map(toLocalTimelineClip),
+  }))
+  const playback = compileLivePlaybackSnapshot({
+    revision: (await snapshot(projectId)).project.revision,
+    bpm: 120,
+    transport: { state: 'paused', playheadSec: 0, loopEnabled: false, loopStartSec: 0, loopEndSec: 8 },
+    tracks: reloadedTracks,
+    renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+    sidechainRoutes: [],
+  })
+  expect(playback.supported).toBeTrue()
+  if (!playback.supported) return
+  const native = compileLiveNativeProjection({
+    tracks: playback.snapshot.tracks.filter((track) => track.id === reloadedClip.trackId),
+    bpm: playback.snapshot.bpm,
+    sampleRateHz: 48_000,
+    revision: playback.snapshot.revision,
+    epoch: 1,
+    firstSequence: 1,
+  })
+  expect(native.supported).toBeTrue()
+  if (!native.supported) return
+  expect(native.assets).toMatchObject([{
+    sourceAssetKey: assetId,
+    asset: { sampleRateHz: 48_000, channelCount: 2, frameCount: 345_600_000 },
+  }])
 })

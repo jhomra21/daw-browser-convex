@@ -4,7 +4,7 @@ import {
   type LocalProjectEntityRow,
   type LocalProjectStoredValue,
 } from '~/lib/local-project-db'
-import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, midiClipEquals, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeMidiClip, normalizeTrackRouting } from '@daw-browser/shared'
+import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, isLocalProjectAssetKey, midiClipEquals, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeMidiClip, normalizeTrackRouting, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushRegisteredLocalProjectWrites } from '~/lib/local-project-write-flushers'
 import { LocalEntityWriteQueue } from '~/lib/local-write-queue'
@@ -36,6 +36,7 @@ import {
   planLocalExternalProcessorDeletion,
 } from '~/lib/external-plugins'
 import { z } from 'zod'
+import { getLocalAsset } from '~/lib/local-assets'
 
 const TRACK_KIND = 'track'
 const CLIP_KIND = 'clip'
@@ -524,6 +525,18 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     if (!trackRow || !isTrackRow(trackRow.value)) {
       throw new Error('Failed to create local clip because the target track was not found.')
     }
+    const localAsset = input.sourceAssetKey && isLocalProjectAssetKey(input.sourceAssetKey)
+      ? await getLocalAsset(projectId, input.sourceAssetKey)
+      : undefined
+    if (localAsset && (
+        sanitizeAudioSourceKind(localAsset.sourceKind) === undefined
+        || localAsset.durationSec === undefined
+        || localAsset.sampleRate === undefined
+        || localAsset.channelCount === undefined
+      )) {
+        throw new Error('Local audio assets require authoritative duration, sample rate, and channel count.')
+    }
+    const sourceKind = localAsset ? sanitizeAudioSourceKind(localAsset.sourceKind) : input.sourceKind
     const timestamp = now()
     const id = input.id ?? createLocalClipId()
     const clip: TimelineClipRow = {
@@ -536,16 +549,16 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       color: input.color ?? 'clip-midi',
       sourceAssetId: input.sourceAssetId,
       sourceAssetKey: input.sourceAssetKey,
-      sourceKind: input.sourceKind,
-      sourceDurationSec: input.sourceDurationSec,
-      sourceSampleRate: input.sourceSampleRate,
-      sourceChannelCount: input.sourceChannelCount,
+      sourceKind,
+      sourceDurationSec: localAsset?.durationSec ?? input.sourceDurationSec,
+      sourceSampleRate: localAsset?.sampleRate ?? input.sourceSampleRate,
+      sourceChannelCount: localAsset?.channelCount ?? input.sourceChannelCount,
       leftPadSec: input.leftPadSec,
       bufferOffsetSec: input.bufferOffsetSec,
       audioWarp: normalizeAudioWarp(input.audioWarp),
       gain: input.gain,
       fades: input.fades ? normalizeClipFades(input.fades, input.duration) : undefined,
-      sampleUrl: input.sampleUrl,
+      sampleUrl: localAsset ? undefined : input.sampleUrl,
       midi: input.midi === undefined ? undefined : normalizeMidi(input.midi),
       midiOffsetBeats: input.midiOffsetBeats,
       createdAt: timestamp,
@@ -732,6 +745,18 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     const current = row ? normalizeClipRow(row.value) : null
     if (!current) return null
     if (input.trackId) requireTrackIds([input.trackId], tracks)
+    const targetAssetKey = input.sourceAssetKey ?? current.sourceAssetKey
+    const localAsset = targetAssetKey && isLocalProjectAssetKey(targetAssetKey)
+      ? await getLocalAsset(projectId, targetAssetKey)
+      : undefined
+    if (localAsset && (
+        sanitizeAudioSourceKind(localAsset.sourceKind) === undefined
+        || localAsset.durationSec === undefined
+        || localAsset.sampleRate === undefined
+        || localAsset.channelCount === undefined
+      )) {
+        throw new Error('Local audio assets require authoritative duration, sample rate, and channel count.')
+    }
     const timestamp = now()
     const clip: TimelineClipRow = {
       ...current,
@@ -740,12 +765,12 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       startSec: input.startSec ?? current.startSec,
       duration: input.duration ?? current.duration,
       sourceAssetId: input.sourceAssetId ?? current.sourceAssetId,
-      sourceAssetKey: input.sourceAssetKey ?? current.sourceAssetKey,
-      sourceKind: input.sourceKind ?? current.sourceKind,
-      sourceDurationSec: input.sourceDurationSec ?? current.sourceDurationSec,
-      sourceSampleRate: input.sourceSampleRate ?? current.sourceSampleRate,
-      sourceChannelCount: input.sourceChannelCount ?? current.sourceChannelCount,
-      sampleUrl: patchOptionalString(current.sampleUrl, input.sampleUrl),
+      sourceAssetKey: targetAssetKey,
+      sourceKind: localAsset ? sanitizeAudioSourceKind(localAsset.sourceKind) : input.sourceKind ?? current.sourceKind,
+      sourceDurationSec: localAsset?.durationSec ?? input.sourceDurationSec ?? current.sourceDurationSec,
+      sourceSampleRate: localAsset?.sampleRate ?? input.sourceSampleRate ?? current.sourceSampleRate,
+      sourceChannelCount: localAsset?.channelCount ?? input.sourceChannelCount ?? current.sourceChannelCount,
+      sampleUrl: localAsset ? undefined : patchOptionalString(current.sampleUrl, input.sampleUrl),
       leftPadSec: input.leftPadSec ?? current.leftPadSec,
       bufferOffsetSec: input.bufferOffsetSec ?? current.bufferOffsetSec,
       audioWarp: input.audioWarp === undefined ? current.audioWarp : normalizeAudioWarp(input.audioWarp),

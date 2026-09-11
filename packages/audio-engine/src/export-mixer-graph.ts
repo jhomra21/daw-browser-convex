@@ -5,7 +5,7 @@ import type { ResolvedMixerGraph } from './mixer/types'
 import type { ExportFx } from './export-types'
 
 export const resolveExportMixerGraph = (input: {
-  tracks: Track<AudioBuffer>[]
+  tracks: readonly Track<AudioBuffer | null>[]
   fx?: ExportFx
 }): ResolvedMixerGraph => {
   const { tracks, fx } = input
@@ -13,7 +13,9 @@ export const resolveExportMixerGraph = (input: {
     channels: createMixerChannels(tracks),
     sourceChannelCounts: Object.fromEntries(tracks.map((track) => [
       track.id,
-      track.clips.flatMap((clip) => clip.buffer ? [clip.buffer.numberOfChannels] : []),
+      track.clips.flatMap((clip) => clip.buffer
+        ? [clip.buffer.numberOfChannels]
+        : clip.sourceChannelCount !== undefined ? [clip.sourceChannelCount] : []),
     ])),
     masterVolume: fx?.masterVolume,
     masterFxInstances: fx?.masterFxInstances ?? [],

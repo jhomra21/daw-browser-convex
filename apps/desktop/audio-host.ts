@@ -3,6 +3,7 @@ import { access } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
 import path from "node:path"
 import { audioCoreWasmAbiVersion } from "@daw-browser/audio-core-wasm"
+import { defaultDecodedAudioPageFrames } from "@daw-browser/audio-engine/media-pages"
 import {
   maxVst3WorkerEventsPerBlock,
   maxVst3WorkerFrames,
@@ -40,6 +41,9 @@ import type {
   NativeScheduleProgress,
   NativeOutputDevice,
   NativeHostPcmAsset,
+  NativeHostMappedAsset,
+  NativeHostMappedAssetPage,
+  NativeOfflineMappedAsset,
   NativeOfflineRenderPlan,
   NativeOfflinePcmChunk,
   NativeHostTransport,
@@ -54,6 +58,10 @@ const {
   graphSnapshot: graphSnapshotType,
   assetInstall: assetInstallType,
   assetRelease: assetReleaseType,
+  mappedAssetCreate: mappedAssetCreateType,
+  mappedAssetWritePage: mappedAssetWritePageType,
+  mappedAssetPrepareRange: mappedAssetPrepareRangeType,
+  mappedAssetRelease: mappedAssetReleaseType,
   transport: transportType,
   parameterEvents: parameterEventsType,
   midiEvents: midiEventsType,
@@ -520,6 +528,10 @@ type NativeHostRequestType =
   | typeof deviceConfigureType
   | typeof assetInstallType
   | typeof assetReleaseType
+  | typeof mappedAssetCreateType
+  | typeof mappedAssetWritePageType
+  | typeof mappedAssetPrepareRangeType
+  | typeof mappedAssetReleaseType
   | typeof startType
   | typeof stopType
   | typeof teardownType
@@ -551,10 +563,18 @@ type NativeHostRequestType =
   | typeof vstDetachType
   | typeof vstEditorType
   | typeof diagnosticStartType
+  | typeof diagnosticsType
   | typeof scheduleWindowType
   | typeof vstScheduleAutomationEnableType
   | typeof instrumentStatesType
   | typeof spectrumSelectionType
+
+const nativeAudioHostRequestNames = new Map<number, string>(
+  Object.entries(nativeAudioHostControlTypes).map(([name, type]) => [type, name]),
+)
+
+export const nativeAudioHostRequestName = (type: number) =>
+  nativeAudioHostRequestNames.get(type) ?? "unknown"
 
 const coreAudioDeviceId = (value: string): value is `coreaudio:${string}` => (
   value.startsWith("coreaudio:") && value.length > "coreaudio:".length
@@ -565,12 +585,14 @@ const nativeVstInstanceId = (value: string): boolean => (
 
 export class NativeAudioHostCommandError extends Error {
   readonly requestType: number
+  readonly requestName: string
   readonly recoverable = true
 
   constructor(requestType: number, message = `The native audio host rejected control request ${requestType}.`) {
     super(message)
     this.name = "NativeAudioHostCommandError"
     this.requestType = requestType
+    this.requestName = nativeAudioHostRequestName(requestType)
   }
 }
 
@@ -584,6 +606,9 @@ export type NativeOfflineWaitStage =
   | "transport"
   | "schedule window"
   | "offline start"
+  | "mapped asset creation"
+  | "mapped asset page"
+  | "mapped asset range"
   | "offline completion"
 
 export class NativeOfflineRenderTimeoutError extends Error {
@@ -620,6 +645,14 @@ type NativeOfflineStdoutPumpInput = {
   onError: (error: Error) => void
   pause: () => void
   resume: () => void
+}
+
+type NativeOfflineMappedPageRequest = {
+  jobId: string
+  requestId: string
+  asset: NativeOfflineMappedAsset
+  startFrame: number
+  frameCount: number
 }
 
 export const createNativeOfflineStdoutPump = (input: NativeOfflineStdoutPumpInput) => {
@@ -744,10 +777,15 @@ export const createNativeOfflineFrameMailbox = () => {
 
 export const renderNativeOffline = async (input: {
   hostPath: string
+  jobId?: string
   plan: NativeOfflineRenderPlan
   vstAttachments?: readonly ResolvedVst3Attachment[]
   signal: AbortSignal
   onChunk: (chunk: NativeOfflinePcmChunk) => void | Promise<void>
+  onMappedPage?: (
+    request: NativeOfflineMappedPageRequest,
+    signal: AbortSignal,
+  ) => Promise<NativeHostMappedAssetPage>
   completionInactivityMs?: number
   schedule?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
   cancelScheduled?: (timer: ReturnType<typeof setTimeout>) => void
@@ -789,10 +827,13 @@ export const renderNativeOffline = async (input: {
     return diagnostic ? `${message} Native stderr: ${diagnostic}` : message
   }
   let stopPump = () => {}
+  const pendingMappedPagePromises = new Set<Promise<NativeHostMappedAssetPage>>()
+  const pendingMappedPageRejectors = new Map<Promise<NativeHostMappedAssetPage>, (error: Error) => void>()
   const fail = (error: Error) => {
     if (finished) return
     finished = true
     mailbox.fail(error)
+    for (const reject of pendingMappedPageRejectors.values()) reject(error)
     stopPump()
     terminate()
   }
@@ -935,6 +976,66 @@ export const renderNativeOffline = async (input: {
       send(assetInstallType, payload)
       await waitFor(ackType, assetInstallType, "asset installation")
     }
+    for (const asset of input.plan.mappedAssets ?? []) {
+      const createPayload = Buffer.alloc(28)
+      createPayload.writeUInt32BE(asset.sessionAssetId, 0)
+      createPayload.writeBigUInt64BE(BigInt(asset.frameCount), 4)
+      createPayload.writeUInt32BE(asset.sampleRateHz, 12)
+      createPayload.writeUInt32BE(asset.channelCount, 16)
+      createPayload.writeBigUInt64BE(0n, 20)
+      send(mappedAssetCreateType, createPayload)
+      await waitFor(ackType, mappedAssetCreateType, "mapped asset creation")
+      for (const range of asset.ranges) {
+        const pageFrames = Math.min(
+          range.frameCount,
+          defaultDecodedAudioPageFrames,
+          Math.floor((maximumPayloadBytes - 16) / (asset.channelCount * Float32Array.BYTES_PER_ELEMENT)),
+        )
+        for (let startFrame = range.startFrame; startFrame < range.startFrame + range.frameCount; startFrame += pageFrames) {
+          const frameCount = Math.min(pageFrames, range.startFrame + range.frameCount - startFrame)
+          if (!input.onMappedPage) throw new Error("The native offline mapped page provider is unavailable.")
+          const request = {
+            jobId: input.jobId ?? "offline",
+            requestId: crypto.randomUUID(),
+            asset,
+            startFrame,
+            frameCount,
+          }
+          const pagePromise = Promise.resolve().then(() => input.onMappedPage?.(request, input.signal)
+            ?? Promise.reject(new Error("The native offline mapped page provider is unavailable.")))
+          let rejectPage: ((error: Error) => void) | undefined
+          const pendingPage = new Promise<NativeHostMappedAssetPage>((resolve, reject) => {
+            rejectPage = reject
+            void pagePromise.then(resolve, reject)
+          })
+          pendingMappedPagePromises.add(pendingPage)
+          pendingMappedPageRejectors.set(pendingPage, (error) => rejectPage?.(error))
+          const page = await pendingPage.finally(() => {
+            pendingMappedPagePromises.delete(pendingPage)
+            pendingMappedPageRejectors.delete(pendingPage)
+          })
+          if (page.sessionAssetId !== asset.sessionAssetId
+            || page.startFrame !== startFrame
+            || page.frameCount !== frameCount
+            || page.planarPcm.byteLength !== frameCount * asset.channelCount * Float32Array.BYTES_PER_ELEMENT) {
+            throw new Error("The native offline mapped page provider returned invalid audio.")
+          }
+          const pagePayload = Buffer.alloc(16 + page.planarPcm.byteLength)
+          pagePayload.writeUInt32BE(page.sessionAssetId, 0)
+          pagePayload.writeBigUInt64BE(BigInt(page.startFrame), 4)
+          pagePayload.writeUInt32BE(page.frameCount, 12)
+          pagePayload.set(page.planarPcm, 16)
+          send(mappedAssetWritePageType, pagePayload)
+          await waitFor(ackType, mappedAssetWritePageType, "mapped asset page")
+        }
+        const preparePayload = Buffer.alloc(20)
+        preparePayload.writeUInt32BE(asset.sessionAssetId, 0)
+        preparePayload.writeBigUInt64BE(BigInt(range.startFrame), 4)
+        preparePayload.writeBigUInt64BE(BigInt(range.frameCount), 12)
+        send(mappedAssetPrepareRangeType, preparePayload)
+        await waitFor(ackType, mappedAssetPrepareRangeType, "mapped asset range")
+      }
+    }
     for (const attachment of input.vstAttachments ?? []) {
       const payload = serializeVstAttachment(attachment)
       if (!payload) throw new Error("The native offline VST attachment is invalid.")
@@ -963,6 +1064,10 @@ export const renderNativeOffline = async (input: {
     finished = true
     mailbox.close()
     input.signal.removeEventListener("abort", abort)
+    for (const reject of pendingMappedPageRejectors.values()) {
+      reject(new Error("The native offline mapped page callback was canceled."))
+    }
+    await Promise.allSettled(pendingMappedPagePromises)
     stopPump()
     child.stdout.removeListener("data", pump.push)
     child.removeListener("error", onError)
@@ -1065,6 +1170,7 @@ type PendingControl = {
   resolve: () => void
   reject: (error: Error) => void
   deadline: ReturnType<typeof setTimeout>
+  requestType: NativeHostRequestType
   expectedAckType?: NativeHostRequestType
   diagnosticsResolve?: (value: NativeHostDiagnostics) => void
   devicesResolve?: (value: NativeOutputDevice | null) => void
@@ -1100,6 +1206,10 @@ export type NativeAudioHostSupervisor = {
   detachVst(instanceId: string, transactionToken?: string): Promise<void>
   executeVstEditorCommand(input: { instanceId: string; command: NativeVstEditorCommand; width?: number; height?: number; anchor?: NativeVstEditorAnchor }, transactionToken?: string): Promise<NativeVstEditorStatus>
   installAsset(input: NativeHostPcmAsset, transactionToken?: string): Promise<void>
+  createMappedAsset(input: NativeHostMappedAsset, transactionToken?: string): Promise<void>
+  writeMappedAssetPage(input: NativeHostMappedAssetPage, transactionToken?: string): Promise<void>
+  prepareMappedAssetRange(sessionAssetId: number, startFrame: number, frameCount: number, transactionToken?: string): Promise<void>
+  releaseMappedAsset(sessionAssetId: number, transactionToken?: string): Promise<void>
   releaseAsset(sessionAssetId: number, transactionToken?: string): Promise<void>
   publishGraph(bytes: Uint8Array, transactionToken?: string): Promise<void>
   configureInstrumentStates(bytes: Uint8Array, transactionToken?: string): Promise<void>
@@ -1422,24 +1532,26 @@ export const createNativeAudioHostSupervisor = (
   const safeUnsigned64 = (value: bigint) => value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : undefined
   const decodeRecordingBlock = (frame: Buffer): NativeHostRecordingBlock | undefined => {
     const payload = frame.subarray(headerBytes)
-    if (payload.byteLength < 32) return undefined
-    const channelCount = payload.readUInt32BE(20)
-    const frameCount = payload.readUInt32BE(16)
+    if (payload.byteLength < 36) return undefined
+    const channelCount = payload.readUInt32BE(24)
+    const frameCount = payload.readUInt32BE(20)
     const expectedBytes = frameCount * channelCount * Float32Array.BYTES_PER_ELEMENT
     if (
       (channelCount !== 1 && channelCount !== 2)
       || frameCount === 0 || frameCount > 2_048
-      || expectedBytes !== payload.byteLength - 32
+      || expectedBytes !== payload.byteLength - 36
     ) return undefined
+    const sequence = payload.readBigUInt64BE(12)
+    if (sequence > BigInt(Number.MAX_SAFE_INTEGER)) return undefined
     return {
       generation: payload.readUInt32BE(0),
       sessionId: payload.readBigUInt64BE(4),
-      sequence: payload.readUInt32BE(12),
+      sequence: Number(sequence),
       frameCount,
       channelCount,
-      rms: payload.readFloatBE(24),
-      peak: payload.readFloatBE(28),
-      planarPcm: Uint8Array.from(payload.subarray(32)),
+      rms: payload.readFloatBE(28),
+      peak: payload.readFloatBE(32),
+      planarPcm: Uint8Array.from(payload.subarray(36)),
     }
   }
   const decodeRecordingStatus = (frame: Buffer): NativeHostRecordingStatus | undefined => {
@@ -1720,12 +1832,25 @@ export const createNativeAudioHostSupervisor = (
         resolve: () => undefined,
         reject: next.reject,
         deadline,
+        requestType: next.type,
         stateResolve: next.stateResolve,
         stateInstanceId: next.stateInstanceId,
       }
       : next.editorResolve
-      ? { resolve: () => undefined, reject: next.reject, deadline, editorResolve: next.editorResolve }
-      : { resolve: next.resolve, reject: next.reject, deadline, expectedAckType: next.type }
+      ? {
+        resolve: () => undefined,
+        reject: next.reject,
+        deadline,
+        requestType: next.type,
+        editorResolve: next.editorResolve,
+      }
+      : {
+        resolve: next.resolve,
+        reject: next.reject,
+        deadline,
+        requestType: next.type,
+        expectedAckType: next.type,
+      }
     current.stdin.write(frame)
   }
   const ownerForToken = (token: string | undefined) => (
@@ -1825,7 +1950,13 @@ export const createNativeAudioHostSupervisor = (
     if (!frame) throw new Error("The native audio host protocol is unavailable.")
     return new Promise<NativeGraphRevisionStatus>((resolve, reject) => {
       const deadline = setTimeout(() => lost("The native audio host graph revision request timed out.", current), 2_000)
-      pending = { deadline, reject, resolve: () => undefined, graphRevisionResolve: resolve }
+      pending = {
+        deadline,
+        reject,
+        resolve: () => undefined,
+        requestType: type,
+        graphRevisionResolve: resolve,
+      }
       current.stdin.write(frame)
     })
   }
@@ -1858,9 +1989,23 @@ export const createNativeAudioHostSupervisor = (
         child = spawned
         spawned.once("error", () => lost("The native audio host could not start.", spawned))
         spawned.once("close", (code, signal) => {
-          console.error("[native-vst3] native audio host closed", { code, signal })
+          const requestType = pending?.requestType
+          const pendingRequest = requestType === undefined
+            ? undefined
+            : `${nativeAudioHostRequestName(requestType)} request ${requestType}`
+          console.error("[native-vst3] native audio host closed", {
+            code,
+            signal,
+            pendingRequestType: requestType,
+            pendingRequestName: requestType === undefined ? undefined : nativeAudioHostRequestName(requestType),
+          })
           if (teardownPromise && child === spawned) return
-          lost("The native audio host stopped.", spawned)
+          lost(
+            pendingRequest
+              ? `The native audio host stopped during ${pendingRequest}.`
+              : "The native audio host stopped.",
+            spawned,
+          )
         })
         spawned.stderr.on("data", (chunk: Buffer) => {
           console.error("[native-vst3] native audio host stderr", chunk.toString("utf8").trim())
@@ -2141,6 +2286,55 @@ export const createNativeAudioHostSupervisor = (
       if (!payload) throw new Error("The native audio host asset is invalid.")
       await request(assetInstallType, payload, transactionToken)
     },
+    async createMappedAsset(input, transactionToken) {
+      const hash = input.contentHashPrefix ?? 0n
+      if (
+        !unsigned32(input.sessionAssetId) || input.sessionAssetId === 0
+        || !Number.isSafeInteger(input.frameCount) || input.frameCount <= 0
+        || !unsigned32(input.sampleRateHz) || input.sampleRateHz === 0
+        || !unsigned32(input.channelCount) || input.channelCount === 0 || input.channelCount > maximumAssetChannels
+        || hash < 0n || hash > 0xffff_ffff_ffff_ffffn
+      ) throw new Error("The native mapped audio asset is invalid.")
+      const payload = Buffer.alloc(28)
+      payload.writeUInt32BE(input.sessionAssetId, 0)
+      payload.writeBigUInt64BE(BigInt(input.frameCount), 4)
+      payload.writeUInt32BE(input.sampleRateHz, 12)
+      payload.writeUInt32BE(input.channelCount, 16)
+      payload.writeBigUInt64BE(hash, 20)
+      await request(mappedAssetCreateType, payload, transactionToken)
+    },
+    async writeMappedAssetPage(input, transactionToken) {
+      if (
+        !unsigned32(input.sessionAssetId) || input.sessionAssetId === 0
+        || !Number.isSafeInteger(input.startFrame) || input.startFrame < 0
+        || !unsigned32(input.frameCount) || input.frameCount === 0
+        || input.planarPcm.byteLength === 0
+        || input.planarPcm.byteLength > maximumPayloadBytes - 16
+        || input.planarPcm.byteLength % (input.frameCount * 4) !== 0
+      ) throw new Error("The native mapped audio page is invalid.")
+      const payload = Buffer.alloc(16 + input.planarPcm.byteLength)
+      payload.writeUInt32BE(input.sessionAssetId, 0)
+      payload.writeBigUInt64BE(BigInt(input.startFrame), 4)
+      payload.writeUInt32BE(input.frameCount, 12)
+      payload.set(input.planarPcm, 16)
+      await request(mappedAssetWritePageType, payload, transactionToken)
+    },
+    async prepareMappedAssetRange(sessionAssetId, startFrame, frameCount, transactionToken) {
+      if (
+        !unsigned32(sessionAssetId) || sessionAssetId === 0
+        || !Number.isSafeInteger(startFrame) || startFrame < 0
+        || !Number.isSafeInteger(frameCount) || frameCount <= 0
+      ) throw new Error("The native mapped audio range is invalid.")
+      const payload = Buffer.alloc(20)
+      payload.writeUInt32BE(sessionAssetId, 0)
+      payload.writeBigUInt64BE(BigInt(startFrame), 4)
+      payload.writeBigUInt64BE(BigInt(frameCount), 12)
+      await request(mappedAssetPrepareRangeType, payload, transactionToken)
+    },
+    async releaseMappedAsset(sessionAssetId, transactionToken) {
+      if (!unsigned32(sessionAssetId) || sessionAssetId === 0) throw new Error("The native mapped audio asset is invalid.")
+      await request(mappedAssetReleaseType, writeUnsigned32(sessionAssetId), transactionToken)
+    },
     async releaseAsset(sessionAssetId, transactionToken) {
       if (!unsigned32(sessionAssetId) || sessionAssetId === 0) throw new Error("The native audio host asset is invalid.")
       await request(assetReleaseType, writeUnsigned32(sessionAssetId), transactionToken)
@@ -2226,7 +2420,13 @@ export const createNativeAudioHostSupervisor = (
       if (!frame) throw new Error("The native audio host protocol is unavailable.")
       return new Promise<NativeOutputDevice | null>((resolve, reject) => {
         const deadline = setTimeout(() => lost("The native audio host device request timed out."), 2_000)
-        pending = { deadline, reject, resolve: () => undefined, devicesResolve: resolve }
+        pending = {
+          deadline,
+          reject,
+          resolve: () => undefined,
+          requestType: deviceListType,
+          devicesResolve: resolve,
+        }
         current.stdin.write(frame)
       })
     },
@@ -2242,7 +2442,13 @@ export const createNativeAudioHostSupervisor = (
       if (!frame) throw new Error("The native audio host protocol is unavailable.")
       return new Promise<NativeInputDevice | null>((resolve, reject) => {
         const deadline = setTimeout(() => lost("The native audio host input device request timed out."), 2_000)
-        pending = { deadline, reject, resolve: () => undefined, inputDeviceResolve: resolve }
+        pending = {
+          deadline,
+          reject,
+          resolve: () => undefined,
+          requestType: recordingDeviceQueryType,
+          inputDeviceResolve: resolve,
+        }
         current.stdin.write(frame)
       })
     },
@@ -2268,6 +2474,7 @@ export const createNativeAudioHostSupervisor = (
           deadline,
           reject,
           resolve: () => undefined,
+          requestType: diagnosticsType,
           diagnosticsResolve: resolve,
         }
         current.stdin.write(frame)

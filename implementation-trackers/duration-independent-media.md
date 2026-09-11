@@ -1,0 +1,214 @@
+# Duration-Independent Media Tracker
+
+## Status
+
+IN PROGRESS
+
+Branch: `fix/native-asset-capacity` (name retained for PR continuity)
+Base: `master`
+
+## Product invariant
+
+Audio duration is never an application-level admission limit.
+
+Imports, project assets, recordings, playback sources, and exports may be as long as the underlying filesystem/storage and media format permit. Memory use must remain bounded independently of duration. Disk use may grow with media. A media operation may fail for real resource or format failures, but not because a DAW-owned frame/byte counter translates into "too many seconds."
+
+This means there must be no correctness dependency on:
+
+- complete-file `arrayBuffer()` reads
+- complete-asset `AudioBuffer` decoding
+- complete planar PCM copies
+- one-control-frame PCM installation
+- application-defined total recording byte ceilings
+- complete rendered-output `AudioBuffer` materialization
+
+Short media may still use eager caches as an optimization. Eager materialization must never be required for correctness.
+
+## Grounded current-state findings
+
+- Local project media is already copied to project-owned files (project directory or OPFS), so durable bytes are not inherently RAM-backed.
+- Local asset hashing already streams `File.stream()` rather than requiring a complete `ArrayBuffer`.
+- Audio import reads metadata lazily with MediaBunny and can create ordinary clips without complete-file Web Audio decoding.
+- Ordinary portable/native snapshots are metadata-only; bounded legacy instrument and prepared Stretch paths may still carry planar PCM.
+- Native live playback hydrates bounded MediaBunny pages into one sparse mapped asset per ordinary source before scheduling.
+- Recording capture already uses bounded reusable blocks and writes them sequentially to OPFS.
+- Recording capture, temporary storage, RF64 finalization, and post-recording playback are bounded and page-backed. A packaged 10-minute native runtime soak completed with zero dropped frames, finalized, reopened, and played.
+- Shared-project audio promotion preserves the security-bounded 10 MiB multipart endpoint for small assets and now has an authorized resumable R2 multipart boundary for larger assets.
+- Native recording block sequence identifiers are versioned uint64 fields across the audio-core ABI and native host protocol.
+- Recording WAV finalization reads/writes blocks incrementally and selects RF64 before the RIFF 4 GiB container boundary.
+- Native offline rendering consumes scheduled ordinary-source ranges through bounded mapped pages, emits bounded PCM chunks, and spools output to disk-backed streaming DSP and encoding.
+- MediaBunny is already a project dependency and provides lazy `BlobSource` reading plus incremental `AudioSampleSink` decoding.
+
+## Architecture
+
+### Durable source
+
+The project-owned media file is the source of truth. Timeline clips retain semantic asset identity and persisted metadata. Runtime decoded PCM is a cache, never the authoritative asset.
+
+### Metadata
+
+Use MediaBunny over `BlobSource(File)` to read the primary audio track, sample rate, channel count, and duration without complete-file reads or complete decoding.
+
+### Decoded pages
+
+Represent decoded audio as bounded time/frame pages. Decode only the requested/sequentially prefetched ranges. Cache pages under an explicit memory budget and evict by access policy. The cache budget is independent of source duration.
+
+### Browser playback
+
+Feed bounded decoded pages into the portable audio runtime. The audio callback/worklet consumes prepared pages/ring data and never performs filesystem or decoder work.
+
+### Desktop native playback
+
+Do not transfer an entire asset over control IPC. Use a desktop-owned, path-safe media cache keyed by project/asset identity. Canonical decoded channel data is file-backed and range-addressable. Native playback must use prepared ranges without blocking filesystem/decoder work in the realtime callback. A mapped/file-backed representation may provide the audio core stable planar pointers while allowing the OS to page media instead of allocating duration-sized RAM.
+
+### Recording
+
+Capture remains block-based and sequential. There is no default total byte/frame ceiling. Storage writes continue until the user stops or the filesystem/quota/write boundary reports a real failure. Finalization and project promotion remain streaming.
+
+### Export
+
+Both source consumption and rendered output are block-streamed. Native `offlinePcmChunk` output is written to the encoder/output sink as it arrives rather than collected into one `AudioBuffer`. Export duration therefore does not determine peak RAM.
+
+## Implementation phases
+
+### Phase 0 — invariant and hard-limit audit
+
+- [x] Establish duration-independent product invariant.
+- [x] Record current whole-file/whole-PCM boundaries.
+- [x] Add regression helpers/tests that express duration independence without giant allocations.
+
+### Phase 1 — metadata and import admission
+
+- [x] Add MediaBunny-backed audio metadata reader using lazy `BlobSource` input.
+- [x] Stop requiring whole-file Web Audio decode before a local audio file can be persisted and represented as a clip.
+- [x] Preserve optional eager `AudioBuffer` cache for short/active media only as an optimization.
+- [x] Ensure invalid/unsupported audio still fails explicitly.
+
+### Phase 2 — recording duration independence
+
+- [x] Remove the default 4 GiB recording-session cap; large PCM takes select RF64 without allocating the logical take.
+- [x] Keep explicit injectable storage limits only for bounded unit-test/failure simulation.
+- [x] Ensure native and portable recording writers remain bounded by queued block count, not total captured duration.
+- [x] Avoid complete-file decode after recording finalization; ordinary playback resolves the durable source through bounded pages.
+- [x] Replace security-bounded multipart shared-project promotion with authorized resumable object upload while preserving the existing 10 MiB endpoint; resumable verification is range-bounded and continues SHA-256 state across claims.
+- [x] Version the native recording protocol/ABI to remove the 32-bit block-sequence rollover boundary.
+
+### Phase 3 — decoded page source
+
+- [x] Use one bounded `AudioPcmSourceDescriptor` page abstraction across ordinary native/portable playback, export, Stretch, and waveform consumers.
+- [x] Decode requested ranges with MediaBunny `AudioSampleSink`.
+- [x] Close decoded samples promptly and keep a fixed memory budget.
+- [x] Preserve sample-rate/channel metadata and deterministic frame addressing.
+
+### Phase 4 — timeline/runtime migration
+
+- [x] Make source asset identity + metadata sufficient for a playable audio clip; `AudioBuffer` becomes optional cache only.
+- [x] Migrate ordinary native and non-loop portable clip hydration away from whole-asset decode; eager hydration remains only at the legacy Web Audio compatibility boundary.
+- [x] Ensure seeking, duplicated clips, offsets, trims, fades, fractional boundaries, and sample-rate conversion request bounded source ranges.
+- [x] Add paged portable loop scheduling without duration-sized allocation.
+- [x] Generate and persist waveform/peak data incrementally from bounded decoded pages without complete decoded PCM or duration-linear manifests.
+
+### Phase 5 — desktop native file-backed assets
+
+- [x] Replace whole-PCM `assetInstall` with a duration-independent file/range boundary.
+- [x] Main/native host owns cache paths; renderer never supplies arbitrary filesystem paths.
+- [x] Keep IPC messages bounded and sequential.
+- [x] Keep realtime callback free of blocking I/O/decoding.
+- [x] Preserve asset lifetime/release/transaction semantics.
+- [x] Remove native duration-derived `maximumAssetFrames` admission checks for mapped ordinary assets; bounded legacy instrument installs remain intentionally capped.
+
+### Phase 6 — streaming export
+
+- [x] Consume ordinary source audio in bounded pages for native export.
+- [x] Consume source audio in bounded pages for portable export.
+- [x] Stream native offline PCM chunks directly into encoding/output.
+- [x] Remove monolithic rendered-PCM `AudioBuffer` requirement and duration-derived output-memory rejection.
+- [x] Keep cancellation and partial-file cleanup deterministic.
+
+### Phase 7 — instrument/warp compatibility
+
+- [x] Audit sampler, Drum Rack, and Granular preparation for whole-asset assumptions.
+- [x] Sampled-instrument regionalization uses bounded source/page access for sampler, Drum Rack, and Granular.
+- [x] Stretch/WSOLA uses bounded stateful processing with page/range-backed source reads and prepared ownership across native and portable playback/export.
+- [x] Keep any intentionally bounded instrument-local buffers explicit and unrelated to project-asset duration.
+
+### Phase 8 — acceptance
+
+- [x] Confirm a multi-minute imported source persists without complete-file decoding in the packaged app.
+- [x] Seek near beginning/middle/end and play through the packaged native path.
+- [x] Native VST processing works on the long source.
+- [x] Record for a duration logically beyond the old 4 GiB policy without an application ceiling (synthetic storage test plus practical runtime soak).
+- [x] Export a long range with bounded process memory.
+- [x] Corrected Valhalla automation acceptance from PR #51 still passes.
+- [x] `bun run lint`
+- [x] `bun run typecheck`
+- [x] `bun run test`
+- [x] native CTest/runtime checks on macOS
+- [x] packaged Electron acceptance on macOS
+
+Current live boundary evidence: MediaBunny page decoding, metadata-only ordinary
+snapshots, bounded concurrent mapped-page hydration, bounded native written-range
+ledgering, renderer page LRU bookkeeping, and hydration-before-schedule are
+covered by focused tests. Native offline planning now emits metadata-only mapped
+ordinary-source descriptors, hydrates only their scheduled source ranges through
+bounded pages before graph publication, and retains `native-pcm-chunking` only
+for eagerly prepared Stretch/instrument PCM. The final accepted unsigned packaged
+Electron build is from `448e442a67c3d1aac8b5b23cbce84030783ff0b7`.
+Its `app.asar` SHA-256 is
+`da8a2e78b914e9387eb356706d8e27f0eeb0bae1c3f49be104b64adb762cc96b`;
+the native audio host is
+`ab53077948e9ea37398cd4a0c8856018a02f7e3877e1cf12b9ccc895494d3d84`,
+the VST worker is
+`0d4d9c4c8d1e32efffe7d2ceaa208ccf5ccaebfe5897047feb19a4d658a6e1e2`,
+and the scanner is
+`1644deb9c854605509dc90efe792e6ce622d2417eef474c969fc6e1e305fe69f`.
+
+The packaged long-media campaign, first completed on the intermediate
+`94665eeb` build, imported a deterministic six-minute, 48 kHz mono WAV into fresh
+local project `project:76b4e135-a197-4ef2-ab27-1c9b63050ea2`. ValhallaSupermassive
+5.0.0 inserted on the long-source track as instance
+`a722f97f-71bb-4ed5-a175-628d3c87ed66`; its native rebuild succeeded, ParamID 48
+persisted at normalized value `0.5`, and the same native host/worker processes
+advanced playback from 0 to 2.08 seconds, 180 to 182.069 seconds, and 359 to
+361.048 seconds without paging, worker-fault, restart, or detach errors. That
+intermediate build's historical `app.asar` SHA-256 was
+`d41cb89e71361cbe8338ea6fa9e79be5bfa27baa3544ea54d1456dcc33406a9d`;
+it is not the final accepted package. The same campaign retained the bounded six-minute
+48 kHz stereo float export result of 138,240,044 bytes with main-process RSS
+near 332 MiB.
+
+Packaged recording initially exposed an IPC contract defect: preload sent the
+standard native session envelope while the main-process configure/stop handlers
+validated the envelope as a raw recording value. After correcting that boundary,
+the built-in 48 kHz microphone completed a 644.085-second native capture with
+29,712,896 frames observed at ten minutes, zero dropped frames, stable host/worker
+ownership, bounded RSS, successful finalization, cold reopen, and playback.
+
+The absent historical PR #51 project was recreated locally as
+`project:cb7c3f25-ffc1-48ca-804b-ba0124115dfa`. ValhallaSupermassive exposed all
+19 expected parameters. Canonical parameter
+`vst3:292f4274-c54c-4926-8080-3cbf50027338:48` persisted exactly eight linear
+points from 0 through 82.5 seconds. Native playback started with an isolated VST
+worker. Three cold exports and one warm export each produced a 44.1 kHz,
+3,638,250-frame stereo float32 WAV of 29,106,044 bytes; all four SHA-256 digests
+were `8aee11194bb5e0dc1b84557a12abb3e6cb009ffc8c5fc0482aa69831012f8923`.
+
+Final certification on the docs-only acceptance head completed with 2,825
+passing tests across 353 files, 372,276 assertions, one intentionally skipped
+Electron AudioWorklet integration, and zero failures. The prior
+local-send timing failure did not recur under the correctly configured isolated
+run. Real shared Worker/R2 smoke was not executed because cloud control remained
+unauthenticated; it is supplementary and does not block packaged acceptance.
+
+## Non-goals / real limits
+
+"Any duration" does not mean infinite physical resources. The following remain valid failures when they come from the environment rather than a DAW-owned duration ceiling:
+
+- disk full / browser storage quota exhausted
+- filesystem permission revoked
+- unsupported or corrupt media format/codec
+- OS/process address-space or mapping failure
+- user cancellation
+- source removed or cloud media unavailable
+
+Those failures must be explicit and recoverable; none should be reported as a generic maximum-duration error.

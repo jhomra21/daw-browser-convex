@@ -98,12 +98,14 @@ import {
 } from "~/lib/external-plugin-ui";
 import {
   deleteLocalExternalProcessor,
+  getLocalExternalProcessor,
   listLocalExternalProcessors,
   persistLocalExternalProcessorState,
   readLocalExternalProcessorState,
 } from "~/lib/external-plugins";
 import { localVstStateOwnerId } from "~/lib/external-plugin-artifacts";
 import { compileNativeExternalAttachmentPlan } from "~/lib/desktop/native-external-attachment-plan";
+import { resolveNativeLivePlaybackProcessors } from "~/lib/desktop/native-live-playback-processors";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, {
   type AppMessageDialogState,
@@ -130,12 +132,15 @@ import { createAttachedHostController, registerAttachedHostController } from "~/
 import { createNativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
 import { createVstParameterFeedbackController } from "~/lib/desktop/vst-parameter-feedback-controller";
 import { createExportQueue } from "~/lib/export/export-queue";
+import { createImportJobQueue } from "~/lib/desktop/import-job-queue";
 import { createTimelineExportService } from "~/lib/export/timeline-export-service";
 import { createExportRenderStateSnapshot, type ExportAutomationPatch } from "~/lib/export/run-export-job";
-import { createDesktopNativeOfflineRenderer } from "~/lib/export/desktop-native-offline-renderer";
+import { createDesktopNativeOfflinePcmRenderer } from "~/lib/export/desktop-native-offline-pcm-renderer";
 import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackTransport } from "~/lib/live-playback-snapshot";
 import { withInstrumentOverride } from "~/lib/export/export-effect-rows";
 import { createTimelineExtensionHost } from "~/lib/extensions";
+import { createSampledInstrumentSession } from "~/lib/sampled-instrument-session";
+import { createAudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
 
 type TimelineProps = {
   bootstrapIfEmpty: boolean;
@@ -149,12 +154,13 @@ const Timeline: Component<TimelineProps> = (props) => {
   const requiresNativeAudio = import.meta.env.VITE_DESKTOP === 'true';
   const navigate = useNavigate();
   const exportQueue = createExportQueue();
+  const importQueue = createImportJobQueue();
   onCleanup(exportQueue.dispose);
   const nativeOfflineBridge = requiresNativeAudio
     ? window.dawDesktop?.audioHost?.offlineRender
     : undefined;
-  const nativeOfflineRenderer = nativeOfflineBridge
-    ? createDesktopNativeOfflineRenderer(nativeOfflineBridge)
+  const nativeOfflinePcmRenderer = nativeOfflineBridge
+    ? createDesktopNativeOfflinePcmRenderer(nativeOfflineBridge)
     : undefined;
   const nativeVstParameterQueue = window.dawDesktop
     ? createNativeVstParameterQueue(async (bytes) => {
@@ -255,6 +261,11 @@ const Timeline: Component<TimelineProps> = (props) => {
     notify,
     bootstrapIfEmpty: untrack(() => props.bootstrapIfEmpty),
   });
+  const resolveAudioSource = createAudioPcmSourceResolver({ projectId });
+  const sampledInstrumentSession = createSampledInstrumentSession({
+    projectId,
+  });
+  onCleanup(sampledInstrumentSession.dispose);
   const localProject = useLocalProjectActions({
     projectId,
     userId,
@@ -319,6 +330,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     projectId,
     tracks: renderTracks,
     onBufferChange: () => setBufferVersion((current) => current + 1),
+    resolveAudioSource,
   });
   const currentLocalProjectMode = createMemo(
     () => projects().find((project) => project.projectId === projectId())?.mode,
@@ -434,9 +446,16 @@ const Timeline: Component<TimelineProps> = (props) => {
       renderState: hydratedRenderState,
       sidechainRoutes: effects?.snapshotSidechainRoutes() ?? sidechainRoutes(),
     });
-    if (!result.supported || !isLocalId("project", projectId())) return result;
-    const processors = (await listLocalExternalProcessors(projectId()))
+    const compiledProjectId = projectId();
+    if (!result.supported || !isLocalId("project", compiledProjectId)) return result;
+    const liveProcessors = (await listLocalExternalProcessors(compiledProjectId))
       .filter((processor) => !processor.bypassed && processor.health.state !== "degraded");
+    const processors = await resolveNativeLivePlaybackProcessors({
+      projectId: compiledProjectId,
+      persisted: liveProcessors,
+      seed: context?.externalProcessor,
+      readPersisted: getLocalExternalProcessor,
+    });
     if (processors.length === 0) return result;
     const attachmentPlan = compileNativeExternalAttachmentPlan({
       target: "native",
@@ -463,7 +482,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         const processor = processors.find((candidate) => candidate.instanceId === attachment.instanceId)
         if (!processor?.manifest.supportsState) return undefined
         const state = processor
-          ? await readLocalExternalProcessorState(projectId(), processor)
+          ? await readLocalExternalProcessorState(compiledProjectId, processor)
           : undefined
         return state ? { instanceId: attachment.instanceId, ...state } : undefined
       }))
@@ -486,7 +505,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const exportService = createTimelineExportService({
     queue: exportQueue,
     nativeRendererRequired: requiresNativeAudio,
-    nativeOfflineRenderer,
+    nativeOfflinePcmRenderer,
     getNativeOfflineExternalAttachments: async ({ projectId: capturedProjectId, localProject, tracks, renderState, bpm, timeSignature, sidechainRoutes }) => {
       if (!capturedProjectId || !localProject) return undefined
       const processors = (await listLocalExternalProcessors(capturedProjectId))
@@ -572,6 +591,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     getEffectsExportSnapshot: effectsExportSnapshot,
     getSidechainRoutes: sidechainRoutes,
     loadCapturedClipBuffer: clipBuffers.loadCapturedMedia,
+    resolveAudioSource,
+    sampledInstrumentSession,
   });
   const [replayEffectInstanceParams, setReplayEffectInstanceParams] =
     createSignal<EffectsPanelAudioEffects["replayInstanceParams"]>();
@@ -588,6 +609,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     ensureClipBuffer: clipBuffers.preload,
     grantTrackWrite,
     grantClipWrite,
+    drumRackBufferSync: sampledInstrumentSession.drumRackBufferSync,
     persistLocalMix: (_projectId, trackId, patch) =>
       localMix.persist(trackId, patch),
     getActions: () => {
@@ -632,6 +654,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     requiresNativeAudio,
     tracks: renderTracks,
     ensureClipBuffer: clipBuffers.preload,
+    resolveAudioSource,
     loopEnabled,
     loopStartSec,
     loopEndSec,
@@ -1214,6 +1237,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     selection,
     playheadSec,
     projectId,
+    mountedProjectGeneration,
     userId,
     clipBuffers,
     getScrollElement: () => scrollRef,
@@ -1521,6 +1545,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   };
   recordingStopRef.activeTrackId = audioRecordingTrackId;
   setProjectTransitionSettlement(async () => {
+    importQueue.cancelAll();
     if (untrack(isAudioRecording)) await stopAudioRecording();
     if (untrack(midiRecording.isRecording)) await midiRecording.stopRecording();
     if (untrack(provisionalMidiClipId)) throw new Error("MIDI recording remains protected until it can be finalized.");
@@ -1950,6 +1975,13 @@ const Timeline: Component<TimelineProps> = (props) => {
       openEffectsForTarget(processor.targetId);
       const intent = playbackIntent ?? captureStructuralPlaybackIntent();
       const insertedProjectId = intent.projectId ?? projectId();
+      const insertionIntent: TimelinePlaybackRebuildIntent = {
+        ...intent,
+        externalProcessor: {
+          projectId: insertedProjectId,
+          processor,
+        },
+      };
       const request: ExternalProcessorEditorRequest = {
         instanceId: processor.instanceId,
         projectId: intent.projectId ?? projectId(),
@@ -1967,7 +1999,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         nativePlaybackEnabled,
       });
       try {
-        await rebuildPlaybackBackend(renderTracks(), intent);
+        await rebuildPlaybackBackend(renderTracks(), insertionIntent);
         if (processor.manifest.supportsState) {
           const capture = await window.dawDesktop?.audioHost?.session.captureVstState(processor.instanceId);
           if (!capture?.ok) {
@@ -1995,10 +2027,11 @@ const Timeline: Component<TimelineProps> = (props) => {
         try {
           await deleteLocalExternalProcessor(insertedProjectId, processor.instanceId);
           await rebuildPlaybackBackend(renderTracks(), {
-            ...intent,
-            resumePlayback: intent.resumePlayback,
+            ...insertionIntent,
+            resumePlayback: insertionIntent.resumePlayback,
             projectId: insertedProjectId,
             projectGeneration: intent.projectGeneration,
+            externalProcessor: undefined,
           });
         } catch (rollbackError) {
           const detail = rollbackError instanceof Error
@@ -2117,6 +2150,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         }
       },
       exportQueue,
+      importQueue,
       exportService,
       importFiles,
       enqueueNativeVstParameter: nativeVstParameterQueue
@@ -2287,6 +2321,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       projectId: projectId(),
       userId: userId(),
       audioEngine,
+      samplerBufferSync: sampledInstrumentSession.samplerBufferSync,
+      drumRackBufferSync: sampledInstrumentSession.drumRackBufferSync,
       spectrumProvider: subscribeSpectrum,
       canWriteTrackRouting: canWriteTrack,
       grantClipWrite,
@@ -2407,6 +2443,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       audioEngine,
       bpmDetection: audioWarpController.bpmDetection,
       ensureClipBuffer: clipBuffers.preload,
+      resolveAudioSource,
       canWriteClip,
       onChange: sampleDetail.changeWarp,
       onGainChange: sampleDetail.changeGain,
@@ -2556,6 +2593,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           },
         }}
         ensureClipBuffer={clipBuffers.preload}
+        resolveAudioSource={resolveAudioSource}
         replaceMissingMediaClip={mediaRecovery.replaceMissingMediaClip}
         removeMissingMediaClip={mediaRecovery.removeMissingMediaClip}
         trackLookup={trackLookup()}

@@ -7,7 +7,10 @@ import { useTimelinePlayback } from './useTimelinePlayback'
 import type { DeferredStretchWindow } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { createDefaultDrumRackParams } from '@daw-browser/shared'
+import { externalProcessorSchema, type ExternalProcessor } from '@daw-browser/external-plugins'
 import { compileLivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
+import { compileNativeExternalAttachmentPlan } from '~/lib/desktop/native-external-attachment-plan'
+import { resolveNativeLivePlaybackProcessors } from '~/lib/desktop/native-live-playback-processors'
 import type { NativeScheduleProgress } from '@daw-browser/audio-engine/native-host-wire'
 import type { DesktopAudioLifecycle } from '~/lib/desktop-audio-lifecycle'
 import {
@@ -51,6 +54,9 @@ const portableResponseFor = (
   if (message.type === 'schedule-sources') {
     return { version: portableWasmProtocolVersion, type: 'sources-scheduled', requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: 'scheduled' }
   }
+  if (message.type === 'replace-sources') {
+    return { version: portableWasmProtocolVersion, type: 'sources-replaced', requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: 'replaced' }
+  }
   if (message.type === 'register-asset') {
     return { version: portableWasmProtocolVersion, type: 'asset-registered', requestId: message.requestId, generation: message.generation, assetId: message.asset.assetId, result: 'registered', handle: { slot: 0, generation: message.generation } }
   }
@@ -63,6 +69,48 @@ const track: Track = {
   volume: 1,
   clips: [],
 }
+
+const insertedExternalProcessor = (): ExternalProcessor => externalProcessorSchema.parse({
+  instanceId: '33333333-3333-4333-8333-333333333333',
+  targetId: 'track-2',
+  index: 0,
+  manifest: {
+    identity: {
+      format: 'vst3',
+      classId: 'example',
+      vendor: 'Example',
+      name: 'Example',
+      version: '1',
+      architecture: 'arm64',
+      binaryFingerprint: 'a'.repeat(64),
+    },
+    role: 'effect',
+    audioInputs: [{ name: 'Input', channels: 2, enabled: true }],
+    audioOutputs: [{ name: 'Output', channels: 2, enabled: true }],
+    sidechainInputs: [],
+    parameters: [],
+    latencyFrames: 0,
+    tailFrames: 0,
+    supportsBypass: false,
+    supportsEditor: false,
+    supportsState: false,
+  },
+  parameterOverrides: {},
+  latencyFrames: 0,
+  tailFrames: 0,
+  bypassed: false,
+  launchReference: {
+    version: 1,
+    classId: 'example',
+    vendorId: 'Example',
+    architecture: 'arm64',
+    bundleFingerprint: 'b'.repeat(64),
+    binaryFingerprint: 'a'.repeat(64),
+    scannerCatalogVersion: 2,
+  },
+  health: { state: 'ready', updatedAt: 1 },
+  updatedAt: 1,
+})
 
 class TestAudioBuffer implements AudioBuffer {
   readonly duration = 4 / 48_000
@@ -1523,12 +1571,13 @@ test('keeps a paused portable session compatible when enabling a loop', async ()
         })).resolves.toBeUndefined()
 
         expect(loopEnabled()).toBeTrue()
-        expect(playback.isPortableBrowserPlaybackPrepared()).toBeFalse()
-        expect(playback.backendDiagnostics().activeBackend).toBe("idle")
+        expect(playback.isPortableBrowserPlaybackPrepared()).toBeTrue()
+        expect(playback.backendDiagnostics().activeBackend).toBe("portable-browser")
 
         await playback.handlePlay([track])
         expect(playback.isPlaying()).toBeTrue()
-        expect(playback.usesLegacyAudioEngine()).toBeTrue()
+        expect(playback.usesLegacyAudioEngine()).toBeFalse()
+        expect(playback.isPortableBrowserPlayback()).toBeTrue()
         expect(loopEnabled()).toBeTrue()
         dispose()
       })
@@ -1579,7 +1628,8 @@ test('rebuilds active portable playback into compatibility playback for a loop',
         })).resolves.toBeUndefined()
 
         expect(playback.isPlaying()).toBeTrue()
-        expect(playback.usesLegacyAudioEngine()).toBeTrue()
+        expect(playback.usesLegacyAudioEngine()).toBeFalse()
+        expect(playback.isPortableBrowserPlayback()).toBeTrue()
         expect(loopEnabled()).toBeTrue()
         dispose()
       })
@@ -1974,6 +2024,95 @@ test('coalesces queued structural rebuilds and resumes once', async () => {
     })
   } finally {
     Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test('carries the latest inserted processor through coalesced paused rebuild compilation', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  const inserted = insertedExternalProcessor()
+  const compileContexts: Array<unknown> = []
+  const longTrack: Track = {
+    id: 'track-2',
+    name: 'Track 2',
+    volume: 1,
+    clips: [],
+  }
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
+  })
+  try {
+    await withFakeRaf(async () => {
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => 'project',
+          compileSnapshot: async (transport, context) => {
+            compileContexts.push(context)
+            const result = compileLivePlaybackSnapshot({
+              revision: 1,
+              bpm: 120,
+              transport,
+              tracks: [longTrack],
+              renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+              sidechainRoutes: [],
+            })
+            if (!result.supported) return result
+            const processors = await resolveNativeLivePlaybackProcessors({
+              projectId: 'project',
+              persisted: [],
+              seed: context?.externalProcessor,
+              readPersisted: async () => undefined,
+            })
+            const plan = compileNativeExternalAttachmentPlan({
+              target: 'native',
+              graph: result.snapshot.mixer.graph,
+              processors,
+              workerTransport: { slotCount: 2, maximumFrames: 8_192, maximumEventsPerBlock: 128 },
+            })
+            if (!plan.supported) return {
+              supported: true as const,
+              snapshot: { ...result.snapshot, requiresNativePlayback: true },
+            }
+            return {
+              supported: true as const,
+              snapshot: {
+                ...result.snapshot,
+                nativeExternalAttachmentPlan: plan.plan,
+                requiresNativePlayback: true,
+              },
+            }
+          },
+        })
+        const first = playback.restartTimelineSchedule([longTrack], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          owner: 'native',
+          projectId: 'project',
+          externalProcessor: { projectId: 'project', processor: inserted },
+        })
+        const second = playback.restartTimelineSchedule([longTrack], {
+          rebuildBackend: true,
+          resumePlayback: false,
+          owner: 'native',
+          projectId: 'project',
+          externalProcessor: { projectId: 'project', processor: inserted },
+        })
+        await Promise.all([first, second])
+        expect(compileContexts).toContainEqual({
+          externalProcessor: { projectId: 'project', processor: inserted },
+        })
+        expect(compileContexts.at(-1)).toEqual({
+          externalProcessor: { projectId: 'project', processor: inserted },
+        })
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 })
 
@@ -3251,6 +3390,7 @@ test('re-establishes paused native preview after structural fingerprint disposal
 test('keeps optional paused structural rebuilds idle when native preview becomes unavailable', async () => {
   const source = await readFile(new URL('./useTimelinePlayback.ts', import.meta.url), 'utf8')
   expect(source).toContain('reportUnavailable: requiresNativeAudio')
+  expect(source).toContain(': "The prepared native playback graph could not be rebuilt.")')
 
   const previousWindow = globalThis.window
   let failBegin = false
@@ -3300,7 +3440,9 @@ test('keeps optional paused structural rebuilds idle when native preview becomes
           playheadSec: 0,
           owner: 'native',
           projectId: 'project',
-        })).rejects.toThrow('prepared native playback graph could not be rebuilt')
+        })).rejects.toThrow(
+          'The prepared native playback graph could not be rebuilt: Native playback failed during begin-transaction: The native audio session is unavailable.',
+        )
 
         expect(faults).toEqual([])
         expect(playback.isPlaying()).toBeFalse()

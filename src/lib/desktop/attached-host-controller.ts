@@ -3,6 +3,7 @@ import { isLocalId } from "@daw-browser/shared"
 import {
   desktopHostExportRunInputSchemaV1,
   desktopHostExportCancelInputSchemaV1,
+  desktopHostImportCancelInputSchemaV1,
   desktopHostVstInstancesInputSchemaV1,
   desktopHostVstParametersInputSchemaV1,
   desktopRendererControlCapabilitiesInputSchemaV1,
@@ -42,13 +43,15 @@ import { createLocalControlHandlers } from "~/lib/local-control/local-control-ha
 import { LocalControlServiceError } from "~/lib/local-control/local-control-service"
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
 import type { ExportQueue } from "~/lib/export/export-queue"
-import type { ImportSummary } from "~/hooks/useTimelineClipImport"
+import { createImportJobQueue, type ImportJobQueue } from "~/lib/desktop/import-job-queue"
+import type { ImportProjectBinding, ImportSummary } from "~/hooks/useTimelineClipImport"
 export type {
   DesktopPluginCatalog,
   DesktopPluginCatalogEntry,
   DesktopPluginCatalogReply,
 } from "~/types/desktop-bridge"
 import { createDesktopCapabilityExportOutputTargetFactory, desktopExportResourceLimits } from "~/lib/desktop/capability-export-output-targets"
+import { CapabilityFile } from "~/lib/desktop/capability-file"
 import { preflightExportResources } from "~/lib/export/export-resource-preflight"
 import { collectStemTracks } from "~/lib/export/run-export-job"
 import type { PreparedStemExport, PreparedTimelineExport, TimelineExportInput, TimelineExportService } from "~/lib/export/timeline-export-service"
@@ -70,6 +73,7 @@ type HostResponse = {
 type TimelineHostController = {
   request: (request: HostRequest) => Promise<HostResponse>
   prepareToClose: () => Promise<boolean>
+  dispose: () => void
 }
 
 const unavailable = (id: string): HostResponse => ({
@@ -157,7 +161,7 @@ class ControlRequestUnavailableError extends Error {}
 
 let activeController: TimelineHostController | undefined
 
-type CapabilityImport = { canceled: boolean; files?: { token: string; basename: string; mime: string }[] }
+type CapabilityImport = { canceled: boolean; files?: { token: string; basename: string; byteLength: number; mime: string }[] }
 type CapabilityExport = {
   canceled: boolean
   preflightOnly: boolean
@@ -242,11 +246,33 @@ const safeExportStatus = (job: ReturnType<TimelineExportService["status"]>) => {
   }
 }
 
-const fileFromCapability = async (requestId: string, file: { token: string; basename: string; mime: string }) => {
-  const bytes = await window.dawDesktop!.readChunk(requestId, file.token)
-  const buffer = new ArrayBuffer(bytes.byteLength)
-  new Uint8Array(buffer).set(bytes)
-  return new File([buffer], file.basename, { type: file.mime })
+const safeImportStatus = (job: ReturnType<ImportJobQueue["status"]>) => {
+  if (!job) return { status: "idle" as const }
+  const safeJob: NonNullable<DesktopOperationMapV1["host.import.status"]["result"]["job"]> = {
+    id: job.id,
+    name: job.name,
+  }
+  if (job.summary) {
+    safeJob.count = job.summary.outcomes.filter((outcome) => (
+      outcome.status === "created" || outcome.status === "queued"
+    )).length
+  }
+  if (job.error) safeJob.error = job.error.slice(0, 512)
+  return { status: job.status, job: safeJob }
+}
+
+const fileFromCapability = (
+  requestId: string,
+  signal: AbortSignal,
+  file: { token: string; basename: string; byteLength: number; mime: string },
+) => {
+  return new CapabilityFile({
+    requestId,
+    token: file.token,
+    size: file.byteLength,
+    readChunk: window.dawDesktop!.readChunk,
+    signal,
+  }, file.basename, file.mime)
 }
 
 export const registerAttachedHostController = (controller: TimelineHostController) => {
@@ -269,6 +295,7 @@ export const registerAttachedHostController = (controller: TimelineHostControlle
     activeController = undefined
     window.dawDesktop?.setRequestHandler(undefined)
     window.dawDesktop?.onPrepareToClose(undefined)
+    controller.dispose()
   }
 }
 
@@ -286,7 +313,8 @@ export const createAttachedHostController = (input: {
   captureNativeVstStates?: (capture?: { projectId: string; instanceIds: readonly string[] }) => Promise<void>
   exportService: TimelineExportService
   exportQueue: ExportQueue
-  importFiles: (files: readonly File[], signal?: AbortSignal) => Promise<ImportSummary>
+  importQueue?: ImportJobQueue
+  importFiles: (files: readonly File[], signal?: AbortSignal, binding?: ImportProjectBinding) => Promise<ImportSummary>
   setPlayhead: (seconds: number) => void
   enqueueNativeVstParameter?: (event: { instanceId: string; id: number; value: number }) => Promise<boolean>
   reconcileMountedLocalTimeline?: (guard: {
@@ -303,6 +331,15 @@ export const createAttachedHostController = (input: {
   getMountedLocalProject?: typeof getLocalProject
 }): TimelineHostController => {
   const preparedExports = new Map<string, PreparedTimelineExport | PreparedStemExport>()
+  const importQueue = input.importQueue ?? createImportJobQueue()
+  const maxPreparedExports = 8
+  const releasePreparedExport = (prepared: PreparedTimelineExport | PreparedStemExport) => {
+    input.exportService.releasePreparedExport?.(prepared)
+  }
+  const clearPreparedExports = () => {
+    for (const prepared of preparedExports.values()) releasePreparedExport(prepared)
+    preparedExports.clear()
+  }
   const findMountedLocalProject = input.getMountedLocalProject ?? getLocalProject
   const transport = () => ({
     state: input.isPlaying() ? "playing" as const : input.playheadSec() === 0 ? "stopped" as const : "paused" as const,
@@ -568,60 +605,118 @@ export const createAttachedHostController = (input: {
         const input_: CapabilityImport = parsedInput.data
         if (input_.canceled) result = { status: "canceled", count: 0 }
         else {
-          const files = await Promise.all((input_.files ?? []).map((file) => fileFromCapability(request_.id, file)))
+          const files = input_.files ?? []
           if (request_.signal.aborted) return cancelled(request_.id)
-          const summary = await input.importFiles(files, request_.signal)
-          const created = summary.outcomes.filter((outcome) => outcome.status === "created").length
-          const queued = summary.outcomes.filter((outcome) => outcome.status === "queued").length
-          result = { status: created > 0 ? "created" : queued > 0 ? "queued" : "failed", count: created + queued }
+          const submittedProjectId = input.projectId()
+          const submittedProjectGeneration = input.mountedProjectGeneration()
+          const isCurrent = () => activeController === controller
+            && input.projectId() === submittedProjectId
+            && input.mountedProjectGeneration() === submittedProjectGeneration
+          const assertCurrent = (signal: AbortSignal) => {
+            signal.throwIfAborted()
+            if (!isCurrent()) throw new DOMException("The audio import was canceled.", "AbortError")
+          }
+          const submitted = importQueue.submit(
+            files[0]?.basename ?? "Audio import",
+            async (signal) => {
+              assertCurrent(signal)
+              const summary = await input.importFiles(
+                files.map((file) => fileFromCapability(request_.id, signal, file)),
+                signal,
+                {
+                  projectId: submittedProjectId,
+                  mountedProjectGeneration: submittedProjectGeneration,
+                },
+              )
+              assertCurrent(signal)
+              return summary
+            },
+            isCurrent,
+          )
+          void submitted.completion.then(() => {
+            window.dawDesktop?.importTerminal?.(submitted.id)
+          })
+          result = { status: "queued", count: 0, jobId: submitted.id }
         }
+      } else if (request_.operation === "host.import.status") {
+        result = safeImportStatus(importQueue.status())
+      } else if (request_.operation === "host.import.cancel") {
+        const parsedInput = desktopHostImportCancelInputSchemaV1.safeParse(request_.input)
+        if (!parsedInput.success) return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid import job ID." } }
+        importQueue.cancel(parsedInput.data.jobId)
+        result = safeImportStatus(importQueue.status(parsedInput.data.jobId))
       } else if (request_.operation === "host.export.run") {
         const exportInput = parseCapabilityExport(request_)
         if (!exportInput) return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid export request." } }
         if (exportInput.canceled) {
+          const prepared = preparedExports.get(request_.id)
+          if (prepared) releasePreparedExport(prepared)
           preparedExports.delete(request_.id)
           return { id: request_.id, result: { status: "canceled" } }
         }
         if (exportInput.preflightOnly) {
-          const prepared = exportInput.mode === "mixdown"
-            ? await input.exportService.prepareTimelineExport(exportInput.settings)
-            : exportInput.stems
-              ? await input.exportService.prepareStemExport({ ...exportInput.settings, ...exportInput.stems })
-              : undefined
-          if (!prepared) return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid stem export request." } }
-          const stemCount = prepared.kind === "timeline"
-            ? 1
-            : collectStemTracks({ ...prepared.input, tracks: prepared.snapshot.tracks }).length
-          if (stemCount === 0) throw new Error("Select at least one track to export stems.")
-          preflightExportResources({
-            tracks: prepared.snapshot.tracks,
-            range: prepared.snapshot.settings.range,
-            formats: prepared.snapshot.settings.formats,
-            render: prepared.snapshot.settings.render,
-            encoding: prepared.snapshot.settings.encoding,
-            stemCount,
-            resourceLimits: desktopExportResourceLimits,
-          })
-          if (request_.signal.aborted) return cancelled(request_.id)
-          preparedExports.set(request_.id, prepared)
+          let prepared: PreparedTimelineExport | PreparedStemExport | undefined
+          try {
+            prepared = exportInput.mode === "mixdown"
+              ? await input.exportService.prepareTimelineExport(exportInput.settings)
+              : exportInput.stems
+                ? await input.exportService.prepareStemExport({ ...exportInput.settings, ...exportInput.stems })
+                : undefined
+            if (!prepared) return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Invalid stem export request." } }
+            const stemCount = prepared.kind === "timeline"
+              ? 1
+              : collectStemTracks({ ...prepared.input, tracks: prepared.snapshot.tracks }).length
+            if (stemCount === 0) throw new Error("Select at least one track to export stems.")
+            preflightExportResources({
+              tracks: prepared.snapshot.tracks,
+              range: prepared.snapshot.settings.range,
+              formats: prepared.snapshot.settings.formats,
+              render: prepared.snapshot.settings.render,
+              encoding: prepared.snapshot.settings.encoding,
+              stemCount,
+              resourceLimits: desktopExportResourceLimits,
+            })
+            if (request_.signal.aborted) {
+              releasePreparedExport(prepared)
+              return cancelled(request_.id)
+            }
+            const previous = preparedExports.get(request_.id)
+            if (previous) releasePreparedExport(previous)
+            preparedExports.set(request_.id, prepared)
+            while (preparedExports.size > maxPreparedExports) {
+              const oldest = preparedExports.entries().next().value
+              if (!oldest) break
+              releasePreparedExport(oldest[1])
+              preparedExports.delete(oldest[0])
+            }
+          } catch (error) {
+            if (prepared) releasePreparedExport(prepared)
+            throw error
+          }
           return { id: request_.id, result: { status: "canceled" } }
         }
         const prepared = preparedExports.get(request_.id)
         preparedExports.delete(request_.id)
         if (!prepared || (exportInput.mode === "mixdown") !== (prepared.kind === "timeline")) {
+          if (prepared) releasePreparedExport(prepared)
           return { id: request_.id, error: { version: "v1", code: "invalid-request", message: "Export preflight is missing or stale." } }
         }
-        const target = createDesktopCapabilityExportOutputTargetFactory(window.dawDesktop!, request_.id, exportInput.output)
-        const submitted = prepared.kind === "timeline"
-          ? input.exportService.submitPreparedTimelineExport(prepared, target)
-          : input.exportService.submitPreparedStemExport(prepared, target)
-        void submitted.completion.then((outcome) => {
-          window.dawDesktop?.exportTerminal(
-            submitted.id,
-            outcome.type === "success" ? "success" : outcome.type === "canceled" ? "canceled" : "error",
-          )
-        })
-        result = { jobId: submitted.id, status: "queued" }
+        try {
+          const target = createDesktopCapabilityExportOutputTargetFactory(window.dawDesktop!, request_.id, exportInput.output)
+          const submitted = prepared.kind === "timeline"
+            ? input.exportService.submitPreparedTimelineExport(prepared, target)
+            : input.exportService.submitPreparedStemExport(prepared, target)
+          void submitted.completion.then((outcome) => {
+            window.dawDesktop?.exportTerminal(
+              submitted.id,
+              outcome.type === "success" ? "success" : outcome.type === "canceled" ? "canceled" : "error",
+            )
+          })
+          result = { jobId: submitted.id, status: "queued" }
+        } catch (error) {
+          releasePreparedExport(prepared)
+          throw error
+        }
       } else if (request_.operation === "host.export.status") {
         result = safeExportStatus(input.exportService.status())
       } else if (request_.operation === "host.export.cancel") {
@@ -670,6 +765,8 @@ export const createAttachedHostController = (input: {
       await input.captureNativeVstStates?.()
       await input.stop()
       input.exportQueue.dispose()
+      importQueue.dispose()
+      clearPreparedExports()
       await input.finishRecording()
       const projectId = input.projectId()
       if (isLocalId("project", projectId)) await flushLocalProjectPendingWrites(projectId)
@@ -680,6 +777,13 @@ export const createAttachedHostController = (input: {
       return false
     }
   }
-  const controller: TimelineHostController = { request, prepareToClose }
+  const controller: TimelineHostController = {
+    request,
+    prepareToClose,
+    dispose: () => {
+      clearPreparedExports()
+      importQueue.dispose()
+    },
+  }
   return controller
 }

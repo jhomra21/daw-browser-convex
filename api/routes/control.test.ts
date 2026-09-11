@@ -68,13 +68,18 @@ const history = { entries: [], continueCursor: "next", isDone: true }
 
 const app = (
   resolve = async () => bearer,
-  query = async () => snapshot,
-  mutation = async () => commitResult,
+  query: ControlGateway["query"] = async () => snapshot,
+  mutation: ControlGateway["mutation"] = async () => commitResult,
 ) => {
   const application = new Hono<ApiBindings>()
   registerControlRoutes(application, {
     resolveBearer: resolve,
-    createGateway: async () => ({ query, mutation }),
+    createGateway: async () => ({
+      query: async (reference, args) => (
+        reference === convexApi.projectAccess.roleForUser ? "owner" : query(reference, args)
+      ),
+      mutation,
+    }),
   })
   return application
 }
@@ -133,7 +138,7 @@ describe("control REST routes", () => {
     )
   })
 
-  test("requires a bounded multipart length and sends insufficient-scope challenges for assets", async () => {
+  test("requires a multipart length and sends insufficient-scope challenges for assets", async () => {
     const application = app()
     expect((await application.request("https://control.example/api/control/v1/projects/project-1/assets", {
       method: "POST",
@@ -168,7 +173,7 @@ test("inspects upload bytes before beginning the receipt or writing R2", async (
       }
     },
     createGateway: async () => ({
-      query: async () => snapshot,
+      query: async () => "owner",
       mutation: async (_reference) => {
         if (!events.includes("begin")) {
           events.push("begin")
@@ -200,7 +205,11 @@ test("inspects upload bytes before beginning the receipt or writing R2", async (
   form.append("file", new File([bytes], "Kick.wav", { type: "audio/wav" }))
   const response = await application.request("https://control.example/api/control/v1/projects/project-1/assets", {
     method: "POST",
-    headers: { "Idempotency-Key": "asset-key-1", "Content-Length": "1000", "x-content-sha256": digest },
+    headers: {
+      "Idempotency-Key": "asset-key-1",
+      "Content-Length": "1000",
+      "x-content-sha256": digest,
+    },
     body: form,
   }, {
     daw_audio_samples: {
@@ -213,6 +222,110 @@ test("inspects upload bytes before beginning the receipt or writing R2", async (
   expect(events).toEqual(["inspect", "begin", "put", "finalize"])
 })
 
+test("rejects oversized control requests before multipart parsing or hashing", async () => {
+  const application = new Hono<ApiBindings>()
+  let hashed = false
+  registerControlRoutes(application, {
+    resolveBearer: async () => bearer,
+    hashFile: async () => {
+      hashed = true
+      return "0".repeat(64)
+    },
+    createGateway: async () => ({
+      query: async () => "owner",
+      mutation: async () => commitResult,
+    }),
+  })
+  const response = await application.request("https://control.example/api/control/v1/projects/project-1/assets", {
+    method: "POST",
+    headers: {
+      "Idempotency-Key": "large-asset-key",
+      "Content-Length": String(controlLimitsV1.maxAssetUploadRequestBytes + 1),
+      "x-content-sha256": "0".repeat(64),
+    },
+    body: "not multipart",
+  })
+
+  expect(response.status).toBe(422)
+  expect(hashed).toBeFalse()
+  const unsafeLength = await application.request("https://control.example/api/control/v1/projects/project-1/assets", {
+    method: "POST",
+    headers: {
+      "Idempotency-Key": "unsafe-length-key",
+      "Content-Length": String(Number.MAX_SAFE_INTEGER + 1),
+      "x-content-sha256": "0".repeat(64),
+    },
+    body: "not multipart",
+  })
+  expect(unsafeLength.status).toBe(400)
+})
+
+test("rejects oversized control files after parsing but before hashing", async () => {
+  const application = new Hono<ApiBindings>()
+  let hashed = false
+  const file = new File([new Uint8Array(controlLimitsV1.maxAssetUploadBytes + 1)], "Large.wav", { type: "audio/wav" })
+  const form = new FormData()
+  form.append("file", file)
+  registerControlRoutes(application, {
+    resolveBearer: async () => bearer,
+    hashFile: async () => {
+      hashed = true
+      return "0".repeat(64)
+    },
+    createGateway: async () => ({
+      query: async () => "owner",
+      mutation: async () => commitResult,
+    }),
+  })
+  const response = await application.request("https://control.example/api/control/v1/projects/project-1/assets", {
+    method: "POST",
+    headers: {
+      "Idempotency-Key": "large-file-key",
+      "Content-Length": String(controlLimitsV1.maxAssetUploadRequestBytes),
+      "x-content-sha256": "0".repeat(64),
+    },
+    body: form,
+  })
+  expect(response.status).toBe(422)
+  expect(hashed).toBeFalse()
+})
+
+test("authenticates control asset uploads before hashing or validating media", async () => {
+  const application = new Hono<ApiBindings>()
+  let hashed = false
+  let inspected = false
+  const file = new File([new Uint8Array(10 * 1024 * 1024 + 1)], "Large.wav", { type: "audio/wav" })
+  const form = new FormData()
+  form.append("file", file)
+  registerControlRoutes(application, {
+    resolveBearer: async (_request, _environment, scope) => (
+      scope === "control:write" ? null : bearer
+    ),
+    hashFile: async () => {
+      hashed = true
+      return "0".repeat(64)
+    },
+    inspectAudioMetadata: async () => {
+      inspected = true
+      throw new Error("media validation should not run")
+    },
+  })
+
+  const response = await application.request("https://control.example/api/control/v1/projects/project-1/assets", {
+    method: "POST",
+    headers: {
+      "Idempotency-Key": "unauthorized-large-asset",
+      "Content-Length": String(file.size),
+      "x-content-sha256": "0".repeat(64),
+    },
+    body: form,
+  })
+
+  expect(response.status).toBe(403)
+  expect(hashed).toBeFalse()
+  expect(inspected).toBeFalse()
+})
+
 test("maps invalid control upload media to validation and parser failures to internal", async () => {
   const bytes = new Uint8Array([1, 2, 3, 4])
   const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("")
@@ -221,6 +334,10 @@ test("maps invalid control upload media to validation and parser failures to int
     registerControlRoutes(application, {
       resolveBearer: async () => bearer,
       inspectAudioMetadata,
+      createGateway: async () => ({
+        query: async () => "owner",
+        mutation: async () => commitResult,
+      }),
     })
     const form = new FormData()
     form.append("file", new File([bytes], "Kick.wav", { type: "audio/wav" }))

@@ -34,7 +34,7 @@ const createTransportHost = async (
 
 test('the portable Wasm host exposes the same explicit API to worklet and Worker callers', async () => {
   const { DawPortableAudioCoreHost } = await import(hostUrl.href)
-  const statuses: PortableWasmStatusMessage[] = []
+  const statuses: unknown[] = []
   const createHost = () => new DawPortableAudioCoreHost({
     sampleRate: 48_000,
     postMessage: (message: PortableWasmStatusMessage) => statuses.push(message),
@@ -88,6 +88,7 @@ test('v1 and v2 portable hosts pass curved fade values and defaults to Wasm', as
     fadeOutCurvePosition: 0.8,
   }
   for (const hostUrlToUse of [hostUrl, hostV2Url]) {
+    const protocolVersion = hostUrlToUse === hostV2Url ? 2 : 1
     const { DawPortableAudioCoreHost } = await import(hostUrlToUse.href)
     const calls: unknown[][] = []
     const messages: PortableWasmStatusMessage[] = []
@@ -105,7 +106,7 @@ test('v1 and v2 portable hosts pass curved fade values and defaults to Wasm', as
     }
     host.assets = new Map([['asset', { handle: { value: 1n } }]])
     host.scheduleSources({
-      version: 1,
+      version: protocolVersion,
       type: 'schedule-sources',
       requestId: 1,
       revision: 1,
@@ -116,7 +117,7 @@ test('v1 and v2 portable hosts pass curved fade values and defaults to Wasm', as
     expect(messages).toContainEqual(expect.objectContaining({ type: 'sources-scheduled', result: 'scheduled' }))
     calls.length = 0
     host.scheduleSources({
-      version: 1,
+      version: protocolVersion,
       type: 'schedule-sources',
       requestId: 2,
       revision: 1,
@@ -140,7 +141,7 @@ test('portable Wasm hosts enforce the 24-parameter contract in every parameter v
 test('the v2 host acknowledges transport only after its rendered quantum reaches the output', async () => {
   const { host, messages } = await createTransportHost(() => 0)
 
-  host.handleMessage({ version: 1, type: 'transport', requestId: 1, epoch: 1, running: false, frame: 2_048 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 1, epoch: 1, running: false, frame: 2_048 })
   expect(messages).not.toContainEqual(expect.objectContaining({ type: 'transport-applied', requestId: 1 }))
 
   const firstOutput = [[new Float32Array(8), new Float32Array(8)]]
@@ -151,7 +152,7 @@ test('the v2 host acknowledges transport only after its rendered quantum reaches
 
   host.process([], [[new Float32Array(8), new Float32Array(8)]])
   expect(messages).toContainEqual({
-    version: 1,
+    version: 2,
     type: 'transport-applied',
     requestId: 1,
     epoch: 1,
@@ -159,7 +160,7 @@ test('the v2 host acknowledges transport only after its rendered quantum reaches
   })
 
   messages.length = 0
-  host.handleMessage({ version: 1, type: 'transport', requestId: 2, epoch: 1, running: true, frame: 2_048 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 2, epoch: 1, running: true, frame: 2_048 })
   expect(messages).not.toContainEqual(expect.objectContaining({ type: 'transport-applied', requestId: 2 }))
 
   const runningOutput = [[new Float32Array(8), new Float32Array(8)]]
@@ -170,7 +171,7 @@ test('the v2 host acknowledges transport only after its rendered quantum reaches
 
   host.process([], [[new Float32Array(8), new Float32Array(8)]])
   expect(messages).toContainEqual({
-    version: 1,
+    version: 2,
     type: 'transport-applied',
     requestId: 2,
     epoch: 1,
@@ -185,12 +186,12 @@ test('the v2 host lets the latest successful transport command supersede a pendi
     return 0
   })
 
-  host.handleMessage({ version: 1, type: 'transport', requestId: 1, epoch: 1, running: false, frame: 0 })
-  host.handleMessage({ version: 1, type: 'transport', requestId: 2, epoch: 1, running: true, frame: 128 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 1, epoch: 1, running: false, frame: 0 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 2, epoch: 1, running: true, frame: 128 })
 
   expect(calls).toEqual([[1, 0, 0n], [1, 1, 128n]])
   expect(messages).toContainEqual({
-    version: 1,
+    version: 2,
     type: 'transport-applied',
     requestId: 1,
     epoch: 1,
@@ -205,7 +206,7 @@ test('the v2 host lets the latest successful transport command supersede a pendi
   host.process([], [[new Float32Array(8), new Float32Array(8)]])
   host.process([], [[new Float32Array(8), new Float32Array(8)]])
   expect(messages).toContainEqual({
-    version: 1,
+    version: 2,
     type: 'transport-applied',
     requestId: 2,
     epoch: 1,
@@ -220,11 +221,11 @@ test('the v2 host preserves a pending transport when a newer core command fails'
     return callCount === 1 ? 0 : 1
   })
 
-  host.handleMessage({ version: 1, type: 'transport', requestId: 1, epoch: 1, running: false, frame: 64 })
-  host.handleMessage({ version: 1, type: 'transport', requestId: 2, epoch: 2, running: true, frame: 256 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 1, epoch: 1, running: false, frame: 64 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 2, epoch: 2, running: true, frame: 256 })
 
   expect(messages).toContainEqual({
-    version: 1,
+    version: 2,
     type: 'transport-applied',
     requestId: 2,
     epoch: 2,
@@ -240,7 +241,7 @@ test('the v2 host preserves a pending transport when a newer core command fails'
   host.process([], [[new Float32Array(8), new Float32Array(8)]])
   host.process([], [[new Float32Array(8), new Float32Array(8)]])
   expect(messages).toContainEqual({
-    version: 1,
+    version: 2,
     type: 'transport-applied',
     requestId: 1,
     epoch: 1,
@@ -348,7 +349,7 @@ test('the actual portable Wasm host renders built-in effects without native hook
         },
       ],
       edges: [{
-        version: 1,
+      version: 1,
         id: 'track-master',
         fromNodeId: 'track',
         toNodeId: 'master',
@@ -361,27 +362,27 @@ test('the actual portable Wasm host renders built-in effects without native hook
     },
   })
 
-  expect(messages).toContainEqual({
+  expect(messages).toContainEqual(expect.objectContaining({
     version: 1,
     type: 'graph-prepared',
     requestId: 1,
     revision: 1,
     result: 'prepared',
-  })
+  }))
   host.handleMessage({ version: 1, type: 'publish-graph', requestId: 2, revision: 1 })
-  expect(messages).toContainEqual({
+  expect(messages).toContainEqual(expect.objectContaining({
     version: 1,
     type: 'graph-published',
     requestId: 2,
     revision: 1,
     result: 'published',
-  })
-  expect(messages).toContainEqual({
+  }))
+  expect(messages).toContainEqual(expect.objectContaining({
     version: 1,
     type: 'graph-continuity',
     revision: 1,
     result: 'accepted',
-  })
+  }))
   const left = new Float32Array([1])
   const right = new Float32Array([1])
   const outputLeft = new Float32Array(1)

@@ -1,15 +1,16 @@
 import { ensurePeakAsset } from '@daw-browser/waveforms/asset-store'
 import { getAudioSourceMetadata } from '~/lib/audio-source'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
 
 export async function primeClipSourceAsset(input: {
   sourceAssetKey: string
-  sampleUrl?: string
   buffer?: AudioBuffer | null
+  source?: AudioPcmSourceDescriptor
 }) {
   const record = await ensurePeakAsset({
     assetKey: input.sourceAssetKey,
-    sampleUrl: input.sampleUrl,
     buffer: input.buffer ?? null,
+    source: input.source,
   })
 
   if (!record) {

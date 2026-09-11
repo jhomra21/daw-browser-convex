@@ -6,11 +6,12 @@ import { useAppPreferences } from "~/context/app-preferences";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { buildNextAudioWarp } from "~/lib/audio-warp-patch";
 import { getSourceBeatOffsetAnchorX, getSourceBeatOffsetFromAnchorX } from "~/lib/audio-waveform-layout";
+import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
 
 type SampleDetailWaveformProps = {
   clip: Clip<AudioBuffer>;
   projectBpm: number;
-  ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>;
+  resolveAudioSource: AudioPcmSourceResolver;
   canWrite: boolean;
   onMarkerDragStateChange?: (dragging: boolean) => void;
   onWarpChange: (audioWarp: AudioWarp) => Promise<boolean> | boolean | void;
@@ -42,9 +43,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     clip: () => props.clip,
     cssWidthPx: () => WAVEFORM_WIDTH_PX,
     projectBpm: () => props.projectBpm,
-    ensureClipBuffer: async (clipId, sampleUrl) => {
-      await props.ensureClipBuffer?.(clipId, sampleUrl);
-    },
+    resolveAudioSource: () => props.resolveAudioSource,
   });
   const [dragPreviewOffset, setDragPreviewOffset] = createSignal<number | undefined>();
   const [isDraggingMarker, setIsDraggingMarker] = createSignal(false);

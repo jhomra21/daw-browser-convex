@@ -29,6 +29,71 @@ const midiOperationSchema = z.object({
   }),
 })
 
+const createRetryFileStorage = () => {
+  const files = new Map<string, File>()
+  let failRemoval = false
+  const assets = {
+    getFileHandle: async (name: string) => ({
+      getFile: async () => files.get(name),
+    }),
+    removeEntry: async (name: string) => {
+      if (failRemoval) throw new Error('retry file cleanup unavailable')
+      files.delete(name)
+    },
+  }
+  const projects = new Map<string, { getDirectoryHandle: (name: string) => Promise<typeof assets> }>()
+  const storageRoot = {
+    getDirectoryHandle: async (projectId: string) => {
+      const project = projects.get(projectId) ?? {
+        getDirectoryHandle: async (name: string) => {
+          if (name !== 'assets') throw new Error(`Unexpected directory: ${name}`)
+          return assets
+        },
+      }
+      projects.set(projectId, project)
+      return project
+    },
+  }
+  return {
+    files,
+    storage: { getDirectory: async () => storageRoot },
+    setFailRemoval: (value: boolean) => { failRemoval = value },
+  }
+}
+
+const uploadedAudioEntry = (projectId: string, userId: string, id: string, timestamp: number) => ({
+  id,
+  kind: 'clips.createUploadedAudio',
+  projectId,
+  userId,
+  payload: {
+    projectId,
+    assetKey: 'asset-1',
+    materializedPath: 'outbox-source.bin',
+    fileName: 'clip.wav',
+    mimeType: 'audio/wav',
+    duration: 1,
+    clipPayload: {
+      trackId: 'track-1',
+      startSec: 0,
+      duration: 1,
+      assetKey: 'asset-1',
+      sourceKind: 'upload',
+      durationSec: 1,
+      sampleRate: 48_000,
+      channelCount: 2,
+      clipKind: 'audio',
+      operationId: id,
+    },
+  },
+  status: 'pending',
+  attempts: 0,
+  nextAttemptAt: timestamp,
+  sequence: 1,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+})
+
 test('sanitizes legacy queued MIDI through the strict endpoint and continues with later operations', async () => {
   const projectId = `outbox-replay-${crypto.randomUUID()}`
   const userId = 'user-1'
@@ -483,12 +548,16 @@ test('dead-letters uploaded audio clip creates with null results before completi
   })
 
   const originalFetch = globalThis.fetch
+  const uploadUrls: string[] = []
   globalThis.fetch = Object.assign(
-    async (input: RequestInfo | URL) => (
-      String(input) === '/api/samples'
-        ? new Response(JSON.stringify({ url: 'https://example.test/clip.wav', assetKey: 'asset-1' }), { status: 200 })
-        : new Response(JSON.stringify(null), { status: 200 })
-    ),
+    async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/samples?projectId=')) {
+        uploadUrls.push(url)
+        return new Response(JSON.stringify({ url: 'https://example.test/clip.wav', assetKey: 'asset-1' }), { status: 200 })
+      }
+      return new Response(JSON.stringify(null), { status: 200 })
+    },
     { preconnect: originalFetch.preconnect },
   )
   try {
@@ -502,7 +571,96 @@ test('dead-letters uploaded audio clip creates with null results before completi
     attempts: 1,
     lastError: 'Permanent failure: Clip creation was rejected.',
   })
+  expect(uploadUrls).toEqual([`/api/samples?projectId=${encodeURIComponent(projectId)}`])
   expect(await db.get('syncState', `shared-outbox-completion:${projectId}:${userId}:${operationId}`)).toBeUndefined()
+})
+
+test('records uploaded clip completion before retry-file cleanup and retries cleanup independently', async () => {
+  const projectId = `outbox-cleanup-${crypto.randomUUID()}`
+  const userId = 'user-1'
+  const db = await openLocalProjectDb(projectId)
+  const timestamp = Date.now()
+  const storage = createRetryFileStorage()
+  storage.files.set('outbox-source.bin', new File(['audio'], 'outbox-source.bin', { type: 'audio/wav' }))
+  const originalStorage = Object.getOwnPropertyDescriptor(navigator, 'storage')
+  Object.defineProperty(navigator, 'storage', { configurable: true, value: storage.storage })
+  await db.put('syncState', {
+    key: 'shared-outbox:uploaded-audio',
+    value: uploadedAudioEntry(projectId, userId, 'uploaded-audio', timestamp),
+    updatedAt: timestamp,
+  })
+  const originalFetch = globalThis.fetch
+  let publicationRequests = 0
+  globalThis.fetch = Object.assign(
+    async (input: RequestInfo | URL) => {
+      publicationRequests += 1
+      if (String(input).startsWith('/api/samples?')) {
+        return new Response(JSON.stringify({ assetKey: 'asset-1', url: 'https://example.test/asset-1.wav' }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
+    },
+    { preconnect: originalFetch.preconnect },
+  )
+  storage.setFailRemoval(true)
+  try {
+    expect(await flushSharedOutbox(projectId, userId)).toEqual({ pending: 0, failed: 0 })
+    expect(publicationRequests).toBe(2)
+    expect((await db.get('syncState', 'shared-outbox:uploaded-audio'))?.value).toMatchObject({
+      status: 'completed',
+      retryFileCleanup: { storagePath: 'outbox-source.bin' },
+      lastError: 'retry file cleanup unavailable',
+    })
+    expect(await db.get('syncState', `shared-outbox-completion:${projectId}:${userId}:uploaded-audio`)).toBeDefined()
+
+    storage.setFailRemoval(false)
+    expect(await flushSharedOutbox(projectId, userId)).toEqual({ pending: 0, failed: 0 })
+    expect(publicationRequests).toBe(2)
+    expect(await db.get('syncState', 'shared-outbox:uploaded-audio')).toBeUndefined()
+    expect(storage.files.has('outbox-source.bin')).toBe(false)
+  } finally {
+    globalThis.fetch = originalFetch
+    if (originalStorage) Object.defineProperty(navigator, 'storage', originalStorage)
+    else Reflect.deleteProperty(navigator, 'storage')
+  }
+})
+
+test('resumes completed uploaded clip cleanup after a crash without republishing', async () => {
+  const projectId = `outbox-cleanup-crash-${crypto.randomUUID()}`
+  const userId = 'user-1'
+  const db = await openLocalProjectDb(projectId)
+  const timestamp = Date.now()
+  const storage = createRetryFileStorage()
+  storage.files.set('outbox-source.bin', new File(['audio'], 'outbox-source.bin', { type: 'audio/wav' }))
+  const originalStorage = Object.getOwnPropertyDescriptor(navigator, 'storage')
+  Object.defineProperty(navigator, 'storage', { configurable: true, value: storage.storage })
+  await db.put('syncState', {
+    key: 'shared-outbox:uploaded-audio',
+    value: {
+      ...uploadedAudioEntry(projectId, userId, 'uploaded-audio', timestamp),
+      status: 'completed',
+      retryFileCleanup: { projectId, storagePath: 'outbox-source.bin' },
+    },
+    updatedAt: timestamp,
+  })
+  const originalFetch = globalThis.fetch
+  let requests = 0
+  globalThis.fetch = Object.assign(
+    async () => {
+      requests += 1
+      return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
+    },
+    { preconnect: originalFetch.preconnect },
+  )
+  try {
+    expect(await flushSharedOutbox(projectId, userId)).toEqual({ pending: 0, failed: 0 })
+  } finally {
+    globalThis.fetch = originalFetch
+    if (originalStorage) Object.defineProperty(navigator, 'storage', originalStorage)
+    else Reflect.deleteProperty(navigator, 'storage')
+  }
+  expect(requests).toBe(0)
+  expect(await db.get('syncState', 'shared-outbox:uploaded-audio')).toBeUndefined()
+  expect(storage.files.has('outbox-source.bin')).toBe(false)
 })
 
 test('assigns a durable FIFO sequence before publishing same-millisecond admissions', async () => {

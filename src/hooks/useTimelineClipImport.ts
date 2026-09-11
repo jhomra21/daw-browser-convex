@@ -11,6 +11,7 @@ import { clientXToSec, clientYToTimelineTrackY, calcNonOverlapStart, quantizeSec
 import { trackIndexAtY, type TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { createAudioImportTransaction } from '~/lib/timeline-audio-import'
+import { readAudioFileMetadata } from '~/lib/media/audio-file-metadata'
 import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
 import { isAbortError } from '~/lib/dom-errors'
 import type { HistoryEntry } from '~/lib/undo/types'
@@ -36,6 +37,7 @@ type TimelineClipImportOptions = {
   selection: TimelineSelectionController
   playheadSec: Accessor<number>
   projectId: Accessor<string | undefined>
+  mountedProjectGeneration: Accessor<number>
   userId: Accessor<string | undefined>
   clipBuffers: ClipBuffers & { uploadToR2: UploadToR2 }
   getScrollElement: () => HTMLDivElement | undefined
@@ -53,10 +55,15 @@ type TimelineClipImportOptions = {
   onDecodedClipCreated?: (clip: Clip<AudioBuffer>) => void
 }
 
+export type ImportProjectBinding = {
+  projectId: string
+  mountedProjectGeneration: number
+}
+
 type TimelineClipImportHandlers = {
   handleDrop: (event: DragEvent) => Promise<void>
   handleFiles: (files: FileList | null) => Promise<void>
-  importFiles: (files: readonly File[], signal?: AbortSignal) => Promise<ImportSummary>
+  importFiles: (files: readonly File[], signal?: AbortSignal, binding?: ImportProjectBinding) => Promise<ImportSummary>
   handleAddAudio: () => Promise<void>
   handleInsertSample: (input: InsertSampleInput) => Promise<void>
 }
@@ -81,7 +88,6 @@ type TargetAudioTrack = {
 
 export function useTimelineClipImport(options: TimelineClipImportOptions): TimelineClipImportHandlers {
   const {
-    audioEngine,
     tracks,
     trackLayout,
     removeLocalTrack,
@@ -111,6 +117,12 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
 
   const isActiveProjectTrack = (rid: string, trackId: Track['id']) =>
     projectId() === rid && tracks().some((entry) => entry.id === trackId)
+  const assertCurrentImport = (binding: ImportProjectBinding, signal?: AbortSignal) => {
+    signal?.throwIfAborted()
+    if (projectId() !== binding.projectId || options.mountedProjectGeneration() !== binding.mountedProjectGeneration) {
+      throw new DOMException('The audio import was canceled.', 'AbortError')
+    }
+  }
 
   const createAudioTrack = () => options.createTimelineTrack({}, { pushHistory: false, select: true })
 
@@ -224,24 +236,34 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     desiredStart?: number,
     autoCreatedTrack?: Track,
     signal?: AbortSignal,
+    binding?: ImportProjectBinding,
   ): Promise<ImportFileOutcome> => {
+    const importBinding = binding ?? {
+      projectId: projectId() ?? '',
+      mountedProjectGeneration: options.mountedProjectGeneration(),
+    }
+    assertCurrentImport(importBinding, signal)
     signal?.throwIfAborted()
-    const decoded = await audioEngine.decodeAudioData(await file.arrayBuffer())
-    signal?.throwIfAborted()
+    const source = await readAudioFileMetadata(file, signal)
+    assertCurrentImport(importBinding, signal)
     const target = await ensureTargetAudioTrack(trackId)
+    assertCurrentImport(importBinding, signal)
     if (!target) return { fileName: file.name, status: 'skipped' }
     const startSec = resolveClipStartSec(
       target.track,
       desiredStart ?? playheadSec(),
-      decoded.duration,
+      source.durationSec,
     )
     const result = await audioImportTransaction.createUploadedFileClip({
       file,
-      decoded,
+      source,
       track: target.track,
       startSec,
       autoCreatedTrack: autoCreatedTrack ?? (target.autoCreated ? target.track : undefined),
       signal,
+      projectId: importBinding.projectId,
+      isCurrentProject: () => projectId() === importBinding.projectId
+        && options.mountedProjectGeneration() === importBinding.mountedProjectGeneration,
     })
     if (result.status === 'local-save-failed' || result.status === 'failed') {
       notify('Audio import failed', result.message)
@@ -256,10 +278,24 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
     }
   }
 
-  const importFiles = async (files: readonly File[], signal?: AbortSignal): Promise<ImportSummary> => {
+  const importFiles = async (
+    files: readonly File[],
+    signal?: AbortSignal,
+    binding?: ImportProjectBinding,
+  ): Promise<ImportSummary> => {
+    const importBinding = binding ?? {
+      projectId: projectId() ?? '',
+      mountedProjectGeneration: options.mountedProjectGeneration(),
+    }
+    assertCurrentImport(importBinding, signal)
     const outcomes: ImportFileOutcome[] = []
     for (const file of files) {
       if (signal?.aborted) {
+        outcomes.push({ fileName: file.name, status: 'canceled' })
+        continue
+      }
+      if (projectId() !== importBinding.projectId
+        || options.mountedProjectGeneration() !== importBinding.mountedProjectGeneration) {
         outcomes.push({ fileName: file.name, status: 'canceled' })
         continue
       }
@@ -268,7 +304,7 @@ export function useTimelineClipImport(options: TimelineClipImportOptions): Timel
         continue
       }
       try {
-        const outcome = await handleFilesInternal(file, undefined, undefined, undefined, signal)
+        const outcome = await handleFilesInternal(file, undefined, undefined, undefined, signal, importBinding)
         outcomes.push(outcome)
       } catch (error) {
         if (isAbortError(error) || signal?.aborted) outcomes.push({ fileName: file.name, status: 'canceled' })

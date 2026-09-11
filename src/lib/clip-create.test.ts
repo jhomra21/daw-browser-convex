@@ -117,6 +117,32 @@ test('returns the committed clip when cancellation follows the server commit', a
   expect(insertedClipIds[1]).toBe('clip-1')
 })
 
+test('does not queue a canceled cloud upload', async () => {
+  const controller = new AbortController()
+  const projectId = 'project-canceled-upload'
+  await expect(createUploadedAudioClip({
+    projectId,
+    userId: 'user-1',
+    trackId: 'track-1',
+    startSec: 0,
+    file: new File(['audio'], 'clip.wav', { type: 'audio/wav' }),
+    durationSec: 1,
+    source,
+    sourceAssetKey: 'asset-1',
+    sourceKind: 'upload',
+    createServerClip: async () => 'clip-1',
+    insertLocalClip: () => undefined,
+    uploadToR2: async (_projectId, _assetKey, _file, _duration, signal) => {
+      controller.abort()
+      signal?.throwIfAborted()
+      return null
+    },
+    audioBufferCache: clipBufferWriter,
+    signal: controller.signal,
+  })).rejects.toHaveProperty('name', 'AbortError')
+  expect((await openLocalProjectDb(projectId)).getAll('syncState')).resolves.toEqual([])
+})
+
 test('carries the persisted operation receipt when an uploaded clip is queued', async () => {
   let error: unknown
 

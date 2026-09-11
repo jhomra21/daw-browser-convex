@@ -10,6 +10,9 @@ import { getScheduledMidiEvents } from '@daw-browser/audio-engine/audio-scheduli
 import { resolveTrackMidiExpressionSchedule } from '@daw-browser/audio-engine/midi-expression-scheduling'
 import { getAutomationParameterDescriptor, type ArpParams, type AutomationEnvelope } from '@daw-browser/shared'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
+import {
+  loopFramesForTransport, splitLoopScheduleRange, type LoopTransport,
+} from '@daw-browser/audio-engine/loop-frame-schedule'
 
 export type PortableFrameScheduleAdapterInput = {
   revision: number
@@ -28,6 +31,8 @@ export type PortableFrameScheduleAdapterInput = {
   eventRangeStartSec?: number
   noteScheduleStartSec?: number
   clipSpanningNoteOn?: boolean
+  loop?: LoopTransport
+  loopIteration?: number
 }
 
 type PendingEventPayload =
@@ -71,6 +76,10 @@ const stableNoteId = (trackId: string, clipId: string, identity: string) => {
   }
   return (hash >>> 0) || 1
 }
+
+const noteIdentity = (input: PortableFrameScheduleAdapterInput, identity: string) => (
+  input.loopIteration === undefined ? identity : `${identity}:loop:${input.loopIteration}`
+)
 
 const parameterTarget = (envelope: AutomationEnvelope): PortableParameterTarget => (
   envelope.target.kind === 'track'
@@ -124,12 +133,16 @@ const eventWithFrame = (
   return { ...event, frame, sequence: 0 }
 }
 
+const eventPriorityAtFrame = (event: PortableFrameScheduleEvent) => (
+  event.type === 'note-off' ? 0 : event.type === 'note-on' ? 1 : 2
+)
+
 /**
  * App-owned projection from the hydrated timeline snapshot to the engine's
  * frame contract. Timing and interpolation remain delegated to engine
  * authorities; this layer only provides browser-owned identities and data.
  */
-export const compilePortableFrameSchedule = (
+const compileSinglePortableFrameSchedule = (
   input: PortableFrameScheduleAdapterInput,
 ): PortableFrameSchedule => {
   const pending: PendingEvent[] = []
@@ -205,7 +218,7 @@ export const compilePortableFrameSchedule = (
             type: 'note-on',
             target: { kind: 'instrument', trackId: track.id },
             noteId: input.stableNoteIds
-              ? stableNoteId(track.id, clip.id, note.identity)
+              ? stableNoteId(track.id, clip.id, noteIdentity(input, note.identity))
               : nextNoteId,
             pitch: note.pitch,
             velocity: note.velocity ?? 1,
@@ -217,7 +230,7 @@ export const compilePortableFrameSchedule = (
           type: 'note-on',
           target: { kind: 'instrument', trackId: track.id },
           noteId: input.stableNoteIds
-            ? stableNoteId(track.id, clip.id, note.identity)
+            ? stableNoteId(track.id, clip.id, noteIdentity(input, note.identity))
             : noteId,
           pitch: note.pitch,
           velocity: note.velocity ?? 1,
@@ -226,7 +239,7 @@ export const compilePortableFrameSchedule = (
           type: 'note-off',
           target: { kind: 'instrument', trackId: track.id },
           noteId: input.stableNoteIds
-            ? stableNoteId(track.id, clip.id, note.identity)
+            ? stableNoteId(track.id, clip.id, noteIdentity(input, note.identity))
             : noteId,
           pitch: note.pitch,
         })
@@ -252,6 +265,68 @@ export const compilePortableFrameSchedule = (
     .sort((left, right) => left.event.frame - right.event.frame || left.ordinal - right.ordinal)
     .map(({ event }, index) => ({ ...event, sequence: index + 1 }))
   return assertPortableFrameSchedule({ ...identity, events })
+}
+
+export const compilePortableFrameSchedule = (
+  input: PortableFrameScheduleAdapterInput,
+): PortableFrameSchedule => {
+  const loop = loopFramesForTransport(input.loop ?? {
+    loopEnabled: false,
+    loopStartSec: 0,
+    loopEndSec: 0,
+  }, input.sampleRateHz)
+  if (!loop || input.loopIteration === -1) return compileSinglePortableFrameSchedule(input)
+  const startFrame = input.timeOrigin.frame
+  const endFrame = portableFrameAtTimelineTime(
+    { sampleRateHz: input.sampleRateHz, timeOrigin: input.timeOrigin },
+    input.rangeEndSec,
+  )
+  const slices = splitLoopScheduleRange(startFrame, endFrame, loop)
+  const schedules = slices.map((slice) => {
+    const schedule = compileSinglePortableFrameSchedule({
+    ...input,
+    loop: undefined,
+    loopIteration: slice.iteration,
+    timeOrigin: {
+      timelineSec: input.timeOrigin.timelineSec
+        + (slice.arrangementStartFrame - startFrame) / input.sampleRateHz,
+      frame: slice.nativeStartFrame,
+    },
+    rangeEndSec: input.timeOrigin.timelineSec
+      + (slice.arrangementEndFrame - startFrame) / input.sampleRateHz,
+    eventRangeStartSec: input.timeOrigin.timelineSec
+      + (slice.arrangementStartFrame - startFrame) / input.sampleRateHz,
+    stableNoteIds: true,
+    })
+    const activeNotes = new Map<number, Extract<PortableFrameScheduleEvent, { type: 'note-on' }>>()
+    for (const event of schedule.events) {
+      if (event.type === 'note-on') activeNotes.set(event.noteId, event)
+      if (event.type === 'note-off') activeNotes.delete(event.noteId)
+    }
+    if (activeNotes.size === 0) return schedule
+    const boundaryEvents: PortableFrameScheduleEvent[] = [...activeNotes.values()].map((event, index) => ({
+      type: 'note-off',
+      target: event.target,
+      noteId: event.noteId,
+      pitch: event.pitch,
+      frame: slice.nativeEndFrame,
+      sequence: schedule.events.length + index + 1,
+    }))
+    return assertPortableFrameSchedule({
+      ...schedule,
+      events: [...schedule.events, ...boundaryEvents],
+    })
+  })
+  const events = schedules.flatMap((schedule) => schedule.events)
+    .sort((left, right) => left.frame - right.frame
+      || eventPriorityAtFrame(left) - eventPriorityAtFrame(right)
+      || left.sequence - right.sequence)
+    .map((event, index) => ({ ...event, sequence: index + 1 }))
+  const base = schedules[0] ?? compileSinglePortableFrameSchedule(input)
+  return assertPortableFrameSchedule({
+    ...base,
+    events,
+  })
 }
 
 export const compilePortableFrameScheduleWindow = (

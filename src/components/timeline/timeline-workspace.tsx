@@ -14,6 +14,7 @@ import TimelineRuler from "~/components/timeline/TimelineRuler";
 import ArrangementOverview from "~/components/timeline/ArrangementOverview";
 import TrackLane from "~/components/timeline/TrackLane";
 import type { ClipContextMenuActions } from "~/components/timeline/ClipComponent";
+import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
 import {
   masterAreaHeight,
   masterRowHeight,
@@ -146,6 +147,7 @@ type Props = {
   onDeleteTrack: (trackId: Track["id"]) => void;
   clipContextMenu: ClipContextMenuActions;
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>;
+  resolveAudioSource: AudioPcmSourceResolver;
   replaceMissingMediaClip: (
     trackId: Track["id"],
     clipId: string,
@@ -330,7 +332,7 @@ export default function TimelineWorkspace(props: Props) {
             onRemoveMissingMedia={(trackId, clipId) => {
               void props.removeMissingMediaClip(trackId, clipId);
             }}
-            ensureClipBuffer={props.ensureClipBuffer}
+            resolveAudioSource={props.resolveAudioSource}
             bpm={props.bpm}
             pixelsPerSecond={props.pixelsPerSecond}
             viewportRedrawVersion={viewportRedrawVersion()}

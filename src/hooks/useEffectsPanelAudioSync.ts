@@ -25,7 +25,7 @@ import { collectAudioEffectInstances } from "~/lib/audio-effect-order-rows";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import type { ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
-import { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
+import type { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
 import type { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
 
 type UseEffectsPanelAudioSyncOptions = {
@@ -49,7 +49,7 @@ type UseEffectsPanelAudioSyncOptions = {
     arp?: (targetId: string) => ArpeggiatorParams | undefined;
   };
   samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
-  drumRackBufferSync?: ReturnType<typeof createDrumRackBufferSync>;
+  drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>;
   spectrumProvider?: Accessor<((targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void) | undefined>;
 };
 
@@ -504,11 +504,10 @@ export function useEffectsPanelAudioSync(
 
   let syncedTrackIds = new Set<Track["id"]>();
   let syncedProjectId: string | null = null;
-  const drumRackBufferSync = options.drumRackBufferSync ?? createDrumRackBufferSync();
+  const drumRackBufferSync = options.drumRackBufferSync;
   const samplerBufferSync = options.samplerBufferSync;
   const pendingWorkOwner = createPendingWorkOwner();
   onCleanup(pendingWorkOwner.dispose);
-  if (!options.drumRackBufferSync) onCleanup(drumRackBufferSync.dispose);
 
   const clearSyncedTrackState = (audioEngine: AudioEngine, trackIds: Iterable<Track["id"]>) => {
     for (const trackId of trackIds) {
@@ -547,9 +546,16 @@ export function useEffectsPanelAudioSync(
     const tracks = options.tracks();
     const currentTrackIds = new Set(tracks.map((track) => track.id));
     if (effects === undefined) {
-      if (usesLegacyAudioEngine && projectId && syncedProjectId !== projectId) {
-        clearSyncedTrackState(audioEngine, new Set([...syncedTrackIds, ...currentTrackIds]));
-        clearSyncedMasterState(audioEngine);
+      if (projectId && syncedProjectId !== projectId) {
+        if (usesLegacyAudioEngine) {
+          clearSyncedTrackState(audioEngine, new Set([...syncedTrackIds, ...currentTrackIds]));
+          clearSyncedMasterState(audioEngine);
+        } else {
+          for (const trackId of new Set([...syncedTrackIds, ...currentTrackIds])) {
+            drumRackBufferSync.clearTrack(trackId);
+            samplerBufferSync.clearTrack(trackId);
+          }
+        }
         syncedTrackIds = new Set(currentTrackIds);
         syncedProjectId = projectId;
       }

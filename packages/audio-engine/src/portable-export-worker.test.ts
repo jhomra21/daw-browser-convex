@@ -1,22 +1,26 @@
 import { afterEach, expect, test } from 'bun:test'
 import type { PortableExportWorkerLike } from './portable-export-worker'
 import { PortableExportWorker } from './portable-export-worker'
-import { audioCoreContractVersion } from '../../audio-core-contract/src'
+import {
+  audioCoreContractVersion,
+  type AudioCoreSampleSourceEventDto,
+} from '../../audio-core-contract/src'
 import {
   audioCoreWasmAbiVersion,
   audioCoreWasmArtifactVersion,
+  audioCoreWasmPagedAbiVersion,
   type AudioCoreWasmArtifact,
 } from '../../audio-core-wasm/src'
 import {
-  portableExportWorkerMaxFrames,
   portableExportWorkerProtocolVersion,
   type PortableExportWorkerRequest,
   type PortableExportWorkerResponse,
 } from './portable-export-worker-protocol'
+import type { PortableExportAsset } from './portable-export-snapshot'
 import { portableWasmCapabilityMatrix } from './backends/portable-wasm-capabilities'
 import { portableWasmCapabilityMatrix as emittedPortableWasmCapabilityMatrix } from '../../../public/audio-workers/daw-portable-capability-metadata-v1.js'
 
-const workerUrl = new URL('../../../public/audio-workers/daw-portable-export-worker-v1.js', import.meta.url)
+const workerUrl = new URL('../../../public/audio-workers/daw-portable-export-worker-v2.js', import.meta.url)
 
 class MockWorker implements PortableExportWorkerLike {
   onmessage: ((event: MessageEvent<PortableExportWorkerResponse>) => void) | null = null
@@ -49,8 +53,8 @@ test('the dedicated Worker defines only bounded render lifecycle messages', asyn
   expect(source).toContain("type: 'complete'")
   expect(source).toContain("type: 'cancelled'")
   expect(source).toContain("type: 'dispose'")
-  expect(source).toContain('MAX_CHUNKS = 4096')
-  expect(portableExportWorkerMaxFrames).toBe(33_554_432)
+  expect(source).toContain("type: 'page-request'")
+  expect(source).toContain('chunk-consumed')
 })
 
 test('the dedicated Worker consumes the emitted fixture-derived capability metadata', () => {
@@ -108,6 +112,7 @@ test('the Worker transfers a copy without detaching the cached Wasm artifact', a
     manifest: {
       version: audioCoreWasmArtifactVersion,
       abiVersion: audioCoreWasmAbiVersion,
+      pagedAbi: audioCoreWasmPagedAbiVersion,
       contractVersion: audioCoreContractVersion,
       contractHash: 'fixture',
       fixedMemory: true,
@@ -162,16 +167,37 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
     postMessage: (message: PortableExportWorkerResponse) => void
   }
   const responses: PortableExportWorkerResponse[] = []
+  const pageRequests: Extract<PortableExportWorkerResponse, { type: 'page-request' }>[] = []
   const cancellation = { jobId: 0 }
   const harness: WorkerHarness = {
     onmessage: null,
     postMessage: (message) => {
       responses.push(message)
-      if (cancellation.jobId > 0
+      if (message.type === 'page-request') {
+        pageRequests.push(message)
+        queueMicrotask(() => {
+          harness.onmessage?.(new MessageEvent('message', {
+            data: {
+              version: portableExportWorkerProtocolVersion,
+              type: 'page-response',
+              jobId: message.jobId,
+              requestId: message.requestId,
+              assetId: message.assetId,
+              startFrame: message.startFrame,
+              frameCount: message.frameCount,
+              planes: [new Float32Array(message.frameCount), new Float32Array(message.frameCount)],
+            },
+          }))
+        })
+      } else if (cancellation.jobId > 0
         && message.type === 'chunk'
         && message.jobId === cancellation.jobId) {
         harness.onmessage?.(new MessageEvent('message', {
           data: { version: portableExportWorkerProtocolVersion, type: 'cancel', jobId: cancellation.jobId },
+        }))
+      } else if (message.type === 'chunk') {
+        harness.onmessage?.(new MessageEvent('message', {
+          data: { version: portableExportWorkerProtocolVersion, type: 'chunk-consumed', jobId: message.jobId, index: message.index },
         }))
       }
     },
@@ -261,11 +287,12 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
   const chunk = responses.find((
     response,
   ): response is Extract<PortableExportWorkerResponse, { type: 'chunk' }> => response.type === 'chunk')
-  if (!chunk) throw new Error('Worker did not return PCM.')
+  if (!chunk) throw new Error(`Worker did not return PCM: ${JSON.stringify(responses)}`)
   expect(chunk.pcm.planes).toEqual([
     new Float32Array([0, 0.25, -0.5, 1]),
     new Float32Array([1, -0.5, 0.25, 0]),
   ])
+  expect(chunk.startFrame).toBe(0)
   expect(responses).toContainEqual({
     version: portableExportWorkerProtocolVersion,
     type: 'complete',
@@ -294,4 +321,122 @@ test('the Worker rejects unsupported snapshots and renders the production Wasm a
   expect(responses.some((response) => (
     response.type === 'complete' && response.jobId === 3
   ))).toBe(false)
+
+  const pagedAsset: PortableExportAsset = {
+    asset: {
+      version: 1,
+      assetId: 'paged-fixture',
+      frameCount: 128 * 16_384,
+      sampleRateHz: 48_000,
+      channelCount: 2,
+    },
+    pageFrames: 16_384,
+    transferables: [],
+  }
+  const pagedEvent = (
+    sequence: number,
+    assetId: string,
+    sourceOffsetFrame: number,
+  ): AudioCoreSampleSourceEventDto => ({
+    version: 1,
+    epoch: 1,
+    sequence,
+    sourceNodeId: 'source',
+    assetId,
+    startFrame: 0,
+    stopFrame: 1,
+    sourceOffsetFrame,
+    sourceFrameCount: 1,
+    gain: 1,
+    fadeInStartFrame: 0,
+    fadeInEndFrame: 0,
+    fadeOutStartFrame: 1,
+    fadeOutEndFrame: 1,
+  })
+  const pagedRequest = (
+    jobId: number,
+    assets: typeof pagedAsset[],
+    events: ReturnType<typeof pagedEvent>[],
+  ): Extract<PortableExportWorkerRequest, { type: 'render' }> => ({
+    ...renderRequest,
+    jobId,
+    frameCount: 1,
+    maxFramesPerBlock: 1,
+    wasmBytes: renderRequest.wasmBytes.slice(0),
+    snapshot: {
+      ...renderRequest.snapshot,
+      graph: {
+        ...renderRequest.snapshot.graph,
+        assets: assets.map((entry) => entry.asset),
+      },
+      assets,
+      events,
+    },
+  })
+  const waitForTerminalResponse = async (jobId: number) => {
+    for (let attempt = 0; attempt < 200 && !responses.some((response) => (
+      response.type !== 'disposed'
+      && response.jobId === jobId
+      && (response.type === 'complete' || response.type === 'error')
+    )); attempt += 1) await Bun.sleep(10)
+  }
+
+  const unionJobId = 4
+  harness.onmessage(new MessageEvent('message', {
+    data: pagedRequest(
+      unionJobId,
+      [pagedAsset],
+      Array.from({ length: 65 }, (_, index) => pagedEvent(index + 1, pagedAsset.asset.assetId, index * 16_384)),
+    ),
+  }))
+  await waitForTerminalResponse(unionJobId)
+
+  const distinctAssetJobId = 5
+  const distinctAssets = Array.from({ length: 65 }, (_, index) => ({
+    ...pagedAsset,
+    asset: { ...pagedAsset.asset, assetId: `paged-fixture-${index}` },
+  }))
+  harness.onmessage(new MessageEvent('message', {
+    data: pagedRequest(
+      distinctAssetJobId,
+      distinctAssets,
+      distinctAssets.map((asset, index) => pagedEvent(index + 1, asset.asset.assetId, 0)),
+    ),
+  }))
+  await waitForTerminalResponse(distinctAssetJobId)
+  expect(responses).toContainEqual({
+    version: portableExportWorkerProtocolVersion,
+    type: 'error',
+    jobId: distinctAssetJobId,
+    code: 'unsupported-snapshot',
+    message: 'The export snapshot exceeds the portable asset or event bound.',
+  })
+  expect(pageRequests.some((request) => request.jobId === distinctAssetJobId)).toBe(false)
+
+  const sharedRangeJobId = 6
+  harness.onmessage(new MessageEvent('message', {
+    data: pagedRequest(
+      sharedRangeJobId,
+      [pagedAsset],
+      Array.from({ length: 256 }, (_, index) => pagedEvent(index + 1, pagedAsset.asset.assetId, 0)),
+    ),
+  }))
+  await waitForTerminalResponse(sharedRangeJobId)
+
+  expect(responses).toContainEqual({
+    version: portableExportWorkerProtocolVersion,
+    type: 'complete',
+    jobId: unionJobId,
+    frameCount: 1,
+    chunkCount: 1,
+  })
+  expect(pageRequests.filter((request) => request.jobId === unionJobId)).toHaveLength(65)
+  expect(responses).toContainEqual({
+    version: portableExportWorkerProtocolVersion,
+    type: 'complete',
+    jobId: sharedRangeJobId,
+    frameCount: 1,
+    chunkCount: 1,
+  })
+  expect(pageRequests.filter((request) => request.jobId === sharedRangeJobId)).toHaveLength(1)
 })

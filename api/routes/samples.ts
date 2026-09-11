@@ -8,10 +8,9 @@ import {
   AudioUploadValidationError,
   inspectControlUploadAudioMetadata,
 } from '../control-upload-audio-metadata'
-import { controlErrorSchemaV1 } from '@daw-browser/control'
+import { controlErrorSchemaV1, controlLimitsV1 } from '@daw-browser/control'
 import { z } from 'zod'
 
-const maxUploadBytes = 10 * 1024 * 1024
 const trustedDesktopSampleOrigins = new Set([
   'daw://app',
   'http://localhost:5173',
@@ -20,6 +19,7 @@ const trustedDesktopSampleOrigins = new Set([
 
 type SampleRouteDependencies = {
   requireProjectRoleContext?: typeof requireProjectRoleContextForApi
+  hashFile?: typeof hashFile
   putObject?: (key: string, file: File, contentSha256: string) => Promise<void>
   inspectAudioMetadata?: typeof inspectControlUploadAudioMetadata
 }
@@ -119,31 +119,42 @@ export function registerPublicSampleRoutes(app: App, dependencies: PublicSampleR
 
 export function registerSampleRoutes(app: App, dependencies: SampleRouteDependencies = {}) {
   const requireProjectRoleContext = dependencies.requireProjectRoleContext ?? requireProjectRoleContextForApi
+  const hashUploadedFile = dependencies.hashFile ?? hashFile
   const inspectAudioMetadata = dependencies.inspectAudioMetadata ?? inspectControlUploadAudioMetadata
   app.post('/api/samples', async (c) => {
     const contentLength = c.req.header('content-length')
     if (!contentLength) return c.json({ error: 'Content-Length is required' }, 411)
-    if (!/^\d+$/.test(contentLength) || Number(contentLength) > maxUploadBytes + 16 * 1024) {
-      return c.json({ error: 'Upload exceeds the 10 MiB limit' }, 413)
+    if (!/^\d+$/.test(contentLength)) return c.json({ error: 'Invalid Content-Length' }, 400)
+    const contentLengthBytes = Number(contentLength)
+    if (!Number.isSafeInteger(contentLengthBytes) || contentLengthBytes < 1) {
+      return c.json({ error: 'Invalid Content-Length' }, 400)
     }
+    if (contentLengthBytes > controlLimitsV1.maxAssetUploadRequestBytes) {
+      return c.json({ error: 'Upload exceeds the 10 MiB multipart limit' }, 413)
+    }
+    const projectId = c.req.query('projectId')
+    if (!projectId) return c.json({ error: 'Invalid sample upload' }, 400)
+    const access = await requireProjectRoleContext(c, projectId, ['owner', 'editor'])
+    if (!access) return c.json({ error: 'Forbidden' }, 403)
     try {
       const form = await c.req.formData()
-      const projectId = form.get('projectId')?.toString()
+      const formProjectId = form.get('projectId')?.toString()
       const clientAssetKeyResult = z.string().min(1).safeParse(form.get('assetKey'))
       const file = form.get('file')
-      if (!projectId || !clientAssetKeyResult.success || !(file instanceof File) || file.size < 1 || file.size > maxUploadBytes) {
+      if (formProjectId !== projectId || !clientAssetKeyResult.success || !(file instanceof File) || file.size < 1) {
         return c.json({ error: 'Invalid sample upload' }, 400)
       }
+      if (file.size > controlLimitsV1.maxAssetUploadBytes) {
+        return c.json({ error: 'Upload exceeds the 10 MiB file limit' }, 413)
+      }
       const clientAssetKey = clientAssetKeyResult.data
-      const access = await requireProjectRoleContext(c, projectId, ['owner', 'editor'])
-      if (!access) return c.json({ error: 'Forbidden' }, 403)
-      const contentSha256 = await hashFile(file)
+      const contentSha256 = await hashUploadedFile(file)
       const metadata = await inspectAudioMetadata({
         file,
         declaredMimeType: file.type,
       })
       const idempotencyKey = await browserIdempotencyKey(clientAssetKey)
-      const begun = await access.convex.mutation(convexApi.assets.beginUpload, {
+      const begun = await access.convex.mutation(convexApi.resumableAssetUploads.beginUpload, {
         projectId, idempotencyKey, contentSha256, name: file.name, mimeType: file.type, sizeBytes: file.size,
         durationSec: metadata.durationSec, sampleRate: metadata.sampleRate, channelCount: metadata.channelCount,
       })
@@ -158,17 +169,17 @@ export function registerSampleRoutes(app: App, dependencies: SampleRouteDependen
             })
           }
         } catch (error) {
-          await access.convex.mutation(convexApi.assets.failUpload, { projectId, idempotencyKey, contentSha256 })
+          await access.convex.mutation(convexApi.resumableAssetUploads.failUpload, { projectId, idempotencyKey, contentSha256 })
           throw error
         }
       }
       let result
       try {
-        result = await access.convex.mutation(convexApi.assets.finalizeUpload, {
+        result = await access.convex.mutation(convexApi.resumableAssetUploads.finalizeUpload, {
           projectId, idempotencyKey, contentSha256,
         })
       } catch (error) {
-        await access.convex.mutation(convexApi.assets.failUpload, { projectId, idempotencyKey, contentSha256 })
+        await access.convex.mutation(convexApi.resumableAssetUploads.failUpload, { projectId, idempotencyKey, contentSha256 })
         throw error
       }
       return c.json({

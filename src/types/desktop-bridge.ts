@@ -3,6 +3,8 @@ import type {
   NativeHostMeterBatch,
   NativeHostSpectrumFrame,
   NativeHostPcmAsset,
+  NativeHostMappedAsset,
+  NativeHostMappedAssetPage,
   NativeHostRecordingBlock,
   NativeHostRecordingConfiguration,
   NativeHostRecordingStatus,
@@ -10,6 +12,7 @@ import type {
   NativeScheduleProgress,
   NativeOutputDevice,
   NativeOfflinePcmChunk,
+  NativeOfflineMappedAsset,
   NativeOfflineRenderPlan
 } from "@daw-browser/audio-engine/native-host-wire"
 import type {
@@ -139,6 +142,10 @@ type NativeSessionBridge = {
     transactionToken?: string
   }): Promise<NativeVstEditorReply>
   installAsset(input: NativeHostPcmAsset, transactionToken?: string): Promise<NativeSessionReply>
+  createMappedAsset(input: NativeHostMappedAsset, transactionToken?: string): Promise<NativeSessionReply>
+  writeMappedAssetPage(input: NativeHostMappedAssetPage, transactionToken?: string): Promise<NativeSessionReply>
+  prepareMappedAssetRange(sessionAssetId: number, startFrame: number, frameCount: number, transactionToken?: string): Promise<NativeSessionReply>
+  releaseMappedAsset(sessionAssetId: number, transactionToken?: string): Promise<NativeSessionReply>
   releaseAsset(sessionAssetId: number, transactionToken?: string): Promise<NativeSessionReply>
   publishGraph(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   configureInstrumentStates?: (bytes: Uint8Array, transactionToken?: string) => Promise<NativeSessionReply>
@@ -187,12 +194,13 @@ type DesktopBridge = {
     requestId: string,
   ): Promise<{ canceled: true } | { canceled: false; directory: { token: string; basename: string } }>
   releaseExportOutput(requestId: string): Promise<void>
-  readChunk(requestId: string, token: string): Promise<Uint8Array>
+  readChunk(requestId: string, token: string, offset: number, length: number): Promise<Uint8Array>
   beginWrite(requestId: string, token: string, relativePath?: string): Promise<{ writerId: string }>
   writeChunk(requestId: string, writerId: string, offset: number, chunk: Uint8Array): Promise<{ nextOffset: number }>
   commit(requestId: string, writerId: string): Promise<{ basename: string; byteLength: number; mime: string }>
   abort(requestId: string, writerId: string): Promise<void>
   exportTerminal(jobId: string, status: "success" | "canceled" | "error"): void
+  importTerminal(jobId: string): void
   audioHost?: {
     diagnostics(): Promise<NativeAudioHostDiagnosticsReply>
     resolveOutputDevice(preferredDeviceId?: string): Promise<NativeOutputDeviceReply>
@@ -203,6 +211,12 @@ type DesktopBridge = {
         jobId: string,
         plan: NativeOfflineRenderPlan,
         onChunk: (chunk: NativeOfflinePcmChunk) => void | Promise<void>,
+        onMappedPage: (
+          requestId: string,
+            asset: NativeOfflineMappedAsset,
+          startFrame: number,
+          frameCount: number,
+          ) => Promise<NativeHostMappedAssetPage>,
       ): Promise<{ ok: true } | { ok: false; error: string }>
       cancel(jobId: string): Promise<{ accepted: boolean }>
     }

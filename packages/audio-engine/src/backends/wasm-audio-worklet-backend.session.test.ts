@@ -19,6 +19,12 @@ const responseFor = (message: PortableRequest): PortableWasmStatusMessage => {
   if (message.type === "transport") return { version: portableWasmProtocolVersion, type: "transport-applied", requestId: message.requestId, epoch: message.epoch, result: "applied" }
   if (message.type === "processor-events") return { version: portableWasmProtocolVersion, type: "processor-events-applied", requestId: message.requestId, revision: message.revision, epoch: message.epoch, sequence: message.sequence, result: "applied" }
   if (message.type === "release-asset") return { version: portableWasmProtocolVersion, type: "asset-released", requestId: message.requestId, generation: message.generation, assetId: message.assetId, result: "released" }
+  if (message.type === "register-paged-asset") return { version: portableWasmProtocolVersion, type: "paged-asset-registered", requestId: message.requestId, generation: message.generation, assetId: message.asset.assetId, result: "registered", handle: { slot: 0, generation: message.generation } }
+  if (message.type === "write-asset-page") return { version: portableWasmProtocolVersion, type: "asset-page-written", requestId: message.requestId, generation: message.generation, assetId: message.assetId, pageIndex: message.pageIndex, result: "written" }
+  if (message.type === "prepare-asset-range") return { version: portableWasmProtocolVersion, type: "asset-range-prepared", requestId: message.requestId, generation: message.generation, assetId: message.assetId, result: "prepared", preparationId: 1 }
+  if (message.type === "schedule-prepared-sources") return { version: portableWasmProtocolVersion, type: "prepared-sources-scheduled", requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: "scheduled" }
+  if (message.type === "release-asset-preparation") return { version: portableWasmProtocolVersion, type: "asset-preparation-released", requestId: message.requestId, generation: message.generation, preparationId: message.preparationId, result: "released" }
+  if (message.type === "trim-asset-pages") return { version: portableWasmProtocolVersion, type: "asset-pages-trimmed", requestId: message.requestId, generation: message.generation, assetId: message.assetId, firstPage: message.firstPage, pageCount: message.pageCount, result: "trimmed" }
   return { version: portableWasmProtocolVersion, type: "processor-automation-reenabled", requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: "applied" }
 }
 
@@ -123,7 +129,7 @@ test("routes requestless graph continuity notifications to telemetry listeners",
   fixture.session.onGraphContinuity((message) => continuity.push(`${message.revision}:${message.result}`))
 
   fixture.node.port.onmessage?.(new MessageEvent("message", {
-    data: { version: 1, type: "graph-continuity", revision: 7, result: "fallback" },
+    data: { version: 2, type: "graph-continuity", revision: 7, result: "fallback" },
   }))
 
   expect(continuity).toEqual(["7:fallback"])

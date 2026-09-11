@@ -38,6 +38,6 @@ function createMixerChannel(track: Track): MixerChannel {
   }
 }
 
-export function createMixerChannels(tracks: Track[]): MixerChannel[] {
+export function createMixerChannels(tracks: readonly Track[]): MixerChannel[] {
   return tracks.map(createMixerChannel)
 }

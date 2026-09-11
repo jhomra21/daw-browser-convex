@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { parsePortableWasmControlMessage, portableWasmMaxGraphNodes, portableWasmMaxInstrumentEvents, portableWasmMaxPendingEvents, portableWasmProtocolVersion, readPortableWasmGraphContinuityMessage, readPortableWasmRecordingStatusMessage, readPortableWasmTransportPositionMessage } from './portable-wasm-protocol'
+import { parsePortableWasmControlMessage, portableWasmMaxGraphNodes, portableWasmMaxInstrumentEvents, portableWasmMaxPendingEvents, portableWasmProtocolVersion, readPortableWasmGraphContinuityMessage, readPortableWasmRecordingStatusMessage, readPortableWasmTransportPositionMessage, type PortableWasmStatusMessage } from './portable-wasm-protocol'
 import { audioCoreContractVersion, audioCoreMaxGraphProcessors, audioCoreMaxProcessorParameterTargets, audioCoreMaxProcessorsPerNode, encodeAudioCoreProcessorStateEnvelope, encodeEqProcessorState, encodeSaturatorProcessorState, encodeUtilityProcessorState, type UtilityProcessorState } from '../../audio-core-contract/src/index'
 
 const utilityState: UtilityProcessorState = {
@@ -60,6 +60,42 @@ test('accepts only monotonic-shaped portable transport positions', () => {
     running: true,
     frame: 128,
   })).toBeNull()
+})
+
+test('accepts safe recording uint64 boundaries and rejects overflow', () => {
+  const safe = Number.MAX_SAFE_INTEGER
+  const block: Extract<PortableWasmStatusMessage, { type: 'recording-capture-block' }> = {
+    version: portableWasmProtocolVersion,
+    type: 'recording-capture-block',
+    generation: 1,
+    sessionId: safe,
+    sequence: safe,
+    frameCount: 1,
+    channelCount: 1,
+    planes: [new Float32Array(1)],
+    rms: 0,
+    peak: 0,
+  }
+  expect(readPortableWasmRecordingStatusMessage(block)).toEqual(block)
+  expect(readPortableWasmRecordingStatusMessage({
+    ...block,
+    sequence: safe + 1,
+  })).toBeNull()
+  expect(readPortableWasmRecordingStatusMessage({
+    version: portableWasmProtocolVersion,
+    type: 'recording-capture-diagnostics',
+    generation: 1,
+    sessionId: safe,
+    capturedFrames: safe,
+    droppedFrames: safe,
+    droppedBlocks: 0,
+    availableBlocks: 1,
+    queuedBlocks: 0,
+    rms: 0,
+    peak: 0,
+    fatal: false,
+    active: false,
+  })).not.toBeNull()
 })
 
 test('preserves portable capacity continuity results', () => {
@@ -123,6 +159,25 @@ test('validates bounded portable recording capture controls', () => {
   })).toMatchObject({ action: 'configured', frame: 48 })
 })
 
+test('keeps recording uint64 identifiers exact within the JavaScript safe-number boundary', () => {
+  const sequence = Number.MAX_SAFE_INTEGER
+  const block = {
+    version: portableWasmProtocolVersion,
+    type: 'recording-capture-block',
+    generation: 3,
+    sessionId: sequence,
+    sequence,
+    frameCount: 1,
+    channelCount: 1,
+    planes: [Float32Array.of(0)],
+    rms: 0,
+    peak: 0,
+  }
+  expect(readPortableWasmRecordingStatusMessage(block)).toMatchObject({ sessionId: sequence, sequence })
+  expect(readPortableWasmRecordingStatusMessage({ ...block, sequence: sequence + 1 })).toBeNull()
+  expect(readPortableWasmRecordingStatusMessage({ ...block, sessionId: sequence + 1 })).toBeNull()
+})
+
 test('accepts only versioned schedules with explicit ramp endpoints and restore values', () => {
   const schedule = {
     revision: 2,
@@ -184,7 +239,7 @@ test('accepts only versioned bounded portable worklet control messages', () => {
 
 test('accepts exact planar PCM only for versioned portable asset registration', () => {
   const asset = {
-    version: portableWasmProtocolVersion,
+    version: audioCoreContractVersion,
     assetId: 'asset:one',
     frameCount: 2,
     sampleRateHz: 48_000,
@@ -270,6 +325,59 @@ test('requires ordered source-targeted schedules in one transport epoch', () => 
     revision: 1,
     epoch: 2,
     events: [{ ...event, sourceNodeId: '' }],
+  })).toBeNull()
+})
+
+test('accepts atomic mixed ordinary and prepared source replacements in sequence order', () => {
+  const ordinary = {
+    version: audioCoreContractVersion,
+    epoch: 2,
+    sequence: 1,
+    sourceNodeId: 'track-1',
+    assetId: 'asset:one',
+    startFrame: 0,
+    stopFrame: 128,
+    sourceOffsetFrame: 0,
+    sourceFrameCount: 128,
+    gain: 1,
+    fadeInStartFrame: 0,
+    fadeInEndFrame: 0,
+    fadeOutStartFrame: 128,
+    fadeOutEndFrame: 128,
+  }
+  const prepared = {
+    version: audioCoreContractVersion,
+    epoch: 2,
+    sequence: 2,
+    sourceNodeId: 'track-2',
+    preparationId: 4,
+    startFrame: 128,
+    stopFrame: 256,
+    sourceOffsetFrame: 0,
+    sourceFrameCount: 128,
+    gain: 1,
+    fadeInStartFrame: 128,
+    fadeInEndFrame: 128,
+    fadeOutStartFrame: 256,
+    fadeOutEndFrame: 256,
+  }
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion,
+    type: 'replace-sources',
+    requestId: 1,
+    revision: 1,
+    epoch: 2,
+    ordinary: [ordinary],
+    prepared: [prepared],
+  })).toMatchObject({ type: 'replace-sources', ordinary: [ordinary], prepared: [prepared] })
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion,
+    type: 'replace-sources',
+    requestId: 1,
+    revision: 1,
+    epoch: 2,
+    ordinary: [ordinary],
+    prepared: [{ ...prepared, sequence: 1 }],
   })).toBeNull()
 })
 

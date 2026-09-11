@@ -1,19 +1,16 @@
 import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from 'solid-js'
 
 import { getWaveformSlice } from '@daw-browser/waveforms/select-waveform-window'
-import { resolveClipSampleUrl } from '@daw-browser/shared'
 import { getAudioWaveformLayout } from '~/lib/audio-waveform-layout'
 import { getPersistableAudioSourceMetadata } from '~/lib/audio-source'
-import {
-  resolveSamplePlaybackUrlForRuntime,
-} from '~/lib/renderer-api-url'
+import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type { RuntimeClip } from '~/lib/timeline-runtime-types'
 
 type ClipWaveformViewModelOptions = {
   clip: Accessor<RuntimeClip>
   cssWidthPx: Accessor<number>
   projectBpm: Accessor<number>
-  ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
+  resolveAudioSource: Accessor<AudioPcmSourceResolver>
 }
 
 const concatPeakSegments = (segments: Uint8Array[]) => {
@@ -34,26 +31,20 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
   const view = createMemo(() => {
     const clip = options.clip()
     const midi = clip.midi
-    const buffer = clip.buffer ?? null
     const assetKey = clip.waveformAssetKey ?? clip.sourceAssetKey
-    const unresolvedSampleUrl = resolveClipSampleUrl(clip)
-    const sampleUrl = unresolvedSampleUrl ? resolveSamplePlaybackUrlForRuntime(unresolvedSampleUrl) ?? undefined : undefined
-    const layout = getAudioWaveformLayout(clip, options.cssWidthPx(), buffer?.duration, options.projectBpm())
     const metadata = getPersistableAudioSourceMetadata({
-      buffer,
+      buffer: clip.buffer,
       sourceDurationSec: clip.sourceDurationSec,
       sourceSampleRate: clip.sourceSampleRate,
       sourceChannelCount: clip.sourceChannelCount,
     })
+    const layout = getAudioWaveformLayout(clip, options.cssWidthPx(), metadata?.durationSec, options.projectBpm())
 
     return {
       assetKey,
-      buffer,
       clip,
       layout,
       midi,
-      sampleUrl,
-      sourceIdentity: assetKey && metadata ? { assetKey, ...metadata } : undefined,
     }
   })
 
@@ -70,13 +61,6 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       return
     }
     const assetKey = current.assetKey
-    if (!current.buffer && !current.sampleUrl) {
-      if (!current.clip.mediaStatus) {
-        void options.ensureClipBuffer?.(current.clip.id)
-      }
-      setPeaks(null)
-      return
-    }
 
     const segments = current.layout.segments
       ? current.layout.segments
@@ -86,15 +70,23 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         sourceEndSec: current.layout.sourceEndSec,
       }]
 
-    void Promise.all(segments.map((segment) => getWaveformSlice({
-      assetKey,
-      sourceIdentity: current.sourceIdentity,
-      sampleUrl: current.sampleUrl,
-      buffer: current.buffer,
-      sourceStartSec: segment.sourceStartSec,
-      sourceEndSec: segment.sourceEndSec,
-      bins: segment.drawCols,
-    })))
+    const controller = new AbortController()
+    void options.resolveAudioSource()(current.clip, controller.signal)
+      .then((source) => Promise.all(segments.map((segment) => getWaveformSlice({
+        assetKey,
+        source: source,
+        sourceIdentity: {
+          assetKey,
+          identity: source.identity,
+          durationSec: source.durationSec,
+          sampleRate: source.sampleRate,
+          channelCount: source.channelCount,
+        },
+        sourceStartSec: segment.sourceStartSec,
+        sourceEndSec: segment.sourceEndSec,
+        bins: segment.drawCols,
+        signal: controller.signal,
+      }))))
       .then((next) => {
         if (currentRequestId !== requestId) return
         const complete = next.flatMap((segment) => segment ? [segment] : [])
@@ -108,6 +100,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         if (currentRequestId !== requestId) return
         setPeaks(null)
       })
+    onCleanup(() => controller.abort())
   })
 
   onCleanup(() => {

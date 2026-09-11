@@ -10,6 +10,9 @@ import {
   type PortableStretchAssetRegistry,
   type PortableStretchDiagnosticCode,
 } from './portable-stretch-preparation'
+import { createAudioPcmSourceDescriptor } from './media-pages'
+import { createAudioStretchReadPlan } from './audio-stretch-read-plan'
+import { WSOLA_MAX_PIPELINE_WORKING_MEMORY_BYTES } from './audio-stretching'
 
 class TestAudioBuffer implements AudioBuffer {
   readonly duration: number
@@ -181,7 +184,7 @@ const prepareAggregateStretch = async (
   )),
 })
 
-test('rejects Stretch preparation before rendering when estimated frames exceed native capacity', async () => {
+test('uses mapped source duration for exact frame-capacity preflight', async () => {
   let createBufferCalls = 0
   const source = buffer([[0, 0.25, -0.5, 1]], 4)
   const result = await preparePortableStretchAssets({
@@ -189,7 +192,7 @@ test('rejects Stretch preparation before rendering when estimated frames exceed 
     projectBpm: 120,
     projectGeneration: 7,
     requiredSampleRateHz: 8,
-    maximumFrameCount: 23,
+    maximumFrameCount: 7,
     createBuffer: (channels, frames, sampleRate) => {
       createBufferCalls += 1
       return new TestAudioBuffer(
@@ -207,16 +210,131 @@ test('rejects Stretch preparation before rendering when estimated frames exceed 
     }],
   })
   expect(createBufferCalls).toBe(0)
+
+  const withinCapacity = await preparePortableStretchAssets({
+    tracks: [preparedStretchTrack(source, 3)],
+    projectBpm: 120,
+    projectGeneration: 7,
+    requiredSampleRateHz: 8,
+    maximumFrameCount: 8,
+    createBuffer: (channels, frames, sampleRate) => new TestAudioBuffer(
+      Array.from({ length: channels }, () => new Float32Array(frames)),
+      sampleRate,
+    ),
+  })
+  if (!withinCapacity.supported) throw new Error(withinCapacity.diagnostics.map((entry) => entry.message).join('\n'))
+  expect(withinCapacity.assets[0]?.asset.frameCount).toBe(8)
+})
+
+test('plans the clipped source range instead of the nominal clip duration', () => {
+  const source = buffer([Array.from({ length: 16 }, (_, index) => index)], 16)
+  const descriptor = createAudioPcmSourceDescriptor({
+    identity: 'source',
+    durationSec: source.duration,
+    frameCount: source.length,
+    sampleRate: source.sampleRate,
+    channelCount: source.numberOfChannels,
+    source,
+  })
+  const plan = createAudioStretchReadPlan({
+    clip: {
+      ...clip(source),
+      duration: 3,
+      leftPadSec: 0.25,
+      bufferOffsetSec: 0.25,
+    },
+    source: descriptor,
+    projectBpm: 120,
+  })
+
+  expect(plan.map.timelineDurationSec).toBeCloseTo(0.75)
+  expect(plan.frameCount).toBe(12)
+  expect(plan.segments[0]).toMatchObject({
+    sourceStartFrame: 2,
+    sourceEndFrame: 16,
+    trimStartFrame: 1,
+    trimEndFrame: 13,
+  })
+})
+
+test('plans marker warp segments from mapped source coverage', () => {
+  const source = buffer([Array.from({ length: 16 }, (_, index) => index)], 16)
+  const descriptor = createAudioPcmSourceDescriptor({
+    identity: 'source',
+    durationSec: source.duration,
+    frameCount: source.length,
+    sampleRate: source.sampleRate,
+    channelCount: source.numberOfChannels,
+    source,
+  })
+  const plan = createAudioStretchReadPlan({
+    clip: {
+      ...clip(source),
+      duration: 3,
+      audioWarp: {
+        enabled: true,
+        mode: 'stretch',
+        sourceBpm: 120,
+        markers: [
+          { id: 'a', timelineBeat: 0, sourceBeat: 0 },
+          { id: 'b', timelineBeat: 1, sourceBeat: 0.5 },
+          { id: 'c', timelineBeat: 2, sourceBeat: 1 },
+        ],
+      },
+    },
+    source: descriptor,
+    projectBpm: 120,
+  })
+
+  expect(plan.segments).toHaveLength(3)
+  expect(plan.frameCount).toBe(32)
+  expect(plan.segments.map((segment) => [segment.sourceStartFrame, segment.sourceEndFrame])).toEqual([
+    [0, 4],
+    [4, 8],
+    [8, 16],
+  ])
 })
 
 test('allows Stretch preparation at the estimated native frame boundary', async () => {
   const source = buffer([[0, 0.25, -0.5, 1]], 4)
   const result = await prepareAggregateStretch(source, 8, 24, 3, {
     maximumAssetCount: 1,
-    maximumPreparationBytes: 36 * Float32Array.BYTES_PER_ELEMENT,
+    maximumPreparationBytes: 36 * Float32Array.BYTES_PER_ELEMENT + WSOLA_MAX_PIPELINE_WORKING_MEMORY_BYTES,
   })
 
   expect(result.supported).toBe(true)
+})
+
+test('charges one sequential WSOLA workspace for many tiny Stretch assets', async () => {
+  const source = buffer([[0.25]], 44_100)
+  const tracks = (count: number): Track<AudioBuffer>[] => Array.from({ length: count }, (_, index) => ({
+    ...preparedStretchTrack(source, source.duration, `clip-stretch-${index}`),
+    id: `track-stretch-${index}`,
+  }))
+
+  const eightUnder512MiB = await preparePortableStretchAssets({
+    tracks: tracks(8),
+    projectBpm: 120,
+    projectGeneration: 7,
+    maximumPreparationBytes: 512 * 1024 * 1024,
+    createBuffer: (channels, frames, sampleRate) => new TestAudioBuffer(
+      Array.from({ length: channels }, () => new Float32Array(frames)),
+      sampleRate,
+    ),
+  })
+  expect(eightUnder512MiB.supported).toBe(true)
+
+  const fourUnder256MiB = await preparePortableStretchAssets({
+    tracks: tracks(4),
+    projectBpm: 120,
+    projectGeneration: 7,
+    maximumPreparationBytes: 256 * 1024 * 1024,
+    createBuffer: (channels, frames, sampleRate) => new TestAudioBuffer(
+      Array.from({ length: channels }, () => new Float32Array(frames)),
+      sampleRate,
+    ),
+  })
+  expect(fourUnder256MiB.supported).toBe(true)
 })
 
 test('rejects aggregate Stretch asset count before rendering', async () => {
@@ -279,11 +397,32 @@ test('rejects cumulative estimated Stretch bytes before rendering', async () => 
   expect(createBufferCalls).toBe(0)
 })
 
+test('rejects materialization expansion before allocating the rendered buffer', async () => {
+  let createBufferCalls = 0
+  const source = new TestAudioBuffer([new Float32Array(1_000)], 1_000)
+  const result = await prepareAggregateStretch(source, 2_000, undefined, source.duration, {
+    maximumPreparationBytes: 7_000,
+    createBuffer: (channels, frames, sampleRate) => {
+      createBufferCalls += 1
+      return new TestAudioBuffer(
+        Array.from({ length: channels }, () => new Float32Array(frames)),
+        sampleRate,
+      )
+    },
+  })
+
+  expect(result).toMatchObject({
+    supported: false,
+    diagnostics: [{ code: 'stretch-preparation-bytes-exceeded' }],
+  })
+  expect(createBufferCalls).toBe(0)
+})
+
 test('admits a high-rate source when final normalized frames fit capacity', async () => {
   const source = new TestAudioBuffer([new Float32Array(288_000)], 96_000)
   const result = await prepareAggregateStretch(source, 48_000, 144_000, 3, {
     maximumAssetCount: 1,
-    maximumPreparationBytes: 432_000 * Float32Array.BYTES_PER_ELEMENT,
+    maximumPreparationBytes: 1_100_000 * Float32Array.BYTES_PER_ELEMENT + WSOLA_MAX_PIPELINE_WORKING_MEMORY_BYTES,
   })
   if (!result.supported) throw new Error(result.diagnostics.map((entry) => entry.message).join('\n'))
   expect(result.assets[0]?.asset).toMatchObject({

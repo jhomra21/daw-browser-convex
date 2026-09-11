@@ -2,6 +2,10 @@ import { createEffect, createSignal, For, onCleanup, Show, type Component, untra
 import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
 import { getWaveformSlice } from "@daw-browser/waveforms/select-waveform-window";
 import {
+  sampledInstrumentRegion,
+  sampledInstrumentRegionIdentity,
+} from "@daw-browser/audio-engine/sampled-instrument-region";
+import {
   DRUM_RACK_FIRST_NOTE,
   DRUM_RACK_PAD_COUNT,
   getDrumRackPadNoteLabel,
@@ -10,12 +14,11 @@ import {
   type DrumRackSampleAssignment,
 } from "@daw-browser/shared";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
+import type { SampledInstrumentBuffer } from "@daw-browser/audio-engine/sampled-instrument-region";
 import EffectShell from "~/components/effects/EffectShell";
 import { DeviceToggleButton } from "~/components/ui/device-control";
 import Knob from "~/components/ui/knob";
 import { useAppPreferences } from "~/context/app-preferences";
-import { drumRackSampleKey } from "~/lib/drum-rack-buffer-sync";
-import { createSampleBufferLoader } from "~/lib/sample-buffer-loader";
 import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE, type SampleDragData } from "~/lib/sample-drag-data";
 
 type DrumRackProps = {
@@ -28,12 +31,8 @@ type DrumRackProps = {
   onAssignSampleToPad: (padId: string, sample: DrumRackSampleAssignment) => void;
   onReset: () => void;
   onUpdatePad: (padId: string, updates: Partial<DrumRackPadParams>) => void;
-};
-
-type DrumRackBufferState = {
-  targetId: string;
-  buffers: ReadonlyMap<string, AudioBuffer>;
-  sampleKeys: ReadonlyMap<string, string>;
+  buffers?: () => ReadonlyMap<string, SampledInstrumentBuffer> | undefined;
+  subscribeBuffers: (listener: () => void) => () => void;
 };
 
 const sampleToAssignment = (sample: SampleDragData): DrumRackSampleAssignment => ({
@@ -52,28 +51,6 @@ const formatSampleLength = (pad: DrumRackPadParams) => {
 
 const padDisplayName = (pad: DrumRackPadParams) => pad.name ?? getDrumRackPadNoteLabel(pad.note);
 
-const sampleKey = (sample: DrumRackSampleAssignment | undefined) => sample ? drumRackSampleKey(sample) : undefined;
-
-const createEmptyBufferState = (targetId: string): DrumRackBufferState => ({
-  targetId,
-  buffers: new Map(),
-  sampleKeys: new Map(),
-});
-
-const pruneBufferState = (state: DrumRackBufferState, targetId: string, params: DrumRackParams): DrumRackBufferState => {
-  if (state.targetId !== targetId) return createEmptyBufferState(targetId);
-  const nextBuffers = new Map<string, AudioBuffer>();
-  const nextKeys = new Map<string, string>();
-  for (const pad of params.pads) {
-    const key = sampleKey(pad.sample);
-    const buffer = state.buffers.get(pad.id);
-    if (!key || !buffer || state.sampleKeys.get(pad.id) !== key) continue;
-    nextBuffers.set(pad.id, buffer);
-    nextKeys.set(pad.id, key);
-  }
-  return nextBuffers.size === state.buffers.size ? state : { targetId, buffers: nextBuffers, sampleKeys: nextKeys };
-};
-
 const CHOKE_GROUPS = Array.from({ length: 16 }, (_, index) => index + 1);
 const SAMPLE_WAVEFORM_BINS = 360;
 
@@ -91,6 +68,8 @@ const sampleChannelLabel = (channelCount: number) => channelCount === 1 ? "Mono"
 const SampleWaveform: Component<{
   sample: DrumRackSampleAssignment;
   buffer: AudioBuffer | undefined;
+  sourceStartSec: number;
+  sourceEndSec: number;
 }> = (props) => {
   const appPreferences = useAppPreferences();
   let canvasRef: HTMLCanvasElement | undefined;
@@ -101,23 +80,30 @@ const SampleWaveform: Component<{
   createEffect(() => {
     const sample = props.sample;
     const buffer = props.buffer;
-    const nextRequestKey = `${drumRackSampleKey(sample)}\n${buffer ? String(buffer.length) : "url"}`;
+    const region = sampledInstrumentRegion(sample.source, props.sourceStartSec, props.sourceEndSec);
+    const regionAssetKey = sampledInstrumentRegionIdentity(sample, region);
+    const nextRequestKey = `${regionAssetKey}\n${buffer ? String(buffer.length) : "missing"}`;
     if (waveformRequestKey === nextRequestKey) return;
     waveformRequestKey = nextRequestKey;
     let cancelled = false;
     setPeaks(null);
+    if (!buffer) {
+      onCleanup(() => {
+        cancelled = true;
+      });
+      return;
+    }
     void getWaveformSlice({
-      assetKey: sample.assetKey,
+      assetKey: regionAssetKey,
       sourceIdentity: {
-        assetKey: sample.assetKey,
-        durationSec: sample.source.durationSec,
-        sampleRate: sample.source.sampleRate,
-        channelCount: sample.source.channelCount,
+        assetKey: regionAssetKey,
+        durationSec: buffer.duration,
+        sampleRate: buffer.sampleRate,
+        channelCount: buffer.numberOfChannels,
       },
-      sampleUrl: sample.url,
       buffer,
       sourceStartSec: 0,
-      sourceEndSec: sample.source.durationSec,
+      sourceEndSec: buffer.duration,
       bins: SAMPLE_WAVEFORM_BINS,
     }).then((nextPeaks) => {
       if (!cancelled) setPeaks(nextPeaks);
@@ -203,76 +189,28 @@ const SampleWaveform: Component<{
 };
 
 const DrumRack: Component<DrumRackProps> = (props) => {
-  const loader = createSampleBufferLoader({ projectId: () => props.projectId });
   const [selectedPadId, setSelectedPadId] = createSignal(untrack(() => props.params.selectedPadId ?? props.params.pads[0]?.id));
-  const [loadingPadId, setLoadingPadId] = createSignal<string>();
-  const [bufferState, setBufferState] = createSignal<DrumRackBufferState>(untrack(() => createEmptyBufferState(props.targetId)));
+  const [buffersVersion, setBuffersVersion] = createSignal(0);
+
+  createEffect(() => {
+    const unsubscribe = props.subscribeBuffers(() => setBuffersVersion((version) => version + 1));
+    onCleanup(unsubscribe);
+  });
 
   createEffect(() => {
     setSelectedPadId(props.params.selectedPadId ?? props.params.pads[0]?.id);
   });
 
-  createEffect(() => {
-    const targetId = props.targetId;
-    const params = props.params;
-    setBufferState((current) => pruneBufferState(current, targetId, params));
-  });
-
   const selectedPad = () => props.params.pads.find((pad) => pad.id === selectedPadId()) ?? props.params.pads[0];
-  const readCachedPadBuffer = (targetId: string, pad: DrumRackPadParams) => {
-    const key = sampleKey(pad.sample);
-    const state = bufferState();
-    if (!key || state.targetId !== targetId || state.sampleKeys.get(pad.id) !== key) return undefined;
-    return state.buffers.get(pad.id);
-  };
-  const currentPadSampleKey = (padId: string) => sampleKey(props.params.pads.find((pad) => pad.id === padId)?.sample);
-
-  const loadPadBuffer = async (targetId: string, pad: DrumRackPadParams) => {
-    const sample = pad.sample;
-    if (!sample) return undefined;
-    setLoadingPadId(pad.id);
-    const audioEngine = props.audioEngine;
-    const buffer = await loader.load(
-      sample.url,
-      (data, targetSampleRate) => audioEngine.decodeAudioData(data, targetSampleRate),
-      { targetSampleRate: sample.source.sampleRate },
-    );
-    if (untrack(loadingPadId) === pad.id) setLoadingPadId(undefined);
-    if (untrack(() => props.targetId) !== targetId) return undefined;
-    return buffer ?? undefined;
+  const readCachedPadBuffer = (pad: DrumRackPadParams) => {
+    buffersVersion();
+    if (!pad.sample) return undefined;
+    return props.buffers?.()?.get(pad.id)?.buffer;
   };
 
-  const syncPadBuffer = async (pad: DrumRackPadParams) => {
-    const targetId = props.targetId;
-    const params = props.params;
-    const key = sampleKey(pad.sample);
-    if (!key) return false;
-
-    const cachedState = bufferState();
-    const cachedBuffer = readCachedPadBuffer(targetId, pad);
-    if (cachedBuffer) {
-      props.audioEngine.setTrackDrumRack(targetId, params, cachedState.buffers);
-      return true;
-    }
-
-    const buffer = await loadPadBuffer(targetId, pad);
-    if (!buffer) return false;
-    if (currentPadSampleKey(pad.id) !== key) return false;
-    const nextParams = props.params;
-    const pruned = pruneBufferState(bufferState(), targetId, nextParams);
-    const buffers = new Map(pruned.buffers);
-    const sampleKeys = new Map(pruned.sampleKeys);
-    buffers.set(pad.id, buffer);
-    sampleKeys.set(pad.id, key);
-    setBufferState({ targetId, buffers, sampleKeys });
-    props.audioEngine.setTrackDrumRack(targetId, nextParams, buffers);
-    return true;
-  };
-
-  const previewPad = async (pad: DrumRackPadParams) => {
+  const previewPad = (pad: DrumRackPadParams) => {
     if (!pad.sample || pad.mute) return;
-    const didSync = await syncPadBuffer(pad);
-    if (!didSync) return;
+    if (!readCachedPadBuffer(pad)) return;
     if (props.onPreviewNote) {
       props.onPreviewNote(props.targetId, pad.note, 1, 0.35);
     } else {
@@ -280,31 +218,9 @@ const DrumRack: Component<DrumRackProps> = (props) => {
     }
   };
 
-  const assignSample = async (pad: DrumRackPadParams, sample: SampleDragData) => {
-    const targetId = props.targetId;
+  const assignSample = (pad: DrumRackPadParams, sample: SampleDragData) => {
     const assignment = sampleToAssignment(sample);
     props.onAssignSampleToPad(pad.id, assignment);
-    const audioEngine = props.audioEngine;
-    const buffer = await loader.load(
-      assignment.url,
-      (data, targetSampleRate) => audioEngine.decodeAudioData(data, targetSampleRate),
-      { targetSampleRate: assignment.source.sampleRate },
-    );
-    if (!buffer || untrack(() => props.targetId) !== targetId) return;
-    const key = drumRackSampleKey(assignment);
-    if (currentPadSampleKey(pad.id) !== key) return;
-    const nextParams = props.params;
-    const pruned = pruneBufferState(bufferState(), targetId, nextParams);
-    const buffers = new Map(pruned.buffers);
-    const sampleKeys = new Map(pruned.sampleKeys);
-    buffers.set(pad.id, buffer);
-    sampleKeys.set(pad.id, key);
-    setBufferState({ targetId, buffers, sampleKeys });
-    props.audioEngine.setTrackDrumRack(
-      targetId,
-      nextParams,
-      buffers,
-    );
   };
 
   const acceptsSampleDrop = (event: DragEvent) => {
@@ -395,14 +311,13 @@ const DrumRack: Component<DrumRackProps> = (props) => {
                 </div>
                 <button
                   class="flex h-6 w-6 shrink-0 items-center justify-center border border-border bg-app-surface text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-                  disabled={!pad().sample || pad().mute || loadingPadId() === pad().id}
-                  onClick={() => void previewPad(pad())}
+                  disabled={!pad().sample || pad().mute || !readCachedPadBuffer(pad())}
+                  onClick={() => previewPad(pad())}
                   aria-label={`Preview ${padDisplayName(pad())}`}
                   title="Preview"
                 >
                   <Show
-                    when={loadingPadId() !== pad().id}
-                    fallback={<span class="font-mono text-2xs leading-none">...</span>}
+                    when={true}
                   >
                     <span class="ml-px h-0 w-0 border-y-4 border-l-8 border-y-transparent border-l-current" />
                   </Show>
@@ -428,7 +343,12 @@ const DrumRack: Component<DrumRackProps> = (props) => {
                       onDragOver={handleSampleDragOver}
                       onDrop={(event) => handleSampleDrop(event, pad())}
                     >
-                      <SampleWaveform sample={sample()} buffer={readCachedPadBuffer(props.targetId, pad())} />
+                      <SampleWaveform
+                        sample={sample()}
+                        buffer={readCachedPadBuffer(pad())}
+                        sourceStartSec={pad().startSec}
+                        sourceEndSec={pad().endSec ?? sample().source.durationSec}
+                      />
                       <div class="mt-1 flex items-center gap-2 text-2xs leading-none text-muted-foreground">
                         <span>{formatSampleLength(pad())}</span>
                         <span>{formatSampleRate(sample().source.sampleRate)}</span>

@@ -4,6 +4,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { audioCoreWasmAbiVersion } from "@daw-browser/audio-core-wasm"
+import { defaultDecodedAudioPageFrames } from "@daw-browser/audio-engine/media-pages"
 import { portableGraphContractHash, processorContractHash } from "@daw-browser/audio-core-contract/generated"
 import { maxVst3WorkerEventsPerBlock } from "@daw-browser/plugin-host-protocol"
 import { z } from "zod"
@@ -27,6 +28,7 @@ import {
   nativeAudioHostControlTypes,
   nativeAudioHostProtocolVersion,
 } from "@daw-browser/desktop-protocol/native-audio-host"
+import type { NativeHostMappedAssetPage } from "@daw-browser/audio-engine/native-host-wire"
 
 const hostScript = `
 const u32 = (value) => {
@@ -107,7 +109,7 @@ const recordingBlock = () => {
   samples.writeFloatLE(0.25, 0)
   samples.writeFloatLE(-0.5, 4)
   return frame(32, Buffer.concat([
-    u32(1), u64(1), u32(0), u32(2), u32(1), f32(0.4), f32(0.5), samples,
+    u32(1), u64(1), u64(0), u32(2), u32(1), f32(0.4), f32(0.5), samples,
   ]))
 }
 const recordingStatus = () => frame(33, Buffer.concat([
@@ -230,6 +232,8 @@ process.stdin.on("data", (chunk) => {
         else process.stdout.write(frame(55, u64(10)))
       }
       sendChunk()
+    } else if (type === 53 && process.env.MODE === "offline-mapped-pages") {
+      process.stdout.write(Buffer.concat([ack(type), frame(55, u64(0))]))
     } else if (type === 53 && process.env.MODE === "offline-stalled") {
       process.stdout.write(ack(type))
     } else if (type === 26) {
@@ -243,6 +247,8 @@ process.stdin.on("data", (chunk) => {
       setTimeout(() => process.stdout.write(ack(type)), 30)
     } else if (type === 22 && process.env.MODE === "rollback-rejected") {
       process.stdout.write(ack(type, 0))
+    } else if (type === 3 && process.env.MODE === "close-on-configure") {
+      process.exit(0)
     } else if (type === 10 && vstPlaybackFlag(payload) !== 0) {
       process.exit(2)
     } else {
@@ -263,7 +269,7 @@ describe("native audio host protocol", () => {
     expect(encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.graphRollback)).toEqual(
       Buffer.from([
         0x44, 0x41, 0x57, 0x48,
-        0x00, 0x00, 0x00, 0x11,
+        0x00, 0x00, 0x00, 0x12,
         0x00, 0x00, 0x00, 0x27,
         0x00, 0x00, 0x00, 0x00,
       ]),
@@ -499,6 +505,111 @@ test("consumes offline PCM bursts while waiting for the start acknowledgement", 
       },
     })
     expect(chunks).toEqual([0, 1, 2, 3, 4])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("cancels mapped-page rendering without leaving a provider rejection unhandled", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-mapped-cancel-"))
+  const hostPath = path.join(directory, "host.mjs")
+  const scriptPath = path.join(directory, "fixture.mjs")
+  await writeFile(scriptPath, hostScript)
+  await writeFile(hostPath, `#!/bin/sh\nexec ${process.execPath} ${scriptPath}\n`)
+  await chmod(hostPath, 0o755)
+  try {
+    const controller = new AbortController()
+    const providerCalled = Promise.withResolvers<void>()
+    const render = renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 1,
+        totalFrames: 1,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        mappedAssets: [{
+          sessionAssetId: 1,
+          sourceAssetKey: "source-a",
+          frameCount: 1,
+          sampleRateHz: 48_000,
+          channelCount: 1,
+          ranges: [{ startFrame: 0, frameCount: 1 }],
+        }],
+        transport: { epoch: 1, running: false, frame: 0 },
+        schedule: new Uint8Array([1]),
+      },
+      signal: controller.signal,
+      onChunk: () => undefined,
+      onMappedPage: async () => {
+        providerCalled.resolve()
+        return new Promise<NativeHostMappedAssetPage>(() => {})
+      },
+    })
+    await providerCalled.promise
+    controller.abort()
+    await expect(render).rejects.toMatchObject({ name: "AbortError" })
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("keeps mapped offline page requests within the bounded provider page size", async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), "daw-offline-render-mapped-pages-"))
+  const hostPath = path.join(directory, "host.mjs")
+  const scriptPath = path.join(directory, "fixture.mjs")
+  await writeFile(scriptPath, hostScript)
+  await writeFile(hostPath, `#!/bin/sh\nMODE=offline-mapped-pages exec ${process.execPath} ${scriptPath}\n`)
+  await chmod(hostPath, 0o755)
+  try {
+    const totalFrames = 6 * 60 * 48_000
+    const pageFrames = defaultDecodedAudioPageFrames
+    const pages: Array<{ startFrame: number; frameCount: number }> = []
+    await renderNativeOffline({
+      hostPath,
+      plan: {
+        version: 1,
+        sampleRateHz: 48_000,
+        channelCount: 1,
+        totalFrames: 1,
+        blockFrames: 1,
+        graph: new Uint8Array([1]),
+        assets: [],
+        mappedAssets: [{
+          sessionAssetId: 1,
+          sourceAssetKey: "asset:local-6-minute",
+          frameCount: totalFrames,
+          sampleRateHz: 48_000,
+          channelCount: 1,
+          ranges: [{ startFrame: 0, frameCount: totalFrames }],
+        }],
+        transport: { epoch: 1, running: false, frame: 0 },
+        schedule: new Uint8Array([1]),
+      },
+      signal: new AbortController().signal,
+      onChunk: () => undefined,
+      onMappedPage: async (request) => {
+        if (request.frameCount > pageFrames) {
+          throw new Error('Native audio asset "asset:local-6-minute" page is invalid.')
+        }
+        pages.push({ startFrame: request.startFrame, frameCount: request.frameCount })
+        return {
+          sessionAssetId: request.asset.sessionAssetId,
+          startFrame: request.startFrame,
+          frameCount: request.frameCount,
+          planarPcm: new Uint8Array(request.frameCount * request.asset.channelCount * Float32Array.BYTES_PER_ELEMENT),
+        }
+      },
+    })
+    expect(pages).toHaveLength(Math.ceil(totalFrames / pageFrames))
+    expect(pages[0]).toEqual({ startFrame: 0, frameCount: pageFrames })
+    expect(pages.at(-1)).toEqual({
+      startFrame: totalFrames - (totalFrames % pageFrames),
+      frameCount: totalFrames % pageFrames || pageFrames,
+    })
+    expect(pages.reduce((total, page) => total + page.frameCount, 0)).toBe(totalFrames)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
@@ -841,7 +952,7 @@ test("cleans the offline completion watchdog on abort", async () => {
 })
 
 const fixtureSupervisor = async (
-  mode?: "incompatible" | "loss" | "wrong-ack" | "rejected-ack" | "state-rejected" | "state-malformed" | "state-mismatch" | "notification" | "meter" | "schedule" | "editor-interaction" | "parameter-edit" | "silent" | "editor-anchor" | "editor-queued" | "ignore-teardown" | "rollback-rejected" | "begin-delayed" | "commit-delayed",
+  mode?: "incompatible" | "loss" | "wrong-ack" | "rejected-ack" | "state-rejected" | "state-malformed" | "state-mismatch" | "notification" | "meter" | "schedule" | "editor-interaction" | "parameter-edit" | "silent" | "editor-anchor" | "editor-queued" | "ignore-teardown" | "rollback-rejected" | "begin-delayed" | "commit-delayed" | "close-on-configure",
   onSpawn?: () => void,
   supervisorOptions?: NativeAudioHostSupervisorOptions,
   onChild?: (child: ChildProcessWithoutNullStreams) => void,
@@ -1257,13 +1368,18 @@ test("keeps the host alive after a recoverable negative acknowledgement", async 
     const losses: string[] = []
     fixture.supervisor.onLoss((error) => losses.push(error.message))
     await fixture.supervisor.start()
-    await expect(fixture.supervisor.configure({
+    const rejection = fixture.supervisor.configure({
       deviceId: "coreaudio:fixture",
       sampleRateHz: 48_000,
       maxFramesPerBlock: 512,
       channelCount: 2,
       revision: 1,
-    })).rejects.toBeInstanceOf(NativeAudioHostCommandError)
+    })
+    await expect(rejection).rejects.toBeInstanceOf(NativeAudioHostCommandError)
+    await expect(rejection).rejects.toMatchObject({
+      requestType: nativeAudioHostControlTypes.deviceConfigure,
+      requestName: "deviceConfigure",
+    })
     expect(fixture.supervisor.status().running).toBeTrue()
     expect(losses).toEqual([])
     await expect(fixture.supervisor.configure({
@@ -1407,6 +1523,28 @@ test("notifies subscribers when the native host is lost", async () => {
     })
     await fixture.supervisor.start()
     await expect(lost).resolves.toBe("The native audio host stopped.")
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("names the pending request when the native host closes", async () => {
+  const fixture = await fixtureSupervisor("close-on-configure")
+  try {
+    const lost = new Promise<string>((resolve) => {
+      fixture.supervisor.onLoss((error) => resolve(error.message))
+    })
+    await fixture.supervisor.start()
+    const configure = fixture.supervisor.configure({
+      deviceId: "coreaudio:fixture",
+      sampleRateHz: 48_000,
+      maxFramesPerBlock: 512,
+      channelCount: 2,
+      revision: 1,
+    })
+    await expect(configure).rejects.toThrow("native audio host stopped during deviceConfigure request 3")
+    await expect(lost).resolves.toBe("The native audio host stopped during deviceConfigure request 3.")
   } finally {
     await fixture.supervisor.teardown()
     await fixture.dispose()

@@ -7,9 +7,9 @@ import {
   saveProjectDirectoryHandle,
   type LocalProjectAssetRow,
 } from '~/lib/local-project-db'
+import { sha256File } from '@daw-browser/audio-engine/media-pages'
 import { assetCloudIdMappingKey } from '~/lib/local-cloud-id-map'
 import { createLocalAssetId } from '@daw-browser/shared'
-import { sha256 } from '@noble/hashes/sha2.js'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 
@@ -27,6 +27,7 @@ type CreateLocalAssetInput = {
   projectId: string
   file: File
   metadata?: LocalAssetMetadata
+  signal?: AbortSignal
 }
 
 type LocalAssetWriteErrorKind = 'permission-denied' | 'quota-exceeded' | 'unsupported' | 'write-failed'
@@ -48,6 +49,7 @@ export type LocalAssetBytesResult =
 
 const ASSETS_DIRECTORY_NAME = 'assets'
 const MAX_ASSET_EXTENSION_LENGTH = 16
+const MAX_WRITE_CHUNK_BYTES = 1024 * 1024
 const isPermissionError = (error: Error) => (
   error instanceof DOMException
   && (error.name === 'NotAllowedError' || error.name === 'SecurityError')
@@ -83,6 +85,7 @@ const writeFile = async (
   root: FileSystemDirectoryHandle,
   path: string,
   file: File,
+  signal?: AbortSignal,
 ) => {
   let writable: FileSystemWritableFileStream | undefined
   try {
@@ -92,24 +95,25 @@ const writeFile = async (
     if (!writable) {
       throw new LocalAssetWriteError('unsupported', 'Writable file streams are not supported.')
     }
-    await writable.write(file)
+    for await (const chunk of file.stream()) {
+      signal?.throwIfAborted()
+      for (let offset = 0; offset < chunk.byteLength; offset += MAX_WRITE_CHUNK_BYTES) {
+        signal?.throwIfAborted()
+        await writable.write(chunk.subarray(offset, offset + MAX_WRITE_CHUNK_BYTES))
+      }
+    }
     await writable.close()
   } catch (error) {
     try {
       await writable?.abort()
     } catch {}
+    if (signal?.aborted) throw signal.reason ?? new DOMException('The asset write was canceled.', 'AbortError')
     if (error instanceof LocalAssetWriteError) throw error
     if (error instanceof DOMException && error.name === 'QuotaExceededError') {
       throw new LocalAssetWriteError('quota-exceeded', 'Not enough browser storage is available for this audio file.')
     }
     throw new LocalAssetWriteError('write-failed', 'Audio could not be saved to local project storage.')
   }
-}
-
-const sha256File = async (file: File): Promise<string> => {
-  const hash = sha256.create()
-  for await (const chunk of file.stream()) hash.update(chunk)
-  return hash.digest().reduce((hex, byte) => `${hex}${byte.toString(16).padStart(2, '0')}`, '')
 }
 
 const removeFileIfPresent = async (
@@ -123,6 +127,57 @@ const removeFileIfPresent = async (
     if (error instanceof DOMException && error.name === 'NotFoundError') return
     throw error
   }
+}
+
+const retryFileName = () => `outbox-${crypto.randomUUID()}.bin`
+
+export const materializeLocalRetryFile = async (
+  projectId: string,
+  file: File,
+  signal?: AbortSignal,
+): Promise<{ storagePath: string }> => {
+  const storagePath = retryFileName()
+  const root = await getWritableProjectRoot(projectId)
+  if (!root) throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required.')
+  try {
+    await writeFile(root, storagePath, file, signal)
+    return { storagePath }
+  } catch (error) {
+    await removeFileIfPresent(root, storagePath).catch(() => undefined)
+    throw error
+  }
+}
+
+export const readLocalRetryFile = async (
+  projectId: string,
+  storagePath: string,
+  name = storagePath,
+  type = 'application/octet-stream',
+): Promise<File | undefined> => {
+  const directoryHandle = await getProjectDirectoryHandle(projectId)
+  const root = directoryHandle ?? await getProjectOpfsRoot(projectId)
+  try {
+    if (directoryHandle) {
+      const permission = await queryFileSystemHandlePermission(directoryHandle, 'read')
+      if (permission !== 'granted' && await requestFileSystemHandlePermission(directoryHandle, 'read') !== 'granted') return undefined
+    }
+    const assetsDir = await root.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
+    const stored = await (await assetsDir.getFileHandle(storagePath)).getFile()
+    return new File([stored], name, { type })
+  } catch {
+    return undefined
+  }
+}
+
+export const removeLocalRetryFile = async (
+  projectId: string,
+  storagePath: string,
+): Promise<void> => {
+  const root = await getWritableProjectRoot(projectId)
+  if (!root) {
+    throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required to remove the retry file.')
+  }
+  await removeFileIfPresent(root, storagePath)
 }
 
 type LocalAssetRemovalResult =
@@ -165,20 +220,22 @@ export const writeLocalAssetFileUnlocked = async (
   projectId: string,
   path: string,
   file: File,
+  signal?: AbortSignal,
 ): Promise<void> => {
   const root = await getWritableProjectRoot(projectId)
   if (!root) {
     throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required.')
   }
-  await writeFile(root, path, file)
+  await writeFile(root, path, file, signal)
 }
 
 export const writeLocalAssetFile = async (
   projectId: string,
   path: string,
   file: File,
+  signal?: AbortSignal,
 ): Promise<void> => {
-  await withLocalProjectAssetLock(projectId, () => writeLocalAssetFileUnlocked(projectId, path, file))
+  await withLocalProjectAssetLock(projectId, () => writeLocalAssetFileUnlocked(projectId, path, file, signal))
 }
 
 const createLocalAssetUnlocked = async (input: CreateLocalAssetInput): Promise<LocalProjectAssetRow> => {
@@ -190,7 +247,8 @@ const createLocalAssetUnlocked = async (input: CreateLocalAssetInput): Promise<L
   const timestamp = now()
   const id = createLocalAssetId()
   const storagePath = getAssetFileName(id, input.file.name)
-  const contentHash = await sha256File(input.file)
+  input.signal?.throwIfAborted()
+  const contentHash = await sha256File(input.file, input.signal)
 
   const row: LocalProjectAssetRow = {
     id,
@@ -210,7 +268,7 @@ const createLocalAssetUnlocked = async (input: CreateLocalAssetInput): Promise<L
   }
 
   try {
-    await writeFile(root, storagePath, input.file)
+    await writeFile(root, storagePath, input.file, input.signal)
     const db = await openLocalProjectDb(input.projectId)
     await db.put('assets', row)
   } catch (error) {

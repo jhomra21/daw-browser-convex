@@ -1,9 +1,6 @@
-import {
-  compileLiveNativeProjection,
-} from "@daw-browser/audio-engine/live-native-projection"
+import { compileLiveNativeProjection } from "@daw-browser/audio-engine/live-native-projection"
 import { nativeExternalLatencyFrames as nativeOfflineExternalLatencyFrames } from "~/lib/export/native-offline-render-plan"
 import {
-  nativeAudioHostMaximumAssetFrames,
   nativeAudioHostMaximumInstalledAssets,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import {
@@ -20,11 +17,19 @@ import {
 } from "@daw-browser/audio-engine/native-host-wire"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
 import {
-  isPortableStretchClip,
-  preparePortableStretchAssets,
-  type PortablePreparedStretchAsset,
-} from "@daw-browser/audio-engine/portable-stretch-preparation"
+  prepareNativeStretchArtifacts,
+  type NativePreparedStretchAsset,
+} from "@daw-browser/audio-engine/native-stretch-preparation"
+import { createAudioStretchCache, type AudioStretchCacheOptions } from "@daw-browser/audio-engine/audio-stretch-cache"
+import {
+  createPreparedStretchArtifactRepository,
+  type PreparedStretchArtifactRepository,
+} from "@daw-browser/audio-engine/prepared-stretch-store"
 import type { NativePcmChunkDescriptor } from "@daw-browser/audio-engine/native-pcm-chunking"
+import {
+  createAudioPcmSourceDescriptor,
+  type AudioPcmSourceDescriptor,
+} from "@daw-browser/audio-engine/media-pages"
 import type { SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch } from "@daw-browser/audio-engine/audio-engine"
 import type {
   NativeHostDeviceConfiguration,
@@ -37,6 +42,7 @@ import type {
   NativeScheduleProgress,
 } from "@daw-browser/audio-engine/native-host-wire"
 import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
+import { portableWasmProtocolVersion } from "@daw-browser/audio-engine/portable-wasm-protocol"
 import { encodeNativeExternalAttachmentPlan, maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
 import type {
   LivePlaybackCompileContext,
@@ -47,6 +53,7 @@ import type {
 import type { EffectParamsCommitPayload } from "~/lib/undo/types"
 import { createPortableRecordingWriter } from "~/lib/recording/portable-recording-writer"
 import type { DesktopBridge } from "~/types/desktop-bridge"
+import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type {
   LiveProcessorControl,
   LiveProcessorControlRequest,
@@ -62,6 +69,7 @@ import {
   encodeNativeBuiltInStateCommit,
   nativeBuiltInTimingForCommit,
 } from "./native-built-in-parameter-mapper"
+import { createNativeTimelinePageManager } from "./native-timeline-page-manager"
 
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
 
@@ -135,6 +143,9 @@ type NativePlaybackBridge = Pick<
     | "onMeterBatch"
     | "onScheduleProgress"
   > & {
+    createMappedAsset?: NativeSessionBridge["createMappedAsset"]
+    writeMappedAssetPage?: NativeSessionBridge["writeMappedAssetPage"]
+    prepareMappedAssetRange?: NativeSessionBridge["prepareMappedAssetRange"]
     configure: (
       input: NativeHostDeviceConfiguration,
       transactionToken?: string,
@@ -223,22 +234,31 @@ const assertReply: <T extends NativeSessionReply>(reply: T) => asserts reply is 
   if (!reply.ok) throw new Error(reply.error)
 }
 
-const planarBytes = (planes: readonly Float32Array[]) => {
-  const byteLength = planes.reduce((total, plane) => total + plane.byteLength, 0)
-  const output = new Uint8Array(byteLength)
-  let offset = 0
-  for (const plane of planes) {
-    output.set(new Uint8Array(plane.buffer, plane.byteOffset, plane.byteLength), offset)
-    offset += plane.byteLength
-  }
+const planarPageBytes = (
+  planes: readonly Float32Array[],
+  startFrame: number,
+  frameCount: number,
+) => {
+  const bytesPerPlane = frameCount * Float32Array.BYTES_PER_ELEMENT
+  const output = new Uint8Array(planes.length * bytesPerPlane)
+  planes.forEach((plane, index) => {
+    output.set(
+      new Uint8Array(
+        plane.buffer,
+        plane.byteOffset + startFrame * Float32Array.BYTES_PER_ELEMENT,
+        bytesPerPlane,
+      ),
+      index * bytesPerPlane,
+    )
+  })
   return output
 }
 
-const nativeStretchPreparationMaximumBytes =
-  nativeAudioHostMaximumInstalledAssets
-  * nativeAudioHostMaximumAssetFrames
-  * 2
-  * Float32Array.BYTES_PER_ELEMENT
+const planarBytes = (planes: readonly Float32Array[]) => planarPageBytes(
+  planes,
+  0,
+  planes[0]?.length ?? 0,
+)
 
 const nativeAssetCapacityError =
   `Native playback exceeds the installed audio asset capacity of ${nativeAudioHostMaximumInstalledAssets} assets.`
@@ -273,10 +293,13 @@ export const createNativePlaybackController = (input: {
   compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
   getProjectId?: () => string
   getProjectGeneration?: () => number
+  resolveSource?: AudioPcmSourceResolver
   createBuffer?: (channels: number, frames: number, sampleRate: number) => AudioBuffer
   reportFault?: (message: string) => void
   reportUnavailable?: boolean
   createRecordingWriter?: typeof createPortableRecordingWriter
+  createPreparedStretchRepository?: () => PreparedStretchArtifactRepository
+  createStretchCache?: (options: AudioStretchCacheOptions) => ReturnType<typeof createAudioStretchCache>
 }) => {
   let active = false
   let prepared = false
@@ -293,6 +316,7 @@ export const createNativePlaybackController = (input: {
   let preparedProjectGeneration: number | undefined
   let pendingStart: Promise<NativeStartResult> | undefined
   let pendingStartMode: "play" | "preview" | undefined
+  let pendingStartCompileContext: LivePlaybackCompileContext | undefined
   let lifecycleGeneration = 0
   let nativeSessionGeneration = 0
   let transportEpoch = 1
@@ -300,8 +324,10 @@ export const createNativePlaybackController = (input: {
   let nextTransportTransitionId = 0n
   let installedAssetIds: readonly number[] = []
   let installedAssets: readonly NativeSessionAsset[] = []
-  let preparedStretchAssetsForSession: readonly PortablePreparedStretchAsset[] = []
+  let preparedStretchAssetsForSession: readonly NativePreparedStretchAsset[] = []
+  let preparedStretchLeaseSession: (() => Promise<void>) | undefined
   let nativePcmChunkDescriptorsForSession: readonly NativePcmChunkDescriptor[] = []
+  let nativeTimelinePageManager: ReturnType<typeof createNativeTimelinePageManager> | undefined
   let preparedSnapshot: LivePlaybackSnapshot | undefined
   let preparedGraph: AudioCoreGraphSnapshot | undefined
   let unsubscribeMeters: (() => void) | undefined
@@ -345,6 +371,13 @@ export const createNativePlaybackController = (input: {
   let latestSpectrumSequence = 0n
   let latestScheduleProgress: NativeScheduleProgress | undefined
   let stretchPreparationAbortController: AbortController | undefined
+  let startAbortController: AbortController | undefined
+  let preparedStretchRepository: PreparedStretchArtifactRepository | undefined
+  let stretchCache: ReturnType<typeof createAudioStretchCache> | undefined
+  let installedAssetSourceKeys = new Map<string, string>()
+  let destroyed = false
+  let destroyPromise: Promise<void> | undefined
+  let nativeStretchDrainPromise: Promise<void> | undefined
   const resolveProjectGeneration = () => input.getProjectGeneration?.() ?? 0
   const safePreparedProjectGeneration = (projectGeneration: number) =>
     Number.isSafeInteger(projectGeneration) && projectGeneration > 0 ? projectGeneration : 1
@@ -576,7 +609,7 @@ export const createNativePlaybackController = (input: {
     epoch: number
     sampleRateHz: number
     assets: readonly NativeSessionAsset[]
-    preparedStretchAssets?: readonly PortablePreparedStretchAsset[]
+    preparedStretchAssets?: readonly NativePreparedStretchAsset[]
     nativePcmChunkDescriptors?: readonly NativePcmChunkDescriptor[]
     projectGeneration?: number
     startFrame: number
@@ -607,8 +640,10 @@ export const createNativePlaybackController = (input: {
         maximumVstEventsPerBlock: maxVst3WorkerFrames,
       },
       assets: options.assets,
+      assetSourceKeys: installedAssetSourceKeys,
       preparedStretchAssets: options.preparedStretchAssets,
       nativePcmChunkDescriptors: options.nativePcmChunkDescriptors,
+      pageManager: nativeTimelinePageManager,
       projectGeneration: options.projectGeneration,
       startFrame: options.startFrame,
       onFault: (error) => {
@@ -641,9 +676,12 @@ export const createNativePlaybackController = (input: {
     if (!preservePendingStart) {
       pendingStart = undefined
       pendingStartMode = undefined
+      pendingStartCompileContext = undefined
     }
     stretchPreparationAbortController?.abort()
     stretchPreparationAbortController = undefined
+    startAbortController?.abort()
+    startAbortController = undefined
     const hadSession = prepared
       || nativeSessionStarted
       || active
@@ -677,19 +715,35 @@ export const createNativePlaybackController = (input: {
     installedAssetIds = []
     preparedStretchAssetsForSession = []
     nativePcmChunkDescriptorsForSession = []
+    installedAssetSourceKeys = new Map()
+    const pageManager = nativeTimelinePageManager
+    const releaseStretch = preparedStretchLeaseSession
+    const drain = (async () => {
+      await pageManager?.dispose()
+      await releaseStretch?.()
+    })().catch(() => {})
+    nativeStretchDrainPromise = nativeStretchDrainPromise
+      ? Promise.all([nativeStretchDrainPromise, drain]).then(() => undefined)
+      : drain
+    nativeTimelinePageManager = undefined
+    preparedStretchLeaseSession = undefined
     sampleRate = 0
     maximumFramesPerBlock = 0
     transportFrame = 0
     if (hadSession) transportEpoch += 1
   }
 
-  const dispose = async () => {
+  const dispose = async (options?: { invalidateProjectArtifacts?: boolean }) => {
     intentionalHostTransitionDepth += 1
     try {
       const bridge = input.bridge
       const assetIds = installedAssetIds
+      const pageManager = nativeTimelinePageManager
       const hostLost = hasNativeHostConnectionLoss()
       invalidateNativeOwnership()
+      await pageManager?.dispose()
+      await nativeStretchDrainPromise
+      if (options?.invalidateProjectArtifacts) stretchCache?.invalidate()
       if (!bridge || hostLost) return
       const stopPromise = bridge.session.stop()
       await cancelRecording().catch(() => undefined)
@@ -846,6 +900,8 @@ export const createNativePlaybackController = (input: {
     }
     if (prepared) {
       const assetIds = installedAssetIds
+      const pageManager = nativeTimelinePageManager
+      const releaseStretch = preparedStretchLeaseSession
       installedAssetIds = []
       nativeSessionGeneration += 1
       scheduleCoordinator?.dispose()
@@ -863,6 +919,8 @@ export const createNativePlaybackController = (input: {
       preparedGraph = undefined
       installedAssets = []
       preparedStretchAssetsForSession = []
+      nativeTimelinePageManager = undefined
+      preparedStretchLeaseSession = undefined
       nativePcmChunkDescriptorsForSession = []
       sampleRate = 0
       maximumFramesPerBlock = 0
@@ -870,10 +928,15 @@ export const createNativePlaybackController = (input: {
         bridge.session.stop(),
         ...assetIds.map((sessionAssetId) => bridge.session.releaseAsset(sessionAssetId)),
       ])
+      await pageManager?.dispose()
+      await releaseStretch?.()
       await bridge.session.teardown().catch(() => undefined)
     }
+    const startAbortControllerForAttempt = new AbortController()
+    startAbortController = startAbortControllerForAttempt
     let transactionOpen = false
     let transactionToken: string | undefined
+    let attemptedStretchLeaseDispose: (() => Promise<void>) | undefined
     let requiresNative = false
     let startStage = "compile"
     try {
@@ -941,30 +1004,47 @@ export const createNativePlaybackController = (input: {
         return unavailable("The native VST3 graph cannot activate with the current sidechain routing.")
       }
       if (snapshot.requiresNativePlayback && !attachmentPlan) return unavailable("The active VST3 attachment plan is unavailable.")
-      const hasStretchClips = snapshot.tracks.some((track) => track.clips.some(isPortableStretchClip))
+      const hasStretchClips = snapshot.tracks.some((track) => track.clips.some((clip) => (
+        clip.midi === undefined
+        && clip.audioWarp?.enabled === true
+        && clip.audioWarp.mode === "stretch"
+      )))
       preparedStretchAssetsForSession = []
-      let preparedStretchAssets: readonly PortablePreparedStretchAsset[] = []
+      let preparedStretchAssets: readonly NativePreparedStretchAsset[] = []
       if (hasStretchClips) {
-        const createBuffer = input.createBuffer
-        if (!createBuffer) return unavailable("Native Stretch playback requires an AudioBuffer creation function.")
+        if (!preparedStretchRepository) {
+          preparedStretchRepository = input.createPreparedStretchRepository?.()
+          if (!preparedStretchRepository) {
+            if (!globalThis.indexedDB || !globalThis.navigator?.locks) {
+              throw new Error("Native Stretch playback requires IndexedDB and cross-realm Web Locks for bounded artifact storage.")
+            }
+            preparedStretchRepository = createPreparedStretchArtifactRepository()
+          }
+        }
+        stretchCache ??= (input.createStretchCache ?? createAudioStretchCache)({
+          resolveSource: input.resolveSource,
+          artifactRepository: preparedStretchRepository,
+        })
         const preparationAbortController = new AbortController()
         stretchPreparationAbortController = preparationAbortController
         try {
-          const preparation = await preparePortableStretchAssets({
+          const preparation = await prepareNativeStretchArtifacts({
             tracks: snapshot.tracks,
             projectBpm: snapshot.bpm,
             projectGeneration: safePreparedProjectGeneration(projectGeneration),
-            requiredSampleRateHz: deviceReply.device.nominalSampleRateHz,
-            maximumAssetCount: nativeAudioHostMaximumInstalledAssets,
-            maximumPreparationBytes: nativeStretchPreparationMaximumBytes,
-            createBuffer,
+            cache: stretchCache,
+            repository: preparedStretchRepository,
             signal: preparationAbortController.signal,
           })
-          if (cancelled()) return "unavailable"
           if (!preparation.supported) {
             return unavailable(preparation.diagnostics.map((diagnostic) => diagnostic.message).join(" "))
           }
+          if (cancelled()) {
+            await preparation.dispose()
+            return "unavailable"
+          }
           preparedStretchAssets = preparation.assets
+          attemptedStretchLeaseDispose = preparation.dispose
         } finally {
           if (stretchPreparationAbortController === preparationAbortController) {
             stretchPreparationAbortController = undefined
@@ -984,11 +1064,28 @@ export const createNativePlaybackController = (input: {
         preparedStretchAssets,
       })
       if (!projection.supported) return unavailable(projection.reasons.join(" "))
+      const preparedStretchAssetsById = new Map(
+        preparedStretchAssets.map((prepared) => [prepared.preparedStretchArtifactId ?? prepared.asset.assetId, prepared]),
+      )
+      for (const { asset, preparedStretchArtifactId } of projection.assets) {
+        if (!preparedStretchArtifactId) continue
+        const prepared = preparedStretchAssetsById.get(preparedStretchArtifactId)
+        if (!prepared
+          || prepared.asset.assetId !== preparedStretchArtifactId
+          || prepared.asset.frameCount !== asset.frameCount
+          || prepared.asset.sampleRateHz !== asset.sampleRateHz
+          || prepared.asset.channelCount !== asset.channelCount) {
+          return unavailable(`Native Stretch prepared artifact "${preparedStretchArtifactId}" is not a known source for this project.`)
+        }
+      }
       if (projection.assets.length > nativeAudioHostMaximumInstalledAssets) {
         return unavailable(nativeAssetCapacityError)
       }
       if (deviceReply.device.outputChannelCount < 2) return unavailable("The native audio output does not provide compatible stereo routing.")
       const assets = mapNativeSessionAssets(projection.graph.assets)
+      installedAssetSourceKeys = new Map(
+        projection.assets.map(({ asset, sourceAssetKey }) => [asset.assetId, sourceAssetKey]),
+      )
       const nativeGraph = projection.graph
       startStage = "begin-transaction"
       const transactionReply = await bridge.session.beginTransaction()
@@ -1020,17 +1117,97 @@ export const createNativePlaybackController = (input: {
         revision: snapshot.revision,
       }, transactionToken))
       if (cancelled()) throw new Error("Native playback startup was cancelled.")
-      for (const { asset, pcm } of projection.assets) {
+      if (bridge.session.createMappedAsset && bridge.session.writeMappedAssetPage && bridge.session.prepareMappedAssetRange) {
+        const ordinaryAssets = projection.assets
+          .filter(({ pcm }) => !pcm)
+        const ordinarySources = (await Promise.all(ordinaryAssets.map(async ({ asset, sourceAssetKey }) => {
+            const prepared = preparedStretchAssets.find((candidate) => (
+              candidate.preparedStretchArtifactId === sourceAssetKey
+            ))
+            if (prepared) {
+              return {
+                sourceAssetKey,
+                sessionAssetId: assets.find(({ asset: mapped }) => mapped.assetId === asset.assetId)?.sessionAssetId ?? 0,
+                frameCount: prepared.asset.frameCount,
+                sampleRateHz: prepared.asset.sampleRateHz,
+                channelCount: prepared.asset.channelCount,
+                preparedStretchArtifactId: prepared.preparedStretchArtifactId,
+                artifactRepository: preparedStretchRepository,
+              }
+            }
+            const snapshotAsset = snapshot.assets.find((candidate) => candidate.assetId === sourceAssetKey)
+            if (!snapshotAsset) throw new Error(`Native audio asset "${sourceAssetKey}" is absent from the playback snapshot.`)
+            const clip = snapshot.tracks
+              .flatMap((track) => track.clips)
+              .find((candidate) => candidate.sourceAssetKey === sourceAssetKey)
+            const descriptor: AudioPcmSourceDescriptor | undefined = snapshotAsset.buffer
+              ? createAudioPcmSourceDescriptor({
+                identity: `buffer:${sourceAssetKey}`,
+                durationSec: snapshotAsset.buffer.duration,
+                frameCount: snapshotAsset.buffer.length,
+                sampleRate: snapshotAsset.buffer.sampleRate,
+                channelCount: snapshotAsset.buffer.numberOfChannels,
+                source: snapshotAsset.buffer,
+              })
+              : clip && input.resolveSource
+                ? await input.resolveSource(clip, startAbortControllerForAttempt.signal)
+                : undefined
+            if (!descriptor) {
+              throw new Error(`Native audio asset "${sourceAssetKey}" has no resolvable PCM source descriptor.`)
+            }
+            return {
+              sourceAssetKey,
+              sessionAssetId: assets.find(({ asset: mapped }) => mapped.assetId === asset.assetId)?.sessionAssetId ?? 0,
+              frameCount: descriptor.frameCount,
+              sampleRateHz: descriptor.sampleRate,
+              channelCount: descriptor.channelCount,
+              descriptor,
+            }
+          }))).filter((source) => source.sessionAssetId > 0)
+        nativeTimelinePageManager = createNativeTimelinePageManager({
+          sources: ordinarySources,
+          writePage: async (page, signal) => {
+            signal?.throwIfAborted()
+            const writeMappedAssetPage = bridge.session.writeMappedAssetPage
+            if (!writeMappedAssetPage) throw new Error("The native mapped asset page bridge is unavailable.")
+            assertReply(await writeMappedAssetPage(page, nativeSessionStarted ? undefined : transactionToken))
+          },
+          prepareRange: async (sessionAssetId, startFrame, frameCount, signal) => {
+            signal?.throwIfAborted()
+            const prepareMappedAssetRange = bridge.session.prepareMappedAssetRange
+            if (!prepareMappedAssetRange) throw new Error("The native mapped asset preparation bridge is unavailable.")
+            assertReply(await prepareMappedAssetRange(
+              sessionAssetId,
+              startFrame,
+              frameCount,
+              nativeSessionStarted ? undefined : transactionToken,
+            ))
+          },
+        })
+      }
+      for (const { asset, pcm, preparedStretchArtifactId } of projection.assets) {
         startStage = "install-asset"
         const mapping = assets.find(({ asset: mapped }) => mapped.assetId === asset.assetId)
         if (!mapping) throw new Error("Native session asset mapping is incomplete.")
-        assertReply(await bridge.session.installAsset({
-          sessionAssetId: mapping.sessionAssetId,
-          frameCount: asset.frameCount,
-          sampleRateHz: asset.sampleRateHz,
-          channelCount: asset.channelCount,
-          planarPcm: planarBytes(pcm.planes),
-        }, transactionToken))
+        if (pcm) {
+          assertReply(await bridge.session.installAsset({
+            sessionAssetId: mapping.sessionAssetId,
+            frameCount: asset.frameCount,
+            sampleRateHz: asset.sampleRateHz,
+            channelCount: asset.channelCount,
+            planarPcm: planarBytes(pcm.planes),
+          }, transactionToken))
+        } else if (bridge.session.createMappedAsset && bridge.session.writeMappedAssetPage && bridge.session.prepareMappedAssetRange) {
+          assertReply(await bridge.session.createMappedAsset({
+            sessionAssetId: mapping.sessionAssetId,
+            frameCount: asset.frameCount,
+            sampleRateHz: asset.sampleRateHz,
+            channelCount: asset.channelCount,
+            preparedStretchArtifactId,
+          }, transactionToken))
+        } else {
+          throw new Error("Native mapped asset hydration is unavailable.")
+        }
         if (cancelled()) throw new Error("Native playback startup was cancelled.")
       }
       startStage = "publish-graph"
@@ -1090,6 +1267,8 @@ export const createNativePlaybackController = (input: {
       installedAssetIds = assets.map(({ sessionAssetId }) => sessionAssetId)
       installedAssets = assets
       preparedStretchAssetsForSession = preparedStretchAssets
+      preparedStretchLeaseSession = attemptedStretchLeaseDispose
+      attemptedStretchLeaseDispose = undefined
       nativePcmChunkDescriptorsForSession = projection.nativePcmChunkDescriptors
       preparedSnapshot = runtimeSnapshot
       preparedGraph = nativeGraph
@@ -1152,13 +1331,21 @@ export const createNativePlaybackController = (input: {
         error: sanitizeNativeVst3DiagnosticError(diagnosticError),
       })
       if (!wasCancelled && !connectionLoss) {
-        reportFault(error instanceof Error ? error.message : "Native playback could not start.")
+        reportFault(
+          `Native playback failed during ${startStage}: ${sanitizeNativeVst3DiagnosticError(diagnosticError)}`,
+        )
       }
       return result
+    } finally {
+      if (startAbortController === startAbortControllerForAttempt) {
+        startAbortController = undefined
+      }
+      await attemptedStretchLeaseDispose?.()
     }
   }
 
   const start = (transport: LivePlaybackTransport, compileContext?: LivePlaybackCompileContext): Promise<NativeStartResult> => {
+    if (destroyed) return Promise.resolve("unavailable")
     if (active) return Promise.resolve("started")
     if (pendingStart) {
       if (pendingStartMode === "play") return pendingStart
@@ -1170,10 +1357,12 @@ export const createNativePlaybackController = (input: {
         : result)
       pendingStart = request
       pendingStartMode = "play"
+      pendingStartCompileContext = compileContext
       void request.finally(() => {
         if (pendingStart === request) {
           pendingStart = undefined
           pendingStartMode = undefined
+          pendingStartCompileContext = undefined
         }
       })
       return request
@@ -1200,21 +1389,21 @@ export const createNativePlaybackController = (input: {
     })()
     pendingStart = request
     pendingStartMode = "play"
+    pendingStartCompileContext = compileContext
     void request.finally(() => {
       if (pendingStart === request) {
         pendingStart = undefined
         pendingStartMode = undefined
+        pendingStartCompileContext = undefined
       }
     })
     return request
   }
 
-  const ensureLivePreview = (playheadSec: number, compileContext?: LivePlaybackCompileContext): Promise<NativeStartResult> => {
-    if (!input.bridge) return Promise.resolve("unavailable")
-    if (livePreviewActive) return Promise.resolve("started")
-    if (pendingStart) {
-      return pendingStart
-    }
+  const createLivePreviewStart = (
+    playheadSec: number,
+    compileContext?: LivePlaybackCompileContext,
+  ): Promise<NativeStartResult> => {
     const generation = lifecycleGeneration
     const projectGeneration = resolveProjectGeneration()
     const request = (async () => {
@@ -1244,13 +1433,45 @@ export const createNativePlaybackController = (input: {
     })()
     pendingStart = request
     pendingStartMode = "preview"
+    pendingStartCompileContext = compileContext
     void request.finally(() => {
       if (pendingStart === request) {
         pendingStart = undefined
         pendingStartMode = undefined
+        pendingStartCompileContext = undefined
       }
     })
     return request
+  }
+
+  const ensureLivePreview = (playheadSec: number, compileContext?: LivePlaybackCompileContext): Promise<NativeStartResult> => {
+    if (destroyed) return Promise.resolve("unavailable")
+    if (!input.bridge) return Promise.resolve("unavailable")
+    if (livePreviewActive) return Promise.resolve("started")
+    if (pendingStart) {
+      if (
+        !compileContext
+        || pendingStartMode !== "preview"
+        || pendingStartCompileContext === compileContext
+      ) return pendingStart
+      const supersededPreview = pendingStart
+      invalidateNativeOwnership()
+      const request = supersededPreview
+        .catch(() => "unavailable" as const)
+        .then(() => createLivePreviewStart(playheadSec, compileContext))
+      pendingStart = request
+      pendingStartMode = "preview"
+      pendingStartCompileContext = compileContext
+      void request.finally(() => {
+        if (pendingStart === request) {
+          pendingStart = undefined
+          pendingStartMode = undefined
+          pendingStartCompileContext = undefined
+        }
+      })
+      return request
+    }
+    return createLivePreviewStart(playheadSec, compileContext)
   }
 
   let preparedTransportTransition = Promise.resolve()
@@ -1258,6 +1479,21 @@ export const createNativePlaybackController = (input: {
     const transition = preparedTransportTransition.then(task)
     preparedTransportTransition = transition.then(() => undefined, () => undefined)
     return transition
+  }
+
+  const destroy = async () => {
+    if (destroyPromise) return destroyPromise
+    destroyed = true
+    const pending = pendingStart
+    destroyPromise = (async () => {
+      await dispose()
+      await pending?.catch(() => undefined)
+      await stretchCache?.dispose()
+      stretchCache = undefined
+      await preparedStretchRepository?.dispose?.()
+      preparedStretchRepository = undefined
+    })()
+    return destroyPromise
   }
 
   const transitionPreparedTransport = async (
@@ -1466,7 +1702,7 @@ export const createNativePlaybackController = (input: {
           block.planarPcm.byteLength / Float32Array.BYTES_PER_ELEMENT,
         )
         writer.write({
-          version: 1,
+          version: portableWasmProtocolVersion,
           type: "recording-capture-block",
           generation,
           sessionId: Number(numericSessionId),
@@ -1961,6 +2197,7 @@ export const createNativePlaybackController = (input: {
     start,
     pause,
     dispose,
+    destroy,
     isActive: () => active,
     isAvailable: () => input.bridge !== undefined && !hasNativeHostConnectionLoss(),
     canProcessLiveMidi: () => livePreviewActive,

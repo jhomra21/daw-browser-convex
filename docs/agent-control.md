@@ -250,7 +250,7 @@ DELETE /api/control/v1/projects/:projectId/asset-folders/:folderId
 PATCH  /api/control/v1/projects/:projectId/assets/:assetId/folder
 ```
 
-Upload is multipart and capped at 10 MiB. It requires project write access, `Content-Length`, `Idempotency-Key`, and `x-content-sha256`. The Worker checks the digest, MIME type, extension, and audio metadata from the uploaded bytes before finalizing the Convex and R2 records.
+Small uploads use the bounded `/api/samples` multipart endpoint and require project write access, `Content-Length`, `Idempotency-Key`, and `x-content-sha256`; the file remains capped at 10 MiB. Larger audio uses `/api/resumable-uploads`, whose server-owned Convex session records enforce fixed 8 MiB R2 parts, leases, quotas, expiry, and authoritative completion parts. The 8 MiB request body is below Cloudflare's 100 MiB minimum account request limit, and 10,000 parts derive an 80,000 MiB (approximately 83.9 GB) maximum resumable object size. The Worker streams the completed R2 object through bounded digest and MediaBunny metadata inspection before creating the asset. Resumable multipart cleanup is worker-reconciled and uses the existing R2 delete backoff queue for completed object keys.
 
 A project action may refer to an asset ID returned by project state. It must not invent an R2 key.
 

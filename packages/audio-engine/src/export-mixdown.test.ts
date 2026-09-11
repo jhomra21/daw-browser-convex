@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { automationTargetKey, createDefaultDelayParams, createDefaultDrumRackParams, createDefaultSaturatorParams, type AutomationEnvelope } from '@daw-browser/shared'
-import { createPortableOutputBuffer, createSourceAutomationScope, createStemRenderPlan, downmixStereoBufferToMono, encodeAudioBuffer, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, renderMixdown, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
+import { createPortableOutputBuffer, createSourceAutomationScope, createStemRenderPlan, downmixStereoBufferToMono, encodeAudioBuffer, getAudioBufferPeak, isAutomationEnvelopeInSourceScope, normalizeAudioBufferInPlace, readPortableDescriptorPage, renderMixdown, resolveExportMixerGraph, type ExportFx } from './export-mixdown'
 import type { ResolvedMixerChannel, ResolvedMixerGraph } from './mixer/types'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { resolveLiveMixerGraph } from './live-mixer-runtime'
@@ -519,6 +519,79 @@ describe('portable mixdown output adapter', () => {
 
     expect(Array.from(output.getChannelData(0))).toEqual([0.25, -0.5, 0.75, 1])
     expect(Array.from(output.getChannelData(1))).toEqual([0.5, -0.25, -0.75, -1])
+  })
+})
+
+describe('portable descriptor page adapter', () => {
+  const descriptor = (
+    pages: readonly {
+      startFrame: number
+      frameCount: number
+      planes: readonly Float32Array[]
+    }[],
+    frameCount = 12,
+  ) => ({
+    identity: 'source',
+    durationSec: frameCount / 10,
+    frameCount,
+    sampleRate: 10,
+    channelCount: 2,
+    readPages: async function* () {
+      for (const page of pages) {
+        yield {
+          ...page,
+          sampleRate: 10,
+          channelCount: 2,
+          planes: [...page.planes],
+        }
+      }
+    },
+  })
+
+  test('assembles contiguous source pages for a non-page-aligned request', async () => {
+    const output = await readPortableDescriptorPage(descriptor([
+      {
+        startFrame: 0,
+        frameCount: 4,
+        planes: [new Float32Array([0, 1, 2, 3]), new Float32Array([10, 11, 12, 13])],
+      },
+      {
+        startFrame: 4,
+        frameCount: 4,
+        planes: [new Float32Array([4, 5, 6, 7]), new Float32Array([14, 15, 16, 17])],
+      },
+    ]), { assetId: 'asset', startFrame: 2, frameCount: 6 })
+
+    expect(Array.from(output[0] ?? [])).toEqual([2, 3, 4, 5, 6, 7])
+    expect(Array.from(output[1] ?? [])).toEqual([12, 13, 14, 15, 16, 17])
+  })
+
+  test('rejects a gap in source page coverage', async () => {
+    await expect(readPortableDescriptorPage(descriptor([
+      {
+        startFrame: 0,
+        frameCount: 2,
+        planes: [new Float32Array([0, 1]), new Float32Array([10, 11])],
+      },
+      {
+        startFrame: 3,
+        frameCount: 3,
+        planes: [new Float32Array([3, 4, 5]), new Float32Array([13, 14, 15])],
+      },
+    ]), { assetId: 'asset', startFrame: 0, frameCount: 6 })).rejects.toThrow('gap')
+  })
+
+  test('reads a fully covered clipped tail request', async () => {
+    const output = await readPortableDescriptorPage(descriptor([
+      {
+        startFrame: 3,
+        frameCount: 9,
+        planes: [new Float32Array([3, 4, 5, 6, 7, 8, 9, 10, 11]), new Float32Array([13, 14, 15, 16, 17, 18, 19, 20, 21])],
+      },
+    ]), { assetId: 'asset', startFrame: 7, frameCount: 5 })
+
+    expect(Array.from(output[0] ?? [])).toEqual([7, 8, 9, 10, 11])
+    expect(Array.from(output[1] ?? [])).toEqual([17, 18, 19, 20, 21])
   })
 })
 

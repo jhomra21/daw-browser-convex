@@ -177,12 +177,13 @@ describe("desktop protocol v1", () => {
         token: "0".repeat(64),
         basename: "input.wav",
         mime: "audio/wav",
+        byteLength: 1,
       }],
     }
     expect(desktopRendererImportInputSchemaV1.safeParse(input).success).toBe(true)
     expect(desktopRendererImportInputSchemaV1.safeParse({
       ...input,
-      files: [{ ...input.files[0], byteLength: 1 }],
+      files: [{ token: input.files[0].token, basename: input.files[0].basename, mime: input.files[0].mime }],
     }).success).toBe(false)
   })
 
@@ -230,7 +231,7 @@ describe("desktop protocol v1", () => {
   })
 
   test("keeps the V1 hello acknowledgment operation set exact", () => {
-    expect(desktopOperationSchemaV1.options).toHaveLength(20)
+    expect(desktopOperationSchemaV1.options).toHaveLength(22)
     expect(desktopHelloAckSchemaV1.safeParse({
       version: "v1",
       type: "helloAck",

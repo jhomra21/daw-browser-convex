@@ -235,6 +235,32 @@ test('supports a schedule with no clips in the requested range', () => {
   })
 })
 
+test('assigns unique monotonic sequences across loop slices', () => {
+  const result = projectPortableClipEvents({
+    tracks: [{
+      id: 'track-1',
+      name: 'track-1',
+      volume: 1,
+      clips: [clip({ startSec: 0, duration: 1 })],
+    }],
+    assets: new Map([['source-1', asset]]),
+    bpm: 120,
+    sampleRateHz: 48_000,
+    rangeStartSec: 0,
+    rangeEndSec: 3,
+    epoch: 1,
+    firstSequence: 20,
+    includeStableIdentity: true,
+    loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 },
+  })
+
+  expect(result.supported).toBe(true)
+  if (!result.supported) throw new Error('Expected loop projection to be supported.')
+  expect(result.events.map((event) => event.sequence)).toEqual([20, 21, 22])
+  expect(result.events.map((event) => event.startFrame)).toEqual([0, 48_000, 96_000])
+  expect(new Set(result.events.map((event) => event.sourceIdentity)).size).toBe(3)
+})
+
 test('projects a spanning clip from the requested window boundary', () => {
   expect(projectPortableClipEvents({
     tracks: [{

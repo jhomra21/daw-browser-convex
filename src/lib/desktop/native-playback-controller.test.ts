@@ -1,13 +1,32 @@
 import { expect, test } from "bun:test"
+import "fake-indexeddb/auto"
 
 import { createNativePlaybackController } from "./native-playback-controller"
 import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
+import { createAudioPcmSourceDescriptor, type AudioPcmSourceDescriptor } from "@daw-browser/audio-engine/media-pages"
 import { automationTargetKey, createDefaultDrumRackParams, createDefaultReverbParams, createDefaultSynthParams, createDefaultUtilityParams, externalAutomationParameterId } from "@daw-browser/shared"
-import { nativeGraphNodeId, type NativeHostMeterBatch, type NativeHostPcmAsset, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
+import { nativeGraphNodeId, type NativeHostMappedAsset, type NativeHostMappedAssetPage, type NativeHostMeterBatch, type NativeHostPcmAsset, type NativeHostRecordingBlock, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import type { SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
+import { externalProcessorSchema, type ExternalProcessor } from "@daw-browser/external-plugins"
 import type { EffectParamsCommitPayload } from "~/lib/undo/types"
+
+if (!globalThis.navigator?.locks) {
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      ...globalThis.navigator,
+      locks: {
+        request: async <Value>(
+          name: string,
+          _options: { ifAvailable?: boolean; mode?: 'shared' | 'exclusive' },
+          callback: (lock: { name: string } | null) => Promise<Value>,
+        ) => callback({ name }),
+      },
+    },
+  })
+}
 
 class TestAudioBuffer implements AudioBuffer {
   readonly duration: number
@@ -47,6 +66,27 @@ class TestAudioBuffer implements AudioBuffer {
   }
 }
 
+const silenceWavDataUrl = (frameCount: number, channelCount = 1) => {
+  const bytes = new Uint8Array(44 + frameCount * channelCount * 2)
+  const view = new DataView(bytes.buffer)
+  const write = (offset: number, value: string) => bytes.set(new TextEncoder().encode(value), offset)
+  write(0, "RIFF")
+  view.setUint32(4, bytes.byteLength - 8, true)
+  write(8, "WAVE")
+  write(12, "fmt ")
+  view.setUint32(16, 16, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, channelCount, true)
+  view.setUint32(24, 48_000, true)
+  view.setUint32(28, 48_000 * channelCount * 2, true)
+  view.setUint16(32, channelCount * 2, true)
+  view.setUint16(34, 16, true)
+  write(36, "data")
+  view.setUint32(40, bytes.byteLength - 44, true)
+  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("")
+  return `data:audio/wav;base64,${btoa(binary)}`
+}
+
 const sourceTrack = (volume = 0.8): RuntimeTrack => ({
   id: "track",
   name: "Track",
@@ -58,8 +98,41 @@ const sourceTrack = (volume = 0.8): RuntimeTrack => ({
     startSec: 0,
     duration: 1 / 48_000,
     sourceAssetKey: "source",
+    sourceKind: "url" as const,
+    sampleUrl: silenceWavDataUrl(1),
     buffer: new TestAudioBuffer(),
   }],
+})
+
+const longSourceTrack = (): RuntimeTrack => ({
+  ...sourceTrack(),
+  clips: [{
+    ...sourceTrack().clips[0]!,
+    buffer: null,
+    duration: 7_200,
+    sourceDurationSec: 7_200,
+    sourceSampleRate: 48_000,
+    sourceChannelCount: 2,
+  }],
+})
+
+const longSourceDescriptor = (): AudioPcmSourceDescriptor => ({
+  identity: "test:long-source",
+  durationSec: 7_200,
+  frameCount: 7_200 * 48_000,
+  sampleRate: 48_000,
+  channelCount: 2,
+  readPages: async function* ({ startFrame = 0, endFrame = 7_200 * 48_000, signal } = {}) {
+    signal?.throwIfAborted()
+    const frameCount = endFrame - startFrame
+    yield {
+      startFrame,
+      frameCount,
+      sampleRate: 48_000,
+      channelCount: 2,
+      planes: [new Float32Array(frameCount), new Float32Array(frameCount)],
+    }
+  },
 })
 
 const input = (track = sourceTrack()): LivePlaybackSnapshotInput => ({
@@ -193,6 +266,48 @@ const nativeAttachmentPlan: NativeExternalAttachmentPlan = {
   }],
 }
 
+const insertedExternalProcessor = (): ExternalProcessor => externalProcessorSchema.parse({
+  instanceId: "11111111-1111-4111-8111-111111111111",
+  targetId: "track",
+  index: 0,
+  manifest: {
+    identity: {
+      format: "vst3",
+      classId: "example",
+      vendor: "Example",
+      name: "Example",
+      version: "1",
+      architecture: "arm64",
+      binaryFingerprint: "b".repeat(64),
+    },
+    role: "effect",
+    audioInputs: [{ name: "Input", channels: 2, enabled: true }],
+    audioOutputs: [{ name: "Output", channels: 2, enabled: true }],
+    sidechainInputs: [],
+    parameters: [],
+    latencyFrames: 0,
+    tailFrames: 0,
+    supportsBypass: false,
+    supportsEditor: false,
+    supportsState: false,
+  },
+  parameterOverrides: {},
+  latencyFrames: 0,
+  tailFrames: 0,
+  bypassed: false,
+  launchReference: {
+    version: 1,
+    classId: "example",
+    vendorId: "Example",
+    architecture: "arm64",
+    bundleFingerprint: "a".repeat(64),
+    binaryFingerprint: "b".repeat(64),
+    scannerCatalogVersion: 2,
+  },
+  health: { state: "ready", updatedAt: 1 },
+  updatedAt: 1,
+})
+
 type BridgeReply = { ok: true } | { ok: false; error: string }
 type BridgeTransactionReply = { ok: true; transactionToken: string } | { ok: false; error: string }
 
@@ -212,6 +327,8 @@ const createBridge = (
   const schedulePayloads: Uint8Array[] = []
   const graphPayloads: Uint8Array[] = []
   const installedAssets: NativeHostPcmAsset[] = []
+  let legacyInstallCount = 0
+  let mappedAssetCreateCount = 0
   const transports: Array<{
     epoch: number
     frame: number
@@ -282,6 +399,8 @@ const createBridge = (
     schedulePayloads,
     graphPayloads,
     installedAssets,
+    get legacyInstallCount() { return legacyInstallCount },
+    get mappedAssetCreateCount() { return mappedAssetCreateCount },
     transports,
     spectrumNodeIds,
     spectrumSelections,
@@ -331,11 +450,28 @@ const createBridge = (
         rollbackTransaction: reply("rollback"),
         installAsset: async (asset: NativeHostPcmAsset) => {
           calls.push("install")
+          legacyInstallCount += 1
           installedAssets.push(asset)
           return failure === "install"
             ? { ok: false as const, error: failureMessage }
             : { ok: true as const }
         },
+        createMappedAsset: async (asset: NativeHostMappedAsset) => {
+          calls.push("install")
+          mappedAssetCreateCount += 1
+          installedAssets.push({
+            sessionAssetId: asset.sessionAssetId,
+            frameCount: asset.frameCount,
+            sampleRateHz: asset.sampleRateHz,
+            channelCount: asset.channelCount,
+            planarPcm: new Uint8Array(),
+          })
+          return failure === "install"
+            ? { ok: false as const, error: failureMessage }
+            : { ok: true as const }
+        },
+        writeMappedAssetPage: async (_page: NativeHostMappedAssetPage) => ({ ok: true as const }),
+        prepareMappedAssetRange: async () => ({ ok: true as const }),
         releaseAsset: reply("release"),
         publishGraph: async (bytes: Uint8Array) => {
           calls.push("graph")
@@ -610,6 +746,8 @@ test("commits a supported native session before starting and tears it down deter
   })
 
   expect(await controller.start(input().transport)).toBe("started")
+  expect(fixture.legacyInstallCount).toBe(0)
+  expect(fixture.mappedAssetCreateCount).toBe(1)
   expect(fixture.calls).toEqual(["begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport"])
   expect(fixture.transports.every(({ hasCycleStart, hasCycleEnd }) => !hasCycleStart && !hasCycleEnd)).toBe(true)
   await controller.dispose()
@@ -617,6 +755,53 @@ test("commits a supported native session before starting and tears it down deter
     "begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport",
     "stop", "release", "teardown",
   ])
+})
+
+test("reports the bounded native start stage and sanitized failure", async () => {
+  const fixture = createBridge("begin", false, false, "native failure /Users/secret/plugin.vst3")
+  const faults: string[] = []
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    reportFault: (message) => faults.push(message),
+    reportUnavailable: true,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+  })
+
+  await expect(controller.start(input().transport)).resolves.toBe("unavailable")
+  expect(faults).toEqual([
+    "Native playback failed during begin-transaction: native failure <path>",
+  ])
+})
+
+test("starts a mapped session from persisted ordinary metadata without an eager buffer", async () => {
+  const fixture = createBridge()
+  const track = {
+    ...sourceTrack(),
+    clips: [{
+      ...sourceTrack().clips[0]!,
+      buffer: null,
+      sourceDurationSec: 1 / 48_000,
+      sourceSampleRate: 48_000,
+      sourceChannelCount: 1,
+    }],
+  }
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input(track)),
+    resolveSource: async () => createAudioPcmSourceDescriptor({
+      identity: "test:ordinary-source",
+      durationSec: 1 / 48_000,
+      frameCount: 1,
+      sampleRate: 48_000,
+      channelCount: 1,
+      source: new TestAudioBuffer([new Float32Array(1)]),
+    }),
+  })
+
+  await expect(controller.start(input(track).transport)).resolves.toBe("started")
+  expect(fixture.legacyInstallCount).toBe(0)
+  expect(fixture.mappedAssetCreateCount).toBe(1)
+  await controller.dispose()
 })
 
 test("forwards compile context when promoting a pending preview to play", async () => {
@@ -650,6 +835,75 @@ test("forwards compile context when promoting a pending preview to play", async 
   await expect(preview).resolves.toBe("started")
   await expect(play).resolves.toBe("started")
   expect(contexts).toEqual([undefined, compileContext])
+})
+
+test("supersedes an in-flight contextless preview for an inserted native processor", async () => {
+  const fixture = createBridge()
+  const previewGate = Promise.withResolvers<void>()
+  const contexts: Array<LivePlaybackCompileContext | undefined> = []
+  let compilation = 0
+  const inserted = insertedExternalProcessor()
+  const compileContext = {
+    externalProcessor: {
+      projectId: "project",
+      processor: inserted,
+    },
+  } satisfies LivePlaybackCompileContext
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    getProjectId: () => "project",
+    resolveSource: async () => longSourceDescriptor(),
+    compileSnapshot: async (transport, context) => {
+      contexts.push(context)
+      compilation += 1
+      if (compilation === 1) await previewGate.promise
+      const result = compileLivePlaybackSnapshot({
+        ...input(longSourceTrack()),
+        transport,
+      })
+      if (!result.supported) return result
+      return context?.externalProcessor
+        ? {
+          supported: true as const,
+          snapshot: {
+            ...result.snapshot,
+            nativeExternalAttachmentPlan: nativeAttachmentPlan,
+            requiresNativePlayback: true,
+          },
+        }
+        : result
+    },
+  })
+
+  const stalePreview = controller.ensureLivePreview(0)
+  await Bun.sleep(0)
+  const insertedPreview = controller.ensureLivePreview(0, compileContext)
+  previewGate.resolve()
+
+  await expect(stalePreview).resolves.toBe("unavailable")
+  await expect(insertedPreview).resolves.toBe("started")
+  expect(contexts).toEqual([undefined, compileContext])
+  expect(fixture.calls.filter((call) => call === "coordinate")).toHaveLength(1)
+  await controller.dispose()
+})
+
+test("deduplicates identical contextless preview requests", async () => {
+  const fixture = createBridge()
+  const previewGate = Promise.withResolvers<void>()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async (transport) => {
+      await previewGate.promise
+      return compileLivePlaybackSnapshot({ ...input(), transport })
+    },
+  })
+
+  const first = controller.ensureLivePreview(0)
+  const second = controller.ensureLivePreview(0)
+  expect(second).toBe(first)
+  previewGate.resolve()
+  await expect(Promise.all([first, second])).resolves.toEqual(["started", "started"])
+  await controller.dispose()
 })
 
 test("prepares enabled Stretch clips before publishing the native graph", async () => {
@@ -700,11 +954,44 @@ test("prepares enabled Stretch clips before publishing the native graph", async 
   expect(fixture.calls).toContain("graph")
   expect(fixture.installedAssets).toHaveLength(1)
   expect(fixture.installedAssets[0]).toMatchObject({
-    frameCount: Math.round(stretchBuffer.length * 48_000 / 44_100),
-    sampleRateHz: 48_000,
+    frameCount: stretchBuffer.length,
+    sampleRateHz: stretchBuffer.sampleRate,
     channelCount: 2,
   })
+  expect(fixture.installedAssets[0]?.planarPcm.byteLength).toBe(0)
   await controller.dispose()
+})
+
+test("fails closed before opening a native transaction when bounded storage is unavailable", async () => {
+  const fixture = createBridge()
+  const faults: string[] = []
+  const previousIndexedDb = globalThis.indexedDB
+  const previousNavigator = globalThis.navigator
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: undefined })
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: { ...previousNavigator, locks: undefined },
+  })
+  try {
+    const controller = createNativePlaybackController({
+      bridge: fixture.bridge,
+      createBuffer: () => new TestAudioBuffer(),
+      reportFault: (message) => faults.push(message),
+      reportUnavailable: true,
+      compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+        ...inputWithRawAssetsAndStretch(0),
+        transport,
+      }),
+    })
+
+    expect(await controller.start(input().transport)).toBe("unavailable")
+    expect(fixture.calls).not.toContain("begin")
+    expect(faults[0]).toContain("requires IndexedDB and cross-realm Web Locks")
+    await controller.destroy()
+  } finally {
+    Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: previousIndexedDb })
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: previousNavigator })
+  }
 })
 
 test("does not begin a native transaction when Stretch preparation fails", async () => {
@@ -715,6 +1002,11 @@ test("does not begin a native transaction when Stretch preparation fails", async
     clips: [{
       ...sourceTrack().clips[0]!,
       audioWarp: { enabled: true, mode: "stretch", sourceBpm: 120 },
+      buffer: new TestAudioBuffer([
+        new Float32Array(48_000),
+        new Float32Array(48_000),
+        new Float32Array(48_000),
+      ]),
     }],
   }
   const compiled = compileLivePlaybackSnapshot(input(stretchTrack))
@@ -738,7 +1030,7 @@ test("does not begin a native transaction when Stretch preparation fails", async
 
   expect(await controller.start(compiled.snapshot.transport)).toBe("blocked")
   expect(fixture.calls).toEqual([])
-  expect(faults[0]).toContain("portable Stretch preparation failed")
+  expect(faults[0]).toContain("only mono and stereo assets are supported")
 })
 
 test("rejects the 65th native asset after final projection", async () => {
@@ -761,7 +1053,7 @@ test("rejects the 65th native asset after final projection", async () => {
   })
 
   expect(await controller.start(snapshotInput.transport)).toBe("unavailable")
-  expect(createBufferCalls).toBe(1)
+  expect(createBufferCalls).toBe(0)
   expect(fixture.calls).toEqual([])
   expect(faults[0]).toContain("installed audio asset capacity")
 })
@@ -786,7 +1078,7 @@ test("accepts an expanded session at the 64-asset native boundary", async () => 
   await controller.dispose()
 })
 
-test("reports optional native unavailability when packaged playback has no fallback", async () => {
+test("uses native prepared Stretch playback without an output buffer factory", async () => {
   const fixture = createBridge()
   const faults: string[] = []
   const stretchTrack: RuntimeTrack = {
@@ -809,9 +1101,9 @@ test("reports optional native unavailability when packaged playback has no fallb
     compileSnapshot: async () => compiled,
   })
 
-  expect(await controller.start(compiled.snapshot.transport)).toBe("unavailable")
-  expect(fixture.calls).toEqual([])
-  expect(faults).toEqual(["clip: portable Stretch preparation failed: buffer creation unavailable"])
+  expect(await controller.start(compiled.snapshot.transport)).toBe("started")
+  expect(fixture.calls).toContain("install")
+  expect(faults).toEqual([])
 })
 
 test("rebuilds a fresh paused native session with a new transport epoch", async () => {
@@ -2126,6 +2418,8 @@ test("primes each advancing prepared resume with active source and automation wi
     clips: [{
       ...sourceTrack().clips[0]!,
       duration: 5,
+      sourceKind: "url" as const,
+      sampleUrl: silenceWavDataUrl(270_000, 2),
       buffer: new TestAudioBuffer([
         new Float32Array(270_000),
         new Float32Array(270_000),
@@ -2172,7 +2466,7 @@ test("primes each advancing prepared resume with active source and automation wi
   expect(new Set(sourceEvents.filter((event) => event.epoch === 1).map((event) => event.assetId)).size).toBe(1)
   expect(new Set(sourceEvents.filter((event) => event.epoch === 2).map((event) => event.assetId)).size).toBe(1)
   expect(sourceEvents.find((event) => event.epoch === 2)?.assetId)
-    .not.toBe(sourceEvents.find((event) => event.epoch === 1)?.assetId)
+    .toBe(sourceEvents.find((event) => event.epoch === 1)?.assetId)
   for (const transport of runningTransports) {
     const windows = fixture.schedulePayloads.filter((payload) => {
       const view = new DataView(payload.buffer)
@@ -2351,6 +2645,22 @@ test("project generation changes release retained native assets before rebuildin
   expect(fixture.calls.filter((call) => call === "install")).toHaveLength(2)
   expect(controller.isActive()).toBeFalse()
   expect(controller.canProcessLiveMidi()).toBeTrue()
+})
+
+test("destroys a native controller idempotently", async () => {
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+      ...input(),
+      transport,
+    }),
+  })
+
+  await expect(controller.start(input().transport)).resolves.toBe("started")
+  await Promise.all([controller.destroy(), controller.destroy(), controller.destroy()])
+  expect(fixture.calls.filter((call) => call === "stop")).toHaveLength(1)
+  expect(fixture.calls.filter((call) => call === "teardown")).toHaveLength(1)
 })
 
 test("starts sessions with non-unity track gain without opening a legacy fallback", async () => {

@@ -38,12 +38,12 @@ export const findExternalSidechainTarget = (
     : undefined
 }
 
-type RuntimeTrack = Track<AudioBuffer>
+type RuntimeTrack = Track<AudioBuffer | null>
 
 type MasterMixerFx = Pick<ResolveMixerGraphOptions, 'masterFxInstances' | 'masterVolume'>
 
 export function resolveLiveMixerGraph(
-  tracks: RuntimeTrack[],
+  tracks: readonly RuntimeTrack[],
   trackFx: Record<string, MixerTrackFx>,
   masterFx: MasterMixerFx = {},
 ): ResolvedMixerGraph {
@@ -51,7 +51,9 @@ export function resolveLiveMixerGraph(
     channels: createMixerChannels(tracks),
     sourceChannelCounts: Object.fromEntries(tracks.map((track) => [
       track.id,
-      track.clips.flatMap((clip) => clip.buffer ? [clip.buffer.numberOfChannels] : []),
+      track.clips.flatMap((clip) => clip.buffer
+        ? [clip.buffer.numberOfChannels]
+        : clip.sourceChannelCount !== undefined ? [clip.sourceChannelCount] : []),
     ])),
     trackFx,
     ...masterFx,

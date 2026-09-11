@@ -21,6 +21,7 @@ const MAX_WARP_BPM = 300
 const MIN_SOURCE_BEAT_OFFSET = -16
 const MAX_SOURCE_BEAT_OFFSET = 16
 const SOURCE_BEAT_OFFSET_PRECISION = 1_000
+export const MAX_AUDIO_WARP_MARKERS = 1_000
 
 const normalizeWarpBpm = (value: JsonValue | undefined) => (
   isJsonNumber(value) && Number.isFinite(value)
@@ -57,7 +58,7 @@ export function normalizeAudioWarpMarkers(value: JsonValue): AudioWarpMarker[] |
 
   const markers: AudioWarpMarker[] = []
   const ids = new Set<string>()
-  for (const marker of ordered) {
+  for (const marker of ordered.slice(0, MAX_AUDIO_WARP_MARKERS)) {
     const previous = markers[markers.length - 1]
     if (ids.has(marker.id)) continue
     if (previous && (marker.timelineBeat <= previous.timelineBeat || marker.sourceBeat <= previous.sourceBeat)) continue

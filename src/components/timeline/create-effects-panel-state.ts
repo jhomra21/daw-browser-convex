@@ -42,6 +42,7 @@ import {
 import type { EffectParamsByEffect, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
+import type { SampledInstrumentBuffer } from "@daw-browser/audio-engine/sampled-instrument-region";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import type { AddMidiClipOptions } from "~/components/timeline/timeline-device-insert-actions";
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
@@ -91,6 +92,8 @@ type EffectsPanelInstrumentDevice = {
   };
   drumRack: {
     assignSampleToPad: (padId: string, sample: DrumRackSampleAssignment) => void;
+    buffers: (targetId: string, params: DrumRackParams) => ReadonlyMap<string, SampledInstrumentBuffer> | undefined;
+    subscribeBuffers: (listener: () => void) => () => void;
     params: Accessor<DrumRackParams | undefined>;
     readDraftForTarget: (targetId: string) => DrumRackParams | undefined;
     readForTarget: (targetId: string) => DrumRackParams | undefined;
@@ -119,9 +122,9 @@ type EffectsPanelInstrumentDevice = {
     targetId: string,
     instrument: TrackInstrumentParams,
   ) => {
-    samplerBuffers?: ReadonlyMap<string, AudioBuffer>;
-    drumRackBuffers?: ReadonlyMap<string, AudioBuffer>;
-    granularBuffer?: { assetKey: string; buffer: AudioBuffer };
+    samplerBuffers?: ReadonlyMap<string, SampledInstrumentBuffer>;
+    drumRackBuffers?: ReadonlyMap<string, SampledInstrumentBuffer>;
+    granularBuffer?: { assetKey: string } & SampledInstrumentBuffer;
   } | undefined;
   readDraftInstrumentForTarget: (targetId: string) => TrackInstrumentParams | undefined;
   readInstrumentForTarget: (targetId: string) => TrackInstrumentParams | undefined;
@@ -595,6 +598,13 @@ export function createEffectsPanelInstrumentDevice(
     },
     drumRack: {
       assignSampleToPad: assignSampleToCurrentDrumRackPad,
+      buffers: (targetId, params) => {
+        const instrument = instrumentState.readForTarget(targetId);
+        return instrument?.kind === "drum-rack"
+          ? context.drumRackBufferSync.snapshotBuffers(targetId, { kind: "drum-rack", instanceId: instrument.instanceId, params })
+          : undefined;
+      },
+      subscribeBuffers: context.drumRackBufferSync.subscribe,
       params: drumRackParams,
       readDraftForTarget: (targetId) => {
         const current = instrumentState.readDraftForTarget(targetId);

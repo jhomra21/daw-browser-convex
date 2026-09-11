@@ -5,7 +5,7 @@ import type { ApiContext } from './app-types'
 import type { Session } from './auth'
 import { createMaintenanceWorkerConvexClient, createWorkerConvexClient, type ApiConvexClient } from './convex-auth'
 
-type R2DeleteBucket = Pick<R2Bucket, 'list' | 'delete'>
+type R2DeleteBucket = Pick<R2Bucket, 'list' | 'delete' | 'resumeMultipartUpload'>
 
 type R2DeleteQueueRow = {
   _id: Id<'r2DeleteQueue'>
@@ -13,6 +13,7 @@ type R2DeleteQueueRow = {
   r2Key: string
   kind: R2DeleteKind
   claimToken?: string
+  multipartUploadId?: string
 }
 
 type R2DeleteDrainSummary = {
@@ -82,11 +83,25 @@ export const drainR2DeleteRows = async (input: {
     deletedKeys.push(row.r2Key)
   }
   const objectRows: R2DeleteQueueRow[] = []
+  const multipartRows: R2DeleteQueueRow[] = []
   const prefixRows: R2DeleteQueueRow[] = []
   for (const row of claimed) {
     if (row.kind === 'project-prefix') prefixRows.push(row)
+    else if (row.kind === 'multipart-abort') multipartRows.push(row)
     else objectRows.push(row)
   }
+  await Promise.all(multipartRows.map(async (row) => {
+    if (!row.claimToken || !row.multipartUploadId) {
+      await markFailed(input.convex, row, new Error('Multipart abort row is malformed'))
+      return
+    }
+    try {
+      await input.bucket.resumeMultipartUpload(row.r2Key, row.multipartUploadId).abort()
+      recordDeleted(row)
+    } catch (error) {
+      await markFailed(input.convex, row, error instanceof Error ? error : new Error('Multipart abort failed'))
+    }
+  }))
   const deletedPrefixKeys = new Set<string>()
   const failedPrefixKeys = new Set<string>()
   for (let index = 0; index < prefixRows.length; index += 2) {
@@ -177,8 +192,12 @@ export const drainDueR2DeleteQueue = async (input: {
   limit?: number
 }): Promise<R2DeleteDrainSummary> => {
   const convex = await createMaintenanceWorkerConvexClient(input.c)
-  await convex.mutation(convexApi.assets.reconcileStalePending, {
+  await convex.mutation(convexApi.resumableAssetUploads.reconcileStalePending, {
     before: Date.now() - 60 * 60 * 1000,
+    limit: 100,
+  })
+  await convex.mutation(convexApi.resumableAssetUploads.expireResumableSessions, {
+    now: Date.now(),
     limit: 100,
   })
   const rows = await convex.query(convexApi.r2Deletes.listDueAny, {

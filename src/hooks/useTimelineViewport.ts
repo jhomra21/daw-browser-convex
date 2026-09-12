@@ -27,10 +27,27 @@ type UseTimelineViewportOptions = {
   canZoom: () => boolean
 }
 
+type TimelineScrollElement = {
+  clientWidth: number
+  scrollLeft: number
+  addEventListener: (
+    type: 'scroll',
+    listener: () => void,
+    options?: AddEventListenerOptions,
+  ) => void
+  removeEventListener: (type: 'scroll', listener: () => void) => void
+  getBoundingClientRect: () => Pick<DOMRect, 'left'>
+}
+
+type TimelineWheelEvent = Pick<
+  WheelEvent,
+  'ctrlKey' | 'metaKey' | 'deltaY' | 'deltaMode' | 'clientX' | 'preventDefault'
+>
+
 export function useTimelineViewport(options: UseTimelineViewportOptions) {
   const [visibleStartSec, setVisibleStartSec] = createSignal(0)
   const [viewportWidth, setViewportWidth] = createSignal(0)
-  let element: HTMLDivElement | undefined
+  let element: TimelineScrollElement | undefined
   let observer: ResizeObserver | undefined
   let wheelCommitTimeout: ReturnType<typeof setTimeout> | undefined
   let wheelFrame: number | undefined
@@ -87,14 +104,14 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     setPhysicalAnchor()
   }
 
-  const bind = (next: HTMLDivElement) => {
+  const bind = (next: TimelineScrollElement) => {
     if (element === next) return
     clearWheelCommit()
     if (element) element.removeEventListener('scroll', updateScrollLeft)
     observer?.disconnect()
     element = next
     observer = new ResizeObserver(measureWidth)
-    observer.observe(next)
+    if (next instanceof Element) observer.observe(next)
     next.addEventListener('scroll', updateScrollLeft, { passive: true })
     measureWidth()
     setPhysicalAnchor()
@@ -129,7 +146,8 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
       if (commit) options.commitPixelsPerSecond(nextScale)
       else options.previewPixelsPerSecond(nextScale)
       setVisibleStartSec(normalizedRange.startSec)
-      setPhysicalAnchor()
+      // Zoom changes logical time only; physical anchor is maintained by bind,
+      // resize, reset, and native scroll paths.
     })
     if (!isWheelPreview) clearWheelCommit()
     return nextScale
@@ -192,7 +210,7 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     }, 150)
   }
 
-  const onWheel = (event: WheelEvent) => {
+  const onWheel = (event: TimelineWheelEvent) => {
     if (!event.ctrlKey && !event.metaKey) return
     event.preventDefault()
     const previous = pendingWheel

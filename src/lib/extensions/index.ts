@@ -7,6 +7,7 @@ export {
   isShortcutId,
   normalizeShortcutChord,
 } from './extension-kernel'
+export { createExtensionManager } from './extension-manager'
 export {
   builtinViewToggleBrowserCommand,
   builtinViewToggleBrowserShortcut,
@@ -16,6 +17,12 @@ export { createTimelineExtensionHost } from './timeline-extension-host'
 export { createBuiltinExtensionManager } from './builtin-manager'
 export { createProjectActionFacade } from './project-actions'
 export type { ProjectActionFacade, ProjectActionGrant } from './project-actions'
+export type {
+  AppExtensionSource,
+  ExtensionManager,
+  ExtensionManagerRegistration,
+  ExtensionManagerSnapshot,
+} from './extension-manager'
 export type {
   AppExtensionCommandDeclaration,
   AppExtensionDefinition,

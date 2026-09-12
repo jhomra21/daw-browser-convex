@@ -25,9 +25,20 @@ export function drawWaveformPeaks(options: WaveformDrawOptions) {
   const halfH = contentH / 2
   const midY = topY + halfH
   ctx.fillStyle = fillStyle
+  const sourceColumns = Math.floor(peaks.length / 2)
+  if (sourceColumns <= 0) return
   for (let i = 0; i < drawCols; i++) {
-    const min = decodePeakByte(peaks[i * 2])
-    const max = decodePeakByte(peaks[i * 2 + 1])
+    const sourceStart = Math.floor(i * sourceColumns / Math.max(1, drawCols))
+    const sourceEnd = Math.max(
+      sourceStart + 1,
+      Math.ceil((i + 1) * sourceColumns / Math.max(1, drawCols)),
+    )
+    let min = Infinity
+    let max = -Infinity
+    for (let sourceColumn = sourceStart; sourceColumn < sourceEnd; sourceColumn += 1) {
+      min = Math.min(min, decodePeakByte(peaks[sourceColumn * 2] ?? 128))
+      max = Math.max(max, decodePeakByte(peaks[sourceColumn * 2 + 1] ?? 128))
+    }
     const amplitude = Math.max(Math.abs(min), Math.abs(max))
     const amplitudeScale = options.amplitudeScaleAtColumn?.(i) ?? 1
     const scale = Number.isFinite(amplitudeScale)

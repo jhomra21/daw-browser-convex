@@ -142,7 +142,7 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
         drawWaveformPeaks({
           ctx,
           peaks,
-          drawCols: segment.peaks.columns,
+          drawCols: segmentWidthPx,
           padPx: 0,
           topY: contentTop + channel * channelHeight,
           contentH: channelHeight,

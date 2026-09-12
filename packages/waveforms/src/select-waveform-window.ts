@@ -94,11 +94,18 @@ async function loadWindowSourceData(
   return source
 }
 
-function resampleWindow(source: readonly Uint8Array[], bins: number): WaveformPeakChannelSlice {
+function resampleWindow(
+  source: readonly Uint8Array[],
+  bins: number,
+  sourceStartSec: number,
+  sourceEndSec: number,
+): WaveformPeakChannelSlice {
   return {
     mode: 'pcm-envelope',
     channels: resamplePeakChannels(source, bins),
     columns: Math.max(1, Math.floor(bins)),
+    sourceStartSec,
+    sourceEndSec,
   }
 }
 
@@ -112,7 +119,7 @@ async function readWaveformSlice(
   if (!level) return null
   const window = getWaveformWindow(level, record, request)
   const source = await loadWindowSourceData(level, record, window, request.signal)
-  return resampleWindow(source, request.bins)
+  return resampleWindow(source, request.bins, window.startSec, window.endSec)
 }
 
 export async function getCachedWaveformSlice(request: WaveformSliceRequest): Promise<WaveformPeakChannelSlice | null> {

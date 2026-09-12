@@ -117,6 +117,8 @@ describe('arrangement waveform PCM scheduler', () => {
       decode: async (input) => ({
         mode: 'pcm-envelope',
         columns: input.tileEndFrame - input.tileStartFrame,
+        sourceStartSec: input.tileStartFrame / input.sampleRate,
+        sourceEndSec: input.tileEndFrame / input.sampleRate,
         channels: [Uint8Array.from(
           { length: (input.tileEndFrame - input.tileStartFrame) * 2 },
           (_, index) => index % 2 === 0 ? encodePeakByte(0) : encodePeakByte(
@@ -266,6 +268,8 @@ describe('arrangement waveform PCM scheduler', () => {
         return {
           mode: 'pcm-envelope',
           columns: input.columns,
+          sourceStartSec: 0,
+          sourceEndSec: 1,
           channels: [new Uint8Array(input.columns * 2).fill(encodePeakByte(0.25)), new Uint8Array(input.columns * 2).fill(encodePeakByte(-0.5))],
         }
       },
@@ -380,6 +384,8 @@ describe('arrangement waveform PCM scheduler', () => {
         return {
           mode: 'pcm-envelope',
           columns: input.columns,
+          sourceStartSec: input.tileStartFrame / input.sampleRate,
+          sourceEndSec: input.tileEndFrame / input.sampleRate,
           channels: [new Uint8Array(input.columns * 2)],
         }
       },
@@ -404,7 +410,13 @@ describe('arrangement waveform PCM scheduler', () => {
         calls += 1
         if (calls === 1) return null
         if (calls === 2) throw new Error('failed')
-        return { mode: 'pcm-envelope', columns: 2, channels: [new Uint8Array(4), new Uint8Array(4)] }
+        return {
+          mode: 'pcm-envelope',
+          columns: 2,
+          sourceStartSec: 0,
+          sourceEndSec: ARRANGEMENT_PCM_TILE_FRAMES / 48_000,
+          channels: [new Uint8Array(4), new Uint8Array(4)],
+        }
       },
     })
     expect(await scheduler.request(request('retry'))).toBeNull()
@@ -426,7 +438,13 @@ describe('arrangement waveform PCM scheduler', () => {
       decode: async (input) => {
         starts.push(input.assetKey)
         if (input.assetKey === 'blocker') await blocker.promise
-        return { mode: 'pcm-envelope', columns: 2, channels: [new Uint8Array(4), new Uint8Array(4)] }
+        return {
+          mode: 'pcm-envelope',
+          columns: 2,
+          sourceStartSec: 0,
+          sourceEndSec: 1,
+          channels: [new Uint8Array(4), new Uint8Array(4)],
+        }
       },
     })
     const active = scheduler.request(request('blocker'))
@@ -475,7 +493,13 @@ describe('arrangement waveform PCM scheduler', () => {
       maxCacheEntryBytes: 4,
       decode: async () => {
         calls += 1
-        return { mode: 'pcm-envelope', columns: 2, channels: [new Uint8Array(8)] }
+        return {
+          mode: 'pcm-envelope',
+          columns: 2,
+          sourceStartSec: 0,
+          sourceEndSec: 1,
+          channels: [new Uint8Array(8)],
+        }
       },
     })
     await scheduler.request(request('oversized'))

@@ -37,6 +37,7 @@ type TrackLaneProps = {
   viewportWidthPx: number
   timeToX: (timeSec: number) => number
   viewportRedrawVersion: number
+  waveformVisible?: boolean
   canEditClipFades: (clipId: string) => boolean
   onCommitClipFades: (clipId: string, fades: ClipFades, baseline: ClipFades) => void
   automation: {
@@ -187,6 +188,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
               visibleRange={props.visibleRange}
               timeToX={props.timeToX}
               viewportRedrawVersion={props.viewportRedrawVersion}
+              waveformVisible={props.waveformVisible}
               canEditFades={() => props.canEditClipFades(clip.id)}
               onCommitFades={props.onCommitClipFades}
             />

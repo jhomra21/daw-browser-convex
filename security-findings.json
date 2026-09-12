@@ -1,8 +1,8 @@
 {
-  "scan_id": "scan-2026-09-11-waveform-verified-persistence",
-  "scan_date": "2026-09-11T22:15:00Z",
+  "scan_id": "scan-2026-09-12-live-waveform-raster",
+  "scan_date": "2026-09-12T19:55:34Z",
   "scan_type": "working",
-  "commit_range": "bf6d180f8030202852e3dbb725c6befd2eecbad6+working-tree",
+  "commit_range": "b8b663a5c9bb3e02f6d117af2bae99912c6db880+working-tree",
   "pr_number": 54,
   "threat_model_version": "1.0.0",
   "findings": [],
@@ -22,6 +22,6 @@
       "DoS": 0,
       "ElevationOfPrivilege": 0
     },
-    "files_analyzed": 6
+    "files_analyzed": 21
   }
 }

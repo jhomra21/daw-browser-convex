@@ -1,10 +1,20 @@
-import { batch, createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor } from 'solid-js'
 
 import { getCachedWaveformSlice, getWaveformSlice } from '@daw-browser/waveforms/select-waveform-window'
 import { arrangementWaveformPcmScheduler } from '@daw-browser/waveforms/arrangement-waveform-pcm'
-import { selectWaveformLod } from '@daw-browser/waveforms/lod'
 import type { WaveformPeakChannelSlice, WaveformPcmResult } from '@daw-browser/waveforms/types'
-import { getAudioWaveformLayout } from '~/lib/audio-waveform-layout'
+import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
+import {
+  getAudioWaveformLayout,
+} from '~/lib/audio-waveform-layout'
+import {
+  createWaveformRequestPlans,
+  createRetainedRasterLayout,
+  densityBucketFor,
+  projectRetainedWaveformData,
+  type WaveformRequestPlans,
+  type WaveformSegmentPlan,
+} from '~/lib/retained-waveform'
 import { getPersistableAudioSourceMetadata } from '~/lib/audio-source'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type { RuntimeClip } from '~/lib/timeline-runtime-types'
@@ -17,6 +27,7 @@ type ClipWaveformViewModelOptions = {
   visibleRange?: Accessor<{ startSec: number; endSec: number }>
   priorityRange?: Accessor<{ startSec: number; endSec: number }>
   mode?: 'arrangement' | 'sample-detail'
+  waveformVisible?: Accessor<boolean>
 }
 
 export type ClipWaveformSegment = {
@@ -46,20 +57,88 @@ export type ClipWaveformRenderSegment =
     showPoints: boolean
   }
 
+type RetainedWaveform = {
+  data: WaveformPcmResult
+  sourceStartSec: number
+  sourceEndSec: number
+  showPoints: boolean
+}
+
+export type ClipWaveformRaster = {
+  timelineStartSec: number
+  timelineEndSec: number
+  pixelsPerSecond: number
+  widthPx: number
+  timingSignature: string
+  dataRevision: number
+}
+
+type WaveformSnapshot = {
+  resultsByKey: ReadonlyMap<string, RetainedWaveform>
+  rasterLayout: readonly WaveformSegmentPlan[]
+  raster: ClipWaveformRaster | null
+  revision: number
+}
+
+const sourceIdentityKey = (assetKey: string, clip: RuntimeClip) => [
+  clip.id,
+  clip.sourceAssetKey ?? '',
+  clip.sampleUrl ?? '',
+  clip.sourceDurationSec ?? '',
+  clip.sourceSampleRate ?? '',
+  clip.sourceChannelCount ?? '',
+  assetKey,
+  'verified',
+].join('|')
+
+const layoutSegmentsFor = (layout: ReturnType<typeof getAudioWaveformLayout>, clip: RuntimeClip) => (
+  layout.segments ?? (layout.drawCols > 0
+    ? [{
+      drawCols: layout.drawCols,
+      sourceStartSec: layout.sourceStartSec,
+      sourceEndSec: layout.sourceEndSec,
+      startPx: layout.padPx,
+      endPx: layout.audioEndPx,
+      canvasStartSec: layout.canvasStartSec ?? clip.startSec,
+      canvasEndSec: layout.canvasEndSec ?? clip.startSec + clip.duration,
+    }]
+    : [])
+)
+
+const timingSignatureFor = (clip: RuntimeClip, projectBpm: number, sourceDurationSec: number) => JSON.stringify([
+  clip.startSec,
+  clip.duration,
+  clip.bufferOffsetSec ?? 0,
+  clip.leftPadSec ?? 0,
+  clip.audioWarp?.enabled ?? false,
+  clip.audioWarp?.mode ?? 'repitch',
+  clip.audioWarp?.sourceBpm ?? projectBpm,
+  clip.audioWarp?.sourceBeatOffset ?? 0,
+  clip.audioWarp?.markers ?? [],
+  projectBpm,
+  sourceDurationSec,
+])
+
 export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) {
-  const [peaks, setPeaks] = createSignal<WaveformPeakChannelSlice | null>(null)
-  const [pcm, setPcm] = createSignal<WaveformPcmResult | null>(null)
-  const [segments, setSegments] = createSignal<ClipWaveformSegment[]>([])
+  const [resolvedSource, setResolvedSource] = createSignal<Awaited<ReturnType<AudioPcmSourceResolver>> | null>(null)
+  const [snapshot, setSnapshot] = createSignal<WaveformSnapshot>({
+    resultsByKey: new Map(),
+    rasterLayout: [],
+    raster: null,
+    revision: 0,
+  })
   const [loading, setLoading] = createSignal(false)
   const [error, setError] = createSignal<string>()
-  let requestId = 0
-  let lastSourceIdentityKey: string | undefined
+  let sourceRequestId = 0
+  let dataRequestId = 0
+  let sourceCleanup: (() => void) | undefined
+  let dataCleanup: (() => void) | undefined
   let resolvedSourceKey: string | undefined
-  let resolvedSource: Awaited<ReturnType<AudioPcmSourceResolver>> | undefined
+  let resolvedSourceValue: Awaited<ReturnType<AudioPcmSourceResolver>> | undefined
+  let dataRevision = 0
 
   const view = createMemo(() => {
     const clip = options.clip()
-    const midi = clip.midi
     const assetKey = clip.waveformAssetKey ?? clip.sourceAssetKey ?? `clip:${clip.id}`
     const metadata = getPersistableAudioSourceMetadata({
       buffer: clip.buffer,
@@ -74,286 +153,421 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       options.projectBpm(),
       options.visibleRange?.(),
     )
-
-    return {
-      assetKey,
-      clip,
-      layout,
-      midi,
-    }
+    return { assetKey, clip, layout, midi: clip.midi }
   })
 
-  createEffect(() => {
-    const currentRequestId = ++requestId
-    const current = view()
+  const displaySegments = createMemo(() => layoutSegmentsFor(view().layout, view().clip))
+  const desiredDensity = createMemo(() => Math.max(
+    1,
+    ...displaySegments().map((segment) => segment.drawCols),
+  ))
+  const [densityBucket, setDensityBucket] = createSignal(0)
+  createEffect(on(
+    desiredDensity,
+    (requested) => setDensityBucket((current) => densityBucketFor(requested, current)),
+  ))
 
-    if (current.midi) {
-      setLoading(false)
-      setError(undefined)
-      setPeaks(null)
-      setPcm(null)
-      setSegments([])
-      return
+  const requestPlan = createMemo<WaveformRequestPlans>(() => {
+    const current = view()
+    if (current.midi || current.layout.sourceDurationSec <= 0 || options.waveformVisible?.() === false) {
+      return { requests: [], segments: [] }
     }
-    if (current.layout.drawCols <= 0 || current.layout.sourceDurationSec <= 0 || !current.assetKey) {
-      setLoading(false)
-      setError(undefined)
-      setPeaks(null)
-      setPcm(null)
-      setSegments([])
-      return
-    }
-    const assetKey = current.assetKey
-    const layoutSegments = current.layout.segments
-      ? current.layout.segments
-      : [{
-        drawCols: current.layout.drawCols,
-        sourceStartSec: current.layout.sourceStartSec,
-        sourceEndSec: current.layout.sourceEndSec,
-        startPx: current.layout.padPx,
-        endPx: current.layout.audioEndPx,
-        canvasStartSec: current.layout.canvasStartSec ?? current.clip.startSec,
-        canvasEndSec: current.layout.canvasEndSec ?? current.clip.startSec + current.clip.duration,
-      }]
-    const previousSegments = untrack(segments)
-    const currentCanvasStartSec = current.layout.canvasStartSec ?? current.clip.startSec
-    const currentCanvasEndSec = current.layout.canvasEndSec
-      ?? current.clip.startSec + current.clip.duration
-    const pixelsPerCanvasSecond = options.cssWidthPx() / Math.max(
-      1e-6,
-      currentCanvasEndSec - currentCanvasStartSec,
-    )
-    const preserve = layoutSegments.map((segment) => {
-      const previous = previousSegments.find((candidate) => (
-        candidate.sourceStartSec < segment.sourceEndSec
-        && candidate.sourceEndSec > segment.sourceStartSec
-      ))
-      if (!previous) {
-        return {
-          startPx: segment.startPx,
-          endPx: segment.endPx,
-          canvasStartSec: segment.canvasStartSec,
-          canvasEndSec: segment.canvasEndSec,
-          sourceStartSec: segment.sourceStartSec,
-          sourceEndSec: segment.sourceEndSec,
-          peaks: null,
-          pcm: null,
-          showPoints: false,
-        }
-      }
-      return {
-        startPx: (previous.canvasStartSec - currentCanvasStartSec) * pixelsPerCanvasSecond,
-        endPx: (previous.canvasEndSec - currentCanvasStartSec) * pixelsPerCanvasSecond,
-        canvasStartSec: previous.canvasStartSec,
-        canvasEndSec: previous.canvasEndSec,
-        sourceStartSec: previous.sourceStartSec,
-        sourceEndSec: previous.sourceEndSec,
-        peaks: previous?.peaks ?? null,
-        pcm: previous?.pcm ?? null,
-        showPoints: previous?.showPoints ?? false,
-      }
+    const sampleRate = current.clip.sourceSampleRate ?? 48_000
+    return createWaveformRequestPlans({
+      segments: displaySegments(),
+      sampleRate,
+      sourceDurationSec: current.layout.sourceDurationSec,
+      sampleDetail: options.mode === 'sample-detail',
+      densityBucket: densityBucket() || densityBucketFor(desiredDensity()),
     })
+  })
+  const requestPlanKey = createMemo(() => JSON.stringify([
+    requestPlan().requests.map((item) => item.key),
+    timingSignatureFor(view().clip, options.projectBpm(), view().layout.sourceDurationSec),
+  ]))
+  const sourceKey = createMemo(() => {
+    const clip = options.clip()
+    const assetKey = clip.waveformAssetKey ?? clip.sourceAssetKey ?? `clip:${clip.id}`
+    return sourceIdentityKey(assetKey, clip)
+  })
+  const rasterGeometryKey = createMemo(() => JSON.stringify(
+    requestPlan().segments.map((item) => [
+      item.requestKey,
+      item.segment.sourceStartSec,
+      item.segment.sourceEndSec,
+      item.segment.canvasStartSec,
+      item.segment.canvasEndSec,
+      item.segment.startPx,
+      item.segment.endPx,
+    ]),
+  ))
+
+  createEffect(on(
+    rasterGeometryKey,
+    () => {
+      const current = view()
+      const plan = requestPlan()
+      const previous = untrack(snapshot)
+      if (previous.resultsByKey.size === 0
+        || plan.requests.some((request) => !previous.resultsByKey.has(request.key))) return
+      const currentStart = current.layout.canvasStartSec ?? current.clip.startSec
+      const currentEnd = current.layout.canvasEndSec
+        ?? current.clip.startSec + current.clip.duration
+      const rasterWindow = createRetainedRasterLayout({
+        plan,
+        map: getAudioClipTimeMap({
+          clip: current.clip,
+          bufferDurationSec: current.layout.sourceDurationSec,
+          projectBpm: options.projectBpm(),
+          rangeStartSec: current.clip.startSec,
+          rangeEndSec: current.clip.startSec + current.clip.duration,
+        }),
+        pixelsPerSecond: options.cssWidthPx() / Math.max(1e-6, currentEnd - currentStart),
+      })
+      if (!rasterWindow) return
+      const revision = previous.revision + 1
+      setSnapshot({
+        resultsByKey: previous.resultsByKey,
+        rasterLayout: rasterWindow.segments,
+        raster: {
+          timelineStartSec: rasterWindow.timelineStartSec,
+          timelineEndSec: rasterWindow.timelineEndSec,
+          pixelsPerSecond: rasterWindow.pixelsPerSecond,
+          widthPx: Math.max(
+            1,
+            Math.ceil((rasterWindow.timelineEndSec - rasterWindow.timelineStartSec) * rasterWindow.pixelsPerSecond),
+          ),
+          timingSignature: timingSignatureFor(
+            current.clip,
+            options.projectBpm(),
+            current.layout.sourceDurationSec,
+          ),
+          dataRevision: revision,
+        },
+        revision,
+      })
+    },
+  ))
+
+  createEffect(on(
+    () => [sourceKey(), options.waveformVisible?.() !== false] as const,
+    ([key, visible]) => {
+    const currentRequestId = ++sourceRequestId
+    sourceCleanup?.()
+    if (!visible) {
+      setResolvedSource(null)
+      setLoading(false)
+      return
+    }
     const controller = new AbortController()
-    setLoading(true)
-    setError(undefined)
-    const sourceKey = [
-      current.clip.id,
-      current.clip.sourceAssetKey ?? '',
-      current.clip.sampleUrl ?? '',
-      current.clip.sourceDurationSec ?? '',
-      current.clip.sourceSampleRate ?? '',
-      current.clip.sourceChannelCount ?? '',
-      'verified',
-    ].join('|')
-    const sourcePromise = resolvedSourceKey === sourceKey && resolvedSource
-      ? Promise.resolve(resolvedSource)
+    sourceCleanup = () => controller.abort()
+    const current = untrack(view)
+    if (resolvedSourceKey !== key) setResolvedSource(null)
+    const source = resolvedSourceKey === key && resolvedSourceValue
+      ? Promise.resolve(resolvedSourceValue)
       : options.resolveAudioSource()(current.clip, controller.signal, { verifyContentHash: true })
-    void sourcePromise
-      .then(async (source) => {
-        if (currentRequestId !== requestId) return
-        resolvedSourceKey = sourceKey
-        resolvedSource = source
-        const sourceIdentity = {
+    void source.then((next) => {
+      if (currentRequestId !== sourceRequestId) return
+      resolvedSourceKey = key
+      resolvedSourceValue = next
+      setResolvedSource(next)
+    }).catch((cause) => {
+      if (currentRequestId !== sourceRequestId
+        || controller.signal.aborted
+        || isAbortError(cause instanceof Error ? cause : new Error())) return
+      setResolvedSource(null)
+      setError(sanitizeWaveformError(cause instanceof Error ? cause : new Error('Waveform loading failed.')))
+    })
+    },
+  ))
+
+  createEffect(on(
+    () => [resolvedSource(), requestPlanKey()] as const,
+    ([source]) => {
+      const plan = requestPlan()
+      const current = view()
+      const currentAssetKey = current.assetKey
+      const waveformMode = options.mode
+      const priorityRange = options.priorityRange?.()
+      const projectBpm = options.projectBpm()
+      const cssWidthPx = options.cssWidthPx()
+      const timingSignature = timingSignatureFor(
+        current.clip,
+        projectBpm,
+        current.layout.sourceDurationSec,
+      )
+      if (untrack(snapshot).raster?.timingSignature !== timingSignature) {
+        setSnapshot((previous) => ({
+          ...previous,
+          resultsByKey: new Map(),
+          raster: null,
+          rasterLayout: [],
+          revision: previous.revision + 1,
+        }))
+      }
+      const currentDataRequestId = ++dataRequestId
+      dataCleanup?.()
+      if (!source || plan.requests.length === 0) {
+        setLoading(false)
+        if (!source) {
+          setSnapshot((previous) => ({
+            ...previous,
+            resultsByKey: new Map(),
+            rasterLayout: [],
+            raster: null,
+            revision: previous.revision + 1,
+          }))
+        }
+        return
+      }
+      const controller = new AbortController()
+      dataCleanup = () => controller.abort()
+      const assetKey = currentAssetKey
+      const midpointByKey = new Map(plan.segments.map((segment) => [
+        segment.requestKey,
+        (segment.segment.canvasStartSec + segment.segment.canvasEndSec) / 2,
+      ]))
+      setLoading(true)
+      setError(undefined)
+      void Promise.all(plan.requests.map(async (item) => {
+        const identity = {
           assetKey,
           identity: source.identity,
           durationSec: source.durationSec,
           sampleRate: source.sampleRate,
           channelCount: source.channelCount,
         }
-        const sourceIdentityKey = [
-          assetKey,
-          source.identity,
-          source.durationSec,
-          source.sampleRate,
-          source.channelCount,
-        ].join('|')
-        const preserveResolvedSource = lastSourceIdentityKey === sourceIdentityKey
-        lastSourceIdentityKey = sourceIdentityKey
-        const preservedSegments = preserveResolvedSource ? preserve : layoutSegments.map((segment) => ({
-          startPx: segment.startPx,
-          endPx: segment.endPx,
-          canvasStartSec: segment.canvasStartSec,
-          canvasEndSec: segment.canvasEndSec,
-          sourceStartSec: segment.sourceStartSec,
-          sourceEndSec: segment.sourceEndSec,
-          peaks: null,
-          pcm: null,
-          showPoints: false,
-        }))
-        if (preserveResolvedSource) {
-          batch(() => {
-            setSegments(preservedSegments)
-            setPeaks(preservedSegments.length === 1 ? preservedSegments[0]?.peaks ?? null : null)
-            setPcm(preservedSegments.length === 1 ? preservedSegments[0]?.pcm ?? null : null)
-          })
-        } else {
-          batch(() => {
-            setSegments([])
-            setPeaks(null)
-            setPcm(null)
-          })
-        }
-        const lods = layoutSegments.map((segment) => selectWaveformLod({
-          sampleRate: source.sampleRate,
-          sourceStartSec: segment.sourceStartSec,
-          sourceEndSec: segment.sourceEndSec,
-          widthPx: segment.drawCols,
-        }))
-        const cachedPeaks = await Promise.all(layoutSegments.map((segment, index) => {
+        if (item.lod.mode === 'cached-peaks') {
           const request = {
             assetKey,
-            sourceIdentity,
-            sourceStartSec: segment.sourceStartSec,
-            sourceEndSec: segment.sourceEndSec,
-            bins: segment.drawCols,
+            sourceIdentity: identity,
+            sourceStartSec: item.sourceStartSec,
+            sourceEndSec: item.sourceEndSec,
+            bins: item.bins,
             signal: controller.signal,
           }
-          return lods[index]?.mode === 'cached-peaks'
-            ? getWaveformSlice({ ...request, source })
-            : getCachedWaveformSlice(request).catch(() => null)
-        }))
-        if (currentRequestId !== requestId) return
-        const projectSegments = (
-          peakResults: readonly (WaveformPeakChannelSlice | null)[],
-          pcmResults: readonly (WaveformPcmResult | null)[],
-        ) => layoutSegments.map((segment, index) => {
-          const preserved = preservedSegments[index]
-          const peaksResult = peakResults[index]
-          const pcmResult = pcmResults[index]
-          const keepPreserved = peaksResult === null
-            && pcmResult === null
-            && (preserved?.peaks !== null || preserved?.pcm !== null)
-          return {
-            ...(keepPreserved && preserved ? preserved : {
-              startPx: segment.startPx,
-              endPx: segment.endPx,
-              canvasStartSec: segment.canvasStartSec,
-              canvasEndSec: segment.canvasEndSec,
-              sourceStartSec: segment.sourceStartSec,
-              sourceEndSec: segment.sourceEndSec,
-            }),
-            peaks: peaksResult ?? (keepPreserved ? preserved?.peaks ?? null : null),
-            pcm: pcmResult ?? (keepPreserved ? preserved?.pcm ?? null : null),
-            showPoints: pcmResult
-              ? lods[index]?.mode === 'pcm-line' && lods[index].showPoints === true
-              : keepPreserved ? preserved?.showPoints ?? false : false,
-          }
+          const result = await getWaveformSlice({ ...request, source })
+            ?? await getCachedWaveformSlice(request).catch(() => null)
+          return result
+            ? { key: item.key, data: result, showPoints: false }
+            : null
+        }
+        const result = await arrangementWaveformPcmScheduler.request({
+          assetKey,
+          sourceIdentity: source.identity,
+          source: async () => source,
+          sourceStartSec: item.sourceStartSec,
+          sourceEndSec: item.sourceEndSec,
+          columns: item.bins,
+          sampleRate: source.sampleRate,
+          channelCount: source.channelCount,
+            mode: item.lod.mode,
+          exactRange: waveformMode === 'sample-detail',
+          priority: waveformMode === 'sample-detail'
+            ? 0
+            : Math.abs(
+              (midpointByKey.get(item.key)
+                ?? current.clip.startSec + current.clip.duration / 2)
+                - (
+                  (priorityRange?.startSec ?? current.clip.startSec)
+                  + (priorityRange?.endSec ?? current.clip.startSec + current.clip.duration)
+                ) / 2,
+            ),
+          signal: controller.signal,
         })
-        const initialSegments = projectSegments(cachedPeaks, layoutSegments.map(() => null))
-        batch(() => {
-          setSegments(initialSegments)
-          setPeaks(initialSegments.length === 1 ? initialSegments[0]?.peaks ?? null : null)
-          setPcm(initialSegments.length === 1 ? initialSegments[0]?.pcm ?? null : null)
-        })
-        const pcmResults = await Promise.all(layoutSegments.map((segment, index) => {
-          const lod = lods[index]
-          if (!lod
-            || (lod.mode === 'cached-peaks'
-              && (cachedPeaks[index] !== null || options.mode !== 'sample-detail'))) {
-            return Promise.resolve<WaveformPcmResult | null>(null)
-          }
-          return arrangementWaveformPcmScheduler.request({
-            assetKey,
-            sourceIdentity: source.identity,
-            source: async () => source,
-            sourceStartSec: segment.sourceStartSec,
-            sourceEndSec: segment.sourceEndSec,
-            columns: segment.drawCols,
-            sampleRate: source.sampleRate,
-            channelCount: source.channelCount,
-            mode: lod.mode === 'pcm-line' ? 'pcm-line' : 'pcm-envelope',
-            exactRange: options.mode === 'sample-detail',
-            priority: options.mode === 'sample-detail'
-              ? 0
-              : Math.abs(
-                (segment.canvasStartSec + segment.canvasEndSec) / 2
-                  - (
-                    (options.priorityRange?.().startSec ?? current.clip.startSec)
-                    + (options.priorityRange?.().endSec ?? current.clip.startSec + current.clip.duration)
-                  ) / 2,
-              ),
-            signal: controller.signal,
+        return result
+          ? { key: item.key, data: result, showPoints: item.lod.mode === 'pcm-line' && item.lod.showPoints }
+          : null
+      })).then((results) => {
+        if (currentDataRequestId !== dataRequestId || controller.signal.aborted) return
+        const resultsByKey = new Map<string, RetainedWaveform>()
+        for (const result of results) {
+          if (!result) continue
+          resultsByKey.set(result.key, {
+            data: result.data,
+            sourceStartSec: result.data.sourceStartSec,
+            sourceEndSec: result.data.sourceEndSec,
+            showPoints: result.showPoints,
           })
-        }))
-        if (currentRequestId !== requestId) return
-        const readySegments = projectSegments(cachedPeaks, pcmResults)
-        batch(() => {
-          setSegments(readySegments)
-          setPeaks(readySegments.length === 1 ? readySegments[0]?.peaks ?? null : null)
-          setPcm(readySegments.length === 1 ? readySegments[0]?.pcm ?? null : null)
-        })
+        }
+        if (resultsByKey.size > 0) {
+          const latest = untrack(view)
+          const currentStart = latest.layout.canvasStartSec ?? latest.clip.startSec
+          const currentEnd = latest.layout.canvasEndSec
+            ?? latest.clip.startSec + latest.clip.duration
+          const currentDuration = Math.max(1e-6, currentEnd - currentStart)
+          const currentPixelsPerSecond = cssWidthPx / currentDuration
+          const rasterWindow = createRetainedRasterLayout({
+            plan,
+            map: getAudioClipTimeMap({
+              clip: latest.clip,
+              bufferDurationSec: latest.layout.sourceDurationSec,
+              projectBpm,
+              rangeStartSec: latest.clip.startSec,
+              rangeEndSec: latest.clip.startSec + latest.clip.duration,
+            }),
+            pixelsPerSecond: currentPixelsPerSecond,
+          })
+          if (!rasterWindow) return
+          dataRevision += 1
+          const rasterWidthPx = Math.max(
+            1,
+            Math.ceil((rasterWindow.timelineEndSec - rasterWindow.timelineStartSec) * rasterWindow.pixelsPerSecond),
+          )
+          setSnapshot({
+            resultsByKey,
+            rasterLayout: rasterWindow.segments,
+            raster: {
+            timelineStartSec: rasterWindow.timelineStartSec,
+            timelineEndSec: rasterWindow.timelineEndSec,
+            pixelsPerSecond: rasterWindow.pixelsPerSecond,
+            widthPx: rasterWidthPx,
+            timingSignature: timingSignatureFor(
+              latest.clip,
+              projectBpm,
+              latest.layout.sourceDurationSec,
+            ),
+              dataRevision,
+            },
+            revision: dataRevision,
+          })
+        }
         setLoading(false)
-      })
-      .catch((error) => {
-        const waveformError = error instanceof Error
-          ? error
-          : new Error('Waveform loading failed.')
-        if (currentRequestId !== requestId || controller.signal.aborted || isAbortError(waveformError)) return
+      }).catch((cause) => {
+        if (currentDataRequestId !== dataRequestId
+          || controller.signal.aborted
+          || isAbortError(cause instanceof Error ? cause : new Error())) return
         setLoading(false)
-        setError(sanitizeWaveformError(waveformError))
+        setError(sanitizeWaveformError(cause instanceof Error ? cause : new Error('Waveform loading failed.')))
       })
-    onCleanup(() => controller.abort())
-  })
+    },
+  ))
 
   onCleanup(() => {
-    requestId += 1
+    sourceRequestId += 1
+    dataRequestId += 1
+    sourceCleanup?.()
+    dataCleanup?.()
   })
 
-  const renderSegments = createMemo<ClipWaveformRenderSegment[]>(() => {
-    const render: ClipWaveformRenderSegment[] = []
-    for (const segment of segments()) {
+  const projectedSegments = createMemo<ClipWaveformSegment[]>(() => {
+    const current = view()
+    if (current.midi || snapshot().resultsByKey.size === 0) return []
+    const map = getAudioClipTimeMap({
+      clip: current.clip,
+      bufferDurationSec: current.layout.sourceDurationSec,
+      projectBpm: options.projectBpm(),
+      rangeStartSec: current.clip.startSec,
+      rangeEndSec: current.clip.startSec + current.clip.duration,
+    })
+    const plan = requestPlan()
+    const projectionSegments = options.mode === 'sample-detail'
+      ? plan.segments.map((item) => {
+        if (snapshot().resultsByKey.has(item.requestKey)) return item
+        const retainedKey = [...snapshot().resultsByKey.entries()].find(([, retained]) => (
+          retained.sourceStartSec < item.segment.sourceEndSec
+          && retained.sourceEndSec > item.segment.sourceStartSec
+        ))?.[0]
+        return retainedKey ? { ...item, requestKey: retainedKey } : item
+      })
+      : plan.segments
+    const projected = projectRetainedWaveformData({
+      retainedByKey: snapshot().resultsByKey,
+      segments: projectionSegments,
+      map,
+    })
+    return projected.map((item) => {
+      const showPoints = item.requestKey
+        ? snapshot().resultsByKey.get(item.requestKey)?.showPoints ?? false
+        : false
+      return {
+        startPx: item.startPx,
+        endPx: item.endPx,
+        canvasStartSec: item.canvasStartSec,
+        canvasEndSec: item.canvasEndSec,
+        sourceStartSec: item.sourceStartSec,
+        sourceEndSec: item.sourceEndSec,
+        peaks: item.data.mode === 'pcm-envelope' ? item.data : null,
+        pcm: item.data.mode === 'pcm-line' ? item.data : null,
+        showPoints,
+      }
+    })
+  })
+
+  const rasterSegments = createMemo<ClipWaveformSegment[]>(() => {
+    const currentRaster = snapshot().raster
+    if (!currentRaster) return []
+    const current = view()
+    const map = getAudioClipTimeMap({
+      clip: current.clip,
+      bufferDurationSec: current.layout.sourceDurationSec,
+      projectBpm: options.projectBpm(),
+      rangeStartSec: current.clip.startSec,
+      rangeEndSec: current.clip.startSec + current.clip.duration,
+    })
+    const layoutSegments = snapshot().rasterLayout
+    const projected = projectRetainedWaveformData({
+      retainedByKey: snapshot().resultsByKey,
+      segments: layoutSegments,
+      map,
+    })
+    return projected.map((item) => ({
+      startPx: (item.canvasStartSec - currentRaster.timelineStartSec) * currentRaster.pixelsPerSecond,
+      endPx: (item.canvasEndSec - currentRaster.timelineStartSec) * currentRaster.pixelsPerSecond,
+      canvasStartSec: item.canvasStartSec,
+      canvasEndSec: item.canvasEndSec,
+      sourceStartSec: item.sourceStartSec,
+      sourceEndSec: item.sourceEndSec,
+      peaks: item.data.mode === 'pcm-envelope' ? item.data : null,
+      pcm: item.data.mode === 'pcm-line' ? item.data : null,
+      showPoints: item.requestKey
+        ? snapshot().resultsByKey.get(item.requestKey)?.showPoints ?? false
+        : false,
+    }))
+  })
+
+  const renderSegments = createMemo<ClipWaveformRenderSegment[]>(() => (
+    (options.mode === 'sample-detail'
+      ? projectedSegments()
+      : rasterSegments().length > 0 ? rasterSegments() : projectedSegments())
+      .flatMap<ClipWaveformRenderSegment>((segment) => {
       if (segment.pcm?.mode === 'pcm-line') {
-        render.push({
-          mode: 'samples',
+        return [{
+          mode: 'samples' as const,
           drawStartPx: segment.startPx,
           drawCols: segment.endPx - segment.startPx,
           samples: segment.pcm,
           showPoints: segment.showPoints,
-        })
-      } else if (segment.pcm?.mode === 'pcm-envelope') {
-        render.push({
-          mode: 'peaks',
-          drawStartPx: segment.startPx,
-          drawCols: segment.pcm.columns,
-          peaks: segment.pcm,
-        })
-      } else if (segment.peaks) {
-        render.push({
-          mode: 'peaks',
-          drawStartPx: segment.startPx,
-          drawCols: segment.peaks.columns,
-          peaks: segment.peaks,
-        })
+        }]
       }
-    }
-    return render
+      if (segment.peaks) {
+        return [{
+          mode: 'peaks' as const,
+          drawStartPx: segment.startPx,
+          drawCols: Math.max(1, Math.ceil(segment.endPx - segment.startPx)),
+          peaks: segment.peaks,
+        }]
+      }
+      return []
+      })
+  ))
+
+  const peaks = createMemo(() => {
+    const segments = projectedSegments()
+    return segments.length === 1 ? segments[0]?.peaks ?? null : null
+  })
+  const pcm = createMemo(() => {
+    const segments = projectedSegments()
+    return segments.length === 1 ? segments[0]?.pcm ?? null : null
   })
 
   return {
     layout: () => view().layout,
     peaks,
     pcm,
-    segments,
+    segments: projectedSegments,
+    raster: () => snapshot().raster,
+    rasterSegments,
     renderSegments,
     loading,
     error,

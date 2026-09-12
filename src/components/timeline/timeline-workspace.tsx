@@ -49,6 +49,7 @@ import TimelineContextMenu, {
 } from "./context-menu/timeline-context-menu";
 import {
   buildGroupClipOverview,
+  trackIdsInYRange,
   type TimelineTrackLayout,
   type TimelineTrackLayoutRow,
 } from "~/lib/timeline-track-layout";
@@ -236,6 +237,23 @@ type Props = {
 export default function TimelineWorkspace(props: Props) {
   let scrollElement: HTMLDivElement | undefined;
   const viewportRedrawVersion = createViewportRedrawVersion();
+  const [verticalScrollTop, setVerticalScrollTop] = createSignal(0);
+  const [verticalClientHeight, setVerticalClientHeight] = createSignal(0);
+  const observeScrollViewport = (element: HTMLDivElement) => {
+    scrollElement = element;
+    props.scrollRef(element);
+    setVerticalClientHeight(element.clientHeight);
+    const resizeObserver = new ResizeObserver(() => {
+      setVerticalClientHeight(element.clientHeight);
+    });
+    resizeObserver.observe(element);
+    onCleanup(() => resizeObserver.disconnect());
+  };
+  const verticalWaveformTrackIds = createMemo(() => new Set(trackIdsInYRange(
+    props.trackLayout.scrollingRows,
+    verticalScrollTop() - TIMELINE_HEADER_HEIGHT - 512,
+    verticalScrollTop() + verticalClientHeight() - TIMELINE_HEADER_HEIGHT + 512,
+  )));
   const trackById = createMemo(() => props.trackLookup.trackById);
   const visibleTracks = createMemo(() =>
     [
@@ -303,6 +321,7 @@ export default function TimelineWorkspace(props: Props) {
     row: TimelineTrackLayoutRow;
     layout: TimelineTrackLayoutRow;
     isDropTarget?: Accessor<boolean>;
+    isReturn?: boolean;
   }> = (laneProps) => {
     const track = () => trackById().get(laneProps.row.trackId);
     const visibleTargetKeys = () =>
@@ -347,6 +366,10 @@ export default function TimelineWorkspace(props: Props) {
             viewportWidthPx={props.viewport.width}
             timeToX={props.viewport.timeToX}
             viewportRedrawVersion={viewportRedrawVersion()}
+            waveformVisible={
+              laneProps.isReturn === true
+              || verticalWaveformTrackIds().has(laneProps.row.trackId)
+            }
             automation={{
               projectId: props.automation.projectId,
               visible:
@@ -396,9 +419,11 @@ export default function TimelineWorkspace(props: Props) {
       <TimelineContextMenu items={fallbackMenuItems}>
         <div
           class="flex-1 relative overflow-auto"
-          ref={(element) => {
-            scrollElement = element;
-            props.scrollRef(element);
+          ref={(element) => observeScrollViewport(element)}
+          onScroll={(event) => {
+            const element = event.currentTarget;
+            setVerticalScrollTop(element.scrollTop);
+            setVerticalClientHeight(element.clientHeight);
           }}
           onWheel={(event) => props.viewport.onWheel(event)}
         >
@@ -535,6 +560,7 @@ export default function TimelineWorkspace(props: Props) {
                           row={row}
                           layout={{ ...row, topPx: 0 }}
                           isDropTarget={isDropTarget}
+                          isReturn
                         />
                       </div>
                       );

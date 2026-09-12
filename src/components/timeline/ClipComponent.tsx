@@ -11,6 +11,7 @@ import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { createClipVisualColors, resolveClipColor } from "~/lib/clip-color";
 import { LANE_HEIGHT } from "~/lib/timeline-utils";
 import { getTimelineClipViewportSlice } from "~/lib/timeline-viewport-geometry";
+import { waveformCanvasSize } from "~/lib/waveform-canvas";
 import { cn } from "~/lib/utils";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip } from "~/lib/timeline-runtime-types";
@@ -61,6 +62,7 @@ type ClipComponentProps = {
   visibleRange: { startSec: number; endSec: number };
   timeToX: (timeSec: number) => number;
   viewportRedrawVersion: number;
+  waveformVisible?: boolean;
   rangeOverlap: ClipRangeOverlap | null;
   canEditFades: () => boolean;
   onCommitFades: (clipId: string, fades: ClipFades, baseline: ClipFades) => void;
@@ -148,6 +150,18 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     resolveAudioSource: () => props.resolveAudioSource,
     visibleRange: () => props.visibleRange,
     priorityRange: () => props.visibleRange,
+    waveformVisible: () => props.waveformVisible !== false,
+  });
+  const waveformCanvasStyle = createMemo(() => {
+    const currentRaster = waveform.raster();
+    return {
+      width: `${currentRaster?.widthPx ?? clipWidthPx()}px`,
+      height: `${LANE_HEIGHT - 1}px`,
+      transform: currentRaster
+        ? `translateX(${((currentRaster.timelineStartSec - renderStartSec()) * props.pixelsPerSecond)}px) scaleX(${props.pixelsPerSecond / Math.max(1e-6, currentRaster.pixelsPerSecond)})`
+        : undefined,
+      "transform-origin": "top left",
+    };
   });
   const overlapProjection = createMemo(() => {
     const overlap = props.rangeOverlap;
@@ -245,13 +259,22 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
   function drawWaveform() {
     const canvas = canvasRef;
     if (!canvas) return;
+    if (props.waveformVisible === false) {
+      canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
 
-    const cssW = clipWidthPx();
+    const currentRaster = waveform.raster();
     const cssH = Math.max(1, Math.floor(LANE_HEIGHT - 1));
 
-    const dpr = window.devicePixelRatio || 1;
-    const pxW = Math.floor(cssW * dpr);
-    const pxH = Math.floor(cssH * dpr);
+    const canvasSize = waveformCanvasSize({
+      cssWidthPx: currentRaster?.widthPx ?? clipWidthPx(),
+      cssHeightPx: cssH,
+      devicePixelRatio: window.devicePixelRatio || 1,
+    });
+    const cssW = canvasSize.cssWidthPx;
+    const pxW = canvasSize.backingWidthPx;
+    const pxH = canvasSize.backingHeightPx;
     if (canvas.width !== pxW || canvas.height !== pxH) {
       canvas.width = pxW;
       canvas.height = pxH;
@@ -259,7 +282,14 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setTransform(
+      canvasSize.contextScaleX,
+      0,
+      0,
+      canvasSize.contextScaleY,
+      0,
+      0,
+    );
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, cssW, cssH);
 
@@ -360,7 +390,14 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     }
 
     const layout = waveform.layout();
-    const { padPx, drawCols, audioStartPx, audioEndPx } = layout;
+    const rasterSegments = waveform.rasterSegments();
+    const { padPx, drawCols } = layout;
+    const audioStartPx = rasterSegments.length > 0
+      ? Math.min(...rasterSegments.map((segment) => segment.startPx))
+      : layout.audioStartPx;
+    const audioEndPx = rasterSegments.length > 0
+      ? Math.max(...rasterSegments.map((segment) => segment.endPx))
+      : layout.audioEndPx;
     const peaks = waveform.peaks();
     if (drawCols <= 0) {
       ctx.fillStyle = timelineSurface;
@@ -392,7 +429,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       || fades.fadeInSec > 0
       || fades.fadeOutSec > 0
       || fades.fadeOutEndSec > 0;
-    const waveformSegments = waveform.segments();
+    const waveformSegments = rasterSegments;
     if (waveformSegments.length > 0) {
       for (const segment of waveformSegments) {
         const segmentWidth = Math.max(1, segment.endPx - segment.startPx);
@@ -412,7 +449,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
             drawWaveformPeaks({
               ctx,
               peaks: channelPeaks,
-              drawCols: segmentPcm.columns,
+              drawCols: Math.max(1, Math.ceil(segmentWidth)),
               padPx: 0,
               xOffsetPx: segment.startPx,
               topY: waveformTop + channel * laneHeight,
@@ -452,7 +489,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
             drawWaveformPeaks({
               ctx,
               peaks: channelPeaks,
-              drawCols: segment.peaks?.columns ?? 0,
+              drawCols: Math.max(1, Math.ceil(segmentWidth)),
               padPx: 0,
               xOffsetPx: segment.startPx,
               topY: waveformTop + channel * laneHeight,
@@ -470,7 +507,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       return;
     }
 
-    if (!peaks) {
+    if (!peaks && !currentRaster) {
       ctx.strokeStyle = timelineGridMinor;
       for (let x = audioStartPx; x < audioEndPx; x += 6) {
         ctx.beginPath();
@@ -513,31 +550,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
   }
 
   createEffect(() => {
-    void props.clip.duration;
-    void props.clip.buffer;
-    void props.clip.sampleUrl;
-    void props.clip.sourceAssetKey;
-    void props.clip.leftPadSec;
-    void props.clip.bufferOffsetSec;
-    void props.clip.sourceDurationSec;
-    void props.clip.sourceSampleRate;
-    void props.clip.sourceChannelCount;
-    void props.clip.audioWarp;
-    void props.clip.color;
-    void props.isSelected;
-    const midi = props.clip.midi;
-    const midiSignature = Array.isArray(midi?.notes)
-      ? midi.notes
-          .map(
-            (note) =>
-              `${note.pitch ?? ""}/${note.beat ?? ""}/${note.length ?? ""}`,
-          )
-          .join("|")
-      : "";
-    void midiSignature;
-    void props.bpm;
-    void waveform.peaks();
-    void waveform.pcm();
+    void waveform.raster()?.dataRevision;
     void props.viewportRedrawVersion;
     drawWaveform();
   });
@@ -628,10 +641,13 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         </div>
       </Show>
 
-      <canvas
-        ref={(el) => (canvasRef = el || undefined)}
-        class="absolute inset-0 size-full pointer-events-none z-10"
-      />
+      <Show when={props.waveformVisible !== false}>
+        <canvas
+          ref={(el) => (canvasRef = el || undefined)}
+          class="absolute inset-0 size-full pointer-events-none z-10"
+          style={waveformCanvasStyle()}
+        />
+      </Show>
       <ClipFadeOverlay
         clip={{
           ...props.clip,

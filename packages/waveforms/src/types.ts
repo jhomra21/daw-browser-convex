@@ -39,8 +39,8 @@ export type WaveformPeakChannelSlice = {
   readonly mode: 'pcm-envelope'
   readonly channels: readonly Uint8Array[]
   readonly columns: number
-  readonly sourceStartSec?: number
-  readonly sourceEndSec?: number
+  readonly sourceStartSec: number
+  readonly sourceEndSec: number
 }
 
 export type WaveformSampleChannelSlice = {

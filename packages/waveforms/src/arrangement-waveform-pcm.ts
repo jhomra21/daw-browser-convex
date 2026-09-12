@@ -154,7 +154,7 @@ const requestKey = (
   request.channelCount,
   tileStartFrame,
   tileEndFrame,
-  request.columns,
+  request.exactRange ? request.columns : tileEndFrame - tileStartFrame,
   request.mode ?? 'pcm-envelope',
 ])
 

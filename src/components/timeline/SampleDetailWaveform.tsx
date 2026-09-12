@@ -286,7 +286,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
           drawWaveformPeaks({
             ctx,
             peaks,
-            drawCols: segment.peaks.columns,
+            drawCols: segmentWidthPx,
             padPx: 0,
             topY: contentTop + channel * channelHeight,
             contentH: channelHeight,

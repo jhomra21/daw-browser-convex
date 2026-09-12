@@ -91,20 +91,11 @@ export function createPcmEnvelopeAccumulator(input: PcmEnvelopeAccumulatorInput)
         peaks[column * 2 + 1] = encodePeakByte(maxs[channel]![column]!)
       }
       return peaks
-    }),
+      }),
+      sourceStartSec: input.sourceStartSec ?? input.startFrame / input.sampleRate,
+      sourceEndSec: input.sourceEndSec ?? input.endFrame / input.sampleRate,
     })
-    if (input.sourceStartSec === undefined && input.sourceEndSec === undefined) return base()
-    if (input.sourceStartSec === undefined) {
-      return { ...base(), sourceEndSec: input.sourceEndSec }
-    }
-    if (input.sourceEndSec === undefined) {
-      return { ...base(), sourceStartSec: input.sourceStartSec }
-    }
-    return {
-      ...base(),
-      sourceStartSec: input.sourceStartSec,
-      sourceEndSec: input.sourceEndSec,
-    }
+    return base()
   }
 
   return { append, finish }

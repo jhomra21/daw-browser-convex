@@ -79,6 +79,46 @@ describe('drawWaveformPeaks', () => {
 
     expect(rectangles).toEqual([{ x: 1, y: 41, width: 1, height: 18 }])
   })
+
+  test('maps retained peak columns across the projected destination width', () => {
+    const { ctx, rectangles } = createContext()
+
+    drawWaveformPeaks({
+      ctx,
+      peaks: new Uint8Array([128, 128, 128, 255]),
+      drawCols: 8,
+      padPx: 0,
+      topY: 0,
+      contentH: 100,
+      cssW: 8,
+      cssH: 100,
+    })
+
+    expect(rectangles.map((rectangle) => rectangle.x)).toEqual([4, 5, 6, 7])
+  })
+
+  test('preserves extrema from every source interval when downsampling', () => {
+    const { ctx, rectangles } = createContext()
+
+    drawWaveformPeaks({
+      ctx,
+      peaks: new Uint8Array([
+        128, 128,
+        0, 128,
+        128, 128,
+        128, 255,
+      ]),
+      drawCols: 2,
+      padPx: 0,
+      topY: 0,
+      contentH: 100,
+      cssW: 2,
+      cssH: 100,
+    })
+
+    expect(rectangles.map((rectangle) => rectangle.x)).toEqual([0, 1])
+    expect(rectangles.map((rectangle) => rectangle.height)).toEqual([36, 36])
+  })
 })
 
 describe('drawWaveformPcmLine', () => {

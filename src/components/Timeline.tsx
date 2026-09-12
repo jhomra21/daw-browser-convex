@@ -1080,7 +1080,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   let timelineSurfaceRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
   let effectsChainElement: HTMLElement | undefined;
-  const duration = () => timelineDurationSec(renderTracks());
+  const duration = createMemo(() => timelineDurationSec(renderTracks()));
 
   const leftBrowser = useTimelineLeftBrowserState({
     projectId,

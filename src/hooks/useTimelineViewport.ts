@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, onCleanup, type Accessor } from 'solid-js'
+import { batch, createEffect, createSignal, on, onCleanup, type Accessor } from 'solid-js'
 
 import {
   minimumVisibleDuration,
@@ -125,10 +125,12 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     const minimumDuration = minimumVisibleDuration(width)
     const normalizedRange = normalizeTimelineRange(range, options.durationSec(), minimumDuration)
     const nextScale = pixelsPerSecondForRange(normalizedRange, width)
-    if (commit) options.commitPixelsPerSecond(nextScale)
-    else options.previewPixelsPerSecond(nextScale)
-    setVisibleStartSec(normalizedRange.startSec)
-    setPhysicalAnchor()
+    batch(() => {
+      if (commit) options.commitPixelsPerSecond(nextScale)
+      else options.previewPixelsPerSecond(nextScale)
+      setVisibleStartSec(normalizedRange.startSec)
+      setPhysicalAnchor()
+    })
     if (!isWheelPreview) clearWheelCommit()
     return nextScale
   }

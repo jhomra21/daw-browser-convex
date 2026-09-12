@@ -509,6 +509,143 @@ describe('useClipWaveformViewModel browser reactivity', () => {
     }))
   })
 
+  test('keeps the retained raster revision stable during pure viewport geometry changes', async () => {
+    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
+      const [width, setWidth] = createSignal(500)
+      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
+        signal?.throwIfAborted()
+        return source
+      }
+      const waveform = useClipWaveformViewModel({
+        clip: () => clip,
+        cssWidthPx: width,
+        projectBpm: () => 120,
+        resolveAudioSource: () => resolveAudioSource,
+        visibleRange: () => ({ startSec: 0, endSec: 1 }),
+      })
+      void (async () => {
+        await waitForReady(waveform)
+        const initialRaster = waveform.raster()
+        if (!initialRaster) throw new Error('Expected a retained raster.')
+        setWidth(510)
+        await flushEffects()
+        expect(waveform.raster()?.dataRevision).toBe(initialRaster.dataRevision)
+        expect(waveform.raster()?.widthPx).toBe(initialRaster.widthPx)
+        dispose()
+        resolve()
+      })().catch((error) => {
+        dispose()
+        reject(error)
+      })
+    }))
+  })
+
+  test('publishes a density refinement while viewport motion is active', async () => {
+    const firstGate = deferred<void>()
+    const secondGate = deferred<void>()
+    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
+      const [width, setWidth] = createSignal(600)
+      const refinementSource = createSource('active-refinement-source', [firstGate, secondGate])
+      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
+        signal?.throwIfAborted()
+        return refinementSource
+      }
+      const waveform = useClipWaveformViewModel({
+        clip: () => clip,
+        cssWidthPx: width,
+        projectBpm: () => 120,
+        resolveAudioSource: () => resolveAudioSource,
+        visibleRange: () => ({ startSec: 0, endSec: 1 }),
+      })
+      void (async () => {
+        const initial = waitForReady(waveform)
+        firstGate.resolve()
+        await initial
+        const initialRevision = waveform.raster()?.dataRevision ?? 0
+        const refinement = waitForReady(waveform)
+        setWidth(1_000)
+        await flushEffects()
+        expect(waveform.loading()).toBe(true)
+        secondGate.resolve()
+        await refinement
+        expect(waveform.raster()?.dataRevision).toBeGreaterThan(initialRevision)
+        dispose()
+        resolve()
+      })().catch((error) => {
+        dispose()
+        reject(error)
+      })
+    }))
+  })
+
+  test('reprojects retained coverage for a sub-tile pan without restarting data', async () => {
+    let readPages = 0
+    const longSource: AudioPcmSourceDescriptor = {
+      identity: 'sub-tile-pan-source',
+      durationSec: 20,
+      frameCount: 20_000,
+      sampleRate: 1_000,
+      channelCount: 1,
+      readPages: async function* (options = {}) {
+        readPages += 1
+        const startFrame = options.startFrame ?? 0
+        const endFrame = options.endFrame ?? longSource.frameCount
+        yield {
+          startFrame,
+          frameCount: endFrame - startFrame,
+          sampleRate: longSource.sampleRate,
+          channelCount: longSource.channelCount,
+          planes: [new Float32Array(endFrame - startFrame)],
+        }
+      },
+    }
+    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
+      const [range, setRange] = createSignal({ startSec: 0, endSec: 1 })
+      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
+        signal?.throwIfAborted()
+        return longSource
+      }
+      const waveform = useClipWaveformViewModel({
+        clip: () => ({
+          ...clip,
+          duration: 20,
+          sourceDurationSec: longSource.durationSec,
+          sourceSampleRate: longSource.sampleRate,
+          sourceChannelCount: longSource.channelCount,
+        }),
+        cssWidthPx: () => 600,
+        projectBpm: () => 120,
+        resolveAudioSource: () => resolveAudioSource,
+        visibleRange: range,
+      })
+      void (async () => {
+        await waitForReady(waveform)
+        const initialRaster = waveform.raster()
+        if (!initialRaster) throw new Error('Expected a retained raster.')
+        const initialReadPages = readPages
+        setRange({ startSec: 0.01, endSec: 1.01 })
+        await flushEffects()
+        const movedRaster = waveform.raster()
+        const movedSegment = waveform.renderSegments()[0]
+        expect(readPages).toBe(initialReadPages)
+        expect(movedRaster?.dataRevision).toBe(initialRaster.dataRevision)
+        expect(initialRaster.timelineEndSec).toBeGreaterThan(1.01)
+        expect(movedRaster?.timelineEndSec).toBe(initialRaster.timelineEndSec)
+        if (!movedSegment) throw new Error('Expected retained waveform coverage.')
+        const movedScale = 600 / (movedRaster?.pixelsPerSecond ?? 1)
+        const movedTranslate = (initialRaster.timelineStartSec - 0.01) * 600
+        expect(movedTranslate + movedSegment.drawStartPx * movedScale).toBeLessThanOrEqual(0)
+        expect(movedTranslate + (movedSegment.drawStartPx + movedSegment.drawCols) * movedScale)
+          .toBeGreaterThanOrEqual(600)
+        dispose()
+        resolve()
+      })().catch((error) => {
+        dispose()
+        reject(error)
+      })
+    }))
+  })
+
   test('exposes non-abort first-load failures but keeps superseded failures quiet', async () => {
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
       const waveform = useClipWaveformViewModel({

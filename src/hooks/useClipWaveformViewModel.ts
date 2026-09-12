@@ -3,7 +3,10 @@ import { createEffect, createMemo, createSignal, on, onCleanup, untrack, type Ac
 import { getCachedWaveformSlice, getWaveformSlice } from '@daw-browser/waveforms/select-waveform-window'
 import { arrangementWaveformPcmScheduler } from '@daw-browser/waveforms/arrangement-waveform-pcm'
 import type { WaveformPeakChannelSlice, WaveformPcmResult } from '@daw-browser/waveforms/types'
-import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
+import {
+  getAudioClipTimeMap,
+  getMarkerWarpTimelineSegments,
+} from '@daw-browser/timeline-core/audio-clip-time-map'
 import {
   getAudioWaveformLayout,
 } from '~/lib/audio-waveform-layout'
@@ -119,6 +122,63 @@ const timingSignatureFor = (clip: RuntimeClip, projectBpm: number, sourceDuratio
   sourceDurationSec,
 ])
 
+const createRasterGeometry = (input: {
+  plan: WaveformRequestPlans
+  retainedByKey?: ReadonlyMap<string, RetainedWaveform>
+  clip: RuntimeClip
+  sourceDurationSec: number
+  projectBpm: number
+  pixelsPerSecond: number
+}) => {
+  const map = getAudioClipTimeMap({
+    clip: input.clip,
+    bufferDurationSec: input.sourceDurationSec,
+    projectBpm: input.projectBpm,
+    rangeStartSec: input.clip.startSec,
+    rangeEndSec: input.clip.startSec + input.clip.duration,
+  })
+  const markerSegments = map
+    ? getMarkerWarpTimelineSegments({
+      clip: input.clip,
+      map,
+      projectBpm: input.projectBpm,
+      timelineEndSec: map.timelineEndSec,
+    })
+    : []
+  const canonicalSegments = markerSegments.length > 0
+    ? markerSegments.map((segment) => ({
+      ...segment,
+      canvasStartSec: segment.timelineStartSec,
+      canvasEndSec: segment.timelineEndSec,
+    }))
+    : map
+      ? [{
+        sourceStartSec: map.sourceStartSec,
+        sourceEndSec: map.sourceEndSec,
+        canvasStartSec: map.sourceToTimelineSec(map.sourceStartSec),
+        canvasEndSec: map.sourceToTimelineSec(map.sourceEndSec),
+      }]
+      : []
+  const rasterWindow = createRetainedRasterLayout({
+    plan: input.plan,
+    map,
+    pixelsPerSecond: input.pixelsPerSecond,
+    coverageByKey: input.retainedByKey,
+    canonicalSegments,
+  })
+  if (!rasterWindow) return null
+  return {
+    timelineStartSec: rasterWindow.timelineStartSec,
+    timelineEndSec: rasterWindow.timelineEndSec,
+    pixelsPerSecond: rasterWindow.pixelsPerSecond,
+    widthPx: Math.max(
+      1,
+      Math.ceil((rasterWindow.timelineEndSec - rasterWindow.timelineStartSec) * rasterWindow.pixelsPerSecond),
+    ),
+    rasterLayout: rasterWindow.segments,
+  }
+}
+
 export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) {
   const [resolvedSource, setResolvedSource] = createSignal<Awaited<ReturnType<AudioPcmSourceResolver>> | null>(null)
   const [snapshot, setSnapshot] = createSignal<WaveformSnapshot>({
@@ -208,47 +268,56 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       const current = view()
       const plan = requestPlan()
       const previous = untrack(snapshot)
-      if (previous.resultsByKey.size === 0
-        || plan.requests.some((request) => !previous.resultsByKey.has(request.key))) return
+      const currentRaster = previous.raster
+      if (!currentRaster
+        || previous.resultsByKey.size === 0
+        || plan.requests.some((request) => !previous.resultsByKey.has(request.key))
+        || plan.segments.length === 0) return
+      const map = getAudioClipTimeMap({
+        clip: current.clip,
+        bufferDurationSec: current.layout.sourceDurationSec,
+        projectBpm: options.projectBpm(),
+        rangeStartSec: current.clip.startSec,
+        rangeEndSec: current.clip.startSec + current.clip.duration,
+      })
+      if (!map) return
+      const displayStartSec = Math.min(
+        ...plan.segments.map((item) => map.sourceToTimelineSec(item.segment.sourceStartSec)),
+      )
+      const displayEndSec = Math.max(
+        ...plan.segments.map((item) => map.sourceToTimelineSec(item.segment.sourceEndSec)),
+      )
+      if (displayStartSec >= currentRaster.timelineStartSec
+        && displayEndSec <= currentRaster.timelineEndSec) return
       const currentStart = current.layout.canvasStartSec ?? current.clip.startSec
       const currentEnd = current.layout.canvasEndSec
         ?? current.clip.startSec + current.clip.duration
-      const rasterWindow = createRetainedRasterLayout({
+      const geometry = createRasterGeometry({
         plan,
-        map: getAudioClipTimeMap({
-          clip: current.clip,
-          bufferDurationSec: current.layout.sourceDurationSec,
-          projectBpm: options.projectBpm(),
-          rangeStartSec: current.clip.startSec,
-          rangeEndSec: current.clip.startSec + current.clip.duration,
-        }),
+        retainedByKey: previous.resultsByKey,
+        clip: current.clip,
+        sourceDurationSec: current.layout.sourceDurationSec,
+        projectBpm: options.projectBpm(),
         pixelsPerSecond: options.cssWidthPx() / Math.max(1e-6, currentEnd - currentStart),
       })
-      if (!rasterWindow) return
-      const revision = previous.revision + 1
-      setSnapshot({
-        resultsByKey: previous.resultsByKey,
-        rasterLayout: rasterWindow.segments,
-        raster: {
-          timelineStartSec: rasterWindow.timelineStartSec,
-          timelineEndSec: rasterWindow.timelineEndSec,
-          pixelsPerSecond: rasterWindow.pixelsPerSecond,
-          widthPx: Math.max(
-            1,
-            Math.ceil((rasterWindow.timelineEndSec - rasterWindow.timelineStartSec) * rasterWindow.pixelsPerSecond),
-          ),
-          timingSignature: timingSignatureFor(
-            current.clip,
-            options.projectBpm(),
-            current.layout.sourceDurationSec,
-          ),
-          dataRevision: revision,
-        },
-        revision,
+      if (!geometry) return
+      setSnapshot((latest) => {
+        if (!latest.raster || latest.raster.dataRevision !== currentRaster.dataRevision) return latest
+        return {
+          ...latest,
+          rasterLayout: geometry.rasterLayout,
+          raster: {
+            timelineStartSec: geometry.timelineStartSec,
+            timelineEndSec: geometry.timelineEndSec,
+            pixelsPerSecond: geometry.pixelsPerSecond,
+            widthPx: geometry.widthPx,
+            timingSignature: latest.raster.timingSignature,
+            dataRevision: latest.raster.dataRevision,
+          },
+        }
       })
     },
   ))
-
   createEffect(on(
     () => [sourceKey(), options.waveformVisible?.() !== false] as const,
     ([key, visible]) => {
@@ -290,7 +359,6 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       const waveformMode = options.mode
       const priorityRange = options.priorityRange?.()
       const projectBpm = options.projectBpm()
-      const cssWidthPx = options.cssWidthPx()
       const timingSignature = timingSignatureFor(
         current.clip,
         projectBpm,
@@ -396,32 +464,25 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
           const currentEnd = latest.layout.canvasEndSec
             ?? latest.clip.startSec + latest.clip.duration
           const currentDuration = Math.max(1e-6, currentEnd - currentStart)
-          const currentPixelsPerSecond = cssWidthPx / currentDuration
-          const rasterWindow = createRetainedRasterLayout({
+          const currentPixelsPerSecond = options.cssWidthPx() / currentDuration
+          const rasterGeometry = createRasterGeometry({
             plan,
-            map: getAudioClipTimeMap({
-              clip: latest.clip,
-              bufferDurationSec: latest.layout.sourceDurationSec,
-              projectBpm,
-              rangeStartSec: latest.clip.startSec,
-              rangeEndSec: latest.clip.startSec + latest.clip.duration,
-            }),
+            retainedByKey: resultsByKey,
+            clip: latest.clip,
+            sourceDurationSec: latest.layout.sourceDurationSec,
+            projectBpm,
             pixelsPerSecond: currentPixelsPerSecond,
           })
-          if (!rasterWindow) return
+          if (!rasterGeometry) return
           dataRevision += 1
-          const rasterWidthPx = Math.max(
-            1,
-            Math.ceil((rasterWindow.timelineEndSec - rasterWindow.timelineStartSec) * rasterWindow.pixelsPerSecond),
-          )
           setSnapshot({
             resultsByKey,
-            rasterLayout: rasterWindow.segments,
+            rasterLayout: rasterGeometry.rasterLayout,
             raster: {
-            timelineStartSec: rasterWindow.timelineStartSec,
-            timelineEndSec: rasterWindow.timelineEndSec,
-            pixelsPerSecond: rasterWindow.pixelsPerSecond,
-            widthPx: rasterWidthPx,
+            timelineStartSec: rasterGeometry.timelineStartSec,
+            timelineEndSec: rasterGeometry.timelineEndSec,
+            pixelsPerSecond: rasterGeometry.pixelsPerSecond,
+            widthPx: rasterGeometry.widthPx,
             timingSignature: timingSignatureFor(
               latest.clip,
               projectBpm,
@@ -560,6 +621,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     const segments = projectedSegments()
     return segments.length === 1 ? segments[0]?.pcm ?? null : null
   })
+  const rasterDataRevision = createMemo(() => snapshot().raster?.dataRevision)
 
   return {
     layout: () => view().layout,
@@ -567,6 +629,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     pcm,
     segments: projectedSegments,
     raster: () => snapshot().raster,
+    rasterDataRevision,
     rasterSegments,
     renderSegments,
     loading,

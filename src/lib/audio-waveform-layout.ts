@@ -72,7 +72,7 @@ export const cropWaveformDataToSourceRange = (input: {
     if (endFrame <= firstFrame) return null
     const offset = firstFrame - input.data.firstFrame
     const channels = input.data.channels.map((channel) => (
-      channel.slice(offset, offset + endFrame - firstFrame)
+      channel.subarray(offset, offset + endFrame - firstFrame)
     ))
     const cropped: WaveformSampleChannelSlice = {
       mode: 'pcm-line',
@@ -104,7 +104,7 @@ export const cropWaveformDataToSourceRange = (input: {
   const cropped: WaveformPeakChannelSlice = {
     mode: 'pcm-envelope',
     channels: input.data.channels.map((channel) => (
-      channel.slice(startColumn * 2, endColumn * 2)
+      channel.subarray(startColumn * 2, endColumn * 2)
     )),
     columns: endColumn - startColumn,
     sourceStartSec,

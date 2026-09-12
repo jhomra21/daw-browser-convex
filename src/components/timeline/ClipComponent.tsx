@@ -3,11 +3,12 @@ import {
   createEffect,
   createMemo,
   Show,
+  untrack,
 } from "solid-js";
 
 import { drawWaveformPeaks, drawWaveformPcmLine } from "@daw-browser/waveforms/render-waveform";
 import { useAppPreferences } from "~/context/app-preferences";
-import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
+import { useClipWaveformViewModel, type ClipWaveformRaster } from "~/hooks/useClipWaveformViewModel";
 import { createClipVisualColors, resolveClipColor } from "~/lib/clip-color";
 import { LANE_HEIGHT } from "~/lib/timeline-utils";
 import { getTimelineClipViewportSlice } from "~/lib/timeline-viewport-geometry";
@@ -76,6 +77,13 @@ const AUDIO_WAVEFORM_MAX_HEIGHT_FRACTION = 0.9;
 const DOUBLE_TAP_MS = 700;
 const DOUBLE_TAP_DISTANCE_PX = 8;
 const SELECTED_TAP_MS = 700;
+export const retainedWaveformTransform = (
+  raster: ClipWaveformRaster,
+  renderStartSec: number,
+  pixelsPerSecond: number,
+) => (
+  `translateX(${(raster.timelineStartSec - renderStartSec) * pixelsPerSecond}px) scaleX(${pixelsPerSecond / Math.max(1e-6, raster.pixelsPerSecond)})`
+);
 const createFadeScale = (
   fades: ReturnType<typeof normalizeClipFades>,
   duration: number,
@@ -158,7 +166,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       width: `${currentRaster?.widthPx ?? clipWidthPx()}px`,
       height: `${LANE_HEIGHT - 1}px`,
       transform: currentRaster
-        ? `translateX(${((currentRaster.timelineStartSec - renderStartSec()) * props.pixelsPerSecond)}px) scaleX(${props.pixelsPerSecond / Math.max(1e-6, currentRaster.pixelsPerSecond)})`
+        ? retainedWaveformTransform(currentRaster, renderStartSec(), props.pixelsPerSecond)
         : undefined,
       "transform-origin": "top left",
     };
@@ -389,16 +397,22 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       return;
     }
 
-    const layout = waveform.layout();
     const rasterSegments = waveform.rasterSegments();
-    const { padPx, drawCols } = layout;
+    const layout = waveform.layout();
+    const padPx = layout.padPx;
+    const drawCols = layout.drawCols || rasterSegments.reduce(
+      (end, segment) => Math.max(end, segment.endPx),
+      0,
+    );
     const audioStartPx = rasterSegments.length > 0
       ? Math.min(...rasterSegments.map((segment) => segment.startPx))
       : layout.audioStartPx;
     const audioEndPx = rasterSegments.length > 0
       ? Math.max(...rasterSegments.map((segment) => segment.endPx))
       : layout.audioEndPx;
-    const peaks = waveform.peaks();
+    const peaks = rasterSegments.length === 0
+      ? waveform.peaks()
+      : null;
     if (drawCols <= 0) {
       ctx.fillStyle = timelineSurface;
       ctx.fillRect(0, 0, cssW, cssH);
@@ -550,9 +564,18 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
   }
 
   createEffect(() => {
-    void waveform.raster()?.dataRevision;
+    const hasRaster = waveform.rasterDataRevision() !== undefined;
     void props.viewportRedrawVersion;
-    drawWaveform();
+    void props.clip;
+    void props.isSelected;
+    void props.bpm;
+    void props.waveformVisible;
+    void appPreferences.appearance.themeTokens();
+    if (!hasRaster || props.clip.midi) {
+      void props.pixelsPerSecond;
+      void props.visibleRange;
+    }
+    untrack(drawWaveform);
   });
 
   const clipElement = (

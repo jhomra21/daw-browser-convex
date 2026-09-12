@@ -3,7 +3,7 @@ import { encodePeakByte } from '@daw-browser/waveforms/extract-peaks'
 import type { WaveformPcmResult } from '@daw-browser/waveforms/types'
 import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import { cropWaveformDataToSourceRange, getAudioWaveformLayout } from './audio-waveform-layout'
-import { projectRetainedWaveformData } from './retained-waveform'
+import { createRetainedRasterLayout, projectRetainedWaveformData } from './retained-waveform'
 import type { Clip } from '@daw-browser/timeline-core/types'
 
 const clip = (input: Partial<Clip<AudioBuffer>> = {}): Clip<AudioBuffer> => ({
@@ -37,6 +37,7 @@ describe('retained waveform provenance', () => {
     if (!cropped || cropped.data.mode !== 'pcm-line') throw new Error('Expected PCM data')
     expect(cropped.data.firstFrame).toBe(102)
     expect(Array.from(cropped.data.channels[0] ?? [])).toEqual([2, 3, 4])
+    expect(cropped.data.channels[0]?.buffer).toBe(data.channels[0]?.buffer)
     expect(cropped.sourceStartSec).toBe(1.02)
     expect(cropped.sourceEndSec).toBe(1.05)
   })
@@ -63,6 +64,7 @@ describe('retained waveform provenance', () => {
     if (!cropped || cropped.data.mode !== 'pcm-envelope') throw new Error('Expected peaks')
     expect(cropped.data.columns).toBe(2)
     expect(Array.from(cropped.data.channels[0] ?? [])).toEqual(Array.from(data.channels[0]?.slice(2, 6) ?? []))
+    expect(cropped.data.channels[0]?.buffer).toBe(data.channels[0]?.buffer)
     expect(cropped.sourceStartSec).toBe(1)
     expect(cropped.sourceEndSec).toBe(3)
   })
@@ -152,5 +154,60 @@ describe('retained waveform provenance', () => {
     expect(projected.length).toBe(2)
     expect(projected[0]?.sourceStartSec).toBe(0)
     expect(projected[1]?.sourceEndSec).toBe(2)
+  })
+
+  test('reprojects retained marker coverage across canonical map segments', () => {
+    const currentClip = clip({
+      duration: 4,
+      sourceDurationSec: 2,
+      audioWarp: {
+        enabled: true,
+        mode: 'stretch',
+        sourceBpm: 120,
+        markers: [
+          { id: 'a', sourceBeat: 0, timelineBeat: 0 },
+          { id: 'b', sourceBeat: 1, timelineBeat: 4 },
+          { id: 'c', sourceBeat: 4, timelineBeat: 8 },
+        ],
+      },
+    })
+    const map = getAudioClipTimeMap({
+      clip: currentClip,
+      bufferDurationSec: 2,
+      projectBpm: 120,
+      rangeStartSec: currentClip.startSec,
+      rangeEndSec: currentClip.startSec + currentClip.duration,
+    })
+    if (!map) throw new Error('Expected marker-warp time map')
+    const layout = getAudioWaveformLayout(currentClip, 100, 2, 120)
+    const segment = layout.segments?.[0]
+    if (!segment) throw new Error('Expected a marker-warp segment')
+    const retained = createRetainedRasterLayout({
+      plan: {
+        requests: [],
+        segments: [{ requestKey: 'marker', segment }],
+      },
+      map,
+      pixelsPerSecond: 100,
+      coverageByKey: new Map([['marker', { sourceStartSec: 0, sourceEndSec: 2 }]]),
+      canonicalSegments: (layout.segments ?? []).map((item) => ({
+        sourceStartSec: item.sourceStartSec,
+        sourceEndSec: item.sourceEndSec,
+        canvasStartSec: item.canvasStartSec,
+        canvasEndSec: item.canvasEndSec,
+      })),
+    })
+    expect(retained?.segments).toHaveLength(2)
+    expect(retained?.segments.map((item) => [
+      item.segment.sourceStartSec,
+      item.segment.sourceEndSec,
+      item.segment.canvasStartSec,
+      item.segment.canvasEndSec,
+    ])).toEqual((layout.segments ?? []).map((item) => [
+      item.sourceStartSec,
+      item.sourceEndSec,
+      item.canvasStartSec,
+      item.canvasEndSec,
+    ]))
   })
 })

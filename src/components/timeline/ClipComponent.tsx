@@ -22,7 +22,11 @@ import {
   normalizedFadeGainAtClipTime,
   type ClipFades,
 } from "@daw-browser/timeline-core/clip-fades";
-import ClipFadeOverlay from "./ClipFadeOverlay";
+import ClipFadeOverlay, {
+  createFadeOverlayInput,
+  stabilizeFadeOverlayInput,
+  type FadeOverlayInput,
+} from "./ClipFadeOverlay";
 import type { ClipRangeOverlap } from "~/lib/timeline-range-selection";
 import {
   getVisibleMidiBarIndices,
@@ -150,6 +154,17 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     props.isSelected,
     isGhost(),
   ));
+  const createCurrentFadeOverlayInput = () => createFadeOverlayInput({
+    ...props.clip,
+    sliceStartSec: renderStartSec() - props.clip.startSec,
+    sliceDurationSec: Math.max(0, renderEndSec() - renderStartSec()),
+  });
+  const fadeOverlayInput = createMemo(
+    (previous: FadeOverlayInput | undefined) => {
+      const next = createCurrentFadeOverlayInput();
+      return previous ? stabilizeFadeOverlayInput(previous, next) : next;
+    },
+  );
 
   const waveform = useClipWaveformViewModel({
     clip: () => props.clip,
@@ -672,11 +687,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         />
       </Show>
       <ClipFadeOverlay
-        clip={{
-          ...props.clip,
-          sliceStartSec: renderStartSec() - props.clip.startSec,
-          sliceDurationSec: Math.max(0, renderEndSec() - renderStartSec()),
-        }}
+        clip={fadeOverlayInput()}
         canEdit={() => props.canEditFades()}
         onCommit={(fades, baseline) => props.onCommitFades(props.clip.id, fades, baseline)}
       />

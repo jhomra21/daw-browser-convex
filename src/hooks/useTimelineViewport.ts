@@ -23,7 +23,6 @@ type UseTimelineViewportOptions = {
   previewPixelsPerSecond: (value: number) => void
   commitPixelsPerSecond: (value: number) => void
   durationSec: Accessor<number>
-  rightSidebarWidth: Accessor<number>
   canZoom: () => boolean
 }
 
@@ -68,7 +67,7 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
 
   const setPhysicalAnchor = () => {
     if (!element) return
-    const width = Math.max(0, element.clientWidth - options.rightSidebarWidth())
+    const width = Math.max(0, element.clientWidth)
     const runwayWidth = Math.max(width, TIMELINE_PHYSICAL_RUNWAY_WIDTH_PX)
     physicalAnchor = Math.max(0, (runwayWidth - width) / 2)
     suppressScroll = true
@@ -84,7 +83,7 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
 
   const measureWidth = () => {
     if (!element) return
-    setViewportWidth(Math.max(0, element.clientWidth - options.rightSidebarWidth()))
+    setViewportWidth(Math.max(0, element.clientWidth))
     setPhysicalAnchor()
   }
 
@@ -116,11 +115,6 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     measureWidth()
     setPhysicalAnchor()
   }
-
-  createEffect(() => {
-    options.rightSidebarWidth()
-    measureWidth()
-  })
 
   const visibleDurationSec = () => (
     viewportWidth() / Math.max(1e-9, options.pixelsPerSecond())

@@ -90,7 +90,6 @@ describe('useTimelineViewport physical anchor maintenance', () => {
           previewPixelsPerSecond: setPixelsPerSecond,
           commitPixelsPerSecond: setPixelsPerSecond,
           durationSec: () => 60,
-          rightSidebarWidth: () => 0,
           canZoom: () => true,
         })
         viewport.bind(element)
@@ -99,6 +98,7 @@ describe('useTimelineViewport physical anchor maintenance', () => {
           await flushEffects()
           const writesAfterBind = element.scrollWrites
           expect(writesAfterBind).toBeGreaterThan(0)
+          expect(viewport.usableWidth()).toBe(1_000)
 
           const rangeBeforeWheel = viewport.visibleRange()
           viewport.onWheel({
@@ -118,6 +118,7 @@ describe('useTimelineViewport physical anchor maintenance', () => {
 
           element.clientWidth = 800
           TestResizeObserver.current?.dispatchResize()
+          expect(viewport.usableWidth()).toBe(800)
           expect(element.scrollWrites).toBeGreaterThan(writesAfterBind)
           const writesAfterResize = element.scrollWrites
 

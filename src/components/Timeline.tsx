@@ -1353,7 +1353,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     previewPixelsPerSecond,
     commitPixelsPerSecond,
     durationSec: duration,
-    rightSidebarWidth: sidebarWidth,
     canZoom: () => !clipDrag.isDragging() && !clipResize.isResizing(),
   });
   timelineViewportStartSec = () => timelineViewport.visibleRange().startSec;

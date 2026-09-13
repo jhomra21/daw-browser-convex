@@ -55,6 +55,7 @@ import {
 } from "~/lib/timeline-track-layout";
 import { intersectTimelineRangeWithViewport } from "~/lib/timeline-viewport-geometry";
 import type { TrackDropTarget } from "~/lib/track-group-ops";
+import { createTimelineVerticalScrollSync } from "~/lib/timeline-vertical-scroll-sync";
 
 const createViewportRedrawVersion = () => {
   const [version, setVersion] = createSignal(0);
@@ -235,13 +236,16 @@ type Props = {
 };
 
 export default function TimelineWorkspace(props: Props) {
-  let scrollElement: HTMLDivElement | undefined;
+  let sidebarScrollElement: HTMLDivElement | undefined;
   const viewportRedrawVersion = createViewportRedrawVersion();
   const [verticalScrollTop, setVerticalScrollTop] = createSignal(0);
   const [verticalClientHeight, setVerticalClientHeight] = createSignal(0);
+  const verticalScrollSync = createTimelineVerticalScrollSync({
+    onCanonicalScrollTop: setVerticalScrollTop,
+  });
   const observeScrollViewport = (element: HTMLDivElement) => {
-    scrollElement = element;
     props.scrollRef(element);
+    verticalScrollSync.bindTimeline(element);
     setVerticalClientHeight(element.clientHeight);
     const resizeObserver = new ResizeObserver(() => {
       setVerticalClientHeight(element.clientHeight);
@@ -416,21 +420,17 @@ export default function TimelineWorkspace(props: Props) {
       >
         <TimelineLeftBrowser browser={props.leftBrowser} />
       </div>
-      <TimelineContextMenu items={fallbackMenuItems}>
+      <div class="relative min-h-0 min-w-0 flex-1">
+        <TimelineContextMenu items={fallbackMenuItems}>
         <div
-          class="flex-1 relative overflow-auto"
+          class="relative h-full w-full min-w-0 overflow-auto overscroll-x-none"
           ref={(element) => observeScrollViewport(element)}
-          onScroll={(event) => {
-            const element = event.currentTarget;
-            setVerticalScrollTop(element.scrollTop);
-            setVerticalClientHeight(element.clientHeight);
-          }}
           onWheel={(event) => props.viewport.onWheel(event)}
         >
           <div
             class="relative flex select-none"
             style={{
-              width: `${props.viewport.runwayWidth + props.sidebarWidth}px`,
+              width: `${props.viewport.runwayWidth}px`,
               height: `${scrollContentHeight()}px`,
               "min-height": "100%",
             }}
@@ -675,54 +675,60 @@ export default function TimelineWorkspace(props: Props) {
               />
             </div>
 
-            <TrackSidebar
-              sidebar={{
-                tracks: visibleTracks(),
-                allTracks: props.tracks,
-                trackById: trackById(),
-                trackLayout: props.trackLayout,
-                scrollElement: () => scrollElement,
-                selectedTrackId: props.selection.selectedTrackId(),
-                selectedTrackIds: selectedTrackIds(),
-                sidebarWidth: props.sidebarWidth,
-                bottomOffsetPx: props.bottomPanelOffsetPx,
-                stickyFooterHeightPx: stickyFooterHeight(),
-                master: props.sidebar.master,
-                recordArmTrackId: props.recording.recordArmTrackId,
-                currentUserId: props.sidebar.currentUserId,
-                subscribeTrackLevels: props.sidebar.subscribeTrackLevels,
-                subscribeMasterLevels: props.sidebar.subscribeMasterLevels,
-                onTrackClick: props.sidebar.onTrackClick,
-                canWriteTrackRouting: props.sidebar.canWriteTrackRouting,
-                onTrackSendsChange: props.sidebar.onTrackSendsChange,
-                onTrackOutputTargetChange:
-                  props.sidebar.onTrackOutputTargetChange,
-                onVolumePreview: props.sidebar.onVolumePreview,
-                onVolumeChange: props.sidebar.onVolumeChange,
-                onToggleMute: props.sidebar.onToggleMute,
-                onToggleSolo: props.sidebar.onToggleSolo,
-                onSidebarPointerDown: props.sidebar.onSidebarPointerDown,
-                onToggleRecordArm: props.sidebar.onToggleRecordArm,
-                onDeleteTrack: props.sidebar.onDeleteTrack,
-                onToggleTrackCollapsed: props.sidebar.onToggleTrackCollapsed,
-                onSetTracksCollapsed: props.sidebar.onSetTracksCollapsed,
-                onGroupTracks: props.sidebar.onGroupTracks,
-                onUngroupTrack: props.sidebar.onUngroupTrack,
-                onMoveTrackToGroup: props.sidebar.onMoveTrackToGroup,
-                onReorderTracks: props.sidebar.onReorderTracks,
-                onSetTrackColor: props.sidebar.onSetTrackColor,
-                onResetTrackColor: props.sidebar.onResetTrackColor,
-                onAssignTrackColorToClips:
-                  props.sidebar.onAssignTrackColorToClips,
-                onResetClipColors: props.sidebar.onResetClipColors,
-                onSelectAllClipsInGroup:
-                  props.sidebar.onSelectAllClipsInGroup,
-              }}
-              automation={props.automation}
-            />
           </div>
         </div>
-      </TimelineContextMenu>
+        </TimelineContextMenu>
+      </div>
+      <TrackSidebar
+        scrollRef={(element) => {
+          sidebarScrollElement = element;
+          verticalScrollSync.bindSidebar(element);
+        }}
+        sidebar={{
+          tracks: visibleTracks(),
+          allTracks: props.tracks,
+          trackById: trackById(),
+          trackLayout: props.trackLayout,
+          scrollElement: () => sidebarScrollElement,
+          contentHeightPx: scrollContentHeight(),
+          selectedTrackId: props.selection.selectedTrackId(),
+          selectedTrackIds: selectedTrackIds(),
+          sidebarWidth: props.sidebarWidth,
+          bottomOffsetPx: props.bottomPanelOffsetPx,
+          stickyFooterHeightPx: stickyFooterHeight(),
+          master: props.sidebar.master,
+          recordArmTrackId: props.recording.recordArmTrackId,
+          currentUserId: props.sidebar.currentUserId,
+          subscribeTrackLevels: props.sidebar.subscribeTrackLevels,
+          subscribeMasterLevels: props.sidebar.subscribeMasterLevels,
+          onTrackClick: props.sidebar.onTrackClick,
+          canWriteTrackRouting: props.sidebar.canWriteTrackRouting,
+          onTrackSendsChange: props.sidebar.onTrackSendsChange,
+          onTrackOutputTargetChange:
+            props.sidebar.onTrackOutputTargetChange,
+          onVolumePreview: props.sidebar.onVolumePreview,
+          onVolumeChange: props.sidebar.onVolumeChange,
+          onToggleMute: props.sidebar.onToggleMute,
+          onToggleSolo: props.sidebar.onToggleSolo,
+          onSidebarPointerDown: props.sidebar.onSidebarPointerDown,
+          onToggleRecordArm: props.sidebar.onToggleRecordArm,
+          onDeleteTrack: props.sidebar.onDeleteTrack,
+          onToggleTrackCollapsed: props.sidebar.onToggleTrackCollapsed,
+          onSetTracksCollapsed: props.sidebar.onSetTracksCollapsed,
+          onGroupTracks: props.sidebar.onGroupTracks,
+          onUngroupTrack: props.sidebar.onUngroupTrack,
+          onMoveTrackToGroup: props.sidebar.onMoveTrackToGroup,
+          onReorderTracks: props.sidebar.onReorderTracks,
+          onSetTrackColor: props.sidebar.onSetTrackColor,
+          onResetTrackColor: props.sidebar.onResetTrackColor,
+          onAssignTrackColorToClips:
+            props.sidebar.onAssignTrackColorToClips,
+          onResetClipColors: props.sidebar.onResetClipColors,
+          onSelectAllClipsInGroup:
+            props.sidebar.onSelectAllClipsInGroup,
+        }}
+        automation={props.automation}
+      />
     </div>
   );
 }

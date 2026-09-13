@@ -51,4 +51,38 @@ describe('retained waveform request density', () => {
     ])).toEqual([[0.1, 0.2], [0.2, 0.3]])
     expect(new Set(result.segments.map((item) => item.requestKey)).size).toBe(1)
   })
+
+  test('distinguishes raw PCM lines from sample points without changing same-LOD keys', () => {
+    const createPlan = (drawCols: number) => createWaveformRequestPlans({
+      sampleRate: 48_000,
+      sourceDurationSec: 1,
+      sampleDetail: false,
+      densityBucket: 4_096,
+      segments: [{
+        drawCols,
+        sourceStartSec: 0,
+        sourceEndSec: 1,
+        startPx: 0,
+        endPx: drawCols,
+        canvasStartSec: 0,
+        canvasEndSec: 1,
+      }],
+    })
+
+    const raw = createPlan(120_000)
+    const rawAgain = createPlan(130_000)
+    const points = createPlan(240_000)
+    const cached = createPlan(400)
+    const cachedAgain = createPlan(300)
+    const envelope = createPlan(10_000)
+    const envelopeAgain = createPlan(12_000)
+
+    expect(raw.requests[0]?.lod).toMatchObject({ mode: 'pcm-line', showPoints: false })
+    expect(rawAgain.requests[0]?.lod).toMatchObject({ mode: 'pcm-line', showPoints: false })
+    expect(points.requests[0]?.lod).toMatchObject({ mode: 'pcm-line', showPoints: true })
+    expect(raw.requests[0]?.key).toBe(rawAgain.requests[0]?.key)
+    expect(raw.requests[0]?.key).not.toBe(points.requests[0]?.key)
+    expect(cached.requests[0]?.key).toBe(cachedAgain.requests[0]?.key)
+    expect(envelope.requests[0]?.key).toBe(envelopeAgain.requests[0]?.key)
+  })
 })

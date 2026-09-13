@@ -4,6 +4,8 @@ import { createEffect, createRoot, createSignal } from 'solid-js'
 import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type { RuntimeClip } from '~/lib/timeline-runtime-types'
+import { retainedWaveformTransform } from '~/components/timeline/ClipComponent'
+import { createWaveformRequestPlans } from '~/lib/retained-waveform'
 import { useClipWaveformViewModel } from './useClipWaveformViewModel'
 
 const source: AudioPcmSourceDescriptor = {
@@ -569,6 +571,278 @@ describe('useClipWaveformViewModel browser reactivity', () => {
         secondGate.resolve()
         await refinement
         expect(waveform.raster()?.dataRevision).toBeGreaterThan(initialRevision)
+        dispose()
+        resolve()
+      })().catch((error) => {
+        dispose()
+        reject(error)
+      })
+    }))
+  })
+
+  test('projects every live deep-zoom preview against retained waveform coverage', async () => {
+    let readGate: Deferred<void> | undefined
+    let readStarted: Deferred<void> | undefined
+    const deepZoomSource: AudioPcmSourceDescriptor = {
+      identity: 'deep-zoom-preview-source',
+      durationSec: 1,
+      frameCount: 48_000,
+      sampleRate: 48_000,
+      channelCount: 1,
+      readPages: async function* (options = {}) {
+        readStarted?.resolve()
+        const gate = readGate
+        if (gate) await gate.promise
+        options.signal?.throwIfAborted()
+        const startFrame = options.startFrame ?? 0
+        const endFrame = options.endFrame ?? 48_000
+        yield {
+          startFrame,
+          frameCount: endFrame - startFrame,
+          sampleRate: 48_000,
+          channelCount: 1,
+          planes: [new Float32Array(endFrame - startFrame)],
+        }
+      },
+    }
+    const previewClip = {
+      ...clip,
+      sourceAssetKey: 'asset:deep-zoom-preview',
+      sourceDurationSec: 1,
+      sourceSampleRate: 48_000,
+      sourceChannelCount: 1,
+    }
+
+    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
+      const [width, setWidth] = createSignal(100)
+      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
+        signal?.throwIfAborted()
+        return deepZoomSource
+      }
+      const waveform = useClipWaveformViewModel({
+        clip: () => previewClip,
+        cssWidthPx: width,
+        projectBpm: () => 120,
+        resolveAudioSource: () => resolveAudioSource,
+        visibleRange: () => ({ startSec: 0, endSec: 1 }),
+        mode: 'arrangement',
+      })
+      let initialRevision = 0
+      const previewScales = [100, 150, 250, 400, 800, 2_000, 10_000, 48_000, 120_000, 240_000]
+      type RenderExpectation =
+        | { mode: 'peaks'; minimumColumns: number; maximumColumns?: number }
+        | { mode: 'samples'; showPoints: boolean }
+
+      const selectedLod = () => {
+        const layout = waveform.layout()
+        const segments = layout.segments ?? [{
+          drawCols: layout.drawCols,
+          sourceStartSec: layout.sourceStartSec,
+          sourceEndSec: layout.sourceEndSec,
+          startPx: layout.padPx,
+          endPx: layout.audioEndPx,
+          canvasStartSec: layout.canvasStartSec ?? previewClip.startSec,
+          canvasEndSec: layout.canvasEndSec ?? previewClip.startSec + previewClip.duration,
+        }]
+        return createWaveformRequestPlans({
+          segments,
+          sampleRate: deepZoomSource.sampleRate,
+          sourceDurationSec: deepZoomSource.durationSec,
+          sampleDetail: true,
+        }).requests[0]?.lod
+      }
+
+      const assertPreviewProjection = (
+        pixelsPerSecond: number,
+        expectedMode: 'cached-peaks' | 'pcm-envelope' | 'pcm-line',
+        expectedShowPoints: boolean,
+      ) => {
+        const lod = selectedLod()
+        expect(waveform.layout().drawCols).toBe(pixelsPerSecond)
+        expect(lod?.mode).toBe(expectedMode)
+        if (lod?.mode === 'pcm-line') expect(lod.showPoints).toBe(expectedShowPoints)
+        expect(waveform.renderSegments()).not.toHaveLength(0)
+        const rendered = waveform.renderSegments()[0]
+        if (!rendered) throw new Error('Expected a rendered waveform segment.')
+        expect(rendered.drawCols).toBeGreaterThan(0)
+        const raster = waveform.raster()
+        const segment = waveform.rasterSegments()[0]
+        if (!raster || !segment) throw new Error('Expected retained raster coverage.')
+        const transform = retainedWaveformTransform(
+          raster,
+          previewClip.startSec,
+          pixelsPerSecond,
+        )
+        expect(transform).toContain(`scaleX(${pixelsPerSecond / raster.pixelsPerSecond})`)
+        const liveScale = pixelsPerSecond / raster.pixelsPerSecond
+        const translate = (raster.timelineStartSec - previewClip.startSec) * pixelsPerSecond
+        const projectedStart = translate + segment.startPx * liveScale
+        const projectedEnd = translate + segment.endPx * liveScale
+        expect(projectedEnd - projectedStart).toBeCloseTo(pixelsPerSecond, 5)
+      }
+
+      const matchesRenderExpectation = (expectation: RenderExpectation) => {
+        const segment = waveform.renderSegments()[0]
+        if (!segment) return false
+        if (expectation.mode === 'samples') {
+          return segment.mode === 'samples' && segment.showPoints === expectation.showPoints
+        }
+        return segment.mode === 'peaks'
+          && segment.peaks.columns >= expectation.minimumColumns
+          && (expectation.maximumColumns === undefined
+            || segment.peaks.columns <= expectation.maximumColumns)
+      }
+
+      const waitForRenderExpectation = (expectation: RenderExpectation) => (
+        new Promise<void>((settle) => {
+          createEffect(() => {
+            if (matchesRenderExpectation(expectation)) settle()
+          })
+        })
+      )
+
+      const assertRenderExpectation = (expectation: RenderExpectation) => {
+        expect(matchesRenderExpectation(expectation)).toBe(true)
+      }
+
+      void (async () => {
+        const ready = waitForReady(waveform)
+        await ready
+        expect(waveform.renderSegments()).not.toHaveLength(0)
+        initialRevision = waveform.rasterDataRevision() ?? 0
+        expect(selectedLod()?.mode).toBe('cached-peaks')
+        const initialPeaks = waveform.renderSegments()[0]
+        if (!initialPeaks || initialPeaks.mode !== 'peaks') {
+          throw new Error('Expected cached peaks to be ready before zoom previews.')
+        }
+        expect(initialPeaks.peaks.columns).toBe(100)
+        assertPreviewProjection(100, 'cached-peaks', false)
+        assertRenderExpectation({ mode: 'peaks', minimumColumns: 0 })
+
+        for (const pixelsPerSecond of previewScales.slice(1, 4)) {
+          setWidth(pixelsPerSecond)
+          await flushEffects()
+          assertPreviewProjection(pixelsPerSecond, 'cached-peaks', false)
+        }
+
+        const envelopeReady = new Promise<void>((settle) => {
+          createEffect(() => {
+            const segment = waveform.renderSegments()[0]
+            if (segment?.mode === 'peaks' && segment.peaks.columns === 800) settle()
+          })
+        })
+        const envelopeGate = deferred<void>()
+        const envelopeStarted = deferred<void>()
+        readStarted = envelopeStarted
+        readGate = envelopeGate
+        setWidth(previewScales[4] ?? 0)
+        await flushEffects()
+        await envelopeStarted.promise
+        expect(waveform.loading()).toBe(true)
+        assertPreviewProjection(previewScales[4] ?? 0, 'pcm-envelope', false)
+        envelopeGate.resolve()
+        readGate = undefined
+        await envelopeReady
+        assertRenderExpectation({
+          mode: 'peaks',
+          minimumColumns: previewScales[4] ?? 0,
+          maximumColumns: previewScales[4] ?? 0,
+        })
+        expect(waveform.rasterDataRevision()).toBeGreaterThan(initialRevision)
+        const envelope = waveform.renderSegments()[0]
+        if (!envelope || envelope.mode !== 'peaks') {
+          throw new Error('Expected a ready refined envelope projection.')
+        }
+        expect(envelope.peaks.columns).toBeGreaterThan(100)
+
+        for (const pixelsPerSecond of previewScales.slice(5, 8)) {
+          setWidth(pixelsPerSecond)
+          await flushEffects()
+          assertPreviewProjection(pixelsPerSecond, 'pcm-envelope', false)
+          await waitForRenderExpectation({
+            mode: 'peaks',
+            minimumColumns: 0,
+          })
+          assertRenderExpectation({
+            mode: 'peaks',
+            minimumColumns: 0,
+          })
+        }
+
+        const rawReady = new Promise<void>((settle) => {
+          createEffect(() => {
+            const segment = waveform.renderSegments()[0]
+            if (segment?.mode === 'samples' && !segment.showPoints) settle()
+          })
+        })
+        const rawGate = deferred<void>()
+        const rawStarted = deferred<void>()
+        readStarted = rawStarted
+        readGate = rawGate
+        setWidth(previewScales[8] ?? 0)
+        await flushEffects()
+        await rawStarted.promise
+        expect(waveform.loading()).toBe(true)
+        assertPreviewProjection(previewScales[8] ?? 0, 'pcm-line', false)
+        rawGate.resolve()
+        readGate = undefined
+        await rawReady
+        assertRenderExpectation({ mode: 'samples', showPoints: false })
+        const rawSegment = waveform.renderSegments()[0]
+        if (!rawSegment || rawSegment.mode !== 'samples' || rawSegment.showPoints) {
+          throw new Error('Expected a ready raw PCM line before sample points.')
+        }
+        expect(rawSegment.samples.channels[0]?.length).toBeGreaterThan(0)
+        const pointsReady = waitForRenderExpectation({ mode: 'samples', showPoints: true })
+        setWidth(previewScales[9] ?? 0)
+        await flushEffects()
+        assertPreviewProjection(previewScales[9] ?? 0, 'pcm-line', true)
+        await pointsReady
+        assertRenderExpectation({ mode: 'samples', showPoints: true })
+        const samplePointSegment = waveform.renderSegments()[0]
+        if (!samplePointSegment || samplePointSegment.mode !== 'samples' || !samplePointSegment.showPoints) {
+          throw new Error('Expected a ready raw PCM sample-point projection.')
+        }
+        const samplePointRasterSegment = waveform.rasterSegments()[0]
+        if (!samplePointRasterSegment
+          || samplePointRasterSegment.pcm?.mode !== 'pcm-line'
+          || !samplePointRasterSegment.showPoints) {
+          throw new Error('Expected sample points in the arrangement raster path.')
+        }
+
+        setWidth(previewScales[8] ?? 0)
+        await flushEffects()
+        assertPreviewProjection(previewScales[8] ?? 0, 'pcm-line', false)
+        await waitForRenderExpectation({ mode: 'samples', showPoints: false })
+        assertRenderExpectation({ mode: 'samples', showPoints: false })
+
+        for (const pixelsPerSecond of previewScales.slice(4, 8).reverse()) {
+          setWidth(pixelsPerSecond)
+          await flushEffects()
+          assertPreviewProjection(pixelsPerSecond, 'pcm-envelope', false)
+          await waitForRenderExpectation({
+            mode: 'peaks',
+            minimumColumns: 0,
+          })
+          assertRenderExpectation({
+            mode: 'peaks',
+            minimumColumns: 0,
+          })
+        }
+
+        for (const pixelsPerSecond of previewScales.slice(0, 4).reverse()) {
+          setWidth(pixelsPerSecond)
+          await flushEffects()
+          assertPreviewProjection(pixelsPerSecond, 'cached-peaks', false)
+          await waitForRenderExpectation({
+            mode: 'peaks',
+            minimumColumns: 0,
+          })
+          assertRenderExpectation({
+            mode: 'peaks',
+            minimumColumns: 0,
+          })
+        }
         dispose()
         resolve()
       })().catch((error) => {

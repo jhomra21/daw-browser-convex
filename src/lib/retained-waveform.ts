@@ -224,14 +224,19 @@ const requestKeyFor = (input: {
   bins: number
   exactRange: boolean
   densityBucket: number
-}) => [
-  input.sourceStartSec,
-  input.sourceEndSec,
-  input.lod.mode,
-  input.exactRange ? 'exact' : 'tile',
-  input.bins,
-  input.densityBucket,
-].join(':')
+}) => {
+  const visualLod = input.lod.mode === 'pcm-line'
+    ? input.lod.showPoints ? 'pcm-line:points' : 'pcm-line:line'
+    : input.lod.mode
+  return [
+    input.sourceStartSec,
+    input.sourceEndSec,
+    visualLod,
+    input.exactRange ? 'exact' : 'tile',
+    input.bins,
+    input.densityBucket,
+  ].join(':')
+}
 
 const lodRank = (lod: WaveformLod) => (
   lod.mode === 'cached-peaks' ? 0 : lod.mode === 'pcm-envelope' ? 1 : 2

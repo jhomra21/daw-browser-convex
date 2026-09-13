@@ -9,7 +9,9 @@ import {
   resolveSamplePlaybackUrlForRuntime,
 } from '~/lib/renderer-api-url'
 import { createSampleBufferLoader } from '~/lib/sample-buffer-loader'
-import { createAudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
+import {
+  createAudioPcmSourceResolver,
+} from '~/lib/audio-pcm-source-resolver'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import { ResumableAudioUploadHttpError, uploadAudioFile } from '~/lib/resumable-audio-uploader'
 
@@ -360,6 +362,7 @@ export function useClipBuffers(options: ClipBufferOptions): ClipBufferControls {
     audioBufferCache.clear()
     sampleBufferLoader.clear()
     clearWaveformAssetCache()
+    resolveAudioSource.clear?.()
     audioEngine.invalidateAudioSourceCache()
   }
 

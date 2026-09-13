@@ -1,0 +1,27 @@
+{
+  "scan_id": "scan-2026-09-12-live-waveform-raster",
+  "scan_date": "2026-09-12T19:55:34Z",
+  "scan_type": "working",
+  "commit_range": "b8b663a5c9bb3e02f6d117af2bae99912c6db880+working-tree",
+  "pr_number": 54,
+  "threat_model_version": "1.0.0",
+  "findings": [],
+  "summary": {
+    "total_findings": 0,
+    "by_severity": {
+      "CRITICAL": 0,
+      "HIGH": 0,
+      "MEDIUM": 0,
+      "LOW": 0
+    },
+    "by_stride": {
+      "Spoofing": 0,
+      "Tampering": 0,
+      "Repudiation": 0,
+      "InfoDisclosure": 0,
+      "DoS": 0,
+      "ElevationOfPrivilege": 0
+    },
+    "files_analyzed": 21
+  }
+}

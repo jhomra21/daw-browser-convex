@@ -1,7 +1,10 @@
-import { ensurePeakAsset, loadPeakChunkData } from './asset-store'
+import { ensurePeakAsset, invalidatePeakAsset, loadCachedPeakAsset, loadPeakChunkData } from './asset-store'
 import { getPeakChunkRecord, SILENCE_BYTE } from './extract-peaks'
-import { resamplePeakPairs } from './resample-peak-pairs'
-import type { PeakAssetRecord, PeakLevelRecord, WaveformSliceRequest } from './types'
+import { isPeakChunkData } from './peak-db'
+import { resamplePeakChannels } from './resample-peak-pairs'
+import { peakAssetMatchesSourceIdentity } from './source-identity'
+import type { PeakAssetRecord, PeakLevelRecord, WaveformPeakChannelSlice, WaveformSliceRequest } from './types'
+import { maximumCachedPeaksPerSecond } from './lod'
 
 type WaveformWindow = {
   startSec: number
@@ -21,7 +24,7 @@ function selectPeakLevel(record: PeakAssetRecord, request: WaveformSliceRequest,
   for (const level of levels) {
     if (level.peaksPerSecond >= requestedPeaksPerSecond) return level
   }
-  return levels[levels.length - 1]
+  return null
 }
 
 function getWaveformWindow(level: PeakLevelRecord, record: PeakAssetRecord, request: WaveformSliceRequest): WaveformWindow {
@@ -47,9 +50,12 @@ async function loadWindowSourceData(
   record: PeakAssetRecord,
   window: WaveformWindow,
   signal?: AbortSignal,
-) {
-  const source = new Uint8Array(window.peakCount * 2)
-  source.fill(SILENCE_BYTE)
+) : Promise<readonly Uint8Array[]> {
+  const source = Array.from({ length: record.channelCount }, () => {
+    const channel = new Uint8Array(window.peakCount * 2)
+    channel.fill(SILENCE_BYTE)
+    return channel
+  })
   if (window.endSec <= window.startSec) return source
 
   const firstChunkIndex = Math.max(0, Math.floor(window.startSec / level.chunkDurationSec))
@@ -63,7 +69,9 @@ async function loadWindowSourceData(
     if (chunk.endSec <= window.startSec || chunk.startSec >= window.endSec) continue
     const data = await loadPeakChunkData(chunk.chunkKey)
     signal?.throwIfAborted()
-    if (!data) continue
+    if (!data || !isPeakChunkData(data, record.channelCount, chunk.peakCount)) {
+      throw new Error('Waveform peak storage is incomplete or malformed.')
+    }
     const overlapStartSec = Math.max(window.startSec, chunk.startSec)
     const overlapEndSec = Math.min(window.endSec, chunk.endSec)
     const sourceStartOffset = getWindowStartOffset(chunk, overlapStartSec, level.peaksPerSecond)
@@ -73,27 +81,69 @@ async function loadWindowSourceData(
     const targetStartOffset = Math.max(0, Math.floor((overlapStartSec - window.startSec) * level.peaksPerSecond))
     const availableBins = Math.min(copyBins, window.peakCount - targetStartOffset)
     if (availableBins <= 0) continue
-    source.set(
-      data.subarray(sourceStartOffset * 2, (sourceStartOffset + availableBins) * 2),
-      targetStartOffset * 2,
-    )
+    for (let channel = 0; channel < source.length; channel++) {
+      const channelData = data[channel]
+      if (!channelData) continue
+      source[channel]!.set(
+        channelData.subarray(sourceStartOffset * 2, (sourceStartOffset + availableBins) * 2),
+        targetStartOffset * 2,
+      )
+    }
   }
 
   return source
 }
 
-function resampleWindow(source: Uint8Array, bins: number) {
-  return resamplePeakPairs(source, bins)
+function resampleWindow(
+  source: readonly Uint8Array[],
+  bins: number,
+  sourceStartSec: number,
+  sourceEndSec: number,
+): WaveformPeakChannelSlice {
+  return {
+    mode: 'pcm-envelope',
+    channels: resamplePeakChannels(source, bins),
+    columns: Math.max(1, Math.floor(bins)),
+    sourceStartSec,
+    sourceEndSec,
+  }
 }
 
-export async function getWaveformSlice(request: WaveformSliceRequest): Promise<Uint8Array | null> {
-  const record = await ensurePeakAsset(request)
-  if (!record) return null
+async function readWaveformSlice(
+  record: PeakAssetRecord,
+  request: WaveformSliceRequest,
+): Promise<WaveformPeakChannelSlice | null> {
   const startSec = Math.max(0, request.sourceStartSec)
   const endSec = Math.max(startSec, Math.min(record.durationSec, request.sourceEndSec))
   const level = selectPeakLevel(record, request, startSec, endSec)
   if (!level) return null
   const window = getWaveformWindow(level, record, request)
   const source = await loadWindowSourceData(level, record, window, request.signal)
-  return resampleWindow(source, request.bins)
+  return resampleWindow(source, request.bins, window.startSec, window.endSec)
+}
+
+export async function getCachedWaveformSlice(request: WaveformSliceRequest): Promise<WaveformPeakChannelSlice | null> {
+  const record = await loadCachedPeakAsset(request.assetKey)
+  if (!record || !peakAssetMatchesSourceIdentity(record, request.sourceIdentity)) return null
+  return await readWaveformSlice(record, request)
+}
+
+export async function getWaveformSlice(request: WaveformSliceRequest): Promise<WaveformPeakChannelSlice | null> {
+  const requestedDurationSec = request.sourceEndSec - request.sourceStartSec
+  if (Number.isFinite(requestedDurationSec)
+    && requestedDurationSec > 0
+    && request.bins / requestedDurationSec > maximumCachedPeaksPerSecond) {
+    return null
+  }
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const record = await ensurePeakAsset(request)
+    if (!record) return null
+    try {
+      return await readWaveformSlice(record, request)
+    } catch (error) {
+      if (attempt === 1) throw error
+      await invalidatePeakAsset(request.assetKey)
+    }
+  }
+  return null
 }

@@ -1,11 +1,14 @@
 import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
 
+export const peakAssetFormatVersion = 3
+
 export type PeakChunkRecord = {
   chunkKey: string
   chunkIndex: number
   startSec: number
   endSec: number
   peakCount: number
+  channelCount: number
 }
 
 export type PeakLevelRecord = {
@@ -15,6 +18,7 @@ export type PeakLevelRecord = {
 }
 
 export type PeakAssetRecord = {
+  formatVersion: typeof peakAssetFormatVersion
   assetKey: string
   durationSec: number
   sampleRate: number
@@ -31,6 +35,25 @@ export type WaveformSourceIdentity = {
   channelCount?: number
 }
 
+export type WaveformPeakChannelSlice = {
+  readonly mode: 'pcm-envelope'
+  readonly channels: readonly Uint8Array[]
+  readonly columns: number
+  readonly sourceStartSec: number
+  readonly sourceEndSec: number
+}
+
+export type WaveformSampleChannelSlice = {
+  readonly mode: 'pcm-line'
+  readonly channels: readonly Float32Array[]
+  readonly firstFrame: number
+  readonly sampleRate: number
+  readonly sourceStartSec: number
+  readonly sourceEndSec: number
+}
+
+export type WaveformPcmResult = WaveformPeakChannelSlice | WaveformSampleChannelSlice
+
 export type EnsureWaveformAssetOptions = {
   assetKey: string
   sourceIdentity?: WaveformSourceIdentity
@@ -44,6 +67,8 @@ export type WaveformSliceRequest = EnsureWaveformAssetOptions & {
   sourceEndSec: number
   bins: number
 }
+
+export type WaveformPeakChunkData = readonly Uint8Array[]
 
 export type WaveformDrawOptions = {
   ctx: Pick<
@@ -61,4 +86,6 @@ export type WaveformDrawOptions = {
   boundaryStyle?: string
   maxHeightFraction?: number
   amplitudeScaleAtColumn?: (column: number) => number
+  xOffsetPx?: number
+  drawBoundary?: boolean
 }

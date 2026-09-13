@@ -1,9 +1,10 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, test } from 'bun:test'
-import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
+import { createAudioPcmSourceDescriptor, type AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
 import { loadPeakAssetRecord, loadPeakChunk } from './peak-db'
 import { getPeakChunkRecord } from './extract-peaks'
 import { clearWaveformAssetCache, ensurePeakAsset, getWaveformCacheSizes, waveformCacheLimits } from './asset-store'
+import { getWaveformSlice } from './select-waveform-window'
 
 function createDeferred() {
   let resolve: () => void = () => {}
@@ -30,6 +31,20 @@ function createTestBuffer(duration: number): AudioBuffer {
       data.set(source.subarray(0, data.length))
     },
   }
+}
+
+function createPersistableSource(buffer: AudioBuffer): AudioPcmSourceDescriptor {
+  return createAudioPcmSourceDescriptor({
+    identity: `persistable:${buffer.duration}`,
+    durationSec: buffer.duration,
+    frameCount: buffer.length,
+    sampleRate: buffer.sampleRate,
+    channelCount: buffer.numberOfChannels,
+    contentHash: 'a'.repeat(64),
+    contentHashVerified: true,
+    persistable: true,
+    source: buffer,
+  })
 }
 
 function createDelayedSource(input: {
@@ -162,5 +177,133 @@ describe('ensurePeakAsset', () => {
     const chunk = getPeakChunkRecord(assetKey, record.levels[0], record, 0)
     expect(await loadPeakAssetRecord(assetKey)).toBeNull()
     expect(await loadPeakChunk(chunk.chunkKey)).toBeNull()
+  })
+
+  test('regenerates a persisted asset when a declared chunk is missing', async () => {
+    const assetKey = `missing:${crypto.randomUUID()}`
+    const buffer = createTestBuffer(0.1)
+    const source = createPersistableSource(buffer)
+    const record = await ensurePeakAsset({ assetKey, source })
+    if (!record) throw new Error('Expected waveform record')
+    const chunk = getPeakChunkRecord(assetKey, record.levels[0], record, 0)
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('audio-peaks-db', 3)
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction('asset-chunks', 'readwrite')
+      transaction.objectStore('asset-chunks').delete(chunk.chunkKey)
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => reject(transaction.error)
+    })
+    clearWaveformAssetCache()
+    const slice = await getWaveformSlice({
+      assetKey,
+      source,
+      sourceStartSec: 0,
+      sourceEndSec: 0.1,
+      bins: 10,
+    })
+    expect(slice?.channels).toHaveLength(1)
+  })
+
+  test('regenerates a persisted asset when a declared chunk is malformed', async () => {
+    const assetKey = `malformed:${crypto.randomUUID()}`
+    const buffer = createTestBuffer(0.1)
+    const source = createPersistableSource(buffer)
+    const record = await ensurePeakAsset({ assetKey, source })
+    if (!record) throw new Error('Expected waveform record')
+    const chunk = getPeakChunkRecord(assetKey, record.levels[0], record, 0)
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('audio-peaks-db', 3)
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction('asset-chunks', 'readwrite')
+      transaction.objectStore('asset-chunks').put([new Uint8Array([1])], chunk.chunkKey)
+      transaction.oncomplete = () => resolve()
+      transaction.onerror = () => reject(transaction.error)
+    })
+    clearWaveformAssetCache()
+    const slice = await getWaveformSlice({
+      assetKey,
+      source,
+      sourceStartSec: 0,
+      sourceEndSec: 0.1,
+      bins: 10,
+    })
+    expect(slice?.channels).toHaveLength(1)
+  })
+
+  test('reloads a persisted six-minute overview after clearing memory caches', async () => {
+    const assetKey = `overview:${crypto.randomUUID()}`
+    const buffer = createTestBuffer(408)
+    const source = createPersistableSource(buffer)
+    const initial = await getWaveformSlice({
+      assetKey,
+      source,
+      sourceStartSec: 0,
+      sourceEndSec: 408,
+      bins: 960,
+    })
+    expect(initial?.columns).toBe(960)
+
+    clearWaveformAssetCache()
+
+    const reopened = await getWaveformSlice({
+      assetKey,
+      source,
+      sourceStartSec: 0,
+      sourceEndSec: 408,
+      bins: 960,
+    })
+    expect(reopened?.columns).toBe(960)
+    expect(reopened?.channels).toHaveLength(1)
+  })
+
+  test('requires persistent chunks for a long overview to survive memory eviction', async () => {
+    const assetKey = `long-session:${crypto.randomUUID()}`
+    const buffer = createTestBuffer(408)
+    const sessionSource = createAudioPcmSourceDescriptor({
+      identity: 'long-session-source',
+      durationSec: buffer.duration,
+      frameCount: buffer.length,
+      sampleRate: buffer.sampleRate,
+      channelCount: buffer.numberOfChannels,
+      source: buffer,
+    })
+
+    await expect(getWaveformSlice({
+      assetKey,
+      source: sessionSource,
+      sourceStartSec: 0,
+      sourceEndSec: buffer.duration,
+      bins: 960,
+    })).rejects.toThrow('Waveform peak storage is incomplete or malformed.')
+
+    clearWaveformAssetCache()
+
+    const persistableSource = createPersistableSource(buffer)
+    const initial = await getWaveformSlice({
+      assetKey,
+      source: persistableSource,
+      sourceStartSec: 0,
+      sourceEndSec: buffer.duration,
+      bins: 960,
+    })
+    expect(initial?.columns).toBe(960)
+
+    clearWaveformAssetCache()
+
+    const reopened = await getWaveformSlice({
+      assetKey,
+      source: persistableSource,
+      sourceStartSec: 0,
+      sourceEndSec: buffer.duration,
+      bins: 960,
+    })
+    expect(reopened?.columns).toBe(960)
   })
 })

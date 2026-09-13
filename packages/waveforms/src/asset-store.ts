@@ -4,17 +4,17 @@ import {
   type AudioPcmSourceDescriptor,
 } from '@daw-browser/audio-engine/media-pages'
 import { extractPeakAsset } from './extract-peaks'
-import { loadPeakAssetRecord, loadPeakChunk, storePeakAssetRecord, storePeakChunk } from './peak-db'
+import { deletePeakAssetData, loadPeakAssetRecord, loadPeakChunk, storePeakAssetRecord, storePeakChunk } from './peak-db'
 import { createWaveformSourceIdentity, peakAssetMatchesSourceIdentity } from './source-identity'
-import type { EnsureWaveformAssetOptions, PeakAssetRecord, WaveformSourceIdentity } from './types'
+import type { EnsureWaveformAssetOptions, PeakAssetRecord, WaveformPeakChunkData, WaveformSourceIdentity } from './types'
 
 const MAX_RECORD_CACHE_ENTRIES = 32
 const MAX_CHUNK_CACHE_ENTRIES = 64
 const assetRecordCache = new Map<string, PeakAssetRecord>()
-const assetChunkCache = new Map<string, Uint8Array>()
+const assetChunkCache = new Map<string, WaveformPeakChunkData>()
 const pendingAssetLoads = new Map<string, Promise<PeakAssetRecord | null>>()
 const pendingAssetOperations = new Map<string, PendingAssetOperation>()
-const pendingChunkLoads = new Map<string, Promise<Uint8Array | null>>()
+const pendingChunkLoads = new Map<string, Promise<WaveformPeakChunkData | null>>()
 const assetGenerations = new Map<string, number>()
 let generationSequence = 0
 
@@ -203,7 +203,7 @@ export async function ensurePeakAsset(options: EnsureWaveformAssetOptions): Prom
         },
       }, sourceIdentity)
       generationController.signal.throwIfAborted()
-      if (assetGenerations.get(assetKey) !== generation) return record
+      if (assetGenerations.get(assetKey) !== generation) return null
       if (source.persistable === true) await storePeakAssetRecord(record)
       generationController.signal.throwIfAborted()
       cacheSet(assetRecordCache, assetKey, record, MAX_RECORD_CACHE_ENTRIES)
@@ -231,7 +231,7 @@ export async function ensurePeakAsset(options: EnsureWaveformAssetOptions): Prom
   return await waitForAssetLoad(operation, options.signal)
 }
 
-export async function loadPeakChunkData(chunkKey: string): Promise<Uint8Array | null> {
+export async function loadPeakChunkData(chunkKey: string): Promise<WaveformPeakChunkData | null> {
   const cached = cacheGet(assetChunkCache, chunkKey)
   if (cached) return cached
 
@@ -250,6 +250,25 @@ export async function loadPeakChunkData(chunkKey: string): Promise<Uint8Array | 
   } finally {
     if (pendingChunkLoads.get(chunkKey) === task) pendingChunkLoads.delete(chunkKey)
   }
+}
+
+export async function invalidatePeakAsset(assetKey: string): Promise<void> {
+  cacheGet(assetRecordCache, assetKey)
+  assetRecordCache.delete(assetKey)
+  for (const key of Array.from(assetChunkCache.keys())) {
+    if (key.startsWith(`${assetKey}:`)) assetChunkCache.delete(key)
+  }
+  await deletePeakAssetData(assetKey)
+}
+
+export async function loadCachedPeakAsset(
+  assetKey: string,
+): Promise<PeakAssetRecord | null> {
+  const cached = cacheGet(assetRecordCache, assetKey)
+  if (cached) return cached
+  const stored = await loadPeakAssetRecord(assetKey)
+  if (stored) cacheSet(assetRecordCache, assetKey, stored, MAX_RECORD_CACHE_ENTRIES)
+  return stored
 }
 
 export function clearWaveformAssetCache() {

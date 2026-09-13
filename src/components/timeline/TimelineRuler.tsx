@@ -1,4 +1,4 @@
-import { createMemo, type Component, For, Show, onCleanup } from 'solid-js'
+import { createMemo, type Component, Index, Show, onCleanup } from 'solid-js'
 import { ARRANGEMENT_OVERVIEW_HEIGHT, RULER_HEIGHT, quantizeSecToGrid } from '~/lib/timeline-utils'
 import { musicalBarLabelAtTime, selectTimelineGridIntervals } from '~/lib/timeline-view'
 
@@ -9,6 +9,9 @@ type TimelineRulerProps = {
   gridEnabled: boolean
   pixelsPerSecond: number
   visibleRange: { startSec: number; endSec: number }
+  viewportWidthPx: number
+  timeToX: (timeSec: number) => number
+  xToTime: (x: number) => number
   onPointerDown: (e: PointerEvent) => void
   loopEnabled?: boolean
   loopStartSec?: number
@@ -16,21 +19,39 @@ type TimelineRulerProps = {
   onSetLoopRegion?: (startSec: number, endSec: number) => void
 }
 
-type Marker = {
-  positionPx: number
-  label?: string
+const formatTimeInterval = (seconds: number) => {
+  if (seconds < 0.001) return `${Math.round(seconds * 1_000_000)}µs`
+  if (seconds < 1) return `${Math.round(seconds * 1_000)}ms`
+  return `${seconds}s`
 }
 
-const isMarker = (marker: Marker | null): marker is Marker => marker !== null
-const filterMarkers = (markers: Array<Marker | null>): Marker[] => markers.filter(isMarker)
+export const collectTimelineMarkerIndices = (
+  first: number,
+  last: number,
+  stepSec: number,
+  rulerWidthPx: number,
+  timeToX: (timeSec: number) => number,
+  isExcluded?: (positionPx: number, index: number) => boolean,
+) => {
+  if (!(Number.isFinite(stepSec) && stepSec > 0) || last < first) return []
+
+  const indices: number[] = []
+  for (let index = first; index <= last; index += 1) {
+    const positionPx = timeToX(index * stepSec)
+    if (positionPx <= rulerWidthPx && !isExcluded?.(positionPx, index)) {
+      indices.push(index)
+    }
+  }
+  return indices
+}
 
 const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   const intervals = createMemo(() => selectTimelineGridIntervals(props.pixelsPerSecond, props.bpm, props.denom, props.gridEnabled))
   const barStepPx = () => Math.max(0.5, intervals().majorSec * props.pixelsPerSecond)
 
-  const rulerWidthPx = () => Math.max(0, props.durationSec * props.pixelsPerSecond)
-  const loopStartPx = () => Math.max(0, (props.loopStartSec ?? 0) * props.pixelsPerSecond)
-  const loopEndPx = () => Math.min(rulerWidthPx(), Math.max(loopStartPx(), (props.loopEndSec ?? 0) * props.pixelsPerSecond))
+  const rulerWidthPx = () => Math.max(0, props.viewportWidthPx)
+  const loopStartPx = () => Math.max(0, props.timeToX(props.loopStartSec ?? 0))
+  const loopEndPx = () => Math.min(rulerWidthPx(), Math.max(loopStartPx(), props.timeToX(props.loopEndSec ?? 0)))
   const loopWidthPx = () => Math.max(0, loopEndPx() - loopStartPx())
   const showLoop = () => props.loopEnabled && loopWidthPx() > 1
 
@@ -63,7 +84,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     const rect = rootEl?.getBoundingClientRect()
     if (!rect) return 0
     const x = clientX - rect.left
-    return Math.max(0, x / props.pixelsPerSecond)
+    return props.xToTime(x)
   }
 
   const onPointerMove = (e: PointerEvent) => {
@@ -123,7 +144,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     const sec = clientXToSecLocal(e.clientX)
     const startPx = loopStartPx()
     const endPx = loopEndPx()
-    const xPx = (sec * props.pixelsPerSecond)
+    const xPx = props.timeToX(sec)
     const near = 6 // px threshold for grabbing edges
     const hasLoop = props.loopEnabled && (props.loopEndSec ?? 0) - (props.loopStartSec ?? 0) > 0.05
     if (hasLoop && Math.abs(xPx - startPx) <= near) {
@@ -149,7 +170,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     const inTopHalf = (e.clientY - rect.top) <= (RULER_HEIGHT / 2)
     if (!inTopHalf || !props.loopEnabled) { rootEl.style.cursor = '' ; return }
     const sec = clientXToSecLocal(e.clientX)
-    const xPx = sec * props.pixelsPerSecond
+    const xPx = props.timeToX(sec)
     const startPx = loopStartPx()
     const endPx = loopEndPx()
     const near = 6
@@ -203,76 +224,64 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     } as const
   }
 
-  const majorMarkers = createMemo<Marker[]>(() => {
+  const majorMarkerIndices = createMemo<number[]>(() => {
     if (props.gridEnabled) {
       const step = intervals().majorSec
       if (!(Number.isFinite(step) && step > 0)) return []
       const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
       const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
-      const rulerWidth = rulerWidthPx()
-      const pixelsPerSecond = props.pixelsPerSecond
-      const bpm = props.bpm
-      return filterMarkers(Array.from({ length: last - first + 1 }, (_, index) => {
-        const idx = first + index
-        const positionPx = idx * step * pixelsPerSecond
-        if (positionPx > rulerWidth) return null
-        return { positionPx, label: `${musicalBarLabelAtTime(idx * step, bpm)}` }
-      }))
+      return collectTimelineMarkerIndices(first, last, step, rulerWidthPx(), props.timeToX)
     }
 
     const step = intervals().majorSec
     const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
     const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
-    const rulerWidth = rulerWidthPx()
-    const pixelsPerSecond = props.pixelsPerSecond
-    return filterMarkers(Array.from({ length: last - first + 1 }, (_, index) => {
-      const idx = first + index
-      const positionPx = idx * step * pixelsPerSecond
-      if (positionPx > rulerWidth) return null
-      const seconds = idx * step
-      return { positionPx, label: `${seconds}s` }
-    }))
+    return collectTimelineMarkerIndices(first, last, step, rulerWidthPx(), props.timeToX)
   })
 
-  const minorMarkers = createMemo<Marker[]>(() => {
-    const majors = majorMarkers()
-    const majorLookup = new Set(majors.map(m => Math.round(m.positionPx)))
+  const minorMarkerIndices = createMemo<number[]>(() => {
+    const majors = majorMarkerIndices()
+    const step = intervals().minorSec
+    const majorStep = intervals().majorSec
+    const majorLookup = new Set(majors.map(index => Math.round(props.timeToX(index * majorStep))))
 
     if (props.gridEnabled) {
-      const stepSec = intervals().minorSec
-      if (!(Number.isFinite(stepSec) && stepSec > 0)) return []
-      const first = Math.max(0, Math.floor(props.visibleRange.startSec / stepSec) - 1)
-      const last = Math.min(Math.ceil(props.durationSec / stepSec), Math.ceil(props.visibleRange.endSec / stepSec) + 1)
-      const rulerWidth = rulerWidthPx()
-      const pixelsPerSecond = props.pixelsPerSecond
-      return filterMarkers(Array.from({ length: last - first + 1 }, (_, index) => {
-        const idx = first + index
-        const positionPx = idx * stepSec * pixelsPerSecond
-        if (positionPx > rulerWidth) return null
-        if (majorLookup.has(Math.round(positionPx))) return null
-        return { positionPx }
-      }))
+      if (!(Number.isFinite(step) && step > 0)) return []
+      const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
+      const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
+      return collectTimelineMarkerIndices(
+        first,
+        last,
+        step,
+        rulerWidthPx(),
+        props.timeToX,
+        positionPx => majorLookup.has(Math.round(positionPx)),
+      )
     }
 
-    const step = intervals().minorSec
     const first = Math.max(0, Math.floor(props.visibleRange.startSec / step) - 1)
     const last = Math.min(Math.ceil(props.durationSec / step), Math.ceil(props.visibleRange.endSec / step) + 1)
-    const rulerWidth = rulerWidthPx()
-    const pixelsPerSecond = props.pixelsPerSecond
-    return filterMarkers(Array.from({ length: last - first + 1 }, (_, index) => {
-      const idx = first + index
-      const positionPx = idx * step * pixelsPerSecond
-      if (positionPx > rulerWidth) return null
-      if (majorLookup.has(Math.round(positionPx))) return null
-      return { positionPx }
-    }))
+    return collectTimelineMarkerIndices(
+      first,
+      last,
+      step,
+      rulerWidthPx(),
+      props.timeToX,
+      positionPx => majorLookup.has(Math.round(positionPx)),
+    )
   })
 
   return (
     <div
       data-timeline-ruler="1"
       class="sticky z-30 border-b border-border bg-timeline-surface"
-      style={{ top: `${ARRANGEMENT_OVERVIEW_HEIGHT}px`, width: `${rulerWidthPx()}px`, height: `${RULER_HEIGHT}px`, ...backgroundStyle() }}
+      style={{
+        top: `${ARRANGEMENT_OVERVIEW_HEIGHT}px`,
+        width: `${rulerWidthPx()}px`,
+        height: `${RULER_HEIGHT}px`,
+        'background-position': `${-props.visibleRange.startSec * props.pixelsPerSecond}px 0px`,
+        ...backgroundStyle(),
+      }}
       ref={el => { rootEl = el }}
       onPointerDown={onLocalPointerDown}
       onPointerMove={onLocalPointerMove}
@@ -284,24 +293,33 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
           style={{ left: `${loopStartPx()}px`, width: `${loopWidthPx()}px` }}
         />
       </Show>
-      <For each={minorMarkers()}>
-        {(marker) => (
-          <div
-            class="absolute top-0 w-px bg-timeline-grid-minor"
-            style={{ left: `${marker.positionPx}px`, height: `${RULER_HEIGHT / 2}px` }}
-          />
-        )}
-      </For>
-      <For each={majorMarkers()}>
-        {(marker) => (
-          <div class="absolute bottom-0" style={{ left: `${marker.positionPx}px` }}>
-            <div class="w-0.5 bg-timeline-grid-major" style={{ height: `${RULER_HEIGHT}px` }} />
-            <div class="absolute -top-5 text-2xs font-medium text-muted-foreground select-none">
-              {marker.label}
+      <Index each={minorMarkerIndices()}>
+        {(markerIndex) => {
+          const positionPx = () => props.timeToX(markerIndex() * intervals().minorSec)
+          return (
+            <div
+              class="absolute top-0 w-px bg-timeline-grid-minor"
+              style={{ left: `${positionPx()}px`, height: `${RULER_HEIGHT / 2}px` }}
+            />
+          )
+        }}
+      </Index>
+      <Index each={majorMarkerIndices()}>
+        {(markerIndex) => {
+          const positionPx = () => props.timeToX(markerIndex() * intervals().majorSec)
+          const label = () => props.gridEnabled
+            ? `${musicalBarLabelAtTime(markerIndex() * intervals().majorSec, props.bpm)}`
+            : formatTimeInterval(markerIndex() * intervals().majorSec)
+          return (
+            <div class="absolute bottom-0" style={{ left: `${positionPx()}px` }}>
+              <div class="w-0.5 bg-timeline-grid-major" style={{ height: `${RULER_HEIGHT}px` }} />
+              <div class="absolute -top-5 text-2xs font-medium text-muted-foreground select-none">
+                {label()}
+              </div>
             </div>
-          </div>
-        )}
-      </For>
+          )
+        }}
+      </Index>
     </div>
   )
 }

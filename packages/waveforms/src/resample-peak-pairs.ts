@@ -22,3 +22,7 @@ export function resamplePeakPairs(source: Uint8Array, targetBins: number) {
 
   return output
 }
+
+export function resamplePeakChannels(source: readonly Uint8Array[], targetBins: number) {
+  return source.map((channel) => resamplePeakPairs(channel, targetBins))
+}

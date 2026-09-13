@@ -1,6 +1,12 @@
 import { expect, test } from 'bun:test'
 
 import {
+  createFadeOverlayInput,
+  createFadeOverlayPathMemo,
+  stabilizeFadeOverlayInput,
+} from './ClipFadeOverlay'
+import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
+import {
   canStartFadeInteraction,
   clipFadeControlValueText,
   curveFadeControlValueText,
@@ -20,6 +26,69 @@ const baseline = {
   fadeInCurvePosition: 0.5,
   fadeOutCurvePosition: 0.5,
 }
+
+test('stabilizes fade inputs across zoom updates with the same local slice', () => {
+  const first = createFadeOverlayInput({
+    duration: 20,
+    fades: baseline,
+    midi: undefined,
+    sliceStartSec: 0,
+    sliceDurationSec: 20,
+  })
+  const zoomUpdate = createFadeOverlayInput({
+    duration: 20,
+    fades: { ...baseline },
+    midi: undefined,
+    sliceStartSec: 0,
+    sliceDurationSec: 20,
+  })
+  expect(stabilizeFadeOverlayInput(first, zoomUpdate)).toBe(first)
+})
+
+test('recomputes fade paths when the slice boundary or fade data changes', () => {
+  const first = createFadeOverlayInput({
+    duration: 20,
+    fades: baseline,
+    sliceStartSec: 0,
+    sliceDurationSec: 20,
+  })
+  const fadePathMemo = createFadeOverlayPathMemo()
+  const normalizedFades = normalizeClipFades(first.fades, first.duration)
+  const initialPaths = fadePathMemo(first, normalizedFades)
+  const zoomInput = stabilizeFadeOverlayInput(first, createFadeOverlayInput({
+    duration: 20,
+    fades: { ...baseline },
+    sliceStartSec: 0,
+    sliceDurationSec: 20,
+  }))
+  expect(fadePathMemo(zoomInput, normalizedFades)).toBe(initialPaths)
+
+  const boundaryInput = createFadeOverlayInput({
+    duration: 20,
+    fades: baseline,
+    sliceStartSec: 0,
+    sliceDurationSec: 4,
+  })
+  const boundaryPaths = fadePathMemo(
+    boundaryInput,
+    normalizedFades,
+  )
+  expect(boundaryPaths).not.toBe(initialPaths)
+  expect(boundaryPaths.fadeIn).not.toBe(initialPaths.fadeIn)
+
+  const editedInput = createFadeOverlayInput({
+    duration: 20,
+    fades: { ...baseline, fadeInSec: 2 },
+    sliceStartSec: 0,
+    sliceDurationSec: 4,
+  })
+  const editedPaths = fadePathMemo(
+    editedInput,
+    normalizeClipFades(editedInput.fades, editedInput.duration),
+  )
+  expect(editedPaths).not.toBe(boundaryPaths)
+  expect(editedPaths.fadeIn).not.toBe(boundaryPaths.fadeIn)
+})
 
 test('accepts editable fade controls only with usable overlay dimensions', () => {
   expect(canStartFadeInteraction({
@@ -116,4 +185,20 @@ test('maps pointer movement against the initial overlay geometry', () => {
   const snapshot = { left: 100, top: 50 }
   expect(pointerPositionInFadeOverlay(snapshot, { clientX: 140, clientY: 70 })).toEqual({ x: 40, y: 20 })
   expect(pointerPositionInFadeOverlay(snapshot, { clientX: 140, clientY: 70 })).toEqual({ x: 40, y: 20 })
+})
+
+test('commits slice-relative fade pointer movement in absolute clip time', () => {
+  const next = updateFadeDraft({
+    baseline,
+    side: 'fadeIn',
+    mode: 'fadeInEnd',
+    duration: 20,
+    overlayWidth: 100,
+    overlayHeight: 40,
+    currentX: 50,
+    currentY: 0,
+    overlayStartSec: 8,
+    overlayDurationSec: 4,
+  })
+  expect(next.fadeInSec).toBe(10)
 })

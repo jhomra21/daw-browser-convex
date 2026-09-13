@@ -49,10 +49,13 @@ import TimelineContextMenu, {
 } from "./context-menu/timeline-context-menu";
 import {
   buildGroupClipOverview,
+  trackIdsInYRange,
   type TimelineTrackLayout,
   type TimelineTrackLayoutRow,
 } from "~/lib/timeline-track-layout";
+import { intersectTimelineRangeWithViewport } from "~/lib/timeline-viewport-geometry";
 import type { TrackDropTarget } from "~/lib/track-group-ops";
+import { createTimelineVerticalScrollSync } from "~/lib/timeline-vertical-scroll-sync";
 
 const createViewportRedrawVersion = () => {
   const [version, setVersion] = createSignal(0);
@@ -102,7 +105,13 @@ type Props = {
   pixelsPerSecond: number;
   viewport: {
     visibleRange: { startSec: number; endSec: number };
+    overscanRange: { startSec: number; endSec: number };
     width: number;
+    pixelsPerSecond: number;
+    timeToX: (timeSec: number) => number;
+    xToTime: (x: number) => number;
+    runwayWidth: number;
+    runwayOffset: number;
     previewVisibleRange: (range: { startSec: number; endSec: number }) => void;
     commitVisibleRange: (range: { startSec: number; endSec: number }) => void;
     onWheel: (event: WheelEvent) => void;
@@ -227,8 +236,28 @@ type Props = {
 };
 
 export default function TimelineWorkspace(props: Props) {
-  let scrollElement: HTMLDivElement | undefined;
+  let sidebarScrollElement: HTMLDivElement | undefined;
   const viewportRedrawVersion = createViewportRedrawVersion();
+  const [verticalScrollTop, setVerticalScrollTop] = createSignal(0);
+  const [verticalClientHeight, setVerticalClientHeight] = createSignal(0);
+  const verticalScrollSync = createTimelineVerticalScrollSync({
+    onCanonicalScrollTop: setVerticalScrollTop,
+  });
+  const observeScrollViewport = (element: HTMLDivElement) => {
+    props.scrollRef(element);
+    verticalScrollSync.bindTimeline(element);
+    setVerticalClientHeight(element.clientHeight);
+    const resizeObserver = new ResizeObserver(() => {
+      setVerticalClientHeight(element.clientHeight);
+    });
+    resizeObserver.observe(element);
+    onCleanup(() => resizeObserver.disconnect());
+  };
+  const verticalWaveformTrackIds = createMemo(() => new Set(trackIdsInYRange(
+    props.trackLayout.scrollingRows,
+    verticalScrollTop() - TIMELINE_HEADER_HEIGHT - 512,
+    verticalScrollTop() + verticalClientHeight() - TIMELINE_HEADER_HEIGHT + 512,
+  )));
   const trackById = createMemo(() => props.trackLookup.trackById);
   const visibleTracks = createMemo(() =>
     [
@@ -296,6 +325,7 @@ export default function TimelineWorkspace(props: Props) {
     row: TimelineTrackLayoutRow;
     layout: TimelineTrackLayoutRow;
     isDropTarget?: Accessor<boolean>;
+    isReturn?: boolean;
   }> = (laneProps) => {
     const track = () => trackById().get(laneProps.row.trackId);
     const visibleTargetKeys = () =>
@@ -335,7 +365,15 @@ export default function TimelineWorkspace(props: Props) {
             resolveAudioSource={props.resolveAudioSource}
             bpm={props.bpm}
             pixelsPerSecond={props.pixelsPerSecond}
+            visibleRange={props.viewport.visibleRange}
+            clipVisibleRange={props.viewport.overscanRange}
+            viewportWidthPx={props.viewport.width}
+            timeToX={props.viewport.timeToX}
             viewportRedrawVersion={viewportRedrawVersion()}
+            waveformVisible={
+              laneProps.isReturn === true
+              || verticalWaveformTrackIds().has(laneProps.row.trackId)
+            }
             automation={{
               projectId: props.automation.projectId,
               visible:
@@ -382,19 +420,17 @@ export default function TimelineWorkspace(props: Props) {
       >
         <TimelineLeftBrowser browser={props.leftBrowser} />
       </div>
-      <TimelineContextMenu items={fallbackMenuItems}>
+      <div class="relative min-h-0 min-w-0 flex-1">
+        <TimelineContextMenu items={fallbackMenuItems}>
         <div
-          class="flex-1 relative overflow-auto"
-          ref={(element) => {
-            scrollElement = element;
-            props.scrollRef(element);
-          }}
+          class="relative h-full w-full min-w-0 overflow-auto overscroll-x-none"
+          ref={(element) => observeScrollViewport(element)}
           onWheel={(event) => props.viewport.onWheel(event)}
         >
           <div
             class="relative flex select-none"
             style={{
-              width: `${props.durationSec * props.pixelsPerSecond + props.sidebarWidth}px`,
+              width: `${props.viewport.runwayWidth}px`,
               height: `${scrollContentHeight()}px`,
               "min-height": "100%",
             }}
@@ -403,7 +439,8 @@ export default function TimelineWorkspace(props: Props) {
               class="relative flex shrink-0 flex-col"
               ref={props.timelineSurfaceRef}
               style={{
-                width: `${props.durationSec * props.pixelsPerSecond}px`,
+                width: `${props.viewport.width}px`,
+                "margin-left": `${props.viewport.runwayOffset}px`,
               }}
                onPointerDown={(event) => props.onLanePointerDown(event)}
             >
@@ -422,6 +459,9 @@ export default function TimelineWorkspace(props: Props) {
                 gridEnabled={props.gridEnabled}
                 pixelsPerSecond={props.pixelsPerSecond}
                 visibleRange={props.viewport.visibleRange}
+                viewportWidthPx={props.viewport.width}
+                timeToX={props.viewport.timeToX}
+                xToTime={props.viewport.xToTime}
                 onPointerDown={props.onRulerPointerDown}
                 loopEnabled={props.loopEnabled}
                 loopStartSec={props.loopStartSec}
@@ -459,6 +499,8 @@ export default function TimelineWorkspace(props: Props) {
                     trackLookup: props.trackLookup,
                     durationSec: props.durationSec,
                     pixelsPerSecond: props.pixelsPerSecond,
+                    visibleStartSec: props.viewport.visibleRange.startSec,
+                    viewportWidthPx: props.viewport.width,
                     bpm: props.bpm,
                     gridDenominator: props.gridDenominator,
                     gridEnabled: props.gridEnabled,
@@ -487,7 +529,7 @@ export default function TimelineWorkspace(props: Props) {
               <div
                 class="sticky z-30 box-border shrink-0 border-t border-neutral-800 bg-timeline-background"
                 style={{
-                  width: `${props.durationSec * props.pixelsPerSecond}px`,
+                  width: `${props.viewport.width}px`,
                   height: `${stickyFooterHeight()}px`,
                   bottom: `${props.bottomPanelOffsetPx}px`,
                 }}
@@ -518,6 +560,7 @@ export default function TimelineWorkspace(props: Props) {
                           row={row}
                           layout={{ ...row, topPx: 0 }}
                           isDropTarget={isDropTarget}
+                          isReturn
                         />
                       </div>
                       );
@@ -526,6 +569,8 @@ export default function TimelineWorkspace(props: Props) {
                   <GridOverlay
                     durationSec={props.durationSec}
                     pixelsPerSecond={props.pixelsPerSecond}
+                    visibleStartSec={props.viewport.visibleRange.startSec}
+                    viewportWidthPx={props.viewport.width}
                     bpm={props.bpm}
                     denom={props.gridDenominator}
                     enabled={props.gridEnabled}
@@ -551,23 +596,32 @@ export default function TimelineWorkspace(props: Props) {
                   </Show>
                   <Show when={props.selection.rangeSelection()}>
                     {(range) => (
-                      <For
-                        each={props.trackLayout.returnRows.filter((row) =>
-                          range().trackIds.includes(row.trackId),
+                      <Show when={intersectTimelineRangeWithViewport({
+                        range: range(),
+                        visibleStartSec: props.viewport.visibleRange.startSec,
+                        viewportWidthPx: props.viewport.width,
+                        pixelsPerSecond: props.pixelsPerSecond,
+                      })}>
+                        {(projection) => (
+                          <For
+                            each={props.trackLayout.returnRows.filter((row) =>
+                              range().trackIds.includes(row.trackId),
+                            )}
+                          >
+                            {(row) => (
+                              <div
+                                class="absolute z-10 pointer-events-none bg-blue-400/12 border-x border-blue-300/30"
+                                style={{
+                                  left: `${projection().leftPx}px`,
+                                  top: `${row.topPx}px`,
+                                  width: `${projection().widthPx}px`,
+                                  height: `${row.heightPx}px`,
+                                }}
+                              />
+                            )}
+                          </For>
                         )}
-                      >
-                        {(row) => (
-                          <div
-                            class="absolute z-10 pointer-events-none bg-blue-400/12 border-x border-blue-300/30"
-                            style={{
-                              left: `${range().startSec * props.pixelsPerSecond}px`,
-                              top: `${row.topPx}px`,
-                              width: `${(range().endSec - range().startSec) * props.pixelsPerSecond}px`,
-                              height: `${row.heightPx}px`,
-                            }}
-                          />
-                        )}
-                      </For>
+                      </Show>
                     )}
                   </Show>
                 </div>
@@ -580,6 +634,8 @@ export default function TimelineWorkspace(props: Props) {
                     <GridOverlay
                       durationSec={props.durationSec}
                       pixelsPerSecond={props.pixelsPerSecond}
+                      visibleStartSec={props.viewport.visibleRange.startSec}
+                      viewportWidthPx={props.viewport.width}
                       bpm={props.bpm}
                       denom={props.gridDenominator}
                       enabled={props.gridEnabled}
@@ -602,6 +658,8 @@ export default function TimelineWorkspace(props: Props) {
                         )}
                         durationSec={props.durationSec}
                         pixelsPerSecond={props.pixelsPerSecond}
+                        visibleStartSec={props.viewport.visibleRange.startSec}
+                        viewportWidthPx={props.viewport.width}
                         heightPx={props.automation.lanes.masterHeight}
                         onPreview={props.automation.envelopes.preview}
                         onCommit={props.automation.envelopes.commit}
@@ -617,54 +675,60 @@ export default function TimelineWorkspace(props: Props) {
               />
             </div>
 
-            <TrackSidebar
-              sidebar={{
-                tracks: visibleTracks(),
-                allTracks: props.tracks,
-                trackById: trackById(),
-                trackLayout: props.trackLayout,
-                scrollElement: () => scrollElement,
-                selectedTrackId: props.selection.selectedTrackId(),
-                selectedTrackIds: selectedTrackIds(),
-                sidebarWidth: props.sidebarWidth,
-                bottomOffsetPx: props.bottomPanelOffsetPx,
-                stickyFooterHeightPx: stickyFooterHeight(),
-                master: props.sidebar.master,
-                recordArmTrackId: props.recording.recordArmTrackId,
-                currentUserId: props.sidebar.currentUserId,
-                subscribeTrackLevels: props.sidebar.subscribeTrackLevels,
-                subscribeMasterLevels: props.sidebar.subscribeMasterLevels,
-                onTrackClick: props.sidebar.onTrackClick,
-                canWriteTrackRouting: props.sidebar.canWriteTrackRouting,
-                onTrackSendsChange: props.sidebar.onTrackSendsChange,
-                onTrackOutputTargetChange:
-                  props.sidebar.onTrackOutputTargetChange,
-                onVolumePreview: props.sidebar.onVolumePreview,
-                onVolumeChange: props.sidebar.onVolumeChange,
-                onToggleMute: props.sidebar.onToggleMute,
-                onToggleSolo: props.sidebar.onToggleSolo,
-                onSidebarPointerDown: props.sidebar.onSidebarPointerDown,
-                onToggleRecordArm: props.sidebar.onToggleRecordArm,
-                onDeleteTrack: props.sidebar.onDeleteTrack,
-                onToggleTrackCollapsed: props.sidebar.onToggleTrackCollapsed,
-                onSetTracksCollapsed: props.sidebar.onSetTracksCollapsed,
-                onGroupTracks: props.sidebar.onGroupTracks,
-                onUngroupTrack: props.sidebar.onUngroupTrack,
-                onMoveTrackToGroup: props.sidebar.onMoveTrackToGroup,
-                onReorderTracks: props.sidebar.onReorderTracks,
-                onSetTrackColor: props.sidebar.onSetTrackColor,
-                onResetTrackColor: props.sidebar.onResetTrackColor,
-                onAssignTrackColorToClips:
-                  props.sidebar.onAssignTrackColorToClips,
-                onResetClipColors: props.sidebar.onResetClipColors,
-                onSelectAllClipsInGroup:
-                  props.sidebar.onSelectAllClipsInGroup,
-              }}
-              automation={props.automation}
-            />
           </div>
         </div>
-      </TimelineContextMenu>
+        </TimelineContextMenu>
+      </div>
+      <TrackSidebar
+        scrollRef={(element) => {
+          sidebarScrollElement = element;
+          verticalScrollSync.bindSidebar(element);
+        }}
+        sidebar={{
+          tracks: visibleTracks(),
+          allTracks: props.tracks,
+          trackById: trackById(),
+          trackLayout: props.trackLayout,
+          scrollElement: () => sidebarScrollElement,
+          contentHeightPx: scrollContentHeight(),
+          selectedTrackId: props.selection.selectedTrackId(),
+          selectedTrackIds: selectedTrackIds(),
+          sidebarWidth: props.sidebarWidth,
+          bottomOffsetPx: props.bottomPanelOffsetPx,
+          stickyFooterHeightPx: stickyFooterHeight(),
+          master: props.sidebar.master,
+          recordArmTrackId: props.recording.recordArmTrackId,
+          currentUserId: props.sidebar.currentUserId,
+          subscribeTrackLevels: props.sidebar.subscribeTrackLevels,
+          subscribeMasterLevels: props.sidebar.subscribeMasterLevels,
+          onTrackClick: props.sidebar.onTrackClick,
+          canWriteTrackRouting: props.sidebar.canWriteTrackRouting,
+          onTrackSendsChange: props.sidebar.onTrackSendsChange,
+          onTrackOutputTargetChange:
+            props.sidebar.onTrackOutputTargetChange,
+          onVolumePreview: props.sidebar.onVolumePreview,
+          onVolumeChange: props.sidebar.onVolumeChange,
+          onToggleMute: props.sidebar.onToggleMute,
+          onToggleSolo: props.sidebar.onToggleSolo,
+          onSidebarPointerDown: props.sidebar.onSidebarPointerDown,
+          onToggleRecordArm: props.sidebar.onToggleRecordArm,
+          onDeleteTrack: props.sidebar.onDeleteTrack,
+          onToggleTrackCollapsed: props.sidebar.onToggleTrackCollapsed,
+          onSetTracksCollapsed: props.sidebar.onSetTracksCollapsed,
+          onGroupTracks: props.sidebar.onGroupTracks,
+          onUngroupTrack: props.sidebar.onUngroupTrack,
+          onMoveTrackToGroup: props.sidebar.onMoveTrackToGroup,
+          onReorderTracks: props.sidebar.onReorderTracks,
+          onSetTrackColor: props.sidebar.onSetTrackColor,
+          onResetTrackColor: props.sidebar.onResetTrackColor,
+          onAssignTrackColorToClips:
+            props.sidebar.onAssignTrackColorToClips,
+          onResetClipColors: props.sidebar.onResetClipColors,
+          onSelectAllClipsInGroup:
+            props.sidebar.onSelectAllClipsInGroup,
+        }}
+        automation={props.automation}
+      />
     </div>
   );
 }

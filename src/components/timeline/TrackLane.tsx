@@ -1,4 +1,4 @@
-import { createMemo, type Accessor, type Component, For } from 'solid-js'
+import { createMemo, type Accessor, type Component, For, Show } from 'solid-js'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { useAppPreferences } from '~/context/app-preferences'
 import { createClipVisualColors, resolveClipColor } from '~/lib/clip-color'
@@ -10,6 +10,7 @@ import TimelineContextMenu, { type TimelineContextMenuItem } from './context-men
 import type { GroupClipOverviewSegment, TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
+import { intersectTimelineRangeWithViewport } from '~/lib/timeline-viewport-geometry'
 
 type TrackLaneProps = {
   track: Track
@@ -31,7 +32,12 @@ type TrackLaneProps = {
   onDeleteTrack?: (trackId: Track['id']) => void
   bpm: number
   pixelsPerSecond: number
+  visibleRange: { startSec: number; endSec: number }
+  clipVisibleRange: { startSec: number; endSec: number }
+  viewportWidthPx: number
+  timeToX: (timeSec: number) => number
   viewportRedrawVersion: number
+  waveformVisible?: boolean
   canEditClipFades: (clipId: string) => boolean
   onCommitClipFades: (clipId: string, fades: ClipFades, baseline: ClipFades) => void
   automation: {
@@ -121,6 +127,8 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
                   envelope={props.automation.envelopeForSelection(selection)}
                   durationSec={props.automation.durationSec}
                   pixelsPerSecond={props.pixelsPerSecond}
+                  visibleStartSec={props.visibleRange.startSec}
+                  viewportWidthPx={(props.visibleRange.endSec - props.visibleRange.startSec) * props.pixelsPerSecond}
                   heightPx={props.automation.laneHeightPx}
                   onPreview={props.automation.onPreview}
                   onCommit={props.automation.onCommit}
@@ -134,18 +142,32 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
       {props.track.collapsed ? (
         <For each={collapsedSegments()}>
           {(segment) => (
-            <div
-              class="absolute top-1 bottom-1 rounded-sm border"
-              style={{
-                left: `${segment.startSec * props.pixelsPerSecond}px`,
-                width: `${Math.max(2, (segment.endSec - segment.startSec) * props.pixelsPerSecond)}px`,
-                ...segmentVisualColors(segment.color),
-              }}
-            />
+          <Show when={segment.endSec >= props.clipVisibleRange.startSec && segment.startSec <= props.clipVisibleRange.endSec}>
+            <Show when={intersectTimelineRangeWithViewport({
+              range: segment,
+              visibleStartSec: props.visibleRange.startSec,
+              viewportWidthPx: props.viewportWidthPx,
+              pixelsPerSecond: props.pixelsPerSecond,
+            })}>
+              {(projection) => (
+                <div
+                  class="absolute top-1 bottom-1 rounded-sm border"
+                  style={{
+                    left: `${projection().leftPx}px`,
+                    width: `${projection().widthPx}px`,
+                    ...segmentVisualColors(segment.color),
+                  }}
+                />
+              )}
+            </Show>
+            </Show>
           )}
         </For>
       ) : (
-        <For each={props.track.clips}>
+        <For each={props.track.clips.filter((clip) => (
+          clip.startSec < props.visibleRange.endSec
+          && clip.startSec + clip.duration > props.visibleRange.startSec
+        ))}>
           {(clip) => (
             <ClipComponent
               clip={clip}
@@ -163,7 +185,10 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
               resolveAudioSource={props.resolveAudioSource}
               bpm={props.bpm}
               pixelsPerSecond={props.pixelsPerSecond}
+              visibleRange={props.visibleRange}
+              timeToX={props.timeToX}
               viewportRedrawVersion={props.viewportRedrawVersion}
+              waveformVisible={props.waveformVisible}
               canEditFades={() => props.canEditClipFades(clip.id)}
               onCommitFades={props.onCommitClipFades}
             />

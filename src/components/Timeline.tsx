@@ -244,6 +244,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     setAppMessage({ title, message });
   };
 
+  let timelineViewportStartSec = () => 0;
+  let setTimelineVisibleStart = (_startSec: number) => {};
   const {
     projectId,
     mountedProjectGeneration,
@@ -659,6 +661,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     loopStartSec,
     loopEndSec,
     pixelsPerSecond,
+    visibleStartSec: () => timelineViewportStartSec(),
     preflightPlayback: async () => {
       const currentProjectId = projectId();
       if (!isLocalId("project", currentProjectId)) return true;
@@ -1077,7 +1080,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   let timelineSurfaceRef: HTMLDivElement | undefined;
   let rootRef: HTMLDivElement | undefined;
   let effectsChainElement: HTMLElement | undefined;
-  const duration = () => timelineDurationSec(renderTracks());
+  const duration = createMemo(() => timelineDurationSec(renderTracks()));
 
   const leftBrowser = useTimelineLeftBrowserState({
     projectId,
@@ -1182,6 +1185,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       openMidiEditorFor,
       ensureClipBuffer: clipBuffers.preload,
       getScrollElement: () => scrollRef,
+      setVisibleStartSec: (startSec) => setTimelineVisibleStart(startSec),
       pixelsPerSecond,
     },
   });
@@ -1246,6 +1250,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     gridEnabled,
     gridDenominator,
     pixelsPerSecond,
+    visibleStartSec: () => timelineViewportStartSec(),
     createTimelineTrack,
     removeCreatedCloudTrack,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
@@ -1308,6 +1313,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     gridEnabled,
     gridDenominator,
     pixelsPerSecond,
+    visibleStartSec: () => timelineViewportStartSec(),
     audioBufferCache: clipBuffers,
     onCommitMoves: (ids) => {
       rescheduleChangedClips(ids);
@@ -1335,6 +1341,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     gridEnabled,
     gridDenominator,
     pixelsPerSecond,
+    visibleStartSec: () => timelineViewportStartSec(),
     rescheduleChangedClips,
     projectId,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
@@ -1346,9 +1353,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     previewPixelsPerSecond,
     commitPixelsPerSecond,
     durationSec: duration,
-    rightSidebarWidth: sidebarWidth,
     canZoom: () => !clipDrag.isDragging() && !clipResize.isResizing(),
   });
+  timelineViewportStartSec = () => timelineViewport.visibleRange().startSec;
+  setTimelineVisibleStart = (startSec) => timelineViewport.setVisibleStart(startSec);
 
   const commitClipFades = async (
     clipId: string,
@@ -1441,6 +1449,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     bpm,
     gridDenominator,
     pixelsPerSecond,
+    visibleStartSec: () => timelineViewport.visibleRange().startSec,
     startScrub,
     moveScrub,
     stopScrub,
@@ -2551,8 +2560,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         durationSec={duration()}
         pixelsPerSecond={pixelsPerSecond()}
         viewport={{
-          visibleRange: timelineViewport.visibleRange(),
-          width: timelineViewport.usableWidth(),
+          ...timelineViewport.viewport(),
           previewVisibleRange: timelineViewport.previewVisibleRange,
           commitVisibleRange: timelineViewport.commitVisibleRange,
           onWheel: timelineViewport.onWheel,

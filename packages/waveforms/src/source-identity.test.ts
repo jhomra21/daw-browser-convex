@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { peakAssetMatchesSourceIdentity } from './source-identity'
-import type { PeakAssetRecord } from './types'
+import { peakAssetFormatVersion, type PeakAssetRecord } from './types'
 
 const record: PeakAssetRecord = {
+  formatVersion: peakAssetFormatVersion,
   assetKey: 'project:asset',
   durationSec: 2,
   sampleRate: 44100,

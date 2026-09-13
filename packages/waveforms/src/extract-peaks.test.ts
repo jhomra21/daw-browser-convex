@@ -22,6 +22,37 @@ function createSource(input: {
 }
 
 describe('bounded peak extraction', () => {
+  test('stores signed min/max independently for a stereo impulse and polarity fixture', async () => {
+    const source = createSource({
+      durationSec: 1,
+      sampleRate: 8,
+      channelCount: 2,
+      page: {
+        startFrame: 0,
+        frameCount: 8,
+        sampleRate: 8,
+        channelCount: 2,
+        planes: [
+          new Float32Array([1, 0, 0, 0, -1, 0, 0, 0]),
+          new Float32Array([0, -1, 0, 0, 0, 1, 0, 0]),
+        ],
+      },
+    })
+    let high: readonly Uint8Array[] | undefined
+    const record = await extractPeakAsset(source, 'stereo-fixture', {
+      onChunk: async ({ chunks }) => {
+        high = chunks[0]?.data
+      },
+    })
+    const chunk = getPeakChunkRecord('stereo-fixture', record.levels[0]!, record, 0)
+    expect(chunk.channelCount).toBe(2)
+    expect(high).toHaveLength(2)
+    expect(decodePeakByte(high?.[0]?.[0] ?? 128)).toBeCloseTo(1, 2)
+    expect(decodePeakByte(high?.[0]?.[1] ?? 128)).toBeCloseTo(1, 2)
+    expect(decodePeakByte(high?.[1]?.[100] ?? 128)).toBeCloseTo(-1, 2)
+    expect(decodePeakByte(high?.[0]?.[100] ?? 128)).toBeCloseTo(0, 2)
+  })
+
   test('persists arithmetic metadata independent of multi-hour duration', async () => {
     const source = createSource({
       durationSec: 3 * 60 * 60,
@@ -72,7 +103,8 @@ describe('bounded peak extraction', () => {
     const chunks: Uint8Array[] = []
     const record = await extractPeakAsset(source, 'values', {
       onChunk: async ({ chunks: next }) => {
-        chunks.push(next[0].data)
+        const channel = next[0]?.data[0]
+        if (channel) chunks.push(channel)
       },
     })
     const firstChunk = getPeakChunkRecord('values', record.levels[0], record, 0)

@@ -3,6 +3,26 @@ import type { WaveformDrawOptions, WaveformSampleChannelSlice } from './types'
 
 const DEFAULT_MAX_HEIGHT_FRACTION = 0.36
 
+export const waveformSampleY = (input: {
+  sample: number
+  topY: number
+  contentH: number
+  maxHeightFraction: number
+  amplitudeScale?: number
+}) => {
+  const halfH = input.contentH / 2
+  const midY = input.topY + halfH
+  const sample = Math.max(-1, Math.min(1, input.sample))
+  const maxHeightFraction = Number.isFinite(input.maxHeightFraction)
+    ? Math.max(0, Math.min(1, input.maxHeightFraction))
+    : DEFAULT_MAX_HEIGHT_FRACTION
+  const amplitudeScale = input.amplitudeScale ?? 1
+  const scale = Number.isFinite(amplitudeScale)
+    ? Math.max(0, Math.min(1, amplitudeScale))
+    : 0
+  return midY - sample * halfH * maxHeightFraction * scale
+}
+
 export function drawWaveformPeaks(options: WaveformDrawOptions) {
   const {
     ctx,
@@ -26,8 +46,6 @@ export function drawWaveformPeaks(options: WaveformDrawOptions) {
   const previousAlpha = ctx.globalAlpha ?? 1
   ctx.globalAlpha = previousAlpha * Math.max(0, Math.min(1, opacity))
   try {
-    const halfH = contentH / 2
-    const midY = topY + halfH
     ctx.fillStyle = fillStyle
     const sourceColumns = Math.floor(peaks.length / 2)
     if (sourceColumns <= 0) return
@@ -39,23 +57,36 @@ export function drawWaveformPeaks(options: WaveformDrawOptions) {
       )
       let min = Infinity
       let max = -Infinity
+      let hasNonSilence = false
       for (let sourceColumn = sourceStart; sourceColumn < sourceEnd; sourceColumn += 1) {
-        min = Math.min(min, decodePeakByte(peaks[sourceColumn * 2] ?? 128))
-        max = Math.max(max, decodePeakByte(peaks[sourceColumn * 2 + 1] ?? 128))
+        const encodedMin = peaks[sourceColumn * 2] ?? 128
+        const encodedMax = peaks[sourceColumn * 2 + 1] ?? 128
+        hasNonSilence ||= encodedMin !== 128 || encodedMax !== 128
+        min = Math.min(min, decodePeakByte(encodedMin))
+        max = Math.max(max, decodePeakByte(encodedMax))
       }
-      const amplitude = Math.max(Math.abs(min), Math.abs(max))
       const amplitudeScale = options.amplitudeScaleAtColumn?.(i) ?? 1
       const scale = Number.isFinite(amplitudeScale)
         ? Math.max(0, Math.min(1, amplitudeScale))
         : 0
-      const halfHeight = Math.min(
-        halfH,
-        amplitude * scale * halfH * normalizedMaxHeightFraction,
-      )
-      if (halfHeight <= 0.35) continue
-      const top = Math.max(topY, midY - halfHeight)
-      const height = Math.min(contentH, Math.max(1, halfHeight * 2))
-      ctx.fillRect(xOffsetPx + padPx + i, top, 1, height)
+      const upperY = waveformSampleY({
+        sample: max,
+        topY,
+        contentH,
+        maxHeightFraction: normalizedMaxHeightFraction,
+        amplitudeScale: scale,
+      })
+      const lowerY = waveformSampleY({
+        sample: min,
+        topY,
+        contentH,
+        maxHeightFraction: normalizedMaxHeightFraction,
+        amplitudeScale: scale,
+      })
+      const top = Math.max(topY, Math.min(topY + contentH, upperY))
+      const bottom = Math.max(top, Math.min(topY + contentH, lowerY))
+      if (!hasNonSilence || scale <= 0 || bottom < top) continue
+      ctx.fillRect(xOffsetPx + padPx + i, top, 1, bottom - top)
     }
 
     const audioEndX = Math.min(cssW, xOffsetPx + padPx + drawCols)
@@ -110,8 +141,6 @@ export function drawWaveformPcmLine(options: {
       ctx.globalAlpha = previousAlpha * lineOpacity
       for (const [channelIndex, samples] of pcm.channels.entries()) {
         if (samples.length === 0) continue
-        const midY = topY + laneHeight * (channelIndex + 0.5)
-        const amplitude = laneHeight * maxHeightFraction / 2
         ctx.strokeStyle = fillStyle
         ctx.lineWidth = 1
         ctx.beginPath()
@@ -122,7 +151,13 @@ export function drawWaveformPcmLine(options: {
             : 0
           const x = xOffsetPx + Math.max(0, Math.min(1, progress)) * cssW
           const scale = Math.max(0, Math.min(1, options.amplitudeScaleAtSample?.(index) ?? 1))
-          const y = midY - Math.max(-1, Math.min(1, samples[index] ?? 0)) * amplitude * scale
+          const y = waveformSampleY({
+            sample: samples[index] ?? 0,
+            topY: topY + laneHeight * channelIndex,
+            contentH: laneHeight,
+            maxHeightFraction,
+            amplitudeScale: scale,
+          })
           if (index === 0) ctx.moveTo(x, y)
           else ctx.lineTo(x, y)
         }
@@ -134,8 +169,6 @@ export function drawWaveformPcmLine(options: {
       ctx.globalAlpha = previousAlpha * pointOpacity
       for (const [channelIndex, samples] of pcm.channels.entries()) {
         if (samples.length === 0) continue
-        const midY = topY + laneHeight * (channelIndex + 0.5)
-        const amplitude = laneHeight * maxHeightFraction / 2
         ctx.fillStyle = fillStyle
         for (let index = 0; index < samples.length; index += 1) {
           const sampleTimeSec = (pcm.firstFrame + index) / pcm.sampleRate
@@ -144,7 +177,13 @@ export function drawWaveformPcmLine(options: {
             : 0
           const x = xOffsetPx + Math.max(0, Math.min(1, progress)) * cssW
           const scale = Math.max(0, Math.min(1, options.amplitudeScaleAtSample?.(index) ?? 1))
-          const y = midY - Math.max(-1, Math.min(1, samples[index] ?? 0)) * amplitude * scale
+          const y = waveformSampleY({
+            sample: samples[index] ?? 0,
+            topY: topY + laneHeight * channelIndex,
+            contentH: laneHeight,
+            maxHeightFraction,
+            amplitudeScale: scale,
+          })
           ctx.beginPath()
           ctx.arc(x, y, pointRadius, 0, Math.PI * 2)
           ctx.fill()

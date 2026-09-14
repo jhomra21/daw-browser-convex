@@ -224,6 +224,18 @@
 - Visible detail must transition continuously from envelope to exact PCM line to smoothly emerging sample points during an uninterrupted zoom gesture, without blank frames, LOD snapping, delayed settle-to-sharpen, or timing drift.
 - Safari automation is waived for this phase. Merge, rebase, force-push, and production deployment remain prohibited.
 
+### Continuous signal representation
+
+- Supplied video evidence shows a harsh envelope-to-PCM snap around 2.42–2.43 seconds.
+- The old behavior selected a PCM envelope at `samplesPerPixel >= 1` and a PCM line below `1`, but composed the two only when the acquisition mode was `pcm-line`; the renderer also collapsed signed min/max intervals to symmetric absolute bars.
+- Visual composition now uses the current projected segment density independently of acquisition mode, retains the envelope while PCM line refinement is pending, and uses the shared `1.5 → 2/3 samples-per-pixel` line blend.
+- Peak rendering now preserves signed min/max intervals and shares the sample-to-Y mapping with PCM line rendering, including asymmetric and polarity-preserving geometry.
+- Focused LOD, renderer, and browser-condition coverage was added for pre-switch line opacity, signed intervals, shared coordinates, refinement publication, and bounded retained generations.
+- Browser-condition continuity coverage passes 7/7. The isolated full suite reached 2,938 passed, one intentional Electron-only skip, and one unrelated five-second timeout in the 129th protected-recovery fixture; that fixture passed alone in 4.1 seconds with a 20-second allowance.
+- The fixed browser preview and rebuilt arm64 Electron package both render with `transform: none`. Packaged playback remained active through 120 synthetic zoom events with p50 7.9 ms, p95 13.4 ms, p99 14.1 ms, max 14.3 ms, zero intervals at or above 50 ms, and approximately 63.6 MB renderer heap.
+- Browser and Electron screenshots are preserved as `acceptance-reports/continuity-browser-real-deep-zoom.png` and `acceptance-reports/continuity-electron-playback-zoom.png`. The Electron capture shows the signed envelope while playback is active; the browser capture shows the exact PCM curve with sample points.
+- Slowed frame-by-frame recording remains unavailable because CDP rejects `Target.createTarget`. The deterministic threshold and shared-coordinate tests replace no visual claim: the supplied snap's two source causes are corrected, but no recording pass is claimed.
+
 ### Exact local reference matrix
 
 | Reference | Exact files inspected | Evidence | Decision |

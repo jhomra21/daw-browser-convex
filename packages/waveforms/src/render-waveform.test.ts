@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { drawWaveformPcmLine, drawWaveformPeaks } from './render-waveform'
+import { encodePeakByte } from './extract-peaks'
+import { drawWaveformPcmLine, drawWaveformPeaks, waveformSampleY } from './render-waveform'
 import type { WaveformSampleChannelSlice } from './types'
 
 type Rectangle = {
@@ -96,6 +97,7 @@ describe('drawWaveformPeaks', () => {
     })
 
     expect(rectangles.map((rectangle) => rectangle.x)).toEqual([4, 5, 6, 7])
+    expect(rectangles.every((rectangle) => rectangle.height > 0)).toBeTruthy()
   })
 
   test('preserves extrema from every source interval when downsampling', () => {
@@ -118,7 +120,110 @@ describe('drawWaveformPeaks', () => {
     })
 
     expect(rectangles.map((rectangle) => rectangle.x)).toEqual([0, 1])
-    expect(rectangles.map((rectangle) => rectangle.height)).toEqual([36, 36])
+    expect(rectangles.map((rectangle) => rectangle.height)).toEqual([
+      18.070588235294117,
+      17.929411764705883,
+    ])
+  })
+
+  test('preserves signed positive, negative, and asymmetric intervals', () => {
+    const { ctx, rectangles } = createContext()
+
+    drawWaveformPeaks({
+      ctx,
+      peaks: new Uint8Array([
+        192, 255,
+        0, 64,
+        64, 192,
+      ]),
+      drawCols: 3,
+      padPx: 0,
+      topY: 0,
+      contentH: 100,
+      cssW: 3,
+      cssH: 100,
+      maxHeightFraction: 1,
+    })
+
+    expect(rectangles[0]?.y).toBeCloseTo(0)
+    expect(rectangles[0]?.height).toBeCloseTo(24.70588235)
+    expect(rectangles[1]?.y).toBeCloseTo(74.90196078)
+    expect(rectangles[1]?.height).toBeCloseTo(25.09803922)
+    expect(rectangles[2]?.y).toBeCloseTo(24.70588235)
+    expect(rectangles[2]?.height).toBeCloseTo(50.19607843)
+  })
+
+  test('shares exact sample coordinates between envelope and PCM', () => {
+    const samples = [-1, -0.75, -0.25, 0, 0.25, 0.75, 1]
+    for (const sample of samples) {
+      const expected = waveformSampleY({
+        sample,
+        topY: 10,
+        contentH: 80,
+        maxHeightFraction: 0.72,
+        amplitudeScale: 0.6,
+      })
+      const yValues: number[] = []
+      drawWaveformPcmLine({
+        ctx: {
+          fillStyle: '',
+          strokeStyle: '',
+          lineWidth: 1,
+          beginPath() {},
+          moveTo(_x, y) { yValues.push(y) },
+          lineTo(_x, y) { yValues.push(y) },
+          stroke() {},
+          fillRect() {},
+          arc() {},
+          fill() {},
+        },
+        pcm: {
+          mode: 'pcm-line',
+          channels: [new Float32Array([sample])],
+          firstFrame: 0,
+          sampleRate: 1,
+          sourceStartSec: 0,
+          sourceEndSec: 1,
+        },
+        topY: 10,
+        contentH: 80,
+        cssW: 1,
+        maxHeightFraction: 0.72,
+        amplitudeScaleAtSample: () => 0.6,
+      })
+      expect(yValues[0]).toBe(expected)
+    }
+  })
+
+  test('keeps one-sample envelopes at the exact PCM coordinate', () => {
+    for (const sample of [-1, -0.75, -0.25, 0, 0.25, 0.75, 1]) {
+      const { ctx, rectangles } = createContext()
+      drawWaveformPeaks({
+        ctx,
+        peaks: new Uint8Array([encodePeakByte(sample), encodePeakByte(sample)]),
+        drawCols: 1,
+        padPx: 0,
+        topY: 10,
+        contentH: 80,
+        cssW: 1,
+        cssH: 100,
+        maxHeightFraction: 0.72,
+        drawBoundary: false,
+      })
+      if (sample === 0) {
+        expect(rectangles).toHaveLength(0)
+      } else {
+        expect(rectangles[0]?.y).toBeCloseTo(
+          waveformSampleY({
+            sample: encodePeakByte(sample) / 127.5 - 1,
+            topY: 10,
+            contentH: 80,
+            maxHeightFraction: 0.72,
+          }),
+        )
+        expect(rectangles[0]?.height).toBe(0)
+      }
+    }
   })
 })
 

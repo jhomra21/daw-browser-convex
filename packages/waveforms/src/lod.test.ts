@@ -45,4 +45,14 @@ describe('selectWaveformLod', () => {
     expect(pointsEnd.pointOpacity).toBe(1)
     expect(maximumCachedPeaksPerSecond).toBe(400)
   })
+
+  test('starts the visual line mix before acquisition reaches pcm-line', () => {
+    const values = [1.1, 1.05, 1.01, 1.001, 1, 0.999, 0.99, 0.95, 0.9, 0.8, 0.7, 2 / 3]
+      .map((samplesPerPixel) => waveformVisualMixFor({ samplesPerPixel }).lineOpacity)
+    expect(values[0]).toBeGreaterThan(0)
+    for (let index = 1; index < values.length; index += 1) {
+      expect(values[index]).toBeGreaterThanOrEqual(values[index - 1] ?? 0)
+    }
+    expect(values.at(-1)).toBe(1)
+  })
 })

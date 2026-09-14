@@ -1,8 +1,8 @@
 {
-  "scan_id": "scan-2026-09-14-waveform-visual-fidelity",
+  "scan_id": "scan-2026-09-14-waveform-continuity",
   "scan_date": "2026-09-14T00:00:00Z",
   "scan_type": "working",
-  "commit_range": "8b9e0ea9f3aa0343074f71dd4c43ff02a068444d+working-tree",
+  "commit_range": "c9178532c44790cbb95a1d6c402b359588b65ed8+working-tree",
   "pr_number": 54,
   "threat_model_version": "1.0.0",
   "findings": [],
@@ -22,6 +22,6 @@
       "DoS": 0,
       "ElevationOfPrivilege": 0
     },
-    "files_analyzed": 17
+    "files_analyzed": 7
   }
 }

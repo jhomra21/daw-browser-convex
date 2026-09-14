@@ -3,7 +3,11 @@ import { createEffect, createMemo, createSignal, on, onCleanup, untrack, type Ac
 import { getCachedWaveformSlice, getWaveformSlice } from '@daw-browser/waveforms/select-waveform-window'
 import { arrangementWaveformPcmScheduler } from '@daw-browser/waveforms/arrangement-waveform-pcm'
 import type { WaveformPeakChannelSlice, WaveformPcmResult } from '@daw-browser/waveforms/types'
-import { waveformVisualMixFor, type WaveformVisualMix } from '@daw-browser/waveforms/lod'
+import {
+  lineBlendStartSamplesPerPixel,
+  waveformVisualMixFor,
+  type WaveformVisualMix,
+} from '@daw-browser/waveforms/lod'
 import {
   getAudioClipTimeMap,
 } from '@daw-browser/timeline-core/audio-clip-time-map'
@@ -295,7 +299,10 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         return
       }
       const plan = requestPlan()
-      const target = plan.requests.find((request) => request.lod.mode === 'pcm-envelope')
+      const target = plan.requests.find((request) => (
+        request.lod.mode !== 'pcm-line'
+          && request.lod.samplesPerPixel <= lineBlendStartSamplesPerPixel
+      ))
       if (!target) return
       const tileSpan = Math.ceil(
         (target.sourceEndSec - target.sourceStartSec) * source.sampleRate / 16_384,
@@ -645,9 +652,15 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     for (const segment of plan.segments) {
       const lod = lodByKey.get(segment.requestKey)
       if (!lod) continue
+      const sampleRate = resolvedSource()?.sampleRate
+        ?? current.clip.sourceSampleRate
+        ?? 48_000
+      const sourceDuration = Math.max(0, segment.segment.sourceEndSec - segment.segment.sourceStartSec)
+      const screenWidth = Math.max(1e-9, segment.segment.endPx - segment.segment.startPx)
+      const samplesPerPixel = sourceDuration * sampleRate / screenWidth
       const mix = waveformVisualMixFor({
-        samplesPerPixel: lod.samplesPerPixel,
-        pixelsPerSample: lod.mode === 'pcm-line' ? lod.pixelsPerSample : undefined,
+        samplesPerPixel,
+        pixelsPerSample: 1 / samplesPerPixel,
       })
       const lineEntry = fallbackEntryFor({ segment, mode: 'pcm-line', snapshot: currentSnapshot })
       const envelopeEntry = fallbackEntryFor({ segment, mode: 'pcm-envelope', snapshot: currentSnapshot })
@@ -657,66 +670,34 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       const envelope = envelopeEntry && !isLine(envelopeEntry[1])
         ? projectRetainedEntry({ entry: envelopeEntry, segment, map })
         : undefined
-      if (lod.mode === 'pcm-line') {
-        if (envelope && mix.envelopeOpacity > 0) {
-          projected.push({
-            startPx: envelope.startPx,
-            endPx: envelope.endPx,
-            canvasStartSec: envelope.canvasStartSec,
-            canvasEndSec: envelope.canvasEndSec,
-            sourceStartSec: envelope.sourceStartSec,
-            sourceEndSec: envelope.sourceEndSec,
-            peaks: envelope.data.mode === 'pcm-envelope' ? envelope.data : null,
-            pcm: null,
-            presentation: mix,
-            opacity: mix.envelopeOpacity,
-          })
-        }
-        if (line) {
-          projected.push({
-            startPx: line.startPx,
-            endPx: line.endPx,
-            canvasStartSec: line.canvasStartSec,
-            canvasEndSec: line.canvasEndSec,
-            sourceStartSec: line.sourceStartSec,
-            sourceEndSec: line.sourceEndSec,
-            peaks: null,
-            pcm: line.data.mode === 'pcm-line' ? line.data : null,
-            presentation: mix,
-            opacity: mix.lineOpacity,
-          })
-        }
-        continue
-      }
-      const fallback = envelope ?? (
-        line?.data.mode === 'pcm-line' ? line : undefined
-      )
-      if (!fallback) continue
-      projected.push(fallback.data.mode === 'pcm-envelope'
-        ? {
-          startPx: fallback.startPx,
-          endPx: fallback.endPx,
-          canvasStartSec: fallback.canvasStartSec,
-          canvasEndSec: fallback.canvasEndSec,
-          sourceStartSec: fallback.sourceStartSec,
-          sourceEndSec: fallback.sourceEndSec,
-          peaks: fallback.data,
+      if (envelope?.data.mode === 'pcm-envelope') {
+        projected.push({
+          startPx: envelope.startPx,
+          endPx: envelope.endPx,
+          canvasStartSec: envelope.canvasStartSec,
+          canvasEndSec: envelope.canvasEndSec,
+          sourceStartSec: envelope.sourceStartSec,
+          sourceEndSec: envelope.sourceEndSec,
+          peaks: envelope.data,
           pcm: null,
           presentation: mix,
-          opacity: 1,
-        }
-        : {
-          startPx: fallback.startPx,
-          endPx: fallback.endPx,
-          canvasStartSec: fallback.canvasStartSec,
-          canvasEndSec: fallback.canvasEndSec,
-          sourceStartSec: fallback.sourceStartSec,
-          sourceEndSec: fallback.sourceEndSec,
-          peaks: null,
-          pcm: fallback.data,
-          presentation: mix,
-          opacity: 1,
+          opacity: line ? mix.envelopeOpacity : 1,
         })
+      }
+      if (line?.data.mode === 'pcm-line') {
+        projected.push({
+          startPx: line.startPx,
+          endPx: line.endPx,
+          canvasStartSec: line.canvasStartSec,
+          canvasEndSec: line.canvasEndSec,
+          sourceStartSec: line.sourceStartSec,
+          sourceEndSec: line.sourceEndSec,
+          peaks: null,
+          pcm: line.data,
+          presentation: mix,
+          opacity: line ? (envelope ? mix.lineOpacity : 1) : 0,
+        })
+      }
     }
     return projected
   })

@@ -1,5 +1,9 @@
 export const maximumCachedPeaksPerSecond = 400
 export const samplePointMinimumPixelsPerSample = 5
+export const lineBlendStartSamplesPerPixel = 1.5
+export const lineBlendEndSamplesPerPixel = 2 / 3
+export const pointBlendStartPixelsPerSample = 4
+export const pointBlendEndPixelsPerSample = 6
 
 export type WaveformLod =
   | {
@@ -50,8 +54,14 @@ export const waveformVisualMixFor = (input: {
   const pixelsPerSample = Number.isFinite(input.pixelsPerSample) && (input.pixelsPerSample ?? 0) > 0
     ? input.pixelsPerSample ?? 1 / samplesPerPixel
     : 1 / samplesPerPixel
-  const lineOpacity = smoothstep((1.5 - samplesPerPixel) / (1.5 - 2 / 3))
-  const pointOpacity = smoothstep((pixelsPerSample - 4) / 2)
+  const lineOpacity = smoothstep(
+    (lineBlendStartSamplesPerPixel - samplesPerPixel)
+      / (lineBlendStartSamplesPerPixel - lineBlendEndSamplesPerPixel),
+  )
+  const pointOpacity = smoothstep(
+    (pixelsPerSample - pointBlendStartPixelsPerSample)
+      / (pointBlendEndPixelsPerSample - pointBlendStartPixelsPerSample),
+  )
   return {
     envelopeOpacity: 1 - lineOpacity,
     lineOpacity,

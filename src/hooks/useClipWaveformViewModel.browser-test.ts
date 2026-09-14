@@ -153,7 +153,7 @@ describe('useClipWaveformViewModel browser reactivity', () => {
       }
       const waveform = useClipWaveformViewModel({
         clip: () => ({ ...clip, id: 'clip:revision-refinement', duration: 0.2, sourceDurationSec: 0.2 }),
-        cssWidthPx: () => 1_000,
+        cssWidthPx: () => 6_500,
         projectBpm: () => 120,
         resolveAudioSource: () => resolveAudioSource,
         visibleRange: () => ({ startSec: 0, endSec: 0.2 }),
@@ -167,12 +167,19 @@ describe('useClipWaveformViewModel browser reactivity', () => {
         await ready
         const envelopeRevision = waveform.renderRevision()
         expect(envelopeRevision).toBeGreaterThan(initialRevision)
+        const envelopeSegments = waveform.renderSegments()
+        expect(envelopeSegments.some((segment) => segment.mode === 'peaks')).toBe(true)
         refinementGate.resolve()
         for (let index = 0; index < 10 && waveform.renderRevision() === envelopeRevision; index += 1) {
           await flushEffects()
         }
         expect(waveform.renderRevision()).toBeGreaterThan(envelopeRevision)
         expect(revisions.at(-1)).toBe(waveform.renderRevision())
+        const refinedSegments = waveform.renderSegments()
+        expect(refinedSegments.some((segment) => segment.mode === 'peaks')).toBe(true)
+        expect(refinedSegments.some((segment) => (
+          segment.mode === 'samples' && segment.presentation.lineOpacity > 0
+        ))).toBe(true)
         dispose()
         resolve()
       })().catch((error) => { dispose(); reject(error) })

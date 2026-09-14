@@ -549,6 +549,7 @@ describe('canonical audio clip waveform timing', () => {
             lineTo(x) { xValues.push(x) },
             stroke() {},
             fillRect() {},
+            globalAlpha: 1,
             arc() { points += 1 },
             fill() {},
           },
@@ -557,7 +558,8 @@ describe('canonical audio clip waveform timing', () => {
           contentH: 100,
           cssW: item.endPx - item.startPx,
           xOffsetPx: item.startPx,
-          showPoints: lodCase.name === 'sample points',
+          lineOpacity: 1,
+          pointOpacity: lodCase.name === 'sample points' ? 1 : 0,
           pointRadius: 1,
         })
         const expectedX = screenX({

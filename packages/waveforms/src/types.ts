@@ -74,7 +74,7 @@ export type WaveformDrawOptions = {
   ctx: Pick<
     CanvasRenderingContext2D,
     'fillStyle' | 'strokeStyle' | 'lineWidth' | 'beginPath' | 'moveTo' | 'lineTo' | 'stroke' | 'fillRect'
-  >
+  > & { globalAlpha?: number }
   peaks: Uint8Array
   drawCols: number
   padPx: number
@@ -88,4 +88,5 @@ export type WaveformDrawOptions = {
   amplitudeScaleAtColumn?: (column: number) => number
   xOffsetPx?: number
   drawBoundary?: boolean
+  opacity?: number
 }

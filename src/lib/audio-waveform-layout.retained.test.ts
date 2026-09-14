@@ -3,7 +3,7 @@ import { encodePeakByte } from '@daw-browser/waveforms/extract-peaks'
 import type { WaveformPcmResult } from '@daw-browser/waveforms/types'
 import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import { cropWaveformDataToSourceRange, getAudioWaveformLayout } from './audio-waveform-layout'
-import { createRetainedRasterLayout, projectRetainedWaveformData } from './retained-waveform'
+import { projectRetainedWaveformData } from './retained-waveform'
 import type { Clip } from '@daw-browser/timeline-core/types'
 
 const clip = (input: Partial<Clip<AudioBuffer>> = {}): Clip<AudioBuffer> => ({
@@ -156,58 +156,5 @@ describe('retained waveform provenance', () => {
     expect(projected[1]?.sourceEndSec).toBe(2)
   })
 
-  test('reprojects retained marker coverage across canonical map segments', () => {
-    const currentClip = clip({
-      duration: 4,
-      sourceDurationSec: 2,
-      audioWarp: {
-        enabled: true,
-        mode: 'stretch',
-        sourceBpm: 120,
-        markers: [
-          { id: 'a', sourceBeat: 0, timelineBeat: 0 },
-          { id: 'b', sourceBeat: 1, timelineBeat: 4 },
-          { id: 'c', sourceBeat: 4, timelineBeat: 8 },
-        ],
-      },
-    })
-    const map = getAudioClipTimeMap({
-      clip: currentClip,
-      bufferDurationSec: 2,
-      projectBpm: 120,
-      rangeStartSec: currentClip.startSec,
-      rangeEndSec: currentClip.startSec + currentClip.duration,
-    })
-    if (!map) throw new Error('Expected marker-warp time map')
-    const layout = getAudioWaveformLayout(currentClip, 100, 2, 120)
-    const segment = layout.segments?.[0]
-    if (!segment) throw new Error('Expected a marker-warp segment')
-    const retained = createRetainedRasterLayout({
-      plan: {
-        requests: [],
-        segments: [{ requestKey: 'marker', segment }],
-      },
-      map,
-      pixelsPerSecond: 100,
-      coverageByKey: new Map([['marker', { sourceStartSec: 0, sourceEndSec: 2 }]]),
-      canonicalSegments: (layout.segments ?? []).map((item) => ({
-        sourceStartSec: item.sourceStartSec,
-        sourceEndSec: item.sourceEndSec,
-        canvasStartSec: item.canvasStartSec,
-        canvasEndSec: item.canvasEndSec,
-      })),
-    })
-    expect(retained?.segments).toHaveLength(2)
-    expect(retained?.segments.map((item) => [
-      item.segment.sourceStartSec,
-      item.segment.sourceEndSec,
-      item.segment.canvasStartSec,
-      item.segment.canvasEndSec,
-    ])).toEqual((layout.segments ?? []).map((item) => [
-      item.sourceStartSec,
-      item.sourceEndSec,
-      item.canvasStartSec,
-      item.canvasEndSec,
-    ]))
-  })
+
 })

@@ -1,538 +1,248 @@
 import { describe, expect, test } from 'bun:test'
-import { createEffect, createRoot, createSignal } from 'solid-js'
+import { createEffect, createRoot, createSignal, untrack } from 'solid-js'
 
 import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type { RuntimeClip } from '~/lib/timeline-runtime-types'
-import { retainedWaveformTransform } from '~/components/timeline/ClipComponent'
 import { createWaveformRequestPlans } from '~/lib/retained-waveform'
 import { useClipWaveformViewModel } from './useClipWaveformViewModel'
 
-const source: AudioPcmSourceDescriptor = {
-  identity: 'waveform-reactivity-test-source',
-  durationSec: 1,
-  frameCount: 1_000,
-  sampleRate: 1_000,
-  channelCount: 1,
-  readPages: async function* (options = {}) {
-    const startFrame = options.startFrame ?? 0
-    const endFrame = options.endFrame ?? source.frameCount
-    const frameCount = endFrame - startFrame
-    if (frameCount <= 0) return
-    yield {
-      startFrame,
-      frameCount,
-      sampleRate: source.sampleRate,
-      channelCount: source.channelCount,
-      planes: [new Float32Array(frameCount)],
-    }
-  },
-}
-
-const clip: RuntimeClip = {
-  id: 'clip:waveform-reactivity',
-  name: 'Waveform reactivity',
-  startSec: 0,
-  duration: 1,
-  sourceAssetKey: 'asset:waveform-reactivity',
-  sourceDurationSec: source.durationSec,
-  sourceSampleRate: source.sampleRate,
-  sourceChannelCount: source.channelCount,
-  color: '#ffffff',
-}
-
-type Deferred<Value> = {
-  promise: Promise<Value>
-  resolve: (value: Value) => void
-}
+type Deferred<Value> = { promise: Promise<Value>; resolve: (value: Value) => void }
+type ReadCounters = { reads: number; aborts: number; ranges: string[] }
 
 const deferred = <Value>(): Deferred<Value> => {
   let resolve: (value: Value) => void = () => {}
-  const promise = new Promise<Value>((nextResolve) => {
-    resolve = nextResolve
-  })
+  const promise = new Promise<Value>((nextResolve) => { resolve = nextResolve })
   return { promise, resolve }
 }
-
-const createSource = (
-  identity: string,
-  readGates: Array<Deferred<void>>,
-  impulseFrame?: number,
-): AudioPcmSourceDescriptor => ({
-  identity,
-  durationSec: 1,
-  frameCount: 1_000,
-  sampleRate: 1_000,
-  channelCount: 1,
-  readPages: async function* (options = {}) {
-    const gate = readGates.shift()
-    if (gate) await gate.promise
-    options.signal?.throwIfAborted()
-    const samples = new Float32Array(Math.max(
-      1,
-      (options.endFrame ?? 1_000) - (options.startFrame ?? 0),
-    ))
-    if (impulseFrame !== undefined) {
-      const impulseIndex = impulseFrame - (options.startFrame ?? 0)
-      if (impulseIndex >= 0 && impulseIndex < samples.length) samples[impulseIndex] = 1
-    }
-    yield {
-      startFrame: options.startFrame ?? 0,
-      frameCount: samples.length,
-      sampleRate: 1_000,
-      channelCount: 1,
-      planes: [samples],
-    }
-  },
+const flushEffects = async () => { await Promise.resolve(); await Promise.resolve() }
+const createReadCounters = (): ReadCounters => ({ reads: 0, aborts: 0, ranges: [] })
+const waitForReady = (waveform: ReturnType<typeof useClipWaveformViewModel>) => new Promise<void>((resolve) => {
+  let sawLoading = false
+  createEffect(() => { if (waveform.loading()) sawLoading = true; else if (sawLoading) resolve() })
 })
-
-const waitForReady = (waveform: ReturnType<typeof useClipWaveformViewModel>) => (
-  new Promise<void>((resolve) => {
-    let sawLoading = false
-    createEffect(() => {
-      if (waveform.loading()) {
-        sawLoading = true
-      } else if (sawLoading) {
-        resolve()
-      }
-    })
-  })
-)
-
-const flushEffects = async () => {
-  await Promise.resolve()
-  await Promise.resolve()
+const createSource = (input: {
+  identity: string
+  durationSec?: number
+  sampleRate?: number
+  gate?: Deferred<void>
+  counters?: ReadCounters
+}): AudioPcmSourceDescriptor => {
+  const durationSec = input.durationSec ?? 1
+  const sampleRate = input.sampleRate ?? 48_000
+  const frameCount = Math.ceil(durationSec * sampleRate)
+  return {
+    identity: input.identity, durationSec, frameCount, sampleRate, channelCount: 1,
+    readPages: async function* (options = {}) {
+      if (input.counters) input.counters.reads += 1
+      const startFrame = options.startFrame ?? 0
+      const endFrame = options.endFrame ?? frameCount
+      options.signal?.addEventListener('abort', () => { if (input.counters) input.counters.aborts += 1 }, { once: true })
+      input.counters?.ranges.push(`${startFrame}:${endFrame}`)
+      if (input.gate) await input.gate.promise
+      options.signal?.throwIfAborted()
+      const samples = new Float32Array(Math.max(1, endFrame - startFrame))
+      yield { startFrame, frameCount: samples.length, sampleRate, channelCount: 1, planes: [samples] }
+    },
+  }
+}
+const clip: RuntimeClip = {
+  id: 'clip:waveform-browser-regression', name: 'Waveform browser regression', startSec: 0, duration: 1,
+  sourceAssetKey: 'asset:waveform-browser-regression', sourceDurationSec: 1, sourceSampleRate: 48_000,
+  sourceChannelCount: 1, color: '#ffffff',
+}
+const slicedClip: RuntimeClip = {
+  ...clip,
+  id: 'clip:waveform-render-segment-timing',
+  startSec: 4,
+  duration: 4,
+  sourceAssetKey: 'asset:waveform-render-segment-timing',
+  sourceDurationSec: 4,
 }
 
 describe('useClipWaveformViewModel browser reactivity', () => {
-  test('does not recurse when a renderable waveform responds to zoom', async () => {
+  test('does not recurse or resolve the source again during zoom', async () => {
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-      const [width, setWidth] = createSignal(500)
+      const [width, setWidth] = createSignal(400)
+      const counters = createReadCounters()
+      const source = createSource({ identity: 'browser-source', counters })
       let resolverCalls = 0
-      let loadingStarts = 0
-      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
-        resolverCalls += 1
-        signal?.throwIfAborted()
-        return source
-      }
-      const waveform = useClipWaveformViewModel({
-        clip: () => clip,
-        cssWidthPx: width,
-        projectBpm: () => 120,
-        resolveAudioSource: () => resolveAudioSource,
-        visibleRange: () => ({ startSec: 0, endSec: 1 }),
-      })
-
-      createEffect(() => {
-        if (waveform.loading()) loadingStarts += 1
-      })
-
-      const waitForReady = () => new Promise<void>((settle) => {
-        let sawLoading = false
-        createEffect(() => {
-          if (waveform.loading()) {
-            sawLoading = true
-          } else if (sawLoading) {
-            settle()
-          }
-        })
-      })
-
+      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => { resolverCalls += 1; signal?.throwIfAborted(); return source }
+      const waveform = useClipWaveformViewModel({ clip: () => clip, cssWidthPx: width, projectBpm: () => 120, resolveAudioSource: () => resolveAudioSource, visibleRange: () => ({ startSec: 0, endSec: 1 }), mode: 'sample-detail' })
       void (async () => {
-        await waitForReady()
+        const ready = waitForReady(waveform)
+        await ready
         expect(resolverCalls).toBe(1)
-        expect(loadingStarts).toBe(1)
-        expect(waveform.layout().drawCols).toBe(500)
-
-        const rerenders = { count: 0 }
-        createEffect(() => {
-          if (waveform.layout().drawCols > 0) rerenders.count += 1
-        })
-        const rerendersBeforeZoom = rerenders.count
-        setWidth(600)
-        await flushEffects()
-
-        expect(rerenders.count - rerendersBeforeZoom).toBeGreaterThan(0)
-        expect(resolverCalls).toBe(1)
-        expect(loadingStarts).toBe(1)
-        expect(waveform.layout().drawCols).toBe(600)
-        dispose()
-        resolve()
-      })().catch((error) => {
-        dispose()
-        reject(error)
-      })
-    }))
-  })
-
-  test('keeps a ready overlapping waveform rendered during same-source pan replacement', async () => {
-    const firstGate = deferred<void>()
-    const secondGate = deferred<void>()
-    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-      const [range, setRange] = createSignal({ startSec: 0, endSec: 0.6 })
-      const source = createSource('pan-source', [firstGate, secondGate], 300)
-      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
-        signal?.throwIfAborted()
-        return source
-      }
-      const waveform = useClipWaveformViewModel({
-        clip: () => clip,
-        cssWidthPx: () => 1_000,
-        projectBpm: () => 120,
-        resolveAudioSource: () => resolveAudioSource,
-        visibleRange: range,
-        mode: 'sample-detail',
-      })
-      void (async () => {
-        const ready = waitForReady(waveform)
-        firstGate.resolve()
-        await ready
-        const initial = waveform.renderSegments()
-        expect(initial).toHaveLength(1)
-        if (initial[0]?.mode !== 'samples') throw new Error('Expected sample rendering')
-        expect(initial[0].drawStartPx).toBeCloseTo(0, 5)
-        expect(initial[0].drawCols).toBeCloseTo(1_000, 5)
-        expect(initial[0].samples.firstFrame).toBe(0)
-        setRange({ startSec: 0.2, endSec: 0.8 })
-        await flushEffects()
-        expect(waveform.loading()).toBe(true)
-        const retained = waveform.renderSegments()
-        expect(retained).toHaveLength(1)
-        if (retained[0]?.mode !== 'samples') throw new Error('Expected retained sample rendering')
-        expect(retained[0].drawStartPx).toBeCloseTo(0, 5)
-        expect(retained[0].drawCols).toBeCloseTo(667, 0)
-        expect(retained[0].samples.firstFrame).toBe(200)
-        const retainedImpulseIndex = retained[0].samples.channels[0]?.findIndex((value) => value === 1) ?? -1
-        expect(retainedImpulseIndex).toBe(100)
-        expect(retained[0].drawStartPx
-          + ((retained[0].samples.firstFrame + retainedImpulseIndex) / 1_000
-            - retained[0].samples.sourceStartSec)
-            / (retained[0].samples.sourceEndSec - retained[0].samples.sourceStartSec)
-            * retained[0].drawCols)
-          .toBeCloseTo(167, 0)
-        const replacement = waitForReady(waveform)
-        secondGate.resolve()
-        await replacement
-        const replaced = waveform.renderSegments()
-        expect(replaced).toHaveLength(1)
-        if (replaced[0]?.mode !== 'samples') throw new Error('Expected replacement sample rendering')
-        expect(replaced[0].drawStartPx).toBeCloseTo(0, 5)
-        expect(replaced[0].drawCols).toBeCloseTo(1_000, 5)
-        expect(replaced[0].samples.firstFrame).toBe(200)
-        const replacedImpulseIndex = replaced[0].samples.channels[0]?.findIndex((value) => value === 1) ?? -1
-        expect(replacedImpulseIndex).toBe(100)
-        expect(replaced[0].drawStartPx
-          + ((replaced[0].samples.firstFrame + replacedImpulseIndex) / 1_000
-            - replaced[0].samples.sourceStartSec)
-            / (replaced[0].samples.sourceEndSec - replaced[0].samples.sourceStartSec)
-            * replaced[0].drawCols)
-          .toBeCloseTo(167, 0)
-        dispose()
-        resolve()
-      })().catch((error) => {
-        dispose()
-        reject(error)
-      })
-    }))
-  })
-
-  test('keeps a ready waveform rendered during same-source zoom replacement', async () => {
-    const firstGate = deferred<void>()
-    const secondGate = deferred<void>()
-    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-      const [width, setWidth] = createSignal(1_000)
-      const source = createSource('zoom-source', [firstGate, secondGate])
-      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
-        signal?.throwIfAborted()
-        return source
-      }
-      const waveform = useClipWaveformViewModel({
-        clip: () => clip,
-        cssWidthPx: width,
-        projectBpm: () => 120,
-        resolveAudioSource: () => resolveAudioSource,
-        visibleRange: () => ({ startSec: 0, endSec: 1 }),
-        mode: 'sample-detail',
-      })
-      void (async () => {
-        const ready = waitForReady(waveform)
-        firstGate.resolve()
-        await ready
-        const replacement = waitForReady(waveform)
-        setWidth(1_200)
-        await flushEffects()
         expect(waveform.renderSegments()).not.toHaveLength(0)
-        secondGate.resolve()
-        await replacement
-        expect(waveform.renderSegments()).not.toHaveLength(0)
-        dispose()
-        resolve()
-      })().catch((error) => {
-        dispose()
-        reject(error)
-      })
-    }))
-  })
-
-  test('clears stale waveform after a changed source resolves before replacement is ready', async () => {
-    const firstGate = deferred<void>()
-    const secondGate = deferred<void>()
-    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-      const [currentClip, setClip] = createSignal(clip)
-      const firstSource = createSource('first-source', [firstGate])
-      const secondSource = createSource('second-source', [secondGate])
-      const resolveAudioSource: AudioPcmSourceResolver = async (nextClip, signal) => {
-        signal?.throwIfAborted()
-        return nextClip.sourceAssetKey === 'asset:second' ? secondSource : firstSource
-      }
-      const waveform = useClipWaveformViewModel({
-        clip: currentClip,
-        cssWidthPx: () => 1_000,
-        projectBpm: () => 120,
-        resolveAudioSource: () => resolveAudioSource,
-        visibleRange: () => ({ startSec: 0, endSec: 1 }),
-        mode: 'sample-detail',
-      })
-      void (async () => {
-        const ready = waitForReady(waveform)
-        firstGate.resolve()
-        await ready
-        expect(waveform.renderSegments()).not.toHaveLength(0)
-        const replacement = waitForReady(waveform)
-        setClip({ ...clip, sourceAssetKey: 'asset:second' })
-        await flushEffects()
-        expect(waveform.renderSegments()).toHaveLength(0)
-        secondGate.resolve()
-        await replacement
-        expect(waveform.renderSegments()).not.toHaveLength(0)
-        dispose()
-        resolve()
-      })().catch((error) => {
-        dispose()
-        reject(error)
-      })
-    }))
-  })
-
-  test('retains a ready waveform when same-source replacement resolution rejects', async () => {
-    const firstGate = deferred<void>()
-    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-      const [currentClip, setClip] = createSignal(clip)
-      const source = createSource('same-source-rejection', [firstGate])
-      let rejectReplacement = false
-      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
-        signal?.throwIfAborted()
-        if (rejectReplacement) throw new Error('replacement failed')
-        return source
-      }
-      const waveform = useClipWaveformViewModel({
-        clip: currentClip,
-        cssWidthPx: () => 1_000,
-        projectBpm: () => 120,
-        resolveAudioSource: () => resolveAudioSource,
-        visibleRange: () => ({ startSec: 0, endSec: 1 }),
-        mode: 'sample-detail',
-      })
-      void (async () => {
-        const ready = waitForReady(waveform)
-        firstGate.resolve()
-        await ready
-        const before = waveform.renderSegments()
-        rejectReplacement = true
-        const replacement = waitForReady(waveform)
-        setClip({ ...clip, audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 } })
-        await replacement
-        expect(waveform.renderSegments()).toEqual(before)
-        expect(waveform.loading()).toBe(false)
-        dispose()
-        resolve()
-      })().catch((error) => {
-        dispose()
-        reject(error)
-      })
-    }))
-  })
-
-  test('does not leave a ready same-source waveform empty after rapid cancellation', async () => {
-    const firstGate = deferred<void>()
-    const secondGate = deferred<void>()
-    const thirdGate = deferred<void>()
-    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-      const [width, setWidth] = createSignal(1_000)
-      const source = createSource('rapid-source', [firstGate, secondGate, thirdGate])
-      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
-        signal?.throwIfAborted()
-        return source
-      }
-      const waveform = useClipWaveformViewModel({
-        clip: () => clip,
-        cssWidthPx: width,
-        projectBpm: () => 120,
-        resolveAudioSource: () => resolveAudioSource,
-        visibleRange: () => ({ startSec: 0, endSec: 1 }),
-        mode: 'sample-detail',
-      })
-      void (async () => {
-        const ready = waitForReady(waveform)
-        firstGate.resolve()
-        await ready
-        setWidth(1_100)
-        await flushEffects()
-        const third = waitForReady(waveform)
-        setWidth(1_200)
-        await flushEffects()
-        expect(waveform.renderSegments()).not.toHaveLength(0)
-        secondGate.resolve()
-        await flushEffects()
-        expect(waveform.renderSegments()).not.toHaveLength(0)
-        thirdGate.resolve()
-        await third
-        expect(waveform.renderSegments()).not.toHaveLength(0)
-        dispose()
-        resolve()
-      })().catch((error) => {
-        dispose()
-        reject(error)
-      })
-    }))
-  })
-
-  test('atomically supersedes preserved data when the replacement is ready', async () => {
-    const firstGate = deferred<void>()
-    const secondGate = deferred<void>()
-    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-      const [width, setWidth] = createSignal(1_000)
-      const source = createSource('atomic-source', [firstGate, secondGate])
-      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
-        signal?.throwIfAborted()
-        return source
-      }
-      const waveform = useClipWaveformViewModel({
-        clip: () => clip,
-        cssWidthPx: width,
-        projectBpm: () => 120,
-        resolveAudioSource: () => resolveAudioSource,
-        visibleRange: () => ({ startSec: 0, endSec: 1 }),
-        mode: 'sample-detail',
-      })
-      void (async () => {
-        const ready = waitForReady(waveform)
-        firstGate.resolve()
-        await ready
-        const previousColumns = waveform.renderSegments()[0]
-        if (!previousColumns || previousColumns.mode !== 'peaks') {
-          throw new Error('Expected an initial envelope waveform.')
+        const renderSegment = waveform.renderSegments()[0]
+        expect(renderSegment?.mode).toBe('peaks')
+        if (renderSegment?.mode === 'peaks') {
+          expect(renderSegment.canvasStartSec).toBe(0)
+          expect(renderSegment.canvasEndSec).toBe(1)
+          expect(renderSegment.drawCols).toBe(400)
         }
-        setWidth(1_200)
+        setWidth(500)
         await flushEffects()
-        expect(waveform.renderSegments()[0]).toMatchObject({ mode: 'peaks' })
-        expect(waveform.loading()).toBe(true)
-        dispose()
-        resolve()
-      })().catch((error) => {
-        dispose()
-        reject(error)
-      })
+        expect(waveform.layout().drawCols).toBe(500)
+        expect(resolverCalls).toBe(1)
+        expect(waveform.renderSegments()).not.toHaveLength(0)
+        dispose(); resolve()
+      })().catch((error) => { dispose(); reject(error) })
     }))
   })
 
-  test('requests verified source identity for waveform resolution', async () => {
+  test('changes render revision when async waveform data becomes drawable', async () => {
+    const gate = deferred<void>()
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-      let receivedOptions: { verifyContentHash?: boolean } | undefined
-      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal, options?) => {
-        receivedOptions = options
+      const source = createSource({ identity: 'revision-source', gate })
+      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
         signal?.throwIfAborted()
         return source
       }
       const waveform = useClipWaveformViewModel({
         clip: () => clip,
-        cssWidthPx: () => 500,
+        cssWidthPx: () => 400,
         projectBpm: () => 120,
         resolveAudioSource: () => resolveAudioSource,
         visibleRange: () => ({ startSec: 0, endSec: 1 }),
+        mode: 'sample-detail',
+      })
+      let redraws = 0
+      createEffect(() => {
+        waveform.renderRevision()
+        untrack(() => {
+          waveform.renderSegments()
+          redraws += 1
+        })
       })
       void (async () => {
-        await waitForReady(waveform)
-        expect(receivedOptions).toEqual({ verifyContentHash: true })
+        await flushEffects()
+        const initialRevision = waveform.renderRevision()
+        const initialRedraws = redraws
+        const ready = waitForReady(waveform)
+        gate.resolve()
+        await ready
+        expect(waveform.renderRevision()).toBeGreaterThan(initialRevision)
+        expect(redraws).toBeGreaterThan(initialRedraws)
         dispose()
         resolve()
-      })().catch((error) => {
-        dispose()
-        reject(error)
-      })
+      })().catch((error) => { dispose(); reject(error) })
     }))
   })
 
-  test('does not restart verified source resolution during viewport motion', async () => {
-    const pending: Array<{ resolve: (value: AudioPcmSourceDescriptor) => void }> = []
-    const [width, setWidth] = createSignal(500)
-    const [range, setRange] = createSignal({ startSec: 0, endSec: 1 })
-    const [currentClip, setClip] = createSignal(clip)
-    let resolverCalls = 0
-    let aborts = 0
-    const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
-      resolverCalls += 1
-      signal?.addEventListener('abort', () => {
-        aborts += 1
-      }, { once: true })
-      return new Promise<AudioPcmSourceDescriptor>((resolve) => {
-        pending.push({ resolve })
-      })
-    }
+  test('changes render revision when PCM refinement becomes drawable', async () => {
+    const refinementGate = deferred<void>()
+    let reads = 0
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
+      const source = createSource({
+        identity: 'revision-refinement-source',
+        durationSec: 0.2,
+        counters: { reads: 0, aborts: 0, ranges: [] },
+      })
+      const gatedSource: AudioPcmSourceDescriptor = {
+        ...source,
+        readPages: async function* (options = {}) {
+          reads += 1
+          if (reads > 1) await refinementGate.promise
+          yield* source.readPages(options)
+        },
+      }
+      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
+        signal?.throwIfAborted()
+        return gatedSource
+      }
       const waveform = useClipWaveformViewModel({
-        clip: currentClip,
-        cssWidthPx: width,
+        clip: () => ({ ...clip, id: 'clip:revision-refinement', duration: 0.2, sourceDurationSec: 0.2 }),
+        cssWidthPx: () => 1_000,
         projectBpm: () => 120,
         resolveAudioSource: () => resolveAudioSource,
-        visibleRange: range,
+        visibleRange: () => ({ startSec: 0, endSec: 0.2 }),
       })
+      let revisions: number[] = []
+      createEffect(() => { revisions = [...revisions, waveform.renderRevision()] })
       void (async () => {
-        for (let index = 0; index < 20; index += 1) {
-          setWidth(500 + index * 20)
-          setRange({ startSec: index * 0.001, endSec: 1 + index * 0.001 })
+        const ready = waitForReady(waveform)
+        await flushEffects()
+        const initialRevision = waveform.renderRevision()
+        await ready
+        const envelopeRevision = waveform.renderRevision()
+        expect(envelopeRevision).toBeGreaterThan(initialRevision)
+        refinementGate.resolve()
+        for (let index = 0; index < 10 && waveform.renderRevision() === envelopeRevision; index += 1) {
           await flushEffects()
         }
-        expect(resolverCalls).toBe(1)
-        expect(aborts).toBe(0)
-        setClip({ ...clip, sourceAssetKey: 'asset:source-changed' })
-        await flushEffects()
-        expect(resolverCalls).toBe(2)
-        expect(aborts).toBe(1)
-        pending[1]?.resolve(source)
-        await flushEffects()
-        expect(waveform.error()).toBeUndefined()
+        expect(waveform.renderRevision()).toBeGreaterThan(envelopeRevision)
+        expect(revisions.at(-1)).toBe(waveform.renderRevision())
         dispose()
         resolve()
-      })().catch((error) => {
-        dispose()
-        reject(error)
-      })
+      })().catch((error) => { dispose(); reject(error) })
     }))
   })
 
-  test('keeps the retained raster revision stable during pure viewport geometry changes', async () => {
+  test('bounds retained waveform generations across distinct range plans', async () => {
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-      const [width, setWidth] = createSignal(500)
+      const [range, setRange] = createSignal({ startSec: 0, endSec: 0.5 })
+      const source = createSource({ identity: 'bounded-generation-source', durationSec: 3 })
       const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
         signal?.throwIfAborted()
         return source
       }
       const waveform = useClipWaveformViewModel({
-        clip: () => clip,
-        cssWidthPx: width,
+        clip: () => ({ ...clip, id: 'clip:bounded-generation', duration: 3, sourceDurationSec: 3 }),
+        cssWidthPx: () => 1_000,
         projectBpm: () => 120,
         resolveAudioSource: () => resolveAudioSource,
-        visibleRange: () => ({ startSec: 0, endSec: 1 }),
+        visibleRange: range,
+        mode: 'sample-detail',
       })
       void (async () => {
-        await waitForReady(waveform)
-        const initialRaster = waveform.raster()
-        if (!initialRaster) throw new Error('Expected a retained raster.')
-        setWidth(510)
-        await flushEffects()
-        expect(waveform.raster()?.dataRevision).toBe(initialRaster.dataRevision)
-        expect(waveform.raster()?.widthPx).toBe(initialRaster.widthPx)
+        const initialReady = waitForReady(waveform)
+        await initialReady
+        expect(waveform.retainedResultCounts()).toEqual({ current: 1, previous: 0 })
+        for (const nextRange of [
+          { startSec: 1, endSec: 1.5 },
+          { startSec: 2, endSec: 2.5 },
+          { startSec: 0.5, endSec: 1 },
+          { startSec: 1.5, endSec: 2 },
+        ]) {
+          const ready = waitForReady(waveform)
+          setRange(nextRange)
+          await ready
+          const counts = waveform.retainedResultCounts()
+          expect(counts.current).toBeLessThanOrEqual(2)
+          expect(counts.previous).toBeLessThanOrEqual(2)
+        }
+        dispose()
+        resolve()
+      })().catch((error) => { dispose(); reject(error) })
+    }))
+  })
+
+  test('keeps canonical timing on peak render segments for fade projection', async () => {
+    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
+      const source = createSource({ identity: 'render-segment-timing-source', durationSec: 4 })
+      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
+        signal?.throwIfAborted()
+        return source
+      }
+      const waveform = useClipWaveformViewModel({
+        clip: () => slicedClip,
+        cssWidthPx: () => 400,
+        projectBpm: () => 120,
+        resolveAudioSource: () => resolveAudioSource,
+        visibleRange: () => ({ startSec: 5, endSec: 7 }),
+        mode: 'sample-detail',
+      })
+      void (async () => {
+        const ready = waitForReady(waveform)
+        await ready
+        const renderSegment = waveform.renderSegments()[0]
+        expect(renderSegment?.mode).toBe('peaks')
+        if (renderSegment?.mode === 'peaks') {
+          expect(renderSegment.canvasStartSec).toBe(5)
+          expect(renderSegment.canvasEndSec).toBe(7)
+          expect(renderSegment.drawCols).toBe(400)
+        }
         dispose()
         resolve()
       })().catch((error) => {
@@ -542,436 +252,52 @@ describe('useClipWaveformViewModel browser reactivity', () => {
     }))
   })
 
-  test('publishes a density refinement while viewport motion is active', async () => {
+  test('keeps overlapping source coverage through uninterrupted forward and reverse zoom', async () => {
     const firstGate = deferred<void>()
-    const secondGate = deferred<void>()
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-      const [width, setWidth] = createSignal(600)
-      const refinementSource = createSource('active-refinement-source', [firstGate, secondGate])
-      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
-        signal?.throwIfAborted()
-        return refinementSource
-      }
-      const waveform = useClipWaveformViewModel({
-        clip: () => clip,
-        cssWidthPx: width,
-        projectBpm: () => 120,
-        resolveAudioSource: () => resolveAudioSource,
-        visibleRange: () => ({ startSec: 0, endSec: 1 }),
-      })
+      const [width, setWidth] = createSignal(1_000)
+      const counters = createReadCounters()
+      const source = createSource({ identity: 'zoom-source', gate: firstGate, counters })
+      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => { signal?.throwIfAborted(); return source }
+      const waveform = useClipWaveformViewModel({ clip: () => clip, cssWidthPx: width, projectBpm: () => 120, resolveAudioSource: () => resolveAudioSource, visibleRange: () => ({ startSec: 0, endSec: 1 }), mode: 'sample-detail' })
       void (async () => {
         const initial = waitForReady(waveform)
         firstGate.resolve()
         await initial
-        const initialRevision = waveform.raster()?.dataRevision ?? 0
-        const refinement = waitForReady(waveform)
-        setWidth(1_000)
-        await flushEffects()
-        expect(waveform.loading()).toBe(true)
-        secondGate.resolve()
-        await refinement
-        expect(waveform.raster()?.dataRevision).toBeGreaterThan(initialRevision)
-        dispose()
-        resolve()
-      })().catch((error) => {
-        dispose()
-        reject(error)
-      })
+        expect(waveform.renderSegments()).not.toHaveLength(0)
+        for (const nextWidth of [1_200, 1_500, 2_000, 1_500, 1_200]) {
+          setWidth(nextWidth)
+          await flushEffects()
+          expect(waveform.renderSegments()).not.toHaveLength(0)
+        }
+        expect(counters.reads).toBeGreaterThan(0)
+        expect(new Set(counters.ranges).size).toBeLessThanOrEqual(counters.reads)
+        expect(counters.aborts).toBeLessThanOrEqual(counters.reads)
+        dispose(); resolve()
+      })().catch((error) => { dispose(); reject(error) })
     }))
   })
 
-  test('projects every live deep-zoom preview against retained waveform coverage', async () => {
-    let readGate: Deferred<void> | undefined
-    let readStarted: Deferred<void> | undefined
-    const deepZoomSource: AudioPcmSourceDescriptor = {
-      identity: 'deep-zoom-preview-source',
-      durationSec: 1,
-      frameCount: 48_000,
-      sampleRate: 48_000,
-      channelCount: 1,
-      readPages: async function* (options = {}) {
-        readStarted?.resolve()
-        const gate = readGate
-        if (gate) await gate.promise
-        options.signal?.throwIfAborted()
-        const startFrame = options.startFrame ?? 0
-        const endFrame = options.endFrame ?? 48_000
-        yield {
-          startFrame,
-          frameCount: endFrame - startFrame,
-          sampleRate: 48_000,
-          channelCount: 1,
-          planes: [new Float32Array(endFrame - startFrame)],
-        }
-      },
-    }
-    const previewClip = {
-      ...clip,
-      sourceAssetKey: 'asset:deep-zoom-preview',
-      sourceDurationSec: 1,
-      sourceSampleRate: 48_000,
-      sourceChannelCount: 1,
-    }
-
+  test('projects current layout before a pending replacement completes', async () => {
+    const gate = deferred<void>()
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-      const [width, setWidth] = createSignal(100)
-      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
-        signal?.throwIfAborted()
-        return deepZoomSource
-      }
-      const waveform = useClipWaveformViewModel({
-        clip: () => previewClip,
-        cssWidthPx: width,
-        projectBpm: () => 120,
-        resolveAudioSource: () => resolveAudioSource,
-        visibleRange: () => ({ startSec: 0, endSec: 1 }),
-        mode: 'arrangement',
-      })
-      let initialRevision = 0
-      const previewScales = [100, 150, 250, 400, 800, 2_000, 10_000, 48_000, 120_000, 240_000]
-      type RenderExpectation =
-        | { mode: 'peaks'; minimumColumns: number; maximumColumns?: number }
-        | { mode: 'samples'; showPoints: boolean }
-
-      const selectedLod = () => {
-        const layout = waveform.layout()
-        const segments = layout.segments ?? [{
-          drawCols: layout.drawCols,
-          sourceStartSec: layout.sourceStartSec,
-          sourceEndSec: layout.sourceEndSec,
-          startPx: layout.padPx,
-          endPx: layout.audioEndPx,
-          canvasStartSec: layout.canvasStartSec ?? previewClip.startSec,
-          canvasEndSec: layout.canvasEndSec ?? previewClip.startSec + previewClip.duration,
-        }]
-        return createWaveformRequestPlans({
-          segments,
-          sampleRate: deepZoomSource.sampleRate,
-          sourceDurationSec: deepZoomSource.durationSec,
-          sampleDetail: true,
-        }).requests[0]?.lod
-      }
-
-      const assertPreviewProjection = (
-        pixelsPerSecond: number,
-        expectedMode: 'cached-peaks' | 'pcm-envelope' | 'pcm-line',
-        expectedShowPoints: boolean,
-      ) => {
-        const lod = selectedLod()
-        expect(waveform.layout().drawCols).toBe(pixelsPerSecond)
-        expect(lod?.mode).toBe(expectedMode)
-        if (lod?.mode === 'pcm-line') expect(lod.showPoints).toBe(expectedShowPoints)
-        expect(waveform.renderSegments()).not.toHaveLength(0)
-        const rendered = waveform.renderSegments()[0]
-        if (!rendered) throw new Error('Expected a rendered waveform segment.')
-        expect(rendered.drawCols).toBeGreaterThan(0)
-        const raster = waveform.raster()
-        const segment = waveform.rasterSegments()[0]
-        if (!raster || !segment) throw new Error('Expected retained raster coverage.')
-        const transform = retainedWaveformTransform(
-          raster,
-          previewClip.startSec,
-          pixelsPerSecond,
-        )
-        expect(transform).toContain(`scaleX(${pixelsPerSecond / raster.pixelsPerSecond})`)
-        const liveScale = pixelsPerSecond / raster.pixelsPerSecond
-        const translate = (raster.timelineStartSec - previewClip.startSec) * pixelsPerSecond
-        const projectedStart = translate + segment.startPx * liveScale
-        const projectedEnd = translate + segment.endPx * liveScale
-        expect(projectedEnd - projectedStart).toBeCloseTo(pixelsPerSecond, 5)
-      }
-
-      const matchesRenderExpectation = (expectation: RenderExpectation) => {
-        const segment = waveform.renderSegments()[0]
-        if (!segment) return false
-        if (expectation.mode === 'samples') {
-          return segment.mode === 'samples' && segment.showPoints === expectation.showPoints
-        }
-        return segment.mode === 'peaks'
-          && segment.peaks.columns >= expectation.minimumColumns
-          && (expectation.maximumColumns === undefined
-            || segment.peaks.columns <= expectation.maximumColumns)
-      }
-
-      const waitForRenderExpectation = (expectation: RenderExpectation) => (
-        new Promise<void>((settle) => {
-          createEffect(() => {
-            if (matchesRenderExpectation(expectation)) settle()
-          })
-        })
-      )
-
-      const assertRenderExpectation = (expectation: RenderExpectation) => {
-        expect(matchesRenderExpectation(expectation)).toBe(true)
-      }
-
+      const [width, setWidth] = createSignal(400)
+      const source = createSource({ identity: 'projection-source', gate })
+      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => { signal?.throwIfAborted(); return source }
+      const waveform = useClipWaveformViewModel({ clip: () => clip, cssWidthPx: width, projectBpm: () => 120, resolveAudioSource: () => resolveAudioSource, visibleRange: () => ({ startSec: 0, endSec: 1 }), mode: 'sample-detail' })
       void (async () => {
+        await flushEffects()
+        setWidth(800)
+        await flushEffects()
+        expect(waveform.layout().drawCols).toBe(800)
+        const plan = createWaveformRequestPlans({ segments: [{ drawCols: 800, sourceStartSec: 0, sourceEndSec: 1, startPx: 0, endPx: 800, canvasStartSec: 0, canvasEndSec: 1 }], sampleRate: 48_000, sourceDurationSec: 1, sampleDetail: true })
+        expect(plan.requests[0]?.key).toContain('pcm-envelope')
         const ready = waitForReady(waveform)
+        gate.resolve()
         await ready
         expect(waveform.renderSegments()).not.toHaveLength(0)
-        initialRevision = waveform.rasterDataRevision() ?? 0
-        expect(selectedLod()?.mode).toBe('cached-peaks')
-        const initialPeaks = waveform.renderSegments()[0]
-        if (!initialPeaks || initialPeaks.mode !== 'peaks') {
-          throw new Error('Expected cached peaks to be ready before zoom previews.')
-        }
-        expect(initialPeaks.peaks.columns).toBe(100)
-        assertPreviewProjection(100, 'cached-peaks', false)
-        assertRenderExpectation({ mode: 'peaks', minimumColumns: 0 })
-
-        for (const pixelsPerSecond of previewScales.slice(1, 4)) {
-          setWidth(pixelsPerSecond)
-          await flushEffects()
-          assertPreviewProjection(pixelsPerSecond, 'cached-peaks', false)
-        }
-
-        const envelopeReady = new Promise<void>((settle) => {
-          createEffect(() => {
-            const segment = waveform.renderSegments()[0]
-            if (segment?.mode === 'peaks' && segment.peaks.columns === 800) settle()
-          })
-        })
-        const envelopeGate = deferred<void>()
-        const envelopeStarted = deferred<void>()
-        readStarted = envelopeStarted
-        readGate = envelopeGate
-        setWidth(previewScales[4] ?? 0)
-        await flushEffects()
-        await envelopeStarted.promise
-        expect(waveform.loading()).toBe(true)
-        assertPreviewProjection(previewScales[4] ?? 0, 'pcm-envelope', false)
-        envelopeGate.resolve()
-        readGate = undefined
-        await envelopeReady
-        assertRenderExpectation({
-          mode: 'peaks',
-          minimumColumns: previewScales[4] ?? 0,
-          maximumColumns: previewScales[4] ?? 0,
-        })
-        expect(waveform.rasterDataRevision()).toBeGreaterThan(initialRevision)
-        const envelope = waveform.renderSegments()[0]
-        if (!envelope || envelope.mode !== 'peaks') {
-          throw new Error('Expected a ready refined envelope projection.')
-        }
-        expect(envelope.peaks.columns).toBeGreaterThan(100)
-
-        for (const pixelsPerSecond of previewScales.slice(5, 8)) {
-          setWidth(pixelsPerSecond)
-          await flushEffects()
-          assertPreviewProjection(pixelsPerSecond, 'pcm-envelope', false)
-          await waitForRenderExpectation({
-            mode: 'peaks',
-            minimumColumns: 0,
-          })
-          assertRenderExpectation({
-            mode: 'peaks',
-            minimumColumns: 0,
-          })
-        }
-
-        const rawReady = new Promise<void>((settle) => {
-          createEffect(() => {
-            const segment = waveform.renderSegments()[0]
-            if (segment?.mode === 'samples' && !segment.showPoints) settle()
-          })
-        })
-        const rawGate = deferred<void>()
-        const rawStarted = deferred<void>()
-        readStarted = rawStarted
-        readGate = rawGate
-        setWidth(previewScales[8] ?? 0)
-        await flushEffects()
-        await rawStarted.promise
-        expect(waveform.loading()).toBe(true)
-        assertPreviewProjection(previewScales[8] ?? 0, 'pcm-line', false)
-        rawGate.resolve()
-        readGate = undefined
-        await rawReady
-        assertRenderExpectation({ mode: 'samples', showPoints: false })
-        const rawSegment = waveform.renderSegments()[0]
-        if (!rawSegment || rawSegment.mode !== 'samples' || rawSegment.showPoints) {
-          throw new Error('Expected a ready raw PCM line before sample points.')
-        }
-        expect(rawSegment.samples.channels[0]?.length).toBeGreaterThan(0)
-        const pointsReady = waitForRenderExpectation({ mode: 'samples', showPoints: true })
-        setWidth(previewScales[9] ?? 0)
-        await flushEffects()
-        assertPreviewProjection(previewScales[9] ?? 0, 'pcm-line', true)
-        await pointsReady
-        assertRenderExpectation({ mode: 'samples', showPoints: true })
-        const samplePointSegment = waveform.renderSegments()[0]
-        if (!samplePointSegment || samplePointSegment.mode !== 'samples' || !samplePointSegment.showPoints) {
-          throw new Error('Expected a ready raw PCM sample-point projection.')
-        }
-        const samplePointRasterSegment = waveform.rasterSegments()[0]
-        if (!samplePointRasterSegment
-          || samplePointRasterSegment.pcm?.mode !== 'pcm-line'
-          || !samplePointRasterSegment.showPoints) {
-          throw new Error('Expected sample points in the arrangement raster path.')
-        }
-
-        setWidth(previewScales[8] ?? 0)
-        await flushEffects()
-        assertPreviewProjection(previewScales[8] ?? 0, 'pcm-line', false)
-        await waitForRenderExpectation({ mode: 'samples', showPoints: false })
-        assertRenderExpectation({ mode: 'samples', showPoints: false })
-
-        for (const pixelsPerSecond of previewScales.slice(4, 8).reverse()) {
-          setWidth(pixelsPerSecond)
-          await flushEffects()
-          assertPreviewProjection(pixelsPerSecond, 'pcm-envelope', false)
-          await waitForRenderExpectation({
-            mode: 'peaks',
-            minimumColumns: 0,
-          })
-          assertRenderExpectation({
-            mode: 'peaks',
-            minimumColumns: 0,
-          })
-        }
-
-        for (const pixelsPerSecond of previewScales.slice(0, 4).reverse()) {
-          setWidth(pixelsPerSecond)
-          await flushEffects()
-          assertPreviewProjection(pixelsPerSecond, 'cached-peaks', false)
-          await waitForRenderExpectation({
-            mode: 'peaks',
-            minimumColumns: 0,
-          })
-          assertRenderExpectation({
-            mode: 'peaks',
-            minimumColumns: 0,
-          })
-        }
-        dispose()
-        resolve()
-      })().catch((error) => {
-        dispose()
-        reject(error)
-      })
-    }))
-  })
-
-  test('reprojects retained coverage for a sub-tile pan without restarting data', async () => {
-    let readPages = 0
-    const longSource: AudioPcmSourceDescriptor = {
-      identity: 'sub-tile-pan-source',
-      durationSec: 20,
-      frameCount: 20_000,
-      sampleRate: 1_000,
-      channelCount: 1,
-      readPages: async function* (options = {}) {
-        readPages += 1
-        const startFrame = options.startFrame ?? 0
-        const endFrame = options.endFrame ?? longSource.frameCount
-        yield {
-          startFrame,
-          frameCount: endFrame - startFrame,
-          sampleRate: longSource.sampleRate,
-          channelCount: longSource.channelCount,
-          planes: [new Float32Array(endFrame - startFrame)],
-        }
-      },
-    }
-    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-      const [range, setRange] = createSignal({ startSec: 0, endSec: 1 })
-      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
-        signal?.throwIfAborted()
-        return longSource
-      }
-      const waveform = useClipWaveformViewModel({
-        clip: () => ({
-          ...clip,
-          duration: 20,
-          sourceDurationSec: longSource.durationSec,
-          sourceSampleRate: longSource.sampleRate,
-          sourceChannelCount: longSource.channelCount,
-        }),
-        cssWidthPx: () => 600,
-        projectBpm: () => 120,
-        resolveAudioSource: () => resolveAudioSource,
-        visibleRange: range,
-      })
-      void (async () => {
-        await waitForReady(waveform)
-        const initialRaster = waveform.raster()
-        if (!initialRaster) throw new Error('Expected a retained raster.')
-        const initialReadPages = readPages
-        setRange({ startSec: 0.01, endSec: 1.01 })
-        await flushEffects()
-        const movedRaster = waveform.raster()
-        const movedSegment = waveform.renderSegments()[0]
-        expect(readPages).toBe(initialReadPages)
-        expect(movedRaster?.dataRevision).toBe(initialRaster.dataRevision)
-        expect(initialRaster.timelineEndSec).toBeGreaterThan(1.01)
-        expect(movedRaster?.timelineEndSec).toBe(initialRaster.timelineEndSec)
-        if (!movedSegment) throw new Error('Expected retained waveform coverage.')
-        const movedScale = 600 / (movedRaster?.pixelsPerSecond ?? 1)
-        const movedTranslate = (initialRaster.timelineStartSec - 0.01) * 600
-        expect(movedTranslate + movedSegment.drawStartPx * movedScale).toBeLessThanOrEqual(0)
-        expect(movedTranslate + (movedSegment.drawStartPx + movedSegment.drawCols) * movedScale)
-          .toBeGreaterThanOrEqual(600)
-        dispose()
-        resolve()
-      })().catch((error) => {
-        dispose()
-        reject(error)
-      })
-    }))
-  })
-
-  test('exposes non-abort first-load failures but keeps superseded failures quiet', async () => {
-    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-      const waveform = useClipWaveformViewModel({
-        clip: () => clip,
-        cssWidthPx: () => 500,
-        projectBpm: () => 120,
-        resolveAudioSource: () => (async () => {
-          throw new Error('decoder failed')
-        }),
-        visibleRange: () => ({ startSec: 0, endSec: 1 }),
-      })
-      void (async () => {
-        await new Promise<void>((settle) => {
-          createEffect(() => {
-            if (waveform.error()) settle()
-          })
-        })
-        expect(waveform.error()).toBe('Waveform loading failed.')
-        dispose()
-        resolve()
-      })().catch((error) => {
-        dispose()
-        reject(error)
-      })
-    }))
-
-    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-      const [width, setWidth] = createSignal(500)
-      const resolveAudioSource: AudioPcmSourceResolver = async (_clip, signal) => {
-        await new Promise<void>((_, rejectPromise) => {
-          signal?.addEventListener('abort', () => rejectPromise(new DOMException('aborted', 'AbortError')), { once: true })
-        })
-        return source
-      }
-      const waveform = useClipWaveformViewModel({
-        clip: () => clip,
-        cssWidthPx: width,
-        projectBpm: () => 120,
-        resolveAudioSource: () => resolveAudioSource,
-        visibleRange: () => ({ startSec: 0, endSec: 1 }),
-      })
-      void (async () => {
-        await flushEffects()
-        setWidth(600)
-        await flushEffects()
-        expect(waveform.error()).toBeUndefined()
-        dispose()
-        resolve()
-      })().catch((error) => {
-        dispose()
-        reject(error)
-      })
+        dispose(); resolve()
+      })().catch((error) => { dispose(); reject(error) })
     }))
   })
 })

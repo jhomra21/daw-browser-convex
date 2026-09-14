@@ -13,6 +13,7 @@ function createContext() {
   const rectangles: Rectangle[] = []
   const ctx: Parameters<typeof drawWaveformPeaks>[0]['ctx'] = {
     fillStyle: '',
+    globalAlpha: 1,
     strokeStyle: '',
     lineWidth: 1,
     beginPath() {},
@@ -124,9 +125,12 @@ describe('drawWaveformPeaks', () => {
 describe('drawWaveformPcmLine', () => {
   test('draws points only when the LOD allows them and applies sample gain', () => {
     let arcs = 0
+    const alphaChanges: number[] = []
     const yValues: number[] = []
     const ctx: Parameters<typeof drawWaveformPcmLine>[0]['ctx'] = {
       fillStyle: '',
+      get globalAlpha() { return alphaChanges.at(-1) ?? 0.75 },
+      set globalAlpha(value: number) { alphaChanges.push(value) },
       strokeStyle: '',
       lineWidth: 1,
       beginPath() {},
@@ -153,7 +157,8 @@ describe('drawWaveformPcmLine', () => {
       cssW: 10,
       fillStyle: 'white',
       pointRadius: 1,
-      showPoints: false,
+      lineOpacity: 0.5,
+      pointOpacity: 0,
       amplitudeScaleAtSample: () => 0.5,
     })
     expect(arcs).toBe(0)
@@ -166,9 +171,52 @@ describe('drawWaveformPcmLine', () => {
       cssW: 10,
       fillStyle: 'white',
       pointRadius: 1,
-      showPoints: true,
+      lineOpacity: 1,
+      pointOpacity: 1,
     })
     expect(arcs).toBe(2)
+    expect(alphaChanges.at(-1)).toBe(0.75)
+    expect(alphaChanges).toContain(0.375)
+    expect(alphaChanges).toContain(0.75)
+  })
+
+  test('skips zero-opacity work without changing canvas state', () => {
+    let strokes = 0
+    let arcs = 0
+    const ctx: Parameters<typeof drawWaveformPcmLine>[0]['ctx'] = {
+      fillStyle: '',
+      globalAlpha: 0.5,
+      strokeStyle: '',
+      lineWidth: 1,
+      beginPath() {},
+      moveTo() {},
+      lineTo() {},
+      stroke() { strokes += 1 },
+      fillRect() {},
+      arc() { arcs += 1 },
+      fill() {},
+    }
+    const pcm: WaveformSampleChannelSlice = {
+      mode: 'pcm-line',
+      channels: [new Float32Array([1, 1])],
+      firstFrame: 0,
+      sampleRate: 48_000,
+      sourceStartSec: 0,
+      sourceEndSec: 1 / 48_000,
+    }
+    drawWaveformPcmLine({
+      ctx,
+      pcm,
+      topY: 0,
+      contentH: 100,
+      cssW: 10,
+      lineOpacity: 0,
+      pointOpacity: 0,
+      pointRadius: 1,
+    })
+    expect(strokes).toBe(0)
+    expect(arcs).toBe(0)
+    expect(ctx.globalAlpha).toBe(0.5)
   })
 
   test('places samples from source frames instead of stretching the array', () => {

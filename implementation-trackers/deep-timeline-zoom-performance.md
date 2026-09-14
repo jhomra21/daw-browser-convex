@@ -214,3 +214,59 @@
 - Packaged Electron fresh import produced one persisted peak asset and 540 peak chunks. A full app restart restored the clip from those persisted peaks. Forced canvas redraw recorded 988 waveform strokes, confirming actual waveform geometry rather than the diagonal fallback. Playback advanced to 1.365 seconds without renderer errors.
 - Evidence: `acceptance-reports/deep-zoom-8ee079c/electron-waveform-confirmed.png` and `acceptance-reports/deep-zoom-8ee079c/electron-true-cold-reopen.png`.
 - The exact-head browser preview loaded and accepted a local six-minute import, but desktop-sized visual/zoom stress could not be completed in the available isolated browser session because it remained constrained to a narrow viewport. Safari remains UNPROVEN. These browser-specific gaps are reported separately and are not represented as passes.
+
+## Visual fidelity qualification (supersedes prior READY)
+
+- Current status: **DEEP TIMELINE ZOOM — VISUAL FIDELITY QUALIFICATION IN PROGRESS**.
+- The prior READY determination and any PR wording based on it are superseded. PR #54 must remain open and unmerged.
+- Frozen accepted scope: deep-zoom geometry, sidebar behavior, persistence, bounded scheduling/cache behavior, browser audio, and native audio. This phase changes waveform visual authority only where measurements require it.
+- Acceptance requires the visible waveform to derive from source data, canonical clip-time projection, and the current viewport at native device-pixel density. A retained bitmap enlarged with CSS is not acceptable as primary visual truth.
+- Visible detail must transition continuously from envelope to exact PCM line to smoothly emerging sample points during an uninterrupted zoom gesture, without blank frames, LOD snapping, delayed settle-to-sharpen, or timing drift.
+- Safari automation is waived for this phase. Merge, rebase, force-push, and production deployment remain prohibited.
+
+### Exact local reference matrix
+
+| Reference | Exact files inspected | Evidence | Decision |
+| --- | --- | --- | --- |
+| `/Users/juan/Documents/monorepo-new` | `apps/web/src/components/engine/timeline/timeline.ts`; `apps/web/src/components/engine/timeline/render/audio.ts`; `apps/web/src/components/engine/timeline/render/clip.ts`; `apps/web/src/components/engine/timeline/utils.ts` | Uses centralized domain view state, frame-oriented timeline canvas rendering, native-DPR backing dimensions, visible-range clipping, source-window waveform caching, pixel-density-driven peak requests, and one active plus latest pending asynchronous update. | **Adapt.** Preserve this project's canonical clip timing and bounded source LOD/cache contracts, but move visible waveform rasterization toward current-frame/current-DPR projection. Adopt visible-window overscan and latest-pending coalescing only if Phase 1 traces show request churn. Do not assume its shared-canvas shape is correct here without profiling. |
+| `/Users/juan/Documents/dialkit` | `src/solid/components/Timeline/DialTimeline.tsx`; `src/store/DialStore.ts`; `src/store/TimelineStore.ts` | Keeps transient pointer/zoom state cheap and local, snapshots gesture anchors in plain variables, preserves the anchor during updates, cleans listeners explicitly, and separates transient interaction state from persisted state. | **Adapt selectively.** Retain this project's stronger wheel rAF coalescing and preview/commit separation. Keep transient zoom out of expensive waveform acquisition identity and preserve deterministic gesture cleanup. |
+| `/Users/juan/Documents/solid-primitives` | `packages/raf/src/index.ts`; `packages/resize-observer/src/index.ts`; `packages/media/src/index.ts` | Demonstrates one owned animation-frame lifecycle, direct ResizeObserver ownership, explicit reactive dependencies, DPR/media-query re-arming, coalescing, and deterministic cleanup. | **Adapt without dependency.** Reuse existing local timeline-level scheduler and DPR patterns. Do not add a package or clip-local self-rescheduling loop. |
+| `/Users/juan/Documents/opencode` | Repository located; no waveform/timeline renderer evidence was identified in the focused Phase 0 audit. | Its declared relevance is Solid persistence, preferences, and product architecture, not current-view waveform rasterization. | **Reject for renderer design.** Revisit only if this phase changes persisted preferences or cross-session view state, which is currently out of scope. |
+| `/Users/juan/Documents/daw-effect-research` | Top-level clone inspected; only `.DS_Store` and empty directory shells were present. | No implementation source exists locally to audit for DSP or waveform rendering. | **Unavailable.** Do not claim evidence from this reference. Continue with canonical project timing/DSP tests and the populated references unless the clone is restored. |
+
+### Current implementation facts to prove or replace
+
+- Superseded: `ClipComponent.tsx` previously enlarged retained waveform output with a CSS `scaleX` transform during live zoom; the current implementation draws the current slice directly.
+- Superseded: `useClipWaveformViewModel.ts` previously retained raster geometry at an earlier pixels-per-second value; the current implementation retains source data only and projects through the current layout/map.
+- Superseded: `waveform-canvas.ts` previously capped CSS raster width at 4,096 and applied a DPR double penalty; it now preserves logical CSS width and budgets only the horizontal backing density.
+- Superseded: sample points previously switched through a boolean `showPoints` threshold; the current implementation uses continuous opacity/radius mixing while preserving the exact PCM line.
+
+### Required evidence before renderer selection
+
+- [x] Phase 1 focused coverage records current-view projection, selected LOD, samples/pixel, and pixels/sample while zooming; retained raster scale and CSS transform are no longer render inputs.
+- [x] The renderer now uses the current visible clip slice and native-DPR backing dimensions. At 4,096 x 47 CSS px, DPR 3 produces exactly 12,288 x 141 backing px; over-budget widths preserve CSS width and reduce only horizontal backing density.
+- [x] The prior DPR double-penalty was rejected: the backing-width budget is `floor(2,000,000 / backingHeightPx)`, with backing height `ceil(cssHeightPx * dpr)`, covered at DPR 1, 1.5, 2, and 3.
+- [x] Focused browser-condition churn coverage exercises forward/reverse zoom and asserts source reuse plus non-empty overlapping retained coverage. The measured focused path remained bounded; no active/latest coalescer was added.
+- [x] Per-visible-clip canvases remain the frame authority. No shared canvas, OffscreenCanvas, WebGL, dependency, RAF, timer, or polling loop was introduced.
+- [x] Canonical trim, Re-Pitch, Stretch, BPM mismatch, source beat offset, marker warp, and silence projection remain covered by the existing canonical timing fixtures and current-layout projection path.
+
+### Current-view waveform architecture
+
+- [x] Acquisition identity is data-only: PCM line and point presentation share the same `pcm-line` request key.
+- [x] Retained data is limited to the current ready generation and one previous ready generation; source identity or timing changes clear both generations.
+- [x] Arrangement and Sample Detail project retained source data through the current `getAudioWaveformLayout` and `getAudioClipTimeMap` result on every view change.
+- [x] Envelope, exact PCM line, and sample points use a monotonic smooth visual mix. The exact line remains present while point opacity and radius emerge across the 4–6 pixels/sample band.
+- [ ] Runtime browser/Electron visual qualification, screenshot comparison, and packaged playback qualification are not claimed complete by this implementation change.
+
+### Current-view renderer implementation and interim runtime evidence
+
+- [x] Removed retained raster geometry and CSS `scaleX` from arrangement waveform authority; retained state now contains bounded source representations and projects through the current canonical layout/time map on each view change.
+- [x] Removed point presentation from PCM acquisition identity and added continuous envelope/line and line/point visual weights.
+- [x] Corrected backing-store DPR budgeting: a 4,096 × 47 CSS-pixel canvas at DPR 3 now uses 12,288 × 141 backing pixels (1,732,608 total, within the 2,000,000-pixel budget). Logical current-view width is no longer capped to 4,096 CSS pixels.
+- [x] Retained results are bounded to the current plan plus one relevant refinement and one previous ready generation. Async refinement publication advances the render revision; current projected peak layers preserve fade timing.
+- [x] Focused validation passed 46 tests with 1,452 assertions. The complete suite passed 2,935 tests, one intentional Electron-only skip, zero failures, and 373,887 assertions. Package/root/API typechecks, lint with zero warnings, anti-slop, production build, and `git diff --check` pass.
+- [x] Exact local-browser visual probe on a real bundled audio clip observed `transform: none`, 3,360 point arcs, and 2,820 line strokes. Measured cadence was p50 8.3 ms, p95 9.6 ms, p99 10.2 ms, max 10.3 ms, with zero intervals at or above 50 ms.
+- [x] Exact arm64 Electron packaging succeeded with `VITE_CONVEX_URL=https://polite-peccary-245.convex.cloud` and `/Users/juan/Documents/vst3sdk-3.8.0`. The accepted local fixture reopened with 21 tracks and reached 18 simultaneously visible canvases after resizing to the maximum available 1,290 px outer window height. During active playback, a 20-cycle synthetic trackpad zoom campaign measured p50 8.3 ms, p95 10.2 ms, p99 10.4 ms, max 18.6 ms, zero intervals at or above 50 ms, 1,202 waveform strokes, no canvas CSS transforms, a 200,000 px runway, and approximately 97.4 MB renderer heap.
+- [ ] Final 20-simultaneously-visible audio-canvas browser and Electron campaign remains unproven. The isolated browser fixture reached 20 tracks but the UI-only bundled-sample insertion path did not populate all tracks reliably; the packaged fixture exposed at most 18 canvases at the maximum available 1,290 px outer window height. These results are not mislabeled as the required all-20-visible pass.
+- [ ] Slowed uninterrupted zoom recording remains unavailable because the attached browser driver rejected recording context creation. Static screenshots are preserved under `acceptance-reports/visual-fidelity-*.png`; no recording pass is claimed.
+- Current status remains **DEEP TIMELINE ZOOM — VISUAL FIDELITY QUALIFICATION IN PROGRESS**. PR #54 must remain open and unmerged.

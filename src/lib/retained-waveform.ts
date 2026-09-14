@@ -7,7 +7,6 @@ import {
   type ProjectedWaveformData,
 } from './audio-waveform-layout'
 import type { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
-import { MAX_WAVEFORM_RASTER_WIDTH_PX } from './waveform-canvas'
 
 export const MAX_WAVEFORM_DENSITY_BUCKET = 4_096
 const WAVEFORM_DENSITY_BUCKET_FACTOR = 1.5
@@ -77,108 +76,6 @@ export type WaveformRequestPlans = {
   segments: readonly WaveformSegmentPlan[]
 }
 
-type RetainedRasterCanonicalSegment = Pick<
-  AudioWaveformLayoutSegment,
-  'sourceStartSec' | 'sourceEndSec' | 'canvasStartSec' | 'canvasEndSec'
->
-
-const createRetainedCoverageSegments = (input: {
-  plan: WaveformRequestPlans
-  map: NonNullable<ReturnType<typeof getAudioClipTimeMap>>
-  coverageByKey: ReadonlyMap<string, {
-    sourceStartSec: number
-    sourceEndSec: number
-  }>
-  canonicalSegments: readonly RetainedRasterCanonicalSegment[]
-}) => {
-  const seenKeys = new Set<string>()
-  return input.plan.segments.flatMap((item) => {
-    if (seenKeys.has(item.requestKey)) return []
-    seenKeys.add(item.requestKey)
-    const coverage = input.coverageByKey.get(item.requestKey)
-    if (!coverage) return [item]
-    return input.canonicalSegments.flatMap((canonical) => {
-      const sourceStartSec = Math.max(coverage.sourceStartSec, canonical.sourceStartSec)
-      const sourceEndSec = Math.min(coverage.sourceEndSec, canonical.sourceEndSec)
-      if (sourceEndSec <= sourceStartSec) return []
-      const canvasStartSec = input.map.sourceToTimelineSec(sourceStartSec)
-      const canvasEndSec = input.map.sourceToTimelineSec(sourceEndSec)
-      if (canvasEndSec <= canvasStartSec) return []
-      return [{
-        requestKey: item.requestKey,
-        segment: {
-          drawCols: 1,
-          sourceStartSec,
-          sourceEndSec,
-          startPx: 0,
-          endPx: 0,
-          canvasStartSec,
-          canvasEndSec,
-        },
-      }]
-    })
-  })
-}
-
-export const createRetainedRasterLayout = (input: {
-  plan: WaveformRequestPlans
-  map: ReturnType<typeof getAudioClipTimeMap>
-  pixelsPerSecond: number
-  coverageByKey?: ReadonlyMap<string, {
-    sourceStartSec: number
-    sourceEndSec: number
-  }>
-  canonicalSegments?: readonly RetainedRasterCanonicalSegment[]
-}) => {
-  if (!input.map || input.plan.segments.length === 0) return null
-  const canonicalSegments = input.canonicalSegments ?? input.plan.segments.map((item) => ({
-    sourceStartSec: item.segment.sourceStartSec,
-    sourceEndSec: item.segment.sourceEndSec,
-    canvasStartSec: input.map?.sourceToTimelineSec(item.segment.sourceStartSec) ?? 0,
-    canvasEndSec: input.map?.sourceToTimelineSec(item.segment.sourceEndSec) ?? 0,
-  }))
-  const coverageSegments = input.coverageByKey
-    ? createRetainedCoverageSegments({
-      plan: input.plan,
-      map: input.map,
-      coverageByKey: input.coverageByKey,
-      canonicalSegments,
-    })
-    : input.plan.segments
-  if (coverageSegments.length === 0) return null
-  const timelineStartSec = Math.min(
-    ...coverageSegments.map((item) => item.segment.canvasStartSec),
-  )
-  const timelineEndSec = Math.max(
-    ...coverageSegments.map((item) => item.segment.canvasEndSec),
-  )
-  if (timelineEndSec <= timelineStartSec) return null
-  const boundedPixelsPerSecond = Math.min(
-    input.pixelsPerSecond,
-    MAX_WAVEFORM_RASTER_WIDTH_PX / Math.max(1e-6, timelineEndSec - timelineStartSec),
-  )
-  return {
-    timelineStartSec,
-    timelineEndSec,
-    pixelsPerSecond: boundedPixelsPerSecond,
-    segments: coverageSegments.map((item) => {
-      const canvasStartSec = item.segment.canvasStartSec
-      const canvasEndSec = item.segment.canvasEndSec
-      return {
-        requestKey: item.requestKey,
-        segment: {
-          ...item.segment,
-          canvasStartSec,
-          canvasEndSec,
-          startPx: (canvasStartSec - timelineStartSec) * boundedPixelsPerSecond,
-          endPx: (canvasEndSec - timelineStartSec) * boundedPixelsPerSecond,
-          drawCols: Math.max(1, Math.ceil((canvasEndSec - canvasStartSec) * boundedPixelsPerSecond)),
-        },
-      }
-    }),
-  }
-}
-
 const quantizeRequestRange = (input: {
   startSec: number
   endSec: number
@@ -225,16 +122,15 @@ const requestKeyFor = (input: {
   exactRange: boolean
   densityBucket: number
 }) => {
-  const visualLod = input.lod.mode === 'pcm-line'
-    ? input.lod.showPoints ? 'pcm-line:points' : 'pcm-line:line'
-    : input.lod.mode
+  const acquisitionDensity = input.lod.mode === 'pcm-line'
+    ? 'pcm'
+    : `${input.bins}:${input.densityBucket}`
   return [
     input.sourceStartSec,
     input.sourceEndSec,
-    visualLod,
+    input.lod.mode,
     input.exactRange ? 'exact' : 'tile',
-    input.bins,
-    input.densityBucket,
+    acquisitionDensity,
   ].join(':')
 }
 
@@ -294,7 +190,9 @@ export const createWaveformRequestPlans = (input: {
           )
           : densityBucket,
       )
-    const densityKey = exactRange || lod.mode === 'cached-peaks' ? bins : densityBucket
+    const densityKey = lod.mode === 'pcm-line'
+      ? 'pcm'
+      : exactRange || lod.mode === 'cached-peaks' ? bins : densityBucket
     const rangeKey = [
       range.sourceStartSec,
       range.sourceEndSec,

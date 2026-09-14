@@ -296,6 +296,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
             boundaryStyle: timelineGridMajor,
             xOffsetPx: segment.drawStartPx,
             drawBoundary: false,
+            opacity: segment.opacity,
           });
         }
         continue;
@@ -309,8 +310,9 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
         cssW: segmentWidthPx,
         xOffsetPx: segment.drawStartPx,
         fillStyle: clipAudio,
-        showPoints: segment.showPoints,
-        pointRadius: 1,
+        lineOpacity: segment.presentation.lineOpacity,
+        pointOpacity: segment.presentation.pointOpacity,
+        pointRadius: segment.presentation.pointRadius,
         maxHeightFraction: 0.72,
       });
     }

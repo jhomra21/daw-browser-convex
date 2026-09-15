@@ -1,8 +1,12 @@
 import { For, createEffect, createMemo, createSignal, on, onCleanup, onMount, type Component } from "solid-js";
-import { drawWaveformPeaks, drawWaveformPcmLine } from "@daw-browser/waveforms/render-waveform";
+import { drawWaveformSignal } from "@daw-browser/waveforms/draw-waveform-signal";
+import { waveformCanvasSize } from "~/lib/waveform-canvas";
+import { resolveWaveformPaintStyle } from "~/lib/waveform-style";
+import { useDevicePixelRatio } from "~/lib/device-pixel-ratio";
 import type { AudioWarp, Clip } from "@daw-browser/timeline-core/types";
 import { mapTimelineBeatToSourceBeat, normalizeSourceBeatOffsetValue } from "@daw-browser/shared";
 import { useAppPreferences } from "~/context/app-preferences";
+import { resolveClipColor } from "~/lib/clip-color";
 import SampleDetailWaveformOverview from "~/components/timeline/SampleDetailWaveformOverview";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { buildNextAudioWarp } from "~/lib/audio-warp-patch";
@@ -44,6 +48,7 @@ const getClipBeatWidth = (clipDurationSec: number, projectBpm: number) => (
 
 const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
   const appPreferences = useAppPreferences();
+  const devicePixelRatio = useDevicePixelRatio();
   let canvasRef: HTMLCanvasElement | undefined;
   let canvasWrapRef: HTMLDivElement | undefined;
   let markerHandleRef: HTMLButtonElement | undefined;
@@ -68,11 +73,15 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     cssWidthPx: waveformWidthPx,
     projectBpm: () => props.projectBpm,
     resolveAudioSource: () => props.resolveAudioSource,
-    mode: "sample-detail",
     visibleRange: () => ({
       startSec: props.clip.startSec + viewport().startSec,
       endSec: props.clip.startSec + viewport().endSec,
     }),
+    backingPixelsPerCssPixel: () => waveformCanvasSize({
+      cssWidthPx: waveformWidthPx(),
+      cssHeightPx: waveformHeightPx(),
+      devicePixelRatio: devicePixelRatio(),
+    }).contextScaleX,
   });
   createEffect(on(
     () => [
@@ -223,30 +232,34 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
   const draw = () => {
     const canvas = canvasRef;
     if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
     const width = waveformWidthPx();
     const height = waveformHeightPx();
-    const pxW = Math.floor(width * dpr);
-    const pxH = Math.floor(height * dpr);
+    const canvasSize = waveformCanvasSize({
+      cssWidthPx: width,
+      cssHeightPx: height,
+      devicePixelRatio: devicePixelRatio(),
+    });
+    const pxW = canvasSize.backingWidthPx;
+    const pxH = canvasSize.backingHeightPx;
     if (canvas.width !== pxW || canvas.height !== pxH) {
       canvas.width = pxW;
       canvas.height = pxH;
     }
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, height);
+    ctx.setTransform(canvasSize.contextScaleX, 0, 0, canvasSize.contextScaleY, 0, 0);
+    ctx.clearRect(0, 0, canvasSize.cssWidthPx, canvasSize.cssHeightPx);
 
     const canvasColors = appPreferences.appearance.themeTokens();
     const timelineBackground = canvasColors["timeline-background"];
     const timelineGridMinor = canvasColors["timeline-grid-minor"];
     const timelineGridMajor = canvasColors["timeline-grid-major"];
-    const clipAudio = canvasColors["clip-audio"];
+    const waveformColor = resolveClipColor(props.clip.color, canvasColors);
     const currentViewport = viewport();
     const viewportDurationSec = currentViewport.endSec - currentViewport.startSec;
 
     ctx.fillStyle = timelineBackground;
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(0, 0, canvasSize.cssWidthPx, canvasSize.cssHeightPx);
 
     ctx.strokeStyle = timelineGridMinor;
     ctx.lineWidth = 1;
@@ -262,58 +275,34 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
       const x = Math.round(((timelineSec - visibleTimelineStartSec) / Math.max(1e-6, viewportDurationSec)) * width) + 0.5;
       ctx.beginPath();
       ctx.moveTo(x, 0);
-      ctx.lineTo(x, height);
+      ctx.lineTo(x, canvasSize.cssHeightPx);
       ctx.stroke();
     }
 
-    const renderSegments = waveform.renderSegments();
-    const firstPopulatedSegment = renderSegments.find((segment) => (
-      segment.mode === "peaks" ? segment.peaks.channels.length > 0 : segment.samples.channels.length > 0
-    ));
+    const renderSegments = waveform.segments();
+    const firstPopulatedSegment = renderSegments.find((segment) => segment.data.channels.length > 0);
     const visibleChannelCount = firstPopulatedSegment
-      ? (firstPopulatedSegment.mode === "peaks" ? firstPopulatedSegment.peaks.channels.length : firstPopulatedSegment.samples.channels.length)
+      ? firstPopulatedSegment.data.channels.length
       : Math.max(1, props.clip.buffer?.numberOfChannels ?? props.clip.sourceChannelCount ?? 1);
     const contentTop = 16;
     const contentHeight = Math.max(1, height - 32);
     const channelHeight = contentHeight / visibleChannelCount;
 
     for (const segment of renderSegments) {
-      const segmentWidthPx = Math.max(0, segment.drawCols);
-      if (segment.mode === "peaks") {
-        for (let channel = 0; channel < segment.peaks.channels.length; channel += 1) {
-          const peaks = segment.peaks.channels[channel];
-          if (!peaks) continue;
-          drawWaveformPeaks({
-            ctx,
-            peaks,
-            drawCols: segmentWidthPx,
-            padPx: 0,
-            topY: contentTop + channel * channelHeight,
-            contentH: channelHeight,
-            cssW: segmentWidthPx,
-            cssH: height,
-            fillStyle: clipAudio,
-            boundaryStyle: timelineGridMajor,
-            xOffsetPx: segment.drawStartPx,
-            drawBoundary: false,
-            opacity: segment.opacity,
-          });
-        }
-        continue;
-      }
-
-      drawWaveformPcmLine({
-        ctx,
-        pcm: segment.samples,
+      drawWaveformSignal(ctx, {
+        data: segment.data,
+        sourceStartFrame: segment.sourceStartFrame,
+        sourceEndFrame: segment.sourceEndFrame,
+        startPx: segment.startPx,
+        endPx: segment.endPx,
         topY: contentTop,
         contentH: contentHeight,
-        cssW: segmentWidthPx,
-        xOffsetPx: segment.drawStartPx,
-        fillStyle: clipAudio,
-        lineOpacity: segment.presentation.lineOpacity,
-        pointOpacity: segment.presentation.pointOpacity,
-        pointRadius: segment.presentation.pointRadius,
-        maxHeightFraction: 0.72,
+        channelCount: visibleChannelCount,
+        style: resolveWaveformPaintStyle({
+          color: waveformColor,
+          backingScaleY: canvasSize.contextScaleY,
+          pointRadius: segment.pointRadius,
+        }),
       });
     }
 
@@ -323,7 +312,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
       const centerY = contentTop + channel * channelHeight + channelHeight / 2;
       ctx.beginPath();
       ctx.moveTo(0, Math.floor(centerY) + 0.5);
-      ctx.lineTo(width, Math.floor(centerY) + 0.5);
+      ctx.lineTo(canvasSize.cssWidthPx, Math.floor(centerY) + 0.5);
       ctx.stroke();
     }
   };
@@ -519,7 +508,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
       <SampleDetailWaveformOverview
         clip={props.clip}
         projectBpm={props.projectBpm}
-        resolveAudioSource={props.resolveAudioSource}
+        source={waveform.source}
         viewport={viewport()}
         onViewportChange={setViewport}
       />

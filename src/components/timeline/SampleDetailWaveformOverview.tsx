@@ -1,8 +1,10 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount, type Component } from 'solid-js'
 
-import { drawWaveformPeaks } from '@daw-browser/waveforms/render-waveform'
+import { drawWaveformSignal } from '@daw-browser/waveforms/draw-waveform-signal'
 import type { Clip } from '@daw-browser/timeline-core/types'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
 import { useAppPreferences } from '~/context/app-preferences'
+import { resolveClipColor } from '~/lib/clip-color'
 import { useSampleDetailWaveformOverview } from '~/hooks/useSampleDetailWaveformOverview'
 import {
   fitSampleDetailWaveformViewport,
@@ -14,7 +16,9 @@ import {
   getSampleDetailWaveformOverviewViewportRect,
   moveSampleDetailWaveformOverviewViewport,
 } from '~/lib/sample-detail-waveform-overview'
-import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
+import { useDevicePixelRatio } from '~/lib/device-pixel-ratio'
+import { resolveWaveformPaintStyle } from '~/lib/waveform-style'
+import { waveformCanvasSize } from '~/lib/waveform-canvas'
 
 const OVERVIEW_HEIGHT_PX = 40
 const DEFAULT_OVERVIEW_WIDTH_PX = 960
@@ -23,13 +27,14 @@ const MINIMUM_VIEWPORT_HANDLE_PX = 2
 type SampleDetailWaveformOverviewProps = {
   clip: Clip<AudioBuffer>
   projectBpm: number
-  resolveAudioSource: AudioPcmSourceResolver
+  source: () => AudioPcmSourceDescriptor | null
   viewport: SampleDetailWaveformViewport
   onViewportChange: (viewport: SampleDetailWaveformViewport) => void
 }
 
 const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps> = (props) => {
   const appPreferences = useAppPreferences()
+  const devicePixelRatio = useDevicePixelRatio()
   let canvasRef: HTMLCanvasElement | undefined
   let overviewRef: HTMLButtonElement | undefined
   let capturedPointerId: number | undefined
@@ -41,7 +46,12 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
     clip: () => props.clip,
     cssWidthPx: widthPx,
     projectBpm: () => props.projectBpm,
-    resolveAudioSource: () => props.resolveAudioSource,
+    source: () => props.source(),
+    backingPixelsPerCssPixel: () => waveformCanvasSize({
+      cssWidthPx: widthPx(),
+      cssHeightPx: OVERVIEW_HEIGHT_PX,
+      devicePixelRatio: devicePixelRatio(),
+    }).contextScaleX,
   })
   const viewportRect = createMemo(() => getSampleDetailWaveformOverviewViewportRect({
     viewport: props.viewport,
@@ -106,29 +116,33 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
   const draw = () => {
     const canvas = canvasRef
     if (!canvas) return
-    const dpr = window.devicePixelRatio || 1
     const width = widthPx()
-    const pxWidth = Math.floor(width * dpr)
-    const pxHeight = Math.floor(OVERVIEW_HEIGHT_PX * dpr)
+    const canvasSize = waveformCanvasSize({
+      cssWidthPx: width,
+      cssHeightPx: OVERVIEW_HEIGHT_PX,
+      devicePixelRatio: devicePixelRatio(),
+    })
+    const pxWidth = canvasSize.backingWidthPx
+    const pxHeight = canvasSize.backingHeightPx
     if (canvas.width !== pxWidth || canvas.height !== pxHeight) {
       canvas.width = pxWidth
       canvas.height = pxHeight
     }
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    ctx.clearRect(0, 0, width, OVERVIEW_HEIGHT_PX)
+    ctx.setTransform(canvasSize.contextScaleX, 0, 0, canvasSize.contextScaleY, 0, 0)
+    ctx.clearRect(0, 0, canvasSize.cssWidthPx, canvasSize.cssHeightPx)
 
     const colors = appPreferences.appearance.themeTokens()
     const timelineBackground = colors['timeline-background']
     const timelineGridMajor = colors['timeline-grid-major']
-    const clipAudio = colors['clip-audio']
+    const waveformColor = resolveClipColor(props.clip.color, colors)
     ctx.fillStyle = timelineBackground
-    ctx.fillRect(0, 0, width, OVERVIEW_HEIGHT_PX)
+    ctx.fillRect(0, 0, canvasSize.cssWidthPx, canvasSize.cssHeightPx)
 
     const segments = overview.renderSegments()
-    const firstSegment = segments.find((segment) => segment.peaks.channels.length > 0)
-    const channelCount = firstSegment?.peaks.channels.length
+    const firstSegment = segments.find((segment) => segment.data.channels.length > 0)
+    const channelCount = firstSegment?.data.channels.length
       ?? Math.max(1, props.clip.buffer?.numberOfChannels ?? props.clip.sourceChannelCount ?? 1)
     const contentTop = 3
     const contentHeight = OVERVIEW_HEIGHT_PX - 6
@@ -136,24 +150,20 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
 
     for (const segment of segments) {
       const segmentWidthPx = Math.max(0, segment.drawCols)
-      for (let channel = 0; channel < segment.peaks.channels.length; channel += 1) {
-        const peaks = segment.peaks.channels[channel]
-        if (!peaks) continue
-        drawWaveformPeaks({
-          ctx,
-          peaks,
-          drawCols: segmentWidthPx,
-          padPx: 0,
-          topY: contentTop + channel * channelHeight,
-          contentH: channelHeight,
-          cssW: segmentWidthPx,
-          cssH: OVERVIEW_HEIGHT_PX,
-          fillStyle: clipAudio,
-          boundaryStyle: timelineGridMajor,
-          xOffsetPx: segment.drawStartPx,
-          drawBoundary: false,
-        })
-      }
+      drawWaveformSignal(ctx, {
+        data: segment.data,
+        sourceStartFrame: segment.sourceStartFrame,
+        sourceEndFrame: segment.sourceEndFrame,
+        startPx: segment.drawStartPx,
+        endPx: segment.drawStartPx + segmentWidthPx,
+        topY: contentTop,
+        contentH: contentHeight,
+        channelCount,
+        style: resolveWaveformPaintStyle({
+          color: waveformColor,
+          backingScaleY: canvasSize.contextScaleY,
+        }),
+      })
     }
 
     ctx.strokeStyle = timelineGridMajor
@@ -162,7 +172,7 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
       const centerY = contentTop + channel * channelHeight + channelHeight / 2
       ctx.beginPath()
       ctx.moveTo(0, Math.floor(centerY) + 0.5)
-      ctx.lineTo(width, Math.floor(centerY) + 0.5)
+      ctx.lineTo(canvasSize.cssWidthPx, Math.floor(centerY) + 0.5)
       ctx.stroke()
     }
   }

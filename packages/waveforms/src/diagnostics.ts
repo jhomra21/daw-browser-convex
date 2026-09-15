@@ -1,10 +1,10 @@
 import {
-  arrangementWaveformPcmScheduler,
-  type ArrangementWaveformPcmDiagnostics,
-} from './arrangement-waveform-pcm'
+  arrangementWaveformScheduler,
+  type ArrangementWaveformDiagnostics,
+} from './arrangement-waveform'
 
-export type ArrangementWaveformDiagnostics = ArrangementWaveformPcmDiagnostics
+export type { ArrangementWaveformDiagnostics }
 
 export const getArrangementWaveformDiagnostics = (): ArrangementWaveformDiagnostics => (
-  arrangementWaveformPcmScheduler.getDiagnostics()
+  arrangementWaveformScheduler.getDiagnostics()
 )

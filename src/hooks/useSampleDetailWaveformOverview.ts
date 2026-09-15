@@ -1,22 +1,34 @@
 import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from 'solid-js'
 
-import { getWaveformSlice } from '@daw-browser/waveforms/select-waveform-window'
-import type { WaveformPeakChannelSlice } from '@daw-browser/waveforms/types'
-import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
+import type { WaveformSourceData } from '@daw-browser/waveforms/types'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
 import type { RuntimeClip } from '~/lib/timeline-runtime-types'
-import { getAudioWaveformLayout } from '~/lib/audio-waveform-layout'
+import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
+import {
+  getAudioWaveformLayout,
+  type AudioWaveformLayoutSegment,
+} from '~/lib/audio-waveform-layout'
+import {
+  createWaveformRequestPlans,
+  projectRetainedWaveformData,
+  retainWaveformData,
+} from '~/lib/retained-waveform'
+import { requestWaveformData } from '~/lib/waveform-scheduler-request'
 
-type OverviewRenderSegment = {
+export type OverviewRenderSegment = {
   drawStartPx: number
   drawCols: number
-  peaks: WaveformPeakChannelSlice
+  sourceStartFrame: number
+  sourceEndFrame: number
+  data: WaveformSourceData
 }
 
 type SampleDetailWaveformOverviewOptions = {
   clip: Accessor<RuntimeClip>
   cssWidthPx: Accessor<number>
   projectBpm: Accessor<number>
-  resolveAudioSource: Accessor<AudioPcmSourceResolver>
+  source: Accessor<AudioPcmSourceDescriptor | null>
+  backingPixelsPerCssPixel: Accessor<number>
 }
 
 type OverviewView = {
@@ -39,13 +51,20 @@ export function useSampleDetailWaveformOverview(options: SampleDetailWaveformOve
     const current = view()
     const cssWidthPx = options.cssWidthPx()
     const projectBpm = options.projectBpm()
+    const backingPixelsPerCssPixel = options.backingPixelsPerCssPixel()
     const currentRequestId = ++requestId
+    const controller = new AbortController()
     if (!current) {
       setRenderSegments([])
       return
     }
-    const controller = new AbortController()
-    void options.resolveAudioSource()(current.clip, controller.signal, { verifyContentHash: true })
+    const source = options.source()
+    if (!source) {
+      setRenderSegments([])
+      onCleanup(() => controller.abort())
+      return
+    }
+    void Promise.resolve(source)
       .then(async (source) => {
         const layout = getAudioWaveformLayout(
           current.clip,
@@ -53,43 +72,58 @@ export function useSampleDetailWaveformOverview(options: SampleDetailWaveformOve
           source.durationSec,
           projectBpm,
         )
-        const segments = layout.segments?.map((segment) => ({
-          drawStartPx: segment.startPx,
-          drawCols: segment.drawCols,
-          sourceStartSec: segment.sourceStartSec,
-          sourceEndSec: segment.sourceEndSec,
-        })) ?? (layout.drawCols > 0
-          ? [{
-            drawStartPx: layout.padPx,
-            drawCols: layout.drawCols,
-            sourceStartSec: layout.sourceStartSec,
-            sourceEndSec: layout.sourceEndSec,
-          }]
-          : [])
-        return await Promise.all(segments.map(async (segment) => {
-          const durationSec = Math.max(0, segment.sourceEndSec - segment.sourceStartSec)
-          const bins = Math.max(1, Math.min(
-            segment.drawCols,
-            Math.ceil(durationSec * 400),
-          ))
-          const peaks = await getWaveformSlice({
+        const segments: readonly AudioWaveformLayoutSegment[] = layout.segments
+          ?? (layout.drawCols > 0
+            ? [{
+              drawCols: layout.drawCols,
+              sourceStartSec: layout.sourceStartSec,
+              sourceEndSec: layout.sourceEndSec,
+              startPx: layout.padPx,
+              endPx: layout.padPx + layout.drawCols,
+              canvasStartSec: layout.canvasStartSec ?? current.clip.startSec,
+              canvasEndSec: layout.canvasEndSec ?? current.clip.startSec + current.clip.duration,
+            }]
+            : [])
+        const plans = createWaveformRequestPlans({
+          segments,
+          sampleRate: source.sampleRate,
+          sourceDurationSec: source.durationSec,
+          sourceFrameCount: source.frameCount,
+          backingPixelsPerCssPixel,
+        })
+        const results = await Promise.all(plans.requests.map(async (request) => {
+          const data = await requestWaveformData({
             assetKey: current.assetKey,
-            sourceIdentity: {
-              assetKey: current.assetKey,
-              identity: source.identity,
-              durationSec: source.durationSec,
-              sampleRate: source.sampleRate,
-              channelCount: source.channelCount,
-            },
             source,
-            sourceStartSec: segment.sourceStartSec,
-            sourceEndSec: segment.sourceEndSec,
-            bins,
+            sourceStartFrame: request.sourceStartFrame,
+            sourceEndFrame: request.sourceEndFrame,
+            framesPerInterval: request.framesPerInterval,
+            priority: request.priority,
             signal: controller.signal,
           })
-          return peaks
-            ? { drawStartPx: segment.drawStartPx, drawCols: bins, peaks }
-            : null
+          return data ? { key: request.key, data: retainWaveformData(data) } : null
+        }))
+        const retainedByKey = new Map(
+          results.flatMap((result) => result ? [[result.key, result.data]] : []),
+        )
+        const map = getAudioClipTimeMap({
+          clip: current.clip,
+          bufferDurationSec: source.durationSec,
+          projectBpm,
+          rangeStartSec: current.clip.startSec,
+          rangeEndSec: current.clip.startSec + current.clip.duration,
+        })
+        if (!map) return []
+        return projectRetainedWaveformData({
+          retainedByKey,
+          segments: plans.segments,
+          map,
+        }).map((segment) => ({
+          drawStartPx: segment.startPx,
+          drawCols: Math.max(0, segment.endPx - segment.startPx),
+          sourceStartFrame: segment.sourceStartFrame,
+          sourceEndFrame: segment.sourceEndFrame,
+          data: segment.data,
         }))
       })
       .then((next) => {

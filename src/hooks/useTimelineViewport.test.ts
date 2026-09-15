@@ -81,21 +81,33 @@ describe('useTimelineViewport physical anchor maintenance', () => {
 
     try {
       await new Promise<void>((resolve, reject) => createRoot((dispose) => {
-        const [scope] = createSignal('project-1')
-        const [pixelsPerSecond, setPixelsPerSecond] = createSignal(100)
+        const [scope, setScope] = createSignal('project-1')
+        const [pixelsPerSecond, setPixelsPerSecond] = createSignal(100 / 3)
         const element = new TestTimelineElement()
         const viewport = useTimelineViewport({
           persistenceScope: scope,
           pixelsPerSecond,
           previewPixelsPerSecond: setPixelsPerSecond,
           commitPixelsPerSecond: setPixelsPerSecond,
-          durationSec: () => 60,
+          durationSec: () => 30,
           canZoom: () => true,
         })
         viewport.bind(element)
 
         void (async () => {
+          viewport.zoomIn()
+          const rangeAfterImmediateZoom = viewport.visibleRange()
+          expect(rangeAfterImmediateZoom.startSec).toBeCloseTo(3)
+          expect(rangeAfterImmediateZoom.endSec).toBeCloseTo(27)
+
           await flushEffects()
+          expect(viewport.visibleRange()).toEqual(rangeAfterImmediateZoom)
+
+          setScope('project-2')
+          await flushEffects()
+          expect(viewport.visibleRange().startSec).toBe(0)
+          expect(viewport.visibleRange().endSec).toBeCloseTo(24)
+
           const writesAfterBind = element.scrollWrites
           expect(writesAfterBind).toBeGreaterThan(0)
           expect(viewport.usableWidth()).toBe(1_000)

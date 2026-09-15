@@ -1,7 +1,11 @@
 import { getAudioClipTimeMap, getMarkerWarpTimelineSegments } from '@daw-browser/timeline-core/audio-clip-time-map'
 import type { Clip } from '@daw-browser/timeline-core/types'
 import { normalizeSourceBeatOffsetValue } from '@daw-browser/shared'
-import type { WaveformPcmResult, WaveformPeakChannelSlice, WaveformSampleChannelSlice } from '@daw-browser/waveforms/types'
+import type {
+  WaveformByteIntervals,
+  WaveformFloatIntervals,
+  WaveformSourceData,
+} from '@daw-browser/waveforms/types'
 
 type AudioWaveformLayoutSegment = {
   drawCols: number
@@ -29,9 +33,9 @@ type AudioWaveformLayout = {
 export type { AudioWaveformLayout, AudioWaveformLayoutSegment }
 
 export type CroppedWaveformData = {
-  data: WaveformPcmResult
-  sourceStartSec: number
-  sourceEndSec: number
+  data: WaveformSourceData
+  sourceStartFrame: number
+  sourceEndFrame: number
 }
 
 export type ProjectedWaveformData = CroppedWaveformData & {
@@ -55,17 +59,19 @@ const clampSource = (value: number, start: number, end: number) => (
 )
 
 export const cropWaveformDataToSourceRange = (input: {
-  data: WaveformPcmResult
+  data: WaveformSourceData
   sourceStartSec: number
   sourceEndSec: number
 }): CroppedWaveformData | null => {
-  const dataStart = input.data.sourceStartSec
-  const dataEnd = input.data.sourceEndSec
+  const dataStart = input.data.firstFrame / input.data.sampleRate
+  const dataEnd = input.data.kind === 'samples'
+    ? dataStart + (input.data.channels[0]?.length ?? 0) / input.data.sampleRate
+    : dataStart + input.data.intervalCount * input.data.framesPerInterval / input.data.sampleRate
   const start = clampSource(Math.max(input.sourceStartSec, dataStart), dataStart, dataEnd)
   const end = clampSource(Math.min(input.sourceEndSec, dataEnd), dataStart, dataEnd)
   if (end <= start) return null
 
-  if (input.data.mode === 'pcm-line') {
+  if (input.data.kind === 'samples') {
     const firstFrame = Math.max(input.data.firstFrame, Math.ceil(start * input.data.sampleRate))
     const dataEndFrame = input.data.firstFrame + (input.data.channels[0]?.length ?? 0)
     const endFrame = Math.min(dataEndFrame, Math.ceil(end * input.data.sampleRate))
@@ -74,43 +80,67 @@ export const cropWaveformDataToSourceRange = (input: {
     const channels = input.data.channels.map((channel) => (
       channel.subarray(offset, offset + endFrame - firstFrame)
     ))
-    const cropped: WaveformSampleChannelSlice = {
-      mode: 'pcm-line',
+    const cropped: WaveformSourceData = {
+      kind: 'samples',
       channels,
       firstFrame,
       sampleRate: input.data.sampleRate,
-      sourceStartSec: firstFrame / input.data.sampleRate,
-      sourceEndSec: endFrame / input.data.sampleRate,
+      sourceFrameCount: input.data.sourceFrameCount,
     }
     return {
       data: cropped,
-      sourceStartSec: cropped.sourceStartSec,
-      sourceEndSec: cropped.sourceEndSec,
+      sourceStartFrame: firstFrame,
+      sourceEndFrame: endFrame,
     }
   }
 
-  const duration = dataEnd - dataStart
+  const framesPerInterval = input.data.framesPerInterval
+  const exactStartFrame = Math.max(
+    input.data.firstFrame,
+    Math.min(input.data.sourceFrameCount, Math.ceil(start * input.data.sampleRate)),
+  )
+  const exactEndFrame = Math.max(
+    exactStartFrame,
+    Math.min(input.data.sourceFrameCount, Math.ceil(end * input.data.sampleRate)),
+  )
   const startColumn = Math.max(
     0,
-    Math.min(input.data.columns - 1, Math.floor((start - dataStart) * input.data.columns / duration)),
+    Math.min(input.data.intervalCount - 1, Math.floor((start * input.data.sampleRate - input.data.firstFrame) / framesPerInterval)),
   )
   const endColumn = Math.min(
-    input.data.columns,
-    Math.max(startColumn + 1, Math.ceil((end - dataStart) * input.data.columns / duration)),
+    input.data.intervalCount,
+    Math.max(startColumn + 1, Math.ceil((end * input.data.sampleRate - input.data.firstFrame) / framesPerInterval)),
   )
   if (endColumn <= startColumn) return null
-  const sourceStartSec = dataStart + (startColumn / input.data.columns) * duration
-  const sourceEndSec = dataStart + (endColumn / input.data.columns) * duration
-  const cropped: WaveformPeakChannelSlice = {
-    mode: 'pcm-envelope',
-    channels: input.data.channels.map((channel) => (
-      channel.subarray(startColumn * 2, endColumn * 2)
-    )),
-    columns: endColumn - startColumn,
-    sourceStartSec,
-    sourceEndSec,
+  const base: Pick<
+    WaveformByteIntervals,
+    'kind' | 'firstFrame' | 'sampleRate' | 'sourceFrameCount' | 'framesPerInterval' | 'intervalCount'
+  > = {
+    kind: 'intervals',
+    firstFrame: input.data.firstFrame + startColumn * framesPerInterval,
+    sampleRate: input.data.sampleRate,
+    sourceFrameCount: input.data.sourceFrameCount,
+    framesPerInterval,
+    intervalCount: endColumn - startColumn,
   }
-  return { data: cropped, sourceStartSec, sourceEndSec }
+  const cropped: WaveformByteIntervals | WaveformFloatIntervals = input.data.encoding === 'signed-u8'
+    ? {
+      ...base,
+      kind: 'intervals',
+      encoding: 'signed-u8',
+      channels: input.data.channels.map((channel) => channel.subarray(startColumn * 2, endColumn * 2)),
+    }
+    : {
+      ...base,
+      kind: 'intervals',
+      encoding: 'float32',
+      channels: input.data.channels.map((channel) => channel.subarray(startColumn * 2, endColumn * 2)),
+    }
+  return {
+    data: cropped,
+    sourceStartFrame: exactStartFrame,
+    sourceEndFrame: exactEndFrame,
+  }
 }
 
 export const getSourceBeatOffsetAnchorX = (input: {

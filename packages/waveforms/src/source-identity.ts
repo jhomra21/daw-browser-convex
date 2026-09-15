@@ -12,6 +12,7 @@ export function createWaveformSourceIdentity(input: WaveformSourceIdentity): Wav
     assetKey: input.assetKey,
     identity: input.identity,
     durationSec: input.durationSec,
+    frameCount: input.frameCount,
     sampleRate: input.sampleRate,
     channelCount: input.channelCount,
   }
@@ -27,6 +28,7 @@ export function peakAssetMatchesSourceIdentity(
     && identity.identity !== undefined
     && record.sourceIdentity.identity !== identity.identity) return false
   if (!nearlyEqual(record.durationSec, identity.durationSec)) return false
+  if (identity.frameCount !== undefined && record.frameCount !== identity.frameCount) return false
   if (identity.sampleRate !== undefined && record.sampleRate !== identity.sampleRate) return false
   if (identity.channelCount !== undefined && record.channelCount !== identity.channelCount) return false
   return true

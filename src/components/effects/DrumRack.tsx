@@ -1,7 +1,8 @@
 import { createEffect, createSignal, For, onCleanup, Show, type Component, untrack } from "solid-js";
-import { drawWaveformPeaks } from "@daw-browser/waveforms/render-waveform";
-import { getWaveformSlice } from "@daw-browser/waveforms/select-waveform-window";
-import type { WaveformPeakChannelSlice } from "@daw-browser/waveforms/types";
+import { drawWaveformSignal } from "@daw-browser/waveforms/draw-waveform-signal";
+import { loadWaveformSourceData } from "@daw-browser/waveforms/select-waveform-window";
+import type { WaveformSourceData } from "@daw-browser/waveforms/types";
+import { resolveWaveformPaintStyle } from "~/lib/waveform-style";
 import {
   sampledInstrumentRegion,
   sampledInstrumentRegionIdentity,
@@ -21,6 +22,12 @@ import { DeviceToggleButton } from "~/components/ui/device-control";
 import Knob from "~/components/ui/knob";
 import { useAppPreferences } from "~/context/app-preferences";
 import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE, type SampleDragData } from "~/lib/sample-drag-data";
+import { useDevicePixelRatio } from "~/lib/device-pixel-ratio";
+import {
+  getDrumRackWaveformBufferIdentity,
+  SAMPLE_WAVEFORM_BINS,
+  sampleWaveformFramesPerInterval,
+} from "~/lib/drum-rack-waveform";
 
 type DrumRackProps = {
   params: DrumRackParams;
@@ -53,7 +60,6 @@ const formatSampleLength = (pad: DrumRackPadParams) => {
 const padDisplayName = (pad: DrumRackPadParams) => pad.name ?? getDrumRackPadNoteLabel(pad.note);
 
 const CHOKE_GROUPS = Array.from({ length: 16 }, (_, index) => index + 1);
-const SAMPLE_WAVEFORM_BINS = 360;
 
 const formatPan = (value: number) => {
   if (value === 0) return "C";
@@ -73,8 +79,9 @@ const SampleWaveform: Component<{
   sourceEndSec: number;
 }> = (props) => {
   const appPreferences = useAppPreferences();
+  const devicePixelRatio = useDevicePixelRatio();
   let canvasRef: HTMLCanvasElement | undefined;
-  const [peaks, setPeaks] = createSignal<WaveformPeakChannelSlice | null>(null);
+  const [data, setData] = createSignal<WaveformSourceData | null>(null);
   const [canvasSize, setCanvasSize] = createSignal({ width: SAMPLE_WAVEFORM_BINS, height: 56 });
   let waveformRequestKey: string | undefined;
 
@@ -83,33 +90,36 @@ const SampleWaveform: Component<{
     const buffer = props.buffer;
     const region = sampledInstrumentRegion(sample.source, props.sourceStartSec, props.sourceEndSec);
     const regionAssetKey = sampledInstrumentRegionIdentity(sample, region);
-    const nextRequestKey = `${regionAssetKey}\n${buffer ? String(buffer.length) : "missing"}`;
+    const bufferIdentity = getDrumRackWaveformBufferIdentity(buffer);
+    const nextRequestKey = `${regionAssetKey}\n${bufferIdentity}`;
     if (waveformRequestKey === nextRequestKey) return;
     waveformRequestKey = nextRequestKey;
     let cancelled = false;
-    setPeaks(null);
+    setData(null);
     if (!buffer) {
       onCleanup(() => {
         cancelled = true;
       });
       return;
     }
-    void getWaveformSlice({
+    void loadWaveformSourceData({
       assetKey: regionAssetKey,
       sourceIdentity: {
         assetKey: regionAssetKey,
+        identity: bufferIdentity,
         durationSec: buffer.duration,
+        frameCount: buffer.length,
         sampleRate: buffer.sampleRate,
         channelCount: buffer.numberOfChannels,
       },
       buffer,
-      sourceStartSec: 0,
-      sourceEndSec: buffer.duration,
-      bins: SAMPLE_WAVEFORM_BINS,
+      sourceStartFrame: 0,
+      sourceEndFrame: buffer.length,
+      framesPerInterval: sampleWaveformFramesPerInterval(buffer.length),
     }).then((nextPeaks) => {
-      if (!cancelled) setPeaks(nextPeaks);
+      if (!cancelled) setData(nextPeaks);
     }, () => {
-      if (!cancelled) setPeaks(null);
+      if (!cancelled) setData(null);
     });
     onCleanup(() => {
       cancelled = true;
@@ -134,7 +144,7 @@ const SampleWaveform: Component<{
     const canvas = canvasRef;
     if (!canvas) return;
     const { width: cssW, height: cssH } = canvasSize();
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = devicePixelRatio();
     const pxW = Math.floor(cssW * dpr);
     const pxH = Math.floor(cssH * dpr);
     if (canvas.width !== pxW || canvas.height !== pxH) {
@@ -144,15 +154,17 @@ const SampleWaveform: Component<{
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const contextScaleX = pxW / cssW;
+    const contextScaleY = pxH / cssH;
+    ctx.setTransform(contextScaleX, 0, 0, contextScaleY, 0, 0);
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, cssW, cssH);
 
     const themeTokens = appPreferences.appearance.themeTokens();
     const gridColor = themeTokens["device-graph-grid"];
     const waveformColor = themeTokens["clip-audio"];
-    const data = peaks();
-    if (!data) {
+    const nextData = data();
+    if (!nextData) {
       ctx.strokeStyle = gridColor;
       for (let x = 0; x < cssW; x += 7) {
         ctx.beginPath();
@@ -163,20 +175,21 @@ const SampleWaveform: Component<{
       return;
     }
 
-    const channelHeight = cssH / Math.max(1, data.channels.length);
-    data.channels.forEach((channel, index) => {
-      drawWaveformPeaks({
-        ctx,
-        peaks: channel,
-        drawCols: Math.min(data.columns, cssW),
-        padPx: 0,
-        topY: index * channelHeight,
-        contentH: channelHeight,
-        cssW,
-        cssH,
-        fillStyle: waveformColor,
-        boundaryStyle: gridColor,
-      });
+    drawWaveformSignal(ctx, {
+      data: nextData,
+      sourceStartFrame: nextData.firstFrame,
+      sourceEndFrame: nextData.kind === 'samples'
+        ? nextData.firstFrame + (nextData.channels[0]?.length ?? 0)
+        : nextData.firstFrame + nextData.intervalCount * nextData.framesPerInterval,
+      startPx: 0,
+      endPx: cssW,
+      topY: 0,
+      contentH: cssH,
+      channelCount: nextData.channels.length,
+      style: resolveWaveformPaintStyle({
+        color: waveformColor,
+        backingScaleY: contextScaleY,
+      }),
     });
   });
 

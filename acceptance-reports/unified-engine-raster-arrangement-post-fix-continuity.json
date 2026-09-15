@@ -1,0 +1,30 @@
+{
+  "arrangement" : {
+    "blankFrames" : 0,
+    "blankFrameTimes" : [
+
+    ],
+    "durationSeconds" : 16.011666666666667,
+    "maximumAdjacentGreenPixelDropRatio" : 0.93191221934234769,
+    "maximumAdjacentMeanLuminanceJump" : 23.859279373417323,
+    "maximumAdjacentMeanThicknessRatio" : 1.0308728896062096,
+    "maximumGreenPixels" : 256397,
+    "minimumGreenPixels" : 13523,
+    "sampledFrames" : 153,
+    "sampleIntervalSeconds" : 0.10000000000000001
+  },
+  "sample-detail" : {
+    "blankFrames" : 0,
+    "blankFrameTimes" : [
+
+    ],
+    "durationSeconds" : 16.011666666666667,
+    "maximumAdjacentGreenPixelDropRatio" : 0.81255337318531173,
+    "maximumAdjacentMeanLuminanceJump" : 21.043692672314577,
+    "maximumAdjacentMeanThicknessRatio" : 18.646650506011913,
+    "maximumGreenPixels" : 32670,
+    "minimumGreenPixels" : 439,
+    "sampledFrames" : 153,
+    "sampleIntervalSeconds" : 0.10000000000000001
+  }
+}

@@ -3,17 +3,18 @@ import {
   createEffect,
   createMemo,
   Show,
-  untrack,
 } from "solid-js";
 
-import { drawWaveformPeaks, drawWaveformPcmLine } from "@daw-browser/waveforms/render-waveform";
+import { drawWaveformSignal } from "@daw-browser/waveforms/draw-waveform-signal";
 import { useAppPreferences } from "~/context/app-preferences";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { createClipVisualColors, resolveClipColor } from "~/lib/clip-color";
 import { LANE_HEIGHT } from "~/lib/timeline-utils";
 import { getTimelineClipViewportSlice } from "~/lib/timeline-viewport-geometry";
 import { waveformCanvasSize } from "~/lib/waveform-canvas";
+import { resolveWaveformPaintStyle } from "~/lib/waveform-style";
 import { cn } from "~/lib/utils";
+import { useDevicePixelRatio } from "~/lib/device-pixel-ratio";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip } from "~/lib/timeline-runtime-types";
 import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
@@ -77,31 +78,21 @@ const MIN_CLIP_PX = 1;
 const WAVEFORM_PAD_Y = 6;
 const CLIP_TITLE_HEADER_H = 20;
 const AUDIO_WAVEFORM_PADDING_Y = 4;
-const AUDIO_WAVEFORM_MAX_HEIGHT_FRACTION = 0.9;
 const DOUBLE_TAP_MS = 700;
 const DOUBLE_TAP_DISTANCE_PX = 8;
 const SELECTED_TAP_MS = 700;
-export const createFadeScale = (
+const createFadeFrameScale = (
   fades: ReturnType<typeof normalizeClipFades>,
   duration: number,
   canvasStartSec: number,
   canvasDurationSec: number,
-  cssW: number,
-) => (column: number) => normalizedFadeGainAtClipTime(
+  sourceStartFrame: number,
+  sourceEndFrame: number,
+) => (frame: number) => normalizedFadeGainAtClipTime(
   fades,
   duration,
-  canvasStartSec + ((column + 0.5) / Math.max(1, cssW)) * canvasDurationSec,
-);
-const createFadeSampleScale = (
-  fades: ReturnType<typeof normalizeClipFades>,
-  duration: number,
-  canvasStartSec: number,
-  canvasDurationSec: number,
-  sampleCount: number,
-) => (index: number) => normalizedFadeGainAtClipTime(
-  fades,
-  duration,
-  canvasStartSec + (index / Math.max(1, sampleCount - 1)) * canvasDurationSec,
+  canvasStartSec
+    + ((frame - sourceStartFrame) / Math.max(1, sourceEndFrame - sourceStartFrame)) * canvasDurationSec,
 );
 type ClipTapState = { key: string; at: number; x: number; y: number; pointerType: string };
 type ClipOpenState = { key: string; at: number };
@@ -116,6 +107,7 @@ let lastClipDoubleOpen:
 const ClipComponent: Component<ClipComponentProps> = (props) => {
   const appPreferences = useAppPreferences();
   let canvasRef: HTMLCanvasElement | undefined;
+  const devicePixelRatio = useDevicePixelRatio();
   let selectedTapStart:
     | { x: number; y: number; at: number }
     | undefined;
@@ -167,6 +159,11 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     visibleRange: () => props.visibleRange,
     priorityRange: () => props.visibleRange,
     waveformVisible: () => props.waveformVisible !== false,
+    backingPixelsPerCssPixel: () => waveformCanvasSize({
+      cssWidthPx: clipWidthPx(),
+      cssHeightPx: Math.max(1, Math.floor(LANE_HEIGHT - 1)),
+      devicePixelRatio: devicePixelRatio(),
+    }).contextScaleX,
   });
   const waveformCanvasStyle = createMemo(() => {
     return {
@@ -280,7 +277,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const canvasSize = waveformCanvasSize({
       cssWidthPx: clipWidthPx(),
       cssHeightPx: cssH,
-      devicePixelRatio: window.devicePixelRatio || 1,
+      devicePixelRatio: devicePixelRatio(),
     });
     const cssW = canvasSize.cssWidthPx;
     const pxW = canvasSize.backingWidthPx;
@@ -400,12 +397,10 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     }
 
     const layout = waveform.layout();
-    const padPx = layout.padPx;
     const drawCols = layout.drawCols;
     const audioStartPx = layout.audioStartPx;
     const audioEndPx = layout.audioEndPx;
-    const renderSegments = waveform.renderSegments();
-    const peaks = waveform.peaks();
+    const renderSegments = waveform.segments();
     if (drawCols <= 0) {
       ctx.fillStyle = timelineSurface;
       ctx.fillRect(0, 0, cssW, cssH);
@@ -439,101 +434,42 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const waveformSegments = renderSegments;
     if (waveformSegments.length > 0) {
       for (const segment of waveformSegments) {
-        if (segment.mode === "peaks") {
-          const laneHeight = waveformBoxH / Math.max(1, segment.peaks.channels.length);
-          segment.peaks.channels.forEach((channelPeaks, channel) => {
-            drawWaveformPeaks({
-              ctx,
-              peaks: channelPeaks,
-              drawCols: segment.drawCols,
-              padPx: 0,
-              xOffsetPx: segment.drawStartPx,
-              topY: waveformTop + channel * laneHeight,
-              contentH: laneHeight,
-              cssW,
-              cssH,
-              fillStyle: contentColor,
-              boundaryStyle: timelineGridMajor,
-              maxHeightFraction: AUDIO_WAVEFORM_MAX_HEIGHT_FRACTION,
-              drawBoundary: false,
-              amplitudeScaleAtColumn: hasEffectiveFade
-                ? createFadeScale(
-                  fades,
-                  props.clip.duration,
-                  segment.canvasStartSec - props.clip.startSec,
-                  segment.canvasEndSec - segment.canvasStartSec,
-                  segment.drawCols,
-                )
-                : undefined,
-              opacity: segment.opacity,
-            });
-          });
-        } else {
-          drawWaveformPcmLine({
-            ctx,
-            pcm: segment.samples,
-            topY: waveformTop,
-            contentH: waveformBoxH,
-            cssW: segment.drawCols,
-            xOffsetPx: segment.drawStartPx,
-            fillStyle: contentColor,
-            pointRadius: segment.presentation.pointRadius,
-            lineOpacity: segment.presentation.lineOpacity,
-            pointOpacity: segment.presentation.pointOpacity,
-            amplitudeScaleAtSample: hasEffectiveFade
-              ? createFadeSampleScale(
-                fades,
-                props.clip.duration,
-                segment.canvasStartSec - props.clip.startSec,
-                segment.canvasEndSec - segment.canvasStartSec,
-                segment.samples.channels[0]?.length ?? 1,
-              )
-              : undefined,
-          });
-        }
-      }
-      return;
-    }
-
-    if (!peaks) {
-      ctx.strokeStyle = timelineGridMinor;
-      for (let x = audioStartPx; x < audioEndPx; x += 6) {
-        ctx.beginPath();
-        ctx.moveTo(x, cssH);
-        ctx.lineTo(Math.min(audioEndPx, x + 6), 0);
-        ctx.stroke();
-      }
-      return;
-    }
-
-    if (peaks) {
-      const laneHeight = waveformBoxH / Math.max(1, peaks.channels.length);
-      peaks.channels.forEach((channelPeaks, channel) => {
-        drawWaveformPeaks({
-          ctx,
-          peaks: channelPeaks,
-          drawCols,
-          padPx,
-          topY: waveformTop + channel * laneHeight,
-          contentH: laneHeight,
-          cssW,
-          cssH,
-          fillStyle: contentColor,
-          boundaryStyle: timelineGridMajor,
-          maxHeightFraction: AUDIO_WAVEFORM_MAX_HEIGHT_FRACTION,
-          amplitudeScaleAtColumn: hasEffectiveFade
-            ? createFadeScale(
+        const laneCount = Math.max(1, segment.data.channels.length);
+        drawWaveformSignal(ctx, {
+          data: segment.data,
+          sourceStartFrame: segment.sourceStartFrame,
+          sourceEndFrame: segment.sourceEndFrame,
+          startPx: segment.startPx,
+          endPx: segment.endPx,
+          topY: waveformTop,
+          contentH: waveformBoxH,
+          channelCount: laneCount,
+          style: resolveWaveformPaintStyle({
+            color: contentColor,
+            backingScaleY: canvasSize.contextScaleY,
+            pointRadius: segment.pointRadius,
+          }),
+          fadeScaleAtSourceFrame: hasEffectiveFade
+            ? createFadeFrameScale(
               fades,
               props.clip.duration,
-              (layout.canvasStartSec ?? props.clip.startSec) - props.clip.startSec
-                + padPx / Math.max(1, cssW)
-                  * Math.max(0, (layout.canvasEndSec ?? props.clip.startSec + props.clip.duration) - (layout.canvasStartSec ?? props.clip.startSec)),
-              Math.max(0, (layout.canvasEndSec ?? props.clip.startSec + props.clip.duration) - (layout.canvasStartSec ?? props.clip.startSec)),
-              cssW,
+              segment.canvasStartSec - props.clip.startSec,
+              segment.canvasEndSec - segment.canvasStartSec,
+              segment.sourceStartFrame,
+              segment.sourceEndFrame,
             )
             : undefined,
         });
-      });
+      }
+      return;
+    }
+
+    ctx.strokeStyle = timelineGridMinor;
+    for (let x = audioStartPx; x < audioEndPx; x += 6) {
+      ctx.beginPath();
+      ctx.moveTo(x, cssH);
+      ctx.lineTo(Math.min(audioEndPx, x + 6), 0);
+      ctx.stroke();
     }
   }
 
@@ -547,7 +483,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void props.pixelsPerSecond;
     void props.visibleRange;
     void waveform.renderRevision();
-    untrack(drawWaveform);
+    drawWaveform();
   });
 
   const clipElement = (

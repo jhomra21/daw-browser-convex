@@ -4,29 +4,43 @@ import {
   type AudioPcmSourceDescriptor,
 } from '@daw-browser/audio-engine/media-pages'
 import { extractPeakAsset } from './extract-peaks'
-import { deletePeakAssetData, loadPeakAssetRecord, loadPeakChunk, storePeakAssetRecord, storePeakChunk } from './peak-db'
+import {
+  deletePeakGenerationChunks,
+  loadPeakAssetRecord,
+  loadPeakChunk,
+  storePeakAssetRecord,
+  storePeakChunk,
+} from './peak-db'
 import { createWaveformSourceIdentity, peakAssetMatchesSourceIdentity } from './source-identity'
-import type { EnsureWaveformAssetOptions, PeakAssetRecord, WaveformPeakChunkData, WaveformSourceIdentity } from './types'
+import type {
+  EnsureWaveformAssetOptions,
+  PeakAssetRecord,
+  WaveformChunkData,
+  WaveformSourceIdentity,
+} from './types'
 
 const MAX_RECORD_CACHE_ENTRIES = 32
 const MAX_CHUNK_CACHE_ENTRIES = 64
-const assetRecordCache = new Map<string, PeakAssetRecord>()
-const assetChunkCache = new Map<string, WaveformPeakChunkData>()
-const pendingAssetLoads = new Map<string, Promise<PeakAssetRecord | null>>()
-const pendingAssetOperations = new Map<string, PendingAssetOperation>()
-const pendingChunkLoads = new Map<string, Promise<WaveformPeakChunkData | null>>()
-const assetGenerations = new Map<string, number>()
-let generationSequence = 0
-
-type PendingAssetOperation = {
-  identityKey: string
-  controller: AbortController
-  promise: Promise<PeakAssetRecord | null>
-  waiterCount: number
-  settled: boolean
+const records = new Map<string, PeakAssetRecord>()
+const chunks = new Map<string, WaveformChunkData>()
+type PendingRecord = {
+  readonly key: string
+  readonly promise: Promise<PeakAssetRecord | null>
+  readonly controller: AbortController
+  readonly subscribers: Set<(value: PeakAssetRecord | null) => void>
 }
+type Generation = {
+  readonly key: string
+  readonly token: object
+  readonly controller: AbortController
+}
+const pendingRecords = new Map<string, PendingRecord>()
+const pendingChunks = new Map<string, Promise<WaveformChunkData | null>>()
+const latestGeneration = new Map<string, Generation>()
+const publicationTails = new Map<string, Promise<void>>()
+let cacheEpoch = 0
 
-function cacheSet<Key, Value>(cache: Map<Key, Value>, key: Key, value: Value, limit: number) {
+const cacheSet = <Key, Value>(cache: Map<Key, Value>, key: Key, value: Value, limit: number) => {
   cache.delete(key)
   cache.set(key, value)
   while (cache.size > limit) {
@@ -36,7 +50,7 @@ function cacheSet<Key, Value>(cache: Map<Key, Value>, key: Key, value: Value, li
   }
 }
 
-function cacheGet<Key, Value>(cache: Map<Key, Value>, key: Key) {
+const cacheGet = <Key, Value>(cache: Map<Key, Value>, key: Key) => {
   const value = cache.get(key)
   if (value === undefined) return undefined
   cache.delete(key)
@@ -44,14 +58,8 @@ function cacheGet<Key, Value>(cache: Map<Key, Value>, key: Key) {
   return value
 }
 
-function nextGeneration(assetKey: string) {
-  const generation = ++generationSequence
-  assetGenerations.set(assetKey, generation)
-  return generation
-}
-
-function createBufferSource(assetKey: string, buffer: AudioBuffer): AudioPcmSourceDescriptor {
-  return createAudioPcmSourceDescriptor({
+export const createWaveformSourceFromBuffer = (buffer: AudioBuffer): AudioPcmSourceDescriptor => (
+  createAudioPcmSourceDescriptor({
     identity: getAudioBufferSessionIdentity(buffer),
     durationSec: buffer.duration,
     frameCount: buffer.length,
@@ -59,226 +67,224 @@ function createBufferSource(assetKey: string, buffer: AudioBuffer): AudioPcmSour
     channelCount: buffer.numberOfChannels,
     source: buffer,
   })
-}
+)
 
-function getSource(options: EnsureWaveformAssetOptions) {
-  return options.source ?? (options.buffer ? createBufferSource(options.assetKey, options.buffer) : undefined)
-}
+const sourceFor = (options: EnsureWaveformAssetOptions) => (
+  options.source ?? (options.buffer ? createWaveformSourceFromBuffer(options.buffer) : undefined)
+)
 
-function createSourceIdentity(
+const identityFor = (
   assetKey: string,
   source: AudioPcmSourceDescriptor | undefined,
   identity: WaveformSourceIdentity | undefined,
-) {
+) => {
   if (identity) return createWaveformSourceIdentity(identity)
   if (!source) return undefined
   return createWaveformSourceIdentity({
     assetKey,
     identity: source.identity,
     durationSec: source.durationSec,
+    frameCount: source.frameCount,
     sampleRate: source.sampleRate,
     channelCount: source.channelCount,
   })
 }
 
-function sourceIdentityKey(identity: WaveformSourceIdentity | undefined) {
-  return JSON.stringify(identity ?? null)
-}
-
-async function runSerializedAssetLoad(
+const generationKey = (
   assetKey: string,
-  load: () => Promise<PeakAssetRecord | null>,
-) {
-  const previous = pendingAssetLoads.get(assetKey)
-  const current = (async () => {
-    if (previous) {
-      try {
-        await previous
-      } catch {}
-    }
-    return await load()
-  })()
-  pendingAssetLoads.set(assetKey, current)
-  try {
-    return await current
-  } finally {
-    if (pendingAssetLoads.get(assetKey) === current) {
-      pendingAssetLoads.delete(assetKey)
-    }
+  identity: WaveformSourceIdentity | undefined,
+) => JSON.stringify([assetKey, identity])
+
+const discardUnpublishedGeneration = async (assetKey: string, generationId: string) => {
+  await deletePeakGenerationChunks(assetKey, generationId)
+  const prefix = `${assetKey}:${generationId}:`
+  for (const key of chunks.keys()) {
+    if (key.startsWith(prefix)) chunks.delete(key)
   }
 }
 
-function waitForAssetLoad(operation: PendingAssetOperation, signal?: AbortSignal) {
-  operation.waiterCount += 1
-  let detached = false
-  let settled = false
-
-  const detach = () => {
-    if (detached) return
-    detached = true
-    operation.waiterCount -= 1
-    if (operation.waiterCount === 0 && !operation.settled) {
-      operation.controller.abort(signal?.reason)
-    }
-  }
-
-  return new Promise<PeakAssetRecord | null>((resolve, reject) => {
-    const finish = () => {
-      if (settled) return
-      settled = true
-      signal?.removeEventListener('abort', onAbort)
-      detach()
-    }
-    const onAbort = () => {
-      finish()
-      resolve(null)
-    }
-
-    if (signal?.aborted) {
-      onAbort()
-      return
-    }
-    signal?.addEventListener('abort', onAbort, { once: true })
-    void operation.promise.then(
-      (value) => {
-        finish()
-        resolve(value)
-      },
-      (error) => {
-        finish()
-        reject(error)
-      },
-    )
+const publishRecord = async (
+  assetKey: string,
+  record: PeakAssetRecord,
+  isCurrent: () => boolean,
+): Promise<boolean> => {
+  const previous = publicationTails.get(assetKey) ?? Promise.resolve()
+  let release: () => void = () => {}
+  const tail = new Promise<void>((resolve) => {
+    release = resolve
   })
+  publicationTails.set(assetKey, tail)
+  try {
+    await previous
+    if (!isCurrent()) return false
+    await storePeakAssetRecord(record)
+    return true
+  } finally {
+    release()
+    if (publicationTails.get(assetKey) === tail) publicationTails.delete(assetKey)
+  }
 }
 
 export async function ensurePeakAsset(options: EnsureWaveformAssetOptions): Promise<PeakAssetRecord | null> {
-  const { assetKey } = options
   options.signal?.throwIfAborted()
-  const source = getSource(options)
-  const sourceIdentity = createSourceIdentity(assetKey, source, options.sourceIdentity)
-  const cached = cacheGet(assetRecordCache, assetKey)
-  if (cached && peakAssetMatchesSourceIdentity(cached, sourceIdentity)) return cached
+  const source = sourceFor(options)
+  const identity = identityFor(options.assetKey, source, options.sourceIdentity)
+  const current = options.forceRegenerate ? undefined : cacheGet(records, options.assetKey)
+  if (current && peakAssetMatchesSourceIdentity(current, identity)) return current
   if (!source) return null
-  const identityKey = sourceIdentityKey(sourceIdentity)
-  const pending = pendingAssetOperations.get(assetKey)
-  if (pending?.identityKey === identityKey && !pending.controller.signal.aborted) {
-    return await waitForAssetLoad(pending, options.signal)
+
+  const key = generationKey(options.assetKey, identity)
+  const pending = pendingRecords.get(key)
+  if (pending) return await subscribeToRecord(pending, options.signal)
+  const generationToken = {}
+  const controller = new AbortController()
+  const previous = latestGeneration.get(options.assetKey)
+  if (previous) {
+    const previousPending = pendingRecords.get(previous.key)
+    if (previousPending?.controller === previous.controller) {
+      pendingRecords.delete(previous.key)
+      for (const finish of previousPending.subscribers) finish(null)
+    }
+    previous.controller.abort()
   }
-
-  const generation = nextGeneration(assetKey)
-  pending?.controller.abort()
-  const generationController = new AbortController()
-  const promise = runSerializedAssetLoad(assetKey, async () => {
+  const generation: Generation = { key, token: generationToken, controller }
+  latestGeneration.set(options.assetKey, generation)
+  const generationEpoch = cacheEpoch
+  const task = (async () => {
+    let generationId: string | undefined
+    let published = false
+    const isCurrent = () => (
+      cacheEpoch === generationEpoch
+      && latestGeneration.get(options.assetKey)?.token === generationToken
+    )
+    let stored: PeakAssetRecord | null = null
     try {
-      generationController.signal.throwIfAborted()
-      const current = cacheGet(assetRecordCache, assetKey)
-      if (current && peakAssetMatchesSourceIdentity(current, sourceIdentity)) return current
-
-      const stored = source.persistable === true
-        ? await loadPeakAssetRecord(assetKey)
-        : null
-      generationController.signal.throwIfAborted()
-      if (stored && peakAssetMatchesSourceIdentity(stored, sourceIdentity)) {
-        cacheSet(assetRecordCache, assetKey, stored, MAX_RECORD_CACHE_ENTRIES)
+      stored = source.persistable === true ? await loadPeakAssetRecord(options.assetKey) : null
+      controller.signal.throwIfAborted()
+      if (!options.forceRegenerate && stored && peakAssetMatchesSourceIdentity(stored, identity)) {
+        if (!isCurrent()) return null
+        cacheSet(records, options.assetKey, stored, MAX_RECORD_CACHE_ENTRIES)
+        published = true
         return stored
       }
-
-      const record = await extractPeakAsset(source, assetKey, {
-        signal: generationController.signal,
-        onChunk: async ({ chunks }) => {
-          generationController.signal.throwIfAborted()
-          if (assetGenerations.get(assetKey) !== generation) {
-            generationController.abort()
-            generationController.signal.throwIfAborted()
-          }
-          for (const chunk of chunks) {
-            if (assetGenerations.get(assetKey) !== generation) {
-              generationController.abort()
-              generationController.signal.throwIfAborted()
-            }
-            if (source.persistable === true) await storePeakChunk(chunk.meta.chunkKey, chunk.data)
-            cacheSet(assetChunkCache, chunk.meta.chunkKey, chunk.data, MAX_CHUNK_CACHE_ENTRIES)
-          }
+      const record = await extractPeakAsset(source, options.assetKey, {
+        signal: controller.signal,
+        onGeneration: (nextRecord) => {
+          generationId = nextRecord.generationId
         },
-      }, sourceIdentity)
-      generationController.signal.throwIfAborted()
-      if (assetGenerations.get(assetKey) !== generation) return null
-      if (source.persistable === true) await storePeakAssetRecord(record)
-      generationController.signal.throwIfAborted()
-      cacheSet(assetRecordCache, assetKey, record, MAX_RECORD_CACHE_ENTRIES)
+        onChunk: async ({ meta, data }) => {
+          controller.signal.throwIfAborted()
+          if (!isCurrent()) {
+            controller.abort()
+            controller.signal.throwIfAborted()
+          }
+          if (source.persistable === true) await storePeakChunk(meta.chunkKey, data)
+          if (!isCurrent()) {
+            controller.abort()
+            controller.signal.throwIfAborted()
+          }
+          cacheSet(chunks, meta.chunkKey, data, MAX_CHUNK_CACHE_ENTRIES)
+        },
+      }, identity)
+      controller.signal.throwIfAborted()
+      if (!isCurrent()) return null
+      if (source.persistable === true) {
+        const committed = await publishRecord(options.assetKey, record, isCurrent)
+        if (committed) published = true
+        if (!isCurrent()) return null
+        if (stored && stored.generationId !== record.generationId) {
+          await deletePeakGenerationChunks(options.assetKey, stored.generationId)
+        }
+        if (!isCurrent()) return null
+      } else {
+        published = true
+      }
+      if (!isCurrent()) return null
+      cacheSet(records, options.assetKey, record, MAX_RECORD_CACHE_ENTRIES)
       return record
-    } catch (error) {
-      if (generationController.signal.aborted) return null
-      throw error
+    } finally {
+      if (latestGeneration.get(options.assetKey)?.token === generationToken) {
+        latestGeneration.delete(options.assetKey)
+      }
+      if (!published && source.persistable === true && generationId) {
+        await discardUnpublishedGeneration(options.assetKey, generationId)
+      }
     }
-  }).finally(() => {
-    const operation = pendingAssetOperations.get(assetKey)
-    if (operation?.controller === generationController) {
-      operation.settled = true
-      pendingAssetOperations.delete(assetKey)
-    }
-    if (assetGenerations.get(assetKey) === generation) assetGenerations.delete(assetKey)
-  })
-  const operation: PendingAssetOperation = {
-    identityKey,
-    controller: generationController,
-    promise,
-    waiterCount: 0,
-    settled: false,
-  }
-  pendingAssetOperations.set(assetKey, operation)
-  return await waitForAssetLoad(operation, options.signal)
+  })()
+  const pendingRecord: PendingRecord = { key, promise: task, controller, subscribers: new Set() }
+  pendingRecords.set(key, pendingRecord)
+  void task.finally(() => {
+    if (pendingRecords.get(key) === pendingRecord) pendingRecords.delete(key)
+  }).catch(() => {})
+  return await subscribeToRecord(pendingRecord, options.signal)
 }
 
-export async function loadPeakChunkData(chunkKey: string): Promise<WaveformPeakChunkData | null> {
-  const cached = cacheGet(assetChunkCache, chunkKey)
-  if (cached) return cached
+async function subscribeToRecord(
+  pending: PendingRecord,
+  signal?: AbortSignal,
+): Promise<PeakAssetRecord | null> {
+  if (signal?.aborted) return null
+  return await new Promise<PeakAssetRecord | null>((resolve) => {
+    let settled = false
+    const finish = (value: PeakAssetRecord | null) => {
+      if (settled) return
+      settled = true
+      pending.subscribers.delete(finish)
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort)
+      resolve(value)
+    }
+    const onAbort = () => {
+      finish(null)
+      if (pending.subscribers.size !== 0) return
+      if (pendingRecords.get(pending.key) === pending) pendingRecords.delete(pending.key)
+      pending.controller.abort()
+    }
+    pending.subscribers.add(finish)
+    signal?.addEventListener('abort', onAbort, { once: true })
+    void pending.promise.then(finish, () => finish(null))
+  })
+}
 
-  const pending = pendingChunkLoads.get(chunkKey)
+export async function loadPeakChunkData(chunkKey: string): Promise<WaveformChunkData | null> {
+  const current = cacheGet(chunks, chunkKey)
+  if (current) return current
+  const pending = pendingChunks.get(chunkKey)
   if (pending) return await pending
-
-  const task = (async () => {
-    const loaded = await loadPeakChunk(chunkKey)
-    if (loaded) cacheSet(assetChunkCache, chunkKey, loaded, MAX_CHUNK_CACHE_ENTRIES)
-    return loaded
-  })()
-
-  pendingChunkLoads.set(chunkKey, task)
+  const epoch = cacheEpoch
+  const task = loadPeakChunk(chunkKey).then((value) => {
+    if (cacheEpoch !== epoch) return null
+    if (value) cacheSet(chunks, chunkKey, value, MAX_CHUNK_CACHE_ENTRIES)
+    return value
+  })
+  pendingChunks.set(chunkKey, task)
   try {
     return await task
   } finally {
-    if (pendingChunkLoads.get(chunkKey) === task) pendingChunkLoads.delete(chunkKey)
+    if (pendingChunks.get(chunkKey) === task) pendingChunks.delete(chunkKey)
   }
 }
 
-export async function invalidatePeakAsset(assetKey: string): Promise<void> {
-  cacheGet(assetRecordCache, assetKey)
-  assetRecordCache.delete(assetKey)
-  for (const key of Array.from(assetChunkCache.keys())) {
-    if (key.startsWith(`${assetKey}:`)) assetChunkCache.delete(key)
-  }
-  await deletePeakAssetData(assetKey)
-}
-
-export async function loadCachedPeakAsset(
-  assetKey: string,
-): Promise<PeakAssetRecord | null> {
-  const cached = cacheGet(assetRecordCache, assetKey)
-  if (cached) return cached
+export async function loadCachedPeakAsset(assetKey: string) {
+  const current = cacheGet(records, assetKey)
+  if (current) return current
+  const epoch = cacheEpoch
   const stored = await loadPeakAssetRecord(assetKey)
-  if (stored) cacheSet(assetRecordCache, assetKey, stored, MAX_RECORD_CACHE_ENTRIES)
+  if (cacheEpoch !== epoch) return null
+  if (stored) cacheSet(records, assetKey, stored, MAX_RECORD_CACHE_ENTRIES)
   return stored
 }
 
 export function clearWaveformAssetCache() {
-  assetRecordCache.clear()
-  assetChunkCache.clear()
-  pendingAssetLoads.clear()
-  pendingChunkLoads.clear()
-  assetGenerations.clear()
-  for (const operation of pendingAssetOperations.values()) operation.controller.abort()
-  pendingAssetOperations.clear()
+  cacheEpoch += 1
+  for (const pending of pendingRecords.values()) {
+    for (const finish of pending.subscribers) finish(null)
+    pending.controller.abort()
+  }
+  records.clear()
+  chunks.clear()
+  pendingRecords.clear()
+  pendingChunks.clear()
+  latestGeneration.clear()
 }
 
 export const waveformCacheLimits = {
@@ -287,7 +293,7 @@ export const waveformCacheLimits = {
 }
 
 export const getWaveformCacheSizes = () => ({
-  recordEntries: assetRecordCache.size,
-  chunkEntries: assetChunkCache.size,
-  generationEntries: assetGenerations.size,
+  recordEntries: records.size,
+  chunkEntries: chunks.size,
+  generationEntries: latestGeneration.size,
 })

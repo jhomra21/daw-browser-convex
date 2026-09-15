@@ -1,96 +1,58 @@
-export const maximumCachedPeaksPerSecond = 400
-export const samplePointMinimumPixelsPerSample = 5
-export const lineBlendStartSamplesPerPixel = 1.5
-export const lineBlendEndSamplesPerPixel = 2 / 3
-export const pointBlendStartPixelsPerSample = 4
-export const pointBlendEndPixelsPerSample = 6
+export const pointStartPixelsPerSample = 4
+export const pointFullPixelsPerSample = 6
 
-export type WaveformLod =
-  | {
-    mode: 'cached-peaks'
-    requestedColumnsPerSecond: number
-    samplesPerPixel: number
-  }
-  | {
-    mode: 'pcm-envelope'
-    requestedColumnsPerSecond: number
-    samplesPerPixel: number
-  }
-  | {
-    mode: 'pcm-line'
-    requestedColumnsPerSecond: number
-    samplesPerPixel: number
-    pixelsPerSample: number
-  }
-
-export type WaveformVisualMix = {
-  envelopeOpacity: number
-  lineOpacity: number
-  pointOpacity: number
-  pointRadius: number
+export type WaveformTier = {
+  readonly framesPerInterval: number
+  readonly sourceFramesPerBackingPixel: number
+  readonly projectedIntervalWidth: number
+  readonly showPoints: boolean
 }
 
-export type SelectWaveformLodInput = {
-  sampleRate: number
-  sourceStartSec: number
-  sourceEndSec: number
-  widthPx: number
+export type WaveformTierSelectionInput = {
+  readonly sourceFrameSpan: number
+  readonly cssSegmentWidth: number
+  readonly backingPixelsPerCssPixel: number
+  readonly tiers: readonly number[]
+  readonly previousFramesPerInterval?: number
 }
 
-const clamp01 = (value: number) => Math.max(0, Math.min(1, value))
+const valid = (value: number) => Number.isFinite(value) && value > 0
 
-const smoothstep = (value: number) => {
-  const clamped = clamp01(value)
-  return clamped * clamped * (3 - 2 * clamped)
-}
-
-export const waveformVisualMixFor = (input: {
-  samplesPerPixel: number
-  pixelsPerSample?: number
-}): WaveformVisualMix => {
-  const samplesPerPixel = Number.isFinite(input.samplesPerPixel) && input.samplesPerPixel > 0
-    ? input.samplesPerPixel
-    : 1
-  const pixelsPerSample = Number.isFinite(input.pixelsPerSample) && (input.pixelsPerSample ?? 0) > 0
-    ? input.pixelsPerSample ?? 1 / samplesPerPixel
-    : 1 / samplesPerPixel
-  const lineOpacity = smoothstep(
-    (lineBlendStartSamplesPerPixel - samplesPerPixel)
-      / (lineBlendStartSamplesPerPixel - lineBlendEndSamplesPerPixel),
-  )
-  const pointOpacity = smoothstep(
-    (pixelsPerSample - pointBlendStartPixelsPerSample)
-      / (pointBlendEndPixelsPerSample - pointBlendStartPixelsPerSample),
-  )
+export const selectWaveformTier = (input: WaveformTierSelectionInput): WaveformTier | null => {
+  if (!valid(input.sourceFrameSpan)
+    || !valid(input.cssSegmentWidth)
+    || !valid(input.backingPixelsPerCssPixel)
+    || input.tiers.length === 0) return null
+  const tiers = [...new Set(input.tiers.filter((tier) => Number.isSafeInteger(tier) && tier > 0))].sort((a, b) => a - b)
+  if (tiers.length === 0) return null
+  const sourceFramesPerBackingPixel = input.sourceFrameSpan
+    / (input.cssSegmentWidth * input.backingPixelsPerCssPixel)
+  const projected = (tier: number) => tier / sourceFramesPerBackingPixel
+  const requestedIndex = tiers.reduce((index, tier, candidateIndex) => (
+    projected(tier) <= 0.75 ? candidateIndex : index
+  ), 0)
+  let index = requestedIndex
+  const previousIndex = input.previousFramesPerInterval === undefined
+    ? -1
+    : Math.max(0, tiers.indexOf(input.previousFramesPerInterval))
+  if (previousIndex >= 0) {
+    const previousWidth = projected(tiers[previousIndex] ?? tiers[0]!)
+    if (index > previousIndex && previousWidth <= 0.875) index = previousIndex
+    if (index < previousIndex && previousWidth > 0.625) index = previousIndex
+  }
+  const framesPerInterval = tiers[index] ?? tiers[0]!
+  const pixelsPerSample = 1 / sourceFramesPerBackingPixel
   return {
-    envelopeOpacity: 1 - lineOpacity,
-    lineOpacity,
-    pointOpacity,
-    pointRadius: pointOpacity,
+    framesPerInterval,
+    sourceFramesPerBackingPixel,
+    projectedIntervalWidth: projected(framesPerInterval),
+    showPoints: pixelsPerSample >= pointStartPixelsPerSample,
   }
 }
 
-export function selectWaveformLod(input: SelectWaveformLodInput): WaveformLod | null {
-  const durationSec = input.sourceEndSec - input.sourceStartSec
-  if (!Number.isFinite(input.sampleRate) || input.sampleRate <= 0
-    || !Number.isFinite(input.sourceStartSec) || input.sourceStartSec < 0
-    || !Number.isFinite(input.sourceEndSec)
-    || !Number.isFinite(durationSec) || durationSec <= 0
-    || !Number.isFinite(input.widthPx) || input.widthPx <= 0) return null
-
-  const requestedColumnsPerSecond = input.widthPx / durationSec
-  const samplesPerPixel = input.sampleRate / requestedColumnsPerSecond
-  if (requestedColumnsPerSecond <= maximumCachedPeaksPerSecond) {
-    return { mode: 'cached-peaks', requestedColumnsPerSecond, samplesPerPixel }
-  }
-  if (samplesPerPixel >= 1) {
-    return { mode: 'pcm-envelope', requestedColumnsPerSecond, samplesPerPixel }
-  }
-
-  return {
-    mode: 'pcm-line',
-    requestedColumnsPerSecond,
-    samplesPerPixel,
-    pixelsPerSample: 1 / samplesPerPixel,
-  }
-}
+export const pointRadiusForPixelsPerSample = (pixelsPerSample: number) => (
+  !valid(pixelsPerSample) || pixelsPerSample <= pointStartPixelsPerSample
+    ? 0
+    : Math.min(1, (pixelsPerSample - pointStartPixelsPerSample)
+      / (pointFullPixelsPerSample - pointStartPixelsPerSample))
+)

@@ -282,3 +282,24 @@
 - [ ] Final 20-simultaneously-visible audio-canvas browser and Electron campaign remains unproven. The isolated browser fixture reached 20 tracks but the UI-only bundled-sample insertion path did not populate all tracks reliably; the packaged fixture exposed at most 18 canvases at the maximum available 1,290 px outer window height. These results are not mislabeled as the required all-20-visible pass.
 - [ ] Slowed uninterrupted zoom recording remains unavailable because the attached browser driver rejected recording context creation. Static screenshots are preserved under `acceptance-reports/visual-fidelity-*.png`; no recording pass is claimed.
 - Current status remains **DEEP TIMELINE ZOOM — VISUAL FIDELITY QUALIFICATION IN PROGRESS**. PR #54 must remain open and unmerged.
+
+## Unified visual waveform
+
+- Status remains **VISUAL FIDELITY QUALIFICATION IN PROGRESS, NOT READY**. Runtime and video qualification remain pending.
+- Supplied video timing recorded: the visible waveform transition occurs around 1.5–2.0 seconds and 3.4–3.9 seconds. The rejected `9a58802478a8b75d6505f7d8b849332a3776a6b7` architecture used blended envelope/line visual identities and request-relative data.
+- Reference audit recorded: the relevant `monorepo-new` timeline renderer/source-window files and `dialkit` timeline projection/coalescing files were inspected and adapted selectively; `solid-primitives` resize/RAF/media lifecycle concepts were inspected without adding the dependency. `daw-effect-research` is empty and there is no local openDAW checkout.
+- Persisted waveform data is format v4 with frame-count metadata, globally aligned power-of-two levels, 1024-interval chunks, signed-u8 min/max pairs, and one-pass page-ordered extraction with deterministic silence tails.
+- The visible source contract is now `WaveformSourceData`: aligned interval byte/float data or exact samples. Source frame windows and frames-per-interval are acquisition identity; CSS width is not.
+- The unified painter is `drawWaveformSignal`. It fills one signed min/max band, strokes only collapsed zero-area runs, and draws exact-sample vertices/points through the same Y mapping. It does not draw grid or boundary chrome.
+- The view model publishes one ready source geometry per segment. It performs current canonical projection from source frames through the clip time map and does not crossfade, retain raster geometry, scale stale bitmaps, or emit separate visual representations.
+- Deterministic coverage added for aligned request deduplication, signed interval painting, and source-aligned interval cropping. Full runtime/video evidence is still required.
+
+### Unified waveform correctness follow-up
+
+- [x] Peak extraction now accounts for chunk sizes in intervals rather than byte lengths, uses fixed per-level chunk buffers, and reduces parent tails with bounded accumulators.
+- [x] Extraction accepts ordered non-overlapping pages with gaps, converts gaps and end tails to silence, validates page planes, and proves that every hierarchy level emitted its declared interval count.
+- [x] Signed-u8 quantization is monotonic across the full byte range with an exact silence midpoint; persisted tier selection never silently substitutes a coarser level.
+- [x] PCM windows preserve page gaps as silence, exact sample windows remain frame-aligned, malformed persisted chunks invalidate and regenerate persistable assets, and exact samples spanning more than two tiles are rejected by the scheduler.
+- [x] Scheduler subscribers are isolated for cancellation, final cancellation aborts work, queued visible requests can evict lower-priority overscan work, cache size is bounded by bytes and entry count, and source resolution receives the scheduler signal.
+- [x] Restored focused waveform coverage now passes 28 tests and 86 assertions across extraction, persistence, asset identity/generation, source windows, LOD, scheduler, and painter behavior.
+- [ ] Full runtime/video qualification remains pending; this follow-up claims static correctness coverage only.

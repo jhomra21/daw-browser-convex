@@ -1,0 +1,39 @@
+{
+  "scan_id": "scan-2026-09-15-waveform-raster",
+  "scan_date": "2026-09-15T12:38:43.239456Z",
+  "scan_type": "working",
+  "commit_range": "9a58802478a8b75d6505f7d8b849332a3776a6b7..working-tree",
+  "pr_number": 54,
+  "threat_model_version": "1.0.0",
+  "scope": [
+    "packages/waveforms/src/draw-waveform-signal.ts",
+    "packages/waveforms/src/types.ts",
+    "src/lib/waveform-style.ts",
+    "src/lib/waveform-ribbon.browser.test.ts",
+    "src/lib/waveform-ribbon.browser-runtime.ts",
+    "src/hooks/useTimelineViewport.ts",
+    "src/components/timeline/TrackLane.tsx",
+    "src/components/timeline/clip-render-range.ts"
+  ],
+  "findings": [],
+  "summary": {
+    "total_findings": 0,
+    "by_severity": {
+      "CRITICAL": 0,
+      "HIGH": 0,
+      "MEDIUM": 0,
+      "LOW": 0
+    },
+    "by_stride": {
+      "Spoofing": 0,
+      "Tampering": 0,
+      "Repudiation": 0,
+      "InfoDisclosure": 0,
+      "DoS": 0,
+      "ElevationOfPrivilege": 0
+    },
+    "files_analyzed": 8,
+    "thresholds_triggered": []
+  },
+  "review_note": "Final focused STRIDE review included persistence-scope deferral and overscan clip ownership. No new trust boundary, external input sink, privilege, disclosure, injection, or unbounded-resource path was introduced."
+}

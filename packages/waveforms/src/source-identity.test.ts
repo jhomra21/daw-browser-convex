@@ -5,34 +5,26 @@ import { peakAssetFormatVersion, type PeakAssetRecord } from './types'
 const record: PeakAssetRecord = {
   formatVersion: peakAssetFormatVersion,
   assetKey: 'project:asset',
+  generationId: 'generation-1',
+  frameCount: 96_000,
   durationSec: 2,
-  sampleRate: 44100,
+  sampleRate: 48_000,
   channelCount: 2,
   levels: [],
 }
 
-describe('peakAssetMatchesSourceIdentity', () => {
-  test('accepts matching identity metadata', () => {
+describe('waveform source identity', () => {
+  test('accepts matching metadata and rejects stale source changes', () => {
     expect(peakAssetMatchesSourceIdentity(record, {
       assetKey: 'project:asset',
+      frameCount: 96_000,
       durationSec: 2,
-      sampleRate: 44100,
+      sampleRate: 48_000,
       channelCount: 2,
     })).toBe(true)
-  })
-
-  test('rejects stale peaks when source metadata changes', () => {
     expect(peakAssetMatchesSourceIdentity(record, {
       assetKey: 'project:asset',
-      durationSec: 3,
-      sampleRate: 44100,
-      channelCount: 2,
-    })).toBe(false)
-    expect(peakAssetMatchesSourceIdentity(record, {
-      assetKey: 'project:asset',
-      durationSec: 2,
-      sampleRate: 48000,
-      channelCount: 2,
+      frameCount: 144_000,
     })).toBe(false)
     expect(peakAssetMatchesSourceIdentity(record, {
       assetKey: 'other:asset',

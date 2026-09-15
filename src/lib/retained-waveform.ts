@@ -1,5 +1,7 @@
-import { ARRANGEMENT_PCM_TILE_FRAMES } from '@daw-browser/waveforms/arrangement-waveform-pcm'
-import { selectWaveformLod, type WaveformLod } from '@daw-browser/waveforms/lod'
+import { ARRANGEMENT_PCM_TILE_FRAMES } from '@daw-browser/waveforms/arrangement-waveform'
+import { pointStartPixelsPerSample, selectWaveformTier, type WaveformTier } from '@daw-browser/waveforms/lod'
+import { createWaveformRequestTierFrames } from '@daw-browser/waveforms/extract-peaks'
+import type { WaveformSourceData } from '@daw-browser/waveforms/types'
 import {
   cropWaveformDataToSourceRange,
   type AudioWaveformLayoutSegment,
@@ -8,62 +10,212 @@ import {
 } from './audio-waveform-layout'
 import type { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 
-export const MAX_WAVEFORM_DENSITY_BUCKET = 4_096
-const WAVEFORM_DENSITY_BUCKET_FACTOR = 1.5
-
 export type WaveformRequestPlan = {
-  key: string
-  sourceStartSec: number
-  sourceEndSec: number
-  lod: WaveformLod
-  bins: number
-  exactRange: boolean
+  readonly key: string
+  readonly sourceStartFrame: number
+  readonly sourceEndFrame: number
+  readonly framesPerInterval: number
+  readonly priority: number
 }
 
 export type WaveformSegmentPlan = {
-  requestKey: string
-  segment: AudioWaveformLayoutSegment
+  readonly requestKey: string
+  readonly tier: WaveformTier
+  readonly segment: AudioWaveformLayoutSegment
+}
+
+export type WaveformRequestPlans = {
+  readonly requests: readonly WaveformRequestPlan[]
+  readonly segments: readonly WaveformSegmentPlan[]
+}
+
+export const waveformDataEndFrame = (data: WaveformSourceData) => (
+  data.firstFrame + (
+    data.kind === 'samples'
+      ? data.channels[0]?.length ?? 0
+      : data.intervalCount * data.framesPerInterval
+  )
+)
+
+export const retainWaveformData = (data: WaveformSourceData): CroppedWaveformData => ({
+  data,
+  sourceStartFrame: data.firstFrame,
+  sourceEndFrame: waveformDataEndFrame(data),
+})
+
+const quantizeRange = (
+  start: number,
+  end: number,
+  sampleRate: number,
+  sourceFrameCount: number,
+) => {
+  const startFrame = Math.max(0, Math.min(sourceFrameCount, Math.floor(start * sampleRate)))
+  if (startFrame >= sourceFrameCount) return null
+  const endFrame = Math.min(
+    sourceFrameCount,
+    Math.max(startFrame + 1, Math.ceil(end * sampleRate)),
+  )
+  if (endFrame <= startFrame) return null
+  const firstTile = Math.floor(startFrame / ARRANGEMENT_PCM_TILE_FRAMES)
+  const lastTile = Math.floor((endFrame - 1) / ARRANGEMENT_PCM_TILE_FRAMES)
+  return {
+    startFrame: firstTile * ARRANGEMENT_PCM_TILE_FRAMES,
+    endFrame: Math.min(sourceFrameCount, (lastTile + 1) * ARRANGEMENT_PCM_TILE_FRAMES),
+  }
+}
+
+const keyFor = (startFrame: number, endFrame: number, framesPerInterval: number) => (
+  `${startFrame}:${endFrame}:${framesPerInterval}`
+)
+
+export const createWaveformRequestPlans = (input: {
+  readonly segments: readonly AudioWaveformLayoutSegment[]
+  readonly sampleRate: number
+  readonly sourceDurationSec: number
+  readonly sourceFrameCount: number
+  readonly backingPixelsPerCssPixel?: number
+  readonly priorityRange?: { startSec: number; endSec: number }
+}): WaveformRequestPlans => {
+  const sourceFrameCount = input.sourceFrameCount
+  if (!Number.isSafeInteger(sourceFrameCount) || sourceFrameCount < 0) {
+    return { requests: [], segments: [] }
+  }
+  if (sourceFrameCount <= 0) return { requests: [], segments: [] }
+  const requests = new Map<string, WaveformRequestPlan>()
+  const segments: WaveformSegmentPlan[] = []
+  for (const segment of input.segments) {
+    if (!Number.isFinite(segment.sourceStartSec) || !Number.isFinite(segment.sourceEndSec)) continue
+    const sourceStartFrame = Math.max(
+      0,
+      Math.min(sourceFrameCount, Math.floor(segment.sourceStartSec * input.sampleRate)),
+    )
+    const sourceEndFrame = Math.min(
+      sourceFrameCount,
+      Math.max(sourceStartFrame + 1, Math.ceil(segment.sourceEndSec * input.sampleRate)),
+    )
+    const density = input.backingPixelsPerCssPixel ?? 1
+    if (sourceStartFrame >= sourceEndFrame) continue
+    const tiers = createWaveformRequestTierFrames(sourceFrameCount, input.sampleRate)
+    const sourceFramesPerBackingPixel = (sourceEndFrame - sourceStartFrame)
+      / (Math.max(1, segment.endPx - segment.startPx) * density)
+    const tiersWithSamples = sourceFramesPerBackingPixel <= 1 / pointStartPixelsPerSample
+      ? [1, ...tiers]
+      : tiers
+    const tier = selectWaveformTier({
+      sourceFrameSpan: sourceEndFrame - sourceStartFrame,
+      cssSegmentWidth: Math.max(1, segment.endPx - segment.startPx),
+      backingPixelsPerCssPixel: density,
+      tiers: tiersWithSamples,
+    })
+    if (!tier) continue
+    const range = quantizeRange(
+      segment.sourceStartSec,
+      segment.sourceEndSec,
+      input.sampleRate,
+      sourceFrameCount,
+    )
+    if (!range) continue
+    const key = keyFor(range.startFrame, range.endFrame, tier.framesPerInterval)
+    const priorityCenter = input.priorityRange
+      ? (input.priorityRange.startSec + input.priorityRange.endSec) / 2
+      : (segment.canvasStartSec + segment.canvasEndSec) / 2
+    const existing = requests.get(key)
+    if (!existing) {
+      requests.set(key, {
+        key,
+        sourceStartFrame: range.startFrame,
+        sourceEndFrame: range.endFrame,
+        framesPerInterval: tier.framesPerInterval,
+        priority: Math.abs((segment.canvasStartSec + segment.canvasEndSec) / 2 - priorityCenter),
+      })
+    } else {
+      requests.set(key, {
+        ...existing,
+        priority: Math.min(
+          existing.priority,
+          Math.abs((segment.canvasStartSec + segment.canvasEndSec) / 2 - priorityCenter),
+        ),
+      })
+    }
+    segments.push({ requestKey: key, tier, segment })
+  }
+  return { requests: [...requests.values()], segments }
 }
 
 export const projectRetainedWaveformData = (input: {
-  retainedByKey: ReadonlyMap<string, CroppedWaveformData>
-  segments: readonly WaveformSegmentPlan[]
-  map: ReturnType<typeof getAudioClipTimeMap>
+  readonly retainedByKey: ReadonlyMap<string, CroppedWaveformData>
+  readonly segments: readonly WaveformSegmentPlan[]
+  readonly map: ReturnType<typeof getAudioClipTimeMap>
 }): ProjectedWaveformData[] => {
   if (!input.map) return []
+  const coverage = [...input.retainedByKey.values()]
+    .map((retained) => {
+      const start = retained.data.firstFrame
+      const end = waveformDataEndFrame(retained.data)
+      return { retained, start, end, sampleRate: retained.data.sampleRate }
+    })
+    .sort((left, right) => left.start - right.start)
+    .reduce<Array<{
+      readonly retained: CroppedWaveformData
+      readonly start: number
+      readonly end: number
+      readonly sampleRate: number
+      readonly maxEnd: number
+      readonly maxEndIndex: number
+    }>>((entries, entry, index) => {
+      const previous = entries[index - 1]
+      const maxEnd = previous && previous.maxEnd >= entry.end ? previous.maxEnd : entry.end
+      const maxEndIndex = previous && previous.maxEnd >= entry.end
+        ? previous.maxEndIndex
+        : index
+      entries.push({ ...entry, maxEnd, maxEndIndex })
+      return entries
+    }, [])
+  const findCoverage = (start: number, end: number) => {
+    let upperBoundLow = 0
+    let upperBoundHigh = coverage.length
+    while (upperBoundLow < upperBoundHigh) {
+      const middle = Math.floor((upperBoundLow + upperBoundHigh) / 2)
+      if ((coverage[middle]?.start ?? 0) <= start) upperBoundLow = middle + 1
+      else upperBoundHigh = middle
+    }
+    let low = 0
+    let high = upperBoundLow
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2)
+      if ((coverage[middle]?.maxEnd ?? -Infinity) >= end) high = middle
+      else low = middle + 1
+    }
+    const candidate = coverage[low]
+    const covering = candidate ? coverage[candidate.maxEndIndex] : undefined
+    return covering && covering.start <= start && covering.end >= end ? covering.retained : undefined
+  }
   const projected: ProjectedWaveformData[] = []
   for (const plan of input.segments) {
-    const retained = input.retainedByKey.get(plan.requestKey)
+    const direct = input.retainedByKey.get(plan.requestKey)
+    const retained = direct ?? findCoverage(
+      Math.floor(plan.segment.sourceStartSec * (coverage[0]?.sampleRate ?? 1)),
+      Math.ceil(plan.segment.sourceEndSec * (coverage[0]?.sampleRate ?? 1)),
+    )
     if (!retained) continue
-    const segment = plan.segment
-    const overlapStart = Math.max(segment.sourceStartSec, retained.sourceStartSec)
-    const overlapEnd = Math.min(segment.sourceEndSec, retained.sourceEndSec)
     const cropped = cropWaveformDataToSourceRange({
       data: retained.data,
-      sourceStartSec: overlapStart,
-      sourceEndSec: overlapEnd,
+      sourceStartSec: plan.segment.sourceStartSec,
+      sourceEndSec: plan.segment.sourceEndSec,
     })
     if (!cropped) continue
-    const timelineStartSec = Math.max(
-      segment.canvasStartSec,
-      input.map.sourceToTimelineSec(cropped.sourceStartSec),
-    )
-    const timelineEndSec = Math.min(
-      segment.canvasEndSec,
-      input.map.sourceToTimelineSec(cropped.sourceEndSec),
-    )
+    const sourceStartSec = cropped.sourceStartFrame / cropped.data.sampleRate
+    const sourceEndSec = cropped.sourceEndFrame / cropped.data.sampleRate
+    const timelineStartSec = Math.max(plan.segment.canvasStartSec, input.map.sourceToTimelineSec(sourceStartSec))
+    const timelineEndSec = Math.min(plan.segment.canvasEndSec, input.map.sourceToTimelineSec(sourceEndSec))
     if (timelineEndSec <= timelineStartSec) continue
-    const segmentTimelineDuration = Math.max(1e-9, segment.canvasEndSec - segment.canvasStartSec)
-    const segmentWidth = segment.endPx - segment.startPx
-    const startPx = segment.startPx
-      + ((timelineStartSec - segment.canvasStartSec) / segmentTimelineDuration) * segmentWidth
-    const endPx = segment.startPx
-      + ((timelineEndSec - segment.canvasStartSec) / segmentTimelineDuration) * segmentWidth
+    const width = plan.segment.endPx - plan.segment.startPx
+    const duration = Math.max(1e-9, plan.segment.canvasEndSec - plan.segment.canvasStartSec)
     projected.push({
       ...cropped,
       requestKey: plan.requestKey,
-      startPx,
-      endPx,
+      startPx: plan.segment.startPx + (timelineStartSec - plan.segment.canvasStartSec) / duration * width,
+      endPx: plan.segment.startPx + (timelineEndSec - plan.segment.canvasStartSec) / duration * width,
       canvasStartSec: timelineStartSec,
       canvasEndSec: timelineEndSec,
     })
@@ -71,175 +223,4 @@ export const projectRetainedWaveformData = (input: {
   return projected
 }
 
-export type WaveformRequestPlans = {
-  requests: readonly WaveformRequestPlan[]
-  segments: readonly WaveformSegmentPlan[]
-}
-
-const quantizeRequestRange = (input: {
-  startSec: number
-  endSec: number
-  sampleRate: number
-  sourceDurationSec: number
-}) => {
-  const startFrame = Math.max(0, Math.floor(input.startSec * input.sampleRate))
-  const endFrame = Math.min(
-    Math.ceil(input.sourceDurationSec * input.sampleRate),
-    Math.ceil(input.endSec * input.sampleRate),
-  )
-  const firstTile = Math.floor(startFrame / ARRANGEMENT_PCM_TILE_FRAMES)
-  const lastTile = Math.max(
-    firstTile,
-    Math.floor(Math.max(startFrame, endFrame - 1) / ARRANGEMENT_PCM_TILE_FRAMES),
-  )
-  return {
-    sourceStartSec: firstTile * ARRANGEMENT_PCM_TILE_FRAMES / input.sampleRate,
-    sourceEndSec: Math.min(
-      input.sourceDurationSec,
-      (lastTile + 1) * ARRANGEMENT_PCM_TILE_FRAMES / input.sampleRate,
-    ),
-  }
-}
-
-export const densityBucketFor = (requestedBins: number, currentBucket = 0) => {
-  const bounded = Math.max(1, Math.min(MAX_WAVEFORM_DENSITY_BUCKET, Math.ceil(requestedBins)))
-  if (currentBucket > 0) {
-    if (bounded < currentBucket * WAVEFORM_DENSITY_BUCKET_FACTOR
-      && bounded > currentBucket / WAVEFORM_DENSITY_BUCKET_FACTOR) return currentBucket
-    if (bounded >= currentBucket) {
-      return bounded
-    }
-    return bounded
-  }
-  return bounded
-}
-
-const requestKeyFor = (input: {
-  sourceStartSec: number
-  sourceEndSec: number
-  lod: WaveformLod
-  bins: number
-  exactRange: boolean
-  densityBucket: number
-}) => {
-  const acquisitionDensity = input.lod.mode === 'pcm-line'
-    ? 'pcm'
-    : `${input.bins}:${input.densityBucket}`
-  return [
-    input.sourceStartSec,
-    input.sourceEndSec,
-    input.lod.mode,
-    input.exactRange ? 'exact' : 'tile',
-    acquisitionDensity,
-  ].join(':')
-}
-
-const lodRank = (lod: WaveformLod) => (
-  lod.mode === 'cached-peaks' ? 0 : lod.mode === 'pcm-envelope' ? 1 : 2
-)
-
-export const createWaveformRequestPlans = (input: {
-  segments: readonly AudioWaveformLayoutSegment[]
-  sampleRate: number
-  sourceDurationSec: number
-  sampleDetail: boolean
-  densityBucket?: number
-}): WaveformRequestPlans => {
-  if (input.segments.length === 0) return { requests: [], segments: [] }
-  const densityBucket = input.densityBucket ?? densityBucketFor(
-    Math.max(...input.segments.map((segment) => segment.drawCols)),
-  )
-  const candidatesByRange = new Map<string, {
-    sourceStartSec: number
-    sourceEndSec: number
-    lod: WaveformLod
-    bins: number
-    exactRange: boolean
-  }>()
-  const segmentRanges: Array<{ rangeKey: string; segment: AudioWaveformLayoutSegment }> = []
-
-  for (const segment of input.segments) {
-    const lod = selectWaveformLod({
-      sampleRate: input.sampleRate,
-      sourceStartSec: segment.sourceStartSec,
-      sourceEndSec: segment.sourceEndSec,
-      widthPx: segment.drawCols,
-    })
-    if (!lod) continue
-    const range = input.sampleDetail
-      ? {
-        sourceStartSec: Math.max(0, segment.sourceStartSec),
-        sourceEndSec: Math.min(input.sourceDurationSec, segment.sourceEndSec),
-      }
-      : quantizeRequestRange({
-        startSec: segment.sourceStartSec,
-        endSec: segment.sourceEndSec,
-        sampleRate: input.sampleRate,
-        sourceDurationSec: input.sourceDurationSec,
-      })
-    if (range.sourceEndSec <= range.sourceStartSec) continue
-    const exactRange = input.sampleDetail
-    const bins = exactRange
-      ? Math.max(1, segment.drawCols)
-      : Math.max(
-        1,
-        lod.mode === 'cached-peaks'
-          ? Math.min(
-            densityBucket,
-            Math.ceil((range.sourceEndSec - range.sourceStartSec) * 400),
-          )
-          : densityBucket,
-      )
-    const densityKey = lod.mode === 'pcm-line'
-      ? 'pcm'
-      : exactRange || lod.mode === 'cached-peaks' ? bins : densityBucket
-    const rangeKey = [
-      range.sourceStartSec,
-      range.sourceEndSec,
-      exactRange ? 'exact' : 'tile',
-      densityKey,
-    ].join(':')
-    const existing = candidatesByRange.get(rangeKey)
-    if (!existing) {
-      candidatesByRange.set(rangeKey, {
-        sourceStartSec: range.sourceStartSec,
-        sourceEndSec: range.sourceEndSec,
-        lod,
-        bins,
-        exactRange,
-      })
-    } else {
-      if (lodRank(lod) > lodRank(existing.lod)) existing.lod = lod
-      existing.bins = Math.max(existing.bins, bins)
-    }
-    segmentRanges.push({ rangeKey, segment })
-  }
-
-  const requestsByKey = new Map<string, WaveformRequestPlan>()
-  const keyByRange = new Map<string, string>()
-  for (const [rangeKey, candidate] of candidatesByRange) {
-    const key = requestKeyFor({
-      ...candidate,
-      densityBucket: candidate.exactRange || candidate.lod.mode === 'cached-peaks'
-        ? candidate.bins
-        : densityBucket,
-    })
-    keyByRange.set(rangeKey, key)
-    requestsByKey.set(key, {
-      key,
-      sourceStartSec: candidate.sourceStartSec,
-      sourceEndSec: candidate.sourceEndSec,
-      lod: candidate.lod,
-      bins: candidate.bins,
-      exactRange: candidate.exactRange,
-    })
-  }
-
-  return {
-    requests: [...requestsByKey.values()],
-    segments: segmentRanges.flatMap(({ rangeKey, segment }) => {
-      const requestKey = keyByRange.get(rangeKey)
-      return requestKey ? [{ requestKey, segment }] : []
-    }),
-  }
-}
+export type { WaveformSourceData }

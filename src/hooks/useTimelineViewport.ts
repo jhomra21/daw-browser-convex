@@ -79,7 +79,7 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     clearWheelCommit()
     setVisibleStartSec(0)
     setPhysicalAnchor()
-  }))
+  }, { defer: true }))
 
   const measureWidth = () => {
     if (!element) return

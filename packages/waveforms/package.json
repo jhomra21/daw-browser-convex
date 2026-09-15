@@ -5,15 +5,12 @@
   "type": "module",
   "exports": {
     "./asset-store": "./src/asset-store.ts",
-    "./arrangement-waveform-pcm": "./src/arrangement-waveform-pcm.ts",
+    "./arrangement-waveform": "./src/arrangement-waveform.ts",
     "./diagnostics": "./src/diagnostics.ts",
     "./extract-peaks": "./src/extract-peaks.ts",
     "./lod": "./src/lod.ts",
-    "./pcm-envelope": "./src/pcm-envelope.ts",
-    "./pcm-samples": "./src/pcm-samples.ts",
     "./peak-db": "./src/peak-db.ts",
-    "./render-waveform": "./src/render-waveform.ts",
-    "./resample-peak-pairs": "./src/resample-peak-pairs.ts",
+    "./draw-waveform-signal": "./src/draw-waveform-signal.ts",
     "./select-waveform-window": "./src/select-waveform-window.ts",
     "./source-identity": "./src/source-identity.ts",
     "./types": "./src/types.ts"

@@ -11,6 +11,7 @@ import type { GroupClipOverviewSegment, TimelineTrackLayoutRow } from '~/lib/tim
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import { intersectTimelineRangeWithViewport } from '~/lib/timeline-viewport-geometry'
+import { isClipWithinRenderRange } from './clip-render-range'
 
 type TrackLaneProps = {
   track: Track
@@ -164,10 +165,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
           )}
         </For>
       ) : (
-        <For each={props.track.clips.filter((clip) => (
-          clip.startSec < props.visibleRange.endSec
-          && clip.startSec + clip.duration > props.visibleRange.startSec
-        ))}>
+        <For each={props.track.clips.filter((clip) => isClipWithinRenderRange(clip, props.clipVisibleRange))}>
           {(clip) => (
             <ClipComponent
               clip={clip}

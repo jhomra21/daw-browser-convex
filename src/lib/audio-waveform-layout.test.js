@@ -355,8 +355,8 @@ describe('getAudioWaveformLayout', () => {
     )
 
     expect(layout.segments).toEqual([
-      { drawCols: 200, sourceStartSec: 0, sourceEndSec: 0.5 },
-      { drawCols: 200, sourceStartSec: 0.5, sourceEndSec: 2 },
+      { drawCols: 200, sourceStartSec: 0, sourceEndSec: 0.5, startPx: 0, endPx: 200, canvasStartSec: 10, canvasEndSec: 12 },
+      { drawCols: 200, sourceStartSec: 0.5, sourceEndSec: 2, startPx: 200, endPx: 400, canvasStartSec: 12, canvasEndSec: 14 },
     ])
   })
 })

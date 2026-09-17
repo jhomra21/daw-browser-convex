@@ -64,6 +64,7 @@ type ClipDragOptions = {
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
   pixelsPerSecond: Accessor<number>
+  visibleStartSec?: Accessor<number>
   // buffer cache to prime newly created duplicates
   audioBufferCache: ClipBuffers
   // Notify timeline that a set of clip moves has been committed (drop finished)
@@ -300,7 +301,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       return
     }
     const rect = scroll.getBoundingClientRect()
-    const leftPx = clip.startSec * options.pixelsPerSecond() - (scroll.scrollLeft || 0)
+    const leftPx = (clip.startSec - (options.visibleStartSec?.() ?? 0)) * options.pixelsPerSecond()
     dragDeltaX = event.clientX - (rect.left + leftPx)
     beginPointerDrag(event)
   }
@@ -326,6 +327,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       bpm: options.bpm(),
       gridDenominator: options.gridDenominator(),
       pixelsPerSecond: options.pixelsPerSecond(),
+      visibleStartSec: options.visibleStartSec?.(),
     })
 
     // If duplicating and Ctrl released, cancel
@@ -449,6 +451,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       bpm: options.bpm(),
       gridDenominator: options.gridDenominator(),
       pixelsPerSecond: options.pixelsPerSecond(),
+      visibleStartSec: options.visibleStartSec?.(),
     })
     let laneIdx = initialLaneIdx
 

@@ -1,6 +1,5 @@
 import { type Accessor, onCleanup } from 'solid-js'
 
-import { clientXToSec } from '~/lib/timeline-utils'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { useTimelinePlayback } from './useTimelinePlayback'
@@ -16,6 +15,7 @@ type Options = {
   loopStartSec?: Accessor<number>
   loopEndSec?: Accessor<number>
   pixelsPerSecond: Accessor<number>
+  visibleStartSec?: Accessor<number>
   preflightPlayback?: () => Promise<boolean>
   requiresNativeAudio?: boolean
   nativePlayback?: {
@@ -33,7 +33,7 @@ type Options = {
   }
 }
 
-export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, resolveAudioSource, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond, preflightPlayback, requiresNativeAudio, nativePlayback, portableBrowserPlayback }: Options) {
+export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, resolveAudioSource, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond, visibleStartSec, preflightPlayback, requiresNativeAudio, nativePlayback, portableBrowserPlayback }: Options) {
   const playback = useTimelinePlayback(audioEngine, {
     loopEnabled,
     loopStartSec,
@@ -75,7 +75,8 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, res
 
   const moveScrub = (clientX: number) => {
     if (!scrubbing || !scrollEl) return
-    const sec = clientXToSec(clientX, scrollEl, pixelsPerSecond())
+    const rect = scrollEl.getBoundingClientRect()
+    const sec = Math.max(0, (visibleStartSec?.() ?? 0) + (clientX - rect.left) / pixelsPerSecond())
     playback.setPlayhead(sec, tracks())
   }
 
@@ -85,7 +86,8 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, res
 
   const startScrub = (clientX: number, options?: { listen?: boolean }) => {
     if (!scrollEl) return
-    const sec = clientXToSec(clientX, scrollEl, pixelsPerSecond())
+    const rect = scrollEl.getBoundingClientRect()
+    const sec = Math.max(0, (visibleStartSec?.() ?? 0) + (clientX - rect.left) / pixelsPerSecond())
     playback.setPlayhead(sec, tracks())
     scrubbing = true
     if (options?.listen === false || scrubListenersActive) return

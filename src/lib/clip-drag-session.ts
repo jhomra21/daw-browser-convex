@@ -92,11 +92,12 @@ export const readDragPointer = (input: {
   bpm: number;
   gridDenominator: number;
   pixelsPerSecond: number;
+  visibleStartSec?: number;
 }) => {
   const rect = input.scroll.getBoundingClientRect();
-  const x = input.event.clientX - rect.left - input.dragDeltaX + (input.scroll.scrollLeft || 0);
+  const x = input.event.clientX - rect.left - input.dragDeltaX;
   const laneIdx = trackLayoutDropIndexAtClientY(input.trackLayout, input.event.clientY, input.scroll);
-  const rawStart = Math.max(0, x / input.pixelsPerSecond);
+  const rawStart = Math.max(0, (input.visibleStartSec ?? 0) + x / input.pixelsPerSecond);
   return {
     desiredStart: input.gridEnabled
       ? quantizeSecToGrid(rawStart, input.bpm, input.gridDenominator, "round")

@@ -1,0 +1,78 @@
+{
+  "capturedAt": "2026-09-16T19:23:00-07:00",
+  "status": "PASS",
+  "surface": "Arrangement",
+  "captureMethod": "macOS screencapture native window-ID capture",
+  "candidateWindowId": 32224,
+  "candidatePackage": "apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app",
+  "fixture": {
+    "archive": "/tmp/electron-fixture-complete.dawproject",
+    "tracks": 21,
+    "waveformCanvases": 12,
+    "devicePixelRatio": 2,
+    "windowPixels": "3256x2128"
+  },
+  "interaction": {
+    "anchoredFeature": "center of Arrangement timeline surface",
+    "pan": "none",
+    "sequence": "overview -> deepest zoom -> overview",
+    "normalPlayback": true,
+    "normalPlaybackRate": 1.0,
+    "sourceCaptureSeconds": 9.991666666666667,
+    "stablePrerollSeconds": 1.2,
+    "stablePostrollSeconds": 1.3,
+    "zoomInGestures": 18,
+    "zoomOutGestures": 18,
+    "quarterSpeed": "derived from native capture with exact 4x time scale",
+    "quarterPlaybackRate": 0.25
+  },
+  "videos": {
+    "normal": "acceptance-reports/rebuilt-arrangement-native-clean.mov",
+    "quarterSpeed": "acceptance-reports/rebuilt-arrangement-native-clean-025x.mov"
+  },
+  "metrics": {
+    "normal": {
+      "blankFrames": 0,
+      "blankFrameTimes": [],
+      "durationSeconds": 9.991666666666667,
+      "maximumAdjacentGreenPixelDropRatio": 0.0014062454494646144,
+      "maximumAdjacentMeanLuminanceJump": 0.14871872796584285,
+      "maximumAdjacentMeanThicknessRatio": 1.00379908955494,
+      "maximumGreenPixels": 721635,
+      "minimumGreenPixels": 718327,
+      "region": {"x": 550, "y": 100, "width": 2050, "height": 800},
+      "sampledFrames": 96,
+      "sampleIntervalSeconds": 0.1,
+      "video": "/private/tmp/daw-deep-timeline-zoom/acceptance-reports/rebuilt-arrangement-native-clean.mov"
+    },
+    "quarterSpeed": {
+      "blankFrames": 0,
+      "blankFrameTimes": [],
+      "durationSeconds": 39.96666666666667,
+      "maximumAdjacentGreenPixelDropRatio": 0.0014062454494646144,
+      "maximumAdjacentMeanLuminanceJump": 0.14957997514562749,
+      "maximumAdjacentMeanThicknessRatio": 1.0081449729389838,
+      "maximumGreenPixels": 721642,
+      "minimumGreenPixels": 711875,
+      "region": {"x": 550, "y": 100, "width": 2050, "height": 800},
+      "sampledFrames": 396,
+      "sampleIntervalSeconds": 0.1,
+      "video": "/private/tmp/daw-deep-timeline-zoom/acceptance-reports/rebuilt-arrangement-native-clean-025x.mov"
+    }
+  },
+  "directFrameReview": {
+    "status": "PASS",
+    "frames": ["acceptance-reports/rebuilt-arrangement-native-frames/dismissed.png"],
+    "observations": [
+      "waveform paint remains present across the loaded Arrangement tracks",
+      "no blank mask or white flash is visible in the clean native checkpoint",
+      "the rebuilt packaged candidate is visibly rendered and responsive"
+    ]
+  },
+  "gates": {
+    "zeroBlankFrames": true,
+    "denseWaveformMetrics": true,
+    "continuityRatios": true
+  },
+  "releaseGate": true
+}

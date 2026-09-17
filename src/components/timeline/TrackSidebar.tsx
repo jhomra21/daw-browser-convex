@@ -56,12 +56,14 @@ import { trackNumberById } from "~/lib/track-sidebar-mixer";
 import TrackSidebarRow from "./TrackSidebarRow";
 
 export type TrackSidebarProps = {
+  scrollRef: (el: HTMLDivElement) => void;
   sidebar: {
     tracks: Track[];
     allTracks: Track[];
     trackById: ReadonlyMap<string, Track>;
     trackLayout: TimelineTrackLayout;
     scrollElement: () => HTMLDivElement | undefined;
+    contentHeightPx: number;
     selectedTrackId: Track["id"] | "";
     selectedTrackIds: readonly Track["id"][];
     sidebarWidth: number;
@@ -687,18 +689,23 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
 
   return (
     <div
-      class="sticky right-0 z-40 relative flex shrink-0 flex-col overflow-x-clip border-l border-border bg-timeline-surface p-0"
+      class="relative h-full min-h-0 shrink-0 overflow-x-hidden overflow-y-auto border-l border-border bg-timeline-surface p-0"
+      ref={props.scrollRef}
       style={{
         width: `${sidebar().sidebarWidth}px`,
         "min-width": `${TIMELINE_SIDEBAR_MIN_WIDTH}px`,
       }}
     >
       <div
-        class="group absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize"
-        onPointerDown={(event) => sidebar().onSidebarPointerDown(event)}
+        class="relative flex min-h-full flex-col"
+        style={{ height: `${sidebar().contentHeightPx}px` }}
       >
-        <div class="pointer-events-none absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 bg-transparent group-hover:bg-sky-500/20 group-active:bg-sky-500/20" />
-      </div>
+        <div
+          class="group absolute inset-y-0 left-0 z-40 w-4 -translate-x-1/2 cursor-col-resize"
+          onPointerDown={(event) => sidebar().onSidebarPointerDown(event)}
+        >
+          <div class="pointer-events-none absolute inset-y-0 left-1/2 w-1 -translate-x-1/2 bg-transparent group-hover:bg-sky-500/20 group-active:bg-sky-500/20" />
+        </div>
 
       <div class="sticky top-0 z-40 bg-timeline-surface">
         <div
@@ -872,6 +879,7 @@ const TrackSidebar: Component<TrackSidebarProps> = (props) => {
             </>
           );
       })()}
+      </div>
     </div>
   );
 };

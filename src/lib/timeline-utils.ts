@@ -31,12 +31,6 @@ export function timelineDurationSec(tracks: Track[]) {
   return Math.max(30, maxEnd + 5)
 }
 
-export function clientXToSec(clientX: number, scrollRef: HTMLDivElement, pixelsPerSecond: number) {
-  const rect = scrollRef.getBoundingClientRect()
-  const x = clientX - rect.left + (scrollRef.scrollLeft || 0)
-  return Math.max(0, x / pixelsPerSecond)
-}
-
 export function clientYToTimelineTrackY(
   clientY: number,
   scrollRef: TimelineTrackScrollElement,

@@ -1,6 +1,8 @@
+import { MAX_PIXELS_PER_SECOND } from './timeline-viewport-geometry'
+
 export const DEFAULT_PIXELS_PER_SECOND = 100
 export const MIN_PIXELS_PER_SECOND = Number.EPSILON
-export const MAX_PIXELS_PER_SECOND = 800
+export { MAX_PIXELS_PER_SECOND }
 export const ZOOM_STEP_FACTOR = 1.25
 
 export type TimelineRange = { startSec: number; endSec: number }
@@ -99,7 +101,7 @@ export const musicalBarLabelAtTime = (timeSec: number, bpm: number) => (
 
 type TimelineGridIntervals = { minorSec: number; majorSec: number }
 
-const secondsIntervals = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600]
+const secondsIntervals = [0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800, 3600]
 
 export const selectTimelineGridIntervals = (
   pixelsPerSecond: number,

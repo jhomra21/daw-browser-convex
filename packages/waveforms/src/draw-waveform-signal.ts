@@ -7,8 +7,12 @@ import type {
 
 const DEFAULT_MAX_HEIGHT = 0.9
 const DEFAULT_FILL_STYLE = 'rgba(255,255,255,0.55)'
-const RASTER_SENSITIVE_BACKING_THICKNESS = 2
-const RAW_CENTER_RELEASE_BACKING_THICKNESS = 4
+export const MINIMUM_WAVEFORM_BACKING_THICKNESS_PX = 2
+
+export const minimumWaveformThicknessCssPx = (backingScaleY: number) => (
+  MINIMUM_WAVEFORM_BACKING_THICKNESS_PX
+    / (Number.isFinite(backingScaleY) && backingScaleY > 0 ? backingScaleY : 1)
+)
 
 export const waveformSampleY = (input: {
   readonly sample: number
@@ -47,49 +51,16 @@ export const waveformRibbonGeometry = (input: {
   readonly minimumThicknessCssPx: number
   readonly backingScaleY: number
 }): WaveformRibbonGeometry => {
-  const backingScaleY = Number.isFinite(input.backingScaleY) && input.backingScaleY > 0
-    ? input.backingScaleY
-    : 1
   const rawUpperY = Math.min(input.upperY, input.lowerY)
   const rawLowerY = Math.max(input.upperY, input.lowerY)
   const rawThickness = rawLowerY - rawUpperY
   const rawCenterY = (rawUpperY + rawLowerY) / 2
-  const rawThicknessBackingPx = rawThickness * backingScaleY
   const minimumThicknessCssPx = Math.max(0, input.minimumThicknessCssPx)
-  const minimumBackingThickness = minimumThicknessCssPx * backingScaleY
-  if (
-    rawThicknessBackingPx >= RAW_CENTER_RELEASE_BACKING_THICKNESS
-    && rawThicknessBackingPx >= minimumBackingThickness
-  ) {
-    return {
-      upperY: rawUpperY,
-      lowerY: rawLowerY,
-      centerY: rawCenterY,
-      thickness: rawThickness,
-    }
-  }
-  const backingThickness = Math.max(1, rawThicknessBackingPx, minimumBackingThickness)
-  const rawCenterBackingY = rawCenterY * backingScaleY
-  const snappedCenterBackingY = Math.floor(rawCenterBackingY) + 0.5
-  const releaseProgress = Math.max(
-    0,
-    Math.min(
-      1,
-      (backingThickness - RASTER_SENSITIVE_BACKING_THICKNESS)
-        / (RAW_CENTER_RELEASE_BACKING_THICKNESS - RASTER_SENSITIVE_BACKING_THICKNESS),
-    ),
-  )
-  // Smoothstep keeps the center continuous, slows movement near the raster
-  // sensitive range, and reaches the raw center exactly at 4 backing pixels.
-  const releaseWeight = releaseProgress * releaseProgress * (3 - 2 * releaseProgress)
-  const centerBackingY = snappedCenterBackingY
-    + (rawCenterBackingY - snappedCenterBackingY) * releaseWeight
-  const centerY = centerBackingY / backingScaleY
-  const thickness = backingThickness / backingScaleY
+  const thickness = Math.max(rawThickness, minimumThicknessCssPx)
   return {
-    upperY: centerY - thickness / 2,
-    lowerY: centerY + thickness / 2,
-    centerY,
+    upperY: rawCenterY - thickness / 2,
+    lowerY: rawCenterY + thickness / 2,
+    centerY: rawCenterY,
     thickness,
   }
 }
@@ -129,12 +100,12 @@ export function drawWaveformSignal(
 ) {
   const data = segment.data
   const pointRadius = segment.style?.pointRadius ?? 0
-  const minimumThicknessCssPx = Number.isFinite(segment.style?.minimumThicknessCssPx)
-    ? Math.max(0, segment.style?.minimumThicknessCssPx ?? 0)
-    : 1
   const backingScaleY = Number.isFinite(segment.style?.backingScaleY)
     ? segment.style?.backingScaleY ?? 1
     : 1
+  const minimumThicknessCssPx = Number.isFinite(segment.style?.minimumThicknessCssPx)
+    ? Math.max(0, segment.style?.minimumThicknessCssPx ?? 0)
+    : minimumWaveformThicknessCssPx(backingScaleY)
   const channelCount = Math.min(segment.channelCount, data.channels.length)
   if (channelCount <= 0 || segment.endPx <= segment.startPx) return
   const style = segment.style

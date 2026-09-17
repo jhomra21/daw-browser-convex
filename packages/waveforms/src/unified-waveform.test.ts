@@ -363,7 +363,7 @@ describe('unified waveform painter', () => {
     return { ctx, commands }
   }
 
-  test('aligns minimum ribbons to one backing row at common backing scales', () => {
+  test('keeps minimum ribbons centered on their raw center at common backing scales', () => {
     for (const backingScaleY of [1, 1.5, 2, 3]) {
       for (const deviceCenter of [10, 10.25, 10.5, 10.75]) {
         const centerY = deviceCenter / backingScaleY
@@ -375,17 +375,15 @@ describe('unified waveform painter', () => {
         })
         const upperBackingY = ribbon.upperY * backingScaleY
         const lowerBackingY = ribbon.lowerY * backingScaleY
-        expect(upperBackingY).toBe(Math.floor(upperBackingY))
-        expect(lowerBackingY).toBe(Math.floor(lowerBackingY))
         expect(ribbon.thickness * backingScaleY).toBeGreaterThanOrEqual(1)
-        expect(ribbon.centerY * backingScaleY - 0.5).toBe(
-          Math.floor(ribbon.centerY * backingScaleY),
-        )
+        expect(ribbon.centerY).toBeCloseTo(centerY)
+        expect((ribbon.upperY + ribbon.lowerY) / 2).toBe(centerY)
+        expect(upperBackingY + lowerBackingY).toBe(deviceCenter * 2)
       }
     }
   })
 
-  test('releases snapped centers continuously through the safe backing-thickness range', () => {
+  test('keeps raw centers and only raises thickness below the configured floor', () => {
     for (const backingScaleY of [1, 2, 3]) {
       for (const deviceThickness of [
         0.9, 0.999, 1, 1.001, 1.25, 1.5, 1.999, 2, 2.001, 2.01,
@@ -403,17 +401,16 @@ describe('unified waveform painter', () => {
           const upperBackingY = ribbon.upperY * backingScaleY
           const lowerBackingY = ribbon.lowerY * backingScaleY
           expect(ribbon.thickness * backingScaleY).toBeGreaterThanOrEqual(1)
-          expect(Math.floor(lowerBackingY) - Math.ceil(upperBackingY)).toBeGreaterThanOrEqual(0)
-          if (deviceThickness >= 4) {
-            expect(ribbon.upperY).toBe(centerY - thickness / 2)
-            expect(ribbon.lowerY).toBe(centerY + thickness / 2)
-          }
+          expect(ribbon.centerY).toBeCloseTo(centerY)
+          expect(ribbon.upperY + ribbon.lowerY).toBeCloseTo(centerY * 2)
+          expect(ribbon.thickness).toBeCloseTo(Math.max(thickness, 1 / backingScaleY))
+          expect(lowerBackingY - upperBackingY).toBeCloseTo(ribbon.thickness * backingScaleY)
         }
       }
     }
   })
 
-  test('does not jump when raw thickness crosses the snapped-center release', () => {
+  test('does not jump when raw thickness crosses the former release thresholds', () => {
     for (const backingScaleY of [1, 1.5, 2, 3]) {
       for (const deviceCenter of [10, 10.25, 10.5, 10.75]) {
         const centers: number[] = []
@@ -428,8 +425,8 @@ describe('unified waveform painter', () => {
           }).centerY * backingScaleY)
         }
         const jumps = centers.slice(1).map((value, index) => Math.abs(value - (centers[index] ?? value)))
-        expect(Math.max(...jumps)).toBeLessThan(0.5)
-        expect(centers.at(-1)).toBe(deviceCenter)
+        expect(Math.max(...jumps)).toBeLessThan(1e-12)
+        expect(centers.every((value) => Math.abs(value - deviceCenter) < 1e-12)).toBe(true)
       }
     }
   })
@@ -679,6 +676,35 @@ describe('unified waveform painter', () => {
     expect(arcCount).toBe(2)
   })
 
+  test('keeps line geometry and paint unchanged when point decoration starts', () => {
+    const render = (pointRadius: number) => {
+      const recorded = recordingContext()
+      drawWaveformSignal(recorded.ctx, {
+        data: {
+          kind: 'samples',
+          channels: [new Float32Array([-.5, 0, .5])],
+          firstFrame: 0,
+          sampleRate: 3,
+          sourceFrameCount: 3,
+        },
+        sourceStartFrame: 0,
+        sourceEndFrame: 3,
+        startPx: 0,
+        endPx: 30,
+        topY: 0,
+        contentH: 40,
+        channelCount: 1,
+        style: { fillStyle: '#4ade80', pointRadius },
+      })
+      const firstFill = recorded.commands.findIndex(([kind]) => kind === 'fill')
+      return {
+        line: recorded.commands.slice(0, firstFill),
+        fillStyle: recorded.ctx.fillStyle,
+      }
+    }
+    expect(render(0)).toEqual(render(1))
+  })
+
   test('uses exact sample-frame x coordinates for line and point vertices', () => {
     const moves: number[] = []
     const arcs: number[] = []
@@ -751,7 +777,7 @@ describe('unified waveform painter', () => {
       return crosses ? !inside : inside
     }, false)
     expect(path.some(([, x, y]) => x === 10 && y < 15.5)).toBe(true)
-    expect(path.some(([, x, y]) => x === 10 && y > 15.5)).toBe(true)
+    expect(path.some(([, x, y]) => x === 10 && y >= 15.5)).toBe(true)
     expect(path.filter(([, x]) => x === 10)).toHaveLength(2)
     expect(Math.abs(area)).toBeGreaterThan(0)
     expect(filledPixel).toBe(true)

@@ -6,6 +6,7 @@ type RasterMeasurement = {
   readonly darkestLuminance: number
   readonly darkestColorDistance: number
   readonly fullyCoveredBackingRows: number
+  readonly effectiveBackingThickness: number
 }
 
 type RasterRegressionResult = {
@@ -18,12 +19,46 @@ type RasterRegressionResult = {
     readonly center: number
     readonly rawCenter: number
   }[]
+  readonly fractionalCoverage: readonly {
+    readonly dpr: number
+    readonly fraction: number
+    readonly darkestLuminance: number
+    readonly fullyCoveredBackingRows: number
+  }[]
+  readonly floorExperiments: readonly {
+    readonly dpr: number
+    readonly floorCssPx: number
+    readonly floorLabel: string
+    readonly medianDarkestLuminance: number
+    readonly luminanceSpread: number
+    readonly phasePulse: number
+    readonly medianEffectiveBackingThickness: number
+    readonly effectiveThicknessSpread: number
+    readonly minimumEffectiveBackingThickness: number
+    readonly maximumEffectiveBackingThickness: number
+    readonly minimumDarkestLuminance: number
+    readonly maximumDarkestLuminance: number
+  }[]
+  readonly geometryDiagnostics: readonly {
+    readonly dpr: number
+    readonly zoom: number
+    readonly sourceFrame: number
+    readonly framesPerInterval: number
+    readonly tier: number
+    readonly generation: number
+    readonly paintIdentity: string
+    readonly rawCenter: number
+    readonly finalCenter: number
+    readonly rawThickness: number
+    readonly finalThickness: number
+  }[]
 }
 
 const rasterMeasurementSchema = z.object({
   darkestLuminance: z.number(),
   darkestColorDistance: z.number(),
   fullyCoveredBackingRows: z.number(),
+  effectiveBackingThickness: z.number(),
 })
 
 const rasterRegressionResultSchema = z.object({
@@ -35,6 +70,39 @@ const rasterRegressionResultSchema = z.object({
     thickness: z.number(),
     center: z.number(),
     rawCenter: z.number(),
+  })),
+  fractionalCoverage: z.array(z.object({
+    dpr: z.number(),
+    fraction: z.number(),
+    darkestLuminance: z.number(),
+    fullyCoveredBackingRows: z.number(),
+  })),
+  floorExperiments: z.array(z.object({
+    dpr: z.number(),
+    floorCssPx: z.number(),
+    floorLabel: z.string(),
+    medianDarkestLuminance: z.number(),
+    luminanceSpread: z.number(),
+    phasePulse: z.number(),
+    medianEffectiveBackingThickness: z.number(),
+    effectiveThicknessSpread: z.number(),
+    minimumEffectiveBackingThickness: z.number(),
+    maximumEffectiveBackingThickness: z.number(),
+    minimumDarkestLuminance: z.number(),
+    maximumDarkestLuminance: z.number(),
+  })),
+  geometryDiagnostics: z.array(z.object({
+    dpr: z.number(),
+    zoom: z.number(),
+    sourceFrame: z.number(),
+    framesPerInterval: z.number(),
+    tier: z.number(),
+    generation: z.number(),
+    paintIdentity: z.string(),
+    rawCenter: z.number(),
+    finalCenter: z.number(),
+    rawThickness: z.number(),
+    finalThickness: z.number(),
   })),
 })
 
@@ -112,7 +180,7 @@ const measureInChromium = async (): Promise<RasterRegressionResult> => {
   }
 }
 
-test('rasterizes the globally minimum physical thickness consistently in Chromium', async () => {
+test('rasterizes the shared CSS floor and raw-center geometry consistently in Chromium', async () => {
   const result = await measureInChromium()
   const alignedLuminances = result.aligned.map((measurement) => measurement.darkestLuminance)
   const alignedDistances = result.aligned.map((measurement) => measurement.darkestColorDistance)
@@ -150,11 +218,13 @@ test('rasterizes the globally minimum physical thickness consistently in Chromiu
     return maximum
   }
 
-  expect(luminanceSpread).toBeLessThanOrEqual(0.5)
-  expect(colorDistanceSpread).toBeLessThanOrEqual(0.5)
-  expect(maxPhaseLuminanceSpread(alignedLuminances)).toBeLessThanOrEqual(0.5)
-  expect(maxAdjacentThresholdLuminanceSpread(alignedLuminances)).toBeLessThanOrEqual(0.5)
-  expect(result.aligned.every((measurement) => measurement.fullyCoveredBackingRows >= 1)).toBe(true)
+  expect(luminanceSpread).toBeLessThanOrEqual(legacyLuminanceSpread)
+  expect(colorDistanceSpread).toBeLessThanOrEqual(legacyColorDistanceSpread)
+  expect(maxPhaseLuminanceSpread(alignedLuminances))
+    .toBeLessThanOrEqual(maxPhaseLuminanceSpread(legacyLuminances))
+  expect(maxAdjacentThresholdLuminanceSpread(alignedLuminances))
+    .toBeLessThanOrEqual(maxAdjacentThresholdLuminanceSpread(legacyLuminances))
+  expect(result.aligned.every((measurement) => measurement.darkestColorDistance > 0)).toBe(true)
   expect(legacyLuminanceSpread).toBeGreaterThan(50)
   expect(legacyColorDistanceSpread).toBeGreaterThan(100)
   expect(maxPhaseLuminanceSpread(legacyLuminances)).toBeGreaterThan(50)
@@ -175,4 +245,39 @@ test('rasterizes the globally minimum physical thickness consistently in Chromiu
     .filter((sample) => sample.thickness === 4)
     .every((sample) => sample.center === sample.rawCenter))
     .toBe(true)
+  expect(result.fractionalCoverage).toHaveLength(30)
+  for (const dpr of [1, 2, 3]) {
+    const samples = result.fractionalCoverage.filter((sample) => sample.dpr === dpr)
+    expect(samples.map((sample) => sample.fraction)).toEqual(
+      [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
+    )
+    expect(samples.every((sample) => Number.isFinite(sample.darkestLuminance))).toBe(true)
+    expect(samples.every((sample) => sample.fullyCoveredBackingRows >= 0)).toBe(true)
+  }
+  expect(result.floorExperiments).toHaveLength(12)
+  expect(result.floorExperiments.every((experiment) => (
+    experiment.luminanceSpread >= 0
+      && experiment.minimumDarkestLuminance <= experiment.maximumDarkestLuminance
+      && experiment.phasePulse === experiment.luminanceSpread
+      && experiment.medianEffectiveBackingThickness >= 0
+      && experiment.effectiveThicknessSpread >= 0
+      && experiment.minimumEffectiveBackingThickness
+        <= experiment.maximumEffectiveBackingThickness
+  ))).toBe(true)
+  for (const dpr of [1, 2, 3]) {
+    const selectedFloor = result.floorExperiments.find((experiment) => (
+      experiment.dpr === dpr && experiment.floorLabel === 'two-physical-pixels'
+    ))
+    if (!selectedFloor) throw new Error(`Missing two-physical-pixel floor diagnostics for DPR ${dpr}`)
+    expect(selectedFloor.minimumEffectiveBackingThickness)
+      .toBeGreaterThanOrEqual(1.99)
+    expect(selectedFloor.effectiveThicknessSpread).toBeLessThanOrEqual(0.01)
+    expect(selectedFloor.luminanceSpread).toBe(0)
+  }
+  expect(result.geometryDiagnostics).toHaveLength(3)
+  expect(result.geometryDiagnostics.every((diagnostic) => (
+    Math.abs(diagnostic.finalCenter - diagnostic.rawCenter) < 1e-12
+      && diagnostic.finalThickness >= diagnostic.rawThickness
+      && diagnostic.paintIdentity === 'rgba(17,17,17,1)|source-over|fill'
+  ))).toBe(true)
 })

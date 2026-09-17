@@ -1,4 +1,4 @@
-import { batch, createEffect, createSignal, on, onCleanup, type Accessor } from 'solid-js'
+import { batch, createRenderEffect, createSignal, on, onCleanup, type Accessor } from 'solid-js'
 
 import {
   minimumVisibleDuration,
@@ -75,11 +75,13 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     suppressScroll = false
   }
 
-  createEffect(on(options.persistenceScope, () => {
+  const resetForPersistenceScopeChange = () => {
     clearWheelCommit()
     setVisibleStartSec(0)
     setPhysicalAnchor()
-  }, { defer: true }))
+  }
+
+  createRenderEffect(on(options.persistenceScope, resetForPersistenceScopeChange, { defer: true }))
 
   const measureWidth = () => {
     if (!element) return

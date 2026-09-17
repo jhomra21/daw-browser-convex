@@ -1,5 +1,6 @@
 import {
   drawWaveformSignal,
+  minimumWaveformThicknessCssPx,
   waveformRibbonGeometry,
 } from '@daw-browser/waveforms/draw-waveform-signal'
 import { resolveWaveformPaintStyle } from './waveform-style'
@@ -8,6 +9,7 @@ type RasterMeasurement = {
   readonly darkestLuminance: number
   readonly darkestColorDistance: number
   readonly fullyCoveredBackingRows: number
+  readonly effectiveBackingThickness: number
 }
 
 type CenterReleaseSample = {
@@ -16,12 +18,51 @@ type CenterReleaseSample = {
   readonly rawCenter: number
 }
 
+type FractionalCoverageSample = {
+  readonly dpr: number
+  readonly fraction: number
+  readonly darkestLuminance: number
+  readonly fullyCoveredBackingRows: number
+}
+
+type FloorExperiment = {
+  readonly dpr: number
+  readonly floorCssPx: number
+  readonly floorLabel: string
+  readonly medianDarkestLuminance: number
+  readonly luminanceSpread: number
+  readonly phasePulse: number
+  readonly medianEffectiveBackingThickness: number
+  readonly effectiveThicknessSpread: number
+  readonly minimumEffectiveBackingThickness: number
+  readonly maximumEffectiveBackingThickness: number
+  readonly minimumDarkestLuminance: number
+  readonly maximumDarkestLuminance: number
+}
+
+type GeometryDiagnostic = {
+  readonly dpr: number
+  readonly zoom: number
+  readonly sourceFrame: number
+  readonly framesPerInterval: number
+  readonly tier: number
+  readonly generation: number
+  readonly paintIdentity: string
+  readonly rawCenter: number
+  readonly finalCenter: number
+  readonly rawThickness: number
+  readonly finalThickness: number
+}
+
 type RasterRegressionResult = {
   readonly aligned: readonly RasterMeasurement[]
   readonly legacy: readonly RasterMeasurement[]
   readonly samplesWithoutPoints: RasterMeasurement
   readonly samplesWithPoints: RasterMeasurement
   readonly centerRelease: readonly CenterReleaseSample[]
+  readonly fractionalCoverage: readonly FractionalCoverageSample[]
+  readonly floorExperiments: readonly FloorExperiment[]
+  readonly geometryDiagnostics: readonly GeometryDiagnostic[]
 }
 
 const background = { red: 238, green: 238, blue: 238 }
@@ -48,6 +89,7 @@ const sampleMeasurement = (
   let darkestLuminance = Number.POSITIVE_INFINITY
   let darkestColorDistance = 0
   let fullyCoveredBackingRows = 0
+  let effectiveBackingThickness = 0
   for (let y = 0; y < height; y += 1) {
     const offset = (y * width + x) * 4
     const red = pixels[offset] ?? 0
@@ -56,6 +98,16 @@ const sampleMeasurement = (
     const alpha = pixels[offset + 3] ?? 0
     darkestLuminance = Math.min(darkestLuminance, luminance(red, green, blue))
     darkestColorDistance = Math.max(darkestColorDistance, colorDistance(red, green, blue))
+    effectiveBackingThickness += Math.max(
+      0,
+      Math.min(
+        1,
+        (luminance(background.red, background.green, background.blue)
+          - luminance(red, green, blue))
+          / (luminance(background.red, background.green, background.blue)
+            - luminance(waveform.red, waveform.green, waveform.blue)),
+      ),
+    )
     if (
       red === waveform.red
       && green === waveform.green
@@ -65,7 +117,12 @@ const sampleMeasurement = (
       fullyCoveredBackingRows += 1
     }
   }
-  return { darkestLuminance, darkestColorDistance, fullyCoveredBackingRows }
+  return {
+    darkestLuminance,
+    darkestColorDistance,
+    fullyCoveredBackingRows,
+    effectiveBackingThickness,
+  }
 }
 
 const render = (input: {
@@ -75,6 +132,7 @@ const render = (input: {
   readonly kind: 'aligned' | 'legacy'
   readonly data?: Parameters<typeof drawWaveformSignal>[1]['data']
   readonly pointRadius?: number
+  readonly minimumThicknessCssPx?: number
 }): RasterMeasurement => {
   const cssWidth = 64
   const cssHeight = 32
@@ -94,6 +152,17 @@ const render = (input: {
   const centerY = input.centerDeviceY / input.dpr
   if (input.kind === 'aligned') {
     if (!input.data) throw new Error('Waveform data is required for aligned rendering')
+    const resolvedStyle = resolveWaveformPaintStyle({
+      color: '#111111',
+      backingScaleY: input.dpr,
+      pointRadius: input.pointRadius,
+    })
+    const style = input.minimumThicknessCssPx === undefined
+      ? resolvedStyle
+      : {
+        ...resolvedStyle,
+        minimumThicknessCssPx: input.minimumThicknessCssPx,
+      }
     drawWaveformSignal(ctx, {
       data: input.data,
       sourceStartFrame: 0,
@@ -103,11 +172,7 @@ const render = (input: {
       topY: centerY - 8,
       contentH: 16,
       channelCount: 1,
-      style: resolveWaveformPaintStyle({
-        color: '#111111',
-        backingScaleY: input.dpr,
-        pointRadius: input.pointRadius,
-      }),
+      style,
     })
   } else {
     // Deliberately keep the unsnapped geometry local to this regression control.
@@ -146,6 +211,9 @@ const renderAll = (): RasterRegressionResult => {
   const aligned: RasterMeasurement[] = []
   const legacy: RasterMeasurement[] = []
   const centerRelease: CenterReleaseSample[] = []
+  const fractionalCoverage: FractionalCoverageSample[] = []
+  const floorExperiments: FloorExperiment[] = []
+  const geometryDiagnostics: GeometryDiagnostic[] = []
   for (const dpr of [1, 2, 3]) {
     for (const deviceThickness of [
       0.9, 0.999, 1, 1.001, 1.25, 1.5, 1.999, 2, 2.001, 2.01,
@@ -174,6 +242,86 @@ const renderAll = (): RasterRegressionResult => {
         }
       }
     }
+    for (const fraction of [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]) {
+      const measurement = render({
+        dpr,
+        deviceThickness: 1,
+        centerDeviceY: 8 + fraction,
+        kind: 'aligned',
+        data: sampleData,
+      })
+      fractionalCoverage.push({
+        dpr,
+        fraction,
+        darkestLuminance: measurement.darkestLuminance,
+        fullyCoveredBackingRows: measurement.fullyCoveredBackingRows,
+      })
+    }
+    for (const floor of [
+      { label: 'one-physical-pixel', cssPx: 1 / dpr },
+      { label: '0.75-css-pixel', cssPx: 0.75 },
+      { label: 'one-css-pixel', cssPx: 1 },
+      { label: 'two-physical-pixels', cssPx: 2 / dpr },
+    ]) {
+      const measurements = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        .map((fraction) => render({
+          dpr,
+          deviceThickness: 0,
+          centerDeviceY: 8 + fraction,
+          kind: 'aligned',
+          data: sampleData,
+          minimumThicknessCssPx: floor.cssPx,
+        }))
+      const luminances = measurements.map((measurement) => measurement.darkestLuminance)
+      const effectiveThicknesses = measurements.map((measurement) => measurement.effectiveBackingThickness)
+      const sortedLuminances = [...luminances].sort((a, b) => a - b)
+      const sortedThicknesses = [...effectiveThicknesses].sort((a, b) => a - b)
+      const middle = Math.floor(sortedLuminances.length / 2)
+      const median = (
+        (sortedLuminances[middle - 1] ?? 0)
+          + (sortedLuminances[middle] ?? 0)
+      ) / 2
+      const thicknessMiddle = Math.floor(sortedThicknesses.length / 2)
+      floorExperiments.push({
+        dpr,
+        floorCssPx: floor.cssPx,
+        floorLabel: floor.label,
+        medianDarkestLuminance: median,
+        luminanceSpread: Math.max(...luminances) - Math.min(...luminances),
+        phasePulse: Math.max(...luminances) - Math.min(...luminances),
+        medianEffectiveBackingThickness: (
+          (sortedThicknesses[thicknessMiddle - 1] ?? 0)
+            + (sortedThicknesses[thicknessMiddle] ?? 0)
+        ) / 2,
+        effectiveThicknessSpread: Math.max(...effectiveThicknesses)
+          - Math.min(...effectiveThicknesses),
+        minimumEffectiveBackingThickness: Math.min(...effectiveThicknesses),
+        maximumEffectiveBackingThickness: Math.max(...effectiveThicknesses),
+        minimumDarkestLuminance: Math.min(...luminances),
+        maximumDarkestLuminance: Math.max(...luminances),
+      })
+    }
+    const rawCenter = (8.25 + 8.75) / 2 / dpr
+    const rawThickness = (8.75 - 8.25) / dpr
+    const ribbon = waveformRibbonGeometry({
+      upperY: 8.25 / dpr,
+      lowerY: 8.75 / dpr,
+      minimumThicknessCssPx: minimumWaveformThicknessCssPx(dpr),
+      backingScaleY: dpr,
+    })
+    geometryDiagnostics.push({
+      dpr,
+      zoom: 1,
+      sourceFrame: 0,
+      framesPerInterval: 1,
+      tier: 1,
+      generation: 1,
+      paintIdentity: 'rgba(17,17,17,1)|source-over|fill',
+      rawCenter,
+      finalCenter: ribbon.centerY,
+      rawThickness,
+      finalThickness: ribbon.thickness,
+    })
   }
   return {
     aligned,
@@ -194,6 +342,9 @@ const renderAll = (): RasterRegressionResult => {
       pointRadius: 1.5,
     }),
     centerRelease,
+    fractionalCoverage,
+    floorExperiments,
+    geometryDiagnostics,
   }
 }
 

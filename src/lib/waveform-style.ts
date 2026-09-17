@@ -1,3 +1,4 @@
+import { minimumWaveformThicknessCssPx } from '@daw-browser/waveforms/draw-waveform-signal'
 import type { WaveformDrawStyle } from '@daw-browser/waveforms/types'
 
 export const resolveWaveformPaintStyle = (input: {
@@ -7,7 +8,7 @@ export const resolveWaveformPaintStyle = (input: {
 }): WaveformDrawStyle => ({
   fillStyle: input.color,
   maxHeightFraction: 0.9,
-  minimumThicknessCssPx: 1 / Math.max(1, input.backingScaleY),
+  minimumThicknessCssPx: minimumWaveformThicknessCssPx(input.backingScaleY),
   backingScaleY: input.backingScaleY,
   pointRadius: input.pointRadius,
 })

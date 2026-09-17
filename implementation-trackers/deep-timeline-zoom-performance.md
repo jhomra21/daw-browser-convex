@@ -303,3 +303,12 @@
 - [x] Scheduler subscribers are isolated for cancellation, final cancellation aborts work, queued visible requests can evict lower-priority overscan work, cache size is bounded by bytes and entry count, and source resolution receives the scheduler signal.
 - [x] Restored focused waveform coverage now passes 28 tests and 86 assertions across extraction, persistence, asset identity/generation, source windows, LOD, scheduler, and painter behavior.
 - [ ] Full runtime/video qualification remains pending; this follow-up claims static correctness coverage only.
+
+## Rebuilt packaged Arrangement continuity qualification
+
+- [x] Rebuilt arm64 Electron package was launched with a fresh isolated profile and the complete 21-track fixture; native window-ID capture used window `32224`.
+- [x] Clean native Arrangement capture completed with the required overview → deepest zoom → overview sequence, centered anchored gestures, normal playback, 1.2-second preroll, and 1.3-second postroll.
+- [x] Normal capture measured 96 waveform-only samples over 9.9917 seconds with zero blank frames, maximum adjacent thickness ratio `1.003799`, maximum green-pixel drop `0.001406`, and maximum luminance jump `0.148719`.
+- [x] Exact 4× slowed evidence measured 396 waveform-only samples over 39.9667 seconds with zero blank frames, maximum adjacent thickness ratio `1.008145`, maximum green-pixel drop `0.001406`, and maximum luminance jump `0.149580`.
+- [x] Direct native checkpoint review confirmed rendered waveform content without a blank mask or white flash.
+- Evidence: `acceptance-reports/rebuilt-arrangement-continuity.json`, `acceptance-reports/rebuilt-arrangement-native-clean.mov`, and `acceptance-reports/rebuilt-arrangement-native-clean-025x.mov`.

@@ -1,0 +1,27 @@
+{
+  "capturedAt": "2026-09-20T17:32:46.777Z",
+  "surface": "packaged-electron-grid-final-settled",
+  "url": "daw://app/?projectId=project%3Ac36096ac-b0ba-4247-9858-d6847ecd3fd0",
+  "dpr": 2,
+  "cycles": 20,
+  "canvases": 12,
+  "nonzeroCanvases": 12,
+  "scrollWidth": 200000,
+  "clientWidth": 584,
+  "intervals": {
+    "count": 191,
+    "p50Ms": 8.30000000000291,
+    "p95Ms": 10.19999999999709,
+    "p99Ms": 10.30000000000291,
+    "maxMs": 10.39999999999418,
+    "ge16_67": 0,
+    "ge50": 0,
+    "ge100": 0
+  },
+  "heap": {
+    "beforeBytes": 89065994,
+    "afterBytes": 93872718,
+    "deltaBytes": 4806724
+  },
+  "errors": []
+}

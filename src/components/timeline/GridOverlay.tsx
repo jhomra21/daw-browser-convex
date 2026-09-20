@@ -1,5 +1,6 @@
 import { createMemo, type Component, Show } from 'solid-js'
 import { selectTimelineGridIntervals } from '~/lib/timeline-view'
+import { timelineGridPhasePx } from '~/lib/timeline-grid-phase'
 
 type GridOverlayProps = {
   durationSec: number
@@ -38,7 +39,11 @@ const GridOverlay: Component<GridOverlayProps> = (props) => {
           var(--timeline-grid-major) 2px,
           transparent 2px,
           transparent ${major}px
-        )`
+        )`,
+      'background-position': [
+        `${timelineGridPhasePx(props.visibleStartSec, props.pixelsPerSecond, intervals().minorSec)}px 0px`,
+        `${timelineGridPhasePx(props.visibleStartSec, props.pixelsPerSecond, intervals().majorSec)}px 0px`,
+      ].join(', '),
     }
   }
 
@@ -49,7 +54,6 @@ const GridOverlay: Component<GridOverlayProps> = (props) => {
         style={{
           width: `${Math.max(0, props.viewportWidthPx)}px`,
           height: '100%',
-          'background-position': `${-props.visibleStartSec * props.pixelsPerSecond}px 0px`,
           ...backgroundStyle(),
         }}
       />

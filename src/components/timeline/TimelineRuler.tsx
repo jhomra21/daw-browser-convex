@@ -1,6 +1,7 @@
 import { createMemo, type Component, Index, Show, onCleanup } from 'solid-js'
 import { ARRANGEMENT_OVERVIEW_HEIGHT, RULER_HEIGHT, quantizeSecToGrid } from '~/lib/timeline-utils'
 import { musicalBarLabelAtTime, selectTimelineGridIntervals } from '~/lib/timeline-view'
+import { timelineGridPhasePx } from '~/lib/timeline-grid-phase'
 
 type TimelineRulerProps = {
   durationSec: number
@@ -209,16 +210,15 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       } as const
     }
 
-    const fiveSecPx = props.pixelsPerSecond * 5
     return {
       background: `
-        /* 5s lines */
+        /* Adaptive major lines */
         repeating-linear-gradient(
           to right,
           var(--timeline-grid-major) 0px,
           var(--timeline-grid-major) 2px,
           transparent 2px,
-          transparent ${fiveSecPx}px
+          transparent ${barStepPx()}px
         ),
         var(--timeline-surface)`
     } as const
@@ -279,8 +279,12 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
         top: `${ARRANGEMENT_OVERVIEW_HEIGHT}px`,
         width: `${rulerWidthPx()}px`,
         height: `${RULER_HEIGHT}px`,
-        'background-position': `${-props.visibleRange.startSec * props.pixelsPerSecond}px 0px`,
         ...backgroundStyle(),
+        'background-position': `${timelineGridPhasePx(
+          props.visibleRange.startSec,
+          props.pixelsPerSecond,
+          intervals().majorSec,
+        )}px 0px`,
       }}
       ref={el => { rootEl = el }}
       onPointerDown={onLocalPointerDown}

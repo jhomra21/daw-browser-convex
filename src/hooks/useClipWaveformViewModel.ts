@@ -319,6 +319,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       retainedByKey: currentGeneration.entries,
       segments: plans().segments,
       map,
+      backingPixelsPerCssPixel: options.backingPixelsPerCssPixel?.() ?? 1,
     }).map((projected) => {
       const segmentWidth = Math.max(1, projected.endPx - projected.startPx)
       const frameSpan = Math.max(1, projected.sourceEndFrame - projected.sourceStartFrame)

@@ -130,7 +130,6 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
       durationSec: options.durationSec(),
     }),
     runwayWidth: physicalRunwayWidth(),
-    runwayOffset: physicalAnchor,
   })
 
   const applyVisibleRange = (range: TimelineRange, commit: boolean, isWheelPreview = false) => {
@@ -239,7 +238,6 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     setVisibleStart,
     usableWidth: viewportWidth,
     physicalRunwayWidth,
-    physicalOffset: () => physicalAnchor,
     zoomIn,
     zoomOut,
     zoomToFit,

@@ -258,6 +258,16 @@
 - [x] Phase 1 focused coverage records current-view projection, selected LOD, samples/pixel, and pixels/sample while zooming; retained raster scale and CSS transform are no longer render inputs.
 - [x] The renderer now uses the current visible clip slice and native-DPR backing dimensions. At 4,096 x 47 CSS px, DPR 3 produces exactly 12,288 x 141 backing px; over-budget widths preserve CSS width and reduce only horizontal backing density.
 - [x] The prior DPR double-penalty was rejected: the backing-width budget is `floor(2,000,000 / backingHeightPx)`, with backing height `ceil(cssHeightPx * dpr)`, covered at DPR 1, 1.5, 2, and 3.
+
+## Tier-continuity final qualification
+
+- [x] Focused tier/LOD, retained projection, Arrangement/Sample Detail parity, browser-raster, geometry, lifecycle, and persistence coverage passed: 103 tests.
+- [x] Browser-condition coverage passed: 10 tests, including the 7-test waveform view-model continuity suite.
+- [x] Configured complete suite passed: 2,967 passed, 0 failed, 1 intentional portable-Wasm Electron skip, 2,968 tests across 372 files, 375,067 assertions.
+- [x] Package/root/API/desktop typechecks, lint with zero warnings, 12 anti-slop suites, production build, portable Wasm validation, Workers dry-run, desktop packaging, focused diff secret/security scans, and `git diff --check` passed.
+- [x] Exact arm64 Electron packaging succeeded with `/Users/juan/Documents/vst3sdk-3.8.0`; the packaged renderer launched at `daw://app/` with an isolated profile and DevTools endpoint.
+- [x] Candidate runtime evidence records three Electron stress runs with zero in-campaign frame intervals at or above 16.67/50/100 ms and canonical forward/reverse aggregation within all declared tolerances.
+- [ ] Safari automation remains unavailable in this environment and is not claimed by this qualification.
 - [x] Focused browser-condition churn coverage exercises forward/reverse zoom and asserts source reuse plus non-empty overlapping retained coverage. The measured focused path remained bounded; no active/latest coalescer was added.
 - [x] Per-visible-clip canvases remain the frame authority. No shared canvas, OffscreenCanvas, WebGL, dependency, RAF, timer, or polling loop was introduced.
 - [x] Canonical trim, Re-Pitch, Stretch, BPM mismatch, source beat offset, marker warp, and silence projection remain covered by the existing canonical timing fixtures and current-layout projection path.
@@ -312,3 +322,16 @@
 - [x] Exact 4× slowed evidence measured 396 waveform-only samples over 39.9667 seconds with zero blank frames, maximum adjacent thickness ratio `1.008145`, maximum green-pixel drop `0.001406`, and maximum luminance jump `0.149580`.
 - [x] Direct native checkpoint review confirmed rendered waveform content without a blank mask or white flash.
 - Evidence: `acceptance-reports/rebuilt-arrangement-continuity.json`, `acceptance-reports/rebuilt-arrangement-native-clean.mov`, and `acceptance-reports/rebuilt-arrangement-native-clean-025x.mov`.
+
+## Final pinned-timeline and logical-grid qualification
+
+- [x] The visible Arrangement surface remains pinned inside the 200,000 px native scroll proxy; 40 active-scroll samples measured 0 px maximum left and right gaps.
+- [x] Waveform body geometry uses one symmetric source-anchor ribbon for aggregate intervals and exact samples; exact points remain decoration only and final geometry is independent of zoom history.
+- [x] Fresh packaged Electron projects show the ruler, grid, and lane on first settled paint without scroll, resize, or synthetic wake-up.
+- [x] Timeline grid and ruler major lines share the same adaptive canonical interval and bounded logical phase derived from `visibleStartSec` and `pixelsPerSecond`.
+- [x] Chromium regression coverage proves grid phase advances during pan, remains aligned with the ruler through zoom/reverse-pan, and is unchanged by physical runway recentering.
+- [x] Final configured suite passed: 2,974 passed, 1 intentional skip, 0 failed, with 375,109 assertions across 375 files.
+- [x] Typechecks, lint with zero warnings, 12 anti-slop suites, production build, portable Wasm validation, Workers dry-run, Electron packaging, security scan, and `git diff --check` passed.
+- [x] Final settled packaged-Electron 20-cycle telemetry: p50 8.3 ms, p95 10.2 ms, p99 10.3 ms, maximum 10.4 ms, zero intervals at or above 16.67/50/100 ms, 12/12 nonzero canvases, and zero renderer errors.
+- [x] User supplied and approved final normal-speed and 0.25× visual acceptance evidence. Safari qualification was waived by the user.
+- Status: **DEEP TIMELINE ZOOM — READY**.

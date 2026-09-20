@@ -39,7 +39,6 @@ export type TimelineViewport = {
   timeToX: (timeSec: number) => number
   xToTime: (x: number) => number
   runwayWidth: number
-  runwayOffset: number
 }
 
 export const TIMELINE_VIEWPORT_OVERSCAN_PX = 512
@@ -131,7 +130,6 @@ export const createTimelineViewport = (input: TimelineViewportGeometry): Timelin
     timeToX: (timeSec) => timeToViewportX(geometry, timeSec),
     xToTime: (x) => viewportXToTime(geometry, x),
     runwayWidth: geometry.viewportWidthPx,
-    runwayOffset: 0,
   }
 }
 

@@ -1,0 +1,90 @@
+{
+  "capturedAt": "2026-09-20T17:33:00Z",
+  "head": "4a40629d9bdd515a4db83fb0027ade015f17cb7a",
+  "status": "READY",
+  "waveform": {
+    "oneAnchorGeometry": true,
+    "bodyBranchesOnDataKind": false,
+    "pointDecorationControlsAcquisition": false,
+    "historyIndependentTests": "PASS"
+  },
+  "coldOpen": {
+    "packagedElectron": "PASS",
+    "interactionRequired": false,
+    "viewportWidthPx": 584,
+    "surfaceWidthPx": 584,
+    "screenshot": "acceptance-reports/three-defect-qualification/cold-open-pinned-timeline.png"
+  },
+  "horizontalAttachment": {
+    "architecture": "sticky visible surface inside bounded scroll proxy",
+    "sampledFrames": 40,
+    "maxLeftGapPx": 0,
+    "maxRightGapPx": 0
+  },
+  "gridPhase": {
+    "logicalViewportProjection": "PASS",
+    "rulerMajorGridParity": "PASS",
+    "activeScrollParity": "PASS",
+    "physicalRecenterInvariant": "PASS",
+    "coldOpenPhase": "PASS",
+    "cssShorthandResetRegression": "PASS"
+  },
+  "automated": {
+    "focusedWaveformViewportTests": {
+      "passed": 66,
+      "failed": 0
+    },
+    "interactionTests": {
+      "passed": 76,
+      "failed": 0
+    },
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "antiSlop": "PASS",
+    "productionBuild": "PASS",
+    "portableWasm": "PASS",
+    "workersDryRun": "PASS",
+    "electronPackage": "PASS",
+    "diffCheck": "PASS",
+    "securityFindings": 0,
+    "configuredFullSuite": {
+      "passed": 2974,
+      "skipped": 1,
+      "failed": 0,
+      "assertions": 375109,
+      "execution": "Dedicated TMPDIR, max concurrency 1, 15000 ms timeout, configured VITE_CONVEX_URL.",
+      "evidence": "acceptance-reports/three-defect-qualification/configured-full-suite-zero-failure.txt"
+    }
+  },
+  "runtimeTelemetry": {
+    "browser": {
+      "cycles": 20,
+      "p50Ms": 8.3,
+      "p95Ms": 9,
+      "p99Ms": 9.2,
+      "maxMs": 9.3,
+      "intervalsAtOrAbove16_67Ms": 0,
+      "canvases": 15,
+      "nonzeroCanvases": 15,
+      "rendererErrors": 0,
+      "evidence": "acceptance-reports/three-defect-qualification/browser-pan-zoom-telemetry.json"
+    },
+    "electron": {
+      "cycles": 20,
+      "p50Ms": 8.3,
+      "p95Ms": 10.2,
+      "p99Ms": 10.3,
+      "maxMs": 10.4,
+      "intervalsAtOrAbove16_67Ms": 0,
+      "canvases": 12,
+      "nonzeroCanvases": 12,
+      "heapDeltaBytes": 4806724,
+      "rendererErrors": 0,
+      "evidence": "acceptance-reports/three-defect-qualification/electron-pan-zoom-telemetry.json",
+      "screenshot": "acceptance-reports/three-defect-qualification/electron-populated-fixture.png"
+    }
+  },
+  "video": "PROVIDED_BY_USER",
+  "remaining": [],
+  "final": "READY"
+}

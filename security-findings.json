@@ -1,9 +1,10 @@
 {
-  "scan_id": "scan-2026-09-14-waveform-continuity",
-  "scan_date": "2026-09-14T00:00:00Z",
+  "scan_id": "deep-timeline-final-candidate",
+  "scan_date": "2026-09-20T17:33:00Z",
   "scan_type": "working",
-  "commit_range": "c9178532c44790cbb95a1d6c402b359588b65ed8+working-tree",
+  "commit_range": "4a40629d9bdd515a4db83fb0027ade015f17cb7a+working-tree",
   "pr_number": 54,
+  "scope": "unified waveform geometry, deterministic tier planning, pinned timeline scroll proxy, and logical grid phase",
   "threat_model_version": "1.0.0",
   "findings": [],
   "summary": {
@@ -22,6 +23,11 @@
       "DoS": 0,
       "ElevationOfPrivilege": 0
     },
-    "files_analyzed": 7
+    "files_analyzed": 20
+  },
+  "checks": {
+    "secretPatternScan": "PASS",
+    "dangerousSinkScan": "PASS",
+    "gitDiffCheck": "PASS"
   }
 }

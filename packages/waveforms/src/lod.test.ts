@@ -1,21 +1,44 @@
 import { describe, expect, test } from 'bun:test'
-import { pointRadiusForPixelsPerSample, selectWaveformTier } from './lod'
+import {
+  pointRadiusForPixelsPerSample,
+  selectWaveformTier,
+  waveformTierSelectionThreshold,
+} from './lod'
 
 describe('waveform level of detail', () => {
-  test('uses effective backing density and hysteresis', () => {
+  test('uses effective backing density deterministically', () => {
     const input = {
       sourceFrameSpan: 48_000,
       cssSegmentWidth: 480,
       backingPixelsPerCssPixel: 1,
       tiers: [1, 2, 4, 8, 16, 32, 64, 128],
     }
-    expect(selectWaveformTier(input)?.framesPerInterval).toBe(64)
-    expect(selectWaveformTier({ ...input, previousFramesPerInterval: 32 })?.framesPerInterval).toBe(32)
+    expect(selectWaveformTier(input)?.framesPerInterval).toBe(8)
     expect(selectWaveformTier({
       ...input,
       sourceFrameSpan: 96_000,
-      previousFramesPerInterval: 32,
-    })?.framesPerInterval).toBe(32)
+    })?.framesPerInterval).toBe(16)
+  })
+
+  test('does not make tier selection depend on a previous zoom tier', () => {
+    const first = selectWaveformTier({
+      sourceFrameSpan: 40,
+      cssSegmentWidth: 7,
+      backingPixelsPerCssPixel: 1,
+      tiers: [1, 2, 4],
+    })?.framesPerInterval
+    const second = selectWaveformTier({
+      sourceFrameSpan: 20,
+      cssSegmentWidth: 7,
+      backingPixelsPerCssPixel: 1,
+      tiers: [1, 2, 4],
+    })?.framesPerInterval
+    expect(first).toBe(1)
+    expect(second).toBe(1)
+  })
+
+  test('keeps the early acquisition threshold explicit', () => {
+    expect(waveformTierSelectionThreshold).toBe(0.125)
   })
 
   test('returns continuous point radius only above the point threshold', () => {

@@ -118,6 +118,7 @@ export function useSampleDetailWaveformOverview(options: SampleDetailWaveformOve
           retainedByKey,
           segments: plans.segments,
           map,
+          backingPixelsPerCssPixel,
         }).map((segment) => ({
           drawStartPx: segment.startPx,
           drawCols: Math.max(0, segment.endPx - segment.startPx),

@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { drawWaveformSignal } from '@daw-browser/waveforms/draw-waveform-signal'
+import { decodePeakByte, encodePeakByte } from '@daw-browser/waveforms/extract-peaks'
 import type { WaveformSourceData } from '@daw-browser/waveforms/types'
 import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import { resolveWaveformPaintStyle } from './waveform-style'
 import {
+  aggregateWaveformDataToBackingPixels,
   createWaveformRequestPlans,
   projectRetainedWaveformData,
   retainWaveformData,
@@ -12,6 +14,58 @@ import { loadWaveformSourceData } from '@daw-browser/waveforms/select-waveform-w
 import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
 
 describe('waveform request planning', () => {
+  const intervalDataFor = (
+    samples: readonly number[],
+    framesPerInterval: number,
+    encoding: 'float32' | 'signed-u8' = 'float32',
+  ): WaveformSourceData => {
+    const intervalCount = Math.ceil(samples.length / framesPerInterval)
+    const values = Array.from({ length: intervalCount }, (_, interval) => {
+      const start = interval * framesPerInterval
+      const end = Math.min(samples.length, start + framesPerInterval)
+      const intervalSamples = samples.slice(start, end)
+      return [
+        Math.min(...intervalSamples),
+        Math.max(...intervalSamples),
+      ]
+    }).flat()
+    if (encoding === 'signed-u8') {
+      return {
+        kind: 'intervals',
+        encoding,
+        channels: [Uint8Array.from(values.map(encodePeakByte))],
+        firstFrame: 0,
+        sampleRate: 48_000,
+        sourceFrameCount: samples.length,
+        framesPerInterval,
+        intervalCount,
+      }
+    }
+    return {
+      kind: 'intervals',
+      encoding,
+      channels: [Float32Array.from(values)],
+      firstFrame: 0,
+      sampleRate: 48_000,
+      sourceFrameCount: samples.length,
+      framesPerInterval,
+      intervalCount,
+    }
+  }
+
+  const aggregateSamples = (
+    samples: readonly number[],
+    framesPerInterval: number,
+    cssWidthPx: number,
+    backingPixelsPerCssPixel = 2,
+  ) => aggregateWaveformDataToBackingPixels({
+    data: intervalDataFor(samples, framesPerInterval),
+    sourceStartFrame: 0,
+    sourceEndFrame: samples.length,
+    cssWidthPx,
+    backingPixelsPerCssPixel,
+  })
+
   test('uses canonical descriptor frame count for a short exact source window', async () => {
     const source: AudioPcmSourceDescriptor = {
       identity: '27-frame-source',
@@ -115,8 +169,8 @@ describe('waveform request planning', () => {
     })
     expect(at48k.requests[0]?.framesPerInterval).toBeGreaterThanOrEqual(128)
     expect(at44k.requests[0]?.framesPerInterval).toBeGreaterThanOrEqual(128)
-    expect(at48k.requests[0]?.framesPerInterval).toBe(65_536)
-    expect(at44k.requests[0]?.framesPerInterval).toBe(65_536)
+    expect(at48k.requests[0]?.framesPerInterval).toBe(16_384)
+    expect(at44k.requests[0]?.framesPerInterval).toBe(16_384)
   })
 
   test('prioritizes the segment nearest the visible range center', () => {
@@ -196,8 +250,182 @@ describe('waveform request planning', () => {
         canvasEndSec: 1,
       }],
     })
-    expect(intervalPlan.requests[0]?.framesPerInterval).toBe(16)
+    expect(intervalPlan.requests[0]?.framesPerInterval).toBe(2)
     expect(detailPlan.requests[0]?.framesPerInterval).toBe(1)
+  })
+
+  test('allows exact PCM before point decoration becomes visible', () => {
+    const plan = createWaveformRequestPlans({
+      sampleRate: 48_000,
+      sourceFrameCount: 48_000,
+      sourceDurationSec: 1,
+      segments: [{
+        drawCols: 160_000,
+        sourceStartSec: 0,
+        sourceEndSec: 1,
+        startPx: 0,
+        endPx: 160_000,
+        canvasStartSec: 0,
+        canvasEndSec: 1,
+      }],
+    })
+    expect(plan.requests[0]?.framesPerInterval).toBe(1)
+  })
+
+  test('uses the same tier for the same visible source geometry', () => {
+    const segment = {
+      drawCols: 480,
+      sourceStartSec: 0,
+      sourceEndSec: 1,
+      startPx: 0,
+      endPx: 480,
+      canvasStartSec: 0,
+      canvasEndSec: 1,
+    }
+    expect(createWaveformRequestPlans({
+      sampleRate: 48_000,
+      sourceFrameCount: 48_000,
+      sourceDurationSec: 1,
+      segments: [segment],
+    }).requests[0]?.framesPerInterval).toBe(8)
+    const first = createWaveformRequestPlans({
+      sampleRate: 48_000,
+      sourceFrameCount: 48_000,
+      sourceDurationSec: 1,
+      segments: [segment],
+    })
+    const second = createWaveformRequestPlans({
+      sampleRate: 48_000,
+      sourceFrameCount: 48_000,
+      sourceDurationSec: 1,
+      segments: [segment],
+    })
+    expect(second.requests[0]?.framesPerInterval).toBe(first.requests[0]?.framesPerInterval)
+  })
+
+  test('aligns adjacent interval tiers to the same canonical backing bins', () => {
+    const makeData = (framesPerInterval: number): WaveformSourceData => ({
+      kind: 'intervals',
+      encoding: 'float32',
+      channels: [Float32Array.from(
+        { length: 128 / framesPerInterval * 2 },
+        (_, index) => {
+          const interval = Math.floor(index / 2)
+          const base = Math.floor(interval * framesPerInterval / 16) % 2 === 0 ? -0.5 : 0.25
+          return index % 2 === 0 ? base : base + 0.5
+        },
+      )],
+      firstFrame: 0,
+      sampleRate: 48_000,
+      sourceFrameCount: 128,
+      framesPerInterval,
+      intervalCount: 128 / framesPerInterval,
+    })
+    const aggregate = (framesPerInterval: number) => aggregateWaveformDataToBackingPixels({
+      data: makeData(framesPerInterval),
+      sourceStartFrame: 0,
+      sourceEndFrame: 128,
+      cssWidthPx: 8,
+      backingPixelsPerCssPixel: 2,
+    })
+    const fine = aggregate(8)
+    const coarse = aggregate(16)
+    expect(fine).toEqual(coarse)
+    expect(fine.kind).toBe('intervals')
+    if (fine.kind !== 'intervals') return
+    expect(fine.framesPerInterval).toBe(8)
+    expect([...fine.channels[0] ?? []]).toEqual(Array.from(
+      { length: 32 },
+      (_, index) => Math.floor(index / 4) % 2 === 0
+        ? (index % 2 === 0 ? -0.5 : 0)
+        : (index % 2 === 0 ? 0.25 : 0.75),
+    ))
+  })
+
+  test('aggregates exact samples and signed peaks onto the same canonical grid', () => {
+    const samples: WaveformSourceData = {
+      kind: 'samples',
+      channels: [Float32Array.from([-0.75, 0.25, 0.5, -0.125])],
+      firstFrame: 0,
+      sampleRate: 48_000,
+      sourceFrameCount: 4,
+    }
+    const peaks = intervalDataFor(
+      [-0.75, 0.25, 0.5, -0.125],
+      1,
+      'signed-u8',
+    )
+    const aggregate = (data: WaveformSourceData) => aggregateWaveformDataToBackingPixels({
+      data,
+      sourceStartFrame: 0,
+      sourceEndFrame: 4,
+      cssWidthPx: 2,
+      backingPixelsPerCssPixel: 1,
+    })
+    const sampleAggregate = aggregate(samples)
+    const peakAggregate = aggregate(peaks)
+    expect(sampleAggregate.kind).toBe('intervals')
+    expect(peakAggregate.kind).toBe('intervals')
+    if (sampleAggregate.kind !== 'intervals' || peakAggregate.kind !== 'intervals') return
+    expect(sampleAggregate.framesPerInterval).toBe(2)
+    expect([...sampleAggregate.channels[0] ?? []]).toEqual([-0.75, 0.25, -0.125, 0.5])
+    expect([...peakAggregate.channels[0] ?? []]).toHaveLength(4)
+    for (const [index, value] of (peakAggregate.channels[0] ?? []).entries()) {
+      expect(value).toBeCloseTo([
+        decodePeakByte(encodePeakByte(-0.75)),
+        decodePeakByte(encodePeakByte(0.25)),
+        decodePeakByte(encodePeakByte(-0.125)),
+        decodePeakByte(encodePeakByte(0.5)),
+      ][index] ?? value)
+    }
+    expect(peakAggregate.channels[0]?.every((value, index) => (
+      Math.abs(value - (sampleAggregate.channels[0]?.[index] ?? value)) <= 1 / 127
+    ))).toBe(true)
+  })
+
+  test('keeps deterministic waveform features tier-invariant across zoom direction', () => {
+    const waveforms = [
+      Array.from({ length: 1_024 }, (_, index) => Math.sin(index / 17) * 0.7),
+      Array.from({ length: 1_024 }, (_, index) => index === 317 ? 0.91 : index === 683 ? -0.47 : 0),
+      Array.from({ length: 1_024 }, (_, index) => Math.abs(Math.sin(index / 23)) * 0.8),
+      Array.from({ length: 1_024 }, (_, index) => -Math.abs(Math.sin(index / 23)) * 0.8),
+    ]
+    const widths = [16, 32, 64]
+    for (const samples of waveforms) {
+      const forward = widths.map((width) => aggregateSamples(samples, 8, width, 1))
+      const reverse = [...widths].reverse().map((width) => aggregateSamples(samples, 16, width, 1))
+      for (let index = 0; index < widths.length; index += 1) {
+        expect(forward[index]).toEqual(reverse[widths.length - 1 - index])
+      }
+    }
+  })
+
+  test('preserves the canonical feature X and bounded signed encoding error at publication', () => {
+    const samples = Array.from({ length: 1_024 }, (_, index) => (
+      Math.floor(index / 64) % 2 === 0 ? -0.75 : 0.5
+    ))
+    const fine = aggregateSamples(samples, 32, 32, 1)
+    const coarse = aggregateSamples(samples, 64, 32, 1)
+    expect(fine).toEqual(coarse)
+    if (fine.kind !== 'intervals') return
+    const values = fine.channels[0]
+    expect(values).toBeDefined()
+    expect(fine.firstFrame).toBe(0)
+    expect(fine.intervalCount).toBe(32)
+    expect(fine.framesPerInterval).toBe(32)
+    for (let index = 0; index < fine.intervalCount; index += 1) {
+      const startFrame = fine.firstFrame + index * fine.framesPerInterval
+      expect(startFrame / fine.framesPerInterval).toBeCloseTo(index)
+      const minimum = values?.[index * 2] ?? 0
+      const maximum = values?.[index * 2 + 1] ?? 0
+      expect(minimum).toBeLessThanOrEqual(maximum)
+      expect(Math.abs(minimum)).toBeLessThanOrEqual(1)
+      expect(Math.abs(maximum)).toBeLessThanOrEqual(1)
+    }
+    const encoded = samples.map(encodePeakByte)
+    expect(Math.max(...encoded.map((value, index) => (
+      Math.abs(decodePeakByte(value) - samples[index]!)
+    )))).toBeLessThanOrEqual(1 / 127)
   })
 
   test('keeps Arrangement and Sample Detail plans, geometry, and painter commands identical', () => {
@@ -218,12 +446,12 @@ describe('waveform request planning', () => {
     })
     if (!map) throw new Error('Expected parity time map')
     const cases = [
-      { name: 'zero', baseWidth: 6, expectedTier: 512, sampleValue: 0 },
-      { name: 'narrow', baseWidth: 6, expectedTier: 512, sampleValue: 0.001 },
-      { name: 'raster-sensitive', baseWidth: 6, expectedTier: 512, deviceThickness: 1.001 },
-      { name: 'coarse', baseWidth: 6, expectedTier: 512 },
-      { name: 'fine', baseWidth: 48, expectedTier: 64 },
-      { name: 'transient', baseWidth: 200, expectedTier: 16 },
+      { name: 'zero', baseWidth: 6, expectedTier: 64, sampleValue: 0 },
+      { name: 'narrow', baseWidth: 6, expectedTier: 64, sampleValue: 0.001 },
+      { name: 'raster-sensitive', baseWidth: 6, expectedTier: 64, deviceThickness: 1.001 },
+      { name: 'coarse', baseWidth: 6, expectedTier: 64 },
+      { name: 'fine', baseWidth: 48, expectedTier: 8 },
+      { name: 'transient', baseWidth: 200, expectedTier: 2 },
       { name: 'exact', baseWidth: 24_000, expectedTier: 1 },
     ] as const
 

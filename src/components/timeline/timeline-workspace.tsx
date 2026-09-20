@@ -111,7 +111,6 @@ type Props = {
     timeToX: (timeSec: number) => number;
     xToTime: (x: number) => number;
     runwayWidth: number;
-    runwayOffset: number;
     previewVisibleRange: (range: { startSec: number; endSec: number }) => void;
     commitVisibleRange: (range: { startSec: number; endSec: number }) => void;
     onWheel: (event: WheelEvent) => void;
@@ -436,11 +435,10 @@ export default function TimelineWorkspace(props: Props) {
             }}
           >
             <div
-              class="relative flex shrink-0 flex-col"
+              class="relative sticky left-0 flex shrink-0 flex-col"
               ref={props.timelineSurfaceRef}
               style={{
                 width: `${props.viewport.width}px`,
-                "margin-left": `${props.viewport.runwayOffset}px`,
               }}
                onPointerDown={(event) => props.onLanePointerDown(event)}
             >

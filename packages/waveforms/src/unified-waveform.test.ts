@@ -237,19 +237,19 @@ describe('waveform hierarchy and quantization', () => {
 })
 
 describe('waveform LOD and source scheduler', () => {
-  test('selects the finest tier at the 0.75 interval-width threshold', () => {
+  test('selects the finest tier at the early interval-width threshold', () => {
     expect(selectWaveformTier({
       sourceFrameSpan: 48_000,
       cssSegmentWidth: 480,
       backingPixelsPerCssPixel: 2,
       tiers: [1, 2, 4, 8, 16, 32, 64, 128],
-    })?.framesPerInterval).toBe(32)
+    })?.framesPerInterval).toBe(4)
     expect(selectWaveformTier({
       sourceFrameSpan: 48_000,
       cssSegmentWidth: 480,
       backingPixelsPerCssPixel: 1,
       tiers: [1, 2, 4, 8, 16, 32, 64, 128],
-    })?.framesPerInterval).toBe(64)
+    })?.framesPerInterval).toBe(8)
   })
 
   test('deduplicates tiles, clones cached data, and retries null results', async () => {
@@ -784,6 +784,54 @@ describe('unified waveform painter', () => {
     expect(recorded.commands.filter(([kind]) => kind === 'fill')).toHaveLength(1)
   })
 
+  test('uses one source-anchor ribbon path for exact samples and interval peaks', () => {
+    const bodyCommands = (data: Parameters<typeof drawWaveformSignal>[1]['data']) => {
+      const recorded = recordingContext()
+      drawWaveformSignal(recorded.ctx, {
+        data,
+        sourceStartFrame: 0,
+        sourceEndFrame: 4,
+        startPx: 0,
+        endPx: 40,
+        topY: 0,
+        contentH: 30,
+        channelCount: 1,
+        style: { minimumThicknessCssPx: 1 },
+      })
+      const fillIndex = recorded.commands.findIndex(([kind]) => kind === 'fill')
+      return recorded.commands.slice(0, fillIndex)
+        .filter((command) => command[0] === 'moveTo' || command[0] === 'lineTo')
+    }
+    const samples = bodyCommands({
+      kind: 'samples',
+      channels: [new Float32Array([-.5, .25, -.25, .5])],
+      firstFrame: 0,
+      sampleRate: 1,
+      sourceFrameCount: 4,
+    })
+    const intervals = bodyCommands({
+      kind: 'intervals',
+      encoding: 'float32',
+      channels: [new Float32Array([-.5, .5, -.25, .25])],
+      firstFrame: 0,
+      sampleRate: 1,
+      sourceFrameCount: 4,
+      framesPerInterval: 2,
+      intervalCount: 2,
+    })
+    const assertSourceAnchors = (commands: readonly (readonly [string, ...number[]])[]) => {
+      const xValues = commands.map((command) => command[1] ?? 0)
+      const repeatedXTransitions = xValues.slice(1).filter((x, index) => x === xValues[index]).length
+      expect(repeatedXTransitions).toBe(1)
+      expect(commands.filter(([kind]) => kind === 'moveTo')).toHaveLength(1)
+      expect(commands.filter(([kind]) => kind === 'lineTo').length).toBeGreaterThan(1)
+    }
+    assertSourceAnchors(samples)
+    assertSourceAnchors(intervals)
+    expect(samples[0]?.[0]).toBe('moveTo')
+    expect(intervals[0]?.[0]).toBe('moveTo')
+  })
+
   test('clips signed bands, applies fades per channel, and bounds canvas operations', () => {
     let fills = 0
     let moves = 0
@@ -824,7 +872,7 @@ describe('unified waveform painter', () => {
       },
     })
     expect(fills).toBe(2)
-    expect(fadeFrames).toEqual([5, 15])
+    expect(fadeFrames).toEqual([5, 7.5, 12.5, 15])
     expect(moves + lines).toBeLessThanOrEqual(20)
   })
 })

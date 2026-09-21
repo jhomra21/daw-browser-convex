@@ -14,7 +14,6 @@ import { getTimelineClipViewportSlice } from "~/lib/timeline-viewport-geometry";
 import { waveformCanvasSize } from "~/lib/waveform-canvas";
 import { resolveWaveformPaintStyle } from "~/lib/waveform-style";
 import { cn } from "~/lib/utils";
-import { useDevicePixelRatio } from "~/lib/device-pixel-ratio";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { RuntimeClip } from "~/lib/timeline-runtime-types";
 import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
@@ -68,6 +67,7 @@ type ClipComponentProps = {
   visibleRange: { startSec: number; endSec: number };
   timeToX: (timeSec: number) => number;
   viewportRedrawVersion: number;
+  devicePixelRatio: number;
   waveformVisible?: boolean;
   rangeOverlap: ClipRangeOverlap | null;
   canEditFades: () => boolean;
@@ -107,7 +107,6 @@ let lastClipDoubleOpen:
 const ClipComponent: Component<ClipComponentProps> = (props) => {
   const appPreferences = useAppPreferences();
   let canvasRef: HTMLCanvasElement | undefined;
-  const devicePixelRatio = useDevicePixelRatio();
   let selectedTapStart:
     | { x: number; y: number; at: number }
     | undefined;
@@ -162,7 +161,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     backingPixelsPerCssPixel: () => waveformCanvasSize({
       cssWidthPx: clipWidthPx(),
       cssHeightPx: Math.max(1, Math.floor(LANE_HEIGHT - 1)),
-      devicePixelRatio: devicePixelRatio(),
+      devicePixelRatio: props.devicePixelRatio,
     }).contextScaleX,
   });
   const waveformCanvasStyle = createMemo(() => {
@@ -277,7 +276,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const canvasSize = waveformCanvasSize({
       cssWidthPx: clipWidthPx(),
       cssHeightPx: cssH,
-      devicePixelRatio: devicePixelRatio(),
+      devicePixelRatio: props.devicePixelRatio,
     });
     const cssW = canvasSize.cssWidthPx;
     const pxW = canvasSize.backingWidthPx;
@@ -482,7 +481,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void appPreferences.appearance.themeTokens();
     void props.pixelsPerSecond;
     void props.visibleRange;
-    void waveform.renderRevision();
+    void waveform.segments();
     drawWaveform();
   });
 

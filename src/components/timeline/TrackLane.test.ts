@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test'
-import { readFile } from 'node:fs/promises'
 import { isClipWithinRenderRange } from './clip-render-range'
 import { buildTimelineTrackLayoutRows, timelineTrackLaneHitRegion } from '~/lib/timeline-track-layout'
 import { LANE_HEIGHT } from '~/lib/timeline-utils'
@@ -23,11 +22,6 @@ describe('TrackLane automation interaction path', () => {
     expect(timelineTrackLaneHitRegion(row, row.clipLaneHeightPx + 10)).toBe('automation')
     expect(timelineTrackLaneHitRegion(row, row.clipLaneHeightPx - 1)).toBe('clip')
 
-    const source = await readFile(new URL('./TrackLane.tsx', import.meta.url), 'utf8')
-    expect(source).toContain('data-timeline-automation-surface="true"')
-    expect(source).toContain('class="absolute inset-x-0 z-30 pointer-events-auto')
-    expect(source).toContain('<AutomationLane')
-    expect(source).toContain('onCommit={props.automation.onCommit}')
   })
 })
 

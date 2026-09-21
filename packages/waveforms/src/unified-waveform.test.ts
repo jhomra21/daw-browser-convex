@@ -370,8 +370,7 @@ describe('unified waveform painter', () => {
         const ribbon = waveformRibbonGeometry({
           upperY: centerY,
           lowerY: centerY,
-          minimumThicknessCssPx: 1 / backingScaleY,
-          backingScaleY,
+        minimumThicknessCssPx: 1 / backingScaleY,
         })
         const upperBackingY = ribbon.upperY * backingScaleY
         const lowerBackingY = ribbon.lowerY * backingScaleY
@@ -396,7 +395,6 @@ describe('unified waveform painter', () => {
             upperY: centerY - thickness / 2,
             lowerY: centerY + thickness / 2,
             minimumThicknessCssPx: 1 / backingScaleY,
-            backingScaleY,
           })
           const upperBackingY = ribbon.upperY * backingScaleY
           const lowerBackingY = ribbon.lowerY * backingScaleY
@@ -421,7 +419,6 @@ describe('unified waveform painter', () => {
             upperY: centerY - thickness / 2,
             lowerY: centerY + thickness / 2,
             minimumThicknessCssPx: 1 / backingScaleY,
-            backingScaleY,
           }).centerY * backingScaleY)
         }
         const jumps = centers.slice(1).map((value, index) => Math.abs(value - (centers[index] ?? value)))
@@ -436,7 +433,6 @@ describe('unified waveform painter', () => {
       upperY: 4,
       lowerY: 12,
       minimumThicknessCssPx: 1,
-      backingScaleY: 2,
     })
     expect(thick).toEqual({
       upperY: 4,

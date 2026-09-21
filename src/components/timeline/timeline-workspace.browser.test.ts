@@ -40,9 +40,7 @@ const timelineSampleSchema = z.object({
 const timelineWorkspaceRegressionSchema = z.object({
   coldMount: z.array(timelineSampleSchema),
   pinnedScroll: z.array(timelineSampleSchema),
-  legacyMarginScroll: z.array(timelineSampleSchema),
   pinnedMaxAttachmentError: z.number(),
-  legacyMaxAttachmentError: z.number(),
   runwayWidth: z.number(),
   activeNativeScrollFrames: z.array(timelineSampleSchema),
   recenterSameLogicalViewport: z.array(timelineSampleSchema),
@@ -132,8 +130,6 @@ test('keeps the mounted timeline surface pinned through runway scrolling', async
     expect(result.pinnedScroll.every((sample) => (
       sample.rulerMajorPhasePx === sample.gridMajorPhasePx
     ))).toBe(true)
-    expect(result.legacyMarginScroll.length).toBe(5)
-    expect(result.legacyMaxAttachmentError).toBeGreaterThan(0.5)
     expect(result.activeNativeScrollFrames.length).toBe(4)
     expect(result.activeNativeScrollFrames.every((sample, index, frames) => (
       Math.abs(sample.surfaceLeft - sample.viewportLeft) <= 0.5

@@ -273,11 +273,9 @@ describe('useClipWaveformViewModel unified generation publication', () => {
         await flush()
         expect(waveform.segments()).not.toHaveLength(0)
         expect(waveform.segments()[0]?.data.kind).toBe('intervals')
-        expect(waveform.retainedResultCounts().previous).toBeLessThanOrEqual(1)
         source.controls.replacementGate.resolve()
         await settle(waveform)
         expect(waveform.segments()[0]?.data.kind).toBe('samples')
-        expect(waveform.retainedResultCounts().previous).toBe(0)
         dispose()
         resolve()
       })().catch((cause: unknown) => {
@@ -376,8 +374,7 @@ describe('useClipWaveformViewModel unified generation publication', () => {
         setWidth(400)
         await flush()
         expect(source.controls.aborts()).toBeGreaterThan(0)
-        expect(waveform.retainedResultCounts().current).toBeLessThanOrEqual(1)
-        expect(waveform.retainedResultCounts().previous).toBeLessThanOrEqual(1)
+        expect(waveform.segments()).not.toHaveLength(0)
         dispose()
         resolve()
       })().catch((cause: unknown) => {
@@ -406,7 +403,6 @@ describe('useClipWaveformViewModel unified generation publication', () => {
         await settle(waveform)
         expect(waveform.error()).toBe('waveform read failed')
         expect(waveform.segments().length).toBeGreaterThanOrEqual(before.length)
-        expect(waveform.retainedResultCounts().previous).toBeLessThanOrEqual(1)
         dispose()
         resolve()
       })().catch((cause: unknown) => {

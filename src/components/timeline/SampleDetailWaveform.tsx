@@ -511,6 +511,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
         source={waveform.source}
         viewport={viewport()}
         onViewportChange={setViewport}
+        devicePixelRatio={devicePixelRatio()}
       />
     </div>
   );

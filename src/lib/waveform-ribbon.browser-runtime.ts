@@ -232,7 +232,6 @@ const renderAll = (): RasterRegressionResult => {
             upperY: (centerDeviceY - deviceThickness / 2) / dpr,
             lowerY: (centerDeviceY + deviceThickness / 2) / dpr,
             minimumThicknessCssPx: 1 / dpr,
-            backingScaleY: dpr,
           })
           centerRelease.push({
             thickness: deviceThickness,
@@ -307,7 +306,6 @@ const renderAll = (): RasterRegressionResult => {
       upperY: 8.25 / dpr,
       lowerY: 8.75 / dpr,
       minimumThicknessCssPx: minimumWaveformThicknessCssPx(dpr),
-      backingScaleY: dpr,
     })
     geometryDiagnostics.push({
       dpr,

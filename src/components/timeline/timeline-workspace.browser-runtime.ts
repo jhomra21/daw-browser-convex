@@ -23,14 +23,12 @@ type TimelineSample = {
 type TimelineWorkspaceRegressionResult = {
   readonly coldMount: readonly TimelineSample[]
   readonly pinnedScroll: readonly TimelineSample[]
-  readonly legacyMarginScroll: readonly TimelineSample[]
   readonly activeNativeScrollFrames: readonly TimelineSample[]
   readonly recenterSameLogicalViewport: readonly TimelineSample[]
   readonly sameLogicalViewportPhysicalProxies: readonly TimelineSample[]
   readonly panZoomSequence: readonly TimelineSample[]
   readonly fixedLogicalPan: readonly TimelineSample[]
   readonly pinnedMaxAttachmentError: number
-  readonly legacyMaxAttachmentError: number
   readonly runwayWidth: number
   readonly coldMountExpected: TimelineSample
   readonly canonicalMinorSpacingPx: number
@@ -223,9 +221,6 @@ const mountTimelineSurface = () => {
       [data-timeline-overview] { height: 20px; background: #222; }
       [data-timeline-lane] { height: 190px; background: #111; }
       [data-timeline-grid] { position: absolute; inset: 0; pointer-events: none; }
-      #legacy-viewport { width: 800px; height: 40px; overflow: auto; position: absolute; top: 250px; visibility: hidden; }
-      #legacy-runway { width: 20000px; height: 40px; position: relative; }
-      #legacy-surface { width: 800px; height: 40px; margin-left: 9600px; background: #111; }
     </style>
     <div id="app">
       <div id="left-chrome"></div>
@@ -242,11 +237,6 @@ const mountTimelineSurface = () => {
       </div>
       <div id="right-chrome"></div>
     </div>
-    <div id="legacy-viewport">
-      <div id="legacy-runway">
-        <div id="legacy-surface"></div>
-      </div>
-    </div>
   `
 }
 
@@ -254,8 +244,6 @@ const run = async (): Promise<TimelineWorkspaceRegressionResult> => {
   mountTimelineSurface()
   const viewport = requireElement('timeline-viewport')
   const surface = requireElement('timeline-surface')
-  const legacyViewport = requireElement('legacy-viewport')
-  const legacySurface = requireElement('legacy-surface')
   const runwayWidth = requireElement('timeline-runway').getBoundingClientRect().width
   const anchor = (runwayWidth - viewport.clientWidth) / 2
   const initialVisibleStartSec = 7.375
@@ -281,13 +269,6 @@ const run = async (): Promise<TimelineWorkspaceRegressionResult> => {
     viewport,
     surface,
     [anchor, 1_000, 50_000, maxScrollLeft, anchor, 199_000, 0],
-    initialVisibleStartSec,
-    initialPixelsPerSecond,
-  )
-  const legacyScroll = await sampleScrollPath(
-    legacyViewport,
-    legacySurface,
-    [9_600, 10_600, 5_000, 19_200, 9_600],
     initialVisibleStartSec,
     initialPixelsPerSecond,
   )
@@ -372,9 +353,7 @@ const run = async (): Promise<TimelineWorkspaceRegressionResult> => {
   return {
     coldMount,
     pinnedScroll,
-    legacyMarginScroll: legacyScroll,
     pinnedMaxAttachmentError: Math.max(...pinnedScroll.map(attachmentError)),
-    legacyMaxAttachmentError: Math.max(...legacyScroll.map(attachmentError)),
     runwayWidth,
     activeNativeScrollFrames,
     recenterSameLogicalViewport,

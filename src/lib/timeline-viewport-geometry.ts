@@ -44,15 +44,6 @@ export type TimelineViewport = {
 export const TIMELINE_VIEWPORT_OVERSCAN_PX = 512
 export const TIMELINE_PHYSICAL_RUNWAY_WIDTH_PX = 200_000
 
-export type BoundedPhysicalRunway = {
-  startSec: number
-  widthPx: number
-  visibleStartPx: number
-  visibleEndPx: number
-  recenteredStartSec: number
-  needsRecentering: boolean
-}
-
 const finiteNonNegative = (value: number) => Number.isFinite(value) && value >= 0
 
 const safePixelsPerSecond = (value: number) => (
@@ -223,34 +214,5 @@ export const scaleViewportAtPointer = (
       Math.max(0, geometry.durationSec - nextDuration),
     ),
     pixelsPerSecond: nextScale,
-  }
-}
-
-export const calculateBoundedPhysicalRunway = (input: {
-  visibleStartSec: number
-  viewportWidthPx: number
-  pixelsPerSecond: number
-  maxRunwayWidthPx: number
-  recenterMarginPx?: number
-}): BoundedPhysicalRunway => {
-  const pixelsPerSecond = safePixelsPerSecond(input.pixelsPerSecond)
-  const viewportWidthPx = finiteNonNegative(input.viewportWidthPx) ? input.viewportWidthPx : 0
-  const maxRunwayWidthPx = finiteNonNegative(input.maxRunwayWidthPx) ? input.maxRunwayWidthPx : 0
-  const widthPx = Math.max(viewportWidthPx, maxRunwayWidthPx)
-  const marginPx = input.recenterMarginPx !== undefined && finiteNonNegative(input.recenterMarginPx)
-    ? input.recenterMarginPx
-    : widthPx / 4
-  const visibleStartSec = finiteNonNegative(input.visibleStartSec) ? input.visibleStartSec : 0
-  const visibleStartPx = visibleStartSec * pixelsPerSecond
-  const visibleEndPx = visibleStartPx + viewportWidthPx
-  const startSec = Math.max(0, visibleStartSec - (widthPx - viewportWidthPx) / pixelsPerSecond / 2)
-  const recenteredStartSec = Math.max(0, visibleStartSec - (widthPx - viewportWidthPx) / pixelsPerSecond / 2)
-  return {
-    startSec,
-    widthPx,
-    visibleStartPx: visibleStartPx - startSec * pixelsPerSecond,
-    visibleEndPx: visibleEndPx - startSec * pixelsPerSecond,
-    recenteredStartSec,
-    needsRecentering: visibleStartPx < marginPx || visibleEndPx > widthPx - marginPx,
   }
 }

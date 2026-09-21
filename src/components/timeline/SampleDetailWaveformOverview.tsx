@@ -16,7 +16,6 @@ import {
   getSampleDetailWaveformOverviewViewportRect,
   moveSampleDetailWaveformOverviewViewport,
 } from '~/lib/sample-detail-waveform-overview'
-import { useDevicePixelRatio } from '~/lib/device-pixel-ratio'
 import { resolveWaveformPaintStyle } from '~/lib/waveform-style'
 import { waveformCanvasSize } from '~/lib/waveform-canvas'
 
@@ -30,11 +29,11 @@ type SampleDetailWaveformOverviewProps = {
   source: () => AudioPcmSourceDescriptor | null
   viewport: SampleDetailWaveformViewport
   onViewportChange: (viewport: SampleDetailWaveformViewport) => void
+  devicePixelRatio: number
 }
 
 const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps> = (props) => {
   const appPreferences = useAppPreferences()
-  const devicePixelRatio = useDevicePixelRatio()
   let canvasRef: HTMLCanvasElement | undefined
   let overviewRef: HTMLButtonElement | undefined
   let capturedPointerId: number | undefined
@@ -50,7 +49,7 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
     backingPixelsPerCssPixel: () => waveformCanvasSize({
       cssWidthPx: widthPx(),
       cssHeightPx: OVERVIEW_HEIGHT_PX,
-      devicePixelRatio: devicePixelRatio(),
+      devicePixelRatio: props.devicePixelRatio,
     }).contextScaleX,
   })
   const viewportRect = createMemo(() => getSampleDetailWaveformOverviewViewportRect({
@@ -120,7 +119,7 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
     const canvasSize = waveformCanvasSize({
       cssWidthPx: width,
       cssHeightPx: OVERVIEW_HEIGHT_PX,
-      devicePixelRatio: devicePixelRatio(),
+      devicePixelRatio: props.devicePixelRatio,
     })
     const pxWidth = canvasSize.backingWidthPx
     const pxHeight = canvasSize.backingHeightPx

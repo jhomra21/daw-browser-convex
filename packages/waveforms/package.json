@@ -6,7 +6,6 @@
   "exports": {
     "./asset-store": "./src/asset-store.ts",
     "./arrangement-waveform": "./src/arrangement-waveform.ts",
-    "./diagnostics": "./src/diagnostics.ts",
     "./extract-peaks": "./src/extract-peaks.ts",
     "./lod": "./src/lod.ts",
     "./peak-db": "./src/peak-db.ts",

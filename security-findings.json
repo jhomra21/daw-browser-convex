@@ -1,10 +1,10 @@
 {
-  "scan_id": "deep-timeline-final-candidate",
-  "scan_date": "2026-09-20T17:33:00Z",
+  "scan_id": "deep-timeline-anti-slop-cleanup",
+  "scan_date": "2026-09-21T00:16:00Z",
   "scan_type": "working",
-  "commit_range": "4a40629d9bdd515a4db83fb0027ade015f17cb7a+working-tree",
+  "commit_range": "aed791b3c2e3e62695252cdfa7208512439153d6+working-tree",
   "pr_number": 54,
-  "scope": "unified waveform geometry, deterministic tier planning, pinned timeline scroll proxy, and logical grid phase",
+  "scope": "behavior-preserving cleanup of deep timeline rendering, DPR ownership, dead APIs, qualification fixtures, and tracker evidence",
   "threat_model_version": "1.0.0",
   "findings": [],
   "summary": {
@@ -23,7 +23,7 @@
       "DoS": 0,
       "ElevationOfPrivilege": 0
     },
-    "files_analyzed": 20
+    "files_analyzed": 24
   },
   "checks": {
     "secretPatternScan": "PASS",

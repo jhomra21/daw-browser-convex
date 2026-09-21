@@ -1,20 +1,9 @@
-import { readFile } from 'node:fs/promises'
-import { describe, expect, test } from 'bun:test'
 
+import { describe, expect, test } from 'bun:test'
 import { collectTimelineMarkerIndices } from './TimelineRuler'
 import { musicalBarLabelAtTime } from '~/lib/timeline-view'
 
 describe('TimelineRuler marker slots', () => {
-  test('uses primitive Index slots so zoom updates retain marker DOM identity', async () => {
-    const source = await readFile(new URL('./TimelineRuler.tsx', import.meta.url), 'utf8')
-
-    expect(source).toContain('<Index each={minorMarkerIndices()}>')
-    expect(source).toContain('<Index each={majorMarkerIndices()}>')
-    expect(source).not.toContain('type Marker =')
-    expect(source).not.toContain('<For each={minorMarkers()}>')
-    expect(source).not.toContain('<For each={majorMarkers()}>')
-  })
-
   test('updates primitive marker slots when interval and visible length change', () => {
     const timeToX = (timeSec: number) => timeSec * 10
     const initial = collectTimelineMarkerIndices(0, 10, 1, 25, timeToX)

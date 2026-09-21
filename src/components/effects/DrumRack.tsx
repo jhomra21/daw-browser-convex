@@ -77,9 +77,9 @@ const SampleWaveform: Component<{
   buffer: AudioBuffer | undefined;
   sourceStartSec: number;
   sourceEndSec: number;
+  devicePixelRatio: number;
 }> = (props) => {
   const appPreferences = useAppPreferences();
-  const devicePixelRatio = useDevicePixelRatio();
   let canvasRef: HTMLCanvasElement | undefined;
   const [data, setData] = createSignal<WaveformSourceData | null>(null);
   const [canvasSize, setCanvasSize] = createSignal({ width: SAMPLE_WAVEFORM_BINS, height: 56 });
@@ -144,7 +144,7 @@ const SampleWaveform: Component<{
     const canvas = canvasRef;
     if (!canvas) return;
     const { width: cssW, height: cssH } = canvasSize();
-    const dpr = devicePixelRatio();
+    const dpr = props.devicePixelRatio;
     const pxW = Math.floor(cssW * dpr);
     const pxH = Math.floor(cssH * dpr);
     if (canvas.width !== pxW || canvas.height !== pxH) {
@@ -205,6 +205,7 @@ const SampleWaveform: Component<{
 };
 
 const DrumRack: Component<DrumRackProps> = (props) => {
+  const devicePixelRatio = useDevicePixelRatio();
   const [selectedPadId, setSelectedPadId] = createSignal(untrack(() => props.params.selectedPadId ?? props.params.pads[0]?.id));
   const [buffersVersion, setBuffersVersion] = createSignal(0);
 
@@ -364,6 +365,7 @@ const DrumRack: Component<DrumRackProps> = (props) => {
                         buffer={readCachedPadBuffer(pad())}
                         sourceStartSec={pad().startSec}
                         sourceEndSec={pad().endSec ?? sample().source.durationSec}
+                        devicePixelRatio={devicePixelRatio()}
                       />
                       <div class="mt-1 flex items-center gap-2 text-2xs leading-none text-muted-foreground">
                         <span>{formatSampleLength(pad())}</span>

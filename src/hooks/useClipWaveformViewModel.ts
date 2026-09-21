@@ -46,8 +46,6 @@ type Retained = {
 type Generation = {
   readonly entries: ReadonlyMap<string, Retained>
   readonly sourceIdentity: string
-  readonly timingSignature: string
-  readonly revision: number
 }
 
 type WaveformState = {
@@ -135,7 +133,6 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     return createWaveformRequestPlans({
       segments: displaySegments(),
       sampleRate: currentSource?.sampleRate ?? current.clip.sourceSampleRate ?? 48_000,
-      sourceDurationSec: current.layout.sourceDurationSec,
       sourceFrameCount: currentSource?.frameCount
         ?? Math.max(0, Math.round(current.layout.sourceDurationSec * (
           current.clip.sourceSampleRate ?? 48_000
@@ -206,7 +203,6 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         setLoading(false)
         return
       }
-      const timingSignature = timingSignatureFor(current.clip, options.projectBpm(), current.layout.sourceDurationSec)
       const previousState = untrack(generation)
       const visible = previousState.visible
       const seed = visible?.sourceIdentity === nextSource.identity
@@ -220,8 +216,6 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       const target: Generation = {
         entries: targetEntries,
         sourceIdentity: nextSource.identity,
-        timingSignature,
-        revision: (visible?.revision ?? 0) + 1,
       }
       const missing = plan.requests.filter((request) => !targetEntries.has(request.key))
       if (missing.length === 0) {
@@ -277,8 +271,6 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
           visible: {
             entries: additions,
             sourceIdentity: nextSource.identity,
-            timingSignature,
-            revision: target.revision,
           },
           replacement: null,
         })
@@ -342,11 +334,6 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
     layout: () => view().layout,
     source,
     segments,
-    renderRevision: () => generation().visible?.revision ?? 0,
-    retainedResultCounts: () => ({
-      current: generation().visible?.entries.size ?? 0,
-      previous: generation().replacement?.entries.size ?? 0,
-    }),
     loading,
     error,
   }

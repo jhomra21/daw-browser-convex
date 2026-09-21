@@ -87,7 +87,6 @@ describe('waveform request planning', () => {
     }
     const plan = createWaveformRequestPlans({
       sampleRate: source.sampleRate,
-      sourceDurationSec: source.durationSec,
       sourceFrameCount: source.frameCount,
       segments: [{
         drawCols: 27,
@@ -115,7 +114,6 @@ describe('waveform request planning', () => {
     const plan = createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 48_000,
-      sourceDurationSec: 2,
       segments: [
         { drawCols: 400, sourceStartSec: 0, sourceEndSec: 1, startPx: 0, endPx: 400, canvasStartSec: 0, canvasEndSec: 1 },
         { drawCols: 400, sourceStartSec: 0, sourceEndSec: 1, startPx: 0, endPx: 400, canvasStartSec: 0, canvasEndSec: 1 },
@@ -129,7 +127,6 @@ describe('waveform request planning', () => {
     const input = {
       sampleRate: 48_000,
       sourceFrameCount: 48_000,
-      sourceDurationSec: 2,
       backingPixelsPerCssPixel: 2,
       priorityRange: { startSec: 0.25, endSec: 0.75 },
       segments: [{
@@ -158,13 +155,11 @@ describe('waveform request planning', () => {
     const at48k = createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 172_800_000,
-      sourceDurationSec: 3600,
       segments: [segment],
     })
     const at44k = createWaveformRequestPlans({
       sampleRate: 44_100,
       sourceFrameCount: 158_760_000,
-      sourceDurationSec: 3600,
       segments: [segment],
     })
     expect(at48k.requests[0]?.framesPerInterval).toBeGreaterThanOrEqual(128)
@@ -177,7 +172,6 @@ describe('waveform request planning', () => {
     const plan = createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 192_000,
-      sourceDurationSec: 4,
       priorityRange: { startSec: 1.5, endSec: 2.5 },
       segments: [
         { drawCols: 100, sourceStartSec: 0, sourceEndSec: 1, startPx: 0, endPx: 100, canvasStartSec: 0, canvasEndSec: 1 },
@@ -191,7 +185,6 @@ describe('waveform request planning', () => {
     const plan = createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 192_000,
-      sourceDurationSec: 4,
       priorityRange: { startSec: 1.5, endSec: 2.5 },
       segments: [
         { drawCols: 100, sourceStartSec: 0, sourceEndSec: 1, startPx: 0, endPx: 100, canvasStartSec: 0, canvasEndSec: 1 },
@@ -224,7 +217,6 @@ describe('waveform request planning', () => {
     const intervalPlan = createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 48_000,
-      sourceDurationSec: 1,
       segments: [{
         drawCols: 2_000,
         sourceStartSec: 0,
@@ -238,7 +230,6 @@ describe('waveform request planning', () => {
     const detailPlan = createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 48_000,
-      sourceDurationSec: 1,
       backingPixelsPerCssPixel: 1,
       segments: [{
         drawCols: 48_000,
@@ -258,7 +249,6 @@ describe('waveform request planning', () => {
     const plan = createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 48_000,
-      sourceDurationSec: 1,
       segments: [{
         drawCols: 160_000,
         sourceStartSec: 0,
@@ -285,19 +275,16 @@ describe('waveform request planning', () => {
     expect(createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 48_000,
-      sourceDurationSec: 1,
       segments: [segment],
     }).requests[0]?.framesPerInterval).toBe(8)
     const first = createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 48_000,
-      sourceDurationSec: 1,
       segments: [segment],
     })
     const second = createWaveformRequestPlans({
       sampleRate: 48_000,
       sourceFrameCount: 48_000,
-      sourceDurationSec: 1,
       segments: [segment],
     })
     expect(second.requests[0]?.framesPerInterval).toBe(first.requests[0]?.framesPerInterval)
@@ -434,7 +421,6 @@ describe('waveform request planning', () => {
       name: 'parity',
       startSec: 0,
       duration: 1,
-      sourceDurationSec: 1,
       color: '#fff',
     }
     const map = getAudioClipTimeMap({
@@ -473,7 +459,6 @@ describe('waveform request planning', () => {
           const input = {
             sampleRate: 48_000,
           sourceFrameCount: 48_000,
-            sourceDurationSec: 1,
             backingPixelsPerCssPixel,
             segments: [segment],
           }

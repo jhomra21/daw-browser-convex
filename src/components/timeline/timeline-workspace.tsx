@@ -57,8 +57,9 @@ import { intersectTimelineRangeWithViewport } from "~/lib/timeline-viewport-geom
 import type { TrackDropTarget } from "~/lib/track-group-ops";
 import { createTimelineVerticalScrollSync } from "~/lib/timeline-vertical-scroll-sync";
 
-const createViewportRedrawVersion = () => {
+const createViewportRedrawState = () => {
   const [version, setVersion] = createSignal(0);
+  const [devicePixelRatio, setDevicePixelRatio] = createSignal(1);
   const requestRedraw = () => setVersion((value) => value + 1);
 
   onMount(() => {
@@ -71,9 +72,8 @@ const createViewportRedrawVersion = () => {
     const bindDprListener = () => {
       if (dprQuery && dprListener)
         dprQuery.removeEventListener("change", dprListener);
-      dprQuery = window.matchMedia(
-        `(resolution: ${window.devicePixelRatio}dppx)`,
-      );
+      setDevicePixelRatio(window.devicePixelRatio || 1);
+      dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
       dprListener = () => {
         requestRedraw();
         bindDprListener();
@@ -90,7 +90,7 @@ const createViewportRedrawVersion = () => {
     });
   });
 
-  return version;
+  return { version, devicePixelRatio };
 };
 
 type Props = {
@@ -236,7 +236,7 @@ type Props = {
 
 export default function TimelineWorkspace(props: Props) {
   let sidebarScrollElement: HTMLDivElement | undefined;
-  const viewportRedrawVersion = createViewportRedrawVersion();
+  const viewportRedrawState = createViewportRedrawState();
   const [verticalScrollTop, setVerticalScrollTop] = createSignal(0);
   const [verticalClientHeight, setVerticalClientHeight] = createSignal(0);
   const verticalScrollSync = createTimelineVerticalScrollSync({
@@ -368,7 +368,8 @@ export default function TimelineWorkspace(props: Props) {
             clipVisibleRange={props.viewport.overscanRange}
             viewportWidthPx={props.viewport.width}
             timeToX={props.viewport.timeToX}
-            viewportRedrawVersion={viewportRedrawVersion()}
+            viewportRedrawVersion={viewportRedrawState.version()}
+            devicePixelRatio={viewportRedrawState.devicePixelRatio()}
             waveformVisible={
               laneProps.isReturn === true
               || verticalWaveformTrackIds().has(laneProps.row.trackId)

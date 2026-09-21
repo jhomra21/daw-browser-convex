@@ -188,7 +188,6 @@ export const aggregateWaveformDataToBackingPixels = (input: {
 export const createWaveformRequestPlans = (input: {
   readonly segments: readonly AudioWaveformLayoutSegment[]
   readonly sampleRate: number
-  readonly sourceDurationSec: number
   readonly sourceFrameCount: number
   readonly backingPixelsPerCssPixel?: number
   readonly priorityRange?: { startSec: number; endSec: number }

@@ -87,7 +87,6 @@ export function useSampleDetailWaveformOverview(options: SampleDetailWaveformOve
         const plans = createWaveformRequestPlans({
           segments,
           sampleRate: source.sampleRate,
-          sourceDurationSec: source.durationSec,
           sourceFrameCount: source.frameCount,
           backingPixelsPerCssPixel,
         })

@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  calculateBoundedPhysicalRunway,
   clampedVisibleStartSec,
   createTimelineViewport,
   scaleViewportAtPointer,
@@ -44,19 +43,6 @@ describe('timeline viewport geometry', () => {
     expect(next.pixelsPerSecond).toBe(200)
   })
 
-  test('calculates a bounded physical runway and a recenter point', () => {
-    const runway = calculateBoundedPhysicalRunway({
-      visibleStartSec: 1000,
-      viewportWidthPx: 1000,
-      pixelsPerSecond: 100,
-      maxRunwayWidthPx: 4000,
-    })
-    expect(runway.widthPx).toBe(4000)
-    expect(runway.visibleStartPx).toBe(1500)
-    expect(runway.visibleEndPx).toBe(2500)
-    expect(runway.recenteredStartSec).toBe(985)
-  })
-
   test('projects a nonzero-origin viewport into screen coordinates', () => {
     const projected = createTimelineViewport(viewport)
     expect(projected.timeToX(12.5)).toBe(250)
@@ -70,14 +56,7 @@ describe('timeline viewport geometry', () => {
       durationSec: 360,
       pixelsPerSecond: 240_000,
     })
-    const runway = calculateBoundedPhysicalRunway({
-      visibleStartSec: projected.visibleRange.startSec,
-      viewportWidthPx: projected.width,
-      pixelsPerSecond: projected.pixelsPerSecond,
-      maxRunwayWidthPx: 200_000,
-    })
     expect(projected.width).toBe(1000)
-    expect(runway.widthPx).toBe(200_000)
   })
 
   test('applies scroll deltas from the current clamped start', () => {

@@ -50,7 +50,6 @@ export const waveformRibbonGeometry = (input: {
   readonly upperY: number
   readonly lowerY: number
   readonly minimumThicknessCssPx: number
-  readonly backingScaleY: number
 }): WaveformRibbonGeometry => {
   const rawUpperY = Math.min(input.upperY, input.lowerY)
   const rawLowerY = Math.max(input.upperY, input.lowerY)
@@ -214,7 +213,6 @@ export function drawWaveformSignal(
         upperY,
         lowerY,
         minimumThicknessCssPx,
-        backingScaleY,
       })
       const x = segment.startPx
         + ((value.sourceFrame - segment.sourceStartFrame) / sourceSpan) * width

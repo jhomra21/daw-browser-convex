@@ -191,6 +191,7 @@ const progressFor = (progressSequence: bigint, scheduleComplete = false): Native
 const bridgeFor = (options: { failureCount?: number; onAccept?: (attempt: number) => void } = {}) => {
   const payloads: Uint8Array[] = []
   const instrumentPayloads: Uint8Array[] = []
+  const reenablePayloads: Uint8Array[] = []
   let remainingFailures = options.failureCount ?? 0
   let onAccept = options.onAccept
   let attempt = 0
@@ -200,6 +201,7 @@ const bridgeFor = (options: { failureCount?: number; onAccept?: (attempt: number
   let lossUnsubscribeCount = 0
   return {
     payloads,
+    reenablePayloads,
     setFailureCount: (count: number) => { remainingFailures = count },
     setOnAccept: (listener: (attempt: number) => void) => { onAccept = listener },
     emitProgress: (progress: NativeScheduleProgress) => {
@@ -227,6 +229,10 @@ const bridgeFor = (options: { failureCount?: number; onAccept?: (attempt: number
       },
       queueInstrumentEvents: async (bytes: Uint8Array) => {
         instrumentPayloads.push(bytes)
+        return { ok: true as const }
+      },
+      reenableVstScheduleAutomation: async (bytes: Uint8Array) => {
+        reenablePayloads.push(bytes)
         return { ok: true as const }
       },
       onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
@@ -1116,6 +1122,26 @@ test("does not let persisted parameter initialization suppress scheduled automat
     1,
   )
   expect(segments).toMatchObject([{ parameterId: 7, startValue: 0.5, endValue: 0.5 }])
+})
+
+test("reenables VST automation while native transport remains running", async () => {
+  const snapshot = automationSnapshot([
+    { id: "start", timeSec: 0, value: 0.5, interpolation: "hold" },
+  ])
+  const { fixture, coordinator } = coordinatorFor(snapshot)
+  coordinator.install()
+  fixture.emitProgress(progressFor(1n))
+  const scheduleWindowCount = fixture.payloads.length
+
+  await expect(coordinator.reenableAutomation(
+    attachmentPlan.attachments[0]!.instanceId,
+    [7],
+  )).resolves.toBeUndefined()
+
+  expect(fixture.reenablePayloads).toHaveLength(1)
+  expect(fixture.payloads).toHaveLength(scheduleWindowCount)
+  expect(fixture.reenablePayloads[0]?.byteLength).toBeGreaterThan(8)
+  coordinator.dispose()
 })
 
 test("extends finite scheduling through synth release metadata", () => {

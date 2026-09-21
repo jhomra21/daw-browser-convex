@@ -42,7 +42,7 @@ describe('timeline scale storage', () => {
 
   test('bounds stored scale values to the canonical limits', () => {
     storage.setItem('mb:timeline-scale:low', String(Number.MIN_VALUE))
-    storage.setItem('mb:timeline-scale:high', '900')
+    storage.setItem('mb:timeline-scale:high', '900000')
 
     expect(loadTimelineScale('low')).toBe(MIN_PIXELS_PER_SECOND)
     expect(loadTimelineScale('high')).toBe(MAX_PIXELS_PER_SECOND)
@@ -53,7 +53,7 @@ describe('timeline scale storage', () => {
 
     expect(loadTimelineScale('valid')).toBe(125)
 
-    saveTimelineScale('saved', 900)
+    saveTimelineScale('saved', 900000)
 
     expect(storage.getItem('mb:timeline-scale:saved')).toBe(String(MAX_PIXELS_PER_SECOND))
   })

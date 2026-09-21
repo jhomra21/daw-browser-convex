@@ -19,6 +19,8 @@ type FadeDraftUpdate = {
   overlayHeight: number
   currentX: number
   currentY: number
+  overlayStartSec?: number
+  overlayDurationSec?: number
 }
 
 const fadeKeyboardStepSec = 0.05
@@ -71,8 +73,12 @@ export const updateFadeDraft = (update: FadeDraftUpdate): NormalizedClipFades =>
       ? update.baseline.fadeInSec
       : update.duration - update.baseline.fadeOutEndSec
     const span = fadeEnd - fadeStart
+    const overlayStartSec = update.overlayStartSec ?? 0
+    const overlayDurationSec = update.overlayDurationSec ?? update.duration
+    const localTime = overlayStartSec
+      + (update.currentX / update.overlayWidth) * overlayDurationSec
     const position = span > 0
-      ? Math.min(1, Math.max(0, ((update.currentX / update.overlayWidth) * update.duration - fadeStart) / span))
+      ? Math.min(1, Math.max(0, (localTime - fadeStart) / span))
       : 0.5
     const linearGain = update.side === 'fadeIn' ? position : 1 - position
     const gain = Math.min(1, Math.max(0, 1 - update.currentY / update.overlayHeight))
@@ -86,7 +92,12 @@ export const updateFadeDraft = (update: FadeDraftUpdate): NormalizedClipFades =>
     }, update.duration)
   }
 
-  const time = Math.min(update.duration, Math.max(0, (update.currentX / update.overlayWidth) * update.duration))
+  const overlayStartSec = update.overlayStartSec ?? 0
+  const overlayDurationSec = update.overlayDurationSec ?? update.duration
+  const time = Math.min(
+    update.duration,
+    Math.max(0, overlayStartSec + (update.currentX / update.overlayWidth) * overlayDurationSec),
+  )
   const patch = update.mode === 'fadeInStart'
     ? { fadeInStartSec: time }
     : update.mode === 'fadeInEnd'

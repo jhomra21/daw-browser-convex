@@ -37,6 +37,7 @@ type ClipResizeOptions = {
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
   pixelsPerSecond: Accessor<number>
+  visibleStartSec?: Accessor<number>
   rescheduleChangedClips: (clipIds: string[]) => void
   projectId: Accessor<string | undefined>
   historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
@@ -143,8 +144,8 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     const others = track.clips.filter(c => c.id !== clip.id)
 
     const rect = scroll.getBoundingClientRect()
-    const x = event.clientX - rect.left + (scroll.scrollLeft || 0)
-    const pointerSec = Math.max(0, x / options.pixelsPerSecond())
+    const x = event.clientX - rect.left
+    const pointerSec = Math.max(0, (options.visibleStartSec?.() ?? 0) + x / options.pixelsPerSecond())
 
     if (resizing.edge === 'left') {
       const right = resizeFixedRight

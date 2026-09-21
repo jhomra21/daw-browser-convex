@@ -35,6 +35,22 @@ const dataUrl = (bytes: Uint8Array) => {
   return `data:audio/wav;base64,${btoa(binary)}`
 }
 
+const deferred = <Value>() => {
+  let resolve: (value: Value) => void = () => {}
+  const promise = new Promise<Value>((nextResolve) => { resolve = nextResolve })
+  return { promise, resolve }
+}
+
+const installFetch = (handler: () => Promise<Response>) => {
+  const originalFetch = globalThis.fetch
+  const fetchForTest: typeof fetch = async () => handler()
+  fetchForTest.preconnect = () => {}
+  globalThis.fetch = fetchForTest
+  return () => {
+    globalThis.fetch = originalFetch
+  }
+}
+
 const clip = (input: {
   id?: string
   sourceAssetKey?: string
@@ -69,6 +85,48 @@ test('resolves a metadata-only cloud asset through its canonical project URL', a
   expect(result.identity).toBe('asset:project/cloud:asset/cloud')
 })
 
+test('deduplicates stable cloud source descriptor resolution', async () => {
+  let resolves = 0
+  const resolver = createAudioPcmSourceResolver({
+    projectId: () => 'project/cloud',
+    resolveUrl: () => {
+      resolves += 1
+      return dataUrl(wave())
+    },
+  })
+  await resolver(clip({ sourceAssetKey: 'asset/stable' }))
+  await resolver(clip({ sourceAssetKey: 'asset/stable' }))
+  expect(resolves).toBe(1)
+})
+
+test('isolates descriptor caches between resolver instances', async () => {
+  let firstResolves = 0
+  let secondResolves = 0
+  const first = createAudioPcmSourceResolver({
+    projectId: () => 'project/isolation',
+    resolveUrl: () => {
+      firstResolves += 1
+      return dataUrl(wave())
+    },
+  })
+  const second = createAudioPcmSourceResolver({
+    projectId: () => 'project/isolation',
+    resolveUrl: () => {
+      secondResolves += 1
+      return dataUrl(wave())
+    },
+  })
+
+  await first(clip({ sourceAssetKey: 'asset/isolation' }))
+  await second(clip({ sourceAssetKey: 'asset/isolation' }))
+  first.clear?.()
+  await first(clip({ sourceAssetKey: 'asset/isolation' }))
+  await second(clip({ sourceAssetKey: 'asset/isolation' }))
+
+  expect(firstResolves).toBe(2)
+  expect(secondResolves).toBe(1)
+})
+
 test('resolves a local asset from its local File without deriving a cloud URL', async () => {
   const project = await createLocalProject(`Resolver ${crypto.randomUUID()}`)
   const db = await openLocalProjectDb(project.id)
@@ -101,8 +159,82 @@ test('resolves a local asset from its local File without deriving a cloud URL', 
   const result = await resolver(clip({ sourceAssetKey: 'asset:local' }))
 
   expect(calls).toEqual([])
-  expect(result.identity).toMatch(/^asset:local:session:[0-9a-f-]{36}$/u)
+  expect(result.identity).toBe(`local:${project.id}:asset:local:session`)
   expect(result.persistable).toBe(false)
+})
+
+test('deduplicates repeated local descriptor resolution with a stable session identity', async () => {
+  const project = await createLocalProject(`Stable local resolver ${crypto.randomUUID()}`)
+  const db = await openLocalProjectDb(project.id)
+  await db.put('assets', {
+    id: 'asset:stable-local',
+    name: 'sample.wav',
+    mimeType: 'audio/wav',
+    sizeBytes: wave().byteLength,
+    storagePath: 'sample.wav',
+    durationSec: 5 / 48_000,
+    sampleRate: 48_000,
+    channelCount: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  let reads = 0
+  const resolver = createAudioPcmSourceResolver({
+    projectId: () => project.id,
+    readLocalAsset: async () => {
+      reads += 1
+      return {
+        status: 'ready',
+        file: new File([wave()], 'sample.wav', { type: 'audio/wav' }),
+      }
+    },
+  })
+
+  const first = await resolver(clip({ sourceAssetKey: 'asset:stable-local' }))
+  const second = await resolver(clip({ sourceAssetKey: 'asset:stable-local' }))
+
+  expect(reads).toBe(1)
+  expect(second).toBe(first)
+  expect(second.identity).toBe(`local:${project.id}:asset:stable-local:session`)
+  expect(second.persistable).toBe(false)
+})
+
+test('isolates unverified local identities between projects with equal asset keys', async () => {
+  const firstProject = await createLocalProject(`First identity project ${crypto.randomUUID()}`)
+  const secondProject = await createLocalProject(`Second identity project ${crypto.randomUUID()}`)
+  for (const projectId of [firstProject.id, secondProject.id]) {
+    const db = await openLocalProjectDb(projectId)
+    await db.put('assets', {
+      id: 'asset:shared-local',
+      name: 'sample.wav',
+      mimeType: 'audio/wav',
+      sizeBytes: wave().byteLength,
+      storagePath: 'sample.wav',
+      durationSec: 5 / 48_000,
+      sampleRate: 48_000,
+      channelCount: 1,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+  }
+  let projectId = firstProject.id
+  const resolver = createAudioPcmSourceResolver({
+    projectId: () => projectId,
+    readLocalAsset: async () => ({
+      status: 'ready',
+      file: new File([wave()], 'sample.wav', { type: 'audio/wav' }),
+    }),
+  })
+
+  const first = await resolver(clip({ sourceAssetKey: 'asset:shared-local' }))
+  projectId = secondProject.id
+  const second = await resolver(clip({ sourceAssetKey: 'asset:shared-local' }))
+
+  expect(first.persistable).toBe(false)
+  expect(second.persistable).toBe(false)
+  expect(first.identity).toBe(`local:${firstProject.id}:asset:shared-local:session`)
+  expect(second.identity).toBe(`local:${secondProject.id}:asset:shared-local:session`)
+  expect(first.identity).not.toBe(second.identity)
 })
 
 test('admits a local content hash only after verifying the resolved File bytes', async () => {
@@ -127,12 +259,55 @@ test('admits a local content hash only after verifying the resolved File bytes',
     readLocalAsset: async () => ({ status: 'ready', file }),
   })
 
-  const result = await resolver(clip({ sourceAssetKey: 'asset:verified', stretch: true }))
+  const result = await resolver(
+    clip({ sourceAssetKey: 'asset:verified' }),
+    undefined,
+    { verifyContentHash: true },
+  )
 
   expect(result.contentHashVerified).toBe(true)
   expect(result.persistable).toBe(true)
   expect(result.contentHash).toMatch(/^[0-9a-f]{64}$/u)
   expect(result.identity).toBe(`asset:verified:${result.contentHash}`)
+})
+
+test('keeps ordinary and verified local descriptor cache entries separate', async () => {
+  const project = await createLocalProject(`Resolver cache modes ${crypto.randomUUID()}`)
+  const file = new File([wave()], 'sample.wav', { type: 'audio/wav' })
+  const db = await openLocalProjectDb(project.id)
+  await db.put('assets', {
+    id: 'asset:cache-modes',
+    name: file.name,
+    mimeType: file.type,
+    sizeBytes: file.size,
+    storagePath: 'sample.wav',
+    contentHash: await sha256File(file),
+    durationSec: 5 / 48_000,
+    sampleRate: 48_000,
+    channelCount: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+  let reads = 0
+  const resolver = createAudioPcmSourceResolver({
+    projectId: () => project.id,
+    readLocalAsset: async () => {
+      reads += 1
+      return { status: 'ready', file }
+    },
+  })
+
+  const ordinary = await resolver(clip({ sourceAssetKey: 'asset:cache-modes' }))
+  const verified = await resolver(
+    clip({ sourceAssetKey: 'asset:cache-modes' }),
+    undefined,
+    { verifyContentHash: true },
+  )
+
+  expect(reads).toBe(2)
+  expect(ordinary.persistable).toBe(false)
+  expect(verified.persistable).toBe(true)
+  expect(ordinary).not.toBe(verified)
 })
 
 test('does not alias different files that carry the same forged canonical hash', async () => {
@@ -164,8 +339,16 @@ test('does not alias different files that carry the same forged canonical hash',
     }),
   })
 
-  const first = await resolver(clip({ sourceAssetKey: 'asset:forged-a' }))
-  const second = await resolver(clip({ sourceAssetKey: 'asset:forged-b' }))
+  const first = await resolver(
+    clip({ sourceAssetKey: 'asset:forged-a' }),
+    undefined,
+    { verifyContentHash: true },
+  )
+  const second = await resolver(
+    clip({ sourceAssetKey: 'asset:forged-b' }),
+    undefined,
+    { verifyContentHash: true },
+  )
 
   expect(first.persistable).toBe(false)
   expect(second.persistable).toBe(false)
@@ -195,4 +378,74 @@ test('reports a missing project ID for a metadata-only cloud asset', async () =>
 
   await expect(resolver(clip({ sourceAssetKey: 'cloud-asset' })))
     .rejects.toThrow('requires a project ID to resolve cloud audio asset "cloud-asset"')
+})
+
+test('keeps a shared descriptor resolution alive for a remaining subscriber', async () => {
+  const gate = deferred<{ status: 'ready'; file: File }>()
+  const restoreFetch = installFetch(async () => {
+    const result = await gate.promise
+    return new Response(await result.file.arrayBuffer(), {
+      headers: { 'content-type': 'audio/wav' },
+    })
+  })
+  try {
+    const resolver = createAudioPcmSourceResolver({
+      projectId: () => 'project/shared',
+      resolveUrl: () => 'https://resolver.test/shared.wav',
+    })
+  const firstController = new AbortController()
+  const secondController = new AbortController()
+  const first = resolver(clip({ sampleUrl: 'shared://sample' }), firstController.signal)
+  await Promise.resolve()
+  const second = resolver(clip({ sampleUrl: 'shared://sample' }), secondController.signal)
+  firstController.abort()
+  await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+  gate.resolve({
+    status: 'ready',
+    file: new File([wave()], 'sample.wav', { type: 'audio/wav' }),
+  })
+  await expect(second).resolves.toMatchObject({ identity: 'remote:https://resolver.test/shared.wav' })
+  } finally {
+    restoreFetch()
+  }
+})
+
+test('replaces a shared resolution after its final subscriber aborts', async () => {
+  const gates = [deferred<{ status: 'ready'; file: File }>(), deferred<{ status: 'ready'; file: File }>()]
+  let reads = 0
+  const restoreFetch = installFetch(async () => {
+    const gate = gates[reads]
+    reads += 1
+    if (!gate) throw new Error('Unexpected extra source fetch.')
+    const result = await gate.promise
+    return new Response(await result.file.arrayBuffer(), {
+      headers: { 'content-type': 'audio/wav' },
+    })
+  })
+  try {
+  const resolver = createAudioPcmSourceResolver({
+    projectId: () => 'project/replace',
+    resolveUrl: () => 'https://resolver.test/replace.wav',
+  })
+  const firstController = new AbortController()
+  const first = resolver(clip({ sampleUrl: 'replace://sample' }), firstController.signal)
+  await Promise.resolve()
+  firstController.abort()
+  await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+
+  const replacement = resolver(clip({ sampleUrl: 'replace://sample' }))
+  await Promise.resolve()
+  expect(reads).toBe(2)
+  gates[1]!.resolve({
+    status: 'ready',
+    file: new File([wave()], 'sample.wav', { type: 'audio/wav' }),
+  })
+  await expect(replacement).resolves.toMatchObject({ identity: 'remote:https://resolver.test/replace.wav' })
+  gates[0]!.resolve({
+    status: 'ready',
+    file: new File([wave()], 'sample.wav', { type: 'audio/wav' }),
+  })
+  } finally {
+    restoreFetch()
+  }
 })

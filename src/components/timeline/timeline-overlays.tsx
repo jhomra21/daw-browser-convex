@@ -7,9 +7,13 @@ import type { TimelineMidiBounds } from '~/lib/timeline-midi-bounds'
 import type { TimelineRangeSelection } from '~/lib/timeline-range-selection'
 import type { TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import type { AutomationTargetDeviceInstance } from '@daw-browser/shared'
-import RecordingPreview from '~/components/timeline/RecordingPreview'
+import RecordingPreview, { clipRecordingPreviewToViewport } from '~/components/timeline/RecordingPreview'
 import GridOverlay from '~/components/timeline/GridOverlay'
 import MidiEditorCard from '~/components/midi/MidiEditorCard'
+import {
+  intersectTimelineRangeWithViewport,
+  projectTimelineTimeToViewport,
+} from '~/lib/timeline-viewport-geometry'
 
 type MarqueeRect = { x: number; y: number; width: number; height: number } | null
 
@@ -19,6 +23,8 @@ type TimelineOverlaysProps = {
     trackLookup: TimelineTrackIndex<AudioBuffer>
     durationSec: number
     pixelsPerSecond: number
+    visibleStartSec: number
+    viewportWidthPx: number
     bpm: number
     gridDenominator: number
     gridEnabled: boolean
@@ -76,9 +82,17 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
     if (!props.recording.isRecording || start == null || points.length === 0 || !trackId) return null
     const row = layoutByTrackId().get(trackId)
     if (!row) return null
-    return {
-      start,
+    const clipped = clipRecordingPreviewToViewport({
+      startSec: start,
       points,
+      visibleStartSec: props.timeline.visibleStartSec,
+      visibleEndSec: props.timeline.visibleStartSec
+        + props.timeline.viewportWidthPx / props.timeline.pixelsPerSecond,
+      pixelsPerSecond: props.timeline.pixelsPerSecond,
+    })
+    if (!clipped) return null
+    return {
+      ...clipped,
       topPx: row.topPx,
       heightPx: row.clipLaneHeightPx,
     }
@@ -90,6 +104,35 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
     const selectedTrackIds = new Set(range.trackIds)
     return props.timeline.rowLayouts.filter((row) => selectedTrackIds.has(row.trackId))
   })
+  const rangeProjection = createMemo(() => {
+    const range = props.timeline.range
+    return range
+      ? intersectTimelineRangeWithViewport({
+        range,
+        visibleStartSec: props.timeline.visibleStartSec,
+        viewportWidthPx: props.timeline.viewportWidthPx,
+        pixelsPerSecond: props.timeline.pixelsPerSecond,
+      })
+      : null
+  })
+  const loopProjection = createMemo(() => {
+    if (!props.timeline.loopEnabled) return null
+    return intersectTimelineRangeWithViewport({
+      range: {
+        startSec: props.timeline.loopStartSec,
+        endSec: props.timeline.loopEndSec,
+      },
+      visibleStartSec: props.timeline.visibleStartSec,
+      viewportWidthPx: props.timeline.viewportWidthPx,
+      pixelsPerSecond: props.timeline.pixelsPerSecond,
+    })
+  })
+  const playheadProjection = createMemo(() => projectTimelineTimeToViewport({
+    visibleStartSec: props.timeline.visibleStartSec,
+    viewportWidthPx: props.timeline.viewportWidthPx,
+    pixelsPerSecond: props.timeline.pixelsPerSecond,
+    durationSec: props.timeline.durationSec,
+  }, props.timeline.playheadSec))
 
   return (
     <>
@@ -99,7 +142,13 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
             class="absolute left-0 right-0 pointer-events-none"
             style={{ top: `${preview().topPx}px`, height: `${preview().heightPx}px` }}
           >
-            <RecordingPreview startSec={preview().start} points={preview().points} heightPx={preview().heightPx} pixelsPerSecond={props.timeline.pixelsPerSecond} />
+            <RecordingPreview
+              leftPx={preview().leftPx}
+              widthPx={preview().widthPx}
+              points={preview().points}
+              heightPx={preview().heightPx}
+              pixelsPerSecond={props.timeline.pixelsPerSecond}
+            />
           </div>
         )}
       </Show>
@@ -112,20 +161,22 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
       <GridOverlay
         durationSec={props.timeline.durationSec}
         pixelsPerSecond={props.timeline.pixelsPerSecond}
+        visibleStartSec={props.timeline.visibleStartSec}
+        viewportWidthPx={props.timeline.viewportWidthPx}
         bpm={props.timeline.bpm}
         denom={props.timeline.gridDenominator}
         enabled={props.timeline.gridEnabled}
       />
-      <Show when={props.timeline.range}>
-        {(range) => (
+      <Show when={rangeProjection()}>
+        {(projection) => (
           <For each={rangeOverlayRows()}>
             {(row) => (
               <div
                 class="absolute z-10 pointer-events-none bg-blue-400/12 border-x border-blue-300/30"
                 style={{
-                  left: `${range().startSec * props.timeline.pixelsPerSecond}px`,
+                  left: `${projection().leftPx}px`,
+                  width: `${projection().widthPx}px`,
                   top: `${row.topPx}px`,
-                  width: `${(range().endSec - range().startSec) * props.timeline.pixelsPerSecond}px`,
                   height: `${row.heightPx}px`,
                 }}
               />
@@ -133,18 +184,17 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
           </For>
         )}
       </Show>
-      {props.timeline.loopEnabled && props.timeline.loopEndSec - props.timeline.loopStartSec > 0.05 && (
-        <>
+      <Show when={loopProjection()}>
+        {(projection) => (
           <div
-            class="absolute top-0 bottom-0 w-px bg-green-400/70 pointer-events-none z-[25]"
-            style={{ left: `${props.timeline.loopStartSec * props.timeline.pixelsPerSecond}px` }}
+            class="absolute top-0 bottom-0 bg-green-400/10 border-y border-green-400/40 pointer-events-none z-[25]"
+            style={{
+              left: `${projection().leftPx}px`,
+              width: `${projection().widthPx}px`,
+            }}
           />
-          <div
-            class="absolute top-0 bottom-0 w-px bg-green-400/70 pointer-events-none z-[25]"
-            style={{ left: `${props.timeline.loopEndSec * props.timeline.pixelsPerSecond}px` }}
-          />
-        </>
-      )}
+        )}
+      </Show>
       <Show when={props.timeline.marqueeRect}>
         {(rect) => (
           <div
@@ -153,7 +203,12 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
           />
         )}
       </Show>
-      <div class="absolute top-0 bottom-0 z-[25] w-px bg-red-500 pointer-events-none" style={{ left: `${props.timeline.playheadSec * props.timeline.pixelsPerSecond}px` }} />
+      <Show when={playheadProjection() !== null}>
+        <div
+          class="absolute top-0 bottom-0 z-[25] w-px bg-red-500 pointer-events-none"
+          style={{ left: `${playheadProjection() ?? 0}px` }}
+        />
+      </Show>
       <Show when={midiClip()}>
         {(clip) => (
           <MidiEditorCard

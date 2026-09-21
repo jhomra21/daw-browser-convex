@@ -1,5 +1,8 @@
 import { createEffect, createSignal, onCleanup, type Accessor } from 'solid-js'
-import { subscribeToLocalProjectChanges } from '~/lib/local-project-changes'
+import {
+  subscribeToLocalProjectChanges,
+  subscribeToLocalProjectStateChanges,
+} from '~/lib/local-project-changes'
 
 type Options = {
   projectId: Accessor<string>
@@ -36,7 +39,7 @@ export const useCloudSyncTick = (options: Options) => {
   createEffect(() => {
     const projectId = options.projectId()
     if (!projectId) return
-    const unsubscribe = subscribeToLocalProjectChanges(projectId, () => {
+    const onProjectChanged = () => {
       const alreadyPending = pendingChanges.has(projectId)
       pendingChanges.add(projectId)
       if (options.enabled()) {
@@ -44,8 +47,13 @@ export const useCloudSyncTick = (options: Options) => {
       } else if (!alreadyPending) {
         setChangeVersion((version) => version + 1)
       }
+    }
+    const unsubscribeProjectChanges = subscribeToLocalProjectChanges(projectId, onProjectChanged)
+    const unsubscribeProjectStateChanges = subscribeToLocalProjectStateChanges(projectId, onProjectChanged)
+    onCleanup(() => {
+      unsubscribeProjectChanges()
+      unsubscribeProjectStateChanges()
     })
-    onCleanup(unsubscribe)
   })
 
   createEffect(() => {

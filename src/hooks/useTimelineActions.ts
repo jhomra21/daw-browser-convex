@@ -69,6 +69,7 @@ type UseTimelineActionsOptions = {
     openMidiEditorFor: (clipId: string) => void
     ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
     getScrollElement: () => HTMLDivElement | undefined
+      setVisibleStartSec: (startSec: number) => void
     pixelsPerSecond: Accessor<number>
   }
 }
@@ -695,8 +696,11 @@ export function useTimelineActions(
     try {
       const scrollElement = options.navigation.getScrollElement()
       if (!scrollElement) return
-      const centerLeft = Math.max(0, startSec * options.navigation.pixelsPerSecond() - (scrollElement.clientWidth / 2))
-      scrollElement.scrollLeft = Math.floor(centerLeft)
+      const width = scrollElement.clientWidth
+      options.navigation.setVisibleStartSec(Math.max(
+        0,
+        startSec - width / Math.max(1e-9, options.navigation.pixelsPerSecond()) / 2,
+      ))
     } catch {}
   }
 

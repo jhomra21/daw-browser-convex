@@ -1,0 +1,16 @@
+{
+  "tracks": 21,
+  "canvases": 13,
+  "cycles": 20,
+  "frames": 4312,
+  "frameMedianMs": 8.30000000000291,
+  "frameP95Ms": 16.60000000000582,
+  "frameMaxMs": 152.09999999999127,
+  "waveformCanvasFills": 9576,
+  "canvasFillMs": 360.80000281333923,
+  "longTaskCount": 4,
+  "longTaskMaxMs": 147,
+  "longTaskTotalMs": 371,
+  "heapUsedBytes": 0,
+  "errors": []
+}

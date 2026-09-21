@@ -1,0 +1,22 @@
+{
+  "capturedAt": "2026-09-20T16:23:20.031Z",
+  "surface": "production-browser",
+  "url": "http://127.0.0.1:4181/?projectId=project%3A03b5c079-bfd1-48bd-870f-9975f84bee2f",
+  "dpr": 2.190890312194824,
+  "cycles": 20,
+  "canvases": 15,
+  "nonzeroCanvases": 15,
+  "scrollWidth": 200000,
+  "clientWidth": 360,
+  "intervals": {
+    "count": 252,
+    "p50Ms": 8.299999999999272,
+    "p95Ms": 9,
+    "p99Ms": 9.200000000000728,
+    "maxMs": 9.299999999999272,
+    "ge16_67": 0,
+    "ge50": 0,
+    "ge100": 0
+  },
+  "errors": []
+}

@@ -28,7 +28,7 @@ describe('timeline view contracts', () => {
     expect(clampPixelsPerSecond(Number.NaN)).toBe(DEFAULT_PIXELS_PER_SECOND)
     expect(clampPixelsPerSecond(-1)).toBe(MIN_PIXELS_PER_SECOND)
     expect(clampPixelsPerSecond(Number.POSITIVE_INFINITY)).toBe(DEFAULT_PIXELS_PER_SECOND)
-    expect(clampPixelsPerSecond(9999)).toBe(MAX_PIXELS_PER_SECOND)
+    expect(clampPixelsPerSecond(9999)).toBe(9999)
   })
 
   test('keeps the zoom anchor fixed when not clamped by arrangement bounds', () => {
@@ -65,7 +65,7 @@ describe('timeline view contracts', () => {
       startSec: 18,
       endSec: 20,
     })
-    expect(minimumVisibleDuration(800)).toBe(1)
+    expect(minimumVisibleDuration(800)).toBeCloseTo(800 / MAX_PIXELS_PER_SECOND)
   })
 
   test('normalizes wheel deltas into smooth bounded factors', () => {
@@ -88,5 +88,10 @@ describe('timeline view contracts', () => {
     const seconds = selectTimelineGridIntervals(10, 120, 4, false)
     expect(seconds.minorSec * 10).toBeGreaterThanOrEqual(8)
     expect(seconds.majorSec * 10).toBeGreaterThanOrEqual(56)
+  })
+
+  test('selects sub-millisecond ruler intervals at deep zoom', () => {
+    const intervals = selectTimelineGridIntervals(240_000, 120, 4, false)
+    expect([0.0005, 0.001, 0.002, 0.005]).toContain(intervals.minorSec)
   })
 })

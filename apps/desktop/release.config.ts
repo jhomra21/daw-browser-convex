@@ -64,7 +64,13 @@ const runNativeBuildCommand: NativeBuildCommand = (command, arguments_) => {
 export const rebuildNativePackageArtifacts = (
   projectRoot: string,
   runCommand: NativeBuildCommand = runNativeBuildCommand,
+  environment: NodeJS.ProcessEnv = process.env,
 ): void => {
+  const vst3SdkPath = environment.VST3_SDK_PATH
+  if (!vst3SdkPath) {
+    throw new Error("VST3_SDK_PATH is required to rebuild native package artifacts.")
+  }
+
   const nativeRoot = path.join(projectRoot, "native")
   const builds = [
     {
@@ -98,6 +104,7 @@ export const rebuildNativePackageArtifacts = (
       "-B",
       build.directory,
       ...build.configureArguments,
+      `-DVST3_SDK_PATH:PATH=${vst3SdkPath}`,
     ])
     if (configure.error || configure.status !== 0) {
       throw new Error(`CMake configure failed for ${build.name}.`)

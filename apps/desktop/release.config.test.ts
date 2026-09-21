@@ -69,10 +69,14 @@ test("resolves release artifact candidates with the release audio host preferred
 
 test("rebuilds every native artifact used by desktop packaging", () => {
   const calls: Array<{ command: string; arguments_: readonly string[] }> = []
-  rebuildNativePackageArtifacts("/project", (command, arguments_) => {
-    calls.push({ command, arguments_ })
-    return { status: 0 }
-  })
+  rebuildNativePackageArtifacts(
+    "/project",
+    (command, arguments_) => {
+      calls.push({ command, arguments_ })
+      return { status: 0 }
+    },
+    { VST3_SDK_PATH: "/sdk" },
+  )
 
   expect(calls).toEqual([
     {
@@ -86,6 +90,7 @@ test("rebuilds every native artifact used by desktop packaging", () => {
         "-DDAW_BUILD_PLUGIN_HOST=ON",
         "-DDAW_BUILD_AUDIO_HOST_MACOS=OFF",
         "-DBUILD_TESTING=ON",
+        "-DVST3_SDK_PATH:PATH=/sdk",
       ],
     },
     {
@@ -110,6 +115,7 @@ test("rebuilds every native artifact used by desktop packaging", () => {
         "-DDAW_BUILD_PLUGIN_HOST=ON",
         "-DDAW_BUILD_AUDIO_HOST_MACOS=ON",
         "-DBUILD_TESTING=OFF",
+        "-DVST3_SDK_PATH:PATH=/sdk",
       ],
     },
     {
@@ -123,6 +129,36 @@ test("rebuilds every native artifact used by desktop packaging", () => {
       ],
     },
   ])
+})
+
+test("requires VST3_SDK_PATH before running native packaging commands", () => {
+  let invoked = false
+  expect(() => rebuildNativePackageArtifacts("/project", () => {
+    invoked = true
+    return { status: 0 }
+  }, {})).toThrow("VST3_SDK_PATH is required to rebuild native package artifacts.")
+  expect(invoked).toBe(false)
+})
+
+test("passes VST3 SDK paths with spaces as one CMake argument", () => {
+  const calls: Array<{ command: string; arguments_: readonly string[] }> = []
+  rebuildNativePackageArtifacts(
+    "/project",
+    (command, arguments_) => {
+      calls.push({ command, arguments_ })
+      return { status: 0 }
+    },
+    { VST3_SDK_PATH: "/Users/example/VST3 SDK 3.8" },
+  )
+
+  const configureCalls = calls.filter(({ command, arguments_ }) =>
+    command === "cmake" && arguments_.includes("-S"))
+  expect(configureCalls).toHaveLength(2)
+  for (const call of configureCalls) {
+    expect(call.arguments_).toContain("-DVST3_SDK_PATH:PATH=/Users/example/VST3 SDK 3.8")
+    expect(call.arguments_).not.toContain("\"/Users/example/VST3 SDK 3.8\"")
+    expect(call.arguments_).not.toContain("'/Users/example/VST3 SDK 3.8'")
+  }
 })
 
 test("uses the committed notary profile unless explicitly overridden", () => {

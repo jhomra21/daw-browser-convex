@@ -80,9 +80,9 @@ export const browserCommand = async (session: string, args: readonly string[]) =
   const environment = { ...process.env }
   delete environment.AGENT_BROWSER_CDP
   delete environment.AGENT_BROWSER_SESSION
-  if (!environment.AGENT_BROWSER_EXECUTABLE_PATH && environment.HOME) {
+  if (!session.startsWith("daw-30-track-electron-") && !environment.AGENT_BROWSER_EXECUTABLE_PATH && environment.HOME) {
     const browserGlob = new Bun.Glob("Library/Caches/ms-playwright/**/chrome-headless-shell")
-    const candidates = []
+    const candidates: string[] = []
     for await (const executablePath of browserGlob.scan({ cwd: environment.HOME, absolute: true })) {
       candidates.push(executablePath)
     }

@@ -828,7 +828,7 @@ export const createNativeScheduleCoordinator = (input: {
       ),
     )
     const threshold = renderedFrame + Math.round(input.sampleRateHz * nativeScheduleRefillThresholdSec)
-    if (nextWindowStartFrame >= targetEnd && nextWindowStartFrame >= threshold) return
+    if (nextWindowStartFrame >= threshold) return
     while (!disposed && !scheduleComplete && nextWindowStartFrame < targetEnd) {
       let endFrame = targetEnd
       let candidate = compileWindow(nextWindowStartFrame, endFrame)

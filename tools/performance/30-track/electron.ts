@@ -1,0 +1,247 @@
+import { constants } from "node:fs"
+import { randomBytes } from "node:crypto"
+import { chmod, mkdir, open } from "node:fs/promises"
+import path from "node:path"
+import { z } from "zod"
+
+export type ProcessMetric = {
+  readonly pid: number
+  readonly role: "main" | "child"
+  readonly cpuPercent: number | null
+  readonly rssBytes: number | null
+}
+
+export type NativeDiagnosticDelta = {
+  readonly before: {
+    readonly state: string
+    readonly sampleRate: number | null
+    readonly workletFaultCount: number
+    readonly inferredApplicationStallCount: number
+    readonly callbacks: number | null
+    readonly rejectedBlocks: number | null
+  }
+  readonly after: {
+    readonly state: string
+    readonly sampleRate: number | null
+    readonly workletFaultCount: number
+    readonly inferredApplicationStallCount: number
+    readonly callbacks: number | null
+    readonly rejectedBlocks: number | null
+  }
+  readonly callbackIncrease: number | null
+  readonly rejectedBlocksIncrease: number | null
+}
+
+export type ProcessIdentity = {
+  readonly pid: number
+  readonly parentPid: number
+  readonly processGroupId: number
+  readonly command: string
+}
+
+export type CleanupPlan = {
+  readonly rootPid: number
+  readonly processGroupId: number
+  readonly recordedProcesses: readonly ProcessIdentity[]
+}
+
+type LaunchIdentityInput = {
+  readonly rootPid: number
+  readonly executablePath: string
+  readonly profilePath: string
+  readonly port: number
+  readonly listenerPids: readonly number[]
+  readonly processes: readonly ProcessIdentity[]
+  readonly websocketUrl: string
+}
+
+type LaunchIdentityResult =
+  | { readonly verified: true; readonly processGroupId: number }
+  | { readonly verified: false; readonly reason: string }
+
+export const processMetricSchema = z.object({
+  pid: z.number().int().positive(),
+  role: z.enum(["main", "child"]),
+  cpuPercent: z.number().finite().nonnegative().nullable(),
+  rssBytes: z.number().int().nonnegative().nullable(),
+}).strict()
+
+export const nativeDiagnosticDeltaSchema = z.object({
+  before: z.object({
+    state: z.string(),
+    sampleRate: z.number().finite().nullable(),
+    workletFaultCount: z.number().int().nonnegative(),
+    inferredApplicationStallCount: z.number().int().nonnegative(),
+    callbacks: z.number().int().nonnegative().nullable(),
+    rejectedBlocks: z.number().int().nonnegative().nullable(),
+  }).strict(),
+  after: z.object({
+    state: z.string(),
+    sampleRate: z.number().finite().nullable(),
+    workletFaultCount: z.number().int().nonnegative(),
+    inferredApplicationStallCount: z.number().int().nonnegative(),
+    callbacks: z.number().int().nonnegative().nullable(),
+    rejectedBlocks: z.number().int().nonnegative().nullable(),
+  }).strict(),
+  callbackIncrease: z.number().int().nonnegative().nullable(),
+  rejectedBlocksIncrease: z.number().int().nonnegative().nullable(),
+}).strict()
+
+export const processMetricsAvailability = (
+  metrics: readonly ProcessMetric[],
+): { readonly available: true } | { readonly available: false; readonly reason: string } => (
+  metrics.length > 0
+    ? { available: true }
+    : { available: false, reason: "runner-owned process metrics unavailable" }
+)
+
+const difference = (after: number | null, before: number | null) => (
+  after === null || before === null ? null : Math.max(0, after - before)
+)
+
+export const createNativeDiagnosticDelta = (before: NativeDiagnosticDelta["before"], after: NativeDiagnosticDelta["after"]): NativeDiagnosticDelta => ({
+  before,
+  after,
+  callbackIncrease: difference(after.callbacks, before.callbacks),
+  rejectedBlocksIncrease: difference(after.rejectedBlocks, before.rejectedBlocks),
+})
+
+export const nativeCallbacksIncreased = (delta: NativeDiagnosticDelta | null): boolean => (
+  delta?.callbackIncrease !== null && delta?.callbackIncrease !== undefined && delta.callbackIncrease > 0
+)
+
+export const descendantsOf = (
+  processes: readonly { readonly pid: number; readonly parentPid: number }[],
+  rootPid: number,
+): number[] => {
+  const children = new Map<number, number[]>()
+  for (const process of processes) {
+    const current = children.get(process.parentPid) ?? []
+    current.push(process.pid)
+    children.set(process.parentPid, current)
+  }
+  const result: number[] = []
+  const pending = [rootPid]
+  while (pending.length > 0) {
+    const parent = pending.shift()
+    if (parent === undefined) continue
+    for (const child of children.get(parent) ?? []) {
+      result.push(child)
+      pending.push(child)
+    }
+  }
+  return result
+}
+
+export const createPrivateRunDirectory = async (temporaryRoot: string): Promise<string> => {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const directory = path.join(temporaryRoot, `daw-e-${randomBytes(12).toString("hex")}`)
+    try {
+      await mkdir(directory, { mode: 0o700 })
+      await chmod(directory, 0o700)
+      return directory
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? error.code : undefined
+      if (code !== "EEXIST") throw error
+    }
+  }
+  throw new Error("Could not create a private Electron benchmark directory.")
+}
+
+export const writePrivateArtifact = async (filePath: string, contents: string): Promise<void> => {
+  const file = await open(
+    filePath,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW,
+    0o600,
+  )
+  try {
+    await file.writeFile(contents, "utf8")
+    await file.chmod(0o600)
+  } finally {
+    await file.close()
+  }
+}
+
+const commandContainsArgument = (command: string, argument: string): boolean => (
+  command.split(/\s+/).includes(argument)
+)
+
+export const verifyElectronLaunchIdentity = (input: LaunchIdentityInput): LaunchIdentityResult => {
+  const root = input.processes.find((process) => process.pid === input.rootPid)
+  if (!root) return { verified: false, reason: "Electron root process exited before attachment." }
+  if (root.processGroupId !== input.rootPid) {
+    return { verified: false, reason: "Electron process group is not runner-owned." }
+  }
+  const executableBasename = path.basename(input.executablePath)
+  if (!root.command.startsWith(input.executablePath)
+    && !root.command.startsWith(`${executableBasename} `)
+    && root.command !== executableBasename) {
+    return { verified: false, reason: "Electron root executable identity does not match." }
+  }
+  if (!commandContainsArgument(root.command, `--user-data-dir=${input.profilePath}`)) {
+    return { verified: false, reason: "Electron profile identity does not match." }
+  }
+  if (!commandContainsArgument(root.command, "--remote-debugging-port=0")
+    || !commandContainsArgument(root.command, "--remote-debugging-address=127.0.0.1")) {
+    return { verified: false, reason: "Electron debugging endpoint identity does not match." }
+  }
+  if (input.listenerPids.length === 0) {
+    return { verified: false, reason: "Electron debugging endpoint has no listener." }
+  }
+  const ownedPids = new Set([
+    input.rootPid,
+    ...descendantsOf(input.processes, input.rootPid),
+  ])
+  if (input.listenerPids.some((pid) => !ownedPids.has(pid))) {
+    return { verified: false, reason: "Electron debugging endpoint is owned by another process." }
+  }
+  let websocket: URL
+  try {
+    websocket = new URL(input.websocketUrl)
+  } catch {
+    return { verified: false, reason: "Electron debugging endpoint returned an invalid browser target." }
+  }
+  if (websocket.protocol !== "ws:" || websocket.hostname !== "127.0.0.1"
+    || websocket.port !== String(input.port)
+    || !/^\/devtools\/browser\/[a-zA-Z0-9-]{32,}$/.test(websocket.pathname)) {
+    return { verified: false, reason: "Electron browser target capability is invalid." }
+  }
+  return { verified: true, processGroupId: root.processGroupId }
+}
+
+export const electronRendererTarget = (
+  tabs: string,
+): { readonly targetId: string; readonly url: "daw://app/" } | undefined => {
+  const targets = [...tabs.matchAll(/\[(t[0-9]+)\][^\n]*\s(daw:\/\/app\/[^\s]*)/g)]
+  if (targets.length !== 1 || targets[0]?.[2] !== "daw://app/") return undefined
+  const targetId = targets[0]?.[1]
+  return targetId ? { targetId, url: "daw://app/" } : undefined
+}
+
+export const createCleanupPlan = (
+  processes: readonly ProcessIdentity[],
+  rootPid: number,
+): CleanupPlan | undefined => {
+  const root = processes.find((process) => process.pid === rootPid)
+  if (!root || root.processGroupId !== rootPid) return undefined
+  const ownedPids = new Set([rootPid, ...descendantsOf(processes, rootPid)])
+  return {
+    rootPid,
+    processGroupId: root.processGroupId,
+    recordedProcesses: processes.filter((process) => ownedPids.has(process.pid)),
+  }
+}
+
+export const cleanupSurvivors = (
+  plan: CleanupPlan,
+  processes: readonly ProcessIdentity[],
+): number[] => {
+  const recordedProcesses = new Map(plan.recordedProcesses.map((process) => [process.pid, process]))
+  return processes
+    .filter((process) => {
+      const recorded = recordedProcesses.get(process.pid)
+      return recorded !== undefined
+        && process.command === recorded.command
+    })
+    .map((process) => process.pid)
+}

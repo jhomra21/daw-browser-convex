@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises"
+import { mkdir, rm, stat } from "node:fs/promises"
 import path from "node:path"
 
 type HarnessServer = {
@@ -77,15 +77,33 @@ const readBoundedBody = async (request: Request, maxBytes: number): Promise<Uint
 }
 
 export const browserCommand = async (session: string, args: readonly string[]) => {
-  const process = Bun.spawn(["agent-browser", "--session", session, ...args], {
+  const environment = { ...process.env }
+  delete environment.AGENT_BROWSER_CDP
+  delete environment.AGENT_BROWSER_SESSION
+  if (!environment.AGENT_BROWSER_EXECUTABLE_PATH && environment.HOME) {
+    const browserGlob = new Bun.Glob("Library/Caches/ms-playwright/**/chrome-headless-shell")
+    const candidates = []
+    for await (const executablePath of browserGlob.scan({ cwd: environment.HOME, absolute: true })) {
+      candidates.push(executablePath)
+    }
+    for (const executablePath of candidates.sort((left, right) => right.localeCompare(left))) {
+      const details = await stat(executablePath).catch(() => undefined)
+      if (details?.isFile() && (details.mode & 0o111) !== 0) {
+        environment.AGENT_BROWSER_EXECUTABLE_PATH = executablePath
+        break
+      }
+    }
+  }
+  const childProcess = Bun.spawn(["agent-browser", "--session", session, ...args], {
+    env: environment,
     stdout: "pipe",
     stderr: "pipe",
   })
   const [stdout, stderr] = await Promise.all([
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
+    new Response(childProcess.stdout).text(),
+    new Response(childProcess.stderr).text(),
   ])
-  const exitCode = await process.exited
+  const exitCode = await childProcess.exited
   if (exitCode !== 0) throw new Error(`agent-browser ${args[0] ?? "command"} failed: ${stderr || stdout}`)
   return stdout.trim()
 }
@@ -94,13 +112,30 @@ export const waitForBrowserValue = async (
   session: string,
   expression: string,
   timeoutMs: number,
-  retryDelayMs = 50,
 ) => {
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || !Number.isSafeInteger(retryDelayMs) || retryDelayMs < 1) {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
     throw new Error("Browser wait bounds are invalid.")
   }
-  const script = `(async()=>{const deadline=Date.now()+${timeoutMs};while(Date.now()<deadline){const value=(${expression});if(value!==null&&value!==undefined)return JSON.stringify(value);await new Promise(resolve=>setTimeout(resolve,${retryDelayMs}));}return null})()`
-  return browserCommand(session, ["eval", script])
+  try {
+    await browserCommand(session, ["wait", "--fn", `(()=>{const value=(${expression});return value!==null&&value!==undefined})()`, "--timeout", String(timeoutMs)])
+    return await browserCommand(session, ["eval", `JSON.stringify(${expression})`])
+  } catch (error) {
+    let diagnostics = ""
+    try {
+      diagnostics = await browserCommand(session, ["eval", `JSON.stringify({
+        url: location.href,
+        readyState: document.readyState,
+        title: document.title,
+        benchmarkPresent: typeof window.__thirtyTrackBenchmark !== "undefined",
+        probePresent: typeof window.__thirtyTrackProbeResult !== "undefined",
+        moduleScripts: [...document.querySelectorAll('script[type="module"]')].map((script) => script.getAttribute("src")),
+        bodyText: document.body?.innerText?.slice(0, 500) ?? "",
+      })`])
+    } catch (diagnosticError) {
+      diagnostics = `diagnostics unavailable: ${diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError)}`
+    }
+    throw new Error(`Browser wait timed out for ${expression.slice(0, 240)}: ${error instanceof Error ? error.message : String(error)}; ${diagnostics}`)
+  }
 }
 
 export const buildBrowserRuntime = async (input: {
@@ -192,6 +227,9 @@ export const withProductionBrowserServer = async <Value>(
 ): Promise<Value> => {
   const indexPath = path.join(clientDirectory, "index.html")
   const index = await Bun.file(indexPath).text()
+  const appModulePattern = /<script type="module"[^>]+src="[^"]+"[^>]*><\/script>/
+  const appModule = index.match(appModulePattern)?.[0]
+  if (!appModule) throw new Error("Production index does not contain an application module.")
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -200,8 +238,32 @@ export const withProductionBrowserServer = async <Value>(
       if (url.pathname === "/perf-runtime.js") {
         return new Response(Bun.file(runtimePath), { headers: { "content-type": "text/javascript" } })
       }
+      if (url.pathname === "/api/convex-auth/token") {
+        return new Response('{"token":null}', {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (url.pathname === "/api/auth/get-session") {
+        return new Response("null", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      if (url.pathname.startsWith("/api/")) {
+        return new Response("Not found", { status: 404 })
+      }
+      if (url.pathname === "/sw.js") {
+        return new Response("/* benchmark no-op service worker */", {
+          headers: { "content-type": "application/javascript" },
+        })
+      }
       if (url.pathname === "/") {
-        return new Response(index.replace("</body>", '<script type="module" src="/perf-runtime.js"></script></body>'), {
+        const instrumentedIndex = index.replace(
+          appModulePattern,
+          (appScript) => `<script type="module" src="/perf-runtime.js"></script>${appScript}`,
+        )
+        return new Response(instrumentedIndex, {
           headers: { "content-type": "text/html" },
         })
       }

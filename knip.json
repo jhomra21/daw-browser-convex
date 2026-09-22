@@ -1,15 +1,27 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
+    ".": {
+      "entry": [
+        "src/components/timeline/ClipComponent.browser-test.ts",
+        "src/components/timeline/TimelineRuler.browser-test.ts",
+        "tools/oxlint/anti-slop/rules/*.rule-test.ts"
+      ]
+    },
     "apps/desktop": {
       "entry": [
         "main.ts",
-        "preload.ts"
+        "preload.ts",
+        "portable-wasm-worklet-electron.cjs",
+        "portable-wasm-worklet-fixture.mjs",
+        "scripts/run-forge.ts"
       ]
     }
   },
   "ignoreFiles": [
     "public/audio-worklets/*.js",
+    "public/audio-workers/daw-portable-capability-metadata-v1.d.ts",
+    "public/audio-worklets/daw-portable-graph-envelope-v3.d.ts",
     "src/components/nav-user.tsx",
     "src/components/ui/avatar.tsx",
     "src/components/ui/badge.tsx",
@@ -17,19 +29,16 @@
     "src/components/ui/sheet.tsx",
     "src/components/ui/sidebar.tsx",
     "src/components/ui/skeleton.tsx",
-    "apps/desktop/forge.config.ts",
     "apps/desktop/no-pwa.ts",
     "apps/desktop/vite.main.config.ts",
-    "apps/desktop/vite.preload.config.ts",
-    "apps/desktop/vite.renderer.config.ts"
+    "apps/desktop/vite.preload.config.ts"
   ],
   "ignoreDependencies": [
     "@electron-forge/maker-dmg",
     "@electron-forge/maker-squirrel",
     "@electron-forge/maker-zip",
     "@electron-forge/plugin-fuses",
-    "@electron-forge/plugin-vite",
-    "@electron/fuses"
+    "@electron-forge/plugin-vite"
   ],
   "ignoreIssues": {
     "src/lib/local-cloud-id-map.ts": [

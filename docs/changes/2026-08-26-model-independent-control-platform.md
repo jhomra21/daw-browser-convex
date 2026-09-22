@@ -416,11 +416,11 @@ Worker or native-host loss can trigger a limited rebuild. Recovery keeps the nor
 
 Editor-capable plugins run their editor in a separate native worker. Open, close, focus, resize, and status use typed commands and notifications.
 
-Manual parameter edits override scheduled automation for the addressed parameter. Native override insertion handles tombstones, preserves existing overrides, and rolls back a newly reserved override if event queuing fails. The current product flow requires stopped transport before automation re-enable succeeds.
+Manual parameter edits override scheduled automation for the addressed parameter. Native override insertion handles tombstones, preserves existing overrides, and rolls back a newly reserved override if event queuing fails. The 2026-08-20 packaged campaign observed re-enable with stopped transport. Later source and coordinator tests support live re-enable from the current playhead, but packaged real-VST feedback/resumption remains uncertified.
 
 Native export resolves and preflights attachments again. The render result is finalized before plugin teardown, and offline workers no longer initialize unused AppKit editor state.
 
-Current limitation: Native Phase A export rejects projects that contain automation.
+Current evidence: Native Phase A has packaged real-VST evidence for VST3, track mixer, and built-in processor automation, while unsupported targets fail closed. Live native automation has source/test support but not fresh packaged real-VST certification.
 
 ## Real VST acceptance
 
@@ -442,6 +442,8 @@ The campaign verified:
 - renderer reload and crash recovery
 
 The browser campaign separately covered non-VST editing, routing, import, playback and seek, built-in EQ and Synth, restart media hydration, settings, keyboard shortcuts, and a one-second nonzero export.
+
+The packaged campaign's re-enable evidence was stopped-transport only, and its export evidence covered a VST project without automation. A later exact-head campaign certified mixed native automated export. Its live engine remained uninitialized, so that later campaign did not certify live-running real-VST re-enable.
 
 ## Renderer lifecycle
 
@@ -580,9 +582,6 @@ The merge does not provide:
 - arbitrary DSP/package loading
 - portable or cloud opaque VST state transport
 - packaged extension activation, deactivation, or reload controls
-- Native Phase A export for projects that contain automation
-
-The current product flow also requires stopped transport before automation re-enable succeeds.
 
 The exact overlapping same-URL Electron event sequence cannot be forced reliably through CDP. The executable lifecycle tests are the authority for that case.
 

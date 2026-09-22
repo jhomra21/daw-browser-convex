@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import {
   desktopDiagnosticsSchemaV1,
+  desktopDiagnosticsSchemaV2,
   desktopEmptyInputSchemaV1,
   desktopHostStatusSchemaV1,
   desktopHostImportResultSchemaV1,
@@ -26,6 +27,7 @@ type HostToolInput = Parameters<typeof desktopEmptyInputSchemaV1.parse>[0]
 type HostToolResult = DesktopOperationMapV1[HostOperation]["result"]
 type ToolTextContent = { type: "text"; text: string }
 type ToolSuccess<Value extends object> = { structuredContent: Value; content: ToolTextContent[] }
+type ToolFailure = { isError: true; content: ToolTextContent[] }
 
 export type HostToolService = {
   status: () => Promise<DesktopOperationMapV1["host.status"]["result"]>
@@ -35,6 +37,7 @@ export type HostToolService = {
   stop: () => Promise<DesktopOperationMapV1["transport.stop"]["result"]>
   seek: (input: DesktopOperationMapV1["transport.seek"]["input"]) => Promise<DesktopOperationMapV1["transport.seek"]["result"]>
   diagnostics: () => Promise<DesktopOperationMapV1["diagnostics.snapshot"]["result"]>
+  diagnosticsV2: () => Promise<DesktopOperationMapV1["diagnostics.snapshot.v2"]["result"]>
   importAudio: (input: DesktopOperationMapV1["host.import.audio"]["input"]) => Promise<DesktopOperationMapV1["host.import.audio"]["result"]>
   importStatus: () => Promise<DesktopOperationMapV1["host.import.status"]["result"]>
   importCancel: (input: DesktopOperationMapV1["host.import.cancel"]["input"]) => Promise<DesktopOperationMapV1["host.import.cancel"]["result"]>
@@ -52,8 +55,8 @@ const text = <Value extends object>(value: Value): ToolSuccess<Value> => ({
   structuredContent: value,
   content: [{ type: "text", text: JSON.stringify(value) }],
 })
-const failure = () => ({ isError: true, content: [{ type: "text" as const, text: JSON.stringify({ version: "v1", code: "unavailable", message: "The local desktop host is unavailable." }) }] })
-const invalid = () => ({ isError: true, content: [{ type: "text" as const, text: JSON.stringify({ version: "v1", code: "invalid-request", message: "Invalid local desktop host tool input." }) }] })
+const failure = (): ToolFailure => ({ isError: true, content: [{ type: "text", text: JSON.stringify({ version: "v1", code: "unavailable", message: "The local desktop host is unavailable." }) }] })
+const invalid = (): ToolFailure => ({ isError: true, content: [{ type: "text", text: JSON.stringify({ version: "v1", code: "invalid-request", message: "Invalid local desktop host tool input." }) }] })
 
 const invoke = async <Value extends object>(operation: () => Promise<HostToolResult>, output: { parse: (value: HostToolResult) => Value }) => {
   try {
@@ -71,6 +74,7 @@ export const executeHostTool = (name: string, input: HostToolInput, service: Hos
           : name === "host_stop" ? "transport.stop"
             : name === "host_seek" ? "transport.seek"
               : name === "host_diagnostics" ? "diagnostics.snapshot"
+                : name === "host_diagnostics_v2" ? "diagnostics.snapshot.v2"
                 : name === "host_import_audio" ? "host.import.audio"
                   : name === "host_import_status" ? "host.import.status"
                     : name === "host_import_cancel" ? "host.import.cancel"
@@ -88,6 +92,7 @@ export const executeHostTool = (name: string, input: HostToolInput, service: Hos
   const seek = desktopSeekInputSchemaV1.safeParse(input)
   if (name === "host_seek") return seek.success ? invoke(() => service.seek(seek.data), desktopTransportStatusSchemaV1) : invalid()
   if (name === "host_diagnostics") return desktopEmptyInputSchemaV1.safeParse(input).success ? invoke(service.diagnostics, desktopDiagnosticsSchemaV1) : invalid()
+  if (name === "host_diagnostics_v2") return desktopEmptyInputSchemaV1.safeParse(input).success ? invoke(service.diagnosticsV2, desktopDiagnosticsSchemaV2) : invalid()
   const importAudio = desktopHostImportInputSchemaV1.safeParse(input)
   if (name === "host_import_audio") return importAudio.success ? invoke(() => service.importAudio(importAudio.data), desktopHostImportResultSchemaV1) : invalid()
   if (name === "host_import_status") return desktopEmptyInputSchemaV1.safeParse(input).success ? invoke(service.importStatus, desktopHostImportStatusSchemaV1) : invalid()
@@ -114,6 +119,7 @@ export const registerHostTools = (server: McpServer, service: HostToolService) =
   if (enabled("transport.stop")) server.registerTool("host_stop", { description: "Stop playback in the open local desktop DAW.", inputSchema: desktopEmptyInputSchemaV1, outputSchema: desktopTransportStatusSchemaV1, annotations: local }, (input) => executeHostTool("host_stop", input, service))
   if (enabled("transport.seek")) server.registerTool("host_seek", { description: "Seek the open local desktop DAW transport.", inputSchema: desktopSeekInputSchemaV1, outputSchema: desktopTransportStatusSchemaV1, annotations: local }, (input) => executeHostTool("host_seek", input, service))
   if (enabled("diagnostics.snapshot")) server.registerTool("host_diagnostics", { description: "Return safe local desktop audio diagnostics.", inputSchema: desktopEmptyInputSchemaV1, outputSchema: desktopDiagnosticsSchemaV1, annotations: read }, (input) => executeHostTool("host_diagnostics", input, service))
+  if (enabled("diagnostics.snapshot.v2")) server.registerTool("host_diagnostics_v2", { description: "Return detailed local desktop audio diagnostics.", inputSchema: desktopEmptyInputSchemaV1, outputSchema: desktopDiagnosticsSchemaV2, annotations: read }, (input) => executeHostTool("host_diagnostics_v2", input, service))
   if (enabled("host.import.audio")) server.registerTool("host_import_audio", { description: "Import bounded local audio into the open desktop DAW.", inputSchema: desktopHostImportInputSchemaV1, outputSchema: desktopHostImportResultSchemaV1, annotations: local }, (input) => executeHostTool("host_import_audio", input, service))
   if (enabled("host.import.status")) server.registerTool("host_import_status", { description: "Return the active local desktop import status.", inputSchema: desktopEmptyInputSchemaV1, outputSchema: desktopHostImportStatusSchemaV1, annotations: read }, (input) => executeHostTool("host_import_status", input, service))
   if (enabled("host.import.cancel")) server.registerTool("host_import_cancel", { description: "Cancel a local desktop import by job ID.", inputSchema: desktopHostImportCancelInputSchemaV1, outputSchema: desktopHostImportStatusSchemaV1, annotations: local }, (input) => executeHostTool("host_import_cancel", input, service))

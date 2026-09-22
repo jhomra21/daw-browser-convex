@@ -8,6 +8,7 @@ import {
   desktopHostImportCancelInputSchemaV1,
   desktopHostImportStatusSchemaV1,
   desktopHostExportRunInputSchemaV1,
+  desktopDiagnosticsSchemaV2,
   desktopProtocolVersion,
   type DesktopControlOperationV1,
   type DesktopOperationMapV1,
@@ -130,6 +131,17 @@ export const runHostCommand = async (arguments_: string[], io: CliIo) => {
       io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))
       return 0
     } finally { client.close() }
+  }
+  if (action === "diagnostics-v2") {
+    if (extra.length !== 0 || value !== undefined) throw new Error("Invalid host diagnostics-v2 command.")
+    const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+    try {
+      const data = desktopDiagnosticsSchemaV2.parse(await client.request("diagnostics.snapshot.v2", {}))
+      io.stdout(canonicalJson({ version: "v1", ok: true, command: "host diagnostics-v2", data }))
+      return 0
+    } finally {
+      client.close()
+    }
   }
   if (extra.length !== 0 || (action !== "seek" && value !== undefined)) throw new Error("Invalid host command.")
   const operation = action === "status" ? "host.status"

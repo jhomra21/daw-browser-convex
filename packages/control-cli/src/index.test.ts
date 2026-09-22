@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { createServer, type Socket } from "node:net"
 import {
   desktopFrameSchemaV1,
+  desktopDiagnosticsSchemaV2,
   desktopProtocolVersion,
   type DesktopFrameV1,
   type DesktopOperationV1,
@@ -298,6 +299,63 @@ describe("control CLI output", () => {
       data: { state: "paused", playheadSec: 12.5 },
     })
     expect(output.stderr).toEqual([])
+  })
+
+  test("dispatches host diagnostics-v2 with the strict protocol operation", async () => {
+    const observed: Array<{ operation: DesktopOperationV1; input: unknown }> = []
+    const data = desktopDiagnosticsSchemaV2.parse({
+      version: "v2",
+      audio: {
+        state: "uninitialized",
+        sampleRate: null,
+        requestedSampleRate: null,
+        latencyHint: null,
+        baseLatencySec: null,
+        outputLatencySec: null,
+        totalOutputLatencySec: null,
+        graphPdcLatencyFrames: null,
+        workletFaultCount: 0,
+        runtimeFaults: {
+          eventCount: 0,
+          uniqueSignatureCount: 0,
+          byKind: { compressor: 0, "owned-processor": 0, "track-meter": 0, recorder: 0 },
+          last: null,
+        },
+        inferredApplicationStallCount: 0,
+      },
+      recording: {
+        requestedFormat: "pcm",
+        activeFormat: "pcm",
+        requestedLayout: "mono",
+        activeChannels: null,
+        requestedSampleRate: null,
+        activeSampleRate: null,
+        transport: null,
+        capturedFrames: null,
+        overrunFrames: null,
+        droppedFrames: null,
+        queuedFrames: null,
+        muted: false,
+        deviceLost: false,
+        lastFailurePresent: false,
+      },
+      counts: { tracks: 0, clips: 0 },
+      waveform: { available: false, reason: "not-exposed-at-controller-boundary" },
+      native: { status: "unavailable", reason: "desktop-bridge-unavailable" },
+    })
+    await createHost((socket, frame) => {
+      observed.push({ operation: frame.operation, input: frame.input })
+      socket.write(encodeDesktopFrame(desktopFrameSchemaV1.parse({
+        version: "v1",
+        type: "reply",
+        id: frame.id,
+        result: data,
+      })))
+    }, ["diagnostics.snapshot.v2"])
+    const output = io()
+    expect(await runCli(["host", "diagnostics-v2"], output.value)).toBe(0)
+    expect(observed).toEqual([{ operation: "diagnostics.snapshot.v2", input: {} }])
+    expect(JSON.parse(output.stdout[0]).data).toEqual(data)
   })
 
   test("preserves host transport failures as transport errors", async () => {

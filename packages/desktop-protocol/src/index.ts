@@ -83,6 +83,7 @@ export const desktopOperationSchemaV1 = z.enum([
   "transport.stop",
   "transport.seek",
   "diagnostics.snapshot",
+  "diagnostics.snapshot.v2",
   "control.capabilities",
   "control.snapshot",
   "control.preview",
@@ -227,6 +228,7 @@ const requestInputs = {
   "transport.stop": desktopEmptyInputSchemaV1,
   "transport.seek": desktopSeekInputSchemaV1,
   "diagnostics.snapshot": desktopEmptyInputSchemaV1,
+  "diagnostics.snapshot.v2": desktopEmptyInputSchemaV1,
   "control.capabilities": desktopControlCapabilitiesInputSchemaV1,
   "control.snapshot": desktopControlSnapshotInputSchemaV1,
   "control.preview": controlPreviewRequestSchemaV1,
@@ -339,6 +341,103 @@ export const desktopDiagnosticsSchemaV1 = z.object({
     deviceLost: z.boolean(),
   }).strict(),
   counts: z.object({ tracks: z.number().int().nonnegative(), clips: z.number().int().nonnegative() }).strict(),
+}).strict()
+const runtimeFaultSchemaV2 = z.object({
+  kind: z.enum(["compressor", "owned-processor", "track-meter", "recorder"]),
+  codePresent: z.boolean(),
+}).strict()
+const runtimeFaultSnapshotSchemaV2 = z.object({
+  eventCount: z.number().int().nonnegative(),
+  uniqueSignatureCount: z.number().int().nonnegative(),
+  byKind: z.object({
+    compressor: z.number().int().nonnegative(),
+    "owned-processor": z.number().int().nonnegative(),
+    "track-meter": z.number().int().nonnegative(),
+    recorder: z.number().int().nonnegative(),
+  }).strict(),
+    last: runtimeFaultSchemaV2.nullable(),
+}).strict()
+export const desktopDiagnosticsSchemaV2 = z.object({
+  version: z.literal("v2"),
+  audio: z.object({
+    state: z.enum(["suspended", "running", "closed", "uninitialized"]),
+    sampleRate: z.number().finite().nullable(),
+    requestedSampleRate: z.number().finite().nullable(),
+    latencyHint: z.union([z.enum(["balanced", "interactive", "playback"]), z.number().finite()]).nullable(),
+    baseLatencySec: z.number().finite().nonnegative().nullable(),
+    outputLatencySec: z.number().finite().nonnegative().nullable(),
+    totalOutputLatencySec: z.number().finite().nonnegative().nullable(),
+    graphPdcLatencyFrames: z.number().int().nonnegative().nullable(),
+    workletFaultCount: z.number().int().nonnegative(),
+    runtimeFaults: runtimeFaultSnapshotSchemaV2,
+    inferredApplicationStallCount: z.number().int().nonnegative(),
+  }).strict(),
+  recording: z.object({
+    requestedFormat: z.enum(["pcm", "compressed"]),
+    activeFormat: z.enum(["pcm", "compressed"]),
+    requestedLayout: z.enum(["mono", "stereo"]),
+    activeChannels: z.number().int().positive().nullable(),
+    requestedSampleRate: z.number().finite().positive().nullable(),
+    activeSampleRate: z.number().finite().positive().nullable(),
+    transport: z.enum(["sab", "transferable"]).nullable(),
+    capturedFrames: z.number().int().nonnegative().nullable(),
+    overrunFrames: z.number().int().nonnegative().nullable(),
+    droppedFrames: z.number().int().nonnegative().nullable(),
+    queuedFrames: z.number().int().nonnegative().nullable(),
+    muted: z.boolean(),
+    deviceLost: z.boolean(),
+    lastFailurePresent: z.boolean(),
+  }).strict(),
+  counts: z.object({
+    tracks: z.number().int().nonnegative(),
+    clips: z.number().int().nonnegative(),
+  }).strict(),
+  waveform: z.object({
+    available: z.literal(false),
+    reason: z.literal("not-exposed-at-controller-boundary"),
+  }).strict(),
+  native: z.discriminatedUnion("status", [
+    z.object({
+      status: z.literal("unavailable"),
+      reason: z.literal("desktop-bridge-unavailable"),
+    }).strict(),
+    z.object({
+      status: z.literal("failed"),
+      errorCode: z.literal("native-diagnostics-unavailable"),
+      artifactVerification: z.union([
+        z.object({ status: z.enum(["disabled", "development", "verified"]) }).strict(),
+        z.object({ status: z.literal("failed") }).strict(),
+      ]),
+    }).strict(),
+    z.object({
+      status: z.literal("available"),
+      artifactVerification: z.union([
+        z.object({ status: z.enum(["disabled", "development", "verified"]) }).strict(),
+        z.object({ status: z.literal("failed") }).strict(),
+      ]),
+      diagnostics: z.object({
+      state: z.enum(["idle", "configured", "running", "faulted"]),
+      activeRevision: z.number().int().nonnegative(),
+      preparedRevision: z.number().int().nonnegative(),
+      retiredRevision: z.number().int().nonnegative(),
+      transportEpoch: z.number().int().nonnegative(),
+      renderEpoch: z.string().regex(/^(0|[1-9][0-9]*)$/),
+      installedAssets: z.number().int().nonnegative(),
+      callbacks: z.number().int().nonnegative(),
+      rejectedBlocks: z.number().int().nonnegative(),
+      lastRejectedReason: z.number().int().nonnegative(),
+      lastRejectedCallback: z.string().regex(/^(0|[1-9][0-9]*)$/),
+      lastRejectedRenderEpoch: z.string().regex(/^(0|[1-9][0-9]*)$/),
+      lastRejectedTransportEpoch: z.number().int().nonnegative(),
+      lastRejectedCoreResult: z.number().int().nonnegative(),
+      lastRejectedFrameCount: z.number().int().nonnegative(),
+      lastRejectedChannelCount: z.number().int().nonnegative(),
+      lastRejectedProcessorEventCount: z.number().int().nonnegative(),
+      lastRejectedInstrumentEventCount: z.number().int().nonnegative(),
+      lastRejectedGraphRevision: z.number().int().nonnegative(),
+      }).strict(),
+    }).strict(),
+  ]),
 }).strict()
 const safeExportOutputSchema = z.object({ name: z.string().min(1).max(256), sizeBytes: z.number().int().nonnegative().max(8 * 1024 * 1024 * 1024) }).strict()
 export const desktopHostImportResultSchemaV1 = z.object({
@@ -518,6 +617,12 @@ export const desktopHostOperationCatalog = {
     output: desktopDiagnosticsSchemaV1,
     effect: "read",
   },
+  "diagnostics.snapshot.v2": {
+    id: "diagnostics.snapshot.v2",
+    input: desktopEmptyInputSchemaV1,
+    output: desktopDiagnosticsSchemaV2,
+    effect: "read",
+  },
 } satisfies Record<DesktopHostOperationV1, DesktopHostOperationDescriptorV1>
 
 export const desktopHostOperationIds = Object.freeze(
@@ -550,6 +655,7 @@ export type DesktopOperationMapV1 = {
   "transport.stop": { input: Record<string, never>; result: z.infer<typeof desktopTransportStatusSchemaV1> }
   "transport.seek": { input: { seconds: number }; result: z.infer<typeof desktopTransportStatusSchemaV1> }
   "diagnostics.snapshot": { input: Record<string, never>; result: z.infer<typeof desktopDiagnosticsSchemaV1> }
+  "diagnostics.snapshot.v2": { input: Record<string, never>; result: z.infer<typeof desktopDiagnosticsSchemaV2> }
   "control.capabilities": { input: z.infer<typeof desktopControlCapabilitiesInputSchemaV1>; result: z.infer<typeof controlCapabilitiesSchemaV1> }
   "control.snapshot": { input: z.infer<typeof desktopControlSnapshotInputSchemaV1>; result: z.infer<typeof projectSnapshotSchemaV1> }
   "control.preview": { input: z.infer<typeof controlPreviewRequestSchemaV1>; result: z.infer<typeof controlPreviewResultSchemaV1> }
@@ -762,6 +868,7 @@ const nonControlResultSchemas = {
   "transport.stop": desktopTransportStatusSchemaV1,
   "transport.seek": desktopTransportStatusSchemaV1,
   "diagnostics.snapshot": desktopDiagnosticsSchemaV1,
+  "diagnostics.snapshot.v2": desktopDiagnosticsSchemaV2,
 } satisfies Partial<Record<DesktopOperationV1, z.ZodType>>
 
 const desktopControlDescriptor = (operation: DesktopControlOperationV1) => {

@@ -1,0 +1,223 @@
+import { mkdir, rm } from "node:fs/promises"
+import path from "node:path"
+
+type HarnessServer = {
+  readonly url: URL
+  readonly uploadToken: string
+  upload?: (body: Uint8Array) => Promise<Response>
+  stop: (closeActiveConnections?: boolean) => void
+}
+
+export const performanceUploadMaxBytes = 40 * 1024 * 1024
+
+type UploadGateState = "ready" | "in-progress" | "accepted"
+type UploadGateInput = {
+  readonly method: string
+  readonly token: string | null
+  readonly contentLength: number | null
+}
+type UploadGateDecision =
+  | { readonly accepted: true }
+  | { readonly accepted: false; readonly status: 401 | 405 | 409 | 413 }
+
+export const createUploadGate = (token: string, maxBytes = performanceUploadMaxBytes) => {
+  let state: UploadGateState = "ready"
+  return {
+    begin(input: UploadGateInput): UploadGateDecision {
+      if (input.method !== "POST") return { accepted: false, status: 405 }
+      if (input.token !== token) return { accepted: false, status: 401 }
+      if (state !== "ready") return { accepted: false, status: 409 }
+      if (input.contentLength !== null && input.contentLength > maxBytes) return { accepted: false, status: 413 }
+      state = "in-progress"
+      return { accepted: true }
+    },
+    finish(success: boolean) {
+      state = success ? "accepted" : "ready"
+    },
+  }
+}
+
+export const resolveContainedPath = (rootDirectory: string, pathname: string): string | undefined => {
+  try {
+    const decodedPath = decodeURIComponent(pathname)
+    const root = path.resolve(rootDirectory)
+    const resolved = path.resolve(root, `.${decodedPath}`)
+    return resolved === root || resolved.startsWith(`${root}${path.sep}`) ? resolved : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const readBoundedBody = async (request: Request, maxBytes: number): Promise<Uint8Array | undefined> => {
+  if (!request.body) return undefined
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    while (true) {
+      const next = await reader.read()
+      if (next.done) break
+      total += next.value.byteLength
+      if (total > maxBytes) {
+        await reader.cancel()
+        return undefined
+      }
+      chunks.push(next.value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  const body = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    body.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return body
+}
+
+export const browserCommand = async (session: string, args: readonly string[]) => {
+  const process = Bun.spawn(["agent-browser", "--session", session, ...args], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const [stdout, stderr] = await Promise.all([
+    new Response(process.stdout).text(),
+    new Response(process.stderr).text(),
+  ])
+  const exitCode = await process.exited
+  if (exitCode !== 0) throw new Error(`agent-browser ${args[0] ?? "command"} failed: ${stderr || stdout}`)
+  return stdout.trim()
+}
+
+export const waitForBrowserValue = async (
+  session: string,
+  expression: string,
+  timeoutMs: number,
+  retryDelayMs = 50,
+) => {
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || !Number.isSafeInteger(retryDelayMs) || retryDelayMs < 1) {
+    throw new Error("Browser wait bounds are invalid.")
+  }
+  const script = `(async()=>{const deadline=Date.now()+${timeoutMs};while(Date.now()<deadline){const value=(${expression});if(value!==null&&value!==undefined)return JSON.stringify(value);await new Promise(resolve=>setTimeout(resolve,${retryDelayMs}));}return null})()`
+  return browserCommand(session, ["eval", script])
+}
+
+export const buildBrowserRuntime = async (input: {
+  readonly entrypoint: string
+  readonly name: string
+}) => {
+  const temporaryRoot = path.join(process.env.TMPDIR ?? "/tmp", `daw-performance-${crypto.randomUUID()}`)
+  await mkdir(temporaryRoot, { recursive: true })
+  const build = await Bun.build({
+    entrypoints: [input.entrypoint],
+    target: "browser",
+    format: "esm",
+    outdir: temporaryRoot,
+    naming: `${input.name}.js`,
+    alias: { "~": path.resolve(import.meta.dir, "../../src") },
+  })
+  if (!build.success) {
+    await rm(temporaryRoot, { recursive: true, force: true })
+    throw new Error(build.logs.map((log) => log.message).join("\n"))
+  }
+  return `${temporaryRoot}/${input.name}.js`
+}
+
+export const withBrowserServer = async <Value>(
+  runtimePath: string,
+  callback: (server: HarnessServer) => Promise<Value>,
+): Promise<Value> => {
+  const uploadToken = crypto.randomUUID()
+  const uploadGate = createUploadGate(uploadToken)
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const url = new URL(request.url)
+      if (url.pathname === "/fixture") {
+        const contentLengthHeader = request.headers.get("content-length")
+        const contentLength = contentLengthHeader === null ? null : Number(contentLengthHeader)
+        const decision = uploadGate.begin({
+          method: request.method,
+          token: url.searchParams.get("token"),
+          contentLength: Number.isSafeInteger(contentLength) && contentLength >= 0 ? contentLength : null,
+        })
+        if (!decision.accepted) return new Response("Fixture upload rejected.", { status: decision.status })
+        const body = await readBoundedBody(request, performanceUploadMaxBytes)
+        if (!body || !serverState.upload) {
+          uploadGate.finish(false)
+          return new Response("Fixture upload rejected.", { status: 413 })
+        }
+        try {
+          const response = await serverState.upload(body)
+          uploadGate.finish(response.ok)
+          return response
+        } catch {
+          uploadGate.finish(false)
+          return new Response("Fixture upload failed.", { status: 500 })
+        }
+      }
+      if (url.pathname === "/") {
+        return new Response(
+          '<!doctype html><meta name="viewport" content="width=device-width"><script type="module" src="/runtime.js"></script>',
+          { headers: { "content-type": "text/html" } },
+        )
+      }
+      if (url.pathname === "/runtime.js") {
+        return new Response(Bun.file(runtimePath), {
+          headers: { "content-type": "text/javascript" },
+        })
+      }
+      return new Response("Not found", { status: 404 })
+    },
+  })
+  const serverState: HarnessServer = {
+    url: server.url,
+    uploadToken,
+    stop: (closeActiveConnections = false) => server.stop(closeActiveConnections),
+  }
+  try {
+    return await callback(serverState)
+  } finally {
+    server.stop(true)
+    await rm(path.dirname(runtimePath), { recursive: true, force: true })
+  }
+}
+
+export const withProductionBrowserServer = async <Value>(
+  clientDirectory: string,
+  runtimePath: string,
+  callback: (server: HarnessServer) => Promise<Value>,
+): Promise<Value> => {
+  const indexPath = path.join(clientDirectory, "index.html")
+  const index = await Bun.file(indexPath).text()
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      const url = new URL(request.url)
+      if (url.pathname === "/perf-runtime.js") {
+        return new Response(Bun.file(runtimePath), { headers: { "content-type": "text/javascript" } })
+      }
+      if (url.pathname === "/") {
+        return new Response(index.replace("</body>", '<script type="module" src="/perf-runtime.js"></script></body>'), {
+          headers: { "content-type": "text/html" },
+        })
+      }
+      const filePath = resolveContainedPath(clientDirectory, url.pathname)
+      if (!filePath) return new Response("Not found", { status: 404 })
+      if (!await Bun.file(filePath).exists()) return new Response("Not found", { status: 404 })
+      return new Response(Bun.file(filePath))
+    },
+  })
+  const serverState: HarnessServer = {
+    url: server.url,
+    stop: (closeActiveConnections = false) => server.stop(closeActiveConnections),
+  }
+  try {
+    return await callback(serverState)
+  } finally {
+    server.stop(true)
+  }
+}

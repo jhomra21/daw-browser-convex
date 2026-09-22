@@ -11,6 +11,7 @@ import {
   desktopRendererExportInputSchemaV1,
   desktopRendererImportInputSchemaV1,
   desktopSeekInputSchemaV1,
+  desktopDiagnosticsSchemaV2,
   desktopJsonValueSchema,
   type DesktopJsonValue,
   hostError,
@@ -42,6 +43,7 @@ import { listLocalExternalProcessors } from "~/lib/external-plugins"
 import { createLocalControlHandlers } from "~/lib/local-control/local-control-handlers"
 import { LocalControlServiceError } from "~/lib/local-control/local-control-service"
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
+import type { NativeHostDiagnostics } from "@daw-browser/audio-engine/native-host-wire"
 import type { ExportQueue } from "~/lib/export/export-queue"
 import { createImportJobQueue, type ImportJobQueue } from "~/lib/desktop/import-job-queue"
 import type { ImportProjectBinding, ImportSummary } from "~/hooks/useTimelineClipImport"
@@ -89,7 +91,28 @@ const cancelled = (id: string): HostResponse => ({
 const mountedProjectRequired = () => hostError("unavailable", "A mounted local project is required.")
 const controlUnavailable = () => hostError("cancelled", "The local control request was cancelled.")
 const controlFailure = () => hostError("internal", "The local control request could not be completed.")
-
+const safeRuntimeFaults = (runtime: ReturnType<AudioEngine["getRuntimeSnapshot"]>["runtimeFaults"]) => ({
+  ...runtime,
+  last: runtime.last === null
+    ? null
+    : { kind: runtime.last.kind, codePresent: runtime.last.code.length > 0 },
+})
+const safeRecordingDiagnostics = (recording: ReturnType<typeof getRecordingDiagnostics>) => {
+  const { lastFailure, ...safeRecording } = recording
+  return { ...safeRecording, lastFailurePresent: lastFailure !== null }
+}
+const serializeNativeDiagnostics = (diagnostics: NativeHostDiagnostics) => ({
+  ...diagnostics,
+  renderEpoch: diagnostics.renderEpoch.toString(),
+  lastRejectedCallback: diagnostics.lastRejectedCallback.toString(),
+  lastRejectedRenderEpoch: diagnostics.lastRejectedRenderEpoch.toString(),
+})
+type NativeArtifactVerification =
+  | { status: "disabled" | "development" | "verified" }
+  | { status: "failed" }
+const safeNativeArtifactVerification = (
+  verification: { status: "disabled" | "development" | "verified" } | { status: "failed"; reason: string },
+): NativeArtifactVerification => verification.status === "failed" ? { status: "failed" } : verification
 const mountedProjectMismatch = () => hostError("invalid-request", "The requested project is not mounted.")
 const projectIdForControlRequest = (request: HostRequest) => {
   switch (request.operation) {
@@ -746,6 +769,46 @@ export const createAttachedHostController = (input: {
         if (request_.signal.aborted) return cancelled(request_.id)
         input.setPlayhead(parsedInput.data.seconds)
         result = transport()
+      } else if (request_.operation === "diagnostics.snapshot.v2") {
+        const runtime = input.audioEngine.getRuntimeSnapshot()
+        const recording = getRecordingDiagnostics()
+        let native: {
+          status: "unavailable"
+          reason: "desktop-bridge-unavailable"
+        } | {
+          status: "failed"
+          errorCode: "native-diagnostics-unavailable"
+          artifactVerification: NativeArtifactVerification
+        } | {
+          status: "available"
+          artifactVerification: NativeArtifactVerification
+          diagnostics: ReturnType<typeof serializeNativeDiagnostics>
+        } = {
+          status: "unavailable",
+          reason: "desktop-bridge-unavailable",
+        }
+        try {
+          const nativeReply = await window.dawDesktop?.audioHost?.diagnostics()
+          if (nativeReply) {
+            native = nativeReply.ok
+              ? { status: "available", artifactVerification: safeNativeArtifactVerification(nativeReply.artifactVerification), diagnostics: serializeNativeDiagnostics(nativeReply.diagnostics) }
+              : { status: "failed", errorCode: "native-diagnostics-unavailable", artifactVerification: safeNativeArtifactVerification(nativeReply.artifactVerification) }
+          }
+        } catch {}
+        result = desktopDiagnosticsSchemaV2.parse({
+          version: "v2",
+          audio: { ...runtime, runtimeFaults: safeRuntimeFaults(runtime.runtimeFaults) },
+          recording: safeRecordingDiagnostics(recording),
+          counts: {
+            tracks: input.tracks().length,
+            clips: input.tracks().reduce((total, track) => total + track.clips.length, 0),
+          },
+          waveform: {
+            available: false,
+            reason: "not-exposed-at-controller-boundary",
+          },
+          native,
+        })
       } else {
         const runtime = input.audioEngine.getRuntimeSnapshot()
         const recording = getRecordingDiagnostics()

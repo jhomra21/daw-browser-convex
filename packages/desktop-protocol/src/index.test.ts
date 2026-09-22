@@ -231,7 +231,7 @@ describe("desktop protocol v1", () => {
   })
 
   test("keeps the V1 hello acknowledgment operation set exact", () => {
-    expect(desktopOperationSchemaV1.options).toHaveLength(22)
+    expect(desktopOperationSchemaV1.options).toHaveLength(23)
     expect(desktopHelloAckSchemaV1.safeParse({
       version: "v1",
       type: "helloAck",

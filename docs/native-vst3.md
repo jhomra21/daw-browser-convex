@@ -116,7 +116,7 @@ The attachment payload has strict size and count limits. The native decoder also
 
 Project-control writes use normalized values through `external-plugin.parameters.set`. The action must use processor and target IDs from the latest project snapshot.
 
-A manual parameter edit can override scheduled automation for the same parameter during playback. The native host tracks those overrides and keeps the manual value in control until the override is cleared. Live re-enable clears the override and resumes scheduled automation from the current playhead while transport may remain running. Live and Native Phase A automation support VST3, track mixer, and built-in processor targets; unsupported targets fail closed.
+A manual parameter edit can override scheduled automation for the same parameter during playback. The native host tracks those overrides and keeps the manual value in control until the override is cleared. Source and coordinator tests support clearing that override and resuming scheduled automation from the current playhead while transport remains running. Fresh packaged real-VST feedback/resumption evidence is still required before treating that live path as runtime-certified.
 
 ## State and persistence
 
@@ -175,7 +175,7 @@ The export path waits for the render result before plugin teardown. Offline work
 
 Native Phase A mixdown projects enabled VST3, track mixer, and built-in processor automation into the scheduled representations consumed by the native workers. Hold and linear interpolation are preserved, custom export ranges are rebased to offline frame zero, and the planner checks each worker's frame and callback-event limits before rendering. Unsupported automation targets are rejected instead of being silently omitted.
 
-The packaged merge campaign independently verified a one-second stereo 48 kHz 16-bit PCM VST export without automation. The file was 192,044 bytes and contained nonzero signal. VST automation export was added after that campaign, so a fresh packaged run is required before treating that path as runtime-certified evidence.
+The packaged merge campaign independently verified a one-second stereo 48 kHz 16-bit PCM VST export without automation. A later exact-head packaged campaign rendered a five-second stereo 48 kHz float WAV with real ValhallaSupermassive plus VST3, track volume, master volume, and built-in Utility automation. The automated and disabled-automation renders differed in 479,998 of 480,000 samples, with a difference RMS of 0.097734.
 
 ## Packaged acceptance
 
@@ -198,7 +198,7 @@ The campaign verified:
 
 See the [runtime acceptance report](../acceptance-reports/control-platform-runtime-2026-08-20.md) for the full evidence trail.
 
-That 2026-08-20 packaged campaign certified re-enable only with stopped transport and certified a VST export without automation. Later source and native scheduling tests cover VST/native processor automation, but no later packaged runtime campaign is claimed here.
+That 2026-08-20 packaged campaign certified re-enable only with stopped transport and certified a VST export without automation. A later exact-head packaged campaign certified mixed native automated export, but its live engine remained uninitialized, so live-running real-VST re-enable remains unproven.
 
 ## Current limits
 
@@ -208,6 +208,7 @@ That 2026-08-20 packaged campaign certified re-enable only with stopped transpor
 - Every launch rechecks the current plugin files.
 - Device availability, bus layout, editor support, state support, plugin behavior, or architecture can make an instance unavailable.
 - Public control does not expose arbitrary plugin insertion, removal, editor control, or worker control.
-- Native Phase A mixdown supports VST3, track mixer, and built-in processor automation; unsupported targets fail closed.
+- Native Phase A mixdown has packaged real-VST evidence for VST3, track mixer, and built-in processor automation; unsupported targets fail closed.
+- Live-running real-VST re-enable has source/test support but remains pending packaged runtime certification.
 - Native stem export with VST3 remains outside the current native offline mixdown path.
 - VST worker processes do not sandbox malicious plugin code.

@@ -223,8 +223,8 @@ See the [acceptance report](acceptance-reports/control-platform-runtime-2026-08-
 
 - Native VST3 runs only in the macOS desktop app.
 - Public control does not expose arbitrary plugin insertion, removal, editor control, or worker process control.
-- Native Phase A mixdown supports VST3, track mixer, and built-in processor automation; unsupported targets fail closed.
-- Live automation re-enable clears the manual override and resumes from the current playhead without requiring stopped transport.
+- Native Phase A mixdown has packaged real-VST evidence for mixed VST3, track mixer, and built-in processor automation; unsupported targets fail closed.
+- Source and coordinator tests support live automation re-enable without stopped transport, but packaged real-VST feedback/resumption remains uncertified.
 - Cloud JSONL process transport is not implemented.
 - External extension packages and arbitrary DSP/package loading are not implemented.
 - VST worker processes do not make untrusted plugins safe.

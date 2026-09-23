@@ -1,12 +1,16 @@
 import { z } from "zod"
+import { AUDIO_EFFECT_CONTRACTS, createDefaultSynthParams } from "@daw-browser/shared"
 
-export const thirtyTrackFixtureVersion = "30-track-v1"
+export const thirtyTrackFixtureVersion = "30-track-v2"
 export const thirtyTrackSampleRate = 48_000
 export const thirtyTrackSourceDurationSec = 90
 export const thirtyTrackTimelineDurationSec = 60
 export const thirtyTrackCount = 30
+export const thirtyTrackTotalTrackCount = 31
+export const thirtyTrackTotalClipCount = 31
 export const thirtyTrackClipGain = 0.1
-export const thirtyTrackProjectName = "30 Track Performance v1"
+export const thirtyTrackProjectName = "30 Track Performance v2"
+export const thirtyTrackArchiveName = `${thirtyTrackFixtureVersion}.dawproject`
 export type ThirtyTrackFixtureVersion = typeof thirtyTrackFixtureVersion
 export type ThirtyTrackColor = "#ff5f57" | "#febc2e" | "#28c840" | "#4da3ff" | "#a78bfa" | "#f472b6"
 export const thirtyTrackColors: readonly ThirtyTrackColor[] = Object.freeze([
@@ -18,6 +22,8 @@ export const thirtyTrackColors: readonly ThirtyTrackColor[] = Object.freeze([
   "#f472b6",
 ])
 
+const tierTwoPitches: readonly [60, 64, 67, 71] = [60, 64, 67, 71]
+
 const benchmarkName = (index: number) => `Benchmark ${String(index + 1).padStart(2, "0")}`
 const colorAt = (index: number): ThirtyTrackColor => {
   const color = thirtyTrackColors[index % thirtyTrackColors.length]
@@ -25,60 +31,72 @@ const colorAt = (index: number): ThirtyTrackColor => {
   return color
 }
 
-export type ThirtyTrackSemanticManifest = {
-  readonly fixtureVersion: typeof thirtyTrackFixtureVersion
-  readonly sampleRate: typeof thirtyTrackSampleRate
-  readonly projectName: typeof thirtyTrackProjectName
-  readonly source: {
-    readonly durationSec: typeof thirtyTrackSourceDurationSec
-    readonly channelCount: 2
-    readonly channels: {
-      readonly left: {
-        readonly components: readonly [{ readonly amplitude: 0.12; readonly period: 240 }, { readonly amplitude: 0.06; readonly period: 60 }]
-      }
-      readonly right: {
-        readonly components: readonly [{ readonly amplitude: 0.12; readonly period: 160 }, { readonly amplitude: 0.06; readonly period: 40 }]
-      }
-    }
-  }
-  readonly timeline: {
-    readonly durationSec: typeof thirtyTrackTimelineDurationSec
-    readonly trackCount: typeof thirtyTrackCount
-    readonly clipCount: typeof thirtyTrackCount
-    readonly clipDurationSec: typeof thirtyTrackTimelineDurationSec
-    readonly clipGain: typeof thirtyTrackClipGain
-    readonly sourceOffsetsSec: readonly number[]
-    readonly colors: readonly ThirtyTrackColor[]
-    readonly tracks: readonly {
-      readonly index: number
-      readonly name: string
-      readonly kind: "audio"
-      readonly volume: 1
-      readonly color: ThirtyTrackColor
-    }[]
-    readonly clips: readonly {
-      readonly index: number
-      readonly name: string
-      readonly trackIndex: number
-      readonly startSec: 0
-      readonly durationSec: typeof thirtyTrackTimelineDurationSec
-      readonly sourceOffsetSec: number
-      readonly gain: typeof thirtyTrackClipGain
-      readonly color: ThirtyTrackColor
-      readonly sourceKind: "recording"
-      readonly sourceDurationSec: typeof thirtyTrackSourceDurationSec
-      readonly sourceSampleRate: typeof thirtyTrackSampleRate
-      readonly sourceChannelCount: 2
-    }[]
-  }
-  readonly asset: {
-    readonly name: "30-track-source.wav"
-    readonly sourceKind: "recording"
-    readonly durationSec: typeof thirtyTrackSourceDurationSec
-    readonly sampleRate: typeof thirtyTrackSampleRate
-    readonly channelCount: 2
-  }
-}
+const synthParamsSchema = z.object({
+  version: z.literal(2),
+  oscillators: z.tuple([
+    z.object({ enabled: z.literal(true), wave: z.literal("sawtooth"), octave: z.literal(0), semitone: z.literal(0), detuneCents: z.literal(-7), level: z.literal(0.7) }).strict(),
+    z.object({ enabled: z.literal(true), wave: z.literal("sawtooth"), octave: z.literal(0), semitone: z.literal(0), detuneCents: z.literal(7), level: z.literal(0.45) }).strict(),
+  ]),
+  ampEnvelope: z.object({ attackSec: z.literal(0.005), decaySec: z.literal(0.1), sustain: z.literal(0.8), releaseSec: z.literal(0.12) }).strict(),
+  filter: z.object({
+    enabled: z.literal(true),
+    mode: z.literal("lowpass"),
+    frequencyHz: z.literal(12000),
+    q: z.literal(0.7),
+    keyTracking: z.literal(0),
+    envelopeAmountOctaves: z.literal(0),
+    envelope: z.object({ attackSec: z.literal(0.005), decaySec: z.literal(0.15), sustain: z.literal(0), releaseSec: z.literal(0.15) }).strict(),
+  }).strict(),
+  lfo: z.object({
+    enabled: z.literal(false),
+    wave: z.literal("sine"),
+    frequencyHz: z.literal(5),
+    pitchCents: z.literal(0),
+    filterOctaves: z.literal(0),
+    amp: z.literal(0),
+    pan: z.literal(0),
+  }).strict(),
+  noise: z.object({ enabled: z.literal(false), level: z.literal(0.25) }).strict(),
+  gain: z.literal(0.8),
+  pan: z.literal(0),
+  polyphony: z.literal(1),
+  retrigger: z.literal(true),
+}).strict()
+
+const saturatorParamsSchema = z.object({
+  enabled: z.literal(true),
+  driveDb: z.literal(6),
+  curve: z.literal("soft"),
+  color: z.literal(false),
+  colorFrequencyHz: z.literal(1200),
+  colorAmount: z.literal(0),
+  outputDb: z.literal(0),
+  dryWet: z.literal(1),
+}).strict()
+
+const utilityParamsSchema = z.object({
+  version: z.literal(1),
+  state: z.object({
+    enabled: z.literal(true),
+    gainDb: z.literal(-12),
+    polarity: z.literal("normal"),
+    inputMode: z.literal("stereo"),
+    pan: z.literal(0),
+    balance: z.literal(0),
+    width: z.literal(1),
+    matrix: z.literal("stereo"),
+    swap: z.literal(false),
+    dcBlock: z.literal(true),
+  }).strict(),
+}).strict()
+
+const tierTwoNoteSchema = z.object({
+  id: z.string().min(1),
+  beat: z.number().int().min(0).max(15),
+  length: z.literal(0.75),
+  pitch: z.union([z.literal(60), z.literal(64), z.literal(67), z.literal(71)]),
+  velocity: z.literal(0.5),
+}).strict()
 
 const triangleComponentSchema = z.object({
   amplitude: z.number(),
@@ -99,8 +117,8 @@ const semanticManifestSchema = z.object({
   }).strict(),
   timeline: z.object({
     durationSec: z.literal(thirtyTrackTimelineDurationSec),
-    trackCount: z.literal(thirtyTrackCount),
-    clipCount: z.literal(thirtyTrackCount),
+    trackCount: z.literal(thirtyTrackTotalTrackCount),
+    clipCount: z.literal(thirtyTrackTotalClipCount),
     clipDurationSec: z.literal(thirtyTrackTimelineDurationSec),
     clipGain: z.literal(thirtyTrackClipGain),
     sourceOffsetsSec: z.array(z.number().int().min(0)).length(thirtyTrackCount),
@@ -127,6 +145,42 @@ const semanticManifestSchema = z.object({
       sourceChannelCount: z.literal(2),
     }).strict()).length(thirtyTrackCount),
   }).strict(),
+  tier2: z.object({
+    track: z.object({
+      id: z.literal("tier2-track"),
+      name: z.literal("Tier 2 Synth"),
+      index: z.literal(30),
+      kind: z.literal("instrument"),
+      volume: z.literal(1),
+    }).strict(),
+    midiClip: z.object({
+      id: z.literal("tier2-midi-clip"),
+      name: z.literal("Tier 2 Synth Clip"),
+      startSec: z.literal(0),
+      durationSec: z.literal(8),
+      wave: z.literal("sawtooth"),
+      notes: z.array(tierTwoNoteSchema).length(16),
+    }).strict(),
+    instrument: z.object({
+      id: z.literal("tier2-instrument"),
+      kind: z.literal("synth"),
+      params: synthParamsSchema,
+    }).strict(),
+    effects: z.tuple([
+      z.object({ id: z.literal("tier2-saturator"), index: z.literal(0), kind: z.literal("saturator"), params: saturatorParamsSchema }).strict(),
+      z.object({ id: z.literal("tier2-utility"), index: z.literal(1), kind: z.literal("utility"), params: utilityParamsSchema }).strict(),
+    ]),
+    automation: z.object({
+      effectKind: z.literal("saturator"),
+      parameterId: z.literal("saturator.driveDb"),
+      enabled: z.literal(true),
+      points: z.tuple([
+        z.object({ id: z.literal("tier2-saturator-drive-0"), timeSec: z.literal(0), value: z.literal(0), interpolation: z.literal("linear") }).strict(),
+        z.object({ id: z.literal("tier2-saturator-drive-4"), timeSec: z.literal(4), value: z.literal(12), interpolation: z.literal("linear") }).strict(),
+        z.object({ id: z.literal("tier2-saturator-drive-8"), timeSec: z.literal(8), value: z.literal(0), interpolation: z.literal("linear") }).strict(),
+      ]),
+    }).strict(),
+  }).strict(),
   asset: z.object({
     name: z.literal("30-track-source.wav"),
     sourceKind: z.literal("recording"),
@@ -135,17 +189,36 @@ const semanticManifestSchema = z.object({
     channelCount: z.literal(2),
   }).strict(),
 }).strict()
-export const thirtyTrackFixtureGenerationResultSchema = z.object({
-  semanticManifest: semanticManifestSchema,
-  projectId: z.string().min(1),
-  assetId: z.string().min(1),
-  tracks: z.number().int().nonnegative(),
-  clips: z.number().int().nonnegative(),
-}).strict()
-export const thirtyTrackFixtureBrowserOutputSchema = z.union([
-  thirtyTrackFixtureGenerationResultSchema,
-  z.object({ error: z.string().min(1) }).strict(),
-])
+
+type DeepReadonly<Value> = Value extends object
+  ? { readonly [Key in keyof Value]: DeepReadonly<Value[Key]> }
+  : Value
+
+export type ThirtyTrackSemanticManifest = DeepReadonly<z.infer<typeof semanticManifestSchema>>
+
+const tuple = <Items extends readonly unknown[]>(...items: Items): Readonly<Items> => Object.freeze(items)
+
+const tierTwoNotes: ThirtyTrackSemanticManifest["tier2"]["midiClip"]["notes"] = Object.freeze(
+  Array.from({ length: 16 }, (_, beat) => {
+    const pitch = tierTwoPitches[beat % tierTwoPitches.length]
+    if (pitch === undefined) throw new Error(`Missing Tier 2 pitch at beat ${beat}.`)
+    return Object.freeze({
+      id: `tier2-note-${String(beat).padStart(2, "0")}`,
+      beat,
+      length: 0.75,
+      pitch,
+      velocity: 0.5,
+    })
+  }),
+)
+
+const tierTwoSynthParams = synthParamsSchema.parse(createDefaultSynthParams())
+const tierTwoSaturatorParams = saturatorParamsSchema.parse(AUDIO_EFFECT_CONTRACTS.saturator.createDefaultParams())
+const utilityDefaults = AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams()
+const tierTwoUtilityParams = utilityParamsSchema.parse({
+  ...utilityDefaults,
+  state: { ...utilityDefaults.state, gainDb: -12 },
+})
 
 export const thirtyTrackSemanticManifest: ThirtyTrackSemanticManifest = Object.freeze({
   fixtureVersion: thirtyTrackFixtureVersion,
@@ -155,14 +228,14 @@ export const thirtyTrackSemanticManifest: ThirtyTrackSemanticManifest = Object.f
     durationSec: thirtyTrackSourceDurationSec,
     channelCount: 2,
     channels: Object.freeze({
-      left: Object.freeze({ components: Object.freeze([{ amplitude: 0.12, period: 240 }, { amplitude: 0.06, period: 60 }]) }),
-      right: Object.freeze({ components: Object.freeze([{ amplitude: 0.12, period: 160 }, { amplitude: 0.06, period: 40 }]) }),
+      left: Object.freeze({ components: tuple({ amplitude: 0.12, period: 240 }, { amplitude: 0.06, period: 60 }) }),
+      right: Object.freeze({ components: tuple({ amplitude: 0.12, period: 160 }, { amplitude: 0.06, period: 40 }) }),
     }),
   }),
   timeline: Object.freeze({
     durationSec: thirtyTrackTimelineDurationSec,
-    trackCount: thirtyTrackCount,
-    clipCount: thirtyTrackCount,
+    trackCount: thirtyTrackTotalTrackCount,
+    clipCount: thirtyTrackTotalClipCount,
     clipDurationSec: thirtyTrackTimelineDurationSec,
     clipGain: thirtyTrackClipGain,
     sourceOffsetsSec: Object.freeze(Array.from({ length: thirtyTrackCount }, (_, index) => index)),
@@ -189,6 +262,32 @@ export const thirtyTrackSemanticManifest: ThirtyTrackSemanticManifest = Object.f
       sourceChannelCount: 2,
     }))),
   }),
+  tier2: Object.freeze({
+    track: Object.freeze({ id: "tier2-track", name: "Tier 2 Synth", index: 30, kind: "instrument", volume: 1 }),
+    midiClip: Object.freeze({
+      id: "tier2-midi-clip",
+      name: "Tier 2 Synth Clip",
+      startSec: 0,
+      durationSec: 8,
+      wave: "sawtooth",
+      notes: tierTwoNotes,
+    }),
+    instrument: Object.freeze({ id: "tier2-instrument", kind: "synth", params: tierTwoSynthParams }),
+    effects: tuple(
+      Object.freeze({ id: "tier2-saturator", index: 0, kind: "saturator", params: tierTwoSaturatorParams }),
+      Object.freeze({ id: "tier2-utility", index: 1, kind: "utility", params: tierTwoUtilityParams }),
+    ),
+    automation: Object.freeze({
+      effectKind: "saturator",
+      parameterId: "saturator.driveDb",
+      enabled: true,
+      points: tuple(
+        Object.freeze({ id: "tier2-saturator-drive-0", timeSec: 0, value: 0, interpolation: "linear" }),
+        Object.freeze({ id: "tier2-saturator-drive-4", timeSec: 4, value: 12, interpolation: "linear" }),
+        Object.freeze({ id: "tier2-saturator-drive-8", timeSec: 8, value: 0, interpolation: "linear" }),
+      ),
+    }),
+  }),
   asset: Object.freeze({
     name: "30-track-source.wav",
     sourceKind: "recording",
@@ -197,6 +296,18 @@ export const thirtyTrackSemanticManifest: ThirtyTrackSemanticManifest = Object.f
     channelCount: 2,
   }),
 })
+
+export const thirtyTrackFixtureGenerationResultSchema = z.object({
+  semanticManifest: semanticManifestSchema,
+  projectId: z.string().min(1),
+  assetId: z.string().min(1),
+  tracks: z.literal(thirtyTrackTotalTrackCount),
+  clips: z.literal(thirtyTrackTotalClipCount),
+}).strict()
+export const thirtyTrackFixtureBrowserOutputSchema = z.union([
+  thirtyTrackFixtureGenerationResultSchema,
+  z.object({ error: z.string().min(1) }).strict(),
+])
 
 export const triangle = (sampleIndex: number, period: number): number => (
   4 * (Math.abs(((sampleIndex % period) / period) - 0.5)) - 1
@@ -212,6 +323,13 @@ export const validateThirtyTrackSemanticManifest = (value: unknown): ThirtyTrack
   const parsed = semanticManifestSchema.parse(value)
   if (parsed.timeline.sourceOffsetsSec.some((offset, index) => offset !== index)) {
     throw new Error("30-track fixture source offsets must be the integers 0 through 29.")
+  }
+  if (parsed.tier2.midiClip.notes.some((note, index) => (
+    note.id !== `tier2-note-${String(index).padStart(2, "0")}`
+    || note.beat !== index
+    || note.pitch !== tierTwoPitches[index % tierTwoPitches.length]
+  ))) {
+    throw new Error("Tier 2 MIDI notes do not match the canonical sequence.")
   }
   return parsed
 }

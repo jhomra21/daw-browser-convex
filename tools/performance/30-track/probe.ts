@@ -1,5 +1,7 @@
 import { z } from "zod"
 
+z.config({ jitless: true })
+
 export type QuantileStats = {
   readonly p50: number | null
   readonly p95: number | null
@@ -69,6 +71,7 @@ export type BrowserProbeResult = {
   readonly integrity: {
     readonly fixtureHashVerified: boolean
     readonly semanticManifestVerified: boolean
+    readonly tier2SemanticSnapshotVerified: boolean
     readonly starterProjectId: string | null
     readonly importedProjectId: string | null
     readonly importedProjectDifferent: boolean
@@ -79,7 +82,23 @@ export type BrowserProbeResult = {
     readonly serviceWorkerControllerAbsent: boolean
     readonly transportPlaybackUiVerified: boolean
     readonly transportStopUiVerified: boolean
-    readonly audioEvidence: "not-observed"
+    readonly tier2VisibleWorkload: {
+      readonly trackSelected: boolean
+      readonly effectsPanelOpened: boolean
+      readonly synthVisible: boolean
+      readonly saturatorVisible: boolean
+      readonly utilityVisible: boolean
+    }
+    readonly meterEvidence: {
+      readonly status: "observed" | "unavailable"
+      readonly activityDetected: boolean | null
+      readonly maxHeightPercent: number | null
+      readonly unavailableReason: "stable-rendered-meter-signal-unavailable" | null
+    }
+    readonly audioEvidence: {
+      readonly kind: "rendered-meter-only" | "native-callbacks" | "not-observed"
+      readonly audibleOutputVerified: false
+    }
   }
 }
 
@@ -152,6 +171,7 @@ export const browserProbeResultSchema = z.object({
   integrity: z.object({
     fixtureHashVerified: z.boolean(),
     semanticManifestVerified: z.boolean(),
+    tier2SemanticSnapshotVerified: z.boolean(),
     starterProjectId: z.string().nullable(),
     importedProjectId: z.string().nullable(),
     importedProjectDifferent: z.boolean(),
@@ -162,7 +182,30 @@ export const browserProbeResultSchema = z.object({
     serviceWorkerControllerAbsent: z.boolean(),
     transportPlaybackUiVerified: z.boolean(),
     transportStopUiVerified: z.boolean(),
-    audioEvidence: z.literal("not-observed"),
+    tier2VisibleWorkload: z.object({
+      trackSelected: z.boolean(),
+      effectsPanelOpened: z.boolean(),
+      synthVisible: z.boolean(),
+      saturatorVisible: z.boolean(),
+      utilityVisible: z.boolean(),
+    }).strict(),
+    meterEvidence: z.object({
+      status: z.enum(["observed", "unavailable"]),
+      activityDetected: z.boolean().nullable(),
+      maxHeightPercent: z.number().finite().nonnegative().max(100).nullable(),
+      unavailableReason: z.literal("stable-rendered-meter-signal-unavailable").nullable(),
+    }).strict().superRefine((value, context) => {
+      if (value.status === "observed" && (value.activityDetected === null || value.maxHeightPercent === null || value.unavailableReason !== null)) {
+        context.addIssue({ code: "custom", message: "Observed meter evidence requires activity and height without an unavailable reason." })
+      }
+      if (value.status === "unavailable" && (value.activityDetected !== null || value.maxHeightPercent !== null || value.unavailableReason === null)) {
+        context.addIssue({ code: "custom", message: "Unavailable meter evidence must not claim observed activity." })
+      }
+    }),
+    audioEvidence: z.object({
+      kind: z.enum(["rendered-meter-only", "native-callbacks", "not-observed"]),
+      audibleOutputVerified: z.literal(false),
+    }).strict(),
   }).strict(),
 }).strict()
 
@@ -218,6 +261,7 @@ const performanceMemory = (): PerformanceMemory | undefined => {
 const emptyIntegrity = (): BrowserProbeResult["integrity"] => ({
   fixtureHashVerified: false,
   semanticManifestVerified: false,
+  tier2SemanticSnapshotVerified: false,
   starterProjectId: null,
   importedProjectId: null,
   importedProjectDifferent: false,
@@ -228,7 +272,23 @@ const emptyIntegrity = (): BrowserProbeResult["integrity"] => ({
   serviceWorkerControllerAbsent: navigator.serviceWorker?.controller === null,
   transportPlaybackUiVerified: false,
   transportStopUiVerified: false,
-  audioEvidence: "not-observed",
+  tier2VisibleWorkload: {
+    trackSelected: false,
+    effectsPanelOpened: false,
+    synthVisible: false,
+    saturatorVisible: false,
+    utilityVisible: false,
+  },
+  meterEvidence: {
+    status: "unavailable",
+    activityDetected: null,
+    maxHeightPercent: null,
+    unavailableReason: "stable-rendered-meter-signal-unavailable",
+  },
+  audioEvidence: {
+    kind: "not-observed",
+    audibleOutputVerified: false,
+  },
 })
 
 export type BrowserProbeCoordinator = {

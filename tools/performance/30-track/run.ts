@@ -21,10 +21,28 @@ import {
   type ProcessIdentity,
   type ProcessMetric,
 } from "./electron"
-import { deriveProbeErrors, deriveUnavailable, type ElectronBenchmarkEvidence, type ElectronBenchmarkProgress, type SourceIdentity } from "./run-result"
+import {
+  deriveProbeErrors,
+  deriveRequiredTier2Failures,
+  deriveUnavailable,
+  electronHardGatesPassed,
+  tierTwoDevicesVisible,
+  type ElectronBenchmarkEvidence,
+  type ElectronBenchmarkProgress,
+  type SourceIdentity,
+} from "./run-result"
 import { z } from "zod"
-import { assertThirtyTrackSemanticManifest, thirtyTrackSemanticManifest, thirtyTrackFixtureVersion } from "./spec"
+import {
+  assertThirtyTrackSemanticManifest,
+  thirtyTrackArchiveName,
+  thirtyTrackFixtureVersion,
+  thirtyTrackSemanticManifest,
+  thirtyTrackTotalClipCount,
+  thirtyTrackTotalTrackCount,
+} from "./spec"
+import { assertThirtyTrackSnapshot } from "./tier-two"
 import { desktopDiagnosticsSchemaV2, desktopHostStatusSchemaV1, desktopTransportStatusSchemaV1 } from "@daw-browser/desktop-protocol"
+import { projectSnapshotSchemaV2 } from "@daw-browser/control"
 
 type Surface = "browser" | "electron"
 type CliOptions = {
@@ -46,7 +64,7 @@ export type BaselineRunResult = {
   }
   phases: { fixtureIntegrity: "pending" | "complete" | "failed"; probeCollection: "pending" | "complete" | "failed" | "skipped" | "unsupported" }
   probe: BrowserProbeResult | null
-  electron: ElectronBenchmarkProgress | null
+  electron: ElectronBenchmarkProgress | ElectronBenchmarkEvidence | null
   unavailable: string[]
   errors: string[]
 }
@@ -97,7 +115,7 @@ const main = async () => {
     },
     fixture: {
       semanticManifest: thirtyTrackSemanticManifest,
-      archive: { status: "not-checked", path: path.join(root, "tools/performance/fixtures/30-track-v1.dawproject") },
+      archive: { status: "not-checked", path: path.join(root, "tools/performance/fixtures", thirtyTrackArchiveName) },
       integrity: { status: "not-checked", sha256: null },
     },
     phases: {
@@ -110,7 +128,7 @@ const main = async () => {
     errors: [],
   }
   assertThirtyTrackSemanticManifest(thirtyTrackSemanticManifest)
-  const archivePath = path.join(root, "tools/performance/fixtures/30-track-v1.dawproject")
+  const archivePath = path.join(root, "tools/performance/fixtures", thirtyTrackArchiveName)
   const hashPath = `${archivePath}.sha256`
   try {
     const archive = await readFile(archivePath)
@@ -171,10 +189,10 @@ const main = async () => {
           const starterProjectId = new URL(starterUrl).searchParams.get("projectId")
           if (!starterProjectId) throw new Error("Starter local project ID was not mounted.")
           await browserCommand(session, ["eval", "window.__thirtyTrackBenchmark.setIntegrity({fixtureHashVerified:true})"])
-          await browserCommand(session, ["eval", "window.__thirtyTrackBenchmark.startPhase('import',{selector:'input[accept=\".dawproject,application/vnd.dawproject,application/zip\"]',expectedTracks:30,expectedClips:30})"])
+          await browserCommand(session, ["eval", `window.__thirtyTrackBenchmark.startPhase('import',{selector:'input[accept=".dawproject,application/vnd.dawproject,application/zip"]',expectedTracks:${thirtyTrackTotalTrackCount},expectedClips:${thirtyTrackTotalClipCount}})`])
           await browserCommand(session, ["upload", "input[accept='.dawproject,application/vnd.dawproject,application/zip']", archivePath])
           await browserCommand(session, ["wait", "--url", "**projectId=**", "--timeout", "60000"])
-          await waitForBrowserValue(session, `(()=>{const labels=[...document.querySelectorAll('[aria-label^="Select track "]')].map((e)=>e.getAttribute('aria-label'));const clips=[...document.querySelectorAll('[title$=" Clip"]')].map((e)=>e.getAttribute('title'));const url=new URL(location.href);return url.searchParams.get('projectId') && url.searchParams.get('projectId')!==${JSON.stringify(starterProjectId)} && labels.length===30 && clips.length===30 ? true : null})()`, 60_000)
+          await waitForBrowserValue(session, `(()=>{const labels=[...document.querySelectorAll('[aria-label^="Select track "]')].map((e)=>e.getAttribute('aria-label'));const clips=[...document.querySelectorAll('[title$=" Clip"]')].map((e)=>e.getAttribute('title'));const url=new URL(location.href);return url.searchParams.get('projectId') && url.searchParams.get('projectId')!==${JSON.stringify(starterProjectId)} && labels.length===${thirtyTrackTotalTrackCount} && clips.length===${thirtyTrackTotalClipCount} ? true : null})()`, 60_000)
           const importedState = parseJsonOutput(z.object({
             localProjectId: z.string().nullable(),
             trackLabels: z.array(z.string()),
@@ -182,11 +200,16 @@ const main = async () => {
             serviceWorkerControllerAbsent: z.boolean(),
           }).strict(), await browserCommand(session, ["eval", "(()=>{const state=window.__thirtyTrackBenchmark.state();return {localProjectId:state.localProjectId,trackLabels:state.trackLabels,clipTitles:state.clipTitles,serviceWorkerControllerAbsent:state.serviceWorkerControllerAbsent}})()"]), "browser fixture state")
           const expectedLabels = Array.from({ length: 30 }, (_, index) => `Select track ${index + 1}: Benchmark ${String(index + 1).padStart(2, "0")}`)
+          expectedLabels.push("Select track 31: Tier 2 Synth")
           const expectedTitles = Array.from({ length: 30 }, (_, index) => `Benchmark ${String(index + 1).padStart(2, "0")} Clip`)
+          expectedTitles.push("Tier 2 Synth Clip")
           if (JSON.stringify(importedState.trackLabels) !== JSON.stringify(expectedLabels)) throw new Error("Imported track accessibility manifest is not canonical.")
           if (JSON.stringify([...importedState.clipTitles].sort()) !== JSON.stringify([...expectedTitles].sort())) throw new Error("Imported clip title manifest is not canonical.")
           if (!importedState.serviceWorkerControllerAbsent) throw new Error("An active service-worker controller is present.")
-          await browserCommand(session, ["eval", `window.__thirtyTrackBenchmark.setIntegrity({semanticManifestVerified:true,starterProjectId:${JSON.stringify(starterProjectId)},importedProjectId:${JSON.stringify(importedState.localProjectId)},importedProjectDifferent:${JSON.stringify(importedState.localProjectId !== starterProjectId)},trackCount:${importedState.trackLabels.length},clipCount:${importedState.clipTitles.length},expectedTrackLabels:30,expectedClipTitles:30,serviceWorkerControllerAbsent:true});window.__thirtyTrackBenchmark.finishPhase()`])
+          await browserCommand(session, ["eval", "window.__thirtyTrackBenchmark.verifyTier2Snapshot()"])
+          await browserCommand(session, ["eval", `window.__thirtyTrackBenchmark.setIntegrity({semanticManifestVerified:true,tier2SemanticSnapshotVerified:true,starterProjectId:${JSON.stringify(starterProjectId)},importedProjectId:${JSON.stringify(importedState.localProjectId)},importedProjectDifferent:${JSON.stringify(importedState.localProjectId !== starterProjectId)},trackCount:${importedState.trackLabels.length},clipCount:${importedState.clipTitles.length},expectedTrackLabels:${thirtyTrackTotalTrackCount},expectedClipTitles:${thirtyTrackTotalClipCount},serviceWorkerControllerAbsent:true});window.__thirtyTrackBenchmark.finishPhase()`])
+          const tier2VisibleWorkload = await runTier2VisibleWorkload(session)
+          await browserCommand(session, ["eval", `window.__thirtyTrackBenchmark.setIntegrity({tier2VisibleWorkload:${JSON.stringify(tier2VisibleWorkload)}})`])
 
           const waitForState = async (expression: string, timeout = 30_000) => {
             try {
@@ -235,12 +258,16 @@ const main = async () => {
           await browserCommand(session, ["eval", "window.__thirtyTrackBenchmark.startPhase('playback',{activation:'agent-browser-role-click',minimumActivityDurationMs:10000,zoomPairs:5,verticalSweeps:5,pacingMs:1000})"])
           await browserCommand(session, ["find", "role", "button", "click", "--name", "Play"])
           await waitForState("document.querySelector(\"button[aria-label='Pause']\") !== null")
+          let maxTier2MeterHeight = await selectedTier2MeterHeight(session)
           for (let index = 0; index < 5; index += 1) {
             await zoom("Zoom In")
             await scroll(index % 2 === 0 ? "bottom" : "top", 1000)
             await scroll(index % 2 === 0 ? "top" : "bottom", 1000)
+            const height = await selectedTier2MeterHeight(session)
+            if (height !== null) maxTier2MeterHeight = Math.max(maxTier2MeterHeight ?? 0, height)
           }
-          await browserCommand(session, ["eval", "window.__thirtyTrackBenchmark.setIntegrity({transportPlaybackUiVerified:true})"])
+          if (maxTier2MeterHeight === null) throw new Error("Stable rendered Tier 2 selected-track meter signal is unavailable.")
+          await browserCommand(session, ["eval", `window.__thirtyTrackBenchmark.setIntegrity({transportPlaybackUiVerified:true,meterEvidence:{status:"observed",activityDetected:${String(maxTier2MeterHeight > 0)},maxHeightPercent:${maxTier2MeterHeight},unavailableReason:null},audioEvidence:{kind:${maxTier2MeterHeight > 0 ? '"rendered-meter-only"' : '"not-observed"'},audibleOutputVerified:false}})`])
           await browserCommand(session, ["eval", "window.__thirtyTrackBenchmark.finishPhase()"])
           await browserCommand(session, ["eval", "window.__thirtyTrackBenchmark.startPhase('stop',{action:'real-stop-click',expectedPlayhead:'0.00s'})"])
           await browserCommand(session, ["find", "role", "button", "click", "--name", "Stop"])
@@ -264,7 +291,7 @@ const main = async () => {
       result.phases = { fixtureIntegrity: "complete", probeCollection: "complete" }
       result.probe = probe
       result.unavailable = deriveUnavailable(options.surface, probe)
-      result.errors = deriveProbeErrors(probe)
+      result.errors = [...deriveProbeErrors(probe), ...deriveRequiredTier2Failures(options.surface, probe)]
       if (result.errors.length > 0) result.phases = { fixtureIntegrity: "complete", probeCollection: "failed" }
     } catch (error) {
       result.phases = { fixtureIntegrity: "complete", probeCollection: "failed" }
@@ -291,17 +318,15 @@ const main = async () => {
       result.probe = evidence.rendererProbe
       result.electron = evidence
       result.unavailable = deriveUnavailable(options.surface, evidence.rendererProbe)
-      result.errors = deriveProbeErrors(evidence.rendererProbe)
-      if (!evidence.hardGates.packageFresh || !evidence.hardGates.hostReady
-        || !evidence.hardGates.diagnosticsClean || !evidence.hardGates.transportVerified
-        || !evidence.hardGates.nativeCallbacksIncreased || !evidence.hardGates.noRendererErrors) {
-        result.errors.push("Electron Tier 1 hard gate failed.")
+      result.errors = [...deriveProbeErrors(evidence.rendererProbe), ...deriveRequiredTier2Failures(options.surface, evidence.rendererProbe)]
+      if (!electronHardGatesPassed(evidence.hardGates)) {
+        result.errors.push("Electron runtime hard gate failed.")
         result.phases = { fixtureIntegrity: "complete", probeCollection: "failed" }
       }
     } catch (error) {
       result.phases = { fixtureIntegrity: "complete", probeCollection: "failed" }
       result.errors = [error instanceof Error ? conciseError(error) : "Electron benchmark failed."]
-      if (result.electron?.status !== "failed") {
+      if (result.electron === null || !("status" in result.electron) || result.electron.status !== "failed") {
         result.electron = { status: "failed", stage: "setup", error: "Electron benchmark failed." }
       }
     }
@@ -355,6 +380,28 @@ const parseEncodedJson = (input: string, label: string): JsonValue => {
 const parseJsonOutput = <Value>(schema: z.ZodType<Value>, input: string, label: string): Value => (
   schema.parse(parseEncodedJson(input, label))
 )
+
+const tier2VisibleWorkloadSchema = z.object({
+  trackSelected: z.literal(true),
+  effectsPanelOpened: z.literal(true),
+  synthVisible: z.literal(true),
+  saturatorVisible: z.literal(true),
+  utilityVisible: z.literal(true),
+}).strict()
+
+type Tier2VisibleWorkload = z.infer<typeof tier2VisibleWorkloadSchema>
+
+const runTier2VisibleWorkload = async (session: string): Promise<Tier2VisibleWorkload> => {
+  await browserCommand(session, ["eval", `(()=>{const button=document.querySelector("button[aria-label='Select track 31: Tier 2 Synth']");if(!(button instanceof HTMLButtonElement))throw new Error("Accessible Tier 2 Synth track selector is missing.");button.click();return true})()`])
+  await browserCommand(session, ["find", "role", "button", "click", "--name", "Effects"])
+  const visible = await waitForBrowserValue(session, `(()=>{const visible=(element)=>element instanceof HTMLElement&&!element.hidden&&element.getClientRects().length>0;const titles=[...document.querySelectorAll(".effect-shell [data-effect-shell-header='true'] span")].filter(visible).map((element)=>element.textContent?.trim());return titles.includes("Synth")&&titles.includes("Saturator")&&titles.includes("Utility")?{trackSelected:true,effectsPanelOpened:true,synthVisible:true,saturatorVisible:true,utilityVisible:true}:null})()`, 30_000)
+  return parseJsonOutput(tier2VisibleWorkloadSchema, visible, "Tier 2 visible workload")
+}
+
+const selectedTier2MeterHeight = async (session: string): Promise<number | null> => {
+  const output = await browserCommand(session, ["eval", `(()=>{const button=document.querySelector("button[aria-label='Select track 31: Tier 2 Synth']");const row=button?.closest(".track-row-divider");const meter=row?.querySelector(".track-meter-strip");if(!(meter instanceof HTMLElement)||meter.getClientRects().length===0)return null;const heights=[...meter.querySelectorAll("[style*='height']")].flatMap((element)=>{if(!(element instanceof HTMLElement))return [];const value=Number.parseFloat(element.style.height);return Number.isFinite(value)?[value]:[]});return heights.length===0?null:Math.max(...heights)})()`])
+  return parseJsonOutput(z.number().finite().nonnegative().max(100).nullable(), output, "Tier 2 selected-track meter")
+}
 
 const commandJson = async (root: string, profile: string, arguments_: readonly string[]): Promise<JsonValue> => {
   const cli = path.join(root, "packages/control-cli/dist/daw-control.js")
@@ -639,9 +686,9 @@ const runElectronBenchmark = async (
     report({ ...progress, stage, host: { ...progress.host, mounted } })
     if (!mounted.ready || mounted.project === null) throw new Error("Packaged host did not mount the blank local project.")
     await browserCommand(session, ["eval", "window.__thirtyTrackBenchmark.setIntegrity({fixtureHashVerified:true})"])
-    await browserCommand(session, ["eval", "window.__thirtyTrackBenchmark.startPhase('import',{selector:'input[accept=\".dawproject,application/vnd.dawproject,application/zip\"]',expectedTracks:30,expectedClips:30})"])
+    await browserCommand(session, ["eval", `window.__thirtyTrackBenchmark.startPhase('import',{selector:'input[accept=".dawproject,application/vnd.dawproject,application/zip"]',expectedTracks:${thirtyTrackTotalTrackCount},expectedClips:${thirtyTrackTotalClipCount}})`])
     await browserCommand(session, ["upload", "input[accept='.dawproject,application/vnd.dawproject,application/zip']", archivePath])
-    await waitForBrowserValue(session, `(()=>{const labels=[...document.querySelectorAll('[aria-label^="Select track "]')];const clips=[...document.querySelectorAll('[title$=" Clip"]')];const url=new URL(location.href);return url.searchParams.get('projectId') && url.searchParams.get('projectId')!==${JSON.stringify(starterProjectId)} && labels.length===30 && clips.length===30 ? true : null})()`, 60_000)
+    await waitForBrowserValue(session, `(()=>{const labels=[...document.querySelectorAll('[aria-label^="Select track "]')];const clips=[...document.querySelectorAll('[title$=" Clip"]')];const url=new URL(location.href);return url.searchParams.get('projectId') && url.searchParams.get('projectId')!==${JSON.stringify(starterProjectId)} && labels.length===${thirtyTrackTotalTrackCount} && clips.length===${thirtyTrackTotalClipCount} ? true : null})()`, 60_000)
     const imported = parseJsonOutput(z.object({
       localProjectId: z.string().nullable(),
       trackLabels: z.array(z.string()),
@@ -649,9 +696,20 @@ const runElectronBenchmark = async (
       serviceWorkerControllerAbsent: z.boolean(),
     }).strict(), await browserCommand(session, ["eval", "(()=>{const state=window.__thirtyTrackBenchmark.state();return JSON.stringify({localProjectId:state.localProjectId,trackLabels:state.trackLabels,clipTitles:state.clipTitles,serviceWorkerControllerAbsent:state.serviceWorkerControllerAbsent})})()"]), "Electron fixture state")
     const expectedLabels = Array.from({ length: 30 }, (_, index) => `Select track ${index + 1}: Benchmark ${String(index + 1).padStart(2, "0")}`)
+    expectedLabels.push("Select track 31: Tier 2 Synth")
     const expectedTitles = Array.from({ length: 30 }, (_, index) => `Benchmark ${String(index + 1).padStart(2, "0")} Clip`)
+    expectedTitles.push("Tier 2 Synth Clip")
     if (JSON.stringify(imported.trackLabels) !== JSON.stringify(expectedLabels) || JSON.stringify([...imported.clipTitles].sort()) !== JSON.stringify([...expectedTitles].sort())) throw new Error("Imported Electron DOM manifest is not canonical.")
-    await browserCommand(session, ["eval", `window.__thirtyTrackBenchmark.setIntegrity({semanticManifestVerified:true,starterProjectId:${JSON.stringify(starterProjectId)},importedProjectId:${JSON.stringify(imported.localProjectId)},importedProjectDifferent:${JSON.stringify(imported.localProjectId !== starterProjectId)},trackCount:30,clipCount:30,expectedTrackLabels:30,expectedClipTitles:30,serviceWorkerControllerAbsent:${String(imported.serviceWorkerControllerAbsent)}});window.__thirtyTrackBenchmark.finishPhase()`])
+    await browserCommand(session, ["eval", "window.__thirtyTrackBenchmark.verifyTier2Snapshot()"])
+    if (!imported.localProjectId) throw new Error("Imported Electron project ID is unavailable.")
+    const authoritativeSnapshot = commandData(
+      projectSnapshotSchemaV2,
+      await commandJson(root, profile, ["snapshot-v2", imported.localProjectId, "--target", "host"]),
+    )
+    assertThirtyTrackSnapshot(authoritativeSnapshot)
+    await browserCommand(session, ["eval", `window.__thirtyTrackBenchmark.setIntegrity({semanticManifestVerified:true,tier2SemanticSnapshotVerified:true,starterProjectId:${JSON.stringify(starterProjectId)},importedProjectId:${JSON.stringify(imported.localProjectId)},importedProjectDifferent:${JSON.stringify(imported.localProjectId !== starterProjectId)},trackCount:${thirtyTrackTotalTrackCount},clipCount:${thirtyTrackTotalClipCount},expectedTrackLabels:${thirtyTrackTotalTrackCount},expectedClipTitles:${thirtyTrackTotalClipCount},serviceWorkerControllerAbsent:${String(imported.serviceWorkerControllerAbsent)}});window.__thirtyTrackBenchmark.finishPhase()`])
+    const tier2VisibleWorkload = await runTier2VisibleWorkload(session)
+    await browserCommand(session, ["eval", `window.__thirtyTrackBenchmark.setIntegrity({tier2VisibleWorkload:${JSON.stringify(tier2VisibleWorkload)}})`])
     const waitForState = async (expression: string) => waitForBrowserValue(session, expression, 30_000)
     const scroll = async (position: "top" | "bottom", durationMs: number) => {
       const value = parseJsonOutput(z.object({ timeline: z.number(), sidebar: z.number() }).strict(), await browserCommand(session, ["eval", `(async()=>{const s=window.__thirtyTrackBenchmark.state();if(!s.timeline||!s.sidebar)throw new Error('Timeline/sidebar unavailable.');s.timeline.scrollTop=${position === "top" ? "0" : "Math.max(0,s.timeline.scrollHeight-s.timeline.clientHeight)"};s.timeline.dispatchEvent(new Event('scroll'));await new Promise(requestAnimationFrame);return {timeline:s.timeline.scrollTop,sidebar:s.sidebar.scrollTop}})()`]), "Electron scroll state")
@@ -683,14 +741,27 @@ const runElectronBenchmark = async (
     report({ ...progress, stage, host: { ...progress.host, beforePlayback } })
     await browserCommand(session, ["find", "role", "button", "click", "--name", "Play"])
     await waitForState("document.querySelector(\"button[aria-label='Pause']\") !== null")
-    for (let index = 0; index < 5; index += 1) { await zoom("Zoom In"); await scroll(index % 2 === 0 ? "bottom" : "top", 1000); await scroll(index % 2 === 0 ? "top" : "bottom", 1000) }
+    let maxTier2MeterHeight = await selectedTier2MeterHeight(session)
+    for (let index = 0; index < 5; index += 1) {
+      await zoom("Zoom In")
+      await scroll(index % 2 === 0 ? "bottom" : "top", 1000)
+      await scroll(index % 2 === 0 ? "top" : "bottom", 1000)
+      const height = await selectedTier2MeterHeight(session)
+      if (height !== null) maxTier2MeterHeight = Math.max(maxTier2MeterHeight ?? 0, height)
+    }
     stage = "transport-playing"
     const playing = commandData(desktopTransportStatusSchemaV1, await commandJson(root, profile, ["host", "transport-status"]))
     const duringPlayback = await processMetrics(app.pid ?? 0)
     stage = "diagnostics-after-playback"
     const afterPlayback = commandData(desktopDiagnosticsSchemaV2, await commandJson(root, profile, ["host", "diagnostics-v2"]))
     report({ ...progress, stage, host: { ...progress.host, afterPlayback }, transport: { playing }, processMetrics: { ...progress.processMetrics, duringPlayback } })
-    await browserCommand(session, ["eval", "window.__thirtyTrackBenchmark.setIntegrity({transportPlaybackUiVerified:true});window.__thirtyTrackBenchmark.finishPhase();window.__thirtyTrackBenchmark.startPhase('stop',{action:'real-stop-click',expectedPlayhead:'0.00s'})"])
+    const nativeAudioObserved = beforePlayback.native.status === "available"
+      && afterPlayback.native.status === "available"
+      && afterPlayback.native.diagnostics.callbacks > beforePlayback.native.diagnostics.callbacks
+    const meterEvidence = maxTier2MeterHeight === null
+      ? { status: "unavailable", activityDetected: null, maxHeightPercent: null, unavailableReason: "stable-rendered-meter-signal-unavailable" }
+      : { status: "observed", activityDetected: maxTier2MeterHeight > 0, maxHeightPercent: maxTier2MeterHeight, unavailableReason: null }
+    await browserCommand(session, ["eval", `window.__thirtyTrackBenchmark.setIntegrity({transportPlaybackUiVerified:true,meterEvidence:${JSON.stringify(meterEvidence)},audioEvidence:{kind:${nativeAudioObserved ? '"native-callbacks"' : '"not-observed"'},audibleOutputVerified:false}});window.__thirtyTrackBenchmark.finishPhase();window.__thirtyTrackBenchmark.startPhase('stop',{action:'real-stop-click',expectedPlayhead:'0.00s'})`])
     const stopButtonVisible = parseJsonOutput(z.boolean(), await browserCommand(session, ["eval", "document.querySelector(\"button[aria-label='Stop']\") !== null"]), "stop button visibility")
     if (!stopButtonVisible) {
       await browserCommand(session, ["find", "role", "button", "click", "--name", "OK"]).catch(() => undefined)
@@ -715,7 +786,7 @@ const runElectronBenchmark = async (
       : null
     const beforeMetrics = await processMetrics(app.pid ?? 0)
     const processAvailability = processMetricsAvailability([...beforeMetrics, ...duringPlayback])
-    const evidence = {
+    const evidence: ElectronBenchmarkEvidence = {
       package: { identity: "electron-forge-production", platform: "darwin", architecture: "arm64", electronVersion: "43.1.1", appVersion: "0.0.0", asarSha256: appHash, sourceCommit: (await $`git -C ${root} rev-parse HEAD`.text()).trim() },
       rendererProbe: parsed,
       host: { beforeImport, mounted, beforePlayback, afterPlayback, afterStop, nativePlaybackDelta: delta },
@@ -724,9 +795,13 @@ const runElectronBenchmark = async (
       hardGates: {
         packageFresh: true,
         hostReady: beforeImport.ready,
-        diagnosticsClean: afterPlayback.audio.workletFaultCount === beforePlayback.audio.workletFaultCount && afterPlayback.recording.lastFailurePresent === false && (delta?.rejectedBlocksIncrease ?? 0) === 0,
+        diagnosticsClean: afterPlayback.audio.workletFaultCount === beforePlayback.audio.workletFaultCount
+          && afterPlayback.audio.inferredApplicationStallCount === beforePlayback.audio.inferredApplicationStallCount
+          && afterPlayback.recording.lastFailurePresent === false
+          && (delta?.rejectedBlocksIncrease ?? 0) === 0,
         transportVerified: playing.state === "playing" && stopped.state === "stopped" && stopped.playheadSec === 0,
         nativeCallbacksIncreased: nativeCallbacksIncreased(delta),
+        tier2DevicesVisible: tierTwoDevicesVisible(parsed),
         noRendererErrors: parsed.startupErrors.length === 0 && parsed.phases.every((phase) => phase.errors.length === 0),
       },
     }

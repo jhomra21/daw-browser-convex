@@ -6,13 +6,14 @@ import { z } from "zod"
 import { browserCommand, buildBrowserRuntime, waitForBrowserValue, withBrowserServer } from "../browser-harness"
 import {
   assertThirtyTrackSemanticManifest,
+  thirtyTrackArchiveName,
   thirtyTrackFixtureBrowserOutputSchema,
   thirtyTrackSemanticManifest,
 } from "./spec"
 
 const root = path.resolve(import.meta.dir, "../../..")
 const fixtureDirectory = path.join(root, "tools/performance/fixtures")
-const archivePath = path.join(fixtureDirectory, "30-track-v1.dawproject")
+const archivePath = path.join(fixtureDirectory, thirtyTrackArchiveName)
 const hashPath = `${archivePath}.sha256`
 
 const main = async () => {
@@ -32,7 +33,7 @@ const main = async () => {
     }
     try {
       await browserCommand(session, ["open", `${server.url}?upload=${encodeURIComponent(uploadUrl.toString())}`])
-      const output = await waitForBrowserValue(session, "window.__thirtyTrackFixtureResult", 30_000)
+      const output = await waitForBrowserValue(session, "window.__thirtyTrackFixtureResult", 120_000)
       const encoded = z.union([z.string(), z.null()]).or(thirtyTrackFixtureBrowserOutputSchema).parse(JSON.parse(output))
       const encodedString = z.string().safeParse(encoded)
       const decoded = encodedString.success ? JSON.parse(encodedString.data) : encoded
@@ -40,6 +41,13 @@ const main = async () => {
       const parsed = thirtyTrackFixtureBrowserOutputSchema.parse(decoded)
       if ("error" in parsed) throw new Error(parsed.error)
       return parsed
+    } catch (error) {
+      const diagnostics = await Promise.all([
+        browserCommand(session, ["eval", "window.__thirtyTrackFixtureStage ?? 'stage unavailable'"]).catch(() => "stage unavailable"),
+        browserCommand(session, ["console"]).catch(() => "console unavailable"),
+        browserCommand(session, ["errors"]).catch(() => "errors unavailable"),
+      ])
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; ${diagnostics.join(" | ")}`)
     } finally {
       await browserCommand(session, ["close"]).catch(() => undefined)
     }
@@ -48,7 +56,7 @@ const main = async () => {
   if (archive.byteLength === 0) throw new Error("Fixture generator returned an empty archive.")
   await writeFile(archivePath, archive)
   const hash = createHash("sha256").update(archive).digest("hex")
-  await writeFile(hashPath, `${hash}  30-track-v1.dawproject\n`)
+  await writeFile(hashPath, `${hash}  ${thirtyTrackArchiveName}\n`)
   const checkedHash = (await readFile(hashPath, "utf8")).trim()
   if (!checkedHash.startsWith(hash)) throw new Error("Fixture SHA-256 verification failed.")
   console.log(JSON.stringify({

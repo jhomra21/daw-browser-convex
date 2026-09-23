@@ -1,10 +1,12 @@
 import { installBrowserProbe, type BrowserProbeCoordinator, type PhaseName, type ProbeIntegrityPatch } from "./probe"
+import { assertThirtyTrackSnapshot, createTierTwoControlClient } from "./tier-two"
 
 type BenchmarkApi = {
   startPhase: (name: PhaseName, parameters: Readonly<Record<string, boolean | number | string>>) => void
   finishPhase: () => void
   setIntegrity: (patch: ProbeIntegrityPatch) => void
   recordError: (message: string) => void
+  verifyTier2Snapshot: () => Promise<void>
   state: () => {
     readonly url: string
     readonly localProjectId: string | null
@@ -68,6 +70,12 @@ const benchmarkApi: BenchmarkApi = {
   finishPhase: () => coordinator.finishPhase(),
   setIntegrity: (patch) => coordinator.setIntegrity(patch),
   recordError: (message) => coordinator.recordError(message),
+  verifyTier2Snapshot: async () => {
+    const projectId = state().localProjectId
+    if (!projectId) throw new Error("Imported local project ID is unavailable.")
+    const control = createTierTwoControlClient(projectId)
+    assertThirtyTrackSnapshot(await control.snapshotV2())
+  },
   state,
   finish: () => {
     const result = coordinator.finish()

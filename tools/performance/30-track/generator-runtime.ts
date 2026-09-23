@@ -1,11 +1,10 @@
 import { createLocalProject, deleteLocalProject } from "../../../src/lib/local-project-db"
 import { createLocalAsset } from "../../../src/lib/local-assets"
-import { exportDawProjectArchive } from "../../../src/lib/project-archive"
+import { exportDawProjectArchive, importDawProjectArchive } from "../../../src/lib/project-archive"
 import { createLocalTimelineRepository } from "../../../src/lib/timeline-repository/local-timeline-repository"
 import { encodePlanarFloat32Wav } from "@daw-browser/audio-engine/recording-encode-wav"
+import { localControlCapabilitiesV2 } from "@daw-browser/control"
 import {
-  assertThirtyTrackSemanticManifest,
-  assertThirtyTrackSemanticManifestExact,
   sampleThirtyTrackSource,
   thirtyTrackClipGain,
   thirtyTrackCount,
@@ -14,12 +13,27 @@ import {
   thirtyTrackSampleRate,
   thirtyTrackSemanticManifest,
   thirtyTrackSourceDurationSec,
+  thirtyTrackTotalClipCount,
+  thirtyTrackTotalTrackCount,
   thirtyTrackTrackAt,
   thirtyTrackTimelineDurationSec,
 } from "./spec"
+import {
+  assertThirtyTrackSnapshot,
+  createTierTwoControlClient,
+  createTierTwoControlRequest,
+  tierTwoRequiredActionKinds,
+} from "./tier-two"
 
 const uploadUrl = new URLSearchParams(location.search).get("upload")
 if (!uploadUrl) throw new Error("Fixture generator upload URL is missing.")
+
+const setStage = (stage: string) => {
+  Object.defineProperty(globalThis, "__thirtyTrackFixtureStage", {
+    configurable: true,
+    value: stage,
+  })
+}
 
 const createWavFile = async () => {
   const capturedFrames = thirtyTrackSampleRate * thirtyTrackSourceDurationSec
@@ -77,9 +91,12 @@ const createWavFile = async () => {
 }
 
 const run = async () => {
+  setStage("create-project")
   const project = await createLocalProject(thirtyTrackProjectName)
   try {
+    setStage("create-wav")
     const source = await createWavFile()
+    setStage("create-asset")
     const asset = await createLocalAsset({
       projectId: project.id,
       file: source,
@@ -90,6 +107,7 @@ const run = async () => {
         channelCount: 2,
       },
     })
+    setStage("bootstrap-audio-tracks")
     const repository = createLocalTimelineRepository(project.id)
     const initial = await repository.loadSnapshot()
     const tracks = [...initial.tracks]
@@ -133,48 +151,49 @@ const run = async () => {
     if (snapshot.tracks.length !== thirtyTrackCount || snapshot.clips.length !== thirtyTrackCount) {
       throw new Error("Generated project does not contain exactly 30 tracks and 30 clips.")
     }
-    const semanticManifest = {
-      fixtureVersion: thirtyTrackSemanticManifest.fixtureVersion,
-      sampleRate: thirtyTrackSemanticManifest.sampleRate,
-      projectName: project.name,
-      source: thirtyTrackSemanticManifest.source,
-      timeline: {
-        ...thirtyTrackSemanticManifest.timeline,
-        tracks: snapshot.tracks.map((track) => ({
-          index: track.index,
-          name: track.name,
-          kind: track.kind,
-          volume: track.volume,
-          color: track.color,
-        })),
-        clips: [...snapshot.clips]
-          .sort((left, right) => (left.bufferOffsetSec ?? -1) - (right.bufferOffsetSec ?? -1))
-          .map((clip, index) => ({
-          index,
-          name: clip.name,
-          trackIndex: snapshot.tracks.find((track) => track.id === clip.trackId)?.index ?? -1,
-          startSec: clip.startSec,
-          durationSec: clip.duration,
-          sourceOffsetSec: clip.bufferOffsetSec ?? -1,
-          gain: clip.gain,
-          color: clip.color,
-          sourceKind: clip.sourceKind,
-          sourceDurationSec: clip.sourceDurationSec,
-          sourceSampleRate: clip.sourceSampleRate,
-          sourceChannelCount: clip.sourceChannelCount,
-          })),
-      },
-      asset: {
-        name: asset.name,
-        sourceKind: asset.sourceKind,
-        durationSec: asset.durationSec,
-        sampleRate: asset.sampleRate,
-        channelCount: asset.channelCount,
-      },
+    const control = createTierTwoControlClient(project.id)
+    setStage("capabilities")
+    for (const action of tierTwoRequiredActionKinds) {
+      if (!localControlCapabilitiesV2.actionKinds.includes(action)) throw new Error(`Tier 2 fixture requires unsupported action ${action}.`)
     }
-    assertThirtyTrackSemanticManifest(semanticManifest)
-    assertThirtyTrackSemanticManifestExact(semanticManifest)
+    setStage("snapshot-before-tier2")
+    const beforeTierTwo = await control.snapshotV2()
+    const request = createTierTwoControlRequest(project.id, beforeTierTwo.project.revision)
+    setStage("preview-tier2")
+    const preview = await control.previewV1(request)
+    if (!preview.applied) throw new Error("Tier 2 control preview did not apply any changes.")
+    const approvalToken = preview.approval?.required
+      ? (await control.requestApprovalV1(request)).approvalToken
+      : undefined
+    setStage("commit-tier2")
+    const commit = await control.commitV1({
+      ...request,
+      idempotencyKey: "fixture-30-track-v2-tier2",
+      approvalToken,
+    })
+    if (!commit.applied) throw new Error("Tier 2 control commit did not apply any changes.")
+    setStage("snapshot-after-tier2")
+    const persisted = await control.snapshotV2()
+    if (persisted.tracks.length !== thirtyTrackTotalTrackCount || persisted.clips.length !== thirtyTrackTotalClipCount) {
+      throw new Error("Generated project does not contain exactly 31 tracks and 31 clips.")
+    }
+    assertThirtyTrackSnapshot(persisted)
+    const semanticManifest = thirtyTrackSemanticManifest
+    setStage("export")
     const archive = await exportDawProjectArchive(project.id)
+    setStage("verify-import")
+    const restoredProjectId = await importDawProjectArchive(new File(
+      [archive],
+      `${thirtyTrackSemanticManifest.fixtureVersion}.dawproject`,
+      { type: "application/vnd.dawproject" },
+    ))
+    try {
+      const restoredControl = createTierTwoControlClient(restoredProjectId)
+      assertThirtyTrackSnapshot(await restoredControl.snapshotV2())
+    } finally {
+      await deleteLocalProject(restoredProjectId)
+    }
+    setStage("upload")
     const response = await fetch(uploadUrl, {
       method: "POST",
       headers: { "content-type": "application/vnd.dawproject" },
@@ -187,8 +206,8 @@ const run = async () => {
         semanticManifest,
         projectId: project.id,
         assetId: asset.id,
-        tracks: snapshot.tracks.length,
-        clips: snapshot.clips.length,
+        tracks: persisted.tracks.length,
+        clips: persisted.clips.length,
       },
     })
   } finally {

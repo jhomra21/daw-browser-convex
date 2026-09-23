@@ -44,6 +44,7 @@ export type ElectronBenchmarkEvidence = {
     readonly diagnosticsClean: boolean
     readonly transportVerified: boolean
     readonly nativeCallbacksIncreased: boolean
+    readonly tier2DevicesVisible: boolean
     readonly noRendererErrors: boolean
   }
 }
@@ -61,6 +62,14 @@ export type ElectronBenchmarkProgress = {
   readonly hardGates?: Partial<ElectronBenchmarkEvidence["hardGates"]>
 }
 
+export const electronHardGatesPassed = (
+  hardGates: ElectronBenchmarkEvidence["hardGates"],
+): boolean => Object.values(hardGates).every(Boolean)
+
+export const tierTwoDevicesVisible = (
+  probe: BrowserProbeResult,
+): boolean => Object.values(probe.integrity.tier2VisibleWorkload).every(Boolean)
+
 export const deriveUnavailable = (surface: "browser" | "electron", probe: BrowserProbeResult | null): string[] => {
   const unavailable = new Set<string>()
   if (surface === "electron" && probe === null) unavailable.add("electron-surface-not-run")
@@ -77,3 +86,25 @@ export const deriveProbeErrors = (probe: BrowserProbeResult): string[] => (
     ...probe.phases.flatMap((phase) => phase.errors),
   ].map((error) => `${error.kind}: ${error.message}`)
 )
+
+export const deriveRequiredTier2Failures = (
+  surface: "browser" | "electron",
+  probe: BrowserProbeResult,
+): string[] => {
+  const visible = probe.integrity.tier2VisibleWorkload
+  return [
+    ...(visible.trackSelected ? [] : ["Tier 2 Synth track was not selected through the rendered UI."]),
+    ...(visible.effectsPanelOpened ? [] : ["Effects panel was not opened through the rendered UI."]),
+    ...(visible.synthVisible ? [] : ["Tier 2 Synth device was not visibly rendered."]),
+    ...(visible.saturatorVisible ? [] : ["Tier 2 Saturator device was not visibly rendered."]),
+    ...(visible.utilityVisible ? [] : ["Tier 2 Utility device was not visibly rendered."]),
+    ...(surface !== "browser" || probe.integrity.meterEvidence.status === "observed"
+      ? []
+      : ["Tier 2 selected-track meter activity was unavailable."]),
+    ...(surface !== "browser" || probe.integrity.meterEvidence.activityDetected
+      ? []
+      : probe.integrity.meterEvidence.status === "observed"
+        ? ["Tier 2 selected-track meter did not show playback activity."]
+        : []),
+  ]
+}

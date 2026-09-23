@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { browserProbeResultSchema } from "./probe"
-import { deriveProbeErrors, deriveUnavailable } from "./run-result"
+import { deriveProbeErrors, deriveRequiredTier2Failures, deriveUnavailable } from "./run-result"
 
 const probe = {
   version: "30-track-probe-v2",
@@ -33,6 +33,7 @@ const probe = {
   integrity: {
     fixtureHashVerified: false,
     semanticManifestVerified: false,
+    tier2SemanticSnapshotVerified: false,
     starterProjectId: null,
     importedProjectId: null,
     importedProjectDifferent: false,
@@ -43,7 +44,23 @@ const probe = {
     serviceWorkerControllerAbsent: true,
     transportPlaybackUiVerified: false,
     transportStopUiVerified: false,
-    audioEvidence: "not-observed",
+    tier2VisibleWorkload: {
+      trackSelected: false,
+      effectsPanelOpened: false,
+      synthVisible: false,
+      saturatorVisible: false,
+      utilityVisible: false,
+    },
+    meterEvidence: {
+      status: "unavailable",
+      activityDetected: null,
+      maxHeightPercent: null,
+      unavailableReason: "stable-rendered-meter-signal-unavailable",
+    },
+    audioEvidence: {
+      kind: "not-observed",
+      audibleOutputVerified: false,
+    },
   },
 } satisfies Parameters<typeof deriveProbeErrors>[0]
 
@@ -72,6 +89,26 @@ test("accepts exact transport and heap evidence fields", () => {
   const parsed = browserProbeResultSchema.parse(probe)
   expect(parsed.integrity.transportPlaybackUiVerified).toBe(false)
   expect(parsed.integrity.transportStopUiVerified).toBe(false)
-  expect(parsed.integrity.audioEvidence).toBe("not-observed")
+  expect(parsed.integrity.tier2SemanticSnapshotVerified).toBe(false)
+  expect(parsed.integrity.audioEvidence).toEqual({
+    kind: "not-observed",
+    audibleOutputVerified: false,
+  })
   expect(parsed.phases[0]?.heap.source).toBe("performance.memory")
+})
+
+test("rejects probe results that omit explicit Tier 2 runtime evidence", () => {
+  const { tier2VisibleWorkload: _tier2VisibleWorkload, ...integrity } = probe.integrity
+  expect(() => browserProbeResultSchema.parse({ ...probe, integrity })).toThrow()
+})
+
+test("fails required Tier 2 device gates and browser meter activity", () => {
+  expect(deriveRequiredTier2Failures("browser", probe)).toEqual([
+    "Tier 2 Synth track was not selected through the rendered UI.",
+    "Effects panel was not opened through the rendered UI.",
+    "Tier 2 Synth device was not visibly rendered.",
+    "Tier 2 Saturator device was not visibly rendered.",
+    "Tier 2 Utility device was not visibly rendered.",
+    "Tier 2 selected-track meter activity was unavailable.",
+  ])
 })

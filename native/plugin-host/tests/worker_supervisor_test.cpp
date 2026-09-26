@@ -3,6 +3,7 @@
 #include "worker-control-protocol.h"
 #include "editor-parameter-state.h"
 #include "vst3-bus-arrangement.h"
+#include "automation-observation.h"
 
 #include <array>
 #include <chrono>
@@ -340,6 +341,33 @@ int main(int argc, char* argv[]) {
     {.kind = WorkerEventKind::kParameter, .sampleOffset = 3, .parameterId = 9, .parameterValue = 0.5},
     {.kind = WorkerEventKind::kMidi, .sampleOffset = 7, .midiData = {0x90, 60, 100}},
   };
+  daw::plugin_host::AutomationObservation observation;
+  const WorkerTransportEvent scheduled{
+    .kind = WorkerEventKind::kParameter, .sampleOffset = 3, .parameterId = 9,
+    .parameterValue = 0.5, .scheduledAutomation = true,
+  };
+  observation.Accept(scheduled, 7);
+  observation.Accept(events[0], 7);
+  observation.Accept({.kind = WorkerEventKind::kMidi}, 7);
+  if (!Check(observation.count == 1 && observation.parameterId == 9
+    && observation.transportEpoch == 7, "scheduled input observation lost provenance")) return EXIT_FAILURE;
+  daw::plugin_host::WatchedMixObservation mix;
+  mix.Submitted(scheduled, 7);
+  mix.Added(scheduled, 7);
+  mix.Processed(true);
+  if (!Check(mix.submitted == 0 && mix.added == 0 && mix.processed == 0,
+    "unrelated scheduled parameter was reported as Mix")) return EXIT_FAILURE;
+  const WorkerTransportEvent watched{
+    .kind = WorkerEventKind::kParameter, .parameterId = 48,
+    .parameterValue = 0.25, .scheduledAutomation = true,
+  };
+  mix.Submitted(watched, 8);
+  mix.Added(watched, 8);
+  mix.Processed(false);
+  if (!Check(mix.submitted == 1 && mix.added == 1 && mix.processed == 0
+    && mix.transportEpoch == 8, "failed process counted as completed Mix")) return EXIT_FAILURE;
+  mix.Processed(true);
+  if (!Check(mix.processed == 1, "successful Mix process was not counted")) return EXIT_FAILURE;
   if (!Check(transport.Submit(1, 2, 64, events), "variable-sized transport submit failed")) return EXIT_FAILURE;
   if (!Check(transport.numSamples(1) == 64 && transport.events(1).size() == 2, "transport lost event offsets")) return EXIT_FAILURE;
   if (!Check(!transport.Submit(1, 3, 64, std::span<const WorkerTransportEvent>(events, 1)), "occupied transport slot was reused")) return EXIT_FAILURE;

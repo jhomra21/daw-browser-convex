@@ -264,6 +264,49 @@ const bridgeFor = (options: { failureCount?: number; onAccept?: (attempt: number
   }
 }
 
+test("opt-in refill diagnostics aggregate progress and synchronous compilation per coordinator", async () => {
+  const fixture = bridgeFor()
+  const reports: Array<{ progressCount: number; compileCount: number; compileTotalMs: number; compileMaxMs: number }> = []
+  const coordinator = createNativeScheduleCoordinator({
+    bridge: fixture.bridge,
+    snapshot: snapshotFor(instrumentTrack),
+    epoch: 1,
+    sampleRateHz: 48_000,
+    capacity: { maximumFramesPerBlock: 128 },
+    assets: [],
+    startFrame: 0,
+    onRefillDiagnostics: (snapshot) => reports.push(snapshot),
+  })
+  coordinator.install()
+  await coordinator.prime(0)
+  for (let index = 1; index <= 1000; index += 1) {
+    fixture.emitProgress({ ...progressFor(BigInt(index)), renderedThroughFrame: 48_000n })
+  }
+  await Promise.resolve()
+  await Promise.resolve()
+  const snapshot = coordinator.refillDiagnostics()
+  expect(snapshot.progressCount).toBe(1000)
+  expect(snapshot.compileCount).toBeGreaterThan(0)
+  expect(snapshot.compileTotalMs).toBeGreaterThanOrEqual(snapshot.compileMaxMs)
+  expect(snapshot.compileMaxMs).toBeGreaterThanOrEqual(0)
+  expect(reports.length).toBeLessThan(1000)
+  expect(reports.at(-1)?.compileCount).toBeLessThanOrEqual(snapshot.compileCount)
+  const other = createNativeScheduleCoordinator({
+    bridge: bridgeFor().bridge,
+    snapshot: snapshotFor(instrumentTrack),
+    epoch: 1,
+    sampleRateHz: 48_000,
+    capacity: { maximumFramesPerBlock: 128 },
+    assets: [],
+    startFrame: 0,
+  })
+  expect(other.refillDiagnostics()).toEqual({
+    progressCount: 0, compileCount: 0, compileTotalMs: 0, compileMaxMs: 0, submittedVstSegments: 0,
+  })
+  coordinator.dispose()
+  other.dispose()
+})
+
 const instrumentEventsFrom = (payloads: readonly Uint8Array[]) => payloads.flatMap((payload) => {
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
   const count = view.getUint32(44, true)
@@ -1124,6 +1167,14 @@ test("projects non-empty VST automation segments across start, seek, and end bou
     48_000,
   )
   expect(endBoundary.every((segment) => segment.startFrame < segment.endFrame)).toBeTrue()
+})
+
+test("counts accepted VST schedule segments separately from native worker acceptance", async () => {
+  const snapshot = automationSnapshot([{ id: "start", timeSec: 0, value: 0.5, interpolation: "hold" }])
+  const { coordinator } = coordinatorFor(snapshot)
+  expect(coordinator.refillDiagnostics().submittedVstSegments).toBe(0)
+  await coordinator.prime(0)
+  expect(coordinator.refillDiagnostics().submittedVstSegments).toBeGreaterThan(0)
 })
 
 test("projects track and master volume automation into native processor events", async () => {

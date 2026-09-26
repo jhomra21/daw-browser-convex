@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { browserProbeResultSchema } from "./probe"
-import { deriveProbeErrors, deriveRequiredTier2Failures, deriveUnavailable } from "./run-result"
+import { deriveProbeErrors, deriveRequiredTier2Failures, deriveUnavailable, deriveTierThreeFailures } from "./run-result"
 
 const probe = {
   version: "30-track-probe-v2",
@@ -111,4 +111,16 @@ test("fails required Tier 2 device gates and browser meter activity", () => {
     "Tier 2 Utility device was not visibly rendered.",
     "Tier 2 selected-track meter activity was unavailable.",
   ])
+})
+
+test("reports a failed or missing requested Tier 3 workload as a failed run", () => {
+  expect(deriveTierThreeFailures(true, undefined)).toEqual(["Tier 3 workload did not produce a result."])
+  expect(deriveTierThreeFailures(true, {
+    status: "failed",
+    stage: "recording",
+    reason: "MIDI access denied",
+    failureEvidencePath: "/tmp/private/failure.json",
+    issue48LiveReEnableCertification: "not-attempted",
+  })).toEqual(["Tier 3 failed at recording: MIDI access denied"])
+  expect(deriveTierThreeFailures(false, undefined)).toEqual([])
 })

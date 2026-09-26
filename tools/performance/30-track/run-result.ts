@@ -1,4 +1,19 @@
 import type { BrowserProbeResult } from "./probe"
+import type { runTierThree } from "./tier-three"
+export type TierThreeEvidence = Awaited<ReturnType<typeof runTierThree>>
+export type TierThreeOutcome = TierThreeEvidence | {
+  readonly status: "failed"
+  readonly stage: string
+  readonly reason: string
+  readonly failureEvidencePath: string
+  readonly issue48LiveReEnableCertification: "not-attempted"
+}
+
+export const deriveTierThreeFailures = (requested: boolean, outcome: TierThreeOutcome | undefined): string[] => {
+  if (!requested) return []
+  if (!outcome) return ["Tier 3 workload did not produce a result."]
+  return outcome.status === "failed" ? [`Tier 3 failed at ${outcome.stage}: ${outcome.reason}`] : []
+}
 import type { NativeDiagnosticDelta, ProcessMetric } from "./electron"
 import type { z } from "zod"
 import type { desktopDiagnosticsSchemaV2, desktopHostStatusSchemaV1, desktopTransportStatusSchemaV1 } from "@daw-browser/desktop-protocol"
@@ -60,6 +75,7 @@ export type ElectronBenchmarkProgress = {
   readonly transport?: Partial<ElectronBenchmarkEvidence["transport"]>
   readonly processMetrics?: Partial<ElectronBenchmarkEvidence["processMetrics"]>
   readonly hardGates?: Partial<ElectronBenchmarkEvidence["hardGates"]>
+  readonly tier3?: TierThreeOutcome
 }
 
 export const electronHardGatesPassed = (

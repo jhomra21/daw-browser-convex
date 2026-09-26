@@ -202,6 +202,9 @@ export type DesktopAudioLifecycle = {
 }
 
 type DesktopBridge = {
+  benchmarkSabRecording?: boolean
+  benchmarkHeartbeat?: () => Promise<{ mainEpochMs: number } | null>
+  traceDiagnosticsV2(id: string, stage: "controller-before-native" | "controller-after-native" | "controller-parsed"): void
   setRequestHandler(next: DesktopRequestHandler | undefined, onCancel?: DesktopRequestCancellationHandler): void
   onPrepareToClose(next: DesktopPrepareToCloseHandler | undefined): void
   prepareToClose(): Promise<{ flushed: boolean }>

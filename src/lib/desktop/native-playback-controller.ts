@@ -52,6 +52,8 @@ import type {
 } from "~/lib/live-playback-snapshot"
 import type { EffectParamsCommitPayload } from "~/lib/undo/types"
 import { createPortableRecordingWriter } from "~/lib/recording/portable-recording-writer"
+import type { createNativeSabRecordingWriter } from "~/lib/recording/native-sab-recording-writer"
+import { recordNativeBlockTiming, updateRecordingDiagnostics, type RecordingTerminationCause } from "~/lib/recording/recording-diagnostics"
 import type { DesktopBridge } from "~/types/desktop-bridge"
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type {
@@ -202,20 +204,20 @@ export type NativeBuiltInStatePatchResult =
   | { handled: false; reason: "unprepared" | "unsupported-instance" | "unsupported-state" | "unavailable" | "bridge-error"; error?: string }
 export type NativeRecordingDiagnostics = Pick<
   NativeHostRecordingStatus,
-  "capturedFrames" | "droppedFrames" | "droppedBlocks" | "availableBlocks" | "queuedBlocks" | "rms" | "peak" | "fatal"
+  "active" | "capturedFrames" | "droppedFrames" | "droppedBlocks" | "availableBlocks" | "queuedBlocks" | "rms" | "peak" | "fatal"
 >
 
 type NativeRecordingSession = {
   appSessionId: string
   numericSessionId: bigint
   generation: number
-  writer: ReturnType<typeof createPortableRecordingWriter>
+  writer: ReturnType<typeof createPortableRecordingWriter> | ReturnType<typeof createNativeSabRecordingWriter>
   unsubscribeBlock: () => void
   unsubscribeStatus: () => void
   terminal: boolean
   latestStatus?: NativeHostRecordingStatus
   onDiagnostics?: (diagnostics: NativeRecordingDiagnostics) => void
-  onFailure?: (error: Error) => void
+  onFailure?: (error: Error, cause: RecordingTerminationCause) => void
 }
 
 type NativeRecordingStatusSubscription = {
@@ -298,6 +300,8 @@ export const createNativePlaybackController = (input: {
   reportFault?: (message: string) => void
   reportUnavailable?: boolean
   createRecordingWriter?: typeof createPortableRecordingWriter
+  /** Benchmark-only opt-in; absent in production. */
+  createNativeSabRecordingWriter?: (input: Parameters<typeof createNativeSabRecordingWriter>[0]) => ReturnType<typeof createNativeSabRecordingWriter> | Promise<ReturnType<typeof createNativeSabRecordingWriter>>
   createPreparedStretchRepository?: () => PreparedStretchArtifactRepository
   createStretchCache?: (options: AudioStretchCacheOptions) => ReturnType<typeof createAudioStretchCache>
 }) => {
@@ -654,6 +658,7 @@ export const createNativePlaybackController = (input: {
       onRenderedFrame: (renderedFrame) => {
         if (renderedFrame >= transportFrame) transportFrame = renderedFrame
       },
+      onRefillDiagnostics: () => undefined,
       onHostLoss: (error) => {
         if (sessionGeneration !== nativeSessionGeneration) return
         handleNativeHostLoss(error)
@@ -690,7 +695,7 @@ export const createNativePlaybackController = (input: {
       || recording !== undefined
     if (hostLost && recording) {
       recording.terminal = true
-      recording.onFailure?.(new Error(nativeHostConnectionLossMessage()))
+      recording.onFailure?.(new Error(nativeHostConnectionLossMessage()), "controller-cleanup")
       recording.unsubscribeBlock()
       recording.unsubscribeStatus()
       recording.writer.terminate()
@@ -798,9 +803,12 @@ export const createNativePlaybackController = (input: {
       let previousCoordinator: NativeScheduleCoordinator | undefined
       try {
         previousCoordinator = scheduleCoordinator
-        const refreshed = previousCoordinator && preparedSnapshot && !compileContext
-          ? { supported: true as const, snapshot: { ...preparedSnapshot, transport } }
-          : await input.compileSnapshot(transport, compileContext)
+        // Public project control can persist automation while a paused native
+        // session remains prepared. Recompile before resuming its coordinator.
+        const compiled = await input.compileSnapshot(transport, compileContext)
+        const refreshed = compiled.supported
+          ? { ...compiled, snapshot: { ...compiled.snapshot, transport } }
+          : compiled
         if (!refreshed.supported || refreshed.snapshot.revision !== preparedSnapshot?.revision) {
           preparedProjectGeneration = undefined
         } else {
@@ -1350,11 +1358,12 @@ export const createNativePlaybackController = (input: {
     if (pendingStart) {
       if (pendingStartMode === "play") return pendingStart
       const previewRequest = pendingStart
-      const generation = lifecycleGeneration
       const projectGeneration = resolveProjectGeneration()
-      const request = previewRequest.then((result) => result === "started"
-        ? startAttempt(transport, generation, projectGeneration, true, compileContext)
-        : result)
+      const projectId = input.getProjectId?.()
+      const request = previewRequest.then(() =>
+        destroyed || projectGeneration !== resolveProjectGeneration() || projectId !== input.getProjectId?.()
+          ? "unavailable"
+          : startAttempt(transport, lifecycleGeneration, projectGeneration, true, compileContext))
       pendingStart = request
       pendingStartMode = "play"
       pendingStartCompileContext = compileContext
@@ -1620,10 +1629,10 @@ export const createNativePlaybackController = (input: {
     recording = undefined
   }
 
-  const failRecording = (session: NativeRecordingSession, error: Error) => {
+  const failRecording = (session: NativeRecordingSession, error: Error, cause: RecordingTerminationCause) => {
     if (recording !== session || session.terminal) return
     session.terminal = true
-    session.onFailure?.(error)
+    session.onFailure?.(error, cause)
     void cancelRecording().catch(() => {
       void session.writer.abort().catch(() => undefined).finally(() => clearRecording(session))
     })
@@ -1663,7 +1672,7 @@ export const createNativePlaybackController = (input: {
     punchStartFrame: number
     punchEndFrame?: number
     onDiagnostics?: (diagnostics: NativeRecordingDiagnostics) => void
-    onFailure?: (error: Error) => void
+    onFailure?: (error: Error, cause: RecordingTerminationCause) => void
   }) => {
     const bridge = input.bridge
     if (!active || !bridge || recording || sampleRate === 0) throw new Error("Native playback is not active for recording.")
@@ -1675,12 +1684,29 @@ export const createNativePlaybackController = (input: {
     nextRecordingSessionId += 1n
     const generation = recordingGeneration
     recordingGeneration += 1
-    const writer = (input.createRecordingWriter ?? createPortableRecordingWriter)({
+    const sabWriter = await input.createNativeSabRecordingWriter?.({
+        generation, sessionId: recordingInput.appSessionId, sampleRate, channelCount,
+        onFailure: (error) => {
+          if (recording?.generation === generation && recording.appSessionId === recordingInput.appSessionId) {
+            failRecording(recording, error, "writer-failure")
+          }
+        },
+      })
+    const writer = sabWriter ?? (input.createRecordingWriter ?? createPortableRecordingWriter)({
       generation,
       sessionId: recordingInput.appSessionId,
       sampleRate,
       channelCount,
-    })
+      onQueuedFrames: (frames) => updateRecordingDiagnostics({ queuedFrames: frames }),
+      onBufferMetrics: (metrics) => updateRecordingDiagnostics({
+        writerReturnedBuffers: metrics.returned,
+        writerOutstandingBuffers: metrics.outstanding,
+        writerReturnMaxMs: metrics.latencyMs,
+        writerReturnDeliveryMaxMs: metrics.deliveryMs,
+        writerReturnDeliveryWorst: metrics.deliveryWorst ?? null,
+        writerOldestOutstandingMs: metrics.oldestAgeMs,
+      }),
+      })
     const session: NativeRecordingSession = {
       appSessionId: recordingInput.appSessionId,
       numericSessionId,
@@ -1695,12 +1721,23 @@ export const createNativePlaybackController = (input: {
     session.unsubscribeBlock = bridge.session.onRecordingBlock((block) => {
       if (recording !== session || session.terminal
         || block.generation !== generation || block.sessionId !== numericSessionId) return
+      const arrivedAt = performance.now()
       try {
+        if (input.createNativeSabRecordingWriter && (
+          block.channelCount !== channelCount ||
+          !Number.isInteger(block.frameCount) || block.frameCount < 1 ||
+          block.frameCount > 2048 ||
+          block.planarPcm.byteLength !== channelCount * block.frameCount * Float32Array.BYTES_PER_ELEMENT ||
+          block.planarPcm.byteOffset % Float32Array.BYTES_PER_ELEMENT !== 0
+        )) throw new Error("Invalid native SAB recording block payload.")
         const samples = new Float32Array(
           block.planarPcm.buffer,
           block.planarPcm.byteOffset,
           block.planarPcm.byteLength / Float32Array.BYTES_PER_ELEMENT,
         )
+        const planes = Array.from({ length: channelCount }, (_, channel) => (
+          samples.slice(channel * block.frameCount, (channel + 1) * block.frameCount)
+        ))
         writer.write({
           version: portableWasmProtocolVersion,
           type: "recording-capture-block",
@@ -1711,19 +1748,36 @@ export const createNativePlaybackController = (input: {
           channelCount,
           rms: block.rms,
           peak: block.peak,
-          planes: Array.from({ length: channelCount }, (_, channel) => (
-            samples.slice(channel * block.frameCount, (channel + 1) * block.frameCount)
-          )),
+          planes,
         })
       } catch (error) {
-        failRecording(session, error instanceof Error ? error : new Error("Native recording writer failed."))
+        failRecording(session, error instanceof Error ? error : new Error("Native recording writer failed."), "writer-failure")
+      } finally {
+        if (sabWriter) {
+          const stats = sabWriter.stats()
+          updateRecordingDiagnostics({
+            transport: "sab",
+            sabWriterOccupancy: stats.occupancy,
+            peakSabWriterOccupancy: stats.peakOccupancy,
+          })
+        }
+        recordNativeBlockTiming(arrivedAt, performance.now() - arrivedAt)
       }
     })
     session.unsubscribeStatus = bridge.session.onRecordingStatus((status) => {
       if (recording !== session || status.generation !== generation || status.sessionId !== numericSessionId) return
       session.latestStatus = status
       session.onDiagnostics?.(status)
-      if (status.fatal) failRecording(session, new Error("Native recording capture overflowed."))
+      if (input.createNativeSabRecordingWriter && (
+        !Number.isSafeInteger(status.capturedFrames) || status.capturedFrames < 0 ||
+        !Number.isSafeInteger(status.queuedBlocks) || status.queuedBlocks < 0 ||
+        !Number.isSafeInteger(status.droppedBlocks) || status.droppedBlocks !== 0 ||
+        !Number.isSafeInteger(status.droppedFrames) || status.droppedFrames !== 0
+      )) {
+        failRecording(session, new Error("Invalid native SAB recording status or dropped blocks."), "native-fatal")
+        return
+      }
+      if (status.fatal) failRecording(session, new Error("Native recording capture overflowed."), "native-fatal")
     })
     recording = session
     try {
@@ -1774,7 +1828,7 @@ export const createNativePlaybackController = (input: {
       clearRecording(session)
       return result
     } catch (error) {
-      failRecording(session, error instanceof Error ? error : new Error("Native recording finalization failed."))
+      failRecording(session, error instanceof Error ? error : new Error("Native recording finalization failed."), "writer-failure")
       throw error
     }
   }
@@ -2189,6 +2243,7 @@ export const createNativePlaybackController = (input: {
   }
 
   return {
+    schedulerDiagnostics: () => scheduleCoordinator?.refillDiagnostics(),
     getPendingStart: () => pendingStart
       ? { mode: pendingStartMode, promise: pendingStart }
       : undefined,

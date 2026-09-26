@@ -359,6 +359,13 @@ const runtimeFaultSnapshotSchemaV2 = z.object({
 }).strict()
 export const desktopDiagnosticsSchemaV2 = z.object({
   version: z.literal("v2"),
+  scheduler: z.object({
+    progressCount: z.number().int().nonnegative(),
+    compileCount: z.number().int().nonnegative(),
+    compileTotalMs: z.number().finite().nonnegative(),
+    compileMaxMs: z.number().finite().nonnegative(),
+    submittedVstSegments: z.number().int().nonnegative(),
+  }).strict().optional(),
   audio: z.object({
     state: z.enum(["suspended", "running", "closed", "uninitialized"]),
     sampleRate: z.number().finite().nullable(),
@@ -384,9 +391,47 @@ export const desktopDiagnosticsSchemaV2 = z.object({
     overrunFrames: z.number().int().nonnegative().nullable(),
     droppedFrames: z.number().int().nonnegative().nullable(),
     queuedFrames: z.number().int().nonnegative().nullable(),
+    peakQueuedFrames: z.number().int().nonnegative(),
+    writerReturnedBuffers: z.number().int().nonnegative(),
+    writerOutstandingBuffers: z.number().int().min(0).max(8),
+    nativeReceivedBlocks: z.number().int().nonnegative(),
+    nativeArrivalGapMaxMs: z.number().finite().nonnegative(),
+    nativeHandlerMaxMs: z.number().finite().nonnegative(),
+    peakWriterOutstandingBuffers: z.number().int().min(0).max(8),
+    sabWriterOccupancy: z.number().int().min(0).max(8).optional(),
+    peakSabWriterOccupancy: z.number().int().min(0).max(8).optional(),
+    writerReturnMaxMs: z.number().finite().nonnegative(),
+    writerReturnDeliveryMaxMs: z.number().finite().nonnegative(),
+    writerReturnDeliveryWorst: z.object({
+      returnedAtEpochMs: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
+      receivedAtEpochMs: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    }).strict().refine((value) => value.receivedAtEpochMs >= value.returnedAtEpochMs).nullable(),
+    writerOldestOutstandingMs: z.number().finite().nonnegative(),
+    writerTiming: z.object({
+      append: z.object({
+        count: z.number().int().nonnegative(),
+        startDelayMs: z.object({ total: z.number().finite().nonnegative(), max: z.number().finite().nonnegative() }).strict(),
+        durationMs: z.object({ total: z.number().finite().nonnegative(), max: z.number().finite().nonnegative() }).strict(),
+      }).strict(),
+      storage: z.object({
+        headerWriteMs: z.object({ count: z.number().int().nonnegative(), total: z.number().finite().nonnegative(), max: z.number().finite().nonnegative() }).strict(),
+        channelWriteMs: z.object({ count: z.number().int().nonnegative(), total: z.number().finite().nonnegative(), max: z.number().finite().nonnegative() }).strict(),
+      }).strict().nullable(),
+    }).strict().nullable(),
     muted: z.boolean(),
     deviceLost: z.boolean(),
     lastFailurePresent: z.boolean(),
+    termination: z.object({
+      cause: z.enum(["native-fatal", "writer-failure", "lifecycle-cancellation", "controller-cleanup", "explicit-stop", "start-failure", "capture-failure"]),
+    }).strict().nullable(),
+    lifecycleTransitions: z.array(z.string().max(64)).max(8),
+    lastNativeStatus: z.object({
+      active: z.boolean(),
+      fatal: z.boolean(),
+      capturedFrames: z.number().int().nonnegative(),
+      droppedFrames: z.number().int().nonnegative(),
+      queuedBlocks: z.number().int().nonnegative(),
+    }).strict().nullable(),
   }).strict(),
   counts: z.object({
     tracks: z.number().int().nonnegative(),
@@ -416,6 +461,28 @@ export const desktopDiagnosticsSchemaV2 = z.object({
         z.object({ status: z.literal("failed") }).strict(),
       ]),
       diagnostics: z.object({
+      watchedMixHost: z.object({
+        instanceId: z.string().min(1).max(256),
+        transportEpoch: z.number().int().positive().max(0xffffffff),
+        published: z.number().int().nonnegative().max(0xffffffff),
+        projected: z.number().int().nonnegative().max(0xffffffff),
+        overrideSkips: z.number().int().nonnegative().max(0xffffffff),
+        submitted: z.number().int().nonnegative().max(0xffffffff),
+      }).strict().nullable().optional(),
+      watchedMixProcessed: z.object({
+        instanceId: z.string().min(1).max(256),
+        acceptedPoints: z.number().int().positive().max(64),
+        lastParameterId: z.literal(48),
+        transportEpoch: z.number().int().positive().max(0xffffffff),
+        sequence: z.string().regex(/^[1-9][0-9]*$/),
+      }).strict().nullable().optional(),
+      workerAutomation: z.object({
+        instanceId: z.string().min(1).max(256),
+        acceptedPoints: z.number().int().positive().max(64),
+        lastParameterId: z.number().int().nonnegative().max(0xffffffff),
+        transportEpoch: z.number().int().positive().max(0xffffffff),
+        sequence: z.string().regex(/^[1-9][0-9]*$/),
+      }).strict().nullable(),
       state: z.enum(["idle", "configured", "running", "faulted"]),
       activeRevision: z.number().int().nonnegative(),
       preparedRevision: z.number().int().nonnegative(),
@@ -435,7 +502,12 @@ export const desktopDiagnosticsSchemaV2 = z.object({
       lastRejectedProcessorEventCount: z.number().int().nonnegative(),
       lastRejectedInstrumentEventCount: z.number().int().nonnegative(),
       lastRejectedGraphRevision: z.number().int().nonnegative(),
-      }).strict(),
+      }).strict().refine(value => value.workerAutomation === null
+        || value.workerAutomation.transportEpoch === value.transportEpoch, "Stale worker automation epoch")
+        .refine(value => value.watchedMixProcessed == null
+          || value.watchedMixProcessed.transportEpoch === value.transportEpoch, "Stale watched Mix epoch")
+        .refine(value => value.watchedMixHost == null
+          || value.watchedMixHost.transportEpoch === value.transportEpoch, "Stale host Mix epoch"),
     }).strict(),
   ]),
 }).strict()

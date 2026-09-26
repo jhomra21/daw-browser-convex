@@ -161,6 +161,30 @@ export const writePrivateArtifact = async (filePath: string, contents: string): 
     await file.close()
   }
 }
+export const nativeControlTimingLines = (output: string): string[] => (
+  output.split(/\r?\n/).flatMap((line) => {
+    const marker = line.indexOf("[native-control-timing]")
+    if (marker < 0) return []
+    const value = line.slice(marker).trim()
+    return /^\[native-control-timing\] (?:stop (?:entry|exit)|diagnostics (?:entry|response)|worker stop (?:entry|exit))(?: index=\d+)?(?: elapsed_ms=\d+)?$/.test(value) ? [value] : []
+  }).slice(-32)
+)
+export const desktopDiagnosticsBoundaryLines = (output: string): string[] => (
+  output.split(/\r?\n/).flatMap((line) => {
+    const marker = line.indexOf("[diagnostics-v2-boundary]")
+    if (marker < 0) return []
+    const value = line.slice(marker).trim()
+    return /^\[diagnostics-v2-boundary\] operation=diagnostics\.snapshot\.v2 stage=[a-z-]+ elapsedMs=\d+$/.test(value) ? [value] : []
+  }).slice(-64)
+)
+export const desktopDiagnosticsValidationLines = (output: string): string[] => (
+  output.split(/\r?\n/).flatMap((line) => {
+    const marker = line.indexOf("[diagnostics-v2-validation]")
+    if (marker < 0) return []
+    const value = line.slice(marker).trim()
+    return /^\[diagnostics-v2-validation\] paths=(?:result|audio|recording|native|scheduler|counts|workerAutomation|sequence|transportEpoch|renderEpoch|lastRejectedCallback|lastRejectedRenderEpoch|tracks|other)(?:[.,](?:result|audio|recording|native|scheduler|counts|workerAutomation|sequence|transportEpoch|renderEpoch|lastRejectedCallback|lastRejectedRenderEpoch|tracks|other))*$/.test(value) ? [value] : []
+  }).slice(-8)
+)
 
 const commandContainsArgument = (command: string, argument: string): boolean => (
   command.split(/\s+/).includes(argument)
@@ -211,11 +235,11 @@ export const verifyElectronLaunchIdentity = (input: LaunchIdentityInput): Launch
 
 export const electronRendererTarget = (
   tabs: string,
-): { readonly targetId: string; readonly url: "daw://app/" } | undefined => {
+): { readonly targetId: string; readonly url: string } | undefined => {
   const targets = [...tabs.matchAll(/\[(t[0-9]+)\][^\n]*\s(daw:\/\/app\/[^\s]*)/g)]
-  if (targets.length !== 1 || targets[0]?.[2] !== "daw://app/") return undefined
+  if (targets.length !== 1 || !/^daw:\/\/app\/(?:\?dashboard=general)?$/.test(targets[0]?.[2] ?? "")) return undefined
   const targetId = targets[0]?.[1]
-  return targetId ? { targetId, url: "daw://app/" } : undefined
+  return targetId ? { targetId, url: targets[0]![2]! } : undefined
 }
 
 export const createCleanupPlan = (

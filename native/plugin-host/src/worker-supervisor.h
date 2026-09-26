@@ -290,6 +290,8 @@ enum class WorkerDiagnosticKind : std::uint32_t {
   kTail,
   kEditorState,
   kParameterEditBegin,
+  kScheduledAutomationInput,
+  kWatchedMixProcessed,
 };
 
 struct WorkerDiagnostic {
@@ -318,6 +320,7 @@ struct WorkerTransportEvent {
   std::uint32_t parameterId = 0;
   double parameterValue = 0.0;
   std::uint8_t midiData[3]{};
+  bool scheduledAutomation = false;
 };
 
 struct WorkerBlockContext {

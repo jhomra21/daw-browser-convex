@@ -46,8 +46,15 @@ const createViews = (buffers: RecorderSabRingBuffers) => {
   return { state, frameCounts, samples }
 }
 
-export const createRecorderSabRingProducer = (buffers: RecorderSabRingBuffers) => {
+export const createRecorderSabRingProducer = (
+  buffers: RecorderSabRingBuffers,
+  maximumOccupancy = RECORDER_POOL_BLOCKS,
+) => {
+  if (!Number.isInteger(maximumOccupancy) || maximumOccupancy < 1 || maximumOccupancy > RECORDER_POOL_BLOCKS) {
+    throw new Error('Recorder SAB maximum occupancy is invalid.')
+  }
   const views = createViews(buffers)
+  let peakOccupancy = 0
 
   const push = (channels: readonly Float32Array[], frameCount: number): boolean => {
     if (
@@ -60,7 +67,7 @@ export const createRecorderSabRingProducer = (buffers: RecorderSabRingBuffers) =
     ) throw new Error('Recorder SAB block is invalid.')
     const writeIndex = Atomics.load(views.state, WRITE_INDEX)
     const readIndex = Atomics.load(views.state, READ_INDEX)
-    if (writeIndex - readIndex >= RECORDER_POOL_BLOCKS) {
+    if (writeIndex - readIndex >= maximumOccupancy) {
       Atomics.add(views.state, DROPPED_FRAMES, frameCount)
       Atomics.add(views.state, DROPPED_BLOCKS, 1)
       return false
@@ -77,6 +84,7 @@ export const createRecorderSabRingProducer = (buffers: RecorderSabRingBuffers) =
     }
     Atomics.store(views.frameCounts, slot, frameCount)
     Atomics.store(views.state, WRITE_INDEX, writeIndex + 1)
+    peakOccupancy = Math.max(peakOccupancy, writeIndex + 1 - readIndex)
     Atomics.add(views.state, NOTIFICATION, 1)
     Atomics.notify(views.state, NOTIFICATION)
     return true
@@ -87,6 +95,8 @@ export const createRecorderSabRingProducer = (buffers: RecorderSabRingBuffers) =
     stats: () => ({
       droppedFrames: Atomics.load(views.state, DROPPED_FRAMES),
       droppedBlocks: Atomics.load(views.state, DROPPED_BLOCKS),
+      peakOccupancy,
+      occupancy: Atomics.load(views.state, WRITE_INDEX) - Atomics.load(views.state, READ_INDEX),
     }),
   }
 }

@@ -1,5 +1,6 @@
 import {
   assetSnapshotSchemaV1,
+  assetSnapshotSchemaV2,
   stableIdSchemaV1,
   type ProjectSnapshotV1,
   type ProjectSnapshotV2,
@@ -150,9 +151,12 @@ const isProjectMix = (value: JsonValue | undefined): value is { masterVolume: nu
   isJsonObject(value) && isJsonNumber(value.masterVolume)
 )
 
-const completeAssets = (assets: readonly LocalProjectAssetRow[]) => assets.flatMap((asset) => {
+const completeAssets = (
+  assets: readonly LocalProjectAssetRow[],
+  schema: typeof assetSnapshotSchemaV1 | typeof assetSnapshotSchemaV2,
+) => assets.flatMap((asset) => {
   if (asset.missing || !asset.sourceKind || !asset.contentHash) return []
-  const result = assetSnapshotSchemaV1.safeParse({
+  const result = schema.safeParse({
     id: asset.id,
     name: asset.name,
     sourceKind: asset.sourceKind,
@@ -195,6 +199,7 @@ type LocalControlSnapshotInput = {
 const projectLocalControlSnapshot = <Snapshot>(
   input: LocalControlSnapshotInput,
   projectSnapshot: (value: Parameters<typeof projectControlSnapshotV1>[0]) => Snapshot,
+  assetSchema: typeof assetSnapshotSchemaV1 | typeof assetSnapshotSchemaV2,
 ): Snapshot => {
   const metadata = projectMetadata(input.projectState, input.fallbackMetadata)
   const bpm = input.projectState.find((row) => row.key === 'bpm')?.value
@@ -299,7 +304,7 @@ const projectLocalControlSnapshot = <Snapshot>(
       points: envelope.points,
     })),
     sidechainRoutes: valueOfKind(input.entities, 'sidechain-route', isSidechain),
-    assets: completeAssets(input.assets),
+    assets: completeAssets(input.assets, assetSchema),
     assetFolders: input.projectState.flatMap((row) => {
       if (!row.key.startsWith(LOCAL_ASSET_FOLDER_KEY_PREFIX)) return []
       const value = parseLocalProjectStoredJsonValue(row.value)
@@ -315,9 +320,9 @@ const projectLocalControlSnapshot = <Snapshot>(
 }
 
 export const projectLocalControlSnapshotV1 = (input: LocalControlSnapshotInput): ProjectSnapshotV1 => (
-  projectLocalControlSnapshot(input, projectControlSnapshotV1)
+  projectLocalControlSnapshot(input, projectControlSnapshotV1, assetSnapshotSchemaV1)
 )
 
 export const projectLocalControlSnapshotV2 = (input: LocalControlSnapshotInput): ProjectSnapshotV2 => (
-  projectLocalControlSnapshot(input, projectControlSnapshotV2)
+  projectLocalControlSnapshot(input, projectControlSnapshotV2, assetSnapshotSchemaV2)
 )

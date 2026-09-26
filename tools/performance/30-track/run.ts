@@ -4,15 +4,18 @@ import { createHash } from "node:crypto"
 import { $ } from "bun"
 import path from "node:path"
 import { spawn } from "node:child_process"
-import { browserCommand, buildBrowserRuntime, waitForBrowserValue, withProductionBrowserServer } from "../browser-harness"
+import { browserCommand as invokeBrowserCommand, buildBrowserRuntime, waitForBrowserValue as invokeWaitForBrowserValue, withProductionBrowserServer } from "../browser-harness"
 import { browserProbeOutputSchema, browserProbeResultSchema, type BrowserProbeResult } from "./probe"
 import {
   cleanupSurvivors,
   createCleanupPlan,
   createNativeDiagnosticDelta,
+  desktopDiagnosticsBoundaryLines,
+  desktopDiagnosticsValidationLines,
   createPrivateRunDirectory,
   descendantsOf,
   electronRendererTarget,
+  nativeControlTimingLines,
   nativeCallbacksIncreased,
   processMetricsAvailability,
   verifyElectronLaunchIdentity,
@@ -24,12 +27,14 @@ import {
 import {
   deriveProbeErrors,
   deriveRequiredTier2Failures,
+  deriveTierThreeFailures,
   deriveUnavailable,
   electronHardGatesPassed,
   tierTwoDevicesVisible,
   type ElectronBenchmarkEvidence,
   type ElectronBenchmarkProgress,
   type SourceIdentity,
+  type TierThreeOutcome,
 } from "./run-result"
 import { z } from "zod"
 import {
@@ -41,13 +46,29 @@ import {
   thirtyTrackTotalTrackCount,
 } from "./spec"
 import { assertThirtyTrackSnapshot } from "./tier-two"
+import { runTierThree, TierThreeRecordingFailure } from "./tier-three"
+import { analyzeTaskSourceEvidence, diagnosticReturnInterval } from "./task-source-liveness"
+import { startRendererProfile } from "./renderer-profile"
+import { startRendererTrace } from "./renderer-trace"
 import { desktopDiagnosticsSchemaV2, desktopHostStatusSchemaV1, desktopTransportStatusSchemaV1 } from "@daw-browser/desktop-protocol"
 import { projectSnapshotSchemaV2 } from "@daw-browser/control"
+
+import { createCommandTimings } from "../command-timings"
+
+const commandTimings = createCommandTimings(Bun.argv.includes("--command-timings"))
+const browserCommand = (session: string, args: readonly string[]) => invokeBrowserCommand(session, args, commandTimings)
+const waitForBrowserValue = (session: string, expression: string, timeoutMs: number) =>
+  invokeWaitForBrowserValue(session, expression, timeoutMs, commandTimings)
 
 type Surface = "browser" | "electron"
 type CliOptions = {
   readonly surface: Surface
   readonly out: string
+  readonly tier3: boolean
+  readonly sabRecording: boolean
+  readonly rendererProfile: boolean
+  readonly rendererTrace: boolean
+  readonly commandTimings: boolean
 }
 export type BaselineRunResult = {
   version: "30-track-baseline-v1"
@@ -65,6 +86,7 @@ export type BaselineRunResult = {
   phases: { fixtureIntegrity: "pending" | "complete" | "failed"; probeCollection: "pending" | "complete" | "failed" | "skipped" | "unsupported" }
   probe: BrowserProbeResult | null
   electron: ElectronBenchmarkProgress | ElectronBenchmarkEvidence | null
+  tier3?: TierThreeOutcome
   unavailable: string[]
   errors: string[]
 }
@@ -72,8 +94,21 @@ export type BaselineRunResult = {
 const parseOptions = (arguments_: readonly string[]): CliOptions => {
   let surface: Surface | undefined
   let out: string | undefined
+  let tier3 = false
+  let sabRecording = false
+  let rendererProfile = false
+  let rendererTrace = false
+  let commandTimings = false
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index]
+    if (argument === "--command-timings" && !commandTimings) { commandTimings = true; continue }
+    if (argument === "--renderer-profile" && !rendererProfile) { rendererProfile = true; continue }
+    if (argument === "--renderer-trace" && !rendererTrace) { rendererTrace = true; continue }
+    if (argument === "--tier3" && !tier3) {
+      tier3 = true
+      continue
+    }
+    if (argument === "--sab-recording" && !sabRecording) { sabRecording = true; continue }
     if (argument === "--surface") {
       const value = arguments_[index + 1]
       if (surface !== undefined || (value !== "browser" && value !== "electron")) throw new Error("Invalid --surface.")
@@ -90,8 +125,8 @@ const parseOptions = (arguments_: readonly string[]): CliOptions => {
     }
     throw new Error(`Unknown argument: ${argument}`)
   }
-  if (surface === undefined || out === undefined) throw new Error("Usage: run.ts --surface browser|electron --out <absolute-path>.")
-  return { surface, out }
+  if (surface === undefined || out === undefined || (tier3 && surface !== "electron") || ((rendererProfile || rendererTrace || sabRecording) && (!tier3 || surface !== "electron"))) throw new Error("Usage: run.ts --surface browser|electron --out <absolute-path> [--tier3 --sab-recording --renderer-profile --renderer-trace (Electron only)].")
+  return { surface, out, tier3, sabRecording, rendererProfile, rendererTrace, commandTimings }
 }
 
 const main = async () => {
@@ -310,15 +345,21 @@ const main = async () => {
         entrypoint: path.join(import.meta.dir, "run-runtime.ts"),
         name: "30-track-probe",
       })
-      const evidence = await runElectronBenchmark(root, archivePath, runId, runtimePath, (progress) => {
+      const evidence = await runElectronBenchmark(root, archivePath, runId, runtimePath, options.tier3, options.sabRecording, options.rendererProfile, options.rendererTrace, (progress) => {
         result.electron = progress
         if (progress.rendererProbe) result.probe = progress.rendererProbe
+        if (progress.tier3) result.tier3 = progress.tier3
       })
       result.phases = { fixtureIntegrity: "complete", probeCollection: "complete" }
       result.probe = evidence.rendererProbe
       result.electron = evidence
       result.unavailable = deriveUnavailable(options.surface, evidence.rendererProbe)
-      result.errors = [...deriveProbeErrors(evidence.rendererProbe), ...deriveRequiredTier2Failures(options.surface, evidence.rendererProbe)]
+      result.errors = [
+        ...deriveProbeErrors(evidence.rendererProbe),
+        ...deriveRequiredTier2Failures(options.surface, evidence.rendererProbe),
+        ...deriveTierThreeFailures(options.tier3, result.tier3),
+      ]
+      if (result.errors.length > 0) result.phases = { fixtureIntegrity: "complete", probeCollection: "failed" }
       if (!electronHardGatesPassed(evidence.hardGates)) {
         result.errors.push("Electron runtime hard gate failed.")
         result.phases = { fixtureIntegrity: "complete", probeCollection: "failed" }
@@ -331,10 +372,14 @@ const main = async () => {
       }
     }
   }
+  if (options.surface === "browser" && result.errors.length > 0 && options.commandTimings) {
+    await writePrivateArtifact(path.join(path.dirname(options.out), "failure.json"),
+      JSON.stringify({ commandTimings: commandTimings.snapshot() }, null, 2))
+  }
   await writeResult(options.out, result)
   if (result.errors.length > 0) {
     throw new Error(options.surface === "electron"
-      ? "Electron benchmark reported errors."
+      ? "Electron benchmark reported errors; consult the private result artifact."
       : `Browser probe reported errors: ${result.errors.join("; ")}`)
   }
   console.log(JSON.stringify({ runId, surface: options.surface }, null, 2))
@@ -403,21 +448,33 @@ const selectedTier2MeterHeight = async (session: string): Promise<number | null>
   return parseJsonOutput(z.number().finite().nonnegative().max(100).nullable(), output, "Tier 2 selected-track meter")
 }
 
-const commandJson = async (root: string, profile: string, arguments_: readonly string[]): Promise<JsonValue> => {
+const commandJson = async (root: string, profile: string, arguments_: readonly string[], input?: string): Promise<JsonValue> => {
   const cli = path.join(root, "packages/control-cli/dist/daw-control.js")
+  const startedAt = Date.now()
+  const start = performance.now()
+  let exitCode: number | null = null
+  try {
   const child = Bun.spawn(["bun", cli, ...arguments_], {
     cwd: root,
     env: { ...process.env, DAW_DESKTOP_USER_DATA: profile, DAW_CONTROL_AUTH_PATH: path.join(profile, "control-auth.json") },
+    stdin: input === undefined ? "ignore" : "pipe",
     stdout: "pipe",
     stderr: "pipe",
   })
+  if (input !== undefined && child.stdin) {
+    child.stdin.write(input)
+    child.stdin.end()
+  }
   const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
-  const exitCode = await child.exited
+  exitCode = await child.exited
   if (exitCode !== 0) throw new Error(`daw-control ${arguments_.join(" ")} failed: ${stderr.slice(0, 512)}`)
   if (stdout.trim().length === 0) {
     throw new Error(`daw-control ${arguments_.join(" ")} returned an empty response${stderr.trim() ? `: ${stderr.trim().slice(0, 512)}` : "."}`)
   }
   return parseEncodedJson(stdout, `daw-control ${arguments_.join(" ")}`)
+  } finally {
+    commandTimings.record("control-cli", arguments_[0] ?? "unknown", startedAt, performance.now() - start, exitCode)
+  }
 }
 
 const commandData = <Value>(schema: z.ZodType<Value>, envelopeValue: JsonValue): Value => {
@@ -580,11 +637,11 @@ const selectElectronRenderer = async (session: string, getAppOutput: () => strin
   for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
       const tabs = await browserCommand(session, ["tab"])
-      const target = electronRendererTarget(tabs)?.targetId
+      const target = electronRendererTarget(tabs)
       if (target) {
-        await browserCommand(session, ["tab", target])
+        await browserCommand(session, ["tab", target.targetId])
         const url = await browserCommand(session, ["get", "url"])
-        if (url !== "daw://app/") throw new Error("Electron renderer identity changed during attachment.")
+        if (url !== target.url) throw new Error("Electron renderer identity changed during attachment.")
         return
       }
       lastError = `Electron renderer target not listed: ${tabs}`
@@ -603,6 +660,10 @@ const runElectronBenchmark = async (
   archivePath: string,
   runId: string,
   runtimePath: string,
+  tier3: boolean,
+  sabRecording: boolean,
+  rendererProfile: boolean,
+  rendererTrace: boolean,
   reportProgress: ElectronProgressReporter,
 ): Promise<ElectronBenchmarkEvidence> => {
   const packageRoot = path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64")
@@ -616,6 +677,7 @@ const runElectronBenchmark = async (
   let cleanupPlan: CleanupPlan | undefined
   let browserAttached = false
   let retainFailureEvidence = false
+  let appOutput = ""
   const session = `daw-30-track-electron-${runId}`
   let stage = "launch"
   let progress: ElectronBenchmarkProgress = { status: "running", stage }
@@ -637,17 +699,20 @@ const runElectronBenchmark = async (
     // --remote-debugging-pipe. Port 0 lets Chromium atomically bind an
     // unpredictable loopback port and publish its UUID browser capability in
     // the private profile, avoiding the release-before-launch port race.
+    const appEnvironment = { ...process.env, DAW_DESKTOP_USER_DATA: profile }
+    if (tier3) appEnvironment.DAW_BENCHMARK_HEARTBEAT = "1"
+    delete appEnvironment.DAW_BENCHMARK_SAB_RECORDING
+    if (sabRecording) appEnvironment.DAW_BENCHMARK_SAB_RECORDING = "1"
     app = spawn(executablePath, [
       "--remote-debugging-address=127.0.0.1",
       "--remote-debugging-port=0",
       `--user-data-dir=${profile}`,
     ], {
       cwd: root,
-      env: { ...process.env, DAW_DESKTOP_USER_DATA: profile },
+      env: appEnvironment,
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     })
-    let appOutput = ""
     app.stdout?.on("data", (chunk: Buffer) => { appOutput += chunk.toString().slice(-4_000) })
     app.stderr?.on("data", (chunk: Buffer) => { appOutput += chunk.toString().slice(-4_000) })
     if (!app.pid) throw new Error("Packaged Electron launch did not return a process ID.")
@@ -682,9 +747,20 @@ const runElectronBenchmark = async (
     const starterProjectId = new URL(await browserCommand(session, ["get", "url"])).searchParams.get("projectId")
     if (!starterProjectId) throw new Error("Starter local project ID was not mounted.")
     stage = "host-status-mounted"
-    const mounted = commandData(desktopHostStatusSchemaV1, await commandJson(root, profile, ["host", "status"]))
+    // The timeline mounts before its attached control host receives the project binding.
+    // Observe the host boundary itself, rather than treating the DOM mount as host readiness.
+    let mounted = commandData(desktopHostStatusSchemaV1, await commandJson(root, profile, ["host", "status"]))
+    const mountObservations = [{ elapsedMs: 0, ready: mounted.ready, projectMounted: mounted.project !== null }]
+    const mountStartedAt = performance.now()
+    while (mounted.ready && mounted.project === null && performance.now() - mountStartedAt < 15_000) {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      mounted = commandData(desktopHostStatusSchemaV1, await commandJson(root, profile, ["host", "status"]))
+      mountObservations.push({ elapsedMs: Math.round(performance.now() - mountStartedAt), ready: mounted.ready, projectMounted: mounted.project !== null })
+    }
     report({ ...progress, stage, host: { ...progress.host, mounted } })
-    if (!mounted.ready || mounted.project === null) throw new Error("Packaged host did not mount the blank local project.")
+    if (!mounted.ready || mounted.project === null) throw new Error(`Packaged host did not mount the blank local project: ${JSON.stringify(mountObservations.slice(-8))}`)
+    stage = "fixture-import"
+    report({ ...progress, stage })
     await browserCommand(session, ["eval", "window.__thirtyTrackBenchmark.setIntegrity({fixtureHashVerified:true})"])
     await browserCommand(session, ["eval", `window.__thirtyTrackBenchmark.startPhase('import',{selector:'input[accept=".dawproject,application/vnd.dawproject,application/zip"]',expectedTracks:${thirtyTrackTotalTrackCount},expectedClips:${thirtyTrackTotalClipCount}})`])
     await browserCommand(session, ["upload", "input[accept='.dawproject,application/vnd.dawproject,application/zip']", archivePath])
@@ -805,7 +881,83 @@ const runElectronBenchmark = async (
         noRendererErrors: parsed.startupErrors.length === 0 && parsed.phases.every((phase) => phase.errors.length === 0),
       },
     }
-    report({ status: "complete", stage: "complete", ...evidence })
+    if (tier3) {
+      stage = "tier3-real-vst-native-recording"
+      if (rendererProfile || rendererTrace) retainFailureEvidence = true
+      report({ ...progress, stage })
+      try {
+        const rendererProfilePath = path.join(runDirectory, "tier3-renderer-profile.json")
+        let stopTrace: (() => Promise<void>) | undefined
+        const tier3Evidence = await runTierThree(
+          session, imported.localProjectId,
+          (args, input) => commandJson(root, profile, args, input),
+          commandData,
+          () => processMetrics(app?.pid ?? 0),
+          rendererProfile || rendererTrace ? async (work) => {
+            if (!app?.pid) throw new Error("Renderer profiler requires runner-owned Electron.")
+            const endpoint = new URL(cdp.websocketUrl)
+            await assertCdpIdentity(profile, app.pid, executablePath, Number(endpoint.port), cdp.websocketUrl)
+            const stops: Array<() => Promise<void>> = []
+            try {
+              if (rendererProfile) stops.push(await startRendererProfile(cdp.websocketUrl, rendererProfilePath))
+              return await work()
+            } finally {
+              if (stopTrace) stops.push(stopTrace)
+              for (const stop of stops.reverse()) {
+                try {
+                  await stop()
+                } catch (error) {
+                  await writePrivateArtifact(path.join(runDirectory, "tier3-trace-stop-error.txt"),
+                    error instanceof Error ? error.message.slice(0, 512) : "Renderer trace stop failed.")
+                }
+              }
+            }
+          } : undefined,
+          rendererTrace ? async () => {
+            if (!app?.pid) throw new Error("Renderer tracer requires runner-owned Electron.")
+            stopTrace = await startRendererTrace(cdp.websocketUrl, path.join(runDirectory, "tier3-renderer-trace.json"))
+          } : undefined,
+        )
+        report({ ...progress, stage: "tier3-complete", tier3: tier3Evidence })
+      } catch (error) {
+        retainFailureEvidence = true
+        const reason = error instanceof Error ? conciseError(error) : "Tier 3 failed."
+        const failureEvidencePath = path.join(runDirectory, "tier3-failure.json")
+        const diagnostics = await commandJson(root, profile, ["host", "diagnostics-v2"]).catch(() => null)
+        const host = await commandJson(root, profile, ["host", "status"]).catch(() => null)
+        const dialog = await browserCommand(session, ["eval", "document.querySelector('[role=\"dialog\"]')?.textContent?.slice(-600) ?? ''"]).catch(() => "")
+        const rendererErrors = await browserCommand(session, ["errors"]).catch(() => "")
+        const rendererConsole = await browserCommand(session, ["console"]).catch(() => "")
+        const sabEnvironment = sabRecording ? await browserCommand(session, ["eval",
+          "({isolated:crossOriginIsolated,sharedArrayBuffer:typeof SharedArrayBuffer==='function',workerResources:performance.getEntriesByType('resource').filter(e=>e.name.includes('recording-writer-worker')).map(e=>({durationMs:e.duration,transferSize:e.transferSize})).slice(-2)})",
+        ]).catch(() => null) : null
+        await writePrivateArtifact(failureEvidencePath, JSON.stringify({
+          stage, reason, fullError: error instanceof Error ? error.message.slice(0, 4_096) : null,
+          dialog, host, diagnostics, rendererErrors: rendererErrors.slice(-2_000),
+          rendererConsole: rendererConsole.slice(-4_000), hostPid: app?.pid ?? null,
+          desktopDiagnosticsBoundary: desktopDiagnosticsBoundaryLines(appOutput.slice(-32_000)),
+          desktopDiagnosticsValidation: desktopDiagnosticsValidationLines(appOutput.slice(-32_000)),
+          nativeControlTiming: nativeControlTimingLines(appOutput.slice(-32_000)),
+          sabEnvironment,
+          rendererProfilePath: rendererProfile ? path.join(runDirectory, "tier3-renderer-profile.json") : null,
+          rendererTracePath: rendererTrace ? path.join(runDirectory, "tier3-renderer-trace.json") : null,
+          recordingLongTasks: error instanceof TierThreeRecordingFailure ? error.longTasks : null,
+          recordingTaskSources: error instanceof TierThreeRecordingFailure && error.taskSources
+            ? analyzeTaskSourceEvidence(error.taskSources,
+              diagnosticReturnInterval(z.object({ data: desktopDiagnosticsSchemaV2 }).safeParse(diagnostics).data ?? {})) : null,
+          recordingStallCorrelation: error instanceof TierThreeRecordingFailure ? error.stallCorrelation : "unknown",
+          issue48LiveReEnableReason: error instanceof TierThreeRecordingFailure ? error.issue48LiveReEnableReason : null,
+          workerAutomationAtPlayback: error instanceof TierThreeRecordingFailure ? error.workerAutomationAtPlayback : null,
+          watchedMixAtPlayback: error instanceof TierThreeRecordingFailure ? error.watchedMixAtPlayback : null,
+          nativeAtPlayback: error instanceof TierThreeRecordingFailure ? error.nativeAtPlayback : null,
+          commandTimings: commandTimings.snapshot(),
+        }, null, 2))
+        report({ ...progress, stage: "tier3-failed", tier3: {
+          status: "failed", stage, reason, failureEvidencePath, issue48LiveReEnableCertification: "not-attempted",
+        } })
+      }
+    }
+    report({ status: "complete", stage: "complete", ...evidence, tier3: progress.tier3 })
     return evidence
   } catch (error) {
     retainFailureEvidence = true
@@ -817,13 +969,19 @@ const runElectronBenchmark = async (
         browserCommand(session, ["console"]).catch(() => "console unavailable"),
         browserCommand(session, ["errors"]).catch(() => "errors unavailable"),
         browserCommand(session, ["eval", "document.querySelector('[role=\"dialog\"]')?.textContent ?? 'dialog unavailable'"]).catch(() => "dialog unavailable"),
+        browserCommand(session, ["eval", "(()=>({browser:document.querySelector('[data-timeline-left-browser]')?.textContent?.slice(0,1500),search:document.querySelector('[data-timeline-left-browser] input[type=search]')?.value}))()"]).catch(() => "browser unavailable"),
       ])
       : ["Browser attachment was not verified."]
+    if (browserAttached) await browserCommand(session, ["screenshot", path.join(runDirectory, "failure.png")]).catch(() => undefined)
     await writePrivateArtifact(
       failureEvidencePath,
-      JSON.stringify({ ...progress, status: "failed", stage, error: privateError, diagnostics }, null, 2),
+      JSON.stringify({ ...progress, status: "failed", stage, error: privateError, diagnostics,
+        nativeControlTiming: nativeControlTimingLines(appOutput.slice(-32_000)),
+        desktopDiagnosticsBoundary: desktopDiagnosticsBoundaryLines(appOutput.slice(-32_000)),
+        desktopDiagnosticsValidation: desktopDiagnosticsValidationLines(appOutput.slice(-32_000)),
+        commandTimings: commandTimings.snapshot() }, null, 2),
     )
-    report({ ...progress, status: "failed", stage, error: "Electron benchmark failed." })
+    report({ ...progress, status: "failed", stage, error: "Electron benchmark failed.", failureEvidencePath })
     throw new Error(`Electron benchmark failed at ${stage}.`)
   } finally {
     await browserCommand(session, ["close"]).catch(() => undefined)

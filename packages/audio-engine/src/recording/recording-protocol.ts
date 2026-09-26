@@ -1,3 +1,5 @@
+import { z } from 'zod'
+
 export const RECORDER_BLOCK_FRAMES = 2048
 export const RECORDER_MAX_CHANNELS = 2
 export const RECORDER_POOL_BLOCKS = 32
@@ -55,6 +57,7 @@ export type RecorderReturnMessage = {
   sessionId: string
   blockId: number
   buffer: ArrayBuffer
+  returnedAtMs?: number
 }
 
 export type WriterStartMessage = {
@@ -101,10 +104,40 @@ export type WriterInboundMessage =
 
 export type WriterOutboundMessage =
   | RecorderReturnMessage
+  | { type: 'boot'; generation: number; sessionId: string }
   | { type: 'ready'; generation: number; sessionId: string }
-  | { type: 'finalized'; generation: number; sessionId: string; capturedFrames: number }
-  | { type: 'aborted'; generation: number; sessionId: string }
-  | { type: 'failure'; generation: number; sessionId: string; reason: string }
+  | { type: 'finalized'; generation: number; sessionId: string; capturedFrames: number; timing?: WriterTiming }
+  | { type: 'aborted'; generation: number; sessionId: string; timing?: WriterTiming }
+  | { type: 'failure'; generation: number; sessionId: string; reason: string; timing?: WriterTiming }
+
+export type WriterTiming = {
+  append: { count: number; startDelayMs: { total: number; max: number }; durationMs: { total: number; max: number } }
+  storage: {
+    headerWriteMs: { count: number; total: number; max: number }
+    channelWriteMs: { count: number; total: number; max: number }
+  } | null
+}
+
+const durationSchema = z.object({
+  total: z.number().finite().nonnegative(),
+  max: z.number().finite().nonnegative(),
+}).strict()
+
+const writeAggregateSchema = durationSchema.extend({
+  count: z.number().int().nonnegative(),
+}).strict()
+
+const writerTimingSchema: z.ZodType<WriterTiming> = z.object({
+  append: z.object({
+    count: z.number().int().nonnegative(),
+    startDelayMs: durationSchema,
+    durationMs: durationSchema,
+  }).strict(),
+  storage: z.object({
+    headerWriteMs: writeAggregateSchema,
+    channelWriteMs: writeAggregateSchema,
+  }).strict().nullable(),
+}).strict()
 
 type RecorderMessageFields = {
   type?: unknown
@@ -115,6 +148,7 @@ type RecorderMessageFields = {
   frameCount?: unknown
   channelCount?: unknown
   buffer?: unknown
+  returnedAtMs?: unknown
   rms?: unknown
   peak?: unknown
   capturedFrames?: unknown
@@ -232,15 +266,18 @@ const readRecorderReturnMessage = <Value>(value: Value): RecorderReturnMessage |
     !isGeneration(value.generation) ||
     !isSessionId(value.sessionId) ||
     !isGeneration(value.blockId) ||
-    !(value.buffer instanceof ArrayBuffer)
+    !(value.buffer instanceof ArrayBuffer) ||
+    (value.returnedAtMs !== undefined && (!isNumber(value.returnedAtMs) || !Number.isFinite(value.returnedAtMs) || value.returnedAtMs < 0 || value.returnedAtMs > Number.MAX_SAFE_INTEGER))
   ) return null
-  return {
+  const result: RecorderReturnMessage = {
     type: 'return',
     generation: value.generation,
     sessionId: value.sessionId,
     blockId: value.blockId,
     buffer: value.buffer,
   }
+  if (value.returnedAtMs !== undefined) result.returnedAtMs = value.returnedAtMs
+  return result
 }
 
 export const readWriterInboundMessage = <Value>(value: Value): WriterInboundMessage | null => {
@@ -304,23 +341,36 @@ export const readWriterOutboundMessage = <Value>(value: Value): WriterOutboundMe
   const returned = readRecorderReturnMessage(value)
   if (returned) return returned
   if (!isRecord(value) || !isGeneration(value.generation) || !isSessionId(value.sessionId)) return null
+  const rawTiming = 'timing' in value ? value.timing : undefined
+  const parsedTiming = writerTimingSchema.optional().safeParse(rawTiming)
+  if (!parsedTiming.success) return null
+  const timing = parsedTiming.data
+  if (value.type === 'boot') return { type: 'boot', generation: value.generation, sessionId: value.sessionId }
   if (value.type === 'ready') return { type: 'ready', generation: value.generation, sessionId: value.sessionId }
-  if (value.type === 'aborted') return { type: 'aborted', generation: value.generation, sessionId: value.sessionId }
+  if (value.type === 'aborted') {
+    const result: WriterOutboundMessage = { type: 'aborted', generation: value.generation, sessionId: value.sessionId }
+    if (timing) result.timing = timing
+    return result
+  }
   if (value.type === 'finalized' && isGeneration(value.capturedFrames)) {
-    return {
+    const result: WriterOutboundMessage = {
       type: 'finalized',
       generation: value.generation,
       sessionId: value.sessionId,
       capturedFrames: value.capturedFrames,
     }
+    if (timing) result.timing = timing
+    return result
   }
   if (value.type === 'failure' && isString(value.reason)) {
-    return {
+    const result: WriterOutboundMessage = {
       type: 'failure',
       generation: value.generation,
       sessionId: value.sessionId,
       reason: value.reason,
     }
+    if (timing) result.timing = timing
+    return result
   }
   return null
 }

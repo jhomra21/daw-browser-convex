@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { access } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
 import path from "node:path"
+import { readDiagnosticInstanceId } from "./diagnostic-instance-id"
 import { audioCoreWasmAbiVersion } from "@daw-browser/audio-core-wasm"
 import { defaultDecodedAudioPageFrames } from "@daw-browser/audio-engine/media-pages"
 import {
@@ -1331,10 +1332,74 @@ export const createNativeAudioHostSupervisor = (
     for (const listener of lossListeners) listener(error)
   }
   const decodeDiagnostics = (frame: Buffer): NativeHostDiagnostics | undefined => {
-    if (frame.byteLength !== headerBytes + 88) return undefined
+    if (frame.byteLength < headerBytes + 116 || frame.byteLength > headerBytes + 940) return undefined
     const state = frame.readUInt32BE(headerBytes)
     if (state !== 0 && state !== 1 && state !== 2 && state !== 3) return undefined
+    const present = frame.readUInt32BE(headerBytes + 88)
+    if (present > 1) return undefined
+    const epoch = frame.readUInt32BE(headerBytes + 100)
+    const idBytes = frame.readUInt32BE(headerBytes + 112)
+    if (idBytes > 256 || frame.byteLength < headerBytes + 116 + idBytes
+      || (present === 0 && idBytes !== 0) || (present === 1 && idBytes === 0)) return undefined
+    if (present === 1 && (frame.readUInt32BE(headerBytes + 92) === 0
+      || epoch === 0 || epoch !== frame.readUInt32BE(headerBytes + 16))) return undefined
+    const mixOffset = headerBytes + 116 + idBytes
+    let watchedMixProcessed: NativeHostDiagnostics["watchedMixProcessed"] = null
+    let watchedMixHost: NativeHostDiagnostics["watchedMixHost"] = null
+    let hostOffset = mixOffset
+    if (frame.byteLength !== mixOffset) {
+      if (frame.byteLength < mixOffset + 24) return undefined
+      const mixPresent = frame.readUInt32BE(mixOffset)
+      const mixCount = frame.readUInt32BE(mixOffset + 4)
+      const mixEpoch = frame.readUInt32BE(mixOffset + 8)
+      const mixSequence = frame.readBigUInt64BE(mixOffset + 12)
+      const mixIdBytes = frame.readUInt32BE(mixOffset + 20)
+      hostOffset = mixOffset + 24 + mixIdBytes
+      if (mixPresent > 1 || mixIdBytes > 256 || frame.byteLength < hostOffset
+        || (mixPresent === 0 && (mixCount !== 0 || mixEpoch !== 0 || mixSequence !== 0n || mixIdBytes !== 0))
+        || (mixPresent === 1 && (mixCount === 0 || mixCount > 64 || mixEpoch === 0
+          || mixEpoch !== frame.readUInt32BE(headerBytes + 16) || mixSequence === 0n || mixIdBytes === 0))) return undefined
+      if (mixPresent === 1) watchedMixProcessed = {
+        instanceId: readDiagnosticInstanceId(frame, mixOffset + 24, mixIdBytes),
+        acceptedPoints: mixCount,
+        lastParameterId: 48,
+        transportEpoch: mixEpoch,
+        sequence: mixSequence,
+      }
+      if (frame.byteLength !== hostOffset) {
+        if (frame.byteLength < hostOffset + 28) return undefined
+        const hostPresent = frame.readUInt32BE(hostOffset)
+        const hostPublished = frame.readUInt32BE(hostOffset + 4)
+        const hostProjected = frame.readUInt32BE(hostOffset + 8)
+        const hostSkipped = frame.readUInt32BE(hostOffset + 12)
+        const hostSubmitted = frame.readUInt32BE(hostOffset + 16)
+        const hostEpoch = frame.readUInt32BE(hostOffset + 20)
+        const hostIdBytes = frame.readUInt32BE(hostOffset + 24)
+        if (hostPresent > 1 || hostIdBytes > 256 || frame.byteLength !== hostOffset + 28 + hostIdBytes
+          || (hostPresent === 0 && (hostPublished !== 0 || hostProjected !== 0 || hostSkipped !== 0
+            || hostSubmitted !== 0 || hostEpoch !== 0 || hostIdBytes !== 0))
+          || (hostPresent === 1 && (hostIdBytes === 0 || hostEpoch === 0
+            || hostEpoch !== frame.readUInt32BE(headerBytes + 16)))) return undefined
+        if (hostPresent === 1) watchedMixHost = {
+          instanceId: readDiagnosticInstanceId(frame, hostOffset + 28, hostIdBytes),
+          published: hostPublished,
+          projected: hostProjected,
+          overrideSkips: hostSkipped,
+          submitted: hostSubmitted,
+          transportEpoch: hostEpoch,
+        }
+      }
+    }
     return {
+      watchedMixProcessed,
+      watchedMixHost,
+      workerAutomation: present === 0 ? null : {
+        instanceId: readDiagnosticInstanceId(frame, headerBytes + 116, idBytes),
+        acceptedPoints: frame.readUInt32BE(headerBytes + 92),
+        lastParameterId: frame.readUInt32BE(headerBytes + 96),
+        transportEpoch: epoch,
+        sequence: frame.readBigUInt64BE(headerBytes + 104),
+      },
       state: state === 0 ? "idle" : state === 1 ? "configured" : state === 2 ? "running" : "faulted",
       activeRevision: frame.readUInt32BE(headerBytes + 4),
       preparedRevision: frame.readUInt32BE(headerBytes + 8),

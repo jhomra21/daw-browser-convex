@@ -16,7 +16,7 @@
 
 namespace daw::audio_host_macos {
 
-constexpr std::uint32_t kControlProtocolVersion = 18;
+constexpr std::uint32_t kControlProtocolVersion = 20;
 constexpr std::size_t kMaximumControlPayloadBytes = 1'048'576;
 constexpr std::size_t kControlFrameHeaderBytes = 16;
 constexpr std::size_t kNativeGraphFrameHeaderBytes = 12;
@@ -241,6 +241,24 @@ struct NativeVstAttachment {
 };
 
 struct Diagnostics {
+  struct WorkerAutomation {
+    std::uint32_t accepted_points;
+    std::uint32_t last_parameter_id;
+    std::uint32_t transport_epoch;
+    std::uint64_t sequence;
+    std::string instance_id;
+  };
+  std::optional<WorkerAutomation> worker_automation;
+  std::optional<WorkerAutomation> watched_mix_processed;
+  struct WatchedMixHost {
+    std::uint32_t published;
+    std::uint32_t projected;
+    std::uint32_t override_skips;
+    std::uint32_t submitted;
+    std::uint32_t transport_epoch;
+    std::string instance_id;
+  };
+  std::optional<WatchedMixHost> watched_mix_host;
   LifecycleState state;
   std::uint64_t callbacks;
   std::uint64_t split_blocks;
@@ -263,6 +281,19 @@ struct Diagnostics {
   std::uint32_t last_rejected_instrument_event_count;
   std::uint32_t last_rejected_graph_revision;
 };
+
+[[nodiscard]] inline std::optional<Diagnostics::WorkerAutomation> SelectWorkerAutomation(
+  std::optional<Diagnostics::WorkerAutomation> selected,
+  const Diagnostics::WorkerAutomation& candidate,
+  const std::uint32_t epoch
+) {
+  if (candidate.transport_epoch == epoch
+    && (!selected || candidate.sequence > selected->sequence
+      || (candidate.sequence == selected->sequence && candidate.instance_id < selected->instance_id))) {
+    return candidate;
+  }
+  return selected;
+}
 
 enum class GraphRevisionStatusCode : std::uint32_t {
   kPrepared = 1,

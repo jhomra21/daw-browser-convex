@@ -6,7 +6,7 @@ import {
   type LocalProjectAssetRow,
 } from '~/lib/local-project-db'
 import { buildTimelineTrackRow } from '~/lib/timeline-repository/track-row-builder'
-import { projectLocalControlSnapshotV1 } from './local-control-projector'
+import { projectLocalControlSnapshotV1, projectLocalControlSnapshotV2 } from './local-control-projector'
 
 const metadata: LocalControlProjectMetadata = {
   version: 1,
@@ -77,6 +77,15 @@ test('omits assets that violate canonical limits while retaining unrelated snaps
   expect(snapshot.assets.map((entry) => entry.id)).toEqual(['complete'])
   expect(snapshot.clips[0]?.source).toBeUndefined()
   expect(snapshot.tracks.map((entry) => entry.id)).toEqual(['track-1'])
+})
+test('v2 retains large locally imported audio assets', () => {
+  const large = { ...asset('large', true), sizeBytes: 105_840_044 }
+  const input = {
+    projectId: 'project-1', fallbackMetadata: metadata,
+    entities: [], assets: [large], projectState: [], revision: 0,
+  }
+  expect(projectLocalControlSnapshotV2(input).assets.map((entry) => entry.id)).toEqual(['large'])
+  expect(projectLocalControlSnapshotV1(input).assets).toEqual([])
 })
 
 test('omits tracks with malformed nested routing before shared projection', () => {

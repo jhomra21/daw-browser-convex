@@ -1,14 +1,35 @@
 import { mkdir, rm, stat } from "node:fs/promises"
 import path from "node:path"
+import type { CommandTimings } from "./command-timings"
 
 type HarnessServer = {
   readonly url: URL
   readonly uploadToken: string
   upload?: (body: Uint8Array) => Promise<Response>
+  uploadStream?: (body: ReadableStream<Uint8Array>) => Promise<Response>
   stop: (closeActiveConnections?: boolean) => void
 }
 
 export const performanceUploadMaxBytes = 40 * 1024 * 1024
+export const performanceStreamUploadMaxBytes = 1024 * 1024 * 1024
+export async function* boundedFixtureStream(
+  body: ReadableStream<Uint8Array>,
+  maxBytes = performanceStreamUploadMaxBytes,
+): AsyncGenerator<Uint8Array> {
+  let total = 0
+  for await (const chunk of body) {
+    total += chunk.byteLength
+    if (total > maxBytes) throw new Error("Fixture stream exceeds its fixed byte limit.")
+    yield chunk
+  }
+}
+export const browserCommandTimeoutMs = (args: readonly string[]) => {
+  const timeoutIndex = args.indexOf("--timeout")
+  const waitMs = timeoutIndex < 0 ? NaN : Number(args[timeoutIndex + 1])
+  return Number.isSafeInteger(waitMs) && waitMs >= 0
+    ? Math.max(30_000, waitMs + 10_000)
+    : 30_000
+}
 
 type UploadGateState = "ready" | "in-progress" | "accepted"
 type UploadGateInput = {
@@ -76,7 +97,7 @@ const readBoundedBody = async (request: Request, maxBytes: number): Promise<Uint
   return body
 }
 
-export const browserCommand = async (session: string, args: readonly string[]) => {
+export const browserCommand = async (session: string, args: readonly string[], timings?: CommandTimings) => {
   const environment = { ...process.env }
   delete environment.AGENT_BROWSER_CDP
   delete environment.AGENT_BROWSER_SESSION
@@ -94,16 +115,27 @@ export const browserCommand = async (session: string, args: readonly string[]) =
       }
     }
   }
-  const childProcess = Bun.spawn(["agent-browser", "--session", session, ...args], {
-    env: environment,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [stdout, stderr] = await Promise.all([
-    new Response(childProcess.stdout).text(),
-    new Response(childProcess.stderr).text(),
-  ])
-  const exitCode = await childProcess.exited
+  const startedAt = Date.now()
+  const start = performance.now()
+  let exitCode: number | null = null
+  let stdout: string
+  let stderr: string
+  try {
+    // A stuck CDP daemon must not strand the runner or its disposable app.
+    const childProcess = Bun.spawn(["agent-browser", "--session", session, ...args], {
+      env: environment,
+      signal: AbortSignal.timeout(browserCommandTimeoutMs(args)),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+    ;[stdout, stderr] = await Promise.all([
+      new Response(childProcess.stdout).text(),
+      new Response(childProcess.stderr).text(),
+    ])
+    exitCode = await childProcess.exited
+  } finally {
+    timings?.record("browser", args[0] ?? "unknown", startedAt, performance.now() - start, exitCode)
+  }
   if (exitCode !== 0) throw new Error(`agent-browser ${args[0] ?? "command"} failed: ${stderr || stdout}`)
   return stdout.trim()
 }
@@ -112,13 +144,14 @@ export const waitForBrowserValue = async (
   session: string,
   expression: string,
   timeoutMs: number,
+  timings?: CommandTimings,
 ) => {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) {
     throw new Error("Browser wait bounds are invalid.")
   }
   try {
-    await browserCommand(session, ["wait", "--fn", `(()=>{const value=(${expression});return value!==null&&value!==undefined})()`, "--timeout", String(timeoutMs)])
-    return await browserCommand(session, ["eval", `JSON.stringify(${expression})`])
+    await browserCommand(session, ["wait", "--fn", `(()=>{const value=(${expression});return value!==null&&value!==undefined})()`, "--timeout", String(timeoutMs)], timings)
+    return await browserCommand(session, ["eval", `JSON.stringify(${expression})`], timings)
   } catch (error) {
     let diagnostics = ""
     try {
@@ -130,7 +163,7 @@ export const waitForBrowserValue = async (
         probePresent: typeof window.__thirtyTrackProbeResult !== "undefined",
         moduleScripts: [...document.querySelectorAll('script[type="module"]')].map((script) => script.getAttribute("src")),
         bodyText: document.body?.innerText?.slice(0, 500) ?? "",
-      })`])
+      })`], timings)
     } catch (diagnosticError) {
       diagnostics = `diagnostics unavailable: ${diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError)}`
     }
@@ -165,11 +198,48 @@ export const withBrowserServer = async <Value>(
 ): Promise<Value> => {
   const uploadToken = crypto.randomUUID()
   const uploadGate = createUploadGate(uploadToken)
+  const streamUploadGate = createUploadGate(uploadToken, performanceStreamUploadMaxBytes)
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
+    maxRequestBodySize: performanceStreamUploadMaxBytes,
     async fetch(request) {
       const url = new URL(request.url)
+      if (url.pathname === "/fixture-stream") {
+        const length = request.headers.get("content-length")
+        const size = length === null ? null : Number(length)
+        const decision = streamUploadGate.begin({
+          method: request.method,
+          token: url.searchParams.get("token"),
+          contentLength: Number.isSafeInteger(size) && size >= 0 ? size : null,
+        })
+        if (!decision.accepted) return new Response("Fixture upload rejected.", { status: decision.status })
+        if (!request.body || !serverState.uploadStream) {
+          streamUploadGate.finish(false)
+          return new Response("Fixture stream unavailable.", { status: 413 })
+        }
+        try {
+          const chunks = boundedFixtureStream(request.body)
+          const boundedBody = new ReadableStream<Uint8Array>({
+            async pull(controller) {
+              try {
+                const next = await chunks.next()
+                if (next.done) return controller.close()
+                controller.enqueue(next.value)
+              } catch (error) {
+                controller.error(error)
+              }
+            },
+            cancel: () => chunks.return(),
+          })
+          const response = await serverState.uploadStream(boundedBody)
+          streamUploadGate.finish(response.ok)
+          return response
+        } catch {
+          streamUploadGate.finish(false)
+          return new Response("Fixture stream failed.", { status: 500 })
+        }
+      }
       if (url.pathname === "/fixture") {
         const contentLengthHeader = request.headers.get("content-length")
         const contentLength = contentLengthHeader === null ? null : Number(contentLengthHeader)

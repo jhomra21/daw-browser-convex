@@ -1,5 +1,6 @@
 #include "daw/audio_host_macos.h"
 #include "daw/audio_host_automation_override.h"
+#include "daw/watched_mix_stages.h"
 #include "daw/native-schedule-state.h"
 #include "daw/audio_host_event_scheduler.h"
 #include "daw/audio_core_native.h"
@@ -250,6 +251,9 @@ struct NativeVstWorkerAttachment {
   };
   static constexpr std::size_t kActiveNoteCapacity = 256;
   NativeVstAttachment metadata;
+  std::optional<Diagnostics::WorkerAutomation> worker_automation;
+  std::optional<Diagnostics::WorkerAutomation> watched_mix_processed;
+  WatchedMixStages watched_mix_stages;
   bool offline = false;
   bool offline_started = false;
   bool offline_parameters_applied = false;
@@ -307,7 +311,7 @@ struct NativeVstWorkerAttachment {
     std::span<daw::plugin_host::WorkerTransportEvent> events,
     std::size_t& event_count,
     const std::size_t maximum_events
-  ) const noexcept {
+  ) noexcept {
     const std::uint64_t block_end = static_cast<std::uint64_t>(block_start)
       + static_cast<std::uint64_t>(frame_count);
     const auto buffer = automation_callback_reading.load(std::memory_order_acquire)
@@ -317,8 +321,11 @@ struct NativeVstWorkerAttachment {
     for (std::size_t index = 0; index < segment_count; ++index) {
       const auto& segment = automation_segments[buffer][index];
       if (segment.end_frame <= static_cast<std::uint64_t>(block_start)
-        || segment.start_frame >= block_end
-        || HasAutomationOverride(segment.parameter_id)) continue;
+        || segment.start_frame >= block_end) continue;
+      if (HasAutomationOverride(segment.parameter_id)) {
+        watched_mix_stages.Override(automation_epoch.load(std::memory_order_acquire), segment.parameter_id);
+        continue;
+      }
       const auto value_at = [&segment](const std::uint64_t frame) {
         if (!segment.linear || frame <= segment.start_frame) return segment.start_value;
         if (frame >= segment.end_frame) return segment.end_value;
@@ -336,7 +343,9 @@ struct NativeVstWorkerAttachment {
         .sampleOffset = static_cast<std::uint32_t>(first_frame - static_cast<std::uint64_t>(block_start)),
         .parameterId = segment.parameter_id,
         .parameterValue = value_at(first_frame),
+        .scheduledAutomation = true,
       };
+      watched_mix_stages.Project(automation_epoch.load(std::memory_order_acquire), segment.parameter_id, 1);
       if (segment.linear && segment.end_frame < block_end
         && segment.end_frame > first_frame) {
         if (event_count >= maximum_events || event_count >= events.size()) return false;
@@ -345,7 +354,9 @@ struct NativeVstWorkerAttachment {
           .sampleOffset = static_cast<std::uint32_t>(segment.end_frame - static_cast<std::uint64_t>(block_start)),
           .parameterId = segment.parameter_id,
           .parameterValue = value_at(segment.end_frame),
+          .scheduledAutomation = true,
         };
+        watched_mix_stages.Project(automation_epoch.load(std::memory_order_acquire), segment.parameter_id, 1);
       }
     }
     return true;
@@ -367,6 +378,7 @@ struct NativeVstWorkerAttachment {
       ? automation_segment_count.load(std::memory_order_acquire)
       : 0U;
     std::size_t count = 0;
+    std::uint32_t watched_additions = 0;
     auto& destination = automation_segments[inactive_buffer];
     const auto value_at = [](const NativeVstAutomationSegment& segment, const std::uint64_t frame) {
       if (!segment.linear || frame <= segment.start_frame) return segment.start_value;
@@ -405,10 +417,12 @@ struct NativeVstWorkerAttachment {
       if (already_covered) continue;
       if (count >= destination.size()) return false;
       destination[count++] = addition;
+      if (addition.parameter_id == 48) ++watched_additions;
     }
     automation_segment_count.store(static_cast<std::uint32_t>(count), std::memory_order_release);
     automation_epoch.store(epoch, std::memory_order_release);
     automation_buffer.store(inactive_buffer, std::memory_order_release);
+    watched_mix_stages.Publish(epoch, 48, watched_additions);
     return true;
   }
 
@@ -859,6 +873,9 @@ struct NativeVstWorkerAttachment {
         return;
       }
       event_scheduler.CommitBlock(true);
+      for (std::size_t index = 0; index < event_count; ++index)
+        if (block_events[index].scheduledAutomation)
+          watched_mix_stages.Submit(render.transport_epoch, block_events[index].parameterId, true);
       pending_sequences[slot] = sequence;
       pending_frames[slot] = render.frame_count;
       next_slot = (slot + 1) % metadata.transport.slot_count;
@@ -1586,9 +1603,15 @@ struct AudioHost::Impl {
     return true;
   }
   void StopNativeVstWorkers() {
+    std::size_t worker_index = 0;
     for (auto& [instance_id, attachment] : native_vst_attachments) {
       static_cast<void>(instance_id);
+      const auto worker_entry = std::chrono::steady_clock::now();
+      std::fprintf(stderr, "[native-control-timing] worker stop entry index=%zu\n", worker_index);
       attachment->worker.Stop();
+      std::fprintf(stderr, "[native-control-timing] worker stop exit index=%zu elapsed_ms=%lld\n",
+        worker_index++, static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - worker_entry).count()));
       attachment->offline = false;
       attachment->offline_started = false;
       attachment->offline_parameters_applied = false;
@@ -1859,7 +1882,6 @@ bool AudioHost::Configure(const HostConfig& config) {
   impl_->assets.clear();
   impl_->prepared_asset_handles.clear();
   for (auto& [instance_id, attachment] : impl_->native_vst_attachments) {
-    static_cast<void>(instance_id);
     attachment->realtime_started = false;
     attachment->missed_callbacks.fill(0);
     attachment->missed_frames.fill(0);
@@ -2986,14 +3008,16 @@ bool AudioHost::QueueNativeVstParameterEvents(const std::span<const std::uint8_t
     events[index] = {.kind = daw::plugin_host::WorkerEventKind::kParameter, .sampleOffset = ReadLeU32(bytes + 4),
       .parameterId = parameter_id, .parameterValue = value};
   }
-  for (std::size_t index = 0; index < candidate_override_count; ++index) {
-    const auto result = attachment->second->SetAutomationOverride(candidate_override_ids[index]);
-    if (result == NativeVstWorkerAttachment::AutomationOverrideSetResult::kFull) {
-      rollback_overrides();
-      return false;
-    }
-    if (result == NativeVstWorkerAttachment::AutomationOverrideSetResult::kInserted) {
-      inserted_override_ids[inserted_override_count++] = candidate_override_ids[index];
+  if (ShouldOverrideNativeVstAutomation(impl_->transport_running.load(std::memory_order_acquire))) {
+    for (std::size_t index = 0; index < candidate_override_count; ++index) {
+      const auto result = attachment->second->SetAutomationOverride(candidate_override_ids[index]);
+      if (result == NativeVstWorkerAttachment::AutomationOverrideSetResult::kFull) {
+        rollback_overrides();
+        return false;
+      }
+      if (result == NativeVstWorkerAttachment::AutomationOverrideSetResult::kInserted) {
+        inserted_override_ids[inserted_override_count++] = candidate_override_ids[index];
+      }
     }
   }
   if (!attachment->second->QueueEvents(
@@ -3071,9 +3095,29 @@ void AudioHost::ProcessNativeVstControl() {
   bool restart = false;
   bool faulted = false;
   for (auto& [instance_id, attachment] : impl_->native_vst_attachments) {
-    static_cast<void>(instance_id);
     while (const auto diagnostic = attachment->worker.ReadDiagnostic()) {
-      if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kLatency) {
+      if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kWatchedMixProcessed) {
+        const auto epoch = static_cast<std::uint32_t>(diagnostic->normalized_value);
+        if (diagnostic->parameter_id == 48 && diagnostic->value > 0 && epoch != 0
+          && epoch == impl_->transport_epoch.load(std::memory_order_acquire)
+          && (!attachment->watched_mix_processed
+            || attachment->watched_mix_processed->transport_epoch != epoch
+            || diagnostic->sequence > attachment->watched_mix_processed->sequence)) {
+          attachment->watched_mix_processed = Diagnostics::WorkerAutomation{
+            diagnostic->value, 48, epoch, diagnostic->sequence, instance_id,
+          };
+        }
+      } else if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kScheduledAutomationInput) {
+        const auto epoch = static_cast<std::uint32_t>(diagnostic->normalized_value);
+        if (diagnostic->value > 0 && epoch != 0
+          && epoch == impl_->transport_epoch.load(std::memory_order_acquire)
+          && (!attachment->worker_automation || attachment->worker_automation->transport_epoch != epoch
+            || diagnostic->sequence > attachment->worker_automation->sequence)) {
+          attachment->worker_automation = Diagnostics::WorkerAutomation{
+            diagnostic->value, diagnostic->parameter_id, epoch, diagnostic->sequence, instance_id,
+          };
+        }
+      } else if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kLatency) {
         if (diagnostic->value != attachment->metadata.declared_latency_frames) {
           attachment->metadata.declared_latency_frames = diagnostic->value;
           impl_->native_graph_revision_required = true;
@@ -3095,8 +3139,12 @@ void AudioHost::ProcessNativeVstControl() {
         // already prove the supported stereo bus contract; this notification
         // is informational and must not mute or tear down the graph.
       } else if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kRestart) {
+        attachment->worker_automation.reset();
+        attachment->watched_mix_processed.reset();
         restart = true;
       } else if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kFault) {
+        attachment->worker_automation.reset();
+        attachment->watched_mix_processed.reset();
         faulted = true;
       }
     }
@@ -3755,7 +3803,6 @@ std::optional<ScheduleProgress> AudioHost::DrainScheduleProgress() {
   const auto source_read = impl_->source_queue.read.load(std::memory_order_acquire);
   std::uint32_t automation_credits = 0;
   for (const auto& [instance_id, attachment] : impl_->native_vst_attachments) {
-    static_cast<void>(instance_id);
     const auto used = attachment->automation_segment_count.load(std::memory_order_acquire);
     automation_credits += static_cast<std::uint32_t>(
       attachment->automation_segments[0].size() - std::min<std::uint32_t>(
@@ -4512,7 +4559,30 @@ bool AudioHost::ProcessRecordingPlanar(
 // DAW_REALTIME_CALLBACK_REGION_END audio-host
 
 Diagnostics AudioHost::diagnostics() const {
+  std::optional<Diagnostics::WorkerAutomation> automation;
+  std::optional<Diagnostics::WorkerAutomation> watched_mix;
+  std::optional<Diagnostics::WatchedMixHost> watched_host;
+  const auto epoch = impl_->transport_epoch.load(std::memory_order_acquire);
+  for (const auto& [instance_id, attachment] : impl_->native_vst_attachments) {
+    static_cast<void>(instance_id);
+    const auto& candidate = attachment->worker_automation;
+    if (candidate && candidate->instance_id == instance_id)
+      automation = SelectWorkerAutomation(std::move(automation), *candidate, epoch);
+    const auto& mix_candidate = attachment->watched_mix_processed;
+    if (mix_candidate && mix_candidate->instance_id == instance_id)
+      watched_mix = SelectWorkerAutomation(std::move(watched_mix), *mix_candidate, epoch);
+    const auto host = attachment->watched_mix_stages.Read(epoch);
+    if (host.published != 0 || host.projected != 0 || host.override_skips != 0 || host.submitted != 0)
+      watched_host = Diagnostics::WatchedMixHost{
+        host.published, host.projected, host.override_skips, host.submitted, epoch, instance_id,
+      };
+  }
+  if (watched_mix && watched_host && watched_mix->instance_id != watched_host->instance_id)
+    watched_mix.reset();
   return {
+    .worker_automation = automation,
+    .watched_mix_processed = watched_mix,
+    .watched_mix_host = watched_host,
     .state = impl_->state.load(std::memory_order_acquire),
     .callbacks = impl_->callbacks.load(std::memory_order_relaxed),
     .split_blocks = impl_->split_blocks.load(std::memory_order_relaxed),

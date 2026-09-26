@@ -50,9 +50,19 @@ import type { DesktopBridge, DesktopVstEditorCapturedState, DesktopVstEditorStat
 import { createRequestQueue, type PreloadHostRequest, type PreloadHostResponse } from "./request-queue"
 import { offlinePcmMessageSchema } from "./offline-pcm-protocol"
 import { deliverOfflinePcmChunk } from "./offline-pcm-ack"
+import { diagnosticValidationPaths } from "./diagnostics-trace"
+import { safePreloadReply } from "./preload-reply"
 
 const incomingChannel = "daw:host-request"
 const outgoingChannel = "daw:host-response"
+const diagnosticsTraceChannel = "daw:diagnostics-v2-trace"
+const diagnosticsTraceStarts = new Map<string, number>()
+const traceDiagnostics = (id: string, stage: string) => {
+  const start = diagnosticsTraceStarts.get(id)
+  if (start === undefined) return
+  ipcRenderer.send(diagnosticsTraceChannel, { stage, elapsedMs: Math.max(0, Date.now() - start) })
+  if (stage === "preload-reply-sent" || stage === "preload-reply-invalid") diagnosticsTraceStarts.delete(id)
+}
 const offlinePcmAckChannel = "daw:audio-host:offline-pcm-ack"
 const offlineMappedPageRequestChannel = "daw:audio-host:offline-mapped-page-request"
 const maximumNativeMappedPageBytes = nativeAudioHostMaximumPayloadBytes - nativeAudioHostMappedAssetPageHeaderBytes
@@ -126,13 +136,23 @@ const validExportRequestId = (requestId: string) => /^[A-Za-z0-9][A-Za-z0-9._-]{
 const invalidExportRequest = () => Promise.reject(new Error("Invalid export output request."))
 
 const reply = (generation: number, response: PreloadHostResponse) => {
+  traceDiagnostics(response.id, "preload-reply")
   const parsed = desktopReplySchemaV1.safeParse({
     version: "v1",
     type: "reply",
     id: response.id,
     ...(response.error === undefined ? { result: response.result } : { error: response.error }),
   })
-  if (parsed.success) ipcRenderer.send(outgoingChannel, { generation, frame: parsed.data })
+  if (parsed.success) {
+    ipcRenderer.send(outgoingChannel, { generation, frame: parsed.data })
+    traceDiagnostics(response.id, "preload-reply-sent")
+  } else {
+    if (diagnosticsTraceStarts.has(response.id)) {
+      traceDiagnostics(response.id, "preload-reply-invalid")
+      ipcRenderer.send(diagnosticsTraceChannel, { stage: "preload-reply-invalid-path", elapsedMs: 0, paths: diagnosticValidationPaths(parsed.error) })
+    }
+    ipcRenderer.send(outgoingChannel, { generation, frame: safePreloadReply(response) })
+  }
 }
 
 const requestQueue = createRequestQueue({ reply, queueLimit })
@@ -162,6 +182,10 @@ ipcRenderer.on(incomingChannel, (_event, message) => {
   }
   const parsed = desktopTrustedRendererRequestSchemaV1.safeParse(frame)
   if (!parsed.success) return
+  if (incoming.data.diagnosticsTrace === true && parsed.data.operation === "diagnostics.snapshot.v2") {
+    diagnosticsTraceStarts.set(parsed.data.id, Date.now())
+    traceDiagnostics(parsed.data.id, "preload-received")
+  }
   if (parsed.data.operation === "lifecycle.prepareToClose") {
     dispatchLifecycle(generation, parsed.data)
     return
@@ -170,11 +194,20 @@ ipcRenderer.on(incomingChannel, (_event, message) => {
 })
 
 const desktopBridge = {
+  benchmarkSabRecording: process.env.DAW_BENCHMARK_SAB_RECORDING === "1",
+  benchmarkHeartbeat: (): Promise<{ mainEpochMs: number } | null> =>
+    process.env.DAW_BENCHMARK_HEARTBEAT === "1" ? ipcRenderer.invoke("daw:benchmark:heartbeat") : Promise.resolve(null),
+  traceDiagnosticsV2(id: string, stage: "controller-before-native" | "controller-after-native" | "controller-parsed") {
+    traceDiagnostics(id, stage)
+  },
   setRequestHandler(
     next: ((request: PreloadHostRequest) => Promise<PreloadHostResponse>) | undefined,
     onCancel?: (requestId: string) => void,
   ) {
-    requestQueue.setRequestHandler(next, onCancel)
+    requestQueue.setRequestHandler(next && ((request) => {
+      traceDiagnostics(request.id, "preload-handler")
+      return next(request)
+    }), onCancel)
   },
   onPrepareToClose(next: typeof closeHandler) {
     closeHandler = next

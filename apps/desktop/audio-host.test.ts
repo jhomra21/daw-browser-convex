@@ -165,6 +165,8 @@ process.stdin.on("data", (chunk) => {
         u32(0), u32(0), u32(0), u32(0), u32(0), u32(0), u32(0), u32(0), u64(0),
         u32(0), u64(0), u64(0), u32(0), u32(0),
         u32(0), u32(0), u32(0), u32(0), u32(0),
+        u32(0), u32(0), u32(0), u32(0), u64(0),
+        u32(0),
       ])))
     } else if (type === 36) {
       process.stdout.write(graphStatus(1, 2, 1, 2, 0))
@@ -269,7 +271,7 @@ describe("native audio host protocol", () => {
     expect(encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.graphRollback)).toEqual(
       Buffer.from([
         0x44, 0x41, 0x57, 0x48,
-        0x00, 0x00, 0x00, 0x12,
+        0x00, 0x00, 0x00, 0x14,
         0x00, 0x00, 0x00, 0x27,
         0x00, 0x00, 0x00, 0x00,
       ]),
@@ -1558,6 +1560,9 @@ test("acknowledges diagnostics and tears down without reporting host loss", asyn
     fixture.supervisor.onLoss((error) => losses.push(error.message))
     await fixture.supervisor.start()
     await expect(fixture.supervisor.diagnostics()).resolves.toEqual({
+      workerAutomation: null,
+      watchedMixProcessed: null,
+      watchedMixHost: null,
       state: "idle",
       activeRevision: 0,
       preparedRevision: 0,

@@ -26,7 +26,8 @@
     "knip": "knip",
     "perf:30-track:fixture": "bun tools/performance/30-track/generate-fixture.ts",
     "perf:30-track:browser": "bun tools/performance/30-track/run.ts --surface browser --out \"$PWD/../daw-browser-30-track-browser.json\"",
-    "perf:30-track:electron": "bun tools/performance/30-track/run.ts --surface electron --out \"$PWD/../daw-browser-30-track-electron.json\""
+    "perf:30-track:electron": "bun tools/performance/30-track/run.ts --surface electron --out \"$PWD/../daw-browser-30-track-electron.json\"",
+    "perf:30-track:tier3": "bun tools/performance/30-track/run.ts --surface electron --tier3 --out \"$PWD/../daw-browser-30-track-tier3.json\""
   },
   "overrides": {
     "undici": "7.24.8",

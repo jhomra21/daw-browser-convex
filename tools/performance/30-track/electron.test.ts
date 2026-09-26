@@ -11,9 +11,28 @@ import {
   electronRendererTarget,
   nativeCallbacksIncreased,
   processMetricsAvailability,
+  nativeControlTimingLines,
+  desktopDiagnosticsBoundaryLines,
+  desktopDiagnosticsValidationLines,
   verifyElectronLaunchIdentity,
   writePrivateArtifact,
 } from "./electron"
+
+test("retains only bounded native control timing markers from app stderr", () => {
+  const lines = nativeControlTimingLines("[native-vst3] native audio host stderr [native-control-timing] stop entry\nsecret token\n[native-control-timing] diagnostics response elapsed_ms=12")
+  expect(lines).toEqual(["[native-control-timing] stop entry", "[native-control-timing] diagnostics response elapsed_ms=12"])
+  expect(JSON.stringify(lines)).not.toContain("secret")
+})
+
+test("retains only bounded desktop diagnostics boundary markers", () => {
+  expect(desktopDiagnosticsBoundaryLines("[diagnostics-v2-boundary] operation=diagnostics.snapshot.v2 stage=renderer-dispatched elapsedMs=4\nsecret token"))
+    .toEqual(["[diagnostics-v2-boundary] operation=diagnostics.snapshot.v2 stage=renderer-dispatched elapsedMs=4"])
+})
+
+test("retains only bounded allowlisted validation paths", () => {
+  expect(desktopDiagnosticsValidationLines("[diagnostics-v2-validation] paths=result.audio.other\nsecret token"))
+    .toEqual(["[diagnostics-v2-validation] paths=result.audio.other"])
+})
 
 test("computes native callback and rejection deltas without fabricating timing data", () => {
   const delta = createNativeDiagnosticDelta(
@@ -102,6 +121,15 @@ test("verifies runner-owned Electron listener and browser capability", () => {
   })).toEqual({ verified: true, processGroupId: 42 })
   expect(electronRendererTarget("[t1] page daw://app/")).toEqual({
     targetId: "t1",
+    url: "daw://app/",
+  })
+  expect(electronRendererTarget("→ [t1] Browser DAW - daw://app/?dashboard=general")).toEqual({
+    targetId: "t1",
+    url: "daw://app/?dashboard=general",
+  })
+  expect(electronRendererTarget("→ [t1]  - about:blank")).toBeUndefined()
+  expect(electronRendererTarget("  [t1]  - about:blank\n→ [t2] DAW - daw://app/")).toEqual({
+    targetId: "t2",
     url: "daw://app/",
   })
 })

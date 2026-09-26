@@ -10,6 +10,7 @@ import { setLocalProjectAssetDirectory } from "~/lib/local-assets";
 import { isLocalId } from "@daw-browser/shared";
 import { downloadBlob } from "~/lib/local-export";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
+import { importLocalDawProjectFile } from "~/lib/project-archive-import-choice";
 import { flushSharedOutbox, readSharedOutboxSummary } from "~/lib/shared-outbox";
 import type { CloudBackupDialogState } from "~/components/timeline/cloud-backup-dialog";
 
@@ -81,8 +82,11 @@ export const useLocalProjectActions = (input: Input) => {
     const file = inputElement.files?.[0];
     if (file) {
       try {
-        const { importDawProjectArchive } = await import("~/lib/project-archive");
-        const nextProjectId = await importDawProjectArchive(file);
+        const { importDawProjectArchive, importDawProjectArchiveStreamed } = await import("~/lib/project-archive");
+        const nextProjectId = await importLocalDawProjectFile(file, {
+          legacy: importDawProjectArchive,
+          streamed: importDawProjectArchiveStreamed,
+        });
         input.navigateToRoom(nextProjectId);
       } catch (error) {
         setLocalSaveFailure(error instanceof Error ? error.message : "Archive import failed.");

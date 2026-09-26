@@ -43,7 +43,7 @@ import { listLocalExternalProcessors } from "~/lib/external-plugins"
 import { createLocalControlHandlers } from "~/lib/local-control/local-control-handlers"
 import { LocalControlServiceError } from "~/lib/local-control/local-control-service"
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
-import type { NativeHostDiagnostics } from "@daw-browser/audio-engine/native-host-wire"
+import { serializeNativeDiagnostics } from "~/lib/desktop/native-diagnostics-serialization"
 import type { ExportQueue } from "~/lib/export/export-queue"
 import { createImportJobQueue, type ImportJobQueue } from "~/lib/desktop/import-job-queue"
 import type { ImportProjectBinding, ImportSummary } from "~/hooks/useTimelineClipImport"
@@ -98,15 +98,9 @@ const safeRuntimeFaults = (runtime: ReturnType<AudioEngine["getRuntimeSnapshot"]
     : { kind: runtime.last.kind, codePresent: runtime.last.code.length > 0 },
 })
 const safeRecordingDiagnostics = (recording: ReturnType<typeof getRecordingDiagnostics>) => {
-  const { lastFailure, ...safeRecording } = recording
-  return { ...safeRecording, lastFailurePresent: lastFailure !== null }
+  const { lastFailure, termination, ...safeRecording } = recording
+  return { ...safeRecording, termination: termination ? { cause: termination.cause } : null, lastFailurePresent: lastFailure !== null }
 }
-const serializeNativeDiagnostics = (diagnostics: NativeHostDiagnostics) => ({
-  ...diagnostics,
-  renderEpoch: diagnostics.renderEpoch.toString(),
-  lastRejectedCallback: diagnostics.lastRejectedCallback.toString(),
-  lastRejectedRenderEpoch: diagnostics.lastRejectedRenderEpoch.toString(),
-})
 type NativeArtifactVerification =
   | { status: "disabled" | "development" | "verified" }
   | { status: "failed" }
@@ -329,6 +323,7 @@ export const createAttachedHostController = (input: {
   playheadSec: Accessor<number>
   tracks: Accessor<{ clips: unknown[] }[]>
   audioEngine: AudioEngine
+  schedulerDiagnostics?: () => { progressCount: number; compileCount: number; compileTotalMs: number; compileMaxMs: number; submittedVstSegments: number } | undefined
   requestPlay: () => Promise<void>
   pause: () => Promise<void>
   stop: () => Promise<void>
@@ -770,6 +765,7 @@ export const createAttachedHostController = (input: {
         input.setPlayhead(parsedInput.data.seconds)
         result = transport()
       } else if (request_.operation === "diagnostics.snapshot.v2") {
+        window.dawDesktop?.traceDiagnosticsV2(request_.id, "controller-before-native")
         const runtime = input.audioEngine.getRuntimeSnapshot()
         const recording = getRecordingDiagnostics()
         let native: {
@@ -795,7 +791,9 @@ export const createAttachedHostController = (input: {
               : { status: "failed", errorCode: "native-diagnostics-unavailable", artifactVerification: safeNativeArtifactVerification(nativeReply.artifactVerification) }
           }
         } catch {}
-        result = desktopDiagnosticsSchemaV2.parse({
+        window.dawDesktop?.traceDiagnosticsV2(request_.id, "controller-after-native")
+        const scheduler = input.schedulerDiagnostics?.()
+        const diagnosticSnapshot = {
           version: "v2",
           audio: { ...runtime, runtimeFaults: safeRuntimeFaults(runtime.runtimeFaults) },
           recording: safeRecordingDiagnostics(recording),
@@ -808,7 +806,11 @@ export const createAttachedHostController = (input: {
             reason: "not-exposed-at-controller-boundary",
           },
           native,
-        })
+        }
+        result = desktopDiagnosticsSchemaV2.parse(scheduler === undefined
+          ? diagnosticSnapshot
+          : { ...diagnosticSnapshot, scheduler })
+        window.dawDesktop?.traceDiagnosticsV2(request_.id, "controller-parsed")
       } else {
         const runtime = input.audioEngine.getRuntimeSnapshot()
         const recording = getRecordingDiagnostics()

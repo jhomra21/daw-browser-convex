@@ -1,5 +1,6 @@
 #include "daw/audio_host_macos.h"
 #include "daw/audio_host_automation_override.h"
+#include "daw/watched_mix_stages.h"
 #include "daw/audio_host_event_scheduler.h"
 #include "daw/audio_core_native.h"
 #include "daw/audio_core_instrument_wire.h"
@@ -15,6 +16,33 @@
 #include <vector>
 
 namespace {
+
+void TestWorkerAutomationSelection() {
+  using daw::audio_host_macos::Diagnostics;
+  const Diagnostics::WorkerAutomation stale{2, 9, 6, 30, "stale"};
+  const Diagnostics::WorkerAutomation current{1, 11, 7, 12, "target"};
+  std::optional<Diagnostics::WorkerAutomation> selected;
+  selected = daw::audio_host_macos::SelectWorkerAutomation(selected, stale, 7);
+  selected = daw::audio_host_macos::SelectWorkerAutomation(selected, current, 7);
+  assert(selected && selected->instance_id == "target" && selected->last_parameter_id == 11);
+  const Diagnostics::WorkerAutomation other{3, 14, 7, 13, "other"};
+  selected = daw::audio_host_macos::SelectWorkerAutomation(selected, other, 7);
+  assert(selected && selected->instance_id == "other");
+}
+
+void TestWatchedMixStages() {
+  daw::audio_host_macos::WatchedMixStages watched;
+  watched.Publish(7, 9, 1);
+  watched.Publish(7, 48, 2);
+  watched.Project(7, 48, 2);
+  watched.Override(7, 48);
+  watched.Submit(7, 48, false);
+  watched.Submit(7, 48, true);
+  const auto snapshot = watched.Read(7);
+  assert(snapshot.published == 2 && snapshot.projected == 2
+    && snapshot.override_skips == 1 && snapshot.submitted == 1);
+  assert(watched.Read(8).published == 0);
+}
 
 std::array<std::uint8_t, 32> Fingerprint(const std::string_view value) {
   std::array<std::uint8_t, 32> result{};
@@ -594,6 +622,8 @@ void TestNativeVstEventScheduler() {
 }
 
 void TestNativeVstAutomationOverrideTable() {
+  assert(!daw::audio_host_macos::ShouldOverrideNativeVstAutomation(false));
+  assert(daw::audio_host_macos::ShouldOverrideNativeVstAutomation(true));
   daw::audio_host_macos::NativeVstAutomationOverrideTable table;
   assert(table.Set(7) == daw::audio_host_macos::NativeVstAutomationOverrideTable::SetResult::kInserted);
   assert(table.Set(7) == daw::audio_host_macos::NativeVstAutomationOverrideTable::SetResult::kAlreadyPresent);
@@ -654,7 +684,7 @@ void TestControlFrames() {
     daw::audio_host_macos::ControlType::kGraphRollback, {});
   assert(transaction == std::vector<std::uint8_t>({
     0x44, 0x41, 0x57, 0x48,
-    0x00, 0x00, 0x00, 0x12,
+    0x00, 0x00, 0x00, 0x14,
     0x00, 0x00, 0x00, 0x27,
     0x00, 0x00, 0x00, 0x00,
   }));
@@ -1685,6 +1715,8 @@ void TestWorkerNotificationQueuePolicy() {
 }  // namespace
 
 int main() {
+  TestWatchedMixStages();
+  TestWorkerAutomationSelection();
   TestDeviceNamespace();
   TestControlFrames();
   TestOfflineTerminalIsPublishedBeforeStop();

@@ -4,6 +4,7 @@ import {
   readWriterInboundMessage,
   type RecorderBlockMessage,
   type WriterOutboundMessage,
+  type WriterTiming,
 } from '../../../packages/audio-engine/src/recording/recording-protocol'
 import {
   createRecorderSabRingConsumer,
@@ -15,6 +16,7 @@ type WriterSession = {
   appendPlanar?: (buffer: ArrayBuffer, frameCount: number) => Promise<void>
   finalize: () => Promise<{ capturedFrames: number }>
   abort: () => Promise<void>
+  timingSnapshot?: () => NonNullable<WriterTiming['storage']>
 }
 
 export type RecordingWriterStorage = {
@@ -30,6 +32,7 @@ type RecordingWriterOutput = (message: WriterOutboundMessage, transfer?: readonl
 export const createRecordingWriterHandler = (
   storage: RecordingWriterStorage,
   output: RecordingWriterOutput,
+  clock: () => number = () => performance.now(),
 ) => {
   let generation = -1
   let sessionId = ''
@@ -42,7 +45,34 @@ export const createRecordingWriterHandler = (
   let canonicalChannelCount = 0
   let abortScheduled = false
   let sabConsumer: ReturnType<typeof createRecorderSabRingConsumer> | null = null
+  const appendTiming = {
+    count: 0,
+    startDelayMs: { total: 0, max: 0 },
+    durationMs: { total: 0, max: 0 },
+  }
+  const measureAppend = async (queuedAt: number, append: () => Promise<void>) => {
+    const startedAt = clock()
+    const delay = Math.max(0, startedAt - queuedAt)
+    appendTiming.count += 1
+    appendTiming.startDelayMs.total += delay
+    appendTiming.startDelayMs.max = Math.max(appendTiming.startDelayMs.max, delay)
+    try {
+      await append()
+    } finally {
+      const duration = Math.max(0, clock() - startedAt)
+      appendTiming.durationMs.total += duration
+      appendTiming.durationMs.max = Math.max(appendTiming.durationMs.max, duration)
+    }
+  }
   const hasFailed = () => state === 'failed'
+  const timing = (): WriterTiming => ({
+    append: {
+      count: appendTiming.count,
+      startDelayMs: { ...appendTiming.startDelayMs },
+      durationMs: { ...appendTiming.durationMs },
+    },
+    storage: session?.timingSnapshot?.() ?? null,
+  })
 
   const transitionToFailure = (reason: string) => {
     if (state === 'failed' || state === 'closed') return
@@ -56,28 +86,30 @@ export const createRecordingWriterHandler = (
       } catch {
         // Preserve the originating failure after cleanup has settled.
       }
-      output({ type: 'failure', generation: Math.max(generation, 0), sessionId, reason })
+      output({ type: 'failure', generation: Math.max(generation, 0), sessionId, reason, timing: timing() })
     }).catch(() => {
       queuedBlocks = 0
     })
   }
 
-  const appendBlock = async (message: RecorderBlockMessage) => {
+  const appendBlock = async (message: RecorderBlockMessage, queuedAt: number) => {
     if (!session) throw new Error('recording-session-not-open')
     if (hasFailed()) return
     if (message.sequence !== expectedSequence) throw new Error('recording-block-out-of-order')
     if (message.channelCount !== canonicalChannelCount) throw new Error('recording-channel-layout-mismatch')
     expectedSequence += 1
-    if (session.appendPlanar) {
-      await session.appendPlanar(message.buffer, message.frameCount)
-    } else {
-      const planar = new Float32Array(message.buffer)
-      const channels: Float32Array[] = []
-      for (let channel = 0; channel < message.channelCount; channel += 1) {
-        channels.push(planar.subarray(channel * RECORDER_BLOCK_FRAMES, channel * RECORDER_BLOCK_FRAMES + message.frameCount))
+    await measureAppend(queuedAt, async () => {
+      if (session?.appendPlanar) {
+        await session.appendPlanar(message.buffer, message.frameCount)
+      } else if (session) {
+        const planar = new Float32Array(message.buffer)
+        const channels: Float32Array[] = []
+        for (let channel = 0; channel < message.channelCount; channel += 1) {
+          channels.push(planar.subarray(channel * RECORDER_BLOCK_FRAMES, channel * RECORDER_BLOCK_FRAMES + message.frameCount))
+        }
+        await session.append(channels)
       }
-      await session.append(channels)
-    }
+    })
     if (hasFailed()) return
     output({
       type: 'return',
@@ -85,6 +117,7 @@ export const createRecordingWriterHandler = (
       sessionId,
       blockId: message.blockId,
       buffer: message.buffer,
+      returnedAtMs: performance.timeOrigin + performance.now(),
     }, [message.buffer])
   }
 
@@ -95,7 +128,7 @@ export const createRecordingWriterHandler = (
       if (!block) return
       if (block.sequence !== expectedSequence) throw new Error('recording-block-out-of-order')
       expectedSequence += 1
-      await session.append(block.channels)
+      await measureAppend(clock(), () => session!.append(block.channels))
       if (hasFailed()) return
     }
   }
@@ -141,6 +174,7 @@ export const createRecordingWriterHandler = (
           transitionToFailure(error instanceof Error ? error.message : 'invalid-sab-configuration')
           return
         }
+        output({ type: 'boot', generation, sessionId })
       }
       state = 'closing'
       operations = storage.createSession(message).then((created) => {
@@ -169,6 +203,7 @@ export const createRecordingWriterHandler = (
         return
       }
       queuedBlocks += 1
+      const queuedAt = clock()
       if (queuedBlocks > RECORDER_MAX_QUEUED_BLOCKS) {
         queuedBlocks -= 1
         transitionToFailure('writer-queue-overflow')
@@ -176,7 +211,7 @@ export const createRecordingWriterHandler = (
       }
       operations = operations.then(async () => {
         try {
-          await appendBlock(message)
+          await appendBlock(message, queuedAt)
         } catch (error: unknown) {
           transitionToFailure(error instanceof Error ? error.message : 'write-failed')
         } finally {
@@ -206,7 +241,7 @@ export const createRecordingWriterHandler = (
           descriptor.capturedFrames !== message.capturedFrames
         ) throw new Error('Recording SAB captured frame count mismatch.')
         state = 'closed'
-        output({ type: 'finalized', generation, sessionId, capturedFrames: descriptor.capturedFrames })
+        output({ type: 'finalized', generation, sessionId, capturedFrames: descriptor.capturedFrames, timing: timing() })
       }).catch((error) => transitionToFailure(error instanceof Error ? error.message : 'finalize-failed'))
       return
     }
@@ -217,7 +252,7 @@ export const createRecordingWriterHandler = (
       await session?.abort()
       if (hasFailed()) return
       state = 'closed'
-      output({ type: 'aborted', generation, sessionId })
+      output({ type: 'aborted', generation, sessionId, timing: timing() })
     }).catch((error) => transitionToFailure(error instanceof Error ? error.message : 'abort-failed'))
   }
 
@@ -228,7 +263,14 @@ export const createRecordingWriterHandler = (
         await operations
         await failureCleanup
       },
-      snapshot: () => ({ state, queuedBlocks }),
+      snapshot: () => ({
+        state, queuedBlocks,
+        appendTiming: {
+          count: appendTiming.count,
+          startDelayMs: { ...appendTiming.startDelayMs },
+          durationMs: { ...appendTiming.durationMs },
+        },
+      }),
     },
   }
 }

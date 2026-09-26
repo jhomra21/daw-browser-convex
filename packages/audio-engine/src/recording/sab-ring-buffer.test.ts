@@ -30,9 +30,24 @@ describe('recorder SAB ring buffer', () => {
       expect(producer.push([Float32Array.of(sequence)], 1)).toBe(true)
     }
     expect(producer.push([Float32Array.of(999)], 1)).toBe(false)
-    expect(producer.stats()).toEqual({ droppedFrames: 1, droppedBlocks: 1 })
+    expect(producer.stats()).toMatchObject({ droppedFrames: 1, droppedBlocks: 1 })
     expect(Array.from({ length: RECORDER_POOL_BLOCKS }, () => consumer.pop()?.channels[0]?.[0]))
       .toEqual(Array.from({ length: RECORDER_POOL_BLOCKS }, (_, index) => index))
+  })
+
+  test('bounds an opt-in producer to eight outstanding blocks and tracks its peak', () => {
+    const buffers = createRecorderSabRingBuffers()
+    const producer = createRecorderSabRingProducer(buffers, 8)
+    const consumer = createRecorderSabRingConsumer(buffers, 1)
+    for (let index = 0; index < 8; index += 1) {
+      expect(producer.push([Float32Array.of(index)], 1)).toBe(true)
+    }
+    expect(producer.stats().peakOccupancy).toBe(8)
+    expect(producer.push([Float32Array.of(8)], 1)).toBe(false)
+    expect(producer.stats()).toMatchObject({ droppedBlocks: 1, peakOccupancy: 8 })
+    consumer.pop()
+    expect(producer.push([Float32Array.of(8)], 1)).toBe(true)
+    expect(producer.stats().peakOccupancy).toBe(8)
   })
 
   test('copies stereo full and final partial blocks', () => {

@@ -24,6 +24,7 @@ const commandNames = [
   "recoveries <project-id> [--cursor <cursor>] [--limit <number>] [--target <cloud|host>]",
   "host status", "host transport-status", "host play", "host pause", "host stop", "host seek <seconds>", "host diagnostics", "host diagnostics-v2",
   "host import (--path <absolute-path>|--picker)", "host export --request <file|->", "host export-status", "host export-cancel <job-id>",
+  "host vst-instances <project-id>", "host vst-parameters <project-id> <instance-id>",
 ]
 
 const error = (code: ControlErrorV1["code"], message: string): ControlErrorV1 => ({

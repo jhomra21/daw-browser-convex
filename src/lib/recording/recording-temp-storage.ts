@@ -91,6 +91,7 @@ type CreateRecordingTempStorageOptions = {
   lockManager?: RecordingStorageLockManager
   maxBytes?: number
   now?: () => number
+  clock?: () => number
 }
 
 type CreateSessionInput = {
@@ -104,6 +105,10 @@ type RecordingTempSession = {
   appendPlanar: (buffer: ArrayBuffer, frameCount: number) => Promise<void>
   finalize: () => Promise<RecordingTempSessionDescriptor>
   abort: () => Promise<void>
+  timingSnapshot: () => {
+    headerWriteMs: { count: number; total: number; max: number }
+    channelWriteMs: { count: number; total: number; max: number }
+  }
 }
 
 const isSafeName = (value: string): boolean => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(value)
@@ -273,6 +278,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     ?? (options.filesystem === undefined ? browserLockManager : undefined)
   const maxBytes = options.maxBytes
   const now = options.now ?? Date.now
+  const clock = options.clock ?? (() => performance.now())
   const ownedSessionIds = new Set<string>()
 
   const sessionsDirectory = async () => {
@@ -393,6 +399,22 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     let state: "open" | "finalized" | "aborted" = "open"
     let finalizedDescriptor: RecordingTempSessionDescriptor | null = null
     let appendQueue = Promise.resolve()
+    const headerWriteMs = { count: 0, total: 0, max: 0 }
+    const channelWriteMs = { count: 0, total: 0, max: 0 }
+    const timedWrite = async (
+      bytes: Uint8Array<ArrayBuffer>,
+      aggregate: typeof headerWriteMs,
+    ) => {
+      const startedAt = clock()
+      try {
+        await writable.write(bytes)
+      } finally {
+        const elapsed = Math.max(0, clock() - startedAt)
+        aggregate.count += 1
+        aggregate.total += elapsed
+        aggregate.max = Math.max(aggregate.max, elapsed)
+      }
+    }
 
     try {
       await writeCreatedAt(directory, createdAtMs)
@@ -447,7 +469,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
         try {
           const header = new Uint8Array(BLOCK_HEADER_BYTES)
           new DataView(header.buffer).setUint32(0, frameCount, true)
-          await writable.write(header)
+          await timedWrite(header, headerWriteMs)
           await writeSamples()
         } catch (error) {
           throw storageFailure("Could not write recording audio.", error)
@@ -472,7 +494,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
         return Promise.reject(new RecordingTempStorageError("invalid-block", "Recording block shape does not match the session."))
       }
       return appendEncodedBlock(frameCount, async () => {
-        await writable.write(encodePlanarBlock(channels, frameCount).subarray(BLOCK_HEADER_BYTES))
+        await timedWrite(encodePlanarBlock(channels, frameCount).subarray(BLOCK_HEADER_BYTES), channelWriteMs)
       })
     }
 
@@ -490,11 +512,11 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
       }
       return appendEncodedBlock(frameCount, async () => {
         for (let channel = 0; channel < input.channelCount; channel += 1) {
-          await writable.write(new Uint8Array(
+          await timedWrite(new Uint8Array(
             buffer,
             channel * RECORDER_BLOCK_FRAMES * Float32Array.BYTES_PER_ELEMENT,
             frameCount * Float32Array.BYTES_PER_ELEMENT,
-          ))
+          ), channelWriteMs)
         }
       })
     }
@@ -546,7 +568,13 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
       await abortAndRemove()
     }
 
-    return { append, appendPlanar, finalize, abort }
+    return {
+      append, appendPlanar, finalize, abort,
+      timingSnapshot: () => ({
+        headerWriteMs: { ...headerWriteMs },
+        channelWriteMs: { ...channelWriteMs },
+      }),
+    }
   }
 
   const open = async (sessionId: string): Promise<RecordingTempSessionDescriptor | null> => {

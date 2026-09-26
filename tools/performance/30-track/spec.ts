@@ -9,6 +9,55 @@ export const thirtyTrackCount = 30
 export const thirtyTrackTotalTrackCount = 31
 export const thirtyTrackTotalClipCount = 31
 export const thirtyTrackClipGain = 0.1
+
+// Independent source plan; the committed v2 archive and generator remain unchanged.
+const mixedRateDurations = [3, 10, 30, 60, 120, 360, 600] as const
+export const planThirtyTrackMixedRateSources = () => Object.freeze(
+  Array.from({ length: thirtyTrackCount }, (_, trackIndex) => {
+    const sampleRate = [44_100, 48_000, 96_000][trackIndex % 3]
+    if (sampleRate === undefined) throw new Error(`Missing source rate for track ${trackIndex}.`)
+    const channelCount = trackIndex % 2 === 0 ? 1 : 2
+    const durationSec = trackIndex === 0 ? 600 : mixedRateDurations[(trackIndex - 1) % 6]
+    if (durationSec === undefined) throw new Error(`Missing source duration for track ${trackIndex}.`)
+    return Object.freeze({
+      trackIndex,
+      sampleRate,
+      channelCount,
+      durationSec,
+      uncompressedBytes: sampleRate * channelCount * durationSec * Float32Array.BYTES_PER_ELEMENT,
+    })
+  }),
+)
+
+// Generate only the requested frames; never allocate or encode the entire source.
+export const sampleThirtyTrackMixedRatePage = (
+  source: ReturnType<typeof planThirtyTrackMixedRateSources>[number],
+  startFrame: number,
+  frameCount: number,
+): readonly Float32Array[] => {
+  const totalFrames = source.sampleRate * source.durationSec
+  if (!Number.isSafeInteger(startFrame) || !Number.isSafeInteger(frameCount)
+    || startFrame < 0 || frameCount < 1 || frameCount > 16_384
+    || startFrame + frameCount > totalFrames) {
+    throw new RangeError("Mixed-rate page must contain 1–16384 frames within the source.")
+  }
+  if (![44_100, 48_000, 96_000].includes(source.sampleRate)
+    || (source.channelCount !== 1 && source.channelCount !== 2)
+    || !mixedRateDurations.includes(source.durationSec)) {
+    throw new RangeError("Invalid mixed-rate source descriptor.")
+  }
+  return Array.from({ length: source.channelCount }, (_, channel) => {
+    const samples = new Float32Array(frameCount)
+    for (let frame = 0; frame < frameCount; frame += 1) {
+      const absoluteFrame = startFrame + frame
+      // Integer-period triangular signals remain reproducible across page boundaries.
+      samples[frame] = channel === 0
+        ? 0.12 * triangle(absoluteFrame, 240) + 0.06 * triangle(absoluteFrame, 60)
+        : 0.12 * triangle(absoluteFrame, 160) + 0.06 * triangle(absoluteFrame, 40)
+    }
+    return samples
+  })
+}
 export const thirtyTrackProjectName = "30 Track Performance v2"
 export const thirtyTrackArchiveName = `${thirtyTrackFixtureVersion}.dawproject`
 export type ThirtyTrackFixtureVersion = typeof thirtyTrackFixtureVersion

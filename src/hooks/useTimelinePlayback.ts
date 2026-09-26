@@ -3,6 +3,7 @@ import { createEffect, createSignal, onCleanup, untrack, type Accessor } from 's
 import { canFallbackToRepitchStretch, LIVE_SCHEDULE_HORIZON_SEC, type AudioEngine, type DeferredStretchWindow, type SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { createNativePlaybackController } from '~/lib/desktop/native-playback-controller'
+import { benchmarkSabRecordingEnabled } from '~/lib/desktop/benchmark-sab-recording'
 import { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
 import type { LivePlaybackCompileContext, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from '~/lib/live-playback-snapshot'
 import {
@@ -253,6 +254,8 @@ export function useTimelinePlayback(
 
   const nativePlayback = createNativePlaybackController({
     bridge: audioHostBridge,
+    createNativeSabRecordingWriter: benchmarkSabRecordingEnabled(globalThis.window?.dawDesktop)
+      ? async (input) => (await import('~/lib/recording/benchmark-sab-worker')).createBenchmarkSabRecordingWriter(input) : undefined,
     getProjectId: nativeOptions?.projectId,
     getProjectGeneration: nativeOptions?.projectGeneration,
     resolveSource: nativeOptions?.resolveAudioSource,
@@ -1893,6 +1896,7 @@ export function useTimelinePlayback(
   })
 
   return {
+    schedulerDiagnostics: nativePlayback.schedulerDiagnostics,
     isPlaying,
     isStructuralRebuildInProgress: () => rebuildInProgress,
     isPreparingPlayback: () => (playAttempt !== undefined && !isPlaying())

@@ -137,6 +137,7 @@ import { createTimelineExportService } from "~/lib/export/timeline-export-servic
 import { createExportRenderStateSnapshot, type ExportAutomationPatch } from "~/lib/export/run-export-job";
 import { createDesktopNativeOfflinePcmRenderer } from "~/lib/export/desktop-native-offline-pcm-renderer";
 import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackTransport } from "~/lib/live-playback-snapshot";
+import { nativeVstAutomationSegmentsForSnapshot } from "~/lib/desktop/native-schedule-coordinator";
 import { withInstrumentOverride } from "~/lib/export/export-effect-rows";
 import { createTimelineExtensionHost } from "~/lib/extensions";
 import { createSampledInstrumentSession } from "~/lib/sampled-instrument-session";
@@ -411,6 +412,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     createSignal<EffectsPanelExportSnapshot>();
   let getAutomationPatches: () => ExportAutomationPatch[] = () => [];
   let nativePlaybackRevision = 1;
+  let benchmarkProjectionReports = 0;
   const compilePlaybackSnapshot = async (
     transport: LivePlaybackTransport,
     context?: LivePlaybackCompileContext,
@@ -493,6 +495,15 @@ const Timeline: Component<TimelineProps> = (props) => {
         && processor.manifest.supportsState
         && (processor.state !== undefined || processor.launchReference?.state !== undefined))
       .map((processor) => processor.instanceId)
+    if (window.dawDesktop?.benchmarkSabRecording && benchmarkProjectionReports < 16) {
+      benchmarkProjectionReports += 1;
+      const projected = { ...result.snapshot, nativeExternalAttachmentPlan: attachmentPlan.plan };
+      console.info("[tier3] native automation projection", {
+        envelopes: projected.mixer.automationEnvelopes.length,
+        attachments: attachmentPlan.plan.attachments.length,
+        initialVstSegments: nativeVstAutomationSegmentsForSnapshot(projected, 48_000, 0, 512).length,
+      });
+    }
     return {
       supported: true as const,
       snapshot: {
@@ -628,6 +639,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     isStructuralRebuildInProgress,
     isPreparingPlayback,
     isNativePlaybackPrepared,
+    schedulerDiagnostics,
     isPortableBrowserPlaybackPrepared,
     liveProcessorControl,
     reenableProcessorAutomation,
@@ -2129,6 +2141,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       playheadSec,
       tracks: renderTracks,
       audioEngine,
+      schedulerDiagnostics,
       requestPlay,
       pause: handleTransportPause,
       stop: handleTransportStop,

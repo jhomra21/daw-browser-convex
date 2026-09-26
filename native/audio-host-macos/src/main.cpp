@@ -4,6 +4,8 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
@@ -792,10 +794,12 @@ int main() {
       continue;
     }
     if (request->type == daw::audio_host_macos::ControlType::kDiagnostics) {
+      const auto diagnostics_entry = std::chrono::steady_clock::now();
+      std::fprintf(stderr, "[native-control-timing] diagnostics entry\n");
       if (!payload.empty()) return EXIT_FAILURE;
       const auto diagnostics = host->diagnostics();
       std::vector<std::uint8_t> response;
-      response.reserve(88);
+      response.reserve(372);
       WriteU32(response, static_cast<std::uint32_t>(diagnostics.state));
       WriteU32(response, diagnostics.active_revision);
       WriteU32(response, diagnostics.prepared_revision);
@@ -815,7 +819,28 @@ int main() {
       WriteU32(response, diagnostics.last_rejected_processor_event_count);
       WriteU32(response, diagnostics.last_rejected_instrument_event_count);
       WriteU32(response, diagnostics.last_rejected_graph_revision);
+      WriteU32(response, diagnostics.worker_automation ? 1 : 0);
+      WriteU32(response, diagnostics.worker_automation ? diagnostics.worker_automation->accepted_points : 0);
+      WriteU32(response, diagnostics.worker_automation ? diagnostics.worker_automation->last_parameter_id : 0);
+      WriteU32(response, diagnostics.worker_automation ? diagnostics.worker_automation->transport_epoch : 0);
+      WriteU64(response, diagnostics.worker_automation ? diagnostics.worker_automation->sequence : 0);
+      WriteString(response, diagnostics.worker_automation ? diagnostics.worker_automation->instance_id : "");
+      WriteU32(response, diagnostics.watched_mix_processed ? 1 : 0);
+      WriteU32(response, diagnostics.watched_mix_processed ? diagnostics.watched_mix_processed->accepted_points : 0);
+      WriteU32(response, diagnostics.watched_mix_processed ? diagnostics.watched_mix_processed->transport_epoch : 0);
+      WriteU64(response, diagnostics.watched_mix_processed ? diagnostics.watched_mix_processed->sequence : 0);
+      WriteString(response, diagnostics.watched_mix_processed ? diagnostics.watched_mix_processed->instance_id : "");
+      WriteU32(response, diagnostics.watched_mix_host ? 1 : 0);
+      WriteU32(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->published : 0);
+      WriteU32(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->projected : 0);
+      WriteU32(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->override_skips : 0);
+      WriteU32(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->submitted : 0);
+      WriteU32(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->transport_epoch : 0);
+      WriteString(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->instance_id : "");
       if (!WriteFrame(daw::audio_host_macos::ControlType::kDiagnostics, response)) return EXIT_FAILURE;
+      std::fprintf(stderr, "[native-control-timing] diagnostics response elapsed_ms=%lld\n",
+        static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now() - diagnostics_entry).count()));
       continue;
     }
     if (request->type == daw::audio_host_macos::ControlType::kDeviceList) {
@@ -1040,8 +1065,15 @@ int main() {
         break;
       case daw::audio_host_macos::ControlType::kStop:
         if (!payload.empty()) return EXIT_FAILURE;
+        {
+        const auto stop_entry = std::chrono::steady_clock::now();
+        std::fprintf(stderr, "[native-control-timing] stop entry\n");
         stop_recording_thread();
         if (active_session) active_session->Stop();
+        std::fprintf(stderr, "[native-control-timing] stop exit elapsed_ms=%lld\n",
+          static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - stop_entry).count()));
+        }
         accepted = active_session != nullptr;
         break;
       case daw::audio_host_macos::ControlType::kTeardown:

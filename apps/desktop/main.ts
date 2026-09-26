@@ -1988,6 +1988,18 @@ const createWindow = () => {
       benchmarkStartupStage(process.env.DAW_BENCHMARK_STARTUP_TRACE,
         sameAppOrigin(window_?.webContents.getURL() ?? "") ? "window-loaded" : "unexpected-window-loaded", console.error))
   }
+  if (process.env.DAW_BENCHMARK_QUIET_CAPTURE === "1") {
+    const contents = window_.webContents
+    console.error(`[quiet-capture-lifecycle] stage=created webContentsId=${contents.id} rendererPid=${contents.getOSProcessId()} generation=${generation}`)
+    contents.on("render-process-gone", (_event, details) =>
+      console.error(`[quiet-capture-lifecycle] stage=renderer-gone reason=${details.reason} exitCode=${details.exitCode} generation=${generation}`))
+    contents.on("did-fail-load", (_event, code, _description, url, isMainFrame) => {
+      if (isMainFrame) console.error(`[quiet-capture-lifecycle] stage=load-failed code=${code} appOrigin=${sameAppOrigin(url)} generation=${generation}`)
+    })
+    contents.on("did-finish-load", () =>
+      console.error(`[quiet-capture-lifecycle] stage=loaded rendererPid=${contents.getOSProcessId()} appOrigin=${sameAppOrigin(contents.getURL())} generation=${generation}`))
+    window_.on("closed", () => console.error(`[quiet-capture-lifecycle] stage=closed generation=${generation}`))
+  }
   window_?.on("closed", () => {
     invalidateRendererGeneration("Renderer destroyed.")
     window_ = undefined
@@ -2277,7 +2289,12 @@ else {
     removeAudioHostRecordingBlockListener = audioHostSupervisor?.onRecordingBlock((block) => {
       sendRendererMessage("daw:audio-host:recording-block", block)
     })
+    let lastQuietRecordingStatusLogAt = 0
     removeAudioHostRecordingStatusListener = audioHostSupervisor?.onRecordingStatus((status) => {
+      if (process.env.DAW_BENCHMARK_QUIET_CAPTURE === "1" && Date.now() - lastQuietRecordingStatusLogAt >= 5_000) {
+        lastQuietRecordingStatusLogAt = Date.now()
+        console.error(`[quiet-capture-native] active=${status.active} fatal=${status.fatal} capturedFrames=${status.capturedFrames} droppedFrames=${status.droppedFrames} droppedBlocks=${status.droppedBlocks} queuedBlocks=${status.queuedBlocks} availableBlocks=${status.availableBlocks} generation=${status.generation}`)
+      }
       sendRendererMessage("daw:audio-host:recording-status", status)
     })
     removeAudioHostMeterBatchListener = audioHostSupervisor?.onMeterBatch((batch: NativeHostMeterBatch) => {

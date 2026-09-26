@@ -39,6 +39,7 @@ import {
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
 import { serializeDesktopReply } from "@daw-browser/desktop-protocol/reply-chunks"
 import { createCloseHandler } from "./close-flow"
+import { classifyNavigationUrl } from "./quiet-renderer-telemetry"
 import { createFileCapabilityManager } from "./file-capabilities"
 import { createNativeFileCapabilityHelper } from "./native-file-capability-helper"
 import { createRequestCorrelation } from "./request-correlation"
@@ -1990,6 +1991,38 @@ const createWindow = () => {
   }
   if (process.env.DAW_BENCHMARK_QUIET_CAPTURE === "1") {
     const contents = window_.webContents
+    const startedAt = performance.now()
+    const health = (name: string, url = contents.getURL(), reason = "") =>
+      console.error(`[quiet-renderer-health] ${JSON.stringify({
+        elapsedMs: Math.round(performance.now() - startedAt), name, pid: contents.getOSProcessId(),
+        urlClass: classifyNavigationUrl(url), reason: reason.slice(0, 48),
+      })}`)
+    contents.on("unresponsive", () => health("unresponsive"))
+    contents.on("responsive", () => health("responsive"))
+    contents.on("render-process-gone", (_event, details) => health("render-process-gone", "", details.reason))
+    contents.on("destroyed", () => health("destroyed", ""))
+    contents.on("did-start-navigation", (details) => {
+      if (details.isMainFrame) health("did-start-navigation", details.url)
+    })
+    contents.on("did-navigate", (_event, url) => health("did-navigate", url))
+    contents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
+      if (isMainFrame) health("did-navigate-in-page", url)
+    })
+    // Benchmark-only one-second main-process sampling never calls into the renderer.
+    const metricTimer = setInterval(() => {
+      for (const metric of app.getAppMetrics()) {
+        console.error(`[quiet-renderer-metric] ${JSON.stringify({
+          elapsedMs: Math.round(performance.now() - startedAt), pid: metric.pid,
+          epochMs: Date.now(),
+          type: metric.type, renderer: metric.pid === contents.getOSProcessId(),
+          workingSetKiB: metric.memory.workingSetSize,
+          peakWorkingSetKiB: metric.memory.peakWorkingSetSize,
+          privateKiB: metric.memory.privateBytes ?? null,
+          cpuPercent: metric.cpu.percentCPUUsage,
+        })}`)
+      }
+    }, 1_000)
+    contents.on("destroyed", () => clearInterval(metricTimer))
     console.error(`[quiet-capture-lifecycle] stage=created webContentsId=${contents.id} rendererPid=${contents.getOSProcessId()} generation=${generation}`)
     contents.on("render-process-gone", (_event, details) =>
       console.error(`[quiet-capture-lifecycle] stage=renderer-gone reason=${details.reason} exitCode=${details.exitCode} generation=${generation}`))

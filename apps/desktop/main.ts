@@ -41,6 +41,7 @@ import { serializeDesktopReply } from "@daw-browser/desktop-protocol/reply-chunk
 import { createCloseHandler } from "./close-flow"
 import { classifyNavigationUrl } from "./quiet-renderer-telemetry"
 import { createRecordingBlockTransit } from "./recording-block-transit"
+import { createRecordingBlockForwarder, createRecordingIpcDiagnostics, createRendererTrafficDiagnostics, createStatusSampler, parseRecordingForwardMode } from "./recording-ipc-diagnostics"
 import { createFileCapabilityManager } from "./file-capabilities"
 import { createNativeFileCapabilityHelper } from "./native-file-capability-helper"
 import { createRequestCorrelation } from "./request-correlation"
@@ -2347,6 +2348,13 @@ else {
       publishNativeSessionLoss(sanitizeNativeVst3DiagnosticError(error), "host")
     })
     const sampledBlockSentAt = new Map<number, number>()
+    const benchmarkRecordingIpc = process.env.DAW_BENCHMARK_HEARTBEAT === "1"
+    const recordingForwardMode = parseRecordingForwardMode(process.env.DAW_BENCHMARK_RECORDING_FORWARD_MODE)
+    const recordingForwarder = createRecordingBlockForwarder(recordingForwardMode)
+    const recordingIpcDiagnostics = createRecordingIpcDiagnostics(Date.now())
+    const rendererTrafficDiagnostics = createRendererTrafficDiagnostics(Date.now())
+    const recordingStatusSampler = createStatusSampler()
+    let recordingActive = false
     let latestBlockSequence = -1
     if (process.env.DAW_BENCHMARK_HEARTBEAT === "1") {
       ipcMain.on("daw:benchmark:recording-block-received", (event, sequence) => {
@@ -2362,7 +2370,32 @@ else {
       })
     }
     let lastBlockSendLogAt = 0
+    const forwardRecordingMessages = (messages: ReturnType<typeof recordingForwarder.push>) => {
+      for (const message of messages) {
+        const startedAt = performance.now()
+        if (message.kind === "metadata") {
+          sendRendererMessage("daw:benchmark:recording-block-metadata", message.metadata)
+          rendererTrafficDiagnostics.record("recording-block-metadata", 64)
+        } else {
+          const channel = message.blocks.length === 1
+            ? "daw:audio-host:recording-block" : "daw:benchmark:recording-block-batch"
+          sendRendererMessage(channel, message.blocks.length === 1 ? message.blocks[0] : message.blocks)
+          rendererTrafficDiagnostics.record("recording-block",
+            message.blocks.reduce((bytes, entry) => bytes + entry.planarPcm.byteLength + 64, 0))
+        }
+        recordingIpcDiagnostics.recordSend(performance.now() - startedAt)
+      }
+    }
     removeAudioHostRecordingBlockListener = audioHostSupervisor?.onRecordingBlock((block) => {
+      if (!benchmarkRecordingIpc) {
+        sendRendererMessage("daw:audio-host:recording-block", block)
+        return
+      }
+      recordingIpcDiagnostics.recordBlock({
+        frameCount: block.frameCount,
+        channelCount: block.channelCount,
+        payloadBytes: block.planarPcm.byteLength,
+      })
       if (process.env.DAW_BENCHMARK_HEARTBEAT === "1") {
         latestBlockSequence = block.sequence
         if (createRecordingBlockTransit(block.sequence)) {
@@ -2372,25 +2405,38 @@ else {
         if (Date.now() - lastBlockSendLogAt >= 5_000) {
           lastBlockSendLogAt = Date.now()
           console.error(`[quiet-block-sent] sequence=${block.sequence} outstandingSamples=${sampledBlockSentAt.size}`)
+          console.error(`[quiet-recording-ipc] ${JSON.stringify({
+            mode: recordingForwardMode,
+            blocks: recordingIpcDiagnostics.report(Date.now()),
+            traffic: rendererTrafficDiagnostics.report(Date.now()),
+          })}`)
         }
       }
-      sendRendererMessage("daw:audio-host:recording-block", block)
+      forwardRecordingMessages(recordingForwarder.push(block))
     })
     let lastQuietRecordingStatusLogAt = 0
     removeAudioHostRecordingStatusListener = audioHostSupervisor?.onRecordingStatus((status) => {
+      recordingActive = status.active
+      if (!status.active) forwardRecordingMessages(recordingForwarder.flush())
       if (process.env.DAW_BENCHMARK_QUIET_CAPTURE === "1" && Date.now() - lastQuietRecordingStatusLogAt >= 5_000) {
         lastQuietRecordingStatusLogAt = Date.now()
         console.error(`[quiet-capture-native] active=${status.active} fatal=${status.fatal} capturedFrames=${status.capturedFrames} droppedFrames=${status.droppedFrames} droppedBlocks=${status.droppedBlocks} queuedBlocks=${status.queuedBlocks} availableBlocks=${status.availableBlocks} generation=${status.generation}`)
       }
+      if (!recordingStatusSampler.shouldForward(status, performance.now())) return
+      if (benchmarkRecordingIpc) rendererTrafficDiagnostics.record("recording-status", 96)
       sendRendererMessage("daw:audio-host:recording-status", status)
     })
     removeAudioHostMeterBatchListener = audioHostSupervisor?.onMeterBatch((batch: NativeHostMeterBatch) => {
+      if (recordingActive && process.env.DAW_BENCHMARK_RECORDING_SUPPRESS_CHANNEL === "meter-batch") return
+      if (benchmarkRecordingIpc) rendererTrafficDiagnostics.record("meter-batch", 32 + batch.entries.length * 24)
       sendRendererMessage("daw:audio-host:meter-batch", batch)
     })
     removeAudioHostSpectrumListener = audioHostSupervisor?.onSpectrumFrame((frame) => {
+      if (benchmarkRecordingIpc) rendererTrafficDiagnostics.record("spectrum-frame", 48 + frame.data.byteLength)
       sendRendererMessage("daw:audio-host:spectrum-frame", frame)
     })
     removeAudioHostScheduleProgressListener = audioHostSupervisor?.onScheduleProgress((progress: NativeScheduleProgress) => {
+      if (benchmarkRecordingIpc) rendererTrafficDiagnostics.record("schedule-progress", 96)
       sendRendererMessage("daw:audio-host:schedule-progress", progress)
     })
     protocol.handle("daw", (request) => {

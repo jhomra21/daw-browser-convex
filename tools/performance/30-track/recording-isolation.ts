@@ -200,6 +200,18 @@ const main = async () => {
     await waitForBrowserValue(session, `new URL(location.href).searchParams.get('projectId') === ${JSON.stringify(projectId)} && document.querySelector('[data-timeline-ruler="1"]') ? true : null`, 60_000)
     const reopened = await snapshot()
     verifyReopenedRecording(persisted, reopened, clipId)
+    const beforePlayback = data(desktopDiagnosticsSchemaV2, await command(root, profile, ["host", "diagnostics-v2"]))
+    await browserCommand(session, ["find", "role", "button", "click", "--name", "Play"])
+    await waitForBrowserValue(session, "document.querySelector('button[aria-label=\"Pause\"]') ? true : null", 10_000)
+    await delay(2_000)
+    const afterPlayback = data(desktopDiagnosticsSchemaV2, await command(root, profile, ["host", "diagnostics-v2"]))
+    if (afterPlayback.native.status !== "available"
+      || afterPlayback.native.diagnostics.callbacks <= (beforePlayback.native.status === "available"
+        ? beforePlayback.native.diagnostics.callbacks : 0)
+      || afterPlayback.native.diagnostics.rejectedBlocks !== 0) {
+      throw new Error("Cold-reopened recording did not play through the native host.")
+    }
+    await browserCommand(session, ["find", "role", "button", "click", "--name", "Stop"])
     await mkdir(path.dirname(out), { recursive: true, mode: 0o700 })
     await writePrivateArtifact(out, JSON.stringify({
       status: "complete", projectId, clipId, elapsedMs,
@@ -207,6 +219,7 @@ const main = async () => {
       peakWriterOutstandingBuffers: completed.recording.peakWriterOutstandingBuffers,
       writerReturnMaxMs: completed.recording.writerReturnMaxMs,
       writerTiming: recordingTimingResult(completed.recording),
+      reopenedPlaybackCallbacks: afterPlayback.native.diagnostics.callbacks,
     }, null, 2))
   } catch (error) {
     failure = true

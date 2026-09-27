@@ -78,6 +78,7 @@ const initialDiagnostics = (): RecordingDiagnostics => ({
 let snapshot = initialDiagnostics()
 let lastNativeBlockAt: number | null = null
 const listeners = new Set<() => void>()
+export const recordingDiagnosticsSubscriberCount = () => listeners.size
 
 const boundedFrames = (value: number | null): number | null =>
   value === null ? null : Number.isSafeInteger(value) ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, value)) : null

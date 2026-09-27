@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import { getRecordingDiagnostics, resetRecordingDiagnostics, updateRecordingDiagnostics, recordRecordingTermination, recordRecordingLifecycle, recordNativeBlockTiming } from "./recording-diagnostics"
+import { getRecordingDiagnostics, resetRecordingDiagnostics, updateRecordingDiagnostics, recordRecordingTermination, recordRecordingLifecycle, recordNativeBlockTiming, recordingDiagnosticsSubscriberCount, subscribeRecordingDiagnostics } from "./recording-diagnostics"
 
 describe("recording diagnostics", () => {
+  test("tracks active diagnostic subscribers", () => {
+    const previous = recordingDiagnosticsSubscriberCount()
+    const unsubscribe = subscribeRecordingDiagnostics(() => undefined)
+    expect(recordingDiagnosticsSubscriberCount()).toBe(previous + 1)
+    unsubscribe()
+    expect(recordingDiagnosticsSubscriberCount()).toBe(previous)
+  })
   test("retains first terminal cause, sanitizes errors and bounds lifecycle history", () => {
     resetRecordingDiagnostics()
     for (let index = 0; index < 12; index++) recordRecordingLifecycle(index % 2 ? "ready" : "recovering")

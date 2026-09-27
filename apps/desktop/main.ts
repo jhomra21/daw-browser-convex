@@ -40,6 +40,7 @@ import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desk
 import { serializeDesktopReply } from "@daw-browser/desktop-protocol/reply-chunks"
 import { createCloseHandler } from "./close-flow"
 import { classifyNavigationUrl } from "./quiet-renderer-telemetry"
+import { createRecordingBlockTransit } from "./recording-block-transit"
 import { createFileCapabilityManager } from "./file-capabilities"
 import { createNativeFileCapabilityHelper } from "./native-file-capability-helper"
 import { createRequestCorrelation } from "./request-correlation"
@@ -1091,6 +1092,28 @@ const registerIpc = () => {
     ipcMain.handle("daw:benchmark:heartbeat", (event) =>
       audioHostAllowed(event) && event.senderFrame === event.sender.mainFrame
         ? { mainEpochMs: Date.now() } : null)
+    const pending = new Map<number, { senderId: number; startedAt: number }>()
+    ipcMain.on("daw:benchmark:renderer-pong", (event, sequence) => {
+      if (!audioHostAllowed(event) || event.senderFrame !== event.sender.mainFrame
+        || !Number.isSafeInteger(sequence)) return
+      const request = pending.get(sequence)
+      if (!request || request.senderId !== event.sender.id) return
+      pending.delete(sequence)
+      console.error(`[quiet-renderer-pong] sequence=${sequence} latencyMs=${Math.round(performance.now() - request.startedAt)}`)
+    })
+    app.on("browser-window-created", (_event, window) => {
+      let sequence = 0
+      // Benchmark-only main-to-preload ping; no page JS or CDP dependency.
+      const interval = setInterval(() => {
+        if (window.isDestroyed() || window.webContents.isDestroyed()) return
+        sequence += 1
+        if (pending.size >= 8) pending.delete(pending.keys().next().value ?? -1)
+        pending.set(sequence, { senderId: window.webContents.id, startedAt: performance.now() })
+        console.error(`[quiet-renderer-ping] sequence=${sequence}`)
+        window.webContents.send("daw:benchmark:renderer-ping", sequence)
+      }, 5_000)
+      window.on("closed", () => clearInterval(interval))
+    })
   }
   ipcMain.on(offlinePcmAckChannel, (event, value) => {
     if (!audioHostAllowed(event)) return
@@ -1991,6 +2014,10 @@ const createWindow = () => {
   }
   if (process.env.DAW_BENCHMARK_QUIET_CAPTURE === "1") {
     const contents = window_.webContents
+    contents.on("console-message", (_event, _level, message) => {
+      if (message.startsWith("[quiet-renderer-block-cost] ")
+        && message.length < 256) console.error(message)
+    })
     const startedAt = performance.now()
     const health = (name: string, url = contents.getURL(), reason = "") =>
       console.error(`[quiet-renderer-health] ${JSON.stringify({
@@ -2319,7 +2346,34 @@ else {
     removeAudioHostLossListener = audioHostSupervisor?.onLoss((error) => {
       publishNativeSessionLoss(sanitizeNativeVst3DiagnosticError(error), "host")
     })
+    const sampledBlockSentAt = new Map<number, number>()
+    let latestBlockSequence = -1
+    if (process.env.DAW_BENCHMARK_HEARTBEAT === "1") {
+      ipcMain.on("daw:benchmark:recording-block-received", (event, sequence) => {
+        if (window_ === undefined || event.sender.id !== window_.webContents.id
+          || event.senderFrame !== event.sender.mainFrame
+          || !rendererLifecycle.acceptsPrivilegedRequests()
+          || !sameAppOrigin(event.senderFrame?.url ?? "")
+          || !z.number().int().safe().nonnegative().safeParse(sequence).success) return
+        const sentAt = sampledBlockSentAt.get(sequence)
+        if (sentAt === undefined) return
+        sampledBlockSentAt.delete(sequence)
+        console.error(`[quiet-block-transit] sequence=${sequence} latencyMs=${Date.now() - sentAt} latestSent=${latestBlockSequence}`)
+      })
+    }
+    let lastBlockSendLogAt = 0
     removeAudioHostRecordingBlockListener = audioHostSupervisor?.onRecordingBlock((block) => {
+      if (process.env.DAW_BENCHMARK_HEARTBEAT === "1") {
+        latestBlockSequence = block.sequence
+        if (createRecordingBlockTransit(block.sequence)) {
+          sampledBlockSentAt.set(block.sequence, Date.now())
+          if (sampledBlockSentAt.size > 16) sampledBlockSentAt.delete(sampledBlockSentAt.keys().next().value ?? -1)
+        }
+        if (Date.now() - lastBlockSendLogAt >= 5_000) {
+          lastBlockSendLogAt = Date.now()
+          console.error(`[quiet-block-sent] sequence=${block.sequence} outstandingSamples=${sampledBlockSentAt.size}`)
+        }
+      }
       sendRendererMessage("daw:audio-host:recording-block", block)
     })
     let lastQuietRecordingStatusLogAt = 0

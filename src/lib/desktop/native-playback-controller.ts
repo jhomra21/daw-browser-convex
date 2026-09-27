@@ -53,7 +53,8 @@ import type {
 import type { EffectParamsCommitPayload } from "~/lib/undo/types"
 import { createPortableRecordingWriter } from "~/lib/recording/portable-recording-writer"
 import type { createNativeSabRecordingWriter } from "~/lib/recording/native-sab-recording-writer"
-import { recordNativeBlockTiming, updateRecordingDiagnostics, type RecordingTerminationCause } from "~/lib/recording/recording-diagnostics"
+import { recordNativeBlockTiming, recordingDiagnosticsSubscriberCount, updateRecordingDiagnostics, type RecordingTerminationCause } from "~/lib/recording/recording-diagnostics"
+import { createBenchmarkBlockCost } from "~/lib/recording/benchmark-block-cost"
 import type { DesktopBridge } from "~/types/desktop-bridge"
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type {
@@ -1718,10 +1719,13 @@ export const createNativePlaybackController = (input: {
       onDiagnostics: recordingInput.onDiagnostics,
       onFailure: recordingInput.onFailure,
     }
+    const benchmarkBlockCost = input.createNativeSabRecordingWriter ? createBenchmarkBlockCost() : null
     session.unsubscribeBlock = bridge.session.onRecordingBlock((block) => {
       if (recording !== session || session.terminal
         || block.generation !== generation || block.sessionId !== numericSessionId) return
       const arrivedAt = performance.now()
+      let copiedAt = arrivedAt
+      let enqueuedAt = arrivedAt
       try {
         if (input.createNativeSabRecordingWriter && (
           block.channelCount !== channelCount ||
@@ -1738,6 +1742,7 @@ export const createNativePlaybackController = (input: {
         const planes = Array.from({ length: channelCount }, (_, channel) => (
           samples.slice(channel * block.frameCount, (channel + 1) * block.frameCount)
         ))
+        copiedAt = performance.now()
         writer.write({
           version: portableWasmProtocolVersion,
           type: "recording-capture-block",
@@ -1750,6 +1755,7 @@ export const createNativePlaybackController = (input: {
           peak: block.peak,
           planes,
         })
+        enqueuedAt = performance.now()
       } catch (error) {
         failRecording(session, error instanceof Error ? error : new Error("Native recording writer failed."), "writer-failure")
       } finally {
@@ -1762,6 +1768,9 @@ export const createNativePlaybackController = (input: {
           })
         }
         recordNativeBlockTiming(arrivedAt, performance.now() - arrivedAt)
+        const costs = benchmarkBlockCost?.add(performance.now(), copiedAt - arrivedAt,
+          enqueuedAt - copiedAt, performance.now() - arrivedAt)
+        if (costs) console.info(`[quiet-renderer-block-cost] ${JSON.stringify({ ...costs, subscribers: recordingDiagnosticsSubscriberCount() })}`)
       }
     })
     session.unsubscribeStatus = bridge.session.onRecordingStatus((status) => {

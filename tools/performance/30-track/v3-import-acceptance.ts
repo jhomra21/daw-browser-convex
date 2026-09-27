@@ -13,7 +13,7 @@ const root = path.resolve(import.meta.dir, "../../..")
 const archive = path.join(root, "tools/performance/fixtures/30-track-v3-native.dawproject")
 const executable = path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/MacOS/@daw-browser-desktop")
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-export const parseControlMode = (option: string | undefined): "idle" | "playback" | "ui" | "dsp" | "dsp-one" | "dsp-recording" | "recording" | "acceptance" => {
+export const parseControlMode = (option: string | undefined): "idle" | "playback" | "ui" | "dsp" | "dsp-one" | "dsp-recording" | "media-recording" | "media-recording-probe" | "media-recording-portable" | "recording" | "acceptance" => {
   if (option === undefined) return "acceptance"
   if (option === "--idle-control") return "idle"
   if (option === "--playback-control") return "playback"
@@ -21,6 +21,9 @@ export const parseControlMode = (option: string | undefined): "idle" | "playback
   if (option === "--dsp-control") return "dsp"
   if (option === "--dsp-one-control") return "dsp-one"
   if (option === "--dsp-recording") return "dsp-recording"
+  if (option === "--media-recording") return "media-recording"
+  if (option === "--media-recording-probe") return "media-recording-probe"
+  if (option === "--media-recording-portable") return "media-recording-portable"
   if (option === "--quiet-recording") return "recording"
   throw new Error("Unknown packaged v3 control mode")
 }
@@ -213,7 +216,7 @@ const command = async (profile: string, args: string[], input?: string) => {
 const main = async () => {
   const output = Bun.argv[2]
   const mode = parseControlMode(Bun.argv[3])
-  const quietRecording = mode === "recording" || mode === "dsp-recording"
+  const quietRecording = mode === "recording" || mode === "dsp-recording" || mode === "media-recording" || mode === "media-recording-probe" || mode === "media-recording-portable"
   if (!output || !path.isAbsolute(output) || Bun.argv.length > 4)
     throw new Error("Usage: bun v3-import-acceptance.ts <absolute-result-path> [--quiet-recording|--idle-control|--playback-control|--ui-control|--dsp-control|--dsp-recording]")
   if ((await stat(archive)).size < 773_000_000) throw new Error("Unexpected v3 archive size")
@@ -244,8 +247,9 @@ const main = async () => {
   let cdpError: string | null = null
   let targetsAfter: { type: string; urlClass: string; original: boolean }[] = []
   const app = spawn(executable, ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0", `--user-data-dir=${profile}`], {
-    cwd: root, env: { ...process.env, DAW_DESKTOP_USER_DATA: profile, DAW_BENCHMARK_SAB_RECORDING: quietRecording ? "1" : "0",
-      DAW_BENCHMARK_QUIET_CAPTURE: mode !== "acceptance" ? "1" : "0" }, detached: true, stdio: ["ignore", "pipe", "pipe"],
+    cwd: root, env: { ...process.env, DAW_DESKTOP_USER_DATA: profile, DAW_BENCHMARK_SAB_RECORDING: quietRecording && mode !== "media-recording-portable" ? "1" : "0",
+      DAW_BENCHMARK_QUIET_CAPTURE: mode !== "acceptance" ? "1" : "0",
+      DAW_BENCHMARK_HEARTBEAT: mode === "media-recording-probe" ? "1" : "0" }, detached: true, stdio: ["ignore", "pipe", "pipe"],
   })
   let appOutput = ""
   const collectOutput = (chunk: Buffer) => {
@@ -255,8 +259,11 @@ const main = async () => {
     outputLine = (lines.pop() ?? "").slice(-512)
     for (const line of lines) {
       if (line.includes("[quiet-capture-lifecycle]") || line.includes("[quiet-capture-native]")
+        || line.includes("[quiet-renderer-ping]") || line.includes("[quiet-renderer-pong]")
+        || line.includes("[quiet-renderer-block-cost]")
+        || line.includes("[quiet-block-sent]") || line.includes("[quiet-block-transit]")
         || line.includes("native audio host closed"))
-        lifecycle = (lifecycle + line.slice(0, 512) + "\n").slice(-4000)
+        lifecycle = (lifecycle + line.slice(0, 512) + "\n").slice(mode === "media-recording-probe" ? -32000 : -4000)
       if (line.startsWith("[quiet-renderer-metric]"))
         metricOutput = (metricOutput + line.slice(0, 512) + "\n").slice(-128_000)
       if (line.startsWith("[quiet-renderer-health]"))
@@ -325,6 +332,15 @@ const main = async () => {
     const projectId = parseBrowserProjectId(await waitForBrowserValue(session, "new URL(location.href).searchParams.get('projectId') && document.querySelector('[data-timeline-ruler=\"1\"]') ? new URL(location.href).searchParams.get('projectId') : null", 180000))
     await waitForBrowserValue(session, "document.querySelectorAll('[aria-label^=\"Select track \"]').length === 30 ? true : null", 60_000)
     const snapshot = assertArchiveSnapshot(projectSnapshotSchemaV2.parse(await command(profile, ["snapshot-v2", projectId, "--target", "host"])))
+    if (mode === "media-recording" || mode === "media-recording-probe" || mode === "media-recording-portable") {
+      stage = "media-only-setup"
+      for (let index = 25; index <= 30; index++) {
+        await browserCommand(session, ["eval", `(()=>{const button=document.querySelector('button[aria-label="Deactivate track ${index}"]');if(!(button instanceof HTMLButtonElement))throw new Error('MIDI track mute control unavailable.');button.click();return true})()`])
+      }
+      const muted = projectSnapshotSchemaV2.parse(await command(profile, ["snapshot-v2", projectId, "--target", "host"]))
+      if (muted.tracks.filter((track) => track.kind === "instrument" && track.muted).length !== 6)
+        throw new Error("Six MIDI tracks were not muted for media-only recording.")
+    }
     let dspSetup: Awaited<ReturnType<typeof prepareFullDsp>> | null = null
     if (mode === "dsp" || mode === "dsp-one" || mode === "dsp-recording") {
       stage = "dsp-setup"
@@ -432,7 +448,20 @@ const main = async () => {
           controlStartedAtMs = quietStartedAt
           stage = "quiet-wait"
         },
-        wait: () => delay(61_000),
+        wait: async () => {
+          if (mode !== "media-recording-probe") return delay(61_000)
+          const probeResults: { elapsedMs: number; result: string; latencyMs: number }[] = []
+          for (let index = 0; index < 12; index++) {
+            await delay(5_000)
+            const started = performance.now()
+            let result: string
+            try { result = await probeProjectCdp(new URL(endpoint).port, projectId) }
+            catch { result = "evaluation-failed" }
+            probeResults.push({ elapsedMs: Date.now() - quietStartedAt, result,
+              latencyMs: Math.round(performance.now() - started) })
+          }
+          await writePrivateArtifact(path.join(directory, "diagnostic-cdp-latencies.json"), JSON.stringify(probeResults))
+        },
         stop: async () => {
           stage = "quiet-stop"
           quietElapsedMs = Date.now() - quietStartedAt
@@ -528,7 +557,7 @@ const main = async () => {
         targetFound: targetsAfter.some((target) => target.urlClass === "app"),
         stopPresent, stopSucceeded, rendererFailure: lifecycle.includes("stage=renderer-gone"),
       }),
-      lifecycle: lifecycle.slice(-3000),
+      lifecycle: lifecycle.slice(mode === "media-recording-probe" ? -32000 : -3000),
       ...telemetry(),
       samplePath,
       postmortem: await command(profile, ["host", "diagnostics-v2"]).catch(() => null),

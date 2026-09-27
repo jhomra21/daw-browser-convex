@@ -52,10 +52,19 @@ import { offlinePcmMessageSchema } from "./offline-pcm-protocol"
 import { deliverOfflinePcmChunk } from "./offline-pcm-ack"
 import { diagnosticValidationPaths } from "./diagnostics-trace"
 import { safePreloadReply } from "./preload-reply"
+import { createRecordingBlockTransit } from "./recording-block-transit"
 
 const incomingChannel = "daw:host-request"
 const outgoingChannel = "daw:host-response"
 const diagnosticsTraceChannel = "daw:diagnostics-v2-trace"
+if (process.env.DAW_BENCHMARK_HEARTBEAT === "1") {
+  ipcRenderer.on("daw:benchmark:renderer-ping", (_event, sequence) => {
+    const parsed = z.number().int().safe().safeParse(sequence)
+    if (parsed.success) {
+      ipcRenderer.send("daw:benchmark:renderer-pong", parsed.data)
+    }
+  })
+}
 const diagnosticsTraceStarts = new Map<string, number>()
 const traceDiagnostics = (id: string, stage: string) => {
   const start = diagnosticsTraceStarts.get(id)
@@ -309,7 +318,12 @@ const desktopBridge = {
           return () => ipcRenderer.removeListener("daw:audio-host:loss", notify)
         },
         onRecordingBlock: (listener: (block: NativeHostRecordingBlock) => void) => {
-          const notify = (_event: Electron.IpcRendererEvent, block: NativeHostRecordingBlock) => listener(block)
+          const notify = (_event: Electron.IpcRendererEvent, block: NativeHostRecordingBlock) => {
+            if (process.env.DAW_BENCHMARK_HEARTBEAT === "1" && createRecordingBlockTransit(block.sequence)) {
+              ipcRenderer.send("daw:benchmark:recording-block-received", block.sequence)
+            }
+            listener(block)
+          }
           ipcRenderer.on("daw:audio-host:recording-block", notify)
           return () => ipcRenderer.removeListener("daw:audio-host:recording-block", notify)
         },

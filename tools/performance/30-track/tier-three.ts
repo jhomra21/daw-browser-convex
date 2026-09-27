@@ -363,7 +363,7 @@ export const runTierThree = async (
       throw retainTierThreeRecordingFailure(error, issue48LiveReEnableReason, initial, watchedMixAtPlayback, nativeAtPlayback)
     }
   })()
-  const { recordedClipId, capturedFrames, recordingDuring, longTasks, stallCorrelation } = captured
+  const { recordedClipId, capturedFrames, recordingDuring, longTasks, taskSources, stallCorrelation } = captured
   return {
     status: "complete" as const,
     plugin: { name: instance.identity.name, version: instance.identity.version, instanceId: instance.instanceId, health: instance.health.state },

@@ -13,12 +13,13 @@ const root = path.resolve(import.meta.dir, "../../..")
 const archive = path.join(root, "tools/performance/fixtures/30-track-v3-native.dawproject")
 const executable = path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/MacOS/@daw-browser-desktop")
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-export const parseControlMode = (option: string | undefined): "idle" | "playback" | "ui" | "dsp" | "dsp-one" | "dsp-recording" | "media-recording" | "media-recording-probe" | "media-recording-probe-drop" | "media-recording-probe-drop-no-meters" | "media-recording-probe-metadata" | "media-recording-probe-batch4" | "media-recording-probe-batch8" | "media-recording-portable" | "recording" | "acceptance" => {
+export const parseControlMode = (option: string | undefined): "idle" | "playback" | "ui" | "dsp" | "dsp-soak" | "dsp-one" | "dsp-recording" | "media-recording" | "media-recording-probe" | "media-recording-probe-drop" | "media-recording-probe-drop-no-meters" | "media-recording-probe-metadata" | "media-recording-probe-batch4" | "media-recording-probe-batch8" | "media-recording-portable" | "recording" | "acceptance" => {
   if (option === undefined) return "acceptance"
   if (option === "--idle-control") return "idle"
   if (option === "--playback-control") return "playback"
   if (option === "--ui-control") return "ui"
   if (option === "--dsp-control") return "dsp"
+  if (option === "--dsp-soak") return "dsp-soak"
   if (option === "--dsp-one-control") return "dsp-one"
   if (option === "--dsp-recording") return "dsp-recording"
   if (option === "--media-recording") return "media-recording"
@@ -32,6 +33,8 @@ export const parseControlMode = (option: string | undefined): "idle" | "playback
   if (option === "--quiet-recording") return "recording"
   throw new Error("Unknown packaged v3 control mode")
 }
+export const controlDurationMs = (mode: ReturnType<typeof parseControlMode>) => mode === "dsp-soak" ? 300_000 : 60_000
+const isDspControlMode = (mode: ReturnType<typeof parseControlMode>) => mode === "dsp" || mode === "dsp-soak" || mode === "dsp-one"
 const isMediaRecordingMode = (mode: ReturnType<typeof parseControlMode>) => mode.startsWith("media-recording")
 const recordingForwardMode = (mode: ReturnType<typeof parseControlMode>) =>
   mode.startsWith("media-recording-probe-drop") ? "drop"
@@ -229,7 +232,7 @@ const main = async () => {
   const mode = parseControlMode(Bun.argv[3])
   const quietRecording = mode === "recording" || mode === "dsp-recording" || isMediaRecordingMode(mode)
   if (!output || !path.isAbsolute(output) || Bun.argv.length > 4)
-    throw new Error("Usage: bun v3-import-acceptance.ts <absolute-result-path> [--quiet-recording|--idle-control|--playback-control|--ui-control|--dsp-control|--dsp-recording]")
+    throw new Error("Usage: bun v3-import-acceptance.ts <absolute-result-path> [--quiet-recording|--idle-control|--playback-control|--ui-control|--dsp-control|--dsp-soak|--dsp-recording]")
   if ((await stat(archive)).size < 773_000_000) throw new Error("Unexpected v3 archive size")
   await stat(path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/app.asar"))
   const directory = await createPrivateRunDirectory("/tmp")
@@ -357,7 +360,7 @@ const main = async () => {
         throw new Error("Six MIDI tracks were not muted for media-only recording.")
     }
     let dspSetup: Awaited<ReturnType<typeof prepareFullDsp>> | null = null
-    if (mode === "dsp" || mode === "dsp-one" || mode === "dsp-recording") {
+    if (isDspControlMode(mode) || mode === "dsp-recording") {
       stage = "dsp-setup"
       dspSetup = await prepareFullDsp(session, profile, projectId, snapshot.tracks.filter((track) => track.kind === "audio").map((track) => track.name), mode === "dsp-one" ? 1 : 8)
     }
@@ -387,14 +390,14 @@ const main = async () => {
     await delay(4000)
     const playing = desktopTransportStatusSchemaV1.parse(await command(profile, ["host", "transport-status"]))
     const after = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
-    if (mode !== "dsp" && mode !== "dsp-one" && mode !== "dsp-recording" && (playing.state !== "playing" || after.native.status !== "available" ||
+    if (!isDspControlMode(mode) && mode !== "dsp-recording" && (playing.state !== "playing" || after.native.status !== "available" ||
       !playbackCountersValid(before.native.status === "available" ? before.native.diagnostics : null, after.native.diagnostics)))
       throw new Error(`Playback callbacks missing or native blocks rejected: ${JSON.stringify({
         state: playing.state, before: before.native.status === "available" ? before.native.diagnostics.callbacks : null,
         after: after.native.status === "available" ? after.native.diagnostics.callbacks : null,
         rejected: after.native.status === "available" ? after.native.diagnostics.rejectedBlocks : null,
       })}`)
-    if (mode === "playback" || mode === "ui" || mode === "dsp" || mode === "dsp-one") {
+    if (mode === "playback" || mode === "ui" || isDspControlMode(mode)) {
       stage = `${mode}-control`
       controlStartedAtMs = Date.now()
       if (mode === "ui") {
@@ -407,15 +410,15 @@ const main = async () => {
         }
         await uiStress()
       }
-      await delay(mode === "ui" ? 30_000 : 60_000)
+      await delay(mode === "ui" ? 30_000 : controlDurationMs(mode))
       stage = "playback-verify"
       const responsive = await pingProjectCdp(new URL(endpoint).port, projectId)
       if (!responsive) throw new Error("Playback project renderer URL changed.")
-      const vst = mode === "dsp" || mode === "dsp-one"
+      const vst = isDspControlMode(mode)
         ? desktopHostVstInstancesResultSchemaV1.parse(await command(profile, ["host", "vst-instances", projectId])) : null
       const workerPids = vst ? await nativeWorkers() : []
       let finalNativeCallbacks = after.native.status === "available" ? after.native.diagnostics.callbacks : null
-      if (mode === "dsp" || mode === "dsp-one") {
+      if (isDspControlMode(mode)) {
         const finalNative = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
         if (finalNative.native.status !== "available"
           || finalNative.native.diagnostics.callbacks <= (before.native.status === "available" ? before.native.diagnostics.callbacks : 0)

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { assertArchiveSnapshot, countMidiNotes, parseBrowserProjectId, quietCapture, recoverQuietTarget, importedProjectTarget, classifyQuietCapture, parseControlMode, matchesControlProjectUrl, selectedProjectCdpTarget, playbackCountersValid } from "./v3-import-acceptance"
+import { assertArchiveSnapshot, controlDurationMs, countMidiNotes, parseBrowserProjectId, quietCapture, recoverQuietTarget, importedProjectTarget, classifyQuietCapture, parseControlMode, matchesControlProjectUrl, selectedProjectCdpTarget, playbackCountersValid } from "./v3-import-acceptance"
 
 test("playback validates post-start native callbacks when baseline host was unavailable", () => {
   expect(playbackCountersValid(null, { callbacks: 1121, rejectedBlocks: 0 })).toBe(true)
@@ -26,6 +26,7 @@ test("control modes require a 60-second quiet window without recording", () => {
   expect(parseControlMode("--playback-control")).toBe("playback")
   expect(parseControlMode("--ui-control")).toBe("ui")
   expect(parseControlMode("--dsp-control")).toBe("dsp")
+  expect(parseControlMode("--dsp-soak")).toBe("dsp-soak")
   expect(parseControlMode("--dsp-recording")).toBe("dsp-recording")
   expect(parseControlMode("--media-recording")).toBe("media-recording")
   expect(parseControlMode("--media-recording-probe")).toBe("media-recording-probe")
@@ -38,6 +39,11 @@ test("control modes require a 60-second quiet window without recording", () => {
   expect(parseControlMode("--dsp-one-control")).toBe("dsp-one")
   expect(parseControlMode("--quiet-recording")).toBe("recording")
   expect(() => parseControlMode("--unsupported")).toThrow()
+})
+
+test("five-minute DSP soak extends only the measured control window", () => {
+  expect(controlDurationMs("dsp")).toBe(60_000)
+  expect(controlDurationMs("dsp-soak")).toBe(300_000)
 })
 
 test("control summary rejects an unresponsive renderer after quiet interval", async () => {

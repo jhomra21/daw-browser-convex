@@ -326,6 +326,96 @@ test('chunks long stereo assets for a custom offline export range', () => {
   expect(plan.assets.every((asset) => asset.frameCount <= 131_069)).toBe(true)
   expect(new DataView(plan.schedule.buffer).getUint32(48, true)).toBeGreaterThan(1)
 })
+test('projects the mixed-rate raw mono and stereo precision matrix at exact output frames', () => {
+  const outputSampleRate = 48_000
+  for (const sourceSampleRate of [44_100, 48_000, 96_000]) {
+    for (const channelCount of [1, 2] as const) {
+      const channels = Array.from(
+        { length: channelCount },
+        () => new Float32Array(sourceSampleRate),
+      )
+      channels[0]![Math.floor(sourceSampleRate / 4)] = 1
+      const plan = compileNativeOfflineRenderPlan({
+        tracks: [{
+          ...track,
+          clips: [{
+            ...track.clips[0]!,
+            duration: 1,
+            sourceDurationSec: 1,
+            buffer: new TestAudioBuffer(channels, sourceSampleRate),
+          }],
+        }],
+        fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+        automationEnvelopes: [],
+        sidechainRoutes: [],
+        bpm: 120,
+        range: { mode: 'whole' },
+        sampleRateHz: outputSampleRate,
+        channelCount: 2,
+        tailFrames: 0,
+        projectGeneration: 1,
+      })
+      const event = sourceEventFromSchedule(plan.schedule)
+      expect({
+        sourceSampleRate,
+        channelCount,
+        expectedOutputFrame: outputSampleRate,
+        actualOutputFrame: event.stopFrame,
+        signedErrorFrames: event.stopFrame - outputSampleRate,
+        sourceFrameCount: event.sourceFrameCount,
+      }).toEqual({
+        sourceSampleRate,
+        channelCount,
+        expectedOutputFrame: outputSampleRate,
+        actualOutputFrame: outputSampleRate,
+        signedErrorFrames: 0,
+        sourceFrameCount: sourceSampleRate,
+      })
+    }
+  }
+})
+test('projects raw trim and source offsets at exact output frames', () => {
+  const sourceSampleRate = 96_000
+  const outputSampleRate = 48_000
+  const plan = compileNativeOfflineRenderPlan({
+    tracks: [{
+      ...track,
+      clips: [{
+        ...track.clips[0]!,
+        duration: 1,
+        sourceDurationSec: 2,
+        leftPadSec: 0.25,
+        bufferOffsetSec: 0.5,
+        buffer: new TestAudioBuffer([new Float32Array(sourceSampleRate * 2)], sourceSampleRate),
+      }],
+    }],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: outputSampleRate,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 1,
+  })
+  const event = sourceEventFromSchedule(plan.schedule)
+  expect({
+    startFrame: event.startFrame,
+    stopFrame: event.stopFrame,
+    sourceOffsetFrame: event.sourceOffsetFrame,
+    signedStartErrorFrames: event.startFrame - 12_000,
+    signedStopErrorFrames: event.stopFrame - 48_000,
+    signedSourceOffsetErrorFrames: event.sourceOffsetFrame - 48_000,
+  }).toEqual({
+    startFrame: 12_000,
+    stopFrame: 48_000,
+    sourceOffsetFrame: 48_000,
+    signedStartErrorFrames: 0,
+    signedStopErrorFrames: 0,
+    signedSourceOffsetErrorFrames: 0,
+  })
+})
 
 test('accepts prepared Stretch PCM with custom range timing', () => {
   const warpedTrack: Track<AudioBuffer> = {

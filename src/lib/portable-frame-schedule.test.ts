@@ -125,6 +125,43 @@ test('projects timeline, expression, and automation authorities into stable fram
     },
   ])
 })
+test('keeps hold and linear automation exact over ten seconds, one minute, and five minutes', () => {
+  for (const durationSec of [10, 60, 300]) {
+    const hold: AutomationEnvelope = {
+      ...automation,
+      id: `hold-${durationSec}`,
+      points: [
+        { id: 'hold-start', timeSec: 0, value: 0.25, interpolation: 'hold' },
+        { id: 'hold-end', timeSec: durationSec, value: 0.75, interpolation: 'hold' },
+      ],
+    }
+    const linear: AutomationEnvelope = {
+      ...automation,
+      id: `linear-${durationSec}`,
+      points: [
+        { id: 'linear-start', timeSec: 0, value: 0.25, interpolation: 'linear' },
+        { id: 'linear-end', timeSec: durationSec, value: 0.75, interpolation: 'linear' },
+      ],
+    }
+    const schedule = compilePortableFrameSchedule({
+      ...input,
+      rangeEndSec: durationSec + 1,
+      tracks: [],
+      automationEnvelopes: [hold, linear],
+    })
+    const expectedFrame = durationSec * input.sampleRateHz
+    const events = schedule.events.filter((event) => event.type.startsWith('parameter'))
+    expect(events.some((event) => event.type === 'parameter-set'
+      && event.frame === expectedFrame && event.value === 0.75)).toBe(true)
+    expect(events.some((event) => event.type === 'parameter-ramp'
+      && event.startFrame === 0 && event.endFrame === expectedFrame)).toBe(true)
+    expect(events.flatMap((event) => (
+      event.type === 'parameter-ramp'
+        ? [event.startFrame, event.endFrame]
+        : [event.frame]
+    )).every(Number.isSafeInteger)).toBe(true)
+  }
+})
 
 test('keeps same-frame caller order, excludes a block end boundary, and invalidates after a seek epoch', () => {
   const schedule = compilePortableFrameSchedule(input)

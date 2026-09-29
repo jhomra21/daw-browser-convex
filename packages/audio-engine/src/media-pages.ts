@@ -72,10 +72,15 @@ export const sha256File = async (
 ): Promise<string> => {
   const hash = sha256.create()
   const chunkBytes = 1024 * 1024
-  for (let offset = 0; offset < file.size; offset += chunkBytes) {
+  let bytesSinceYield = 0
+  for await (const chunk of file.stream()) {
     signal?.throwIfAborted()
-    hash.update(new Uint8Array(await file.slice(offset, offset + chunkBytes).arrayBuffer()))
-    if (offset + chunkBytes < file.size) await yieldControl()
+    hash.update(chunk)
+    bytesSinceYield += chunk.byteLength
+    if (bytesSinceYield >= chunkBytes) {
+      bytesSinceYield = 0
+      await yieldControl()
+    }
   }
   signal?.throwIfAborted()
   return hex(hash.digest())

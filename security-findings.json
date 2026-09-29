@@ -1,8 +1,8 @@
 {
-  "scan_id": "scan-2026-09-29-002",
-  "scan_date": "2026-09-29T20:57:08.840984Z",
-  "scan_type": "working",
-  "commit_range": "9201649ca38c907b6dc947c8b5c00a102a3b4a9e..working-tree",
+  "scan_id": "scan-2026-09-29-pr57-final",
+  "scan_date": "2026-09-29T23:01:30.336016+00:00",
+  "scan_type": "range",
+  "commit_range": "origin/master..6131004a",
   "pr_number": 57,
   "threat_model_version": "1.0.0",
   "findings": [],
@@ -22,6 +22,6 @@
       "DoS": 0,
       "ElevationOfPrivilege": 0
     },
-    "files_analyzed": 148
+    "files_analyzed": 159
   }
 }

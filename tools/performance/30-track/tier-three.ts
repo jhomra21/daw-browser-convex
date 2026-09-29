@@ -67,6 +67,11 @@ export const selectTierThreeParameter = <T extends Parameter>(parameters: readon
   if (matches.length !== 1 || !matches[0]) throw new Error("Unique writable Valhalla Mix parameter unavailable.")
   return matches[0]
 }
+export const selectTierThreeSecondaryParameter = <T extends Parameter>(parameters: readonly T[], mixId: number): T => {
+  const parameter = parameters.find((candidate) => candidate.id !== mixId && !candidate.readOnly && !candidate.hidden)
+  if (!parameter) throw new Error("Secondary writable Valhalla parameter unavailable.")
+  return parameter
+}
 
 type MidiClip = { id: string; trackId: string; midi?: { notes: readonly { pitch: number; velocity: number; length: number }[] } }
 export const validateTierThreeRecording = (before: readonly MidiClip[], after: readonly MidiClip[], trackId: string, pitches: readonly number[]): string => {
@@ -170,6 +175,7 @@ export const runTierThree = async (
   if (!instance || instance.health.state !== "ready") throw new Error("Real Valhalla worker is not ready.")
   const parameters = data(desktopHostVstParametersResultSchemaV1, await command(["host", "vst-parameters", projectId, instance.instanceId]))
   const mix = selectTierThreeParameter(parameters.parameters)
+  const secondary = selectTierThreeSecondaryParameter(parameters.parameters, mix.id)
   const targetValue = mix.currentValue < 0.5 ? 0.75 : 0.25
   const request = {
     version: "v1",
@@ -199,11 +205,22 @@ export const runTierThree = async (
   }
   if (!capabilities.actionKinds.includes("automation.set")) throw new Error("VST automation action not advertised.")
   const automationParameterId = `vst3:${instance.instanceId}:${mix.id}`
+  const secondaryAutomationParameterId = `vst3:${instance.instanceId}:${secondary.id}`
   const automationRequest = {
     version: "v1",
     projectId,
     expectedRevision: snapshot.project.revision,
     actions: [{
+      kind: "automation.set",
+      target: { kind: "track", track: { source: "persisted", id: tier2Track.id } },
+      effect: { source: "persisted", id: processor.id },
+      parameterId: secondaryAutomationParameterId,
+      enabled: true,
+      points: [
+        { id: "tier3-valhalla-secondary-0", timeSec: 0, value: 0.2, interpolation: "linear" },
+        { id: "tier3-valhalla-secondary-30", timeSec: 30, value: 0.8, interpolation: "linear" },
+      ],
+    }, {
       kind: "automation.set",
       target: { kind: "track", track: { source: "persisted", id: tier2Track.id } },
       effect: { source: "persisted", id: processor.id },
@@ -213,6 +230,7 @@ export const runTierThree = async (
         { id: "tier3-valhalla-mix-0", timeSec: 0, value: 0.25, interpolation: "linear" },
         { id: "tier3-valhalla-mix-4", timeSec: 4, value: 0.75, interpolation: "linear" },
         { id: "tier3-valhalla-mix-8", timeSec: 8, value: 0.25, interpolation: "linear" },
+        { id: "tier3-valhalla-mix-30", timeSec: 30, value: 0.75, interpolation: "linear" },
       ],
     }],
   }
@@ -224,9 +242,17 @@ export const runTierThree = async (
   })))
   snapshot = await readSnapshot()
   if (!snapshot.automation.some((entry) => entry.effectInstanceId === instance.instanceId
-    && entry.parameterId === automationParameterId && entry.enabled && entry.points.length === 3)) {
+    && entry.parameterId === automationParameterId && entry.enabled && entry.points.length === 4)) {
     throw new Error("Valhalla automation was not persisted by public project control.")
   }
+  if (!snapshot.automation.some((entry) => entry.effectInstanceId === instance.instanceId
+    && entry.parameterId === secondaryAutomationParameterId && entry.enabled && entry.points.length === 2)) {
+    throw new Error("Secondary Valhalla automation was not persisted by public project control.")
+  }
+  await browserCommand(session, ["reload"])
+  await waitForBrowserValue(session, `new URL(location.href).searchParams.get('projectId') === ${JSON.stringify(projectId)} && document.querySelector('[data-timeline-left-browser="1"]') !== null ? true : null`, 30_000)
+  await browserCommand(session, ["eval", "(()=>{const button=document.querySelector('button[aria-label=\"Select track 31: Tier 2 Synth\"]');if(!(button instanceof HTMLButtonElement))throw new Error('Tier 2 track unavailable after reload.');button.click();return true})()"])
+  await waitForBrowserValue(session, `document.querySelector('[data-external-effect-id="${instance.instanceId}"]') !== null ? true : null`, 30_000)
   const prePlaybackReEnable = await reEnableAutomationBeforePlayback(
     (expression) => browserCommand(session, ["eval", expression]))
   const beforePlayback = await diagnostics("before-playback")
@@ -245,7 +271,7 @@ export const runTierThree = async (
   if (duringPlayback.length === 0) throw new Error("Runner-owned Electron process metrics unavailable for Tier 3 playback.")
   // Diagnostics retain only the latest worker observation; lack of a matching
   // observation cannot certify either suppression or resumed delivery.
-  const issue48LiveReEnableCertification = "not-attempted"
+  let issue48LiveReEnableCertification: "not-attempted" | "passed" = "not-attempted"
   let issue48LiveReEnableReason = "No matching worker-authored automation observation during uninterrupted playback."
   if (prePlaybackReEnable === "control-absent") {
     issue48LiveReEnableReason += " Initial parameter commit may have left an override; no visible re-enable control was available."
@@ -261,42 +287,44 @@ export const runTierThree = async (
   const epoch = afterPlayback.native.diagnostics.transportEpoch
   if (afterPlayback.native.diagnostics.state === "running"
     && matchingWorkerAutomation(initial, instance.instanceId, mix.id, epoch, "0")) {
-    const manualSnapshot = await readSnapshot()
-    const manualRequest = {
-      version: "v1", projectId, expectedRevision: manualSnapshot.project.revision,
-      actions: [{
-        kind: "external-plugin.parameters.set",
-        target: { kind: "track", track: { source: "persisted", id: tier2Track.id } },
-        processor: { source: "persisted", id: processor.id },
-        changes: [{ parameterId: mix.id, normalizedValue: targetValue === 0.75 ? 0.25 : 0.75 }],
-      }],
+    const editVisibleParameter = async (title: string, value: number) => {
+      await browserCommand(session, ["eval", `(()=>{const card=document.querySelector('[data-external-effect-id="${instance.instanceId}"]');if(!(card instanceof HTMLElement))throw new Error('Visible Valhalla device unavailable.');const show=[...card.querySelectorAll('button')].find(button=>button.textContent?.startsWith('Show parameters'));if(show instanceof HTMLButtonElement)show.click();const input=[...card.querySelectorAll('input[type="range"]')].find(element=>element.parentElement?.textContent?.includes(${JSON.stringify(title)}));if(!(input instanceof HTMLInputElement))throw new Error('Visible Valhalla parameter unavailable.');input.value=${JSON.stringify(String(value))};input.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertReplacementText'}));return true})()`])
     }
-    const manualPreview = data(controlPreviewResultSchemaV1, await command(["preview", "--request", "-", "--target", "host"], JSON.stringify(manualRequest)))
-    if (!manualPreview.approval?.required) {
-      data(controlCommitResultSchemaV1, await command(["commit", "--request", "-", "--target", "host"], JSON.stringify({
-        ...manualRequest,
-        idempotencyKey: `tier3-${createHash("sha256").update(JSON.stringify(manualRequest)).digest("hex")}`,
-      })))
-      const override = await diagnostics("after-manual-override")
-      const current = override.native.status === "available" ? override.native.diagnostics : null
-      if (current?.state === "running" && current.transportEpoch === epoch
-        && !matchingWorkerAutomation(current.workerAutomation, instance.instanceId, mix.id, epoch, initial.sequence)) {
-        // A public project write does not necessarily trigger the renderer's
-        // manual-override state. Only the visible control can re-enable it.
-        const reenableVisible = (await browserCommand(session, ["eval",
-          "[...document.querySelectorAll('button')].some(button => button.getAttribute('aria-label')?.startsWith('Re-enable automation ('))",
-        ])).trim() === "true"
-        if (reenableVisible) {
-          await browserCommand(session, ["eval", "(()=>{const button=[...document.querySelectorAll('button')].find(button=>button.getAttribute('aria-label')?.startsWith('Re-enable automation ('));if(!(button instanceof HTMLButtonElement))throw new Error('Re-enable control disappeared');button.click();return true})()"])
-          const resumed = await diagnostics("after-re-enable")
-          if (resumed.native.status === "available" && resumed.native.diagnostics.state === "running"
-            && resumed.native.diagnostics.transportEpoch === epoch
-            && matchingWorkerAutomation(resumed.native.diagnostics.workerAutomation, instance.instanceId, mix.id, epoch, initial.sequence)) {
-            issue48LiveReEnableReason = "Worker resumed, but latest-only diagnostics cannot prove no matching observations occurred during override."
-          } else issue48LiveReEnableReason = "No newer matching worker observation after UI re-enable."
-        } else issue48LiveReEnableReason = "Public manual Mix commit did not expose the renderer re-enable control."
-      } else issue48LiveReEnableReason = "Override suppression or uninterrupted native playback could not be proven from latest-only diagnostics."
-    } else issue48LiveReEnableReason = "Manual Mix write requires approval."
+    await editVisibleParameter(mix.title, targetValue === 0.75 ? 0.25 : 0.75)
+    await waitForBrowserValue(session,
+      "[...document.querySelectorAll('button')].some(button=>button.getAttribute('aria-label')==='Re-enable automation (1)') ? true : null",
+      10_000)
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+    await editVisibleParameter(secondary.title, secondary.currentValue < 0.5 ? 0.75 : 0.25)
+    await waitForBrowserValue(session,
+      "[...document.querySelectorAll('button')].some(button=>button.getAttribute('aria-label')==='Re-enable automation (2)') ? true : null",
+      10_000)
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+    const override = await diagnostics("after-manual-override")
+    const current = override.native.status === "available" ? override.native.diagnostics : null
+    const watchedOverride = current?.watchedMixHost
+    const watchedBefore = watchedMixAtPlayback
+    if (current?.state === "running" && current.transportEpoch === epoch
+      && watchedOverride?.instanceId === instance.instanceId
+      && watchedBefore?.instanceId === instance.instanceId
+      && watchedOverride.overrideSkips > watchedBefore.overrideSkips) {
+      await browserCommand(session, ["eval", "(()=>{const button=[...document.querySelectorAll('button')].find(button=>button.getAttribute('aria-label')==='Re-enable automation (2)');if(!(button instanceof HTMLButtonElement))throw new Error('Re-enable control disappeared');button.click();return true})()"])
+      await new Promise((resolve) => setTimeout(resolve, 6_000))
+      const overrideCleared = (await browserCommand(session, ["eval", "[...document.querySelectorAll('button')].some(button=>button.getAttribute('aria-label')?.startsWith('Re-enable automation (')) ? false : true"])).trim() === "true"
+      const resumed = await diagnostics("after-re-enable")
+      const watchedResumed = resumed.native.status === "available" ? resumed.native.diagnostics.watchedMixHost : null
+      const workerResumed = resumed.native.status === "available" ? resumed.native.diagnostics.workerAutomation : null
+      if (overrideCleared && resumed.native.status === "available" && resumed.native.diagnostics.state === "running"
+        && resumed.native.diagnostics.transportEpoch === epoch
+        && watchedResumed?.instanceId === instance.instanceId
+        && (watchedResumed.submitted > watchedOverride.submitted
+          || (watchedResumed.projected > watchedOverride.projected
+            && watchedResumed.overrideSkips === watchedOverride.overrideSkips)
+          || matchingWorkerAutomation(workerResumed, instance.instanceId, mix.id, epoch, initial.sequence))) {
+        issue48LiveReEnableCertification = "passed"
+        issue48LiveReEnableReason = "Two visible Valhalla edits produced native Mix override skips and the existing global control re-enabled both parameters while Mix resumed accepted scheduling without changing transport epoch."
+      } else issue48LiveReEnableReason = `No newer accepted Mix submission after visible UI re-enable. Cleared=${overrideCleared}; before=${JSON.stringify(watchedOverride)}; after=${JSON.stringify(watchedResumed)}; worker=${JSON.stringify(workerResumed)}.`
+    } else issue48LiveReEnableReason = "Visible Mix edit did not produce same-epoch native override skips."
   }
   await browserCommand(session, ["find", "role", "button", "click", "--name", "Stop"])
 
@@ -367,7 +395,7 @@ export const runTierThree = async (
   return {
     status: "complete" as const,
     plugin: { name: instance.identity.name, version: instance.identity.version, instanceId: instance.instanceId, health: instance.health.state },
-    automation: { parameterId: mix.id, before: mix.currentValue, after: targetValue, points: [0, 4, 8], revision: snapshot.project.revision },
+    automation: { parameterId: mix.id, before: mix.currentValue, after: targetValue, points: [0, 4, 8, 30], revision: snapshot.project.revision },
     playback: {
       durationMs,
       nativeCallbackIncrease: afterPlayback.native.diagnostics.callbacks - beforePlayback.native.diagnostics.callbacks,

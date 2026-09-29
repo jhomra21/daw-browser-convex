@@ -21,6 +21,7 @@ import type { TimelineExportService } from '~/lib/export/timeline-export-service
 import type { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
 import type { createSamplerBufferSync } from '~/lib/sampler-buffer-sync'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
+import type { NativeVstParameterQueue } from '~/lib/desktop/native-vst-parameter-queue'
 
 const SharedChat = lazy(() => import('~/components/SharedChat'))
 
@@ -84,6 +85,7 @@ export type TimelinePanelsProps = {
     evaluatedValuesByTargetKey?: ReadonlyMap<string, number>
     onSelectAutomationParameter?: (targetKey: Track['id'] | 'master', parameterId: string, effectInstanceId?: string) => void
     onManualAutomationOverride?: (targetKey: Track['id'] | 'master', parameterId: string, effectInstanceId?: string) => void
+    enqueueNativeVstParameter?: NativeVstParameterQueue["enqueue"]
   }
   sampleDetailPanel: {
     isOpen: boolean
@@ -205,6 +207,7 @@ const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
         evaluatedValuesByTargetKey={panels().effectsPanel.evaluatedValuesByTargetKey}
         onSelectAutomationParameter={panels().effectsPanel.onSelectAutomationParameter}
         onManualAutomationOverride={panels().effectsPanel.onManualAutomationOverride}
+        enqueueNativeVstParameter={panels().effectsPanel.enqueueNativeVstParameter}
       />
 
       <Show when={panels().sampleDetailPanel.isOpen && panels().sampleDetailPanel.selectedClip}>

@@ -16,6 +16,7 @@ import {
   nativeGraphNodeId,
 } from "@daw-browser/audio-engine/native-host-wire"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
+import { parseExternalAutomationParameterId } from "@daw-browser/shared"
 import {
   prepareNativeStretchArtifacts,
   type NativePreparedStretchAsset,
@@ -1977,27 +1978,39 @@ export const createNativePlaybackController = (input: {
     parameterIds: readonly string[],
   ): Promise<LiveProcessorControlResult> => {
     if (!prepared || !preparedGraph) return { accepted: false, reason: "unprepared" }
+    const externalParameters = parameterIds.map((parameterId) => parseExternalAutomationParameterId(parameterId))
+    const externalInstanceId = externalParameters[0]?.instanceId
+    if (externalInstanceId !== undefined) {
+      const attachment = preparedSnapshot?.nativeExternalAttachmentPlan?.attachments
+        .find((candidate) => candidate.instanceId === externalInstanceId)
+      const parameters = new Map(attachment?.parameters?.map((parameter) => [parameter.id, parameter]))
+      const targets = externalParameters
+        .filter((external): external is NonNullable<typeof external> => (
+          external?.instanceId === instanceId
+          && external.instanceId === externalInstanceId
+          && parameters.get(external.parameterId)?.readOnly === false
+        ))
+        .map((external) => external.parameterId)
+      if (!attachment || targets.length !== parameterIds.length || !scheduleCoordinator) {
+        return { accepted: false, reason: "unsupported" }
+      }
+      try {
+        await scheduleCoordinator.reenableAutomation(externalInstanceId, targets)
+        const sequence = ++nextLiveProcessorSequence
+        return { accepted: true, sequence, appliedSequence: sequence }
+      } catch (error) {
+        return { accepted: false, reason: "bridge-error", error: error instanceof Error ? error.message : String(error) }
+      }
+    }
     const processor = resolveGraphProcessor(preparedGraph, instanceId)
-      ?? resolveGraphProcessor(preparedGraph, `external-plugin:${instanceId}`)
-    if (!processor || parameterIds.some((parameterId) => !processor.parameterTargets.has(parameterId))) {
+    if (!processor) {
       return { accepted: false, reason: "unsupported" }
     }
     const targets = parameterIds.map((parameterId) => processor.parameterTargets.get(parameterId))
       .filter((target): target is number => target !== undefined)
-    if (processor.processor.kind !== "external-vst3" || !scheduleCoordinator) {
-      const sequence = ++nextLiveProcessorSequence
-      return { accepted: true, sequence, appliedSequence: sequence }
-    }
-    try {
-      await scheduleCoordinator.reenableAutomation(
-        processor.processor.id.startsWith("external-plugin:") ? processor.processor.id.slice("external-plugin:".length) : processor.processor.id,
-        targets,
-      )
-      const sequence = ++nextLiveProcessorSequence
-      return { accepted: true, sequence, appliedSequence: sequence }
-    } catch (error) {
-      return { accepted: false, reason: "bridge-error", error: error instanceof Error ? error.message : String(error) }
-    }
+    if (targets.length !== parameterIds.length) return { accepted: false, reason: "unsupported" }
+    const sequence = ++nextLiveProcessorSequence
+    return { accepted: true, sequence, appliedSequence: sequence }
   }
 
   const runBuiltInStatePatch = async (

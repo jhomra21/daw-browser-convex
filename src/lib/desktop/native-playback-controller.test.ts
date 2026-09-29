@@ -325,6 +325,7 @@ const createBridge = (
   const statePatchPayloads: Uint8Array[] = []
   const instrumentPayloads: Uint8Array[] = []
   const schedulePayloads: Uint8Array[] = []
+  const reenablePayloads: Uint8Array[] = []
   const graphPayloads: Uint8Array[] = []
   const installedAssets: NativeHostPcmAsset[] = []
   let legacyInstallCount = 0
@@ -397,6 +398,7 @@ const createBridge = (
     statePatchPayloads,
     instrumentPayloads,
     schedulePayloads,
+    reenablePayloads,
     graphPayloads,
     installedAssets,
     get legacyInstallCount() { return legacyInstallCount },
@@ -533,6 +535,13 @@ const createBridge = (
           queueMicrotask(() => emitProgress(0))
           return failure === "schedule" || rejectScheduleWindows
             ? { ok: false as const, error: "failed" }
+            : { ok: true as const }
+        },
+        reenableVstScheduleAutomation: async (bytes: Uint8Array) => {
+          calls.push("reenable-automation")
+          reenablePayloads.push(bytes)
+          return failure === "reenable-automation"
+            ? { ok: false as const, error: failureMessage }
             : { ok: true as const }
         },
         queueVstParameterEvents: async (bytes: Uint8Array) => {
@@ -931,6 +940,66 @@ test("supersedes an in-flight contextless preview for an inserted native process
   await expect(insertedPreview).resolves.toBe("started")
   expect(contexts).toEqual([undefined, compileContext])
   expect(fixture.calls.filter((call) => call === "coordinate")).toHaveLength(1)
+  await controller.dispose()
+})
+
+test("re-enables canonical external automation against the prepared attachment", async () => {
+  const fixture = createBridge()
+  const inserted = insertedExternalProcessor()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    getProjectId: () => "project",
+    resolveSource: async () => longSourceDescriptor(),
+    compileSnapshot: async (transport) => {
+      const result = compileLivePlaybackSnapshot({
+        ...input(longSourceTrack()),
+        transport,
+      })
+      if (!result.supported) return result
+      return {
+        supported: true as const,
+        snapshot: {
+          ...result.snapshot,
+          nativeExternalAttachmentPlan: nativeAttachmentPlan,
+          requiresNativePlayback: true,
+        },
+      }
+    },
+  })
+
+  await expect(controller.ensureLivePreview(0, {
+    externalProcessor: {
+      projectId: "project",
+      processor: inserted,
+    },
+  })).resolves.toBe("started")
+  await expect(controller.reenableProcessorAutomation(
+    inserted.instanceId,
+    [externalAutomationParameterId(inserted.instanceId, 7)],
+  )).resolves.toMatchObject({ accepted: true })
+
+  expect(fixture.reenablePayloads).toHaveLength(1)
+  const payload = fixture.reenablePayloads[0]!
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
+  const instanceByteLength = view.getUint32(0, true)
+  expect(new TextDecoder().decode(payload.subarray(4, 4 + instanceByteLength))).toBe(inserted.instanceId)
+  expect(view.getUint32(4 + instanceByteLength, true)).toBe(1)
+  expect(view.getUint32(8 + instanceByteLength, true)).toBe(7)
+  await expect(controller.reenableProcessorAutomation(
+    inserted.instanceId,
+    [externalAutomationParameterId(inserted.instanceId, 8)],
+  )).resolves.toEqual({ accepted: false, reason: "unsupported" })
+  await expect(controller.reenableProcessorAutomation(
+    inserted.instanceId,
+    [externalAutomationParameterId("22222222-2222-4222-8222-222222222222", 7)],
+  )).resolves.toEqual({ accepted: false, reason: "unsupported" })
+  await expect(controller.liveProcessorControl.reenableAutomation(
+    inserted.instanceId,
+    [externalAutomationParameterId(inserted.instanceId, 7)],
+    0,
+    0,
+  )).resolves.toEqual({ accepted: false, reason: "stale" })
+  expect(fixture.reenablePayloads).toHaveLength(1)
   await controller.dispose()
 })
 

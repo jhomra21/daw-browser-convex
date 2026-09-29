@@ -2963,6 +2963,14 @@ bool AudioHost::ReenableVstScheduleAutomation(const std::span<const std::uint8_t
   if (count > kMaximumScheduleAutomationSegments
     || payload.size() != 8 + instance_bytes + static_cast<std::size_t>(count) * 4) return false;
   for (std::uint32_t index = 0; index < count; ++index) {
+    const auto parameter_id = ReadLeU32(payload.data() + 8 + instance_bytes + index * 4);
+    if (std::find(
+      attachment->second->metadata.parameter_ids.begin(),
+      attachment->second->metadata.parameter_ids.end(),
+      parameter_id
+    ) == attachment->second->metadata.parameter_ids.end()) return false;
+  }
+  for (std::uint32_t index = 0; index < count; ++index) {
     attachment->second->ClearAutomationOverride(ReadLeU32(payload.data() + 8 + instance_bytes + index * 4));
   }
   return true;

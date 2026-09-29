@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { collectLongTaskRecords, correlateRecordingStall, parseLongTaskEvidence, TierThreeRecordingFailure, selectTierThreeParameter, validateTierThreeRecording, validateTierThreeAudioRecording, matchingWorkerAutomation, tierThreeAutomationObservationMs, startTraceBeforeRecordingDiagnostics, reEnableAutomationBeforePlayback, retainTierThreeRecordingFailure, diagnosticStageFailure } from "./tier-three"
+import { collectLongTaskRecords, correlateRecordingStall, parseLongTaskEvidence, TierThreeRecordingFailure, selectTierThreeParameter, selectTierThreeSecondaryParameter, validateTierThreeRecording, validateTierThreeAudioRecording, matchingWorkerAutomation, tierThreeAutomationObservationMs, startTraceBeforeRecordingDiagnostics, reEnableAutomationBeforePlayback, retainTierThreeRecordingFailure, diagnosticStageFailure } from "./tier-three"
 
 test("labels a failed host diagnostic with its Tier 3 stage", () => {
   expect(diagnosticStageFailure('after-manual-override', new Error('deadline-exceeded')).message)
@@ -101,6 +101,15 @@ test("selects only the unique writable Mix parameter from the installed Valhalla
   expect(selectTierThreeParameter(parameters)).toEqual(parameters[0])
   expect(() => selectTierThreeParameter([{ ...parameters[0], hidden: true }])).toThrow()
   expect(() => selectTierThreeParameter([parameters[0], { ...parameters[0], id: 6 }])).toThrow()
+})
+
+test("selects a distinct visible writable Valhalla parameter for selective automation coverage", () => {
+  const parameters = [
+    { id: 48, title: "Mix", readOnly: false, hidden: false, currentValue: 0.5 },
+    { id: 49, title: "Width", readOnly: false, hidden: false, currentValue: 0.5 },
+  ]
+  expect(selectTierThreeSecondaryParameter(parameters, 48)).toEqual(parameters[1])
+  expect(() => selectTierThreeSecondaryParameter([{ ...parameters[1], readOnly: true }], 48)).toThrow()
 })
 
 test("recording must add a real MIDI clip with the requested notes on the armed track", () => {

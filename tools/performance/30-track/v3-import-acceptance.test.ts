@@ -1,5 +1,16 @@
 import { expect, test } from "bun:test"
-import { assertArchiveSnapshot, controlDurationMs, countMidiNotes, createLaterOffsetPagingRequest, parseBrowserProjectId, quietCapture, recoverQuietTarget, importedProjectTarget, classifyQuietCapture, parseControlMode, matchesControlProjectUrl, selectedProjectCdpTarget, playbackCountersValid } from "./v3-import-acceptance"
+import { assertArchiveSnapshot, controlDurationMs, countMidiNotes, createLaterOffsetPagingRequest, fullLoadFrameProbeResultScript, fullLoadFrameProbeScript, parseBrowserProjectId, quietCapture, recoverQuietTarget, importedProjectTarget, classifyQuietCapture, parseControlMode, matchesControlProjectUrl, selectedProjectCdpTarget, playbackCountersValid } from "./v3-import-acceptance"
+
+test("full-load frame probe keeps every sample family bounded", () => {
+  const install = fullLoadFrameProbeScript()
+  const result = fullLoadFrameProbeResultScript()
+  expect(install).toContain("const limit=8192")
+  expect(install).toContain("queueMicrotask")
+  expect(install).toContain("PerformanceObserver.supportedEntryTypes")
+  expect(result).toContain("applicationWork")
+  expect(result).toContain("over16_67Ms")
+  expect(result).toContain("refreshRateHz")
+})
 
 test("playback validates post-start native callbacks when baseline host was unavailable", () => {
   expect(playbackCountersValid(null, { callbacks: 1121, rejectedBlocks: 0 })).toBe(true)
@@ -27,8 +38,10 @@ test("control modes require a 60-second quiet window without recording", () => {
   expect(parseControlMode("--ui-control")).toBe("ui")
   expect(parseControlMode("--paging-control")).toBe("paging")
   expect(parseControlMode("--dsp-control")).toBe("dsp")
+  expect(parseControlMode("--dsp-ui-control")).toBe("dsp-ui")
   expect(parseControlMode("--dsp-soak")).toBe("dsp-soak")
   expect(parseControlMode("--dsp-recording")).toBe("dsp-recording")
+  expect(parseControlMode("--dsp-ui-recording")).toBe("dsp-ui-recording")
   expect(parseControlMode("--media-recording")).toBe("media-recording")
   expect(parseControlMode("--media-recording-probe")).toBe("media-recording-probe")
   expect(parseControlMode("--media-recording-probe-drop")).toBe("media-recording-probe-drop")

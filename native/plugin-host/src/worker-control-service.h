@@ -119,6 +119,7 @@ class WorkerControlService {
   [[nodiscard]] std::uint64_t workerGeneration() const noexcept;
   [[nodiscard]] int workerProcessGroupId() const noexcept;
   [[nodiscard]] std::optional<WorkerDiagnostic> ReadDiagnostic();
+  [[nodiscard]] WorkerProcessingMetrics processingMetrics() const;
   void SetDiagnosticListener(DiagnosticListener listener, void* context) noexcept;
   [[nodiscard]] std::optional<WorkerEditorResponse> ExecuteEditorCommand(
     WorkerControlCommand command,

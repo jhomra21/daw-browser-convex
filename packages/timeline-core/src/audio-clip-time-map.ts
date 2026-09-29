@@ -69,11 +69,15 @@ export function getAudioClipTimeMap(input: AudioClipTimeMapInput): AudioClipTime
   if (markerWarpEnabled) {
     const projectSecondsPerBeat = 60 / projectBpm
     const sourceSecondsPerBeat = 60 / sourceBpm
+    const sourceBeatOffset = input.clip.audioWarp?.sourceBeatOffset ?? 0
     const clipTimelineBeat = (timelineSec: number) => Math.max(0, (timelineSec - audioStart) / projectSecondsPerBeat)
-    const clipSourceBeatToSec = (sourceBeat: number) => bufferOffset + sourceBeat * sourceSecondsPerBeat
+    const clipSourceBeatToSec = (sourceBeat: number) => bufferOffset + (sourceBeat + sourceBeatOffset) * sourceSecondsPerBeat
     const timelineBeatToSec = (timelineBeat: number) => audioStart + timelineBeat * projectSecondsPerBeat
     const timelineToSourceSec = (timelineSec: number) => clipSourceBeatToSec(mapTimelineBeatToSourceBeat(warpMarkers, clipTimelineBeat(timelineSec)))
-    const sourceToTimelineSec = (sourceSec: number) => timelineBeatToSec(mapSourceBeatToTimelineBeat(warpMarkers, (sourceSec - bufferOffset) / sourceSecondsPerBeat))
+    const sourceToTimelineSec = (sourceSec: number) => timelineBeatToSec(mapSourceBeatToTimelineBeat(
+      warpMarkers,
+      (sourceSec - bufferOffset) / sourceSecondsPerBeat - sourceBeatOffset,
+    ))
     const audioStartSec = Math.max(audioStart, sourceToTimelineSec(bufferOffset))
     const audioEnd = Math.min(clipEnd, sourceToTimelineSec(bufferDuration))
     if (input.rangeStartSec >= audioEnd) return null

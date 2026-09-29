@@ -190,6 +190,29 @@ export type NativeOfflinePcmChunk = {
 }
 
 export type NativeHostDiagnostics = {
+  transportFrame: bigint
+  realtimePerformance: {
+    sampleRateHz: number
+    framesPerCallback: number
+    observationCount: bigint
+    processingP50Nanoseconds: bigint
+    processingP95Nanoseconds: bigint
+    processingP99Nanoseconds: bigint
+    processingMaximumNanoseconds: bigint
+    deadlineMisses: bigint
+  }
+  vstWorkerPerformance: {
+    activeWorkers: number
+    observationCount: bigint
+    processingP50Nanoseconds: bigint
+    processingP95Nanoseconds: bigint
+    processingP99Nanoseconds: bigint
+    processingMaximumNanoseconds: bigint
+    deadlineMisses: bigint
+    watchdogMisses: bigint
+    faults: bigint
+    restarts: bigint
+  }
   workerAutomation: null | { acceptedPoints: number; lastParameterId: number; transportEpoch: number; sequence: bigint; instanceId: string }
   watchedMixProcessed: null | { acceptedPoints: number; lastParameterId: 48; transportEpoch: number; sequence: bigint; instanceId: string }
   watchedMixHost: null | { published: number; projected: number; overrideSkips: number; submitted: number; transportEpoch: number; instanceId: string }

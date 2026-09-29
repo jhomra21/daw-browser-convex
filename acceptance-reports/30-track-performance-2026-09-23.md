@@ -4,7 +4,7 @@
 
 The 30-track campaign is accepted on branch `perf/30-track-stress`, including the paging, Knip, and report change set completed after commit `ae1052f1`.
 
-The production workload, exact-frame precision gates, recording path, five-run distribution, five-minute soak, real-Valhalla automation override/re-enable behavior, late-offset mapped-media playback, and final repository-wide validation all passed. Review-PR creation is the remaining release step after this report update.
+The production workload, exact-frame precision gates, recording path, five-run distribution, five-minute soak, real-Valhalla automation override/re-enable behavior, late-offset mapped-media playback, and the published validation through `32042bb1` passed. PR #57 remains open and unmerged while the expanded telemetry change set completes final validation.
 
 ## Authoritative acceptance matrix
 
@@ -14,9 +14,15 @@ The production workload, exact-frame precision gates, recording path, five-run d
 | Bounded fixture generation | Pass | V3 WAV generation streams 16,384-frame pages and enforces the 1 GiB archive budget. Fixture sample checks include page seams and later source positions. |
 | Tier 1 and Tier 2 UI/playback | Pass | Browser and packaged Electron acceptance verified production import, visible timeline operations, built-in devices, transport state, rendered meter activity, increasing native callbacks, and zero rejected blocks. |
 | Full DSP distribution | Pass | Five packaged 60-second runs with eight ValhallaSupermassive instances passed. Median native callback increase: 6,218. Median renderer CPU average: 5.72%. Median renderer CPU P95: 6.68%. Median peak renderer working set: approximately 889 MiB. |
-| Five-minute DSP soak | Pass | Eight VST instances and 16 worker processes remained responsive. Native callbacks increased by 28,720, rejected blocks stayed at zero, renderer CPU averaged 4.95% with 5.82% P95 and 6.91% peak, and working set showed no upward trend. |
-| Recording under full DSP load | Pass | Full PCM recording with eight VST instances remained responsive, stopped explicitly, finalized without dropped/overrun frames or native fatal error, and retained the recording after a true cold Electron relaunch. |
-| Exact-frame precision | Pass | 44.1, 48, and 96 kHz mono/stereo source projection to 48 kHz output, raw trim/source-offset placement, and hold/linear automation at 10 seconds, 60 seconds, and five minutes all passed with zero-frame error. |
+| Full-load UI frame distribution | Pass | Five packaged 60-second full-DSP runs exercised timeline pan/scroll, overview/deep/pointer-anchored zoom, Sample Detail waveform zoom, ruler seek, loop, built-in Drive, instrument-track selection, and visible Valhalla Mix. Median rAF interval was 8.30 ms P50, 9.50 ms P95, and 10.20 ms P99 on the measured approximately 120 Hz display. Four runs reported zero long tasks; one reported one 59 ms long task. |
+| Application main-thread proxy | Pass | The bounded rAF-to-queued-microtask proxy measured 1.90 ms P50, 8.90 ms P95, and 10.80 ms P99 median across five runs. This is an application/main-thread occupancy proxy, not direct framework render duration. Every sample family was capped at 8,192 records with explicit dropped-sample counters; all five runs dropped zero samples. |
+| Native callback deadline headroom | Pass | Across five packaged full-DSP UI runs, the complete CoreAudio callback histogram reported 1.049 ms P99 and 1.366 ms median-of-run maximum against a 10.667 ms 512-frame/48 kHz deadline. Every run recorded zero inferred deadline misses. No hardware-xrun claim is made because CoreAudio does not expose that signal at this boundary. |
+| VST worker processing headroom | Pass | Eight active workers produced approximately 23.9k observations per run. Processing measured 0.131 ms P99 and a 0.358 ms median-of-run maximum. Every run recorded zero worker deadline misses, watchdog misses, faults, or restarts. |
+| Five-minute DSP soak | Pass | Eight VST instances remained responsive. The telemetry run recorded 28,541 callbacks and 229,671 worker observations with zero callback/worker deadline misses, watchdog misses, faults, restarts, or rejected blocks. |
+| Native transport-frame drift | Pass | Authoritative native transport frames were sampled near 10 seconds, 60 seconds, and five minutes. Wall-clock comparison retained a stable approximately 3.4k-frame launch/observation offset; relative to the first checkpoint, later error changed by +64 frames at 60 seconds and -32 frames at five minutes, both within one 512-frame callback. |
+| Recording under full DSP/UI load | Pass | The matched packaged run combined recording with timeline pan/scroll and timeline/Sample Detail zoom. It captured 2,806,784 frames at 48 kHz, committed exactly one recording clip, and reported zero dropped/overrun frames, callback/worker deadline misses, watchdog misses, faults, or restarts. Peak SAB writer occupancy was one. The same run recorded 8.35/9.25/16.95 ms rAF P50/P95/P99 and 15 long tasks totaling 1,733 ms; recording therefore passes correctness and realtime-audio health but exposes visible main-thread tail latency under the matched stress workload. |
+| Exact-frame precision | Pass | 44.1, 48, and 96 kHz mono/stereo source projection to 48 kHz output, raw trim/source-offset placement, waveform source-window projection, and hold/linear automation at 10 seconds, 60 seconds, and five minutes passed with zero-frame error. Marker-based Stretch now applies `sourceBeatOffset` consistently in both directions and is covered to within one source frame at all six sample-rate/channel combinations. |
+| Re-Pitch applicability | Pass | Re-Pitch timing remains supported by the browser scheduler and waveform projection. Portable/native graph projection rejects Re-Pitch explicitly, so native Re-Pitch render precision is not applicable and is not claimed. Stretch marker/source-offset timing is the supported native/browser precision contract. |
 | Issue #48 visible manual override | Pass | A visible Valhalla Mix edit reached the native instance and suppressed scheduled automation in the active transport epoch. |
 | Issue #48 two-parameter global re-enable | Pass | Two visible writable Valhalla edits produced `Re-enable automation (2)`. The existing global control cleared both renderer/native overrides and Mix scheduling resumed without an epoch change. |
 | Issue #48 fail-closed behavior | Pass | Stale revision, stale epoch, malformed identity, mixed identity, unknown instance, and unknown parameter requests are rejected at controller/native boundaries. Native selective clearing validates the full request before changing any override. |
@@ -41,6 +47,9 @@ The production workload, exact-frame precision gates, recording path, five-run d
   - Renderer responsive after the 60-second control interval.
 - One-parameter attachment-plan proof: `/tmp/daw-tier3-issue48-attachment-plan.json`
   - Run ID: `3c3dad38-a990-49b4-aac0-cfa3c6e47129`.
+- Five full-DSP UI distributions: `/private/tmp/daw-v3-dsp-ui-formal-1.json` through `/private/tmp/daw-v3-dsp-ui-formal-5.json`.
+- Matched recording/UI stress: `/private/tmp/daw-v3-dsp-ui-recording-formal-6.json`.
+- Five-minute native transport/deadline telemetry: `/private/tmp/daw-v3-transport-drift-formal.json`.
 
 Temporary artifact paths identify the local acceptance records used for this campaign. Durable behavior is covered by committed harnesses and regression tests.
 
@@ -54,7 +63,7 @@ External VST processors are native attachment-plan entries, not portable graph p
 4. preserves the existing graph-processor path for built-in effects; and
 5. rejects the entire request before clearing anything when any target is stale, malformed, mixed, or unknown.
 
-The UI remains intentionally unchanged. Pointer release does not silently clear an override. Users edit the visible plugin card and use the existing global re-enable control.
+The UI remains intentionally unchanged. Pointer release does not silently clear an override. Users edit the visible plugin card and use the existing global re-enable control. Issue #48 now states this global-only product contract explicitly; selective A-only clearing while B remains overridden is not a visible product requirement.
 
 ## Measured optimization result
 
@@ -68,16 +77,17 @@ No causal performance claim is made from unlike fixtures. Distribution claims us
 ## Known interpretation limits
 
 - Browser meter evidence proves rendered signal activity, not audible-output perception.
-- Zero rejected native blocks and increasing callbacks prove clean scheduling/processing at the exposed boundary, not uninstrumented per-callback execution-time quantiles.
-- The product exposes a global re-enable control. Packaged acceptance clears both visible overrides globally; selective A-only clearing is covered at controller/native boundaries rather than through a new UI.
+- Callback and worker quantiles use fixed, callback-safe power-of-two histograms. Reported quantiles are conservative bucket upper bounds.
+- Callback deadline misses are inferred by comparing measured callback duration with the configured block deadline. They are not hardware-reported CoreAudio xruns.
+- The product exposes a global re-enable control. Packaged acceptance clears both visible overrides globally; selective A-only clearing is an internal protocol capability, not a product contract.
 - Generated V3 fixture archives are large local acceptance inputs and are not source code. Their SHA-256 sidecars provide local integrity checks.
 
 ## Validation status
 
-Completed for the paging/Knip/report change set:
+Completed for the expanded PR #57 telemetry and precision change set:
 
-- Focused performance, paging, recording diagnostics, and acceptance tests: 52 passed, zero failed.
-- Complete Bun suite: 3,154 passed, one intentional skip, zero failed.
+- Focused telemetry, diagnostics, precision, and acceptance tests: 95 passed, zero failed.
+- Complete Bun suite: 3,156 passed, one intentional skip, zero failed.
 - Full package and root TypeScript checks: passed.
 - Lint with warnings denied: passed.
 - Anti-slop rule suites: 12 of 12 passed.
@@ -87,9 +97,13 @@ Completed for the paging/Knip/report change set:
 - Native macOS host debug-preset CTest: 6 of 6 passed.
 - Audio-core standalone CTest: 1 of 1 passed after rebuilding the standalone build directory.
 - Audio-core AddressSanitizer/UndefinedBehaviorSanitizer CTest: 1 of 1 passed.
+- Five packaged full-DSP UI distributions: passed.
+- Matched packaged recording/UI stress: passed with zero audio drops or realtime deadline failures.
+- Five-minute packaged transport/callback/worker telemetry: passed.
+- Cloudflare Worker dry-run bundle after the telemetry changes: passed.
 - Full-branch secret-pattern scan: passed with zero matches.
 - V3 local fixture SHA-256 verification: passed for both browser and native archives.
 - Packaged late-offset paging: passed.
 - Diff hygiene: passed.
 - Exact-base Knip set comparison: passed with zero branch-added findings.
-- Security review: passed with no threshold-triggering findings.
+- Security review: passed across 148 changed files with no threshold-triggering findings.

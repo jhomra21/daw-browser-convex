@@ -135,6 +135,11 @@ std::optional<WorkerDiagnostic> WorkerControlService::ReadDiagnostic() {
   return diagnostic;
 }
 
+WorkerProcessingMetrics WorkerControlService::processingMetrics() const {
+  const auto* transport = runtime_.transport();
+  return transport == nullptr ? WorkerProcessingMetrics{} : transport->ReadProcessingMetrics();
+}
+
 void WorkerControlService::SetDiagnosticListener(
   const DiagnosticListener listener,
   void* const context

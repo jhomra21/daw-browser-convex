@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -25,7 +26,8 @@ constexpr std::size_t kMaximumWorkerRestarts = 3;
 constexpr std::size_t kMaximumWorkerStateBytes = 512U * 1024U;
 constexpr std::uint32_t kMaximumWorkerTailFrames = 100'000'000U;
 constexpr std::uint32_t kInfiniteTailFrames = std::numeric_limits<std::uint32_t>::max();
-constexpr std::uint32_t kWorkerTransportAbiVersion = 5;
+constexpr std::uint32_t kWorkerTransportAbiVersion = 6;
+constexpr std::size_t kWorkerProcessingHistogramBuckets = 32;
 constexpr std::uint32_t kWorkerManifestVersion = 1;
 constexpr std::uint32_t kWorkerStartupProtocolVersion = 1;
 constexpr std::uint32_t kWorkerControlProtocolVersion = 2;
@@ -301,6 +303,13 @@ struct WorkerDiagnostic {
   std::uint32_t parameter_id = 0;
   double normalized_value = 0.0;
 };
+
+struct WorkerProcessingMetrics {
+  std::uint64_t count = 0;
+  std::uint64_t maximum_nanoseconds = 0;
+  std::uint64_t deadline_misses = 0;
+  std::array<std::uint64_t, kWorkerProcessingHistogramBuckets> buckets{};
+};
 static_assert(std::is_trivially_copyable_v<WorkerDiagnostic>);
 
 struct WorkerTailMetadata {
@@ -368,6 +377,7 @@ class WorkerTransport {
   [[nodiscard]] WorkerHealth health() const;
   [[nodiscard]] std::optional<WorkerDiagnostic> ReadDiagnostic();
   [[nodiscard]] std::optional<WorkerTailMetadata> ReadTailMetadata() const;
+  [[nodiscard]] WorkerProcessingMetrics ReadProcessingMetrics() const;
   [[nodiscard]] int fileDescriptor() const;
   [[nodiscard]] std::uint64_t token() const;
   [[nodiscard]] bool valid() const;
@@ -386,6 +396,7 @@ class WorkerTransport {
   void PublishHealth(WorkerHealth health);
   [[nodiscard]] bool PublishDiagnostic(WorkerDiagnostic diagnostic);
   void PublishTailMetadata(std::uint32_t tailFrames);
+  void RecordProcessingDuration(std::uint64_t durationNanoseconds, std::uint64_t deadlineNanoseconds);
 
  private:
   struct Mapping;

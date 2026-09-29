@@ -684,7 +684,7 @@ void TestControlFrames() {
     daw::audio_host_macos::ControlType::kGraphRollback, {});
   assert(transaction == std::vector<std::uint8_t>({
     0x44, 0x41, 0x57, 0x48,
-    0x00, 0x00, 0x00, 0x14,
+    0x00, 0x00, 0x00, 0x15,
     0x00, 0x00, 0x00, 0x27,
     0x00, 0x00, 0x00, 0x00,
   }));
@@ -1250,6 +1250,15 @@ void TestNativeVstWatchdogStartupGrace() {
   ));
 }
 
+void TestRealtimeDurationHistogramBucketsAreBounded() {
+  using daw::audio_host_macos::detail::RealtimeDurationHistogramBucket;
+  assert(RealtimeDurationHistogramBucket(0) == 0);
+  assert(RealtimeDurationHistogramBucket(1) == 0);
+  assert(RealtimeDurationHistogramBucket(2) == 1);
+  assert(RealtimeDurationHistogramBucket(1ULL << 20U) == 20);
+  assert(RealtimeDurationHistogramBucket(std::numeric_limits<std::uint64_t>::max()) == 31);
+}
+
 void TestNativeSessionWireRejectsMalformedFramesAndEvents() {
   daw::audio_host_macos::AudioHost host;
   assert(host.Configure({
@@ -1751,6 +1760,7 @@ int main() {
   TestMappedAssetWrittenRangeLedgerIsBounded();
   TestNativeVstRuntimeControlBounds();
   TestNativeVstWatchdogStartupGrace();
+  TestRealtimeDurationHistogramBucketsAreBounded();
   TestNativeSessionWireRejectsMalformedFramesAndEvents();
   TestScheduledProcessorSetUsesAbsoluteFrame();
   TestScheduleWindowCompletionSemantics();

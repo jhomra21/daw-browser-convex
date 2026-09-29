@@ -1347,6 +1347,7 @@ export const createNativeAudioHostSupervisor = (
     let watchedMixProcessed: NativeHostDiagnostics["watchedMixProcessed"] = null
     let watchedMixHost: NativeHostDiagnostics["watchedMixHost"] = null
     let hostOffset = mixOffset
+    let performanceOffset = hostOffset
     if (frame.byteLength !== mixOffset) {
       if (frame.byteLength < mixOffset + 24) return undefined
       const mixPresent = frame.readUInt32BE(mixOffset)
@@ -1375,7 +1376,8 @@ export const createNativeAudioHostSupervisor = (
         const hostSubmitted = frame.readUInt32BE(hostOffset + 16)
         const hostEpoch = frame.readUInt32BE(hostOffset + 20)
         const hostIdBytes = frame.readUInt32BE(hostOffset + 24)
-        if (hostPresent > 1 || hostIdBytes > 256 || frame.byteLength !== hostOffset + 28 + hostIdBytes
+        performanceOffset = hostOffset + 28 + hostIdBytes
+        if (hostPresent > 1 || hostIdBytes > 256 || frame.byteLength < performanceOffset
           || (hostPresent === 0 && (hostPublished !== 0 || hostProjected !== 0 || hostSkipped !== 0
             || hostSubmitted !== 0 || hostEpoch !== 0 || hostIdBytes !== 0))
           || (hostPresent === 1 && (hostIdBytes === 0 || hostEpoch === 0
@@ -1390,6 +1392,7 @@ export const createNativeAudioHostSupervisor = (
         }
       }
     }
+    if (frame.byteLength !== performanceOffset + 140) return undefined
     return {
       watchedMixProcessed,
       watchedMixHost,
@@ -1399,6 +1402,29 @@ export const createNativeAudioHostSupervisor = (
         lastParameterId: frame.readUInt32BE(headerBytes + 96),
         transportEpoch: epoch,
         sequence: frame.readBigUInt64BE(headerBytes + 104),
+      },
+      transportFrame: frame.readBigInt64BE(performanceOffset),
+      realtimePerformance: {
+        sampleRateHz: frame.readUInt32BE(performanceOffset + 8),
+        framesPerCallback: frame.readUInt32BE(performanceOffset + 12),
+        observationCount: frame.readBigUInt64BE(performanceOffset + 16),
+        processingP50Nanoseconds: frame.readBigUInt64BE(performanceOffset + 24),
+        processingP95Nanoseconds: frame.readBigUInt64BE(performanceOffset + 32),
+        processingP99Nanoseconds: frame.readBigUInt64BE(performanceOffset + 40),
+        processingMaximumNanoseconds: frame.readBigUInt64BE(performanceOffset + 48),
+        deadlineMisses: frame.readBigUInt64BE(performanceOffset + 56),
+      },
+      vstWorkerPerformance: {
+        activeWorkers: frame.readUInt32BE(performanceOffset + 64),
+        observationCount: frame.readBigUInt64BE(performanceOffset + 68),
+        processingP50Nanoseconds: frame.readBigUInt64BE(performanceOffset + 76),
+        processingP95Nanoseconds: frame.readBigUInt64BE(performanceOffset + 84),
+        processingP99Nanoseconds: frame.readBigUInt64BE(performanceOffset + 92),
+        processingMaximumNanoseconds: frame.readBigUInt64BE(performanceOffset + 100),
+        deadlineMisses: frame.readBigUInt64BE(performanceOffset + 108),
+        watchdogMisses: frame.readBigUInt64BE(performanceOffset + 116),
+        faults: frame.readBigUInt64BE(performanceOffset + 124),
+        restarts: frame.readBigUInt64BE(performanceOffset + 132),
       },
       state: state === 0 ? "idle" : state === 1 ? "configured" : state === 2 ? "running" : "faulted",
       activeRevision: frame.readUInt32BE(headerBytes + 4),

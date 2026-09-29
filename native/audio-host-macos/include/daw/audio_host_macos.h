@@ -7,6 +7,8 @@
 #include <string>
 #include <string_view>
 #include <array>
+#include <algorithm>
+#include <bit>
 #include <deque>
 #include <atomic>
 #include <vector>
@@ -16,7 +18,7 @@
 
 namespace daw::audio_host_macos {
 
-constexpr std::uint32_t kControlProtocolVersion = 20;
+constexpr std::uint32_t kControlProtocolVersion = 21;
 constexpr std::size_t kMaximumControlPayloadBytes = 1'048'576;
 constexpr std::size_t kControlFrameHeaderBytes = 16;
 constexpr std::size_t kNativeGraphFrameHeaderBytes = 12;
@@ -32,6 +34,19 @@ constexpr std::size_t kMaximumScheduleAutomationSegments = 2'048;
 constexpr std::size_t kMaximumScheduleInstanceIdBytes = 256;
 
 namespace detail {
+
+inline constexpr std::size_t kRealtimeDurationHistogramBuckets = 32;
+
+[[nodiscard]] inline constexpr std::size_t RealtimeDurationHistogramBucket(
+  const std::uint64_t duration_nanoseconds
+) noexcept {
+  return duration_nanoseconds == 0
+    ? 0
+    : std::min<std::size_t>(
+      kRealtimeDurationHistogramBuckets - 1,
+      static_cast<std::size_t>(std::bit_width(duration_nanoseconds) - 1)
+    );
+}
 
 template <typename PublishTerminal, typename Stop>
 bool PublishOfflineTerminalBeforeStop(PublishTerminal&& publish_terminal, Stop&& stop) {
@@ -241,6 +256,28 @@ struct NativeVstAttachment {
 };
 
 struct Diagnostics {
+  struct DurationQuantiles {
+    std::uint64_t p50_nanoseconds = 0;
+    std::uint64_t p95_nanoseconds = 0;
+    std::uint64_t p99_nanoseconds = 0;
+    std::uint64_t maximum_nanoseconds = 0;
+  };
+  struct RealtimePerformance {
+    std::uint32_t sample_rate_hz = 0;
+    std::uint32_t frames_per_callback = 0;
+    std::uint64_t observation_count = 0;
+    DurationQuantiles processing;
+    std::uint64_t deadline_misses = 0;
+  };
+  struct VstWorkerPerformance {
+    std::uint32_t active_workers = 0;
+    std::uint64_t observation_count = 0;
+    DurationQuantiles processing;
+    std::uint64_t deadline_misses = 0;
+    std::uint64_t watchdog_misses = 0;
+    std::uint64_t faults = 0;
+    std::uint64_t restarts = 0;
+  };
   struct WorkerAutomation {
     std::uint32_t accepted_points;
     std::uint32_t last_parameter_id;
@@ -259,6 +296,8 @@ struct Diagnostics {
     std::string instance_id;
   };
   std::optional<WatchedMixHost> watched_mix_host;
+  RealtimePerformance realtime_performance;
+  VstWorkerPerformance vst_worker_performance;
   LifecycleState state;
   std::uint64_t callbacks;
   std::uint64_t split_blocks;
@@ -571,6 +610,7 @@ class AudioHost {
   bool Retire(std::uint32_t revision);
   bool ProcessPlanar(std::span<const float* const> input, std::span<float* const> output, std::uint32_t frame_count);
   bool ProcessRecordingPlanar(std::span<const float* const> input, std::uint32_t frame_count);
+  void RecordOutputCallback(std::uint32_t frame_count, std::uint64_t duration_nanoseconds) noexcept;
   Diagnostics diagnostics() const;
   DeviceReadinessReason readinessReason() const;
 

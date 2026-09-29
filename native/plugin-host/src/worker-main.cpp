@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <charconv>
 #include <array>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -337,6 +338,7 @@ int main(const int argc, char* argv[]) {
       const auto sequence = transport->BeginProcessing(slotIndex);
       if (!sequence) continue;
       processedSequence = *sequence;
+      const auto processingStarted = std::chrono::steady_clock::now();
       try {
         if (startup->noPluginTestMode) {
           // CTest-only transport verification; regular launches always use Vst3Worker.
@@ -373,6 +375,18 @@ int main(const int argc, char* argv[]) {
       } catch (...) {
         failed = true;
       }
+      const auto processingNanoseconds = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now() - processingStarted
+        ).count()
+      );
+      const auto samples = transport->numSamples(slotIndex);
+      const auto deadlineNanoseconds = startup->setup.sampleRate > 0.0
+        ? static_cast<std::uint64_t>(
+          static_cast<double>(samples) * 1'000'000'000.0 / startup->setup.sampleRate
+        )
+        : 0;
+      transport->RecordProcessingDuration(processingNanoseconds, deadlineNanoseconds);
       if (failed) {
         transport->PublishHealth(daw::plugin_host::WorkerHealth::kFaulted);
         static_cast<void>(transport->PublishDiagnostic({.kind = daw::plugin_host::WorkerDiagnosticKind::kFault, .sequence = *sequence}));

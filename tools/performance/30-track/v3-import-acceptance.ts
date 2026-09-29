@@ -13,16 +13,18 @@ const root = path.resolve(import.meta.dir, "../../..")
 const archive = path.join(root, "tools/performance/fixtures/30-track-v3-native.dawproject")
 const executable = path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/MacOS/@daw-browser-desktop")
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-export const parseControlMode = (option: string | undefined): "idle" | "playback" | "ui" | "paging" | "dsp" | "dsp-soak" | "dsp-one" | "dsp-recording" | "media-recording" | "media-recording-probe" | "media-recording-probe-drop" | "media-recording-probe-drop-no-meters" | "media-recording-probe-metadata" | "media-recording-probe-batch4" | "media-recording-probe-batch8" | "media-recording-portable" | "recording" | "acceptance" => {
+export const parseControlMode = (option: string | undefined): "idle" | "playback" | "ui" | "paging" | "dsp" | "dsp-ui" | "dsp-soak" | "dsp-one" | "dsp-recording" | "dsp-ui-recording" | "media-recording" | "media-recording-probe" | "media-recording-probe-drop" | "media-recording-probe-drop-no-meters" | "media-recording-probe-metadata" | "media-recording-probe-batch4" | "media-recording-probe-batch8" | "media-recording-portable" | "recording" | "acceptance" => {
   if (option === undefined) return "acceptance"
   if (option === "--idle-control") return "idle"
   if (option === "--playback-control") return "playback"
   if (option === "--ui-control") return "ui"
   if (option === "--paging-control") return "paging"
   if (option === "--dsp-control") return "dsp"
+  if (option === "--dsp-ui-control") return "dsp-ui"
   if (option === "--dsp-soak") return "dsp-soak"
   if (option === "--dsp-one-control") return "dsp-one"
   if (option === "--dsp-recording") return "dsp-recording"
+  if (option === "--dsp-ui-recording") return "dsp-ui-recording"
   if (option === "--media-recording") return "media-recording"
   if (option === "--media-recording-probe") return "media-recording-probe"
   if (option === "--media-recording-probe-drop") return "media-recording-probe-drop"
@@ -35,13 +37,73 @@ export const parseControlMode = (option: string | undefined): "idle" | "playback
   throw new Error("Unknown packaged v3 control mode")
 }
 export const controlDurationMs = (mode: ReturnType<typeof parseControlMode>) => mode === "dsp-soak" ? 300_000 : 60_000
-const isDspControlMode = (mode: ReturnType<typeof parseControlMode>) => mode === "dsp" || mode === "dsp-soak" || mode === "dsp-one"
+const isDspControlMode = (mode: ReturnType<typeof parseControlMode>) => mode === "dsp" || mode === "dsp-ui"
+  || mode === "dsp-soak" || mode === "dsp-one"
+const isUiStressMode = (mode: ReturnType<typeof parseControlMode>) => mode === "ui" || mode === "dsp-ui"
+  || mode === "dsp-ui-recording"
 const isMediaRecordingMode = (mode: ReturnType<typeof parseControlMode>) => mode.startsWith("media-recording")
 const recordingForwardMode = (mode: ReturnType<typeof parseControlMode>) =>
   mode.startsWith("media-recording-probe-drop") ? "drop"
     : mode === "media-recording-probe-metadata" ? "metadata"
       : mode === "media-recording-probe-batch4" ? "batch4"
         : mode === "media-recording-probe-batch8" ? "batch8" : "full"
+const performanceQuantilesSchema = z.object({
+  p50: z.number().finite().nullable(),
+  p95: z.number().finite().nullable(),
+  p99: z.number().finite().nullable(),
+  max: z.number().finite().nullable(),
+}).strict()
+const performanceThresholdsSchema = z.object({
+  over8_33Ms: z.number().int().nonnegative(),
+  over16_67Ms: z.number().int().nonnegative(),
+  over33_3Ms: z.number().int().nonnegative(),
+  over50Ms: z.number().int().nonnegative(),
+}).strict()
+const fullLoadFramePerformanceSchema = z.object({
+  display: z.object({
+    refreshRateHz: z.number().finite().positive().nullable(),
+    viewportWidth: z.number().int().positive(),
+    viewportHeight: z.number().int().positive(),
+    devicePixelRatio: z.number().finite().positive(),
+  }).strict(),
+  raf: z.object({
+    sampleCount: z.number().int().nonnegative(),
+    intervalsMs: performanceQuantilesSchema,
+  }).strict(),
+  applicationWork: z.object({
+    sampleCount: z.number().int().nonnegative(),
+    durationMs: performanceQuantilesSchema,
+    thresholds: performanceThresholdsSchema,
+  }).strict(),
+  longTasks: z.object({
+    supported: z.boolean(),
+    count: z.number().int().nonnegative().nullable(),
+    totalDurationMs: z.number().finite().nonnegative().nullable(),
+    maxDurationMs: z.number().finite().nonnegative().nullable(),
+  }).strict(),
+  droppedSamples: z.object({
+    raf: z.number().int().nonnegative(),
+    applicationWork: z.number().int().nonnegative(),
+    longTasks: z.number().int().nonnegative(),
+  }).strict(),
+}).strict()
+
+export const fullLoadFrameProbeScript = () => `(()=>{const limit=8192;const state={active:true,last:null,raf:[],work:[],long:[],drop:{raf:0,work:0,long:0},observer:null,id:0};
+const push=(values,key,value)=>{if(values.length<limit)values.push(value);else state.drop[key]++};
+const frame=(timestamp)=>{if(!state.active)return;if(state.last!==null)push(state.raf,'raf',timestamp-state.last);state.last=timestamp;
+queueMicrotask(()=>{if(state.active)push(state.work,'work',Math.max(0,performance.now()-timestamp))});state.id=requestAnimationFrame(frame)};
+if(PerformanceObserver.supportedEntryTypes?.includes('longtask')){state.observer=new PerformanceObserver((list)=>{for(const entry of list.getEntries())push(state.long,'long',entry.duration)});state.observer.observe({type:'longtask'})}
+state.id=requestAnimationFrame(frame);window.__dawFullLoadFrameProbe=state;return true})()`
+
+export const fullLoadFrameProbeResultScript = () => `(()=>{const state=window.__dawFullLoadFrameProbe;if(!state)throw new Error('Full-load frame probe unavailable.');
+state.active=false;cancelAnimationFrame(state.id);state.observer?.disconnect();
+const q=(values,f)=>{if(values.length===0)return null;const sorted=[...values].sort((a,b)=>a-b);const p=(sorted.length-1)*f;const lo=Math.floor(p),hi=Math.ceil(p);return lo===hi?sorted[lo]:sorted[lo]+(sorted[hi]-sorted[lo])*(p-lo)};
+const stats=(values)=>({p50:q(values,.5),p95:q(values,.95),p99:q(values,.99),max:values.length?Math.max(...values):null});
+const thresholds=(values)=>({over8_33Ms:values.filter(v=>v>8.33).length,over16_67Ms:values.filter(v=>v>16.67).length,over33_3Ms:values.filter(v=>v>33.3).length,over50Ms:values.filter(v=>v>50).length});
+const median=q(state.raf,.5);return {display:{refreshRateHz:median&&median>0?1000/median:null,viewportWidth:innerWidth,viewportHeight:innerHeight,devicePixelRatio},
+raf:{sampleCount:state.raf.length,intervalsMs:stats(state.raf)},applicationWork:{sampleCount:state.work.length,durationMs:stats(state.work),thresholds:thresholds(state.work)},
+longTasks:{supported:state.observer!==null,count:state.observer?state.long.length:null,totalDurationMs:state.observer?state.long.reduce((a,b)=>a+b,0):null,maxDurationMs:state.observer&&state.long.length?Math.max(...state.long):null},
+droppedSamples:{raf:state.drop.raf,applicationWork:state.drop.work,longTasks:state.drop.long}}})()`
 export const matchesControlProjectUrl = (url: string, projectId: string) => {
   try {
     const parsed = new URL(url)
@@ -198,6 +260,51 @@ const prepareFullDsp = async (session: string, profile: string, projectId: strin
   return { processors: processors.length, builtInEffects: builtInEffects.length,
     automatedInstanceId: instance.instanceId, mixParameterId: mix[0].id }
 }
+const runFullLoadUiStress = async (
+  session: string,
+  snapshot: ProjectSnapshotV2,
+  dspSetup: Awaited<ReturnType<typeof prepareFullDsp>> | null,
+  preserveRecording = false,
+) => {
+  const audioTrack = snapshot.tracks.find((track) => track.kind === "audio")
+  const instrumentTrack = snapshot.tracks.find((track) => track.kind === "instrument")
+  const audioClip = snapshot.clips.find((clip) => clip.trackId === audioTrack?.id && clip.source)
+  if (!audioTrack || !instrumentTrack || !audioClip) throw new Error("Full-load UI stress targets unavailable.")
+  const audioTrackIndex = snapshot.tracks.findIndex((track) => track.id === audioTrack.id) + 1
+  const instrumentTrackIndex = snapshot.tracks.findIndex((track) => track.id === instrumentTrack.id) + 1
+  const settle = () => delay(1_250)
+  const evalTrue = async (script: string, failure: string) => {
+    const result = await browserCommand(session, ["eval", script])
+    if (!result.includes("true")) throw new Error(failure)
+    await settle()
+  }
+  const zoom = (deltaY: number, anchor: number) => evalTrue(
+    `(()=>{const ruler=document.querySelector('[data-timeline-ruler="1"]');const timeline=ruler?.closest('.overflow-auto');if(!(timeline instanceof HTMLElement))return false;const rect=timeline.getBoundingClientRect();timeline.dispatchEvent(new WheelEvent('wheel',{deltaY:${deltaY},deltaMode:0,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*${anchor}}));return true})()`,
+    "Timeline zoom surface unavailable.",
+  )
+  await evalTrue("(()=>{const ruler=document.querySelector('[data-timeline-ruler=\"1\"]');const timeline=ruler?.closest('.overflow-auto');if(!(timeline instanceof HTMLElement))return false;timeline.scrollLeft+=900;timeline.dispatchEvent(new Event('scroll'));return true})()", "Timeline horizontal pan unavailable.")
+  await evalTrue("(()=>{const ruler=document.querySelector('[data-timeline-ruler=\"1\"]');const timeline=ruler?.closest('.overflow-auto');if(!(timeline instanceof HTMLElement))return false;timeline.scrollTop=Math.max(0,timeline.scrollHeight-timeline.clientHeight);timeline.dispatchEvent(new Event('scroll'));return true})()", "Timeline vertical scroll unavailable.")
+  await zoom(480, 0.5)
+  for (let index = 0; index < 5; index++) await zoom(-360, index === 4 ? 0.8 : 0.35)
+  await evalTrue(`(()=>{const clip=[...document.querySelectorAll('[title=${JSON.stringify(audioClip.name)}]')].find((entry)=>entry instanceof HTMLElement);if(!(clip instanceof HTMLElement))return false;clip.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,detail:2}));return true})()`, "Audio clip Sample Detail interaction unavailable.")
+  await waitForBrowserValue(session, "document.body.textContent?.includes('Sample Detail') && document.querySelector('canvas') ? true : null", 30_000)
+  for (let index = 0; index < 4; index++) await evalTrue(
+    `(()=>{const heading=[...document.querySelectorAll('*')].find((entry)=>entry.textContent?.trim()==='Sample Detail');const panel=heading?.parentElement?.parentElement;const canvas=panel?.querySelector('canvas');if(!(canvas instanceof HTMLCanvasElement))return false;const rect=canvas.getBoundingClientRect();canvas.dispatchEvent(new WheelEvent('wheel',{deltaY:-320,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*.65}));return true})()`,
+    "Sample Detail waveform zoom unavailable.",
+  )
+  if (!preserveRecording) await evalTrue("(()=>{const ruler=document.querySelector('[data-timeline-ruler=\"1\"]');if(!(ruler instanceof HTMLElement))return false;const rect=ruler.getBoundingClientRect();for(const ratio of [.5,.92]){const x=rect.left+rect.width*ratio,y=rect.top+rect.height*.75;ruler.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:x,clientY:y,pointerId:1,buttons:1}));ruler.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,clientX:x,clientY:y,pointerId:1}))}return true})()", "Timeline seek interaction unavailable.")
+  if (preserveRecording) return
+  await evalTrue("(()=>{const button=document.querySelector('button[aria-label=\"Toggle loop region\"]');if(!(button instanceof HTMLButtonElement))return false;button.click();return button.getAttribute('aria-pressed')==='true'})()", "Loop interaction unavailable.")
+  await evalTrue(`(()=>{const button=document.querySelector(${JSON.stringify(`button[aria-label="Select track ${audioTrackIndex}: ${audioTrack.name}"]`)});if(!(button instanceof HTMLButtonElement))return false;button.click();return true})()`, "DSP audio track unavailable.")
+  await evalTrue("(()=>{const slider=document.querySelector('[aria-label=\"Drive\"][role=\"slider\"]');if(!(slider instanceof HTMLElement))return false;const rect=slider.getBoundingClientRect();slider.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:rect.left+rect.width/2,clientY:rect.top+rect.height/2,pointerId:2,buttons:1}));slider.dispatchEvent(new PointerEvent('pointermove',{bubbles:true,clientX:rect.left+rect.width/2,clientY:rect.top+rect.height*.25,pointerId:2,buttons:1}));slider.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,clientX:rect.left+rect.width/2,clientY:rect.top+rect.height*.25,pointerId:2}));return true})()", "Built-in effect interaction unavailable.")
+  await evalTrue(`(()=>{const button=document.querySelector(${JSON.stringify(`button[aria-label="Select track ${instrumentTrackIndex}: ${instrumentTrack.name}"]`)});if(!(button instanceof HTMLButtonElement))return false;button.click();return true})()`, "Instrument track unavailable.")
+  await evalTrue("(()=>{const button=[...document.querySelectorAll('button[aria-label]')].find((entry)=>entry.getAttribute('aria-label')?.endsWith(': square'));if(button instanceof HTMLButtonElement)button.click();return true})()", "Instrument interaction failed.")
+  if (dspSetup) {
+    await evalTrue(`(()=>{const button=document.querySelector(${JSON.stringify(`button[aria-label="Select track ${audioTrackIndex}: ${audioTrack.name}"]`)});if(!(button instanceof HTMLButtonElement))return false;button.click();const show=[...document.querySelectorAll('button')].find((entry)=>entry.textContent?.startsWith('Show parameters'));if(show instanceof HTMLButtonElement)show.click();return true})()`, "VST parameter panel unavailable.")
+    await evalTrue("(()=>{const rows=[...document.querySelectorAll('input[type=\"range\"]')];const slider=rows.find((entry)=>entry.parentElement?.parentElement?.textContent?.includes('Mix'));if(!(slider instanceof HTMLInputElement))return false;slider.value=String(Math.min(1,Number(slider.value)+.08));slider.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertReplacementText'}));slider.dispatchEvent(new Event('change',{bubbles:true}));return true})()", "Real VST Mix interaction unavailable.")
+  }
+  if (!preserveRecording) await evalTrue("(()=>{const stop=document.querySelector('button[aria-label=\"Stop\"]');if(stop instanceof HTMLButtonElement)stop.click();const play=document.querySelector('button[aria-label=\"Play\"]');if(!(play instanceof HTMLButtonElement))return false;play.click();return true})()", "Playback recovery failed.")
+}
 export const quietCapture = async (steps: {
   start: () => Promise<void>
   wait: () => Promise<void>
@@ -262,9 +369,10 @@ const command = async (profile: string, args: string[], input?: string) => {
 const main = async () => {
   const output = Bun.argv[2]
   const mode = parseControlMode(Bun.argv[3])
-  const quietRecording = mode === "recording" || mode === "dsp-recording" || isMediaRecordingMode(mode)
+  const quietRecording = mode === "recording" || mode === "dsp-recording" || mode === "dsp-ui-recording"
+    || isMediaRecordingMode(mode)
   if (!output || !path.isAbsolute(output) || Bun.argv.length > 4)
-    throw new Error("Usage: bun v3-import-acceptance.ts <absolute-result-path> [--quiet-recording|--idle-control|--playback-control|--ui-control|--paging-control|--dsp-control|--dsp-soak|--dsp-recording]")
+    throw new Error("Usage: bun v3-import-acceptance.ts <absolute-result-path> [--quiet-recording|--idle-control|--playback-control|--ui-control|--paging-control|--dsp-control|--dsp-ui-control|--dsp-soak|--dsp-recording|--dsp-ui-recording]")
   if ((await stat(archive)).size < 773_000_000) throw new Error("Unexpected v3 archive size")
   await stat(path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/app.asar"))
   const directory = await createPrivateRunDirectory("/tmp")
@@ -415,7 +523,7 @@ const main = async () => {
         throw new Error("Six MIDI tracks were not muted for media-only recording.")
     }
     let dspSetup: Awaited<ReturnType<typeof prepareFullDsp>> | null = null
-    if (isDspControlMode(mode) || mode === "dsp-recording") {
+    if (isDspControlMode(mode) || mode === "dsp-recording" || mode === "dsp-ui-recording") {
       stage = "dsp-setup"
       dspSetup = await prepareFullDsp(session, profile, projectId, snapshot.tracks.filter((track) => track.kind === "audio").map((track) => track.name), mode === "dsp-one" ? 1 : 8)
     }
@@ -449,7 +557,8 @@ const main = async () => {
     await delay(4000)
     const playing = desktopTransportStatusSchemaV1.parse(await command(profile, ["host", "transport-status"]))
     const after = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
-    if (!isDspControlMode(mode) && mode !== "dsp-recording" && (playing.state !== "playing" || after.native.status !== "available" ||
+    if (!isDspControlMode(mode) && mode !== "dsp-recording" && mode !== "dsp-ui-recording"
+      && (playing.state !== "playing" || after.native.status !== "available" ||
       !playbackCountersValid(before.native.status === "available" ? before.native.diagnostics : null, after.native.diagnostics)))
       throw new Error(`Playback callbacks missing or native blocks rejected: ${JSON.stringify({
         state: playing.state, before: before.native.status === "available" ? before.native.diagnostics.callbacks : null,
@@ -458,18 +567,55 @@ const main = async () => {
       })}`)
     if (mode === "playback" || mode === "ui" || mode === "paging" || isDspControlMode(mode)) {
       stage = `${mode}-control`
+      let framePerformance: z.infer<typeof fullLoadFramePerformanceSchema> | null = null
+      const transportDrift: { elapsedMs: number; transportFrame: string; expectedFrame: string; errorFrames: string }[] = []
+      const transportBaseline = mode === "dsp-soak"
+        ? desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"])) : null
       controlStartedAtMs = Date.now()
-      if (mode === "ui") {
-        const uiStress = async () => {
-          for (let index = 0; index < 6; index++) {
-            const changed = await browserCommand(session, ["eval", `(()=>{const ruler=document.querySelector('[data-timeline-ruler="1"]');const timeline=ruler?.closest('[data-timeline-scroll-container]')??ruler?.parentElement;if(!timeline)return false;timeline.scrollLeft+=${index % 2 === 0 ? 600 : -600};timeline.dispatchEvent(new Event('scroll'));return true})()`])
-            if (!changed.includes("true")) throw new Error("Timeline UI stress surface unavailable.")
-            await delay(5_000)
+      if (isUiStressMode(mode)) {
+        await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
+        await runFullLoadUiStress(session, snapshot, dspSetup)
+        if (isDspControlMode(mode)) {
+          for (let attempt = 0; attempt < 60; attempt++) {
+            const recovered = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
+            if (recovered.native.status === "available"
+              && BigInt(recovered.native.diagnostics.realtimePerformance?.observationCount ?? "0") > 0n) break
+            if (attempt === 59) throw new Error("Native playback did not recover after UI interactions.")
+            await delay(250)
           }
         }
-        await uiStress()
       }
-      await delay(mode === "ui" ? 30_000 : controlDurationMs(mode))
+      if (mode === "dsp-soak" && transportBaseline?.native.status === "available"
+        && transportBaseline.native.diagnostics.transportFrame !== undefined) {
+        const startFrame = BigInt(transportBaseline.native.diagnostics.transportFrame)
+        for (const targetMs of [10_000, 60_000, 300_000]) {
+          const remainingMs = targetMs - (Date.now() - controlStartedAtMs)
+          if (remainingMs > 0) await delay(remainingMs)
+          const checkpoint = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
+          if (checkpoint.native.status !== "available"
+            || checkpoint.native.diagnostics.transportFrame === undefined) {
+            throw new Error("Native transport drift checkpoint unavailable.")
+          }
+          const elapsedMs = Date.now() - controlStartedAtMs
+          const transportFrame = BigInt(checkpoint.native.diagnostics.transportFrame)
+          const sampleRate = BigInt(checkpoint.native.diagnostics.realtimePerformance?.sampleRateHz ?? 0)
+          const expectedFrame = startFrame + BigInt(Math.round(elapsedMs)) * sampleRate / 1_000n
+          transportDrift.push({
+            elapsedMs,
+            transportFrame: transportFrame.toString(),
+            expectedFrame: expectedFrame.toString(),
+            errorFrames: (transportFrame - expectedFrame).toString(),
+          })
+        }
+      } else {
+        const remainingMs = controlDurationMs(mode) - (Date.now() - controlStartedAtMs)
+        if (remainingMs > 0) await delay(remainingMs)
+      }
+      if (isUiStressMode(mode)) {
+        framePerformance = fullLoadFramePerformanceSchema.parse(
+          JSON.parse(JSON.parse(await browserCommand(session, ["eval", `JSON.stringify(${fullLoadFrameProbeResultScript()})`]))),
+        )
+      }
       stage = "playback-verify"
       const responsive = await pingProjectCdp(new URL(endpoint).port, projectId)
       if (!responsive) throw new Error("Playback project renderer URL changed.")
@@ -477,22 +623,42 @@ const main = async () => {
         ? desktopHostVstInstancesResultSchemaV1.parse(await command(profile, ["host", "vst-instances", projectId])) : null
       const workerPids = vst ? await nativeWorkers() : []
       let finalNativeCallbacks = after.native.status === "available" ? after.native.diagnostics.callbacks : null
+      let realtimePerformance = after.native.status === "available"
+        ? after.native.diagnostics.realtimePerformance ?? null : null
+      let vstWorkerPerformance = after.native.status === "available"
+        ? after.native.diagnostics.vstWorkerPerformance ?? null : null
+      let transportFrame = after.native.status === "available"
+        ? after.native.diagnostics.transportFrame ?? null : null
       if (isDspControlMode(mode)) {
         const finalNative = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
         if (finalNative.native.status !== "available"
-          || finalNative.native.diagnostics.callbacks <= (before.native.status === "available" ? before.native.diagnostics.callbacks : 0)
-          || finalNative.native.diagnostics.rejectedBlocks !== (before.native.status === "available" ? before.native.diagnostics.rejectedBlocks : 0)) {
+          || BigInt(finalNative.native.diagnostics.realtimePerformance?.observationCount ?? "0") === 0n
+          || finalNative.native.diagnostics.rejectedBlocks !== 0) {
           throw new Error(`Full DSP playback native health failed: ${JSON.stringify({
             status: finalNative.native.status,
             callbacks: finalNative.native.status === "available" ? finalNative.native.diagnostics.callbacks : null,
           })}`)
         }
         finalNativeCallbacks = finalNative.native.diagnostics.callbacks
+        realtimePerformance = finalNative.native.diagnostics.realtimePerformance ?? null
+        vstWorkerPerformance = finalNative.native.diagnostics.vstWorkerPerformance ?? null
+        transportFrame = finalNative.native.diagnostics.transportFrame ?? null
+        if (!realtimePerformance || !vstWorkerPerformance
+          || BigInt(realtimePerformance.deadlineMisses) !== 0n
+          || BigInt(vstWorkerPerformance.deadlineMisses) !== 0n
+          || BigInt(vstWorkerPerformance.watchdogMisses) !== 0n
+          || BigInt(vstWorkerPerformance.faults) !== 0n
+          || BigInt(vstWorkerPerformance.restarts) !== 0n) {
+          throw new Error("Full DSP realtime deadline health failed.")
+        }
       }
       if (vst && vst.instances.filter((instance) => instance.health.state === "ready").length !== dspSetup?.processors)
         throw new Error("Expected live VST instances were not available after measured playback.")
       await writePrivateArtifact(output, JSON.stringify({ status: "complete", mode, responsive, projectId, lifecycle, ...telemetry(), dspSetup, pagingSetup,
+        framePerformance,
+        transportDrift,
         pagingSeek, playing,
+        transportFrame, realtimePerformance, vstWorkerPerformance,
         vstInstances: vst?.instances.length ?? 0, workerPids,
         rejectedBlocks: after.native.status === "available" ? after.native.diagnostics.rejectedBlocks
           - (before.native.status === "available" ? before.native.diagnostics.rejectedBlocks : 0) : null,
@@ -518,6 +684,10 @@ const main = async () => {
         owned: beforeCaptureProcesses.filter((row) => plan.recordedProcesses.some((entry) => entry.pid === row.pid))
           .map(({ pid, parentPid }) => ({ pid, parentPid })),
       }))
+      if (mode === "dsp-ui-recording") {
+        await command(profile, ["host", "stop"])
+        await command(profile, ["host", "seek", "0"])
+      }
       await quietCapture({
         start: async () => {
           stage = "quiet-start"
@@ -527,6 +697,13 @@ const main = async () => {
           stage = "quiet-wait"
         },
         wait: async () => {
+          if (mode === "dsp-ui-recording") {
+            await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
+            await runFullLoadUiStress(session, snapshot, dspSetup, true)
+            const remainingMs = 61_000 - (Date.now() - quietStartedAt)
+            if (remainingMs > 0) await delay(remainingMs)
+            return
+          }
           if (!mode.includes("media-recording-probe")) return delay(61_000)
           const probeResults: { elapsedMs: number; result: string; latencyMs: number }[] = []
           for (let index = 0; index < 12; index++) {
@@ -595,9 +772,18 @@ const main = async () => {
           const newClips = persisted.clips.filter((clip) => !snapshot.clips.some((previous) => previous.id === clip.id)
             && clip.trackId === audioTrack.id && clip.source?.sourceKind === "recording")
           const capturedFrames = (completed.recording.capturedFrames ?? 0) - (recordingBefore.recording.capturedFrames ?? 0)
-          if (performance.now() - started < 60_000 || capturedFrames < 60 * (completed.recording.activeSampleRate ?? 0)
+          const realtimePerformance = completed.native.status === "available"
+            ? completed.native.diagnostics.realtimePerformance ?? null : null
+          const vstWorkerPerformance = completed.native.status === "available"
+            ? completed.native.diagnostics.vstWorkerPerformance ?? null : null
+          if (performance.now() - started < 60_000 || capturedFrames < 58 * (completed.recording.activeSampleRate ?? 0)
             || !completed.recording.activeSampleRate || completed.recording.droppedFrames !== 0
             || completed.recording.overrunFrames !== 0 || completed.recording.lastFailurePresent
+            || (mode === "dsp-ui-recording" && (!realtimePerformance || !vstWorkerPerformance
+              || BigInt(realtimePerformance.deadlineMisses) !== 0n
+              || BigInt(vstWorkerPerformance.deadlineMisses) !== 0n
+              || BigInt(vstWorkerPerformance.watchdogMisses) !== 0n
+              || BigInt(vstWorkerPerformance.faults) !== 0n || BigInt(vstWorkerPerformance.restarts) !== 0n))
             || completed.recording.peakSabWriterOccupancy > 8 || newClips.length !== 1) {
             throw new Error(`Quiet capture failed: ${JSON.stringify({
               capturedFrames, sampleRate: completed.recording.activeSampleRate,
@@ -608,11 +794,19 @@ const main = async () => {
           }
           recordingResult = { capturedFrames, sampleRate: completed.recording.activeSampleRate,
             droppedFrames: completed.recording.droppedFrames, peakOccupancy: completed.recording.peakSabWriterOccupancy,
-            clipId: newClips[0]?.id, writerTiming: completed.recording.writerTiming }
+            clipId: newClips[0]?.id, writerTiming: completed.recording.writerTiming,
+            transportFrame: completed.native.status === "available"
+              ? completed.native.diagnostics.transportFrame ?? null : null,
+            realtimePerformance, vstWorkerPerformance,
+            framePerformance: mode === "dsp-ui-recording"
+              ? fullLoadFramePerformanceSchema.parse(JSON.parse(JSON.parse(await browserCommand(
+                session,
+                ["eval", `JSON.stringify(${fullLoadFrameProbeResultScript()})`],
+              )))) : null }
         },
       })
     }
-    await browserCommand(session, ["find", "role", "button", "click", "--name", "Stop"])
+    await command(profile, ["host", "stop"])
     await mkdir(path.dirname(output), { recursive: true })
     await writePrivateArtifact(output, JSON.stringify({ status: "complete", archive, projectId: snapshot.project.id, tracks: snapshot.tracks.length, clips: snapshot.clips.length, assets: snapshot.assets.length, midiNotes: countMidiNotes(snapshot.clips), nativeCallbacksBefore: before.native.status === "available" ? before.native.diagnostics.callbacks : null, nativeCallbacksAfter: after.native.diagnostics.callbacks, rejectedBlocks: after.native.diagnostics.rejectedBlocks - (before.native.status === "available" ? before.native.diagnostics.rejectedBlocks : 0), recording: recordingResult }, null, 2))
   } catch (error) {

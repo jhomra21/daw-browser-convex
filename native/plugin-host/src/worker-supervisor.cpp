@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cerrno>
 #include <cmath>
 #include <cctype>
@@ -81,6 +82,10 @@ struct alignas(kCacheLineBytes) SharedHeader {
   std::atomic<std::uint32_t> diagnosticRead{0};
   std::atomic<std::uint32_t> tailMetadataSequence{0};
   std::atomic<std::uint32_t> tailMetadataFrames{0};
+  std::atomic<std::uint64_t> processingCount{0};
+  std::atomic<std::uint64_t> processingMaximumNanoseconds{0};
+  std::atomic<std::uint64_t> processingDeadlineMisses{0};
+  std::atomic<std::uint64_t> processingBuckets[kWorkerProcessingHistogramBuckets]{};
   WorkerDiagnostic diagnostics[kDiagnosticCapacity]{};
 };
 static_assert(alignof(SharedHeader) >= alignof(std::atomic<std::uint64_t>));
@@ -644,6 +649,19 @@ std::optional<WorkerTailMetadata> WorkerTransport::ReadTailMetadata() const {
   };
 }
 
+WorkerProcessingMetrics WorkerTransport::ReadProcessingMetrics() const {
+  WorkerProcessingMetrics result;
+  if (!mapping_) return result;
+  const auto* header = static_cast<const SharedHeader*>(mapping_->address);
+  result.count = header->processingCount.load(std::memory_order_relaxed);
+  result.maximum_nanoseconds = header->processingMaximumNanoseconds.load(std::memory_order_relaxed);
+  result.deadline_misses = header->processingDeadlineMisses.load(std::memory_order_relaxed);
+  for (std::size_t index = 0; index < result.buckets.size(); ++index) {
+    result.buckets[index] = header->processingBuckets[index].load(std::memory_order_relaxed);
+  }
+  return result;
+}
+
 int WorkerTransport::fileDescriptor() const {
   return mapping_ ? mapping_->fileDescriptor : -1;
 }
@@ -747,6 +765,27 @@ void WorkerTransport::PublishTailMetadata(const std::uint32_t tailFrames) {
   header->tailMetadataSequence.fetch_add(1, std::memory_order_acq_rel);
   header->tailMetadataFrames.store(tailFrames, std::memory_order_relaxed);
   header->tailMetadataSequence.fetch_add(1, std::memory_order_release);
+}
+
+void WorkerTransport::RecordProcessingDuration(
+  const std::uint64_t durationNanoseconds,
+  const std::uint64_t deadlineNanoseconds
+) {
+  if (!mapping_) return;
+  auto* header = static_cast<SharedHeader*>(mapping_->address);
+  header->processingCount.fetch_add(1, std::memory_order_relaxed);
+  auto maximum = header->processingMaximumNanoseconds.load(std::memory_order_relaxed);
+  while (durationNanoseconds > maximum && !header->processingMaximumNanoseconds.compare_exchange_weak(
+    maximum, durationNanoseconds, std::memory_order_relaxed, std::memory_order_relaxed)) {}
+  if (deadlineNanoseconds > 0 && durationNanoseconds > deadlineNanoseconds) {
+    header->processingDeadlineMisses.fetch_add(1, std::memory_order_relaxed);
+  }
+  const auto bucket = durationNanoseconds == 0
+    ? 0U
+    : std::min<std::size_t>(
+      kWorkerProcessingHistogramBuckets - 1,
+      static_cast<std::size_t>(std::bit_width(durationNanoseconds) - 1));
+  header->processingBuckets[bucket].fetch_add(1, std::memory_order_relaxed);
 }
 
 WorkerRuntime::WorkerRuntime() = default;

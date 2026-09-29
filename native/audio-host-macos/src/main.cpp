@@ -837,6 +837,25 @@ int main() {
       WriteU32(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->submitted : 0);
       WriteU32(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->transport_epoch : 0);
       WriteString(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->instance_id : "");
+      WriteU64(response, static_cast<std::uint64_t>(diagnostics.transport_frame));
+      WriteU32(response, diagnostics.realtime_performance.sample_rate_hz);
+      WriteU32(response, diagnostics.realtime_performance.frames_per_callback);
+      WriteU64(response, diagnostics.realtime_performance.observation_count);
+      WriteU64(response, diagnostics.realtime_performance.processing.p50_nanoseconds);
+      WriteU64(response, diagnostics.realtime_performance.processing.p95_nanoseconds);
+      WriteU64(response, diagnostics.realtime_performance.processing.p99_nanoseconds);
+      WriteU64(response, diagnostics.realtime_performance.processing.maximum_nanoseconds);
+      WriteU64(response, diagnostics.realtime_performance.deadline_misses);
+      WriteU32(response, diagnostics.vst_worker_performance.active_workers);
+      WriteU64(response, diagnostics.vst_worker_performance.observation_count);
+      WriteU64(response, diagnostics.vst_worker_performance.processing.p50_nanoseconds);
+      WriteU64(response, diagnostics.vst_worker_performance.processing.p95_nanoseconds);
+      WriteU64(response, diagnostics.vst_worker_performance.processing.p99_nanoseconds);
+      WriteU64(response, diagnostics.vst_worker_performance.processing.maximum_nanoseconds);
+      WriteU64(response, diagnostics.vst_worker_performance.deadline_misses);
+      WriteU64(response, diagnostics.vst_worker_performance.watchdog_misses);
+      WriteU64(response, diagnostics.vst_worker_performance.faults);
+      WriteU64(response, diagnostics.vst_worker_performance.restarts);
       if (!WriteFrame(daw::audio_host_macos::ControlType::kDiagnostics, response)) return EXIT_FAILURE;
       std::fprintf(stderr, "[native-control-timing] diagnostics response elapsed_ms=%lld\n",
         static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(

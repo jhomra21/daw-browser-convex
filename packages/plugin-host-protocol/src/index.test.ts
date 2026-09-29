@@ -206,7 +206,7 @@ test('round trips the bounded native worker artifact and runtime hello contract'
       artifact: { id: 'daw-vst3-worker', version: '3' },
       startupProtocolVersion: 1,
       controlProtocolVersion: 2,
-      transportAbiVersion: 5,
+      transportAbiVersion: 6,
       architecture: 'arm64',
       role: 'effect',
       latencyFrames: 32,

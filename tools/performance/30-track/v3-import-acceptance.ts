@@ -120,8 +120,9 @@ const fullLoadFramePerformanceSchema = z.object({
 export const fullLoadFrameProbeScript = () => `(()=>{const limit=8192,longLimit=256;const state={active:true,last:null,raf:[],work:[],long:[],drop:{raf:0,work:0,long:0,longFrames:0},observer:null,loafObserver:null,id:0,currentPhase:'unattributed',phases:[],longFrames:[],counters:{},durations:{}};
 const push=(values,key,value)=>{if(values.length<limit)values.push(value);else state.drop[key]++};
 const owner=(entry)=>{const scripts=entry.scripts||[];const script=scripts.reduce((best,item)=>(item.duration||0)>(best?.duration||0)?item:best,null);const source=String(script?.sourceURL||'').slice(-160),fn=String(script?.functionName||'').slice(0,120);const text=(source+' '+fn).toLowerCase();const category=text.includes('waveform')?'waveform-geometry':text.includes('record')?'recording-UI':text.includes('timeline')?'timeline-reactivity':text.includes('solid')?'Solid/reactive':scripts.length?'unknown':'layout/style';return {category,source:source||null,functionName:fn||null}};
-window.__dawPerformanceBenchmark={increment:(key,amount=1)=>{state.counters[key]=(state.counters[key]||0)+amount},duration:(key,value)=>{const values=state.durations[key]||(state.durations[key]=[]);if(values.length<limit)values.push(value)},gauge:(key,value)=>{state.counters[key]=value}};
-window.__dawPerformancePhase=(name,active)=>{const now=performance.now();if(active){state.currentPhase=name;state.phases.push({name,startTime:now,endTime:null})}else{const phase=[...state.phases].reverse().find(item=>item.name===name&&item.endTime===null);if(phase)phase.endTime=now;state.currentPhase='unattributed'};return true};
+const phase=(name,active)=>{const now=performance.now();if(active){state.currentPhase=name;state.phases.push({name,startTime:now,endTime:null})}else{const item=[...state.phases].reverse().find(candidate=>candidate.name===name&&candidate.endTime===null);if(item)item.endTime=now;state.currentPhase=[...state.phases].reverse().find(candidate=>candidate.endTime===null)?.name||'unattributed'};return true};
+window.__dawPerformanceBenchmark={increment:(key,amount=1)=>{state.counters[key]=(state.counters[key]||0)+amount},duration:(key,value)=>{const values=state.durations[key]||(state.durations[key]=[]);if(values.length<limit)values.push(value)},gauge:(key,value)=>{state.counters[key]=value},phase};
+window.__dawPerformancePhase=phase;
 const frame=(timestamp)=>{if(!state.active)return;if(state.last!==null)push(state.raf,'raf',timestamp-state.last);state.last=timestamp;
 queueMicrotask(()=>{if(state.active)push(state.work,'work',Math.max(0,performance.now()-timestamp))});state.id=requestAnimationFrame(frame)};
 if(PerformanceObserver.supportedEntryTypes?.includes('longtask')){state.observer=new PerformanceObserver((list)=>{for(const entry of list.getEntries()){push(state.long,'long',entry.duration);if(state.longFrames.length===longLimit){state.drop.longFrames++;continue}state.longFrames.push({startTime:entry.startTime,duration:entry.duration,phase:state.currentPhase,owner:'unknown',scriptDuration:null,renderDuration:null,styleAndLayoutDuration:null,forcedStyleAndLayoutDuration:null,source:null,functionName:null})}});state.observer.observe({type:'longtask'})}
@@ -775,7 +776,9 @@ const main = async () => {
       await quietCapture({
         start: async () => {
           stage = "quiet-start"
+          await browserCommand(session, ["eval", "window.__dawPerformancePhase?.('recording-start',true)??true"])
           await browserCommand(session, ["find", "role", "button", "click", "--name", "Start recording"])
+          await browserCommand(session, ["eval", "window.__dawPerformancePhase?.('recording-start',false)??true"])
           quietStartedAt = Date.now()
           controlStartedAtMs = quietStartedAt
           stage = "quiet-wait"
@@ -804,6 +807,7 @@ const main = async () => {
         },
         stop: async () => {
           stage = "quiet-stop"
+          await browserCommand(session, ["eval", "window.__dawPerformancePhase?.('recording-stop',true)??true"])
           quietElapsedMs = Date.now() - quietStartedAt
           afterCaptureProcesses = await rows()
           const port = new URL(endpoint).port
@@ -844,6 +848,7 @@ const main = async () => {
           if (!stopPresent) throw new Error("Stop recording absent after quiet interval.")
           await browserCommand(session, ["find", "role", "button", "click", "--name", "Stop recording"])
           stopSucceeded = true
+          await browserCommand(session, ["eval", "window.__dawPerformancePhase?.('recording-stop',false)??true"])
           stage = "quiet-observe"
         },
         observe: async () => {

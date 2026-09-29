@@ -55,11 +55,27 @@ const hex = (bytes: Uint8Array) => Array.from(
   (byte) => byte.toString(16).padStart(2, '0'),
 ).join('')
 
-export const sha256File = async (file: File, signal?: AbortSignal): Promise<string> => {
+const yieldToEventLoop = () => new Promise<void>((resolve) => {
+  const channel = new MessageChannel()
+  channel.port1.onmessage = () => {
+    channel.port1.close()
+    channel.port2.close()
+    resolve()
+  }
+  channel.port2.postMessage(null)
+})
+
+export const sha256File = async (
+  file: File,
+  signal?: AbortSignal,
+  yieldControl: () => Promise<void> = yieldToEventLoop,
+): Promise<string> => {
   const hash = sha256.create()
-  for await (const chunk of file.stream()) {
+  const chunkBytes = 1024 * 1024
+  for (let offset = 0; offset < file.size; offset += chunkBytes) {
     signal?.throwIfAborted()
-    hash.update(chunk)
+    hash.update(new Uint8Array(await file.slice(offset, offset + chunkBytes).arrayBuffer()))
+    if (offset + chunkBytes < file.size) await yieldControl()
   }
   signal?.throwIfAborted()
   return hex(hash.digest())

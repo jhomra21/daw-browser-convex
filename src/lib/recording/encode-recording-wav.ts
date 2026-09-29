@@ -20,6 +20,18 @@ const PCM_FILE = 'capture.pcm'
 const WAV_FILE = 'capture.wav'
 const BLOCK_HEADER_BYTES = Uint32Array.BYTES_PER_ELEMENT
 
+export const readPlanarFloat32Channels = (
+  payload: Uint8Array,
+  frameCount: number,
+  channelCount: number,
+): Float32Array[] => {
+  const channelBytes = frameCount * Float32Array.BYTES_PER_ELEMENT
+  return Array.from(
+    { length: channelCount },
+    (_, channel) => new Float32Array(payload.buffer, payload.byteOffset + channel * channelBytes, frameCount),
+  )
+}
+
 const getSessionDirectory = async (sessionId: string) => {
   const root = await navigator.storage.getDirectory()
   const recordings = await root.getDirectoryHandle(RECORDING_DIRECTORY)
@@ -72,18 +84,7 @@ export const encodeRecordingWav = async (
         offset + BLOCK_HEADER_BYTES + payloadBytes,
       ).arrayBuffer())
       if (payload.byteLength !== payloadBytes) throw new Error('Recording PCM block payload is truncated.')
-      const channels: Float32Array[] = []
-      for (let channel = 0; channel < descriptor.channelCount; channel += 1) {
-        const samples = new Float32Array(frameCount)
-        const source = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
-        for (let frame = 0; frame < frameCount; frame += 1) {
-          samples[frame] = source.getFloat32(
-            (channel * frameCount + frame) * Float32Array.BYTES_PER_ELEMENT,
-            true,
-          )
-        }
-        channels.push(samples)
-      }
+      const channels = readPlanarFloat32Channels(payload, frameCount, descriptor.channelCount)
       yield { frameCount, channels }
       offset += BLOCK_HEADER_BYTES + payloadBytes
     }

@@ -25,7 +25,10 @@ import {
 } from '~/lib/track-recording-session'
 import { createRecordingTransport } from '~/lib/recording/recording-transport'
 import { resetRecordingDiagnostics, updateRecordingDiagnostics, recordRecordingTermination, recordRecordingLifecycle, recordNativeRecordingStatus, type RecordingTerminationCause } from '~/lib/recording/recording-diagnostics'
-import { incrementPerformanceBenchmarkCounter } from '~/lib/performance-benchmark-telemetry'
+import {
+  incrementPerformanceBenchmarkCounter,
+  withPerformanceBenchmarkPhase,
+} from '~/lib/performance-benchmark-telemetry'
 import {
   createRecordingTempStorage,
   isRecordingTempStorageSupported,
@@ -397,7 +400,10 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         return
       }
       try {
-        const encoded = await encodeRecordingWav(descriptor)
+        const encoded = await withPerformanceBenchmarkPhase(
+          'recording-wav-encode',
+          () => encodeRecordingWav(descriptor),
+        )
         file = encoded.file
         removeTemp = encoded.remove
         sourceMetadata = {
@@ -432,13 +438,13 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     if (isLocalProject) {
       let assetId: string | undefined
       try {
-        const asset = await createLocalAsset({
+        const asset = await withPerformanceBenchmarkPhase('recording-asset-create', () => createLocalAsset({
           projectId: rid,
           file,
           metadata: { ...sourceMetadata, sourceKind: 'recording' },
-        })
+        }))
         assetId = asset.id
-        const created = await createLocalAudioClip({
+        const created = await withPerformanceBenchmarkPhase('recording-clip-create', () => createLocalAudioClip({
           projectId: rid,
           trackId: ctx.trackId,
           trackRef: getTrackHistoryRef(targetTrack),
@@ -457,7 +463,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
           audioBufferCache,
           color: trackColorForClip(targetTrack.color) ?? 'clip-recording',
           canProject: () => projectId() === rid && tracks().some((entry) => entry.id === ctx.trackId),
-        })
+        }))
         await cleanupRecording()
         await removeTemp().catch(() => undefined)
         if (ctx.createdTrack && projectId() === rid && tracks().some((entry) => entry.id === ctx.trackId)) {
@@ -945,7 +951,10 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     try {
       if (ctx.engineCaptureActive) {
         if (ctx.nativeCaptureActive) {
-          await nativeRecording?.controller.stop()
+          await withPerformanceBenchmarkPhase(
+            'recording-native-stop',
+            async () => nativeRecording?.controller.stop(),
+          )
         } else if (ctx.portableCaptureActive) {
           await portableRecording?.controller.stop()
         } else {

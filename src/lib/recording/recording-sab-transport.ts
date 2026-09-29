@@ -102,6 +102,10 @@ export const createRecordingSabTransport = (
       if (message.type === 'aborted' || message.type === 'failure') worker.terminate()
       return
     }
+    if (message.type === 'boot') {
+      if (state !== 'starting') return fail('Unexpected recording writer boot message.')
+      return
+    }
     if (message.type === 'ready') {
       if (state !== 'starting') return fail('Unexpected recording writer ready message.')
       state = 'open'

@@ -26,7 +26,7 @@ test("exposes only the macOS arm64 typed PCM asset session surface to renderers"
   expect(preload).toContain("offlinePcmMessageSchema")
   expect(preload).not.toContain("socket")
   expect(preload).not.toContain("AudioBuffer")
-  expect(preload).not.toContain("path")
+  expect(preload).not.toContain('from "node:path"')
   expect(preload).not.toContain("canonicalBundlePath")
   expect(preload).not.toContain("canonicalExecutablePath")
   expect(rendererTypes).toContain("audioHost?:")

@@ -8,6 +8,10 @@ import {
 import { drawWaveformSignal } from "@daw-browser/waveforms/draw-waveform-signal";
 import { useAppPreferences } from "~/context/app-preferences";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
+import {
+  incrementPerformanceBenchmarkCounter,
+  measurePerformanceBenchmarkDuration,
+} from "~/lib/performance-benchmark-telemetry";
 import { createClipVisualColors, resolveClipColor } from "~/lib/clip-color";
 import { LANE_HEIGHT } from "~/lib/timeline-utils";
 import { getTimelineClipViewportSlice } from "~/lib/timeline-viewport-geometry";
@@ -264,6 +268,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
   };
 
   function drawWaveform() {
+    incrementPerformanceBenchmarkCounter("waveform.raster-calls");
     const canvas = canvasRef;
     if (!canvas) return;
     if (props.waveformVisible === false) {
@@ -282,6 +287,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const pxW = canvasSize.backingWidthPx;
     const pxH = canvasSize.backingHeightPx;
     if (canvas.width !== pxW || canvas.height !== pxH) {
+      incrementPerformanceBenchmarkCounter("waveform.canvas-resizes");
       canvas.width = pxW;
       canvas.height = pxH;
     }
@@ -482,7 +488,9 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void props.pixelsPerSecond;
     void props.visibleRange;
     void waveform.segments();
+    const startedAt = performance.now();
     drawWaveform();
+    measurePerformanceBenchmarkDuration("waveform.raster", startedAt);
   });
 
   const clipElement = (

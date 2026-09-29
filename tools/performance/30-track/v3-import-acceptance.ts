@@ -13,7 +13,7 @@ const root = path.resolve(import.meta.dir, "../../..")
 const archive = path.join(root, "tools/performance/fixtures/30-track-v3-native.dawproject")
 const executable = path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/MacOS/@daw-browser-desktop")
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-export const parseControlMode = (option: string | undefined): "idle" | "playback" | "ui" | "paging" | "dsp" | "dsp-ui" | "dsp-soak" | "dsp-one" | "dsp-recording" | "dsp-ui-recording" | "media-recording" | "media-recording-probe" | "media-recording-probe-drop" | "media-recording-probe-drop-no-meters" | "media-recording-probe-metadata" | "media-recording-probe-batch4" | "media-recording-probe-batch8" | "media-recording-portable" | "recording" | "acceptance" => {
+export const parseControlMode = (option: string | undefined): "idle" | "playback" | "ui" | "paging" | "dsp" | "dsp-ui" | "dsp-soak" | "dsp-one" | "dsp-recording" | "dsp-ui-recording" | "zoom-profile" | "zoom-recording-profile" | "media-recording" | "media-recording-probe" | "media-recording-probe-drop" | "media-recording-probe-drop-no-meters" | "media-recording-probe-metadata" | "media-recording-probe-batch4" | "media-recording-probe-batch8" | "media-recording-portable" | "recording" | "acceptance" => {
   if (option === undefined) return "acceptance"
   if (option === "--idle-control") return "idle"
   if (option === "--playback-control") return "playback"
@@ -25,6 +25,8 @@ export const parseControlMode = (option: string | undefined): "idle" | "playback
   if (option === "--dsp-one-control") return "dsp-one"
   if (option === "--dsp-recording") return "dsp-recording"
   if (option === "--dsp-ui-recording") return "dsp-ui-recording"
+  if (option === "--zoom-profile") return "zoom-profile"
+  if (option === "--zoom-recording-profile") return "zoom-recording-profile"
   if (option === "--media-recording") return "media-recording"
   if (option === "--media-recording-probe") return "media-recording-probe"
   if (option === "--media-recording-probe-drop") return "media-recording-probe-drop"
@@ -38,7 +40,7 @@ export const parseControlMode = (option: string | undefined): "idle" | "playback
 }
 export const controlDurationMs = (mode: ReturnType<typeof parseControlMode>) => mode === "dsp-soak" ? 300_000 : 60_000
 const isDspControlMode = (mode: ReturnType<typeof parseControlMode>) => mode === "dsp" || mode === "dsp-ui"
-  || mode === "dsp-soak" || mode === "dsp-one"
+  || mode === "dsp-soak" || mode === "dsp-one" || mode === "zoom-profile"
 const isUiStressMode = (mode: ReturnType<typeof parseControlMode>) => mode === "ui" || mode === "dsp-ui"
   || mode === "dsp-ui-recording"
 const isMediaRecordingMode = (mode: ReturnType<typeof parseControlMode>) => mode.startsWith("media-recording")
@@ -86,24 +88,58 @@ const fullLoadFramePerformanceSchema = z.object({
     applicationWork: z.number().int().nonnegative(),
     longTasks: z.number().int().nonnegative(),
   }).strict(),
+  attribution: z.object({
+    phases: z.array(z.object({
+      name: z.string().min(1).max(80),
+      startTime: z.number().finite(),
+      endTime: z.number().finite().nullable(),
+    }).strict()).max(256),
+    longFrames: z.array(z.object({
+      startTime: z.number().finite(),
+      duration: z.number().finite().nonnegative(),
+      phase: z.string().min(1).max(80),
+      owner: z.string().min(1).max(80),
+      scriptDuration: z.number().finite().nonnegative().nullable(),
+      renderDuration: z.number().finite().nonnegative().nullable(),
+      styleAndLayoutDuration: z.number().finite().nonnegative().nullable(),
+      forcedStyleAndLayoutDuration: z.number().finite().nonnegative().nullable(),
+      source: z.string().max(160).nullable(),
+      functionName: z.string().max(120).nullable(),
+    }).strict()).max(256),
+    counters: z.record(z.string(), z.number().finite().nonnegative()),
+    durations: z.record(z.string(), z.object({
+      count: z.number().int().nonnegative(),
+      totalMs: z.number().finite().nonnegative(),
+      p95Ms: z.number().finite().nonnegative().nullable(),
+      maxMs: z.number().finite().nonnegative().nullable(),
+    }).strict()),
+    droppedLongFrames: z.number().int().nonnegative(),
+  }).strict(),
 }).strict()
 
-export const fullLoadFrameProbeScript = () => `(()=>{const limit=8192;const state={active:true,last:null,raf:[],work:[],long:[],drop:{raf:0,work:0,long:0},observer:null,id:0};
+export const fullLoadFrameProbeScript = () => `(()=>{const limit=8192,longLimit=256;const state={active:true,last:null,raf:[],work:[],long:[],drop:{raf:0,work:0,long:0,longFrames:0},observer:null,loafObserver:null,id:0,currentPhase:'unattributed',phases:[],longFrames:[],counters:{},durations:{}};
 const push=(values,key,value)=>{if(values.length<limit)values.push(value);else state.drop[key]++};
+const owner=(entry)=>{const scripts=entry.scripts||[];const script=scripts.reduce((best,item)=>(item.duration||0)>(best?.duration||0)?item:best,null);const source=String(script?.sourceURL||'').slice(-160),fn=String(script?.functionName||'').slice(0,120);const text=(source+' '+fn).toLowerCase();const category=text.includes('waveform')?'waveform-geometry':text.includes('record')?'recording-UI':text.includes('timeline')?'timeline-reactivity':text.includes('solid')?'Solid/reactive':scripts.length?'unknown':'layout/style';return {category,source:source||null,functionName:fn||null}};
+window.__dawPerformanceBenchmark={increment:(key,amount=1)=>{state.counters[key]=(state.counters[key]||0)+amount},duration:(key,value)=>{const values=state.durations[key]||(state.durations[key]=[]);if(values.length<limit)values.push(value)},gauge:(key,value)=>{state.counters[key]=value}};
+window.__dawPerformancePhase=(name,active)=>{const now=performance.now();if(active){state.currentPhase=name;state.phases.push({name,startTime:now,endTime:null})}else{const phase=[...state.phases].reverse().find(item=>item.name===name&&item.endTime===null);if(phase)phase.endTime=now;state.currentPhase='unattributed'};return true};
 const frame=(timestamp)=>{if(!state.active)return;if(state.last!==null)push(state.raf,'raf',timestamp-state.last);state.last=timestamp;
 queueMicrotask(()=>{if(state.active)push(state.work,'work',Math.max(0,performance.now()-timestamp))});state.id=requestAnimationFrame(frame)};
-if(PerformanceObserver.supportedEntryTypes?.includes('longtask')){state.observer=new PerformanceObserver((list)=>{for(const entry of list.getEntries())push(state.long,'long',entry.duration)});state.observer.observe({type:'longtask'})}
-state.id=requestAnimationFrame(frame);window.__dawFullLoadFrameProbe=state;return true})()`
+if(PerformanceObserver.supportedEntryTypes?.includes('longtask')){state.observer=new PerformanceObserver((list)=>{for(const entry of list.getEntries()){push(state.long,'long',entry.duration);if(state.longFrames.length===longLimit){state.drop.longFrames++;continue}state.longFrames.push({startTime:entry.startTime,duration:entry.duration,phase:state.currentPhase,owner:'unknown',scriptDuration:null,renderDuration:null,styleAndLayoutDuration:null,forcedStyleAndLayoutDuration:null,source:null,functionName:null})}});state.observer.observe({type:'longtask'})}
+state.id=requestAnimationFrame(frame);window.__dawFullLoadFrameProbe=state;
+if(PerformanceObserver.supportedEntryTypes?.includes('long-animation-frame')){try{state.loafObserver=new PerformanceObserver((list)=>{for(const entry of list.getEntries()){if(state.longFrames.length===longLimit){state.drop.longFrames++;continue}const attribution=owner(entry);state.longFrames.push({startTime:entry.startTime,duration:entry.duration,phase:state.currentPhase,owner:attribution.category,scriptDuration:Number.isFinite(entry.scripts?.reduce((sum,item)=>sum+(item.duration||0),0))?entry.scripts.reduce((sum,item)=>sum+(item.duration||0),0):null,renderDuration:Number.isFinite(entry.renderStart)?Math.max(0,entry.startTime+entry.duration-entry.renderStart):null,styleAndLayoutDuration:Number.isFinite(entry.styleAndLayoutStart)?Math.max(0,entry.startTime+entry.duration-entry.styleAndLayoutStart):null,forcedStyleAndLayoutDuration:Number.isFinite(entry.scripts?.reduce((sum,item)=>sum+(item.forcedStyleAndLayoutDuration||0),0))?entry.scripts.reduce((sum,item)=>sum+(item.forcedStyleAndLayoutDuration||0),0):null,source:attribution.source,functionName:attribution.functionName})}});state.loafObserver.observe({type:'long-animation-frame'})}catch{state.loafObserver=null}}
+return true})()`
 
 export const fullLoadFrameProbeResultScript = () => `(()=>{const state=window.__dawFullLoadFrameProbe;if(!state)throw new Error('Full-load frame probe unavailable.');
-state.active=false;cancelAnimationFrame(state.id);state.observer?.disconnect();
+state.active=false;cancelAnimationFrame(state.id);state.observer?.disconnect();state.loafObserver?.disconnect();delete window.__dawPerformanceBenchmark;delete window.__dawPerformancePhase;
 const q=(values,f)=>{if(values.length===0)return null;const sorted=[...values].sort((a,b)=>a-b);const p=(sorted.length-1)*f;const lo=Math.floor(p),hi=Math.ceil(p);return lo===hi?sorted[lo]:sorted[lo]+(sorted[hi]-sorted[lo])*(p-lo)};
 const stats=(values)=>({p50:q(values,.5),p95:q(values,.95),p99:q(values,.99),max:values.length?Math.max(...values):null});
+const durationStats=Object.fromEntries(Object.entries(state.durations).map(([key,values])=>[key,{count:values.length,totalMs:values.reduce((sum,value)=>sum+value,0),p95Ms:q(values,.95),maxMs:values.length?Math.max(...values):null}]));
 const thresholds=(values)=>({over8_33Ms:values.filter(v=>v>8.33).length,over16_67Ms:values.filter(v=>v>16.67).length,over33_3Ms:values.filter(v=>v>33.3).length,over50Ms:values.filter(v=>v>50).length});
 const median=q(state.raf,.5);return {display:{refreshRateHz:median&&median>0?1000/median:null,viewportWidth:innerWidth,viewportHeight:innerHeight,devicePixelRatio},
 raf:{sampleCount:state.raf.length,intervalsMs:stats(state.raf)},applicationWork:{sampleCount:state.work.length,durationMs:stats(state.work),thresholds:thresholds(state.work)},
 longTasks:{supported:state.observer!==null,count:state.observer?state.long.length:null,totalDurationMs:state.observer?state.long.reduce((a,b)=>a+b,0):null,maxDurationMs:state.observer&&state.long.length?Math.max(...state.long):null},
-droppedSamples:{raf:state.drop.raf,applicationWork:state.drop.work,longTasks:state.drop.long}}})()`
+droppedSamples:{raf:state.drop.raf,applicationWork:state.drop.work,longTasks:state.drop.long},
+attribution:{phases:state.phases,longFrames:state.longFrames,counters:state.counters,durations:durationStats,droppedLongFrames:state.drop.longFrames}}})()`
 export const matchesControlProjectUrl = (url: string, projectId: string) => {
   try {
     const parsed = new URL(url)
@@ -278,20 +314,31 @@ const runFullLoadUiStress = async (
     if (!result.includes("true")) throw new Error(failure)
     await settle()
   }
+  const phase = async (name: string, action: () => Promise<void>) => {
+    await browserCommand(session, ["eval", `window.__dawPerformancePhase?.(${JSON.stringify(name)},true)??true`])
+    try { await action() }
+    finally {
+      await browserCommand(session, ["eval", `window.__dawPerformancePhase?.(${JSON.stringify(name)},false)??true`])
+    }
+  }
   const zoom = (deltaY: number, anchor: number) => evalTrue(
     `(()=>{const ruler=document.querySelector('[data-timeline-ruler="1"]');const timeline=ruler?.closest('.overflow-auto');if(!(timeline instanceof HTMLElement))return false;const rect=timeline.getBoundingClientRect();timeline.dispatchEvent(new WheelEvent('wheel',{deltaY:${deltaY},deltaMode:0,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*${anchor}}));return true})()`,
     "Timeline zoom surface unavailable.",
   )
-  await evalTrue("(()=>{const ruler=document.querySelector('[data-timeline-ruler=\"1\"]');const timeline=ruler?.closest('.overflow-auto');if(!(timeline instanceof HTMLElement))return false;timeline.scrollLeft+=900;timeline.dispatchEvent(new Event('scroll'));return true})()", "Timeline horizontal pan unavailable.")
-  await evalTrue("(()=>{const ruler=document.querySelector('[data-timeline-ruler=\"1\"]');const timeline=ruler?.closest('.overflow-auto');if(!(timeline instanceof HTMLElement))return false;timeline.scrollTop=Math.max(0,timeline.scrollHeight-timeline.clientHeight);timeline.dispatchEvent(new Event('scroll'));return true})()", "Timeline vertical scroll unavailable.")
-  await zoom(480, 0.5)
-  for (let index = 0; index < 5; index++) await zoom(-360, index === 4 ? 0.8 : 0.35)
-  await evalTrue(`(()=>{const clip=[...document.querySelectorAll('[title=${JSON.stringify(audioClip.name)}]')].find((entry)=>entry instanceof HTMLElement);if(!(clip instanceof HTMLElement))return false;clip.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,detail:2}));return true})()`, "Audio clip Sample Detail interaction unavailable.")
+  await phase("timeline-pan", () => evalTrue("(()=>{const ruler=document.querySelector('[data-timeline-ruler=\"1\"]');const timeline=ruler?.closest('.overflow-auto');if(!(timeline instanceof HTMLElement))return false;timeline.scrollLeft+=900;timeline.dispatchEvent(new Event('scroll'));return true})()", "Timeline horizontal pan unavailable."))
+  await phase("vertical-scroll", () => evalTrue("(()=>{const ruler=document.querySelector('[data-timeline-ruler=\"1\"]');const timeline=ruler?.closest('.overflow-auto');if(!(timeline instanceof HTMLElement))return false;timeline.scrollTop=Math.max(0,timeline.scrollHeight-timeline.clientHeight);timeline.dispatchEvent(new Event('scroll'));return true})()", "Timeline vertical scroll unavailable."))
+  await phase("timeline-zoom-out", () => zoom(480, 0.5))
+  await phase("timeline-deep-zoom", async () => {
+    for (let index = 0; index < 5; index++) await zoom(-360, index === 4 ? 0.8 : 0.35)
+  })
+  await phase("sample-detail-open", () => evalTrue(`(()=>{const clip=[...document.querySelectorAll('[title=${JSON.stringify(audioClip.name)}]')].find((entry)=>entry instanceof HTMLElement);if(!(clip instanceof HTMLElement))return false;clip.dispatchEvent(new MouseEvent('dblclick',{bubbles:true,detail:2}));return true})()`, "Audio clip Sample Detail interaction unavailable."))
   await waitForBrowserValue(session, "document.body.textContent?.includes('Sample Detail') && document.querySelector('canvas') ? true : null", 30_000)
-  for (let index = 0; index < 4; index++) await evalTrue(
-    `(()=>{const heading=[...document.querySelectorAll('*')].find((entry)=>entry.textContent?.trim()==='Sample Detail');const panel=heading?.parentElement?.parentElement;const canvas=panel?.querySelector('canvas');if(!(canvas instanceof HTMLCanvasElement))return false;const rect=canvas.getBoundingClientRect();canvas.dispatchEvent(new WheelEvent('wheel',{deltaY:-320,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*.65}));return true})()`,
-    "Sample Detail waveform zoom unavailable.",
-  )
+  await phase("sample-detail-zoom", async () => {
+    for (let index = 0; index < 4; index++) await evalTrue(
+      `(()=>{const heading=[...document.querySelectorAll('*')].find((entry)=>entry.textContent?.trim()==='Sample Detail');const panel=heading?.parentElement?.parentElement;const canvas=panel?.querySelector('canvas');if(!(canvas instanceof HTMLCanvasElement))return false;const rect=canvas.getBoundingClientRect();canvas.dispatchEvent(new WheelEvent('wheel',{deltaY:-320,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*.65}));return true})()`,
+      "Sample Detail waveform zoom unavailable.",
+    )
+  })
   if (!preserveRecording) await evalTrue("(()=>{const ruler=document.querySelector('[data-timeline-ruler=\"1\"]');if(!(ruler instanceof HTMLElement))return false;const rect=ruler.getBoundingClientRect();for(const ratio of [.5,.92]){const x=rect.left+rect.width*ratio,y=rect.top+rect.height*.75;ruler.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,clientX:x,clientY:y,pointerId:1,buttons:1}));ruler.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,clientX:x,clientY:y,pointerId:1}))}return true})()", "Timeline seek interaction unavailable.")
   if (preserveRecording) return
   await evalTrue("(()=>{const button=document.querySelector('button[aria-label=\"Toggle loop region\"]');if(!(button instanceof HTMLButtonElement))return false;button.click();return button.getAttribute('aria-pressed')==='true'})()", "Loop interaction unavailable.")
@@ -304,6 +351,33 @@ const runFullLoadUiStress = async (
     await evalTrue("(()=>{const rows=[...document.querySelectorAll('input[type=\"range\"]')];const slider=rows.find((entry)=>entry.parentElement?.parentElement?.textContent?.includes('Mix'));if(!(slider instanceof HTMLInputElement))return false;slider.value=String(Math.min(1,Number(slider.value)+.08));slider.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertReplacementText'}));slider.dispatchEvent(new Event('change',{bubbles:true}));return true})()", "Real VST Mix interaction unavailable.")
   }
   if (!preserveRecording) await evalTrue("(()=>{const stop=document.querySelector('button[aria-label=\"Stop\"]');if(stop instanceof HTMLButtonElement)stop.click();const play=document.querySelector('button[aria-label=\"Play\"]');if(!(play instanceof HTMLButtonElement))return false;play.click();return true})()", "Playback recovery failed.")
+}
+const runZoomSweeps = async (session: string) => {
+  const gestures: {
+    sweep: number
+    direction: "in" | "out"
+    anchor: number
+    elapsedMs: number
+    visibleClips: number
+  }[] = []
+  const zoom = async (sweep: number, direction: "in" | "out", anchor: number, deltaY: number) => {
+    const name = `zoom-${direction}-${sweep}-${Math.round(anchor * 100)}`
+    await browserCommand(session, ["eval", `window.__dawPerformancePhase?.(${JSON.stringify(name)},true)??true`])
+    const startedAt = performance.now()
+    const visibleClips = z.number().int().nonnegative().parse(JSON.parse(await browserCommand(session, ["eval",
+      `(()=>{const ruler=document.querySelector('[data-timeline-ruler="1"]');const timeline=ruler?.closest('.overflow-auto');if(!(timeline instanceof HTMLElement))throw new Error('Timeline zoom surface unavailable.');const rect=timeline.getBoundingClientRect();timeline.dispatchEvent(new WheelEvent('wheel',{deltaY:${deltaY},deltaMode:0,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*${anchor}}));return document.querySelectorAll('[title]').length})()`])))
+    await delay(180)
+    await browserCommand(session, ["eval", `window.__dawPerformancePhase?.(${JSON.stringify(name)},false)??true`])
+    gestures.push({ sweep, direction, anchor, elapsedMs: performance.now() - startedAt, visibleClips })
+  }
+  for (let sweep = 0; sweep < 10; sweep++) {
+    for (const anchor of [0.25, 0.5, 0.75]) await zoom(sweep, "in", anchor, -720)
+    await zoom(sweep, "in", 0.5, -1_440)
+    await delay(100)
+    for (const anchor of [0.75, 0.5, 0.25]) await zoom(sweep, "out", anchor, 720)
+    await zoom(sweep, "out", 0.5, 1_440)
+  }
+  return gestures
 }
 export const quietCapture = async (steps: {
   start: () => Promise<void>
@@ -370,6 +444,7 @@ const main = async () => {
   const output = Bun.argv[2]
   const mode = parseControlMode(Bun.argv[3])
   const quietRecording = mode === "recording" || mode === "dsp-recording" || mode === "dsp-ui-recording"
+    || mode === "zoom-recording-profile"
     || isMediaRecordingMode(mode)
   if (!output || !path.isAbsolute(output) || Bun.argv.length > 4)
     throw new Error("Usage: bun v3-import-acceptance.ts <absolute-result-path> [--quiet-recording|--idle-control|--playback-control|--ui-control|--paging-control|--dsp-control|--dsp-ui-control|--dsp-soak|--dsp-recording|--dsp-ui-recording]")
@@ -523,7 +598,8 @@ const main = async () => {
         throw new Error("Six MIDI tracks were not muted for media-only recording.")
     }
     let dspSetup: Awaited<ReturnType<typeof prepareFullDsp>> | null = null
-    if (isDspControlMode(mode) || mode === "dsp-recording" || mode === "dsp-ui-recording") {
+    if (isDspControlMode(mode) || mode === "dsp-recording" || mode === "dsp-ui-recording"
+      || mode === "zoom-recording-profile") {
       stage = "dsp-setup"
       dspSetup = await prepareFullDsp(session, profile, projectId, snapshot.tracks.filter((track) => track.kind === "audio").map((track) => track.name), mode === "dsp-one" ? 1 : 8)
     }
@@ -558,6 +634,7 @@ const main = async () => {
     const playing = desktopTransportStatusSchemaV1.parse(await command(profile, ["host", "transport-status"]))
     const after = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
     if (!isDspControlMode(mode) && mode !== "dsp-recording" && mode !== "dsp-ui-recording"
+      && mode !== "zoom-recording-profile"
       && (playing.state !== "playing" || after.native.status !== "available" ||
       !playbackCountersValid(before.native.status === "available" ? before.native.diagnostics : null, after.native.diagnostics)))
       throw new Error(`Playback callbacks missing or native blocks rejected: ${JSON.stringify({
@@ -568,6 +645,7 @@ const main = async () => {
     if (mode === "playback" || mode === "ui" || mode === "paging" || isDspControlMode(mode)) {
       stage = `${mode}-control`
       let framePerformance: z.infer<typeof fullLoadFramePerformanceSchema> | null = null
+      let zoomSweeps: Awaited<ReturnType<typeof runZoomSweeps>> = []
       const transportDrift: { elapsedMs: number; transportFrame: string; expectedFrame: string; errorFrames: string }[] = []
       const transportBaseline = mode === "dsp-soak"
         ? desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"])) : null
@@ -584,6 +662,10 @@ const main = async () => {
             await delay(250)
           }
         }
+      }
+      if (mode === "zoom-profile") {
+        await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
+        zoomSweeps = await runZoomSweeps(session)
       }
       if (mode === "dsp-soak" && transportBaseline?.native.status === "available"
         && transportBaseline.native.diagnostics.transportFrame !== undefined) {
@@ -656,6 +738,7 @@ const main = async () => {
         throw new Error("Expected live VST instances were not available after measured playback.")
       await writePrivateArtifact(output, JSON.stringify({ status: "complete", mode, responsive, projectId, lifecycle, ...telemetry(), dspSetup, pagingSetup,
         framePerformance,
+        zoomSweeps,
         transportDrift,
         pagingSeek, playing,
         transportFrame, realtimePerformance, vstWorkerPerformance,
@@ -667,6 +750,7 @@ const main = async () => {
       return
     }
     let recordingResult: object | null = null
+    let recordingZoomSweeps: Awaited<ReturnType<typeof runZoomSweeps>> = []
     if (quietRecording) {
       const audioTrack = snapshot.tracks.find((track) => track.kind === "audio")
       if (!audioTrack) throw new Error("No audio track to record.")
@@ -684,7 +768,7 @@ const main = async () => {
         owned: beforeCaptureProcesses.filter((row) => plan.recordedProcesses.some((entry) => entry.pid === row.pid))
           .map(({ pid, parentPid }) => ({ pid, parentPid })),
       }))
-      if (mode === "dsp-ui-recording") {
+      if (mode === "dsp-ui-recording" || mode === "zoom-recording-profile") {
         await command(profile, ["host", "stop"])
         await command(profile, ["host", "seek", "0"])
       }
@@ -697,9 +781,10 @@ const main = async () => {
           stage = "quiet-wait"
         },
         wait: async () => {
-          if (mode === "dsp-ui-recording") {
+          if (mode === "dsp-ui-recording" || mode === "zoom-recording-profile") {
             await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
-            await runFullLoadUiStress(session, snapshot, dspSetup, true)
+            if (mode === "zoom-recording-profile") recordingZoomSweeps = await runZoomSweeps(session)
+            else await runFullLoadUiStress(session, snapshot, dspSetup, true)
             const remainingMs = 61_000 - (Date.now() - quietStartedAt)
             if (remainingMs > 0) await delay(remainingMs)
             return
@@ -779,7 +864,8 @@ const main = async () => {
           if (performance.now() - started < 60_000 || capturedFrames < 58 * (completed.recording.activeSampleRate ?? 0)
             || !completed.recording.activeSampleRate || completed.recording.droppedFrames !== 0
             || completed.recording.overrunFrames !== 0 || completed.recording.lastFailurePresent
-            || (mode === "dsp-ui-recording" && (!realtimePerformance || !vstWorkerPerformance
+            || ((mode === "dsp-ui-recording" || mode === "zoom-recording-profile")
+              && (!realtimePerformance || !vstWorkerPerformance
               || BigInt(realtimePerformance.deadlineMisses) !== 0n
               || BigInt(vstWorkerPerformance.deadlineMisses) !== 0n
               || BigInt(vstWorkerPerformance.watchdogMisses) !== 0n
@@ -798,7 +884,8 @@ const main = async () => {
             transportFrame: completed.native.status === "available"
               ? completed.native.diagnostics.transportFrame ?? null : null,
             realtimePerformance, vstWorkerPerformance,
-            framePerformance: mode === "dsp-ui-recording"
+            zoomSweeps: recordingZoomSweeps,
+            framePerformance: mode === "dsp-ui-recording" || mode === "zoom-recording-profile"
               ? fullLoadFramePerformanceSchema.parse(JSON.parse(JSON.parse(await browserCommand(
                 session,
                 ["eval", `JSON.stringify(${fullLoadFrameProbeResultScript()})`],

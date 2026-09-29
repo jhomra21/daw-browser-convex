@@ -14,6 +14,10 @@ import { getPersistableAudioSourceMetadata } from '~/lib/audio-source'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type { RuntimeClip } from '~/lib/timeline-runtime-types'
 import { requestWaveformData } from '~/lib/waveform-scheduler-request'
+import {
+  incrementPerformanceBenchmarkCounter,
+  measurePerformanceBenchmarkDuration,
+} from '~/lib/performance-benchmark-telemetry'
 
 type ClipWaveformViewModelOptions = {
   readonly clip: Accessor<RuntimeClip>
@@ -106,6 +110,8 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
   let dataCleanup: (() => void) | undefined
 
   const view = createMemo(() => {
+    const startedAt = performance.now()
+    incrementPerformanceBenchmarkCounter('waveform.view-computations')
     const clip = options.clip()
     const assetKey = clip.waveformAssetKey ?? clip.sourceAssetKey ?? `clip:${clip.id}`
     const metadata = getPersistableAudioSourceMetadata({
@@ -121,6 +127,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       options.projectBpm(),
       options.visibleRange?.(),
     )
+    measurePerformanceBenchmarkDuration('waveform.geometry', startedAt)
     return { clip, assetKey, layout }
   })
   const displaySegments = createMemo(() => layoutSegmentsFor(view().layout, view().clip))
@@ -218,6 +225,9 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         sourceIdentity: nextSource.identity,
       }
       const missing = plan.requests.filter((request) => !targetEntries.has(request.key))
+      incrementPerformanceBenchmarkCounter('waveform.requests', plan.requests.length)
+      incrementPerformanceBenchmarkCounter('waveform.cache-hits', targetEntries.size)
+      incrementPerformanceBenchmarkCounter('waveform.cache-misses', missing.length)
       if (missing.length === 0) {
         dataRequest += 1
         dataCleanup?.()
@@ -237,6 +247,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         replacement: target,
       })
       void Promise.all(missing.map(async (request) => {
+        incrementPerformanceBenchmarkCounter('waveform.requests-started')
         const data = await requestWaveformData({
           assetKey: current.assetKey,
           source: nextSource,
@@ -246,9 +257,13 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
           priority: request.priority,
           signal: controller.signal,
         })
+        incrementPerformanceBenchmarkCounter(data ? 'waveform.requests-completed' : 'waveform.requests-empty')
         return data ? { key: request.key, data } : null
       })).then((results) => {
-        if (id !== dataRequest || controller.signal.aborted) return
+        if (id !== dataRequest || controller.signal.aborted) {
+          incrementPerformanceBenchmarkCounter('waveform.requests-superseded', missing.length)
+          return
+        }
         const additions = new Map(target.entries)
         for (const result of results) {
           if (!result) continue
@@ -276,7 +291,10 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         })
         setLoading(false)
       }).catch((cause: unknown) => {
-        if (id !== dataRequest || controller.signal.aborted) return
+        if (id !== dataRequest || controller.signal.aborted) {
+          incrementPerformanceBenchmarkCounter('waveform.requests-cancelled', missing.length)
+          return
+        }
         setLoading(false)
         setError(cause instanceof Error ? cause.message : 'Waveform loading failed.')
       })

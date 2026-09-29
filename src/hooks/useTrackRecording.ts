@@ -25,6 +25,7 @@ import {
 } from '~/lib/track-recording-session'
 import { createRecordingTransport } from '~/lib/recording/recording-transport'
 import { resetRecordingDiagnostics, updateRecordingDiagnostics, recordRecordingTermination, recordRecordingLifecycle, recordNativeRecordingStatus, type RecordingTerminationCause } from '~/lib/recording/recording-diagnostics'
+import { incrementPerformanceBenchmarkCounter } from '~/lib/performance-benchmark-telemetry'
 import {
   createRecordingTempStorage,
   isRecordingTempStorageSupported,
@@ -200,6 +201,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   let previewSampleRate = 1
 
   const publishLivePreview = (offset: number, amplitude: number) => {
+    incrementPerformanceBenchmarkCounter('recording.preview-publishes')
     const cutoff = Math.max(0, offset - 5)
     livePreviewPoints.push({ offset, amplitude: Math.min(1, amplitude) })
     while (livePreviewStartIndex < livePreviewPoints.length && livePreviewPoints[livePreviewStartIndex].offset < cutoff) {
@@ -213,6 +215,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   }
 
   const unsubscribeRecordingStatus = audioEngine.subscribeRecordingStatus((status) => {
+    incrementPerformanceBenchmarkCounter('recording.status-publishes')
     if (status.state === 'recording') {
       updateRecordingDiagnostics({
         capturedFrames: Math.max(0, status.contextFrame - previewContextStartFrame),
@@ -644,6 +647,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         monitoring: requestedSettings.monitor === 'on' || requestedSettings.monitor === 'auto',
         punchStartFrame: previewContextStartFrame,
         onDiagnostics: (diagnostics) => {
+          incrementPerformanceBenchmarkCounter('recording.native-diagnostics')
           recordNativeRecordingStatus(diagnostics)
           updateRecordingDiagnostics({
             capturedFrames: diagnostics.capturedFrames,

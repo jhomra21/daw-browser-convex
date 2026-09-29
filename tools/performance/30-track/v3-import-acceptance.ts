@@ -13,11 +13,12 @@ const root = path.resolve(import.meta.dir, "../../..")
 const archive = path.join(root, "tools/performance/fixtures/30-track-v3-native.dawproject")
 const executable = path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/MacOS/@daw-browser-desktop")
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-export const parseControlMode = (option: string | undefined): "idle" | "playback" | "ui" | "dsp" | "dsp-soak" | "dsp-one" | "dsp-recording" | "media-recording" | "media-recording-probe" | "media-recording-probe-drop" | "media-recording-probe-drop-no-meters" | "media-recording-probe-metadata" | "media-recording-probe-batch4" | "media-recording-probe-batch8" | "media-recording-portable" | "recording" | "acceptance" => {
+export const parseControlMode = (option: string | undefined): "idle" | "playback" | "ui" | "paging" | "dsp" | "dsp-soak" | "dsp-one" | "dsp-recording" | "media-recording" | "media-recording-probe" | "media-recording-probe-drop" | "media-recording-probe-drop-no-meters" | "media-recording-probe-metadata" | "media-recording-probe-batch4" | "media-recording-probe-batch8" | "media-recording-portable" | "recording" | "acceptance" => {
   if (option === undefined) return "acceptance"
   if (option === "--idle-control") return "idle"
   if (option === "--playback-control") return "playback"
   if (option === "--ui-control") return "ui"
+  if (option === "--paging-control") return "paging"
   if (option === "--dsp-control") return "dsp"
   if (option === "--dsp-soak") return "dsp-soak"
   if (option === "--dsp-one-control") return "dsp-one"
@@ -54,7 +55,7 @@ export const selectedProjectCdpTarget = (targets: readonly CdpTarget[], projectI
     && matchesControlProjectUrl(target.url, projectId))
   return matches.length === 1 ? matches[0] ?? null : null
 }
-export const probeProjectCdp = async (port: string, projectId: string): Promise<"responsive" | "target-absent" | "endpoint-mismatch" | "deadline" | "evaluation-failed"> => {
+const probeProjectCdp = async (port: string, projectId: string): Promise<"responsive" | "target-absent" | "endpoint-mismatch" | "deadline" | "evaluation-failed"> => {
   const targets = z.array(z.object({ id: z.string(), type: z.string(), url: z.string(),
     webSocketDebuggerUrl: z.string().optional() }).passthrough()).max(64)
     .parse(await (await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(3_000) })).json())
@@ -81,7 +82,7 @@ export const probeProjectCdp = async (port: string, projectId: string): Promise<
     socket.onerror = () => { clearTimeout(deadline); socket.close(); resolve("evaluation-failed") }
   })
 }
-export const pingProjectCdp = async (port: string, projectId: string) =>
+const pingProjectCdp = async (port: string, projectId: string) =>
   (await probeProjectCdp(port, projectId)) === "responsive"
 export const parseBrowserProjectId = (output: string) => {
   const encoded = z.string().min(1).parse(JSON.parse(output))
@@ -101,6 +102,37 @@ export const playbackCountersValid = (
   before: { callbacks: number; rejectedBlocks: number } | null,
   after: { callbacks: number; rejectedBlocks: number },
 ) => after.callbacks > (before?.callbacks ?? 0) && after.rejectedBlocks === (before?.rejectedBlocks ?? 0)
+
+export const createLaterOffsetPagingRequest = (snapshot: {
+  project: { id: string; revision: number }
+  assets: readonly { id: string; durationSec?: number }[]
+  clips: readonly { id: string; trackId: string; source?: { assetId: string } }[]
+}) => {
+  const longAssets = snapshot.assets.filter((asset) => asset.durationSec === 600)
+  if (longAssets.length !== 1 || !longAssets[0]) throw new Error("Unique 600-second paging source unavailable.")
+  const longClips = snapshot.clips.filter((clip) => clip.source?.assetId === longAssets[0]!.id)
+  if (longClips.length !== 1 || !longClips[0]) throw new Error("Unique long-media clip unavailable.")
+  const clip = longClips[0]
+  return {
+    version: "v1" as const,
+    projectId: snapshot.project.id,
+    expectedRevision: snapshot.project.revision,
+    actions: [
+      {
+        kind: "clip.move" as const,
+        clip: { source: "persisted" as const, id: clip.id },
+        track: { source: "persisted" as const, id: clip.trackId },
+        startSec: 540,
+      },
+      {
+        kind: "clip.timing.set" as const,
+        clip: { source: "persisted" as const, id: clip.id },
+        duration: 60,
+        bufferOffsetSec: 540,
+      },
+    ],
+  }
+}
 
 export const assertArchiveSnapshot = (value: ProjectSnapshotV2) => {
   if (value.tracks.length !== 30 || value.clips.length !== 30 || value.assets.length !== 24 ||
@@ -232,7 +264,7 @@ const main = async () => {
   const mode = parseControlMode(Bun.argv[3])
   const quietRecording = mode === "recording" || mode === "dsp-recording" || isMediaRecordingMode(mode)
   if (!output || !path.isAbsolute(output) || Bun.argv.length > 4)
-    throw new Error("Usage: bun v3-import-acceptance.ts <absolute-result-path> [--quiet-recording|--idle-control|--playback-control|--ui-control|--dsp-control|--dsp-soak|--dsp-recording]")
+    throw new Error("Usage: bun v3-import-acceptance.ts <absolute-result-path> [--quiet-recording|--idle-control|--playback-control|--ui-control|--paging-control|--dsp-control|--dsp-soak|--dsp-recording]")
   if ((await stat(archive)).size < 773_000_000) throw new Error("Unexpected v3 archive size")
   await stat(path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/app.asar"))
   const directory = await createPrivateRunDirectory("/tmp")
@@ -350,6 +382,29 @@ const main = async () => {
     const projectId = parseBrowserProjectId(await waitForBrowserValue(session, "new URL(location.href).searchParams.get('projectId') && document.querySelector('[data-timeline-ruler=\"1\"]') ? new URL(location.href).searchParams.get('projectId') : null", 180000))
     await waitForBrowserValue(session, "document.querySelectorAll('[aria-label^=\"Select track \"]').length === 30 ? true : null", 60_000)
     const snapshot = assertArchiveSnapshot(projectSnapshotSchemaV2.parse(await command(profile, ["snapshot-v2", projectId, "--target", "host"])))
+    let pagingSetup: { clipId: string; timelineStartSec: number; sourceOffsetSec: number; durationSec: number } | null = null
+    if (mode === "paging") {
+      stage = "paging-setup"
+      const request = createLaterOffsetPagingRequest(snapshot)
+      const preview = controlPreviewResultSchemaV1.parse(await command(
+        profile,
+        ["preview", "--request", "-", "--target", "host"],
+        JSON.stringify(request),
+      ))
+      if (preview.approval?.required) throw new Error("Later-offset paging setup unexpectedly requires approval.")
+      controlCommitResultSchemaV1.parse(await command(
+        profile,
+        ["commit", "--request", "-", "--target", "host"],
+        JSON.stringify({ ...request, idempotencyKey: `v3-paging-${crypto.randomUUID()}` }),
+      ))
+      const moved = projectSnapshotSchemaV2.parse(await command(profile, ["snapshot-v2", projectId, "--target", "host"]))
+      const clipId = request.actions[0].clip.id
+      const clip = moved.clips.find((entry) => entry.id === clipId)
+      if (!clip || clip.startSec !== 540 || clip.bufferOffsetSec !== 540 || clip.duration !== 60) {
+        throw new Error("Later-offset paging clip did not persist.")
+      }
+      pagingSetup = { clipId, timelineStartSec: 540, sourceOffsetSec: 540, durationSec: 60 }
+    }
     if (isMediaRecordingMode(mode)) {
       stage = "media-only-setup"
       for (let index = 25; index <= 30; index++) {
@@ -384,6 +439,10 @@ const main = async () => {
     stage = "playback"
     await browserCommand(session, ["reload"])
     await waitForBrowserValue(session, "document.querySelector('button[aria-label=\"Play\"]') && !document.querySelector('[role=\"dialog\"]') ? true : null", 60_000)
+    const pagingSeek = mode === "paging"
+      ? desktopTransportStatusSchemaV1.parse(await command(profile, ["host", "seek", "540"]))
+      : null
+    if (pagingSeek && pagingSeek.playheadSec !== 540) throw new Error("Later-offset transport seek was not applied.")
     const before = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
     await browserCommand(session, ["find", "role", "button", "click", "--name", "Play"])
     await waitForBrowserValue(session, "document.querySelector('button[aria-label=\"Pause\"]') ? true : null", 30000)
@@ -397,7 +456,7 @@ const main = async () => {
         after: after.native.status === "available" ? after.native.diagnostics.callbacks : null,
         rejected: after.native.status === "available" ? after.native.diagnostics.rejectedBlocks : null,
       })}`)
-    if (mode === "playback" || mode === "ui" || isDspControlMode(mode)) {
+    if (mode === "playback" || mode === "ui" || mode === "paging" || isDspControlMode(mode)) {
       stage = `${mode}-control`
       controlStartedAtMs = Date.now()
       if (mode === "ui") {
@@ -432,7 +491,8 @@ const main = async () => {
       }
       if (vst && vst.instances.filter((instance) => instance.health.state === "ready").length !== dspSetup?.processors)
         throw new Error("Expected live VST instances were not available after measured playback.")
-      await writePrivateArtifact(output, JSON.stringify({ status: "complete", mode, responsive, projectId, lifecycle, ...telemetry(), dspSetup,
+      await writePrivateArtifact(output, JSON.stringify({ status: "complete", mode, responsive, projectId, lifecycle, ...telemetry(), dspSetup, pagingSetup,
+        pagingSeek, playing,
         vstInstances: vst?.instances.length ?? 0, workerPids,
         rejectedBlocks: after.native.status === "available" ? after.native.diagnostics.rejectedBlocks
           - (before.native.status === "available" ? before.native.diagnostics.rejectedBlocks : 0) : null,

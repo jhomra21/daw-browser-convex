@@ -60,9 +60,8 @@ export const sampleThirtyTrackMixedRatePage = (
 }
 export const thirtyTrackProjectName = "30 Track Performance v2"
 export const thirtyTrackArchiveName = `${thirtyTrackFixtureVersion}.dawproject`
-export type ThirtyTrackFixtureVersion = typeof thirtyTrackFixtureVersion
-export type ThirtyTrackColor = "#ff5f57" | "#febc2e" | "#28c840" | "#4da3ff" | "#a78bfa" | "#f472b6"
-export const thirtyTrackColors: readonly ThirtyTrackColor[] = Object.freeze([
+type ThirtyTrackColor = "#ff5f57" | "#febc2e" | "#28c840" | "#4da3ff" | "#a78bfa" | "#f472b6"
+const thirtyTrackColors: readonly ThirtyTrackColor[] = Object.freeze([
   "#ff5f57",
   "#febc2e",
   "#28c840",
@@ -243,7 +242,7 @@ type DeepReadonly<Value> = Value extends object
   ? { readonly [Key in keyof Value]: DeepReadonly<Value[Key]> }
   : Value
 
-export type ThirtyTrackSemanticManifest = DeepReadonly<z.infer<typeof semanticManifestSchema>>
+type ThirtyTrackSemanticManifest = DeepReadonly<z.infer<typeof semanticManifestSchema>>
 
 const tuple = <Items extends readonly unknown[]>(...items: Items): Readonly<Items> => Object.freeze(items)
 
@@ -346,7 +345,7 @@ export const thirtyTrackSemanticManifest: ThirtyTrackSemanticManifest = Object.f
   }),
 })
 
-export const thirtyTrackFixtureGenerationResultSchema = z.object({
+const thirtyTrackFixtureGenerationResultSchema = z.object({
   semanticManifest: semanticManifestSchema,
   projectId: z.string().min(1),
   assetId: z.string().min(1),
@@ -368,7 +367,7 @@ export const sampleThirtyTrackSource = (sampleIndex: number) => ({
 })
 
 // oxlint-disable-next-line anti-slop/no-unknown-parameters
-export const validateThirtyTrackSemanticManifest = (value: unknown): ThirtyTrackSemanticManifest => {
+const validateThirtyTrackSemanticManifest = (value: unknown): ThirtyTrackSemanticManifest => {
   const parsed = semanticManifestSchema.parse(value)
   if (parsed.timeline.sourceOffsetsSec.some((offset, index) => offset !== index)) {
     throw new Error("30-track fixture source offsets must be the integers 0 through 29.")
@@ -386,14 +385,6 @@ export const validateThirtyTrackSemanticManifest = (value: unknown): ThirtyTrack
 // oxlint-disable-next-line anti-slop/no-unknown-parameters
 export const assertThirtyTrackSemanticManifest = (value: unknown): void => {
   validateThirtyTrackSemanticManifest(value)
-}
-
-// oxlint-disable-next-line anti-slop/no-unknown-parameters
-export const assertThirtyTrackSemanticManifestExact = (value: unknown): void => {
-  const parsed = validateThirtyTrackSemanticManifest(value)
-  if (JSON.stringify(parsed) !== JSON.stringify(thirtyTrackSemanticManifest)) {
-    throw new Error("30-track fixture semantics do not match the canonical manifest.")
-  }
 }
 
 export const thirtyTrackTrackAt = (index: number): ThirtyTrackSemanticManifest["timeline"]["tracks"][number] => {

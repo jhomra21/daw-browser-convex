@@ -5,6 +5,13 @@
       "entry": [
         "src/components/timeline/ClipComponent.browser-test.ts",
         "src/components/timeline/TimelineRuler.browser-test.ts",
+        "tools/performance/30-track/generate-fixture.ts",
+        "tools/performance/30-track/generator-runtime.ts",
+        "tools/performance/30-track/run.ts",
+        "tools/performance/30-track/run-runtime.ts",
+        "tools/performance/30-track/v3-generate-fixture.ts",
+        "tools/performance/30-track/v3-generator-runtime.ts",
+        "tools/performance/30-track/v3-import-acceptance.ts",
         "tools/oxlint/anti-slop/rules/*.rule-test.ts"
       ]
     },
@@ -39,6 +46,11 @@
     "@electron-forge/maker-zip",
     "@electron-forge/plugin-fuses",
     "@electron-forge/plugin-vite"
+  ],
+  "ignoreBinaries": [
+    "ps",
+    "rev-parse",
+    "status"
   ],
   "ignoreIssues": {
     "src/lib/local-cloud-id-map.ts": [

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { assertArchiveSnapshot, controlDurationMs, countMidiNotes, parseBrowserProjectId, quietCapture, recoverQuietTarget, importedProjectTarget, classifyQuietCapture, parseControlMode, matchesControlProjectUrl, selectedProjectCdpTarget, playbackCountersValid } from "./v3-import-acceptance"
+import { assertArchiveSnapshot, controlDurationMs, countMidiNotes, createLaterOffsetPagingRequest, parseBrowserProjectId, quietCapture, recoverQuietTarget, importedProjectTarget, classifyQuietCapture, parseControlMode, matchesControlProjectUrl, selectedProjectCdpTarget, playbackCountersValid } from "./v3-import-acceptance"
 
 test("playback validates post-start native callbacks when baseline host was unavailable", () => {
   expect(playbackCountersValid(null, { callbacks: 1121, rejectedBlocks: 0 })).toBe(true)
@@ -25,6 +25,7 @@ test("control modes require a 60-second quiet window without recording", () => {
   expect(parseControlMode("--idle-control")).toBe("idle")
   expect(parseControlMode("--playback-control")).toBe("playback")
   expect(parseControlMode("--ui-control")).toBe("ui")
+  expect(parseControlMode("--paging-control")).toBe("paging")
   expect(parseControlMode("--dsp-control")).toBe("dsp")
   expect(parseControlMode("--dsp-soak")).toBe("dsp-soak")
   expect(parseControlMode("--dsp-recording")).toBe("dsp-recording")
@@ -39,6 +40,26 @@ test("control modes require a 60-second quiet window without recording", () => {
   expect(parseControlMode("--dsp-one-control")).toBe("dsp-one")
   expect(parseControlMode("--quiet-recording")).toBe("recording")
   expect(() => parseControlMode("--unsupported")).toThrow()
+})
+
+test("moves the long source to a later timeline offset without changing its bounded window", () => {
+  expect(createLaterOffsetPagingRequest({
+    project: { id: "project:one", revision: 7 },
+    assets: [{ id: "asset-long", durationSec: 600 }, { id: "asset-short", durationSec: 60 }],
+    clips: [
+      { id: "clip-short", trackId: "track-short", source: { assetId: "asset-short" } },
+      { id: "clip-long", trackId: "track-long", source: { assetId: "asset-long" } },
+    ],
+  })).toEqual({
+    version: "v1",
+    projectId: "project:one",
+    expectedRevision: 7,
+    actions: [
+      { kind: "clip.move", clip: { source: "persisted", id: "clip-long" },
+        track: { source: "persisted", id: "track-long" }, startSec: 540 },
+      { kind: "clip.timing.set", clip: { source: "persisted", id: "clip-long" }, duration: 60, bufferOffsetSec: 540 },
+    ],
+  })
 })
 
 test("five-minute DSP soak extends only the measured control window", () => {

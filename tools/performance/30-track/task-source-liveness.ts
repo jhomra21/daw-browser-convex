@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-export type TaskSourceGap = { startEpochMs: number; endEpochMs: number }
+type TaskSourceGap = { startEpochMs: number; endEpochMs: number }
 const gapSchema = z.object({
   startEpochMs: z.number().finite().nonnegative(), endEpochMs: z.number().finite().nonnegative(),
 }).strict()

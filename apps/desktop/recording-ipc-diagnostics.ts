@@ -1,4 +1,4 @@
-export type RecordingForwardMode = "full" | "drop" | "metadata" | "batch4" | "batch8"
+type RecordingForwardMode = "full" | "drop" | "metadata" | "batch4" | "batch8"
 
 export const parseRecordingForwardMode = (value: string | undefined): RecordingForwardMode =>
   value === "drop" || value === "metadata" || value === "batch4" || value === "batch8" ? value : "full"

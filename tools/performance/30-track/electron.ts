@@ -2,7 +2,6 @@ import { constants } from "node:fs"
 import { randomBytes } from "node:crypto"
 import { chmod, mkdir, open } from "node:fs/promises"
 import path from "node:path"
-import { z } from "zod"
 
 export type ProcessMetric = {
   readonly pid: number
@@ -58,34 +57,6 @@ type LaunchIdentityInput = {
 type LaunchIdentityResult =
   | { readonly verified: true; readonly processGroupId: number }
   | { readonly verified: false; readonly reason: string }
-
-export const processMetricSchema = z.object({
-  pid: z.number().int().positive(),
-  role: z.enum(["main", "child"]),
-  cpuPercent: z.number().finite().nonnegative().nullable(),
-  rssBytes: z.number().int().nonnegative().nullable(),
-}).strict()
-
-export const nativeDiagnosticDeltaSchema = z.object({
-  before: z.object({
-    state: z.string(),
-    sampleRate: z.number().finite().nullable(),
-    workletFaultCount: z.number().int().nonnegative(),
-    inferredApplicationStallCount: z.number().int().nonnegative(),
-    callbacks: z.number().int().nonnegative().nullable(),
-    rejectedBlocks: z.number().int().nonnegative().nullable(),
-  }).strict(),
-  after: z.object({
-    state: z.string(),
-    sampleRate: z.number().finite().nullable(),
-    workletFaultCount: z.number().int().nonnegative(),
-    inferredApplicationStallCount: z.number().int().nonnegative(),
-    callbacks: z.number().int().nonnegative().nullable(),
-    rejectedBlocks: z.number().int().nonnegative().nullable(),
-  }).strict(),
-  callbackIncrease: z.number().int().nonnegative().nullable(),
-  rejectedBlocksIncrease: z.number().int().nonnegative().nullable(),
-}).strict()
 
 export const processMetricsAvailability = (
   metrics: readonly ProcessMetric[],

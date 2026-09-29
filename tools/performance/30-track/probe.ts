@@ -104,14 +104,14 @@ export type BrowserProbeResult = {
 
 export type ProbeIntegrityPatch = Partial<BrowserProbeResult["integrity"]>
 
-export const quantileStatsSchema = z.object({
+const quantileStatsSchema = z.object({
   p50: z.number().finite().nullable(),
   p95: z.number().finite().nullable(),
   p99: z.number().finite().nullable(),
   max: z.number().finite().nullable(),
 }).strict()
 
-export const thresholdStatsSchema = z.object({
+const thresholdStatsSchema = z.object({
   over8_33Ms: z.number().int().nonnegative(),
   over16_67Ms: z.number().int().nonnegative(),
   over33_3Ms: z.number().int().nonnegative(),
@@ -433,16 +433,4 @@ export const installBrowserProbe = (): BrowserProbeCoordinator => {
       })
     },
   }
-}
-
-export const collectBrowserProbe = async (sampleCount = 120): Promise<BrowserProbeResult> => {
-  const coordinator = installBrowserProbe()
-  coordinator.startPhase("warmup", { sampleCount })
-  await new Promise<void>((resolve) => {
-    const started = performance.now()
-    const tick = () => performance.now() - started >= 2_000 ? resolve() : requestAnimationFrame(tick)
-    requestAnimationFrame(tick)
-  })
-  coordinator.finishPhase()
-  return coordinator.finish()
 }

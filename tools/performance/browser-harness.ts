@@ -10,7 +10,7 @@ type HarnessServer = {
   stop: (closeActiveConnections?: boolean) => void
 }
 
-export const performanceUploadMaxBytes = 40 * 1024 * 1024
+const performanceUploadMaxBytes = 40 * 1024 * 1024
 export const performanceStreamUploadMaxBytes = 1024 * 1024 * 1024
 export async function* boundedFixtureStream(
   body: ReadableStream<Uint8Array>,

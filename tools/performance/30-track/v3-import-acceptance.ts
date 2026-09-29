@@ -353,7 +353,8 @@ const runFullLoadUiStress = async (
   }
   if (!preserveRecording) await evalTrue("(()=>{const stop=document.querySelector('button[aria-label=\"Stop\"]');if(stop instanceof HTMLButtonElement)stop.click();const play=document.querySelector('button[aria-label=\"Play\"]');if(!(play instanceof HTMLButtonElement))return false;play.click();return true})()", "Playback recovery failed.")
 }
-const runZoomSweeps = async (session: string) => {
+const runZoomSweeps = async (session: string, snapshot: ProjectSnapshotV2) => {
+  const clipNames = JSON.stringify(snapshot.clips.map((clip) => clip.clip.name))
   const gestures: {
     sweep: number
     direction: "in" | "out"
@@ -372,7 +373,7 @@ const runZoomSweeps = async (session: string) => {
     const firstResponseMs = performance.now() - startedAt
     await delay(50)
     const visibleClips = z.number().int().nonnegative().parse(JSON.parse(await browserCommand(session, ["eval",
-      `(()=>[...document.querySelectorAll('[data-timeline-clip="1"]')].filter(entry=>entry instanceof HTMLElement&&entry.offsetWidth>0&&entry.offsetHeight>0).length)()`])))
+      `(()=>{const names=new Set(${clipNames});return [...document.querySelectorAll('[title]')].filter(entry=>names.has(entry.getAttribute('title')??'')).length})()`])))
     const settleMs = performance.now() - startedAt
     await browserCommand(session, ["eval", `window.__dawPerformancePhase?.(${JSON.stringify(name)},false)??true`])
     gestures.push({ sweep, direction, anchor, elapsedMs: performance.now() - startedAt, firstResponseMs, settleMs, visibleClips })
@@ -672,7 +673,7 @@ const main = async () => {
       }
       if (mode === "zoom-profile") {
         await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
-        zoomSweeps = await runZoomSweeps(session)
+        zoomSweeps = await runZoomSweeps(session, snapshot)
       }
       if (mode === "dsp-soak" && transportBaseline?.native.status === "available"
         && transportBaseline.native.diagnostics.transportFrame !== undefined) {
@@ -792,7 +793,7 @@ const main = async () => {
         wait: async () => {
           if (mode === "dsp-ui-recording" || mode === "zoom-recording-profile") {
             await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
-            if (mode === "zoom-recording-profile") recordingZoomSweeps = await runZoomSweeps(session)
+            if (mode === "zoom-recording-profile") recordingZoomSweeps = await runZoomSweeps(session, snapshot)
             else await runFullLoadUiStress(session, snapshot, dspSetup, true)
             const remainingMs = 61_000 - (Date.now() - quietStartedAt)
             if (remainingMs > 0) await delay(remainingMs)

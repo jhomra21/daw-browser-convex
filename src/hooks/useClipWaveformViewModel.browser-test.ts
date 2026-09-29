@@ -285,6 +285,37 @@ describe('useClipWaveformViewModel unified generation publication', () => {
     }))
   })
 
+  test('reuses a completed waveform generation when zoom returns to a prior range', async () => {
+    await new Promise<void>((resolve, reject) => createRoot((dispose) => {
+      const [width, setWidth] = createSignal(400)
+      const source = createSource('source-a', 0.25)
+      const waveform = createWaveform({
+        clip: () => createClip(),
+        width,
+        resolve: resolveWhen(new Map([['asset-a', source.source]])),
+      })
+      void (async () => {
+        source.controls.gate.resolve()
+        await flush()
+        await settle(waveform)
+        setWidth(200_000)
+        await flush()
+        source.controls.replacementGate.resolve()
+        await settle(waveform)
+        const readsAfterReplacement = source.controls.reads()
+        setWidth(400)
+        await flush()
+        await settle(waveform)
+        expect(source.controls.reads()).toBe(readsAfterReplacement)
+        dispose()
+        resolve()
+      })().catch((cause: unknown) => {
+        dispose()
+        reject(cause instanceof Error ? cause : new Error('waveform generation cache test failed'))
+      })
+    }))
+  })
+
   test('never renders stale data after source identity changes', async () => {
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
       const [clip, setClip] = createSignal(createClip('asset-a'))

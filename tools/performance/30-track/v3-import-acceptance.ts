@@ -359,17 +359,23 @@ const runZoomSweeps = async (session: string) => {
     direction: "in" | "out"
     anchor: number
     elapsedMs: number
+    firstResponseMs: number
+    settleMs: number
     visibleClips: number
   }[] = []
   const zoom = async (sweep: number, direction: "in" | "out", anchor: number, deltaY: number) => {
     const name = `zoom-${direction}-${sweep}-${Math.round(anchor * 100)}`
     await browserCommand(session, ["eval", `window.__dawPerformancePhase?.(${JSON.stringify(name)},true)??true`])
     const startedAt = performance.now()
+    await browserCommand(session, ["eval",
+      `(()=>{const ruler=document.querySelector('[data-timeline-ruler="1"]');const timeline=ruler?.closest('.overflow-auto');if(!(timeline instanceof HTMLElement))throw new Error('Timeline zoom surface unavailable.');const rect=timeline.getBoundingClientRect();timeline.dispatchEvent(new WheelEvent('wheel',{deltaY:${deltaY},deltaMode:0,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*${anchor}}));return true})()`])
+    const firstResponseMs = performance.now() - startedAt
+    await delay(50)
     const visibleClips = z.number().int().nonnegative().parse(JSON.parse(await browserCommand(session, ["eval",
-      `(()=>{const ruler=document.querySelector('[data-timeline-ruler="1"]');const timeline=ruler?.closest('.overflow-auto');if(!(timeline instanceof HTMLElement))throw new Error('Timeline zoom surface unavailable.');const rect=timeline.getBoundingClientRect();timeline.dispatchEvent(new WheelEvent('wheel',{deltaY:${deltaY},deltaMode:0,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*${anchor}}));return document.querySelectorAll('[title]').length})()`])))
-    await delay(180)
+      `(()=>[...document.querySelectorAll('[data-timeline-clip="1"]')].filter(entry=>entry instanceof HTMLElement&&entry.offsetWidth>0&&entry.offsetHeight>0).length)()`])))
+    const settleMs = performance.now() - startedAt
     await browserCommand(session, ["eval", `window.__dawPerformancePhase?.(${JSON.stringify(name)},false)??true`])
-    gestures.push({ sweep, direction, anchor, elapsedMs: performance.now() - startedAt, visibleClips })
+    gestures.push({ sweep, direction, anchor, elapsedMs: performance.now() - startedAt, firstResponseMs, settleMs, visibleClips })
   }
   for (let sweep = 0; sweep < 10; sweep++) {
     for (const anchor of [0.25, 0.5, 0.75]) await zoom(sweep, "in", anchor, -720)
@@ -651,7 +657,7 @@ const main = async () => {
       const transportBaseline = mode === "dsp-soak"
         ? desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"])) : null
       controlStartedAtMs = Date.now()
-      if (isUiStressMode(mode)) {
+      if (isUiStressMode(mode) || mode === "zoom-profile") {
         await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
         await runFullLoadUiStress(session, snapshot, dspSetup)
         if (isDspControlMode(mode)) {
@@ -694,7 +700,7 @@ const main = async () => {
         const remainingMs = controlDurationMs(mode) - (Date.now() - controlStartedAtMs)
         if (remainingMs > 0) await delay(remainingMs)
       }
-      if (isUiStressMode(mode)) {
+      if (isUiStressMode(mode) || mode === "zoom-profile") {
         framePerformance = fullLoadFramePerformanceSchema.parse(
           JSON.parse(JSON.parse(await browserCommand(session, ["eval", `JSON.stringify(${fullLoadFrameProbeResultScript()})`]))),
         )

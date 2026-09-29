@@ -551,6 +551,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         openFromDoubleTap();
       }}
       title={`${props.clip.name}`}
+      data-timeline-clip="1"
     >
       <Show when={hasLeftBoundary()}>
         <div

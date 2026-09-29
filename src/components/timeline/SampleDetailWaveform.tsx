@@ -1,6 +1,10 @@
 import { For, createEffect, createMemo, createSignal, on, onCleanup, onMount, type Component } from "solid-js";
 import { drawWaveformSignal } from "@daw-browser/waveforms/draw-waveform-signal";
 import { waveformCanvasSize } from "~/lib/waveform-canvas";
+import {
+  incrementPerformanceBenchmarkCounter,
+  measurePerformanceBenchmarkDuration,
+} from "~/lib/performance-benchmark-telemetry";
 import { resolveWaveformPaintStyle } from "~/lib/waveform-style";
 import { useDevicePixelRatio } from "~/lib/device-pixel-ratio";
 import type { AudioWarp, Clip } from "@daw-browser/timeline-core/types";
@@ -318,7 +322,10 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
   };
 
   createEffect(() => {
+    const startedAt = performance.now();
+    incrementPerformanceBenchmarkCounter("sample-detail.raster-calls");
     draw();
+    measurePerformanceBenchmarkDuration("sample-detail.raster", startedAt);
   });
 
   return (

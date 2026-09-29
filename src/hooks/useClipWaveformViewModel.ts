@@ -68,6 +68,8 @@ const sourceIdentityFor = (assetKey: string, clip: RuntimeClip) => [
   assetKey,
 ].join('|')
 
+const MAX_RETAINED_REQUESTS = 32
+
 const timingSignatureFor = (clip: RuntimeClip, bpm: number, duration: number) => JSON.stringify([
   clip.startSec,
   clip.duration,
@@ -108,6 +110,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
   let dataRequest = 0
   let sourceCleanup: (() => void) | undefined
   let dataCleanup: (() => void) | undefined
+  const retainedEntries = new Map<string, Retained>()
 
   const view = createMemo(() => {
     const startedAt = performance.now()
@@ -160,6 +163,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       dataRequest += 1
       sourceCleanup?.()
       dataCleanup?.()
+      retainedEntries.clear()
       if (options.waveformVisible?.() === false) {
         batch(() => {
           setSource(null)
@@ -213,8 +217,8 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       const previousState = untrack(generation)
       const visible = previousState.visible
       const seed = visible?.sourceIdentity === nextSource.identity
-        ? visible.entries
-        : new Map<string, Retained>()
+        ? new Map([...retainedEntries, ...visible.entries])
+        : retainedEntries
       const targetEntries = new Map<string, Retained>()
       for (const request of plan.requests) {
         const retained = seed.get(request.key)
@@ -267,9 +271,17 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         const additions = new Map(target.entries)
         for (const result of results) {
           if (!result) continue
-          additions.set(result.key, {
+          const retained = {
             ...retainWaveformData(result.data),
-          })
+          }
+          additions.set(result.key, retained)
+          retainedEntries.delete(result.key)
+          retainedEntries.set(result.key, retained)
+          while (retainedEntries.size > MAX_RETAINED_REQUESTS) {
+            const oldest = retainedEntries.keys().next().value
+            if (oldest === undefined) break
+            retainedEntries.delete(oldest)
+          }
         }
         if (additions.size === 0) {
           setLoading(false)

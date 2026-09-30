@@ -552,6 +552,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       }}
       title={`${props.clip.name}`}
       data-timeline-clip="1"
+      data-timeline-clip-id={props.clip.id}
     >
       <Show when={hasLeftBoundary()}>
         <div

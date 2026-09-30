@@ -353,8 +353,11 @@ const runFullLoadUiStress = async (
   }
   if (!preserveRecording) await evalTrue("(()=>{const stop=document.querySelector('button[aria-label=\"Stop\"]');if(stop instanceof HTMLButtonElement)stop.click();const play=document.querySelector('button[aria-label=\"Play\"]');if(!(play instanceof HTMLButtonElement))return false;play.click();return true})()", "Playback recovery failed.")
 }
-const runZoomSweeps = async (session: string, snapshot: ProjectSnapshotV2) => {
-  const clipNames = JSON.stringify(snapshot.clips.map((clip) => clip.clip.name))
+const runZoomSweeps = async (session: string, snapshot: ProjectSnapshotV2, visibleClipLimit = snapshot.clips.length) => {
+  const clipIds = snapshot.clips.slice(0, visibleClipLimit).map((clip) => clip.id)
+  const serializedClipIds = JSON.stringify(clipIds)
+  await browserCommand(session, ["eval",
+    `(()=>{const ids=new Set(${serializedClipIds});for(const entry of document.querySelectorAll('[data-timeline-clip-id]')){const id=entry.getAttribute('data-timeline-clip-id')??'';if(entry instanceof HTMLElement)entry.style.display=ids.has(id)?'':'none'}return true})()`])
   const gestures: {
     sweep: number
     direction: "in" | "out"
@@ -373,7 +376,7 @@ const runZoomSweeps = async (session: string, snapshot: ProjectSnapshotV2) => {
     const firstResponseMs = performance.now() - startedAt
     await delay(50)
     const visibleClips = z.number().int().nonnegative().parse(JSON.parse(await browserCommand(session, ["eval",
-      `(()=>{const names=new Set(${clipNames});return [...document.querySelectorAll('[title]')].filter(entry=>names.has(entry.getAttribute('title')??'')).length})()`])))
+      `(()=>{const ids=new Set(${serializedClipIds});return [...document.querySelectorAll('[data-timeline-clip-id]')].filter(entry=>ids.has(entry.getAttribute('data-timeline-clip-id')??'')&&entry instanceof HTMLElement&&entry.style.display!=='none').length})()`])))
     const settleMs = performance.now() - startedAt
     await browserCommand(session, ["eval", `window.__dawPerformancePhase?.(${JSON.stringify(name)},false)??true`])
     gestures.push({ sweep, direction, anchor, elapsedMs: performance.now() - startedAt, firstResponseMs, settleMs, visibleClips })
@@ -451,10 +454,13 @@ const command = async (profile: string, args: string[], input?: string) => {
 const main = async () => {
   const output = Bun.argv[2]
   const mode = parseControlMode(Bun.argv[3])
+  const zoomVisibleClipLimit = Bun.argv[4] === undefined
+    ? 30
+    : z.coerce.number().int().min(10).max(30).parse(Bun.argv[4])
   const quietRecording = mode === "recording" || mode === "dsp-recording" || mode === "dsp-ui-recording"
     || mode === "zoom-recording-profile"
     || isMediaRecordingMode(mode)
-  if (!output || !path.isAbsolute(output) || Bun.argv.length > 4)
+  if (!output || !path.isAbsolute(output) || Bun.argv.length > 5)
     throw new Error("Usage: bun v3-import-acceptance.ts <absolute-result-path> [--quiet-recording|--idle-control|--playback-control|--ui-control|--paging-control|--dsp-control|--dsp-ui-control|--dsp-soak|--dsp-recording|--dsp-ui-recording]")
   if ((await stat(archive)).size < 773_000_000) throw new Error("Unexpected v3 archive size")
   await stat(path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/app.asar"))
@@ -468,6 +474,7 @@ const main = async () => {
   let originalTarget = ""
   let quietStartedAt = 0
   let quietElapsedMs = 0
+  let recordingZoomSweeps: Awaited<ReturnType<typeof runZoomSweeps>> = []
   let beforeCaptureProcesses: Awaited<ReturnType<typeof rows>> = []
   let afterCaptureProcesses: Awaited<ReturnType<typeof rows>> = []
   let originalTargetAlive: boolean | null = null
@@ -673,7 +680,7 @@ const main = async () => {
       }
       if (mode === "zoom-profile") {
         await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
-        zoomSweeps = await runZoomSweeps(session, snapshot)
+        zoomSweeps = await runZoomSweeps(session, snapshot, zoomVisibleClipLimit)
       }
       if (mode === "dsp-soak" && transportBaseline?.native.status === "available"
         && transportBaseline.native.diagnostics.transportFrame !== undefined) {
@@ -758,7 +765,6 @@ const main = async () => {
       return
     }
     let recordingResult: object | null = null
-    let recordingZoomSweeps: Awaited<ReturnType<typeof runZoomSweeps>> = []
     if (quietRecording) {
       const audioTrack = snapshot.tracks.find((track) => track.kind === "audio")
       if (!audioTrack) throw new Error("No audio track to record.")
@@ -793,7 +799,7 @@ const main = async () => {
         wait: async () => {
           if (mode === "dsp-ui-recording" || mode === "zoom-recording-profile") {
             await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
-            if (mode === "zoom-recording-profile") recordingZoomSweeps = await runZoomSweeps(session, snapshot)
+            if (mode === "zoom-recording-profile") recordingZoomSweeps = await runZoomSweeps(session, snapshot, zoomVisibleClipLimit)
             else await runFullLoadUiStress(session, snapshot, dspSetup, true)
             const remainingMs = 61_000 - (Date.now() - quietStartedAt)
             if (remainingMs > 0) await delay(remainingMs)
@@ -907,7 +913,7 @@ const main = async () => {
     }
     await command(profile, ["host", "stop"])
     await mkdir(path.dirname(output), { recursive: true })
-    await writePrivateArtifact(output, JSON.stringify({ status: "complete", archive, projectId: snapshot.project.id, tracks: snapshot.tracks.length, clips: snapshot.clips.length, assets: snapshot.assets.length, midiNotes: countMidiNotes(snapshot.clips), nativeCallbacksBefore: before.native.status === "available" ? before.native.diagnostics.callbacks : null, nativeCallbacksAfter: after.native.diagnostics.callbacks, rejectedBlocks: after.native.diagnostics.rejectedBlocks - (before.native.status === "available" ? before.native.diagnostics.rejectedBlocks : 0), recording: recordingResult }, null, 2))
+    await writePrivateArtifact(output, JSON.stringify({ status: "complete", archive, projectId: snapshot.project.id, tracks: snapshot.tracks.length, clips: snapshot.clips.length, assets: snapshot.assets.length, midiNotes: countMidiNotes(snapshot.clips), nativeCallbacksBefore: before.native.status === "available" ? before.native.diagnostics.callbacks : null, nativeCallbacksAfter: after.native.status === "available" ? after.native.diagnostics.callbacks : null, rejectedBlocks: after.native.status === "available" ? after.native.diagnostics.rejectedBlocks - (before.native.status === "available" ? before.native.diagnostics.rejectedBlocks : 0) : null, recording: recordingResult }, null, 2))
   } catch (error) {
     await mkdir(path.dirname(output), { recursive: true })
     let samplePath: string | null = null
@@ -934,6 +940,7 @@ const main = async () => {
         stopPresent, stopSucceeded, rendererFailure: lifecycle.includes("stage=renderer-gone"),
       }),
       lifecycle: lifecycle.slice(mode.includes("media-recording-probe") ? -32000 : -3000),
+      zoomSweeps: recordingZoomSweeps,
       ...telemetry(),
       samplePath,
       postmortem: await command(profile, ["host", "diagnostics-v2"]).catch(() => null),

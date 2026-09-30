@@ -58,6 +58,7 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
   let pendingWheel: { deltaY: number; deltaMode: number; clientX: number } | undefined
   let suppressScroll = false
   let physicalAnchor = 0
+  let viewportGeneration = 0
 
   const physicalRunwayWidth = () => Math.max(
     viewportWidth(),
@@ -155,6 +156,8 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     setPerformanceBenchmarkGauge('timeline.pixels-per-second', nextScale)
     setPerformanceBenchmarkGauge('timeline.visible-start-sec', normalizedRange.startSec)
     setPerformanceBenchmarkGauge('timeline.visible-end-sec', normalizedRange.endSec)
+    viewportGeneration += 1
+    setPerformanceBenchmarkGauge('timeline.viewport-generation', viewportGeneration)
     measurePerformanceBenchmarkDuration('timeline.viewport', startedAt)
     return nextScale
   }

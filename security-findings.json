@@ -1,8 +1,8 @@
 {
-  "scan_id": "scan-2026-09-30-pr57-zoom-matrix",
-  "scan_date": "2026-09-30T17:11:31.351951+00:00",
-  "scan_type": "range",
-  "commit_range": "origin/master..working",
+  "scan_id": "scan-2026-09-23-benchmark-correctness",
+  "scan_date": "2026-09-30T20:15:54.589126+00:00",
+  "scan_type": "working",
+  "commit_range": "b77b93be..working",
   "pr_number": 57,
   "threat_model_version": "1.0.0",
   "findings": [],
@@ -22,6 +22,6 @@
       "DoS": 0,
       "ElevationOfPrivilege": 0
     },
-    "files_analyzed": 161
+    "files_analyzed": 5
   }
 }

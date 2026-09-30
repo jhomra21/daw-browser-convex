@@ -244,6 +244,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       dataCleanup?.()
       const controller = new AbortController()
       dataCleanup = () => controller.abort()
+      incrementPerformanceBenchmarkCounter('waveform.requests-pending', missing.length)
       setLoading(true)
       setError(undefined)
       setGeneration({
@@ -309,6 +310,8 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         }
         setLoading(false)
         setError(cause instanceof Error ? cause.message : 'Waveform loading failed.')
+      }).finally(() => {
+        incrementPerformanceBenchmarkCounter('waveform.requests-pending', -missing.length)
       })
     },
     { defer: false },

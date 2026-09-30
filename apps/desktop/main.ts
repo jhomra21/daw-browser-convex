@@ -2036,7 +2036,8 @@ const createWindow = () => {
     contents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
       if (isMainFrame) health("did-navigate-in-page", url)
     })
-    // Benchmark-only one-second main-process sampling never calls into the renderer.
+    const metricIntervalMs = process.env.DAW_BENCHMARK_ZOOM_PROFILE === "1" ? 250 : 1_000
+    // Benchmark-only process sampling never calls into the renderer.
     const metricTimer = setInterval(() => {
       for (const metric of app.getAppMetrics()) {
         console.error(`[quiet-renderer-metric] ${JSON.stringify({
@@ -2049,7 +2050,7 @@ const createWindow = () => {
           cpuPercent: metric.cpu.percentCPUUsage,
         })}`)
       }
-    }, 1_000)
+    }, metricIntervalMs)
     contents.on("destroyed", () => clearInterval(metricTimer))
     console.error(`[quiet-capture-lifecycle] stage=created webContentsId=${contents.id} rendererPid=${contents.getOSProcessId()} generation=${generation}`)
     contents.on("render-process-gone", (_event, details) =>

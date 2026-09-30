@@ -4,7 +4,7 @@ import { mkdir, readFile, stat } from "node:fs/promises"
 import path from "node:path"
 import { browserCommand, waitForBrowserValue } from "../browser-harness"
 import { cleanupSurvivors, createCleanupPlan, createPrivateRunDirectory, descendantsOf, verifyElectronLaunchIdentity, electronRendererTarget, writePrivateArtifact } from "./electron"
-import { controlCapabilitiesSchemaV2, controlCommitResultSchemaV1, controlPreviewResultSchemaV1, projectSnapshotSchemaV2, type ProjectSnapshotV2 } from "@daw-browser/control"
+import { controlApprovalResultSchemaV1, controlCapabilitiesSchemaV2, controlCommitResultSchemaV1, controlPreviewResultSchemaV1, projectSnapshotSchemaV2, type ProjectSnapshotV2 } from "@daw-browser/control"
 import { desktopDiagnosticsSchemaV2, desktopHostVstInstancesResultSchemaV1, desktopHostVstParametersResultSchemaV1, desktopTransportStatusSchemaV1 } from "@daw-browser/desktop-protocol"
 import { z } from "zod"
 import { boundedRendererEvents, summarizeRendererMetrics } from "../../../apps/desktop/quiet-renderer-telemetry"
@@ -117,12 +117,13 @@ const fullLoadFramePerformanceSchema = z.object({
   }).strict(),
 }).strict()
 
-export const fullLoadFrameProbeScript = () => `(()=>{const limit=8192,longLimit=256;const state={active:true,last:null,raf:[],work:[],long:[],drop:{raf:0,work:0,long:0,longFrames:0},observer:null,loafObserver:null,id:0,currentPhase:'unattributed',phases:[],longFrames:[],counters:{},durations:{}};
+export const fullLoadFrameProbeScript = () => `(()=>{const limit=8192,longLimit=256;const state={active:true,last:null,raf:[],work:[],long:[],drop:{raf:0,work:0,long:0,longFrames:0},observer:null,loafObserver:null,id:0,currentPhase:'unattributed',phases:[],longFrames:[],counters:{},durations:{},zoomResults:{}};
 const push=(values,key,value)=>{if(values.length<limit)values.push(value);else state.drop[key]++};
 const owner=(entry)=>{const scripts=entry.scripts||[];const script=scripts.reduce((best,item)=>(item.duration||0)>(best?.duration||0)?item:best,null);const source=String(script?.sourceURL||'').slice(-160),fn=String(script?.functionName||'').slice(0,120);const text=(source+' '+fn).toLowerCase();const category=text.includes('waveform')?'waveform-geometry':text.includes('record')?'recording-UI':text.includes('timeline')?'timeline-reactivity':text.includes('solid')?'Solid/reactive':scripts.length?'unknown':'layout/style';return {category,source:source||null,functionName:fn||null}};
 const phase=(name,active)=>{const now=performance.now();if(active){state.currentPhase=name;state.phases.push({name,startTime:now,endTime:null})}else{const item=[...state.phases].reverse().find(candidate=>candidate.name===name&&candidate.endTime===null);if(item)item.endTime=now;state.currentPhase=[...state.phases].reverse().find(candidate=>candidate.endTime===null)?.name||'unattributed'};return true};
 window.__dawPerformanceBenchmark={increment:(key,amount=1)=>{state.counters[key]=(state.counters[key]||0)+amount},duration:(key,value)=>{const values=state.durations[key]||(state.durations[key]=[]);if(values.length<limit)values.push(value)},gauge:(key,value)=>{state.counters[key]=value},phase};
 window.__dawPerformancePhase=phase;
+window.__dawMeasureZoomGesture=(token,deltaY,anchor)=>{void(async()=>{const timeline=document.querySelector('[data-timeline-scroll-viewport="1"]');if(!(timeline instanceof HTMLElement))throw new Error('Timeline zoom surface unavailable.');const rect=timeline.getBoundingClientRect(),inputTimestamp=performance.now(),beforeGeneration=state.counters['timeline.viewport-generation']||0;timeline.dispatchEvent(new WheelEvent('wheel',{deltaY,deltaMode:0,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*anchor}));let firstStateChangeTimestamp=null,firstPresentedFrameTimestamp=null,settledTimestamp=null,stableFrames=0,lastSignature='',lastRaster=state.counters['waveform.raster-calls']||0;while(performance.now()-inputTimestamp<2000){await new Promise(requestAnimationFrame);const generation=state.counters['timeline.viewport-generation']||0,signature=[generation,state.counters['timeline.pixels-per-second']||0,state.counters['timeline.visible-start-sec']||0,state.counters['timeline.visible-end-sec']||0].join('|'),raster=state.counters['waveform.raster-calls']||0,pending=state.counters['waveform.requests-pending']||0;if(firstStateChangeTimestamp===null&&generation!==beforeGeneration){firstStateChangeTimestamp=performance.now();continue}if(firstStateChangeTimestamp!==null&&firstPresentedFrameTimestamp===null){firstPresentedFrameTimestamp=performance.now();lastSignature=signature;lastRaster=raster;continue}if(firstPresentedFrameTimestamp!==null&&signature===lastSignature&&raster===lastRaster&&pending===0)stableFrames++;else stableFrames=0;lastSignature=signature;lastRaster=raster;if(stableFrames>=2){settledTimestamp=performance.now();break}}state.zoomResults[token]={stateChangeMs:firstStateChangeTimestamp===null?null:firstStateChangeTimestamp-inputTimestamp,firstVisualMs:firstPresentedFrameTimestamp===null?null:firstPresentedFrameTimestamp-inputTimestamp,settledMs:settledTimestamp===null?null:settledTimestamp-inputTimestamp,settled:settledTimestamp!==null}})();return true};
 const frame=(timestamp)=>{if(!state.active)return;if(state.last!==null)push(state.raf,'raf',timestamp-state.last);state.last=timestamp;
 queueMicrotask(()=>{if(state.active)push(state.work,'work',Math.max(0,performance.now()-timestamp))});state.id=requestAnimationFrame(frame)};
 if(PerformanceObserver.supportedEntryTypes?.includes('longtask')){state.observer=new PerformanceObserver((list)=>{for(const entry of list.getEntries()){push(state.long,'long',entry.duration);if(state.longFrames.length===longLimit){state.drop.longFrames++;continue}state.longFrames.push({startTime:entry.startTime,duration:entry.duration,phase:state.currentPhase,owner:'unknown',scriptDuration:null,renderDuration:null,styleAndLayoutDuration:null,forcedStyleAndLayoutDuration:null,source:null,functionName:null})}});state.observer.observe({type:'longtask'})}
@@ -297,6 +298,47 @@ const prepareFullDsp = async (session: string, profile: string, projectId: strin
   return { processors: processors.length, builtInEffects: builtInEffects.length,
     automatedInstanceId: instance.instanceId, mixParameterId: mix[0].id }
 }
+const deriveActiveClipProject = async (
+  profile: string,
+  snapshot: ProjectSnapshotV2,
+  activeClipCount: number,
+) => {
+  if (activeClipCount >= snapshot.clips.length) return snapshot
+  const request = {
+    version: "v1",
+    projectId: snapshot.project.id,
+    expectedRevision: snapshot.project.revision,
+    actions: snapshot.clips.slice(activeClipCount).map((clip) => ({
+      kind: "clip.delete",
+      clip: { source: "persisted", id: clip.id },
+    })),
+  }
+  const preview = controlPreviewResultSchemaV1.parse(await command(
+    profile,
+    ["preview", "--request", "-", "--target", "host"],
+    JSON.stringify(request),
+  ))
+  const approvalToken = preview.approval?.required
+    ? controlApprovalResultSchemaV1.parse(await command(
+      profile,
+      ["approval", "--request", "-", "--target", "host"],
+      JSON.stringify(request),
+    )).approvalToken
+    : undefined
+  controlCommitResultSchemaV1.parse(await command(
+    profile,
+    ["commit", "--request", "-", "--target", "host"],
+    JSON.stringify({ ...request, idempotencyKey: `zoom-clips-${activeClipCount}-${crypto.randomUUID()}`, approvalToken }),
+  ))
+  const derived = projectSnapshotSchemaV2.parse(await command(
+    profile,
+    ["snapshot-v2", snapshot.project.id, "--target", "host"],
+  ))
+  if (derived.clips.length !== activeClipCount) {
+    throw new Error(`Expected ${activeClipCount} active benchmark clips, found ${derived.clips.length}.`)
+  }
+  return derived
+}
 const runFullLoadUiStress = async (
   session: string,
   snapshot: ProjectSnapshotV2,
@@ -353,11 +395,7 @@ const runFullLoadUiStress = async (
   }
   if (!preserveRecording) await evalTrue("(()=>{const stop=document.querySelector('button[aria-label=\"Stop\"]');if(stop instanceof HTMLButtonElement)stop.click();const play=document.querySelector('button[aria-label=\"Play\"]');if(!(play instanceof HTMLButtonElement))return false;play.click();return true})()", "Playback recovery failed.")
 }
-const runZoomSweeps = async (session: string, snapshot: ProjectSnapshotV2, visibleClipLimit = snapshot.clips.length) => {
-  const clipIds = snapshot.clips.slice(0, visibleClipLimit).map((clip) => clip.id)
-  const serializedClipIds = JSON.stringify(clipIds)
-  await browserCommand(session, ["eval",
-    `(()=>{const ids=new Set(${serializedClipIds});for(const entry of document.querySelectorAll('[data-timeline-clip-id]')){const id=entry.getAttribute('data-timeline-clip-id')??'';if(entry instanceof HTMLElement)entry.style.display=ids.has(id)?'':'none'}return true})()`])
+const runZoomSweeps = async (session: string, projectActiveClipCount: number) => {
   const gestures: {
     sweep: number
     direction: "in" | "out"
@@ -365,21 +403,69 @@ const runZoomSweeps = async (session: string, snapshot: ProjectSnapshotV2, visib
     elapsedMs: number
     firstResponseMs: number
     settleMs: number
-    visibleClips: number
+    stateChangeMs: number
+    firstVisualMs: number
+    settled: boolean
+    browserCommandRoundTripMs: number
+    projectActiveClipCount: number
+    mountedClipCount: number
+    viewportIntersectingClipCount: number
   }[] = []
+  const memoryCheckpoints: {
+    name: string
+    heapUsedBytes: number | null
+    heapTotalBytes: number | null
+    waveformRequestStarts: number
+    waveformRasterCalls: number
+  }[] = []
+  await browserCommand(session, ["eval",
+    `(()=>{const timeline=document.querySelector('[data-timeline-scroll-viewport="1"]');if(!(timeline instanceof HTMLElement))throw new Error('Timeline viewport unavailable.');timeline.scrollTop=0;timeline.dispatchEvent(new Event('scroll'));return true})()`])
+  await delay(100)
+  const checkpoint = async (name: string) => {
+    memoryCheckpoints.push(z.object({
+      name: z.string(),
+      heapUsedBytes: z.number().nonnegative().nullable(),
+      heapTotalBytes: z.number().nonnegative().nullable(),
+      waveformRequestStarts: z.number().nonnegative(),
+      waveformRasterCalls: z.number().nonnegative(),
+    }).parse(JSON.parse(await browserCommand(session, ["eval",
+      `(()=>{const probe=window.__dawFullLoadFrameProbe,memory=performance.memory;return {name:${JSON.stringify(name)},heapUsedBytes:Number.isFinite(memory?.usedJSHeapSize)?memory.usedJSHeapSize:null,heapTotalBytes:Number.isFinite(memory?.totalJSHeapSize)?memory.totalJSHeapSize:null,waveformRequestStarts:probe?.counters?.['waveform.requests-started']||0,waveformRasterCalls:probe?.counters?.['waveform.raster-calls']||0}})()`]))))
+  }
+  await checkpoint("before-sweeps")
   const zoom = async (sweep: number, direction: "in" | "out", anchor: number, deltaY: number) => {
     const name = `zoom-${direction}-${sweep}-${Math.round(anchor * 100)}`
     await browserCommand(session, ["eval", `window.__dawPerformancePhase?.(${JSON.stringify(name)},true)??true`])
     const startedAt = performance.now()
+    const token = crypto.randomUUID()
     await browserCommand(session, ["eval",
-      `(()=>{const ruler=document.querySelector('[data-timeline-ruler="1"]');const timeline=ruler?.closest('.overflow-auto');if(!(timeline instanceof HTMLElement))throw new Error('Timeline zoom surface unavailable.');const rect=timeline.getBoundingClientRect();timeline.dispatchEvent(new WheelEvent('wheel',{deltaY:${deltaY},deltaMode:0,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*${anchor}}));return true})()`])
-    const firstResponseMs = performance.now() - startedAt
-    await delay(50)
-    const visibleClips = z.number().int().nonnegative().parse(JSON.parse(await browserCommand(session, ["eval",
-      `(()=>{const ids=new Set(${serializedClipIds});return [...document.querySelectorAll('[data-timeline-clip-id]')].filter(entry=>ids.has(entry.getAttribute('data-timeline-clip-id')??'')&&entry instanceof HTMLElement&&entry.style.display!=='none').length})()`])))
-    const settleMs = performance.now() - startedAt
+      `window.__dawMeasureZoomGesture?.(${JSON.stringify(token)},${deltaY},${anchor})??false`])
+    await waitForBrowserValue(session,
+      `window.__dawFullLoadFrameProbe?.zoomResults?.[${JSON.stringify(token)}]??null`,
+      3_000)
+    const timing = z.object({
+      stateChangeMs: z.number().nonnegative().nullable(),
+      firstVisualMs: z.number().nonnegative().nullable(),
+      settledMs: z.number().nonnegative().nullable(),
+      settled: z.boolean(),
+    }).parse(JSON.parse(await browserCommand(session, ["eval",
+      `window.__dawFullLoadFrameProbe.zoomResults[${JSON.stringify(token)}]`])))
+    const browserCommandRoundTripMs = performance.now() - startedAt
+    if (timing.stateChangeMs === null || timing.firstVisualMs === null || timing.settledMs === null) {
+      throw new Error(`Zoom gesture did not settle: ${name}`)
+    }
+    const clipCounts = z.object({
+      mountedClipCount: z.number().int().nonnegative(),
+      viewportIntersectingClipCount: z.number().int().nonnegative(),
+      viewportRect: z.object({ left: z.number(), top: z.number(), right: z.number(), bottom: z.number() }),
+      firstClipRect: z.object({ left: z.number(), top: z.number(), right: z.number(), bottom: z.number() }).nullable(),
+    }).parse(JSON.parse(await browserCommand(session, ["eval",
+      `(()=>{const timeline=document.querySelector('[data-timeline-scroll-viewport="1"]');if(!(timeline instanceof HTMLElement))throw new Error('Timeline viewport unavailable.');const viewport=timeline.getBoundingClientRect(),clips=[...document.querySelectorAll('[data-timeline-clip-id]')].filter(entry=>entry instanceof HTMLElement&&entry.offsetWidth>0&&entry.offsetHeight>0),rect=clips[0]?.getBoundingClientRect();return {mountedClipCount:clips.length,viewportIntersectingClipCount:clips.filter(entry=>{const rect=entry.getBoundingClientRect();return rect.right>viewport.left&&rect.left<viewport.right&&rect.bottom>viewport.top&&rect.top<viewport.bottom}).length,viewportRect:{left:viewport.left,top:viewport.top,right:viewport.right,bottom:viewport.bottom},firstClipRect:rect?{left:rect.left,top:rect.top,right:rect.right,bottom:rect.bottom}:null}})()`])))
     await browserCommand(session, ["eval", `window.__dawPerformancePhase?.(${JSON.stringify(name)},false)??true`])
-    gestures.push({ sweep, direction, anchor, elapsedMs: performance.now() - startedAt, firstResponseMs, settleMs, visibleClips })
+    gestures.push({ sweep, direction, anchor, elapsedMs: performance.now() - startedAt,
+      firstResponseMs: timing.firstVisualMs, settleMs: timing.settledMs,
+      stateChangeMs: timing.stateChangeMs, firstVisualMs: timing.firstVisualMs,
+      settled: timing.settled, browserCommandRoundTripMs, projectActiveClipCount,
+      ...clipCounts })
   }
   for (let sweep = 0; sweep < 10; sweep++) {
     for (const anchor of [0.25, 0.5, 0.75]) await zoom(sweep, "in", anchor, -720)
@@ -387,8 +473,15 @@ const runZoomSweeps = async (session: string, snapshot: ProjectSnapshotV2, visib
     await delay(100)
     for (const anchor of [0.75, 0.5, 0.25]) await zoom(sweep, "out", anchor, 720)
     await zoom(sweep, "out", 0.5, 1_440)
+    if (sweep === 0) await checkpoint("after-first-overview")
+    if (sweep === 4) await checkpoint("after-sweep-5")
+    if (sweep === 9) await checkpoint("after-sweep-10")
   }
-  return gestures
+  await delay(5_000)
+  await checkpoint("after-5s-settle")
+  await delay(5_000)
+  await checkpoint("after-10s-settle")
+  return { gestures, memoryCheckpoints }
 }
 export const quietCapture = async (steps: {
   start: () => Promise<void>
@@ -474,7 +567,7 @@ const main = async () => {
   let originalTarget = ""
   let quietStartedAt = 0
   let quietElapsedMs = 0
-  let recordingZoomSweeps: Awaited<ReturnType<typeof runZoomSweeps>> = []
+  let recordingZoomProfile: Awaited<ReturnType<typeof runZoomSweeps>> | null = null
   let beforeCaptureProcesses: Awaited<ReturnType<typeof rows>> = []
   let afterCaptureProcesses: Awaited<ReturnType<typeof rows>> = []
   let originalTargetAlive: boolean | null = null
@@ -493,6 +586,7 @@ const main = async () => {
   const app = spawn(executable, ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0", `--user-data-dir=${profile}`], {
     cwd: root, env: { ...process.env, DAW_DESKTOP_USER_DATA: profile, DAW_BENCHMARK_SAB_RECORDING: quietRecording && mode !== "media-recording-portable" ? "1" : "0",
       DAW_BENCHMARK_QUIET_CAPTURE: mode !== "acceptance" ? "1" : "0",
+      DAW_BENCHMARK_ZOOM_PROFILE: mode === "zoom-profile" || mode === "zoom-recording-profile" ? "1" : "0",
       DAW_BENCHMARK_HEARTBEAT: mode.includes("media-recording-probe") ? "1" : "0",
       DAW_BENCHMARK_RECORDING_FORWARD_MODE: recordingForwardMode(mode),
       DAW_BENCHMARK_RECORDING_SUPPRESS_CHANNEL: mode === "media-recording-probe-drop-no-meters" ? "meter-batch" : "" }, detached: true, stdio: ["ignore", "pipe", "pipe"],
@@ -526,10 +620,13 @@ const main = async () => {
     const metrics = metricOutput.split("\n").flatMap((line) => {
       try {
         return [z.object({ elapsedMs: z.number(), epochMs: z.number(), pid: z.number(), renderer: z.boolean(),
-          workingSetKiB: z.number(), peakWorkingSetKiB: z.number(), cpuPercent: z.number() })
+          type: z.string(),
+          workingSetKiB: z.number(), peakWorkingSetKiB: z.number(),
+          privateKiB: z.number().nullable(), cpuPercent: z.number() })
           .parse(JSON.parse(line.slice("[quiet-renderer-metric] ".length)))]
       } catch { return [] }
-    }).filter((metric) => metric.renderer)
+    })
+    const rendererMetrics = metrics.filter((metric) => metric.renderer)
     const events = healthOutput.split("\n").flatMap((line) => {
       try {
         return [z.object({ elapsedMs: z.number(), name: z.string(), pid: z.number(),
@@ -537,8 +634,8 @@ const main = async () => {
           .parse(JSON.parse(line.slice("[quiet-renderer-health] ".length)))]
       } catch { return [] }
     })
-    const startAtMs = metrics.find((metric) => metric.epochMs >= controlStartedAtMs)?.elapsedMs ?? 0
-    return { rendererMetrics: summarizeRendererMetrics(metrics, metrics.at(-1)?.pid ?? 0, startAtMs),
+    const startAtMs = rendererMetrics.find((metric) => metric.epochMs >= controlStartedAtMs)?.elapsedMs ?? 0
+    return { rendererMetrics: summarizeRendererMetrics(rendererMetrics, rendererMetrics.at(-1)?.pid ?? 0, startAtMs),
       rendererEvents: boundedRendererEvents(events), rendererSamples: metrics.slice(-120) }
   }
   try {
@@ -579,7 +676,10 @@ const main = async () => {
     stage = "import"
     const projectId = parseBrowserProjectId(await waitForBrowserValue(session, "new URL(location.href).searchParams.get('projectId') && document.querySelector('[data-timeline-ruler=\"1\"]') ? new URL(location.href).searchParams.get('projectId') : null", 180000))
     await waitForBrowserValue(session, "document.querySelectorAll('[aria-label^=\"Select track \"]').length === 30 ? true : null", 60_000)
-    const snapshot = assertArchiveSnapshot(projectSnapshotSchemaV2.parse(await command(profile, ["snapshot-v2", projectId, "--target", "host"])))
+    let snapshot = assertArchiveSnapshot(projectSnapshotSchemaV2.parse(await command(profile, ["snapshot-v2", projectId, "--target", "host"])))
+    if (mode === "zoom-profile" || mode === "zoom-recording-profile") {
+      snapshot = await deriveActiveClipProject(profile, snapshot, zoomVisibleClipLimit)
+    }
     let pagingSetup: { clipId: string; timelineStartSec: number; sourceOffsetSec: number; durationSec: number } | null = null
     if (mode === "paging") {
       stage = "paging-setup"
@@ -660,7 +760,7 @@ const main = async () => {
     if (mode === "playback" || mode === "ui" || mode === "paging" || isDspControlMode(mode)) {
       stage = `${mode}-control`
       let framePerformance: z.infer<typeof fullLoadFramePerformanceSchema> | null = null
-      let zoomSweeps: Awaited<ReturnType<typeof runZoomSweeps>> = []
+      let zoomProfile: Awaited<ReturnType<typeof runZoomSweeps>> | null = null
       const transportDrift: { elapsedMs: number; transportFrame: string; expectedFrame: string; errorFrames: string }[] = []
       const transportBaseline = mode === "dsp-soak"
         ? desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"])) : null
@@ -680,7 +780,7 @@ const main = async () => {
       }
       if (mode === "zoom-profile") {
         await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
-        zoomSweeps = await runZoomSweeps(session, snapshot, zoomVisibleClipLimit)
+        zoomProfile = await runZoomSweeps(session, snapshot.clips.length)
       }
       if (mode === "dsp-soak" && transportBaseline?.native.status === "available"
         && transportBaseline.native.diagnostics.transportFrame !== undefined) {
@@ -753,7 +853,8 @@ const main = async () => {
         throw new Error("Expected live VST instances were not available after measured playback.")
       await writePrivateArtifact(output, JSON.stringify({ status: "complete", mode, responsive, projectId, lifecycle, ...telemetry(), dspSetup, pagingSetup,
         framePerformance,
-        zoomSweeps,
+        zoomSweeps: zoomProfile?.gestures ?? [],
+        zoomMemoryCheckpoints: zoomProfile?.memoryCheckpoints ?? [],
         transportDrift,
         pagingSeek, playing,
         transportFrame, realtimePerformance, vstWorkerPerformance,
@@ -799,7 +900,7 @@ const main = async () => {
         wait: async () => {
           if (mode === "dsp-ui-recording" || mode === "zoom-recording-profile") {
             await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
-            if (mode === "zoom-recording-profile") recordingZoomSweeps = await runZoomSweeps(session, snapshot, zoomVisibleClipLimit)
+            if (mode === "zoom-recording-profile") recordingZoomProfile = await runZoomSweeps(session, snapshot.clips.length)
             else await runFullLoadUiStress(session, snapshot, dspSetup, true)
             const remainingMs = 61_000 - (Date.now() - quietStartedAt)
             if (remainingMs > 0) await delay(remainingMs)
@@ -902,7 +1003,8 @@ const main = async () => {
             transportFrame: completed.native.status === "available"
               ? completed.native.diagnostics.transportFrame ?? null : null,
             realtimePerformance, vstWorkerPerformance,
-            zoomSweeps: recordingZoomSweeps,
+            zoomSweeps: recordingZoomProfile?.gestures ?? [],
+            zoomMemoryCheckpoints: recordingZoomProfile?.memoryCheckpoints ?? [],
             framePerformance: mode === "dsp-ui-recording" || mode === "zoom-recording-profile"
               ? fullLoadFramePerformanceSchema.parse(JSON.parse(JSON.parse(await browserCommand(
                 session,
@@ -940,7 +1042,8 @@ const main = async () => {
         stopPresent, stopSucceeded, rendererFailure: lifecycle.includes("stage=renderer-gone"),
       }),
       lifecycle: lifecycle.slice(mode.includes("media-recording-probe") ? -32000 : -3000),
-      zoomSweeps: recordingZoomSweeps,
+      zoomSweeps: recordingZoomProfile?.gestures ?? [],
+      zoomMemoryCheckpoints: recordingZoomProfile?.memoryCheckpoints ?? [],
       ...telemetry(),
       samplePath,
       postmortem: await command(profile, ["host", "diagnostics-v2"]).catch(() => null),

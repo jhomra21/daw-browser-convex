@@ -2,6 +2,7 @@ import {
   type Component,
   createEffect,
   createMemo,
+  onCleanup,
   Show,
 } from "solid-js";
 
@@ -111,6 +112,7 @@ let lastClipDoubleOpen:
 const ClipComponent: Component<ClipComponentProps> = (props) => {
   const appPreferences = useAppPreferences();
   let canvasRef: HTMLCanvasElement | undefined;
+  let waveformFrame: number | undefined;
   let selectedTapStart:
     | { x: number; y: number; at: number }
     | undefined;
@@ -478,6 +480,18 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     }
   }
 
+  const scheduleWaveformDraw = () => {
+    if (waveformFrame !== undefined) return;
+    // Zoom updates several reactive inputs together. Coalesce their canvas
+    // invalidations into the browser's next paint and cancel on unmount.
+    waveformFrame = requestAnimationFrame(() => {
+      waveformFrame = undefined;
+      const startedAt = performance.now();
+      drawWaveform();
+      measurePerformanceBenchmarkDuration("waveform.raster", startedAt);
+    });
+  };
+
   createEffect(() => {
     void props.viewportRedrawVersion;
     void props.clip;
@@ -488,9 +502,10 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void props.pixelsPerSecond;
     void props.visibleRange;
     void waveform.segments();
-    const startedAt = performance.now();
-    drawWaveform();
-    measurePerformanceBenchmarkDuration("waveform.raster", startedAt);
+    scheduleWaveformDraw();
+  });
+  onCleanup(() => {
+    if (waveformFrame !== undefined) cancelAnimationFrame(waveformFrame);
   });
 
   const clipElement = (

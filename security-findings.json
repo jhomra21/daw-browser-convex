@@ -1,8 +1,8 @@
 {
-  "scan_id": "scan-2026-09-23-benchmark-correctness",
-  "scan_date": "2026-09-30T20:15:54.589126+00:00",
+  "scan_id": "scan-2026-09-30-zoom-raster",
+  "scan_date": "2026-09-30T22:09:32.894927+00:00",
   "scan_type": "working",
-  "commit_range": "b77b93be..working",
+  "commit_range": "2c21b682..working",
   "pr_number": 57,
   "threat_model_version": "1.0.0",
   "findings": [],
@@ -22,6 +22,6 @@
       "DoS": 0,
       "ElevationOfPrivilege": 0
     },
-    "files_analyzed": 5
+    "files_analyzed": 3
   }
 }

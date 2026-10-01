@@ -1,0 +1,97 @@
+{
+  "generatedAt": "2026-10-01",
+  "method": "Five valid packaged runs per profile; renderer-owned gesture timing; run-level medians unless stated otherwise.",
+  "profiles": {
+    "P10": {
+      "validRuns": 5,
+      "medianRunFirstVisualP95Ms": 21.40000009536743,
+      "medianRunSettledP95Ms": 36.90000009536743,
+      "medianRunZoomInSettledP95Ms": 36.299999713897705,
+      "medianRunZoomOutSettledP95Ms": 36.80000019073486,
+      "medianRendererCpuAveragePercent": 5.919783297314231,
+      "medianRendererCpuP95Percent": 10.812478192661017,
+      "medianRendererPeakBytes": 1325744128,
+      "medianWaveformRequestStarts": 17,
+      "medianWaveformCacheHits": 307,
+      "medianWaveformRasterCalls": 868,
+      "medianWaveformRasterTotalMs": 89.30000114440918,
+      "medianViewportTotalMs": 377.0999994277954,
+      "maximumRafP95Ms": 9.5,
+      "totalLongTasks": 0,
+      "totalRealtimeDeadlineMisses": 0,
+      "totalVstWorkerWatchdogMisses": 0,
+      "totalVstWorkerFaults": 0,
+      "viewportIntersectingClipCounts": [
+        4
+      ],
+      "artifacts": [
+        "/private/tmp/daw-zoom-corrected/p10-2.json",
+        "/private/tmp/daw-zoom-corrected/p10-3.json",
+        "/private/tmp/daw-zoom-corrected/p10-4.json",
+        "/private/tmp/daw-zoom-corrected/p10-5.json",
+        "/private/tmp/daw-zoom-corrected/p10-1.json"
+      ]
+    },
+    "P20": {
+      "validRuns": 4,
+      "medianRunFirstVisualP95Ms": 25.550000190734863,
+      "medianRunSettledP95Ms": 42.84999990463257,
+      "medianRunZoomInSettledP95Ms": 42.0,
+      "medianRunZoomOutSettledP95Ms": 42.549999713897705,
+      "medianRendererCpuAveragePercent": 6.246740378307042,
+      "medianRendererCpuP95Percent": 11.800989631151534,
+      "medianRendererPeakBytes": 1683095552.0,
+      "medianWaveformRequestStarts": 36.0,
+      "medianWaveformCacheHits": 531.0,
+      "medianWaveformRasterCalls": 1446.5,
+      "medianWaveformRasterTotalMs": 175.3999981880188,
+      "medianViewportTotalMs": 676.8999984264374,
+      "maximumRafP95Ms": 9.799999999995634,
+      "totalLongTasks": 0,
+      "totalRealtimeDeadlineMisses": 0,
+      "totalVstWorkerWatchdogMisses": 0,
+      "totalVstWorkerFaults": 0,
+      "viewportIntersectingClipCounts": [
+        5
+      ],
+      "artifacts": [
+        "/private/tmp/daw-zoom-corrected/p20-4.json",
+        "/private/tmp/daw-zoom-corrected/p20-9.json",
+        "/private/tmp/daw-zoom-corrected/p20-3.json",
+        "/private/tmp/daw-zoom-corrected/p20-11.json"
+      ]
+    },
+    "P30": {
+      "validRuns": 7,
+      "medianRunFirstVisualP95Ms": 30.600000381469727,
+      "medianRunSettledP95Ms": 58.19999980926514,
+      "medianRunZoomInSettledP95Ms": 61.59999990463257,
+      "medianRunZoomOutSettledP95Ms": 52,
+      "medianRendererCpuAveragePercent": 6.8360623927656095,
+      "medianRendererCpuP95Percent": 12.589729247406341,
+      "medianRendererPeakBytes": 2094252032,
+      "medianWaveformRequestStarts": 52,
+      "medianWaveformCacheHits": 677,
+      "medianWaveformRasterCalls": 1377,
+      "medianWaveformRasterTotalMs": 135.69999837875366,
+      "medianViewportTotalMs": 693.100001335144,
+      "maximumRafP95Ms": 9.799999999995634,
+      "totalLongTasks": 0,
+      "totalRealtimeDeadlineMisses": 0,
+      "totalVstWorkerWatchdogMisses": 0,
+      "totalVstWorkerFaults": 0,
+      "viewportIntersectingClipCounts": [
+        5
+      ],
+      "artifacts": [
+        "/private/tmp/daw-zoom-optimized/p30-5.json",
+        "/private/tmp/daw-zoom-optimized/p30-4.json",
+        "/private/tmp/daw-zoom-optimized/p30-3.json",
+        "/private/tmp/daw-zoom-optimized/p30-2.json",
+        "/private/tmp/daw-zoom-optimized/p30-1.json",
+        "/private/tmp/daw-zoom-optimized/p30-7.json",
+        "/private/tmp/daw-zoom-optimized/p30-6.json"
+      ]
+    }
+  }
+}

@@ -1,9 +1,9 @@
 {
-  "scan_id": "scan-2026-09-30-zoom-raster",
-  "scan_date": "2026-09-30T22:09:32.894927+00:00",
+  "scan_id": "scan-2026-10-01-vst-reliability-final",
+  "scan_date": "2026-10-01T23:59:00.000000+00:00",
   "scan_type": "working",
-  "commit_range": "2c21b682..working",
-  "pr_number": 57,
+  "commit_range": "uncommitted",
+  "pr_number": null,
   "threat_model_version": "1.0.0",
   "findings": [],
   "summary": {
@@ -22,6 +22,6 @@
       "DoS": 0,
       "ElevationOfPrivilege": 0
     },
-    "files_analyzed": 3
+    "files_analyzed": 10
   }
 }

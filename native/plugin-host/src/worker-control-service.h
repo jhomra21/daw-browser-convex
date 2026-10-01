@@ -74,6 +74,7 @@ class WorkerCallbackPort {
   WorkerCallbackPort() = default;
   [[nodiscard]] WorkerSubmissionStatus Submit(const WorkerSubmission& submission) const noexcept;
   [[nodiscard]] bool ReadCompleted(std::size_t slotIndex, std::uint64_t sequence) const noexcept;
+  [[nodiscard]] WorkerSlotStatus ReadStatus(std::size_t slotIndex, std::uint64_t sequence) const noexcept;
   [[nodiscard]] bool CopyCompletedOutput(
     std::size_t slotIndex,
     std::uint64_t sequence,
@@ -143,6 +144,7 @@ class WorkerControlService {
 
   [[nodiscard]] WorkerSubmissionStatus PublishFromCallback(const WorkerSubmission& submission) noexcept;
   [[nodiscard]] bool ReadCompletionFromCallback(std::size_t slotIndex, std::uint64_t sequence) const noexcept;
+  [[nodiscard]] WorkerSlotStatus ReadStatusFromCallback(std::size_t slotIndex, std::uint64_t sequence) const noexcept;
   [[nodiscard]] bool CopyCompletionOutputFromCallback(
     std::size_t slotIndex,
     std::uint64_t sequence,

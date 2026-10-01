@@ -1253,7 +1253,13 @@ export type NativeAudioHostSupervisor = {
 
 export const createNativeAudioHostSupervisor = (
   hostPath: string,
-  spawnHost: SpawnHost = (executable) => spawn(executable, [], { env: { PATH: "/usr/bin:/bin" }, stdio: ["pipe", "pipe", "pipe"] }),
+  spawnHost: SpawnHost = (executable) => {
+    const environment: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin" }
+    if (process.env.DAW_BENCHMARK_VST_RELIABILITY === "1") {
+      environment.DAW_BENCHMARK_VST_RELIABILITY = "1"
+    }
+    return spawn(executable, [], { env: environment, stdio: ["pipe", "pipe", "pipe"] })
+  },
   options: NativeAudioHostSupervisorOptions = {},
 ): NativeAudioHostSupervisor => {
   let child: ChildProcessWithoutNullStreams | undefined

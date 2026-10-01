@@ -1,6 +1,6 @@
 import { constants } from "node:fs"
 import { randomBytes } from "node:crypto"
-import { chmod, mkdir, open } from "node:fs/promises"
+import { chmod, lstat, mkdir, open, readdir, rm } from "node:fs/promises"
 import path from "node:path"
 
 export type ProcessMetric = {
@@ -43,6 +43,24 @@ export type CleanupPlan = {
   readonly processGroupId: number
   readonly recordedProcesses: readonly ProcessIdentity[]
 }
+
+type OwnedRunDirectoryCleanup = {
+  readonly directory: string
+  readonly profile: string
+  readonly removed: boolean
+  readonly bytesRemoved: number
+  readonly error: string | null
+}
+
+type AbandonedRunDirectory = {
+  readonly path: string
+  readonly profile: string
+  readonly createdAt: string
+  readonly bytes: number
+  readonly active: boolean
+}
+
+const runDirectoryPattern = /^daw-e-[0-9a-f]{24}$/
 
 type LaunchIdentityInput = {
   readonly rootPid: number
@@ -110,6 +128,11 @@ export const createPrivateRunDirectory = async (temporaryRoot: string): Promise<
     try {
       await mkdir(directory, { mode: 0o700 })
       await chmod(directory, 0o700)
+      await writePrivateArtifact(path.join(directory, "runner-owner.json"), JSON.stringify({
+        version: 1,
+        pid: process.pid,
+        createdAt: new Date().toISOString(),
+      }))
       return directory
     } catch (error) {
       const code = error instanceof Error && "code" in error ? error.code : undefined
@@ -117,6 +140,86 @@ export const createPrivateRunDirectory = async (temporaryRoot: string): Promise<
     }
   }
   throw new Error("Could not create a private Electron benchmark directory.")
+}
+
+const directoryBytes = async (directory: string): Promise<number> => {
+  let bytes = 0
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const entryPath = path.join(directory, entry.name)
+    if (entry.isDirectory()) bytes += await directoryBytes(entryPath)
+    else if (entry.isFile()) bytes += (await lstat(entryPath)).size
+  }
+  return bytes
+}
+
+export const cleanupOwnedRunDirectory = async (
+  directory: string,
+  processes: readonly ProcessIdentity[],
+): Promise<OwnedRunDirectoryCleanup> => {
+  const profile = path.join(directory, "profile")
+  if (!runDirectoryPattern.test(path.basename(directory))) {
+    return { directory, profile, removed: false, bytesRemoved: 0, error: "Runner directory name is not owned." }
+  }
+  if (processes.some((process) => commandContainsArgument(process.command, `--user-data-dir=${profile}`))) {
+    return { directory, profile, removed: false, bytesRemoved: 0, error: "Runner profile is still in use." }
+  }
+  try {
+    const bytesRemoved = await directoryBytes(directory)
+    await rm(directory, { recursive: true })
+    return { directory, profile, removed: true, bytesRemoved, error: null }
+  } catch (error) {
+    return {
+      directory,
+      profile,
+      removed: false,
+      bytesRemoved: 0,
+      error: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+export const chicagoStartOfToday = (now = new Date()): Date => {
+  const date = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now)
+  const utcMidnight = new Date(`${date}T00:00:00Z`)
+  const offsetName = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    timeZoneName: "longOffset",
+  }).formatToParts(utcMidnight).find((part) => part.type === "timeZoneName")?.value
+  const offset = /^GMT([+-]\d{2}):(\d{2})$/.exec(offsetName ?? "")
+  if (!offset) throw new Error("Could not resolve America/Chicago offset.")
+  const sign = offset[1].startsWith("-") ? -1 : 1
+  const offsetMinutes = sign * (Number(offset[1].slice(1)) * 60 + Number(offset[2]))
+  return new Date(utcMidnight.getTime() - offsetMinutes * 60_000)
+}
+
+export const abandonedRunDirectories = async (
+  temporaryRoot: string,
+  processes: readonly ProcessIdentity[],
+  now = new Date(),
+): Promise<AbandonedRunDirectory[]> => {
+  const cutoff = chicagoStartOfToday(now).getTime()
+  const entries = await readdir(temporaryRoot, { withFileTypes: true })
+  const candidates: AbandonedRunDirectory[] = []
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !runDirectoryPattern.test(entry.name)) continue
+    const directory = path.join(temporaryRoot, entry.name)
+    const profile = path.join(directory, "profile")
+    const created = await lstat(directory)
+    if (created.birthtimeMs >= cutoff) continue
+    candidates.push({
+      path: directory,
+      profile,
+      createdAt: created.birthtime.toISOString(),
+      bytes: await directoryBytes(directory),
+      active: processes.some((process) => commandContainsArgument(process.command, `--user-data-dir=${profile}`)),
+    })
+  }
+  return candidates.sort((left, right) => left.createdAt.localeCompare(right.createdAt))
 }
 
 export const writePrivateArtifact = async (filePath: string, contents: string): Promise<void> => {

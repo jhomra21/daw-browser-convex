@@ -3,7 +3,7 @@ import { spawn } from "node:child_process"
 import { mkdir, readFile, stat } from "node:fs/promises"
 import path from "node:path"
 import { browserCommand, waitForBrowserValue } from "../browser-harness"
-import { cleanupSurvivors, createCleanupPlan, createPrivateRunDirectory, descendantsOf, verifyElectronLaunchIdentity, electronRendererTarget, writePrivateArtifact } from "./electron"
+import { cleanupOwnedRunDirectory, cleanupSurvivors, createCleanupPlan, createPrivateRunDirectory, descendantsOf, verifyElectronLaunchIdentity, electronRendererTarget, writePrivateArtifact } from "./electron"
 import { controlApprovalResultSchemaV1, controlCapabilitiesSchemaV2, controlCommitResultSchemaV1, controlPreviewResultSchemaV1, projectSnapshotSchemaV2, type ProjectSnapshotV2 } from "@daw-browser/control"
 import { desktopDiagnosticsSchemaV2, desktopHostVstInstancesResultSchemaV1, desktopHostVstParametersResultSchemaV1, desktopTransportStatusSchemaV1 } from "@daw-browser/desktop-protocol"
 import { z } from "zod"
@@ -13,7 +13,7 @@ const root = path.resolve(import.meta.dir, "../../..")
 const archive = path.join(root, "tools/performance/fixtures/30-track-v3-native.dawproject")
 const executable = path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/MacOS/@daw-browser-desktop")
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-export const parseControlMode = (option: string | undefined): "idle" | "playback" | "ui" | "paging" | "dsp" | "dsp-ui" | "dsp-soak" | "dsp-one" | "dsp-recording" | "dsp-ui-recording" | "zoom-profile" | "zoom-recording-profile" | "media-recording" | "media-recording-probe" | "media-recording-probe-drop" | "media-recording-probe-drop-no-meters" | "media-recording-probe-metadata" | "media-recording-probe-batch4" | "media-recording-probe-batch8" | "media-recording-portable" | "recording" | "acceptance" => {
+export const parseControlMode = (option: string | undefined): "idle" | "playback" | "ui" | "paging" | "dsp" | "dsp-ui" | "dsp-soak" | "dsp-one" | "dsp-recording" | "dsp-ui-recording" | "zoom-profile" | "zoom-recording-profile" | "vst-reliability" | "media-recording" | "media-recording-probe" | "media-recording-probe-drop" | "media-recording-probe-drop-no-meters" | "media-recording-probe-metadata" | "media-recording-probe-batch4" | "media-recording-probe-batch8" | "media-recording-portable" | "recording" | "acceptance" => {
   if (option === undefined) return "acceptance"
   if (option === "--idle-control") return "idle"
   if (option === "--playback-control") return "playback"
@@ -27,6 +27,7 @@ export const parseControlMode = (option: string | undefined): "idle" | "playback
   if (option === "--dsp-ui-recording") return "dsp-ui-recording"
   if (option === "--zoom-profile") return "zoom-profile"
   if (option === "--zoom-recording-profile") return "zoom-recording-profile"
+  if (option === "--vst-reliability") return "vst-reliability"
   if (option === "--media-recording") return "media-recording"
   if (option === "--media-recording-probe") return "media-recording-probe"
   if (option === "--media-recording-probe-drop") return "media-recording-probe-drop"
@@ -38,9 +39,10 @@ export const parseControlMode = (option: string | undefined): "idle" | "playback
   if (option === "--quiet-recording") return "recording"
   throw new Error("Unknown packaged v3 control mode")
 }
-export const controlDurationMs = (mode: ReturnType<typeof parseControlMode>) => mode === "dsp-soak" ? 300_000 : 60_000
+export const controlDurationMs = (mode: ReturnType<typeof parseControlMode>) =>
+  mode === "dsp-soak" ? 300_000 : mode === "vst-reliability" ? 20_000 : 60_000
 const isDspControlMode = (mode: ReturnType<typeof parseControlMode>) => mode === "dsp" || mode === "dsp-ui"
-  || mode === "dsp-soak" || mode === "dsp-one" || mode === "zoom-profile"
+  || mode === "dsp-soak" || mode === "dsp-one" || mode === "zoom-profile" || mode === "vst-reliability"
 const isUiStressMode = (mode: ReturnType<typeof parseControlMode>) => mode === "ui" || mode === "dsp-ui"
   || mode === "dsp-ui-recording"
 const isMediaRecordingMode = (mode: ReturnType<typeof parseControlMode>) => mode.startsWith("media-recording")
@@ -123,7 +125,7 @@ const owner=(entry)=>{const scripts=entry.scripts||[];const script=scripts.reduc
 const phase=(name,active)=>{const now=performance.now();if(active){state.currentPhase=name;state.phases.push({name,startTime:now,endTime:null})}else{const item=[...state.phases].reverse().find(candidate=>candidate.name===name&&candidate.endTime===null);if(item)item.endTime=now;state.currentPhase=[...state.phases].reverse().find(candidate=>candidate.endTime===null)?.name||'unattributed'};return true};
 window.__dawPerformanceBenchmark={increment:(key,amount=1)=>{state.counters[key]=(state.counters[key]||0)+amount},duration:(key,value)=>{const values=state.durations[key]||(state.durations[key]=[]);if(values.length<limit)values.push(value)},gauge:(key,value)=>{state.counters[key]=value},phase};
 window.__dawPerformancePhase=phase;
-window.__dawMeasureZoomGesture=(token,deltaY,anchor)=>{void(async()=>{const timeline=document.querySelector('[data-timeline-scroll-viewport="1"]');if(!(timeline instanceof HTMLElement))throw new Error('Timeline zoom surface unavailable.');const rect=timeline.getBoundingClientRect(),inputTimestamp=performance.now(),beforeGeneration=state.counters['timeline.viewport-generation']||0;timeline.dispatchEvent(new WheelEvent('wheel',{deltaY,deltaMode:0,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*anchor}));let firstStateChangeTimestamp=null,firstPresentedFrameTimestamp=null,settledTimestamp=null,stableFrames=0,lastSignature='',lastRaster=state.counters['waveform.raster-calls']||0;while(performance.now()-inputTimestamp<2000){await new Promise(requestAnimationFrame);const generation=state.counters['timeline.viewport-generation']||0,signature=[generation,state.counters['timeline.pixels-per-second']||0,state.counters['timeline.visible-start-sec']||0,state.counters['timeline.visible-end-sec']||0].join('|'),raster=state.counters['waveform.raster-calls']||0,pending=state.counters['waveform.requests-pending']||0;if(firstStateChangeTimestamp===null&&generation!==beforeGeneration){firstStateChangeTimestamp=performance.now();continue}if(firstStateChangeTimestamp!==null&&firstPresentedFrameTimestamp===null){firstPresentedFrameTimestamp=performance.now();lastSignature=signature;lastRaster=raster;continue}if(firstPresentedFrameTimestamp!==null&&signature===lastSignature&&raster===lastRaster&&pending===0)stableFrames++;else stableFrames=0;lastSignature=signature;lastRaster=raster;if(stableFrames>=2){settledTimestamp=performance.now();break}}state.zoomResults[token]={stateChangeMs:firstStateChangeTimestamp===null?null:firstStateChangeTimestamp-inputTimestamp,firstVisualMs:firstPresentedFrameTimestamp===null?null:firstPresentedFrameTimestamp-inputTimestamp,settledMs:settledTimestamp===null?null:settledTimestamp-inputTimestamp,settled:settledTimestamp!==null}})();return true};
+window.__dawMeasureZoomGesture=(token,deltaY,anchor)=>{void(async()=>{const timeline=document.querySelector('[data-timeline-scroll-viewport="1"]');if(!(timeline instanceof HTMLElement))throw new Error('Timeline zoom surface unavailable.');const rect=timeline.getBoundingClientRect(),inputTimestamp=performance.now(),beforeGeneration=state.counters['timeline.viewport-generation']||0;timeline.dispatchEvent(new WheelEvent('wheel',{deltaY,deltaMode:0,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*anchor}));let firstStateChangeTimestamp=null,firstPresentedFrameTimestamp=null,settledTimestamp=null,stableFrames=0,lastSignature='',lastRaster=state.counters['waveform.raster-calls']||0;while(performance.now()-inputTimestamp<4000){await new Promise(requestAnimationFrame);const generation=state.counters['timeline.viewport-generation']||0,signature=[generation,state.counters['timeline.pixels-per-second']||0,state.counters['timeline.visible-start-sec']||0,state.counters['timeline.visible-end-sec']||0].join('|'),raster=state.counters['waveform.raster-calls']||0,pending=state.counters['waveform.requests-pending']||0;if(firstStateChangeTimestamp===null&&generation!==beforeGeneration){firstStateChangeTimestamp=performance.now();continue}if(firstStateChangeTimestamp!==null&&firstPresentedFrameTimestamp===null){firstPresentedFrameTimestamp=performance.now();lastSignature=signature;lastRaster=raster;continue}if(firstPresentedFrameTimestamp!==null&&signature===lastSignature&&raster===lastRaster&&pending===0)stableFrames++;else stableFrames=0;lastSignature=signature;lastRaster=raster;if(stableFrames>=2){settledTimestamp=performance.now();break}}state.zoomResults[token]={stateChangeMs:firstStateChangeTimestamp===null?null:firstStateChangeTimestamp-inputTimestamp,firstVisualMs:firstPresentedFrameTimestamp===null?null:firstPresentedFrameTimestamp-inputTimestamp,settledMs:settledTimestamp===null?null:settledTimestamp-inputTimestamp,settled:settledTimestamp!==null}})();return true};
 const frame=(timestamp)=>{if(!state.active)return;if(state.last!==null)push(state.raf,'raf',timestamp-state.last);state.last=timestamp;
 queueMicrotask(()=>{if(state.active)push(state.work,'work',Math.max(0,performance.now()-timestamp))});state.id=requestAnimationFrame(frame)};
 if(PerformanceObserver.supportedEntryTypes?.includes('longtask')){state.observer=new PerformanceObserver((list)=>{for(const entry of list.getEntries()){push(state.long,'long',entry.duration);if(state.longFrames.length===longLimit){state.drop.longFrames++;continue}state.longFrames.push({startTime:entry.startTime,duration:entry.duration,phase:state.currentPhase,owner:'unknown',scriptDuration:null,renderDuration:null,styleAndLayoutDuration:null,forcedStyleAndLayoutDuration:null,source:null,functionName:null})}});state.observer.observe({type:'longtask'})}
@@ -240,7 +242,8 @@ export const assertArchiveSnapshot = (value: ProjectSnapshotV2) => {
     throw new Error(`V3 semantic mismatch: ${value.tracks.length} tracks, ${value.clips.length} clips, ${value.assets.length} assets, ${countMidiNotes(value.clips)} MIDI notes`)
   return value
 }
-const prepareFullDsp = async (session: string, profile: string, projectId: string, audioTrackNames: readonly string[], instanceCount: number) => {
+const prepareFullDsp = async (session: string, profile: string, projectId: string, audioTrackNames: readonly string[],
+  instanceCount: number, automationActive = true) => {
   await browserCommand(session, ["eval", "(()=>{const url=new URL(location.href);url.searchParams.set('dashboard','plugins');history.pushState(null,'',url);window.dispatchEvent(new PopStateEvent('popstate'));return true})()"])
   await waitForBrowserValue(session, "document.body.textContent?.includes('VST3 Plug-ins') ? true : null", 30_000)
   await browserCommand(session, ["eval", "(()=>{const input=document.querySelector('input[type=checkbox]');if(!(input instanceof HTMLInputElement))throw new Error('VST3 trust acknowledgement UI unavailable.');input.click();return true})()"])
@@ -252,11 +255,12 @@ const prepareFullDsp = async (session: string, profile: string, projectId: strin
     await browserCommand(session, ["eval", "(()=>{const tab=[...document.querySelectorAll('[data-timeline-left-browser=\"1\"] button')].find((button)=>button.textContent?.trim()==='Effects');if(!(tab instanceof HTMLButtonElement))throw new Error('Effects browser tab unavailable.');tab.click();return true})()"])
     for (const name of ["Saturator", "Utility"]) {
       await browserCommand(session, ["fill", "[data-timeline-left-browser='1'] input[type='search']", name])
-      await browserCommand(session, ["find", "role", "button", "click", "--name", name])
+      await browserCommand(session, ["eval", `(()=>{const button=[...document.querySelectorAll('[data-timeline-left-browser="1"] button')].find((entry)=>entry.textContent?.trim()===${JSON.stringify(name)});if(!(button instanceof HTMLButtonElement)||button.disabled)throw new Error(${JSON.stringify(`${name} effect unavailable.`)});button.click();return true})()`])
+      await delay(500)
     }
     await browserCommand(session, ["fill", "[data-timeline-left-browser='1'] input[type='search']", "ValhallaSupermassive"])
     await waitForBrowserValue(session, "(()=>{const row=[...document.querySelectorAll('[data-timeline-left-browser=\"1\"] button')].find((b)=>b.textContent?.trim()==='ValhallaSupermassive');return row && !row.disabled ? true : null})()", 60_000)
-    await browserCommand(session, ["find", "role", "button", "click", "--name", "ValhallaSupermassive"])
+    await browserCommand(session, ["eval", "(()=>{const button=[...document.querySelectorAll('[data-timeline-left-browser=\"1\"] button')].find((entry)=>entry.textContent?.trim()==='ValhallaSupermassive');if(!(button instanceof HTMLButtonElement)||button.disabled)throw new Error('ValhallaSupermassive unavailable.');button.click();return true})()"])
     await waitForBrowserValue(session, "(()=>{const row=[...document.querySelectorAll('[data-timeline-left-browser=\"1\"] button')].find((b)=>b.textContent?.trim()==='ValhallaSupermassive');return row?.getAttribute('aria-description')?.includes('Enabled · Preflight passed') ? true : null})()", 60_000)
   }
   const snapshot = projectSnapshotSchemaV2.parse(await command(profile, ["snapshot-v2", projectId, "--target", "host"]))
@@ -274,6 +278,10 @@ const prepareFullDsp = async (session: string, profile: string, projectId: strin
   const parameters = desktopHostVstParametersResultSchemaV1.parse(await command(profile, ["host", "vst-parameters", projectId, instance.instanceId]))
   const mix = parameters.parameters.filter((item) => item.title.toLowerCase() === "mix" && !item.readOnly && !item.hidden)
   if (mix.length !== 1 || !mix[0]) throw new Error("Unique writable Mix parameter unavailable.")
+  if (!automationActive) {
+    return { processors: processors.length, builtInEffects: builtInEffects.length,
+      automatedInstanceId: null, mixParameterId: mix[0].id }
+  }
   const capabilities = controlCapabilitiesSchemaV2.parse(await command(profile, ["capabilities-v2", "--target", "host"]))
   if (!capabilities.actionKinds.includes("automation.set")) throw new Error("Local automation action not advertised.")
   const request = {
@@ -441,7 +449,7 @@ const runZoomSweeps = async (session: string, projectActiveClipCount: number) =>
       `window.__dawMeasureZoomGesture?.(${JSON.stringify(token)},${deltaY},${anchor})??false`])
     await waitForBrowserValue(session,
       `window.__dawFullLoadFrameProbe?.zoomResults?.[${JSON.stringify(token)}]??null`,
-      3_000)
+      8_000)
     const timing = z.object({
       stateChangeMs: z.number().nonnegative().nullable(),
       firstVisualMs: z.number().nonnegative().nullable(),
@@ -535,30 +543,43 @@ export const classifyQuietCapture = (state: {
   return state.stopSucceeded ? "explicit-stop-completed" : "stop-control-failed"
 }
 const command = async (profile: string, args: string[], input?: string) => {
-  const child = Bun.spawn(["bun", path.join(root, "packages/control-cli/dist/daw-control.js"), ...args], {
-    cwd: root, env: { ...process.env, DAW_DESKTOP_USER_DATA: profile, DAW_CONTROL_AUTH_PATH: path.join(profile, "control-auth.json") }, stdout: "pipe", stderr: "pipe",
-    stdin: input === undefined ? "ignore" : "pipe",
-  })
-  if (input !== undefined && child.stdin) { child.stdin.write(input); child.stdin.end() }
-  const [out, err] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
-  if (await child.exited !== 0) throw new Error(`Control command failed: ${err.slice(0, 500)}`)
-  return JSON.parse(out).data
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const child = Bun.spawn(["bun", path.join(root, "packages/control-cli/dist/daw-control.js"), ...args], {
+      cwd: root, env: { ...process.env, DAW_DESKTOP_USER_DATA: profile, DAW_CONTROL_AUTH_PATH: path.join(profile, "control-auth.json") }, stdout: "pipe", stderr: "pipe",
+      stdin: input === undefined ? "ignore" : "pipe",
+    })
+    if (input !== undefined && child.stdin) { child.stdin.write(input); child.stdin.end() }
+    const [out, err] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+    if (await child.exited === 0) return JSON.parse(out).data
+    if (!err.includes('"code":"unavailable"') || attempt === 19) {
+      throw new Error(`Control command failed: ${err.slice(0, 500)}`)
+    }
+    await delay(250)
+  }
+  throw new Error("Control command retry bound exhausted.")
 }
 const main = async () => {
   const output = Bun.argv[2]
   const mode = parseControlMode(Bun.argv[3])
-  const zoomVisibleClipLimit = Bun.argv[4] === undefined
+  const profileScale = Bun.argv[4] === undefined ? undefined : z.coerce.number().int().parse(Bun.argv[4])
+  const zoomVisibleClipLimit = mode === "vst-reliability"
     ? 30
-    : z.coerce.number().int().min(10).max(30).parse(Bun.argv[4])
+    : profileScale === undefined ? 30 : z.number().int().min(10).max(30).parse(profileScale)
+  const reliabilityVstCount = mode === "vst-reliability"
+    ? z.number().int().min(0).max(8).parse(profileScale ?? 8)
+    : 8
+  const reliabilityStress = mode === "vst-reliability" && Bun.argv[5] === "zoom"
   const quietRecording = mode === "recording" || mode === "dsp-recording" || mode === "dsp-ui-recording"
     || mode === "zoom-recording-profile"
     || isMediaRecordingMode(mode)
-  if (!output || !path.isAbsolute(output) || Bun.argv.length > 5)
+  if (!output || !path.isAbsolute(output) || Bun.argv.length > (mode === "vst-reliability" ? 6 : 5))
     throw new Error("Usage: bun v3-import-acceptance.ts <absolute-result-path> [--quiet-recording|--idle-control|--playback-control|--ui-control|--paging-control|--dsp-control|--dsp-ui-control|--dsp-soak|--dsp-recording|--dsp-ui-recording]")
   if ((await stat(archive)).size < 773_000_000) throw new Error("Unexpected v3 archive size")
   await stat(path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/app.asar"))
   const directory = await createPrivateRunDirectory("/tmp")
   const profile = path.join(directory, "profile")
+  const diagnosticDirectory = `${output}.diagnostics`
+  await mkdir(diagnosticDirectory, { recursive: true, mode: 0o700 })
   await mkdir(profile, { mode: 0o700 })
   const session = `daw-30-track-electron-v3-${crypto.randomUUID()}`
   let stage = "launch"
@@ -576,12 +597,14 @@ const main = async () => {
   let stopPresent: boolean | null = null
   let stopSucceeded = false
   let lifecycle = ""
+  let vstReliability = ""
   let metricOutput = ""
   let healthOutput = ""
   let outputLine = ""
   let controlStartedAtMs = 0
   let rendererPid = 0
   let cdpError: string | null = null
+  let interruptedSignal: NodeJS.Signals | null = null
   let targetsAfter: { type: string; urlClass: string; original: boolean }[] = []
   const app = spawn(executable, ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0", `--user-data-dir=${profile}`], {
     cwd: root, env: { ...process.env, DAW_DESKTOP_USER_DATA: profile, DAW_BENCHMARK_SAB_RECORDING: quietRecording && mode !== "media-recording-portable" ? "1" : "0",
@@ -589,7 +612,8 @@ const main = async () => {
       DAW_BENCHMARK_ZOOM_PROFILE: mode === "zoom-profile" || mode === "zoom-recording-profile" ? "1" : "0",
       DAW_BENCHMARK_HEARTBEAT: mode.includes("media-recording-probe") ? "1" : "0",
       DAW_BENCHMARK_RECORDING_FORWARD_MODE: recordingForwardMode(mode),
-      DAW_BENCHMARK_RECORDING_SUPPRESS_CHANNEL: mode === "media-recording-probe-drop-no-meters" ? "meter-batch" : "" }, detached: true, stdio: ["ignore", "pipe", "pipe"],
+      DAW_BENCHMARK_RECORDING_SUPPRESS_CHANNEL: mode === "media-recording-probe-drop-no-meters" ? "meter-batch" : "",
+      DAW_BENCHMARK_VST_RELIABILITY: mode === "vst-reliability" ? "1" : "0" }, detached: true, stdio: ["ignore", "pipe", "pipe"],
   })
   let appOutput = ""
   const collectOutput = (chunk: Buffer) => {
@@ -606,6 +630,9 @@ const main = async () => {
         || line.includes("native audio host closed"))
         lifecycle = (lifecycle + line.slice(0, line.includes("[quiet-recording-ipc]") ? 2048 : 512) + "\n")
           .slice(mode.includes("media-recording-probe") ? -32000 : -4000)
+      const reliabilityMarker = line.indexOf("[vst-reliability]")
+      if (reliabilityMarker >= 0)
+        vstReliability = (vstReliability + line.slice(reliabilityMarker, reliabilityMarker + 1024) + "\n").slice(-64_000)
       if (line.startsWith("[quiet-renderer-metric]"))
         metricOutput = (metricOutput + line.slice(0, 512) + "\n").slice(-128_000)
       if (line.startsWith("[quiet-renderer-health]"))
@@ -615,7 +642,38 @@ const main = async () => {
   app.stdout?.on("data", collectOutput)
   app.stderr?.on("data", collectOutput)
   if (!app.pid) throw new Error("No Electron PID")
-  let plan: ReturnType<typeof createCleanupPlan>
+  let plan: ReturnType<typeof createCleanupPlan> | undefined
+  let cleanupPromise: Promise<Awaited<ReturnType<typeof cleanupOwnedRunDirectory>>> | null = null
+  const cleanupRun = () => {
+    if (cleanupPromise) return cleanupPromise
+    cleanupPromise = (async () => {
+      if (attached) await browserCommand(session, ["close"]).catch(() => undefined)
+      const current = await rows()
+      const owned = current.find((row) => row.pid === app.pid && row.command.includes(executable)
+        && row.command.includes(`--user-data-dir=${profile}`))
+      const ownedPlan = plan ?? (owned ? createCleanupPlan(current, app.pid) : undefined)
+      if (owned && ownedPlan?.processGroupId === owned.processGroupId && ownedPlan.processGroupId !== process.pid) {
+        process.kill(-ownedPlan.processGroupId, "SIGTERM")
+        await delay(1000)
+        for (const pid of cleanupSurvivors(ownedPlan, await rows())) process.kill(pid, "SIGKILL")
+      }
+      return cleanupOwnedRunDirectory(directory, await rows())
+    })()
+    return cleanupPromise
+  }
+  const interrupt = (signal: NodeJS.Signals) => {
+    interruptedSignal = signal
+    void cleanupRun().then((cleanup) => {
+      if (!cleanup.removed) {
+        const cleanupPath = `${output}.cleanup.json`
+        return writePrivateArtifact(cleanupPath, JSON.stringify({ cleanup, interruptedSignal }, null, 2))
+      }
+    }).finally(() => process.exit(128 + (signal === "SIGINT" ? 2 : 15)))
+  }
+  const interruptSigint = () => interrupt("SIGINT")
+  const interruptSigterm = () => interrupt("SIGTERM")
+  process.once("SIGINT", interruptSigint)
+  process.once("SIGTERM", interruptSigterm)
   const telemetry = () => {
     const metrics = metricOutput.split("\n").flatMap((line) => {
       try {
@@ -655,6 +713,9 @@ const main = async () => {
       } catch { await delay(1000) }
     }
     if (!endpoint || !plan) throw new Error("Owned CDP endpoint unavailable")
+    if (process.env.DAW_BENCHMARK_FORCE_FAILURE === "after-launch") {
+      throw new Error("Forced benchmark failure after verified launch.")
+    }
     await browserCommand(session, ["connect", endpoint])
     attached = true
     let target: string | undefined
@@ -716,7 +777,12 @@ const main = async () => {
     if (isDspControlMode(mode) || mode === "dsp-recording" || mode === "dsp-ui-recording"
       || mode === "zoom-recording-profile") {
       stage = "dsp-setup"
-      dspSetup = await prepareFullDsp(session, profile, projectId, snapshot.tracks.filter((track) => track.kind === "audio").map((track) => track.name), mode === "dsp-one" ? 1 : 8)
+      const instanceCount = mode === "dsp-one" ? 1 : mode === "vst-reliability" ? reliabilityVstCount : 8
+      if (instanceCount > 0) {
+        dspSetup = await prepareFullDsp(session, profile, projectId,
+          snapshot.tracks.filter((track) => track.kind === "audio").map((track) => track.name), instanceCount,
+          mode !== "vst-reliability" || process.env.DAW_BENCHMARK_VST_AUTOMATION === "1")
+      }
     }
     const nativeWorkers = async () => {
       const processes = await rows()
@@ -745,7 +811,7 @@ const main = async () => {
     const before = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
     await browserCommand(session, ["find", "role", "button", "click", "--name", "Play"])
     await waitForBrowserValue(session, "document.querySelector('button[aria-label=\"Pause\"]') ? true : null", 30000)
-    await delay(4000)
+    await delay(mode === "vst-reliability" ? 500 : 4000)
     const playing = desktopTransportStatusSchemaV1.parse(await command(profile, ["host", "transport-status"]))
     const after = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
     if (!isDspControlMode(mode) && mode !== "dsp-recording" && mode !== "dsp-ui-recording"
@@ -765,9 +831,10 @@ const main = async () => {
       const transportBaseline = mode === "dsp-soak"
         ? desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"])) : null
       controlStartedAtMs = Date.now()
-      if (isUiStressMode(mode) || mode === "zoom-profile") {
+      if (isUiStressMode(mode) || mode === "zoom-profile" || reliabilityStress) {
         await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
-        await runFullLoadUiStress(session, snapshot, dspSetup)
+        if (reliabilityStress) zoomProfile = await runZoomSweeps(session, snapshot.clips.length)
+        else await runFullLoadUiStress(session, snapshot, dspSetup)
         if (isDspControlMode(mode)) {
           for (let attempt = 0; attempt < 60; attempt++) {
             const recovered = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
@@ -808,7 +875,7 @@ const main = async () => {
         const remainingMs = controlDurationMs(mode) - (Date.now() - controlStartedAtMs)
         if (remainingMs > 0) await delay(remainingMs)
       }
-      if (isUiStressMode(mode) || mode === "zoom-profile") {
+      if (isUiStressMode(mode) || mode === "zoom-profile" || reliabilityStress) {
         framePerformance = fullLoadFramePerformanceSchema.parse(
           JSON.parse(JSON.parse(await browserCommand(session, ["eval", `JSON.stringify(${fullLoadFrameProbeResultScript()})`]))),
         )
@@ -827,7 +894,11 @@ const main = async () => {
       let transportFrame = after.native.status === "available"
         ? after.native.diagnostics.transportFrame ?? null : null
       if (isDspControlMode(mode)) {
-        const finalNative = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
+        let finalNative = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
+        for (let attempt = 0; finalNative.native.status !== "available" && attempt < 20; attempt += 1) {
+          await delay(250)
+          finalNative = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
+        }
         if (finalNative.native.status !== "available"
           || BigInt(finalNative.native.diagnostics.realtimePerformance?.observationCount ?? "0") === 0n
           || finalNative.native.diagnostics.rejectedBlocks !== 0) {
@@ -849,9 +920,11 @@ const main = async () => {
           throw new Error("Full DSP realtime deadline health failed.")
         }
       }
-      if (vst && vst.instances.filter((instance) => instance.health.state === "ready").length !== dspSetup?.processors)
+      const expectedReadyVstWorkers = mode === "vst-reliability" ? reliabilityVstCount : dspSetup?.processors
+      if (vst && vst.instances.filter((instance) => instance.health.state === "ready").length !== expectedReadyVstWorkers)
         throw new Error("Expected live VST instances were not available after measured playback.")
-      await writePrivateArtifact(output, JSON.stringify({ status: "complete", mode, responsive, projectId, lifecycle, ...telemetry(), dspSetup, pagingSetup,
+      await writePrivateArtifact(output, JSON.stringify({ status: "complete", mode, responsive, projectId, lifecycle,
+        vstReliability: vstReliability.trim().split("\n").filter(Boolean), ...telemetry(), dspSetup, pagingSetup,
         framePerformance,
         zoomSweeps: zoomProfile?.gestures ?? [],
         zoomMemoryCheckpoints: zoomProfile?.memoryCheckpoints ?? [],
@@ -876,7 +949,7 @@ const main = async () => {
       const started = performance.now()
       beforeCaptureProcesses = await rows()
       rendererPid = Number(/stage=loaded rendererPid=(\d+)/.exec(lifecycle)?.[1] ?? 0)
-      await writePrivateArtifact(path.join(directory, "quiet-identity.json"), JSON.stringify({
+      await writePrivateArtifact(path.join(diagnosticDirectory, "quiet-identity.json"), JSON.stringify({
         mainPid: app.pid, rendererPid, processGroupId: plan.processGroupId,
         webContentsId: Number(/stage=created webContentsId=(\d+)/.exec(lifecycle)?.[1] ?? 0),
         targetId: originalTarget, profile, port: new URL(endpoint).port,
@@ -917,7 +990,7 @@ const main = async () => {
             probeResults.push({ elapsedMs: Date.now() - quietStartedAt, result,
               latencyMs: Math.round(performance.now() - started) })
           }
-          await writePrivateArtifact(path.join(directory, "diagnostic-cdp-latencies.json"), JSON.stringify(probeResults))
+          await writePrivateArtifact(path.join(diagnosticDirectory, "diagnostic-cdp-latencies.json"), JSON.stringify(probeResults))
         },
         stop: async () => {
           stage = "quiet-stop"
@@ -935,7 +1008,7 @@ const main = async () => {
               original: item.id === originalTarget,
             }))
           } catch (error) { originalTargetAlive = false; cdpError = error instanceof Error ? error.name : "unknown" }
-          await writePrivateArtifact(path.join(directory, "quiet-after-wait.json"), JSON.stringify({
+          await writePrivateArtifact(path.join(diagnosticDirectory, "quiet-after-wait.json"), JSON.stringify({
             elapsedMs: quietElapsedMs,
             mainAlive: afterCaptureProcesses.some((row) => row.pid === app.pid),
             rendererAlive: rendererPid > 0 && afterCaptureProcesses.some((row) => row.pid === rendererPid),
@@ -1020,12 +1093,12 @@ const main = async () => {
     await mkdir(path.dirname(output), { recursive: true })
     let samplePath: string | null = null
     if (quietElapsedMs >= 60_000 && rendererPid > 0 && afterCaptureProcesses.some((row) => row.pid === rendererPid)) {
-      const sample = Bun.spawn(["sample", String(rendererPid), "5", "-file", path.join(directory, "quiet-renderer-sample.txt")], {
+      const sample = Bun.spawn(["sample", String(rendererPid), "5", "-file", path.join(diagnosticDirectory, "quiet-renderer-sample.txt")], {
         stdout: "ignore", stderr: "pipe",
       })
       await Promise.race([sample.exited, delay(8_000)])
       if (sample.exitCode === null) sample.kill()
-      if (sample.exitCode === 0) samplePath = path.join(directory, "quiet-renderer-sample.txt")
+      if (sample.exitCode === 0) samplePath = path.join(diagnosticDirectory, "quiet-renderer-sample.txt")
     }
     await writePrivateArtifact(output, JSON.stringify({
       status: "failed", stage, error: String(error),
@@ -1042,6 +1115,7 @@ const main = async () => {
         stopPresent, stopSucceeded, rendererFailure: lifecycle.includes("stage=renderer-gone"),
       }),
       lifecycle: lifecycle.slice(mode.includes("media-recording-probe") ? -32000 : -3000),
+      vstReliability: vstReliability.trim().split("\n").filter(Boolean),
       zoomSweeps: recordingZoomProfile?.gestures ?? [],
       zoomMemoryCheckpoints: recordingZoomProfile?.memoryCheckpoints ?? [],
       ...telemetry(),
@@ -1054,13 +1128,16 @@ const main = async () => {
     }, null, 2))
     throw error
   } finally {
-    if (attached) await browserCommand(session, ["close"]).catch(() => undefined)
-    const owned = (await rows()).find((row) => row.pid === app.pid && row.command.includes(executable) && row.command.includes(`--user-data-dir=${profile}`))
-    if (owned && plan?.processGroupId === owned.processGroupId && plan.processGroupId !== process.pid) {
-      process.kill(-plan.processGroupId, "SIGTERM")
-      await delay(1000)
-      for (const pid of cleanupSurvivors(plan, await rows())) process.kill(pid, "SIGKILL")
+    process.off("SIGINT", interruptSigint)
+    process.off("SIGTERM", interruptSigterm)
+    const cleanup = await cleanupRun()
+    if (!cleanup.removed) {
+      const cleanupPath = `${output}.cleanup.json`
+      await writePrivateArtifact(cleanupPath, JSON.stringify({ cleanup, interruptedSignal }, null, 2)).catch(() => undefined)
+      console.error(`Benchmark profile cleanup failed; diagnostic: ${cleanupPath}`)
+      process.exitCode = 1
     }
+    if (interruptedSignal) process.exitCode = 128 + (interruptedSignal === "SIGINT" ? 2 : 15)
   }
 }
 if (import.meta.main) await main()

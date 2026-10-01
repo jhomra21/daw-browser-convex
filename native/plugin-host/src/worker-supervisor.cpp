@@ -1020,11 +1020,11 @@ bool WorkerRuntime::CancelPublishedSubmission(const std::size_t slotIndex, const
 }
 
 bool WorkerRuntime::DispatchPublishedSubmission(const std::size_t slotIndex, const std::uint64_t sequence) {
-  if (!transport_ || transport_->slot(slotIndex).sequence != sequence
-    || !WriteWorkerControlCommand(controlWriteDescriptor_, WorkerControlCommand::kProcess)) {
-    return false;
+  if (!transport_ || transport_->slot(slotIndex).sequence != sequence) return false;
+  if (startup_ && startup_->setup.mode == WorkerProcessSetup::Mode::kRealtime) {
+    return true;
   }
-  return true;
+  return WriteWorkerControlCommand(controlWriteDescriptor_, WorkerControlCommand::kProcess);
 }
 
 bool WorkerRuntime::WaitForOfflineCompletion(

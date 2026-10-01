@@ -29,6 +29,13 @@ bool WorkerCallbackPort::ReadCompleted(const std::size_t slotIndex, const std::u
   return service_ && service_->ReadCompletionFromCallback(slotIndex, sequence);
 }
 
+WorkerSlotStatus WorkerCallbackPort::ReadStatus(
+  const std::size_t slotIndex,
+  const std::uint64_t sequence
+) const noexcept {
+  return service_ ? service_->ReadStatusFromCallback(slotIndex, sequence) : WorkerSlotStatus::kDropped;
+}
+
 bool WorkerCallbackPort::CopyCompletedOutput(
   const std::size_t slotIndex,
   const std::uint64_t sequence,
@@ -216,6 +223,16 @@ bool WorkerControlService::ReadCompletionFromCallback(
   const std::uint64_t sequence
 ) const noexcept {
   return runtime_.ReadCompleted(slotIndex, sequence);
+}
+
+WorkerSlotStatus WorkerControlService::ReadStatusFromCallback(
+  const std::size_t slotIndex,
+  const std::uint64_t sequence
+) const noexcept {
+  const auto* transport = runtime_.transport();
+  if (transport == nullptr) return WorkerSlotStatus::kDropped;
+  const auto slot = transport->slot(slotIndex);
+  return slot.sequence == sequence ? slot.status : WorkerSlotStatus::kDropped;
 }
 
 bool WorkerControlService::CopyCompletionOutputFromCallback(

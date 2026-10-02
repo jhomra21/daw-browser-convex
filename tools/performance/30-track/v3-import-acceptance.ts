@@ -216,6 +216,17 @@ type ProcessCpuDistribution = {
   p95Percent: number | null
   peakPercent: number | null
 }
+type NativeProcessGeneration = {
+  index: number
+  startElapsedMs: number
+  endElapsedMs: number
+  audioHosts: ProcessIdentity[]
+  workers: ProcessIdentity[]
+  samples: number
+  audioHostCpu: ProcessCpuDistribution
+  aggregateWorkerCpu: ProcessCpuDistribution
+  workersCpu: { generation: number; identity: ProcessIdentity; cpu: ProcessCpuDistribution }[]
+}
 type NativeProcessCpu = {
   status: "available" | "blocked"
   reason: string | null
@@ -228,6 +239,8 @@ type NativeProcessCpu = {
   audioHostCpu: ProcessCpuDistribution
   aggregateWorkerCpu: ProcessCpuDistribution
   workersCpu: { identity: ProcessIdentity; cpu: ProcessCpuDistribution }[]
+  generations: NativeProcessGeneration[]
+  identityLosses: { elapsedMs: number; expected: ProcessIdentity[]; observed: ProcessIdentity[] }[]
 }
 const processCpuDistribution = (values: readonly number[]): ProcessCpuDistribution => {
   if (values.length === 0) return { samples: 0, averagePercent: null, p95Percent: null, peakPercent: null }
@@ -252,46 +265,69 @@ const createNativeProcessCpuSampler = async (
   preferActiveWorkerGroup: boolean,
 ): Promise<{ stop: () => Promise<NativeProcessCpu> }> => {
   const sampleIntervalMs = 1_000
-  const initialRows = await rows()
-  const owned = new Set([appPid, ...descendantsOf(initialRows, appPid)])
-  const hostCandidates = initialRows.filter((row) => owned.has(row.pid)
-    && row.command.trim().split(/\s+/)[0]?.endsWith("/daw-audio-host-macos"))
-  const workerCandidates = initialRows.filter((row) => owned.has(row.pid)
-    && row.pid === row.processGroupId
-    && row.command.trim().split(/\s+/)[0]?.endsWith("/daw-vst3-worker"))
-  const hostIds = new Set(hostCandidates.map((row) => row.pid))
-  const workersByHost = new Map<number, ProcessRow[]>()
-  for (const worker of workerCandidates) {
-    if (!hostIds.has(worker.parentPid)) continue
-    const children = workersByHost.get(worker.parentPid) ?? []
-    children.push(worker)
-    workersByHost.set(worker.parentPid, children)
+  const selectIdentities = (processes: readonly ProcessRow[]) => {
+    const owned = new Set([appPid, ...descendantsOf(processes, appPid)])
+    const hostCandidates = processes.filter((row) => owned.has(row.pid)
+      && row.command.trim().split(/\s+/)[0]?.endsWith("/daw-audio-host-macos"))
+    const workerCandidates = processes.filter((row) => owned.has(row.pid)
+      && row.pid === row.processGroupId
+      && row.command.trim().split(/\s+/)[0]?.endsWith("/daw-vst3-worker"))
+    const hostIds = new Set(hostCandidates.map((row) => row.pid))
+    const workersByHost = new Map<number, ProcessRow[]>()
+    for (const worker of workerCandidates) {
+      if (!hostIds.has(worker.parentPid)) continue
+      const children = workersByHost.get(worker.parentPid) ?? []
+      children.push(worker)
+      workersByHost.set(worker.parentPid, children)
+    }
+    const activeWorkerGroup = [...workersByHost.values()].find((children) => children.length === 8)
+    const singletonWorkers = [...workersByHost.values()].filter((children) => children.length === 1).map((children) => children[0]!)
+    const selectedWorkers = preferActiveWorkerGroup
+      ? activeWorkerGroup ?? []
+      : singletonWorkers.length === 8 ? singletonWorkers : activeWorkerGroup ?? []
+    const workerParentIds = new Set(selectedWorkers.map((row) => row.parentPid))
+    const selectedHosts = hostCandidates.filter((row) => workerParentIds.has(row.pid))
+    return selectedHosts.length > 0 && selectedWorkers.length === 8
+      ? { audioHosts: selectedHosts.map(processIdentity), workers: selectedWorkers.map(processIdentity) }
+      : null
   }
-  const activeWorkerGroup = [...workersByHost.values()].find((children) => children.length === 8)
-  const singletonWorkers = [...workersByHost.values()].filter((children) => children.length === 1).map((children) => children[0]!)
-  const selectedWorkers = preferActiveWorkerGroup
-    ? activeWorkerGroup ?? []
-    : singletonWorkers.length === 8 ? singletonWorkers : activeWorkerGroup ?? []
-  const workerParentIds = new Set(selectedWorkers.map((row) => row.parentPid))
-  const selectedHosts = hostCandidates.filter((row) => workerParentIds.has(row.pid))
-  const identities = selectedHosts.length > 0 && selectedWorkers.length === 8
-    ? { audioHosts: selectedHosts.map(processIdentity), workers: selectedWorkers.map(processIdentity) }
-    : null
+  const initialRows = await rows()
+  const identities = selectIdentities(initialRows)
   const base: NativeProcessCpu = {
     status: identities ? "available" : "blocked",
-    reason: identities ? null : `Expected owned audio host process(es) and eight active VST workers; found ${hostCandidates.length} host(s), ${workerCandidates.length} worker candidate(s), ${selectedWorkers.length} selected worker(s).`,
+    reason: identities ? null : "Expected owned runner descendants containing one native host generation and eight active VST workers.",
     sampleIntervalMs, durationMs, expectedSamples: Math.floor(durationMs / sampleIntervalMs), actualSamples: 0,
     audioHosts: identities?.audioHosts ?? [], workers: identities?.workers ?? [],
     audioHostCpu: processCpuDistribution([]),
     aggregateWorkerCpu: processCpuDistribution([]),
-    workersCpu: identities?.workers.map((identity) => ({ identity, cpu: processCpuDistribution([]) })) ?? [],
+    workersCpu: identities?.workers.map((identity) => ({ generation: 0, identity, cpu: processCpuDistribution([]) })) ?? [],
+    generations: [], identityLosses: [],
   }
   if (!identities) return { stop: async () => base }
-  const previous = new Map<number, number>()
-  const hostValues: number[] = []
-  const workerValues = new Map<number, number[]>()
-  for (const identity of identities.workers) workerValues.set(identity.pid, [])
-  const aggregateValues: number[] = []
+  type ActiveGeneration = {
+    index: number
+    identities: { audioHosts: ProcessIdentity[]; workers: ProcessIdentity[] }
+    startElapsedMs: number
+    previous: Map<number, number>
+    hostValues: number[]
+    workerValues: Map<number, number[]>
+    aggregateValues: number[]
+    samples: number
+  }
+  const createGeneration = (
+    nextIdentities: { audioHosts: ProcessIdentity[]; workers: ProcessIdentity[] },
+    index: number,
+    startElapsedMs: number,
+  ): ActiveGeneration => ({
+    index, identities: nextIdentities, startElapsedMs, previous: new Map(),
+    hostValues: [], workerValues: new Map(nextIdentities.workers.map((identity) => [identity.pid, []])),
+    aggregateValues: [], samples: 0,
+  })
+  const generationResults: NativeProcessGeneration[] = []
+  const identityLosses: NativeProcessCpu["identityLosses"] = []
+  const allHostValues: number[] = []
+  const allAggregateWorkerValues: number[] = []
+  let generation = createGeneration(identities, 0, 0)
   let actualSamples = 0
   let stopped = false
   let reason: string | null = null
@@ -299,37 +335,60 @@ const createNativeProcessCpuSampler = async (
   const sample = async () => {
     const current = await rows()
     const currentByPid = new Map(current.map((row) => [row.pid, row]))
-    const targets = [...identities.audioHosts, ...identities.workers]
+    const targets = [...generation.identities.audioHosts, ...generation.identities.workers]
     const valid = targets.every((identity) => {
       const row = currentByPid.get(identity.pid)
       return row !== undefined && row.command.trim().split(/\s+/)[0] === identity.command
         && row.parentPid === identity.parentPid && row.processGroupId === identity.processGroupId
     })
     if (!valid) {
-      reason = "An owned native process changed identity or exited during CPU sampling."
-      return
+      const elapsedMs = Math.max(0, Date.now() - startedAt)
+      const nextIdentities = selectIdentities(current)
+      identityLosses.push({
+        elapsedMs, expected: targets,
+        observed: nextIdentities ? [...nextIdentities.audioHosts, ...nextIdentities.workers] : [],
+      })
+      if (!nextIdentities) {
+        reason = "An owned native process changed identity without a replacement generation."
+        return
+      }
+      generationResults.push({
+        index: generation.index, startElapsedMs: generation.startElapsedMs, endElapsedMs: elapsedMs,
+        audioHosts: generation.identities.audioHosts, workers: generation.identities.workers, samples: generation.samples,
+        audioHostCpu: processCpuDistribution(generation.hostValues),
+        aggregateWorkerCpu: processCpuDistribution(generation.aggregateValues),
+        workersCpu: generation.identities.workers.map((identity) => ({
+          generation: generation.index, identity, cpu: processCpuDistribution(generation.workerValues.get(identity.pid) ?? []),
+        })),
+      })
+      generation = createGeneration(nextIdentities, generation.index + 1, elapsedMs)
     }
+    if (reason !== null) return
+    const targetsForSample = [...generation.identities.audioHosts, ...generation.identities.workers]
     const elapsedMs = Math.max(1, Date.now() - startedAt)
-    const currentCpu = new Map(targets.map((identity) => [identity.pid, currentByPid.get(identity.pid)!.cpuTimeSec]))
-    if (previous.size > 0) {
-      const intervalMs = Math.max(1, elapsedMs - (previous.get(-1) ?? 0))
-      const hostsCpu = identities.audioHosts.map((identity) => (
-        (currentCpu.get(identity.pid)! - previous.get(identity.pid)!) * 100_000 / intervalMs
+    const currentCpu = new Map(targetsForSample.map((identity) => [identity.pid, currentByPid.get(identity.pid)!.cpuTimeSec]))
+    if (generation.previous.size > 0) {
+      const intervalMs = Math.max(1, elapsedMs - (generation.previous.get(-1) ?? 0))
+      const hostsCpu = generation.identities.audioHosts.map((identity) => (
+        (currentCpu.get(identity.pid)! - generation.previous.get(identity.pid)!) * 100_000 / intervalMs
       ))
-      const workersCpu = identities.workers.map((identity) => (
-        (currentCpu.get(identity.pid)! - previous.get(identity.pid)!) * 100_000 / intervalMs
+      const workersCpu = generation.identities.workers.map((identity) => (
+        (currentCpu.get(identity.pid)! - generation.previous.get(identity.pid)!) * 100_000 / intervalMs
       ))
       if (hostsCpu.some((value) => value < 0) || workersCpu.some((value) => value < 0)) {
         reason = "Native process CPU time moved backwards during sampling."
         return
       }
-      hostValues.push(hostsCpu.reduce((sum, value) => sum + value, 0))
-      workersCpu.forEach((value, index) => workerValues.get(identities.workers[index]!.pid)!.push(value))
-      aggregateValues.push(workersCpu.reduce((sum, value) => sum + value, 0))
+      generation.hostValues.push(hostsCpu.reduce((sum, value) => sum + value, 0))
+      workersCpu.forEach((value, index) => generation.workerValues.get(generation.identities.workers[index]!.pid)!.push(value))
+      generation.aggregateValues.push(workersCpu.reduce((sum, value) => sum + value, 0))
+      allHostValues.push(hostsCpu.reduce((sum, value) => sum + value, 0))
+      allAggregateWorkerValues.push(workersCpu.reduce((sum, value) => sum + value, 0))
+      generation.samples += 1
       actualSamples += 1
     }
     currentCpu.set(-1, elapsedMs)
-    currentCpu.forEach((value, pid) => previous.set(pid, value))
+    currentCpu.forEach((value, pid) => generation.previous.set(pid, value))
   }
   const sampling = (async () => {
     // This bounded benchmark sampler is intentionally process-level polling; it is not product runtime logic.
@@ -342,13 +401,27 @@ const createNativeProcessCpuSampler = async (
   const stop = async () => {
     stopped = true
     await sampling
+    const elapsedMs = Math.max(0, Date.now() - startedAt)
+    generationResults.push({
+      index: generation.index, startElapsedMs: generation.startElapsedMs, endElapsedMs: elapsedMs,
+      audioHosts: generation.identities.audioHosts, workers: generation.identities.workers, samples: generation.samples,
+      audioHostCpu: processCpuDistribution(generation.hostValues),
+      aggregateWorkerCpu: processCpuDistribution(generation.aggregateValues),
+      workersCpu: generation.identities.workers.map((identity) => ({
+        generation: generation.index, identity, cpu: processCpuDistribution(generation.workerValues.get(identity.pid) ?? []),
+      })),
+    })
+    const allHosts = [...new Map(generationResults.flatMap((item) => item.audioHosts).map((identity) => [identity.pid, identity])).values()]
+    const allWorkers = [...new Map(generationResults.flatMap((item) => item.workers).map((identity) => [identity.pid, identity])).values()]
     const finished = {
-      ...base, status: reason === null && actualSamples >= Math.max(2, Math.floor(base.expectedSamples * 0.8)) ? "available" as const : "blocked" as const,
+      ...base,
+      status: reason === null && actualSamples >= Math.max(2, Math.floor(base.expectedSamples * 0.8)) ? "available" as const : "blocked" as const,
       reason: reason ?? (actualSamples >= Math.max(2, Math.floor(base.expectedSamples * 0.8)) ? null : "Insufficient complete native process CPU samples were collected."),
-      actualSamples, audioHosts: identities.audioHosts, workers: identities.workers,
-      audioHostCpu: processCpuDistribution(hostValues),
-      aggregateWorkerCpu: processCpuDistribution(aggregateValues),
-      workersCpu: identities.workers.map((identity) => ({ identity, cpu: processCpuDistribution(workerValues.get(identity.pid) ?? []) })),
+      actualSamples, audioHosts: allHosts, workers: allWorkers,
+      audioHostCpu: processCpuDistribution(allHostValues),
+      aggregateWorkerCpu: processCpuDistribution(allAggregateWorkerValues),
+      workersCpu: generationResults.flatMap((item) => item.workersCpu),
+      generations: generationResults, identityLosses,
     }
     return finished
   }
@@ -1101,6 +1174,13 @@ const main = async () => {
           || BigInt(vstWorkerPerformance.restarts) !== 0n) {
           throw new Error("Full DSP realtime deadline health failed.")
         }
+      }
+      if (nativeProcessCpu.status === "available" && nativeProcessCpu.generations.length > 1
+        && (!vstWorkerPerformance
+          || BigInt(vstWorkerPerformance.faults) !== 0n
+          || BigInt(vstWorkerPerformance.restarts) !== 0n)) {
+        nativeProcessCpu.status = "blocked"
+        nativeProcessCpu.reason = "Native process generations changed while worker fault or restart counters were nonzero."
       }
       const expectedReadyVstWorkers = mode === "vst-reliability" ? reliabilityVstCount : dspSetup?.processors
       if (vst && vst.instances.filter((instance) => instance.health.state === "ready").length !== expectedReadyVstWorkers)

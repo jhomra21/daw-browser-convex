@@ -5363,7 +5363,30 @@
               "peakPercent": 1.9493177387914247
             }
           }
-        ]
+        ],
+        "generationAwareFollowup": {
+          "attempts": [
+            {
+              "artifact": "/private/tmp/daw-followup-p30-generation-1.json",
+              "result": "failed-before-complete-cpu-artifact",
+              "reason": "Renderer benchmark probe disappeared during zoom sweep."
+            },
+            {
+              "artifact": "/private/tmp/daw-followup-p30-generation-2.json",
+              "result": "failed-before-complete-cpu-artifact",
+              "reason": "Renderer benchmark probe disappeared during zoom sweep."
+            },
+            {
+              "artifact": "/private/tmp/daw-followup-p30-generation-3.json",
+              "result": "failed-existing-realtime-gate",
+              "reason": "Full DSP realtime deadline health gate failed."
+            }
+          ],
+          "generationBoundariesImplemented": true,
+          "crossGenerationAggregationAllowedOnlyWhenFaultsAndRestartsAreZero": true,
+          "status": "blocked",
+          "reason": "No complete generation-aware P30 CPU control was obtained within the bounded retry rule."
+        }
       }
     },
     "contextSwitchesAndWakeups": {
@@ -5372,7 +5395,7 @@
     },
     "pollingCostAcceptance": {
       "status": "blocked",
-      "reason": "P30 native process CPU sampling lost an owned process identity after 16 of 60 expected interval samples; renderer CPU is not a proxy for native polling cost.",
+      "reason": "P30 retained evidence lost process identity after 16 samples; generation-aware retries were bounded at two renderer-probe failures plus one existing realtime-gate failure, so renderer CPU is not a proxy and polling-cost acceptance remains blocked.",
       "idleAggregateWorkerCpu": {
         "samples": 59,
         "averagePercent": 7.208072077994738,

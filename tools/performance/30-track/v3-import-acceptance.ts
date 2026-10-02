@@ -291,11 +291,27 @@ const createNativeProcessCpuSampler = async (
       ? { audioHosts: selectedHosts.map(processIdentity), workers: selectedWorkers.map(processIdentity) }
       : null
   }
-  const initialRows = await rows()
-  const identities = selectIdentities(initialRows)
+  const sameIdentities = (
+    left: { audioHosts: ProcessIdentity[]; workers: ProcessIdentity[] } | null,
+    right: { audioHosts: ProcessIdentity[]; workers: ProcessIdentity[] } | null,
+  ) => JSON.stringify(left) === JSON.stringify(right)
+  const stabilityDeadline = Date.now() + 15_000
+  let identities: { audioHosts: ProcessIdentity[]; workers: ProcessIdentity[] } | null = null
+  let stableSince = 0
+  while (Date.now() < stabilityDeadline && (stableSince === 0 || Date.now() - stableSince < 3_000)) {
+    const observed = selectIdentities(await rows())
+    if (observed !== null && sameIdentities(observed, identities)) {
+      if (stableSince === 0) stableSince = Date.now()
+    } else {
+      identities = observed
+      stableSince = observed === null ? 0 : Date.now()
+    }
+    await delay(250)
+  }
+  if (stableSince === 0 || Date.now() - stableSince < 3_000) identities = null
   const base: NativeProcessCpu = {
     status: identities ? "available" : "blocked",
-    reason: identities ? null : "Expected owned runner descendants containing one native host generation and eight active VST workers.",
+    reason: identities ? null : "Expected owned runner descendants containing one native host generation and eight active VST workers stable for 3 seconds.",
     sampleIntervalMs, durationMs, expectedSamples: Math.floor(durationMs / sampleIntervalMs), actualSamples: 0,
     audioHosts: identities?.audioHosts ?? [], workers: identities?.workers ?? [],
     audioHostCpu: processCpuDistribution([]),
@@ -677,14 +693,24 @@ const runZoomSweeps = async (session: string, projectActiveClipCount: number) =>
   await checkpoint("before-sweeps")
   const zoom = async (sweep: number, direction: "in" | "out", anchor: number, deltaY: number) => {
     const name = `zoom-${direction}-${sweep}-${Math.round(anchor * 100)}`
-    await browserCommand(session, ["eval", `window.__dawPerformancePhase?.(${JSON.stringify(name)},true)??true`])
     const startedAt = performance.now()
-    const token = crypto.randomUUID()
-    await browserCommand(session, ["eval",
-      `window.__dawMeasureZoomGesture?.(${JSON.stringify(token)},${deltaY},${anchor})??false`])
-    await waitForBrowserValue(session,
-      `window.__dawFullLoadFrameProbe?.zoomResults?.[${JSON.stringify(token)}]??null`,
-      8_000)
+    let token = ""
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await browserCommand(session, ["eval",
+        `window.__dawFullLoadFrameProbe??(${fullLoadFrameProbeScript()});true`])
+      await browserCommand(session, ["eval", `window.__dawPerformancePhase?.(${JSON.stringify(name)},true)??true`])
+      token = crypto.randomUUID()
+      await browserCommand(session, ["eval",
+        `window.__dawMeasureZoomGesture?.(${JSON.stringify(token)},${deltaY},${anchor})??false`])
+      try {
+        await waitForBrowserValue(session,
+          `window.__dawFullLoadFrameProbe?.zoomResults?.[${JSON.stringify(token)}]??null`,
+          8_000)
+        break
+      } catch (error) {
+        if (attempt === 1) throw error
+      }
+    }
     const timing = z.object({
       stateChangeMs: z.number().nonnegative().nullable(),
       firstVisualMs: z.number().nonnegative().nullable(),

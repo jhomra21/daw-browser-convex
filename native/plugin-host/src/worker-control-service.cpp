@@ -215,6 +215,9 @@ WorkerSubmissionStatus WorkerControlService::PublishFromCallback(const WorkerSub
     static_cast<void>(runtime_.CancelPublishedSubmission(submission.slotIndex, submission.sequence));
     return WorkerSubmissionStatus::kQueueFull;
   }
+  // The queue and shared slot are authoritative. This nonblocking one-byte
+  // pipe write is only a bounded wake hint; EAGAIN is intentionally ignored.
+  static_cast<void>(runtime_.NotifyRealtimeWorker());
   return WorkerSubmissionStatus::kAccepted;
 }
 

@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <iostream>
 #include <poll.h>
 #include <string>
@@ -182,17 +183,21 @@ int main(const int argc, char* argv[]) {
     plugin.Dispose();
     return EXIT_SUCCESS;
   }
-  if (argc != 9 || std::string_view(argv[1]) != "--transport-fd"
+  if (argc != 11 || std::string_view(argv[1]) != "--transport-fd"
     || std::string_view(argv[3]) != "--control-fd" || std::string_view(argv[5]) != "--response-fd"
-    || std::string_view(argv[7]) != "--token") {
+    || std::string_view(argv[7]) != "--token" || std::string_view(argv[9]) != "--wake-fd") {
     return EXIT_FAILURE;
   }
   int transportFileDescriptor = -1;
   int controlFileDescriptor = -1;
   int responseFileDescriptor = -1;
+  int wakeFileDescriptor = -1;
   std::uint64_t token = 0;
   if (!Parse(argv[2], transportFileDescriptor) || !Parse(argv[4], controlFileDescriptor)
-    || !Parse(argv[6], responseFileDescriptor) || !Parse(argv[8], token)) return EXIT_FAILURE;
+    || !Parse(argv[6], responseFileDescriptor) || !Parse(argv[8], token)
+    || !Parse(argv[10], wakeFileDescriptor) || wakeFileDescriptor < 0) return EXIT_FAILURE;
+  const auto wakeFlags = fcntl(wakeFileDescriptor, F_GETFL);
+  if (wakeFlags < 0 || fcntl(wakeFileDescriptor, F_SETFL, wakeFlags | O_NONBLOCK) != 0) return EXIT_FAILURE;
   auto transport = daw::plugin_host::WorkerTransport::MapInherited(transportFileDescriptor, token);
   if (!transport) return EXIT_FAILURE;
   const auto startup = daw::plugin_host::ReadWorkerStartupRequest(controlFileDescriptor, token);
@@ -285,14 +290,18 @@ int main(const int argc, char* argv[]) {
       }
       publishEditorFeedback();
     }
-    struct pollfd readyControl{.fd = controlFileDescriptor, .events = POLLIN, .revents = 0};
-    const auto pollTimeout = startup->setup.mode == daw::plugin_host::WorkerProcessSetup::Mode::kRealtime
-      ? 1
-      : editorOpen ? kEditorPollTimeoutMilliseconds : -1;
-    const auto pollResult = poll(&readyControl, 1, pollTimeout);
+    std::array<pollfd, 2> ready{
+      pollfd{.fd = controlFileDescriptor, .events = POLLIN, .revents = 0},
+      pollfd{.fd = wakeFileDescriptor, .events = POLLIN, .revents = 0},
+    };
+    const auto pollTimeout = editorOpen ? kEditorPollTimeoutMilliseconds : -1;
+    const auto pollResult = poll(ready.data(), static_cast<nfds_t>(ready.size()), pollTimeout);
     if (pollResult < 0 && errno == EINTR) continue;
     if (pollResult < 0) continue;
-    if (pollResult > 0) {
+    if (ready[1].revents & POLLIN) {
+      daw::plugin_host::WorkerWakeSignal::Drain(wakeFileDescriptor);
+    }
+    if (pollResult > 0 && (ready[0].revents & (POLLIN | POLLHUP | POLLERR))) {
       const auto command = daw::plugin_host::ReadWorkerControlCommand(controlFileDescriptor);
       if (!command || command->command == daw::plugin_host::WorkerControlCommand::kStop) {
         plugin.Dispose();

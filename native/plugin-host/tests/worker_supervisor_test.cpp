@@ -6,10 +6,13 @@
 #include "automation-observation.h"
 
 #include <array>
+#include <barrier>
 #include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <poll.h>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <unistd.h>
@@ -28,6 +31,7 @@ using daw::plugin_host::WorkerTransportEvent;
 using daw::plugin_host::WorkerEventKind;
 using daw::plugin_host::WorkerTransport;
 using daw::plugin_host::WorkerTransportRequest;
+using daw::plugin_host::WorkerWakeSignal;
 using daw::plugin_host::SpscQueue;
 using daw::plugin_host::WorkerCallbackPort;
 using daw::plugin_host::WorkerControlService;
@@ -480,6 +484,117 @@ int main(int argc, char* argv[]) {
   if (!Check(!daw::plugin_host::IsValidWorkerPreflightResult(invalidPreflight),
     "available worker preflight omitted its hello")) return EXIT_FAILURE;
 
+  {
+    WorkerWakeSignal wake;
+    if (!Check(wake.Open(), "wake signal could not be opened")) return EXIT_FAILURE;
+    pollfd descriptor{.fd = wake.readDescriptor(), .events = POLLIN, .revents = 0};
+    if (!Check(wake.Notify() && poll(&descriptor, 1, 0) == 1 && (descriptor.revents & POLLIN) != 0,
+      "wake before sleep was lost")) return EXIT_FAILURE;
+    WorkerWakeSignal::Drain(wake.readDescriptor());
+    descriptor.revents = 0;
+    if (!Check(poll(&descriptor, 1, 0) == 0, "wake drain left stale bytes")) return EXIT_FAILURE;
+    if (!Check(wake.Notify() && wake.Notify()
+      && poll(&descriptor, 1, 0) == 1 && (descriptor.revents & POLLIN) != 0,
+      "two submissions before one wake were not coalesced into an observable wake")) return EXIT_FAILURE;
+    WorkerWakeSignal::Drain(wake.readDescriptor());
+
+    std::barrier waitStarted(2);
+    std::atomic<bool> observed{false};
+    std::thread waiter([&] {
+      pollfd waiting{.fd = wake.readDescriptor(), .events = POLLIN, .revents = 0};
+      waitStarted.arrive_and_wait();
+      observed.store(poll(&waiting, 1, -1) == 1 && (waiting.revents & POLLIN) != 0, std::memory_order_release);
+    });
+    waitStarted.arrive_and_wait();
+    const auto wakeAfterWait = wake.Notify();
+    waiter.join();
+    if (!Check(wakeAfterWait && observed.load(std::memory_order_acquire), "wake after wait began was lost")) return EXIT_FAILURE;
+    WorkerWakeSignal::Drain(wake.readDescriptor());
+
+    std::barrier processingStarted(2);
+    std::atomic<bool> processing{false};
+    std::thread processor([&] {
+      processing.store(true, std::memory_order_release);
+      processingStarted.arrive_and_wait();
+      pollfd processingWait{.fd = wake.readDescriptor(), .events = POLLIN, .revents = 0};
+      const auto result = poll(&processingWait, 1, -1);
+      observed.store(processing.load(std::memory_order_acquire)
+        && result == 1 && (processingWait.revents & POLLIN) != 0, std::memory_order_release);
+    });
+    processingStarted.arrive_and_wait();
+    const auto wakeDuringProcessing = wake.Notify();
+    processor.join();
+    if (!Check(wakeDuringProcessing && observed.load(std::memory_order_acquire), "publish during processing was lost")) return EXIT_FAILURE;
+    WorkerWakeSignal::Drain(wake.readDescriptor());
+
+    int control[2]{-1, -1};
+    if (!Check(pipe(control) == 0, "idle control pipe could not be opened")) return EXIT_FAILURE;
+    std::array<pollfd, 2> idleDescriptors{
+      pollfd{.fd = control[0], .events = POLLIN, .revents = 0},
+      pollfd{.fd = wake.readDescriptor(), .events = POLLIN, .revents = 0},
+    };
+    const std::uint8_t controlByte = 1;
+    const auto controlObserved = write(control[1], &controlByte, sizeof(controlByte)) == 1
+      && poll(idleDescriptors.data(), idleDescriptors.size(), 0) == 1
+      && (idleDescriptors[0].revents & POLLIN) != 0;
+    if (!Check(controlObserved, "idle control was not observed")) {
+      close(control[1]);
+      close(control[0]);
+      return EXIT_FAILURE;
+    }
+    close(control[1]);
+    idleDescriptors[0].revents = 0;
+    idleDescriptors[1].revents = 0;
+    const auto stopObserved = poll(idleDescriptors.data(), idleDescriptors.size(), 0) == 1
+      && (idleDescriptors[0].revents & POLLHUP) != 0;
+    if (!Check(stopObserved, "idle stop was not observed")) {
+      close(control[0]);
+      return EXIT_FAILURE;
+    }
+    close(control[0]);
+
+    const auto writer = wake.releaseWriteDescriptor();
+    close(writer);
+    descriptor.revents = 0;
+    const auto deathObserved = poll(&descriptor, 1, 0) == 1 && (descriptor.revents & POLLHUP) != 0;
+    if (!Check(deathObserved, "worker death was not observable on the wake descriptor")) return EXIT_FAILURE;
+    wake.Close();
+    if (!Check(!wake.Notify(), "pending teardown retained a usable wake writer")) return EXIT_FAILURE;
+
+    auto submittedTransport = WorkerTransport::Create(*layout);
+    if (!Check(submittedTransport.has_value(), "wake transport fixture could not be created")) return EXIT_FAILURE;
+    if (!Check(submittedTransport->Submit(0, 100, 64, {}) && submittedTransport->Submit(1, 101, 64, {}),
+      "two submitted slots could not be published")) return EXIT_FAILURE;
+    WorkerWakeSignal submittedWake;
+    if (!Check(submittedWake.Open() && submittedWake.Notify(), "submitted-slot wake could not be published")) return EXIT_FAILURE;
+    pollfd submittedDescriptor{.fd = submittedWake.readDescriptor(), .events = POLLIN, .revents = 0};
+    if (!Check(poll(&submittedDescriptor, 1, 0) == 1, "submitted-slot wake was lost")) return EXIT_FAILURE;
+    WorkerWakeSignal::Drain(submittedWake.readDescriptor());
+    if (!Check(submittedTransport->BeginProcessing(0).value_or(0) == 100
+      && submittedTransport->BeginProcessing(1).value_or(0) == 101,
+      "one wake did not drain all submitted slots")) return EXIT_FAILURE;
+    if (!Check(submittedTransport->Complete(0, 100) && submittedTransport->Complete(1, 101)
+      && submittedTransport->ReleaseCompleted(0, 100) && submittedTransport->ReleaseCompleted(1, 101),
+      "processed submitted slots were not released")) return EXIT_FAILURE;
+    submittedWake.Close();
+
+    if (!Check(submittedTransport->Submit(0, 200, 64, {})
+      && submittedTransport->BeginProcessing(0).value_or(0) == 200
+      && !submittedTransport->DropLate(0, 201)
+      && submittedTransport->Complete(0, 200)
+      && submittedTransport->ReleaseCompleted(0, 200),
+      "drop during processing changed an owned slot")) return EXIT_FAILURE;
+    if (!Check(submittedTransport->Submit(0, 250, 64, {}), "drop fixture could not be published")) return EXIT_FAILURE;
+    if (!Check(submittedTransport->DropLate(0, 251)
+      && submittedTransport->slot(0).status == WorkerSlotStatus::kDropped
+      && submittedTransport->ReleaseDropped(0),
+      "dropped slot was not reclaimed")) return EXIT_FAILURE;
+    if (!Check(submittedTransport->Submit(0, 300, 64, {})
+      && submittedTransport->CancelSubmit(0, 300)
+      && submittedTransport->slot(0).status == WorkerSlotStatus::kFree,
+      "pending teardown submission was not cancelled")) return EXIT_FAILURE;
+  }
+
   WorkerControlService service;
   if (!Check(service.Start(NoPluginStartup(), Configuration(argv[1]), Request()), "worker control service launch failed")) return EXIT_FAILURE;
   const auto firstWorkerGeneration = service.workerGeneration();
@@ -539,6 +654,7 @@ int main(int argc, char* argv[]) {
   if (!Check(service.Restart(), "worker control service restart failed")) return EXIT_FAILURE;
   if (!Check(service.workerGeneration() != 0 && service.workerGeneration() != firstWorkerGeneration,
     "worker generation was not refreshed after restart")) return EXIT_FAILURE;
+  if (!Check(!callback.ReadCompleted(0, 9), "stale generation completion was accepted after restart")) return EXIT_FAILURE;
   for (int attempt = 0; attempt < 500 && callback.health() != WorkerHealth::kReady; ++attempt) {
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }

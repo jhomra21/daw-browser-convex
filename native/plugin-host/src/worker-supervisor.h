@@ -437,6 +437,9 @@ class WorkerRuntime {
   );
   [[nodiscard]] bool CancelPublishedSubmission(std::size_t slotIndex, std::uint64_t sequence);
   [[nodiscard]] bool DispatchPublishedSubmission(std::size_t slotIndex, std::uint64_t sequence);
+  // Realtime callback-safe wake hint. The submitted slot remains the source of
+  // truth; a full pipe is therefore a successful no-op rather than a fault.
+  [[nodiscard]] bool NotifyRealtimeWorker() noexcept;
   [[nodiscard]] bool WaitForOfflineCompletion(
     std::size_t slotIndex,
     std::uint64_t sequence,
@@ -468,12 +471,33 @@ class WorkerRuntime {
   std::optional<WorkerTransport> transport_;
   int controlWriteDescriptor_ = -1;
   int responseReadDescriptor_ = -1;
+  int wakeWriteDescriptor_ = -1;
   int childProcessId_ = -1;
   int childProcessGroupId_ = -1;
   std::size_t restartCount_ = 0;
   std::optional<WorkerStartupRequest> startup_;
   WorkerHostConfiguration configuration_;
   WorkerTransportRequest transportRequest_;
+};
+
+class WorkerWakeSignal {
+ public:
+  WorkerWakeSignal() = default;
+  ~WorkerWakeSignal();
+  WorkerWakeSignal(const WorkerWakeSignal&) = delete;
+  WorkerWakeSignal& operator=(const WorkerWakeSignal&) = delete;
+
+  [[nodiscard]] bool Open() noexcept;
+  void Close() noexcept;
+  [[nodiscard]] bool Notify() const noexcept;
+  [[nodiscard]] int readDescriptor() const noexcept;
+  [[nodiscard]] int releaseReadDescriptor() noexcept;
+  [[nodiscard]] int releaseWriteDescriptor() noexcept;
+  static void Drain(int descriptor) noexcept;
+
+ private:
+  int readDescriptor_ = -1;
+  int writeDescriptor_ = -1;
 };
 
 }  // namespace daw::plugin_host

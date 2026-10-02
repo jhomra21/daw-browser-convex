@@ -141,6 +141,7 @@ Completed for the expanded PR #57 telemetry and precision change set:
 
 - Prior pushed evidence SHA: `bf7677582dff7704fe8dc39f1f40ea509a093f69`.
 - Native CPU follow-up implementation SHA: `eb2027eff70f10e71b29325c72086ead1ddc89ed`.
+- Generation-aware sampler follow-up SHA: `1d303d62c83ce57366dd48f8b85cb77e8b39e2b9`.
 - Cloudflare supplied evidence commit: `c9ce7097` — `COMPLETED/SUCCESS`; this is user-supplied evidence, not an independently fetched conclusion.
 - Native CPU follow-up artifacts: `/private/tmp/daw-followup-idle-final-3.json`, `/private/tmp/daw-followup-playback-final.json`, and `/private/tmp/daw-followup-p30-final-2.json`.
 - Generation-aware P30 retries: `/private/tmp/daw-followup-p30-generation-1.json`, `/private/tmp/daw-followup-p30-generation-2.json`, and `/private/tmp/daw-followup-p30-generation-3.json`; the first two failed on renderer probe loss and the third failed the existing full-DSP realtime gate before producing a complete CPU artifact.

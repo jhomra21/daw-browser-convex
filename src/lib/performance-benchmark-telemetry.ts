@@ -2,6 +2,7 @@ export type PerformanceBenchmarkCollector = {
   increment: (owner: string, amount?: number) => void
   duration: (owner: string, durationMs: number) => void
   gauge: (owner: string, value: number) => void
+  mark: (owner: string) => void
   phase: (owner: string, active: boolean) => void
 }
 
@@ -25,6 +26,10 @@ export const measurePerformanceBenchmarkDuration = (
 
 export const setPerformanceBenchmarkGauge = (owner: string, value: number) => {
   globalThis.__dawPerformanceBenchmark?.gauge(owner, value)
+}
+
+export const markPerformanceBenchmark = (owner: string) => {
+  globalThis.__dawPerformanceBenchmark?.mark(owner)
 }
 
 export const withPerformanceBenchmarkPhase = async <Value>(

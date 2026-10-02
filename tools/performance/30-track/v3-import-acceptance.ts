@@ -119,13 +119,13 @@ const fullLoadFramePerformanceSchema = z.object({
   }).strict(),
 }).strict()
 
-export const fullLoadFrameProbeScript = () => `(()=>{const limit=8192,longLimit=256;const state={active:true,last:null,raf:[],work:[],long:[],drop:{raf:0,work:0,long:0,longFrames:0},observer:null,loafObserver:null,id:0,currentPhase:'unattributed',phases:[],longFrames:[],counters:{},durations:{},zoomResults:{}};
+export const fullLoadFrameProbeScript = () => `(()=>{const limit=8192,longLimit=256;const state={active:true,last:null,raf:[],work:[],long:[],drop:{raf:0,work:0,long:0,longFrames:0},observer:null,loafObserver:null,id:0,currentPhase:'unattributed',phases:[],longFrames:[],marks:[],counters:{},durations:{},zoomResults:{}};
 const push=(values,key,value)=>{if(values.length<limit)values.push(value);else state.drop[key]++};
 const owner=(entry)=>{const scripts=entry.scripts||[];const script=scripts.reduce((best,item)=>(item.duration||0)>(best?.duration||0)?item:best,null);const source=String(script?.sourceURL||'').slice(-160),fn=String(script?.functionName||'').slice(0,120);const text=(source+' '+fn).toLowerCase();const category=text.includes('waveform')?'waveform-geometry':text.includes('record')?'recording-UI':text.includes('timeline')?'timeline-reactivity':text.includes('solid')?'Solid/reactive':scripts.length?'unknown':'layout/style';return {category,source:source||null,functionName:fn||null}};
 const phase=(name,active)=>{const now=performance.now();if(active){state.currentPhase=name;state.phases.push({name,startTime:now,endTime:null})}else{const item=[...state.phases].reverse().find(candidate=>candidate.name===name&&candidate.endTime===null);if(item)item.endTime=now;state.currentPhase=[...state.phases].reverse().find(candidate=>candidate.endTime===null)?.name||'unattributed'};return true};
-window.__dawPerformanceBenchmark={increment:(key,amount=1)=>{state.counters[key]=(state.counters[key]||0)+amount},duration:(key,value)=>{const values=state.durations[key]||(state.durations[key]=[]);if(values.length<limit)values.push(value)},gauge:(key,value)=>{state.counters[key]=value},phase};
+window.__dawPerformanceBenchmark={increment:(key,amount=1)=>{state.counters[key]=(state.counters[key]||0)+amount},duration:(key,value)=>{const values=state.durations[key]||(state.durations[key]=[]);if(values.length<limit)values.push(value)},gauge:(key,value)=>{state.counters[key]=value},mark:(owner)=>{if(state.marks.length<limit)state.marks.push({owner,timestamp:performance.now()})},phase};
 window.__dawPerformancePhase=phase;
-window.__dawMeasureZoomGesture=(token,deltaY,anchor)=>{void(async()=>{const timeline=document.querySelector('[data-timeline-scroll-viewport="1"]');if(!(timeline instanceof HTMLElement))throw new Error('Timeline zoom surface unavailable.');const rect=timeline.getBoundingClientRect(),inputTimestamp=performance.now(),beforeGeneration=state.counters['timeline.viewport-generation']||0;timeline.dispatchEvent(new WheelEvent('wheel',{deltaY,deltaMode:0,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*anchor}));let firstStateChangeTimestamp=null,firstPresentedFrameTimestamp=null,settledTimestamp=null,stableFrames=0,lastSignature='',lastRaster=state.counters['waveform.raster-calls']||0;while(performance.now()-inputTimestamp<4000){await new Promise(requestAnimationFrame);const generation=state.counters['timeline.viewport-generation']||0,signature=[generation,state.counters['timeline.pixels-per-second']||0,state.counters['timeline.visible-start-sec']||0,state.counters['timeline.visible-end-sec']||0].join('|'),raster=state.counters['waveform.raster-calls']||0,pending=state.counters['waveform.requests-pending']||0;if(firstStateChangeTimestamp===null&&generation!==beforeGeneration){firstStateChangeTimestamp=performance.now();continue}if(firstStateChangeTimestamp!==null&&firstPresentedFrameTimestamp===null){firstPresentedFrameTimestamp=performance.now();lastSignature=signature;lastRaster=raster;continue}if(firstPresentedFrameTimestamp!==null&&signature===lastSignature&&raster===lastRaster&&pending===0)stableFrames++;else stableFrames=0;lastSignature=signature;lastRaster=raster;if(stableFrames>=2){settledTimestamp=performance.now();break}}state.zoomResults[token]={stateChangeMs:firstStateChangeTimestamp===null?null:firstStateChangeTimestamp-inputTimestamp,firstVisualMs:firstPresentedFrameTimestamp===null?null:firstPresentedFrameTimestamp-inputTimestamp,settledMs:settledTimestamp===null?null:settledTimestamp-inputTimestamp,settled:settledTimestamp!==null}})();return true};
+window.__dawMeasureZoomGesture=(token,deltaY,anchor)=>{void(async()=>{const timeline=document.querySelector('[data-timeline-scroll-viewport="1"]');if(!(timeline instanceof HTMLElement))throw new Error('Timeline zoom surface unavailable.');const rect=timeline.getBoundingClientRect(),inputTimestamp=performance.now(),beforeGeneration=state.counters['timeline.viewport-generation']||0,beforeMark=state.marks.length;timeline.dispatchEvent(new WheelEvent('wheel',{deltaY,deltaMode:0,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*anchor}));let firstStateChangeTimestamp=null,requestsQuiescentTimestamp=null,rasterStartTimestamp=null,rasterCompleteTimestamp=null,firstPresentedFrameTimestamp=null,settledTimestamp=null,stableFrames=0,lastSignature='',lastRaster=state.counters['waveform.raster-calls']||0;while(performance.now()-inputTimestamp<4000){await new Promise(requestAnimationFrame);const now=performance.now(),generation=state.counters['timeline.viewport-generation']||0,signature=[generation,state.counters['timeline.pixels-per-second']||0,state.counters['timeline.visible-start-sec']||0,state.counters['timeline.visible-end-sec']||0].join('|'),raster=state.counters['waveform.raster-calls']||0,pending=state.counters['waveform.requests-pending']||0,marks=state.marks.slice(beforeMark);if(firstStateChangeTimestamp===null&&generation!==beforeGeneration){firstStateChangeTimestamp=now;continue}if(firstStateChangeTimestamp!==null&&requestsQuiescentTimestamp===null&&pending===0)requestsQuiescentTimestamp=now;if(requestsQuiescentTimestamp!==null&&rasterStartTimestamp===null)rasterStartTimestamp=marks.find(mark=>mark.owner==='waveform.raster-start'&&mark.timestamp>=requestsQuiescentTimestamp)?.timestamp??null;if(rasterStartTimestamp!==null&&rasterCompleteTimestamp===null)rasterCompleteTimestamp=marks.find(mark=>mark.owner==='waveform.raster-complete'&&mark.timestamp>=rasterStartTimestamp)?.timestamp??null;if(firstStateChangeTimestamp!==null&&firstPresentedFrameTimestamp===null){firstPresentedFrameTimestamp=now;lastSignature=signature;lastRaster=raster;continue}if(firstPresentedFrameTimestamp!==null&&signature===lastSignature&&raster===lastRaster&&pending===0)stableFrames++;else stableFrames=0;lastSignature=signature;lastRaster=raster;if(stableFrames>=2){settledTimestamp=now;break}}const nonnegative=(value)=>value===null?null:Math.max(0,value);state.zoomResults[token]={stateChangeMs:nonnegative(firstStateChangeTimestamp===null?null:firstStateChangeTimestamp-inputTimestamp),firstVisualMs:nonnegative(firstPresentedFrameTimestamp===null?null:firstPresentedFrameTimestamp-inputTimestamp),settledMs:nonnegative(settledTimestamp===null?null:settledTimestamp-inputTimestamp),settled:settledTimestamp!==null,inputToViewportStateMs:nonnegative(firstStateChangeTimestamp===null?null:firstStateChangeTimestamp-inputTimestamp),viewportToRequestsQuiescentMs:nonnegative(firstStateChangeTimestamp===null||requestsQuiescentTimestamp===null?null:requestsQuiescentTimestamp-firstStateChangeTimestamp),quiescenceToRasterStartMs:nonnegative(requestsQuiescentTimestamp===null||rasterStartTimestamp===null?null:rasterStartTimestamp-requestsQuiescentTimestamp),rasterExecutionMs:nonnegative(rasterStartTimestamp===null||rasterCompleteTimestamp===null?null:rasterCompleteTimestamp-rasterStartTimestamp),rasterCompleteToPresentedFrameMs:nonnegative(rasterCompleteTimestamp===null||firstPresentedFrameTimestamp===null?null:firstPresentedFrameTimestamp-rasterCompleteTimestamp),firstPresentedToTwoStableFramesMs:nonnegative(firstPresentedFrameTimestamp===null||settledTimestamp===null?null:settledTimestamp-firstPresentedFrameTimestamp)}})();return true};
 const frame=(timestamp)=>{if(!state.active)return;if(state.last!==null)push(state.raf,'raf',timestamp-state.last);state.last=timestamp;
 queueMicrotask(()=>{if(state.active)push(state.work,'work',Math.max(0,performance.now()-timestamp))});state.id=requestAnimationFrame(frame)};
 if(PerformanceObserver.supportedEntryTypes?.includes('longtask')){state.observer=new PerformanceObserver((list)=>{for(const entry of list.getEntries()){push(state.long,'long',entry.duration);if(state.longFrames.length===longLimit){state.drop.longFrames++;continue}state.longFrames.push({startTime:entry.startTime,duration:entry.duration,phase:state.currentPhase,owner:'unknown',scriptDuration:null,renderDuration:null,styleAndLayoutDuration:null,forcedStyleAndLayoutDuration:null,source:null,functionName:null})}});state.observer.observe({type:'longtask'})}
@@ -414,6 +414,12 @@ const runZoomSweeps = async (session: string, projectActiveClipCount: number) =>
     stateChangeMs: number
     firstVisualMs: number
     settled: boolean
+    inputToViewportStateMs: number | null
+    viewportToRequestsQuiescentMs: number | null
+    quiescenceToRasterStartMs: number | null
+    rasterExecutionMs: number | null
+    rasterCompleteToPresentedFrameMs: number | null
+    firstPresentedToTwoStableFramesMs: number | null
     browserCommandRoundTripMs: number
     projectActiveClipCount: number
     mountedClipCount: number
@@ -455,6 +461,12 @@ const runZoomSweeps = async (session: string, projectActiveClipCount: number) =>
       firstVisualMs: z.number().nonnegative().nullable(),
       settledMs: z.number().nonnegative().nullable(),
       settled: z.boolean(),
+      inputToViewportStateMs: z.number().nonnegative().nullable(),
+      viewportToRequestsQuiescentMs: z.number().nonnegative().nullable(),
+      quiescenceToRasterStartMs: z.number().nonnegative().nullable(),
+      rasterExecutionMs: z.number().nonnegative().nullable(),
+      rasterCompleteToPresentedFrameMs: z.number().nonnegative().nullable(),
+      firstPresentedToTwoStableFramesMs: z.number().nonnegative().nullable(),
     }).parse(JSON.parse(await browserCommand(session, ["eval",
       `window.__dawFullLoadFrameProbe.zoomResults[${JSON.stringify(token)}]`])))
     const browserCommandRoundTripMs = performance.now() - startedAt
@@ -472,7 +484,14 @@ const runZoomSweeps = async (session: string, projectActiveClipCount: number) =>
     gestures.push({ sweep, direction, anchor, elapsedMs: performance.now() - startedAt,
       firstResponseMs: timing.firstVisualMs, settleMs: timing.settledMs,
       stateChangeMs: timing.stateChangeMs, firstVisualMs: timing.firstVisualMs,
-      settled: timing.settled, browserCommandRoundTripMs, projectActiveClipCount,
+      settled: timing.settled,
+      inputToViewportStateMs: timing.inputToViewportStateMs,
+      viewportToRequestsQuiescentMs: timing.viewportToRequestsQuiescentMs,
+      quiescenceToRasterStartMs: timing.quiescenceToRasterStartMs,
+      rasterExecutionMs: timing.rasterExecutionMs,
+      rasterCompleteToPresentedFrameMs: timing.rasterCompleteToPresentedFrameMs,
+      firstPresentedToTwoStableFramesMs: timing.firstPresentedToTwoStableFramesMs,
+      browserCommandRoundTripMs, projectActiveClipCount,
       ...clipCounts })
   }
   for (let sweep = 0; sweep < 10; sweep++) {
@@ -774,7 +793,7 @@ const main = async () => {
         throw new Error("Six MIDI tracks were not muted for media-only recording.")
     }
     let dspSetup: Awaited<ReturnType<typeof prepareFullDsp>> | null = null
-    if (isDspControlMode(mode) || mode === "dsp-recording" || mode === "dsp-ui-recording"
+    if (mode === "idle" || isDspControlMode(mode) || mode === "dsp-recording" || mode === "dsp-ui-recording"
       || mode === "zoom-recording-profile") {
       stage = "dsp-setup"
       const instanceCount = mode === "dsp-one" ? 1 : mode === "vst-reliability" ? reliabilityVstCount : 8
@@ -798,7 +817,17 @@ const main = async () => {
       stage = "idle-verify"
       const responsive = await pingProjectCdp(new URL(endpoint).port, projectId)
       if (!responsive) throw new Error("Idle project renderer URL changed.")
-      await writePrivateArtifact(output, JSON.stringify({ status: "complete", mode, responsive, projectId, lifecycle, tracks: snapshot.tracks.length, ...telemetry() }, null, 2))
+      const diagnostics = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
+      const workerPids = await nativeWorkers()
+      await writePrivateArtifact(output, JSON.stringify({
+        status: "complete", mode, responsive, projectId, lifecycle, tracks: snapshot.tracks.length,
+        dspSetup, workerPids,
+        realtimePerformance: diagnostics.native.status === "available"
+          ? diagnostics.native.diagnostics.realtimePerformance ?? null : null,
+        vstWorkerPerformance: diagnostics.native.status === "available"
+          ? diagnostics.native.diagnostics.vstWorkerPerformance ?? null : null,
+        ...telemetry(),
+      }, null, 2))
       return
     }
     stage = "playback"

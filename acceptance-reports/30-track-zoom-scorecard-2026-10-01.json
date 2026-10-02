@@ -1,97 +1,4962 @@
 {
-  "generatedAt": "2026-10-01",
-  "method": "Five valid packaged runs per profile; renderer-owned gesture timing; run-level medians unless stated otherwise.",
+  "generatedAt": "2026-10-02",
+  "method": "Exactly five accepted packaged runs per P10/P20/P30; renderer-owned gesture timing; run-level medians plus pooled distributions.",
+  "evidenceBase": "Working tree based on c9ce70977c284a985f61be850f631963bace890d; report commit intentionally not embedded.",
   "profiles": {
     "P10": {
-      "validRuns": 5,
-      "medianRunFirstVisualP95Ms": 21.40000009536743,
-      "medianRunSettledP95Ms": 36.90000009536743,
-      "medianRunZoomInSettledP95Ms": 36.299999713897705,
-      "medianRunZoomOutSettledP95Ms": 36.80000019073486,
-      "medianRendererCpuAveragePercent": 5.919783297314231,
-      "medianRendererCpuP95Percent": 10.812478192661017,
-      "medianRendererPeakBytes": 1325744128,
-      "medianWaveformRequestStarts": 17,
-      "medianWaveformCacheHits": 307,
-      "medianWaveformRasterCalls": 868,
-      "medianWaveformRasterTotalMs": 89.30000114440918,
-      "medianViewportTotalMs": 377.0999994277954,
-      "maximumRafP95Ms": 9.5,
-      "totalLongTasks": 0,
-      "totalRealtimeDeadlineMisses": 0,
-      "totalVstWorkerWatchdogMisses": 0,
-      "totalVstWorkerFaults": 0,
-      "viewportIntersectingClipCounts": [
-        4
-      ],
-      "artifacts": [
+      "acceptedRuns": 5,
+      "gesturesPerRun": 80,
+      "acceptedArtifacts": [
+        "/private/tmp/daw-zoom-corrected/p10-1.json",
         "/private/tmp/daw-zoom-corrected/p10-2.json",
         "/private/tmp/daw-zoom-corrected/p10-3.json",
         "/private/tmp/daw-zoom-corrected/p10-4.json",
-        "/private/tmp/daw-zoom-corrected/p10-5.json",
-        "/private/tmp/daw-zoom-corrected/p10-1.json"
-      ]
+        "/private/tmp/daw-zoom-corrected/p10-5.json"
+      ],
+      "workload": {
+        "activeClips": 10,
+        "fullDspProcessors": 8,
+        "settledGestures": [
+          80,
+          80,
+          80,
+          80,
+          80
+        ],
+        "zeroFaultGates": true
+      },
+      "gestures": {
+        "pooledAccepted": {
+          "samples": 400,
+          "stateChangeMs": {
+            "samples": 400,
+            "p50": 10.899999856948853,
+            "p95": 17.5,
+            "p99": 20.20100028514862,
+            "max": 23.5
+          },
+          "firstVisualMs": {
+            "samples": 400,
+            "p50": 16.399999856948853,
+            "p95": 21.405000090599057,
+            "p99": 24.80100018978119,
+            "max": 27.199999809265137
+          },
+          "settledMs": {
+            "samples": 400,
+            "p50": 32,
+            "p95": 37.70499980449676,
+            "p99": 55.856000189781135,
+            "max": 64.40000009536743
+          },
+          "browserCommandRoundTripMs": {
+            "samples": 400,
+            "p50": 133.99539600000207,
+            "p95": 151.8003541499893,
+            "p99": 164.65568375000058,
+            "max": 180.87229100000695
+          },
+          "settleAttributionMs": {
+            "inputToViewportState": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "viewportToRequestsQuiescent": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "quiescenceToRasterStart": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "rasterExecution": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "rasterCompleteToPresentedFrame": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "firstPresentedToTwoStableFrames": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            }
+          }
+        },
+        "medianAcrossRuns": {
+          "all": {
+            "samples": 80,
+            "stateChangeMs": {
+              "samples": 80,
+              "p50": 11,
+              "p95": 17.509999990463257,
+              "p99": 19.568000135421748,
+              "max": 20.899999618530273
+            },
+            "firstVisualMs": {
+              "samples": 80,
+              "p50": 16.5,
+              "p95": 21.40500009059906,
+              "p99": 23.57299975395202,
+              "max": 24.90000009536743
+            },
+            "settledMs": {
+              "samples": 80,
+              "p50": 31.850000143051147,
+              "p95": 36.940000081062315,
+              "p99": 44.8100000953673,
+              "max": 62.69999980926514
+            },
+            "browserCommandRoundTripMs": {
+              "samples": 80,
+              "p50": 133.97247900000366,
+              "p95": 151.53308089999663,
+              "p99": 158.23282124999918,
+              "max": 168.23787499999162
+            },
+            "settleAttributionMs": {
+              "inputToViewportState": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "viewportToRequestsQuiescent": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "quiescenceToRasterStart": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "rasterExecution": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "rasterCompleteToPresentedFrame": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "firstPresentedToTwoStableFrames": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              }
+            }
+          },
+          "in": {
+            "samples": 40,
+            "stateChangeMs": {
+              "samples": 40,
+              "p50": 10.899999856948853,
+              "p95": 16.809999823570244,
+              "p99": 17.40000009536743,
+              "max": 17.40000009536743
+            },
+            "firstVisualMs": {
+              "samples": 40,
+              "p50": 15.75,
+              "p95": 20.454999637603756,
+              "p99": 22.7929998254776,
+              "max": 23.40000009536743
+            },
+            "settledMs": {
+              "samples": 40,
+              "p50": 31.90000009536743,
+              "p95": 36.35499973297119,
+              "p99": 52.79399995803831,
+              "max": 62.69999980926514
+            },
+            "browserCommandRoundTripMs": {
+              "samples": 40,
+              "p50": 134.8137295000015,
+              "p95": 150.55844999999678,
+              "p99": 159.08858874999672,
+              "max": 162.8013329999958
+            },
+            "settleAttributionMs": {
+              "inputToViewportState": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "viewportToRequestsQuiescent": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "quiescenceToRasterStart": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "rasterExecution": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "rasterCompleteToPresentedFrame": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "firstPresentedToTwoStableFrames": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              }
+            }
+          },
+          "out": {
+            "samples": 40,
+            "stateChangeMs": {
+              "samples": 40,
+              "p50": 10.350000143051147,
+              "p95": 18.070000004768367,
+              "p99": 19.956999983787533,
+              "max": 20.899999618530273
+            },
+            "firstVisualMs": {
+              "samples": 40,
+              "p50": 17.40000009536743,
+              "p95": 21.40500009059906,
+              "p99": 23.534999909400938,
+              "max": 24.90000009536743
+            },
+            "settledMs": {
+              "samples": 40,
+              "p50": 32.09999990463257,
+              "p95": 36.96500017642974,
+              "p99": 39.86599994182587,
+              "max": 40.09999990463257
+            },
+            "browserCommandRoundTripMs": {
+              "samples": 40,
+              "p50": 133.19454200000473,
+              "p95": 150.21366045000468,
+              "p99": 163.29867124999538,
+              "max": 168.23787499999162
+            },
+            "settleAttributionMs": {
+              "inputToViewportState": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "viewportToRequestsQuiescent": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "quiescenceToRasterStart": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "rasterExecution": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "rasterCompleteToPresentedFrame": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "firstPresentedToTwoStableFrames": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              }
+            }
+          }
+        },
+        "pooledIn": {
+          "samples": 200,
+          "stateChangeMs": {
+            "samples": 200,
+            "p50": 10.400000095367432,
+            "p95": 16.90000009536743,
+            "p99": 18.206999812126153,
+            "max": 19.899999618530273
+          },
+          "firstVisualMs": {
+            "samples": 200,
+            "p50": 15.899999856948853,
+            "p95": 21.104999899864197,
+            "p99": 23.414000096321093,
+            "max": 25.800000190734863
+          },
+          "settledMs": {
+            "samples": 200,
+            "p50": 31.5,
+            "p95": 37.30500018596649,
+            "p99": 62.71199980735778,
+            "max": 64.40000009536743
+          },
+          "browserCommandRoundTripMs": {
+            "samples": 200,
+            "p50": 134.48924999999872,
+            "p95": 151.84555180000677,
+            "p99": 162.8195146699958,
+            "max": 180.87229100000695
+          },
+          "settleAttributionMs": {
+            "inputToViewportState": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "viewportToRequestsQuiescent": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "quiescenceToRasterStart": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "rasterExecution": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "rasterCompleteToPresentedFrame": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "firstPresentedToTwoStableFrames": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            }
+          }
+        },
+        "pooledOut": {
+          "samples": 200,
+          "stateChangeMs": {
+            "samples": 200,
+            "p50": 11.099999904632568,
+            "p95": 17.810000181198117,
+            "p99": 20.90499962329864,
+            "max": 23.5
+          },
+          "firstVisualMs": {
+            "samples": 200,
+            "p50": 17.09999990463257,
+            "p95": 22.205000257492063,
+            "p99": 24.91900009632109,
+            "max": 27.199999809265137
+          },
+          "settledMs": {
+            "samples": 200,
+            "p50": 32.30000019073486,
+            "p95": 37.81999971866607,
+            "p99": 40.102999906539914,
+            "max": 49.30000019073486
+          },
+          "browserCommandRoundTripMs": {
+            "samples": 200,
+            "p50": 133.80341650000264,
+            "p95": 151.72237644999694,
+            "p99": 168.28803665999172,
+            "max": 174.72833299999184
+          },
+          "settleAttributionMs": {
+            "inputToViewportState": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "viewportToRequestsQuiescent": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "quiescenceToRasterStart": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "rasterExecution": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "rasterCompleteToPresentedFrame": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "firstPresentedToTwoStableFrames": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            }
+          }
+        }
+      },
+      "framePerformance": {
+        "raf": {
+          "samples": null,
+          "p50": 8.30000000000291,
+          "p95": 9.400000000001455,
+          "p99": 10.19999999999709,
+          "max": 17.400000000001455
+        },
+        "applicationWork": {
+          "samples": null,
+          "p50": 2.8000000000029104,
+          "p95": 8.899999952318467,
+          "p99": 10.299999786375848,
+          "max": 14.600000095364521
+        },
+        "rafSamples": 3829,
+        "applicationWorkSamples": 3830,
+        "thresholds": {
+          "over8_33Ms": {
+            "medianAcrossRuns": 305,
+            "totalAcrossRuns": 1602
+          },
+          "over16_67Ms": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 2
+          },
+          "over33_3Ms": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 0
+          },
+          "over50Ms": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 0
+          }
+        },
+        "longTasks": {
+          "supported": true,
+          "count": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "totalDurationMs": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "maxDurationMs": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "totalCount": 0
+        },
+        "droppedSamples": [
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          },
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          },
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          },
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          },
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          }
+        ]
+      },
+      "processes": {
+        "perProcess": {
+          "main": {
+            "samplesPerRun": [
+              30,
+              30,
+              30,
+              30,
+              30
+            ],
+            "cpuPercent": {
+              "samples": 30,
+              "p50": 0.7396257939281765,
+              "p95": 2.2756328194568,
+              "p99": 2.364580403809043,
+              "max": 2.3909952291724808
+            },
+            "workingSetBytes": {
+              "samples": 30,
+              "p50": 320536576,
+              "p95": 320536576,
+              "p99": 320606371.84,
+              "max": 320634880
+            },
+            "privateBytes": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "peakWorkingSetBytes": 377290752,
+            "availability": "unavailable"
+          },
+          "gpu": {
+            "samplesPerRun": [
+              30,
+              30,
+              30,
+              30,
+              30
+            ],
+            "cpuPercent": {
+              "samples": 30,
+              "p50": 0.572195418633798,
+              "p95": 0.6195180183538537,
+              "p99": 0.6364969258838528,
+              "max": 0.6376757868554482
+            },
+            "workingSetBytes": {
+              "samples": 30,
+              "p50": 91324416,
+              "p95": 91406336,
+              "p99": 91417968.64,
+              "max": 91422720
+            },
+            "privateBytes": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "peakWorkingSetBytes": 96862208,
+            "availability": "unavailable"
+          },
+          "utility": {
+            "samplesPerRun": [
+              30,
+              30,
+              30,
+              30,
+              30
+            ],
+            "cpuPercent": {
+              "samples": 30,
+              "p50": 0,
+              "p95": 0.004860616368112327,
+              "p99": 0.006838740487748062,
+              "max": 0.0074660147010806805
+            },
+            "workingSetBytes": {
+              "samples": 30,
+              "p50": 59637760,
+              "p95": 59637760,
+              "p99": 59637760,
+              "max": 59637760
+            },
+            "privateBytes": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "peakWorkingSetBytes": 63422464,
+            "availability": "unavailable"
+          },
+          "renderer": {
+            "samplesPerRun": [
+              30,
+              30,
+              30,
+              30,
+              30
+            ],
+            "cpuPercent": {
+              "samples": 30,
+              "p50": 6.206378460423977,
+              "p95": 10.710132402690403,
+              "p99": 11.502061108496859,
+              "max": 11.721949467129685
+            },
+            "workingSetBytes": {
+              "samples": 30,
+              "p50": 1301684224,
+              "p95": 1319514112,
+              "p99": 1323990876.16,
+              "max": 1325744128
+            },
+            "privateBytes": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "peakWorkingSetBytes": 1716502528,
+            "availability": "unavailable"
+          }
+        },
+        "aggregateCpu": {
+          "samples": 30,
+          "p50": 7.551687115546358,
+          "p95": 12.382790405644592,
+          "p99": 13.473009829920684,
+          "max": 13.549424602460274
+        }
+      },
+      "rendererMetrics": [
+        {
+          "startBytes": 1221722112,
+          "at30sBytes": 1284538368,
+          "at60sBytes": 1336623104,
+          "endBytes": 1336623104,
+          "peakBytes": 1336623104,
+          "deltaBytes": 114900992,
+          "cpuAveragePercent": 5.899745603207925,
+          "cpuP95Percent": 11.473494538474126,
+          "cpuPeakPercent": 12.211839313329419
+        },
+        {
+          "startBytes": 920158208,
+          "at30sBytes": 823869440,
+          "at60sBytes": 867598336,
+          "endBytes": 867598336,
+          "peakBytes": 921796608,
+          "deltaBytes": -52559872,
+          "cpuAveragePercent": 6.042130993738366,
+          "cpuP95Percent": 10.807923550917744,
+          "cpuPeakPercent": 12.290019548581228
+        },
+        {
+          "startBytes": 1204011008,
+          "at30sBytes": 1298743296,
+          "at60sBytes": 1325744128,
+          "endBytes": 1325744128,
+          "peakBytes": 1325744128,
+          "deltaBytes": 121733120,
+          "cpuAveragePercent": 5.982672639837968,
+          "cpuP95Percent": 10.66607893232259,
+          "cpuPeakPercent": 11.872414156323293
+        },
+        {
+          "startBytes": 1290846208,
+          "at30sBytes": 1319845888,
+          "at60sBytes": 1385037824,
+          "endBytes": 1385037824,
+          "peakBytes": 1385037824,
+          "deltaBytes": 94191616,
+          "cpuAveragePercent": 5.915505934630323,
+          "cpuP95Percent": 10.812478192661017,
+          "cpuPeakPercent": 12.691135782112546
+        },
+        {
+          "startBytes": 1206484992,
+          "at30sBytes": 885014528,
+          "at60sBytes": 927825920,
+          "endBytes": 927825920,
+          "peakBytes": 1307541504,
+          "deltaBytes": -278659072,
+          "cpuAveragePercent": 5.919783297314231,
+          "cpuP95Percent": 11.118089287086576,
+          "cpuPeakPercent": 12.041261232519807
+        }
+      ],
+      "jsHeapCheckpoints": [
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 422445482,
+            "heapTotalBytes": 466524202,
+            "waveformRequestStarts": 4,
+            "waveformRasterCalls": 17
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 514619684,
+            "heapTotalBytes": 562775616,
+            "waveformRequestStarts": 12,
+            "waveformRasterCalls": 108
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 431455031,
+            "heapTotalBytes": 550133367,
+            "waveformRequestStarts": 16,
+            "waveformRasterCalls": 446
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 422143911,
+            "heapTotalBytes": 584552035,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 867
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 440312867,
+            "heapTotalBytes": 581327587,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 867
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 424774291,
+            "heapTotalBytes": 583654211,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 867
+          }
+        ],
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 408952955,
+            "heapTotalBytes": 470990627,
+            "waveformRequestStarts": 4,
+            "waveformRasterCalls": 17
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 508183865,
+            "heapTotalBytes": 560663905,
+            "waveformRequestStarts": 12,
+            "waveformRasterCalls": 105
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 419452865,
+            "heapTotalBytes": 538484441,
+            "waveformRequestStarts": 16,
+            "waveformRasterCalls": 438
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 418398451,
+            "heapTotalBytes": 588890623,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 856
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 545290508,
+            "heapTotalBytes": 593255324,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 856
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 528826592,
+            "heapTotalBytes": 596179712,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 856
+          }
+        ],
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 414042833,
+            "heapTotalBytes": 469108413,
+            "waveformRequestStarts": 4,
+            "waveformRasterCalls": 17
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 504069272,
+            "heapTotalBytes": 558558224,
+            "waveformRequestStarts": 12,
+            "waveformRasterCalls": 115
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 427764230,
+            "heapTotalBytes": 540100334,
+            "waveformRequestStarts": 16,
+            "waveformRasterCalls": 471
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 420143432,
+            "heapTotalBytes": 560160640,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 905
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 427699491,
+            "heapTotalBytes": 565848891,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 905
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 401810732,
+            "heapTotalBytes": 570149644,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 905
+          }
+        ],
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 413845287,
+            "heapTotalBytes": 468849923,
+            "waveformRequestStarts": 4,
+            "waveformRasterCalls": 17
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 502891498,
+            "heapTotalBytes": 557536014,
+            "waveformRequestStarts": 12,
+            "waveformRasterCalls": 108
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 410845175,
+            "heapTotalBytes": 532727043,
+            "waveformRequestStarts": 16,
+            "waveformRasterCalls": 446
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 407805770,
+            "heapTotalBytes": 573652782,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 868
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 526083270,
+            "heapTotalBytes": 581054870,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 868
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 522038958,
+            "heapTotalBytes": 576647262,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 868
+          }
+        ],
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 415421230,
+            "heapTotalBytes": 471101018,
+            "waveformRequestStarts": 4,
+            "waveformRasterCalls": 17
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 497447794,
+            "heapTotalBytes": 564984982,
+            "waveformRequestStarts": 12,
+            "waveformRasterCalls": 105
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 417934086,
+            "heapTotalBytes": 548407002,
+            "waveformRequestStarts": 16,
+            "waveformRasterCalls": 447
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 535634010,
+            "heapTotalBytes": 585275714,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 881
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 394273135,
+            "heapTotalBytes": 573593623,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 881
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 519582262,
+            "heapTotalBytes": 590946422,
+            "waveformRequestStarts": 17,
+            "waveformRasterCalls": 881
+          }
+        ]
+      ],
+      "waveform": {
+        "perRun": [
+          {
+            "requests": 324,
+            "requestStarts": 17,
+            "completed": 17,
+            "cacheHits": 307,
+            "cacheMisses": 17,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 504,
+              "totalMs": 2.9000000953674316,
+              "p95Ms": 0.09999990463256836,
+              "maxMs": 0.10000038146972656
+            },
+            "raster": {
+              "count": 867,
+              "totalMs": 93.80000305175781,
+              "p95Ms": 0.20000028610229492,
+              "maxMs": 1.4000000953674316
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 377.20000171661377,
+              "p95Ms": 7.820000195503233,
+              "maxMs": 9.099999904632568
+            }
+          },
+          {
+            "requests": 324,
+            "requestStarts": 17,
+            "completed": 17,
+            "cacheHits": 307,
+            "cacheMisses": 17,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 504,
+              "totalMs": 2.2999978065490723,
+              "p95Ms": 0,
+              "maxMs": 0.09999990463256836
+            },
+            "raster": {
+              "count": 856,
+              "totalMs": 85.0999960899353,
+              "p95Ms": 0.20000028610229492,
+              "maxMs": 1.3000001907348633
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 369.19999837875366,
+              "p95Ms": 7.005000019073486,
+              "maxMs": 9
+            }
+          },
+          {
+            "requests": 324,
+            "requestStarts": 17,
+            "completed": 17,
+            "cacheHits": 307,
+            "cacheMisses": 17,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 504,
+              "totalMs": 2.500000476837158,
+              "p95Ms": 0,
+              "maxMs": 0.10000038146972656
+            },
+            "raster": {
+              "count": 905,
+              "totalMs": 89.30000114440918,
+              "p95Ms": 0.20000028610229492,
+              "maxMs": 1.4000000953674316
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 377.0999994277954,
+              "p95Ms": 7.104999899864197,
+              "maxMs": 8.5
+            }
+          },
+          {
+            "requests": 324,
+            "requestStarts": 17,
+            "completed": 17,
+            "cacheHits": 307,
+            "cacheMisses": 17,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 504,
+              "totalMs": 2.6000003814697266,
+              "p95Ms": 0.08499991893767969,
+              "maxMs": 0.10000038146972656
+            },
+            "raster": {
+              "count": 868,
+              "totalMs": 93.20000553131104,
+              "p95Ms": 0.2999997138977051,
+              "maxMs": 1.4000000953674316
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 381.9000015258789,
+              "p95Ms": 7.814999747276305,
+              "maxMs": 8.5
+            }
+          },
+          {
+            "requests": 324,
+            "requestStarts": 17,
+            "completed": 17,
+            "cacheHits": 307,
+            "cacheMisses": 17,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 504,
+              "totalMs": 1.8999991416931152,
+              "p95Ms": 0,
+              "maxMs": 0.10000038146972656
+            },
+            "raster": {
+              "count": 881,
+              "totalMs": 83.80000305175781,
+              "p95Ms": 0.20000028610229492,
+              "maxMs": 1.200000286102295
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 363.70000076293945,
+              "p95Ms": 6.805000162124633,
+              "maxMs": 8.800000190734863
+            }
+          }
+        ],
+        "medianAcrossRuns": {
+          "requests": {
+            "medianAcrossRuns": 324,
+            "totalAcrossRuns": 1620,
+            "values": [
+              324,
+              324,
+              324,
+              324,
+              324
+            ]
+          },
+          "requestStarts": {
+            "medianAcrossRuns": 17,
+            "totalAcrossRuns": 85,
+            "values": [
+              17,
+              17,
+              17,
+              17,
+              17
+            ]
+          },
+          "completed": {
+            "medianAcrossRuns": 17,
+            "totalAcrossRuns": 85,
+            "values": [
+              17,
+              17,
+              17,
+              17,
+              17
+            ]
+          },
+          "cacheHits": {
+            "medianAcrossRuns": 307,
+            "totalAcrossRuns": 1535,
+            "values": [
+              307,
+              307,
+              307,
+              307,
+              307
+            ]
+          },
+          "cacheMisses": {
+            "medianAcrossRuns": 17,
+            "totalAcrossRuns": 85,
+            "values": [
+              17,
+              17,
+              17,
+              17,
+              17
+            ]
+          },
+          "cancelled": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 0,
+            "values": [
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "superseded": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 0,
+            "values": [
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "pendingAtEnd": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 0,
+            "values": [
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "cacheBytes": 0,
+          "geometry": {
+            "count": [
+              {
+                "count": 504,
+                "totalMs": 2.9000000953674316,
+                "p95Ms": 0.09999990463256836,
+                "maxMs": 0.10000038146972656
+              },
+              {
+                "count": 504,
+                "totalMs": 2.2999978065490723,
+                "p95Ms": 0,
+                "maxMs": 0.09999990463256836
+              },
+              {
+                "count": 504,
+                "totalMs": 2.500000476837158,
+                "p95Ms": 0,
+                "maxMs": 0.10000038146972656
+              },
+              {
+                "count": 504,
+                "totalMs": 2.6000003814697266,
+                "p95Ms": 0.08499991893767969,
+                "maxMs": 0.10000038146972656
+              },
+              {
+                "count": 504,
+                "totalMs": 1.8999991416931152,
+                "p95Ms": 0,
+                "maxMs": 0.10000038146972656
+              }
+            ],
+            "totalMs": [
+              2.9000000953674316,
+              2.2999978065490723,
+              2.500000476837158,
+              2.6000003814697266,
+              1.8999991416931152
+            ],
+            "p95Ms": [
+              0.09999990463256836,
+              0,
+              0,
+              0.08499991893767969,
+              0
+            ],
+            "maxMs": [
+              0.10000038146972656,
+              0.09999990463256836,
+              0.10000038146972656,
+              0.10000038146972656,
+              0.10000038146972656
+            ],
+            "distributionNote": "Per-sample p50/p99 were not retained by the accepted legacy artifacts; p95/max and totals are retained."
+          },
+          "raster": {
+            "count": [
+              {
+                "count": 867,
+                "totalMs": 93.80000305175781,
+                "p95Ms": 0.20000028610229492,
+                "maxMs": 1.4000000953674316
+              },
+              {
+                "count": 856,
+                "totalMs": 85.0999960899353,
+                "p95Ms": 0.20000028610229492,
+                "maxMs": 1.3000001907348633
+              },
+              {
+                "count": 905,
+                "totalMs": 89.30000114440918,
+                "p95Ms": 0.20000028610229492,
+                "maxMs": 1.4000000953674316
+              },
+              {
+                "count": 868,
+                "totalMs": 93.20000553131104,
+                "p95Ms": 0.2999997138977051,
+                "maxMs": 1.4000000953674316
+              },
+              {
+                "count": 881,
+                "totalMs": 83.80000305175781,
+                "p95Ms": 0.20000028610229492,
+                "maxMs": 1.200000286102295
+              }
+            ],
+            "totalMs": [
+              93.80000305175781,
+              85.0999960899353,
+              89.30000114440918,
+              93.20000553131104,
+              83.80000305175781
+            ],
+            "p95Ms": [
+              0.20000028610229492,
+              0.20000028610229492,
+              0.20000028610229492,
+              0.2999997138977051,
+              0.20000028610229492
+            ],
+            "maxMs": [
+              1.4000000953674316,
+              1.3000001907348633,
+              1.4000000953674316,
+              1.4000000953674316,
+              1.200000286102295
+            ],
+            "distributionNote": "Per-sample p50/p99 were not retained by the accepted legacy artifacts; p95/max and totals are retained."
+          },
+          "viewport": {
+            "count": [
+              {
+                "count": 80,
+                "totalMs": 377.20000171661377,
+                "p95Ms": 7.820000195503233,
+                "maxMs": 9.099999904632568
+              },
+              {
+                "count": 80,
+                "totalMs": 369.19999837875366,
+                "p95Ms": 7.005000019073486,
+                "maxMs": 9
+              },
+              {
+                "count": 80,
+                "totalMs": 377.0999994277954,
+                "p95Ms": 7.104999899864197,
+                "maxMs": 8.5
+              },
+              {
+                "count": 80,
+                "totalMs": 381.9000015258789,
+                "p95Ms": 7.814999747276305,
+                "maxMs": 8.5
+              },
+              {
+                "count": 80,
+                "totalMs": 363.70000076293945,
+                "p95Ms": 6.805000162124633,
+                "maxMs": 8.800000190734863
+              }
+            ],
+            "totalMs": [
+              377.20000171661377,
+              369.19999837875366,
+              377.0999994277954,
+              381.9000015258789,
+              363.70000076293945
+            ],
+            "p95Ms": [
+              7.820000195503233,
+              7.005000019073486,
+              7.104999899864197,
+              7.814999747276305,
+              6.805000162124633
+            ],
+            "maxMs": [
+              9.099999904632568,
+              9,
+              8.5,
+              8.5,
+              8.800000190734863
+            ],
+            "distributionNote": "Per-sample p50/p99 were not retained by the accepted legacy artifacts; p95/max and totals are retained."
+          }
+        },
+        "explicitAbsent": {
+          "cacheBytes": 0,
+          "mediaPaging": 0,
+          "mediaDecode": 0,
+          "waveformCancellation": 0,
+          "waveformSupersede": 0
+        }
+      },
+      "realtime": {
+        "callbackDeadlineMisses": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "workerDeadlineMisses": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "workerWatchdogMisses": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "workerFaults": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "rejectedBlocks": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "visibility": {
+        "projectActiveClipCount": [
+          10
+        ],
+        "mountedClipCount": [
+          6,
+          8
+        ],
+        "viewportIntersectingClipCount": [
+          4
+        ]
+      }
     },
     "P20": {
-      "validRuns": 4,
-      "medianRunFirstVisualP95Ms": 25.550000190734863,
-      "medianRunSettledP95Ms": 42.84999990463257,
-      "medianRunZoomInSettledP95Ms": 42.0,
-      "medianRunZoomOutSettledP95Ms": 42.549999713897705,
-      "medianRendererCpuAveragePercent": 6.246740378307042,
-      "medianRendererCpuP95Percent": 11.800989631151534,
-      "medianRendererPeakBytes": 1683095552.0,
-      "medianWaveformRequestStarts": 36.0,
-      "medianWaveformCacheHits": 531.0,
-      "medianWaveformRasterCalls": 1446.5,
-      "medianWaveformRasterTotalMs": 175.3999981880188,
-      "medianViewportTotalMs": 676.8999984264374,
-      "maximumRafP95Ms": 9.799999999995634,
-      "totalLongTasks": 0,
-      "totalRealtimeDeadlineMisses": 0,
-      "totalVstWorkerWatchdogMisses": 0,
-      "totalVstWorkerFaults": 0,
-      "viewportIntersectingClipCounts": [
-        5
-      ],
-      "artifacts": [
+      "acceptedRuns": 5,
+      "gesturesPerRun": 80,
+      "acceptedArtifacts": [
+        "/private/tmp/daw-zoom-corrected/p20-3.json",
         "/private/tmp/daw-zoom-corrected/p20-4.json",
         "/private/tmp/daw-zoom-corrected/p20-9.json",
-        "/private/tmp/daw-zoom-corrected/p20-3.json",
-        "/private/tmp/daw-zoom-corrected/p20-11.json"
-      ]
+        "/private/tmp/daw-zoom-corrected/p20-11.json",
+        "/private/tmp/daw-zoom-corrected/p20-16.json"
+      ],
+      "workload": {
+        "activeClips": 20,
+        "fullDspProcessors": 8,
+        "settledGestures": [
+          80,
+          80,
+          80,
+          80,
+          80
+        ],
+        "zeroFaultGates": true
+      },
+      "gestures": {
+        "pooledAccepted": {
+          "samples": 400,
+          "stateChangeMs": {
+            "samples": 400,
+            "p50": 13.650000333786013,
+            "p95": 21.81000018119811,
+            "p99": 24.524000000953652,
+            "max": 42.200000286102295
+          },
+          "firstVisualMs": {
+            "samples": 400,
+            "p50": 19.350000143051147,
+            "p95": 26.504999995231625,
+            "p99": 33.718999814987164,
+            "max": 54
+          },
+          "settledMs": {
+            "samples": 400,
+            "p50": 33.59999990463257,
+            "p95": 47.34000017642971,
+            "p99": 79.8280001926422,
+            "max": 94
+          },
+          "browserCommandRoundTripMs": {
+            "samples": 400,
+            "p50": 140.07262499999342,
+            "p95": 162.98482259999727,
+            "p99": 177.01117083000528,
+            "max": 202.92983399999503
+          },
+          "settleAttributionMs": {
+            "inputToViewportState": {
+              "samples": 80,
+              "p50": 12.349999666213987,
+              "p95": 18.910000109672545,
+              "p99": 23.7809999799728,
+              "max": 28.59999990463257
+            },
+            "viewportToRequestsQuiescent": {
+              "samples": 80,
+              "p50": 7.599999904632568,
+              "p95": 12.604999899864197,
+              "p99": 27.529000110626065,
+              "max": 47.19999980926514
+            },
+            "quiescenceToRasterStart": {
+              "samples": 35,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0.0660002517700192,
+              "max": 0.10000038146972656
+            },
+            "rasterExecution": {
+              "samples": 35,
+              "p50": 0,
+              "p95": 0.19999995231628417,
+              "p99": 0.2660002231597897,
+              "max": 0.3000001907348633
+            },
+            "rasterCompleteToPresentedFrame": {
+              "samples": 35,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0
+            },
+            "firstPresentedToTwoStableFrames": {
+              "samples": 80,
+              "p50": 14.700000047683716,
+              "p95": 24.084999990463253,
+              "p99": 40.335000095367285,
+              "max": 58.90000009536743
+            }
+          }
+        },
+        "medianAcrossRuns": {
+          "all": {
+            "samples": 80,
+            "stateChangeMs": {
+              "samples": 80,
+              "p50": 13.249999761581421,
+              "p95": 21.10999991893768,
+              "p99": 23.7809999799728,
+              "max": 24.5
+            },
+            "firstVisualMs": {
+              "samples": 80,
+              "p50": 20.200000047683716,
+              "p95": 25.63499991893768,
+              "p99": 29.0239999246597,
+              "max": 32.5
+            },
+            "settledMs": {
+              "samples": 80,
+              "p50": 34.75,
+              "p95": 43.704999804496765,
+              "p99": 64.35100008010849,
+              "max": 92.69999980926514
+            },
+            "browserCommandRoundTripMs": {
+              "samples": 80,
+              "p50": 142.96085400000447,
+              "p95": 152.54222769999615,
+              "p99": 163.77859949999458,
+              "max": 170.67674999999872
+            },
+            "settleAttributionMs": {
+              "inputToViewportState": {
+                "samples": 0,
+                "p50": 12.349999666213987,
+                "p95": 18.910000109672545,
+                "p99": 23.7809999799728,
+                "max": 28.59999990463257
+              },
+              "viewportToRequestsQuiescent": {
+                "samples": 0,
+                "p50": 7.599999904632568,
+                "p95": 12.604999899864197,
+                "p99": 27.529000110626065,
+                "max": 47.19999980926514
+              },
+              "quiescenceToRasterStart": {
+                "samples": 0,
+                "p50": 0,
+                "p95": 0,
+                "p99": 0.0660002517700192,
+                "max": 0.10000038146972656
+              },
+              "rasterExecution": {
+                "samples": 0,
+                "p50": 0,
+                "p95": 0.19999995231628417,
+                "p99": 0.2660002231597897,
+                "max": 0.3000001907348633
+              },
+              "rasterCompleteToPresentedFrame": {
+                "samples": 0,
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "firstPresentedToTwoStableFrames": {
+                "samples": 0,
+                "p50": 14.700000047683716,
+                "p95": 24.084999990463253,
+                "p99": 40.335000095367285,
+                "max": 58.90000009536743
+              }
+            }
+          },
+          "in": {
+            "samples": 40,
+            "stateChangeMs": {
+              "samples": 40,
+              "p50": 13.450000047683716,
+              "p95": 19.590000009536737,
+              "p99": 22.600999846458432,
+              "max": 23.199999809265137
+            },
+            "firstVisualMs": {
+              "samples": 40,
+              "p50": 19.90000009536743,
+              "p95": 25.110000371932983,
+              "p99": 28.533000016212462,
+              "max": 30.59999990463257
+            },
+            "settledMs": {
+              "samples": 40,
+              "p50": 33.85000014305115,
+              "p95": 42.17999999523162,
+              "p99": 74.33099984645841,
+              "max": 92.69999980926514
+            },
+            "browserCommandRoundTripMs": {
+              "samples": 40,
+              "p50": 141.71252049999748,
+              "p95": 152.45194134999616,
+              "p99": 165.55592886999744,
+              "max": 170.67674999999872
+            },
+            "settleAttributionMs": {
+              "inputToViewportState": {
+                "samples": 0,
+                "p50": 12.049999713897703,
+                "p95": 18.244999837875362,
+                "p99": 20.442000265121457,
+                "max": 21.300000190734863
+              },
+              "viewportToRequestsQuiescent": {
+                "samples": 0,
+                "p50": 7.599999904632568,
+                "p95": 12.739999818801877,
+                "p99": 34.05699988365171,
+                "max": 47.19999980926514
+              },
+              "quiescenceToRasterStart": {
+                "samples": 0,
+                "p50": 0,
+                "p95": 0.02000007629394524,
+                "p99": 0.0840003204345703,
+                "max": 0.10000038146972656
+              },
+              "rasterExecution": {
+                "samples": 0,
+                "p50": 0,
+                "p95": 0.22000026702880854,
+                "p99": 0.28400020599365233,
+                "max": 0.3000001907348633
+              },
+              "rasterCompleteToPresentedFrame": {
+                "samples": 0,
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "firstPresentedToTwoStableFrames": {
+                "samples": 0,
+                "p50": 14.199999809265137,
+                "p95": 26.01999981403349,
+                "p99": 48.44800002098082,
+                "max": 58.90000009536743
+              }
+            }
+          },
+          "out": {
+            "samples": 40,
+            "stateChangeMs": {
+              "samples": 40,
+              "p50": 13.800000190734863,
+              "p95": 21.13499991893768,
+              "p99": 23.72,
+              "max": 24.5
+            },
+            "firstVisualMs": {
+              "samples": 40,
+              "p50": 20.200000047683716,
+              "p95": 26.064999985694882,
+              "p99": 30.238000111579893,
+              "max": 32.5
+            },
+            "settledMs": {
+              "samples": 40,
+              "p50": 34.950000047683716,
+              "p95": 42.13499991893768,
+              "p99": 54.23499999999999,
+              "max": 59.5
+            },
+            "browserCommandRoundTripMs": {
+              "samples": 40,
+              "p50": 143.44460399999662,
+              "p95": 154.64918719999767,
+              "p99": 158.19249199999408,
+              "max": 160.76604200000293
+            },
+            "settleAttributionMs": {
+              "inputToViewportState": {
+                "samples": 0,
+                "p50": 13.5,
+                "p95": 19.08000009059905,
+                "p99": 26.220999941825863,
+                "max": 28.59999990463257
+              },
+              "viewportToRequestsQuiescent": {
+                "samples": 0,
+                "p50": 7.549999952316284,
+                "p95": 9.8449998140335,
+                "p99": 18.51700007915496,
+                "max": 22.300000190734863
+              },
+              "quiescenceToRasterStart": {
+                "samples": 0,
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "rasterExecution": {
+                "samples": 0,
+                "p50": 0,
+                "p95": 0.029999971389770223,
+                "p99": 0.16599984169006313,
+                "max": 0.19999980926513672
+              },
+              "rasterCompleteToPresentedFrame": {
+                "samples": 0,
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "max": 0
+              },
+              "firstPresentedToTwoStableFrames": {
+                "samples": 0,
+                "p50": 14.799999713897703,
+                "p95": 23.24000027179718,
+                "p99": 30.954000058174127,
+                "max": 35.40000009536743
+              }
+            }
+          }
+        },
+        "pooledIn": {
+          "samples": 200,
+          "stateChangeMs": {
+            "samples": 200,
+            "p50": 13.049999952316284,
+            "p95": 21.40500009059906,
+            "p99": 23.202999811172482,
+            "max": 24.199999809265137
+          },
+          "firstVisualMs": {
+            "samples": 200,
+            "p50": 18.799999713897705,
+            "p95": 25.810000181198117,
+            "p99": 30.61399990558623,
+            "max": 32.5
+          },
+          "settledMs": {
+            "samples": 200,
+            "p50": 33.200000286102295,
+            "p95": 48.724999904632526,
+            "p99": 92.70799981117248,
+            "max": 94
+          },
+          "browserCommandRoundTripMs": {
+            "samples": 200,
+            "p50": 140.81789549999667,
+            "p95": 162.99192469999687,
+            "p99": 173.19686940999844,
+            "max": 178.16658299999835
+          },
+          "settleAttributionMs": {
+            "inputToViewportState": {
+              "samples": 40,
+              "p50": 12.049999713897703,
+              "p95": 18.244999837875362,
+              "p99": 20.442000265121457,
+              "max": 21.300000190734863
+            },
+            "viewportToRequestsQuiescent": {
+              "samples": 40,
+              "p50": 7.599999904632568,
+              "p95": 12.739999818801877,
+              "p99": 34.05699988365171,
+              "max": 47.19999980926514
+            },
+            "quiescenceToRasterStart": {
+              "samples": 17,
+              "p50": 0,
+              "p95": 0.02000007629394524,
+              "p99": 0.0840003204345703,
+              "max": 0.10000038146972656
+            },
+            "rasterExecution": {
+              "samples": 17,
+              "p50": 0,
+              "p95": 0.22000026702880854,
+              "p99": 0.28400020599365233,
+              "max": 0.3000001907348633
+            },
+            "rasterCompleteToPresentedFrame": {
+              "samples": 17,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0
+            },
+            "firstPresentedToTwoStableFrames": {
+              "samples": 40,
+              "p50": 14.199999809265137,
+              "p95": 26.01999981403349,
+              "p99": 48.44800002098082,
+              "max": 58.90000009536743
+            }
+          }
+        },
+        "pooledOut": {
+          "samples": 200,
+          "stateChangeMs": {
+            "samples": 200,
+            "p50": 14.5,
+            "p95": 22.520000004768363,
+            "p99": 28.60599990367889,
+            "max": 42.200000286102295
+          },
+          "firstVisualMs": {
+            "samples": 200,
+            "p50": 19.700000286102295,
+            "p95": 26.730000257492055,
+            "p99": 37.40800019264211,
+            "max": 54
+          },
+          "settledMs": {
+            "samples": 200,
+            "p50": 33.950000047683716,
+            "p95": 46.05499999523161,
+            "p99": 67.97600009441369,
+            "max": 79.80000019073486
+          },
+          "browserCommandRoundTripMs": {
+            "samples": 200,
+            "p50": 139.7757919999931,
+            "p95": 162.9087038500038,
+            "p99": 179.78123324999868,
+            "max": 202.92983399999503
+          },
+          "settleAttributionMs": {
+            "inputToViewportState": {
+              "samples": 40,
+              "p50": 13.5,
+              "p95": 19.08000009059905,
+              "p99": 26.220999941825863,
+              "max": 28.59999990463257
+            },
+            "viewportToRequestsQuiescent": {
+              "samples": 40,
+              "p50": 7.549999952316284,
+              "p95": 9.8449998140335,
+              "p99": 18.51700007915496,
+              "max": 22.300000190734863
+            },
+            "quiescenceToRasterStart": {
+              "samples": 18,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0
+            },
+            "rasterExecution": {
+              "samples": 18,
+              "p50": 0,
+              "p95": 0.029999971389770223,
+              "p99": 0.16599984169006313,
+              "max": 0.19999980926513672
+            },
+            "rasterCompleteToPresentedFrame": {
+              "samples": 18,
+              "p50": 0,
+              "p95": 0,
+              "p99": 0,
+              "max": 0
+            },
+            "firstPresentedToTwoStableFrames": {
+              "samples": 40,
+              "p50": 14.799999713897703,
+              "p95": 23.24000027179718,
+              "p99": 30.954000058174127,
+              "max": 35.40000009536743
+            }
+          }
+        }
+      },
+      "framePerformance": {
+        "raf": {
+          "samples": null,
+          "p50": 8.30000000000291,
+          "p95": 9.5,
+          "p99": 10.200000000004366,
+          "max": 18.400000000001455
+        },
+        "applicationWork": {
+          "samples": null,
+          "p50": 3.3000002861008397,
+          "p95": 9.300000357627141,
+          "p99": 11.099999999998545,
+          "max": 18.80000000000291
+        },
+        "rafSamples": 3765,
+        "applicationWorkSamples": 3766,
+        "thresholds": {
+          "over8_33Ms": {
+            "medianAcrossRuns": 411,
+            "totalAcrossRuns": 1873
+          },
+          "over16_67Ms": {
+            "medianAcrossRuns": 1,
+            "totalAcrossRuns": 12
+          },
+          "over33_3Ms": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 1
+          },
+          "over50Ms": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 0
+          }
+        },
+        "longTasks": {
+          "supported": true,
+          "count": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "totalDurationMs": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "maxDurationMs": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "totalCount": 0
+        },
+        "droppedSamples": [
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          },
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          },
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          },
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          },
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          }
+        ]
+      },
+      "processes": {
+        "perProcess": {
+          "main": {
+            "samplesPerRun": [
+              30,
+              30,
+              30,
+              30,
+              30
+            ],
+            "cpuPercent": {
+              "samples": 30,
+              "p50": 0.7231587401622639,
+              "p95": 2.4633174067099204,
+              "p99": 2.5444591381448656,
+              "max": 2.5448332356224452
+            },
+            "workingSetBytes": {
+              "samples": 30,
+              "p50": 343490560,
+              "p95": 343736320,
+              "p99": 343910809.6,
+              "max": 343982080
+            },
+            "privateBytes": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "peakWorkingSetBytes": 393527296,
+            "availability": "unavailable"
+          },
+          "gpu": {
+            "samplesPerRun": [
+              30,
+              30,
+              30,
+              30,
+              30
+            ],
+            "cpuPercent": {
+              "samples": 30,
+              "p50": 0.5695368918662497,
+              "p95": 0.6175816783288886,
+              "p99": 0.640371621277732,
+              "max": 0.6472427193526239
+            },
+            "workingSetBytes": {
+              "samples": 30,
+              "p50": 95059968,
+              "p95": 95134515.2,
+              "p99": 95141888,
+              "max": 95141888
+            },
+            "privateBytes": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "peakWorkingSetBytes": 99336192,
+            "availability": "unavailable"
+          },
+          "utility": {
+            "samplesPerRun": [
+              30,
+              30,
+              30,
+              30,
+              30
+            ],
+            "cpuPercent": {
+              "samples": 30,
+              "p50": 0,
+              "p95": 0.0035376297774298007,
+              "p99": 0.005082133014966619,
+              "max": 0.005613112230169676
+            },
+            "workingSetBytes": {
+              "samples": 30,
+              "p50": 56164352,
+              "p95": 56164352,
+              "p99": 56164352,
+              "max": 56164352
+            },
+            "privateBytes": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "peakWorkingSetBytes": 67272704,
+            "availability": "unavailable"
+          },
+          "renderer": {
+            "samplesPerRun": [
+              30,
+              30,
+              30,
+              30,
+              30
+            ],
+            "cpuPercent": {
+              "samples": 30,
+              "p50": 6.504338261245515,
+              "p95": 11.417057227186751,
+              "p99": 12.121848327513218,
+              "max": 12.307003639779266
+            },
+            "workingSetBytes": {
+              "samples": 30,
+              "p50": 1324441600,
+              "p95": 1482031104,
+              "p99": 1482031104,
+              "max": 1482031104
+            },
+            "privateBytes": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "peakWorkingSetBytes": 1890271232,
+            "availability": "unavailable"
+          }
+        },
+        "aggregateCpu": {
+          "samples": 31,
+          "p50": 7.754518676960842,
+          "p95": 13.138355944664028,
+          "p99": 13.940333297749,
+          "max": 14.156730299495758
+        }
+      },
+      "rendererMetrics": [
+        {
+          "startBytes": 1587232768,
+          "at30sBytes": 1311555584,
+          "at60sBytes": 1333575680,
+          "endBytes": 1333575680,
+          "peakBytes": 1634942976,
+          "deltaBytes": -253657088,
+          "cpuAveragePercent": 6.233681651830463,
+          "cpuP95Percent": 11.738304971638305,
+          "cpuPeakPercent": 13.738051515742987
+        },
+        {
+          "startBytes": 1627897856,
+          "at30sBytes": 1731575808,
+          "at60sBytes": 1733279744,
+          "endBytes": 1733279744,
+          "peakBytes": 1734361088,
+          "deltaBytes": 105381888,
+          "cpuAveragePercent": 6.259799104783619,
+          "cpuP95Percent": 11.863674290664761,
+          "cpuPeakPercent": 12.874600135630798
+        },
+        {
+          "startBytes": 1569816576,
+          "at30sBytes": 1482031104,
+          "at60sBytes": 1292419072,
+          "endBytes": 1292419072,
+          "peakBytes": 1573142528,
+          "deltaBytes": -277397504,
+          "cpuAveragePercent": 0.8793095956162057,
+          "cpuP95Percent": 5.057661063032594,
+          "cpuPeakPercent": 9.805198616441297
+        },
+        {
+          "startBytes": 1424539648,
+          "at30sBytes": 1681195008,
+          "at60sBytes": 1731248128,
+          "endBytes": 1731248128,
+          "peakBytes": 1731248128,
+          "deltaBytes": 306708480,
+          "cpuAveragePercent": 6.999627698419165,
+          "cpuP95Percent": 12.751656193191044,
+          "cpuPeakPercent": 15.29020656239828
+        },
+        {
+          "startBytes": 787234816,
+          "at30sBytes": 897449984,
+          "at60sBytes": 901169152,
+          "endBytes": 901169152,
+          "peakBytes": 904855552,
+          "deltaBytes": 113934336,
+          "cpuAveragePercent": 6.091465453009686,
+          "cpuP95Percent": 11.504296646177416,
+          "cpuPeakPercent": 13.166710640985665
+        }
+      ],
+      "jsHeapCheckpoints": [
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 669467589,
+            "heapTotalBytes": 716071261,
+            "waveformRequestStarts": 7,
+            "waveformRasterCalls": 27
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 766852839,
+            "heapTotalBytes": 819317439,
+            "waveformRequestStarts": 23,
+            "waveformRasterCalls": 168
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 686056169,
+            "heapTotalBytes": 792852833,
+            "waveformRequestStarts": 31,
+            "waveformRasterCalls": 726
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 644164466,
+            "heapTotalBytes": 819168674,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 1446
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 636560226,
+            "heapTotalBytes": 820444402,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 1446
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 790885786,
+            "heapTotalBytes": 859055894,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 1446
+          }
+        ],
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 653740183,
+            "heapTotalBytes": 719599651,
+            "waveformRequestStarts": 7,
+            "waveformRasterCalls": 27
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 756533558,
+            "heapTotalBytes": 823307642,
+            "waveformRequestStarts": 23,
+            "waveformRasterCalls": 178
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 649785652,
+            "heapTotalBytes": 799995404,
+            "waveformRequestStarts": 31,
+            "waveformRasterCalls": 727
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 629825090,
+            "heapTotalBytes": 826092194,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 1424
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 800352866,
+            "heapTotalBytes": 868282250,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 1424
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 747903986,
+            "heapTotalBytes": 842490774,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 1424
+          }
+        ],
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 652486735,
+            "heapTotalBytes": 709476555,
+            "waveformRequestStarts": 7,
+            "waveformRasterCalls": 27
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 698411582,
+            "heapTotalBytes": 756714178,
+            "waveformRequestStarts": 23,
+            "waveformRasterCalls": 191
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 700714426,
+            "heapTotalBytes": 761989810,
+            "waveformRequestStarts": 31,
+            "waveformRasterCalls": 783
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 706606501,
+            "heapTotalBytes": 764952913,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 1516
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 706855521,
+            "heapTotalBytes": 764952913,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 1516
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 706989385,
+            "heapTotalBytes": 764952913,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 1516
+          }
+        ],
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 658041986,
+            "heapTotalBytes": 706988018,
+            "waveformRequestStarts": 7,
+            "waveformRasterCalls": 27
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 624874475,
+            "heapTotalBytes": 739318391,
+            "waveformRequestStarts": 23,
+            "waveformRasterCalls": 176
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 701819473,
+            "heapTotalBytes": 830496973,
+            "waveformRequestStarts": 31,
+            "waveformRasterCalls": 737
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 775972401,
+            "heapTotalBytes": 841088745,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 1447
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 696615286,
+            "heapTotalBytes": 842833418,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 1447
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 701914366,
+            "heapTotalBytes": 841945530,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 1447
+          }
+        ],
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 654170703,
+            "heapTotalBytes": 708947223,
+            "waveformRequestStarts": 7,
+            "waveformRasterCalls": 19
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 745461477,
+            "heapTotalBytes": 810374093,
+            "waveformRequestStarts": 23,
+            "waveformRasterCalls": 109
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 653208671,
+            "heapTotalBytes": 796488827,
+            "waveformRequestStarts": 31,
+            "waveformRasterCalls": 439
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 811136543,
+            "heapTotalBytes": 858242323,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 855
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 762729086,
+            "heapTotalBytes": 833689030,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 855
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 748247641,
+            "heapTotalBytes": 835915661,
+            "waveformRequestStarts": 36,
+            "waveformRasterCalls": 855
+          }
+        ]
+      ],
+      "waveform": {
+        "perRun": [
+          {
+            "requests": 567,
+            "requestStarts": 36,
+            "completed": 36,
+            "cacheHits": 531,
+            "cacheMisses": 36,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 824,
+              "totalMs": 4.099998474121094,
+              "p95Ms": 0,
+              "maxMs": 0.10000038146972656
+            },
+            "raster": {
+              "count": 1446,
+              "totalMs": 170.79999685287476,
+              "p95Ms": 0.2999997138977051,
+              "maxMs": 1.5999999046325684
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 674.1999983787537,
+              "p95Ms": 13.004999995231628,
+              "maxMs": 15.400000095367432
+            }
+          },
+          {
+            "requests": 567,
+            "requestStarts": 36,
+            "completed": 36,
+            "cacheHits": 531,
+            "cacheMisses": 36,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 824,
+              "totalMs": 3.500000476837158,
+              "p95Ms": 0,
+              "maxMs": 0.10000038146972656
+            },
+            "raster": {
+              "count": 1424,
+              "totalMs": 179.99999952316284,
+              "p95Ms": 0.2999997138977051,
+              "maxMs": 1.799999713897705
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 679.5999984741211,
+              "p95Ms": 12.709999799728394,
+              "maxMs": 15.799999713897705
+            }
+          },
+          {
+            "requests": 567,
+            "requestStarts": 36,
+            "completed": 36,
+            "cacheHits": 531,
+            "cacheMisses": 36,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 824,
+              "totalMs": 4.899998188018799,
+              "p95Ms": 0.09999990463256836,
+              "maxMs": 0.10000038146972656
+            },
+            "raster": {
+              "count": 1516,
+              "totalMs": 161.899995803833,
+              "p95Ms": 0.2999997138977051,
+              "maxMs": 0.6999998092651367
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 653.5999970436096,
+              "p95Ms": 12.099999904632568,
+              "maxMs": 13.099999904632568
+            }
+          },
+          {
+            "requests": 567,
+            "requestStarts": 36,
+            "completed": 36,
+            "cacheHits": 531,
+            "cacheMisses": 36,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 824,
+              "totalMs": 5.5,
+              "p95Ms": 0.09999990463256836,
+              "maxMs": 0.19999980926513672
+            },
+            "raster": {
+              "count": 1447,
+              "totalMs": 199.5999984741211,
+              "p95Ms": 0.3000001907348633,
+              "maxMs": 2
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 743.3999996185303,
+              "p95Ms": 12.97500007152557,
+              "maxMs": 31.700000286102295
+            }
+          },
+          {
+            "requests": 567,
+            "requestStarts": 36,
+            "completed": 36,
+            "cacheHits": 531,
+            "cacheMisses": 36,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 824,
+              "totalMs": 3.8999977111816406,
+              "p95Ms": 0,
+              "maxMs": 0.10000038146972656
+            },
+            "raster": {
+              "count": 855,
+              "totalMs": 94.20000171661377,
+              "p95Ms": 0.2999997138977051,
+              "maxMs": 0.9000000953674316
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 512.3999991416931,
+              "p95Ms": 10.31000018119812,
+              "maxMs": 12.299999713897705
+            }
+          }
+        ],
+        "medianAcrossRuns": {
+          "requests": {
+            "medianAcrossRuns": 567,
+            "totalAcrossRuns": 2835,
+            "values": [
+              567,
+              567,
+              567,
+              567,
+              567
+            ]
+          },
+          "requestStarts": {
+            "medianAcrossRuns": 36,
+            "totalAcrossRuns": 180,
+            "values": [
+              36,
+              36,
+              36,
+              36,
+              36
+            ]
+          },
+          "completed": {
+            "medianAcrossRuns": 36,
+            "totalAcrossRuns": 180,
+            "values": [
+              36,
+              36,
+              36,
+              36,
+              36
+            ]
+          },
+          "cacheHits": {
+            "medianAcrossRuns": 531,
+            "totalAcrossRuns": 2655,
+            "values": [
+              531,
+              531,
+              531,
+              531,
+              531
+            ]
+          },
+          "cacheMisses": {
+            "medianAcrossRuns": 36,
+            "totalAcrossRuns": 180,
+            "values": [
+              36,
+              36,
+              36,
+              36,
+              36
+            ]
+          },
+          "cancelled": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 0,
+            "values": [
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "superseded": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 0,
+            "values": [
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "pendingAtEnd": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 0,
+            "values": [
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "cacheBytes": 0,
+          "geometry": {
+            "count": [
+              {
+                "count": 824,
+                "totalMs": 4.099998474121094,
+                "p95Ms": 0,
+                "maxMs": 0.10000038146972656
+              },
+              {
+                "count": 824,
+                "totalMs": 3.500000476837158,
+                "p95Ms": 0,
+                "maxMs": 0.10000038146972656
+              },
+              {
+                "count": 824,
+                "totalMs": 4.899998188018799,
+                "p95Ms": 0.09999990463256836,
+                "maxMs": 0.10000038146972656
+              },
+              {
+                "count": 824,
+                "totalMs": 5.5,
+                "p95Ms": 0.09999990463256836,
+                "maxMs": 0.19999980926513672
+              },
+              {
+                "count": 824,
+                "totalMs": 3.8999977111816406,
+                "p95Ms": 0,
+                "maxMs": 0.10000038146972656
+              }
+            ],
+            "totalMs": [
+              4.099998474121094,
+              3.500000476837158,
+              4.899998188018799,
+              5.5,
+              3.8999977111816406
+            ],
+            "p95Ms": [
+              0,
+              0,
+              0.09999990463256836,
+              0.09999990463256836,
+              0
+            ],
+            "maxMs": [
+              0.10000038146972656,
+              0.10000038146972656,
+              0.10000038146972656,
+              0.19999980926513672,
+              0.10000038146972656
+            ],
+            "distributionNote": "Per-sample p50/p99 were not retained by the accepted legacy artifacts; p95/max and totals are retained."
+          },
+          "raster": {
+            "count": [
+              {
+                "count": 1446,
+                "totalMs": 170.79999685287476,
+                "p95Ms": 0.2999997138977051,
+                "maxMs": 1.5999999046325684
+              },
+              {
+                "count": 1424,
+                "totalMs": 179.99999952316284,
+                "p95Ms": 0.2999997138977051,
+                "maxMs": 1.799999713897705
+              },
+              {
+                "count": 1516,
+                "totalMs": 161.899995803833,
+                "p95Ms": 0.2999997138977051,
+                "maxMs": 0.6999998092651367
+              },
+              {
+                "count": 1447,
+                "totalMs": 199.5999984741211,
+                "p95Ms": 0.3000001907348633,
+                "maxMs": 2
+              },
+              {
+                "count": 855,
+                "totalMs": 94.20000171661377,
+                "p95Ms": 0.2999997138977051,
+                "maxMs": 0.9000000953674316
+              }
+            ],
+            "totalMs": [
+              170.79999685287476,
+              179.99999952316284,
+              161.899995803833,
+              199.5999984741211,
+              94.20000171661377
+            ],
+            "p95Ms": [
+              0.2999997138977051,
+              0.2999997138977051,
+              0.2999997138977051,
+              0.3000001907348633,
+              0.2999997138977051
+            ],
+            "maxMs": [
+              1.5999999046325684,
+              1.799999713897705,
+              0.6999998092651367,
+              2,
+              0.9000000953674316
+            ],
+            "distributionNote": "Per-sample p50/p99 were not retained by the accepted legacy artifacts; p95/max and totals are retained."
+          },
+          "viewport": {
+            "count": [
+              {
+                "count": 80,
+                "totalMs": 674.1999983787537,
+                "p95Ms": 13.004999995231628,
+                "maxMs": 15.400000095367432
+              },
+              {
+                "count": 80,
+                "totalMs": 679.5999984741211,
+                "p95Ms": 12.709999799728394,
+                "maxMs": 15.799999713897705
+              },
+              {
+                "count": 80,
+                "totalMs": 653.5999970436096,
+                "p95Ms": 12.099999904632568,
+                "maxMs": 13.099999904632568
+              },
+              {
+                "count": 80,
+                "totalMs": 743.3999996185303,
+                "p95Ms": 12.97500007152557,
+                "maxMs": 31.700000286102295
+              },
+              {
+                "count": 80,
+                "totalMs": 512.3999991416931,
+                "p95Ms": 10.31000018119812,
+                "maxMs": 12.299999713897705
+              }
+            ],
+            "totalMs": [
+              674.1999983787537,
+              679.5999984741211,
+              653.5999970436096,
+              743.3999996185303,
+              512.3999991416931
+            ],
+            "p95Ms": [
+              13.004999995231628,
+              12.709999799728394,
+              12.099999904632568,
+              12.97500007152557,
+              10.31000018119812
+            ],
+            "maxMs": [
+              15.400000095367432,
+              15.799999713897705,
+              13.099999904632568,
+              31.700000286102295,
+              12.299999713897705
+            ],
+            "distributionNote": "Per-sample p50/p99 were not retained by the accepted legacy artifacts; p95/max and totals are retained."
+          }
+        },
+        "explicitAbsent": {
+          "cacheBytes": 0,
+          "mediaPaging": 0,
+          "mediaDecode": 0,
+          "waveformCancellation": 0,
+          "waveformSupersede": 0
+        }
+      },
+      "realtime": {
+        "callbackDeadlineMisses": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "workerDeadlineMisses": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "workerWatchdogMisses": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "workerFaults": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "rejectedBlocks": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "visibility": {
+        "projectActiveClipCount": [
+          20
+        ],
+        "mountedClipCount": [
+          10,
+          12
+        ],
+        "viewportIntersectingClipCount": [
+          5
+        ]
+      }
     },
     "P30": {
-      "validRuns": 7,
-      "medianRunFirstVisualP95Ms": 30.600000381469727,
-      "medianRunSettledP95Ms": 58.19999980926514,
-      "medianRunZoomInSettledP95Ms": 61.59999990463257,
-      "medianRunZoomOutSettledP95Ms": 52,
-      "medianRendererCpuAveragePercent": 6.8360623927656095,
-      "medianRendererCpuP95Percent": 12.589729247406341,
-      "medianRendererPeakBytes": 2094252032,
-      "medianWaveformRequestStarts": 52,
-      "medianWaveformCacheHits": 677,
-      "medianWaveformRasterCalls": 1377,
-      "medianWaveformRasterTotalMs": 135.69999837875366,
-      "medianViewportTotalMs": 693.100001335144,
-      "maximumRafP95Ms": 9.799999999995634,
-      "totalLongTasks": 0,
-      "totalRealtimeDeadlineMisses": 0,
-      "totalVstWorkerWatchdogMisses": 0,
-      "totalVstWorkerFaults": 0,
-      "viewportIntersectingClipCounts": [
-        5
-      ],
-      "artifacts": [
-        "/private/tmp/daw-zoom-optimized/p30-5.json",
-        "/private/tmp/daw-zoom-optimized/p30-4.json",
-        "/private/tmp/daw-zoom-optimized/p30-3.json",
-        "/private/tmp/daw-zoom-optimized/p30-2.json",
+      "acceptedRuns": 5,
+      "gesturesPerRun": 80,
+      "acceptedArtifacts": [
         "/private/tmp/daw-zoom-optimized/p30-1.json",
-        "/private/tmp/daw-zoom-optimized/p30-7.json",
+        "/private/tmp/daw-zoom-optimized/p30-3.json",
+        "/private/tmp/daw-zoom-optimized/p30-4.json",
+        "/private/tmp/daw-zoom-optimized/p30-5.json",
         "/private/tmp/daw-zoom-optimized/p30-6.json"
-      ]
+      ],
+      "workload": {
+        "activeClips": 30,
+        "fullDspProcessors": 8,
+        "settledGestures": [
+          80,
+          80,
+          80,
+          80,
+          80
+        ],
+        "zeroFaultGates": true
+      },
+      "gestures": {
+        "pooledAccepted": {
+          "samples": 400,
+          "stateChangeMs": {
+            "samples": 400,
+            "p50": 15.300000190734863,
+            "p95": 23.09999990463257,
+            "p99": 26.00799999713897,
+            "max": 30.199999809265137
+          },
+          "firstVisualMs": {
+            "samples": 400,
+            "p50": 22.899999856948853,
+            "p95": 31.81000018119811,
+            "p99": 35.204000282287595,
+            "max": 38.19999980926514
+          },
+          "settledMs": {
+            "samples": 400,
+            "p50": 38.700000047683716,
+            "p95": 58.53999998569485,
+            "p99": 110.00300000190735,
+            "max": 138.19999980926514
+          },
+          "browserCommandRoundTripMs": {
+            "samples": 400,
+            "p50": 148.95406250000815,
+            "p95": 176.46517290000338,
+            "p99": 202.34829990999438,
+            "max": 245.67191699999967
+          },
+          "settleAttributionMs": {
+            "inputToViewportState": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "viewportToRequestsQuiescent": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "quiescenceToRasterStart": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "rasterExecution": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "rasterCompleteToPresentedFrame": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "firstPresentedToTwoStableFrames": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            }
+          }
+        },
+        "medianAcrossRuns": {
+          "all": {
+            "samples": 80,
+            "stateChangeMs": {
+              "samples": 80,
+              "p50": 15.100000143051147,
+              "p95": 22.85500018596649,
+              "p99": 24.828000035285907,
+              "max": 26
+            },
+            "firstVisualMs": {
+              "samples": 80,
+              "p50": 22.899999856948853,
+              "p95": 30.64500036239624,
+              "p99": 34.62100026130676,
+              "max": 35.200000286102295
+            },
+            "settledMs": {
+              "samples": 80,
+              "p50": 38.65000009536743,
+              "p95": 58.000000381469704,
+              "p99": 91.0000001859663,
+              "max": 114.69999980926514
+            },
+            "browserCommandRoundTripMs": {
+              "samples": 80,
+              "p50": 148.76358350000373,
+              "p95": 171.62272079999892,
+              "p99": 191.7318105699928,
+              "max": 202.93741699999373
+            },
+            "settleAttributionMs": {
+              "inputToViewportState": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "viewportToRequestsQuiescent": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "quiescenceToRasterStart": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "rasterExecution": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "rasterCompleteToPresentedFrame": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "firstPresentedToTwoStableFrames": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              }
+            }
+          },
+          "in": {
+            "samples": 40,
+            "stateChangeMs": {
+              "samples": 40,
+              "p50": 13.399999856948853,
+              "p95": 21.85500018596649,
+              "p99": 23.021999979019164,
+              "max": 23.09999990463257
+            },
+            "firstVisualMs": {
+              "samples": 40,
+              "p50": 22.59999990463257,
+              "p95": 28.20999982357025,
+              "p99": 30.96199997901916,
+              "max": 32.59999990463257
+            },
+            "settledMs": {
+              "samples": 40,
+              "p50": 37.700000047683716,
+              "p95": 60.73500027656555,
+              "p99": 96.34999999999998,
+              "max": 114.69999980926514
+            },
+            "browserCommandRoundTripMs": {
+              "samples": 40,
+              "p50": 148.34939600000507,
+              "p95": 176.8410830000008,
+              "p99": 187.1026943799964,
+              "max": 191.28620799999044
+            },
+            "settleAttributionMs": {
+              "inputToViewportState": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "viewportToRequestsQuiescent": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "quiescenceToRasterStart": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "rasterExecution": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "rasterCompleteToPresentedFrame": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "firstPresentedToTwoStableFrames": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              }
+            }
+          },
+          "out": {
+            "samples": 40,
+            "stateChangeMs": {
+              "samples": 40,
+              "p50": 16,
+              "p95": 23.61499991416931,
+              "p99": 25.922000074386595,
+              "max": 26
+            },
+            "firstVisualMs": {
+              "samples": 40,
+              "p50": 23.40000009536743,
+              "p95": 32.27499980926513,
+              "p99": 35.0440000629425,
+              "max": 35.200000286102295
+            },
+            "settledMs": {
+              "samples": 40,
+              "p50": 39.950000047683716,
+              "p95": 51.61999990940094,
+              "p99": 71.38999980926512,
+              "max": 82.69999980926514
+            },
+            "browserCommandRoundTripMs": {
+              "samples": 40,
+              "p50": 148.88268750000134,
+              "p95": 172.03505594999294,
+              "p99": 188.15865950000034,
+              "max": 196.78508400000283
+            },
+            "settleAttributionMs": {
+              "inputToViewportState": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "viewportToRequestsQuiescent": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "quiescenceToRasterStart": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "rasterExecution": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "rasterCompleteToPresentedFrame": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              },
+              "firstPresentedToTwoStableFrames": {
+                "samples": 0,
+                "p50": null,
+                "p95": null,
+                "p99": null,
+                "max": null
+              }
+            }
+          }
+        },
+        "pooledIn": {
+          "samples": 200,
+          "stateChangeMs": {
+            "samples": 200,
+            "p50": 14.299999713897703,
+            "p95": 22.005000019073485,
+            "p99": 23.10199990749359,
+            "max": 24.199999809265137
+          },
+          "firstVisualMs": {
+            "samples": 200,
+            "p50": 22.40000009536743,
+            "p95": 28.30500016212463,
+            "p99": 32.59999990463257,
+            "max": 34.60000038146973
+          },
+          "settledMs": {
+            "samples": 200,
+            "p50": 37.64999985694885,
+            "p95": 65.59999992847443,
+            "p99": 114.75899981021875,
+            "max": 138.19999980926514
+          },
+          "browserCommandRoundTripMs": {
+            "samples": 200,
+            "p50": 148.70270850000088,
+            "p95": 177.35232885000366,
+            "p99": 202.34829990999438,
+            "max": 245.67191699999967
+          },
+          "settleAttributionMs": {
+            "inputToViewportState": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "viewportToRequestsQuiescent": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "quiescenceToRasterStart": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "rasterExecution": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "rasterCompleteToPresentedFrame": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "firstPresentedToTwoStableFrames": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            }
+          }
+        },
+        "pooledOut": {
+          "samples": 200,
+          "stateChangeMs": {
+            "samples": 200,
+            "p50": 16,
+            "p95": 23.90000009536743,
+            "p99": 27.023000001907327,
+            "max": 30.199999809265137
+          },
+          "firstVisualMs": {
+            "samples": 200,
+            "p50": 23.5,
+            "p95": 33.7199998140335,
+            "p99": 37.30800018787383,
+            "max": 38.19999980926514
+          },
+          "settledMs": {
+            "samples": 200,
+            "p50": 39.90000009536743,
+            "p95": 52.01000001430511,
+            "p99": 82.71999981403349,
+            "max": 93
+          },
+          "browserCommandRoundTripMs": {
+            "samples": 200,
+            "p50": 149.17368699999497,
+            "p95": 173.91442465,
+            "p99": 196.84660733000268,
+            "max": 222.78904200000397
+          },
+          "settleAttributionMs": {
+            "inputToViewportState": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "viewportToRequestsQuiescent": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "quiescenceToRasterStart": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "rasterExecution": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "rasterCompleteToPresentedFrame": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "firstPresentedToTwoStableFrames": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            }
+          }
+        }
+      },
+      "framePerformance": {
+        "raf": {
+          "samples": null,
+          "p50": 8.39999999999418,
+          "p95": 9.700000000004366,
+          "p99": 16.418000000001175,
+          "max": 26.5
+        },
+        "applicationWork": {
+          "samples": null,
+          "p50": 3.900000000001455,
+          "p95": 10.000000286105205,
+          "p99": 13.668000030514651,
+          "max": 27.89999971389625
+        },
+        "rafSamples": 3693,
+        "applicationWorkSamples": 3694,
+        "thresholds": {
+          "over8_33Ms": {
+            "medianAcrossRuns": 547,
+            "totalAcrossRuns": 2757
+          },
+          "over16_67Ms": {
+            "medianAcrossRuns": 14,
+            "totalAcrossRuns": 68
+          },
+          "over33_3Ms": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 1
+          },
+          "over50Ms": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 0
+          }
+        },
+        "longTasks": {
+          "supported": true,
+          "count": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "totalDurationMs": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "maxDurationMs": [
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "totalCount": 0
+        },
+        "droppedSamples": [
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          },
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          },
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          },
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          },
+          {
+            "raf": 0,
+            "applicationWork": 0,
+            "longTasks": 0
+          }
+        ]
+      },
+      "processes": {
+        "perProcess": {
+          "main": {
+            "samplesPerRun": [
+              30,
+              30,
+              30,
+              30,
+              30
+            ],
+            "cpuPercent": {
+              "samples": 30,
+              "p50": 0.9182179638579204,
+              "p95": 2.8374327741844887,
+              "p99": 3.7699009627112985,
+              "max": 4.072613134823759
+            },
+            "workingSetBytes": {
+              "samples": 30,
+              "p50": 427753472,
+              "p95": 427959091.2,
+              "p99": 428047892.48,
+              "max": 428081152
+            },
+            "privateBytes": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "peakWorkingSetBytes": 458260480,
+            "availability": "unavailable"
+          },
+          "gpu": {
+            "samplesPerRun": [
+              30,
+              30,
+              30,
+              30,
+              30
+            ],
+            "cpuPercent": {
+              "samples": 30,
+              "p50": 0.6168725505367632,
+              "p95": 0.6770971341175613,
+              "p99": 0.7066273584342935,
+              "max": 0.713787745996335
+            },
+            "workingSetBytes": {
+              "samples": 30,
+              "p50": 99999744,
+              "p95": 100073472,
+              "p99": 100085104.64,
+              "max": 100089856
+            },
+            "privateBytes": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "peakWorkingSetBytes": 102744064,
+            "availability": "unavailable"
+          },
+          "utility": {
+            "samplesPerRun": [
+              30,
+              30,
+              30,
+              30,
+              30
+            ],
+            "cpuPercent": {
+              "samples": 30,
+              "p50": 0,
+              "p95": 0.003637485730072885,
+              "p99": 0.005206859304278451,
+              "max": 0.005738479256558452
+            },
+            "workingSetBytes": {
+              "samples": 30,
+              "p50": 57556992,
+              "p95": 57556992,
+              "p99": 57556992,
+              "max": 57556992
+            },
+            "privateBytes": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "peakWorkingSetBytes": 67321856,
+            "availability": "unavailable"
+          },
+          "renderer": {
+            "samplesPerRun": [
+              30,
+              30,
+              30,
+              30,
+              30
+            ],
+            "cpuPercent": {
+              "samples": 30,
+              "p50": 7.094765124773183,
+              "p95": 12.442591833781488,
+              "p99": 13.115513250290954,
+              "max": 13.254153965335647
+            },
+            "workingSetBytes": {
+              "samples": 30,
+              "p50": 2064228352,
+              "p95": 2067909836.8,
+              "p99": 2067974225.92,
+              "max": 2067988480
+            },
+            "privateBytes": {
+              "samples": 0,
+              "p50": null,
+              "p95": null,
+              "p99": null,
+              "max": null
+            },
+            "peakWorkingSetBytes": 2249031680,
+            "availability": "unavailable"
+          }
+        },
+        "aggregateCpu": {
+          "samples": 32,
+          "p50": 8.586900433887571,
+          "p95": 14.116470632830072,
+          "p99": 15.419375223244467,
+          "max": 15.80813004019106
+        }
+      },
+      "rendererMetrics": [
+        {
+          "startBytes": 1930608640,
+          "at30sBytes": 2089517056,
+          "at60sBytes": 2064089088,
+          "endBytes": 2064089088,
+          "peakBytes": 2094252032,
+          "deltaBytes": 133480448,
+          "cpuAveragePercent": 6.8360623927656095,
+          "cpuP95Percent": 12.591404277932774,
+          "cpuPeakPercent": 15.267861557313195
+        },
+        {
+          "startBytes": 2027814912,
+          "at30sBytes": 2105999360,
+          "at60sBytes": 2170273792,
+          "endBytes": 2170273792,
+          "peakBytes": 2171174912,
+          "deltaBytes": 142458880,
+          "cpuAveragePercent": 6.749234987641256,
+          "cpuP95Percent": 12.429754421858412,
+          "cpuPeakPercent": 13.864206129062815
+        },
+        {
+          "startBytes": 2035417088,
+          "at30sBytes": 1618313216,
+          "at60sBytes": 1617854464,
+          "endBytes": 1617854464,
+          "peakBytes": 2035646464,
+          "deltaBytes": -417562624,
+          "cpuAveragePercent": 6.852856352330274,
+          "cpuP95Percent": 12.332978195043017,
+          "cpuPeakPercent": 14.152972771750692
+        },
+        {
+          "startBytes": 1908801536,
+          "at30sBytes": 2066448384,
+          "at60sBytes": 2061860864,
+          "endBytes": 2061860864,
+          "peakBytes": 2078965760,
+          "deltaBytes": 153059328,
+          "cpuAveragePercent": 6.735376376022468,
+          "cpuP95Percent": 12.589729247406341,
+          "cpuPeakPercent": 14.220544501476313
+        },
+        {
+          "startBytes": 1948762112,
+          "at30sBytes": 2005139456,
+          "at60sBytes": 2061729792,
+          "endBytes": 2061729792,
+          "peakBytes": 2063040512,
+          "deltaBytes": 112967680,
+          "cpuAveragePercent": 6.842590103938943,
+          "cpuP95Percent": 12.64751674604251,
+          "cpuPeakPercent": 14.467290476930577
+        }
+      ],
+      "jsHeapCheckpoints": [
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 916645514,
+            "heapTotalBytes": 968562458,
+            "waveformRequestStarts": 9,
+            "waveformRasterCalls": 29
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 892050406,
+            "heapTotalBytes": 1003948710,
+            "waveformRequestStarts": 31,
+            "waveformRasterCalls": 172
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 964048671,
+            "heapTotalBytes": 1078959347,
+            "waveformRequestStarts": 42,
+            "waveformRasterCalls": 706
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 938105319,
+            "heapTotalBytes": 1090095627,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1378
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 922631331,
+            "heapTotalBytes": 1091556587,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1378
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 1063386521,
+            "heapTotalBytes": 1131740469,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1378
+          }
+        ],
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 916082423,
+            "heapTotalBytes": 982870415,
+            "waveformRequestStarts": 9,
+            "waveformRasterCalls": 28
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 880174182,
+            "heapTotalBytes": 989698002,
+            "waveformRequestStarts": 31,
+            "waveformRasterCalls": 171
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 973259846,
+            "heapTotalBytes": 1057166426,
+            "waveformRequestStarts": 42,
+            "waveformRasterCalls": 705
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 1011963718,
+            "heapTotalBytes": 1086904910,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1377
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 1014137683,
+            "heapTotalBytes": 1086692971,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1377
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 995220732,
+            "heapTotalBytes": 1093590544,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1377
+          }
+        ],
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 934839379,
+            "heapTotalBytes": 990043955,
+            "waveformRequestStarts": 9,
+            "waveformRasterCalls": 29
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 941810740,
+            "heapTotalBytes": 995452456,
+            "waveformRequestStarts": 31,
+            "waveformRasterCalls": 172
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 897645988,
+            "heapTotalBytes": 1059054456,
+            "waveformRequestStarts": 42,
+            "waveformRasterCalls": 706
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 1063077931,
+            "heapTotalBytes": 1127751255,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1378
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 1001221194,
+            "heapTotalBytes": 1109469214,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1378
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 966141307,
+            "heapTotalBytes": 1105696467,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1378
+          }
+        ],
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 900543312,
+            "heapTotalBytes": 968221692,
+            "waveformRequestStarts": 9,
+            "waveformRasterCalls": 28
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 1023250138,
+            "heapTotalBytes": 1077388554,
+            "waveformRequestStarts": 31,
+            "waveformRasterCalls": 171
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 881872654,
+            "heapTotalBytes": 1050657246,
+            "waveformRequestStarts": 42,
+            "waveformRasterCalls": 705
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 899396737,
+            "heapTotalBytes": 1079601597,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1376
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 1048979234,
+            "heapTotalBytes": 1103995922,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1376
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 975925207,
+            "heapTotalBytes": 1087852623,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1376
+          }
+        ],
+        [
+          {
+            "name": "before-sweeps",
+            "heapUsedBytes": 925995351,
+            "heapTotalBytes": 992703799,
+            "waveformRequestStarts": 9,
+            "waveformRasterCalls": 29
+          },
+          {
+            "name": "after-first-overview",
+            "heapUsedBytes": 901161989,
+            "heapTotalBytes": 993915225,
+            "waveformRequestStarts": 31,
+            "waveformRasterCalls": 172
+          },
+          {
+            "name": "after-sweep-5",
+            "heapUsedBytes": 995800604,
+            "heapTotalBytes": 1080107880,
+            "waveformRequestStarts": 42,
+            "waveformRasterCalls": 705
+          },
+          {
+            "name": "after-sweep-10",
+            "heapUsedBytes": 1017845959,
+            "heapTotalBytes": 1092769343,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1377
+          },
+          {
+            "name": "after-5s-settle",
+            "heapUsedBytes": 975942354,
+            "heapTotalBytes": 1088809130,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1377
+          },
+          {
+            "name": "after-10s-settle",
+            "heapUsedBytes": 959520764,
+            "heapTotalBytes": 1087105092,
+            "waveformRequestStarts": 52,
+            "waveformRasterCalls": 1377
+          }
+        ]
+      ],
+      "waveform": {
+        "perRun": [
+          {
+            "requests": 729,
+            "requestStarts": 52,
+            "completed": 52,
+            "cacheHits": 677,
+            "cacheMisses": 52,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 1328,
+              "totalMs": 5.300000190734863,
+              "p95Ms": 0,
+              "maxMs": 0.10000038146972656
+            },
+            "raster": {
+              "count": 1378,
+              "totalMs": 133.80000162124634,
+              "p95Ms": 0.2999997138977051,
+              "maxMs": 1.200000286102295
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 697.1000003814697,
+              "p95Ms": 13.820000195503233,
+              "maxMs": 20
+            }
+          },
+          {
+            "requests": 729,
+            "requestStarts": 52,
+            "completed": 52,
+            "cacheHits": 677,
+            "cacheMisses": 52,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 1328,
+              "totalMs": 6.999996662139893,
+              "p95Ms": 0,
+              "maxMs": 1
+            },
+            "raster": {
+              "count": 1377,
+              "totalMs": 131.19999885559082,
+              "p95Ms": 0.2999997138977051,
+              "maxMs": 1.5
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 684.4999976158142,
+              "p95Ms": 12.92500009536743,
+              "maxMs": 15.199999809265137
+            }
+          },
+          {
+            "requests": 729,
+            "requestStarts": 52,
+            "completed": 52,
+            "cacheHits": 677,
+            "cacheMisses": 52,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 1328,
+              "totalMs": 7.199999809265137,
+              "p95Ms": 0.09999990463256836,
+              "maxMs": 0.10000038146972656
+            },
+            "raster": {
+              "count": 1378,
+              "totalMs": 135.69999837875366,
+              "p95Ms": 0.3000001907348633,
+              "maxMs": 1.4000000953674316
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 683.7999997138977,
+              "p95Ms": 13.420000100135802,
+              "maxMs": 15.200000286102295
+            }
+          },
+          {
+            "requests": 729,
+            "requestStarts": 52,
+            "completed": 52,
+            "cacheHits": 677,
+            "cacheMisses": 52,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 1328,
+              "totalMs": 7.100000381469727,
+              "p95Ms": 0.09999990463256836,
+              "maxMs": 0.10000038146972656
+            },
+            "raster": {
+              "count": 1376,
+              "totalMs": 137.9000015258789,
+              "p95Ms": 0.3000001907348633,
+              "maxMs": 1.5
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 693.100001335144,
+              "p95Ms": 13.440000104904172,
+              "maxMs": 15.800000190734863
+            }
+          },
+          {
+            "requests": 729,
+            "requestStarts": 52,
+            "completed": 52,
+            "cacheHits": 677,
+            "cacheMisses": 52,
+            "cancelled": 0,
+            "superseded": 0,
+            "pendingAtEnd": 0,
+            "cacheBytes": 0,
+            "cacheBytesAvailable": false,
+            "geometry": {
+              "count": 1328,
+              "totalMs": 5.799999713897705,
+              "p95Ms": 0,
+              "maxMs": 0.10000038146972656
+            },
+            "raster": {
+              "count": 1377,
+              "totalMs": 129.19999742507935,
+              "p95Ms": 0.2999997138977051,
+              "maxMs": 1.4000000953674316
+            },
+            "viewport": {
+              "count": 80,
+              "totalMs": 690.2999992370605,
+              "p95Ms": 13.324999713897704,
+              "maxMs": 16.59999990463257
+            }
+          }
+        ],
+        "medianAcrossRuns": {
+          "requests": {
+            "medianAcrossRuns": 729,
+            "totalAcrossRuns": 3645,
+            "values": [
+              729,
+              729,
+              729,
+              729,
+              729
+            ]
+          },
+          "requestStarts": {
+            "medianAcrossRuns": 52,
+            "totalAcrossRuns": 260,
+            "values": [
+              52,
+              52,
+              52,
+              52,
+              52
+            ]
+          },
+          "completed": {
+            "medianAcrossRuns": 52,
+            "totalAcrossRuns": 260,
+            "values": [
+              52,
+              52,
+              52,
+              52,
+              52
+            ]
+          },
+          "cacheHits": {
+            "medianAcrossRuns": 677,
+            "totalAcrossRuns": 3385,
+            "values": [
+              677,
+              677,
+              677,
+              677,
+              677
+            ]
+          },
+          "cacheMisses": {
+            "medianAcrossRuns": 52,
+            "totalAcrossRuns": 260,
+            "values": [
+              52,
+              52,
+              52,
+              52,
+              52
+            ]
+          },
+          "cancelled": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 0,
+            "values": [
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "superseded": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 0,
+            "values": [
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "pendingAtEnd": {
+            "medianAcrossRuns": 0,
+            "totalAcrossRuns": 0,
+            "values": [
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "cacheBytes": 0,
+          "geometry": {
+            "count": [
+              {
+                "count": 1328,
+                "totalMs": 5.300000190734863,
+                "p95Ms": 0,
+                "maxMs": 0.10000038146972656
+              },
+              {
+                "count": 1328,
+                "totalMs": 6.999996662139893,
+                "p95Ms": 0,
+                "maxMs": 1
+              },
+              {
+                "count": 1328,
+                "totalMs": 7.199999809265137,
+                "p95Ms": 0.09999990463256836,
+                "maxMs": 0.10000038146972656
+              },
+              {
+                "count": 1328,
+                "totalMs": 7.100000381469727,
+                "p95Ms": 0.09999990463256836,
+                "maxMs": 0.10000038146972656
+              },
+              {
+                "count": 1328,
+                "totalMs": 5.799999713897705,
+                "p95Ms": 0,
+                "maxMs": 0.10000038146972656
+              }
+            ],
+            "totalMs": [
+              5.300000190734863,
+              6.999996662139893,
+              7.199999809265137,
+              7.100000381469727,
+              5.799999713897705
+            ],
+            "p95Ms": [
+              0,
+              0,
+              0.09999990463256836,
+              0.09999990463256836,
+              0
+            ],
+            "maxMs": [
+              0.10000038146972656,
+              1,
+              0.10000038146972656,
+              0.10000038146972656,
+              0.10000038146972656
+            ],
+            "distributionNote": "Per-sample p50/p99 were not retained by the accepted legacy artifacts; p95/max and totals are retained."
+          },
+          "raster": {
+            "count": [
+              {
+                "count": 1378,
+                "totalMs": 133.80000162124634,
+                "p95Ms": 0.2999997138977051,
+                "maxMs": 1.200000286102295
+              },
+              {
+                "count": 1377,
+                "totalMs": 131.19999885559082,
+                "p95Ms": 0.2999997138977051,
+                "maxMs": 1.5
+              },
+              {
+                "count": 1378,
+                "totalMs": 135.69999837875366,
+                "p95Ms": 0.3000001907348633,
+                "maxMs": 1.4000000953674316
+              },
+              {
+                "count": 1376,
+                "totalMs": 137.9000015258789,
+                "p95Ms": 0.3000001907348633,
+                "maxMs": 1.5
+              },
+              {
+                "count": 1377,
+                "totalMs": 129.19999742507935,
+                "p95Ms": 0.2999997138977051,
+                "maxMs": 1.4000000953674316
+              }
+            ],
+            "totalMs": [
+              133.80000162124634,
+              131.19999885559082,
+              135.69999837875366,
+              137.9000015258789,
+              129.19999742507935
+            ],
+            "p95Ms": [
+              0.2999997138977051,
+              0.2999997138977051,
+              0.3000001907348633,
+              0.3000001907348633,
+              0.2999997138977051
+            ],
+            "maxMs": [
+              1.200000286102295,
+              1.5,
+              1.4000000953674316,
+              1.5,
+              1.4000000953674316
+            ],
+            "distributionNote": "Per-sample p50/p99 were not retained by the accepted legacy artifacts; p95/max and totals are retained."
+          },
+          "viewport": {
+            "count": [
+              {
+                "count": 80,
+                "totalMs": 697.1000003814697,
+                "p95Ms": 13.820000195503233,
+                "maxMs": 20
+              },
+              {
+                "count": 80,
+                "totalMs": 684.4999976158142,
+                "p95Ms": 12.92500009536743,
+                "maxMs": 15.199999809265137
+              },
+              {
+                "count": 80,
+                "totalMs": 683.7999997138977,
+                "p95Ms": 13.420000100135802,
+                "maxMs": 15.200000286102295
+              },
+              {
+                "count": 80,
+                "totalMs": 693.100001335144,
+                "p95Ms": 13.440000104904172,
+                "maxMs": 15.800000190734863
+              },
+              {
+                "count": 80,
+                "totalMs": 690.2999992370605,
+                "p95Ms": 13.324999713897704,
+                "maxMs": 16.59999990463257
+              }
+            ],
+            "totalMs": [
+              697.1000003814697,
+              684.4999976158142,
+              683.7999997138977,
+              693.100001335144,
+              690.2999992370605
+            ],
+            "p95Ms": [
+              13.820000195503233,
+              12.92500009536743,
+              13.420000100135802,
+              13.440000104904172,
+              13.324999713897704
+            ],
+            "maxMs": [
+              20,
+              15.199999809265137,
+              15.200000286102295,
+              15.800000190734863,
+              16.59999990463257
+            ],
+            "distributionNote": "Per-sample p50/p99 were not retained by the accepted legacy artifacts; p95/max and totals are retained."
+          }
+        },
+        "explicitAbsent": {
+          "cacheBytes": 0,
+          "mediaPaging": 0,
+          "mediaDecode": 0,
+          "waveformCancellation": 0,
+          "waveformSupersede": 0
+        }
+      },
+      "realtime": {
+        "callbackDeadlineMisses": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "workerDeadlineMisses": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "workerWatchdogMisses": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "workerFaults": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "rejectedBlocks": [
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      },
+      "visibility": {
+        "projectActiveClipCount": [
+          30
+        ],
+        "mountedClipCount": [
+          16,
+          20
+        ],
+        "viewportIntersectingClipCount": [
+          5
+        ]
+      }
     }
+  },
+  "p30SettleAttribution": {
+    "artifact": "/private/tmp/daw-zoom-attribution-p30-final.json",
+    "gestures": {
+      "samples": 80,
+      "stateChangeMs": {
+        "samples": 80,
+        "p50": 14.100000143051147,
+        "p95": 22.26000025272369,
+        "p99": 27.22100016593933,
+        "max": 27.299999713897705
+      },
+      "firstVisualMs": {
+        "samples": 80,
+        "p50": 21.25000023841858,
+        "p95": 30.909999656677247,
+        "p99": 34.08199986934659,
+        "max": 37.40000009536743
+      },
+      "settledMs": {
+        "samples": 80,
+        "p50": 36.64999985694885,
+        "p95": 53.599999737739545,
+        "p99": 82.30000009536718,
+        "max": 113.90000009536745
+      },
+      "browserCommandRoundTripMs": {
+        "samples": 80,
+        "p50": 147.0148960000006,
+        "p95": 173.80029614999657,
+        "p99": 228.69009250000008,
+        "max": 313.4071249999979
+      },
+      "settleAttributionMs": {
+        "inputToViewportState": {
+          "samples": 80,
+          "p50": 14.100000143051147,
+          "p95": 22.26000025272369,
+          "p99": 27.22100016593933,
+          "max": 27.299999713897705
+        },
+        "viewportToRequestsQuiescent": {
+          "samples": 80,
+          "p50": 8.400000095367432,
+          "p95": 19.805000019073468,
+          "p99": 39.640999794006085,
+          "max": 72.90000009536743
+        },
+        "quiescenceToRasterStart": {
+          "samples": 44,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0.056999945640563994,
+          "max": 0.09999990463256836
+        },
+        "rasterExecution": {
+          "samples": 44,
+          "p50": 0,
+          "p95": 0.20000021457672118,
+          "p99": 0.29999998569488523,
+          "max": 0.3000001907348633
+        },
+        "rasterCompleteToPresentedFrame": {
+          "samples": 44,
+          "p50": 0,
+          "p95": 0,
+          "p99": 0,
+          "max": 0
+        },
+        "firstPresentedToTwoStableFrames": {
+          "samples": 80,
+          "p50": 15.299999952316284,
+          "p95": 27.014999914169287,
+          "p99": 51.48599988937349,
+          "max": 88.30000019073486
+        }
+      }
+    },
+    "note": "Benchmark-only marks distinguish the retained cancellable rAF raster callback. Negative timestamp jitter is clamped to zero. The measured long tail is bounded paint/stability wait, so production rAF strategy is retained."
+  },
+  "cpuControls": {
+    "idle": {
+      "artifact": "/private/tmp/daw-v3-idle-8worker-final.json",
+      "durationSec": 60,
+      "eightWorkerSetup": true,
+      "noPlaybackCallbacksExpected": true,
+      "rendererMetrics": {
+        "startBytes": 599490560,
+        "at30sBytes": 124649472,
+        "at60sBytes": 132153344,
+        "endBytes": 132153344,
+        "peakBytes": 599490560,
+        "deltaBytes": -467337216,
+        "cpuAveragePercent": 0.3762351199618582,
+        "cpuP95Percent": 1.5469241251132486,
+        "cpuPeakPercent": 3.1674104245909334
+      },
+      "realtimePerformance": {
+        "sampleRateHz": 48000,
+        "framesPerCallback": 0,
+        "observationCount": "0",
+        "processingP50Nanoseconds": "0",
+        "processingP95Nanoseconds": "0",
+        "processingP99Nanoseconds": "0",
+        "processingMaximumNanoseconds": "0",
+        "deadlineMisses": "0"
+      },
+      "vstWorkerPerformance": {
+        "activeWorkers": 0,
+        "observationCount": "1272",
+        "processingP50Nanoseconds": "65536",
+        "processingP95Nanoseconds": "131072",
+        "processingP99Nanoseconds": "262144",
+        "processingMaximumNanoseconds": "1003125",
+        "deadlineMisses": "0",
+        "watchdogMisses": "0",
+        "faults": "0",
+        "restarts": "0"
+      },
+      "processes": {
+        "main": {
+          "samplesPerRun": [
+            30
+          ],
+          "cpuPercent": {
+            "samples": 30,
+            "p50": 0.005519569115869035,
+            "p95": 0.025521252080627253,
+            "p99": 0.03547993849446558,
+            "max": 0.03684890549421845
+          },
+          "workingSetBytes": {
+            "samples": 30,
+            "p50": 123756544,
+            "p95": 125154918.4,
+            "p99": 125656432.64,
+            "max": 125779968
+          },
+          "privateBytes": {
+            "samples": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null
+          },
+          "peakWorkingSetBytes": 256901120,
+          "availability": "unavailable"
+        },
+        "gpu": {
+          "samplesPerRun": [
+            30
+          ],
+          "cpuPercent": {
+            "samples": 30,
+            "p50": 0.07760555770175878,
+            "p95": 0.09750399117206016,
+            "p99": 0.0975840733042179,
+            "max": 0.09761535701686269
+          },
+          "workingSetBytes": {
+            "samples": 30,
+            "p50": 56164352,
+            "p95": 56524800,
+            "p99": 57885818.88,
+            "max": 58441728
+          },
+          "privateBytes": {
+            "samples": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null
+          },
+          "peakWorkingSetBytes": 97157120,
+          "availability": "unavailable"
+        },
+        "utility": {
+          "samplesPerRun": [
+            30
+          ],
+          "cpuPercent": {
+            "samples": 30,
+            "p50": 0.00026649172127732334,
+            "p95": 0.0032526852352862644,
+            "p99": 0.004523482773492641,
+            "max": 0.0046572668192317295
+          },
+          "workingSetBytes": {
+            "samples": 30,
+            "p50": 40378368,
+            "p95": 40435712,
+            "p99": 41308160,
+            "max": 41664512
+          },
+          "privateBytes": {
+            "samples": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null
+          },
+          "peakWorkingSetBytes": 58097664,
+          "availability": "unavailable"
+        },
+        "renderer": {
+          "samplesPerRun": [
+            30
+          ],
+          "cpuPercent": {
+            "samples": 30,
+            "p50": 0.2206694722792911,
+            "p95": 0.2693888890975048,
+            "p99": 0.2718113402617389,
+            "max": 0.2725173702548481
+          },
+          "workingSetBytes": {
+            "samples": 30,
+            "p50": 128221184,
+            "p95": 131765862.4,
+            "p99": 132077322.24,
+            "max": 132153344
+          },
+          "privateBytes": {
+            "samples": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null
+          },
+          "peakWorkingSetBytes": 1081049088,
+          "availability": "unavailable"
+        }
+      }
+    },
+    "playback": {
+      "artifact": "/private/tmp/daw-v3-playback-8worker-final.json",
+      "durationSec": 60,
+      "rendererMetrics": {
+        "startBytes": 663732224,
+        "at30sBytes": 478265344,
+        "at60sBytes": 384270336,
+        "endBytes": 384270336,
+        "peakBytes": 663732224,
+        "deltaBytes": -279461888,
+        "cpuAveragePercent": 0.6998831994207982,
+        "cpuP95Percent": 1.2794243456270629,
+        "cpuPeakPercent": 2.0425812310387066
+      },
+      "realtimePerformance": {
+        "sampleRateHz": 48000,
+        "framesPerCallback": 512,
+        "observationCount": "6037",
+        "processingP50Nanoseconds": "1048576",
+        "processingP95Nanoseconds": "1048576",
+        "processingP99Nanoseconds": "2097152",
+        "processingMaximumNanoseconds": "2621875",
+        "deadlineMisses": "0"
+      },
+      "vstWorkerPerformance": {
+        "activeWorkers": 8,
+        "observationCount": "49600",
+        "processingP50Nanoseconds": "65536",
+        "processingP95Nanoseconds": "65536",
+        "processingP99Nanoseconds": "131072",
+        "processingMaximumNanoseconds": "2662458",
+        "deadlineMisses": "0",
+        "watchdogMisses": "0",
+        "faults": "0",
+        "restarts": "0"
+      },
+      "processes": {
+        "main": {
+          "samplesPerRun": [
+            30
+          ],
+          "cpuPercent": {
+            "samples": 30,
+            "p50": 0.432792196620435,
+            "p95": 0.8101537190197265,
+            "p99": 0.8350531280726418,
+            "max": 0.843591665507486
+          },
+          "workingSetBytes": {
+            "samples": 30,
+            "p50": 280559616,
+            "p95": 321130496,
+            "p99": 321241088,
+            "max": 321241088
+          },
+          "privateBytes": {
+            "samples": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null
+          },
+          "peakWorkingSetBytes": 403390464,
+          "availability": "unavailable"
+        },
+        "gpu": {
+          "samplesPerRun": [
+            30
+          ],
+          "cpuPercent": {
+            "samples": 30,
+            "p50": 0.00015828095054107688,
+            "p95": 0.0025054197652016313,
+            "p99": 0.003523661284272358,
+            "max": 0.003672994544978442
+          },
+          "workingSetBytes": {
+            "samples": 30,
+            "p50": 59727872,
+            "p95": 71958528,
+            "p99": 71958528,
+            "max": 71958528
+          },
+          "privateBytes": {
+            "samples": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null
+          },
+          "peakWorkingSetBytes": 97714176,
+          "availability": "unavailable"
+        },
+        "utility": {
+          "samplesPerRun": [
+            30
+          ],
+          "cpuPercent": {
+            "samples": 30,
+            "p50": 0.00008332241809656269,
+            "p95": 0.001472014293238626,
+            "p99": 0.0032003307652938217,
+            "max": 0.0038818427057343316
+          },
+          "workingSetBytes": {
+            "samples": 30,
+            "p50": 47185920,
+            "p95": 52576256,
+            "p99": 52576256,
+            "max": 52576256
+          },
+          "privateBytes": {
+            "samples": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null
+          },
+          "peakWorkingSetBytes": 68304896,
+          "availability": "unavailable"
+        },
+        "renderer": {
+          "samplesPerRun": [
+            30
+          ],
+          "cpuPercent": {
+            "samples": 30,
+            "p50": 0.44251511437820124,
+            "p95": 1.070359897187633,
+            "p99": 1.1917793958705132,
+            "max": 1.241358883402889
+          },
+          "workingSetBytes": {
+            "samples": 30,
+            "p50": 383852544,
+            "p95": 530235392,
+            "p99": 533687500.8,
+            "max": 534495232
+          },
+          "privateBytes": {
+            "samples": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null
+          },
+          "peakWorkingSetBytes": 1933869056,
+          "availability": "unavailable"
+        }
+      }
+    },
+    "p30Zoom": {
+      "artifact": "/private/tmp/daw-zoom-attribution-p30-final.json",
+      "durationSec": 60,
+      "rendererMetrics": {
+        "startBytes": 809549824,
+        "at30sBytes": 851181568,
+        "at60sBytes": 890044416,
+        "endBytes": 890044416,
+        "peakBytes": 944898048,
+        "deltaBytes": 80494592,
+        "cpuAveragePercent": 6.591249795478401,
+        "cpuP95Percent": 12.179499939619056,
+        "cpuPeakPercent": 13.161866636866037
+      },
+      "realtimePerformance": {
+        "sampleRateHz": 48000,
+        "framesPerCallback": 512,
+        "observationCount": "2992",
+        "processingP50Nanoseconds": "1048576",
+        "processingP95Nanoseconds": "1048576",
+        "processingP99Nanoseconds": "1048576",
+        "processingMaximumNanoseconds": "1392500",
+        "deadlineMisses": "0"
+      },
+      "vstWorkerPerformance": {
+        "activeWorkers": 8,
+        "observationCount": "24123",
+        "processingP50Nanoseconds": "65536",
+        "processingP95Nanoseconds": "65536",
+        "processingP99Nanoseconds": "131072",
+        "processingMaximumNanoseconds": "334333",
+        "deadlineMisses": "0",
+        "watchdogMisses": "0",
+        "faults": "0",
+        "restarts": "0"
+      },
+      "processes": {
+        "main": {
+          "samplesPerRun": [
+            30
+          ],
+          "cpuPercent": {
+            "samples": 30,
+            "p50": 0.968112824773234,
+            "p95": 2.751312905967444,
+            "p99": 2.82431121624438,
+            "max": 2.8483716639806556
+          },
+          "workingSetBytes": {
+            "samples": 30,
+            "p50": 261373952,
+            "p95": 268910592,
+            "p99": 268910592,
+            "max": 268910592
+          },
+          "privateBytes": {
+            "samples": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null
+          },
+          "peakWorkingSetBytes": 334233600,
+          "availability": "unavailable"
+        },
+        "gpu": {
+          "samplesPerRun": [
+            30
+          ],
+          "cpuPercent": {
+            "samples": 30,
+            "p50": 0.6057015850479561,
+            "p95": 0.7180423054688913,
+            "p99": 0.7607103181103996,
+            "max": 0.7735392189055922
+          },
+          "workingSetBytes": {
+            "samples": 30,
+            "p50": 73662464,
+            "p95": 77299712,
+            "p99": 77311344.64,
+            "max": 77316096
+          },
+          "privateBytes": {
+            "samples": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null
+          },
+          "peakWorkingSetBytes": 95043584,
+          "availability": "unavailable"
+        },
+        "utility": {
+          "samplesPerRun": [
+            30
+          ],
+          "cpuPercent": {
+            "samples": 30,
+            "p50": 0,
+            "p95": 0.002614115463970737,
+            "p99": 0.005587794715755726,
+            "max": 0.0064301434518601016
+          },
+          "workingSetBytes": {
+            "samples": 30,
+            "p50": 46071808,
+            "p95": 46202880,
+            "p99": 46202880,
+            "max": 46202880
+          },
+          "privateBytes": {
+            "samples": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null
+          },
+          "peakWorkingSetBytes": 66781184,
+          "availability": "unavailable"
+        },
+        "renderer": {
+          "samplesPerRun": [
+            30
+          ],
+          "cpuPercent": {
+            "samples": 30,
+            "p50": 6.9338314713924145,
+            "p95": 10.64141897929517,
+            "p99": 12.852969362337644,
+            "max": 12.969355897150358
+          },
+          "workingSetBytes": {
+            "samples": 30,
+            "p50": 868679680,
+            "p95": 889694617.6,
+            "p99": 890034913.28,
+            "max": 890044416
+          },
+          "privateBytes": {
+            "samples": 0,
+            "p50": null,
+            "p95": null,
+            "p99": null,
+            "max": null
+          },
+          "peakWorkingSetBytes": 1489518592,
+          "availability": "unavailable"
+        }
+      }
+    },
+    "contextSwitchesAndWakeups": {
+      "status": "not-collected",
+      "reason": "No trustworthy per-process sampler was present in the retained harness."
+    }
+  },
+  "userFacingTable": {
+    "P10": {
+      "acceptedRuns": 5,
+      "gestures": 400,
+      "firstVisualP95Ms": 21.40500009059906,
+      "settledP95Ms": 36.940000081062315,
+      "rendererCpuAveragePercent": 5.919783297314231,
+      "longTasks": 0,
+      "realtimeFaults": 0
+    },
+    "P20": {
+      "acceptedRuns": 5,
+      "gestures": 400,
+      "firstVisualP95Ms": 25.63499991893768,
+      "settledP95Ms": 43.704999804496765,
+      "rendererCpuAveragePercent": 6.233681651830463,
+      "longTasks": 0,
+      "realtimeFaults": 0
+    },
+    "P30": {
+      "acceptedRuns": 5,
+      "gestures": 400,
+      "firstVisualP95Ms": 30.64500036239624,
+      "settledP95Ms": 58.000000381469704,
+      "rendererCpuAveragePercent": 6.8360623927656095,
+      "longTasks": 0,
+      "realtimeFaults": 0
+    },
+    "thirtyPlusRecording": {
+      "artifact": "/private/tmp/daw-zoom-recording/r30-5.json",
+      "capturedFrames": 2804224,
+      "sampleRate": 48000,
+      "droppedFrames": 0,
+      "activeWorkers": 8,
+      "zoomGestures": 80,
+      "callbackDeadlineMisses": "0",
+      "workerDeadlineMisses": "0",
+      "watchdogMisses": "0",
+      "faults": "0",
+      "rejectedBlocks": 0
+    }
+  },
+  "mediaPagingAndDecode": {
+    "pagingRequests": 0,
+    "decodedPages": 0,
+    "decodedFrames": 0,
+    "cacheBytes": 0,
+    "status": "not measured in zoom-profile artifacts; retained separately in 30-track performance report."
+  },
+  "validationClaims": {
+    "expectedVstProcessors": 8,
+    "gestureCountPerRun": 80,
+    "acceptedRunCountPerProfile": 5,
+    "rejectedRunsRetained": true,
+    "watchdogMisses": 0,
+    "workerFaults": 0,
+    "deadlineMisses": 0,
+    "rejectedBlocks": 0
   }
 }

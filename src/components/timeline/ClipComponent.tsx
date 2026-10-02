@@ -11,6 +11,7 @@ import { useAppPreferences } from "~/context/app-preferences";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import {
   incrementPerformanceBenchmarkCounter,
+  markPerformanceBenchmark,
   measurePerformanceBenchmarkDuration,
 } from "~/lib/performance-benchmark-telemetry";
 import { createClipVisualColors, resolveClipColor } from "~/lib/clip-color";
@@ -487,8 +488,10 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     waveformFrame = requestAnimationFrame(() => {
       waveformFrame = undefined;
       const startedAt = performance.now();
+      markPerformanceBenchmark("waveform.raster-start");
       drawWaveform();
       measurePerformanceBenchmarkDuration("waveform.raster", startedAt);
+      markPerformanceBenchmark("waveform.raster-complete");
     });
   };
 

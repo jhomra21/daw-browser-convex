@@ -191,12 +191,168 @@ export const parseBrowserProjectId = (output: string) => {
   return z.string().regex(/^project:[A-Za-z0-9-]+$/).parse(JSON.parse(encoded))
 }
 const rows = async () => {
-  const child = Bun.spawn(["ps", "-axo", "pid=,ppid=,pgid=,command="], { stdout: "pipe" })
+  const child = Bun.spawn(["ps", "-axo", "pid=,ppid=,pgid=,time=,command="], { stdout: "pipe" })
   const text = await new Response(child.stdout).text()
   return text.split("\n").flatMap((line) => {
-    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/)
-    return match ? [{ pid: Number(match[1]), parentPid: Number(match[2]), processGroupId: Number(match[3]), command: match[4]! }] : []
+    const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/)
+    if (!match) return []
+    const [, pid, parentPid, processGroupId, cpuTime, command] = match
+    const timeParts = cpuTime.split(":")
+    const seconds = Number(timeParts.pop())
+    const minutes = Number(timeParts.pop() ?? 0)
+    const hours = Number(timeParts.pop() ?? 0)
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(seconds)) return []
+    return [{
+      pid: Number(pid), parentPid: Number(parentPid), processGroupId: Number(processGroupId),
+      cpuTimeSec: hours * 3600 + minutes * 60 + seconds, command,
+    }]
   })
+}
+type ProcessRow = Awaited<ReturnType<typeof rows>>[number]
+type ProcessIdentity = Pick<ProcessRow, "pid" | "parentPid" | "processGroupId" | "command">
+type ProcessCpuDistribution = {
+  samples: number
+  averagePercent: number | null
+  p95Percent: number | null
+  peakPercent: number | null
+}
+type NativeProcessCpu = {
+  status: "available" | "blocked"
+  reason: string | null
+  sampleIntervalMs: number
+  durationMs: number
+  expectedSamples: number
+  actualSamples: number
+  audioHosts: ProcessIdentity[]
+  workers: ProcessIdentity[]
+  audioHostCpu: ProcessCpuDistribution
+  aggregateWorkerCpu: ProcessCpuDistribution
+  workersCpu: { identity: ProcessIdentity; cpu: ProcessCpuDistribution }[]
+}
+const processCpuDistribution = (values: readonly number[]): ProcessCpuDistribution => {
+  if (values.length === 0) return { samples: 0, averagePercent: null, p95Percent: null, peakPercent: null }
+  const sorted = [...values].sort((left, right) => left - right)
+  const position = (sorted.length - 1) * 0.95
+  const lower = Math.floor(position)
+  const upper = Math.ceil(position)
+  return {
+    samples: values.length,
+    averagePercent: values.reduce((sum, value) => sum + value, 0) / values.length,
+    p95Percent: lower === upper ? sorted[lower]! : sorted[lower]! + (sorted[upper]! - sorted[lower]!) * (position - lower),
+    peakPercent: sorted.at(-1)!,
+  }
+}
+const processIdentity = (row: ProcessRow): ProcessIdentity => ({
+  pid: row.pid, parentPid: row.parentPid, processGroupId: row.processGroupId,
+  command: row.command.trim().split(/\s+/)[0]!,
+})
+const createNativeProcessCpuSampler = async (
+  appPid: number,
+  durationMs: number,
+  preferActiveWorkerGroup: boolean,
+): Promise<{ stop: () => Promise<NativeProcessCpu> }> => {
+  const sampleIntervalMs = 1_000
+  const initialRows = await rows()
+  const owned = new Set([appPid, ...descendantsOf(initialRows, appPid)])
+  const hostCandidates = initialRows.filter((row) => owned.has(row.pid)
+    && row.command.trim().split(/\s+/)[0]?.endsWith("/daw-audio-host-macos"))
+  const workerCandidates = initialRows.filter((row) => owned.has(row.pid)
+    && row.pid === row.processGroupId
+    && row.command.trim().split(/\s+/)[0]?.endsWith("/daw-vst3-worker"))
+  const hostIds = new Set(hostCandidates.map((row) => row.pid))
+  const workersByHost = new Map<number, ProcessRow[]>()
+  for (const worker of workerCandidates) {
+    if (!hostIds.has(worker.parentPid)) continue
+    const children = workersByHost.get(worker.parentPid) ?? []
+    children.push(worker)
+    workersByHost.set(worker.parentPid, children)
+  }
+  const activeWorkerGroup = [...workersByHost.values()].find((children) => children.length === 8)
+  const singletonWorkers = [...workersByHost.values()].filter((children) => children.length === 1).map((children) => children[0]!)
+  const selectedWorkers = preferActiveWorkerGroup
+    ? activeWorkerGroup ?? []
+    : singletonWorkers.length === 8 ? singletonWorkers : activeWorkerGroup ?? []
+  const workerParentIds = new Set(selectedWorkers.map((row) => row.parentPid))
+  const selectedHosts = hostCandidates.filter((row) => workerParentIds.has(row.pid))
+  const identities = selectedHosts.length > 0 && selectedWorkers.length === 8
+    ? { audioHosts: selectedHosts.map(processIdentity), workers: selectedWorkers.map(processIdentity) }
+    : null
+  const base: NativeProcessCpu = {
+    status: identities ? "available" : "blocked",
+    reason: identities ? null : `Expected owned audio host process(es) and eight active VST workers; found ${hostCandidates.length} host(s), ${workerCandidates.length} worker candidate(s), ${selectedWorkers.length} selected worker(s).`,
+    sampleIntervalMs, durationMs, expectedSamples: Math.floor(durationMs / sampleIntervalMs), actualSamples: 0,
+    audioHosts: identities?.audioHosts ?? [], workers: identities?.workers ?? [],
+    audioHostCpu: processCpuDistribution([]),
+    aggregateWorkerCpu: processCpuDistribution([]),
+    workersCpu: identities?.workers.map((identity) => ({ identity, cpu: processCpuDistribution([]) })) ?? [],
+  }
+  if (!identities) return { stop: async () => base }
+  const previous = new Map<number, number>()
+  const hostValues: number[] = []
+  const workerValues = new Map<number, number[]>()
+  for (const identity of identities.workers) workerValues.set(identity.pid, [])
+  const aggregateValues: number[] = []
+  let actualSamples = 0
+  let stopped = false
+  let reason: string | null = null
+  const startedAt = Date.now()
+  const sample = async () => {
+    const current = await rows()
+    const currentByPid = new Map(current.map((row) => [row.pid, row]))
+    const targets = [...identities.audioHosts, ...identities.workers]
+    const valid = targets.every((identity) => {
+      const row = currentByPid.get(identity.pid)
+      return row !== undefined && row.command.trim().split(/\s+/)[0] === identity.command
+        && row.parentPid === identity.parentPid && row.processGroupId === identity.processGroupId
+    })
+    if (!valid) {
+      reason = "An owned native process changed identity or exited during CPU sampling."
+      return
+    }
+    const elapsedMs = Math.max(1, Date.now() - startedAt)
+    const currentCpu = new Map(targets.map((identity) => [identity.pid, currentByPid.get(identity.pid)!.cpuTimeSec]))
+    if (previous.size > 0) {
+      const intervalMs = Math.max(1, elapsedMs - (previous.get(-1) ?? 0))
+      const hostsCpu = identities.audioHosts.map((identity) => (
+        (currentCpu.get(identity.pid)! - previous.get(identity.pid)!) * 100_000 / intervalMs
+      ))
+      const workersCpu = identities.workers.map((identity) => (
+        (currentCpu.get(identity.pid)! - previous.get(identity.pid)!) * 100_000 / intervalMs
+      ))
+      if (hostsCpu.some((value) => value < 0) || workersCpu.some((value) => value < 0)) {
+        reason = "Native process CPU time moved backwards during sampling."
+        return
+      }
+      hostValues.push(hostsCpu.reduce((sum, value) => sum + value, 0))
+      workersCpu.forEach((value, index) => workerValues.get(identities.workers[index]!.pid)!.push(value))
+      aggregateValues.push(workersCpu.reduce((sum, value) => sum + value, 0))
+      actualSamples += 1
+    }
+    currentCpu.set(-1, elapsedMs)
+    currentCpu.forEach((value, pid) => previous.set(pid, value))
+  }
+  const sampling = (async () => {
+    // This bounded benchmark sampler is intentionally process-level polling; it is not product runtime logic.
+    while (!stopped && Date.now() - startedAt < durationMs) {
+      await sample()
+      await delay(sampleIntervalMs)
+    }
+    await sample()
+  })()
+  const stop = async () => {
+    stopped = true
+    await sampling
+    const finished = {
+      ...base, status: reason === null && actualSamples >= Math.max(2, Math.floor(base.expectedSamples * 0.8)) ? "available" as const : "blocked" as const,
+      reason: reason ?? (actualSamples >= Math.max(2, Math.floor(base.expectedSamples * 0.8)) ? null : "Insufficient complete native process CPU samples were collected."),
+      actualSamples, audioHosts: identities.audioHosts, workers: identities.workers,
+      audioHostCpu: processCpuDistribution(hostValues),
+      aggregateWorkerCpu: processCpuDistribution(aggregateValues),
+      workersCpu: identities.workers.map((identity) => ({ identity, cpu: processCpuDistribution(workerValues.get(identity.pid) ?? []) })),
+    }
+    return finished
+  }
+  return { stop }
 }
 export const countMidiNotes = (clips: readonly { midi?: { notes: readonly { beat: number }[] } }[]) =>
   clips.reduce((total, clip) => total + (clip.midi?.notes.length ?? 0), 0)
@@ -625,6 +781,7 @@ const main = async () => {
   let cdpError: string | null = null
   let interruptedSignal: NodeJS.Signals | null = null
   let targetsAfter: { type: string; urlClass: string; original: boolean }[] = []
+  let nativeProcessCpuSampler: Awaited<ReturnType<typeof createNativeProcessCpuSampler>> | null = null
   const app = spawn(executable, ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0", `--user-data-dir=${profile}`], {
     cwd: root, env: { ...process.env, DAW_DESKTOP_USER_DATA: profile, DAW_BENCHMARK_SAB_RECORDING: quietRecording && mode !== "media-recording-portable" ? "1" : "0",
       DAW_BENCHMARK_QUIET_CAPTURE: mode !== "acceptance" ? "1" : "0",
@@ -803,25 +960,19 @@ const main = async () => {
           mode !== "vst-reliability" || process.env.DAW_BENCHMARK_VST_AUTOMATION === "1")
       }
     }
-    const nativeWorkers = async () => {
-      const processes = await rows()
-      const owned = new Set([app.pid!, ...descendantsOf(processes, app.pid!)])
-      return processes.filter((process) => owned.has(process.pid)
-        && process.command.includes("/daw-vst3-worker"))
-        .map(({ pid, parentPid }) => ({ pid, parentPid }))
-    }
     if (mode === "idle") {
       stage = "idle-control"
       controlStartedAtMs = Date.now()
+      nativeProcessCpuSampler = await createNativeProcessCpuSampler(app.pid, 60_000, false)
       await delay(60_000)
       stage = "idle-verify"
       const responsive = await pingProjectCdp(new URL(endpoint).port, projectId)
       if (!responsive) throw new Error("Idle project renderer URL changed.")
       const diagnostics = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
-      const workerPids = await nativeWorkers()
+      const nativeProcessCpu = await nativeProcessCpuSampler.stop()
       await writePrivateArtifact(output, JSON.stringify({
         status: "complete", mode, responsive, projectId, lifecycle, tracks: snapshot.tracks.length,
-        dspSetup, workerPids,
+        dspSetup, workerPids: nativeProcessCpu.workers, nativeProcessCpu,
         realtimePerformance: diagnostics.native.status === "available"
           ? diagnostics.native.diagnostics.realtimePerformance ?? null : null,
         vstWorkerPerformance: diagnostics.native.status === "available"
@@ -860,6 +1011,7 @@ const main = async () => {
       const transportBaseline = mode === "dsp-soak"
         ? desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"])) : null
       controlStartedAtMs = Date.now()
+      nativeProcessCpuSampler = await createNativeProcessCpuSampler(app.pid, controlDurationMs(mode), true)
       if (isUiStressMode(mode) || mode === "zoom-profile" || reliabilityStress) {
         await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
         if (reliabilityStress) zoomProfile = await runZoomSweeps(session, snapshot.clips.length)
@@ -910,11 +1062,12 @@ const main = async () => {
         )
       }
       stage = "playback-verify"
+      const nativeProcessCpu = await nativeProcessCpuSampler.stop()
       const responsive = await pingProjectCdp(new URL(endpoint).port, projectId)
       if (!responsive) throw new Error("Playback project renderer URL changed.")
       const vst = isDspControlMode(mode)
         ? desktopHostVstInstancesResultSchemaV1.parse(await command(profile, ["host", "vst-instances", projectId])) : null
-      const workerPids = vst ? await nativeWorkers() : []
+      const workerPids = nativeProcessCpu.workers
       let finalNativeCallbacks = after.native.status === "available" ? after.native.diagnostics.callbacks : null
       let realtimePerformance = after.native.status === "available"
         ? after.native.diagnostics.realtimePerformance ?? null : null
@@ -960,7 +1113,7 @@ const main = async () => {
         transportDrift,
         pagingSeek, playing,
         transportFrame, realtimePerformance, vstWorkerPerformance,
-        vstInstances: vst?.instances.length ?? 0, workerPids,
+        vstInstances: vst?.instances.length ?? 0, workerPids, nativeProcessCpu,
         rejectedBlocks: after.native.status === "available" ? after.native.diagnostics.rejectedBlocks
           - (before.native.status === "available" ? before.native.diagnostics.rejectedBlocks : 0) : null,
         nativeCallbacksBefore: before.native.status === "available" ? before.native.diagnostics.callbacks : null,

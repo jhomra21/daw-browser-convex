@@ -1,7 +1,7 @@
 {
   "generatedAt": "2026-10-02",
-  "method": "Exactly five accepted packaged runs per P10/P20/P30; renderer-owned gesture timing; run-level medians plus pooled distributions.",
-  "evidenceBase": "Working tree based on c9ce70977c284a985f61be850f631963bace890d; report commit intentionally not embedded.",
+  "method": "Exactly five accepted packaged runs per P10/P20/P30; renderer-owned gesture timing; run-level medians plus pooled distributions. Native audio-host and VST-worker CPU controls use runner-owned ps CPU-time deltas at 1-second intervals; renderer CPU remains a separate Electron metric.",
+  "evidenceBase": "Working tree based on c9ce70977c284a985f61be850f631963bace890d; follow-up native CPU evidence collected after benchmark-only sampler change; report commit follows.",
   "profiles": {
     "P10": {
       "acceptedRuns": 5,
@@ -4591,6 +4591,191 @@
           "peakWorkingSetBytes": 1081049088,
           "availability": "unavailable"
         }
+      },
+      "nativeProcessCpuSampling": {
+        "artifact": "/private/tmp/daw-followup-idle-final-3.json",
+        "status": "available",
+        "reason": null,
+        "sampleIntervalMs": 1000,
+        "durationMs": 60000,
+        "expectedSamples": 60,
+        "actualSamples": 59,
+        "audioHosts": [
+          {
+            "pid": 80205,
+            "parentPid": 80086,
+            "processGroupId": 80086,
+            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
+          },
+          {
+            "pid": 80230,
+            "parentPid": 80086,
+            "processGroupId": 80086,
+            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
+          },
+          {
+            "pid": 80258,
+            "parentPid": 80086,
+            "processGroupId": 80086,
+            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
+          },
+          {
+            "pid": 80290,
+            "parentPid": 80086,
+            "processGroupId": 80086,
+            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
+          },
+          {
+            "pid": 80323,
+            "parentPid": 80086,
+            "processGroupId": 80086,
+            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
+          },
+          {
+            "pid": 80359,
+            "parentPid": 80086,
+            "processGroupId": 80086,
+            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
+          },
+          {
+            "pid": 80397,
+            "parentPid": 80086,
+            "processGroupId": 80086,
+            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
+          },
+          {
+            "pid": 80434,
+            "parentPid": 80086,
+            "processGroupId": 80086,
+            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
+          }
+        ],
+        "audioHostCpu": {
+          "samples": 59,
+          "averagePercent": 21.957480428527166,
+          "p95Percent": 23.48336594911936,
+          "peakPercent": 23.48336594911939
+        },
+        "aggregateWorkerCpu": {
+          "samples": 59,
+          "averagePercent": 7.208072077994738,
+          "p95Percent": 7.835455435847205,
+          "peakPercent": 7.843137254901968
+        },
+        "workersCpu": [
+          {
+            "identity": {
+              "pid": 80212,
+              "parentPid": 80205,
+              "processGroupId": 80212,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 0.9113175543487364,
+              "p95Percent": 0.979431929480902,
+              "peakPercent": 0.980392156862746
+            }
+          },
+          {
+            "identity": {
+              "pid": 80237,
+              "parentPid": 80230,
+              "processGroupId": 80237,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 0.9113500407306887,
+              "p95Percent": 0.979431929480902,
+              "peakPercent": 0.980392156862746
+            }
+          },
+          {
+            "identity": {
+              "pid": 80263,
+              "parentPid": 80258,
+              "processGroupId": 80263,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 0.9113500407306886,
+              "p95Percent": 0.979431929480902,
+              "peakPercent": 0.980392156862746
+            }
+          },
+          {
+            "identity": {
+              "pid": 80297,
+              "parentPid": 80290,
+              "processGroupId": 80297,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 0.9113337975397126,
+              "p95Percent": 0.979431929480902,
+              "peakPercent": 0.980392156862746
+            }
+          },
+          {
+            "identity": {
+              "pid": 80327,
+              "parentPid": 80323,
+              "processGroupId": 80327,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 0.9280635888568541,
+              "p95Percent": 0.979431929480902,
+              "peakPercent": 0.980392156862746
+            }
+          },
+          {
+            "identity": {
+              "pid": 80365,
+              "parentPid": 80359,
+              "processGroupId": 80365,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 0.861580903579714,
+              "p95Percent": 0.979431929480902,
+              "peakPercent": 0.980392156862746
+            }
+          },
+          {
+            "identity": {
+              "pid": 80402,
+              "parentPid": 80397,
+              "processGroupId": 80402,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 0.9113499137063475,
+              "p95Percent": 0.979431929480902,
+              "peakPercent": 0.980392156862746
+            }
+          },
+          {
+            "identity": {
+              "pid": 80438,
+              "parentPid": 80434,
+              "processGroupId": 80438,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 0.8617262385019961,
+              "p95Percent": 0.979431929480902,
+              "peakPercent": 0.980392156862746
+            }
+          }
+        ]
       }
     },
     "playback": {
@@ -4692,7 +4877,7 @@
           ],
           "cpuPercent": {
             "samples": 30,
-            "p50": 0.00008332241809656269,
+            "p50": 8.332241809656269e-05,
             "p95": 0.001472014293238626,
             "p99": 0.0032003307652938217,
             "max": 0.0038818427057343316
@@ -4742,6 +4927,149 @@
           "peakWorkingSetBytes": 1933869056,
           "availability": "unavailable"
         }
+      },
+      "nativeProcessCpuSampling": {
+        "artifact": "/private/tmp/daw-followup-playback-final.json",
+        "status": "available",
+        "reason": null,
+        "sampleIntervalMs": 1000,
+        "durationMs": 60000,
+        "expectedSamples": 60,
+        "actualSamples": 59,
+        "audioHosts": [
+          {
+            "pid": 81116,
+            "parentPid": 80729,
+            "processGroupId": 80729,
+            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
+          }
+        ],
+        "audioHostCpu": {
+          "samples": 59,
+          "averagePercent": 22.9361433562206,
+          "p95Percent": 28.347996089931577,
+          "peakPercent": 29.296874999999982
+        },
+        "aggregateWorkerCpu": {
+          "samples": 59,
+          "averagePercent": 9.491687404259913,
+          "p95Percent": 11.707317073170742,
+          "peakPercent": 11.730205278592354
+        },
+        "workersCpu": [
+          {
+            "identity": {
+              "pid": 81131,
+              "parentPid": 81116,
+              "processGroupId": 81131,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 1.1906821520995345,
+              "p95Percent": 1.9550342130987286,
+              "peakPercent": 1.955034213098731
+            }
+          },
+          {
+            "identity": {
+              "pid": 81132,
+              "parentPid": 81116,
+              "processGroupId": 81132,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 1.2071210528534282,
+              "p95Percent": 1.9531250000000018,
+              "peakPercent": 1.9569471624266164
+            }
+          },
+          {
+            "identity": {
+              "pid": 81133,
+              "parentPid": 81116,
+              "processGroupId": 81133,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 1.1574057522339911,
+              "p95Percent": 1.9550342130987286,
+              "peakPercent": 1.9569471624266164
+            }
+          },
+          {
+            "identity": {
+              "pid": 81134,
+              "parentPid": 81116,
+              "processGroupId": 81134,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 1.173858462101436,
+              "p95Percent": 1.9514100609756113,
+              "peakPercent": 1.955034213098731
+            }
+          },
+          {
+            "identity": {
+              "pid": 81135,
+              "parentPid": 81116,
+              "processGroupId": 81135,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 1.1905255564198267,
+              "p95Percent": 1.9550342130987206,
+              "peakPercent": 1.9550342130987284
+            }
+          },
+          {
+            "identity": {
+              "pid": 81136,
+              "parentPid": 81116,
+              "processGroupId": 81136,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 1.1907785695070394,
+              "p95Percent": 1.9533159213098736,
+              "peakPercent": 1.9550342130987284
+            }
+          },
+          {
+            "identity": {
+              "pid": 81137,
+              "parentPid": 81116,
+              "processGroupId": 81137,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 1.207056836773237,
+              "p95Percent": 1.951600982285484,
+              "peakPercent": 1.9569471624266164
+            }
+          },
+          {
+            "identity": {
+              "pid": 81138,
+              "parentPid": 81116,
+              "processGroupId": 81138,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 59,
+              "averagePercent": 1.1742590222714244,
+              "p95Percent": 1.9550342130987286,
+              "peakPercent": 1.955034213098731
+            }
+          }
+        ]
       }
     },
     "p30Zoom": {
@@ -4893,11 +5221,177 @@
           "peakWorkingSetBytes": 1489518592,
           "availability": "unavailable"
         }
+      },
+      "nativeProcessCpuSampling": {
+        "artifact": "/private/tmp/daw-followup-p30-final-2.json",
+        "status": "blocked",
+        "reason": "An owned native process changed identity or exited during CPU sampling.",
+        "sampleIntervalMs": 1000,
+        "durationMs": 60000,
+        "expectedSamples": 60,
+        "actualSamples": 16,
+        "audioHosts": [
+          {
+            "pid": 81867,
+            "parentPid": 81428,
+            "processGroupId": 81428,
+            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
+          }
+        ],
+        "audioHostCpu": {
+          "samples": 16,
+          "averagePercent": 26.011709001232198,
+          "p95Percent": 29.133413877402834,
+          "peakPercent": 29.239766081871327
+        },
+        "aggregateWorkerCpu": {
+          "samples": 16,
+          "averagePercent": 9.503132294313817,
+          "p95Percent": 10.977770128407991,
+          "peakPercent": 11.684518013631946
+        },
+        "workersCpu": [
+          {
+            "identity": {
+              "pid": 81894,
+              "parentPid": 81867,
+              "processGroupId": 81894,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 16,
+              "averagePercent": 1.1575888174857982,
+              "p95Percent": 1.9502695540935688,
+              "peakPercent": 1.9531250000000018
+            }
+          },
+          {
+            "identity": {
+              "pid": 81895,
+              "parentPid": 81867,
+              "processGroupId": 81895,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 16,
+              "averagePercent": 1.1575293867278624,
+              "p95Percent": 1.951219512195121,
+              "peakPercent": 1.951219512195121
+            }
+          },
+          {
+            "identity": {
+              "pid": 81896,
+              "parentPid": 81867,
+              "processGroupId": 81896,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 16,
+              "averagePercent": 1.2186240901512309,
+              "p95Percent": 1.9521731874210235,
+              "peakPercent": 1.955034213098731
+            }
+          },
+          {
+            "identity": {
+              "pid": 81897,
+              "parentPid": 81867,
+              "processGroupId": 81897,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 16,
+              "averagePercent": 1.1574699563089967,
+              "p95Percent": 1.9497931821423466,
+              "peakPercent": 1.951219512195121
+            }
+          },
+          {
+            "identity": {
+              "pid": 81898,
+              "parentPid": 81867,
+              "processGroupId": 81898,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 16,
+              "averagePercent": 1.1574112192953105,
+              "p95Percent": 1.9502695540935688,
+              "peakPercent": 1.9531250000000018
+            }
+          },
+          {
+            "identity": {
+              "pid": 81899,
+              "parentPid": 81867,
+              "processGroupId": 81899,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 16,
+              "averagePercent": 1.2180914062612176,
+              "p95Percent": 1.9516958841463432,
+              "peakPercent": 1.9531250000000018
+            }
+          },
+          {
+            "identity": {
+              "pid": 81900,
+              "parentPid": 81867,
+              "processGroupId": 81900,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 16,
+              "averagePercent": 1.1574699563089967,
+              "p95Percent": 1.9497931821423489,
+              "peakPercent": 1.951219512195121
+            }
+          },
+          {
+            "identity": {
+              "pid": 81901,
+              "parentPid": 81867,
+              "processGroupId": 81901,
+              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
+            },
+            "cpu": {
+              "samples": 16,
+              "averagePercent": 1.2789474617744043,
+              "p95Percent": 1.9493177387914227,
+              "peakPercent": 1.9493177387914247
+            }
+          }
+        ]
       }
     },
     "contextSwitchesAndWakeups": {
       "status": "not-collected",
-      "reason": "No trustworthy per-process sampler was present in the retained harness."
+      "reason": "The native process sampler collected CPU time, but not context-switch or wakeup counters."
+    },
+    "pollingCostAcceptance": {
+      "status": "blocked",
+      "reason": "P30 native process CPU sampling lost an owned process identity after 16 of 60 expected interval samples; renderer CPU is not a proxy for native polling cost.",
+      "idleAggregateWorkerCpu": {
+        "samples": 59,
+        "averagePercent": 7.208072077994738,
+        "p95Percent": 7.835455435847205,
+        "peakPercent": 7.843137254901968
+      },
+      "playbackAggregateWorkerCpu": {
+        "samples": 59,
+        "averagePercent": 9.491687404259913,
+        "p95Percent": 11.707317073170742,
+        "peakPercent": 11.730205278592354
+      },
+      "p30AggregateWorkerCpu": {
+        "samples": 16,
+        "averagePercent": 9.503132294313817,
+        "p95Percent": 10.977770128407991,
+        "peakPercent": 11.684518013631946
+      },
+      "pollingChanged": false
     }
   },
   "userFacingTable": {

@@ -140,7 +140,7 @@ Completed for the expanded PR #57 telemetry and precision change set:
 ## Source and external-status identifiers
 
 - Prior pushed evidence SHA: `bf7677582dff7704fe8dc39f1f40ea509a093f69`.
-- Native CPU follow-up implementation SHA: `d91878f794aea3e659b6c9d9f58652250dd93f3d` (pre-final-report tree).
+- Native CPU follow-up implementation SHA: `eb2027eff70f10e71b29325c72086ead1ddc89ed`.
 - Cloudflare supplied evidence commit: `c9ce7097` — `COMPLETED/SUCCESS`; this is user-supplied evidence, not an independently fetched conclusion.
 - Native CPU follow-up artifacts: `/private/tmp/daw-followup-idle-final-3.json`, `/private/tmp/daw-followup-playback-final.json`, and `/private/tmp/daw-followup-p30-final-2.json`.
 

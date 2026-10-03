@@ -18,7 +18,7 @@
 
 namespace daw::audio_host_macos {
 
-constexpr std::uint32_t kControlProtocolVersion = 21;
+constexpr std::uint32_t kControlProtocolVersion = 22;
 constexpr std::size_t kMaximumControlPayloadBytes = 1'048'576;
 constexpr std::size_t kControlFrameHeaderBytes = 16;
 constexpr std::size_t kNativeGraphFrameHeaderBytes = 12;
@@ -286,16 +286,6 @@ struct Diagnostics {
     std::string instance_id;
   };
   std::optional<WorkerAutomation> worker_automation;
-  std::optional<WorkerAutomation> watched_mix_processed;
-  struct WatchedMixHost {
-    std::uint32_t published;
-    std::uint32_t projected;
-    std::uint32_t override_skips;
-    std::uint32_t submitted;
-    std::uint32_t transport_epoch;
-    std::string instance_id;
-  };
-  std::optional<WatchedMixHost> watched_mix_host;
   RealtimePerformance realtime_performance;
   VstWorkerPerformance vst_worker_performance;
   LifecycleState state;

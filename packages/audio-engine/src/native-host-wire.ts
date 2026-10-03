@@ -214,8 +214,6 @@ export type NativeHostDiagnostics = {
     restarts: bigint
   }
   workerAutomation: null | { acceptedPoints: number; lastParameterId: number; transportEpoch: number; sequence: bigint; instanceId: string }
-  watchedMixProcessed: null | { acceptedPoints: number; lastParameterId: 48; transportEpoch: number; sequence: bigint; instanceId: string }
-  watchedMixHost: null | { published: number; projected: number; overrideSkips: number; submitted: number; transportEpoch: number; instanceId: string }
   state: "idle" | "configured" | "running" | "faulted"
   activeRevision: number
   preparedRevision: number

@@ -63,7 +63,7 @@ const f32 = (value) => {
 const hello = () => frame(2, Buffer.concat([
   u32(${nativeAudioHostProtocolVersion}), u32(0x3ff), u32(${audioCoreWasmAbiVersion}),
   string(process.env.MODE === "incompatible" ? "wrong" : "${processorContractHash}"),
-  string("${portableGraphContractHash}"), string("daw-audio-host-macos/v5"), u32(0), u32(1),
+  string("${portableGraphContractHash}"), string("daw-audio-host-macos/v6"), u32(0), u32(1),
 ]))
 const device = () => frame(19, Buffer.concat([
   u32(1), string("coreaudio:fixture"), string("Fixture Output"), u32(48000), u32(2), u32(512), u32(1),
@@ -167,8 +167,6 @@ process.stdin.on("data", (chunk) => {
         u32(0), u32(0), u32(0), u32(0), u32(0),
         u32(0), u32(0), u32(0), u32(0), u64(0),
         u32(0),
-        u32(0), u32(0), u32(0), u64(0), u32(0),
-        u32(0), u32(0), u32(0), u32(0), u32(0), u32(0), u32(0),
         u64(0), u32(0), u32(0),
         u64(0), u64(0), u64(0), u64(0), u64(0), u64(0),
         u32(0), u64(0), u64(0), u64(0), u64(0), u64(0), u64(0), u64(0), u64(0), u64(0),
@@ -276,7 +274,7 @@ describe("native audio host protocol", () => {
     expect(encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.graphRollback)).toEqual(
       Buffer.from([
         0x44, 0x41, 0x57, 0x48,
-        0x00, 0x00, 0x00, 0x15,
+        0x00, 0x00, 0x00, 0x16,
         0x00, 0x00, 0x00, 0x27,
         0x00, 0x00, 0x00, 0x00,
       ]),
@@ -1592,8 +1590,6 @@ test("acknowledges diagnostics and tears down without reporting host loss", asyn
     await fixture.supervisor.start()
     await expect(fixture.supervisor.diagnostics()).resolves.toEqual({
       workerAutomation: null,
-      watchedMixProcessed: null,
-      watchedMixHost: null,
       transportFrame: 0n,
       realtimePerformance: {
         sampleRateHz: 0,

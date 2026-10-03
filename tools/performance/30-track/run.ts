@@ -948,7 +948,6 @@ const runElectronBenchmark = async (
           recordingStallCorrelation: error instanceof TierThreeRecordingFailure ? error.stallCorrelation : "unknown",
           issue48LiveReEnableReason: error instanceof TierThreeRecordingFailure ? error.issue48LiveReEnableReason : null,
           workerAutomationAtPlayback: error instanceof TierThreeRecordingFailure ? error.workerAutomationAtPlayback : null,
-          watchedMixAtPlayback: error instanceof TierThreeRecordingFailure ? error.watchedMixAtPlayback : null,
           nativeAtPlayback: error instanceof TierThreeRecordingFailure ? error.nativeAtPlayback : null,
           commandTimings: commandTimings.snapshot(),
         }, null, 2))

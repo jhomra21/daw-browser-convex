@@ -15,7 +15,7 @@ import {
   type ControlErrorV1,
 } from "@daw-browser/control"
 export { projectIdSchemaV1 } from "@daw-browser/control"
-import { pluginHealthSchema } from "@daw-browser/plugin-host-protocol"
+import { maxVst3WorkerEventsPerBlock, pluginHealthSchema } from "@daw-browser/plugin-host-protocol"
 export type { ControlErrorV1 } from "@daw-browser/control"
 
 export const desktopProtocolVersion = "v1" as const
@@ -461,24 +461,9 @@ export const desktopDiagnosticsSchemaV2 = z.object({
         z.object({ status: z.literal("failed") }).strict(),
       ]),
       diagnostics: z.object({
-      watchedMixHost: z.object({
-        instanceId: z.string().min(1).max(256),
-        transportEpoch: z.number().int().positive().max(0xffffffff),
-        published: z.number().int().nonnegative().max(0xffffffff),
-        projected: z.number().int().nonnegative().max(0xffffffff),
-        overrideSkips: z.number().int().nonnegative().max(0xffffffff),
-        submitted: z.number().int().nonnegative().max(0xffffffff),
-      }).strict().nullable().optional(),
-      watchedMixProcessed: z.object({
-        instanceId: z.string().min(1).max(256),
-        acceptedPoints: z.number().int().positive().max(64),
-        lastParameterId: z.literal(48),
-        transportEpoch: z.number().int().positive().max(0xffffffff),
-        sequence: z.string().regex(/^[1-9][0-9]*$/),
-      }).strict().nullable().optional(),
       workerAutomation: z.object({
         instanceId: z.string().min(1).max(256),
-        acceptedPoints: z.number().int().positive().max(64),
+        acceptedPoints: z.number().int().positive().max(maxVst3WorkerEventsPerBlock),
         lastParameterId: z.number().int().nonnegative().max(0xffffffff),
         transportEpoch: z.number().int().positive().max(0xffffffff),
         sequence: z.string().regex(/^[1-9][0-9]*$/),
@@ -526,11 +511,7 @@ export const desktopDiagnosticsSchemaV2 = z.object({
       lastRejectedInstrumentEventCount: z.number().int().nonnegative(),
       lastRejectedGraphRevision: z.number().int().nonnegative(),
       }).strict().refine(value => value.workerAutomation === null
-        || value.workerAutomation.transportEpoch === value.transportEpoch, "Stale worker automation epoch")
-        .refine(value => value.watchedMixProcessed == null
-          || value.watchedMixProcessed.transportEpoch === value.transportEpoch, "Stale watched Mix epoch")
-        .refine(value => value.watchedMixHost == null
-          || value.watchedMixHost.transportEpoch === value.transportEpoch, "Stale host Mix epoch"),
+        || value.workerAutomation.transportEpoch === value.transportEpoch, "Stale worker automation epoch"),
     }).strict(),
   ]),
 }).strict()

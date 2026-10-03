@@ -26,7 +26,7 @@ constexpr std::size_t kMaximumWorkerRestarts = 3;
 constexpr std::size_t kMaximumWorkerStateBytes = 512U * 1024U;
 constexpr std::uint32_t kMaximumWorkerTailFrames = 100'000'000U;
 constexpr std::uint32_t kInfiniteTailFrames = std::numeric_limits<std::uint32_t>::max();
-constexpr std::uint32_t kWorkerTransportAbiVersion = 6;
+constexpr std::uint32_t kWorkerTransportAbiVersion = 7;
 constexpr std::size_t kWorkerProcessingHistogramBuckets = 32;
 constexpr std::uint32_t kWorkerManifestVersion = 1;
 constexpr std::uint32_t kWorkerStartupProtocolVersion = 1;
@@ -293,7 +293,6 @@ enum class WorkerDiagnosticKind : std::uint32_t {
   kEditorState,
   kParameterEditBegin,
   kScheduledAutomationInput,
-  kWatchedMixProcessed,
 };
 
 struct WorkerDiagnostic {
@@ -301,6 +300,7 @@ struct WorkerDiagnostic {
   std::uint32_t value = 0;
   std::uint64_t sequence = 0;
   std::uint32_t parameter_id = 0;
+  std::uint32_t transport_epoch = 0;
   double normalized_value = 0.0;
 };
 

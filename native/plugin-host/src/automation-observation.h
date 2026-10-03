@@ -21,30 +21,4 @@ struct AutomationObservation {
   }
 };
 
-// Block-local watched Mix counters; never attributes another parameter to Mix.
-struct WatchedMixObservation {
-  std::uint32_t submitted = 0;
-  std::uint32_t added = 0;
-  std::uint32_t processed = 0;
-  std::uint32_t transportEpoch = 0;
-
-  void Submitted(const WorkerTransportEvent& event, const std::uint32_t epoch) noexcept {
-    if (event.kind != WorkerEventKind::kParameter || !event.scheduledAutomation
-      || event.parameterId != 48 || epoch == 0) return;
-    if (submitted < std::numeric_limits<std::uint32_t>::max()) ++submitted;
-    transportEpoch = epoch;
-  }
-
-  void Added(const WorkerTransportEvent& event, const std::uint32_t epoch) noexcept {
-    if (event.kind != WorkerEventKind::kParameter || !event.scheduledAutomation
-      || event.parameterId != 48 || epoch == 0) return;
-    if (added < std::numeric_limits<std::uint32_t>::max()) ++added;
-    transportEpoch = epoch;
-  }
-
-  void Processed(const bool success) noexcept {
-    if (success) processed = added;
-  }
-};
-
 }  // namespace daw::plugin_host

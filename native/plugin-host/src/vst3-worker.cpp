@@ -886,7 +886,6 @@ bool Vst3Worker::ProcessSubmittedSlot(const std::size_t slotIndex) {
   std::array<PendingEditorParameterEdit, kMaximumWorkerEvents> editorEdits{};
   const auto editorEditCount = implementation_->context.DrainEditorParameterEdits(editorEdits);
   AutomationObservation automationObservation;
-  WatchedMixObservation watchedMix;
   const auto addNoteOff = [&](const Implementation::ActiveNote& note, const std::uint32_t sampleOffset) {
     Event vstEvent{};
     vstEvent.busIndex = 0;
@@ -910,13 +909,11 @@ bool Vst3Worker::ProcessSubmittedSlot(const std::size_t slotIndex) {
   for (const auto& event : implementation_->transport->events(slotIndex)) {
     if (event.sampleOffset >= samples) return false;
     if (event.kind == WorkerEventKind::kParameter) {
-      watchedMix.Submitted(event, implementation_->transport->context(slotIndex).transportEpoch);
       if (!addParameterChange(
         event.parameterId,
         event.parameterValue,
         static_cast<Steinberg::int32>(event.sampleOffset)
       )) return false;
-      watchedMix.Added(event, implementation_->transport->context(slotIndex).transportEpoch);
       automationObservation.Accept(event, implementation_->transport->context(slotIndex).transportEpoch);
       continue;
     }
@@ -1062,7 +1059,6 @@ bool Vst3Worker::ProcessSubmittedSlot(const std::size_t slotIndex) {
   data.inputEvents = &implementation_->events;
   data.processContext = &implementation_->processContext;
   if (implementation_->processor->process(data) != Steinberg::kResultOk) return false;
-  watchedMix.Processed(true);
   std::uint64_t outputSilenceFlags = 0;
   std::size_t outputChannelIndex = 0;
   for (auto& bus : implementation_->outputs) {
@@ -1093,16 +1089,7 @@ bool Vst3Worker::ProcessSubmittedSlot(const std::size_t slotIndex) {
       .value = automationObservation.count,
       .sequence = sequence,
       .parameter_id = automationObservation.parameterId,
-      .normalized_value = static_cast<double>(automationObservation.transportEpoch),
-    }));
-  }
-  if (watchedMix.processed != 0) {
-    static_cast<void>(implementation_->transport->PublishDiagnostic({
-      .kind = WorkerDiagnosticKind::kWatchedMixProcessed,
-      .value = watchedMix.processed,
-      .sequence = sequence,
-      .parameter_id = 48,
-      .normalized_value = static_cast<double>(watchedMix.transportEpoch),
+      .transport_epoch = automationObservation.transportEpoch,
     }));
   }
   return true;

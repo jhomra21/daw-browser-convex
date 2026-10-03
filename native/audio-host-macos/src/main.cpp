@@ -787,19 +787,17 @@ int main() {
       WriteU32(response, DAW_AUDIO_CORE_ABI_VERSION);
       WriteString(response, DAW_AUDIO_CORE_PROCESSOR_CONTRACT_HASH);
       WriteString(response, DAW_AUDIO_CORE_PORTABLE_GRAPH_CONTRACT_HASH);
-      WriteString(response, "daw-audio-host-macos/v5");
+      WriteString(response, "daw-audio-host-macos/v6");
       WriteU32(response, static_cast<std::uint32_t>(host->diagnostics().state));
       WriteU32(response, static_cast<std::uint32_t>(host->readinessReason()));
       if (!WriteFrame(daw::audio_host_macos::ControlType::kHostCapabilities, response)) return EXIT_FAILURE;
       continue;
     }
     if (request->type == daw::audio_host_macos::ControlType::kDiagnostics) {
-      const auto diagnostics_entry = std::chrono::steady_clock::now();
-      std::fprintf(stderr, "[native-control-timing] diagnostics entry\n");
       if (!payload.empty()) return EXIT_FAILURE;
       const auto diagnostics = host->diagnostics();
       std::vector<std::uint8_t> response;
-      response.reserve(372);
+      response.reserve(320);
       WriteU32(response, static_cast<std::uint32_t>(diagnostics.state));
       WriteU32(response, diagnostics.active_revision);
       WriteU32(response, diagnostics.prepared_revision);
@@ -825,18 +823,6 @@ int main() {
       WriteU32(response, diagnostics.worker_automation ? diagnostics.worker_automation->transport_epoch : 0);
       WriteU64(response, diagnostics.worker_automation ? diagnostics.worker_automation->sequence : 0);
       WriteString(response, diagnostics.worker_automation ? diagnostics.worker_automation->instance_id : "");
-      WriteU32(response, diagnostics.watched_mix_processed ? 1 : 0);
-      WriteU32(response, diagnostics.watched_mix_processed ? diagnostics.watched_mix_processed->accepted_points : 0);
-      WriteU32(response, diagnostics.watched_mix_processed ? diagnostics.watched_mix_processed->transport_epoch : 0);
-      WriteU64(response, diagnostics.watched_mix_processed ? diagnostics.watched_mix_processed->sequence : 0);
-      WriteString(response, diagnostics.watched_mix_processed ? diagnostics.watched_mix_processed->instance_id : "");
-      WriteU32(response, diagnostics.watched_mix_host ? 1 : 0);
-      WriteU32(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->published : 0);
-      WriteU32(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->projected : 0);
-      WriteU32(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->override_skips : 0);
-      WriteU32(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->submitted : 0);
-      WriteU32(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->transport_epoch : 0);
-      WriteString(response, diagnostics.watched_mix_host ? diagnostics.watched_mix_host->instance_id : "");
       WriteU64(response, static_cast<std::uint64_t>(diagnostics.transport_frame));
       WriteU32(response, diagnostics.realtime_performance.sample_rate_hz);
       WriteU32(response, diagnostics.realtime_performance.frames_per_callback);
@@ -857,9 +843,6 @@ int main() {
       WriteU64(response, diagnostics.vst_worker_performance.faults);
       WriteU64(response, diagnostics.vst_worker_performance.restarts);
       if (!WriteFrame(daw::audio_host_macos::ControlType::kDiagnostics, response)) return EXIT_FAILURE;
-      std::fprintf(stderr, "[native-control-timing] diagnostics response elapsed_ms=%lld\n",
-        static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - diagnostics_entry).count()));
       continue;
     }
     if (request->type == daw::audio_host_macos::ControlType::kDeviceList) {

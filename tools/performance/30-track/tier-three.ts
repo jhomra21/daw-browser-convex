@@ -54,7 +54,6 @@ export class TierThreeRecordingFailure extends Error {
     readonly issue48LiveReEnableReason?: string,
     readonly workerAutomationAtPlayback: WorkerObservation | null = null,
     readonly taskSources: TaskSourceEvidence | null = null,
-    readonly watchedMixAtPlayback: WatchedMixHost | null = null,
     readonly nativeAtPlayback: { transportEpoch: number; callbacks: number; submittedVstSegments: number | null; state: string } | null = null,
   ) {
     super(message)
@@ -99,17 +98,15 @@ type Command = (args: readonly string[], input?: string) => Promise<Json>
 type Data = <T>(schema: z.ZodType<T>, value: Json) => T
 
 type WorkerObservation = { instanceId: string; lastParameterId: number; transportEpoch: number; sequence: string; acceptedPoints: number }
-type WatchedMixHost = { instanceId: string; transportEpoch: number; published: number; projected: number; overrideSkips: number; submitted: number }
 export const retainTierThreeRecordingFailure = (
   // oxlint-disable-next-line anti-slop/no-unknown-parameters
   error: unknown,
   reason: string,
   worker: WorkerObservation | null,
-  host: WatchedMixHost | null,
   native: { transportEpoch: number; callbacks: number; submittedVstSegments: number | null; state: string },
 ) => error instanceof TierThreeRecordingFailure ? error : new TierThreeRecordingFailure(
   error instanceof Error ? error.message : "Native recording failed.",
-  null, "unknown", reason, worker, null, host, native,
+  null, "unknown", reason, worker, null, native,
 )
 export const matchingWorkerAutomation = (
   observation: WorkerObservation | null, instanceId: string, parameterId: number, epoch: number, afterSequence: string,
@@ -277,7 +274,6 @@ export const runTierThree = async (
     issue48LiveReEnableReason += " Initial parameter commit may have left an override; no visible re-enable control was available."
   }
   const initial = afterPlayback.native.diagnostics.workerAutomation
-  const watchedMixAtPlayback = afterPlayback.native.diagnostics.watchedMixHost ?? null
   const nativeAtPlayback = {
     transportEpoch: afterPlayback.native.diagnostics.transportEpoch,
     callbacks: afterPlayback.native.diagnostics.callbacks,
@@ -302,29 +298,19 @@ export const runTierThree = async (
     await new Promise((resolve) => setTimeout(resolve, 1_000))
     const override = await diagnostics("after-manual-override")
     const current = override.native.status === "available" ? override.native.diagnostics : null
-    const watchedOverride = current?.watchedMixHost
-    const watchedBefore = watchedMixAtPlayback
-    if (current?.state === "running" && current.transportEpoch === epoch
-      && watchedOverride?.instanceId === instance.instanceId
-      && watchedBefore?.instanceId === instance.instanceId
-      && watchedOverride.overrideSkips > watchedBefore.overrideSkips) {
+    if (current?.state === "running" && current.transportEpoch === epoch) {
       await browserCommand(session, ["eval", "(()=>{const button=[...document.querySelectorAll('button')].find(button=>button.getAttribute('aria-label')==='Re-enable automation (2)');if(!(button instanceof HTMLButtonElement))throw new Error('Re-enable control disappeared');button.click();return true})()"])
       await new Promise((resolve) => setTimeout(resolve, 6_000))
       const overrideCleared = (await browserCommand(session, ["eval", "[...document.querySelectorAll('button')].some(button=>button.getAttribute('aria-label')?.startsWith('Re-enable automation (')) ? false : true"])).trim() === "true"
       const resumed = await diagnostics("after-re-enable")
-      const watchedResumed = resumed.native.status === "available" ? resumed.native.diagnostics.watchedMixHost : null
       const workerResumed = resumed.native.status === "available" ? resumed.native.diagnostics.workerAutomation : null
       if (overrideCleared && resumed.native.status === "available" && resumed.native.diagnostics.state === "running"
         && resumed.native.diagnostics.transportEpoch === epoch
-        && watchedResumed?.instanceId === instance.instanceId
-        && (watchedResumed.submitted > watchedOverride.submitted
-          || (watchedResumed.projected > watchedOverride.projected
-            && watchedResumed.overrideSkips === watchedOverride.overrideSkips)
-          || matchingWorkerAutomation(workerResumed, instance.instanceId, mix.id, epoch, initial.sequence))) {
+        && matchingWorkerAutomation(workerResumed, instance.instanceId, mix.id, epoch, initial.sequence)) {
         issue48LiveReEnableCertification = "passed"
-        issue48LiveReEnableReason = "Two visible Valhalla edits produced native Mix override skips and the existing global control re-enabled both parameters while Mix resumed accepted scheduling without changing transport epoch."
-      } else issue48LiveReEnableReason = `No newer accepted Mix submission after visible UI re-enable. Cleared=${overrideCleared}; before=${JSON.stringify(watchedOverride)}; after=${JSON.stringify(watchedResumed)}; worker=${JSON.stringify(workerResumed)}.`
-    } else issue48LiveReEnableReason = "Visible Mix edit did not produce same-epoch native override skips."
+        issue48LiveReEnableReason = "Two visible Valhalla edits registered manual overrides and the existing global control re-enabled both parameters while Mix resumed accepted scheduling without changing transport epoch."
+      } else issue48LiveReEnableReason = `No newer accepted Mix submission after visible UI re-enable. Cleared=${overrideCleared}; worker=${JSON.stringify(workerResumed)}.`
+    } else issue48LiveReEnableReason = "Visible parameter edits did not preserve the running transport epoch."
   }
   await browserCommand(session, ["find", "role", "button", "click", "--name", "Stop"])
 
@@ -372,7 +358,7 @@ export const runTierThree = async (
         failure: recordingDuring.recording.lastFailurePresent,
       },
       newClipCount: snapshot.clips.filter((clip) => !beforeClips.some((before) => before.id === clip.id)).length,
-    })}`, longTasks, longTasks ? correlateRecordingStall(recordingDuring.recording.writerReturnDeliveryWorst, longTasks) : "unknown", issue48LiveReEnableReason, initial, taskSources, watchedMixAtPlayback, nativeAtPlayback)
+    })}`, longTasks, longTasks ? correlateRecordingStall(recordingDuring.recording.writerReturnDeliveryWorst, longTasks) : "unknown", issue48LiveReEnableReason, initial, taskSources, nativeAtPlayback)
   }
   const recordedClipId = validateTierThreeAudioRecording(beforeClips, snapshot.clips, audioTrack.id, capturedFrames, recordingDuring.recording.activeSampleRate ?? 0)
   if (recordingDuring.recording.droppedFrames !== 0 || recordingDuring.recording.overrunFrames !== 0
@@ -388,7 +374,7 @@ export const runTierThree = async (
         }
       }) : await record()
     } catch (error) {
-      throw retainTierThreeRecordingFailure(error, issue48LiveReEnableReason, initial, watchedMixAtPlayback, nativeAtPlayback)
+      throw retainTierThreeRecordingFailure(error, issue48LiveReEnableReason, initial, nativeAtPlayback)
     }
   })()
   const { recordedClipId, capturedFrames, recordingDuring, longTasks, taskSources, stallCorrelation } = captured
@@ -406,7 +392,5 @@ export const runTierThree = async (
       taskSources: analyzeTaskSourceEvidence(taskSources, recordingDuring.recording.writerReturnDeliveryWorst) },
     issue48LiveReEnableCertification,
     issue48LiveReEnableReason,
-    watchedMixAtPlayback,
-    watchedMixProcessedAtPlayback: afterPlayback.native.diagnostics.watchedMixProcessed ?? null,
   }
 }

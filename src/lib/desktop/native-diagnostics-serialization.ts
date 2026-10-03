@@ -1,19 +1,15 @@
 import type { NativeHostDiagnostics } from "@daw-browser/audio-engine/native-host-wire"
 
 export const serializeNativeDiagnostics = <T extends Pick<NativeHostDiagnostics,
-  "workerAutomation" | "watchedMixProcessed" | "watchedMixHost" | "renderEpoch" | "lastRejectedCallback" | "lastRejectedRenderEpoch"
+  "workerAutomation" | "renderEpoch" | "lastRejectedCallback" | "lastRejectedRenderEpoch"
   | "transportFrame" | "realtimePerformance" | "vstWorkerPerformance">>(diagnostics: T) => {
-  const { workerAutomation, watchedMixProcessed, renderEpoch, lastRejectedCallback, lastRejectedRenderEpoch,
+  const { workerAutomation, renderEpoch, lastRejectedCallback, lastRejectedRenderEpoch,
     transportFrame, realtimePerformance, vstWorkerPerformance, ...rest } = diagnostics
   return {
     ...rest,
     workerAutomation: workerAutomation === null ? null : {
       ...workerAutomation,
       sequence: workerAutomation.sequence.toString(),
-    },
-    watchedMixProcessed: watchedMixProcessed === null ? null : {
-      ...watchedMixProcessed,
-      sequence: watchedMixProcessed.sequence.toString(),
     },
     renderEpoch: renderEpoch.toString(),
     transportFrame: transportFrame.toString(),

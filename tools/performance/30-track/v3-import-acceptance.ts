@@ -123,7 +123,7 @@ export const fullLoadFrameProbeScript = () => `(()=>{const limit=8192,longLimit=
 const push=(values,key,value)=>{if(values.length<limit)values.push(value);else state.drop[key]++};
 const owner=(entry)=>{const scripts=entry.scripts||[];const script=scripts.reduce((best,item)=>(item.duration||0)>(best?.duration||0)?item:best,null);const source=String(script?.sourceURL||'').slice(-160),fn=String(script?.functionName||'').slice(0,120);const text=(source+' '+fn).toLowerCase();const category=text.includes('waveform')?'waveform-geometry':text.includes('record')?'recording-UI':text.includes('timeline')?'timeline-reactivity':text.includes('solid')?'Solid/reactive':scripts.length?'unknown':'layout/style';return {category,source:source||null,functionName:fn||null}};
 const phase=(name,active)=>{const now=performance.now();if(active){state.currentPhase=name;state.phases.push({name,startTime:now,endTime:null})}else{const item=[...state.phases].reverse().find(candidate=>candidate.name===name&&candidate.endTime===null);if(item)item.endTime=now;state.currentPhase=[...state.phases].reverse().find(candidate=>candidate.endTime===null)?.name||'unattributed'};return true};
-window.__dawPerformanceBenchmark={increment:(key,amount=1)=>{state.counters[key]=(state.counters[key]||0)+amount},duration:(key,value)=>{const values=state.durations[key]||(state.durations[key]=[]);if(values.length<limit)values.push(value)},gauge:(key,value)=>{state.counters[key]=value},mark:(owner)=>{if(state.marks.length<limit)state.marks.push({owner,timestamp:performance.now()})},phase};
+window.__dawPerformanceBenchmark={increment:(key,amount=1)=>{state.counters[key]=(state.counters[key]||0)+amount},duration:(key,value)=>{const values=state.durations[key]||(state.durations[key]=[]);if(values.length<limit)values.push(value)},gauge:(key,value)=>{state.counters[key]=value},mark:(owner)=>{if(state.marks.length<limit)state.marks.push({owner,timestamp:performance.now()})},phase,currentPhase:()=>state.currentPhase};
 window.__dawPerformancePhase=phase;
 window.__dawMeasureZoomGesture=(token,deltaY,anchor)=>{void(async()=>{const timeline=document.querySelector('[data-timeline-scroll-viewport="1"]');if(!(timeline instanceof HTMLElement))throw new Error('Timeline zoom surface unavailable.');const rect=timeline.getBoundingClientRect(),inputTimestamp=performance.now(),beforeGeneration=state.counters['timeline.viewport-generation']||0,beforeMark=state.marks.length;timeline.dispatchEvent(new WheelEvent('wheel',{deltaY,deltaMode:0,ctrlKey:true,bubbles:true,clientX:rect.left+rect.width*anchor}));let firstStateChangeTimestamp=null,requestsQuiescentTimestamp=null,rasterStartTimestamp=null,rasterCompleteTimestamp=null,firstPresentedFrameTimestamp=null,settledTimestamp=null,stableFrames=0,lastSignature='',lastRaster=state.counters['waveform.raster-calls']||0;while(performance.now()-inputTimestamp<4000){await new Promise(requestAnimationFrame);const now=performance.now(),generation=state.counters['timeline.viewport-generation']||0,signature=[generation,state.counters['timeline.pixels-per-second']||0,state.counters['timeline.visible-start-sec']||0,state.counters['timeline.visible-end-sec']||0].join('|'),raster=state.counters['waveform.raster-calls']||0,pending=state.counters['waveform.requests-pending']||0,marks=state.marks.slice(beforeMark);if(firstStateChangeTimestamp===null&&generation!==beforeGeneration){firstStateChangeTimestamp=now;continue}if(firstStateChangeTimestamp!==null&&requestsQuiescentTimestamp===null&&pending===0)requestsQuiescentTimestamp=now;if(requestsQuiescentTimestamp!==null&&rasterStartTimestamp===null)rasterStartTimestamp=marks.find(mark=>mark.owner==='waveform.raster-start'&&mark.timestamp>=requestsQuiescentTimestamp)?.timestamp??null;if(rasterStartTimestamp!==null&&rasterCompleteTimestamp===null)rasterCompleteTimestamp=marks.find(mark=>mark.owner==='waveform.raster-complete'&&mark.timestamp>=rasterStartTimestamp)?.timestamp??null;if(firstStateChangeTimestamp!==null&&firstPresentedFrameTimestamp===null){firstPresentedFrameTimestamp=now;lastSignature=signature;lastRaster=raster;continue}if(firstPresentedFrameTimestamp!==null&&signature===lastSignature&&raster===lastRaster&&pending===0)stableFrames++;else stableFrames=0;lastSignature=signature;lastRaster=raster;if(stableFrames>=2){settledTimestamp=now;break}}const nonnegative=(value)=>value===null?null:Math.max(0,value);state.zoomResults[token]={stateChangeMs:nonnegative(firstStateChangeTimestamp===null?null:firstStateChangeTimestamp-inputTimestamp),firstVisualMs:nonnegative(firstPresentedFrameTimestamp===null?null:firstPresentedFrameTimestamp-inputTimestamp),settledMs:nonnegative(settledTimestamp===null?null:settledTimestamp-inputTimestamp),settled:settledTimestamp!==null,inputToViewportStateMs:nonnegative(firstStateChangeTimestamp===null?null:firstStateChangeTimestamp-inputTimestamp),viewportToRequestsQuiescentMs:nonnegative(firstStateChangeTimestamp===null||requestsQuiescentTimestamp===null?null:requestsQuiescentTimestamp-firstStateChangeTimestamp),quiescenceToRasterStartMs:nonnegative(requestsQuiescentTimestamp===null||rasterStartTimestamp===null?null:rasterStartTimestamp-requestsQuiescentTimestamp),rasterExecutionMs:nonnegative(rasterStartTimestamp===null||rasterCompleteTimestamp===null?null:rasterCompleteTimestamp-rasterStartTimestamp),rasterCompleteToPresentedFrameMs:nonnegative(rasterCompleteTimestamp===null||firstPresentedFrameTimestamp===null?null:firstPresentedFrameTimestamp-rasterCompleteTimestamp),firstPresentedToTwoStableFramesMs:nonnegative(firstPresentedFrameTimestamp===null||settledTimestamp===null?null:settledTimestamp-firstPresentedFrameTimestamp)}})();return true};
 const frame=(timestamp)=>{if(!state.active)return;if(state.last!==null)push(state.raf,'raf',timestamp-state.last);state.last=timestamp;
@@ -240,7 +240,12 @@ type NativeProcessCpu = {
   aggregateWorkerCpu: ProcessCpuDistribution
   workersCpu: { identity: ProcessIdentity; cpu: ProcessCpuDistribution }[]
   generations: NativeProcessGeneration[]
-  identityLosses: { elapsedMs: number; expected: ProcessIdentity[]; observed: ProcessIdentity[] }[]
+  identityLosses: {
+    elapsedMs: number
+    expected: ProcessIdentity[]
+    observed: ProcessIdentity[]
+    replacementWaitMs: number
+  }[]
 }
 const processCpuDistribution = (values: readonly number[]): ProcessCpuDistribution => {
   if (values.length === 0) return { samples: 0, averagePercent: null, p95Percent: null, peakPercent: null }
@@ -263,8 +268,10 @@ const createNativeProcessCpuSampler = async (
   appPid: number,
   durationMs: number,
   preferActiveWorkerGroup: boolean,
+  onMeasurementStart?: (timestamp: number) => void,
 ): Promise<{ stop: () => Promise<NativeProcessCpu> }> => {
   const sampleIntervalMs = 1_000
+  const replacementGraceMs = 3_000
   const selectIdentities = (processes: readonly ProcessRow[]) => {
     const owned = new Set([appPid, ...descendantsOf(processes, appPid)])
     const hostCandidates = processes.filter((row) => owned.has(row.pid)
@@ -348,9 +355,11 @@ const createNativeProcessCpuSampler = async (
   let stopped = false
   let reason: string | null = null
   const startedAt = Date.now()
+  onMeasurementStart?.(startedAt)
+  let nextSampleAt = startedAt
   const sample = async () => {
-    const current = await rows()
-    const currentByPid = new Map(current.map((row) => [row.pid, row]))
+    let current = await rows()
+    let currentByPid = new Map(current.map((row) => [row.pid, row]))
     const targets = [...generation.identities.audioHosts, ...generation.identities.workers]
     const valid = targets.every((identity) => {
       const row = currentByPid.get(identity.pid)
@@ -359,10 +368,20 @@ const createNativeProcessCpuSampler = async (
     })
     if (!valid) {
       const elapsedMs = Math.max(0, Date.now() - startedAt)
-      const nextIdentities = selectIdentities(current)
+      const expected = targets
+      let nextIdentities = selectIdentities(current)
+      let replacementWaitMs = 0
+      while (!nextIdentities && replacementWaitMs < replacementGraceMs && !stopped) {
+        await delay(100)
+        replacementWaitMs += 100
+        current = await rows()
+        currentByPid = new Map(current.map((row) => [row.pid, row]))
+        nextIdentities = selectIdentities(current)
+      }
       identityLosses.push({
-        elapsedMs, expected: targets,
+        elapsedMs, expected,
         observed: nextIdentities ? [...nextIdentities.audioHosts, ...nextIdentities.workers] : [],
+        replacementWaitMs,
       })
       if (!nextIdentities) {
         reason = "An owned native process changed identity without a replacement generation."
@@ -410,7 +429,8 @@ const createNativeProcessCpuSampler = async (
     // This bounded benchmark sampler is intentionally process-level polling; it is not product runtime logic.
     while (!stopped && Date.now() - startedAt < durationMs) {
       await sample()
-      await delay(sampleIntervalMs)
+      nextSampleAt += sampleIntervalMs
+      await delay(Math.max(0, nextSampleAt - Date.now()))
     }
     await sample()
   })()
@@ -648,7 +668,11 @@ const runFullLoadUiStress = async (
   }
   if (!preserveRecording) await evalTrue("(()=>{const stop=document.querySelector('button[aria-label=\"Stop\"]');if(stop instanceof HTMLButtonElement)stop.click();const play=document.querySelector('button[aria-label=\"Play\"]');if(!(play instanceof HTMLButtonElement))return false;play.click();return true})()", "Playback recovery failed.")
 }
-const runZoomSweeps = async (session: string, projectActiveClipCount: number) => {
+const runZoomSweeps = async (
+  session: string,
+  projectActiveClipCount: number,
+  recoverTarget?: () => Promise<void>,
+) => {
   const gestures: {
     sweep: number
     direction: "in" | "out"
@@ -677,6 +701,19 @@ const runZoomSweeps = async (session: string, projectActiveClipCount: number) =>
     waveformRequestStarts: number
     waveformRasterCalls: number
   }[] = []
+  const ensureProbe = async () => {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      try {
+        const present = (await browserCommand(session, ["eval", "Boolean(window.__dawFullLoadFrameProbe)"])).trim() === "true"
+        if (present) return
+      } catch { /* The renderer may be between targets during a reload. */ }
+      if (!recoverTarget) throw new Error("Full-load frame probe unavailable.")
+      await recoverTarget()
+      await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
+    }
+    throw new Error("Full-load frame probe could not be installed on the recovered target after bounded retries.")
+  }
+  await ensureProbe()
   await browserCommand(session, ["eval",
     `(()=>{const timeline=document.querySelector('[data-timeline-scroll-viewport="1"]');if(!(timeline instanceof HTMLElement))throw new Error('Timeline viewport unavailable.');timeline.scrollTop=0;timeline.dispatchEvent(new Event('scroll'));return true})()`])
   await delay(100)
@@ -695,9 +732,8 @@ const runZoomSweeps = async (session: string, projectActiveClipCount: number) =>
     const name = `zoom-${direction}-${sweep}-${Math.round(anchor * 100)}`
     const startedAt = performance.now()
     let token = ""
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      await browserCommand(session, ["eval",
-        `window.__dawFullLoadFrameProbe??(${fullLoadFrameProbeScript()});true`])
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await ensureProbe()
       await browserCommand(session, ["eval", `window.__dawPerformancePhase?.(${JSON.stringify(name)},true)??true`])
       token = crypto.randomUUID()
       await browserCommand(session, ["eval",
@@ -708,7 +744,8 @@ const runZoomSweeps = async (session: string, projectActiveClipCount: number) =>
           8_000)
         break
       } catch (error) {
-        if (attempt === 1) throw error
+        if (attempt === 9) throw error
+        if (recoverTarget) await recoverTarget()
       }
     }
     const timing = z.object({
@@ -898,13 +935,19 @@ const main = async () => {
     outputLine = (lines.pop() ?? "").slice(-512)
     for (const line of lines) {
       if (line.includes("[quiet-capture-lifecycle]") || line.includes("[quiet-capture-native]")
+        || line.includes("[native-audio-host-teardown-request]")
+        || line.includes("[native-audio-host-teardown-ipc]")
+        || line.includes("[native-audio-host-teardown]")
+        || line.includes("[native-audio-host-suspend-request]")
+        || line.includes("[native-audio-host-termination-request]")
+        || line.includes("[native-vst3] native audio host lost")
         || line.includes("[quiet-renderer-ping]") || line.includes("[quiet-renderer-pong]")
         || line.includes("[quiet-renderer-block-cost]")
         || line.includes("[quiet-block-sent]") || line.includes("[quiet-block-transit]")
         || line.includes("[quiet-recording-ipc]")
         || line.includes("native audio host closed"))
         lifecycle = (lifecycle + line.slice(0, line.includes("[quiet-recording-ipc]") ? 2048 : 512) + "\n")
-          .slice(mode.includes("media-recording-probe") ? -32000 : -4000)
+          .slice(-32000)
       const reliabilityMarker = line.indexOf("[vst-reliability]")
       if (reliabilityMarker >= 0)
         vstReliability = (vstReliability + line.slice(reliabilityMarker, reliabilityMarker + 1024) + "\n").slice(-64_000)
@@ -916,6 +959,9 @@ const main = async () => {
   }
   app.stdout?.on("data", collectOutput)
   app.stderr?.on("data", collectOutput)
+  app.on("exit", (code, signal) => {
+    lifecycle = (lifecycle + `[quiet-capture-lifecycle] stage=main-exit code=${code ?? "null"} signal=${signal ?? "null"}\n`).slice(-32_000)
+  })
   if (!app.pid) throw new Error("No Electron PID")
   let plan: ReturnType<typeof createCleanupPlan> | undefined
   let cleanupPromise: Promise<Awaited<ReturnType<typeof cleanupOwnedRunDirectory>>> | null = null
@@ -1016,6 +1062,29 @@ const main = async () => {
     if (mode === "zoom-profile" || mode === "zoom-recording-profile") {
       snapshot = await deriveActiveClipProject(profile, snapshot, zoomVisibleClipLimit)
     }
+    const recoverRendererTarget = async () => {
+      await browserCommand(session, ["connect", endpoint])
+      const candidate = importedProjectTarget(await browserCommand(session, ["tab"]), projectId)
+      if (!candidate) throw new Error("Verified app target unavailable after renderer recovery.")
+      await browserCommand(session, ["tab", candidate])
+      await waitForBrowserValue(session,
+        `new URL(location.href).searchParams.get("projectId")===${JSON.stringify(projectId)}`,
+        30_000)
+      await waitForBrowserValue(session, "document.readyState==='complete'", 30_000)
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        const diagnostics = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
+        if (diagnostics.native.status === "available") {
+          await delay(250)
+          const stable = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
+          if (stable.native.status === "available") break
+        }
+        if (attempt === 119) throw new Error("Native audio host did not recover after renderer recovery.")
+        await delay(250)
+      }
+      await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
+      await waitForBrowserValue(session, "Boolean(window.__dawFullLoadFrameProbe)", 30_000)
+      originalTarget = candidate
+    }
     let pagingSetup: { clipId: string; timelineStartSec: number; sourceOffsetSec: number; durationSec: number } | null = null
     if (mode === "paging") {
       stage = "paging-setup"
@@ -1109,11 +1178,9 @@ const main = async () => {
       const transportDrift: { elapsedMs: number; transportFrame: string; expectedFrame: string; errorFrames: string }[] = []
       const transportBaseline = mode === "dsp-soak"
         ? desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"])) : null
-      controlStartedAtMs = Date.now()
-      nativeProcessCpuSampler = await createNativeProcessCpuSampler(app.pid, controlDurationMs(mode), true)
       if (isUiStressMode(mode) || mode === "zoom-profile" || reliabilityStress) {
         await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
-        if (reliabilityStress) zoomProfile = await runZoomSweeps(session, snapshot.clips.length)
+        if (reliabilityStress) zoomProfile = await runZoomSweeps(session, snapshot.clips.length, recoverRendererTarget)
         else await runFullLoadUiStress(session, snapshot, dspSetup)
         if (isDspControlMode(mode)) {
           for (let attempt = 0; attempt < 60; attempt++) {
@@ -1125,9 +1192,15 @@ const main = async () => {
           }
         }
       }
+      nativeProcessCpuSampler = await createNativeProcessCpuSampler(
+        app.pid,
+        controlDurationMs(mode),
+        true,
+        (timestamp) => { controlStartedAtMs = timestamp },
+      )
       if (mode === "zoom-profile") {
         await browserCommand(session, ["eval", fullLoadFrameProbeScript()])
-        zoomProfile = await runZoomSweeps(session, snapshot.clips.length)
+        zoomProfile = await runZoomSweeps(session, snapshot.clips.length, recoverRendererTarget)
       }
       if (mode === "dsp-soak" && transportBaseline?.native.status === "available"
         && transportBaseline.native.diagnostics.transportFrame !== undefined) {
@@ -1402,7 +1475,7 @@ const main = async () => {
         targetFound: targetsAfter.some((target) => target.urlClass === "app"),
         stopPresent, stopSucceeded, rendererFailure: lifecycle.includes("stage=renderer-gone"),
       }),
-      lifecycle: lifecycle.slice(mode.includes("media-recording-probe") ? -32000 : -3000),
+      lifecycle: lifecycle.slice(-32000),
       vstReliability: vstReliability.trim().split("\n").filter(Boolean),
       zoomSweeps: recordingZoomProfile?.gestures ?? [],
       zoomMemoryCheckpoints: recordingZoomProfile?.memoryCheckpoints ?? [],

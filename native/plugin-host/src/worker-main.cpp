@@ -298,10 +298,26 @@ int main(const int argc, char* argv[]) {
     const auto pollResult = poll(ready.data(), static_cast<nfds_t>(ready.size()), pollTimeout);
     if (pollResult < 0 && errno == EINTR) continue;
     if (pollResult < 0) continue;
+    if ((ready[0].revents | ready[1].revents) & POLLNVAL) {
+      std::cerr << "[vst-worker-lifecycle] invalid poll descriptor control_revents="
+        << ready[0].revents << " wake_revents=" << ready[1].revents << '\n';
+      return EXIT_FAILURE;
+    }
+    const bool wakeClosed = (ready[1].revents & (POLLHUP | POLLERR)) != 0;
+    const bool controlReady = (ready[0].revents & (POLLIN | POLLHUP | POLLERR)) != 0;
+    if (wakeClosed) {
+      std::cerr << "[vst-worker-lifecycle] wake descriptor closed revents="
+        << ready[1].revents << '\n';
+      if (!controlReady) return EXIT_FAILURE;
+    }
+    if (ready[0].revents & (POLLHUP | POLLERR)) {
+      std::cerr << "[vst-worker-lifecycle] control descriptor closed revents="
+        << ready[0].revents << '\n';
+    }
     if (ready[1].revents & POLLIN) {
       daw::plugin_host::WorkerWakeSignal::Drain(wakeFileDescriptor);
     }
-    if (pollResult > 0 && (ready[0].revents & (POLLIN | POLLHUP | POLLERR))) {
+    if (pollResult > 0 && controlReady) {
       const auto command = daw::plugin_host::ReadWorkerControlCommand(controlFileDescriptor);
       if (!command || command->command == daw::plugin_host::WorkerControlCommand::kStop) {
         plugin.Dispose();

@@ -558,6 +558,8 @@ int main(int argc, char* argv[]) {
     descriptor.revents = 0;
     const auto deathObserved = poll(&descriptor, 1, 0) == 1 && (descriptor.revents & POLLHUP) != 0;
     if (!Check(deathObserved, "worker death was not observable on the wake descriptor")) return EXIT_FAILURE;
+    close(wake.releaseReadDescriptor());
+    if (!Check(!wake.Notify(), "closed wake reader was not handled as EPIPE")) return EXIT_FAILURE;
     wake.Close();
     if (!Check(!wake.Notify(), "pending teardown retained a usable wake writer")) return EXIT_FAILURE;
 

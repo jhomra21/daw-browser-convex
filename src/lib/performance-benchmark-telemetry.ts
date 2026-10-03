@@ -1,9 +1,10 @@
-export type PerformanceBenchmarkCollector = {
+type PerformanceBenchmarkCollector = {
   increment: (owner: string, amount?: number) => void
   duration: (owner: string, durationMs: number) => void
   gauge: (owner: string, value: number) => void
   mark: (owner: string) => void
   phase: (owner: string, active: boolean) => void
+  currentPhase?: () => string
 }
 
 declare global {

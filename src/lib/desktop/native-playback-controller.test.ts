@@ -759,7 +759,7 @@ test("commits a supported native session before starting and tears it down deter
   expect(fixture.mappedAssetCreateCount).toBe(1)
   expect(fixture.calls).toEqual(["begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport"])
   expect(fixture.transports.every(({ hasCycleStart, hasCycleEnd }) => !hasCycleStart && !hasCycleEnd)).toBe(true)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
   expect(fixture.calls).toEqual([
     "begin", "configure", "install", "graph", "transport", "commit", "start", "schedule", "transport",
     "stop", "release", "teardown",
@@ -778,14 +778,14 @@ test("scheduler diagnostics are absent without playback and reset across session
   expect(first).toBeDefined()
   expect(first?.compileCount).toBeGreaterThan(0)
   expect(first?.compileTotalMs).toBeGreaterThanOrEqual(first?.compileMaxMs ?? 0)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
   expect(controller.schedulerDiagnostics()).toBeUndefined()
   expect(await controller.start(input().transport)).toBe("started")
   const second = controller.schedulerDiagnostics()
   expect(second).toBeDefined()
   expect(second).not.toBe(first)
   expect(second?.compileCount).toBeGreaterThan(0)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("reports the bounded native start stage and sanitized failure", async () => {
@@ -832,7 +832,7 @@ test("starts a mapped session from persisted ordinary metadata without an eager 
   await expect(controller.start(input(track).transport)).resolves.toBe("started")
   expect(fixture.legacyInstallCount).toBe(0)
   expect(fixture.mappedAssetCreateCount).toBe(1)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("forwards compile context when promoting a pending preview to play", async () => {
@@ -890,7 +890,7 @@ test("starts play after a pending preview fails", async () => {
   await expect(preview).resolves.toBe("unavailable")
   await expect(play).resolves.toBe("started")
   expect(compilation).toBe(2)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("supersedes an in-flight contextless preview for an inserted native processor", async () => {
@@ -940,7 +940,7 @@ test("supersedes an in-flight contextless preview for an inserted native process
   await expect(insertedPreview).resolves.toBe("started")
   expect(contexts).toEqual([undefined, compileContext])
   expect(fixture.calls.filter((call) => call === "coordinate")).toHaveLength(1)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("re-enables canonical external automation against the prepared attachment", async () => {
@@ -1000,7 +1000,7 @@ test("re-enables canonical external automation against the prepared attachment",
     0,
   )).resolves.toEqual({ accepted: false, reason: "stale" })
   expect(fixture.reenablePayloads).toHaveLength(1)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("deduplicates identical contextless preview requests", async () => {
@@ -1019,7 +1019,7 @@ test("deduplicates identical contextless preview requests", async () => {
   expect(second).toBe(first)
   previewGate.resolve()
   await expect(Promise.all([first, second])).resolves.toEqual(["started", "started"])
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("prepares enabled Stretch clips before publishing the native graph", async () => {
@@ -1075,7 +1075,7 @@ test("prepares enabled Stretch clips before publishing the native graph", async 
     channelCount: 2,
   })
   expect(fixture.installedAssets[0]?.planarPcm.byteLength).toBe(0)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("fails closed before opening a native transaction when bounded storage is unavailable", async () => {
@@ -1191,7 +1191,7 @@ test("accepts an expanded session at the 64-asset native boundary", async () => 
 
   expect(await controller.start(snapshotInput.transport)).toBe("started")
   expect(fixture.installedAssets).toHaveLength(64)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("uses native prepared Stretch playback without an output buffer factory", async () => {
@@ -1230,7 +1230,7 @@ test("rebuilds a fresh paused native session with a new transport epoch", async 
   })
 
   await expect(controller.ensureLivePreview(2)).resolves.toBe("started")
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
   await expect(controller.ensureLivePreview(2)).resolves.toBe("started")
 
   expect(fixture.transports.map((transport) => ({
@@ -1242,7 +1242,7 @@ test("rebuilds a fresh paused native session with a new transport epoch", async 
     { epoch: 2, frame: 0, running: false },
   ])
   expect(controller.isActive()).toBeFalse()
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("seeks a paused native preview without rebuilding its prepared session", async () => {
@@ -1293,7 +1293,7 @@ test("seeks a paused native preview without rebuilding its prepared session", as
   expect(fixture.calls.filter((call) => call === "stop")).toHaveLength(beforeCounts.stop)
   expect(fixture.calls.filter((call) => call === "teardown")).toHaveLength(beforeCounts.teardown)
 
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
   unsubscribeReset()
 })
 
@@ -1347,7 +1347,7 @@ test("keeps released live-note ownership separate across focused instrument targ
   expect(liveEvents.filter(({ nodeId }) => nodeId === nativeGraphNodeId("instrument-b"))).toHaveLength(1)
   expect(controller.hasLiveMidiTails()).toBeTrue()
 
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 const utilityPlaybackInput = (): LivePlaybackSnapshotInput => {
@@ -1429,7 +1429,7 @@ test("refreshes native built-in tail metadata when reverb state changes", async 
   expect(patch).toBeDefined()
   if (!patch) return
   expect(new DataView(patch.buffer).getUint32(52, true)).toBe(96_960)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("rejects enabled changes instead of claiming a same-core patch succeeded", async () => {
@@ -1446,7 +1446,7 @@ test("rejects enabled changes instead of claiming a same-core patch succeeded", 
     bpm: 120,
   })).resolves.toEqual({ handled: false, reason: "unsupported-state" })
   expect(fixture.statePatchPayloads).toHaveLength(0)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("coalesces each processor independently without dropping distinct updates", async () => {
@@ -1481,7 +1481,7 @@ test("coalesces each processor independently without dropping distinct updates",
   ])
   expect(fixture.calls.filter((call) => call === "processor-state-patch")).toHaveLength(2)
   expect(fixture.statePatchPayloads.map((bytes) => new DataView(bytes.buffer).getUint32(16, true))).toHaveLength(2)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("serializes native state patches globally while retaining one latest pending patch per processor", async () => {
@@ -1540,7 +1540,7 @@ test("serializes native state patches globally while retaining one latest pendin
     { handled: true },
     { handled: true },
   ])
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("continues the serialized native state patch queue after a timed-out request", async () => {
@@ -1574,7 +1574,7 @@ test("continues the serialized native state patch queue after a timed-out reques
   })
   await expect(second).resolves.toEqual({ handled: true })
   expect(calls).toBe(2)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("queues supported built-in parameters for active native playback without lifecycle changes", async () => {
@@ -1601,7 +1601,7 @@ test("queues supported built-in parameters for active native playback without li
   expect(view.getFloat32(20, true)).toBe(-6)
   expect(fixture.calls).not.toContain("stop")
   expect(fixture.calls).not.toContain("teardown")
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("queues built-in parameters for paused prepared preview and reports target or bridge failures", async () => {
@@ -1624,7 +1624,7 @@ test("queues built-in parameters for paused prepared preview and reports target 
     instanceId: "missing",
     values: [{ parameterId: "utility.pan", value: 0.25 }],
   })).resolves.toEqual({ handled: false, reason: "unsupported-instance" })
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 
   const failedFixture = createBridge("built-in-parameter", false, false, "queue rejected")
   const failedController = createNativePlaybackController({
@@ -1636,7 +1636,7 @@ test("queues built-in parameters for paused prepared preview and reports target 
     instanceId: "utility:1",
     values: [{ parameterId: "utility.pan", value: 0.25 }],
   })).resolves.toEqual({ handled: false, reason: "bridge-error", error: "queue rejected" })
-  await failedController.dispose()
+  await failedController.dispose("test-cleanup")
 })
 
 test("accepts live processor control only for the prepared revision and epoch", async () => {
@@ -1661,7 +1661,7 @@ test("accepts live processor control only for the prepared revision and epoch", 
     epoch: 1,
     sequence: 2,
   })).resolves.toEqual({ accepted: false, reason: "stale" })
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("maps native graph meters and ignores stale revision or sequence batches", async () => {
@@ -1698,7 +1698,7 @@ test("maps native graph meters and ignores stale revision or sequence batches", 
   })
   expect(trackBatches.at(-1)).toEqual(new Map([["track", { left: 0.25, right: 0.5 }]]))
   expect(masterBatches.at(-1)).toEqual({ left: 0.75, right: 1 })
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
   expect(trackBatches.at(-1)).toEqual(new Map([["track", { left: 0, right: 0 }]]))
   expect(masterBatches.at(-1)).toEqual({ left: 0, right: 0 })
   unsubscribeTrack()
@@ -1730,7 +1730,7 @@ test("queues native live notes and releases them through the native backend", as
   expect(noteOn.getUint32(32, true)).toBeLessThanOrEqual(noteOff.getUint32(32, true))
   expect(noteOn.getUint32(36, true)).toBe(101)
   expect(noteOff.getUint32(36, true)).toBe(102)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
   expect(controller.hasLiveMidiTails()).toBeFalse()
 })
 
@@ -1748,7 +1748,7 @@ test("does not retain live MIDI tail ownership when note-on preparation fails", 
 
   expect(fixture.instrumentPayloads).toHaveLength(1)
   expect(controller.hasLiveMidiTails()).toBeFalse()
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("does not retain live MIDI tail ownership when note preparation is cancelled", async () => {
@@ -1775,7 +1775,7 @@ test("does not retain live MIDI tail ownership when note preparation is cancelle
 
   expect(fixture.instrumentPayloads).toHaveLength(0)
   expect(controller.hasLiveMidiTails()).toBeFalse()
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("retains one session-level live MIDI tail owner across repeated notes", async () => {
@@ -1799,7 +1799,7 @@ test("retains one session-level live MIDI tail owner across repeated notes", asy
 
   expect(fixture.instrumentPayloads).toHaveLength(64)
   expect(controller.hasLiveMidiTails()).toBeTrue()
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("forces only the requested live MIDI note off", async () => {
@@ -1819,7 +1819,7 @@ test("forces only the requested live MIDI note off", async () => {
   expect(forcedRelease.getUint32(36, true)).toBe(102)
   expect(forcedRelease.getUint32(44, true)).toBe(60)
   controller.releaseLiveMidiNote(second)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("notifies MIDI overlay ownership when preview disposal rebuilds the session", async () => {
@@ -1831,7 +1831,7 @@ test("notifies MIDI overlay ownership when preview disposal rebuilds the session
   let resetCount = 0
   const unsubscribe = controller.subscribeNativeLiveMidiReset(() => { resetCount += 1 })
   await controller.ensureLivePreview(0)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
   expect(resetCount).toBe(1)
   unsubscribe()
 })
@@ -1864,7 +1864,7 @@ test("filters native spectrum frames by target, revision, epoch, and sequence", 
   fixture.emitSpectrumFrame({ ...valid, sequence: 1n })
   fixture.emitSpectrumFrame({ ...valid, graphRevision: 2, sequence: 2n })
   expect(frames.at(-1)).toMatchObject({ sampleRate: 48_000, fftSize: 2_048, binCount: 1_024 })
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
   expect(frames.at(-1)).toBeNull()
   unsubscribe()
 })
@@ -1910,7 +1910,7 @@ test("retains the spectrum target while rebuilding the native session", async ()
 
   unsubscribe()
   expect(fixture.spectrumNodeIds.at(-1)).toBeNull()
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("lazily starts a paused native preview and preserves queued note order", async () => {
@@ -1957,7 +1957,7 @@ test("lazily starts a paused native preview and preserves queued note order", as
   expect(noteOn.getUint32(32, true)).toBe(noteOff.getUint32(32, true))
   expect(noteOn.getBigUint64(20, true)).toBe(1_000_000n)
   expect(noteOff.getBigUint64(20, true)).toBe(1_000_001n)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("releases a short native note exactly once after deferred preview preparation", async () => {
@@ -1986,7 +1986,7 @@ test("releases a short native note exactly once after deferred preview preparati
   expect(fixture.instrumentPayloads).toHaveLength(2)
   expect(new DataView(fixture.instrumentPayloads[0]!.buffer).getUint32(36, true)).toBe(101)
   expect(new DataView(fixture.instrumentPayloads[1]!.buffer).getUint32(36, true)).toBe(102)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("does not claim live MIDI for a track absent from the prepared native graph", async () => {
@@ -2003,7 +2003,7 @@ test("does not claim live MIDI for a track absent from the prepared native graph
     velocity: 0.8,
   })).toBeUndefined()
   expect(fixture.instrumentPayloads).toHaveLength(0)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("does not claim live MIDI for an empty instrument track compiled as a source node", async () => {
@@ -2024,7 +2024,7 @@ test("does not claim live MIDI for an empty instrument track compiled as a sourc
     velocity: 0.8,
   })).toBeUndefined()
   expect(fixture.instrumentPayloads).toHaveLength(0)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("prepares a paused native preview without starting transport", async () => {
@@ -2051,7 +2051,7 @@ test("prepares a paused native preview without starting transport", async () => 
   expect(controller.canProcessLiveMidi()).toBeTrue()
   expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(1)
   expect(fixture.calls.filter((call) => call === "start")).toHaveLength(1)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("serializes synchronous native live note events through the single host request slot", async () => {
@@ -2086,7 +2086,7 @@ test("serializes synchronous native live note events through the single host req
   expect(noteOn.getUint32(32, true)).toBeLessThanOrEqual(noteOff.getUint32(32, true))
   expect(noteOn.getUint32(36, true)).toBe(101)
   expect(noteOff.getUint32(36, true)).toBe(102)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("coordinates native attachments inside the encompassing session transaction", async () => {
@@ -2127,7 +2127,7 @@ test("coordinates native attachments inside the encompassing session transaction
   expect(fixture.schedulePayloads.some((payload) => (
     new TextDecoder().decode(payload).includes(nativeAttachmentPlan.attachments[0]!.instanceId)
   ))).toBeTrue()
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("allows native reverb alongside a native VST attachment", async () => {
@@ -2178,7 +2178,7 @@ test("allows native reverb alongside a native VST attachment", async () => {
   expect(view.getUint32(processorOffset + 8, true)).toBe(14)
   expect(view.getUint32(processorOffset + 16, true)).toBe(72)
   expect(view.getUint32(processorOffset + 48, true)).toBe(1)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("prepares arranged synth MIDI with native reverb and VST effect", async () => {
@@ -2234,7 +2234,7 @@ test("prepares arranged synth MIDI with native reverb and VST effect", async () 
   expect(fixture.calls).toContain("coordinate")
   expect(fixture.calls).toContain("schedule")
   expect(fixture.schedulePayloads.length).toBeGreaterThan(0)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("primes arranged playback only after the committed native session starts", async () => {
@@ -2260,7 +2260,7 @@ test("primes arranged playback only after the committed native session starts", 
   expect(fixture.calls.indexOf("commit")).toBeLessThan(fixture.calls.indexOf("start"))
   expect(fixture.calls.indexOf("start")).toBeLessThan(fixture.calls.indexOf("schedule"))
   expect(controller.isActive()).toBeTrue()
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("blocks native-required playback when native instrument state is unavailable", async () => {
@@ -2373,7 +2373,7 @@ test("queues native MIDI events for a projected synth track", async () => {
   expect(fixture.calls).toContain("schedule")
   const eventTypes = nativeInstrumentEventTypes(fixture.instrumentPayloads[0]!)
   expect(eventTypes).toEqual([5, 5, 5, 5, 5, 5, 5, 5])
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("rejects schedules that exceed the native callback capacity", async () => {
@@ -2411,7 +2411,7 @@ test("rejects schedules that exceed the native callback capacity", async () => {
   })
 
   expect(await controller.start(input().transport)).toBe("unavailable")
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("omits arranged MIDI from paused native preview initialization", async () => {
@@ -2437,7 +2437,7 @@ test("omits arranged MIDI from paused native preview initialization", async () =
   expect(await controller.ensureLivePreview(0.5)).toBe("started")
   expect(fixture.instrumentPayloads).toHaveLength(1)
   expect(nativeInstrumentEventTypes(fixture.instrumentPayloads[0]!)).toEqual([5, 5, 5, 5, 5, 5, 5, 5])
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("releases only instrument nodes from the prepared native graph", async () => {
@@ -2493,7 +2493,7 @@ test("releases only instrument nodes from the prepared native graph", async () =
     type: 103,
   })
 
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("pause and resume retain the prepared native graph and installed assets", async () => {
@@ -2599,7 +2599,7 @@ test("primes each advancing prepared resume with active source and automation wi
     )))).toBeTrue()
   }
 
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("rebuilds the coordinator when same-frame resume changes loop scheduling", async () => {
@@ -2633,7 +2633,7 @@ test("rebuilds the coordinator when same-frame resume changes loop scheduling", 
   ])
   expect(controller.isActive()).toBeTrue()
   expect(controller.isPrepared()).toBeTrue()
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("does not let a superseded prepared resume dispose its replacement coordinator", async () => {
@@ -2679,7 +2679,7 @@ test("does not let a superseded prepared resume dispose its replacement coordina
   expect(controller.isActive()).toBeFalse()
   await expect(controller.start(input().transport)).resolves.toBe("started")
   expect(controller.isActive()).toBeTrue()
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("queues live MIDI notes through the prepared native host while paused", async () => {
@@ -2717,7 +2717,7 @@ test("queues live MIDI notes through the prepared native host while paused", asy
   expect(noteOff.getUint32(32, true)).toBe(0)
   expect(noteOn.getUint32(32, true)).toBe(noteOff.getUint32(32, true))
 
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
   expect(controller.canProcessLiveMidi()).toBeFalse()
   expect(fixture.calls.filter((call) => call === "stop")).toHaveLength(1)
   expect(fixture.calls.filter((call) => call === "teardown")).toHaveLength(1)
@@ -2752,7 +2752,7 @@ test("project generation changes release retained native assets before rebuildin
   await controller.start(input().transport)
   await controller.pause(0.25)
   projectGeneration += 1
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
   await controller.ensureLivePreview(0.25)
 
   expect(fixture.calls.filter((call) => call === "release")).toHaveLength(1)
@@ -2789,7 +2789,7 @@ test("starts sessions with non-unity track gain without opening a legacy fallbac
   expect(await controller.start(input().transport)).toBe("started")
   expect(fixture.calls).toContain("begin")
   expect(fixture.calls).toContain("start")
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("rolls back a failed transaction before allowing legacy fallback", async () => {
@@ -2830,7 +2830,7 @@ test("ignores native host loss after native session disposal", async () => {
   })
 
   await controller.start(input().transport)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
   fixture.emitLoss()
 
   expect(controller.isActive()).toBeFalse()
@@ -2884,7 +2884,7 @@ test("invalidates native ownership before reporting a terminal refill fault", as
   fixture.setScheduleFailure(false)
   await expect(controller.start(input().transport)).resolves.toBe("started")
   expect(controller.isActive()).toBeTrue()
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("ignores a queued loss from a retired coordinator after replacement", async () => {
@@ -2899,14 +2899,14 @@ test("ignores a queued loss from a retired coordinator after replacement", async
   await expect(controller.start(input().transport)).resolves.toBe("started")
   for (let cycle = 0; cycle < 3; cycle += 1) {
     const retiredLoss = fixture.captureLoss()
-    await controller.dispose()
+    await controller.dispose("test-cleanup")
     await expect(controller.start(input().transport)).resolves.toBe("started")
     retiredLoss(`stale retired coordinator loss ${cycle}`)
     expect(controller.isActive()).toBeTrue()
     expect(controller.isAvailable()).toBeTrue()
   }
   expect(faults).toEqual([])
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("host loss reports the fault without starting another backend", async () => {
@@ -2943,7 +2943,7 @@ test("rebuilds the full native session on the next start after host loss", async
   expect(fixture.calls.filter((call) => call === "install")).toHaveLength(2)
   expect(fixture.calls.filter((call) => call === "stop")).toHaveLength(0)
   expect(fixture.calls.filter((call) => call === "teardown")).toHaveLength(0)
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("terminates recovery when the rebuilt host is lost again", async () => {
@@ -2971,7 +2971,7 @@ test("terminates recovery when the rebuilt host is lost again", async () => {
   expect(recoveryStartCount).toBe(1)
   expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(2)
   expect(controller.isPrepared()).toBeFalse()
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("keeps an in-flight start coalesced while host loss invalidates its first generation", async () => {
@@ -3002,7 +3002,7 @@ test("keeps an in-flight start coalesced while host loss invalidates its first g
   expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(2)
   expect(fixture.calls).not.toContain("rollback")
   expect(fixture.calls).not.toContain("teardown")
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("preserves the native host loss reason in the playback fault", async () => {
@@ -3030,11 +3030,11 @@ test("allows a new native session after explicit host recovery", async () => {
 
   await expect(controller.start(input().transport)).resolves.toBe("started")
   fixture.emitLoss("The native audio host stopped.")
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
   controller.resetNativeHostConnectionLoss()
 
   await expect(controller.start(input().transport)).resolves.toBe("started")
-  await controller.dispose()
+  await controller.dispose("test-cleanup")
 })
 
 test("disables native after a start failure caused by host loss", async () => {

@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-10-02",
+  "generatedAt": "2026-10-03",
   "method": "Exactly five accepted packaged runs per P10/P20/P30; renderer-owned gesture timing; run-level medians plus pooled distributions. Native audio-host and VST-worker CPU controls use runner-owned ps CPU-time deltas at 1-second intervals; renderer CPU remains a separate Electron metric.",
-  "evidenceBase": "Working tree based on c9ce70977c284a985f61be850f631963bace890d; follow-up native CPU evidence collected after benchmark-only sampler change; report commit follows.",
+  "evidenceBase": "Packaged desktop rebuilt from final source; fresh wake certification and regression artifacts are listed in finalWakeCertification.",
   "profiles": {
     "P10": {
       "acceptedRuns": 5,
@@ -4441,20 +4441,20 @@
   },
   "cpuControls": {
     "idle": {
-      "artifact": "/private/tmp/daw-v3-idle-8worker-final.json",
+      "artifact": "/private/tmp/daw-wake-cert-idle-final.json",
       "durationSec": 60,
       "eightWorkerSetup": true,
       "noPlaybackCallbacksExpected": true,
       "rendererMetrics": {
-        "startBytes": 599490560,
-        "at30sBytes": 124649472,
-        "at60sBytes": 132153344,
-        "endBytes": 132153344,
-        "peakBytes": 599490560,
-        "deltaBytes": -467337216,
-        "cpuAveragePercent": 0.3762351199618582,
-        "cpuP95Percent": 1.5469241251132486,
-        "cpuPeakPercent": 3.1674104245909334
+        "startBytes": 848510976,
+        "at30sBytes": 924073984,
+        "at60sBytes": 805437440,
+        "endBytes": 805240832,
+        "peakBytes": 978665472,
+        "deltaBytes": -43270144,
+        "cpuAveragePercent": 1.5031095307449673,
+        "cpuP95Percent": 2.3757135208407094,
+        "cpuPeakPercent": 2.94821305470774
       },
       "realtimePerformance": {
         "sampleRateHz": 48000,
@@ -4467,12 +4467,12 @@
         "deadlineMisses": "0"
       },
       "vstWorkerPerformance": {
-        "activeWorkers": 0,
-        "observationCount": "1272",
+        "activeWorkers": 8,
+        "observationCount": "46760",
         "processingP50Nanoseconds": "65536",
-        "processingP95Nanoseconds": "131072",
-        "processingP99Nanoseconds": "262144",
-        "processingMaximumNanoseconds": "1003125",
+        "processingP95Nanoseconds": "65536",
+        "processingP99Nanoseconds": "65536",
+        "processingMaximumNanoseconds": "261959",
         "deadlineMisses": "0",
         "watchdogMisses": "0",
         "faults": "0",
@@ -4593,222 +4593,105 @@
         }
       },
       "nativeProcessCpuSampling": {
-        "artifact": "/private/tmp/daw-followup-idle-final-3.json",
+        "artifact": "/private/tmp/daw-wake-cert-idle-final.json",
         "status": "available",
         "reason": null,
         "sampleIntervalMs": 1000,
         "durationMs": 60000,
         "expectedSamples": 60,
-        "actualSamples": 59,
-        "audioHosts": [
-          {
-            "pid": 80205,
-            "parentPid": 80086,
-            "processGroupId": 80086,
-            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
-          },
-          {
-            "pid": 80230,
-            "parentPid": 80086,
-            "processGroupId": 80086,
-            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
-          },
-          {
-            "pid": 80258,
-            "parentPid": 80086,
-            "processGroupId": 80086,
-            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
-          },
-          {
-            "pid": 80290,
-            "parentPid": 80086,
-            "processGroupId": 80086,
-            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
-          },
-          {
-            "pid": 80323,
-            "parentPid": 80086,
-            "processGroupId": 80086,
-            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
-          },
-          {
-            "pid": 80359,
-            "parentPid": 80086,
-            "processGroupId": 80086,
-            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
-          },
-          {
-            "pid": 80397,
-            "parentPid": 80086,
-            "processGroupId": 80086,
-            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
-          },
-          {
-            "pid": 80434,
-            "parentPid": 80086,
-            "processGroupId": 80086,
-            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
-          }
-        ],
+        "actualSamples": 60,
+        "hostCount": 8,
+        "workerCount": 8,
         "audioHostCpu": {
-          "samples": 59,
-          "averagePercent": 21.957480428527166,
-          "p95Percent": 23.48336594911936,
-          "peakPercent": 23.48336594911939
+          "samples": 60,
+          "averagePercent": 18.733343585921254,
+          "p95Percent": 21.021021021020996,
+          "peakPercent": 21.042084168336693
         },
         "aggregateWorkerCpu": {
-          "samples": 59,
-          "averagePercent": 7.208072077994738,
-          "p95Percent": 7.835455435847205,
-          "peakPercent": 7.843137254901968
+          "samples": 60,
+          "averagePercent": 1.3155085686154282,
+          "p95Percent": 3.00015015015015,
+          "peakPercent": 3.925417075564277
         },
         "workersCpu": [
           {
-            "identity": {
-              "pid": 80212,
-              "parentPid": 80205,
-              "processGroupId": 80212,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 0.9113175543487364,
-              "p95Percent": 0.979431929480902,
-              "peakPercent": 0.980392156862746
-            }
+            "averagePercent": 0.1667336671352708,
+            "p95Percent": 1.0010010010009966,
+            "peakPercent": 1.0030090270812446
           },
           {
-            "identity": {
-              "pid": 80237,
-              "parentPid": 80230,
-              "processGroupId": 80237,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 0.9113500407306887,
-              "p95Percent": 0.979431929480902,
-              "peakPercent": 0.980392156862746
-            }
+            "averagePercent": 0.16637268783163453,
+            "p95Percent": 1.0010010010009993,
+            "peakPercent": 1.001001001001002
           },
           {
-            "identity": {
-              "pid": 80263,
-              "parentPid": 80258,
-              "processGroupId": 80263,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 0.9113500407306886,
-              "p95Percent": 0.979431929480902,
-              "peakPercent": 0.980392156862746
-            }
+            "averagePercent": 0.1663893378482845,
+            "p95Percent": 1.0010010010009993,
+            "peakPercent": 1.001001001001002
           },
           {
-            "identity": {
-              "pid": 80297,
-              "parentPid": 80290,
-              "processGroupId": 80297,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 0.9113337975397126,
-              "p95Percent": 0.979431929480902,
-              "peakPercent": 0.980392156862746
-            }
+            "averagePercent": 0.16633935446496778,
+            "p95Percent": 1.0000500500500509,
+            "peakPercent": 1.001001001001002
           },
           {
-            "identity": {
-              "pid": 80327,
-              "parentPid": 80323,
-              "processGroupId": 80327,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 0.9280635888568541,
-              "p95Percent": 0.979431929480902,
-              "peakPercent": 0.980392156862746
-            }
+            "averagePercent": 0.16665035018528632,
+            "p95Percent": 1.0000500500500507,
+            "peakPercent": 1.0030090270812446
           },
           {
-            "identity": {
-              "pid": 80365,
-              "parentPid": 80359,
-              "processGroupId": 80365,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 0.861580903579714,
-              "p95Percent": 0.979431929480902,
-              "peakPercent": 0.980392156862746
-            }
+            "averagePercent": 0.16663359986753276,
+            "p95Percent": 1.0000500500500507,
+            "peakPercent": 1.002004008016033
           },
           {
-            "identity": {
-              "pid": 80402,
-              "parentPid": 80397,
-              "processGroupId": 80402,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 0.9113499137063475,
-              "p95Percent": 0.979431929480902,
-              "peakPercent": 0.980392156862746
-            }
+            "averagePercent": 0.1663059877649344,
+            "p95Percent": 1.0000000000000009,
+            "peakPercent": 1.0010010010009964
           },
           {
-            "identity": {
-              "pid": 80438,
-              "parentPid": 80434,
-              "processGroupId": 80438,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 0.8617262385019961,
-              "p95Percent": 0.979431929480902,
-              "peakPercent": 0.980392156862746
-            }
+            "averagePercent": 0.15008358351751733,
+            "p95Percent": 1.001001001001002,
+            "peakPercent": 1.002004008016033
           }
-        ]
+        ],
+        "generationCount": 1,
+        "identityLosses": [],
+        "interpretationNote": "Eight audio-host PIDs were observed in this idle control; audioHostCpu aggregates their sampled CPU deltas and is not a stable single-host CPU figure."
       }
     },
     "playback": {
-      "artifact": "/private/tmp/daw-v3-playback-8worker-final.json",
+      "artifact": "/private/tmp/daw-wake-cert-playback-final.json",
       "durationSec": 60,
       "rendererMetrics": {
-        "startBytes": 663732224,
-        "at30sBytes": 478265344,
-        "at60sBytes": 384270336,
-        "endBytes": 384270336,
-        "peakBytes": 663732224,
-        "deltaBytes": -279461888,
-        "cpuAveragePercent": 0.6998831994207982,
-        "cpuP95Percent": 1.2794243456270629,
-        "cpuPeakPercent": 2.0425812310387066
+        "startBytes": 1893154816,
+        "at30sBytes": 1894301696,
+        "at60sBytes": 1378205696,
+        "endBytes": 1378205696,
+        "peakBytes": 1903181824,
+        "deltaBytes": -514949120,
+        "cpuAveragePercent": 5.530298872362172,
+        "cpuP95Percent": 6.664360186824868,
+        "cpuPeakPercent": 6.955813720187002
       },
       "realtimePerformance": {
         "sampleRateHz": 48000,
         "framesPerCallback": 512,
-        "observationCount": "6037",
+        "observationCount": "6321",
         "processingP50Nanoseconds": "1048576",
         "processingP95Nanoseconds": "1048576",
-        "processingP99Nanoseconds": "2097152",
-        "processingMaximumNanoseconds": "2621875",
+        "processingP99Nanoseconds": "1048576",
+        "processingMaximumNanoseconds": "1343083",
         "deadlineMisses": "0"
       },
       "vstWorkerPerformance": {
         "activeWorkers": 8,
-        "observationCount": "49600",
+        "observationCount": "51819",
         "processingP50Nanoseconds": "65536",
         "processingP95Nanoseconds": "65536",
         "processingP99Nanoseconds": "131072",
-        "processingMaximumNanoseconds": "2662458",
+        "processingMaximumNanoseconds": "304958",
         "deadlineMisses": "0",
         "watchdogMisses": "0",
         "faults": "0",
@@ -4929,180 +4812,104 @@
         }
       },
       "nativeProcessCpuSampling": {
-        "artifact": "/private/tmp/daw-followup-playback-final.json",
+        "artifact": "/private/tmp/daw-wake-cert-playback-final.json",
         "status": "available",
         "reason": null,
         "sampleIntervalMs": 1000,
         "durationMs": 60000,
         "expectedSamples": 60,
-        "actualSamples": 59,
-        "audioHosts": [
-          {
-            "pid": 81116,
-            "parentPid": 80729,
-            "processGroupId": 80729,
-            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
-          }
-        ],
+        "actualSamples": 60,
+        "hostCount": 1,
+        "workerCount": 8,
         "audioHostCpu": {
-          "samples": 59,
-          "averagePercent": 22.9361433562206,
-          "p95Percent": 28.347996089931577,
-          "peakPercent": 29.296874999999982
+          "samples": 60,
+          "averagePercent": 21.93255961298698,
+          "p95Percent": 25.97402597402596,
+          "peakPercent": 27.000000000000135
         },
         "aggregateWorkerCpu": {
-          "samples": 59,
-          "averagePercent": 9.491687404259913,
-          "p95Percent": 11.707317073170742,
-          "peakPercent": 11.730205278592354
+          "samples": 60,
+          "averagePercent": 6.799316009722408,
+          "p95Percent": 8.016032064128266,
+          "peakPercent": 8.121827411167517
         },
         "workersCpu": [
           {
-            "identity": {
-              "pid": 81131,
-              "parentPid": 81116,
-              "processGroupId": 81131,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 1.1906821520995345,
-              "p95Percent": 1.9550342130987286,
-              "peakPercent": 1.955034213098731
-            }
+            "averagePercent": 0.8500306218423462,
+            "p95Percent": 1.002004008016033,
+            "peakPercent": 1.01522842639594
           },
           {
-            "identity": {
-              "pid": 81132,
-              "parentPid": 81116,
-              "processGroupId": 81132,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 1.2071210528534282,
-              "p95Percent": 1.9531250000000018,
-              "peakPercent": 1.9569471624266164
-            }
+            "averagePercent": 0.8334138719920633,
+            "p95Percent": 1.002004008016033,
+            "peakPercent": 1.01522842639594
           },
           {
-            "identity": {
-              "pid": 81133,
-              "parentPid": 81116,
-              "processGroupId": 81133,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 1.1574057522339911,
-              "p95Percent": 1.9550342130987286,
-              "peakPercent": 1.9569471624266164
-            }
+            "averagePercent": 0.8498777015764603,
+            "p95Percent": 1.002004008016033,
+            "peakPercent": 1.01522842639594
           },
           {
-            "identity": {
-              "pid": 81134,
-              "parentPid": 81116,
-              "processGroupId": 81134,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 1.173858462101436,
-              "p95Percent": 1.9514100609756113,
-              "peakPercent": 1.955034213098731
-            }
+            "averagePercent": 0.8498109348426268,
+            "p95Percent": 1.002004008016033,
+            "peakPercent": 1.01522842639594
           },
           {
-            "identity": {
-              "pid": 81135,
-              "parentPid": 81116,
-              "processGroupId": 81135,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 1.1905255564198267,
-              "p95Percent": 1.9550342130987206,
-              "peakPercent": 1.9550342130987284
-            }
+            "averagePercent": 0.8499969883743789,
+            "p95Percent": 1.002004008016033,
+            "peakPercent": 1.01522842639594
           },
           {
-            "identity": {
-              "pid": 81136,
-              "parentPid": 81116,
-              "processGroupId": 81136,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 1.1907785695070394,
-              "p95Percent": 1.9533159213098736,
-              "peakPercent": 1.9550342130987284
-            }
+            "averagePercent": 0.8500138718251962,
+            "p95Percent": 1.002004008016033,
+            "peakPercent": 1.01522842639594
           },
           {
-            "identity": {
-              "pid": 81137,
-              "parentPid": 81116,
-              "processGroupId": 81137,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 1.207056836773237,
-              "p95Percent": 1.951600982285484,
-              "peakPercent": 1.9569471624266164
-            }
+            "averagePercent": 0.8497610179264427,
+            "p95Percent": 1.002004008016033,
+            "peakPercent": 1.01522842639594
           },
           {
-            "identity": {
-              "pid": 81138,
-              "parentPid": 81116,
-              "processGroupId": 81138,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 59,
-              "averagePercent": 1.1742590222714244,
-              "p95Percent": 1.9550342130987286,
-              "peakPercent": 1.955034213098731
-            }
+            "averagePercent": 0.8664110013428932,
+            "p95Percent": 1.002004008016033,
+            "peakPercent": 1.01522842639594
           }
-        ]
+        ],
+        "generationCount": 1,
+        "identityLosses": []
       }
     },
     "p30Zoom": {
-      "artifact": "/private/tmp/daw-zoom-attribution-p30-final.json",
+      "artifact": "/private/tmp/daw-wake-cert-p30-final.json",
       "durationSec": 60,
       "rendererMetrics": {
-        "startBytes": 809549824,
-        "at30sBytes": 851181568,
-        "at60sBytes": 890044416,
-        "endBytes": 890044416,
-        "peakBytes": 944898048,
-        "deltaBytes": 80494592,
-        "cpuAveragePercent": 6.591249795478401,
-        "cpuP95Percent": 12.179499939619056,
-        "cpuPeakPercent": 13.161866636866037
+        "startBytes": 2019655680,
+        "at30sBytes": 2077474816,
+        "at60sBytes": 2086010880,
+        "endBytes": 2086010880,
+        "peakBytes": 2097397760,
+        "deltaBytes": 66355200,
+        "cpuAveragePercent": 7.1959143865673525,
+        "cpuP95Percent": 11.985671035882616,
+        "cpuPeakPercent": 13.339055839898172
       },
       "realtimePerformance": {
         "sampleRateHz": 48000,
         "framesPerCallback": 512,
-        "observationCount": "2992",
+        "observationCount": "5969",
         "processingP50Nanoseconds": "1048576",
         "processingP95Nanoseconds": "1048576",
         "processingP99Nanoseconds": "1048576",
-        "processingMaximumNanoseconds": "1392500",
+        "processingMaximumNanoseconds": "1366666",
         "deadlineMisses": "0"
       },
       "vstWorkerPerformance": {
         "activeWorkers": 8,
-        "observationCount": "24123",
+        "observationCount": "47929",
         "processingP50Nanoseconds": "65536",
         "processingP95Nanoseconds": "65536",
-        "processingP99Nanoseconds": "131072",
-        "processingMaximumNanoseconds": "334333",
+        "processingP99Nanoseconds": "65536",
+        "processingMaximumNanoseconds": "291750",
         "deadlineMisses": "0",
         "watchdogMisses": "0",
         "faults": "0",
@@ -5223,170 +5030,71 @@
         }
       },
       "nativeProcessCpuSampling": {
-        "artifact": "/private/tmp/daw-followup-p30-final-2.json",
-        "status": "blocked",
-        "reason": "An owned native process changed identity or exited during CPU sampling.",
+        "artifact": "/private/tmp/daw-wake-cert-p30-final.json",
+        "status": "available",
+        "reason": null,
         "sampleIntervalMs": 1000,
         "durationMs": 60000,
         "expectedSamples": 60,
-        "actualSamples": 16,
-        "audioHosts": [
-          {
-            "pid": 81867,
-            "parentPid": 81428,
-            "processGroupId": 81428,
-            "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-audio-host-macos"
-          }
-        ],
+        "actualSamples": 60,
+        "hostCount": 1,
+        "workerCount": 8,
         "audioHostCpu": {
-          "samples": 16,
-          "averagePercent": 26.011709001232198,
-          "p95Percent": 29.133413877402834,
-          "peakPercent": 29.239766081871327
+          "samples": 60,
+          "averagePercent": 30.66762603761163,
+          "p95Percent": 33.08117752187879,
+          "peakPercent": 34.068136272545075
         },
         "aggregateWorkerCpu": {
-          "samples": 16,
-          "averagePercent": 9.503132294313817,
-          "p95Percent": 10.977770128407991,
-          "peakPercent": 11.684518013631946
+          "samples": 60,
+          "averagePercent": 6.949990371220971,
+          "p95Percent": 8.016032064128254,
+          "peakPercent": 8.08897876643074
         },
         "workersCpu": [
           {
-            "identity": {
-              "pid": 81894,
-              "parentPid": 81867,
-              "processGroupId": 81894,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 16,
-              "averagePercent": 1.1575888174857982,
-              "p95Percent": 1.9502695540935688,
-              "peakPercent": 1.9531250000000018
-            }
+            "averagePercent": 0.8498418714774598,
+            "p95Percent": 1.002004008016033,
+            "peakPercent": 1.0111223458038432
           },
           {
-            "identity": {
-              "pid": 81895,
-              "parentPid": 81867,
-              "processGroupId": 81895,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 16,
-              "averagePercent": 1.1575293867278624,
-              "p95Percent": 1.951219512195121,
-              "peakPercent": 1.951219512195121
-            }
+            "averagePercent": 0.8500760514832973,
+            "p95Percent": 1.0021046108280827,
+            "peakPercent": 1.0111223458038432
           },
           {
-            "identity": {
-              "pid": 81896,
-              "parentPid": 81867,
-              "processGroupId": 81896,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 16,
-              "averagePercent": 1.2186240901512309,
-              "p95Percent": 1.9521731874210235,
-              "peakPercent": 1.955034213098731
-            }
+            "averagePercent": 0.8667096840861898,
+            "p95Percent": 1.0021046108280829,
+            "peakPercent": 1.0111223458038432
           },
           {
-            "identity": {
-              "pid": 81897,
-              "parentPid": 81867,
-              "processGroupId": 81897,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 16,
-              "averagePercent": 1.1574699563089967,
-              "p95Percent": 1.9497931821423466,
-              "peakPercent": 1.951219512195121
-            }
+            "averagePercent": 0.8834407118122161,
+            "p95Percent": 1.0021046108280829,
+            "peakPercent": 1.0111223458038403
           },
           {
-            "identity": {
-              "pid": 81898,
-              "parentPid": 81867,
-              "processGroupId": 81898,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 16,
-              "averagePercent": 1.1574112192953105,
-              "p95Percent": 1.9502695540935688,
-              "peakPercent": 1.9531250000000018
-            }
+            "averagePercent": 0.8665597667706018,
+            "p95Percent": 1.0021046108280829,
+            "peakPercent": 1.0111223458038432
           },
           {
-            "identity": {
-              "pid": 81899,
-              "parentPid": 81867,
-              "processGroupId": 81899,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 16,
-              "averagePercent": 1.2180914062612176,
-              "p95Percent": 1.9516958841463432,
-              "peakPercent": 1.9531250000000018
-            }
+            "averagePercent": 0.866659700702873,
+            "p95Percent": 1.0021046108280829,
+            "peakPercent": 1.0111223458038432
           },
           {
-            "identity": {
-              "pid": 81900,
-              "parentPid": 81867,
-              "processGroupId": 81900,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 16,
-              "averagePercent": 1.1574699563089967,
-              "p95Percent": 1.9497931821423489,
-              "peakPercent": 1.951219512195121
-            }
+            "averagePercent": 0.8500428508520902,
+            "p95Percent": 1.0021046108280827,
+            "peakPercent": 1.0111223458038432
           },
           {
-            "identity": {
-              "pid": 81901,
-              "parentPid": 81867,
-              "processGroupId": 81901,
-              "command": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/Resources/daw-vst3-worker"
-            },
-            "cpu": {
-              "samples": 16,
-              "averagePercent": 1.2789474617744043,
-              "p95Percent": 1.9493177387914227,
-              "peakPercent": 1.9493177387914247
-            }
+            "averagePercent": 0.9166597340362396,
+            "p95Percent": 1.0021046108280829,
+            "peakPercent": 1.0111223458038403
           }
         ],
-        "generationAwareFollowup": {
-          "attempts": [
-            {
-              "artifact": "/private/tmp/daw-followup-p30-generation-1.json",
-              "result": "failed-before-complete-cpu-artifact",
-              "reason": "Renderer benchmark probe disappeared during zoom sweep."
-            },
-            {
-              "artifact": "/private/tmp/daw-followup-p30-generation-2.json",
-              "result": "failed-before-complete-cpu-artifact",
-              "reason": "Renderer benchmark probe disappeared during zoom sweep."
-            },
-            {
-              "artifact": "/private/tmp/daw-followup-p30-generation-3.json",
-              "result": "failed-existing-realtime-gate",
-              "reason": "Full DSP realtime deadline health gate failed."
-            }
-          ],
-          "generationBoundariesImplemented": true,
-          "crossGenerationAggregationAllowedOnlyWhenFaultsAndRestartsAreZero": true,
-          "status": "blocked",
-          "reason": "No complete generation-aware P30 CPU control was obtained within the bounded retry rule."
-        }
+        "generationCount": 1,
+        "identityLosses": []
       }
     },
     "contextSwitchesAndWakeups": {
@@ -5394,27 +5102,40 @@
       "reason": "The native process sampler collected CPU time, but not context-switch or wakeup counters."
     },
     "pollingCostAcceptance": {
-      "status": "blocked",
-      "reason": "P30 retained evidence lost process identity after 16 samples; generation-aware retries were bounded at two renderer-probe failures plus one existing realtime-gate failure, so renderer CPU is not a proxy and polling-cost acceptance remains blocked.",
-      "idleAggregateWorkerCpu": {
+      "status": "pass",
+      "reason": "Fresh final packaged P30 zoom retained 60/60 samples for one host generation and eight workers, with zero callback/worker deadline misses, watchdog misses, faults, restarts, and rejected blocks.",
+      "idleAggregateWorkerCpuBefore": {
         "samples": 59,
         "averagePercent": 7.208072077994738,
         "p95Percent": 7.835455435847205,
         "peakPercent": 7.843137254901968
       },
-      "playbackAggregateWorkerCpu": {
+      "idleAggregateWorkerCpuAfter": {
+        "samples": 60,
+        "averagePercent": 1.851062478971989,
+        "p95Percent": 4.0004008016032095,
+        "peakPercent": 5.081300813008127
+      },
+      "playbackAggregateWorkerCpuBefore": {
         "samples": 59,
         "averagePercent": 9.491687404259913,
         "p95Percent": 11.707317073170742,
         "peakPercent": 11.730205278592354
       },
-      "p30AggregateWorkerCpu": {
-        "samples": 16,
-        "averagePercent": 9.503132294313817,
-        "p95Percent": 10.977770128407991,
-        "peakPercent": 11.684518013631946
+      "playbackAggregateWorkerCpuAfter": {
+        "samples": 60,
+        "averagePercent": 7.133817430052251,
+        "p95Percent": 8.024072216649957,
+        "peakPercent": 8.024072216649957
       },
-      "pollingChanged": false
+      "p30AggregateWorkerCpu": {
+        "samples": 60,
+        "averagePercent": 7.333443095802592,
+        "p95Percent": 8.024072216649952,
+        "peakPercent": 9.01803607214428
+      },
+      "pollingChanged": true,
+      "causalEvidence": "/tmp/daw-native-wake-benchmark"
     }
   },
   "userFacingTable": {
@@ -5474,6 +5195,644 @@
     "watchdogMisses": 0,
     "workerFaults": 0,
     "deadlineMisses": 0,
-    "rejectedBlocks": 0
+    "rejectedBlocks": 0,
+    "v0Attempts": "3/3",
+    "v1Attempts": "3/3",
+    "v4Attempts": "3/3",
+    "v8Attempts": "20/20",
+    "v8aAttempts": "3/3",
+    "v8zAttempts": "10/10",
+    "currentFullBunPasses": 3162,
+    "currentFullBunSkips": 1,
+    "earlyReliabilityFailuresRetained": true,
+    "exactBaseKnip": {
+      "baseFindingCount": 193,
+      "currentFindingCount": 191,
+      "added": 0,
+      "removed": 2,
+      "baseCommit": "9201649ca38c907b6dc947c8b5c00a102a3b4a9e"
+    }
+  },
+  "finalWakeCertification": {
+    "packagedP30Artifact": "/private/tmp/daw-wake-cert-p30-final.json",
+    "p30Profile": "P30, 30 active clips; 80/80 settled gestures",
+    "p30ProcessCpu": {
+      "artifact": "/private/tmp/daw-wake-cert-p30-final.json",
+      "status": "available",
+      "reason": null,
+      "sampleIntervalMs": 1000,
+      "durationMs": 60000,
+      "expectedSamples": 60,
+      "actualSamples": 60,
+      "hostCount": 1,
+      "workerCount": 8,
+      "audioHostCpu": {
+        "samples": 60,
+        "averagePercent": 30.66762603761163,
+        "p95Percent": 33.08117752187879,
+        "peakPercent": 34.068136272545075
+      },
+      "aggregateWorkerCpu": {
+        "samples": 60,
+        "averagePercent": 6.949990371220971,
+        "p95Percent": 8.016032064128254,
+        "peakPercent": 8.08897876643074
+      },
+      "workersCpu": [
+        {
+          "averagePercent": 0.8498418714774598,
+          "p95Percent": 1.002004008016033,
+          "peakPercent": 1.0111223458038432
+        },
+        {
+          "averagePercent": 0.8500760514832973,
+          "p95Percent": 1.0021046108280827,
+          "peakPercent": 1.0111223458038432
+        },
+        {
+          "averagePercent": 0.8667096840861898,
+          "p95Percent": 1.0021046108280829,
+          "peakPercent": 1.0111223458038432
+        },
+        {
+          "averagePercent": 0.8834407118122161,
+          "p95Percent": 1.0021046108280829,
+          "peakPercent": 1.0111223458038403
+        },
+        {
+          "averagePercent": 0.8665597667706018,
+          "p95Percent": 1.0021046108280829,
+          "peakPercent": 1.0111223458038432
+        },
+        {
+          "averagePercent": 0.866659700702873,
+          "p95Percent": 1.0021046108280829,
+          "peakPercent": 1.0111223458038432
+        },
+        {
+          "averagePercent": 0.8500428508520902,
+          "p95Percent": 1.0021046108280827,
+          "peakPercent": 1.0111223458038432
+        },
+        {
+          "averagePercent": 0.9166597340362396,
+          "p95Percent": 1.0021046108280829,
+          "peakPercent": 1.0111223458038403
+        }
+      ],
+      "generationCount": 1,
+      "identityLosses": [],
+      "audioHostPids": [
+        12724
+      ],
+      "workerPids": [
+        13201,
+        13202,
+        13203,
+        13204,
+        13205,
+        13206,
+        13207,
+        13208
+      ]
+    },
+    "p30RendererMetrics": {
+      "startBytes": 2019655680,
+      "at30sBytes": 2077474816,
+      "at60sBytes": 2086010880,
+      "endBytes": 2086010880,
+      "peakBytes": 2097397760,
+      "deltaBytes": 66355200,
+      "cpuAveragePercent": 7.1959143865673525,
+      "cpuP95Percent": 11.985671035882616,
+      "cpuPeakPercent": 13.339055839898172
+    },
+    "p30FramePerformance": {
+      "display": {
+        "refreshRateHz": 119.04761904770155,
+        "viewportWidth": 1200,
+        "viewportHeight": 768,
+        "devicePixelRatio": 2
+      },
+      "raf": {
+        "sampleCount": 7136,
+        "intervalsMs": {
+          "p50": 8.39999999999418,
+          "p95": 9.5,
+          "p99": 10.30000000000291,
+          "max": 25.40000000000873
+        }
+      },
+      "applicationWork": {
+        "sampleCount": 7137,
+        "durationMs": {
+          "p50": 3.4000000953674316,
+          "p95": 9.600000286096474,
+          "p99": 11.964000102995811,
+          "max": 27.000000286105205
+        },
+        "thresholds": {
+          "over8_33Ms": 864,
+          "over16_67Ms": 11,
+          "over33_3Ms": 0,
+          "over50Ms": 0
+        }
+      },
+      "longTasks": {
+        "supported": true,
+        "count": 0,
+        "totalDurationMs": 0,
+        "maxDurationMs": null
+      },
+      "droppedSamples": {
+        "raf": 0,
+        "applicationWork": 0,
+        "longTasks": 0
+      },
+      "attribution": {
+        "phases": [
+          {
+            "name": "zoom-in-0-25",
+            "startTime": 43284.800000190735,
+            "endTime": 43432.7000002861
+          },
+          {
+            "name": "zoom-in-0-50",
+            "startTime": 43442,
+            "endTime": 43613
+          },
+          {
+            "name": "zoom-in-0-75",
+            "startTime": 43627.5,
+            "endTime": 43783.5
+          },
+          {
+            "name": "zoom-in-0-50",
+            "startTime": 43803.800000190735,
+            "endTime": 43962.40000009537
+          },
+          {
+            "name": "zoom-out-0-75",
+            "startTime": 44080.300000190735,
+            "endTime": 44234.60000038147
+          },
+          {
+            "name": "zoom-out-0-50",
+            "startTime": 44254.2000002861,
+            "endTime": 44406.7000002861
+          },
+          {
+            "name": "zoom-out-0-25",
+            "startTime": 44419.90000009537,
+            "endTime": 44622
+          },
+          {
+            "name": "zoom-out-0-50",
+            "startTime": 44643.7000002861,
+            "endTime": 44810.10000038147
+          },
+          {
+            "name": "zoom-in-1-25",
+            "startTime": 44836.10000038147,
+            "endTime": 45002.60000038147
+          },
+          {
+            "name": "zoom-in-1-50",
+            "startTime": 45023.40000009537,
+            "endTime": 45196.5
+          },
+          {
+            "name": "zoom-in-1-75",
+            "startTime": 45209.2000002861,
+            "endTime": 45354.7000002861
+          },
+          {
+            "name": "zoom-in-1-50",
+            "startTime": 45367.60000038147,
+            "endTime": 45501.5
+          },
+          {
+            "name": "zoom-out-1-75",
+            "startTime": 45617.300000190735,
+            "endTime": 45768.300000190735
+          },
+          {
+            "name": "zoom-out-1-50",
+            "startTime": 45789.60000038147,
+            "endTime": 45936.5
+          },
+          {
+            "name": "zoom-out-1-25",
+            "startTime": 45950.10000038147,
+            "endTime": 46096.7000002861
+          },
+          {
+            "name": "zoom-out-1-50",
+            "startTime": 46109.90000009537,
+            "endTime": 46252
+          },
+          {
+            "name": "zoom-in-2-25",
+            "startTime": 46267.60000038147,
+            "endTime": 46437.800000190735
+          },
+          {
+            "name": "zoom-in-2-50",
+            "startTime": 46446.60000038147,
+            "endTime": 46613
+          },
+          {
+            "name": "zoom-in-2-75",
+            "startTime": 46626.800000190735,
+            "endTime": 46784.2000002861
+          },
+          {
+            "name": "zoom-in-2-50",
+            "startTime": 46805.300000190735,
+            "endTime": 46965.40000009537
+          },
+          {
+            "name": "zoom-out-2-75",
+            "startTime": 47092.60000038147,
+            "endTime": 47238.7000002861
+          },
+          {
+            "name": "zoom-out-2-50",
+            "startTime": 47247.800000190735,
+            "endTime": 47421
+          },
+          {
+            "name": "zoom-out-2-25",
+            "startTime": 47434.40000009537,
+            "endTime": 47604.60000038147
+          },
+          {
+            "name": "zoom-out-2-50",
+            "startTime": 47613.90000009537,
+            "endTime": 47767.60000038147
+          },
+          {
+            "name": "zoom-in-3-25",
+            "startTime": 47789.90000009537,
+            "endTime": 47937.2000002861
+          },
+          {
+            "name": "zoom-in-3-50",
+            "startTime": 47962.7000002861,
+            "endTime": 48115.60000038147
+          },
+          {
+            "name": "zoom-in-3-75",
+            "startTime": 48127.2000002861,
+            "endTime": 48292.5
+          },
+          {
+            "name": "zoom-in-3-50",
+            "startTime": 48310.7000002861,
+            "endTime": 48455
+          },
+          {
+            "name": "zoom-out-3-75",
+            "startTime": 48570.5,
+            "endTime": 48740.800000190735
+          },
+          {
+            "name": "zoom-out-3-50",
+            "startTime": 48751,
+            "endTime": 48925.10000038147
+          },
+          {
+            "name": "zoom-out-3-25",
+            "startTime": 48934.2000002861,
+            "endTime": 49084.300000190735
+          },
+          {
+            "name": "zoom-out-3-50",
+            "startTime": 49093.800000190735,
+            "endTime": 49265.5
+          },
+          {
+            "name": "zoom-in-4-25",
+            "startTime": 49275.90000009537,
+            "endTime": 49471.800000190735
+          },
+          {
+            "name": "zoom-in-4-50",
+            "startTime": 49497.10000038147,
+            "endTime": 49659
+          },
+          {
+            "name": "zoom-in-4-75",
+            "startTime": 49687.10000038147,
+            "endTime": 49841.7000002861
+          },
+          {
+            "name": "zoom-in-4-50",
+            "startTime": 49850.40000009537,
+            "endTime": 49996
+          },
+          {
+            "name": "zoom-out-4-75",
+            "startTime": 50123.5,
+            "endTime": 50270.5
+          },
+          {
+            "name": "zoom-out-4-50",
+            "startTime": 50284.60000038147,
+            "endTime": 50441.90000009537
+          },
+          {
+            "name": "zoom-out-4-25",
+            "startTime": 50462.90000009537,
+            "endTime": 50631
+          },
+          {
+            "name": "zoom-out-4-50",
+            "startTime": 50640.10000038147,
+            "endTime": 50823.5
+          },
+          {
+            "name": "zoom-in-5-25",
+            "startTime": 50853.5,
+            "endTime": 51008
+          },
+          {
+            "name": "zoom-in-5-50",
+            "startTime": 51021,
+            "endTime": 51188.800000190735
+          },
+          {
+            "name": "zoom-in-5-75",
+            "startTime": 51201.5,
+            "endTime": 51344.7000002861
+          },
+          {
+            "name": "zoom-in-5-50",
+            "startTime": 51358.60000038147,
+            "endTime": 51523.90000009537
+          },
+          {
+            "name": "zoom-out-5-75",
+            "startTime": 51646.10000038147,
+            "endTime": 51797.90000009537
+          },
+          {
+            "name": "zoom-out-5-50",
+            "startTime": 51811,
+            "endTime": 51990.2000002861
+          },
+          {
+            "name": "zoom-out-5-25",
+            "startTime": 52002.2000002861,
+            "endTime": 52176.2000002861
+          },
+          {
+            "name": "zoom-out-5-50",
+            "startTime": 52185.5,
+            "endTime": 52357
+          },
+          {
+            "name": "zoom-in-6-25",
+            "startTime": 52367,
+            "endTime": 52514.10000038147
+          },
+          {
+            "name": "zoom-in-6-50",
+            "startTime": 52526.2000002861,
+            "endTime": 52692.5
+          },
+          {
+            "name": "zoom-in-6-75",
+            "startTime": 52715.2000002861,
+            "endTime": 52863.40000009537
+          },
+          {
+            "name": "zoom-in-6-50",
+            "startTime": 52875.5,
+            "endTime": 53055.40000009537
+          },
+          {
+            "name": "zoom-out-6-75",
+            "startTime": 53172,
+            "endTime": 53321.40000009537
+          },
+          {
+            "name": "zoom-out-6-50",
+            "startTime": 53330.10000038147,
+            "endTime": 53502.2000002861
+          },
+          {
+            "name": "zoom-out-6-25",
+            "startTime": 53510.7000002861,
+            "endTime": 53674.800000190735
+          },
+          {
+            "name": "zoom-out-6-50",
+            "startTime": 53683.60000038147,
+            "endTime": 53830
+          },
+          {
+            "name": "zoom-in-7-25",
+            "startTime": 53838.90000009537,
+            "endTime": 54000.90000009537
+          },
+          {
+            "name": "zoom-in-7-50",
+            "startTime": 54024,
+            "endTime": 54176.2000002861
+          },
+          {
+            "name": "zoom-in-7-75",
+            "startTime": 54196.2000002861,
+            "endTime": 54346.5
+          },
+          {
+            "name": "zoom-in-7-50",
+            "startTime": 54359.2000002861,
+            "endTime": 54531.90000009537
+          },
+          {
+            "name": "zoom-out-7-75",
+            "startTime": 54658.300000190735,
+            "endTime": 54827.10000038147
+          },
+          {
+            "name": "zoom-out-7-50",
+            "startTime": 54846.5,
+            "endTime": 55004.7000002861
+          },
+          {
+            "name": "zoom-out-7-25",
+            "startTime": 55018,
+            "endTime": 55195.300000190735
+          },
+          {
+            "name": "zoom-out-7-50",
+            "startTime": 55210.90000009537,
+            "endTime": 55405.7000002861
+          },
+          {
+            "name": "zoom-in-8-25",
+            "startTime": 55417.60000038147,
+            "endTime": 55590.300000190735
+          },
+          {
+            "name": "zoom-in-8-50",
+            "startTime": 55600.800000190735,
+            "endTime": 55747
+          },
+          {
+            "name": "zoom-in-8-75",
+            "startTime": 55755.60000038147,
+            "endTime": 55912.800000190735
+          },
+          {
+            "name": "zoom-in-8-50",
+            "startTime": 55925.800000190735,
+            "endTime": 56093.800000190735
+          },
+          {
+            "name": "zoom-out-8-75",
+            "startTime": 56205.5,
+            "endTime": 56368.7000002861
+          },
+          {
+            "name": "zoom-out-8-50",
+            "startTime": 56388.90000009537,
+            "endTime": 56542.40000009537
+          },
+          {
+            "name": "zoom-out-8-25",
+            "startTime": 56551,
+            "endTime": 56710.800000190735
+          },
+          {
+            "name": "zoom-out-8-50",
+            "startTime": 56731.300000190735,
+            "endTime": 56881.7000002861
+          },
+          {
+            "name": "zoom-in-9-25",
+            "startTime": 56892.40000009537,
+            "endTime": 57072.2000002861
+          },
+          {
+            "name": "zoom-in-9-50",
+            "startTime": 57085.90000009537,
+            "endTime": 57272.60000038147
+          },
+          {
+            "name": "zoom-in-9-75",
+            "startTime": 57284.90000009537,
+            "endTime": 57441.2000002861
+          },
+          {
+            "name": "zoom-in-9-50",
+            "startTime": 57462.10000038147,
+            "endTime": 57623
+          },
+          {
+            "name": "zoom-out-9-75",
+            "startTime": 57735.40000009537,
+            "endTime": 57889.7000002861
+          },
+          {
+            "name": "zoom-out-9-50",
+            "startTime": 57899.800000190735,
+            "endTime": 58069.60000038147
+          },
+          {
+            "name": "zoom-out-9-25",
+            "startTime": 58084.60000038147,
+            "endTime": 58243.7000002861
+          },
+          {
+            "name": "zoom-out-9-50",
+            "startTime": 58263.300000190735,
+            "endTime": 58426.40000009537
+          }
+        ],
+        "longFrames": [],
+        "counters": {
+          "waveform.requests": 729,
+          "waveform.cache-hits": 677,
+          "waveform.cache-misses": 52,
+          "waveform.requests-pending": 0,
+          "waveform.requests-started": 52,
+          "waveform.raster-calls": 1377,
+          "waveform.canvas-resizes": 31,
+          "waveform.requests-completed": 52,
+          "timeline.viewport-computations": 80,
+          "waveform.view-computations": 1328,
+          "timeline.pixels-per-second": 1102.3176380641562,
+          "timeline.visible-start-sec": 10.139202431891496,
+          "timeline.visible-end-sec": 10.668995279101667,
+          "timeline.viewport-generation": 86
+        },
+        "durations": {
+          "waveform.raster": {
+            "count": 1377,
+            "totalMs": 131.89999914169312,
+            "p95Ms": 0.2999997138977051,
+            "maxMs": 1.5999999046325684
+          },
+          "waveform.geometry": {
+            "count": 1328,
+            "totalMs": 6.399996280670166,
+            "p95Ms": 0,
+            "maxMs": 0.10000038146972656
+          },
+          "timeline.viewport": {
+            "count": 80,
+            "totalMs": 681.0000004768372,
+            "p95Ms": 13.409999656677245,
+            "maxMs": 15.200000286102295
+          }
+        },
+        "droppedLongFrames": 0
+      }
+    },
+    "p10Artifact": "/private/tmp/daw-wake-cert-p10-final.json",
+    "p10Gestures": 80,
+    "p20Artifact": "/private/tmp/daw-wake-cert-p20-final.json",
+    "p20Gestures": 80,
+    "p30Gestures": 80,
+    "recordingZoomArtifact": "/private/tmp/daw-wake-cert-recording-zoom-final.json",
+    "recordingZoomGestures": 80,
+    "recordingFrames": 2812416,
+    "recordingDroppedFrames": 0,
+    "dispatchLatency": "not exposed by packaged harness; no value claimed",
+    "nativeWakeMechanism": {
+      "mechanism": "nonblocking one-byte pipe write is a wake hint; shared transport slots and submission queue remain authoritative",
+      "eagain": "EAGAIN/EWOULDBLOCK is harmless because a wake is already pending",
+      "callback": "no allocation, mutex acquisition, or wait in callback submission path",
+      "syscall": "write(2) remains a syscall; O_NONBLOCK bounds pipe-capacity behavior but is not a hard-realtime or fixed-duration guarantee"
+    },
+    "p30RealtimePerformance": {
+      "sampleRateHz": 48000,
+      "framesPerCallback": 512,
+      "observationCount": "5969",
+      "processingP50Nanoseconds": "1048576",
+      "processingP95Nanoseconds": "1048576",
+      "processingP99Nanoseconds": "1048576",
+      "processingMaximumNanoseconds": "1366666",
+      "deadlineMisses": "0"
+    },
+    "p30VstWorkerPerformance": {
+      "activeWorkers": 8,
+      "observationCount": "47929",
+      "processingP50Nanoseconds": "65536",
+      "processingP95Nanoseconds": "65536",
+      "processingP99Nanoseconds": "65536",
+      "processingMaximumNanoseconds": "291750",
+      "deadlineMisses": "0",
+      "watchdogMisses": "0",
+      "faults": "0",
+      "restarts": "0"
+    },
+    "p30ZoomGestures": 80,
+    "p30ZoomSettledGestures": 80,
+    "p30FirstVisualP95Ms": 29.300000190734863,
+    "p30SettledP95Ms": 52
   }
 }

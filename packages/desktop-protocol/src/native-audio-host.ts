@@ -9,6 +9,46 @@ export const nativeAudioHostMaximumMeterEntries = 64
 export const nativeAudioHostMaximumSpectrumBins = 1024
 export const nativeAudioHostMaximumSpectrumPayloadBytes = 8_192
 export const nativeAudioHostMaximumProcessorStatePatchBytes = 512
+export const nativeAudioHostTeardownReasonSchema = z.enum([
+  "coordinator-fault",
+  "cancelled-start",
+  "start-failure",
+  "session-replacement",
+  "controller-destroy",
+  "pause-failure",
+  "seek-failure",
+  "project-generation-change",
+  "paused-preview-track-fingerprint-change",
+  "playback-mode-backend-switch",
+  "hook-cleanup-unmount",
+  "explicit-playback-stop",
+  "explicit-reprepare",
+  "audio-lifecycle-change",
+  "playback-attempt-cancelled",
+  "renderer-close",
+  "app-quit",
+  "power-suspend",
+  "device-probe-complete",
+  "test-cleanup",
+])
+export type NativeAudioHostTeardownRequest = {
+  reason: z.infer<typeof nativeAudioHostTeardownReasonSchema>
+  projectId: string | null
+  sessionGeneration: number | null
+  transportEpoch: number | null
+  graphRevision: number | null
+  rendererGeneration: number | null
+  benchmarkPhase?: string
+}
+export const nativeAudioHostTeardownRequestSchema = z.object({
+  reason: nativeAudioHostTeardownReasonSchema,
+  projectId: z.string().min(1).max(96).nullable(),
+  sessionGeneration: z.number().int().nonnegative().safe().nullable(),
+  transportEpoch: z.number().int().nonnegative().safe().nullable(),
+  graphRevision: z.number().int().nonnegative().safe().nullable(),
+  rendererGeneration: z.number().int().nonnegative().safe().nullable(),
+  benchmarkPhase: z.string().min(1).max(80).optional(),
+}).strict()
 
 export const nativeAudioHostControlTypes = {
   hostHello: 1,

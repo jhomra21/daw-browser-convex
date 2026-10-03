@@ -178,7 +178,7 @@ export const cleanupOwnedRunDirectory = async (
   }
 }
 
-export const chicagoStartOfToday = (now = new Date()): Date => {
+const chicagoStartOfToday = (now = new Date()): Date => {
   const date = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Chicago",
     year: "numeric",

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { tmpdir } from "node:os"
@@ -1013,6 +1013,32 @@ test("uses an explicit development path and a fixed packaged CoreAudio host name
   expect(packagedAudioHostPath("/Resources", true, "/tmp/audio-host")).toBe("/Resources/daw-audio-host-macos")
 })
 
+test("logs the required bounded teardown reason and identifiers", async () => {
+  const fixture = await fixtureSupervisor()
+  const errorSpy = spyOn(console, "error").mockImplementation(() => undefined)
+  const request = {
+    reason: "session-replacement" as const,
+    projectId: "project_1",
+    sessionGeneration: 3,
+    transportEpoch: 4,
+    graphRevision: 5,
+    rendererGeneration: 6,
+    benchmarkPhase: "timeline-zoom-out",
+  }
+  try {
+    await fixture.supervisor.teardown(request)
+    const logged = errorSpy.mock.calls.find(([marker]) => marker === "[native-audio-host-teardown]")
+    expect(logged).toBeDefined()
+    expect(JSON.parse(String(logged?.[1]))).toMatchObject({
+      ...request,
+      requester: "audio-host-supervisor",
+    })
+  } finally {
+    errorSpy.mockRestore()
+    await fixture.dispose()
+  }
+})
+
 test("reports an unavailable CoreAudio host without launching a device", async () => {
   await expect(runAudioHostDiagnostic("/not/a/daw-audio-host-macos")).resolves.toEqual({
     ok: false,
@@ -1027,13 +1053,13 @@ test("planned suspend invalidates the handshake without reporting host loss", as
     lossCount += 1
   })
   const start = fixture.supervisor.start()
-  await fixture.supervisor.suspend()
+  await fixture.supervisor.suspend({ reason: "power-suspend", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
   await expect(start).rejects.toThrow("startup was cancelled")
   expect(fixture.supervisor.status().running).toBeFalse()
   expect(lossCount).toBe(0)
   fixture.supervisor.resume()
   removeLoss()
-  await fixture.supervisor.teardown()
+  await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
   await fixture.dispose()
 })
 
@@ -1044,12 +1070,12 @@ test("starts a fresh native host after suspend and resume", async () => {
   })
   try {
     await fixture.supervisor.start()
-    await fixture.supervisor.suspend()
+    await fixture.supervisor.suspend({ reason: "power-suspend", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     fixture.supervisor.resume()
     await fixture.supervisor.start()
     expect(spawnCount).toBe(2)
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1061,7 +1087,7 @@ test("waits for bounded old-host termination before spawning after resume", asyn
   })
   try {
     await fixture.supervisor.start()
-    const suspend = fixture.supervisor.suspend()
+    const suspend = fixture.supervisor.suspend({ reason: "power-suspend", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     const resume = fixture.supervisor.resume()
     const nextStart = fixture.supervisor.start()
     expect(spawnCount).toBe(1)
@@ -1070,7 +1096,7 @@ test("waits for bounded old-host termination before spawning after resume", asyn
     await nextStart
     expect(spawnCount).toBe(2)
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1082,9 +1108,9 @@ test("teardown cancels pending resume recovery without respawning", async () => 
   })
   try {
     await fixture.supervisor.start()
-    const suspend = fixture.supervisor.suspend()
+    const suspend = fixture.supervisor.suspend({ reason: "power-suspend", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     const resume = fixture.supervisor.resume()
-    const teardown = fixture.supervisor.teardown()
+    const teardown = fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await Promise.all([suspend, resume, teardown])
     await expect(fixture.supervisor.start()).rejects.toThrow("suspended")
     expect(spawnCount).toBe(1)
@@ -1113,7 +1139,7 @@ test("fails recovery when SIGKILL does not produce a close event", async () => {
   )
   try {
     await fixture.supervisor.start()
-    const suspend = fixture.supervisor.suspend()
+    const suspend = fixture.supervisor.suspend({ reason: "power-suspend", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     const resume = fixture.supervisor.resume()
     await expect(suspend).rejects.toThrow("did not close after SIGKILL")
     await expect(resume).rejects.toThrow("did not close after SIGKILL")
@@ -1128,15 +1154,15 @@ test("serializes suspend-resume-suspend without reviving the old child", async (
   const fixture = await fixtureSupervisor("ignore-teardown")
   try {
     await fixture.supervisor.start()
-    const firstSuspend = fixture.supervisor.suspend()
+    const firstSuspend = fixture.supervisor.suspend({ reason: "power-suspend", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     const firstResume = fixture.supervisor.resume()
-    const secondSuspend = fixture.supervisor.suspend()
+    const secondSuspend = fixture.supervisor.suspend({ reason: "power-suspend", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await Promise.all([firstSuspend, firstResume, secondSuspend])
     await expect(fixture.supervisor.start()).rejects.toThrow("suspended")
     await fixture.supervisor.resume()
     await expect(fixture.supervisor.start()).resolves.toBeDefined()
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1146,7 +1172,7 @@ test("rejects a native host with incompatible contract identity before use", asy
   try {
     await expect(fixture.supervisor.start()).rejects.toThrow("incompatible protocol response")
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1164,7 +1190,7 @@ test("shares one native host startup across concurrent callers", async () => {
     expect(secondHello).toEqual(firstHello)
     expect(spawns).toBe(1)
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1177,8 +1203,8 @@ test("teardown cancels an in-flight native host handshake without reporting loss
     fixture.supervisor.onLoss((error) => losses.push(error.message))
     const starting = fixture.supervisor.start()
     await spawned.promise
-    const firstTeardown = fixture.supervisor.teardown()
-    const secondTeardown = fixture.supervisor.teardown()
+    const firstTeardown = fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
+    const secondTeardown = fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     const restartedDuringTeardown = fixture.supervisor.start()
     expect(secondTeardown).toBe(firstTeardown)
 
@@ -1224,7 +1250,7 @@ test("serializes scoped native host transactions and remains usable after rollba
       await transaction.attachVst(vstAttachment("44444444-4444-4444-8444-444444444444"))
     })).resolves.toBeUndefined()
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1239,7 +1265,7 @@ test("manual transaction invalidation is a no-op without spawning a host", async
     expect(spawnCount).toBe(0)
     expect(fixture.supervisor.transactionOpen()).toBeFalse()
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1262,7 +1288,7 @@ test("manual invalidation after host loss does not respawn", async () => {
     expect(spawnCount).toBe(1)
     expect(fixture.supervisor.transactionOpen()).toBeFalse()
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1278,7 +1304,7 @@ test("invalidates an open manual transaction and allows a fresh transaction", as
     const second = await fixture.supervisor.beginTransaction()
     await fixture.supervisor.rollbackTransaction(second)
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1293,7 +1319,7 @@ test("rollback failure still releases manual transaction ownership", async () =>
     const next = await fixture.supervisor.beginTransaction()
     await fixture.supervisor.commitTransaction(next)
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1310,7 +1336,7 @@ test("invalidating an in-flight begin cannot publish a token", async () => {
     const next = await fixture.supervisor.beginTransaction()
     await fixture.supervisor.rollbackTransaction(next)
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1326,7 +1352,7 @@ test("invalidating an in-flight commit cannot publish a committed renderer state
     await expect(committing).rejects.toThrow("cancelled")
     expect(fixture.supervisor.transactionOpen()).toBeFalse()
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1347,7 +1373,7 @@ test("manual invalidation does not interrupt an internal transaction", async () 
     await expect(transaction).resolves.toBeUndefined()
     expect(fixture.supervisor.transactionOpen()).toBeFalse()
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1364,7 +1390,7 @@ test("correlates acknowledgements to the requested native session operation", as
       revision: 1,
     })).rejects.toThrow("native audio host rejected a control request")
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1397,7 +1423,7 @@ test("keeps the host alive after a recoverable negative acknowledgement", async 
       revision: 1,
     })).resolves.toBeUndefined()
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1411,7 +1437,7 @@ test("captures VST state and correlates the response identity", async () => {
       sha256: "a".repeat(64),
     })
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1432,7 +1458,7 @@ test("keeps the host usable after VST state rejection or malformed response", as
         revision: 1,
       })).resolves.toBeUndefined()
     } finally {
-      await fixture.supervisor.teardown()
+      await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
       await fixture.dispose()
     }
   }
@@ -1473,7 +1499,7 @@ test("round-trips a bounded native VST editor command and signed anchor", async 
       height: 480,
     })
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1507,7 +1533,7 @@ test("queues editor commands behind an in-flight native host request", async () 
       },
     ])
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1517,7 +1543,7 @@ test("starts diagnostic workers without using the playback start request", async
   try {
     await expect(fixture.supervisor.startDiagnosticAudio()).resolves.toBeUndefined()
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1531,7 +1557,7 @@ test("notifies subscribers when the native host is lost", async () => {
     await fixture.supervisor.start()
     await expect(lost).resolves.toBe("The native audio host stopped.")
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1553,7 +1579,7 @@ test("names the pending request when the native host closes", async () => {
     await expect(configure).rejects.toThrow("native audio host stopped during deviceConfigure request 3")
     await expect(lost).resolves.toBe("The native audio host stopped during deviceConfigure request 3.")
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1611,7 +1637,7 @@ test("acknowledges diagnostics and tears down without reporting host loss", asyn
       lastRejectedInstrumentEventCount: 0,
       lastRejectedGraphRevision: 0,
     })
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     expect(fixture.supervisor.status().running).toBeFalse()
     expect(losses).toEqual([])
   } finally {
@@ -1647,7 +1673,7 @@ test("decodes revision statuses and event-driven worker notification identity", 
       retiredRevision: 0,
     })
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1667,7 +1693,7 @@ test("decodes bounded native meter batches", async () => {
       ],
     })
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1694,7 +1720,7 @@ test("decodes schedule progress notifications", async () => {
       automationCredits: 32,
     })
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1712,7 +1738,7 @@ test("decodes editor interaction notifications without treating them as faults",
       value: 0,
     })
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1731,7 +1757,7 @@ test("decodes bounded native VST parameter edit notifications", async () => {
       normalizedValue: 0.625,
     })
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1772,7 +1798,7 @@ test("validates bounded planar PCM installs and allows idempotent releases", asy
     await fixture.supervisor.releaseAsset(1)
     await fixture.supervisor.releaseAsset(1)
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1790,7 +1816,7 @@ test("resolves the host default output device and rejects foreign device namespa
     })
     await expect(fixture.supervisor.resolveOutputDevice("web:default")).rejects.toThrow("native audio host device request is invalid")
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1808,7 +1834,7 @@ test("probes an output device through an isolated native host", async () => {
     )
     expect(device?.nominalSampleRateHz).toBe(48_000)
   } finally {
-    if (!probe) await fixture.supervisor.teardown()
+    if (!probe) await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1875,7 +1901,7 @@ test("resolves the host default recording input and sends bounded recording cont
       monitoring: false,
     })).rejects.toThrow("native recording configuration is invalid")
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })
@@ -1950,7 +1976,7 @@ test("keeps deterministic host lifecycle attachments control-only", async () => 
       },
     })).rejects.toThrow("native VST attachment is invalid")
   } finally {
-    await fixture.supervisor.teardown()
+    await fixture.supervisor.teardown({ reason: "test-cleanup", projectId: null, sessionGeneration: null, transportEpoch: null, graphRevision: null, rendererGeneration: null })
     await fixture.dispose()
   }
 })

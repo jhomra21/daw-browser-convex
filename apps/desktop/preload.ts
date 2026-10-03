@@ -21,6 +21,7 @@ import {
   nativeAudioHostMaximumMappedAssetRanges,
   nativeAudioHostMaximumPayloadBytes,
   nativeOfflineRenderPlanSchema,
+  type NativeAudioHostTeardownRequest,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import type {
   NativeHostDeviceConfiguration,
@@ -309,7 +310,7 @@ const desktopBridge = {
         cancelRecording: () => invokeNativeSession("daw:audio-host:session:cancel-recording"),
         start: () => invokeNativeSession("daw:audio-host:session:start"),
         stop: () => invokeNativeSession("daw:audio-host:session:stop"),
-        teardown: () => invokeNativeSession("daw:audio-host:session:teardown"),
+        teardown: (request: NativeAudioHostTeardownRequest) => invokeNativeSession("daw:audio-host:session:teardown", request),
         onLoss: (listener: (error?: string) => void) => {
           const notify = ipcRendererListener((_event, value) => {
             const parsed = hostLossSchema.safeParse(value)

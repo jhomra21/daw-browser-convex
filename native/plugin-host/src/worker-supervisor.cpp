@@ -900,8 +900,21 @@ bool WorkerRuntime::Start(
   }
   const auto fd = std::to_string(STDIN_FILENO);
   const auto controlFd = std::to_string(STDOUT_FILENO);
-  constexpr int responseFileDescriptor = STDERR_FILENO + 1;
-  constexpr int wakeFileDescriptor = STDERR_FILENO + 2;
+  // Keep child-side protocol descriptors above every parent-side source
+  // descriptor. This prevents a close action for one source from closing a
+  // different descriptor just installed by dup2 when the parent owns many FDs.
+  const auto maximumSourceDescriptor = std::max({
+    transport->fileDescriptor(), control[0], control[1], response[0], response[1], wake.readDescriptor(),
+  });
+  if (maximumSourceDescriptor > std::numeric_limits<int>::max() - 2) {
+    close(control[0]);
+    close(control[1]);
+    close(response[0]);
+    close(response[1]);
+    return false;
+  }
+  const int responseFileDescriptor = maximumSourceDescriptor + 1;
+  const int wakeFileDescriptor = maximumSourceDescriptor + 2;
   const auto responseFd = std::to_string(responseFileDescriptor);
   const auto wakeFd = std::to_string(wakeFileDescriptor);
   const auto token = std::to_string(transport->token());

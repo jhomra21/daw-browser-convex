@@ -1,8 +1,8 @@
 {
-  "scan_id": "scan-2026-10-01-vst-reliability-final",
-  "scan_date": "2026-10-01T23:59:00.000000+00:00",
+  "scan_id": "scan-2026-10-03-wake-certification",
+  "scan_date": "2026-10-03T20:41:47.390719+00:00",
   "scan_type": "working",
-  "commit_range": "uncommitted",
+  "commit_range": "uncommitted working tree vs HEAD a5fe2807",
   "pr_number": null,
   "threat_model_version": "1.0.0",
   "findings": [],
@@ -22,6 +22,7 @@
       "DoS": 0,
       "ElevationOfPrivilege": 0
     },
-    "files_analyzed": 10
-  }
+    "files_analyzed": 7
+  },
+  "review_scope": "Targeted STRIDE review of changed native wake-pipe, worker lifecycle, desktop teardown, playback teardown, and benchmark process telemetry paths against threat model version 1.0.0. Staged-source scan checked 581 added lines for common credential patterns and found 0 matches. No actionable security issue found in reviewed code. Full repository security review and dependency CVE scan not run."
 }

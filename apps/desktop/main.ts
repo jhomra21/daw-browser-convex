@@ -39,8 +39,6 @@ import {
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
 import { serializeDesktopReply } from "@daw-browser/desktop-protocol/reply-chunks"
 import { createCloseHandler } from "./close-flow"
-import { classifyNavigationUrl } from "./quiet-renderer-telemetry"
-import { createRecordingIpcDiagnostics, createRendererTrafficDiagnostics } from "./recording-ipc-diagnostics"
 import { createFileCapabilityManager } from "./file-capabilities"
 import { createNativeFileCapabilityHelper } from "./native-file-capability-helper"
 import { createRequestCorrelation } from "./request-correlation"
@@ -109,7 +107,12 @@ import { createRendererLifecycleOwner } from "./renderer-lifecycle"
 import { createOfflinePcmAckTracker } from "./offline-pcm-ack"
 import { createDiagnosticsTrace } from "./diagnostics-trace"
 import { benchmarkSabHeaders } from "./benchmark-sab-headers"
-import { benchmarkLoadFailure, benchmarkStartupStage } from "./benchmark-startup-stage"
+import {
+  createBenchmarkRecordingTelemetry,
+  createBenchmarkStartupReporter,
+  installBenchmarkHeartbeat,
+  installBenchmarkWindowTelemetry,
+} from "./benchmark-runtime"
 import { offlinePcmAckSchema } from "./offline-pcm-protocol"
 
 protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
@@ -1088,33 +1091,11 @@ const registerIpc = () => {
     && event.senderFrame !== null
     && sameAppOrigin(event.senderFrame.url)
   )
-  if (process.env.DAW_BENCHMARK_HEARTBEAT === "1") {
-    ipcMain.handle("daw:benchmark:heartbeat", (event) =>
-      audioHostAllowed(event) && event.senderFrame === event.sender.mainFrame
-        ? { mainEpochMs: Date.now() } : null)
-    const pending = new Map<number, { senderId: number; startedAt: number }>()
-    ipcMain.on("daw:benchmark:renderer-pong", (event, sequence) => {
-      if (!audioHostAllowed(event) || event.senderFrame !== event.sender.mainFrame
-        || !Number.isSafeInteger(sequence)) return
-      const request = pending.get(sequence)
-      if (!request || request.senderId !== event.sender.id) return
-      pending.delete(sequence)
-      console.error(`[quiet-renderer-pong] sequence=${sequence} latencyMs=${Math.round(performance.now() - request.startedAt)}`)
-    })
-    app.on("browser-window-created", (_event, window) => {
-      let sequence = 0
-      // Benchmark-only main-to-preload ping; no page JS or CDP dependency.
-      const interval = setInterval(() => {
-        if (window.isDestroyed() || window.webContents.isDestroyed()) return
-        sequence += 1
-        if (pending.size >= 8) pending.delete(pending.keys().next().value ?? -1)
-        pending.set(sequence, { senderId: window.webContents.id, startedAt: performance.now() })
-        console.error(`[quiet-renderer-ping] sequence=${sequence}`)
-        window.webContents.send("daw:benchmark:renderer-ping", sequence)
-      }, 5_000)
-      window.on("closed", () => clearInterval(interval))
-    })
-  }
+  installBenchmarkHeartbeat({
+    app,
+    ipcMain,
+    allowed: (event) => audioHostAllowed(event) && event.senderFrame === event.sender.mainFrame,
+  })
   ipcMain.on(offlinePcmAckChannel, (event, value) => {
     if (!audioHostAllowed(event)) return
     const parsed = offlinePcmAckSchema.safeParse(value)
@@ -2005,62 +1986,12 @@ const createWindow = () => {
       webSecurity: true,
     },
   })
-  if (process.env.DAW_BENCHMARK_STARTUP_TRACE === "1") {
-    window_.webContents.on("did-fail-load", (_event, code, _description, url) =>
-      benchmarkLoadFailure(process.env.DAW_BENCHMARK_STARTUP_TRACE, code, url, console.error))
-    window_.webContents.on("did-finish-load", () =>
-      benchmarkStartupStage(process.env.DAW_BENCHMARK_STARTUP_TRACE,
-        sameAppOrigin(window_?.webContents.getURL() ?? "") ? "window-loaded" : "unexpected-window-loaded", console.error))
-  }
-  if (process.env.DAW_BENCHMARK_QUIET_CAPTURE === "1") {
-    const contents = window_.webContents
-    contents.on("console-message", (_event, _level, message) => {
-      if (message.startsWith("[quiet-renderer-block-cost] ")
-        && message.length < 256) console.error(message)
-    })
-    const startedAt = performance.now()
-    const health = (name: string, url = contents.getURL(), reason = "") =>
-      console.error(`[quiet-renderer-health] ${JSON.stringify({
-        elapsedMs: Math.round(performance.now() - startedAt), name, pid: contents.getOSProcessId(),
-        urlClass: classifyNavigationUrl(url), reason: reason.slice(0, 48),
-      })}`)
-    contents.on("unresponsive", () => health("unresponsive"))
-    contents.on("responsive", () => health("responsive"))
-    contents.on("render-process-gone", (_event, details) => health("render-process-gone", "", details.reason))
-    contents.on("destroyed", () => health("destroyed", ""))
-    contents.on("did-start-navigation", (details) => {
-      if (details.isMainFrame) health("did-start-navigation", details.url)
-    })
-    contents.on("did-navigate", (_event, url) => health("did-navigate", url))
-    contents.on("did-navigate-in-page", (_event, url, isMainFrame) => {
-      if (isMainFrame) health("did-navigate-in-page", url)
-    })
-    const metricIntervalMs = process.env.DAW_BENCHMARK_ZOOM_PROFILE === "1" ? 250 : 1_000
-    // Benchmark-only process sampling never calls into the renderer.
-    const metricTimer = setInterval(() => {
-      for (const metric of app.getAppMetrics()) {
-        console.error(`[quiet-renderer-metric] ${JSON.stringify({
-          elapsedMs: Math.round(performance.now() - startedAt), pid: metric.pid,
-          epochMs: Date.now(),
-          type: metric.type, renderer: metric.pid === contents.getOSProcessId(),
-          workingSetKiB: metric.memory.workingSetSize,
-          peakWorkingSetKiB: metric.memory.peakWorkingSetSize,
-          privateKiB: metric.memory.privateBytes ?? null,
-          cpuPercent: metric.cpu.percentCPUUsage,
-        })}`)
-      }
-    }, metricIntervalMs)
-    contents.on("destroyed", () => clearInterval(metricTimer))
-    console.error(`[quiet-capture-lifecycle] stage=created webContentsId=${contents.id} rendererPid=${contents.getOSProcessId()} generation=${generation}`)
-    contents.on("render-process-gone", (_event, details) =>
-      console.error(`[quiet-capture-lifecycle] stage=renderer-gone reason=${details.reason} exitCode=${details.exitCode} generation=${generation}`))
-    contents.on("did-fail-load", (_event, code, _description, url, isMainFrame) => {
-      if (isMainFrame) console.error(`[quiet-capture-lifecycle] stage=load-failed code=${code} appOrigin=${sameAppOrigin(url)} generation=${generation}`)
-    })
-    contents.on("did-finish-load", () =>
-      console.error(`[quiet-capture-lifecycle] stage=loaded rendererPid=${contents.getOSProcessId()} appOrigin=${sameAppOrigin(contents.getURL())} generation=${generation}`))
-    window_.on("closed", () => console.error(`[quiet-capture-lifecycle] stage=closed generation=${generation}`))
-  }
+  installBenchmarkWindowTelemetry({
+    app,
+    window: window_,
+    getGeneration: () => generation,
+    sameAppOrigin,
+  })
   window_?.on("closed", () => {
     invalidateRendererGeneration("Renderer destroyed.")
     window_ = undefined
@@ -2162,8 +2093,7 @@ else {
     window_?.focus()
   })
   app.whenReady().then(async () => {
-    const stage = (value: Parameters<typeof benchmarkStartupStage>[1]) =>
-      benchmarkStartupStage(process.env.DAW_BENCHMARK_STARTUP_TRACE, value, console.error)
+    const stage = createBenchmarkStartupReporter()
     stage("before-native-helper")
     nativeMediaAvailable = await nativeFileCapabilityHelper.selfTest()
     stage("after-native-helper")
@@ -2347,46 +2277,24 @@ else {
     removeAudioHostLossListener = audioHostSupervisor?.onLoss((error) => {
       publishNativeSessionLoss(sanitizeNativeVst3DiagnosticError(error), "host")
     })
-    const benchmarkRecordingIpc = process.env.DAW_BENCHMARK_HEARTBEAT === "1"
-    const recordingIpcDiagnostics = createRecordingIpcDiagnostics(Date.now())
-    const rendererTrafficDiagnostics = createRendererTrafficDiagnostics(Date.now())
-    let lastBlockSendLogAt = 0
+    const recordingBenchmark = createBenchmarkRecordingTelemetry()
     removeAudioHostRecordingBlockListener = audioHostSupervisor?.onRecordingBlock((block) => {
-      const startedAt = benchmarkRecordingIpc ? performance.now() : 0
-      if (benchmarkRecordingIpc) {
-        recordingIpcDiagnostics.recordBlock({
-          frameCount: block.frameCount,
-          channelCount: block.channelCount,
-          payloadBytes: block.planarPcm.byteLength,
-        })
-      }
-      sendRendererMessage("daw:audio-host:recording-block", block)
-      if (benchmarkRecordingIpc) {
-        rendererTrafficDiagnostics.record("recording-block", block.planarPcm.byteLength + 64)
-        recordingIpcDiagnostics.recordSend(performance.now() - startedAt)
-        if (Date.now() - lastBlockSendLogAt >= 5_000) {
-          lastBlockSendLogAt = Date.now()
-          console.error(`[quiet-recording-ipc] ${JSON.stringify({
-            blocks: recordingIpcDiagnostics.report(Date.now()),
-            traffic: rendererTrafficDiagnostics.report(Date.now()),
-          })}`)
-        }
-      }
+      recordingBenchmark.sendBlock(block, () => sendRendererMessage("daw:audio-host:recording-block", block))
     })
     removeAudioHostRecordingStatusListener = audioHostSupervisor?.onRecordingStatus((status) => {
-      if (benchmarkRecordingIpc) rendererTrafficDiagnostics.record("recording-status", 96)
+      recordingBenchmark.recordTraffic("recording-status", 96)
       sendRendererMessage("daw:audio-host:recording-status", status)
     })
     removeAudioHostMeterBatchListener = audioHostSupervisor?.onMeterBatch((batch: NativeHostMeterBatch) => {
-      if (benchmarkRecordingIpc) rendererTrafficDiagnostics.record("meter-batch", 32 + batch.entries.length * 24)
+      recordingBenchmark.recordTraffic("meter-batch", 32 + batch.entries.length * 24)
       sendRendererMessage("daw:audio-host:meter-batch", batch)
     })
     removeAudioHostSpectrumListener = audioHostSupervisor?.onSpectrumFrame((frame) => {
-      if (benchmarkRecordingIpc) rendererTrafficDiagnostics.record("spectrum-frame", 48 + frame.data.byteLength)
+      recordingBenchmark.recordTraffic("spectrum-frame", 48 + frame.data.byteLength)
       sendRendererMessage("daw:audio-host:spectrum-frame", frame)
     })
     removeAudioHostScheduleProgressListener = audioHostSupervisor?.onScheduleProgress((progress: NativeScheduleProgress) => {
-      if (benchmarkRecordingIpc) rendererTrafficDiagnostics.record("schedule-progress", 96)
+      recordingBenchmark.recordTraffic("schedule-progress", 96)
       sendRendererMessage("daw:audio-host:schedule-progress", progress)
     })
     protocol.handle("daw", (request) => {

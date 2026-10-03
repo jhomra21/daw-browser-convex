@@ -52,7 +52,6 @@ import { offlinePcmMessageSchema } from "./offline-pcm-protocol"
 import { deliverOfflinePcmChunk } from "./offline-pcm-ack"
 import { diagnosticValidationPaths } from "./diagnostics-trace"
 import { safePreloadReply } from "./preload-reply"
-import { createRecordingBlockTransit } from "./recording-block-transit"
 
 const incomingChannel = "daw:host-request"
 const outgoingChannel = "daw:host-response"
@@ -318,12 +317,7 @@ const desktopBridge = {
           return () => ipcRenderer.removeListener("daw:audio-host:loss", notify)
         },
         onRecordingBlock: (listener: (block: NativeHostRecordingBlock) => void) => {
-          const notify = (_event: Electron.IpcRendererEvent, block: NativeHostRecordingBlock) => {
-            if (process.env.DAW_BENCHMARK_HEARTBEAT === "1" && createRecordingBlockTransit(block.sequence)) {
-              ipcRenderer.send("daw:benchmark:recording-block-received", block.sequence)
-            }
-            listener(block)
-          }
+          const notify = (_event: Electron.IpcRendererEvent, block: NativeHostRecordingBlock) => listener(block)
           ipcRenderer.on("daw:audio-host:recording-block", notify)
           return () => ipcRenderer.removeListener("daw:audio-host:recording-block", notify)
         },

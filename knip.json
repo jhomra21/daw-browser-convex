@@ -48,9 +48,7 @@
     "@electron-forge/plugin-vite"
   ],
   "ignoreBinaries": [
-    "ps",
-    "rev-parse",
-    "status"
+    "ps"
   ],
   "ignoreIssues": {
     "src/lib/local-cloud-id-map.ts": [

@@ -60,6 +60,17 @@ const browserCommand = (session: string, args: readonly string[]) => invokeBrows
 const waitForBrowserValue = (session: string, expression: string, timeoutMs: number) =>
   invokeWaitForBrowserValue(session, expression, timeoutMs, commandTimings)
 
+const gitText = async (root: string, args: readonly string[]) => {
+  const child = Bun.spawn(["git", "-C", root, ...args], { stdout: "pipe", stderr: "pipe" })
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  if (exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${stderr.trim().slice(0, 512)}`)
+  return stdout
+}
+
 type Surface = "browser" | "electron"
 type CliOptions = {
   readonly surface: Surface
@@ -132,8 +143,8 @@ const parseOptions = (arguments_: readonly string[]): CliOptions => {
 const main = async () => {
   const options = parseOptions(Bun.argv.slice(2))
   const root = path.resolve(import.meta.dir, "../../..")
-  const commit = (await $`git -C ${root} rev-parse HEAD`.text()).trim()
-  const status = await $`git -C ${root} status --porcelain --untracked-files=all`.text()
+  const commit = (await gitText(root, ["rev-parse", "HEAD"])).trim()
+  const status = await gitText(root, ["status", "--porcelain", "--untracked-files=all"])
   const runId = crypto.randomUUID()
   const startedAt = new Date().toISOString()
   const result: BaselineRunResult = {
@@ -533,7 +544,7 @@ const runElectronBenchmark = async (
     report({
       status: "running",
       stage: "package-verified",
-      package: { identity: "electron-forge-production", platform: "darwin", architecture: "arm64", electronVersion: "43.1.1", appVersion: "0.0.0", asarSha256: appHash, sourceCommit: (await $`git -C ${root} rev-parse HEAD`.text()).trim() },
+      package: { identity: "electron-forge-production", platform: "darwin", architecture: "arm64", electronVersion: "43.1.1", appVersion: "0.0.0", asarSha256: appHash, sourceCommit: (await gitText(root, ["rev-parse", "HEAD"])).trim() },
     })
     // agent-browser only supports TCP/WebSocket CDP attachment, not
     // --remote-debugging-pipe. Port 0 lets Chromium atomically bind an
@@ -703,7 +714,7 @@ const runElectronBenchmark = async (
     const beforeMetrics = await processMetrics(app.pid ?? 0)
     const processAvailability = processMetricsAvailability([...beforeMetrics, ...duringPlayback])
     const evidence: ElectronBenchmarkEvidence = {
-      package: { identity: "electron-forge-production", platform: "darwin", architecture: "arm64", electronVersion: "43.1.1", appVersion: "0.0.0", asarSha256: appHash, sourceCommit: (await $`git -C ${root} rev-parse HEAD`.text()).trim() },
+      package: { identity: "electron-forge-production", platform: "darwin", architecture: "arm64", electronVersion: "43.1.1", appVersion: "0.0.0", asarSha256: appHash, sourceCommit: (await gitText(root, ["rev-parse", "HEAD"])).trim() },
       rendererProbe: parsed,
       host: { beforeImport, mounted, beforePlayback, afterPlayback, afterStop, nativePlaybackDelta: delta },
       transport: { playing, stopped },

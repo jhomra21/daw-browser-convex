@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises"
+import type { ChildProcess } from "node:child_process"
 import path from "node:path"
 import { $ } from "bun"
 import {

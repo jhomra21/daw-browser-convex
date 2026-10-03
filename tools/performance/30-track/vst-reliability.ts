@@ -100,7 +100,6 @@ const main = async () => {
       stage: artifact?.stage ?? "artifact",
       error: artifact ? artifact.error ?? null : `Harness exited without writing ${artifactPath}.`,
       diagnostics: artifact?.postmortem ?? null,
-      workerEvents: artifact?.vstReliability ?? [],
       processSamples: samples.slice(-2_000),
       cleanup: { before, after, clean: before.length === 0 && after.length === 0 },
       outputTail: output.slice(-4_000),

@@ -20,7 +20,6 @@
 #include <cmath>
 #include <condition_variable>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <filesystem>
@@ -43,12 +42,6 @@ constexpr std::size_t kGranularStateWireBytes = 60;
 constexpr std::size_t kMaximumMeterQueueEntries = 1024;
 constexpr std::size_t kMaximumSpectrumQueueEntries = 8;
 constexpr std::uint32_t kSpectrumFftSize = 2048;
-
-std::uint64_t ReliabilityTimestampNanoseconds() noexcept {
-  return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-    std::chrono::steady_clock::now().time_since_epoch()
-  ).count());
-}
 
 template <std::size_t Size>
 Diagnostics::DurationQuantiles DurationQuantiles(
@@ -292,10 +285,6 @@ struct NativeVstWorkerAttachment {
   std::array<std::uint32_t, kMaximumNativeVstSlots> missed_callbacks{};
   std::array<std::uint64_t, kMaximumNativeVstSlots> missed_frames{};
   std::atomic<std::uint64_t> watchdog_misses{0};
-  std::atomic<std::uint64_t> first_submitted_sequence{0};
-  std::atomic<std::uint64_t> first_completed_sequence{0};
-  std::atomic<std::uint64_t> last_completed_sequence{0};
-  std::atomic<bool> ready_reported{false};
   bool realtime_started = false;
   std::array<float, kMaximumNativeVstFrames * 2> input{};
   std::array<float, kMaximumNativeVstFrames * 2> output{};
@@ -685,11 +674,6 @@ struct NativeVstWorkerAttachment {
       const std::uint64_t sequence = pending_sequences[slot];
       if (sequence == 0) continue;
       if (port.ReadCompleted(slot, sequence)) {
-        std::uint64_t expected = 0;
-        static_cast<void>(first_completed_sequence.compare_exchange_strong(
-          expected, sequence, std::memory_order_relaxed
-        ));
-        last_completed_sequence.store(sequence, std::memory_order_relaxed);
         const std::size_t completed_frames = pending_frames[slot];
         if (port.CopyCompletedOutput(
           slot,
@@ -908,10 +892,6 @@ struct NativeVstWorkerAttachment {
       }
       event_scheduler.CommitBlock(true);
       pending_sequences[slot] = sequence;
-      std::uint64_t expected = 0;
-      static_cast<void>(first_submitted_sequence.compare_exchange_strong(
-        expected, sequence, std::memory_order_relaxed
-      ));
       pending_frames[slot] = render.frame_count;
       next_slot = (slot + 1) % metadata.transport.slot_count;
       return;
@@ -933,28 +913,6 @@ void ForwardWorkerDiagnostic(
 ) noexcept {
   auto* attachment = static_cast<NativeVstWorkerAttachment*>(context);
   if (attachment == nullptr) return;
-  if (std::getenv("DAW_BENCHMARK_VST_RELIABILITY") != nullptr
-    && (diagnostic.kind == daw::plugin_host::WorkerDiagnosticKind::kMiss
-      || diagnostic.kind == daw::plugin_host::WorkerDiagnosticKind::kFault
-      || diagnostic.kind == daw::plugin_host::WorkerDiagnosticKind::kStopped)) {
-    const auto metrics = attachment->worker.processingMetrics();
-    std::fprintf(stderr,
-      "[vst-reliability] timestampNs=%llu event=%s instance=%s pid=%d sequence=%llu slotStatus=%u firstSubmitted=%llu firstCompleted=%llu lastCompleted=%llu observations=%llu maxProcessingNs=%llu deadlineMisses=%llu watchdogMisses=%llu\n",
-      static_cast<unsigned long long>(ReliabilityTimestampNanoseconds()),
-      diagnostic.kind == daw::plugin_host::WorkerDiagnosticKind::kMiss ? "watchdog-miss"
-        : diagnostic.kind == daw::plugin_host::WorkerDiagnosticKind::kFault ? "fault" : "stopped",
-      attachment->metadata.instance_id.c_str(),
-      attachment->worker.workerProcessGroupId(),
-      static_cast<unsigned long long>(diagnostic.sequence),
-      diagnostic.value,
-      static_cast<unsigned long long>(attachment->first_submitted_sequence.load(std::memory_order_relaxed)),
-      static_cast<unsigned long long>(attachment->first_completed_sequence.load(std::memory_order_relaxed)),
-      static_cast<unsigned long long>(attachment->last_completed_sequence.load(std::memory_order_relaxed)),
-      static_cast<unsigned long long>(metrics.count),
-      static_cast<unsigned long long>(metrics.maximum_nanoseconds),
-      static_cast<unsigned long long>(metrics.deadline_misses),
-      static_cast<unsigned long long>(attachment->watchdog_misses.load(std::memory_order_relaxed)));
-  }
   if (diagnostic.kind == daw::plugin_host::WorkerDiagnosticKind::kParameterEditBegin) {
     static_cast<void>(attachment->SetAutomationOverride(diagnostic.parameter_id));
     return;
@@ -1656,11 +1614,6 @@ struct AudioHost::Impl {
         }
         return false;
       }
-      if (std::getenv("DAW_BENCHMARK_VST_RELIABILITY") != nullptr) {
-        std::fprintf(stderr, "[vst-reliability] timestampNs=%llu event=spawn instance=%s pid=%d\n",
-          static_cast<unsigned long long>(ReliabilityTimestampNanoseconds()),
-          metadata.instance_id.c_str(), attachment->worker.workerProcessGroupId());
-      }
       if (attachment->worker.workerGeneration() == 0) {
         attachment->worker.Stop();
         for (std::size_t index = 0; index < started_count; ++index) {
@@ -1673,15 +1626,9 @@ struct AudioHost::Impl {
     return true;
   }
   void StopNativeVstWorkers() {
-    std::size_t worker_index = 0;
     for (auto& [instance_id, attachment] : native_vst_attachments) {
       static_cast<void>(instance_id);
-      const auto worker_entry = std::chrono::steady_clock::now();
-      std::fprintf(stderr, "[native-control-timing] worker stop entry index=%zu\n", worker_index);
       attachment->worker.Stop();
-      std::fprintf(stderr, "[native-control-timing] worker stop exit index=%zu elapsed_ms=%lld\n",
-        worker_index++, static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - worker_entry).count()));
       attachment->offline = false;
       attachment->offline_started = false;
       attachment->offline_parameters_applied = false;
@@ -4669,12 +4616,6 @@ Diagnostics AudioHost::diagnostics() const {
       automation = SelectWorkerAutomation(std::move(automation), *candidate, epoch);
     if (attachment->worker.health() == daw::plugin_host::WorkerHealth::kReady) {
       ++active_workers;
-      if (std::getenv("DAW_BENCHMARK_VST_RELIABILITY") != nullptr
-        && !attachment->ready_reported.exchange(true, std::memory_order_relaxed)) {
-        std::fprintf(stderr, "[vst-reliability] timestampNs=%llu event=ready instance=%s pid=%d\n",
-          static_cast<unsigned long long>(ReliabilityTimestampNanoseconds()),
-          instance_id.c_str(), attachment->worker.workerProcessGroupId());
-      }
     }
     const auto worker_metrics = attachment->worker.processingMetrics();
     worker_observations += worker_metrics.count;

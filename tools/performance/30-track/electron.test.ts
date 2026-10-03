@@ -11,18 +11,11 @@ import {
   electronRendererTarget,
   nativeCallbacksIncreased,
   processMetricsAvailability,
-  nativeControlTimingLines,
   desktopDiagnosticsBoundaryLines,
   desktopDiagnosticsValidationLines,
   verifyElectronLaunchIdentity,
   writePrivateArtifact,
 } from "./electron"
-
-test("retains only bounded native control timing markers from app stderr", () => {
-  const lines = nativeControlTimingLines("[native-vst3] native audio host stderr [native-control-timing] stop entry\nsecret token\n[native-control-timing] diagnostics response elapsed_ms=12")
-  expect(lines).toEqual(["[native-control-timing] stop entry", "[native-control-timing] diagnostics response elapsed_ms=12"])
-  expect(JSON.stringify(lines)).not.toContain("secret")
-})
 
 test("retains only bounded desktop diagnostics boundary markers", () => {
   expect(desktopDiagnosticsBoundaryLines("[diagnostics-v2-boundary] operation=diagnostics.snapshot.v2 stage=renderer-dispatched elapsedMs=4\nsecret token"))

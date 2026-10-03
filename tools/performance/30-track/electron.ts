@@ -235,14 +235,6 @@ export const writePrivateArtifact = async (filePath: string, contents: string): 
     await file.close()
   }
 }
-export const nativeControlTimingLines = (output: string): string[] => (
-  output.split(/\r?\n/).flatMap((line) => {
-    const marker = line.indexOf("[native-control-timing]")
-    if (marker < 0) return []
-    const value = line.slice(marker).trim()
-    return /^\[native-control-timing\] (?:stop (?:entry|exit)|diagnostics (?:entry|response)|worker stop (?:entry|exit))(?: index=\d+)?(?: elapsed_ms=\d+)?$/.test(value) ? [value] : []
-  }).slice(-32)
-)
 export const desktopDiagnosticsBoundaryLines = (output: string): string[] => (
   output.split(/\r?\n/).flatMap((line) => {
     const marker = line.indexOf("[diagnostics-v2-boundary]")

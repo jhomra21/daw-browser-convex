@@ -1067,15 +1067,8 @@ int main() {
         break;
       case daw::audio_host_macos::ControlType::kStop:
         if (!payload.empty()) return EXIT_FAILURE;
-        {
-        const auto stop_entry = std::chrono::steady_clock::now();
-        std::fprintf(stderr, "[native-control-timing] stop entry\n");
         stop_recording_thread();
         if (active_session) active_session->Stop();
-        std::fprintf(stderr, "[native-control-timing] stop exit elapsed_ms=%lld\n",
-          static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - stop_entry).count()));
-        }
         accepted = active_session != nullptr;
         break;
       case daw::audio_host_macos::ControlType::kTeardown:

@@ -188,7 +188,6 @@ const main = async () => {
   let stopPresent: boolean | null = null
   let stopSucceeded = false
   let lifecycle = ""
-  let vstReliability = ""
   let metricOutput = ""
   let healthOutput = ""
   let outputLine = ""
@@ -203,7 +202,7 @@ const main = async () => {
       DAW_BENCHMARK_QUIET_CAPTURE: mode !== "acceptance" ? "1" : "0",
       DAW_BENCHMARK_ZOOM_PROFILE: mode === "zoom-profile" || mode === "zoom-recording-profile" ? "1" : "0",
       DAW_BENCHMARK_HEARTBEAT: mode.includes("media-recording-probe") ? "1" : "0",
-      DAW_BENCHMARK_VST_RELIABILITY: mode === "vst-reliability" ? "1" : "0" }, detached: true, stdio: ["ignore", "pipe", "pipe"],
+}, detached: true, stdio: ["ignore", "pipe", "pipe"],
   })
   let appOutput = ""
   const collectOutput = (chunk: Buffer) => {
@@ -213,22 +212,13 @@ const main = async () => {
     outputLine = (lines.pop() ?? "").slice(-512)
     for (const line of lines) {
       if (line.includes("[quiet-capture-lifecycle]") || line.includes("[quiet-capture-native]")
-        || line.includes("[native-audio-host-teardown-request]")
-        || line.includes("[native-audio-host-teardown-ipc]")
-        || line.includes("[native-audio-host-teardown]")
-        || line.includes("[native-audio-host-suspend-request]")
-        || line.includes("[native-audio-host-termination-request]")
         || line.includes("[native-vst3] native audio host lost")
         || line.includes("[quiet-renderer-ping]") || line.includes("[quiet-renderer-pong]")
         || line.includes("[quiet-renderer-block-cost]")
-        || line.includes("[quiet-block-sent]") || line.includes("[quiet-block-transit]")
         || line.includes("[quiet-recording-ipc]")
         || line.includes("native audio host closed"))
         lifecycle = (lifecycle + line.slice(0, line.includes("[quiet-recording-ipc]") ? 2048 : 512) + "\n")
           .slice(-32000)
-      const reliabilityMarker = line.indexOf("[vst-reliability]")
-      if (reliabilityMarker >= 0)
-        vstReliability = (vstReliability + line.slice(reliabilityMarker, reliabilityMarker + 1024) + "\n").slice(-64_000)
       if (line.startsWith("[quiet-renderer-metric]"))
         metricOutput = (metricOutput + line.slice(0, 512) + "\n").slice(-128_000)
       if (line.startsWith("[quiet-renderer-health]"))
@@ -563,7 +553,7 @@ const main = async () => {
       if (vst && vst.instances.filter((instance) => instance.health.state === "ready").length !== expectedReadyVstWorkers)
         throw new Error("Expected live VST instances were not available after measured playback.")
       await writePrivateArtifact(output, JSON.stringify({ status: "complete", mode, responsive, projectId, lifecycle,
-        vstReliability: vstReliability.trim().split("\n").filter(Boolean), ...telemetry(), dspSetup, pagingSetup,
+        ...telemetry(), dspSetup, pagingSetup,
         framePerformance,
         zoomSweeps: zoomProfile?.gestures ?? [],
         zoomMemoryCheckpoints: zoomProfile?.memoryCheckpoints ?? [],
@@ -754,7 +744,6 @@ const main = async () => {
         stopPresent, stopSucceeded, rendererFailure: lifecycle.includes("stage=renderer-gone"),
       }),
       lifecycle: lifecycle.slice(-32000),
-      vstReliability: vstReliability.trim().split("\n").filter(Boolean),
       zoomSweeps: recordingZoomProfile?.gestures ?? [],
       zoomMemoryCheckpoints: recordingZoomProfile?.memoryCheckpoints ?? [],
       ...telemetry(),

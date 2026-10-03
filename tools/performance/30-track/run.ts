@@ -15,7 +15,6 @@ import {
   createPrivateRunDirectory,
   descendantsOf,
   electronRendererTarget,
-  nativeControlTimingLines,
   nativeCallbacksIncreased,
   processMetricsAvailability,
   verifyElectronLaunchIdentity,
@@ -937,7 +936,6 @@ const runElectronBenchmark = async (
           rendererConsole: rendererConsole.slice(-4_000), hostPid: app?.pid ?? null,
           desktopDiagnosticsBoundary: desktopDiagnosticsBoundaryLines(appOutput.slice(-32_000)),
           desktopDiagnosticsValidation: desktopDiagnosticsValidationLines(appOutput.slice(-32_000)),
-          nativeControlTiming: nativeControlTimingLines(appOutput.slice(-32_000)),
           sabEnvironment,
           rendererProfilePath: rendererProfile ? path.join(runDirectory, "tier3-renderer-profile.json") : null,
           rendererTracePath: rendererTrace ? path.join(runDirectory, "tier3-renderer-trace.json") : null,
@@ -975,7 +973,6 @@ const runElectronBenchmark = async (
     await writePrivateArtifact(
       failureEvidencePath,
       JSON.stringify({ ...progress, status: "failed", stage, error: privateError, diagnostics,
-        nativeControlTiming: nativeControlTimingLines(appOutput.slice(-32_000)),
         desktopDiagnosticsBoundary: desktopDiagnosticsBoundaryLines(appOutput.slice(-32_000)),
         desktopDiagnosticsValidation: desktopDiagnosticsValidationLines(appOutput.slice(-32_000)),
         commandTimings: commandTimings.snapshot() }, null, 2),

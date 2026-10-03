@@ -437,7 +437,7 @@ class WorkerRuntime {
   );
   [[nodiscard]] bool CancelPublishedSubmission(std::size_t slotIndex, std::uint64_t sequence);
   [[nodiscard]] bool DispatchPublishedSubmission(std::size_t slotIndex, std::uint64_t sequence);
-  // Realtime callback-safe wake hint. The submitted slot remains the source of
+  // Nonblocking callback wake hint. The submitted slot remains the source of
   // truth; a full pipe is therefore a successful no-op rather than a fault.
   [[nodiscard]] bool NotifyRealtimeWorker() noexcept;
   [[nodiscard]] bool WaitForOfflineCompletion(

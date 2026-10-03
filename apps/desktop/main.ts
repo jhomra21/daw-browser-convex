@@ -94,7 +94,6 @@ import {
 import {
   nativeAudioHostMappedAssetPageHeaderBytes,
   nativeAudioHostMaximumPayloadBytes,
-  nativeAudioHostTeardownRequestSchema,
   nativeOfflineRenderPlanSchema,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import {
@@ -1834,19 +1833,11 @@ const registerIpc = () => {
   registerNativeSessionControl("daw:audio-host:session:stop", (supervisor) => supervisor.stopAudio())
   registerNativeSessionControl("daw:audio-host:session:start-recording", (supervisor) => supervisor.startRecording())
   registerNativeSessionControl("daw:audio-host:session:cancel-recording", (supervisor) => supervisor.cancelRecording())
-  ipcMain.handle("daw:audio-host:session:teardown", async (event, value) => {
+  ipcMain.handle("daw:audio-host:session:teardown", async (event) => {
     const supervisor = sessionSupervisorFor(event)
-    const request = nativeAudioHostTeardownRequestSchema.safeParse(value)
-    if (!supervisor || !request.success) return nativeSessionFailure()
+    if (!supervisor) return nativeSessionFailure()
     try {
-      console.error("[native-audio-host-teardown-ipc]", JSON.stringify({
-        ...request.data,
-        requester: "renderer-ipc",
-        timestamp: Date.now(),
-        webContentsId: event.sender.id,
-        rendererPid: event.sender.getOSProcessId(),
-      }))
-      await supervisor.teardown(request.data)
+      await supervisor.teardown()
       activeEditorProjectBindings.clear()
       return { ok: true as const }
     } catch (error) {
@@ -2024,8 +2015,6 @@ const createWindow = () => {
   if (process.env.DAW_BENCHMARK_QUIET_CAPTURE === "1") {
     const contents = window_.webContents
     contents.on("console-message", (_event, _level, message) => {
-      if (message.startsWith("[native-audio-host-teardown-request] ")
-        && message.length < 1024) console.error(message)
       if (message.startsWith("[quiet-renderer-block-cost] ")
         && message.length < 256) console.error(message)
     })
@@ -2153,14 +2142,7 @@ const finishQuit = async () => {
   rejectRendererPending("Application is closing.")
   activeEditorProjectBindings.clear()
   await fileCapabilities.revokeAll()
-  await audioHostSupervisor?.teardown({
-    reason: "app-quit",
-    projectId: null,
-    sessionGeneration: null,
-    transportEpoch: null,
-    graphRevision: null,
-    rendererGeneration: null,
-  }).catch(() => undefined)
+  await audioHostSupervisor?.teardown().catch(() => undefined)
   powerMonitor.removeAllListeners("suspend")
   powerMonitor.removeAllListeners("resume")
   removeAudioHostLossListener?.()
@@ -2350,14 +2332,7 @@ else {
       audioLifecycle = { state: "suspended", powerGeneration: audioLifecycle.powerGeneration + 1 }
       publishAudioLifecycle()
       audioSuspendPromise = Promise.allSettled([
-        audioHostSupervisor?.suspend({
-          reason: "power-suspend",
-          projectId: null,
-          sessionGeneration: null,
-          transportEpoch: null,
-          graphRevision: null,
-          rendererGeneration: null,
-        }),
+        audioHostSupervisor?.suspend(),
         nativeVst3EditorSessionManager?.suspendAll(),
       ]).then(() => undefined)
     }

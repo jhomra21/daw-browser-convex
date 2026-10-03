@@ -57,7 +57,6 @@ import type { createNativeSabRecordingWriter } from "~/lib/recording/native-sab-
 import { recordNativeBlockTiming, recordingDiagnosticsSubscriberCount, updateRecordingDiagnostics, type RecordingTerminationCause } from "~/lib/recording/recording-diagnostics"
 import { createBenchmarkBlockCost } from "~/lib/recording/benchmark-block-cost"
 import type { DesktopBridge } from "~/types/desktop-bridge"
-import type { NativeAudioHostTeardownRequest } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type {
   LiveProcessorControl,
@@ -167,14 +166,6 @@ type NativePlaybackBridge = Pick<
 }
 
 type NativeStartResult = "started" | "unavailable" | "blocked"
-type NativeSessionTeardownReason = NativeAudioHostTeardownRequest["reason"]
-export type NativePlaybackTeardownDiagnostics = {
-  readonly previousTrackFingerprintHash?: string
-  readonly nextTrackFingerprintHash?: string
-  readonly trackCount?: number
-  readonly previousProjectGeneration?: number
-}
-
 const nativeTransportFor = (
   snapshot: LivePlaybackSnapshot,
   epoch: number,
@@ -662,7 +653,7 @@ export const createNativePlaybackController = (input: {
       startFrame: options.startFrame,
       onFault: (error) => {
         if (sessionGeneration !== nativeSessionGeneration) return
-        void disposeNativeSession("coordinator-fault").catch(() => undefined)
+        void disposeNativeSession().catch(() => undefined)
         reportFault(error.message)
       },
       onRenderedFrame: (renderedFrame) => {
@@ -749,9 +740,7 @@ export const createNativePlaybackController = (input: {
   }
 
   const disposeNativeSession = async (
-    reason: NativeSessionTeardownReason,
     options?: { invalidateProjectArtifacts?: boolean },
-    diagnostics?: NativePlaybackTeardownDiagnostics,
   ) => {
     intentionalHostTransitionDepth += 1
     try {
@@ -759,15 +748,6 @@ export const createNativePlaybackController = (input: {
       const assetIds = installedAssetIds
       const pageManager = nativeTimelinePageManager
       const hostLost = hasNativeHostConnectionLoss()
-      const request = teardownRequest(reason)
-      console.error("[native-audio-host-teardown-request]", JSON.stringify({
-        ...request,
-        projectGeneration: resolveProjectGeneration(),
-        ...diagnostics,
-        requester: "native-playback-controller",
-        timestamp: Date.now(),
-        hostTransition: hostLost ? "host-loss" : "controller",
-      }))
       invalidateNativeOwnership()
       await pageManager?.dispose()
       await nativeStretchDrainPromise
@@ -779,32 +759,14 @@ export const createNativePlaybackController = (input: {
         stopPromise,
         ...assetIds.map((sessionAssetId) => bridge.session.releaseAsset(sessionAssetId)),
       ])
-      await bridge.session.teardown(request).catch(() => undefined)
+      await bridge.session.teardown().catch(() => undefined)
     } finally {
       intentionalHostTransitionDepth -= 1
     }
   }
   const dispose = (
-    reason: NativeSessionTeardownReason,
     options?: { invalidateProjectArtifacts?: boolean },
-    diagnostics?: NativePlaybackTeardownDiagnostics,
-  ) => (
-    disposeNativeSession(reason, options, diagnostics)
-  )
-  const teardownRequest = (reason: NativeSessionTeardownReason) => {
-    const projectId = preparedProjectId ?? input.getProjectId?.()
-    const request: NativeAudioHostTeardownRequest = {
-      reason,
-      projectId: projectId && /^[a-zA-Z0-9_-]{1,96}$/.test(projectId) ? projectId : null,
-      sessionGeneration: nativeSessionGeneration,
-      transportEpoch,
-      graphRevision: preparedSnapshot?.revision ?? preparedGraph?.revision ?? null,
-      rendererGeneration: lifecycleGeneration,
-    }
-    const phase = globalThis.__dawPerformanceBenchmark?.currentPhase?.()
-    if (phase && /^[a-zA-Z0-9_-]{1,80}$/.test(phase)) request.benchmarkPhase = phase
-    return request
-  }
+  ) => disposeNativeSession(options)
   const cancelPendingStart = () => {
     const request = pendingStart
     if (!request) return Promise.resolve()
@@ -872,7 +834,7 @@ export const createNativePlaybackController = (input: {
             ))
             await previousCoordinator.waitForTransition(runTransitionId, true)
             if (cancelled()) {
-              await disposeNativeSession("cancelled-start")
+              await disposeNativeSession()
               return "unavailable"
             }
             preparedSnapshot = refreshed.snapshot
@@ -915,7 +877,7 @@ export const createNativePlaybackController = (input: {
             await nextCoordinator.waitForTransition(runTransitionId, true)
           }
           if (cancelled()) {
-            await disposeNativeSession("cancelled-start")
+            await disposeNativeSession()
             return "unavailable"
           }
           preparedSnapshot = refreshed.snapshot
@@ -945,7 +907,7 @@ export const createNativePlaybackController = (input: {
         }
         if (ownsAttemptedCoordinator) {
           if (hasNativeHostConnectionLoss()) invalidateNativeOwnership(true, true)
-          else await disposeNativeSession(cancelled() ? "cancelled-start" : "start-failure")
+          else await disposeNativeSession()
         }
         return "unavailable"
       }
@@ -954,7 +916,6 @@ export const createNativePlaybackController = (input: {
       const assetIds = installedAssetIds
       const pageManager = nativeTimelinePageManager
       const releaseStretch = preparedStretchLeaseSession
-      const request = teardownRequest("session-replacement")
       installedAssetIds = []
       nativeSessionGeneration += 1
       scheduleCoordinator?.dispose()
@@ -983,13 +944,7 @@ export const createNativePlaybackController = (input: {
       ])
       await pageManager?.dispose()
       await releaseStretch?.()
-      console.error("[native-audio-host-teardown-request]", JSON.stringify({
-        ...request,
-        requester: "native-playback-controller",
-        timestamp: Date.now(),
-        hostTransition: "prepared-session-replacement",
-      }))
-      await bridge.session.teardown(request).catch(() => undefined)
+      await bridge.session.teardown().catch(() => undefined)
     }
     const startAbortControllerForAttempt = new AbortController()
     startAbortController = startAbortControllerForAttempt
@@ -1348,7 +1303,7 @@ export const createNativePlaybackController = (input: {
       nativeSessionStarted = true
       configureNativeSpectrumTarget()
       if (cancelled()) {
-        await disposeNativeSession("cancelled-start")
+        await disposeNativeSession()
         return "unavailable"
       }
       await nextCoordinator.waitForTransition(nextTransportTransitionId, false)
@@ -1379,9 +1334,9 @@ export const createNativePlaybackController = (input: {
       const hostLost = hasNativeHostConnectionLoss()
       if (transactionOpen && !hostLost) {
         if (transactionToken) await bridge.session.rollbackTransaction(transactionToken)
-        if (!wasCancelled) await disposeNativeSession("start-failure")
+        if (!wasCancelled) await disposeNativeSession()
       }
-      else if (!wasCancelled && !hostLost) await disposeNativeSession("start-failure")
+      else if (!wasCancelled && !hostLost) await disposeNativeSession()
       else if (hostLost) invalidateNativeOwnership(true, true)
       const result = requiresNative ? "blocked" : "unavailable"
       console.error("[native-vst3] native start failed", {
@@ -1546,7 +1501,7 @@ export const createNativePlaybackController = (input: {
     destroyed = true
     const pending = pendingStart
     destroyPromise = (async () => {
-      await disposeNativeSession("hook-cleanup-unmount")
+      await disposeNativeSession()
       await pending?.catch(() => undefined)
       await stretchCache?.dispose()
       stretchCache = undefined
@@ -1650,7 +1605,7 @@ export const createNativePlaybackController = (input: {
       })
     } catch (error) {
       reportFault(error instanceof Error ? error.message : "Native playback could not pause.")
-      await disposeNativeSession("pause-failure")
+      await disposeNativeSession()
       throw error
     }
   }
@@ -1667,7 +1622,7 @@ export const createNativePlaybackController = (input: {
       })
     } catch (error) {
       reportFault(error instanceof Error ? error.message : "Native playback could not seek.")
-      await disposeNativeSession("seek-failure")
+      await disposeNativeSession()
       throw error
     }
   }

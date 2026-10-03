@@ -16,7 +16,6 @@ import type {
   NativeOfflineMappedAsset,
   NativeOfflineRenderPlan
 } from "@daw-browser/audio-engine/native-host-wire"
-import type { NativeAudioHostTeardownRequest } from "@daw-browser/desktop-protocol/native-audio-host"
 import type {
   DesktopOperationV1,
   ControlErrorV1,
@@ -184,7 +183,7 @@ type NativeSessionBridge = {
   cancelRecording(): Promise<NativeSessionReply>
   start(): Promise<NativeSessionReply>
   stop(): Promise<NativeSessionReply>
-  teardown(request: NativeAudioHostTeardownRequest): Promise<NativeSessionReply>
+  teardown(): Promise<NativeSessionReply>
   onLoss(listener: (error?: string) => void): () => void
   onRecordingBlock(listener: (block: NativeHostRecordingBlock) => void): () => void
   onRecordingStatus(listener: (status: NativeHostRecordingStatus) => void): () => void

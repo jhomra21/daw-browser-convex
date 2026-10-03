@@ -30,8 +30,6 @@ import {
   nativeAudioHostProtocolVersion as protocolVersion,
   nativeAudioHostVstAttachFingerprintBytes as vstAttachFingerprintBytes,
   nativeOfflineRenderPlanSchema,
-  nativeAudioHostTeardownRequestSchema,
-  type NativeAudioHostTeardownRequest,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import type {
   NativeHostDeviceConfiguration,
@@ -1236,7 +1234,7 @@ export type NativeAudioHostSupervisor = {
   startRecording(): Promise<void>
   stopRecording(stopFrame?: number): Promise<void>
   cancelRecording(): Promise<void>
-  teardown(request: NativeAudioHostTeardownRequest): Promise<void>
+  teardown(): Promise<void>
   status(): { running: boolean; hello?: AudioHostHello }
   transactionOpen(): boolean
   onLoss(listener: (error: Error) => void): () => void
@@ -1249,7 +1247,7 @@ export type NativeAudioHostSupervisor = {
   reenableVstScheduleAutomation(bytes: Uint8Array, transactionToken?: string): Promise<void>
   onScheduleProgress(listener: (progress: NativeScheduleProgress) => void): () => void
   onWorkerNotification(listener: (notification: NativeWorkerNotification) => void): () => void
-  suspend(request: NativeAudioHostTeardownRequest): Promise<void>
+  suspend(): Promise<void>
   resume(): Promise<void>
 }
 
@@ -1257,9 +1255,6 @@ export const createNativeAudioHostSupervisor = (
   hostPath: string,
   spawnHost: SpawnHost = (executable) => {
     const environment: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin" }
-    if (process.env.DAW_BENCHMARK_VST_RELIABILITY === "1") {
-      environment.DAW_BENCHMARK_VST_RELIABILITY = "1"
-    }
     return spawn(executable, [], { env: environment, stdio: ["pipe", "pipe", "pipe"] })
   },
   options: NativeAudioHostSupervisorOptions = {},
@@ -2584,16 +2579,8 @@ export const createNativeAudioHostSupervisor = (
     async cancelRecording() {
       await request(recordingCancelType)
     },
-    teardown(request: NativeAudioHostTeardownRequest) {
+    teardown() {
       if (teardownPromise) return teardownPromise
-      const context = nativeAudioHostTeardownRequestSchema.parse(request)
-      console.error("[native-audio-host-teardown]", JSON.stringify({
-        ...context,
-        requester: "audio-host-supervisor",
-        timestamp: Date.now(),
-        lifecycleGeneration,
-        pid: child?.pid ?? null,
-      }))
       lifecycleGeneration += 1
       lifecycleIntentVersion += 1
       const current = child
@@ -2626,18 +2613,10 @@ export const createNativeAudioHostSupervisor = (
       )
       return stopping
     },
-    suspend(request: NativeAudioHostTeardownRequest) {
+    suspend() {
       if (suspended && !resumePromise) return childTerminationPromise ?? (terminationFailure
         ? Promise.reject(terminationFailure)
         : Promise.resolve())
-      const context = nativeAudioHostTeardownRequestSchema.parse(request)
-      console.error("[native-audio-host-suspend-request]", JSON.stringify({
-        ...context,
-        requester: "audio-host-supervisor",
-        timestamp: Date.now(),
-        lifecycleGeneration,
-        pid: child?.pid ?? null,
-      }))
       suspended = true
       lifecycleIntentVersion += 1
       lifecycleGeneration += 1
@@ -2743,13 +2722,6 @@ export const probeNativeAudioOutputDevice = async (
   try {
     return await probe.resolveOutputDevice(preferredDeviceId)
   } finally {
-    await probe.teardown({
-      reason: "device-probe-complete",
-      projectId: null,
-      sessionGeneration: null,
-      transportEpoch: null,
-      graphRevision: null,
-      rendererGeneration: null,
-    }).catch(() => undefined)
+    await probe.teardown().catch(() => undefined)
   }
 }

@@ -412,7 +412,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     createSignal<EffectsPanelExportSnapshot>();
   let getAutomationPatches: () => ExportAutomationPatch[] = () => [];
   let nativePlaybackRevision = 1;
-  let benchmarkProjectionReports = 0;
   const compilePlaybackSnapshot = async (
     transport: LivePlaybackTransport,
     context?: LivePlaybackCompileContext,
@@ -495,15 +494,6 @@ const Timeline: Component<TimelineProps> = (props) => {
         && processor.manifest.supportsState
         && (processor.state !== undefined || processor.launchReference?.state !== undefined))
       .map((processor) => processor.instanceId)
-    if (window.dawDesktop?.benchmarkSabRecording && benchmarkProjectionReports < 16) {
-      benchmarkProjectionReports += 1;
-      const projected = { ...result.snapshot, nativeExternalAttachmentPlan: attachmentPlan.plan };
-      console.info("[tier3] native automation projection", {
-        envelopes: projected.mixer.automationEnvelopes.length,
-        attachments: attachmentPlan.plan.attachments.length,
-        initialVstSegments: nativeVstAutomationSegmentsForSnapshot(projected, 48_000, 0, 512).length,
-      });
-    }
     return {
       supported: true as const,
       snapshot: {

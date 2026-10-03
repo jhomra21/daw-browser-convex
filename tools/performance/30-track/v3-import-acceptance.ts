@@ -53,7 +53,7 @@ const root = path.resolve(import.meta.dir, "../../..")
 const archive = path.join(root, "tools/performance/fixtures/30-track-v3-native.dawproject")
 const executable = path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/MacOS/@daw-browser-desktop")
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
-export const parseControlMode = (option: string | undefined): "idle" | "playback" | "ui" | "paging" | "dsp" | "dsp-ui" | "dsp-soak" | "dsp-one" | "dsp-recording" | "dsp-ui-recording" | "zoom-profile" | "zoom-recording-profile" | "vst-reliability" | "media-recording" | "media-recording-probe" | "media-recording-probe-drop" | "media-recording-probe-drop-no-meters" | "media-recording-probe-metadata" | "media-recording-probe-batch4" | "media-recording-probe-batch8" | "media-recording-portable" | "recording" | "acceptance" => {
+export const parseControlMode = (option: string | undefined): "idle" | "playback" | "ui" | "paging" | "dsp" | "dsp-ui" | "dsp-soak" | "dsp-one" | "dsp-recording" | "dsp-ui-recording" | "zoom-profile" | "zoom-recording-profile" | "vst-reliability" | "media-recording" | "media-recording-probe" | "media-recording-portable" | "recording" | "acceptance" => {
   if (option === undefined) return "acceptance"
   if (option === "--idle-control") return "idle"
   if (option === "--playback-control") return "playback"
@@ -70,11 +70,6 @@ export const parseControlMode = (option: string | undefined): "idle" | "playback
   if (option === "--vst-reliability") return "vst-reliability"
   if (option === "--media-recording") return "media-recording"
   if (option === "--media-recording-probe") return "media-recording-probe"
-  if (option === "--media-recording-probe-drop") return "media-recording-probe-drop"
-  if (option === "--media-recording-probe-drop-no-meters") return "media-recording-probe-drop-no-meters"
-  if (option === "--media-recording-probe-metadata") return "media-recording-probe-metadata"
-  if (option === "--media-recording-probe-batch4") return "media-recording-probe-batch4"
-  if (option === "--media-recording-probe-batch8") return "media-recording-probe-batch8"
   if (option === "--media-recording-portable") return "media-recording-portable"
   if (option === "--quiet-recording") return "recording"
   throw new Error("Unknown packaged v3 control mode")
@@ -86,11 +81,6 @@ const isDspControlMode = (mode: ReturnType<typeof parseControlMode>) => mode ===
 const isUiStressMode = (mode: ReturnType<typeof parseControlMode>) => mode === "ui" || mode === "dsp-ui"
   || mode === "dsp-ui-recording"
 const isMediaRecordingMode = (mode: ReturnType<typeof parseControlMode>) => mode.startsWith("media-recording")
-const recordingForwardMode = (mode: ReturnType<typeof parseControlMode>) =>
-  mode.startsWith("media-recording-probe-drop") ? "drop"
-    : mode === "media-recording-probe-metadata" ? "metadata"
-      : mode === "media-recording-probe-batch4" ? "batch4"
-        : mode === "media-recording-probe-batch8" ? "batch8" : "full"
 const performanceQuantilesSchema = z.object({
   p50: z.number().finite().nullable(),
   p95: z.number().finite().nullable(),
@@ -213,8 +203,6 @@ const main = async () => {
       DAW_BENCHMARK_QUIET_CAPTURE: mode !== "acceptance" ? "1" : "0",
       DAW_BENCHMARK_ZOOM_PROFILE: mode === "zoom-profile" || mode === "zoom-recording-profile" ? "1" : "0",
       DAW_BENCHMARK_HEARTBEAT: mode.includes("media-recording-probe") ? "1" : "0",
-      DAW_BENCHMARK_RECORDING_FORWARD_MODE: recordingForwardMode(mode),
-      DAW_BENCHMARK_RECORDING_SUPPRESS_CHANNEL: mode === "media-recording-probe-drop-no-meters" ? "meter-batch" : "",
       DAW_BENCHMARK_VST_RELIABILITY: mode === "vst-reliability" ? "1" : "0" }, detached: true, stdio: ["ignore", "pipe", "pipe"],
   })
   let appOutput = ""

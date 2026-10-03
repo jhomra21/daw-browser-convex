@@ -15,14 +15,15 @@ export const incrementPerformanceBenchmarkCounter = (owner: string, amount = 1) 
   globalThis.__dawPerformanceBenchmark?.increment(owner, amount)
 }
 
-export const measurePerformanceBenchmarkDuration = (
+export const measurePerformanceBenchmark = <Value>(
   owner: string,
-  startedAt: number,
-  endedAt = performance.now(),
-) => {
-  const durationMs = Math.max(0, endedAt - startedAt)
-  globalThis.__dawPerformanceBenchmark?.duration(owner, durationMs)
-  return durationMs
+  work: () => Value,
+): Value => {
+  const collector = globalThis.__dawPerformanceBenchmark
+  if (!collector) return work()
+  const startedAt = performance.now()
+  try { return work() }
+  finally { collector.duration(owner, Math.max(0, performance.now() - startedAt)) }
 }
 
 export const setPerformanceBenchmarkGauge = (owner: string, value: number) => {

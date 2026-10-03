@@ -1,33 +1,5 @@
 import { expect, test } from "bun:test"
-import { createRecordingBlockForwarder, createRecordingIpcDiagnostics, createRendererTrafficDiagnostics, createStatusSampler, parseRecordingForwardMode } from "./recording-ipc-diagnostics"
-
-test("parses benchmark recording forwarding modes fail closed", () => {
-  expect(parseRecordingForwardMode(undefined)).toBe("full")
-  expect(parseRecordingForwardMode("batch4")).toBe("batch4")
-  expect(parseRecordingForwardMode("unknown")).toBe("full")
-})
-
-test("batches full recording blocks without reordering or unbounded retention", () => {
-  const forwarder = createRecordingBlockForwarder("batch4")
-  const blocks = Array.from({ length: 5 }, (_, sequence) => ({
-    generation: 1, sessionId: 2n, sequence, frameCount: 128, channelCount: 1, planarPcm: new Uint8Array(512),
-  }))
-  expect(forwarder.push(blocks[0]!)).toEqual([])
-  expect(forwarder.push(blocks[1]!)).toEqual([])
-  expect(forwarder.push(blocks[2]!)).toEqual([])
-  expect(forwarder.push(blocks[3]!)).toEqual([{ kind: "blocks", blocks: blocks.slice(0, 4) }])
-  expect(forwarder.push(blocks[4]!)).toEqual([])
-  expect(forwarder.flush()).toEqual([{ kind: "blocks", blocks: blocks.slice(4) }])
-})
-
-test("routes metadata separately and drops PCM only in explicit modes", () => {
-  const block = { generation: 1, sessionId: 2n, sequence: 3, frameCount: 128, channelCount: 2, planarPcm: new Uint8Array(1024) }
-  expect(createRecordingBlockForwarder("drop").push(block)).toEqual([])
-  expect(createRecordingBlockForwarder("metadata").push(block)).toEqual([{
-    kind: "metadata",
-    metadata: { generation: 1, sessionId: 2n, sequence: 3, frameCount: 128, channelCount: 2, payloadByteLength: 1024 },
-  }])
-})
+import { createRecordingIpcDiagnostics, createRendererTrafficDiagnostics } from "./recording-ipc-diagnostics"
 
 test("reports bounded recording rate, payload and send percentiles", () => {
   const diagnostics = createRecordingIpcDiagnostics(0)
@@ -59,15 +31,4 @@ test("reports per-channel renderer traffic rates and estimated bytes", () => {
       "recording-status": { count: 1, messagesPerSecond: 1, estimatedBytesPerSecond: 96 },
     },
   })
-})
-
-test("status sampler preserves transitions and caps unchanged active status at four hertz", () => {
-  const sampler = createStatusSampler()
-  const active = { generation: 1, sessionId: 2n, configured: true, active: true, fatal: false, queuedBlocks: 1 }
-  expect(sampler.shouldForward(active, 0)).toBe(true)
-  expect(sampler.shouldForward(active, 100)).toBe(false)
-  expect(sampler.shouldForward(active, 250)).toBe(true)
-  expect(sampler.shouldForward({ ...active, active: false }, 251)).toBe(true)
-  expect(sampler.shouldForward({ ...active, active: false, queuedBlocks: 0 }, 252)).toBe(true)
-  expect(sampler.shouldForward({ ...active, sessionId: 3n }, 253)).toBe(true)
 })

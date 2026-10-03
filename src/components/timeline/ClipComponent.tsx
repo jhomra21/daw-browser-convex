@@ -12,7 +12,7 @@ import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import {
   incrementPerformanceBenchmarkCounter,
   markPerformanceBenchmark,
-  measurePerformanceBenchmarkDuration,
+  measurePerformanceBenchmark,
 } from "~/lib/performance-benchmark-telemetry";
 import { createClipVisualColors, resolveClipColor } from "~/lib/clip-color";
 import { LANE_HEIGHT } from "~/lib/timeline-utils";
@@ -487,10 +487,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     // invalidations into the browser's next paint and cancel on unmount.
     waveformFrame = requestAnimationFrame(() => {
       waveformFrame = undefined;
-      const startedAt = performance.now();
       markPerformanceBenchmark("waveform.raster-start");
-      drawWaveform();
-      measurePerformanceBenchmarkDuration("waveform.raster", startedAt);
+      measurePerformanceBenchmark("waveform.raster", drawWaveform);
       markPerformanceBenchmark("waveform.raster-complete");
     });
   };

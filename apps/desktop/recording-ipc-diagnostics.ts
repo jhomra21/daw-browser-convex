@@ -1,48 +1,3 @@
-type RecordingForwardMode = "full" | "drop" | "metadata" | "batch4" | "batch8"
-
-export const parseRecordingForwardMode = (value: string | undefined): RecordingForwardMode =>
-  value === "drop" || value === "metadata" || value === "batch4" || value === "batch8" ? value : "full"
-
-type ForwardedRecordingBlock = {
-  generation: number
-  sessionId: bigint
-  sequence: number
-  frameCount: number
-  channelCount: number
-  planarPcm: Uint8Array
-}
-
-export const createRecordingBlockForwarder = <Block extends ForwardedRecordingBlock>(mode: RecordingForwardMode) => {
-  const batchSize = mode === "batch4" ? 4 : mode === "batch8" ? 8 : 1
-  let queued: Block[] = []
-  const flush = () => {
-    if (queued.length === 0) return []
-    const blocks = queued
-    queued = []
-    return [{ kind: "blocks" as const, blocks }]
-  }
-  return {
-    push(block: Block) {
-      if (mode === "drop") return []
-      if (mode === "metadata") return [{
-        kind: "metadata" as const,
-        metadata: {
-          generation: block.generation,
-          sessionId: block.sessionId,
-          sequence: block.sequence,
-          frameCount: block.frameCount,
-          channelCount: block.channelCount,
-          payloadByteLength: block.planarPcm.byteLength,
-        },
-      }]
-      if (mode === "full") return [{ kind: "blocks" as const, blocks: [block] }]
-      queued.push(block)
-      return queued.length === batchSize ? flush() : []
-    },
-    flush,
-  }
-}
-
 const percentile = (values: readonly number[], ratio: number) => {
   const sorted = [...values].sort((left, right) => left - right)
   return sorted[Math.max(0, Math.ceil(sorted.length * ratio) - 1)] ?? 0
@@ -116,27 +71,6 @@ export const createRendererTrafficDiagnostics = (startedAt: number) => {
           estimatedBytesPerSecond: value.bytes / seconds,
         }])),
       }
-    },
-  }
-}
-
-export const createStatusSampler = () => {
-  let lastForwardedAt = Number.NEGATIVE_INFINITY
-  let lastState = ""
-  return {
-    shouldForward(status: {
-      generation: number
-      sessionId: bigint
-      configured: boolean
-      active: boolean
-      fatal: boolean
-      queuedBlocks: number
-    }, at: number) {
-      const state = `${status.generation}:${status.sessionId}:${status.configured}:${status.active}:${status.fatal}:${!status.active && status.queuedBlocks === 0}`
-      if (state === lastState && at - lastForwardedAt < 250) return false
-      lastState = state
-      lastForwardedAt = at
-      return true
     },
   }
 }

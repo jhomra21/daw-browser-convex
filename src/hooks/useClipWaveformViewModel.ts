@@ -16,7 +16,7 @@ import type { RuntimeClip } from '~/lib/timeline-runtime-types'
 import { requestWaveformData } from '~/lib/waveform-scheduler-request'
 import {
   incrementPerformanceBenchmarkCounter,
-  measurePerformanceBenchmarkDuration,
+  measurePerformanceBenchmark,
 } from '~/lib/performance-benchmark-telemetry'
 
 type ClipWaveformViewModelOptions = {
@@ -112,8 +112,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
   let dataCleanup: (() => void) | undefined
   const retainedEntries = new Map<string, Retained>()
 
-  const view = createMemo(() => {
-    const startedAt = performance.now()
+  const view = createMemo(() => measurePerformanceBenchmark('waveform.geometry', () => {
     incrementPerformanceBenchmarkCounter('waveform.view-computations')
     const clip = options.clip()
     const assetKey = clip.waveformAssetKey ?? clip.sourceAssetKey ?? `clip:${clip.id}`
@@ -130,9 +129,8 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       options.projectBpm(),
       options.visibleRange?.(),
     )
-    measurePerformanceBenchmarkDuration('waveform.geometry', startedAt)
     return { clip, assetKey, layout }
-  })
+  }))
   const displaySegments = createMemo(() => layoutSegmentsFor(view().layout, view().clip))
   const plans = createMemo<WaveformRequestPlans>(() => {
     const current = view()

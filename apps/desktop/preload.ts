@@ -65,7 +65,6 @@ if (process.env.DAW_BENCHMARK_HEARTBEAT === "1") {
       ipcRenderer.send("daw:benchmark:renderer-pong", parsed.data)
     }
   })
-  ipcRenderer.on("daw:benchmark:recording-block-metadata", () => undefined)
 }
 const diagnosticsTraceStarts = new Map<string, number>()
 const traceDiagnostics = (id: string, stage: string) => {
@@ -326,16 +325,8 @@ const desktopBridge = {
             }
             listener(block)
           }
-          const notifyBatch = (_event: Electron.IpcRendererEvent, blocks: NativeHostRecordingBlock[]) => {
-            for (const block of blocks) notify(_event, block)
-          }
           ipcRenderer.on("daw:audio-host:recording-block", notify)
-          if (process.env.DAW_BENCHMARK_HEARTBEAT === "1")
-            ipcRenderer.on("daw:benchmark:recording-block-batch", notifyBatch)
-          return () => {
-            ipcRenderer.removeListener("daw:audio-host:recording-block", notify)
-            ipcRenderer.removeListener("daw:benchmark:recording-block-batch", notifyBatch)
-          }
+          return () => ipcRenderer.removeListener("daw:audio-host:recording-block", notify)
         },
         onRecordingStatus: (listener: (status: NativeHostRecordingStatus) => void) => {
           const notify = (_event: Electron.IpcRendererEvent, status: NativeHostRecordingStatus) => listener(status)

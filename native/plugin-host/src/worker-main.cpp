@@ -331,7 +331,6 @@ int main(const int argc, char* argv[]) {
         if (!daw::plugin_host::WriteWorkerEditorResponse(responseFileDescriptor, {.success = success})) {
           return EXIT_FAILURE;
         }
-        continue;
       }
       if (command->command == daw::plugin_host::WorkerControlCommand::kStateGet) {
         const auto state = startup->noPluginTestMode
@@ -340,7 +339,6 @@ int main(const int argc, char* argv[]) {
         if (!state || !daw::plugin_host::WriteWorkerState(responseFileDescriptor, *state)) {
           return EXIT_FAILURE;
         }
-        continue;
       }
       const auto editorCommand = [&]() -> std::optional<daw::plugin_host::WorkerEditorCommand> {
         switch (command->command) {
@@ -372,7 +370,6 @@ int main(const int argc, char* argv[]) {
         )) {
           return EXIT_FAILURE;
         }
-        continue;
       }
     }
     bool failed = false;

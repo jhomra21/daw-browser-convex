@@ -1075,10 +1075,6 @@ bool WorkerRuntime::TerminateForFault() {
     close(responseReadDescriptor_);
     responseReadDescriptor_ = -1;
   }
-  if (wakeWriteDescriptor_ >= 0) {
-    close(wakeWriteDescriptor_);
-    wakeWriteDescriptor_ = -1;
-  }
   transport_->PublishHealth(WorkerHealth::kFaulted);
   return terminated;
 }
@@ -1134,9 +1130,12 @@ bool WorkerRuntime::DispatchPublishedSubmission(const std::size_t slotIndex, con
 bool WorkerRuntime::NotifyRealtimeWorker() noexcept {
   if (wakeWriteDescriptor_ < 0) return false;
   constexpr std::uint8_t wakeByte = 1;
-  const auto result = write(wakeWriteDescriptor_, &wakeByte, sizeof(wakeByte));
-  return result == static_cast<ssize_t>(sizeof(wakeByte))
-    || (result < 0 && (errno == EAGAIN || errno == EWOULDBLOCK));
+  while (true) {
+    const auto result = write(wakeWriteDescriptor_, &wakeByte, sizeof(wakeByte));
+    if (result == static_cast<ssize_t>(sizeof(wakeByte))) return true;
+    if (result < 0 && errno == EINTR) continue;
+    return result < 0 && (errno == EAGAIN || errno == EWOULDBLOCK);
+  }
 }
 
 bool WorkerRuntime::WaitForOfflineCompletion(

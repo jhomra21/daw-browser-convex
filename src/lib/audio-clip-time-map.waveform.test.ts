@@ -130,7 +130,7 @@ describe('unified waveform painter', () => {
     expect(segments[0]?.sourceEndSec).toBe(segments[1]?.sourceStartSec)
   })
 
-  test('keeps marker stretch source-beat offsets aligned at supported sample rates and channel counts', () => {
+  test('keeps UI-authored marker source beats aligned without reapplying source-beat offsets', () => {
     for (const sampleRate of [44_100, 48_000, 96_000]) {
       for (const channelCount of [1, 2]) {
         const sourceBeatOffset = 0.5
@@ -148,9 +148,9 @@ describe('unified waveform painter', () => {
             sourceBpm,
             sourceBeatOffset,
             markers: [
-              { id: 'a', sourceBeat: 0, timelineBeat: 0 },
-              { id: 'b', sourceBeat: 2, timelineBeat: 2 },
-              { id: 'c', sourceBeat: 4, timelineBeat: 4 },
+              { id: 'a', sourceBeat: sourceBeatOffset, timelineBeat: 0 },
+              { id: 'b', sourceBeat: 2 + sourceBeatOffset, timelineBeat: 2 },
+              { id: 'c', sourceBeat: 4 + sourceBeatOffset, timelineBeat: 4 },
             ],
           },
         }

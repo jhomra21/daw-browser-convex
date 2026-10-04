@@ -1,0 +1,37 @@
+name: Generated fixture cleanup verification
+
+on:
+  push:
+    branches:
+      - chore/untrack-generated-performance-fixture
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      - name: Verify generated fixture is untracked and ignored
+        run: |
+          test ! -e tools/performance/fixtures/30-track-v2.dawproject
+          test -z "$(git ls-files tools/performance/fixtures/30-track-v2.dawproject)"
+          git check-ignore --no-index tools/performance/fixtures/30-track-v2.dawproject
+          grep -q '30-track-v2.dawproject' tools/performance/fixtures/30-track-v2.dawproject.sha256
+      - name: Verify missing-fixture guidance
+        run: |
+          set +e
+          output="$(bun tools/performance/30-track/run.ts --surface browser --out "$RUNNER_TEMP/missing-fixture.json" 2>&1)"
+          status=$?
+          set -e
+          test "$status" -ne 0
+          printf '%s\n' "$output" | grep -F 'Run "bun run perf:30-track:fixture" before the benchmark.'
+          grep -F 'Run \"bun run perf:30-track:fixture\" before the benchmark.' "$RUNNER_TEMP/missing-fixture.json"

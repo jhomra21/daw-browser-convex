@@ -339,8 +339,9 @@ export const runTierThree = async (
   const recordingStillActive = (await browserCommand(session, ["eval", "document.querySelector('button[aria-label=\"Stop recording\"]') !== null"])).trim() === "true"
   if (recordingStillActive) await browserCommand(session, ["find", "role", "button", "click", "--name", "Stop recording"])
   await waitForBrowserValue(session, "document.querySelector('button[aria-label=\"Start recording\"]') !== null ? true : null", 30_000)
+  const recordingFinal = await diagnostics("after-recording-stop")
   snapshot = await readSnapshot()
-  const capturedFrames = (recordingDuring.recording.capturedFrames ?? 0) - (recordingBefore.recording.capturedFrames ?? 0)
+  const capturedFrames = (recordingFinal.recording.capturedFrames ?? 0) - (recordingBefore.recording.capturedFrames ?? 0)
   if (!recordingEarlyActive || !recordingStillActive) {
     throw new TierThreeRecordingFailure(`Native recording ended before requested stop: ${JSON.stringify({
       activeAtFiveSeconds: recordingEarlyActive,
@@ -353,18 +354,18 @@ export const runTierThree = async (
         dropped: recordingEarly.recording.droppedFrames,
       },
       end: {
-        frames: recordingDuring.recording.capturedFrames,
-        deviceLost: recordingDuring.recording.deviceLost,
-        failure: recordingDuring.recording.lastFailurePresent,
+        frames: recordingFinal.recording.capturedFrames,
+        deviceLost: recordingFinal.recording.deviceLost,
+        failure: recordingFinal.recording.lastFailurePresent,
       },
       newClipCount: snapshot.clips.filter((clip) => !beforeClips.some((before) => before.id === clip.id)).length,
     })}`, longTasks, longTasks ? correlateRecordingStall(recordingDuring.recording.writerReturnDeliveryWorst, longTasks) : "unknown", issue48LiveReEnableReason, initial, taskSources, nativeAtPlayback)
   }
-  const recordedClipId = validateTierThreeAudioRecording(beforeClips, snapshot.clips, audioTrack.id, capturedFrames, recordingDuring.recording.activeSampleRate ?? 0)
-  if (recordingDuring.recording.droppedFrames !== 0 || recordingDuring.recording.overrunFrames !== 0
-    || recordingDuring.recording.lastFailurePresent) throw new Error("Native recording diagnostics reported dropped frames, overruns, or failure.")
-  return { recordedClipId, capturedFrames, recordingDuring, longTasks, taskSources,
-    stallCorrelation: longTasks ? correlateRecordingStall(recordingDuring.recording.writerReturnDeliveryWorst, longTasks) : "unknown" }
+  const recordedClipId = validateTierThreeAudioRecording(beforeClips, snapshot.clips, audioTrack.id, capturedFrames, recordingFinal.recording.activeSampleRate ?? 0)
+  if (recordingFinal.recording.droppedFrames !== 0 || recordingFinal.recording.overrunFrames !== 0
+    || recordingFinal.recording.lastFailurePresent) throw new Error("Native recording diagnostics reported dropped frames, overruns, or failure.")
+  return { recordedClipId, capturedFrames, recordingDuring: recordingFinal, longTasks, taskSources,
+    stallCorrelation: longTasks ? correlateRecordingStall(recordingFinal.recording.writerReturnDeliveryWorst, longTasks) : "unknown" }
   }
   const captured = await (async () => {
     try {

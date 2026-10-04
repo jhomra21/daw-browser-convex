@@ -17,13 +17,33 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
       - run: bun install --frozen-lockfile
+      - name: Install browser harness
+        run: |
+          bun add --global agent-browser@0.38.2
+          agent-browser install
+      - name: Build portable Wasm
+        run: bun run build:portable-wasm
+      - name: Build native audio-core fixture runner
+        run: sh native/audio-core/scripts/build-native.sh
       - name: Focused tests
         env:
           VITE_CONVEX_URL: https://polite-peccary-245.convex.cloud
         run: bun test src/hooks/useTimelineBrowserController.test.ts src/hooks/local-send-reload.integration.test.ts tools/performance/30-track/tier-three.test.ts
       - run: bun run typecheck
       - run: bun run lint
+      - run: bun run test:anti-slop
+      - run: bun run build
+      - name: Full configured Bun suite
+        env:
+          VITE_CONVEX_URL: https://polite-peccary-245.convex.cloud
+          TMPDIR: ${{ runner.temp }}/daw-post-cert-suite
+        run: |
+          mkdir -p "$TMPDIR"
+          bun test --timeout 15000 --max-concurrency 1
 
   native-audio-host:
     runs-on: macos-15

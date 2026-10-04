@@ -46,3 +46,5 @@ Thumbs.db
 !.factory/skills/*/
 .factory/skills/*/*
 !.factory/skills/*/SKILL.md
+# Generated performance fixtures
+/tools/performance/fixtures/*.dawproject

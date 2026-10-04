@@ -16,7 +16,6 @@ import {
   processMetricsAvailability,
   writePrivateArtifact,
   type CleanupPlan,
-  type ProcessMetric,
 } from "./electron"
 import {
   processMetrics,

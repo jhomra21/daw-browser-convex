@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { tmpdir } from "node:os"

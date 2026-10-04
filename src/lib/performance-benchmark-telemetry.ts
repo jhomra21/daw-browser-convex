@@ -26,6 +26,15 @@ export const measurePerformanceBenchmark = <Value>(
   finally { collector.duration(owner, Math.max(0, performance.now() - startedAt)) }
 }
 
+export const beginPerformanceBenchmark = (): number | undefined => (
+  globalThis.__dawPerformanceBenchmark ? performance.now() : undefined
+)
+
+export const endPerformanceBenchmark = (owner: string, startedAt: number | undefined) => {
+  if (startedAt === undefined) return
+  globalThis.__dawPerformanceBenchmark?.duration(owner, Math.max(0, performance.now() - startedAt))
+}
+
 export const setPerformanceBenchmarkGauge = (owner: string, value: number) => {
   globalThis.__dawPerformanceBenchmark?.gauge(owner, value)
 }

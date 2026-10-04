@@ -2282,7 +2282,7 @@ else {
       recordingBenchmark.sendBlock(block, () => sendRendererMessage("daw:audio-host:recording-block", block))
     })
     removeAudioHostRecordingStatusListener = audioHostSupervisor?.onRecordingStatus((status) => {
-      recordingBenchmark.recordTraffic("recording-status", 96)
+      recordingBenchmark.recordStatus(status)
       sendRendererMessage("daw:audio-host:recording-status", status)
     })
     removeAudioHostMeterBatchListener = audioHostSupervisor?.onMeterBatch((batch: NativeHostMeterBatch) => {

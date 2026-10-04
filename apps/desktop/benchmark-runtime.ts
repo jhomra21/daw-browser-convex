@@ -5,7 +5,7 @@ import type {
   IpcMainEvent,
   IpcMainInvokeEvent,
 } from "electron"
-import type { NativeHostRecordingBlock } from "@daw-browser/audio-engine/native-host-wire"
+import type { NativeHostRecordingBlock, NativeHostRecordingStatus } from "@daw-browser/audio-engine/native-host-wire"
 import { benchmarkLoadFailure, benchmarkStartupStage } from "./benchmark-startup-stage"
 import { classifyNavigationUrl } from "./quiet-renderer-telemetry"
 import {
@@ -126,6 +126,31 @@ export const createBenchmarkRecordingTelemetry = (
   const recording = enabled ? createRecordingIpcDiagnostics(Date.now()) : null
   const traffic = enabled ? createRendererTrafficDiagnostics(Date.now()) : null
   let lastLogAt = 0
+  let lastStatus: NativeHostRecordingStatus | null = null
+  const reportStatus = () => lastStatus ? {
+    generation: lastStatus.generation,
+    sessionId: lastStatus.sessionId.toString(),
+    timelineFrame: lastStatus.timelineFrame,
+    capturedFrames: lastStatus.capturedFrames,
+    droppedFrames: lastStatus.droppedFrames,
+    droppedBlocks: lastStatus.droppedBlocks,
+    availableBlocks: lastStatus.availableBlocks,
+    queuedBlocks: lastStatus.queuedBlocks,
+    rms: lastStatus.rms,
+    peak: lastStatus.peak,
+    fatal: lastStatus.fatal,
+    active: lastStatus.active,
+    configured: lastStatus.configured,
+  } : null
+  const emit = (now: number) => {
+    if (!recording || !traffic) return
+    lastLogAt = now
+    console.error(`[quiet-recording-ipc] ${JSON.stringify({
+      blocks: recording.report(now),
+      traffic: traffic.report(now),
+      status: reportStatus(),
+    })}`)
+  }
   return {
     sendBlock(block: NativeHostRecordingBlock, send: () => void) {
       if (!recording || !traffic) {
@@ -143,11 +168,13 @@ export const createBenchmarkRecordingTelemetry = (
       recording.recordSend(performance.now() - startedAt)
       const now = Date.now()
       if (now - lastLogAt < 5_000) return
-      lastLogAt = now
-      console.error(`[quiet-recording-ipc] ${JSON.stringify({
-        blocks: recording.report(now),
-        traffic: traffic.report(now),
-      })}`)
+      emit(now)
+    },
+    recordStatus(status: NativeHostRecordingStatus) {
+      if (!traffic) return
+      traffic.record("recording-status", 96)
+      lastStatus = status
+      if (!status.active || status.fatal) emit(Date.now())
     },
     recordTraffic(channel: string, estimatedBytes: number) {
       traffic?.record(channel, estimatedBytes)

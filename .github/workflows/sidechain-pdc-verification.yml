@@ -1,0 +1,25 @@
+name: Sidechain PDC verification
+
+on:
+  push:
+    branches:
+      - feat/sidechain-pdc-alignment
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Focused mixer timing tests
+        run: bun test packages/audio-engine/src/mixer/resolve-timing.test.ts packages/audio-engine/src/mixer/graph-contract.test.ts packages/audio-engine/src/mixer/apply-live-routing.test.ts packages/audio-engine/src/live-mixer-runtime.test.ts
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run build

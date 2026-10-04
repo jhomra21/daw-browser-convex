@@ -19,7 +19,13 @@ import {
 import { createCompressorNodeChain } from './effects/chain'
 import { createStaticWorkletNodeChain } from './effects/static-worklet-chain'
 import type { StaticWorkletKind } from './effects/static-worklet-chain'
-import { measureAudio, measureChannelLeakageDb } from './dsp-characterization'
+import {
+  createSineFixture,
+  measureAudio,
+  measureCrosstalkDb,
+  measureThdPlusNoise,
+  measureToneTransfer,
+} from './dsp-characterization'
 import {
   createSrcImpulseFixture,
   createSrcStereoIsolationFixture,
@@ -413,31 +419,60 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
       }
       source.connect(context.destination)
     })
-    const leftPeak = measureAudio([rendered.getChannelData(0)]).peak
-    const rightPeak = measureAudio([rendered.getChannelData(1)]).peak
-    const leakageDetected = Number.isFinite(measureChannelLeakageDb(leftPeak, rightPeak))
+    const left = rendered.getChannelData(0)
+    const right = rendered.getChannelData(1)
+    const leftPeak = measureAudio([left]).peak
+    const rightPeak = measureAudio([right]).peak
+    const crosstalkDb = measureCrosstalkDb(left, right)
     return {
       status: Math.abs(leftPeak - 1) < 1e-3 && rightPeak < 1e-6 ? 'pass' : 'fail',
-      metrics: { leftPeak, rightPeak, leakageDetected },
+      metrics: {
+        leftPeak,
+        rightPeak,
+        crosstalkDb: Number.isFinite(crosstalkDb) ? crosstalkDb : -200,
+      },
     }
   })
 
   const eq = await capture(async () => {
-    const rendered = await render(48_000, 1, 4_800, (context, source) => {
-      if (source.buffer) {
-        const channel = source.buffer.getChannelData(0)
-        for (let frame = 0; frame < channel.length; frame += 1) channel[frame] = Math.sin(2 * Math.PI * 1_000 * frame / 48_000) * 0.25
-      }
+    const sampleRate = 48_000
+    const frequencyHz = 1_000
+    const reference = createSineFixture(4_800, frequencyHz, sampleRate)[0]
+    const input = new Float32Array(reference.length)
+    for (let frame = 0; frame < reference.length; frame += 1) input[frame] = reference[frame] * 0.25
+    const rendered = await render(sampleRate, 1, input.length, (context, source) => {
+      source.buffer?.getChannelData(0).set(input)
       const filter = context.createBiquadFilter()
       filter.type = 'peaking'
-      filter.frequency.value = 1_000
+      filter.frequency.value = frequencyHz
       filter.Q.value = 1
       filter.gain.value = 6
       source.connect(filter)
       filter.connect(context.destination)
     })
-    const rms = measureAudio(readBuffer(rendered)).rms
-    return { status: rms > 0.3 && rms < 0.4 ? 'pass' : 'fail', metrics: { rms } }
+    const output = rendered.getChannelData(0)
+    const settleFrame = 480
+    const settledInput = input.subarray(settleFrame)
+    const settledOutput = output.subarray(settleFrame)
+    const metrics = measureAudio([settledOutput])
+    const transfer = measureToneTransfer(settledInput, settledOutput, frequencyHz, sampleRate)
+    const distortion = measureThdPlusNoise(settledOutput, frequencyHz, sampleRate)
+    const thdPlusNoiseDb = Number.isFinite(distortion.thdPlusNoiseDb) ? distortion.thdPlusNoiseDb : -200
+    return {
+      status: !metrics.containsNonFiniteSamples
+        && transfer.finite
+        && transfer.gainDb > 5.5
+        && transfer.gainDb < 6.5
+        && thdPlusNoiseDb < -60
+        ? 'pass'
+        : 'fail',
+      metrics: {
+        rms: metrics.rms,
+        gainDb: transfer.gainDb,
+        phaseDegrees: transfer.phaseDegrees,
+        thdPlusNoiseDb,
+      },
+    }
   })
 
   const compressorRegistration = await capture(async () => {

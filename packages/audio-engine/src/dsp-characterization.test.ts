@@ -14,9 +14,13 @@ import {
   ANALYZER_BIN_COUNT,
   ANALYZER_FFT_SIZE,
   ANALYZER_SMOOTHING,
+  measureAliasingEnergyDb,
   measureAudio,
   measureChannelLeakageDb,
+  measureCrosstalkDb,
   measureFrameOffset,
+  measureThdPlusNoise,
+  measureToneTransfer,
 } from './dsp-characterization'
 
 describe('DSP characterization fixtures and metrics', () => {
@@ -80,6 +84,38 @@ describe('DSP characterization fixtures and metrics', () => {
     expect(measureAudio(createEdgeCaseFixture()).containsNonFiniteSamples).toBe(true)
     expect(measureChannelLeakageDb(1, 0)).toBe(Number.NEGATIVE_INFINITY)
     expect(measureChannelLeakageDb(1, 0.1)).toBeCloseTo(-20)
+  })
+
+  test('measures gain, phase, THD+N, harmonic-fold alias energy, and RMS crosstalk', () => {
+    const sampleRate = 48_000
+    const frequencyHz = 1_000
+    const length = 4_800
+    const reference = createSineFixture(length, frequencyHz, sampleRate)[0]
+    const shifted = new Float32Array(length)
+    const clipped = new Float32Array(length)
+    const leaked = new Float32Array(length)
+    for (let frame = 0; frame < length; frame += 1) {
+      const angle = 2 * Math.PI * frequencyHz * frame / sampleRate
+      shifted[frame] = 0.5 * Math.sin(angle + Math.PI / 4)
+      clipped[frame] = Math.max(-0.5, Math.min(0.5, reference[frame]))
+      leaked[frame] = reference[frame] * 0.01
+    }
+
+    const transfer = measureToneTransfer(reference, shifted, frequencyHz, sampleRate)
+    expect(transfer.finite).toBe(true)
+    expect(transfer.gainDb).toBeCloseTo(-6.0206, 3)
+    expect(transfer.phaseDegrees).toBeCloseTo(45, 3)
+
+    expect(measureThdPlusNoise(reference, frequencyHz, sampleRate).thdPlusNoiseDb).toBeLessThan(-120)
+    expect(measureThdPlusNoise(clipped, frequencyHz, sampleRate).thdPlusNoiseDb).toBeGreaterThan(-40)
+    expect(measureCrosstalkDb(reference, leaked)).toBeCloseTo(-40, 3)
+
+    const highToneHz = 10_000
+    const aliased = createSineFixture(length, highToneHz, sampleRate)[0]
+    for (let frame = 0; frame < length; frame += 1) {
+      aliased[frame] += 0.1 * Math.sin(2 * Math.PI * 18_000 * frame / sampleRate)
+    }
+    expect(measureAliasingEnergyDb(aliased, highToneHz, sampleRate, 3)).toBeCloseTo(-20, 1)
   })
 
   test('characterizes analyzer silence as finite bounded zero output', () => {

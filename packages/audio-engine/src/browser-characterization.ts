@@ -16,6 +16,7 @@ import {
   normalizeSpectralParamsEnvelope,
   normalizeUtilityParamsEnvelope,
 } from '@daw-browser/shared'
+import { probeAudioPlatformCapabilities, type AudioPlatformCapabilityReport } from './audio-platform-capabilities'
 import { createCompressorNodeChain } from './effects/chain'
 import { createStaticWorkletNodeChain } from './effects/static-worklet-chain'
 import type { StaticWorkletKind } from './effects/static-worklet-chain'
@@ -57,6 +58,7 @@ export type StaticModuleCharacterization = {
 }
 
 export type BrowserCharacterizationReport = {
+  platform: AudioPlatformCapabilityReport
   userAgent: string
   browserIdentity: {
     userAgent: string
@@ -373,6 +375,7 @@ const characterizeStaticModule = async (
 }
 
 export async function runBrowserCharacterization(): Promise<BrowserCharacterizationReport> {
+  const platform = await probeAudioPlatformCapabilities()
   const sampleRates: Record<string, BrowserCharacterizationCase> = {}
   for (const sampleRate of [44_100, 48_000, 96_000]) {
     sampleRates[String(sampleRate)] = await capture(async () => {
@@ -593,6 +596,7 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
       [1, 2].map((channels) => characterizeStaticModule(kind, sampleRate, channels)))))
 
   return {
+    platform,
     userAgent: navigator.userAgent,
     browserIdentity: {
       userAgent: navigator.userAgent,

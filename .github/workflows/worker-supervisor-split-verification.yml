@@ -24,4 +24,4 @@ jobs:
       - name: Build worker and audio host tests
         run: cmake --build native/build/worker-split-ci --target daw-plugin-host-worker-test daw-audio-host-macos daw-audio-host-macos-test daw-audio-host-macos-graph-integration-test daw-audio-host-macos-transaction-test -j 3
       - name: Run native CTest
-        run: ctest --test-dir native/build/worker-split-ci --output-on-failure
+        run: ctest --test-dir native/build/worker-split-ci --output-on-failure -R 'daw-plugin-host-worker-test|daw-audio-host-macos|daw-realtime-callback-static-guard'

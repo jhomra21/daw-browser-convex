@@ -214,7 +214,11 @@ export const useLocalProjectActions = (input: Input) => {
       }
       const { writable } = await createLocalExportWritable(handle);
       try {
-        await exportDawProjectArchiveStreamed(rid, (chunk) => writable.write(chunk));
+        await exportDawProjectArchiveStreamed(rid, (chunk) => {
+          const bytes = new Uint8Array(chunk.byteLength);
+          bytes.set(chunk);
+          return writable.write(bytes.buffer);
+        });
         await writable.close();
       } catch (error) {
         try {

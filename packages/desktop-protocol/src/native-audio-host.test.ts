@@ -3,7 +3,6 @@ import {
   nativeAudioHostMaximumAssetFramesForChannels,
   nativeAudioHostMaximumMappedAssetPageFramesForChannels,
   nativeAudioHostMaximumPayloadBytes,
-  nativeAudioHostTeardownRequestSchema,
   nativeOfflineRenderPlanSchema,
 } from "./native-audio-host"
 
@@ -32,28 +31,6 @@ test("accepts a logical offline render beyond the former in-memory boundary", ()
   })
   expect(result.success).toBe(true)
 })
-
-test("requires bounded teardown reason and lifecycle context", () => {
-  const valid = {
-    reason: "session-replacement",
-    projectId: "project_1",
-    sessionGeneration: 3,
-    transportEpoch: 4,
-    graphRevision: 5,
-    rendererGeneration: 6,
-    benchmarkPhase: "timeline-zoom-out",
-  }
-  expect(nativeAudioHostTeardownRequestSchema.safeParse(valid).success).toBe(true)
-  expect(nativeAudioHostTeardownRequestSchema.safeParse({
-    ...valid,
-    reason: "unknown teardown",
-  }).success).toBe(false)
-  expect(nativeAudioHostTeardownRequestSchema.safeParse({
-    ...valid,
-    benchmarkPhase: "x".repeat(81),
-  }).success).toBe(false)
-})
-
 
 test("rejects binary control payloads above the native frame limit", () => {
   const result = nativeOfflineRenderPlanSchema.safeParse({

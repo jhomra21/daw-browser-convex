@@ -107,14 +107,7 @@ export const createNativeVst3EditorSessionManager = (
     entry.unsubscribeInteraction?.()
     entry.unsubscribeInteraction = undefined
     entry.supervisor = undefined
-    const teardown = Promise.resolve().then(() => supervisor?.teardown({
-      reason: "session-replacement",
-      projectId: entry.projectId ?? null,
-      sessionGeneration: null,
-      transportEpoch: null,
-      graphRevision: null,
-      rendererGeneration: lifecycleGeneration,
-    })).then(() => undefined)
+    const teardown = Promise.resolve().then(() => supervisor?.teardown()).then(() => undefined)
     entry.teardownPromise = teardown
     await teardown
   }

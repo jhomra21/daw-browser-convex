@@ -15,6 +15,7 @@ type HermeticWindow = {
     listener: EventListenerLike,
     options?: EventListenerOptions | boolean,
   ) => void
+  dispatchEvent: (event: Event) => boolean
   clearEventListeners: () => void
 }
 
@@ -46,6 +47,13 @@ export const installHermeticWindow = <Value extends object>(value: Value): (() =
       const typeListeners = listeners.get(type)
       typeListeners?.delete(listener)
       if (typeListeners?.size === 0) listeners.delete(type)
+    },
+    dispatchEvent: (event: Event) => {
+      for (const listener of [...(listeners.get(event.type) ?? [])]) {
+        if (typeof listener === 'function') listener.call(browserWindow, event)
+        else listener.handleEvent(event)
+      }
+      return !event.defaultPrevented
     },
     clearEventListeners: () => {
       listeners.clear()

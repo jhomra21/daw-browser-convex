@@ -9,6 +9,7 @@
 #include <cstring>
 #include <future>
 #include <filesystem>
+#include <iostream>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -1434,7 +1435,11 @@ void TestVstAutomationSegmentsReclaimWithinEpoch() {
   attachment.bundle_fingerprint = Fingerprint("0db70288522e217dd5a3c3690e3d9da2416a0019aa2def7e956e938af35a0a16");
   attachment.binary_fingerprint = Fingerprint("6e45a98e5da42ad8bcbfb7096debc5dddda111a710f28efb439fa8048c139b7d");
   attachment.parameter_ids = {7, 8};
-  if (!std::filesystem::is_regular_file(attachment.canonical_executable_path)) return;
+  if (!std::filesystem::is_regular_file(attachment.canonical_executable_path)) {
+    std::cerr << "[skip] TestVstAutomationSegmentsReclaimWithinEpoch requires ValhallaSupermassive at "
+      << attachment.canonical_executable_path << '\n';
+    return;
+  }
   assert(host.AttachNativeVst(attachment));
   const auto graph_status = host.PrepareGraphRevision(2, GraphSnapshot(2, 1.0F, 2));
   assert(graph_status.code == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);

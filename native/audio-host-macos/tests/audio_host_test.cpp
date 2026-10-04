@@ -667,9 +667,13 @@ void TestControlFrames() {
   assert(decodedTransport && decodedTransport->type == daw::audio_host_macos::ControlType::kTransport);
   const auto transaction = daw::audio_host_macos::EncodeControlFrame(
     daw::audio_host_macos::ControlType::kGraphRollback, {});
+  const auto protocol_version = daw::audio_host_macos::kControlProtocolVersion;
   assert(transaction == std::vector<std::uint8_t>({
     0x44, 0x41, 0x57, 0x48,
-    0x00, 0x00, 0x00, 0x15,
+    static_cast<std::uint8_t>(protocol_version >> 24U),
+    static_cast<std::uint8_t>(protocol_version >> 16U),
+    static_cast<std::uint8_t>(protocol_version >> 8U),
+    static_cast<std::uint8_t>(protocol_version),
     0x00, 0x00, 0x00, 0x27,
     0x00, 0x00, 0x00, 0x00,
   }));

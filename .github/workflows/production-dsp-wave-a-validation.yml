@@ -29,18 +29,29 @@ jobs:
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run test:anti-slop
-      - run: bun run build
+      - name: Build production app
+        env:
+          VITE_CONVEX_URL: https://placeholder-verify.convex.cloud
+        run: bun run build
       - name: Characterize production build in Chromium
         env:
           VITE_CONVEX_URL: https://placeholder-verify.convex.cloud
         run: |
-          bun run serve -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/dsp-preview.log" 2>&1 &
+          bunx vite preview --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/dsp-preview.log" 2>&1 &
           PREVIEW_PID=$!
           trap 'kill "$PREVIEW_PID" 2>/dev/null || true; agent-browser --session dsp-wave-a close >/dev/null 2>&1 || true' EXIT
+          READY=false
           for attempt in {1..30}; do
-            curl --fail --silent http://127.0.0.1:4173/ >/dev/null && break
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then
+              READY=true
+              break
+            fi
             sleep 1
           done
+          if [ "$READY" != "true" ]; then
+            cat "$RUNNER_TEMP/dsp-preview.log"
+            exit 1
+          fi
           agent-browser --session dsp-wave-a open 'http://127.0.0.1:4173/dsp-characterization?diagnostic=dsp&autorun=1'
           for attempt in {1..90}; do
             agent-browser --session dsp-wave-a eval 'document.querySelector("#dsp-characterization-result")?.dataset.status ?? ""' > "$RUNNER_TEMP/dsp-status.json"

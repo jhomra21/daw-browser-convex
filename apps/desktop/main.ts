@@ -105,6 +105,14 @@ import { createApplicationMenuController } from "./application-menu"
 import { deliverToRenderer } from "./renderer-delivery"
 import { createRendererLifecycleOwner } from "./renderer-lifecycle"
 import { createOfflinePcmAckTracker } from "./offline-pcm-ack"
+import { createDiagnosticsTrace } from "./diagnostics-trace"
+import { benchmarkSabHeaders } from "./benchmark-sab-headers"
+import {
+  createBenchmarkRecordingTelemetry,
+  createBenchmarkStartupReporter,
+  installBenchmarkHeartbeat,
+  installBenchmarkWindowTelemetry,
+} from "./benchmark-runtime"
 import { offlinePcmAckSchema } from "./offline-pcm-protocol"
 
 protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
@@ -307,6 +315,14 @@ const editorStateAckSchema = z.object({
 
 const incomingChannel = "daw:host-request"
 const outgoingChannel = "daw:host-response"
+const diagnosticsTraceEnabled = process.env.DAW_DIAGNOSTICS_V2_TRACE === "1"
+const diagnosticsTrace = createDiagnosticsTrace(diagnosticsTraceEnabled, console.error)
+const diagnosticsStarts = new Map<string, number>()
+const diagnosticsTraceMessageSchema = z.object({
+  stage: z.enum(["preload-received", "preload-handler", "controller-before-native", "controller-after-native", "controller-parsed", "preload-reply", "preload-reply-sent", "preload-reply-invalid", "preload-reply-invalid-path"]),
+  elapsedMs: z.number().int().nonnegative().max(60_000),
+  paths: z.string().max(512).regex(/^[a-z.,]*$/).optional(),
+}).strict()
 const offlinePcmAckChannel = "daw:audio-host:offline-pcm-ack"
 const appName = "daw-browser"
 const sanitizeNativeVst3DiagnosticError = (error: Error | undefined) => {
@@ -574,10 +590,12 @@ const sendToRenderer = (
   }
   const expectedGeneration = generation
   rendererPending.set(request.id, { generation: expectedGeneration, resolve, reject })
+  if (request.operation === "diagnostics.snapshot.v2") diagnosticsTrace.mark(diagnosticsStarts.get(request.id) ?? diagnosticsTrace.start(), "renderer-dispatched")
   if (!sendRendererMessage(incomingChannel, {
     generation: expectedGeneration,
     frame: request,
     trustedActorSubject,
+    diagnosticsTrace: diagnosticsTraceEnabled && request.operation === "diagnostics.snapshot.v2",
   })) {
     rendererPending.delete(request.id)
     reject(new Error("Renderer unavailable."))
@@ -598,6 +616,7 @@ const renderRequest = async (operation: DesktopOperationV1 | "lifecycle.prepareT
       new Promise<Extract<DesktopFrameV1, { type: "reply" }>>((_resolve, reject) => {
         timeout = setTimeout(() => {
           deadlineElapsed = true
+          if (operation === "diagnostics.snapshot.v2") diagnosticsTrace.mark(diagnosticsStarts.get(id) ?? diagnosticsTrace.start(), "renderer-deadline")
           reject(new Error("Renderer deadline exceeded."))
         }, deadlineMs)
       }),
@@ -822,6 +841,11 @@ const handleSocket = (socket: Socket) => {
       return
     }
     const rendererId = correlation.create(frame.id)
+    if (diagnosticsTraceEnabled && frame.operation === "diagnostics.snapshot.v2") {
+      const start = diagnosticsTrace.start()
+      diagnosticsStarts.set(rendererId, start)
+      diagnosticsTrace.mark(start, "socket-received")
+    }
     const preparation = new AbortController()
     preparationRegistry.add(preparation)
     preparationControllers.set(rendererId, preparation)
@@ -912,9 +936,11 @@ const handleSocket = (socket: Socket) => {
         )) {
           socket.write(encodeDesktopFrame(outbound))
         }
+        if (frame.operation === "diagnostics.snapshot.v2") diagnosticsTrace.mark(diagnosticsStarts.get(rendererId) ?? diagnosticsTrace.start(), "socket-reply")
       } catch {
         writeSocketFailure(socket, sessionProtocolVersion, frame.operation, externalId, "internal", "The desktop response could not be serialized.")
       }
+      diagnosticsStarts.delete(rendererId)
     }).catch(async (error) => {
       preparationControllers.delete(rendererId)
       preparationRegistry.delete(preparation)
@@ -928,6 +954,8 @@ const handleSocket = (socket: Socket) => {
       const message = error instanceof Error && error.message === "Renderer deadline exceeded." ? "The request deadline elapsed." : "The renderer is unavailable."
       const code = error instanceof Error && error.message === "Renderer deadline exceeded." ? "deadline-exceeded" : "unavailable"
       writeSocketFailure(socket, sessionProtocolVersion, frame.operation, externalId, code, message)
+      if (frame.operation === "diagnostics.snapshot.v2") diagnosticsTrace.mark(diagnosticsStarts.get(rendererId) ?? diagnosticsTrace.start(), "socket-error-reply")
+      diagnosticsStarts.delete(rendererId)
     })
   })
   socket.on("data", (chunk: Buffer) => {
@@ -1018,7 +1046,17 @@ const registerIpc = () => {
     if (parsed.data.frame.type !== "reply") return
     const pending = rendererPending.get(parsed.data.frame.id)
     if (!pending || pending.generation !== parsed.data.generation) return
+    const traceStart = diagnosticsStarts.get(parsed.data.frame.id)
+    if (traceStart !== undefined) diagnosticsTrace.mark(traceStart, "renderer-reply")
     pending.resolve(parsed.data.frame)
+  })
+  ipcMain.on("daw:diagnostics-v2-trace", (event, message) => {
+    if (!diagnosticsTraceEnabled || !window_ || event.sender.id !== window_.webContents.id || !event.senderFrame || !sameAppOrigin(event.senderFrame.url)) return
+    const parsed = diagnosticsTraceMessageSchema.safeParse(message)
+    if (parsed.success) {
+      if (parsed.data.stage === "preload-reply-invalid-path" && parsed.data.paths) console.error(`[diagnostics-v2-validation] paths=${parsed.data.paths}`)
+      else console.error(`[diagnostics-v2-boundary] operation=diagnostics.snapshot.v2 stage=${parsed.data.stage} elapsedMs=${parsed.data.elapsedMs}`)
+    }
   })
   const scopeAllowed = (event: Electron.IpcMainInvokeEvent) => (
     window_ !== undefined
@@ -1053,6 +1091,11 @@ const registerIpc = () => {
     && event.senderFrame !== null
     && sameAppOrigin(event.senderFrame.url)
   )
+  installBenchmarkHeartbeat({
+    app,
+    ipcMain,
+    allowed: (event) => audioHostAllowed(event) && event.senderFrame === event.sender.mainFrame,
+  })
   ipcMain.on(offlinePcmAckChannel, (event, value) => {
     if (!audioHostAllowed(event)) return
     const parsed = offlinePcmAckSchema.safeParse(value)
@@ -1943,6 +1986,12 @@ const createWindow = () => {
       webSecurity: true,
     },
   })
+  installBenchmarkWindowTelemetry({
+    app,
+    window: window_,
+    getGeneration: () => generation,
+    sameAppOrigin,
+  })
   window_?.on("closed", () => {
     invalidateRendererGeneration("Renderer destroyed.")
     window_ = undefined
@@ -2044,7 +2093,10 @@ else {
     window_?.focus()
   })
   app.whenReady().then(async () => {
+    const stage = createBenchmarkStartupReporter()
+    stage("before-native-helper")
     nativeMediaAvailable = await nativeFileCapabilityHelper.selfTest()
+    stage("after-native-helper")
     let scannerPath: string | undefined
     if (process.platform === "darwin" && app.isPackaged) {
       const manifestPath = path.join(process.resourcesPath, nativeReleaseArtifactManifestName)
@@ -2225,19 +2277,24 @@ else {
     removeAudioHostLossListener = audioHostSupervisor?.onLoss((error) => {
       publishNativeSessionLoss(sanitizeNativeVst3DiagnosticError(error), "host")
     })
+    const recordingBenchmark = createBenchmarkRecordingTelemetry()
     removeAudioHostRecordingBlockListener = audioHostSupervisor?.onRecordingBlock((block) => {
-      sendRendererMessage("daw:audio-host:recording-block", block)
+      recordingBenchmark.sendBlock(block, () => sendRendererMessage("daw:audio-host:recording-block", block))
     })
     removeAudioHostRecordingStatusListener = audioHostSupervisor?.onRecordingStatus((status) => {
+      recordingBenchmark.recordTraffic("recording-status", 96)
       sendRendererMessage("daw:audio-host:recording-status", status)
     })
     removeAudioHostMeterBatchListener = audioHostSupervisor?.onMeterBatch((batch: NativeHostMeterBatch) => {
+      recordingBenchmark.recordTraffic("meter-batch", 32 + batch.entries.length * 24)
       sendRendererMessage("daw:audio-host:meter-batch", batch)
     })
     removeAudioHostSpectrumListener = audioHostSupervisor?.onSpectrumFrame((frame) => {
+      recordingBenchmark.recordTraffic("spectrum-frame", 48 + frame.data.byteLength)
       sendRendererMessage("daw:audio-host:spectrum-frame", frame)
     })
     removeAudioHostScheduleProgressListener = audioHostSupervisor?.onScheduleProgress((progress: NativeScheduleProgress) => {
+      recordingBenchmark.recordTraffic("schedule-progress", 96)
       sendRendererMessage("daw:audio-host:schedule-progress", progress)
     })
     protocol.handle("daw", (request) => {
@@ -2252,6 +2309,7 @@ else {
       responseHeaders: {
         ...details.responseHeaders,
         "Content-Security-Policy": [createContentSecurityPolicy(Boolean(MAIN_WINDOW_VITE_DEV_SERVER_URL))],
+        ...benchmarkSabHeaders(details.url, process.env.DAW_BENCHMARK_SAB_RECORDING === "1"),
       },
     }))
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => callback(
@@ -2291,8 +2349,11 @@ else {
       buildFromTemplate: (template) => Menu.buildFromTemplate(template),
       setApplicationMenu: (menu) => Menu.setApplicationMenu(menu),
     })
+    stage("before-socket")
     await startSocket()
+    stage("after-socket")
     createWindow()
+    stage("window-created")
   }).catch((error) => {
     console.error("[desktop] startup failed", error)
     app.quit()

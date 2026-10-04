@@ -16,6 +16,12 @@ import {
   visibleStartAfterScrollDelta,
   type TimelineViewport,
 } from '~/lib/timeline-viewport-geometry'
+import {
+  beginPerformanceBenchmark,
+  endPerformanceBenchmark,
+  incrementPerformanceBenchmarkCounter,
+  setPerformanceBenchmarkGauge,
+} from '~/lib/performance-benchmark-telemetry'
 
 type UseTimelineViewportOptions = {
   persistenceScope: Accessor<string>
@@ -53,6 +59,7 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
   let pendingWheel: { deltaY: number; deltaMode: number; clientX: number } | undefined
   let suppressScroll = false
   let physicalAnchor = 0
+  let viewportGeneration = 0
 
   const physicalRunwayWidth = () => Math.max(
     viewportWidth(),
@@ -133,6 +140,8 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
   })
 
   const applyVisibleRange = (range: TimelineRange, commit: boolean, isWheelPreview = false) => {
+    const benchmarkStartedAt = beginPerformanceBenchmark()
+    incrementPerformanceBenchmarkCounter('timeline.viewport-computations')
     const width = viewportWidth()
     const minimumDuration = minimumVisibleDuration(width)
     const normalizedRange = normalizeTimelineRange(range, options.durationSec(), minimumDuration)
@@ -145,6 +154,12 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
       // resize, reset, and native scroll paths.
     })
     if (!isWheelPreview) clearWheelCommit()
+    setPerformanceBenchmarkGauge('timeline.pixels-per-second', nextScale)
+    setPerformanceBenchmarkGauge('timeline.visible-start-sec', normalizedRange.startSec)
+    setPerformanceBenchmarkGauge('timeline.visible-end-sec', normalizedRange.endSec)
+    viewportGeneration += 1
+    setPerformanceBenchmarkGauge('timeline.viewport-generation', viewportGeneration)
+    endPerformanceBenchmark('timeline.viewport', benchmarkStartedAt)
     return nextScale
   }
 

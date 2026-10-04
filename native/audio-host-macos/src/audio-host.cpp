@@ -43,6 +43,29 @@ constexpr std::size_t kMaximumMeterQueueEntries = 1024;
 constexpr std::size_t kMaximumSpectrumQueueEntries = 8;
 constexpr std::uint32_t kSpectrumFftSize = 2048;
 
+template <std::size_t Size>
+Diagnostics::DurationQuantiles DurationQuantiles(
+  const std::array<std::uint64_t, Size>& buckets,
+  const std::uint64_t count,
+  const std::uint64_t maximum
+) {
+  Diagnostics::DurationQuantiles result{.maximum_nanoseconds = maximum};
+  if (count == 0) return result;
+  const auto value = [&](const std::uint64_t numerator, const std::uint64_t denominator) {
+    const auto target = std::max<std::uint64_t>(1, (count * numerator + denominator - 1) / denominator);
+    std::uint64_t cumulative = 0;
+    for (std::size_t index = 0; index < buckets.size(); ++index) {
+      cumulative += buckets[index];
+      if (cumulative >= target) return std::uint64_t{1} << index;
+    }
+    return maximum;
+  };
+  result.p50_nanoseconds = value(50, 100);
+  result.p95_nanoseconds = value(95, 100);
+  result.p99_nanoseconds = value(99, 100);
+  return result;
+}
+
 std::optional<std::string> WorkerExecutablePath() {
   std::uint32_t size = 0;
   if (_NSGetExecutablePath(nullptr, &size) != -1 || size == 0 || size > 16U * 1024U) return std::nullopt;
@@ -250,6 +273,7 @@ struct NativeVstWorkerAttachment {
   };
   static constexpr std::size_t kActiveNoteCapacity = 256;
   NativeVstAttachment metadata;
+  std::optional<Diagnostics::WorkerAutomation> worker_automation;
   bool offline = false;
   bool offline_started = false;
   bool offline_parameters_applied = false;
@@ -260,6 +284,7 @@ struct NativeVstWorkerAttachment {
   std::array<std::uint32_t, kMaximumNativeVstSlots> pending_frames{};
   std::array<std::uint32_t, kMaximumNativeVstSlots> missed_callbacks{};
   std::array<std::uint64_t, kMaximumNativeVstSlots> missed_frames{};
+  std::atomic<std::uint64_t> watchdog_misses{0};
   bool realtime_started = false;
   std::array<float, kMaximumNativeVstFrames * 2> input{};
   std::array<float, kMaximumNativeVstFrames * 2> output{};
@@ -307,7 +332,7 @@ struct NativeVstWorkerAttachment {
     std::span<daw::plugin_host::WorkerTransportEvent> events,
     std::size_t& event_count,
     const std::size_t maximum_events
-  ) const noexcept {
+  ) noexcept {
     const std::uint64_t block_end = static_cast<std::uint64_t>(block_start)
       + static_cast<std::uint64_t>(frame_count);
     const auto buffer = automation_callback_reading.load(std::memory_order_acquire)
@@ -317,8 +342,10 @@ struct NativeVstWorkerAttachment {
     for (std::size_t index = 0; index < segment_count; ++index) {
       const auto& segment = automation_segments[buffer][index];
       if (segment.end_frame <= static_cast<std::uint64_t>(block_start)
-        || segment.start_frame >= block_end
-        || HasAutomationOverride(segment.parameter_id)) continue;
+        || segment.start_frame >= block_end) continue;
+      if (HasAutomationOverride(segment.parameter_id)) {
+        continue;
+      }
       const auto value_at = [&segment](const std::uint64_t frame) {
         if (!segment.linear || frame <= segment.start_frame) return segment.start_value;
         if (frame >= segment.end_frame) return segment.end_value;
@@ -336,6 +363,7 @@ struct NativeVstWorkerAttachment {
         .sampleOffset = static_cast<std::uint32_t>(first_frame - static_cast<std::uint64_t>(block_start)),
         .parameterId = segment.parameter_id,
         .parameterValue = value_at(first_frame),
+        .scheduledAutomation = true,
       };
       if (segment.linear && segment.end_frame < block_end
         && segment.end_frame > first_frame) {
@@ -345,8 +373,9 @@ struct NativeVstWorkerAttachment {
           .sampleOffset = static_cast<std::uint32_t>(segment.end_frame - static_cast<std::uint64_t>(block_start)),
           .parameterId = segment.parameter_id,
           .parameterValue = value_at(segment.end_frame),
+          .scheduledAutomation = true,
         };
-      }
+        }
     }
     return true;
   }
@@ -685,9 +714,12 @@ struct NativeVstWorkerAttachment {
         missed_frames[slot],
         missed_callbacks[slot]
       )) {
+        const auto slot_status = port.ReadStatus(slot, sequence);
+        watchdog_misses.fetch_add(1, std::memory_order_relaxed);
         static_cast<void>(port.DiscardLate(slot, sequence + 1));
         static_cast<void>(port.PublishDiagnostic({
           .kind = daw::plugin_host::WorkerDiagnosticKind::kMiss,
+          .value = static_cast<std::uint32_t>(slot_status),
           .sequence = sequence,
         }));
         pending_sequences[slot] = 0;
@@ -1254,6 +1286,14 @@ struct AudioHost::Impl {
   std::atomic<LifecycleState> state = LifecycleState::kIdle;
   std::atomic<std::uint64_t> callback_attempts = 0;
   std::atomic<std::uint64_t> callbacks = 0;
+  std::atomic<std::uint32_t> callback_frames = 0;
+  std::atomic<std::uint64_t> callback_timing_count = 0;
+  std::atomic<std::uint64_t> callback_timing_maximum_nanoseconds = 0;
+  std::atomic<std::uint64_t> callback_deadline_misses = 0;
+  std::array<std::atomic<std::uint64_t>, detail::kRealtimeDurationHistogramBuckets>
+    callback_timing_buckets{};
+  std::atomic<std::uint64_t> vst_worker_faults = 0;
+  std::atomic<std::uint64_t> vst_worker_restarts = 0;
   std::atomic<std::uint64_t> split_blocks = 0;
   std::atomic<std::uint64_t> rejected_blocks = 0;
   std::atomic<RejectedBlockReason> last_rejected_reason = RejectedBlockReason::kNone;
@@ -1859,7 +1899,6 @@ bool AudioHost::Configure(const HostConfig& config) {
   impl_->assets.clear();
   impl_->prepared_asset_handles.clear();
   for (auto& [instance_id, attachment] : impl_->native_vst_attachments) {
-    static_cast<void>(instance_id);
     attachment->realtime_started = false;
     attachment->missed_callbacks.fill(0);
     attachment->missed_frames.fill(0);
@@ -2941,6 +2980,14 @@ bool AudioHost::ReenableVstScheduleAutomation(const std::span<const std::uint8_t
   if (count > kMaximumScheduleAutomationSegments
     || payload.size() != 8 + instance_bytes + static_cast<std::size_t>(count) * 4) return false;
   for (std::uint32_t index = 0; index < count; ++index) {
+    const auto parameter_id = ReadLeU32(payload.data() + 8 + instance_bytes + index * 4);
+    if (std::find(
+      attachment->second->metadata.parameter_ids.begin(),
+      attachment->second->metadata.parameter_ids.end(),
+      parameter_id
+    ) == attachment->second->metadata.parameter_ids.end()) return false;
+  }
+  for (std::uint32_t index = 0; index < count; ++index) {
     attachment->second->ClearAutomationOverride(ReadLeU32(payload.data() + 8 + instance_bytes + index * 4));
   }
   return true;
@@ -2986,14 +3033,16 @@ bool AudioHost::QueueNativeVstParameterEvents(const std::span<const std::uint8_t
     events[index] = {.kind = daw::plugin_host::WorkerEventKind::kParameter, .sampleOffset = ReadLeU32(bytes + 4),
       .parameterId = parameter_id, .parameterValue = value};
   }
-  for (std::size_t index = 0; index < candidate_override_count; ++index) {
-    const auto result = attachment->second->SetAutomationOverride(candidate_override_ids[index]);
-    if (result == NativeVstWorkerAttachment::AutomationOverrideSetResult::kFull) {
-      rollback_overrides();
-      return false;
-    }
-    if (result == NativeVstWorkerAttachment::AutomationOverrideSetResult::kInserted) {
-      inserted_override_ids[inserted_override_count++] = candidate_override_ids[index];
+  if (ShouldOverrideNativeVstAutomation(impl_->transport_running.load(std::memory_order_acquire))) {
+    for (std::size_t index = 0; index < candidate_override_count; ++index) {
+      const auto result = attachment->second->SetAutomationOverride(candidate_override_ids[index]);
+      if (result == NativeVstWorkerAttachment::AutomationOverrideSetResult::kFull) {
+        rollback_overrides();
+        return false;
+      }
+      if (result == NativeVstWorkerAttachment::AutomationOverrideSetResult::kInserted) {
+        inserted_override_ids[inserted_override_count++] = candidate_override_ids[index];
+      }
     }
   }
   if (!attachment->second->QueueEvents(
@@ -3071,9 +3120,18 @@ void AudioHost::ProcessNativeVstControl() {
   bool restart = false;
   bool faulted = false;
   for (auto& [instance_id, attachment] : impl_->native_vst_attachments) {
-    static_cast<void>(instance_id);
     while (const auto diagnostic = attachment->worker.ReadDiagnostic()) {
-      if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kLatency) {
+      if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kScheduledAutomationInput) {
+        const auto epoch = diagnostic->transport_epoch;
+        if (diagnostic->value > 0 && epoch != 0
+          && epoch == impl_->transport_epoch.load(std::memory_order_acquire)
+          && (!attachment->worker_automation || attachment->worker_automation->transport_epoch != epoch
+            || diagnostic->sequence > attachment->worker_automation->sequence)) {
+          attachment->worker_automation = Diagnostics::WorkerAutomation{
+            diagnostic->value, diagnostic->parameter_id, epoch, diagnostic->sequence, instance_id,
+          };
+        }
+      } else if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kLatency) {
         if (diagnostic->value != attachment->metadata.declared_latency_frames) {
           attachment->metadata.declared_latency_frames = diagnostic->value;
           impl_->native_graph_revision_required = true;
@@ -3095,8 +3153,12 @@ void AudioHost::ProcessNativeVstControl() {
         // already prove the supported stereo bus contract; this notification
         // is informational and must not mute or tear down the graph.
       } else if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kRestart) {
+        attachment->worker_automation.reset();
+        impl_->vst_worker_restarts.fetch_add(1, std::memory_order_relaxed);
         restart = true;
       } else if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kFault) {
+        attachment->worker_automation.reset();
+        impl_->vst_worker_faults.fetch_add(1, std::memory_order_relaxed);
         faulted = true;
       }
     }
@@ -3755,7 +3817,6 @@ std::optional<ScheduleProgress> AudioHost::DrainScheduleProgress() {
   const auto source_read = impl_->source_queue.read.load(std::memory_order_acquire);
   std::uint32_t automation_credits = 0;
   for (const auto& [instance_id, attachment] : impl_->native_vst_attachments) {
-    static_cast<void>(instance_id);
     const auto used = attachment->automation_segment_count.load(std::memory_order_acquire);
     automation_credits += static_cast<std::uint32_t>(
       attachment->automation_segments[0].size() - std::min<std::uint32_t>(
@@ -4511,8 +4572,83 @@ bool AudioHost::ProcessRecordingPlanar(
 }
 // DAW_REALTIME_CALLBACK_REGION_END audio-host
 
+void AudioHost::RecordOutputCallback(
+  const std::uint32_t frame_count,
+  const std::uint64_t duration_nanoseconds
+) noexcept {
+  if (!impl_->applied_transport_running.load(std::memory_order_acquire)
+    || frame_count == 0 || duration_nanoseconds == 0) return;
+  impl_->callback_frames.store(frame_count, std::memory_order_relaxed);
+  impl_->callback_timing_count.fetch_add(1, std::memory_order_relaxed);
+  auto maximum = impl_->callback_timing_maximum_nanoseconds.load(std::memory_order_relaxed);
+  while (duration_nanoseconds > maximum && !impl_->callback_timing_maximum_nanoseconds.compare_exchange_weak(
+    maximum, duration_nanoseconds, std::memory_order_relaxed, std::memory_order_relaxed)) {}
+  const auto deadline_nanoseconds = impl_->config.sample_rate_hz == 0
+    ? 0
+    : static_cast<std::uint64_t>(
+      static_cast<double>(frame_count) * 1'000'000'000.0
+        / static_cast<double>(impl_->config.sample_rate_hz)
+    );
+  if (deadline_nanoseconds > 0 && duration_nanoseconds > deadline_nanoseconds) {
+    impl_->callback_deadline_misses.fetch_add(1, std::memory_order_relaxed);
+  }
+  impl_->callback_timing_buckets[detail::RealtimeDurationHistogramBucket(duration_nanoseconds)]
+    .fetch_add(1, std::memory_order_relaxed);
+}
+
 Diagnostics AudioHost::diagnostics() const {
+  std::optional<Diagnostics::WorkerAutomation> automation;
+  std::array<std::uint64_t, detail::kRealtimeDurationHistogramBuckets> callback_buckets{};
+  std::array<std::uint64_t, daw::plugin_host::kWorkerProcessingHistogramBuckets> worker_buckets{};
+  for (std::size_t index = 0; index < callback_buckets.size(); ++index) {
+    callback_buckets[index] = impl_->callback_timing_buckets[index].load(std::memory_order_relaxed);
+  }
+  std::uint64_t worker_observations = 0;
+  std::uint64_t worker_maximum = 0;
+  std::uint64_t worker_deadline_misses = 0;
+  std::uint64_t worker_watchdog_misses = 0;
+  std::uint32_t active_workers = 0;
+  const auto epoch = impl_->transport_epoch.load(std::memory_order_acquire);
+  for (const auto& [instance_id, attachment] : impl_->native_vst_attachments) {
+    static_cast<void>(instance_id);
+    const auto& candidate = attachment->worker_automation;
+    if (candidate && candidate->instance_id == instance_id)
+      automation = SelectWorkerAutomation(std::move(automation), *candidate, epoch);
+    if (attachment->worker.health() == daw::plugin_host::WorkerHealth::kReady) {
+      ++active_workers;
+    }
+    const auto worker_metrics = attachment->worker.processingMetrics();
+    worker_observations += worker_metrics.count;
+    worker_maximum = std::max(worker_maximum, worker_metrics.maximum_nanoseconds);
+    worker_deadline_misses += worker_metrics.deadline_misses;
+    worker_watchdog_misses += attachment->watchdog_misses.load(std::memory_order_relaxed);
+    for (std::size_t index = 0; index < worker_buckets.size(); ++index) {
+      worker_buckets[index] += worker_metrics.buckets[index];
+    }
+  }
+  const auto callback_count = impl_->callback_timing_count.load(std::memory_order_relaxed);
   return {
+    .worker_automation = automation,
+    .realtime_performance = {
+      .sample_rate_hz = impl_->config.sample_rate_hz,
+      .frames_per_callback = impl_->callback_frames.load(std::memory_order_relaxed),
+      .observation_count = callback_count,
+      .processing = DurationQuantiles(
+        callback_buckets,
+        callback_count,
+        impl_->callback_timing_maximum_nanoseconds.load(std::memory_order_relaxed)
+      ),
+      .deadline_misses = impl_->callback_deadline_misses.load(std::memory_order_relaxed),
+    },
+    .vst_worker_performance = {
+      .active_workers = active_workers,
+      .observation_count = worker_observations,
+      .processing = DurationQuantiles(worker_buckets, worker_observations, worker_maximum),
+      .deadline_misses = worker_deadline_misses,
+      .watchdog_misses = worker_watchdog_misses,
+      .faults = impl_->vst_worker_faults.load(std::memory_order_relaxed),
+      .restarts = impl_->vst_worker_restarts.load(std::memory_order_relaxed),
+    },
     .state = impl_->state.load(std::memory_order_acquire),
     .callbacks = impl_->callbacks.load(std::memory_order_relaxed),
     .split_blocks = impl_->split_blocks.load(std::memory_order_relaxed),

@@ -17,6 +17,8 @@ import {
 export { projectIdSchemaV1 } from "@daw-browser/control"
 import { pluginHealthSchema } from "@daw-browser/plugin-host-protocol"
 export type { ControlErrorV1 } from "@daw-browser/control"
+import { desktopDiagnosticsSchemaV2 } from "./diagnostics-v2"
+export { desktopDiagnosticsSchemaV2 } from "./diagnostics-v2"
 
 export const desktopProtocolVersion = "v1" as const
 export const desktopProtocolVersionV2 = "v2" as const
@@ -83,6 +85,7 @@ export const desktopOperationSchemaV1 = z.enum([
   "transport.stop",
   "transport.seek",
   "diagnostics.snapshot",
+  "diagnostics.snapshot.v2",
   "control.capabilities",
   "control.snapshot",
   "control.preview",
@@ -227,6 +230,7 @@ const requestInputs = {
   "transport.stop": desktopEmptyInputSchemaV1,
   "transport.seek": desktopSeekInputSchemaV1,
   "diagnostics.snapshot": desktopEmptyInputSchemaV1,
+  "diagnostics.snapshot.v2": desktopEmptyInputSchemaV1,
   "control.capabilities": desktopControlCapabilitiesInputSchemaV1,
   "control.snapshot": desktopControlSnapshotInputSchemaV1,
   "control.preview": controlPreviewRequestSchemaV1,
@@ -518,6 +522,12 @@ export const desktopHostOperationCatalog = {
     output: desktopDiagnosticsSchemaV1,
     effect: "read",
   },
+  "diagnostics.snapshot.v2": {
+    id: "diagnostics.snapshot.v2",
+    input: desktopEmptyInputSchemaV1,
+    output: desktopDiagnosticsSchemaV2,
+    effect: "read",
+  },
 } satisfies Record<DesktopHostOperationV1, DesktopHostOperationDescriptorV1>
 
 export const desktopHostOperationIds = Object.freeze(
@@ -550,6 +560,7 @@ export type DesktopOperationMapV1 = {
   "transport.stop": { input: Record<string, never>; result: z.infer<typeof desktopTransportStatusSchemaV1> }
   "transport.seek": { input: { seconds: number }; result: z.infer<typeof desktopTransportStatusSchemaV1> }
   "diagnostics.snapshot": { input: Record<string, never>; result: z.infer<typeof desktopDiagnosticsSchemaV1> }
+  "diagnostics.snapshot.v2": { input: Record<string, never>; result: z.infer<typeof desktopDiagnosticsSchemaV2> }
   "control.capabilities": { input: z.infer<typeof desktopControlCapabilitiesInputSchemaV1>; result: z.infer<typeof controlCapabilitiesSchemaV1> }
   "control.snapshot": { input: z.infer<typeof desktopControlSnapshotInputSchemaV1>; result: z.infer<typeof projectSnapshotSchemaV1> }
   "control.preview": { input: z.infer<typeof controlPreviewRequestSchemaV1>; result: z.infer<typeof controlPreviewResultSchemaV1> }
@@ -762,6 +773,7 @@ const nonControlResultSchemas = {
   "transport.stop": desktopTransportStatusSchemaV1,
   "transport.seek": desktopTransportStatusSchemaV1,
   "diagnostics.snapshot": desktopDiagnosticsSchemaV1,
+  "diagnostics.snapshot.v2": desktopDiagnosticsSchemaV2,
 } satisfies Partial<Record<DesktopOperationV1, z.ZodType>>
 
 const desktopControlDescriptor = (operation: DesktopControlOperationV1) => {

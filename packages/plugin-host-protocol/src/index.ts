@@ -15,7 +15,7 @@ export const nativeVst3WorkerArtifactVersion = '3'
 export const nativeVst3WorkerManifestVersion = 1
 export const nativeVst3WorkerStartupProtocolVersion = 1
 export const nativeVst3WorkerControlProtocolVersion = vst3WorkerProtocolVersion
-export const nativeVst3WorkerTransportAbiVersion = 5
+export const nativeVst3WorkerTransportAbiVersion = 6
 
 const requestIdSchema = z.string().min(1).max(96).regex(/^[A-Za-z0-9._-]+$/)
 const uuidSchema = z.string().uuid()

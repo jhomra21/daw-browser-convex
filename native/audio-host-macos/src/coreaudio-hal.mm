@@ -1,6 +1,7 @@
 #include "daw/audio_host_macos.h"
 
 #import <CoreAudio/CoreAudio.h>
+#import <mach/mach_time.h>
 
 #include <array>
 #include <limits>
@@ -127,6 +128,8 @@ struct DeviceSession {
   std::array<std::vector<float>, 64> output{};
   std::array<const float*, 64> input_planes{};
   std::array<float*, 64> output_planes{};
+  std::uint32_t timebase_numerator = 0;
+  std::uint32_t timebase_denominator = 0;
   bool watches_device_liveness = false;
 };
 
@@ -193,6 +196,7 @@ OSStatus Process(
   if (frames == 0 || frames > session->max_frames) return noErr;
   const std::uint32_t available_output_channels = AudioBufferListChannels(output);
   if (available_output_channels < session->channel_count) return noErr;
+  const auto started = mach_continuous_time();
   for (std::uint32_t channel = 0; channel < session->channel_count; ++channel) {
     auto& input_plane = session->input[channel];
     for (std::uint32_t frame = 0; frame < frames; ++frame) {
@@ -210,6 +214,13 @@ OSStatus Process(
       WritePlanarSample(output, channel, frame, processed && channel < session->channel_count ? session->output[channel][frame] : 0.0F);
     }
   }
+  const auto elapsed = mach_continuous_time() - started;
+  const auto nanoseconds = session->timebase_denominator == 0
+    ? 0
+    : static_cast<std::uint64_t>(
+      static_cast<unsigned __int128>(elapsed) * session->timebase_numerator / session->timebase_denominator
+    );
+  session->host->RecordOutputCallback(frames, nanoseconds);
   return noErr;
 }
 
@@ -328,6 +339,10 @@ bool StartCoreAudioDevice(
   session->role = CoreAudioDeviceRole::kOutput;
   session->max_frames = max_frames;
   session->channel_count = channel_count;
+  mach_timebase_info_data_t timebase{};
+  mach_timebase_info(&timebase);
+  session->timebase_numerator = timebase.numer;
+  session->timebase_denominator = timebase.denom;
   for (std::uint32_t channel = 0; channel < channel_count; ++channel) {
     session->input[channel].assign(max_frames, 0.0F);
     session->output[channel].assign(max_frames, 0.0F);

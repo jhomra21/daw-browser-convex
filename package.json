@@ -23,7 +23,14 @@
     "test:control-compat": "bun test src/hooks/local-send-reload.integration.test.ts src/lib/desktop/attached-host-controller.test.ts src/lib/local-control/local-control-state.test.ts src/lib/local-control/local-control-service.test.ts",
     "test:control-platform": "bun test src/lib/control-platform-conformance.test.ts packages/control/src/operations.test.ts packages/control-sdk/src/jsonl.test.ts packages/control-sdk/src/index.test.ts packages/control-sdk/src/desktop.test.ts packages/control-cli/src/index.test.ts packages/control-cli/src/process.test.ts packages/control-mcp/src/index.test.ts src/lib/extensions/extension-kernel.test.ts src/lib/extensions/project-actions.test.ts api/routes/control.test.ts api/control-contract-equivalence.test.ts packages/desktop-protocol/src/index.test.ts packages/desktop-protocol/src/client.test.ts packages/desktop-protocol/src/client-identity.test.ts apps/desktop/desktop-operations.test.ts",
     "serve": "vite preview",
-    "knip": "knip"
+    "knip": "knip",
+    "perf:30-track:fixture": "bun tools/performance/30-track/generate-fixture.ts",
+    "perf:30-track:browser": "bun tools/performance/30-track/run.ts --surface browser --out \"$PWD/../daw-browser-30-track-browser.json\"",
+    "perf:30-track:electron": "bun tools/performance/30-track/run.ts --surface electron --out \"$PWD/../daw-browser-30-track-electron.json\"",
+    "perf:30-track:tier3": "bun tools/performance/30-track/run.ts --surface electron --tier3 --out \"$PWD/../daw-browser-30-track-tier3.json\"",
+    "perf:30-track:cleanup-profiles": "bun tools/performance/30-track/cleanup-profiles.ts",
+    "perf:30-track:summarize-zoom": "bun tools/performance/30-track/summarize-zoom.ts",
+    "perf:30-track:vst-reliability": "bun tools/performance/30-track/vst-reliability.ts"
   },
   "overrides": {
     "undici": "7.24.8",

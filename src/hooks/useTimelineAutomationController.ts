@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { LiveProcessorControlResult } from "~/lib/live-processor-control";
@@ -461,17 +461,6 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     if (options.isPlaying()) options.audioEngine.scheduleAutomationFromPlayhead(options.playheadSec(), { targetKeys: reEnabledTargetKeys });
     else options.audioEngine.applyAutomationAtTimelineSec(options.playheadSec());
   };
-  onMount(() => {
-    const releasePointerAutomation = () => {
-      void reEnableAutomation();
-    };
-    window.addEventListener("pointerup", releasePointerAutomation);
-    window.addEventListener("pointercancel", releasePointerAutomation);
-    onCleanup(() => {
-      window.removeEventListener("pointerup", releasePointerAutomation);
-      window.removeEventListener("pointercancel", releasePointerAutomation);
-    });
-  });
   const persistedAutomation = createPersistedAutomationState({
     targetKey: automationTargetKeyAccessor,
     envelopes: automationEnvelopes,

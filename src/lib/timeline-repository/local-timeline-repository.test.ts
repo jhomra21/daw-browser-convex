@@ -203,6 +203,20 @@ test('rejects assigning a Return track to a group', async () => {
   expect(snapshot.tracks.find((track) => track.id === 'return')?.groupId).toBeUndefined()
 })
 
+test('trims and persists track names while preserving an existing name for empty input', async () => {
+  const projectId = 'project:local-track-name-update'
+  const repository = createLocalTimelineRepository(projectId)
+  const track = await repository.createTrack({ id: 'named-track', name: 'Original' })
+
+  const renamed = await repository.updateTrack({ trackId: track.id, name: '  Renamed  ' })
+  expect(renamed?.name).toBe('Renamed')
+  expect((await repository.loadSnapshot()).tracks[0]?.name).toBe('Renamed')
+
+  const preserved = await repository.updateTrack({ trackId: track.id, name: '   ' })
+  expect(preserved?.name).toBe('Renamed')
+  expect((await repository.loadSnapshot()).tracks[0]?.name).toBe('Renamed')
+})
+
 test('persists fades with clip creation and atomically clamps them on duration updates', async () => {
   const projectId = 'project:local-clip-fades'
   const repository = createLocalTimelineRepository(projectId)

@@ -18,6 +18,56 @@ const block = (sequence: number, blockId = sequence) => ({
 })
 
 describe('recording writer handler', () => {
+  test('aggregates queued append start delay and duration without retaining blocks', async () => {
+    let clock = 0
+    let release: () => void = () => undefined
+    const pending = new Promise<void>((resolve) => { release = resolve })
+    const handler = createRecordingWriterHandler({
+      createSession: async () => ({
+        append: async () => { await pending; clock += 4 },
+        finalize: async () => ({ capturedFrames: 4 }),
+        abort: async () => undefined,
+      }),
+    }, () => undefined, () => clock)
+    handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
+    await handler.testing.settled()
+    handler.handle(block(0))
+    handler.handle(block(1))
+    clock = 2
+    release()
+    await handler.testing.settled()
+    expect(handler.testing.snapshot().appendTiming).toEqual({
+      count: 2, startDelayMs: { total: 8, max: 6 },
+      durationMs: { total: 8, max: 4 },
+    })
+    expect(handler.testing.snapshot().queuedBlocks).toBe(0)
+  })
+  test('sends bounded append and storage aggregates only at finalization', async () => {
+    const output: WriterOutboundMessage[] = []
+    const handler = createRecordingWriterHandler({
+      createSession: async () => ({
+        append: async () => undefined,
+        finalize: async () => ({ capturedFrames: 2 }),
+        abort: async () => undefined,
+        timingSnapshot: () => ({
+          headerWriteMs: { count: 1, total: 2, max: 2 },
+          channelWriteMs: { count: 1, total: 3, max: 3 },
+        }),
+      }),
+    }, (message) => output.push(message), () => 1)
+    handler.handle({ type: 'start', generation: 1, sessionId: 'take', sampleRate: 48000, channelCount: 1 })
+    await handler.testing.settled()
+    handler.handle(block(0))
+    await handler.testing.settled()
+    expect(output.find((message) => message.type === 'return')).not.toHaveProperty('timing')
+    expect(output.find((message) => message.type === 'return')).toMatchObject({ returnedAtMs: expect.any(Number) })
+    handler.handle({ type: 'finalize', generation: 1, sessionId: 'take' })
+    await handler.testing.settled()
+    expect(output.at(-1)).toMatchObject({ type: 'finalized', timing: {
+      append: { count: 1, startDelayMs: { total: 0, max: 0 }, durationMs: { total: 0, max: 0 } },
+      storage: { headerWriteMs: { count: 1, total: 2, max: 2 }, channelWriteMs: { count: 1, total: 3, max: 3 } },
+    } })
+  })
   test('owns SAB consumption, planar copying, wake sequencing, and final drain', async () => {
     const buffers = createRecorderSabRingBuffers()
     const producer = createRecorderSabRingProducer(buffers)
@@ -208,7 +258,7 @@ describe('recording writer handler', () => {
     handler.handle({ type: 'abort', generation: 1, sessionId: 'take' })
     await handler.testing.settled()
     expect(events).toEqual(['write', 'abort'])
-    expect(output.at(-1)).toMatchObject({ type: 'aborted' })
+    expect(output.at(-1)).toMatchObject({ type: 'aborted', timing: { append: { count: 1 } } })
 
     const failedOutput: WriterOutboundMessage[] = []
     const failed = createRecordingWriterHandler({
@@ -308,14 +358,14 @@ describe('recording writer handler', () => {
     resolveSession()
     await handler.testing.settled()
 
-    expect(output).toEqual([{
+    expect(output).toMatchObject([{
       type: 'failure',
       generation: 1,
       sessionId: 'take',
       reason: 'malformed-message',
     }])
     expect(aborts).toBe(1)
-    expect(handler.testing.snapshot()).toEqual({ state: 'failed', queuedBlocks: 0 })
+    expect(handler.testing.snapshot()).toMatchObject({ state: 'failed', queuedBlocks: 0 })
   })
 
   test('keeps queued finalize completion from overwriting a terminal failure', async () => {
@@ -350,10 +400,10 @@ describe('recording writer handler', () => {
 
     expect(finalizes).toBe(0)
     expect(aborts).toBe(1)
-    expect(handler.testing.snapshot()).toEqual({ state: 'failed', queuedBlocks: 0 })
+    expect(handler.testing.snapshot()).toMatchObject({ state: 'failed', queuedBlocks: 0 })
     expect(output.filter((message) =>
       message.type === 'failure' || message.type === 'finalized' || message.type === 'aborted'
-    )).toEqual([{
+    )).toMatchObject([{
       type: 'failure',
       generation: 1,
       sessionId: 'take',

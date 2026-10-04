@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "retentionPolicy": {
+    "profiles": "Delete each fresh writable runner profile after owned processes exit; crash recovery keeps today and removes only inactive older America/Chicago profiles.",
+    "diagnostics": "Result JSON and sidecar diagnostics remain outside profiles; reliability attempts are capped at 100, process samples at 2000, output tails at 4000 characters, VST lifecycle text at 64000 characters, and renderer samples at 120."
+  },
+  "recovery": {
+    "previewPath": "/private/tmp/daw-profile-cleanup-preview-2026-10-01.json",
+    "applyPath": "/private/tmp/daw-profile-cleanup-applied-2026-10-01.json",
+    "beforeEligibleBytes": 38142842,
+    "bytesRemoved": 38142842,
+    "candidateCount": 402,
+    "failedRemovals": [],
+    "retainedTodayCount": 195,
+    "retainedTodayBytes": 57021675910
+  },
+  "e2e": {
+    "successResults": [
+      "/private/tmp/daw-profile-cleanup-e2e-success/v0-1.json",
+      "/private/tmp/daw-profile-cleanup-e2e-success/v0-summary.json"
+    ],
+    "forcedFailureResults": [
+      "/private/tmp/daw-profile-cleanup-e2e-failure-3/v0-1.json",
+      "/private/tmp/daw-profile-cleanup-e2e-failure-3/v0-summary.json"
+    ],
+    "cancellationLog": "/private/tmp/daw-profile-cleanup-cancel-direct-4.log",
+    "successProfileRemoved": true,
+    "failureProfileRemoved": true,
+    "cancellationProfileRemoved": true,
+    "ownedProcessesRemoved": true,
+    "unrelatedActiveProfilePreserved": true
+  }
+}

@@ -63,7 +63,7 @@ const f32 = (value) => {
 const hello = () => frame(2, Buffer.concat([
   u32(${nativeAudioHostProtocolVersion}), u32(0x3ff), u32(${audioCoreWasmAbiVersion}),
   string(process.env.MODE === "incompatible" ? "wrong" : "${processorContractHash}"),
-  string("${portableGraphContractHash}"), string("daw-audio-host-macos/v5"), u32(0), u32(1),
+  string("${portableGraphContractHash}"), string("daw-audio-host-macos/v6"), u32(0), u32(1),
 ]))
 const device = () => frame(19, Buffer.concat([
   u32(1), string("coreaudio:fixture"), string("Fixture Output"), u32(48000), u32(2), u32(512), u32(1),
@@ -165,6 +165,11 @@ process.stdin.on("data", (chunk) => {
         u32(0), u32(0), u32(0), u32(0), u32(0), u32(0), u32(0), u32(0), u64(0),
         u32(0), u64(0), u64(0), u32(0), u32(0),
         u32(0), u32(0), u32(0), u32(0), u32(0),
+        u32(0), u32(0), u32(0), u32(0), u64(0),
+        u32(0),
+        u64(0), u32(0), u32(0),
+        u64(0), u64(0), u64(0), u64(0), u64(0), u64(0),
+        u32(0), u64(0), u64(0), u64(0), u64(0), u64(0), u64(0), u64(0), u64(0), u64(0),
       ])))
     } else if (type === 36) {
       process.stdout.write(graphStatus(1, 2, 1, 2, 0))
@@ -269,7 +274,7 @@ describe("native audio host protocol", () => {
     expect(encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.graphRollback)).toEqual(
       Buffer.from([
         0x44, 0x41, 0x57, 0x48,
-        0x00, 0x00, 0x00, 0x12,
+        0x00, 0x00, 0x00, 0x16,
         0x00, 0x00, 0x00, 0x27,
         0x00, 0x00, 0x00, 0x00,
       ]),
@@ -1558,6 +1563,30 @@ test("acknowledges diagnostics and tears down without reporting host loss", asyn
     fixture.supervisor.onLoss((error) => losses.push(error.message))
     await fixture.supervisor.start()
     await expect(fixture.supervisor.diagnostics()).resolves.toEqual({
+      workerAutomation: null,
+      transportFrame: 0n,
+      realtimePerformance: {
+        sampleRateHz: 0,
+        framesPerCallback: 0,
+        observationCount: 0n,
+        processingP50Nanoseconds: 0n,
+        processingP95Nanoseconds: 0n,
+        processingP99Nanoseconds: 0n,
+        processingMaximumNanoseconds: 0n,
+        deadlineMisses: 0n,
+      },
+      vstWorkerPerformance: {
+        activeWorkers: 0,
+        observationCount: 0n,
+        processingP50Nanoseconds: 0n,
+        processingP95Nanoseconds: 0n,
+        processingP99Nanoseconds: 0n,
+        processingMaximumNanoseconds: 0n,
+        deadlineMisses: 0n,
+        watchdogMisses: 0n,
+        faults: 0n,
+        restarts: 0n,
+      },
       state: "idle",
       activeRevision: 0,
       preparedRevision: 0,

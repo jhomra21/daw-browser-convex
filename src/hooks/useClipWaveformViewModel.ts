@@ -14,6 +14,10 @@ import { getPersistableAudioSourceMetadata } from '~/lib/audio-source'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type { RuntimeClip } from '~/lib/timeline-runtime-types'
 import { requestWaveformData } from '~/lib/waveform-scheduler-request'
+import {
+  incrementPerformanceBenchmarkCounter,
+  measurePerformanceBenchmark,
+} from '~/lib/performance-benchmark-telemetry'
 
 type ClipWaveformViewModelOptions = {
   readonly clip: Accessor<RuntimeClip>
@@ -64,6 +68,8 @@ const sourceIdentityFor = (assetKey: string, clip: RuntimeClip) => [
   assetKey,
 ].join('|')
 
+const MAX_RETAINED_REQUESTS = 32
+
 const timingSignatureFor = (clip: RuntimeClip, bpm: number, duration: number) => JSON.stringify([
   clip.startSec,
   clip.duration,
@@ -104,8 +110,10 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
   let dataRequest = 0
   let sourceCleanup: (() => void) | undefined
   let dataCleanup: (() => void) | undefined
+  const retainedEntries = new Map<string, Retained>()
 
-  const view = createMemo(() => {
+  const view = createMemo(() => measurePerformanceBenchmark('waveform.geometry', () => {
+    incrementPerformanceBenchmarkCounter('waveform.view-computations')
     const clip = options.clip()
     const assetKey = clip.waveformAssetKey ?? clip.sourceAssetKey ?? `clip:${clip.id}`
     const metadata = getPersistableAudioSourceMetadata({
@@ -122,7 +130,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       options.visibleRange?.(),
     )
     return { clip, assetKey, layout }
-  })
+  }))
   const displaySegments = createMemo(() => layoutSegmentsFor(view().layout, view().clip))
   const plans = createMemo<WaveformRequestPlans>(() => {
     const current = view()
@@ -153,6 +161,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       dataRequest += 1
       sourceCleanup?.()
       dataCleanup?.()
+      retainedEntries.clear()
       if (options.waveformVisible?.() === false) {
         batch(() => {
           setSource(null)
@@ -206,8 +215,8 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       const previousState = untrack(generation)
       const visible = previousState.visible
       const seed = visible?.sourceIdentity === nextSource.identity
-        ? visible.entries
-        : new Map<string, Retained>()
+        ? new Map([...retainedEntries, ...visible.entries])
+        : retainedEntries
       const targetEntries = new Map<string, Retained>()
       for (const request of plan.requests) {
         const retained = seed.get(request.key)
@@ -218,6 +227,9 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         sourceIdentity: nextSource.identity,
       }
       const missing = plan.requests.filter((request) => !targetEntries.has(request.key))
+      incrementPerformanceBenchmarkCounter('waveform.requests', plan.requests.length)
+      incrementPerformanceBenchmarkCounter('waveform.cache-hits', targetEntries.size)
+      incrementPerformanceBenchmarkCounter('waveform.cache-misses', missing.length)
       if (missing.length === 0) {
         dataRequest += 1
         dataCleanup?.()
@@ -230,6 +242,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
       dataCleanup?.()
       const controller = new AbortController()
       dataCleanup = () => controller.abort()
+      incrementPerformanceBenchmarkCounter('waveform.requests-pending', missing.length)
       setLoading(true)
       setError(undefined)
       setGeneration({
@@ -237,6 +250,7 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         replacement: target,
       })
       void Promise.all(missing.map(async (request) => {
+        incrementPerformanceBenchmarkCounter('waveform.requests-started')
         const data = await requestWaveformData({
           assetKey: current.assetKey,
           source: nextSource,
@@ -246,15 +260,27 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
           priority: request.priority,
           signal: controller.signal,
         })
+        incrementPerformanceBenchmarkCounter(data ? 'waveform.requests-completed' : 'waveform.requests-empty')
         return data ? { key: request.key, data } : null
       })).then((results) => {
-        if (id !== dataRequest || controller.signal.aborted) return
+        if (id !== dataRequest || controller.signal.aborted) {
+          incrementPerformanceBenchmarkCounter('waveform.requests-superseded', missing.length)
+          return
+        }
         const additions = new Map(target.entries)
         for (const result of results) {
           if (!result) continue
-          additions.set(result.key, {
+          const retained = {
             ...retainWaveformData(result.data),
-          })
+          }
+          additions.set(result.key, retained)
+          retainedEntries.delete(result.key)
+          retainedEntries.set(result.key, retained)
+          while (retainedEntries.size > MAX_RETAINED_REQUESTS) {
+            const oldest = retainedEntries.keys().next().value
+            if (oldest === undefined) break
+            retainedEntries.delete(oldest)
+          }
         }
         if (additions.size === 0) {
           setLoading(false)
@@ -276,9 +302,14 @@ export function useClipWaveformViewModel(options: ClipWaveformViewModelOptions) 
         })
         setLoading(false)
       }).catch((cause: unknown) => {
-        if (id !== dataRequest || controller.signal.aborted) return
+        if (id !== dataRequest || controller.signal.aborted) {
+          incrementPerformanceBenchmarkCounter('waveform.requests-cancelled', missing.length)
+          return
+        }
         setLoading(false)
         setError(cause instanceof Error ? cause.message : 'Waveform loading failed.')
+      }).finally(() => {
+        incrementPerformanceBenchmarkCounter('waveform.requests-pending', -missing.length)
       })
     },
     { defer: false },

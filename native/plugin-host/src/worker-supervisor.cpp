@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cerrno>
 #include <cmath>
 #include <cctype>
@@ -81,6 +82,10 @@ struct alignas(kCacheLineBytes) SharedHeader {
   std::atomic<std::uint32_t> diagnosticRead{0};
   std::atomic<std::uint32_t> tailMetadataSequence{0};
   std::atomic<std::uint32_t> tailMetadataFrames{0};
+  std::atomic<std::uint64_t> processingCount{0};
+  std::atomic<std::uint64_t> processingMaximumNanoseconds{0};
+  std::atomic<std::uint64_t> processingDeadlineMisses{0};
+  std::atomic<std::uint64_t> processingBuckets[kWorkerProcessingHistogramBuckets]{};
   WorkerDiagnostic diagnostics[kDiagnosticCapacity]{};
 };
 static_assert(alignof(SharedHeader) >= alignof(std::atomic<std::uint64_t>));
@@ -261,6 +266,75 @@ bool IsValidWorkerHostConfiguration(const WorkerHostConfiguration& configuration
   return !configuration.executable.empty() && IsValidWorkerArtifactIdentity(configuration.artifact);
 }
 
+WorkerWakeSignal::~WorkerWakeSignal() {
+  Close();
+}
+
+bool WorkerWakeSignal::Open() noexcept {
+  if (readDescriptor_ >= 0 || writeDescriptor_ >= 0) return false;
+  int descriptors[2]{-1, -1};
+  if (!CreateCloseOnExecPipe(descriptors)) return false;
+  const auto readFlags = fcntl(descriptors[0], F_GETFL);
+  const auto writeFlags = fcntl(descriptors[1], F_GETFL);
+  if (readFlags < 0 || writeFlags < 0
+    || fcntl(descriptors[0], F_SETFL, readFlags | O_NONBLOCK) != 0
+    || fcntl(descriptors[1], F_SETFL, writeFlags | O_NONBLOCK) != 0
+    || fcntl(descriptors[1], F_SETNOSIGPIPE, 1) != 0) {
+    close(descriptors[0]);
+    close(descriptors[1]);
+    return false;
+  }
+  readDescriptor_ = descriptors[0];
+  writeDescriptor_ = descriptors[1];
+  return true;
+}
+
+void WorkerWakeSignal::Close() noexcept {
+  if (readDescriptor_ >= 0) {
+    close(readDescriptor_);
+    readDescriptor_ = -1;
+  }
+  if (writeDescriptor_ >= 0) {
+    close(writeDescriptor_);
+    writeDescriptor_ = -1;
+  }
+}
+
+bool WorkerWakeSignal::Notify() const noexcept {
+  if (writeDescriptor_ < 0) return false;
+  constexpr std::uint8_t wakeByte = 1;
+  const auto result = write(writeDescriptor_, &wakeByte, sizeof(wakeByte));
+  return result == static_cast<ssize_t>(sizeof(wakeByte))
+    || (result < 0 && (errno == EAGAIN || errno == EWOULDBLOCK));
+}
+
+int WorkerWakeSignal::readDescriptor() const noexcept {
+  return readDescriptor_;
+}
+
+int WorkerWakeSignal::releaseReadDescriptor() noexcept {
+  const auto descriptor = readDescriptor_;
+  readDescriptor_ = -1;
+  return descriptor;
+}
+
+int WorkerWakeSignal::releaseWriteDescriptor() noexcept {
+  const auto descriptor = writeDescriptor_;
+  writeDescriptor_ = -1;
+  return descriptor;
+}
+
+void WorkerWakeSignal::Drain(const int descriptor) noexcept {
+  if (descriptor < 0) return;
+  std::array<std::uint8_t, 64> wakeBytes{};
+  for (;;) {
+    const auto readCount = read(descriptor, wakeBytes.data(), wakeBytes.size());
+    if (readCount > 0) continue;
+    if (readCount < 0 && errno == EINTR) continue;
+    break;
+  }
+}
+
 bool IsValidWorkerManifest(const WorkerManifest& manifest) {
   if (manifest.version != kWorkerManifestVersion || !IsValidWorkerArtifactIdentity(manifest.artifact)
     || manifest.startupProtocolVersion != kWorkerStartupProtocolVersion
@@ -353,7 +427,8 @@ std::optional<WorkerTransportLayout> CreateWorkerTransportLayout(const WorkerTra
   if (!audioBytes || !eventBytes) return std::nullopt;
   const auto slotDataBytes = Add(*eventBytes, *audioBytes);
   if (!slotDataBytes) return std::nullopt;
-  const auto slotBytes = Add(Align(sizeof(SharedSlotControl)), *slotDataBytes);
+  const auto unalignedSlotBytes = Add(Align(sizeof(SharedSlotControl)), *slotDataBytes);
+  const auto slotBytes = unalignedSlotBytes ? std::optional<std::size_t>{Align(*unalignedSlotBytes)} : std::nullopt;
   if (!slotBytes) return std::nullopt;
   const auto bytes = Multiply(request.slotCount, *slotBytes);
   if (!bytes || *bytes > kMaximumWorkerTransportBytes - Align(sizeof(SharedHeader))) return std::nullopt;
@@ -644,6 +719,19 @@ std::optional<WorkerTailMetadata> WorkerTransport::ReadTailMetadata() const {
   };
 }
 
+WorkerProcessingMetrics WorkerTransport::ReadProcessingMetrics() const {
+  WorkerProcessingMetrics result;
+  if (!mapping_) return result;
+  const auto* header = static_cast<const SharedHeader*>(mapping_->address);
+  result.count = header->processingCount.load(std::memory_order_relaxed);
+  result.maximum_nanoseconds = header->processingMaximumNanoseconds.load(std::memory_order_relaxed);
+  result.deadline_misses = header->processingDeadlineMisses.load(std::memory_order_relaxed);
+  for (std::size_t index = 0; index < result.buckets.size(); ++index) {
+    result.buckets[index] = header->processingBuckets[index].load(std::memory_order_relaxed);
+  }
+  return result;
+}
+
 int WorkerTransport::fileDescriptor() const {
   return mapping_ ? mapping_->fileDescriptor : -1;
 }
@@ -749,6 +837,27 @@ void WorkerTransport::PublishTailMetadata(const std::uint32_t tailFrames) {
   header->tailMetadataSequence.fetch_add(1, std::memory_order_release);
 }
 
+void WorkerTransport::RecordProcessingDuration(
+  const std::uint64_t durationNanoseconds,
+  const std::uint64_t deadlineNanoseconds
+) {
+  if (!mapping_) return;
+  auto* header = static_cast<SharedHeader*>(mapping_->address);
+  header->processingCount.fetch_add(1, std::memory_order_relaxed);
+  auto maximum = header->processingMaximumNanoseconds.load(std::memory_order_relaxed);
+  while (durationNanoseconds > maximum && !header->processingMaximumNanoseconds.compare_exchange_weak(
+    maximum, durationNanoseconds, std::memory_order_relaxed, std::memory_order_relaxed)) {}
+  if (deadlineNanoseconds > 0 && durationNanoseconds > deadlineNanoseconds) {
+    header->processingDeadlineMisses.fetch_add(1, std::memory_order_relaxed);
+  }
+  const auto bucket = durationNanoseconds == 0
+    ? 0U
+    : std::min<std::size_t>(
+      kWorkerProcessingHistogramBuckets - 1,
+      static_cast<std::size_t>(std::bit_width(durationNanoseconds) - 1));
+  header->processingBuckets[bucket].fetch_add(1, std::memory_order_relaxed);
+}
+
 WorkerRuntime::WorkerRuntime() = default;
 WorkerRuntime::~WorkerRuntime() {
   Stop();
@@ -772,14 +881,17 @@ bool WorkerRuntime::Start(
   if (!transport) return false;
   int control[2]{-1, -1};
   int response[2]{-1, -1};
-  if (!CreateCloseOnExecPipe(control) || !CreateCloseOnExecPipe(response)) {
+  WorkerWakeSignal wake;
+  if (!CreateCloseOnExecPipe(control) || !CreateCloseOnExecPipe(response)
+    || !wake.Open()) {
     if (control[0] >= 0) close(control[0]);
     if (control[1] >= 0) close(control[1]);
     if (response[0] >= 0) close(response[0]);
     if (response[1] >= 0) close(response[1]);
     return false;
   }
-  if (transport->fileDescriptor() <= STDERR_FILENO || control[0] <= STDERR_FILENO || response[1] <= STDERR_FILENO) {
+  if (transport->fileDescriptor() <= STDERR_FILENO || control[0] <= STDERR_FILENO
+    || response[1] <= STDERR_FILENO || wake.readDescriptor() <= STDERR_FILENO) {
     close(control[0]);
     close(control[1]);
     close(response[0]);
@@ -788,10 +900,25 @@ bool WorkerRuntime::Start(
   }
   const auto fd = std::to_string(STDIN_FILENO);
   const auto controlFd = std::to_string(STDOUT_FILENO);
-  constexpr int responseFileDescriptor = STDERR_FILENO + 1;
+  // Keep child-side protocol descriptors above every parent-side source
+  // descriptor. This prevents a close action for one source from closing a
+  // different descriptor just installed by dup2 when the parent owns many FDs.
+  const auto maximumSourceDescriptor = std::max({
+    transport->fileDescriptor(), control[0], control[1], response[0], response[1], wake.readDescriptor(),
+  });
+  if (maximumSourceDescriptor > std::numeric_limits<int>::max() - 2) {
+    close(control[0]);
+    close(control[1]);
+    close(response[0]);
+    close(response[1]);
+    return false;
+  }
+  const int responseFileDescriptor = maximumSourceDescriptor + 1;
+  const int wakeFileDescriptor = maximumSourceDescriptor + 2;
   const auto responseFd = std::to_string(responseFileDescriptor);
+  const auto wakeFd = std::to_string(wakeFileDescriptor);
   const auto token = std::to_string(transport->token());
-  std::array<std::string, 9> argumentValues{
+  std::array<std::string, 11> argumentValues{
     configuration.executable,
     "--transport-fd",
     fd,
@@ -801,8 +928,10 @@ bool WorkerRuntime::Start(
     responseFd,
     "--token",
     token,
+    "--wake-fd",
+    wakeFd,
   };
-  std::array<char*, 10> arguments{};
+  std::array<char*, 12> arguments{};
   for (std::size_t index = 0; index < argumentValues.size(); ++index) arguments[index] = argumentValues[index].data();
   posix_spawn_file_actions_t fileActions{};
   posix_spawnattr_t attributes{};
@@ -814,7 +943,11 @@ bool WorkerRuntime::Start(
     && posix_spawnattr_setpgroup(&attributes, 0) == 0
     && posix_spawn_file_actions_adddup2(&fileActions, transport->fileDescriptor(), STDIN_FILENO) == 0
     && posix_spawn_file_actions_adddup2(&fileActions, control[0], STDOUT_FILENO) == 0
-    && posix_spawn_file_actions_adddup2(&fileActions, response[1], responseFileDescriptor) == 0;
+    && posix_spawn_file_actions_adddup2(&fileActions, response[1], responseFileDescriptor) == 0
+    && posix_spawn_file_actions_adddup2(&fileActions, wake.readDescriptor(), wakeFileDescriptor) == 0
+    && posix_spawn_file_actions_addclose(&fileActions, control[1]) == 0
+    && posix_spawn_file_actions_addclose(&fileActions, response[0]) == 0
+    && posix_spawn_file_actions_addclose(&fileActions, wake.readDescriptor()) == 0;
   pid_t child = -1;
   char* const environment[] = {nullptr};
   const auto spawnResult = spawnConfigured
@@ -831,8 +964,10 @@ bool WorkerRuntime::Start(
   }
   close(control[0]);
   close(response[1]);
+  close(wake.releaseReadDescriptor());
   controlWriteDescriptor_ = control[1];
   responseReadDescriptor_ = response[0];
+  wakeWriteDescriptor_ = wake.releaseWriteDescriptor();
   childProcessId_ = child;
   childProcessGroupId_ = child;
   transport_ = std::move(*transport);
@@ -872,6 +1007,10 @@ void WorkerRuntime::Stop() {
   if (responseReadDescriptor_ >= 0) {
     close(responseReadDescriptor_);
     responseReadDescriptor_ = -1;
+  }
+  if (wakeWriteDescriptor_ >= 0) {
+    close(wakeWriteDescriptor_);
+    wakeWriteDescriptor_ = -1;
   }
   if (childProcessId_ >= 0 && childAlive) {
     if (!WaitForChildExit(childProcessId_, 250)) {
@@ -981,11 +1120,22 @@ bool WorkerRuntime::CancelPublishedSubmission(const std::size_t slotIndex, const
 }
 
 bool WorkerRuntime::DispatchPublishedSubmission(const std::size_t slotIndex, const std::uint64_t sequence) {
-  if (!transport_ || transport_->slot(slotIndex).sequence != sequence
-    || !WriteWorkerControlCommand(controlWriteDescriptor_, WorkerControlCommand::kProcess)) {
-    return false;
+  if (!transport_ || transport_->slot(slotIndex).sequence != sequence) return false;
+  if (startup_ && startup_->setup.mode == WorkerProcessSetup::Mode::kRealtime) {
+    return true;
   }
-  return true;
+  return WriteWorkerControlCommand(controlWriteDescriptor_, WorkerControlCommand::kProcess);
+}
+
+bool WorkerRuntime::NotifyRealtimeWorker() noexcept {
+  if (wakeWriteDescriptor_ < 0) return false;
+  constexpr std::uint8_t wakeByte = 1;
+  while (true) {
+    const auto result = write(wakeWriteDescriptor_, &wakeByte, sizeof(wakeByte));
+    if (result == static_cast<ssize_t>(sizeof(wakeByte))) return true;
+    if (result < 0 && errno == EINTR) continue;
+    return result < 0 && (errno == EAGAIN || errno == EWOULDBLOCK);
+  }
 }
 
 bool WorkerRuntime::WaitForOfflineCompletion(

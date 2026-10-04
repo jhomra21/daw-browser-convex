@@ -4,6 +4,8 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
@@ -785,7 +787,7 @@ int main() {
       WriteU32(response, DAW_AUDIO_CORE_ABI_VERSION);
       WriteString(response, DAW_AUDIO_CORE_PROCESSOR_CONTRACT_HASH);
       WriteString(response, DAW_AUDIO_CORE_PORTABLE_GRAPH_CONTRACT_HASH);
-      WriteString(response, "daw-audio-host-macos/v5");
+      WriteString(response, "daw-audio-host-macos/v6");
       WriteU32(response, static_cast<std::uint32_t>(host->diagnostics().state));
       WriteU32(response, static_cast<std::uint32_t>(host->readinessReason()));
       if (!WriteFrame(daw::audio_host_macos::ControlType::kHostCapabilities, response)) return EXIT_FAILURE;
@@ -795,7 +797,7 @@ int main() {
       if (!payload.empty()) return EXIT_FAILURE;
       const auto diagnostics = host->diagnostics();
       std::vector<std::uint8_t> response;
-      response.reserve(88);
+      response.reserve(320);
       WriteU32(response, static_cast<std::uint32_t>(diagnostics.state));
       WriteU32(response, diagnostics.active_revision);
       WriteU32(response, diagnostics.prepared_revision);
@@ -815,6 +817,31 @@ int main() {
       WriteU32(response, diagnostics.last_rejected_processor_event_count);
       WriteU32(response, diagnostics.last_rejected_instrument_event_count);
       WriteU32(response, diagnostics.last_rejected_graph_revision);
+      WriteU32(response, diagnostics.worker_automation ? 1 : 0);
+      WriteU32(response, diagnostics.worker_automation ? diagnostics.worker_automation->accepted_points : 0);
+      WriteU32(response, diagnostics.worker_automation ? diagnostics.worker_automation->last_parameter_id : 0);
+      WriteU32(response, diagnostics.worker_automation ? diagnostics.worker_automation->transport_epoch : 0);
+      WriteU64(response, diagnostics.worker_automation ? diagnostics.worker_automation->sequence : 0);
+      WriteString(response, diagnostics.worker_automation ? diagnostics.worker_automation->instance_id : "");
+      WriteU64(response, static_cast<std::uint64_t>(diagnostics.transport_frame));
+      WriteU32(response, diagnostics.realtime_performance.sample_rate_hz);
+      WriteU32(response, diagnostics.realtime_performance.frames_per_callback);
+      WriteU64(response, diagnostics.realtime_performance.observation_count);
+      WriteU64(response, diagnostics.realtime_performance.processing.p50_nanoseconds);
+      WriteU64(response, diagnostics.realtime_performance.processing.p95_nanoseconds);
+      WriteU64(response, diagnostics.realtime_performance.processing.p99_nanoseconds);
+      WriteU64(response, diagnostics.realtime_performance.processing.maximum_nanoseconds);
+      WriteU64(response, diagnostics.realtime_performance.deadline_misses);
+      WriteU32(response, diagnostics.vst_worker_performance.active_workers);
+      WriteU64(response, diagnostics.vst_worker_performance.observation_count);
+      WriteU64(response, diagnostics.vst_worker_performance.processing.p50_nanoseconds);
+      WriteU64(response, diagnostics.vst_worker_performance.processing.p95_nanoseconds);
+      WriteU64(response, diagnostics.vst_worker_performance.processing.p99_nanoseconds);
+      WriteU64(response, diagnostics.vst_worker_performance.processing.maximum_nanoseconds);
+      WriteU64(response, diagnostics.vst_worker_performance.deadline_misses);
+      WriteU64(response, diagnostics.vst_worker_performance.watchdog_misses);
+      WriteU64(response, diagnostics.vst_worker_performance.faults);
+      WriteU64(response, diagnostics.vst_worker_performance.restarts);
       if (!WriteFrame(daw::audio_host_macos::ControlType::kDiagnostics, response)) return EXIT_FAILURE;
       continue;
     }

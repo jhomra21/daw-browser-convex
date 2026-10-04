@@ -8,6 +8,9 @@ import {
   desktopHostImportCancelInputSchemaV1,
   desktopHostImportStatusSchemaV1,
   desktopHostExportRunInputSchemaV1,
+  desktopDiagnosticsSchemaV2,
+  desktopHostVstInstancesInputSchemaV1,
+  desktopHostVstParametersInputSchemaV1,
   desktopProtocolVersion,
   type DesktopControlOperationV1,
   type DesktopOperationMapV1,
@@ -69,6 +72,21 @@ export const requestHostControlV2 = async <Operation extends "control.capabiliti
 export const runHostCommand = async (arguments_: string[], io: CliIo) => {
   const [action, value, ...extra] = arguments_
   if (!action) throw new Error("Invalid host command.")
+  if (action === "vst-instances" || action === "vst-parameters") {
+    if ((action === "vst-instances" && arguments_.length !== 2)
+      || (action === "vst-parameters" && arguments_.length !== 3)) throw new Error("Invalid host VST read command.")
+    const input = action === "vst-instances"
+      ? desktopHostVstInstancesInputSchemaV1.parse({ projectId: value })
+      : desktopHostVstParametersInputSchemaV1.parse({ projectId: value, instanceId: extra[0] })
+    const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+    try {
+      const data = action === "vst-instances"
+        ? await client.request("host.vst.instances", input)
+        : await client.request("host.vst.parameters", input)
+      io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))
+      return 0
+    } finally { client.close() }
+  }
   if (action === "import") {
     const pathValue = option(arguments_.slice(1), "--path")
     const picker = arguments_.length === 2 && arguments_[1] === "--picker"
@@ -130,6 +148,17 @@ export const runHostCommand = async (arguments_: string[], io: CliIo) => {
       io.stdout(canonicalJson({ version: "v1", ok: true, command: `host ${action}`, data }))
       return 0
     } finally { client.close() }
+  }
+  if (action === "diagnostics-v2") {
+    if (extra.length !== 0 || value !== undefined) throw new Error("Invalid host diagnostics-v2 command.")
+    const client = await createAvailableDesktopHostClient(cliDesktopControlOptions())
+    try {
+      const data = desktopDiagnosticsSchemaV2.parse(await client.request("diagnostics.snapshot.v2", {}))
+      io.stdout(canonicalJson({ version: "v1", ok: true, command: "host diagnostics-v2", data }))
+      return 0
+    } finally {
+      client.close()
+    }
   }
   if (extra.length !== 0 || (action !== "seek" && value !== undefined)) throw new Error("Invalid host command.")
   const operation = action === "status" ? "host.status"

@@ -59,6 +59,7 @@ const hostTools: HostToolService = {
   stop: async () => ({ state: "stopped", playheadSec: 0 }),
   seek: async ({ seconds }) => ({ state: "paused", playheadSec: seconds }),
   diagnostics: async () => ({ audio: { state: "running", sampleRate: 48_000 }, recording: { transport: null, capturedFrames: null, droppedFrames: null, deviceLost: false }, counts: { tracks: 0, clips: 0 } }),
+  diagnosticsV2: async () => { throw new Error("unused in this test fixture") },
   importAudio: async () => ({ status: "created", count: 1 }),
   importStatus: async () => ({ status: "idle" }),
   importCancel: async () => ({ status: "canceled", job: { id: "import-1", name: "Import" } }),
@@ -157,7 +158,7 @@ describe("control MCP tools", () => {
 
   test("adds local host tools only when explicitly composed", async () => {
     const response = await request({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }, { host: true })
-    expect(response.result.tools.map((tool: { name: string }) => tool.name).slice(-15)).toEqual([
+    expect(response.result.tools.map((tool: { name: string }) => tool.name).slice(-16)).toEqual([
       "host_status",
       "host_transport_status",
       "host_play",
@@ -165,6 +166,7 @@ describe("control MCP tools", () => {
       "host_stop",
       "host_seek",
       "host_diagnostics",
+      "host_diagnostics_v2",
       "host_import_audio",
       "host_import_status",
       "host_import_cancel",

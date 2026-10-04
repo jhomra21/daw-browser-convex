@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { access } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
 import path from "node:path"
+import { readDiagnosticInstanceId } from "./diagnostic-instance-id"
 import { audioCoreWasmAbiVersion } from "@daw-browser/audio-core-wasm"
 import { defaultDecodedAudioPageFrames } from "@daw-browser/audio-engine/media-pages"
 import {
@@ -114,7 +115,7 @@ const {
   instrumentStates: instrumentStatesType,
 } = nativeAudioHostControlTypes
 const requiredHostCapabilities = 0x000003ff
-const nativeAudioHostArtifactId = "daw-audio-host-macos/v5"
+const nativeAudioHostArtifactId = "daw-audio-host-macos/v6"
 const maximumOfflineStderrBytes = 16 * 1024
 const maximumOfflineQueuedFrames = 4
 const nativeOfflineStageTimeoutMs = 10_000
@@ -1252,7 +1253,10 @@ export type NativeAudioHostSupervisor = {
 
 export const createNativeAudioHostSupervisor = (
   hostPath: string,
-  spawnHost: SpawnHost = (executable) => spawn(executable, [], { env: { PATH: "/usr/bin:/bin" }, stdio: ["pipe", "pipe", "pipe"] }),
+  spawnHost: SpawnHost = (executable) => {
+    const environment: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin" }
+    return spawn(executable, [], { env: environment, stdio: ["pipe", "pipe", "pipe"] })
+  },
   options: NativeAudioHostSupervisorOptions = {},
 ): NativeAudioHostSupervisor => {
   let child: ChildProcessWithoutNullStreams | undefined
@@ -1313,6 +1317,23 @@ export const createNativeAudioHostSupervisor = (
   }
   const lost = (message: string, source = child) => {
     if (!source || child !== source) return
+    console.error("[native-audio-host-termination-request]", JSON.stringify({
+      reason: "host-process-loss",
+      requester: "audio-host-supervisor-lost",
+      timestamp: Date.now(),
+      lifecycleGeneration,
+      pid: source.pid ?? null,
+      signal: "SIGTERM",
+      pendingRequest: pending?.requestType === undefined
+        ? null
+        : nativeAudioHostRequestName(pending.requestType),
+      message: message.replace(/[\r\n\t]+/g, " ").slice(0, 256),
+    }))
+    console.error("[native-vst3] native audio host lost", JSON.stringify({
+      message: message.slice(0, 256),
+      lifecycleGeneration,
+      pid: source.pid ?? null,
+    }))
     const error = new Error(message)
     rejectPending(error)
     child = undefined
@@ -1331,10 +1352,50 @@ export const createNativeAudioHostSupervisor = (
     for (const listener of lossListeners) listener(error)
   }
   const decodeDiagnostics = (frame: Buffer): NativeHostDiagnostics | undefined => {
-    if (frame.byteLength !== headerBytes + 88) return undefined
+    if (frame.byteLength < headerBytes + 256 || frame.byteLength > headerBytes + 512) return undefined
     const state = frame.readUInt32BE(headerBytes)
     if (state !== 0 && state !== 1 && state !== 2 && state !== 3) return undefined
+    const present = frame.readUInt32BE(headerBytes + 88)
+    if (present > 1) return undefined
+    const epoch = frame.readUInt32BE(headerBytes + 100)
+    const idBytes = frame.readUInt32BE(headerBytes + 112)
+    const performanceOffset = headerBytes + 116 + idBytes
+    if (idBytes > 256 || frame.byteLength !== performanceOffset + 140
+      || (present === 0 && idBytes !== 0) || (present === 1 && idBytes === 0)) return undefined
+    const acceptedPoints = frame.readUInt32BE(headerBytes + 92)
+    if (present === 1 && (acceptedPoints === 0 || acceptedPoints > maxVst3WorkerEventsPerBlock
+      || epoch === 0 || epoch !== frame.readUInt32BE(headerBytes + 16))) return undefined
     return {
+      workerAutomation: present === 0 ? null : {
+        instanceId: readDiagnosticInstanceId(frame, headerBytes + 116, idBytes),
+        acceptedPoints,
+        lastParameterId: frame.readUInt32BE(headerBytes + 96),
+        transportEpoch: epoch,
+        sequence: frame.readBigUInt64BE(headerBytes + 104),
+      },
+      transportFrame: frame.readBigInt64BE(performanceOffset),
+      realtimePerformance: {
+        sampleRateHz: frame.readUInt32BE(performanceOffset + 8),
+        framesPerCallback: frame.readUInt32BE(performanceOffset + 12),
+        observationCount: frame.readBigUInt64BE(performanceOffset + 16),
+        processingP50Nanoseconds: frame.readBigUInt64BE(performanceOffset + 24),
+        processingP95Nanoseconds: frame.readBigUInt64BE(performanceOffset + 32),
+        processingP99Nanoseconds: frame.readBigUInt64BE(performanceOffset + 40),
+        processingMaximumNanoseconds: frame.readBigUInt64BE(performanceOffset + 48),
+        deadlineMisses: frame.readBigUInt64BE(performanceOffset + 56),
+      },
+      vstWorkerPerformance: {
+        activeWorkers: frame.readUInt32BE(performanceOffset + 64),
+        observationCount: frame.readBigUInt64BE(performanceOffset + 68),
+        processingP50Nanoseconds: frame.readBigUInt64BE(performanceOffset + 76),
+        processingP95Nanoseconds: frame.readBigUInt64BE(performanceOffset + 84),
+        processingP99Nanoseconds: frame.readBigUInt64BE(performanceOffset + 92),
+        processingMaximumNanoseconds: frame.readBigUInt64BE(performanceOffset + 100),
+        deadlineMisses: frame.readBigUInt64BE(performanceOffset + 108),
+        watchdogMisses: frame.readBigUInt64BE(performanceOffset + 116),
+        faults: frame.readBigUInt64BE(performanceOffset + 124),
+        restarts: frame.readBigUInt64BE(performanceOffset + 132),
+      },
       state: state === 0 ? "idle" : state === 1 ? "configured" : state === 2 ? "running" : "faulted",
       activeRevision: frame.readUInt32BE(headerBytes + 4),
       preparedRevision: frame.readUInt32BE(headerBytes + 8),
@@ -1707,11 +1768,14 @@ export const createNativeAudioHostSupervisor = (
       } else if (frame.readUInt32BE(8) === diagnosticsType && pending?.diagnosticsResolve) {
         const resolve = pending.diagnosticsResolve
         const diagnostic = decodeDiagnostics(frame)
-        if (!diagnostic) return lost("The native audio host returned an invalid diagnostics response.")
-        clearTimeout(pending.deadline)
-        pending = undefined
-        dispatchNext()
-        resolve(diagnostic)
+        if (!diagnostic) {
+          rejectPending(new Error("The native audio host returned an invalid diagnostics response."))
+        } else {
+          clearTimeout(pending.deadline)
+          pending = undefined
+          dispatchNext()
+          resolve(diagnostic)
+        }
       } else if (frame.readUInt32BE(8) === deviceListType && pending?.devicesResolve) {
         const resolve = pending.devicesResolve
         const device = decodeOutputDevice(frame)
@@ -1987,18 +2051,31 @@ export const createNativeAudioHostSupervisor = (
         }
         spawned = spawnHost(hostPath)
         child = spawned
-        spawned.once("error", () => lost("The native audio host could not start.", spawned))
+        console.error("[native-vst3] native audio host spawned", JSON.stringify({
+          lifecycleGeneration,
+          pid: spawned.pid ?? null,
+        }))
+        spawned.once("error", (error) => {
+          console.error("[native-vst3] native audio host spawn error", JSON.stringify({
+            lifecycleGeneration,
+            pid: spawned?.pid ?? null,
+            message: error.message.slice(0, 256),
+          }))
+          lost("The native audio host could not start.", spawned)
+        })
         spawned.once("close", (code, signal) => {
           const requestType = pending?.requestType
           const pendingRequest = requestType === undefined
             ? undefined
             : `${nativeAudioHostRequestName(requestType)} request ${requestType}`
-          console.error("[native-vst3] native audio host closed", {
+          console.error("[native-vst3] native audio host closed", JSON.stringify({
             code,
             signal,
+            lifecycleGeneration,
+            pid: spawned?.pid ?? null,
             pendingRequestType: requestType,
             pendingRequestName: requestType === undefined ? undefined : nativeAudioHostRequestName(requestType),
-          })
+          }))
           if (teardownPromise && child === spawned) return
           lost(
             pendingRequest

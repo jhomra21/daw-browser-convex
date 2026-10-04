@@ -4,8 +4,10 @@
 #include <cerrno>
 #include <charconv>
 #include <array>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <iostream>
 #include <poll.h>
 #include <string>
@@ -19,6 +21,20 @@ constexpr int kEditorPollTimeoutMilliseconds = 8;
 // Commercial plugins may open several files and sockets; retain headroom
 // without allowing unbounded descriptor exhaustion.
 constexpr rlim_t kWorkerNoFileLimit = 512;
+
+bool Parse(const std::string_view text, double& result) {
+  if (text.empty()) return false;
+  const auto first = text.front();
+  if (first == '+' || first == ' ' || first == '\t' || first == '\n'
+    || first == '\r' || first == '\f' || first == '\v') return false;
+  const std::string owned(text);
+  char* end = nullptr;
+  errno = 0;
+  const auto parsed = std::strtod(owned.c_str(), &end);
+  if (errno == ERANGE || end != owned.c_str() + owned.size()) return false;
+  result = parsed;
+  return true;
+}
 
 template <typename Number>
 bool Parse(const std::string_view text, Number& result) {
@@ -181,17 +197,21 @@ int main(const int argc, char* argv[]) {
     plugin.Dispose();
     return EXIT_SUCCESS;
   }
-  if (argc != 9 || std::string_view(argv[1]) != "--transport-fd"
+  if (argc != 11 || std::string_view(argv[1]) != "--transport-fd"
     || std::string_view(argv[3]) != "--control-fd" || std::string_view(argv[5]) != "--response-fd"
-    || std::string_view(argv[7]) != "--token") {
+    || std::string_view(argv[7]) != "--token" || std::string_view(argv[9]) != "--wake-fd") {
     return EXIT_FAILURE;
   }
   int transportFileDescriptor = -1;
   int controlFileDescriptor = -1;
   int responseFileDescriptor = -1;
+  int wakeFileDescriptor = -1;
   std::uint64_t token = 0;
   if (!Parse(argv[2], transportFileDescriptor) || !Parse(argv[4], controlFileDescriptor)
-    || !Parse(argv[6], responseFileDescriptor) || !Parse(argv[8], token)) return EXIT_FAILURE;
+    || !Parse(argv[6], responseFileDescriptor) || !Parse(argv[8], token)
+    || !Parse(argv[10], wakeFileDescriptor) || wakeFileDescriptor < 0) return EXIT_FAILURE;
+  const auto wakeFlags = fcntl(wakeFileDescriptor, F_GETFL);
+  if (wakeFlags < 0 || fcntl(wakeFileDescriptor, F_SETFL, wakeFlags | O_NONBLOCK) != 0) return EXIT_FAILURE;
   auto transport = daw::plugin_host::WorkerTransport::MapInherited(transportFileDescriptor, token);
   if (!transport) return EXIT_FAILURE;
   const auto startup = daw::plugin_host::ReadWorkerStartupRequest(controlFileDescriptor, token);
@@ -284,46 +304,87 @@ int main(const int argc, char* argv[]) {
       }
       publishEditorFeedback();
     }
-    struct pollfd readyControl{.fd = controlFileDescriptor, .events = POLLIN, .revents = 0};
-    const auto pollResult = poll(&readyControl, 1, editorOpen ? kEditorPollTimeoutMilliseconds : -1);
+    std::array<pollfd, 2> ready{
+      pollfd{.fd = controlFileDescriptor, .events = POLLIN, .revents = 0},
+      pollfd{.fd = wakeFileDescriptor, .events = POLLIN, .revents = 0},
+    };
+    const auto pollTimeout = editorOpen ? kEditorPollTimeoutMilliseconds : -1;
+    const auto pollResult = poll(ready.data(), static_cast<nfds_t>(ready.size()), pollTimeout);
     if (pollResult < 0 && errno == EINTR) continue;
-    if (pollResult <= 0) continue;
-    const auto command = daw::plugin_host::ReadWorkerControlCommand(controlFileDescriptor);
-    if (!command || command->command == daw::plugin_host::WorkerControlCommand::kStop) {
-      plugin.Dispose();
-      transport->PublishHealth(daw::plugin_host::WorkerHealth::kStopped);
-      static_cast<void>(transport->PublishDiagnostic({.kind = daw::plugin_host::WorkerDiagnosticKind::kStopped}));
-      return command ? EXIT_SUCCESS : EXIT_FAILURE;
+    if (pollResult < 0) continue;
+    if ((ready[0].revents | ready[1].revents) & POLLNVAL) {
+      std::cerr << "[vst-worker-lifecycle] invalid poll descriptor control_revents="
+        << ready[0].revents << " wake_revents=" << ready[1].revents << '\n';
+      return EXIT_FAILURE;
     }
-    if (command->command == daw::plugin_host::WorkerControlCommand::kStateSet) {
-      const auto state = daw::plugin_host::ReadWorkerState(controlFileDescriptor);
-      const auto success = !startup->noPluginTestMode && state && plugin.SetState(*state);
-      if (!daw::plugin_host::WriteWorkerEditorResponse(responseFileDescriptor, {.success = success})) return EXIT_FAILURE;
-      continue;
+    const bool wakeClosed = (ready[1].revents & (POLLHUP | POLLERR)) != 0;
+    const bool controlReady = (ready[0].revents & (POLLIN | POLLHUP | POLLERR)) != 0;
+    if (wakeClosed) {
+      std::cerr << "[vst-worker-lifecycle] wake descriptor closed revents="
+        << ready[1].revents << '\n';
+      if (!controlReady) return EXIT_FAILURE;
     }
-    if (command->command == daw::plugin_host::WorkerControlCommand::kStateGet) {
-      const auto state = startup->noPluginTestMode ? std::optional<daw::plugin_host::WorkerState>{} : plugin.GetState();
-      if (!state || !daw::plugin_host::WriteWorkerState(responseFileDescriptor, *state)) return EXIT_FAILURE;
-      continue;
+    if (ready[0].revents & (POLLHUP | POLLERR)) {
+      std::cerr << "[vst-worker-lifecycle] control descriptor closed revents="
+        << ready[0].revents << '\n';
     }
-    const auto editorCommand = [&]() -> std::optional<daw::plugin_host::WorkerEditorCommand> {
-      switch (command->command) {
-        case daw::plugin_host::WorkerControlCommand::kEditorOpen: return daw::plugin_host::WorkerEditorCommand::kOpen;
-        case daw::plugin_host::WorkerControlCommand::kEditorClose: return daw::plugin_host::WorkerEditorCommand::kClose;
-        case daw::plugin_host::WorkerControlCommand::kEditorFocus: return daw::plugin_host::WorkerEditorCommand::kFocus;
-        case daw::plugin_host::WorkerControlCommand::kEditorResize: return daw::plugin_host::WorkerEditorCommand::kResize;
-        case daw::plugin_host::WorkerControlCommand::kEditorStatus: return daw::plugin_host::WorkerEditorCommand::kStatus;
-        default: return std::nullopt;
+    if (ready[1].revents & POLLIN) {
+      daw::plugin_host::WorkerWakeSignal::Drain(wakeFileDescriptor);
+    }
+    if (pollResult > 0 && controlReady) {
+      const auto command = daw::plugin_host::ReadWorkerControlCommand(controlFileDescriptor);
+      if (!command || command->command == daw::plugin_host::WorkerControlCommand::kStop) {
+        plugin.Dispose();
+        transport->PublishHealth(daw::plugin_host::WorkerHealth::kStopped);
+        static_cast<void>(transport->PublishDiagnostic({.kind = daw::plugin_host::WorkerDiagnosticKind::kStopped}));
+        return command ? EXIT_SUCCESS : EXIT_FAILURE;
       }
-    }();
-    if (editorCommand) {
-      const auto success = !startup->noPluginTestMode
-        && plugin.ExecuteEditorCommand(*editorCommand, command->width, command->height, command->anchor);
-      const auto status = startup->noPluginTestMode ? daw::plugin_host::WorkerEditorStatus{} : plugin.EditorStatus();
-      plugin.PublishEditorOpenState(status.open);
-      editorOpen = status.open;
-      if (!daw::plugin_host::WriteWorkerEditorResponse(responseFileDescriptor, {.success = success, .status = status})) return EXIT_FAILURE;
-      continue;
+      if (command->command == daw::plugin_host::WorkerControlCommand::kStateSet) {
+        const auto state = daw::plugin_host::ReadWorkerState(controlFileDescriptor);
+        const auto success = !startup->noPluginTestMode && state && plugin.SetState(*state);
+        if (!daw::plugin_host::WriteWorkerEditorResponse(responseFileDescriptor, {.success = success})) {
+          return EXIT_FAILURE;
+        }
+      }
+      if (command->command == daw::plugin_host::WorkerControlCommand::kStateGet) {
+        const auto state = startup->noPluginTestMode
+          ? std::optional<daw::plugin_host::WorkerState>{}
+          : plugin.GetState();
+        if (!state || !daw::plugin_host::WriteWorkerState(responseFileDescriptor, *state)) {
+          return EXIT_FAILURE;
+        }
+      }
+      const auto editorCommand = [&]() -> std::optional<daw::plugin_host::WorkerEditorCommand> {
+        switch (command->command) {
+          case daw::plugin_host::WorkerControlCommand::kEditorOpen:
+            return daw::plugin_host::WorkerEditorCommand::kOpen;
+          case daw::plugin_host::WorkerControlCommand::kEditorClose:
+            return daw::plugin_host::WorkerEditorCommand::kClose;
+          case daw::plugin_host::WorkerControlCommand::kEditorFocus:
+            return daw::plugin_host::WorkerEditorCommand::kFocus;
+          case daw::plugin_host::WorkerControlCommand::kEditorResize:
+            return daw::plugin_host::WorkerEditorCommand::kResize;
+          case daw::plugin_host::WorkerControlCommand::kEditorStatus:
+            return daw::plugin_host::WorkerEditorCommand::kStatus;
+          default:
+            return std::nullopt;
+        }
+      }();
+      if (editorCommand) {
+        const auto success = !startup->noPluginTestMode
+          && plugin.ExecuteEditorCommand(*editorCommand, command->width, command->height, command->anchor);
+        const auto status = startup->noPluginTestMode
+          ? daw::plugin_host::WorkerEditorStatus{}
+          : plugin.EditorStatus();
+        plugin.PublishEditorOpenState(status.open);
+        editorOpen = status.open;
+        if (!daw::plugin_host::WriteWorkerEditorResponse(
+          responseFileDescriptor,
+          {.success = success, .status = status}
+        )) {
+          return EXIT_FAILURE;
+        }
+      }
     }
     bool failed = false;
     std::uint64_t processedSequence = 0;
@@ -337,6 +398,7 @@ int main(const int argc, char* argv[]) {
       const auto sequence = transport->BeginProcessing(slotIndex);
       if (!sequence) continue;
       processedSequence = *sequence;
+      const auto processingStarted = std::chrono::steady_clock::now();
       try {
         if (startup->noPluginTestMode) {
           // CTest-only transport verification; regular launches always use Vst3Worker.
@@ -366,12 +428,33 @@ int main(const int argc, char* argv[]) {
           }
           outputSilenceFlags &= daw::plugin_host::ChannelMask(transport->outputChannels()).value_or(0);
           transport->SetOutputSilenceFlags(slotIndex, outputSilenceFlags);
-          if (!transport->Complete(slotIndex, *sequence)) failed = true;
+          if (!transport->Complete(slotIndex, *sequence)
+            && transport->slot(slotIndex).status != daw::plugin_host::WorkerSlotStatus::kDropped) {
+            failed = true;
+          }
         } else if (!plugin.ProcessSubmittedSlot(slotIndex)) {
-          failed = true;
+          if (transport->slot(slotIndex).status != daw::plugin_host::WorkerSlotStatus::kDropped) {
+            failed = true;
+          }
         }
       } catch (...) {
         failed = true;
+      }
+      const auto processingNanoseconds = static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now() - processingStarted
+        ).count()
+      );
+      const auto samples = transport->numSamples(slotIndex);
+      const auto deadlineNanoseconds = startup->setup.sampleRate > 0.0
+        ? static_cast<std::uint64_t>(
+          static_cast<double>(samples) * 1'000'000'000.0 / startup->setup.sampleRate
+        )
+        : 0;
+      transport->RecordProcessingDuration(processingNanoseconds, deadlineNanoseconds);
+      if (transport->slot(slotIndex).status == daw::plugin_host::WorkerSlotStatus::kDropped) {
+        static_cast<void>(transport->ReleaseDropped(slotIndex));
+        continue;
       }
       if (failed) {
         transport->PublishHealth(daw::plugin_host::WorkerHealth::kFaulted);

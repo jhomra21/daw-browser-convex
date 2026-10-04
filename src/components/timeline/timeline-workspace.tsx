@@ -423,6 +423,7 @@ export default function TimelineWorkspace(props: Props) {
       <div class="relative min-h-0 min-w-0 flex-1">
         <TimelineContextMenu items={fallbackMenuItems}>
         <div
+          data-timeline-scroll-viewport="1"
           class="relative h-full w-full min-w-0 overflow-auto overscroll-x-none"
           ref={(element) => observeScrollViewport(element)}
           onWheel={(event) => props.viewport.onWheel(event)}

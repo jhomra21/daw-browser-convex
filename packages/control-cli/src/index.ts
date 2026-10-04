@@ -22,8 +22,9 @@ const commandNames = [
   "project list [--target <cloud|host>]", "project current --target host", "rpc --target host", "snapshot <project-id> [--target <cloud|host>]", "snapshot-v2 <project-id> [--target <cloud|host>]", "preview --request <file|-> [--target <cloud|host>]", "approval --request <file|-> [--target <cloud|host>]", "commit --request <file|-> [--target <cloud|host>]",
   "history <project-id> [--cursor <cursor>] [--limit <number>] [--target <cloud|host>]",
   "recoveries <project-id> [--cursor <cursor>] [--limit <number>] [--target <cloud|host>]",
-  "host status", "host transport-status", "host play", "host pause", "host stop", "host seek <seconds>", "host diagnostics",
+  "host status", "host transport-status", "host play", "host pause", "host stop", "host seek <seconds>", "host diagnostics", "host diagnostics-v2",
   "host import (--path <absolute-path>|--picker)", "host export --request <file|->", "host export-status", "host export-cancel <job-id>",
+  "host vst-instances <project-id>", "host vst-parameters <project-id> <instance-id>",
 ]
 
 const error = (code: ControlErrorV1["code"], message: string): ControlErrorV1 => ({

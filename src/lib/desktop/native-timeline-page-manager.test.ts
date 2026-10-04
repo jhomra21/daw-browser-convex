@@ -507,6 +507,44 @@ test("bounds uploaded-page bookkeeping independently of source duration", async 
   manager.dispose()
 })
 
+test("hydrates only a bounded page at a late offset in a long source", async () => {
+  const pageFrames = 16_384
+  const startFrame = 540 * 48_000
+  const frameCount = 600 * 48_000
+  const pages: Array<{ startFrame: number; frameCount: number }> = []
+  const prepared: Array<{ startFrame: number; frameCount: number }> = []
+  const manager = createNativeTimelinePageManager({
+    pageFrames,
+    sources: [{
+      sourceAssetKey: "long",
+      sessionAssetId: 7,
+      frameCount,
+      sampleRateHz: 48_000,
+      channelCount: 1,
+      descriptor: descriptorForBuffer(new LongEagerAudioBuffer(frameCount)),
+    }],
+    writePage: async (page) => {
+      pages.push({ startFrame: page.startFrame, frameCount: page.frameCount })
+    },
+    prepareRange: async (_sessionAssetId, preparedStartFrame, preparedFrameCount) => {
+      prepared.push({ startFrame: preparedStartFrame, frameCount: preparedFrameCount })
+    },
+  })
+
+  await manager.ensureRanges([{
+    sourceAssetKey: "long",
+    startFrame,
+    endFrame: startFrame + 4_096,
+  }])
+
+  expect(pages).toEqual([{
+    startFrame: Math.floor(startFrame / pageFrames) * pageFrames,
+    frameCount: pageFrames,
+  }])
+  expect(prepared).toEqual([{ startFrame, frameCount: 4_096 }])
+  manager.dispose()
+})
+
 test("keeps wide-channel mapped pages within the protocol payload limit", async () => {
   const pages: NativeHostMappedAssetPage[] = []
   const manager = createNativeTimelinePageManager({

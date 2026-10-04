@@ -8,7 +8,7 @@ import {
 import { downloadCloudAssetsForOffline } from "~/lib/cloud-asset-cache";
 import { setLocalProjectAssetDirectory } from "~/lib/local-assets";
 import { isLocalId } from "@daw-browser/shared";
-import { downloadBlob } from "~/lib/local-export";
+import { chooseLocalExportFile, createLocalExportWritable, downloadBlob } from "~/lib/local-export";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import { flushSharedOutbox, readSharedOutboxSummary } from "~/lib/shared-outbox";
 import type { CloudBackupDialogState } from "~/components/timeline/cloud-backup-dialog";
@@ -203,10 +203,29 @@ export const useLocalProjectActions = (input: Input) => {
   const exportArchive = async () => {
     const rid = input.projectId();
     if (!isLocalId("project", rid)) return;
+    const suggestedName = `${rid}.dawproject`;
     try {
-      const { exportDawProjectArchive } = await import("~/lib/project-archive");
-      const blob = await exportDawProjectArchive(rid);
-      downloadBlob({ blob, suggestedName: `${rid}.dawproject` });
+      const { exportDawProjectArchive, exportDawProjectArchiveStreamed } = await import("~/lib/project-archive");
+      const handle = await chooseLocalExportFile({ suggestedName });
+      if (!handle) {
+        const blob = await exportDawProjectArchive(rid);
+        downloadBlob({ blob, suggestedName });
+        return;
+      }
+      const { writable } = await createLocalExportWritable(handle);
+      try {
+        await exportDawProjectArchiveStreamed(rid, (chunk) => {
+          const bytes = new Uint8Array(chunk.byteLength);
+          bytes.set(chunk);
+          return writable.write(bytes.buffer);
+        });
+        await writable.close();
+      } catch (error) {
+        try {
+          await writable.abort();
+        } catch {}
+        throw error;
+      }
     } catch (error) {
       setLocalSaveFailure(error instanceof Error ? error.message : "Archive export failed.");
     }

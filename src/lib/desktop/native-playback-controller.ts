@@ -16,6 +16,7 @@ import {
   nativeGraphNodeId,
 } from "@daw-browser/audio-engine/native-host-wire"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
+import { parseExternalAutomationParameterId } from "@daw-browser/shared"
 import {
   prepareNativeStretchArtifacts,
   type NativePreparedStretchAsset,
@@ -52,6 +53,9 @@ import type {
 } from "~/lib/live-playback-snapshot"
 import type { EffectParamsCommitPayload } from "~/lib/undo/types"
 import { createPortableRecordingWriter } from "~/lib/recording/portable-recording-writer"
+import type { createNativeSabRecordingWriter } from "~/lib/recording/native-sab-recording-writer"
+import { recordNativeBlockTiming, recordingDiagnosticsSubscriberCount, updateRecordingDiagnostics, type RecordingTerminationCause } from "~/lib/recording/recording-diagnostics"
+import { createBenchmarkBlockCost } from "~/lib/recording/benchmark-block-cost"
 import type { DesktopBridge } from "~/types/desktop-bridge"
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type {
@@ -162,7 +166,6 @@ type NativePlaybackBridge = Pick<
 }
 
 type NativeStartResult = "started" | "unavailable" | "blocked"
-
 const nativeTransportFor = (
   snapshot: LivePlaybackSnapshot,
   epoch: number,
@@ -202,20 +205,20 @@ export type NativeBuiltInStatePatchResult =
   | { handled: false; reason: "unprepared" | "unsupported-instance" | "unsupported-state" | "unavailable" | "bridge-error"; error?: string }
 export type NativeRecordingDiagnostics = Pick<
   NativeHostRecordingStatus,
-  "capturedFrames" | "droppedFrames" | "droppedBlocks" | "availableBlocks" | "queuedBlocks" | "rms" | "peak" | "fatal"
+  "active" | "capturedFrames" | "droppedFrames" | "droppedBlocks" | "availableBlocks" | "queuedBlocks" | "rms" | "peak" | "fatal"
 >
 
 type NativeRecordingSession = {
   appSessionId: string
   numericSessionId: bigint
   generation: number
-  writer: ReturnType<typeof createPortableRecordingWriter>
+  writer: ReturnType<typeof createPortableRecordingWriter> | ReturnType<typeof createNativeSabRecordingWriter>
   unsubscribeBlock: () => void
   unsubscribeStatus: () => void
   terminal: boolean
   latestStatus?: NativeHostRecordingStatus
   onDiagnostics?: (diagnostics: NativeRecordingDiagnostics) => void
-  onFailure?: (error: Error) => void
+  onFailure?: (error: Error, cause: RecordingTerminationCause) => void
 }
 
 type NativeRecordingStatusSubscription = {
@@ -298,6 +301,8 @@ export const createNativePlaybackController = (input: {
   reportFault?: (message: string) => void
   reportUnavailable?: boolean
   createRecordingWriter?: typeof createPortableRecordingWriter
+  /** Benchmark-only opt-in; absent in production. */
+  createNativeSabRecordingWriter?: (input: Parameters<typeof createNativeSabRecordingWriter>[0]) => ReturnType<typeof createNativeSabRecordingWriter> | Promise<ReturnType<typeof createNativeSabRecordingWriter>>
   createPreparedStretchRepository?: () => PreparedStretchArtifactRepository
   createStretchCache?: (options: AudioStretchCacheOptions) => ReturnType<typeof createAudioStretchCache>
 }) => {
@@ -648,12 +653,13 @@ export const createNativePlaybackController = (input: {
       startFrame: options.startFrame,
       onFault: (error) => {
         if (sessionGeneration !== nativeSessionGeneration) return
-        void dispose().catch(() => undefined)
+        void disposeNativeSession().catch(() => undefined)
         reportFault(error.message)
       },
       onRenderedFrame: (renderedFrame) => {
         if (renderedFrame >= transportFrame) transportFrame = renderedFrame
       },
+      onRefillDiagnostics: () => undefined,
       onHostLoss: (error) => {
         if (sessionGeneration !== nativeSessionGeneration) return
         handleNativeHostLoss(error)
@@ -690,7 +696,7 @@ export const createNativePlaybackController = (input: {
       || recording !== undefined
     if (hostLost && recording) {
       recording.terminal = true
-      recording.onFailure?.(new Error(nativeHostConnectionLossMessage()))
+      recording.onFailure?.(new Error(nativeHostConnectionLossMessage()), "controller-cleanup")
       recording.unsubscribeBlock()
       recording.unsubscribeStatus()
       recording.writer.terminate()
@@ -733,7 +739,9 @@ export const createNativePlaybackController = (input: {
     if (hadSession) transportEpoch += 1
   }
 
-  const dispose = async (options?: { invalidateProjectArtifacts?: boolean }) => {
+  const disposeNativeSession = async (
+    options?: { invalidateProjectArtifacts?: boolean },
+  ) => {
     intentionalHostTransitionDepth += 1
     try {
       const bridge = input.bridge
@@ -756,6 +764,9 @@ export const createNativePlaybackController = (input: {
       intentionalHostTransitionDepth -= 1
     }
   }
+  const dispose = (
+    options?: { invalidateProjectArtifacts?: boolean },
+  ) => disposeNativeSession(options)
   const cancelPendingStart = () => {
     const request = pendingStart
     if (!request) return Promise.resolve()
@@ -798,9 +809,12 @@ export const createNativePlaybackController = (input: {
       let previousCoordinator: NativeScheduleCoordinator | undefined
       try {
         previousCoordinator = scheduleCoordinator
-        const refreshed = previousCoordinator && preparedSnapshot && !compileContext
-          ? { supported: true as const, snapshot: { ...preparedSnapshot, transport } }
-          : await input.compileSnapshot(transport, compileContext)
+        // Public project control can persist automation while a paused native
+        // session remains prepared. Recompile before resuming its coordinator.
+        const compiled = await input.compileSnapshot(transport, compileContext)
+        const refreshed = compiled.supported
+          ? { ...compiled, snapshot: { ...compiled.snapshot, transport } }
+          : compiled
         if (!refreshed.supported || refreshed.snapshot.revision !== preparedSnapshot?.revision) {
           preparedProjectGeneration = undefined
         } else {
@@ -820,7 +834,7 @@ export const createNativePlaybackController = (input: {
             ))
             await previousCoordinator.waitForTransition(runTransitionId, true)
             if (cancelled()) {
-              await dispose()
+              await disposeNativeSession()
               return "unavailable"
             }
             preparedSnapshot = refreshed.snapshot
@@ -863,7 +877,7 @@ export const createNativePlaybackController = (input: {
             await nextCoordinator.waitForTransition(runTransitionId, true)
           }
           if (cancelled()) {
-            await dispose()
+            await disposeNativeSession()
             return "unavailable"
           }
           preparedSnapshot = refreshed.snapshot
@@ -893,7 +907,7 @@ export const createNativePlaybackController = (input: {
         }
         if (ownsAttemptedCoordinator) {
           if (hasNativeHostConnectionLoss()) invalidateNativeOwnership(true, true)
-          else await dispose()
+          else await disposeNativeSession()
         }
         return "unavailable"
       }
@@ -1289,7 +1303,7 @@ export const createNativePlaybackController = (input: {
       nativeSessionStarted = true
       configureNativeSpectrumTarget()
       if (cancelled()) {
-        await dispose()
+        await disposeNativeSession()
         return "unavailable"
       }
       await nextCoordinator.waitForTransition(nextTransportTransitionId, false)
@@ -1320,9 +1334,9 @@ export const createNativePlaybackController = (input: {
       const hostLost = hasNativeHostConnectionLoss()
       if (transactionOpen && !hostLost) {
         if (transactionToken) await bridge.session.rollbackTransaction(transactionToken)
-        if (!wasCancelled) await dispose()
+        if (!wasCancelled) await disposeNativeSession()
       }
-      else if (!wasCancelled && !hostLost) await dispose()
+      else if (!wasCancelled && !hostLost) await disposeNativeSession()
       else if (hostLost) invalidateNativeOwnership(true, true)
       const result = requiresNative ? "blocked" : "unavailable"
       console.error("[native-vst3] native start failed", {
@@ -1350,11 +1364,12 @@ export const createNativePlaybackController = (input: {
     if (pendingStart) {
       if (pendingStartMode === "play") return pendingStart
       const previewRequest = pendingStart
-      const generation = lifecycleGeneration
       const projectGeneration = resolveProjectGeneration()
-      const request = previewRequest.then((result) => result === "started"
-        ? startAttempt(transport, generation, projectGeneration, true, compileContext)
-        : result)
+      const projectId = input.getProjectId?.()
+      const request = previewRequest.then(() =>
+        destroyed || projectGeneration !== resolveProjectGeneration() || projectId !== input.getProjectId?.()
+          ? "unavailable"
+          : startAttempt(transport, lifecycleGeneration, projectGeneration, true, compileContext))
       pendingStart = request
       pendingStartMode = "play"
       pendingStartCompileContext = compileContext
@@ -1486,7 +1501,7 @@ export const createNativePlaybackController = (input: {
     destroyed = true
     const pending = pendingStart
     destroyPromise = (async () => {
-      await dispose()
+      await disposeNativeSession()
       await pending?.catch(() => undefined)
       await stretchCache?.dispose()
       stretchCache = undefined
@@ -1590,7 +1605,7 @@ export const createNativePlaybackController = (input: {
       })
     } catch (error) {
       reportFault(error instanceof Error ? error.message : "Native playback could not pause.")
-      await dispose()
+      await disposeNativeSession()
       throw error
     }
   }
@@ -1607,7 +1622,7 @@ export const createNativePlaybackController = (input: {
       })
     } catch (error) {
       reportFault(error instanceof Error ? error.message : "Native playback could not seek.")
-      await dispose()
+      await disposeNativeSession()
       throw error
     }
   }
@@ -1620,10 +1635,10 @@ export const createNativePlaybackController = (input: {
     recording = undefined
   }
 
-  const failRecording = (session: NativeRecordingSession, error: Error) => {
+  const failRecording = (session: NativeRecordingSession, error: Error, cause: RecordingTerminationCause) => {
     if (recording !== session || session.terminal) return
     session.terminal = true
-    session.onFailure?.(error)
+    session.onFailure?.(error, cause)
     void cancelRecording().catch(() => {
       void session.writer.abort().catch(() => undefined).finally(() => clearRecording(session))
     })
@@ -1663,7 +1678,7 @@ export const createNativePlaybackController = (input: {
     punchStartFrame: number
     punchEndFrame?: number
     onDiagnostics?: (diagnostics: NativeRecordingDiagnostics) => void
-    onFailure?: (error: Error) => void
+    onFailure?: (error: Error, cause: RecordingTerminationCause) => void
   }) => {
     const bridge = input.bridge
     if (!active || !bridge || recording || sampleRate === 0) throw new Error("Native playback is not active for recording.")
@@ -1675,12 +1690,29 @@ export const createNativePlaybackController = (input: {
     nextRecordingSessionId += 1n
     const generation = recordingGeneration
     recordingGeneration += 1
-    const writer = (input.createRecordingWriter ?? createPortableRecordingWriter)({
+    const sabWriter = await input.createNativeSabRecordingWriter?.({
+        generation, sessionId: recordingInput.appSessionId, sampleRate, channelCount,
+        onFailure: (error) => {
+          if (recording?.generation === generation && recording.appSessionId === recordingInput.appSessionId) {
+            failRecording(recording, error, "writer-failure")
+          }
+        },
+      })
+    const writer = sabWriter ?? (input.createRecordingWriter ?? createPortableRecordingWriter)({
       generation,
       sessionId: recordingInput.appSessionId,
       sampleRate,
       channelCount,
-    })
+      onQueuedFrames: (frames) => updateRecordingDiagnostics({ queuedFrames: frames }),
+      onBufferMetrics: (metrics) => updateRecordingDiagnostics({
+        writerReturnedBuffers: metrics.returned,
+        writerOutstandingBuffers: metrics.outstanding,
+        writerReturnMaxMs: metrics.latencyMs,
+        writerReturnDeliveryMaxMs: metrics.deliveryMs,
+        writerReturnDeliveryWorst: metrics.deliveryWorst ?? null,
+        writerOldestOutstandingMs: metrics.oldestAgeMs,
+      }),
+      })
     const session: NativeRecordingSession = {
       appSessionId: recordingInput.appSessionId,
       numericSessionId,
@@ -1692,15 +1724,30 @@ export const createNativePlaybackController = (input: {
       onDiagnostics: recordingInput.onDiagnostics,
       onFailure: recordingInput.onFailure,
     }
+    const benchmarkBlockCost = input.createNativeSabRecordingWriter ? createBenchmarkBlockCost() : null
     session.unsubscribeBlock = bridge.session.onRecordingBlock((block) => {
       if (recording !== session || session.terminal
         || block.generation !== generation || block.sessionId !== numericSessionId) return
+      const arrivedAt = performance.now()
+      let copiedAt = arrivedAt
+      let enqueuedAt = arrivedAt
       try {
+        if (input.createNativeSabRecordingWriter && (
+          block.channelCount !== channelCount ||
+          !Number.isInteger(block.frameCount) || block.frameCount < 1 ||
+          block.frameCount > 2048 ||
+          block.planarPcm.byteLength !== channelCount * block.frameCount * Float32Array.BYTES_PER_ELEMENT ||
+          block.planarPcm.byteOffset % Float32Array.BYTES_PER_ELEMENT !== 0
+        )) throw new Error("Invalid native SAB recording block payload.")
         const samples = new Float32Array(
           block.planarPcm.buffer,
           block.planarPcm.byteOffset,
           block.planarPcm.byteLength / Float32Array.BYTES_PER_ELEMENT,
         )
+        const planes = Array.from({ length: channelCount }, (_, channel) => (
+          samples.slice(channel * block.frameCount, (channel + 1) * block.frameCount)
+        ))
+        copiedAt = performance.now()
         writer.write({
           version: portableWasmProtocolVersion,
           type: "recording-capture-block",
@@ -1711,19 +1758,40 @@ export const createNativePlaybackController = (input: {
           channelCount,
           rms: block.rms,
           peak: block.peak,
-          planes: Array.from({ length: channelCount }, (_, channel) => (
-            samples.slice(channel * block.frameCount, (channel + 1) * block.frameCount)
-          )),
+          planes,
         })
+        enqueuedAt = performance.now()
       } catch (error) {
-        failRecording(session, error instanceof Error ? error : new Error("Native recording writer failed."))
+        failRecording(session, error instanceof Error ? error : new Error("Native recording writer failed."), "writer-failure")
+      } finally {
+        if (sabWriter) {
+          const stats = sabWriter.stats()
+          updateRecordingDiagnostics({
+            transport: "sab",
+            sabWriterOccupancy: stats.occupancy,
+            peakSabWriterOccupancy: stats.peakOccupancy,
+          })
+        }
+        recordNativeBlockTiming(arrivedAt, performance.now() - arrivedAt)
+        const costs = benchmarkBlockCost?.add(performance.now(), copiedAt - arrivedAt,
+          enqueuedAt - copiedAt, performance.now() - arrivedAt)
+        if (costs) console.info(`[quiet-renderer-block-cost] ${JSON.stringify({ ...costs, subscribers: recordingDiagnosticsSubscriberCount() })}`)
       }
     })
     session.unsubscribeStatus = bridge.session.onRecordingStatus((status) => {
       if (recording !== session || status.generation !== generation || status.sessionId !== numericSessionId) return
       session.latestStatus = status
       session.onDiagnostics?.(status)
-      if (status.fatal) failRecording(session, new Error("Native recording capture overflowed."))
+      if (input.createNativeSabRecordingWriter && (
+        !Number.isSafeInteger(status.capturedFrames) || status.capturedFrames < 0 ||
+        !Number.isSafeInteger(status.queuedBlocks) || status.queuedBlocks < 0 ||
+        !Number.isSafeInteger(status.droppedBlocks) || status.droppedBlocks !== 0 ||
+        !Number.isSafeInteger(status.droppedFrames) || status.droppedFrames !== 0
+      )) {
+        failRecording(session, new Error("Invalid native SAB recording status or dropped blocks."), "native-fatal")
+        return
+      }
+      if (status.fatal) failRecording(session, new Error("Native recording capture overflowed."), "native-fatal")
     })
     recording = session
     try {
@@ -1774,7 +1842,7 @@ export const createNativePlaybackController = (input: {
       clearRecording(session)
       return result
     } catch (error) {
-      failRecording(session, error instanceof Error ? error : new Error("Native recording finalization failed."))
+      failRecording(session, error instanceof Error ? error : new Error("Native recording finalization failed."), "writer-failure")
       throw error
     }
   }
@@ -1914,27 +1982,39 @@ export const createNativePlaybackController = (input: {
     parameterIds: readonly string[],
   ): Promise<LiveProcessorControlResult> => {
     if (!prepared || !preparedGraph) return { accepted: false, reason: "unprepared" }
+    const externalParameters = parameterIds.map((parameterId) => parseExternalAutomationParameterId(parameterId))
+    const externalInstanceId = externalParameters[0]?.instanceId
+    if (externalInstanceId !== undefined) {
+      const attachment = preparedSnapshot?.nativeExternalAttachmentPlan?.attachments
+        .find((candidate) => candidate.instanceId === externalInstanceId)
+      const parameters = new Map(attachment?.parameters?.map((parameter) => [parameter.id, parameter]))
+      const targets = externalParameters
+        .filter((external): external is NonNullable<typeof external> => (
+          external?.instanceId === instanceId
+          && external.instanceId === externalInstanceId
+          && parameters.get(external.parameterId)?.readOnly === false
+        ))
+        .map((external) => external.parameterId)
+      if (!attachment || targets.length !== parameterIds.length || !scheduleCoordinator) {
+        return { accepted: false, reason: "unsupported" }
+      }
+      try {
+        await scheduleCoordinator.reenableAutomation(externalInstanceId, targets)
+        const sequence = ++nextLiveProcessorSequence
+        return { accepted: true, sequence, appliedSequence: sequence }
+      } catch (error) {
+        return { accepted: false, reason: "bridge-error", error: error instanceof Error ? error.message : String(error) }
+      }
+    }
     const processor = resolveGraphProcessor(preparedGraph, instanceId)
-      ?? resolveGraphProcessor(preparedGraph, `external-plugin:${instanceId}`)
-    if (!processor || parameterIds.some((parameterId) => !processor.parameterTargets.has(parameterId))) {
+    if (!processor) {
       return { accepted: false, reason: "unsupported" }
     }
     const targets = parameterIds.map((parameterId) => processor.parameterTargets.get(parameterId))
       .filter((target): target is number => target !== undefined)
-    if (processor.processor.kind !== "external-vst3" || !scheduleCoordinator) {
-      const sequence = ++nextLiveProcessorSequence
-      return { accepted: true, sequence, appliedSequence: sequence }
-    }
-    try {
-      await scheduleCoordinator.reenableAutomation(
-        processor.processor.id.startsWith("external-plugin:") ? processor.processor.id.slice("external-plugin:".length) : processor.processor.id,
-        targets,
-      )
-      const sequence = ++nextLiveProcessorSequence
-      return { accepted: true, sequence, appliedSequence: sequence }
-    } catch (error) {
-      return { accepted: false, reason: "bridge-error", error: error instanceof Error ? error.message : String(error) }
-    }
+    if (targets.length !== parameterIds.length) return { accepted: false, reason: "unsupported" }
+    const sequence = ++nextLiveProcessorSequence
+    return { accepted: true, sequence, appliedSequence: sequence }
   }
 
   const runBuiltInStatePatch = async (
@@ -2189,6 +2269,7 @@ export const createNativePlaybackController = (input: {
   }
 
   return {
+    schedulerDiagnostics: () => scheduleCoordinator?.refillDiagnostics(),
     getPendingStart: () => pendingStart
       ? { mode: pendingStartMode, promise: pendingStart }
       : undefined,

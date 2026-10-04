@@ -121,6 +121,56 @@ const createMemoryFilesystem = (failWriteAt = Number.POSITIVE_INFINITY) => {
 }
 
 describe("recording temp storage", () => {
+  test("aggregates awaited header and channel writes with asynchronous storage", async () => {
+    let clock = 0
+    const memory = createMemoryFilesystem()
+    const filesystem: RecordingStorageFilesystem = {
+      root: async () => {
+        const root = await memory.filesystem.root()
+        return {
+          ...root,
+          getDirectory: async (name, create) => {
+            const directory = await root.getDirectory(name, create)
+            return {
+              ...directory,
+              getDirectory: async (sessionName, createSession) => {
+                const sessionDirectory = await directory.getDirectory(sessionName, createSession)
+                return {
+                  ...sessionDirectory,
+                  getFile: async (fileName, createFile) => {
+                    const file = await sessionDirectory.getFile(fileName, createFile)
+                    if (fileName !== "capture.pcm") return file
+                    return {
+                      ...file,
+                      createWritable: async () => {
+                        const writable = await file.createWritable()
+                        return {
+                          ...writable,
+                          write: async (data: Uint8Array<ArrayBuffer>) => {
+                            await Promise.resolve()
+                            clock += data.byteLength === 4 ? 2 : 3
+                            await writable.write(data)
+                          },
+                        }
+                      },
+                    }
+                  },
+                }
+              },
+            }
+          },
+        }
+      },
+    }
+    const session = await createRecordingTempStorage({ filesystem, clock: () => clock })
+      .createSession({ sessionId: "timed", sampleRate: 48000, channelCount: 2 })
+    await session.append([Float32Array.of(1, 2), Float32Array.of(3, 4)])
+    expect(session.timingSnapshot()).toEqual({
+      headerWriteMs: { count: 1, total: 2, max: 2 },
+      channelWriteMs: { count: 1, total: 3, max: 3 },
+    })
+    await session.finalize()
+  })
   test("fails browser-backed storage without Web Locks but permits injected lockless filesystems", async () => {
     const previousNavigator = globalThis.navigator
     Object.defineProperty(globalThis, "navigator", {

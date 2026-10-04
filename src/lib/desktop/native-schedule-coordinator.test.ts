@@ -59,6 +59,16 @@ class LongStereoAudioBuffer implements AudioBuffer {
   }
 }
 
+class MetadataAudioBuffer implements AudioBuffer {
+  readonly duration = 60
+  readonly length = 60 * 48_000
+  readonly numberOfChannels = 2
+  readonly sampleRate = 48_000
+  copyFromChannel(destination: Float32Array) { destination.fill(0) }
+  copyToChannel() {}
+  getChannelData() { return new Float32Array(0) }
+}
+
 const sourceTrack: RuntimeTrack = {
   id: "audio",
   name: "Audio",
@@ -253,6 +263,49 @@ const bridgeFor = (options: { failureCount?: number; onAccept?: (attempt: number
     instrumentPayloads,
   }
 }
+
+test("opt-in refill diagnostics aggregate progress and synchronous compilation per coordinator", async () => {
+  const fixture = bridgeFor()
+  const reports: Array<{ progressCount: number; compileCount: number; compileTotalMs: number; compileMaxMs: number }> = []
+  const coordinator = createNativeScheduleCoordinator({
+    bridge: fixture.bridge,
+    snapshot: snapshotFor(instrumentTrack),
+    epoch: 1,
+    sampleRateHz: 48_000,
+    capacity: { maximumFramesPerBlock: 128 },
+    assets: [],
+    startFrame: 0,
+    onRefillDiagnostics: (snapshot) => reports.push(snapshot),
+  })
+  coordinator.install()
+  await coordinator.prime(0)
+  for (let index = 1; index <= 1000; index += 1) {
+    fixture.emitProgress({ ...progressFor(BigInt(index)), renderedThroughFrame: 48_000n })
+  }
+  await Promise.resolve()
+  await Promise.resolve()
+  const snapshot = coordinator.refillDiagnostics()
+  expect(snapshot.progressCount).toBe(1000)
+  expect(snapshot.compileCount).toBeGreaterThan(0)
+  expect(snapshot.compileTotalMs).toBeGreaterThanOrEqual(snapshot.compileMaxMs)
+  expect(snapshot.compileMaxMs).toBeGreaterThanOrEqual(0)
+  expect(reports.length).toBeLessThan(1000)
+  expect(reports.at(-1)?.compileCount).toBeLessThanOrEqual(snapshot.compileCount)
+  const other = createNativeScheduleCoordinator({
+    bridge: bridgeFor().bridge,
+    snapshot: snapshotFor(instrumentTrack),
+    epoch: 1,
+    sampleRateHz: 48_000,
+    capacity: { maximumFramesPerBlock: 128 },
+    assets: [],
+    startFrame: 0,
+  })
+  expect(other.refillDiagnostics()).toEqual({
+    progressCount: 0, compileCount: 0, compileTotalMs: 0, compileMaxMs: 0, submittedVstSegments: 0,
+  })
+  coordinator.dispose()
+  other.dispose()
+})
 
 const instrumentEventsFrom = (payloads: readonly Uint8Array[]) => payloads.flatMap((payload) => {
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
@@ -499,6 +552,83 @@ test("retries one rejected source window without changing its ledger", async () 
   expect(view.getUint32(44, true)).toBe(0)
 })
 
+test("refills 30 overlapping native source clips only below the one-second threshold", async () => {
+  const buffer = new MetadataAudioBuffer()
+  const tracks: RuntimeTrack[] = Array.from({ length: 30 }, (_, index) => ({
+    id: `audio-${index}`,
+    name: `Audio ${index}`,
+    volume: 1,
+    clips: [{
+      id: `clip-${index}`,
+      name: `Clip ${index}`,
+      color: "#fff",
+      startSec: 0,
+      duration: 60,
+      sourceAssetKey: `source-${index}`,
+      buffer,
+    }],
+  }))
+  const snapshot = snapshotForTracks(tracks)
+  const fixture = bridgeFor()
+  const coordinator = createNativeScheduleCoordinator({
+    bridge: fixture.bridge,
+    snapshot,
+    graph: nativeGraphFor(snapshot),
+    epoch: 1,
+    sampleRateHz: 48_000,
+    capacity: { maximumFramesPerBlock: 4_096 },
+    assets: snapshot.assets.map((asset, index) => ({
+      asset: {
+        version: audioCoreContractVersion,
+        assetId: `portable-export:${asset.assetId}`,
+        frameCount: buffer.length,
+        sampleRateHz: buffer.sampleRate,
+        channelCount: buffer.numberOfChannels,
+      },
+      sessionAssetId: index + 1,
+    })),
+    assetSourceKeys: new Map(snapshot.assets.map((asset) => [
+      `portable-export:${asset.assetId}`,
+      asset.assetId,
+    ])),
+    startFrame: 0,
+  })
+
+  await coordinator.prime(0)
+  expect(fixture.payloads).toHaveLength(1)
+  expect(sourceEventsFrom(fixture.payloads)).toHaveLength(30)
+
+  coordinator.onProgress({
+    ...progressFor(1n),
+    renderedThroughFrame: 4_096n,
+    acceptedThroughFrame: 96_000n,
+  })
+  coordinator.onProgress({
+    ...progressFor(2n),
+    renderedThroughFrame: 48_000n,
+    acceptedThroughFrame: 96_000n,
+  })
+  await Bun.sleep(0)
+  expect(fixture.payloads).toHaveLength(1)
+
+  coordinator.onProgress({
+    ...progressFor(3n),
+    renderedThroughFrame: 49_152n,
+    acceptedThroughFrame: 96_000n,
+  })
+  await Bun.sleep(0)
+  await Bun.sleep(0)
+
+  expect(fixture.payloads).toHaveLength(2)
+  const refillWindow = new DataView(fixture.payloads[1]!.buffer)
+  expect(refillWindow.getBigUint64(16, true)).toBe(96_000n)
+  expect(refillWindow.getBigUint64(24, true)).toBe(145_152n)
+  const events = sourceEventsFrom(fixture.payloads)
+  expect(events).toHaveLength(60)
+  expect(events.slice(0, 30).every((event) => event.startFrame === 0)).toBeTrue()
+  expect(events.slice(30).every((event) => event.startFrame === 96_000)).toBeTrue()
+})
+
 test("hydrates mapped source ranges before queueing a schedule window", async () => {
   const order: string[] = []
   const fixture = bridgeFor()
@@ -650,7 +780,7 @@ test("keeps live-MIDI schedule ownership open with bounded contiguous windows", 
 
   coordinator.onProgress({
     ...progressFor(1n),
-    renderedThroughFrame: 48_000n,
+    renderedThroughFrame: 49_152n,
     acceptedThroughFrame: 96_000n,
   })
   await Bun.sleep(0)
@@ -679,7 +809,7 @@ test("reports a persistent refill rejection after bounded progress retries", asy
   fixture.setFailureCount(100)
   coordinator.install()
   for (let sequence = 1n; sequence <= 8n; sequence += 1n) {
-    coordinator.onProgress(progressFor(sequence))
+    coordinator.onProgress({ ...progressFor(sequence), renderedThroughFrame: 49_152n })
     await Bun.sleep(100)
   }
   expect(fixture.payloads.length).toBeGreaterThanOrEqual(8)
@@ -726,7 +856,7 @@ test("keeps an active arranged note across repeated schedule windows", async () 
     revision: 1,
     epoch: 1,
     progressSequence: 1n,
-    renderedThroughFrame: 48_000n,
+    renderedThroughFrame: 49_152n,
     acceptedThroughFrame: 96_000n,
     lastAcceptedWindowId: 1n,
     appliedTransportTransitionId: 1n,
@@ -762,7 +892,7 @@ test("moves a note-off at a window boundary into the following window", async ()
     revision: 1,
     epoch: 1,
     progressSequence: 1n,
-    renderedThroughFrame: 48_000n,
+    renderedThroughFrame: 49_152n,
     acceptedThroughFrame: 96_000n,
     lastAcceptedWindowId: 1n,
     appliedTransportTransitionId: 1n,
@@ -809,7 +939,7 @@ test("extends the final schedule window so the final note-off is accepted", asyn
     revision: 1,
     epoch: 1,
     progressSequence: 1n,
-    renderedThroughFrame: 48_000n,
+    renderedThroughFrame: 49_152n,
     acceptedThroughFrame: 96_000n,
     lastAcceptedWindowId: 1n,
     appliedTransportTransitionId: 1n,
@@ -1037,6 +1167,14 @@ test("projects non-empty VST automation segments across start, seek, and end bou
     48_000,
   )
   expect(endBoundary.every((segment) => segment.startFrame < segment.endFrame)).toBeTrue()
+})
+
+test("counts accepted VST schedule segments separately from native worker acceptance", async () => {
+  const snapshot = automationSnapshot([{ id: "start", timeSec: 0, value: 0.5, interpolation: "hold" }])
+  const { coordinator } = coordinatorFor(snapshot)
+  expect(coordinator.refillDiagnostics().submittedVstSegments).toBe(0)
+  await coordinator.prime(0)
+  expect(coordinator.refillDiagnostics().submittedVstSegments).toBeGreaterThan(0)
 })
 
 test("projects track and master volume automation into native processor events", async () => {

@@ -29,6 +29,13 @@ bool WorkerCallbackPort::ReadCompleted(const std::size_t slotIndex, const std::u
   return service_ && service_->ReadCompletionFromCallback(slotIndex, sequence);
 }
 
+WorkerSlotStatus WorkerCallbackPort::ReadStatus(
+  const std::size_t slotIndex,
+  const std::uint64_t sequence
+) const noexcept {
+  return service_ ? service_->ReadStatusFromCallback(slotIndex, sequence) : WorkerSlotStatus::kDropped;
+}
+
 bool WorkerCallbackPort::CopyCompletedOutput(
   const std::size_t slotIndex,
   const std::uint64_t sequence,
@@ -135,6 +142,11 @@ std::optional<WorkerDiagnostic> WorkerControlService::ReadDiagnostic() {
   return diagnostic;
 }
 
+WorkerProcessingMetrics WorkerControlService::processingMetrics() const {
+  const auto* transport = runtime_.transport();
+  return transport == nullptr ? WorkerProcessingMetrics{} : transport->ReadProcessingMetrics();
+}
+
 void WorkerControlService::SetDiagnosticListener(
   const DiagnosticListener listener,
   void* const context
@@ -203,6 +215,12 @@ WorkerSubmissionStatus WorkerControlService::PublishFromCallback(const WorkerSub
     static_cast<void>(runtime_.CancelPublishedSubmission(submission.slotIndex, submission.sequence));
     return WorkerSubmissionStatus::kQueueFull;
   }
+  // A full pipe still means a wake is pending. Any other write failure means
+  // the submission cannot be guaranteed to run, so release its shared slot.
+  if (!runtime_.NotifyRealtimeWorker()) {
+    static_cast<void>(runtime_.CancelPublishedSubmission(submission.slotIndex, submission.sequence));
+    return WorkerSubmissionStatus::kUnavailable;
+  }
   return WorkerSubmissionStatus::kAccepted;
 }
 
@@ -211,6 +229,16 @@ bool WorkerControlService::ReadCompletionFromCallback(
   const std::uint64_t sequence
 ) const noexcept {
   return runtime_.ReadCompleted(slotIndex, sequence);
+}
+
+WorkerSlotStatus WorkerControlService::ReadStatusFromCallback(
+  const std::size_t slotIndex,
+  const std::uint64_t sequence
+) const noexcept {
+  const auto* transport = runtime_.transport();
+  if (transport == nullptr) return WorkerSlotStatus::kDropped;
+  const auto slot = transport->slot(slotIndex);
+  return slot.sequence == sequence ? slot.status : WorkerSlotStatus::kDropped;
 }
 
 bool WorkerControlService::CopyCompletionOutputFromCallback(

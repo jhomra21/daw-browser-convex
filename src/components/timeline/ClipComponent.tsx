@@ -2,12 +2,18 @@ import {
   type Component,
   createEffect,
   createMemo,
+  onCleanup,
   Show,
 } from "solid-js";
 
 import { drawWaveformSignal } from "@daw-browser/waveforms/draw-waveform-signal";
 import { useAppPreferences } from "~/context/app-preferences";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
+import {
+  incrementPerformanceBenchmarkCounter,
+  markPerformanceBenchmark,
+  measurePerformanceBenchmark,
+} from "~/lib/performance-benchmark-telemetry";
 import { createClipVisualColors, resolveClipColor } from "~/lib/clip-color";
 import { LANE_HEIGHT } from "~/lib/timeline-utils";
 import { getTimelineClipViewportSlice } from "~/lib/timeline-viewport-geometry";
@@ -107,6 +113,7 @@ let lastClipDoubleOpen:
 const ClipComponent: Component<ClipComponentProps> = (props) => {
   const appPreferences = useAppPreferences();
   let canvasRef: HTMLCanvasElement | undefined;
+  let waveformFrame: number | undefined;
   let selectedTapStart:
     | { x: number; y: number; at: number }
     | undefined;
@@ -264,6 +271,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
   };
 
   function drawWaveform() {
+    incrementPerformanceBenchmarkCounter("waveform.raster-calls");
     const canvas = canvasRef;
     if (!canvas) return;
     if (props.waveformVisible === false) {
@@ -282,6 +290,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     const pxW = canvasSize.backingWidthPx;
     const pxH = canvasSize.backingHeightPx;
     if (canvas.width !== pxW || canvas.height !== pxH) {
+      incrementPerformanceBenchmarkCounter("waveform.canvas-resizes");
       canvas.width = pxW;
       canvas.height = pxH;
     }
@@ -472,6 +481,18 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     }
   }
 
+  const scheduleWaveformDraw = () => {
+    if (waveformFrame !== undefined) return;
+    // Zoom updates several reactive inputs together. Coalesce their canvas
+    // invalidations into the browser's next paint and cancel on unmount.
+    waveformFrame = requestAnimationFrame(() => {
+      waveformFrame = undefined;
+      markPerformanceBenchmark("waveform.raster-start");
+      measurePerformanceBenchmark("waveform.raster", drawWaveform);
+      markPerformanceBenchmark("waveform.raster-complete");
+    });
+  };
+
   createEffect(() => {
     void props.viewportRedrawVersion;
     void props.clip;
@@ -482,7 +503,10 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
     void props.pixelsPerSecond;
     void props.visibleRange;
     void waveform.segments();
-    drawWaveform();
+    scheduleWaveformDraw();
+  });
+  onCleanup(() => {
+    if (waveformFrame !== undefined) cancelAnimationFrame(waveformFrame);
   });
 
   const clipElement = (
@@ -543,6 +567,8 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         openFromDoubleTap();
       }}
       title={`${props.clip.name}`}
+      data-timeline-clip="1"
+      data-timeline-clip-id={props.clip.id}
     >
       <Show when={hasLeftBoundary()}>
         <div

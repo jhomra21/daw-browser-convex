@@ -8,6 +8,7 @@ import type {
   NativeHostRecordingBlock,
   NativeHostRecordingConfiguration,
   NativeHostRecordingStatus,
+  NativeHostDiagnostics,
   NativeHostTransport,
   NativeScheduleProgress,
   NativeOutputDevice,
@@ -96,8 +97,26 @@ export type DesktopPluginCatalogReply =
 type NativeReleaseArtifactVerification =
   | { status: "disabled" | "development" | "verified" }
   | { status: "failed"; reason: string }
+type NativeAudioHostHello = {
+  capabilities: number
+  abiVersion: number
+  processorContractHash: string
+  graphContractHash: string
+  artifactId: string
+  deviceState: "idle" | "configured" | "running" | "faulted"
+  readinessReason: "ready" | "device-not-configured" | "graph-not-prepared" | "transport-not-prepared"
+}
+type NativeAudioHostStatus = {
+  running: boolean
+  hello?: NativeAudioHostHello
+}
 type NativeAudioHostDiagnosticsReply = (
-  | { ok: true }
+  | {
+      ok: true
+      hello: NativeAudioHostHello
+      status: NativeAudioHostStatus
+      diagnostics: NativeHostDiagnostics
+    }
   | { ok: false; error: string }
 ) & { artifactVerification: NativeReleaseArtifactVerification }
 
@@ -183,6 +202,9 @@ export type DesktopAudioLifecycle = {
 }
 
 type DesktopBridge = {
+  benchmarkSabRecording?: boolean
+  benchmarkHeartbeat?: () => Promise<{ mainEpochMs: number } | null>
+  traceDiagnosticsV2(id: string, stage: "controller-before-native" | "controller-after-native" | "controller-parsed"): void
   setRequestHandler(next: DesktopRequestHandler | undefined, onCancel?: DesktopRequestCancellationHandler): void
   onPrepareToClose(next: DesktopPrepareToCloseHandler | undefined): void
   prepareToClose(): Promise<{ flushed: boolean }>

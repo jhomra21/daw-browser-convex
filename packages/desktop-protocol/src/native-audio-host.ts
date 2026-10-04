@@ -2,14 +2,13 @@ export const nativeAudioHostMagic = 0x44415748
 import { nativeExternalAttachmentPlanSchema, maxNativeExternalAttachments } from "@daw-browser/plugin-host-protocol"
 import { z } from "zod"
 
-export const nativeAudioHostProtocolVersion = 18
+export const nativeAudioHostProtocolVersion = 22
 export const nativeAudioHostFrameHeaderBytes = 16
 export const nativeAudioHostMaximumPayloadBytes = 1_048_576
 export const nativeAudioHostMaximumMeterEntries = 64
 export const nativeAudioHostMaximumSpectrumBins = 1024
 export const nativeAudioHostMaximumSpectrumPayloadBytes = 8_192
 export const nativeAudioHostMaximumProcessorStatePatchBytes = 512
-
 export const nativeAudioHostControlTypes = {
   hostHello: 1,
   hostCapabilities: 2,

@@ -17,6 +17,7 @@ import { controlServiceFromCanonicalMethods, createControlMcpServer } from "@daw
 import { ControlTransportError, createCanonicalControlMethodsFromLegacy, createControlClient } from "@daw-browser/control-sdk"
 import {
   desktopDiagnosticsSchemaV1,
+  desktopDiagnosticsSchemaV2,
   desktopHostExportCancelInputSchemaV1,
   desktopHostExportRunInputSchemaV1,
   desktopHostExportRunResultSchemaV1,
@@ -176,6 +177,7 @@ export const startControlMcp = async () => {
       desktopTransportStatusSchemaV1.parse,
     ),
     diagnostics: async () => requestHostTool("diagnostics.snapshot", {}, desktopDiagnosticsSchemaV1.parse),
+    diagnosticsV2: async () => requestHostTool("diagnostics.snapshot.v2", {}, desktopDiagnosticsSchemaV2.parse),
     importAudio: async (input: Parameters<typeof desktopHostImportInputSchemaV1.parse>[0]) => requestHostTool(
       "host.import.audio",
       desktopHostImportInputSchemaV1.parse(input),

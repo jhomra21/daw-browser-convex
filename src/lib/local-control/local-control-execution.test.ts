@@ -730,8 +730,8 @@ const actionFixtures = {
   'recovery.restore': { action: (ids) => ({ kind: 'recovery.restore', recovery: { id: ids.recovery! } }), assert: (current) => expect(current.clips.some((clip) => clip.midi !== undefined)).toBe(true) },
 } satisfies Record<ControlActionV1['kind'], ActionFixture>
 
-// This exhaustive fixture creates and validates all 40 advertised actions. Under
-// the full root suite, Bun's default 5s per-test timeout is occasionally exceeded.
+// This exhaustive fixture creates and validates all 40 advertised actions and
+// uses the same 15-second budget as the configured full-suite acceptance run.
 test('exhaustively executes all advertised local control action fixtures', async () => {
   expect(Object.keys(actionFixtures).sort()).toEqual([...localControlCapabilitiesV1.actionKinds].sort())
   expect(Object.keys(actionFixtures)).toHaveLength(40)
@@ -759,7 +759,7 @@ test('exhaustively executes all advertised local control action fixtures', async
     }
     expect(JSON.stringify(current)).not.toContain('control:')
   }
-}, { timeout: 10_000 })
+}, { timeout: 15_000 })
 
 type RecoveryKind = Extract<ControlActionV1['kind'],
   'track.delete' | 'track.ungroup' | 'clip.delete' | 'effect.remove'

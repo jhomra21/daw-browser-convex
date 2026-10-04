@@ -32,7 +32,6 @@ test("accepts a logical offline render beyond the former in-memory boundary", ()
   expect(result.success).toBe(true)
 })
 
-
 test("rejects binary control payloads above the native frame limit", () => {
   const result = nativeOfflineRenderPlanSchema.safeParse({
     ...plan(),

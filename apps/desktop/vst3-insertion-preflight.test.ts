@@ -60,7 +60,7 @@ const availablePreflight = async (
     artifact: { id: "daw-vst3-worker" as const, version: "3" as const },
     startupProtocolVersion: 1 as const,
     controlProtocolVersion: 2 as const,
-    transportAbiVersion: 5 as const,
+    transportAbiVersion: 6 as const,
     architecture: "arm64" as const,
   },
   hello: {
@@ -72,7 +72,7 @@ const availablePreflight = async (
       artifact: { id: "daw-vst3-worker" as const, version: "3" as const },
       startupProtocolVersion: 1 as const,
       controlProtocolVersion: 2 as const,
-      transportAbiVersion: 5 as const,
+      transportAbiVersion: 6 as const,
       architecture: "arm64" as const,
       role,
       inputBuses: role === "instrument" ? [] : [{ name: "Input", channels, enabled: true }],

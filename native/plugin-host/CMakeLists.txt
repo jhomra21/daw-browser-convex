@@ -21,6 +21,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag(
+  "-Wno-unnecessary-virtual-specifier"
+  DAW_HAS_WNO_UNNECESSARY_VIRTUAL_SPECIFIER
+)
+set(DAW_VST3_CPP_SUPPRESSIONS "-Wno-deprecated-declarations")
+if(DAW_HAS_WNO_UNNECESSARY_VIRTUAL_SPECIFIER)
+  string(APPEND DAW_VST3_CPP_SUPPRESSIONS " -Wno-unnecessary-virtual-specifier")
+endif()
+
 add_library(daw-vst3-worker-runtime STATIC
   src/worker-supervisor.cpp
   src/worker-control-protocol.cpp
@@ -55,12 +65,14 @@ set_source_files_properties(
   src/vst3-worker.cpp
   "${VST3_SDK_PATH}/public.sdk/source/vst/utility/stringconvert.cpp"
   "${VST3_SDK_PATH}/public.sdk/source/common/commonstringconvert.cpp"
-  PROPERTIES COMPILE_FLAGS "-Wno-deprecated-declarations -Wno-unnecessary-virtual-specifier"
+  PROPERTIES COMPILE_FLAGS "${DAW_VST3_CPP_SUPPRESSIONS}"
 )
-set_source_files_properties(
-  "${VST3_SDK_PATH}/public.sdk/source/vst/hosting/hostclasses.cpp"
-  PROPERTIES COMPILE_FLAGS "-Wno-unnecessary-virtual-specifier"
-)
+if(DAW_HAS_WNO_UNNECESSARY_VIRTUAL_SPECIFIER)
+  set_source_files_properties(
+    "${VST3_SDK_PATH}/public.sdk/source/vst/hosting/hostclasses.cpp"
+    PROPERTIES COMPILE_FLAGS "-Wno-unnecessary-virtual-specifier"
+  )
+endif()
 find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
 find_library(SECURITY_FRAMEWORK Security REQUIRED)
 target_link_libraries(daw-vst3-sdk-hosting PUBLIC "${COCOA_FRAMEWORK}" "${SECURITY_FRAMEWORK}")

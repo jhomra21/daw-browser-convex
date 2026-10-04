@@ -68,6 +68,15 @@ export type NativeScheduleCoordinator = {
   currentFrame: () => number
   scheduleEndFrame: () => number
   isDisposed: () => boolean
+  refillDiagnostics: () => NativeRefillDiagnostics
+}
+
+export type NativeRefillDiagnostics = {
+  progressCount: number
+  compileCount: number
+  compileTotalMs: number
+  compileMaxMs: number
+  submittedVstSegments: number
 }
 
 const nativeInstrumentEventBatchSize = 256
@@ -338,6 +347,7 @@ export const createNativeScheduleCoordinator = (input: {
   onFault?: (error: Error) => void
   onHostLoss?: (error?: string) => void
   onRenderedFrame?: (frame: number) => void
+  onRefillDiagnostics?: (snapshot: NativeRefillDiagnostics) => void
 }) => {
   let disposed = false
   const hydrationAbortController = new AbortController()
@@ -355,6 +365,14 @@ export const createNativeScheduleCoordinator = (input: {
   let refillFrame = input.startFrame
   let refillFailureCount = 0
   let refillFaulted = false
+  let progressCount = 0
+  let compileCount = 0
+  let compileTotalMs = 0
+  let compileMaxMs = 0
+  let submittedVstSegments = 0
+  const refillDiagnostics = (): NativeRefillDiagnostics => ({
+    progressCount, compileCount, compileTotalMs, compileMaxMs, submittedVstSegments,
+  })
   const activeNoteIds = new Set<string>()
   const emittedSources = new Map<string, number>()
   const transitionWaiters = new Set<{
@@ -803,6 +821,7 @@ export const createNativeScheduleCoordinator = (input: {
         }
       }
       if (lastError) throw lastError
+      submittedVstSegments += vstAutomationSegments.length
     }
     nextWindowId += 1
     for (const [key, active] of window.noteChanges) {
@@ -818,6 +837,19 @@ export const createNativeScheduleCoordinator = (input: {
     scheduleComplete = !acceptsLiveMidi && endFrame >= scheduleEndFrame
   }
 
+  const compileRefillWindow = (start: number, end: number) => {
+    if (!input.onRefillDiagnostics) return compileWindow(start, end)
+    const started = performance.now()
+    try {
+      return compileWindow(start, end)
+    } finally {
+      const elapsed = performance.now() - started
+      compileCount += 1
+      compileTotalMs += elapsed
+      compileMaxMs = Math.max(compileMaxMs, elapsed)
+    }
+  }
+
   const refill = async (renderedFrame: number, token?: string) => {
     if (disposed || scheduleComplete) return
     const targetEnd = Math.min(
@@ -828,10 +860,10 @@ export const createNativeScheduleCoordinator = (input: {
       ),
     )
     const threshold = renderedFrame + Math.round(input.sampleRateHz * nativeScheduleRefillThresholdSec)
-    if (nextWindowStartFrame >= targetEnd && nextWindowStartFrame >= threshold) return
+    if (nextWindowStartFrame >= threshold) return
     while (!disposed && !scheduleComplete && nextWindowStartFrame < targetEnd) {
       let endFrame = targetEnd
-      let candidate = compileWindow(nextWindowStartFrame, endFrame)
+      let candidate = compileRefillWindow(nextWindowStartFrame, endFrame)
       for (;;) {
         const chunkCount = Math.max(
           Math.ceil(candidate.instrumentEvents.length / nativeInstrumentEventBatchSize),
@@ -853,7 +885,7 @@ export const createNativeScheduleCoordinator = (input: {
         )
         if (shorter >= endFrame) throw capacityError("a logical window cannot fit within the native wire limits.")
         endFrame = shorter
-        candidate = compileWindow(nextWindowStartFrame, endFrame)
+        candidate = compileRefillWindow(nextWindowStartFrame, endFrame)
       }
       await queueWindow(nextWindowStartFrame, endFrame, candidate, token)
     }
@@ -870,6 +902,10 @@ export const createNativeScheduleCoordinator = (input: {
   }
 
   const finishRefill = (marker: Promise<void>, release: () => void) => {
+    // Diagnostics are observational; consumer failures must not alter refill behavior.
+    if (input.onRefillDiagnostics) {
+      try { input.onRefillDiagnostics(refillDiagnostics()) } catch {}
+    }
     if (refillInFlight !== marker) {
       release()
       return
@@ -886,6 +922,7 @@ export const createNativeScheduleCoordinator = (input: {
     if (disposed) return
     if (progress.revision !== input.snapshot.revision || progress.epoch !== input.epoch) return
     if (!force && progress.progressSequence <= (latestProgress?.progressSequence ?? 0n)) return
+    if (!force && input.onRefillDiagnostics) progressCount += 1
     latestProgress = progress
     if (progress.scheduleComplete) {
       scheduleComplete = true
@@ -1036,6 +1073,7 @@ export const createNativeScheduleCoordinator = (input: {
     currentFrame: () => Number(latestProgress?.renderedThroughFrame ?? refillFrame),
     scheduleEndFrame: () => ownedScheduleEndFrame,
     isDisposed: () => disposed,
+    refillDiagnostics,
   }
   return coordinator
 }

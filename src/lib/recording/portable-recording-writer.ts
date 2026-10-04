@@ -7,6 +7,7 @@ import {
   type WriterOutboundMessage,
 } from '@daw-browser/audio-engine/recording-protocol'
 import type { PortableWasmStatusMessage } from '@daw-browser/audio-engine/portable-wasm-protocol'
+import { updateRecordingDiagnostics } from './recording-diagnostics'
 
 type WorkerEndpoint = {
   postMessage: (message: WriterInboundMessage, transfer?: readonly ArrayBuffer[]) => void
@@ -19,6 +20,7 @@ type Deferred<T = void> = {
   resolve: (value: T) => void
   reject: (error: Error) => void
 }
+type BufferMetrics = { returned: number; latencyMs: number; outstanding: number; oldestAgeMs: number; deliveryMs: number; deliveryWorst?: { returnedAtEpochMs: number; receivedAtEpochMs: number } }
 
 const deferred = <T = void>(): Deferred<T> => {
   let resolve = (_value: T) => {}
@@ -39,6 +41,8 @@ export const createPortableRecordingWriter = (input: {
   channelCount: number
   worker?: WorkerEndpoint
   onQueuedFrames?: (frames: number) => void
+  now?: () => number
+  onBufferMetrics?: (metrics: BufferMetrics) => void
   timeoutMs?: number
 }) => {
   const worker = input.worker ?? createBrowserRecordingWriter()
@@ -48,6 +52,17 @@ export const createPortableRecordingWriter = (input: {
     () => new ArrayBuffer(bufferBytes),
   )
   const queuedFrameCounts: number[] = []
+  const postedAt: number[] = []
+  const now = input.now ?? (() => performance.timeOrigin + performance.now())
+  let returned = 0
+  const reportBuffers = (latencyMs: number, deliveryMs = 0, deliveryWorst: { returnedAtEpochMs: number; receivedAtEpochMs: number } | null = null) => {
+    const metrics: BufferMetrics = {
+      returned, latencyMs, deliveryMs, outstanding: postedAt.length,
+      oldestAgeMs: postedAt.length > 0 ? Math.max(0, now() - postedAt[0]!) : 0,
+    }
+    if (deliveryWorst) metrics.deliveryWorst = deliveryWorst
+    input.onBufferMetrics?.(metrics)
+  }
   let queuedFrames = 0
   let state: 'starting' | 'open' | 'closing' | 'closed' | 'failed' = 'starting'
   let nextBlockId = 0
@@ -108,12 +123,24 @@ export const createPortableRecordingWriter = (input: {
       }
       available.push(message.buffer)
       queuedFrames -= queuedFrameCounts.shift()!
+      const sentAt = postedAt.shift()
+      returned += 1
+      const receivedAt = now()
+      reportBuffers(sentAt === undefined ? 0 : Math.max(0, receivedAt - sentAt),
+        message.returnedAtMs === undefined ? 0 : Math.max(0, receivedAt - message.returnedAtMs),
+        message.returnedAtMs === undefined || message.returnedAtMs > receivedAt ? null
+          : { returnedAtEpochMs: message.returnedAtMs, receivedAtEpochMs: receivedAt })
       input.onQueuedFrames?.(queuedFrames)
       requestWriterFinalize()
       return
     }
     if (message.type === 'failure') {
+      if (message.timing) updateRecordingDiagnostics({ writerTiming: message.timing })
       fail(message.reason)
+      return
+    }
+    if (message.type === 'boot') {
+      fail('Unexpected SAB boot response in portable recording writer.')
       return
     }
     if (state !== 'closing' || !completion) {
@@ -126,6 +153,7 @@ export const createPortableRecordingWriter = (input: {
       return
     }
     const pending = completion
+    if (message.timing) updateRecordingDiagnostics({ writerTiming: message.timing })
     clearDeadline()
     completion = undefined
     terminalRequest = undefined
@@ -149,7 +177,10 @@ export const createPortableRecordingWriter = (input: {
       throw new Error('Portable recording block arrived outside an open compatible session.')
     }
     const buffer = available.pop()
-    if (!buffer) throw new Error('Portable recording writer queue exceeded its hard bound.')
+    if (!buffer) {
+      reportBuffers(0)
+      throw new Error('Portable recording writer queue exceeded its hard bound.')
+    }
     const samples = new Float32Array(buffer)
     for (let channel = 0; channel < input.channelCount; channel += 1) {
       const plane = block.planes[channel]
@@ -171,6 +202,7 @@ export const createPortableRecordingWriter = (input: {
     }
     nextBlockId += 1
     queuedFrameCounts.push(block.frameCount)
+    postedAt.push(now())
     queuedFrames += block.frameCount
     input.onQueuedFrames?.(queuedFrames)
     worker.postMessage(message, [buffer])

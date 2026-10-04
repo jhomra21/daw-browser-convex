@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -25,7 +26,8 @@ constexpr std::size_t kMaximumWorkerRestarts = 3;
 constexpr std::size_t kMaximumWorkerStateBytes = 512U * 1024U;
 constexpr std::uint32_t kMaximumWorkerTailFrames = 100'000'000U;
 constexpr std::uint32_t kInfiniteTailFrames = std::numeric_limits<std::uint32_t>::max();
-constexpr std::uint32_t kWorkerTransportAbiVersion = 5;
+constexpr std::uint32_t kWorkerTransportAbiVersion = 7;
+constexpr std::size_t kWorkerProcessingHistogramBuckets = 32;
 constexpr std::uint32_t kWorkerManifestVersion = 1;
 constexpr std::uint32_t kWorkerStartupProtocolVersion = 1;
 constexpr std::uint32_t kWorkerControlProtocolVersion = 2;
@@ -290,6 +292,7 @@ enum class WorkerDiagnosticKind : std::uint32_t {
   kTail,
   kEditorState,
   kParameterEditBegin,
+  kScheduledAutomationInput,
 };
 
 struct WorkerDiagnostic {
@@ -297,7 +300,15 @@ struct WorkerDiagnostic {
   std::uint32_t value = 0;
   std::uint64_t sequence = 0;
   std::uint32_t parameter_id = 0;
+  std::uint32_t transport_epoch = 0;
   double normalized_value = 0.0;
+};
+
+struct WorkerProcessingMetrics {
+  std::uint64_t count = 0;
+  std::uint64_t maximum_nanoseconds = 0;
+  std::uint64_t deadline_misses = 0;
+  std::array<std::uint64_t, kWorkerProcessingHistogramBuckets> buckets{};
 };
 static_assert(std::is_trivially_copyable_v<WorkerDiagnostic>);
 
@@ -318,6 +329,7 @@ struct WorkerTransportEvent {
   std::uint32_t parameterId = 0;
   double parameterValue = 0.0;
   std::uint8_t midiData[3]{};
+  bool scheduledAutomation = false;
 };
 
 struct WorkerBlockContext {
@@ -365,6 +377,7 @@ class WorkerTransport {
   [[nodiscard]] WorkerHealth health() const;
   [[nodiscard]] std::optional<WorkerDiagnostic> ReadDiagnostic();
   [[nodiscard]] std::optional<WorkerTailMetadata> ReadTailMetadata() const;
+  [[nodiscard]] WorkerProcessingMetrics ReadProcessingMetrics() const;
   [[nodiscard]] int fileDescriptor() const;
   [[nodiscard]] std::uint64_t token() const;
   [[nodiscard]] bool valid() const;
@@ -383,6 +396,7 @@ class WorkerTransport {
   void PublishHealth(WorkerHealth health);
   [[nodiscard]] bool PublishDiagnostic(WorkerDiagnostic diagnostic);
   void PublishTailMetadata(std::uint32_t tailFrames);
+  void RecordProcessingDuration(std::uint64_t durationNanoseconds, std::uint64_t deadlineNanoseconds);
 
  private:
   struct Mapping;
@@ -423,6 +437,9 @@ class WorkerRuntime {
   );
   [[nodiscard]] bool CancelPublishedSubmission(std::size_t slotIndex, std::uint64_t sequence);
   [[nodiscard]] bool DispatchPublishedSubmission(std::size_t slotIndex, std::uint64_t sequence);
+  // Nonblocking callback wake hint. The submitted slot remains the source of
+  // truth; a full pipe is therefore a successful no-op rather than a fault.
+  [[nodiscard]] bool NotifyRealtimeWorker() noexcept;
   [[nodiscard]] bool WaitForOfflineCompletion(
     std::size_t slotIndex,
     std::uint64_t sequence,
@@ -454,12 +471,33 @@ class WorkerRuntime {
   std::optional<WorkerTransport> transport_;
   int controlWriteDescriptor_ = -1;
   int responseReadDescriptor_ = -1;
+  int wakeWriteDescriptor_ = -1;
   int childProcessId_ = -1;
   int childProcessGroupId_ = -1;
   std::size_t restartCount_ = 0;
   std::optional<WorkerStartupRequest> startup_;
   WorkerHostConfiguration configuration_;
   WorkerTransportRequest transportRequest_;
+};
+
+class WorkerWakeSignal {
+ public:
+  WorkerWakeSignal() = default;
+  ~WorkerWakeSignal();
+  WorkerWakeSignal(const WorkerWakeSignal&) = delete;
+  WorkerWakeSignal& operator=(const WorkerWakeSignal&) = delete;
+
+  [[nodiscard]] bool Open() noexcept;
+  void Close() noexcept;
+  [[nodiscard]] bool Notify() const noexcept;
+  [[nodiscard]] int readDescriptor() const noexcept;
+  [[nodiscard]] int releaseReadDescriptor() noexcept;
+  [[nodiscard]] int releaseWriteDescriptor() noexcept;
+  static void Drain(int descriptor) noexcept;
+
+ private:
+  int readDescriptor_ = -1;
+  int writeDescriptor_ = -1;
 };
 
 }  // namespace daw::plugin_host

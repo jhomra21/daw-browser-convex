@@ -1,4 +1,5 @@
 #include "vst3-worker.h"
+#include "automation-observation.h"
 
 #include "vst3-bus-arrangement.h"
 #include "public.sdk/source/vst/hosting/eventlist.h"
@@ -884,6 +885,7 @@ bool Vst3Worker::ProcessSubmittedSlot(const std::size_t slotIndex) {
   };
   std::array<PendingEditorParameterEdit, kMaximumWorkerEvents> editorEdits{};
   const auto editorEditCount = implementation_->context.DrainEditorParameterEdits(editorEdits);
+  AutomationObservation automationObservation;
   const auto addNoteOff = [&](const Implementation::ActiveNote& note, const std::uint32_t sampleOffset) {
     Event vstEvent{};
     vstEvent.busIndex = 0;
@@ -912,6 +914,7 @@ bool Vst3Worker::ProcessSubmittedSlot(const std::size_t slotIndex) {
         event.parameterValue,
         static_cast<Steinberg::int32>(event.sampleOffset)
       )) return false;
+      automationObservation.Accept(event, implementation_->transport->context(slotIndex).transportEpoch);
       continue;
     }
     const auto status = static_cast<std::uint8_t>(event.midiData[0] & 0xF0U);
@@ -1079,7 +1082,17 @@ bool Vst3Worker::ProcessSubmittedSlot(const std::size_t slotIndex) {
     }
   }
   implementation_->transport->SetOutputSilenceFlags(slotIndex, outputSilenceFlags);
-  return implementation_->transport->Complete(slotIndex, sequence);
+  if (!implementation_->transport->Complete(slotIndex, sequence)) return false;
+  if (automationObservation.count != 0) {
+    static_cast<void>(implementation_->transport->PublishDiagnostic({
+      .kind = WorkerDiagnosticKind::kScheduledAutomationInput,
+      .value = automationObservation.count,
+      .sequence = sequence,
+      .parameter_id = automationObservation.parameterId,
+      .transport_epoch = automationObservation.transportEpoch,
+    }));
+  }
+  return true;
 }
 
 bool Vst3Worker::PeekEditorParameterFeedback(PendingEditorParameterEdit& edit) const {

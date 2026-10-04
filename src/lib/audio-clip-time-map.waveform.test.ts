@@ -129,4 +129,44 @@ describe('unified waveform painter', () => {
     expect(segments[1]?.timelineEndSec).toBe(segments[2]?.timelineStartSec)
     expect(segments[0]?.sourceEndSec).toBe(segments[1]?.sourceStartSec)
   })
+
+  test('keeps UI-authored marker source beats aligned without reapplying source-beat offsets', () => {
+    for (const sampleRate of [44_100, 48_000, 96_000]) {
+      for (const channelCount of [1, 2]) {
+        const sourceBeatOffset = 0.5
+        const sourceBpm = 120
+        const clip: Clip = {
+          id: `stretch-${sampleRate}-${channelCount}`,
+          name: 'stretch precision',
+          startSec: 0,
+          duration: 2,
+          sourceDurationSec: 4,
+          color: '#fff',
+          audioWarp: {
+            enabled: true,
+            mode: 'stretch',
+            sourceBpm,
+            sourceBeatOffset,
+            markers: [
+              { id: 'a', sourceBeat: sourceBeatOffset, timelineBeat: 0 },
+              { id: 'b', sourceBeat: 2 + sourceBeatOffset, timelineBeat: 2 },
+              { id: 'c', sourceBeat: 4 + sourceBeatOffset, timelineBeat: 4 },
+            ],
+          },
+        }
+        const map = getAudioClipTimeMap({
+          clip,
+          bufferDurationSec: 4,
+          projectBpm: 120,
+          rangeStartSec: 0,
+          rangeEndSec: 2,
+        })
+        if (!map) throw new Error('Expected offset marker map')
+        const expectedSourceFrame = Math.round(sourceBeatOffset * 60 / sourceBpm * sampleRate)
+        const mappedSourceFrame = Math.round(map.timelineToSourceSec(0) * sampleRate)
+        expect(Math.abs(mappedSourceFrame - expectedSourceFrame)).toBeLessThanOrEqual(1)
+        expect(map.sourceToTimelineSec(mappedSourceFrame / sampleRate)).toBeCloseTo(0, 9)
+      }
+    }
+  })
 })

@@ -138,6 +138,7 @@ export type MoveClipInput = {
 
 export type UpdateTrackInput = {
   trackId: TimelineTrackId
+  name?: string
   index?: number
   volume?: number
   muted?: boolean

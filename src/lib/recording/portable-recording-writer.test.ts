@@ -93,6 +93,63 @@ test('fails instead of growing beyond the fixed portable writer queue', async ()
   writer.terminate()
 })
 
+test('reports bounded buffer return latency and oldest outstanding age at overflow', async () => {
+  let handleMessage = (_message: WriterOutboundMessage | null) => {}
+  let now = 0
+  const samples: { returned: number; latencyMs: number; outstanding: number; oldestAgeMs: number; deliveryMs: number }[] = []
+  const writer = createPortableRecordingWriter({
+    generation: 9, sessionId: 'take-timing', sampleRate: 48_000, channelCount: 1,
+    now: () => now,
+    onBufferMetrics: (metric) => samples.push(metric),
+    worker: {
+      postMessage: () => undefined,
+      setMessageHandler: (handler) => { handleMessage = handler },
+      terminate: () => undefined,
+    },
+  })
+  handleMessage({ type: 'ready', generation: 9, sessionId: 'take-timing' })
+  await writer.ready
+  const block: Extract<PortableWasmStatusMessage, { type: 'recording-capture-block' }> = {
+    version: 2, type: 'recording-capture-block', generation: 9, sessionId: 10, sequence: 0,
+    frameCount: 1, channelCount: 1, planes: [Float32Array.of(0)], rms: 0, peak: 0,
+  }
+  for (let index = 0; index < RECORDER_MAX_QUEUED_BLOCKS; index++) {
+    writer.write({ ...block, sequence: index })
+    now += 10
+  }
+  now = 350
+  expect(() => writer.write({ ...block, sequence: 8 })).toThrow()
+  expect(samples.at(-1)).toEqual({ returned: 0, latencyMs: 0, outstanding: 8, oldestAgeMs: 350, deliveryMs: 0 })
+  writer.terminate()
+})
+
+test('attributes worker return dispatch independently of writer round trip', async () => {
+  let handleMessage = (_message: WriterOutboundMessage | null) => {}
+  let now = 1000
+  const samples: { returned: number; latencyMs: number; outstanding: number; oldestAgeMs: number; deliveryMs: number }[] = []
+  const writer = createPortableRecordingWriter({
+    generation: 9, sessionId: 'delivery', sampleRate: 48000, channelCount: 1,
+    now: () => now,
+    onBufferMetrics: (metric) => samples.push(metric),
+    worker: {
+      postMessage: () => undefined,
+      setMessageHandler: (handler) => { handleMessage = handler },
+      terminate: () => undefined,
+    },
+  })
+  handleMessage({ type: 'ready', generation: 9, sessionId: 'delivery' })
+  await writer.ready
+  writer.write({
+    version: 2, type: 'recording-capture-block', generation: 9, sessionId: 1,
+    sequence: 0, frameCount: 1, channelCount: 1, planes: [Float32Array.of(0)], rms: 0, peak: 0,
+  })
+  now = 1100
+  handleMessage({ type: 'return', generation: 9, sessionId: 'delivery', blockId: 0,
+    buffer: new ArrayBuffer(2048 * 4), returnedAtMs: 1020 })
+  expect(samples.at(-1)).toMatchObject({ latencyMs: 100, deliveryMs: 80, outstanding: 0 })
+  writer.terminate()
+})
+
 test('reuses the fixed resident block pool across a long logical sequence', async () => {
   const posted: WriterInboundMessage[] = []
   let handleMessage = (_message: WriterOutboundMessage | null) => {}

@@ -7,6 +7,12 @@
 
 namespace daw::audio_host_macos {
 
+// A stopped write initializes the plugin value; only a playing gesture
+// takes precedence over scheduled automation.
+constexpr bool ShouldOverrideNativeVstAutomation(const bool transport_running) noexcept {
+  return transport_running;
+}
+
 class NativeVstAutomationOverrideTable final {
  public:
   enum class SetResult : std::uint8_t {

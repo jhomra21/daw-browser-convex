@@ -325,6 +325,7 @@ const createBridge = (
   const statePatchPayloads: Uint8Array[] = []
   const instrumentPayloads: Uint8Array[] = []
   const schedulePayloads: Uint8Array[] = []
+  const reenablePayloads: Uint8Array[] = []
   const graphPayloads: Uint8Array[] = []
   const installedAssets: NativeHostPcmAsset[] = []
   let legacyInstallCount = 0
@@ -397,6 +398,7 @@ const createBridge = (
     statePatchPayloads,
     instrumentPayloads,
     schedulePayloads,
+    reenablePayloads,
     graphPayloads,
     installedAssets,
     get legacyInstallCount() { return legacyInstallCount },
@@ -533,6 +535,13 @@ const createBridge = (
           queueMicrotask(() => emitProgress(0))
           return failure === "schedule" || rejectScheduleWindows
             ? { ok: false as const, error: "failed" }
+            : { ok: true as const }
+        },
+        reenableVstScheduleAutomation: async (bytes: Uint8Array) => {
+          calls.push("reenable-automation")
+          reenablePayloads.push(bytes)
+          return failure === "reenable-automation"
+            ? { ok: false as const, error: failureMessage }
             : { ok: true as const }
         },
         queueVstParameterEvents: async (bytes: Uint8Array) => {
@@ -757,6 +766,28 @@ test("commits a supported native session before starting and tears it down deter
   ])
 })
 
+test("scheduler diagnostics are absent without playback and reset across sessions", async () => {
+  const fixture = createBridge()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+  })
+  expect(controller.schedulerDiagnostics()).toBeUndefined()
+  expect(await controller.start(input().transport)).toBe("started")
+  const first = controller.schedulerDiagnostics()
+  expect(first).toBeDefined()
+  expect(first?.compileCount).toBeGreaterThan(0)
+  expect(first?.compileTotalMs).toBeGreaterThanOrEqual(first?.compileMaxMs ?? 0)
+  await controller.dispose()
+  expect(controller.schedulerDiagnostics()).toBeUndefined()
+  expect(await controller.start(input().transport)).toBe("started")
+  const second = controller.schedulerDiagnostics()
+  expect(second).toBeDefined()
+  expect(second).not.toBe(first)
+  expect(second?.compileCount).toBeGreaterThan(0)
+  await controller.dispose()
+})
+
 test("reports the bounded native start stage and sanitized failure", async () => {
   const fixture = createBridge("begin", false, false, "native failure /Users/secret/plugin.vst3")
   const faults: string[] = []
@@ -837,6 +868,31 @@ test("forwards compile context when promoting a pending preview to play", async 
   expect(contexts).toEqual([undefined, compileContext])
 })
 
+test("starts play after a pending preview fails", async () => {
+  const fixture = createBridge()
+  const previewGate = Promise.withResolvers<void>()
+  let compilation = 0
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async (transport) => {
+      compilation += 1
+      if (compilation === 1) {
+        await previewGate.promise
+        throw new Error("preview compilation failed")
+      }
+      return compileLivePlaybackSnapshot({ ...input(), transport })
+    },
+  })
+
+  const preview = controller.ensureLivePreview(0)
+  const play = controller.start(input().transport)
+  previewGate.resolve()
+  await expect(preview).resolves.toBe("unavailable")
+  await expect(play).resolves.toBe("started")
+  expect(compilation).toBe(2)
+  await controller.dispose()
+})
+
 test("supersedes an in-flight contextless preview for an inserted native processor", async () => {
   const fixture = createBridge()
   const previewGate = Promise.withResolvers<void>()
@@ -884,6 +940,66 @@ test("supersedes an in-flight contextless preview for an inserted native process
   await expect(insertedPreview).resolves.toBe("started")
   expect(contexts).toEqual([undefined, compileContext])
   expect(fixture.calls.filter((call) => call === "coordinate")).toHaveLength(1)
+  await controller.dispose()
+})
+
+test("re-enables canonical external automation against the prepared attachment", async () => {
+  const fixture = createBridge()
+  const inserted = insertedExternalProcessor()
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    getProjectId: () => "project",
+    resolveSource: async () => longSourceDescriptor(),
+    compileSnapshot: async (transport) => {
+      const result = compileLivePlaybackSnapshot({
+        ...input(longSourceTrack()),
+        transport,
+      })
+      if (!result.supported) return result
+      return {
+        supported: true as const,
+        snapshot: {
+          ...result.snapshot,
+          nativeExternalAttachmentPlan: nativeAttachmentPlan,
+          requiresNativePlayback: true,
+        },
+      }
+    },
+  })
+
+  await expect(controller.ensureLivePreview(0, {
+    externalProcessor: {
+      projectId: "project",
+      processor: inserted,
+    },
+  })).resolves.toBe("started")
+  await expect(controller.reenableProcessorAutomation(
+    inserted.instanceId,
+    [externalAutomationParameterId(inserted.instanceId, 7)],
+  )).resolves.toMatchObject({ accepted: true })
+
+  expect(fixture.reenablePayloads).toHaveLength(1)
+  const payload = fixture.reenablePayloads[0]!
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
+  const instanceByteLength = view.getUint32(0, true)
+  expect(new TextDecoder().decode(payload.subarray(4, 4 + instanceByteLength))).toBe(inserted.instanceId)
+  expect(view.getUint32(4 + instanceByteLength, true)).toBe(1)
+  expect(view.getUint32(8 + instanceByteLength, true)).toBe(7)
+  await expect(controller.reenableProcessorAutomation(
+    inserted.instanceId,
+    [externalAutomationParameterId(inserted.instanceId, 8)],
+  )).resolves.toEqual({ accepted: false, reason: "unsupported" })
+  await expect(controller.reenableProcessorAutomation(
+    inserted.instanceId,
+    [externalAutomationParameterId("22222222-2222-4222-8222-222222222222", 7)],
+  )).resolves.toEqual({ accepted: false, reason: "unsupported" })
+  await expect(controller.liveProcessorControl.reenableAutomation(
+    inserted.instanceId,
+    [externalAutomationParameterId(inserted.instanceId, 7)],
+    0,
+    0,
+  )).resolves.toEqual({ accepted: false, reason: "stale" })
+  expect(fixture.reenablePayloads).toHaveLength(1)
   await controller.dispose()
 })
 
@@ -2399,7 +2515,7 @@ test("pause and resume retain the prepared native graph and installed assets", a
   expect(fixture.calls.filter((call) => call === "stop")).toHaveLength(0)
   await controller.start({ ...input().transport, playheadSec: 0.5 })
 
-  expect(compilations).toBe(1)
+  expect(compilations).toBe(2)
   expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(1)
   expect(fixture.calls.filter((call) => call === "install")).toHaveLength(1)
   expect(fixture.calls.filter((call) => call === "start")).toHaveLength(1)
@@ -2983,6 +3099,37 @@ test("persists native recording blocks and finalizes only after terminal status"
   expect(fixture.calls).toContain("recording-configure")
   expect(fixture.calls).toContain("recording-start")
   expect(fixture.calls).toContain("recording-stop")
+})
+
+test("injectable native SAB writer receives exact stereo planar bytes and terminal frame count", async () => {
+  const fixture = createBridge()
+  const blocks: Array<{ sequence: number; frameCount: number; planes: readonly Float32Array[] }> = []
+  let finalized = -1
+  const controller = createNativePlaybackController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+    createNativeSabRecordingWriter: () => ({
+      ready: Promise.resolve(),
+      write: (block) => { blocks.push(block) },
+      finalize: async (frames) => { finalized = frames; return { capturedFrames: frames } },
+      abort: async () => undefined,
+      terminate: () => undefined,
+      stats: () => ({ peakOccupancy: 0, occupancy: 0, droppedFrames: 0, droppedBlocks: 0 }),
+    }),
+  })
+  await controller.start(input().transport)
+  await controller.startRecording({
+    appSessionId: 'sab', layout: 'stereo', inputChannel: 0, gain: 1,
+    polarity: 1, monitoring: true, punchStartFrame: 120,
+  })
+  const samples = Float32Array.of(0.25, -0.5, 1, -1)
+  fixture.emitRecordingBlock({
+    generation: 1, sessionId: 1n, sequence: 0, frameCount: 2,
+    channelCount: 2, rms: 0.5, peak: 1, planarPcm: new Uint8Array(samples.buffer),
+  })
+  expect(blocks).toMatchObject([{ sequence: 0, frameCount: 2, planes: [Float32Array.of(0.25, -0.5), Float32Array.of(1, -1)] }])
+  await controller.stopRecording()
+  expect(finalized).toBe(128)
 })
 
 test("does not require a browser audio engine when the native bridge is absent", async () => {

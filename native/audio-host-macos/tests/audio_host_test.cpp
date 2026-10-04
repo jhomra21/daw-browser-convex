@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstring>
 #include <future>
+#include <filesystem>
 #include <limits>
 #include <string>
 #include <string_view>
@@ -15,6 +16,19 @@
 #include <vector>
 
 namespace {
+
+void TestWorkerAutomationSelection() {
+  using daw::audio_host_macos::Diagnostics;
+  const Diagnostics::WorkerAutomation stale{2, 9, 6, 30, "stale"};
+  const Diagnostics::WorkerAutomation current{1, 11, 7, 12, "target"};
+  std::optional<Diagnostics::WorkerAutomation> selected;
+  selected = daw::audio_host_macos::SelectWorkerAutomation(selected, stale, 7);
+  selected = daw::audio_host_macos::SelectWorkerAutomation(selected, current, 7);
+  assert(selected && selected->instance_id == "target" && selected->last_parameter_id == 11);
+  const Diagnostics::WorkerAutomation other{3, 14, 7, 13, "other"};
+  selected = daw::audio_host_macos::SelectWorkerAutomation(selected, other, 7);
+  assert(selected && selected->instance_id == "other");
+}
 
 std::array<std::uint8_t, 32> Fingerprint(const std::string_view value) {
   std::array<std::uint8_t, 32> result{};
@@ -594,6 +608,8 @@ void TestNativeVstEventScheduler() {
 }
 
 void TestNativeVstAutomationOverrideTable() {
+  assert(!daw::audio_host_macos::ShouldOverrideNativeVstAutomation(false));
+  assert(daw::audio_host_macos::ShouldOverrideNativeVstAutomation(true));
   daw::audio_host_macos::NativeVstAutomationOverrideTable table;
   assert(table.Set(7) == daw::audio_host_macos::NativeVstAutomationOverrideTable::SetResult::kInserted);
   assert(table.Set(7) == daw::audio_host_macos::NativeVstAutomationOverrideTable::SetResult::kAlreadyPresent);
@@ -652,9 +668,13 @@ void TestControlFrames() {
   assert(decodedTransport && decodedTransport->type == daw::audio_host_macos::ControlType::kTransport);
   const auto transaction = daw::audio_host_macos::EncodeControlFrame(
     daw::audio_host_macos::ControlType::kGraphRollback, {});
+  const auto protocol_version = daw::audio_host_macos::kControlProtocolVersion;
   assert(transaction == std::vector<std::uint8_t>({
     0x44, 0x41, 0x57, 0x48,
-    0x00, 0x00, 0x00, 0x12,
+    static_cast<std::uint8_t>(protocol_version >> 24U),
+    static_cast<std::uint8_t>(protocol_version >> 16U),
+    static_cast<std::uint8_t>(protocol_version >> 8U),
+    static_cast<std::uint8_t>(protocol_version),
     0x00, 0x00, 0x00, 0x27,
     0x00, 0x00, 0x00, 0x00,
   }));
@@ -1164,6 +1184,21 @@ void TestNativeVstRuntimeControlBounds() {
   AppendLeU32(parameters, 3);
   AppendLeDouble(parameters, 1.0);
   assert(host.QueueNativeVstParameterEvents(parameters));
+  std::vector<std::uint8_t> unknown_reenable_instance;
+  AppendInstanceId(unknown_reenable_instance, "c0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f2");
+  AppendLeU32(unknown_reenable_instance, 1);
+  AppendLeU32(unknown_reenable_instance, 7);
+  assert(!host.ReenableVstScheduleAutomation(unknown_reenable_instance));
+  std::vector<std::uint8_t> unknown_reenable_parameter;
+  AppendInstanceId(unknown_reenable_parameter, instance_id);
+  AppendLeU32(unknown_reenable_parameter, 1);
+  AppendLeU32(unknown_reenable_parameter, 9);
+  assert(!host.ReenableVstScheduleAutomation(unknown_reenable_parameter));
+  std::vector<std::uint8_t> reenable_parameter;
+  AppendInstanceId(reenable_parameter, instance_id);
+  AppendLeU32(reenable_parameter, 1);
+  AppendLeU32(reenable_parameter, 7);
+  assert(host.ReenableVstScheduleAutomation(reenable_parameter));
   parameters.back() = 0x40;
   assert(!host.QueueNativeVstParameterEvents(parameters));
   std::vector<std::uint8_t> midi;
@@ -1203,6 +1238,15 @@ void TestNativeVstWatchdogStartupGrace() {
   assert(daw::audio_host_macos::detail::NativeVstWatchdogShouldMiss(
     true, 48'000, 512, missed_frames, missed_callbacks
   ));
+}
+
+void TestRealtimeDurationHistogramBucketsAreBounded() {
+  using daw::audio_host_macos::detail::RealtimeDurationHistogramBucket;
+  assert(RealtimeDurationHistogramBucket(0) == 0);
+  assert(RealtimeDurationHistogramBucket(1) == 0);
+  assert(RealtimeDurationHistogramBucket(2) == 1);
+  assert(RealtimeDurationHistogramBucket(1ULL << 20U) == 20);
+  assert(RealtimeDurationHistogramBucket(std::numeric_limits<std::uint64_t>::max()) == 31);
 }
 
 void TestNativeSessionWireRejectsMalformedFramesAndEvents() {
@@ -1390,6 +1434,7 @@ void TestVstAutomationSegmentsReclaimWithinEpoch() {
   attachment.bundle_fingerprint = Fingerprint("0db70288522e217dd5a3c3690e3d9da2416a0019aa2def7e956e938af35a0a16");
   attachment.binary_fingerprint = Fingerprint("6e45a98e5da42ad8bcbfb7096debc5dddda111a710f28efb439fa8048c139b7d");
   attachment.parameter_ids = {7, 8};
+  if (!std::filesystem::is_regular_file(attachment.canonical_executable_path)) return;
   assert(host.AttachNativeVst(attachment));
   const auto graph_status = host.PrepareGraphRevision(2, GraphSnapshot(2, 1.0F, 2));
   assert(graph_status.code == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
@@ -1685,6 +1730,7 @@ void TestWorkerNotificationQueuePolicy() {
 }  // namespace
 
 int main() {
+  TestWorkerAutomationSelection();
   TestDeviceNamespace();
   TestControlFrames();
   TestOfflineTerminalIsPublishedBeforeStop();
@@ -1704,6 +1750,7 @@ int main() {
   TestMappedAssetWrittenRangeLedgerIsBounded();
   TestNativeVstRuntimeControlBounds();
   TestNativeVstWatchdogStartupGrace();
+  TestRealtimeDurationHistogramBucketsAreBounded();
   TestNativeSessionWireRejectsMalformedFramesAndEvents();
   TestScheduledProcessorSetUsesAbsoluteFrame();
   TestScheduleWindowCompletionSemantics();

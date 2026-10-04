@@ -188,6 +188,8 @@ const sendsEqual = (
 )
 
 const trackPersistenceFieldsEqual = (left: TimelineTrackRow, right: TimelineTrackRow) => (
+  left.name === right.name
+  &&
   left.volume === right.volume
   && left.muted === right.muted
   && left.soloed === right.soloed
@@ -600,6 +602,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
       : null
     const track: TimelineTrackRow = {
       ...row.value,
+      name: input.name?.trim() || row.value.name,
       volume: input.volume ?? row.value.volume,
       index: input.index ?? row.value.index,
       muted: input.muted ?? row.value.muted,

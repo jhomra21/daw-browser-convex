@@ -44,7 +44,7 @@ jobs:
               port: 4173,
               async fetch(request) {
                 const url = new URL(request.url);
-                const relativePath = decodeURIComponent(url.pathname).replace(/^\\/+/, "") || "index.html";
+                const relativePath = decodeURIComponent(url.pathname).split("/").filter(Boolean).join("/") || "index.html";
                 const candidate = Bun.file(root + "/" + relativePath);
                 if (await candidate.exists()) return new Response(candidate);
                 return new Response(Bun.file(root + "/index.html"), {

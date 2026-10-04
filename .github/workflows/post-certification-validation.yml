@@ -1,0 +1,40 @@
+name: Post-certification validation
+
+on:
+  push:
+    branches:
+      - post-certification-hardening
+
+permissions:
+  contents: read
+
+jobs:
+  focused:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Focused tests
+        env:
+          VITE_CONVEX_URL: https://polite-peccary-245.convex.cloud
+        run: bun test src/hooks/useTimelineBrowserController.test.ts src/hooks/local-send-reload.integration.test.ts tools/performance/30-track/tier-three.test.ts
+      - run: bun run typecheck
+      - run: bun run lint
+
+  native-audio-host:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout VST3 SDK
+        run: git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/steinbergmedia/vst3sdk.git "$RUNNER_TEMP/vst3sdk"
+      - name: Configure
+        run: cmake -S native -B native/build/post-cert -DDAW_BUILD_AUDIO_HOST_MACOS=ON -DDAW_BUILD_PLUGIN_HOST=ON -DBUILD_TESTING=ON -DVST3_SDK_PATH="$RUNNER_TEMP/vst3sdk"
+      - name: Build native audio host tests
+        run: cmake --build native/build/post-cert --target daw-audio-host-macos daw-audio-host-macos-test daw-audio-host-macos-graph-integration-test daw-audio-host-macos-transaction-test -j 3
+      - name: Run native audio host CTest
+        run: ctest --test-dir native/build/post-cert --output-on-failure -R 'daw-audio-host-macos|daw-realtime-callback-static-guard'

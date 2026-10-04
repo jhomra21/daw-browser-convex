@@ -1,0 +1,61 @@
+name: Post-30-track hardening verification
+
+on:
+  push:
+    branches:
+      - chore/post-30-track-hardening
+
+permissions:
+  contents: read
+
+jobs:
+  bun-suite:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+      - run: bun install --frozen-lockfile
+      - name: Install browser harness
+        run: |
+          bun add --global agent-browser@0.38.2
+          agent-browser install
+      - name: Build portable Wasm
+        run: bun run build:portable-wasm
+      - name: Build native audio-core fixture runner
+        run: sh native/audio-core/scripts/build-native.sh
+      - name: Focused hardening tests
+        env:
+          VITE_CONVEX_URL: https://polite-peccary-245.convex.cloud
+        run: bun test src/hooks/useTimelineBrowserController.test.ts
+      - run: bun run typecheck
+      - run: bun run lint
+      - name: Configured full Bun suite
+        env:
+          VITE_CONVEX_URL: https://polite-peccary-245.convex.cloud
+          TMPDIR: ${{ runner.temp }}/daw-bun-suite
+        run: |
+          mkdir -p "$TMPDIR"
+          bun test --timeout 15000 --max-concurrency 1
+
+  native-audio-host:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Checkout VST3 SDK
+        run: git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/steinbergmedia/vst3sdk.git "$RUNNER_TEMP/vst3sdk"
+      - name: Configure native audio host
+        run: cmake -S native -B native/build/audio-host-ci -DDAW_BUILD_AUDIO_HOST_MACOS=ON -DDAW_BUILD_PLUGIN_HOST=ON -DBUILD_TESTING=ON -DVST3_SDK_PATH="$RUNNER_TEMP/vst3sdk"
+      - name: Build native audio host tests
+        run: cmake --build native/build/audio-host-ci --target daw-audio-host-macos daw-audio-host-macos-test daw-audio-host-macos-graph-integration-test daw-audio-host-macos-transaction-test -j 3
+      - name: Run native audio host CTest
+        run: ctest --test-dir native/build/audio-host-ci --output-on-failure -R 'daw-audio-host-macos|daw-realtime-callback-static-guard'

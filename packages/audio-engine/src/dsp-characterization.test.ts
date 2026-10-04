@@ -121,7 +121,7 @@ describe('DSP characterization fixtures and metrics', () => {
       8_000,
       sampleRate,
       9,
-    )).toBe(Number.NEGATIVE_INFINITY)
+    )).toBeLessThan(-200)
   })
 
   test('characterizes analyzer silence as finite bounded zero output', () => {

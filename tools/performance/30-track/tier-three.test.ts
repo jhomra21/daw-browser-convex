@@ -70,26 +70,17 @@ test("retains pre-recording live VST probe status when capture fails", () => {
   expect(failure.workerAutomationAtPlayback).toBeNull()
 })
 
-test("retains watched host pipeline stages when later recording fails", () => {
-  const stages = { instanceId: "trusted", transportEpoch: 9, published: 3, projected: 1, overrideSkipped: 0, submitted: 1 }
-  const failure = new TierThreeRecordingFailure("writer failure", null, "unknown", "No observation", null, null, stages)
-  expect(failure.watchedMixAtPlayback).toEqual(stages)
-})
-
 test("retains playback native epoch and scheduled count before recording changes epoch", () => {
   const playback = { transportEpoch: 7, callbacks: 123, submittedVstSegments: 9, state: "running" }
-  const failure = new TierThreeRecordingFailure("writer failure", null, "unknown", "No observation", null, null, null, playback)
+  const failure = new TierThreeRecordingFailure("writer failure", null, "unknown", "No observation", null, null, playback)
   expect(failure.nativeAtPlayback).toEqual(playback)
 })
 test("preserves initial-playback evidence when recording startup fails before a status sample", () => {
   const playback = { transportEpoch: 7, callbacks: 123, submittedVstSegments: 9, state: "running" }
   const failure = retainTierThreeRecordingFailure(
-    new Error("SAB worker unavailable"), "No matching worker observation", null,
-    { instanceId: "vst", transportEpoch: 7, published: 9, projected: 616, overrideSkips: 0, submitted: 616 },
-    playback,
+    new Error("SAB worker unavailable"), "No matching worker observation", null, playback,
   )
   expect(failure.message).toBe("SAB worker unavailable")
-  expect(failure.watchedMixAtPlayback?.submitted).toBe(616)
   expect(failure.nativeAtPlayback).toEqual(playback)
 })
 

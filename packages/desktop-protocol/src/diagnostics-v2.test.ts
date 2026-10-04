@@ -130,21 +130,12 @@ test("diagnostics v2 requires explicit missing or current worker automation evid
   expect(desktopDiagnosticsSchemaV2.parse({ ...diagnostics, native: missing }).native).toEqual(missing)
   expect(() => desktopDiagnosticsSchemaV2.parse({ ...diagnostics, native: {
     ...missing, diagnostics: { ...missing.diagnostics, watchedMixProcessed: {
-      instanceId: "mix", acceptedPoints: 1, lastParameterId: 9, transportEpoch: 7, sequence: "2",
+      instanceId: "mix", acceptedPoints: 1, lastParameterId: 48, transportEpoch: 7, sequence: "2",
     } },
   } })).toThrow()
-  const mixParameterId = 48
-  const watched = { ...missing, diagnostics: { ...missing.diagnostics, watchedMixProcessed: {
-    instanceId: "mix", acceptedPoints: 1, lastParameterId: mixParameterId, transportEpoch: 7, sequence: "2",
-  } } }
-  expect(desktopDiagnosticsSchemaV2.parse({ ...diagnostics, native: watched }).native?.status).toBe("available")
-  const host = { ...missing, diagnostics: { ...missing.diagnostics, watchedMixHost: {
-    instanceId: "mix", published: 2, projected: 1, overrideSkips: 1, submitted: 1, transportEpoch: 7,
-  } } }
-  expect(desktopDiagnosticsSchemaV2.parse({ ...diagnostics, native: host }).native?.status).toBe("available")
   expect(() => desktopDiagnosticsSchemaV2.parse({ ...diagnostics, native: {
-    ...host, diagnostics: { ...host.diagnostics, watchedMixHost: {
-      ...host.diagnostics.watchedMixHost, transportEpoch: 6,
+    ...missing, diagnostics: { ...missing.diagnostics, watchedMixHost: {
+      instanceId: "mix", published: 2, projected: 1, overrideSkips: 1, submitted: 1, transportEpoch: 7,
     } },
   } })).toThrow()
   const stale = { ...native, diagnostics: { ...native.diagnostics, workerAutomation: {

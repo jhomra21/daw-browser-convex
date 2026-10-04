@@ -454,7 +454,6 @@ test('fingerprints all playback-relevant audio clip compiler fields for paused p
   expect(fingerprint).toContain("clips.map((clip)")
   expect(fingerprint).toContain("buffer: readBufferFingerprint(buffer)")
   expect(fingerprint).not.toContain("clip.id")
-  expect(source).toContain('disposeNativePreview("paused-preview-track-fingerprint-change"')
   expect(source).toContain('"project-generation-change"')
   expect(source).toContain('disposePreparedBackends("explicit-playback-stop")')
   expect(source).toContain('disposePreparedBackends("explicit-reprepare")')

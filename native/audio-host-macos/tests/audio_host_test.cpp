@@ -1,6 +1,5 @@
 #include "daw/audio_host_macos.h"
 #include "daw/audio_host_automation_override.h"
-#include "daw/watched_mix_stages.h"
 #include "daw/audio_host_event_scheduler.h"
 #include "daw/audio_core_native.h"
 #include "daw/audio_core_instrument_wire.h"
@@ -28,20 +27,6 @@ void TestWorkerAutomationSelection() {
   const Diagnostics::WorkerAutomation other{3, 14, 7, 13, "other"};
   selected = daw::audio_host_macos::SelectWorkerAutomation(selected, other, 7);
   assert(selected && selected->instance_id == "other");
-}
-
-void TestWatchedMixStages() {
-  daw::audio_host_macos::WatchedMixStages watched;
-  watched.Publish(7, 9, 1);
-  watched.Publish(7, 48, 2);
-  watched.Project(7, 48, 2);
-  watched.Override(7, 48);
-  watched.Submit(7, 48, false);
-  watched.Submit(7, 48, true);
-  const auto snapshot = watched.Read(7);
-  assert(snapshot.published == 2 && snapshot.projected == 2
-    && snapshot.override_skips == 1 && snapshot.submitted == 1);
-  assert(watched.Read(8).published == 0);
 }
 
 std::array<std::uint8_t, 32> Fingerprint(const std::string_view value) {
@@ -1739,7 +1724,6 @@ void TestWorkerNotificationQueuePolicy() {
 }  // namespace
 
 int main() {
-  TestWatchedMixStages();
   TestWorkerAutomationSelection();
   TestDeviceNamespace();
   TestControlFrames();

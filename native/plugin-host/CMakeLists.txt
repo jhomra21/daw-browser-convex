@@ -33,6 +33,8 @@ endif()
 
 add_library(daw-vst3-worker-runtime STATIC
   src/worker-supervisor.cpp
+  src/worker-transport.cpp
+  src/worker-runtime.cpp
   src/worker-control-protocol.cpp
   src/worker-control-service.cpp
 )

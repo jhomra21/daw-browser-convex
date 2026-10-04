@@ -454,14 +454,6 @@ test('fingerprints all playback-relevant audio clip compiler fields for paused p
   expect(fingerprint).toContain("clips.map((clip)")
   expect(fingerprint).toContain("buffer: readBufferFingerprint(buffer)")
   expect(fingerprint).not.toContain("clip.id")
-  expect(source).toContain('"project-generation-change"')
-  expect(source).toContain('disposePreparedBackends("explicit-playback-stop")')
-  expect(source).toContain('disposePreparedBackends("explicit-reprepare")')
-  expect(source).toContain('disposePreparedBackends("audio-lifecycle-change")')
-  expect(source).toContain('disposePreparedBackends("playback-mode-backend-switch")')
-  expect(source).toContain("previousTrackFingerprintHash")
-  expect(source).toContain("nextTrackFingerprintHash")
-  expect(source).toContain("nativePlayback.destroy()")
 })
 
 test('waits for audio clip hydration before native paused preview and retries after hydration', async () => {

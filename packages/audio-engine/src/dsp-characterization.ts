@@ -331,7 +331,11 @@ export const measureAliasingEnergyDb = (
     const harmonicFrequency = harmonic * fundamentalHz
     if (harmonicFrequency <= sampleRate / 2) continue
     const aliasFrequency = foldFrequencyToNyquist(harmonicFrequency, sampleRate)
-    if (aliasFrequency <= 0 || Math.abs(aliasFrequency - fundamentalHz) < 1e-9) continue
+    if (
+      aliasFrequency <= 0
+      || aliasFrequency >= sampleRate / 2
+      || Math.abs(aliasFrequency - fundamentalHz) < 1e-9
+    ) continue
     aliasFrequencies.add(aliasFrequency)
   }
   if (aliasFrequencies.size === 0) return Number.NEGATIVE_INFINITY

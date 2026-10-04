@@ -116,6 +116,12 @@ describe('DSP characterization fixtures and metrics', () => {
       aliased[frame] += 0.1 * Math.sin(2 * Math.PI * 18_000 * frame / sampleRate)
     }
     expect(measureAliasingEnergyDb(aliased, highToneHz, sampleRate, 3)).toBeCloseTo(-20, 1)
+    expect(measureAliasingEnergyDb(
+      createSineFixture(length, 8_000, sampleRate)[0],
+      8_000,
+      sampleRate,
+      9,
+    )).toBe(Number.NEGATIVE_INFINITY)
   })
 
   test('characterizes analyzer silence as finite bounded zero output', () => {

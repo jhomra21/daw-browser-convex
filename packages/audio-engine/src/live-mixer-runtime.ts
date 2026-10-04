@@ -9,7 +9,7 @@ import { createSaturatorChainState, type SaturatorChainState } from './effects/s
 import { applyLiveMixerGraph, clearLiveMixerEdges, removeLiveMixerEdgesForNodes, type LiveMixerEdgeRuntime } from './mixer/apply-live-routing'
 import { createMixerChannels } from './mixer/channels'
 import { resolveMixerGraph } from './mixer/resolve-routing'
-import { resolveMixerTiming } from './mixer/resolve-timing'
+import { resolveMixerTiming, sidechainRouteKey } from './mixer/resolve-timing'
 import type { MixerTrackFx, ResolveMixerGraphOptions, ResolvedMixerGraph } from './mixer/types'
 import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import type { AutomationAudioBinding } from './automation'
@@ -229,6 +229,16 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     retiredTrackResources.delete(trackId)
   }
 
+  const executableSidechainRoutes = (graph: ResolvedMixerGraph) => {
+    const channelById = new Map(graph.channels.map((entry) => [entry.channel.id, entry]))
+    return sidechainRoutes.filter((route) => {
+      if (!channelById.has(route.sourceTrackId)) return false
+      const target = channelById.get(route.targetTrackId)
+      return target !== undefined
+        && findExternalSidechainTarget(target.fx?.instances, route.effectInstanceId) !== undefined
+    })
+  }
+
   const publishGraphLatency = () => {
     const ctx = options.getAudioContext()
     if (!ctx) {
@@ -236,7 +246,10 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       return
     }
     const graph = resolveLiveMixerGraph(currentTracks, Object.fromEntries(trackFx), options.getMasterFx())
-    options.onGraphLatencyChange?.(resolveMixerTiming(graph, ctx.sampleRate, currentBpm, new Map(), sidechainRoutes).graphLatencyFrames)
+    const activeSidechains = executableSidechainRoutes(graph)
+    options.onGraphLatencyChange?.(
+      resolveMixerTiming(graph, ctx.sampleRate, currentBpm, new Map(), activeSidechains).graphLatencyFrames,
+    )
   }
 
   const disconnectRuntimeEdge = (edge: LiveMixerEdgeRuntime) => {
@@ -251,7 +264,8 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     const ctx = options.getAudioContext()
     if (!ctx) return
     const graph = resolveLiveMixerGraph(currentTracks, Object.fromEntries(trackFx), options.getMasterFx())
-    const timing = resolveMixerTiming(graph, ctx.sampleRate, currentBpm, new Map(), sidechainRoutes)
+    const resolvedSidechains = executableSidechainRoutes(graph)
+    const timing = resolveMixerTiming(graph, ctx.sampleRate, currentBpm, new Map(), resolvedSidechains)
     const activeSidechains = new Set<string>()
     for (const route of sidechainRoutes) {
       const source = outputs.get(route.sourceTrackId)
@@ -854,7 +868,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       currentTime: ctx.currentTime,
       sampleRate: ctx.sampleRate,
       bpm: currentBpm,
-      sidechainRoutes,
+      sidechainRoutes: executableSidechainRoutes(graph),
       reconnectTrackMeters: (trackId, gain) => {
         if (!activeMeterTrackIds.has(trackId)) {
           options.disposeTrackMeters(trackId)

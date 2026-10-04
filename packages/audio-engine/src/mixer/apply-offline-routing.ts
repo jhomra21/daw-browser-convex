@@ -8,7 +8,7 @@ import { resolveDelayAutomationBindings, resolveEqAutomationBindings, resolveRev
 import type { AudioEffectRuntimeInstance } from '../effects/runtime-instance'
 import { createMixerRoutingPlan } from './graph-contract'
 import { createOfflineCompressorLifecycle, type OfflineCompressorLifecycle, type OfflineProcessorTarget } from './offline-compressor-lifecycle'
-import { MASTER_ROUTE_TARGET, mixerRouteKey, resolveMixerTiming } from './resolve-timing'
+import { MASTER_ROUTE_TARGET, mixerRouteKey, resolveMixerTiming, sidechainRouteKey } from './resolve-timing'
 import { createStaticWorkletNodeChain, disconnectStaticWorkletNodeChain, resolveStaticWorkletAutomationBinding, type StaticWorkletKind, type StaticWorkletNodeChain } from '../effects/static-worklet-chain'
 import { PROCESSOR_RESOURCE_LIMITS } from '../effects/processor-release-contract'
 
@@ -166,7 +166,7 @@ export async function createOfflineMixerNodes(
     .reduce((count, instances) => count + (instances?.filter((instance) => isStaticWorkletKind(instance.kind)).length ?? 0), 0)
   if (staticWorkletCount > PROCESSOR_RESOURCE_LIMITS.offlineOwnedWorklets) throw new Error(`Offline rendering is limited to ${PROCESSOR_RESOURCE_LIMITS.offlineOwnedWorklets} static worklets.`)
   const routingPlan = createMixerRoutingPlan(graph)
-  const timingPlan = resolveMixerTiming(graph, ctx.sampleRate, bpm)
+  const timingPlan = resolveMixerTiming(graph, ctx.sampleRate, bpm, new Map(), sidechainRoutes)
   const masterInput = ctx.createGain()
   masterInput.gain.value = routingPlan.masterVolume
   const compressorLifecycle = createOfflineCompressorLifecycle(
@@ -260,7 +260,17 @@ export async function createOfflineMixerNodes(
         `Invalid offline sidechain route for effect ${route.effectInstanceId}`,
       )
       const detectorSource = detectorOnlyTrackIds.has(route.sourceTrackId) ? source.gain : source.output
-      detectorSource.connect(targetNode, 0, 1)
+      const delayFrames = timingPlan.sidechainDelayFrames.get(
+        sidechainRouteKey(route.sourceTrackId, route.targetTrackId, route.effectInstanceId),
+      ) ?? 0
+      if (delayFrames > 0) {
+        const delay = ctx.createDelay()
+        delay.delayTime.value = delayFrames / ctx.sampleRate
+        detectorSource.connect(delay)
+        delay.connect(targetNode, 0, 1)
+      } else {
+        detectorSource.connect(targetNode, 0, 1)
+      }
     }
 
     return {

@@ -1,5 +1,6 @@
 import { assertDefined } from '@daw-browser/shared'
 import type { ResolvedMixerGraph } from './types'
+import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import { createMixerRoutingPlan } from './graph-contract'
 import { MASTER_ROUTE_TARGET, mixerRouteKey, resolveMixerTiming } from './resolve-timing'
 
@@ -28,6 +29,7 @@ type ApplyLiveMixerGraphOptions = {
   currentTime: number
   sampleRate: number
   bpm?: number
+  sidechainRoutes?: readonly ExternalSidechainRoute[]
   reconnectTrackMeters: (trackId: string, output: GainNode) => void
 }
 
@@ -47,7 +49,7 @@ const updateDelay = (delay: DelayNode, seconds: number, currentTime: number) => 
 
 export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
   const plan = createMixerRoutingPlan(options.graph)
-  const timing = resolveMixerTiming(options.graph, options.sampleRate, options.bpm)
+  const timing = resolveMixerTiming(options.graph, options.sampleRate, options.bpm, new Map(), options.sidechainRoutes)
   options.masterInput.gain.value = plan.masterVolume
   const activeEdgeIds = new Set<string>()
 

@@ -175,6 +175,7 @@ describe('mixer routing plan', () => {
       toNodeId: 'return',
       sidechain: true,
       targetProcessorId: 'compressor-1',
+      pdcDelayFrames: 0,
     }))
   })
 

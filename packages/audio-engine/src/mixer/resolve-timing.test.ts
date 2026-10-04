@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { createMixerChannels } from './channels'
 import { resolveMixerGraph } from './resolve-routing'
-import { MASTER_ROUTE_TARGET, mixerRouteKey, resolveMixerTiming } from './resolve-timing'
+import { MASTER_ROUTE_TARGET, mixerRouteKey, resolveMixerTiming, sidechainRouteKey } from './resolve-timing'
 import { normalizeCompressorParams } from '@daw-browser/shared'
 
 describe('mixer timing resolution', () => {
@@ -62,4 +62,66 @@ describe('mixer timing resolution', () => {
     expect(timing.routeDelayFrames.get(mixerRouteKey('source-pre', 'return', 'send', 'pre-fader'))).toBe(480)
     expect(timing.routeDelayFrames.get(mixerRouteKey('source-post', 'return', 'send', 'post-fader'))).toBe(0)
   })
+  test('aligns detector inputs and propagates late detector arrival through the program path', () => {
+    const graph = resolveMixerGraph({
+      channels: createMixerChannels([
+        { id: 'detector', name: 'Detector', clips: [], volume: 1 },
+        { id: 'target', name: 'Target', clips: [], volume: 1 },
+      ]),
+      trackFx: {
+        detector: {
+          instances: [{
+            id: 'detector-compressor',
+            kind: 'compressor',
+            params: normalizeCompressorParams({ enabled: true, lookaheadMs: 10 }),
+          }],
+        },
+        target: {
+          instances: [{
+            id: 'target-compressor',
+            kind: 'compressor',
+            params: normalizeCompressorParams({ enabled: true, lookaheadMs: 10 }),
+          }],
+        },
+      },
+    })
+    const route = { sourceTrackId: 'detector', targetTrackId: 'target', effectInstanceId: 'target-compressor' }
+    const timing = resolveMixerTiming(graph, 48_000, 120, new Map(), [route])
+
+    expect(timing.sidechainDelayFrames.get(sidechainRouteKey('detector', 'target', 'target-compressor'))).toBe(0)
+    expect(timing.routeDelayFrames.get(mixerRouteKey('detector', MASTER_ROUTE_TARGET, 'output'))).toBe(480)
+    expect(timing.routeDelayFrames.get(mixerRouteKey('target', MASTER_ROUTE_TARGET, 'output'))).toBe(0)
+    expect(timing.graphLatencyFrames).toBe(960)
+  })
+
+  test('delays an early detector to the exact processor input after preceding target latency', () => {
+    const graph = resolveMixerGraph({
+      channels: createMixerChannels([
+        { id: 'detector', name: 'Detector', clips: [], volume: 1 },
+        { id: 'target', name: 'Target', clips: [], volume: 1 },
+      ]),
+      trackFx: {
+        target: {
+          instances: [
+            {
+              id: 'prefix-compressor',
+              kind: 'compressor',
+              params: normalizeCompressorParams({ enabled: true, lookaheadMs: 10 }),
+            },
+            {
+              id: 'target-compressor',
+              kind: 'compressor',
+              params: normalizeCompressorParams({ enabled: true, lookaheadMs: 10 }),
+            },
+          ],
+        },
+      },
+    })
+    const route = { sourceTrackId: 'detector', targetTrackId: 'target', effectInstanceId: 'target-compressor' }
+    const timing = resolveMixerTiming(graph, 48_000, 120, new Map(), [route])
+
+    expect(timing.sidechainDelayFrames.get(sidechainRouteKey('detector', 'target', 'target-compressor'))).toBe(480)
+    expect(timing.graphLatencyFrames).toBe(960)
+  })
+
 })

@@ -236,7 +236,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       return
     }
     const graph = resolveLiveMixerGraph(currentTracks, Object.fromEntries(trackFx), options.getMasterFx())
-    options.onGraphLatencyChange?.(resolveMixerTiming(graph, ctx.sampleRate, currentBpm).graphLatencyFrames)
+    options.onGraphLatencyChange?.(resolveMixerTiming(graph, ctx.sampleRate, currentBpm, new Map(), sidechainRoutes).graphLatencyFrames)
   }
 
   const disconnectRuntimeEdge = (edge: LiveMixerEdgeRuntime) => {
@@ -250,6 +250,8 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const applyAuxiliaryRoutes = () => {
     const ctx = options.getAudioContext()
     if (!ctx) return
+    const graph = resolveLiveMixerGraph(currentTracks, Object.fromEntries(trackFx), options.getMasterFx())
+    const timing = resolveMixerTiming(graph, ctx.sampleRate, currentBpm, new Map(), sidechainRoutes)
     const activeSidechains = new Set<string>()
     for (const route of sidechainRoutes) {
       const source = outputs.get(route.sourceTrackId)
@@ -264,10 +266,19 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       if (!targetNode) continue
       const edgeId = `sidechain:${sidechainRouteIdentity(route.targetTrackId, route.effectInstanceId)}`
       activeSidechains.add(edgeId)
+      const delaySeconds = (timing.sidechainDelayFrames.get(
+        sidechainRouteKey(route.sourceTrackId, route.targetTrackId, route.effectInstanceId),
+      ) ?? 0) / ctx.sampleRate
       const existing = sidechainEdges.get(edgeId)
-      if (existing?.source === source && existing.target === targetNode) continue
+      if (existing?.source === source && existing.target === targetNode) {
+        existing.delay.delayTime.cancelScheduledValues(ctx.currentTime)
+        existing.delay.delayTime.setValueAtTime(existing.delay.delayTime.value, ctx.currentTime)
+        existing.delay.delayTime.linearRampToValueAtTime(delaySeconds, ctx.currentTime + 0.01)
+        continue
+      }
       if (existing) disconnectRuntimeEdge(existing)
       const delay = ctx.createDelay()
+      delay.delayTime.value = delaySeconds
       source.connect(delay)
       delay.connect(targetNode, 0, 1)
       sidechainEdges.set(edgeId, { source, target: targetNode, delay })
@@ -843,6 +854,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       currentTime: ctx.currentTime,
       sampleRate: ctx.sampleRate,
       bpm: currentBpm,
+      sidechainRoutes,
       reconnectTrackMeters: (trackId, gain) => {
         if (!activeMeterTrackIds.has(trackId)) {
           options.disposeTrackMeters(trackId)

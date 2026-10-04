@@ -40,6 +40,7 @@ import {
   MASTER_ROUTE_TARGET,
   mixerRouteKey,
   resolveMixerTiming,
+  sidechainRouteKey,
   type ExternalNodeLatencyFrames,
 } from './resolve-timing'
 import type { ResolvedMixerGraph } from './types'
@@ -515,7 +516,7 @@ export const createPortableGraphSnapshot = ({
   externalLatencyFrames = new Map(),
 }: CreatePortableGraphSnapshotOptions): AudioCoreGraphSnapshot => {
   if (!Number.isSafeInteger(revision) || revision <= 0) throw new Error('Portable graph revisions must be positive safe integers.')
-  const timing = resolveMixerTiming(graph, sampleRate, bpm, externalLatencyFrames)
+  const timing = resolveMixerTiming(graph, sampleRate, bpm, externalLatencyFrames, sidechainRoutes)
   const nodes = graph.channels.map((entry) => {
     return {
       id: entry.channel.id,
@@ -573,7 +574,7 @@ export const createPortableGraphSnapshot = ({
     }
     edges.push({
       version: audioCoreContractVersion,
-      id: `sidechain:${JSON.stringify([route.sourceTrackId, route.targetTrackId, route.effectInstanceId])}`,
+      id: `sidechain:${sidechainRouteKey(route.sourceTrackId, route.targetTrackId, route.effectInstanceId)}`,
       fromNodeId: route.sourceTrackId,
       toNodeId: route.targetTrackId,
       gain: 1,
@@ -581,7 +582,7 @@ export const createPortableGraphSnapshot = ({
       tap: 'post-fader',
       sidechain: true,
       targetProcessorId: route.effectInstanceId,
-      pdcDelayFrames: 0,
+      pdcDelayFrames: timing.sidechainDelayFrames.get(sidechainRouteKey(route.sourceTrackId, route.targetTrackId, route.effectInstanceId)) ?? 0,
     })
   }
   return {

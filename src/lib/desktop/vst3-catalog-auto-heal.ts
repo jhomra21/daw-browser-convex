@@ -58,7 +58,7 @@ export const hasStaleVst3CatalogEntries = (catalog: DesktopPluginCatalog): boole
 
 const dispatchCatalogChanged = () => {
   const browserWindow = globalThis.window
-  if (!browserWindow) return
+  if (!browserWindow || typeof browserWindow.dispatchEvent !== "function") return
   browserWindow.dispatchEvent(new Event("daw-plugin-catalog-changed"))
 }
 

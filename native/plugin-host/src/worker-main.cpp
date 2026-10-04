@@ -22,6 +22,20 @@ constexpr int kEditorPollTimeoutMilliseconds = 8;
 // without allowing unbounded descriptor exhaustion.
 constexpr rlim_t kWorkerNoFileLimit = 512;
 
+bool Parse(const std::string_view text, double& result) {
+  if (text.empty()) return false;
+  const auto first = text.front();
+  if (first == '+' || first == ' ' || first == '\t' || first == '\n'
+    || first == '\r' || first == '\f' || first == '\v') return false;
+  const std::string owned(text);
+  char* end = nullptr;
+  errno = 0;
+  const auto parsed = std::strtod(owned.c_str(), &end);
+  if (errno == ERANGE || end != owned.c_str() + owned.size()) return false;
+  result = parsed;
+  return true;
+}
+
 template <typename Number>
 bool Parse(const std::string_view text, Number& result) {
   const auto parsed = std::from_chars(text.data(), text.data() + text.size(), result);

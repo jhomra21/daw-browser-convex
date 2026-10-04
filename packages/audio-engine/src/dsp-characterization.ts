@@ -312,6 +312,10 @@ const foldFrequencyToNyquist = (frequencyHz: number, sampleRate: number) => {
  * This is deliberately not a broadband FFT estimate. It targets the deterministic
  * alias products created when harmonics above Nyquist fold back into the audible
  * band, which makes the result stable enough to use as a release regression gate.
+ *
+ * A fold that lands on DC, Nyquist, the fundamental, or an in-band harmonic is
+ * indistinguishable from legitimate harmonic content, so such fundamentals (for
+ * example any exact divisor of the sample rate) are rejected rather than measured.
  */
 export const measureAliasingEnergyDb = (
   signal: Float32Array,
@@ -323,21 +327,27 @@ export const measureAliasingEnergyDb = (
   if (!Number.isInteger(maximumHarmonic) || maximumHarmonic < 2) {
     throw new RangeError('Maximum harmonic must be an integer greater than or equal to two.')
   }
+  const nyquist = sampleRate / 2
+  const tolerance = sampleRate * 1e-9
+  const inBandHarmonics: number[] = []
+  const aliasFrequencies = new Set<number>()
+  for (let harmonic = 1; harmonic <= maximumHarmonic; harmonic += 1) {
+    const harmonicFrequency = harmonic * fundamentalHz
+    if (harmonicFrequency < nyquist) inBandHarmonics.push(harmonicFrequency)
+    else aliasFrequencies.add(foldFrequencyToNyquist(harmonicFrequency, sampleRate))
+  }
+  for (const aliasFrequency of aliasFrequencies) {
+    if (
+      aliasFrequency <= tolerance
+      || aliasFrequency >= nyquist - tolerance
+      || inBandHarmonics.some((harmonicFrequency) => Math.abs(aliasFrequency - harmonicFrequency) <= tolerance)
+    ) {
+      throw new RangeError('Fundamental folds harmonics onto DC, Nyquist, or in-band harmonics; alias energy is ambiguous.')
+    }
+  }
   const fundamental = measureTone(signal, fundamentalHz, sampleRate)
   if (!fundamental.finite) return Number.POSITIVE_INFINITY
   if (fundamental.amplitude <= 0) return Number.POSITIVE_INFINITY
-  const aliasFrequencies = new Set<number>()
-  for (let harmonic = 2; harmonic <= maximumHarmonic; harmonic += 1) {
-    const harmonicFrequency = harmonic * fundamentalHz
-    if (harmonicFrequency <= sampleRate / 2) continue
-    const aliasFrequency = foldFrequencyToNyquist(harmonicFrequency, sampleRate)
-    if (
-      aliasFrequency <= 0
-      || aliasFrequency >= sampleRate / 2
-      || Math.abs(aliasFrequency - fundamentalHz) < 1e-9
-    ) continue
-    aliasFrequencies.add(aliasFrequency)
-  }
   if (aliasFrequencies.size === 0) return Number.NEGATIVE_INFINITY
   let aliasAmplitudeSquared = 0
   for (const aliasFrequency of aliasFrequencies) {

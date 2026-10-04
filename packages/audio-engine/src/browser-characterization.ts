@@ -12,11 +12,13 @@ import {
   createDefaultSpectralParams,
   createDefaultUtilityParams,
   normalizeCompressorParams,
+  normalizeEqParams,
   normalizeGateParamsEnvelope,
   normalizeSpectralParamsEnvelope,
   normalizeUtilityParamsEnvelope,
 } from '@daw-browser/shared'
 import { createCompressorNodeChain } from './effects/chain'
+import { createEqNodes } from './effects/dsp'
 import { createStaticWorkletNodeChain } from './effects/static-worklet-chain'
 import type { StaticWorkletKind } from './effects/static-worklet-chain'
 import {
@@ -287,15 +289,22 @@ export const characterizeBrowserEq = async (): Promise<BrowserCharacterizationCa
   const reference = createSineFixture(4_800, frequencyHz, sampleRate)[0]
   const input = new Float32Array(reference.length)
   for (let frame = 0; frame < reference.length; frame += 1) input[frame] = reference[frame] * 0.25
+  const params = normalizeEqParams({
+    enabled: true,
+    channelMode: 'mono',
+    bands: [{ id: 'characterization', type: 'peaking', frequency: frequencyHz, gainDb: 6, q: 1, enabled: true }],
+  })
+  let eqNodeCount = 0
   const rendered = await render(sampleRate, 1, input.length, (context, source) => {
     source.buffer?.getChannelData(0).set(input)
-    const filter = context.createBiquadFilter()
-    filter.type = 'peaking'
-    filter.frequency.value = frequencyHz
-    filter.Q.value = 1
-    filter.gain.value = 6
-    source.connect(filter)
-    filter.connect(context.destination)
+    const nodes = createEqNodes(context, params, 1)
+    eqNodeCount = nodes.length
+    let tail: AudioNode = source
+    for (const node of nodes) {
+      tail.connect(node)
+      tail = node
+    }
+    tail.connect(context.destination)
   })
   const output = rendered.getChannelData(0)
   const settleFrame = 480
@@ -306,7 +315,8 @@ export const characterizeBrowserEq = async (): Promise<BrowserCharacterizationCa
   const distortion = measureThdPlusNoise(settledOutput, frequencyHz, sampleRate)
   const thdPlusNoiseDb = Number.isFinite(distortion.thdPlusNoiseDb) ? distortion.thdPlusNoiseDb : -200
   return {
-    status: !metrics.containsNonFiniteSamples
+    status: eqNodeCount === 1
+      && !metrics.containsNonFiniteSamples
       && transfer.finite
       && transfer.gainDb > 5.5
       && transfer.gainDb < 6.5
@@ -314,6 +324,7 @@ export const characterizeBrowserEq = async (): Promise<BrowserCharacterizationCa
       ? 'pass'
       : 'fail',
     metrics: {
+      eqNodeCount,
       rms: metrics.rms,
       gainDb: transfer.gainDb,
       phaseDegrees: transfer.phaseDegrees,

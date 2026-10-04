@@ -17,11 +17,6 @@ type WorkerEndpoint = {
   terminate: () => void
 }
 
-export const benchmarkWorkerAssetUrl = (asset: URL, page: URL) => (
-  asset.protocol === 'daw:' && asset.hostname === 'app'
-  && page.protocol === 'daw:' && page.hostname === 'app'
-)
-
 const deferred = <T>() => {
   let resolve = (_value: T) => {}
   let reject = (_error: Error) => {}
@@ -29,7 +24,7 @@ const deferred = <T>() => {
   return { promise, resolve, reject }
 }
 
-export const createNativeSabRecordingWriter = (input: {
+export type NativeSabRecordingWriterInput = {
   generation: number
   sessionId: string
   sampleRate: number
@@ -37,7 +32,9 @@ export const createNativeSabRecordingWriter = (input: {
   worker?: WorkerEndpoint
   timeoutMs?: number
   onFailure?: (error: Error) => void
-}) => {
+}
+
+export const createNativeSabRecordingWriter = (input: NativeSabRecordingWriterInput) => {
   const buffers = createRecorderSabRingBuffers()
   const producer = createRecorderSabRingProducer(buffers, RECORDER_MAX_QUEUED_BLOCKS)
   const worker = input.worker ?? createBrowserWorker()

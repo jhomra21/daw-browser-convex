@@ -1,0 +1,24 @@
+name: Recording telemetry tail verification
+
+on:
+  push:
+    branches:
+      - fix/recording-telemetry-tail
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run build
+      - run: bun test apps/desktop/recording-ipc-diagnostics.test.ts

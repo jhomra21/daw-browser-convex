@@ -18,7 +18,7 @@ import {
 } from '~/lib/timeline-viewport-geometry'
 import {
   incrementPerformanceBenchmarkCounter,
-  measurePerformanceBenchmarkDuration,
+  measurePerformanceBenchmark,
   setPerformanceBenchmarkGauge,
 } from '~/lib/performance-benchmark-telemetry'
 
@@ -138,29 +138,29 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     runwayWidth: physicalRunwayWidth(),
   })
 
-  const applyVisibleRange = (range: TimelineRange, commit: boolean, isWheelPreview = false) => {
-    const startedAt = performance.now()
-    incrementPerformanceBenchmarkCounter('timeline.viewport-computations')
-    const width = viewportWidth()
-    const minimumDuration = minimumVisibleDuration(width)
-    const normalizedRange = normalizeTimelineRange(range, options.durationSec(), minimumDuration)
-    const nextScale = pixelsPerSecondForRange(normalizedRange, width)
-    batch(() => {
-      if (commit) options.commitPixelsPerSecond(nextScale)
-      else options.previewPixelsPerSecond(nextScale)
-      setVisibleStartSec(normalizedRange.startSec)
-      // Zoom changes logical time only; physical anchor is maintained by bind,
-      // resize, reset, and native scroll paths.
+  const applyVisibleRange = (range: TimelineRange, commit: boolean, isWheelPreview = false) => (
+    measurePerformanceBenchmark('timeline.viewport', () => {
+      incrementPerformanceBenchmarkCounter('timeline.viewport-computations')
+      const width = viewportWidth()
+      const minimumDuration = minimumVisibleDuration(width)
+      const normalizedRange = normalizeTimelineRange(range, options.durationSec(), minimumDuration)
+      const nextScale = pixelsPerSecondForRange(normalizedRange, width)
+      batch(() => {
+        if (commit) options.commitPixelsPerSecond(nextScale)
+        else options.previewPixelsPerSecond(nextScale)
+        setVisibleStartSec(normalizedRange.startSec)
+        // Zoom changes logical time only; physical anchor is maintained by bind,
+        // resize, reset, and native scroll paths.
+      })
+      if (!isWheelPreview) clearWheelCommit()
+      setPerformanceBenchmarkGauge('timeline.pixels-per-second', nextScale)
+      setPerformanceBenchmarkGauge('timeline.visible-start-sec', normalizedRange.startSec)
+      setPerformanceBenchmarkGauge('timeline.visible-end-sec', normalizedRange.endSec)
+      viewportGeneration += 1
+      setPerformanceBenchmarkGauge('timeline.viewport-generation', viewportGeneration)
+      return nextScale
     })
-    if (!isWheelPreview) clearWheelCommit()
-    setPerformanceBenchmarkGauge('timeline.pixels-per-second', nextScale)
-    setPerformanceBenchmarkGauge('timeline.visible-start-sec', normalizedRange.startSec)
-    setPerformanceBenchmarkGauge('timeline.visible-end-sec', normalizedRange.endSec)
-    viewportGeneration += 1
-    setPerformanceBenchmarkGauge('timeline.viewport-generation', viewportGeneration)
-    measurePerformanceBenchmarkDuration('timeline.viewport', startedAt)
-    return nextScale
-  }
+  )
 
   const zoomAtPointer = (viewportX: number, factor: number, commit: boolean, isWheelPreview = false) => {
     if (!isWheelPreview) clearWheelCommit()

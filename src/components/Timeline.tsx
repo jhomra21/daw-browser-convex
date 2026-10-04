@@ -137,7 +137,6 @@ import { createTimelineExportService } from "~/lib/export/timeline-export-servic
 import { createExportRenderStateSnapshot, type ExportAutomationPatch } from "~/lib/export/run-export-job";
 import { createDesktopNativeOfflinePcmRenderer } from "~/lib/export/desktop-native-offline-pcm-renderer";
 import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackTransport } from "~/lib/live-playback-snapshot";
-import { nativeVstAutomationSegmentsForSnapshot } from "~/lib/desktop/native-schedule-coordinator";
 import { withInstrumentOverride } from "~/lib/export/export-effect-rows";
 import { createTimelineExtensionHost } from "~/lib/extensions";
 import { createSampledInstrumentSession } from "~/lib/sampled-instrument-session";

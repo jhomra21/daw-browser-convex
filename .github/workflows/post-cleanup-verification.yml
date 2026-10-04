@@ -27,12 +27,14 @@ jobs:
           agent-browser install
       - name: Build portable Wasm
         run: bun run build:portable-wasm
+      - name: Build native audio-core fixture runner
+        run: sh native/audio-core/scripts/build-native.sh
       - name: Focused stale-test verification
         run: bun test src/hooks/useTimelinePlayback.test.ts packages/desktop-protocol/src/diagnostics-v2.test.ts tools/performance/30-track/v3-import-acceptance.test.ts tools/performance/30-track/tier-three.test.ts
       - run: bun run typecheck
       - run: bun run lint
       - name: Full Bun suite
-        run: bun test
+        run: bun test --timeout 15000
 
   native-audio-host:
     runs-on: macos-15

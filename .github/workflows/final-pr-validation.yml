@@ -9,13 +9,50 @@ permissions:
   contents: read
 
 jobs:
-  repository:
+  knip-diff:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - run: bun install --frozen-lockfile
-      - run: bun run knip
+      - name: Capture branch Knip findings
+        run: |
+          bun install --frozen-lockfile
+          bun x knip --reporter json > "$RUNNER_TEMP/knip-branch.json" || true
+      - name: Capture exact-base Knip findings
+        run: |
+          git worktree add "$RUNNER_TEMP/knip-base" 9201649ca38c907b6dc947c8b5c00a102a3b4a9e
+          cd "$RUNNER_TEMP/knip-base"
+          bun install --frozen-lockfile
+          bun x knip --reporter json > "$RUNNER_TEMP/knip-base.json" || true
+      - name: Require zero branch-added findings
+        run: |
+          bun -e '
+            const fs = require("node:fs");
+            const normalize = (path) => {
+              const report = JSON.parse(fs.readFileSync(path, "utf8"));
+              const findings = new Set();
+              for (const issue of report.issues ?? []) {
+                for (const [kind, values] of Object.entries(issue)) {
+                  if (kind === "file" || kind === "owners" || !Array.isArray(values)) continue;
+                  for (const value of values) {
+                    const name = value && typeof value === "object"
+                      ? [value.namespace ?? "", value.name ?? JSON.stringify(value)].join(":")
+                      : JSON.stringify(value);
+                    findings.add([issue.file, kind, name].join("\t"));
+                  }
+                }
+              }
+              return findings;
+            };
+            const base = normalize(process.env.RUNNER_TEMP + "/knip-base.json");
+            const branch = normalize(process.env.RUNNER_TEMP + "/knip-branch.json");
+            const added = [...branch].filter((finding) => !base.has(finding)).sort();
+            const removed = [...base].filter((finding) => !branch.has(finding)).sort();
+            console.log(JSON.stringify({ base: base.size, branch: branch.size, added, removed }, null, 2));
+            if (added.length !== 0) process.exit(1);
+          '

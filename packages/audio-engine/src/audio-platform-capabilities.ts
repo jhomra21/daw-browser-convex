@@ -31,10 +31,8 @@ export type AudioPlatformCapabilityReport = {
   evidence: Readonly<Record<keyof AudioPlatformCapabilities, AudioCapabilityEvidence>>
 }
 
-const message = (error: unknown) => error instanceof Error ? error.message : String(error)
-
 const probeLiveAudioWorklet = async (): Promise<AudioCapabilityEvidence> => {
-  if (typeof AudioContext !== 'function') {
+  if (!('AudioContext' in globalThis)) {
     return { supported: false, probe: 'active', message: 'AudioContext is unavailable.' }
   }
   let context: AudioContext | null = null
@@ -46,7 +44,11 @@ const probeLiveAudioWorklet = async (): Promise<AudioCapabilityEvidence> => {
     await loadWorkletModule(context, resolveWorkletModuleUrl(trackMeterWorklet.modulePath))
     return { supported: true, probe: 'active' }
   } catch (error) {
-    return { supported: false, probe: 'active', message: message(error) }
+    return {
+      supported: false,
+      probe: 'active',
+      message: error instanceof Error ? error.message : 'AudioWorklet probe failed.',
+    }
   } finally {
     if (context && context.state !== 'closed') {
       await context.close().catch(() => undefined)
@@ -55,7 +57,7 @@ const probeLiveAudioWorklet = async (): Promise<AudioCapabilityEvidence> => {
 }
 
 const probeOfflineAudioWorklet = async (): Promise<AudioCapabilityEvidence> => {
-  if (typeof OfflineAudioContext !== 'function') {
+  if (!('OfflineAudioContext' in globalThis)) {
     return { supported: false, probe: 'active', message: 'OfflineAudioContext is unavailable.' }
   }
   try {
@@ -66,12 +68,16 @@ const probeOfflineAudioWorklet = async (): Promise<AudioCapabilityEvidence> => {
     await loadWorkletModule(context, resolveWorkletModuleUrl(trackMeterWorklet.modulePath))
     return { supported: true, probe: 'active' }
   } catch (error) {
-    return { supported: false, probe: 'active', message: message(error) }
+    return {
+      supported: false,
+      probe: 'active',
+      message: error instanceof Error ? error.message : 'Offline AudioWorklet probe failed.',
+    }
   }
 }
 
 const probeTransferableBuffers = (): AudioCapabilityEvidence => {
-  if (typeof MessageChannel !== 'function') {
+  if (!('MessageChannel' in globalThis)) {
     return { supported: false, probe: 'active', message: 'MessageChannel is unavailable.' }
   }
   const channel = new MessageChannel()
@@ -84,7 +90,11 @@ const probeTransferableBuffers = (): AudioCapabilityEvidence => {
       message: buffer.byteLength === 0 ? undefined : 'ArrayBuffer was not detached after transfer.',
     }
   } catch (error) {
-    return { supported: false, probe: 'active', message: message(error) }
+    return {
+      supported: false,
+      probe: 'active',
+      message: error instanceof Error ? error.message : 'ArrayBuffer transfer probe failed.',
+    }
   } finally {
     channel.port1.close()
     channel.port2.close()
@@ -110,29 +120,28 @@ export async function probeAudioPlatformCapabilities(): Promise<AudioPlatformCap
   ])
   const transferableBuffers = probeTransferableBuffers()
   const sharedArrayBuffer = runtimeEvidence(
-    typeof SharedArrayBuffer === 'function',
+    'SharedArrayBuffer' in globalThis,
     'SharedArrayBuffer is unavailable in this browsing context.',
   )
   const crossOriginIsolation = runtimeEvidence(
     globalThis.crossOriginIsolated === true,
     'The browsing context is not cross-origin isolated.',
   )
-  const mediaDevices = typeof navigator === 'undefined' ? undefined : navigator.mediaDevices
+  const mediaDevices = 'navigator' in globalThis ? globalThis.navigator.mediaDevices : undefined
   const outputSelectionSupported = mediaDevices !== undefined
     && 'selectAudioOutput' in mediaDevices
-    && typeof (mediaDevices as MediaDevices & { selectAudioOutput?: unknown }).selectAudioOutput === 'function'
   const outputSelection = structuralEvidence(
     outputSelectionSupported,
     'navigator.mediaDevices.selectAudioOutput is unavailable.',
   )
-  const sinkRoutingSupported = typeof AudioContext === 'function'
+  const sinkRoutingSupported = 'AudioContext' in globalThis
     && 'setSinkId' in AudioContext.prototype
   const sinkRouting = structuralEvidence(
     sinkRoutingSupported,
     'AudioContext.setSinkId is unavailable.',
   )
-  const mediaTrackSettingsSupported = typeof MediaStreamTrack === 'function'
-    && typeof MediaStreamTrack.prototype.getSettings === 'function'
+  const mediaTrackSettingsSupported = 'MediaStreamTrack' in globalThis
+    && 'getSettings' in MediaStreamTrack.prototype
   const mediaTrackSettings = structuralEvidence(
     mediaTrackSettingsSupported,
     'MediaStreamTrack.getSettings is unavailable.',

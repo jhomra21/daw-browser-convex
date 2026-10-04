@@ -4,6 +4,7 @@ import { createPortableOutputBuffer, createSourceAutomationScope, createStemRend
 import type { ResolvedMixerChannel, ResolvedMixerGraph } from './mixer/types'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { resolveLiveMixerGraph } from './live-mixer-runtime'
+import { createMixerRoutingPlan } from './mixer/graph-contract'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { WavEncodingSettings } from './export-fidelity'
 
@@ -644,6 +645,43 @@ describe('live and offline channel layout parity', () => {
     })))
     expect(live.master.inputLayout).toBe(offline.master.inputLayout)
     expect(live.master.outputLayout).toBe(offline.master.outputLayout)
+  })
+
+  test('resolves identical routing, gain, send-tap, and master topology', () => {
+    const tracks: Track<AudioBuffer | null>[] = [
+      {
+        ...track('source', [clip('source-a', 2)]),
+        volume: 0.5,
+        outputTargetId: 'group',
+        sends: [
+          { targetId: 'return', amount: 0.25, tap: 'pre-fx' },
+          { targetId: 'return', amount: 0.5, tap: 'pre-fader' },
+          { targetId: 'return', amount: 0.75, tap: 'post-fader' },
+        ],
+      },
+      { ...track('group', []), channelRole: 'group', volume: 0.8 },
+      { ...track('return', []), channelRole: 'return', volume: 0.6 },
+    ]
+    const masterVolume = 0.7
+    const offline = resolveExportMixerGraph({ tracks, fx: { masterVolume } })
+    const live = resolveLiveMixerGraph(tracks, {}, { masterVolume })
+
+    expect(createMixerRoutingPlan(live)).toEqual(createMixerRoutingPlan(offline))
+    expect(live.channels.map((entry) => ({
+      id: entry.channel.id,
+      role: entry.channel.role,
+      outputTargetId: entry.outputTargetId,
+      gain: entry.gain,
+      outputGain: entry.outputGain,
+      sends: entry.sends,
+    }))).toEqual(offline.channels.map((entry) => ({
+      id: entry.channel.id,
+      role: entry.channel.role,
+      outputTargetId: entry.outputTargetId,
+      gain: entry.gain,
+      outputGain: entry.outputGain,
+      sends: entry.sends,
+    })))
   })
 })
 

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { applyLiveMixerGraph, clearLiveMixerEdges } from './apply-live-routing'
 import { resolveMixerGraph } from './resolve-routing'
 import { createMixerChannels } from './channels'
+import { normalizeCompressorParams } from '@daw-browser/shared'
 
 type TestAudioNode = Record<never, never>
 
@@ -126,4 +127,55 @@ describe('live mixer edge runtime', () => {
     expect(edgeRuntimes.get(JSON.stringify(['dry', 'pre-fader', 'send', 'pre-fader']))?.source).toBe(dry.postFx)
     expect(edgeRuntimes.get(JSON.stringify(['dry', 'post-fader', 'send', 'post-fader']))?.source).toBe(dry.output)
   })
+  test('delays the program path when a sidechain detector arrives later', () => {
+    const graph = resolveMixerGraph({
+      channels: createMixerChannels([
+        { id: 'detector', name: 'Detector', clips: [], volume: 1 },
+        { id: 'target', name: 'Target', clips: [], volume: 1 },
+      ]),
+      trackFx: {
+        detector: {
+          instances: [{
+            id: 'detector-compressor',
+            kind: 'compressor',
+            params: normalizeCompressorParams({ enabled: true, lookaheadMs: 10 }),
+          }],
+        },
+        target: {
+          instances: [{
+            id: 'target-compressor',
+            kind: 'compressor',
+            params: normalizeCompressorParams({ enabled: true, lookaheadMs: 10 }),
+          }],
+        },
+      },
+    })
+    const masterInput = createGain()
+    const trackNodes = new Map([
+      ['detector', { input: createGain(), postFx: createGain(), gain: createGain(), output: createGain() }],
+      ['target', { input: createGain(), postFx: createGain(), gain: createGain(), output: createGain() }],
+    ])
+    const edgeRuntimes = new Map()
+
+    applyLiveMixerGraph({
+      graph,
+      masterInput,
+      trackNodes,
+      edgeRuntimes,
+      createGain,
+      createDelay,
+      currentTime: 0,
+      sampleRate: 48_000,
+      sidechainRoutes: [{
+        sourceTrackId: 'detector',
+        targetTrackId: 'target',
+        effectInstanceId: 'target-compressor',
+      }],
+      reconnectTrackMeters: () => {},
+    })
+
+    expect(edgeRuntimes.get(JSON.stringify(['detector', '$master', 'output', null]))?.delay.delayTime.value).toBe(0.01)
+    expect(edgeRuntimes.get(JSON.stringify(['target', '$master', 'output', null]))?.delay.delayTime.value).toBe(0)
+  })
+
 })

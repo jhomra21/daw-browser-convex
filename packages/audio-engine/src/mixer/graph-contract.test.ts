@@ -140,11 +140,18 @@ describe('mixer routing plan', () => {
       ]),
       trackFx: {
         return: {
-          instances: [{
-            id: 'compressor-1',
-            kind: 'compressor',
-            params: createDefaultCompressorParams(),
-          }],
+          instances: [
+            {
+              id: 'prefix-compressor',
+              kind: 'compressor',
+              params: createDefaultCompressorParams(),
+            },
+            {
+              id: 'compressor-1',
+              kind: 'compressor',
+              params: createDefaultCompressorParams(),
+            },
+          ],
         },
       },
     })
@@ -175,7 +182,7 @@ describe('mixer routing plan', () => {
       toNodeId: 'return',
       sidechain: true,
       targetProcessorId: 'compressor-1',
-      pdcDelayFrames: 0,
+      pdcDelayFrames: 480,
     }))
   })
 

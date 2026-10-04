@@ -4,10 +4,10 @@ import {
   normalizeProjectManifest,
   parseProjectManifest,
   PROJECT_MANIFEST_SCHEMA_VERSION,
-  PROJECT_PERSISTENCE_VERSIONS,
   SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS,
   type ProjectManifest,
 } from './project-manifest-contract'
+import { PROJECT_PERSISTENCE_VERSIONS } from './project-persistence-versions'
 
 const manifestV1: ProjectManifest = {
   schemaVersion: 1,

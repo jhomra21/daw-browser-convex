@@ -569,7 +569,7 @@ export const importLocalProjectUnlocked = async (
   },
 ): Promise<void> => {
   const projectDb = await openLocalProjectDb(project.id)
-  const entities = normalizeStoredEntityRows(rows.entities)
+  const entities = PROJECT_PERSISTENCE_MIGRATION_AUTHORITY.entities(rows.entities)
   const projectState = normalizedProjectState(project, rows.projectState)
   const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'syncState', 'externalPluginArtifacts'], 'readwrite')
   await Promise.all([
@@ -612,7 +612,7 @@ const replaceLocalProjectUnlocked = async (
   const nextAssetPaths = new Set(rows.assets.map((asset) => asset.storagePath))
   const staleAssetPaths = previousAssetPaths.filter((path) => !nextAssetPaths.has(path))
   const projectState = normalizedProjectState(project, rows.projectState)
-  const entities = normalizeStoredEntityRows(rows.entities)
+  const entities = PROJECT_PERSISTENCE_MIGRATION_AUTHORITY.entities(rows.entities)
   const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'history', 'syncState', 'externalPluginArtifacts', 'controlState', 'controlCommits', 'controlApprovals', 'controlRecoveries', 'controlAssetGc'], 'readwrite')
   await Promise.all([
     tx.objectStore('entities').clear(),

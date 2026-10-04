@@ -21,11 +21,49 @@ jobs:
         with:
           version: latest
       - run: bun install --frozen-lockfile
+      - name: Install browser harness
+        run: |
+          bun add --global agent-browser@0.38.2
+          agent-browser install
       - run: bun run build:portable-wasm
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run test:anti-slop
       - run: bun run build
+      - name: Characterize production build in Chromium
+        env:
+          VITE_CONVEX_URL: https://placeholder-verify.convex.cloud
+        run: |
+          bun run serve -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/dsp-preview.log" 2>&1 &
+          PREVIEW_PID=$!
+          trap 'kill "$PREVIEW_PID" 2>/dev/null || true; agent-browser --session dsp-wave-a close >/dev/null 2>&1 || true' EXIT
+          for attempt in {1..30}; do
+            curl --fail --silent http://127.0.0.1:4173/ >/dev/null && break
+            sleep 1
+          done
+          agent-browser --session dsp-wave-a open 'http://127.0.0.1:4173/dsp-characterization?diagnostic=dsp&autorun=1'
+          for attempt in {1..90}; do
+            agent-browser --session dsp-wave-a eval 'document.querySelector("#dsp-characterization-result")?.dataset.status ?? ""' > "$RUNNER_TEMP/dsp-status.json"
+            STATUS=$(bun -e 'console.log(JSON.parse(await Bun.file(process.env.RUNNER_TEMP + "/dsp-status.json").text()))')
+            [ "$STATUS" = "complete" ] && break
+            sleep 1
+          done
+          agent-browser --session dsp-wave-a eval 'document.querySelector("#dsp-characterization-result")?.textContent ?? ""' > "$RUNNER_TEMP/dsp-report-eval.json"
+          bun -e '
+            const encoded = JSON.parse(await Bun.file(process.env.RUNNER_TEMP + "/dsp-report-eval.json").text());
+            if (!encoded) throw new Error("DSP characterization did not complete.");
+            const report = JSON.parse(encoded);
+            const required = ["audioWorklet","offlineAudioWorklet","transferableBuffers","sharedArrayBuffer","crossOriginIsolated","outputSelection","sinkRouting","mediaTrackSettings"];
+            for (const key of required) {
+              if (typeof report.platform?.capabilities?.[key] !== "boolean") throw new Error("Missing capability " + key);
+              if (typeof report.platform?.evidence?.[key]?.supported !== "boolean") throw new Error("Missing capability evidence " + key);
+            }
+            if (report.platform.policy.productionTarget !== "chrome-stable") throw new Error("Unexpected production browser policy.");
+            if (report.platform.capabilities.audioWorklet !== true) throw new Error("Live AudioWorklet probe failed in Chromium.");
+            if (report.platform.capabilities.offlineAudioWorklet !== true) throw new Error("Offline AudioWorklet probe failed in Chromium.");
+            if (report.platform.capabilities.transferableBuffers !== true) throw new Error("Transferable ArrayBuffer probe failed in Chromium.");
+            console.log(JSON.stringify({ policy: report.platform.policy, capabilities: report.platform.capabilities, evidence: report.platform.evidence }, null, 2));
+          '
       - name: Build native audio-core fixture runner
         run: sh native/audio-core/scripts/build-native.sh
       - name: Focused characterization contracts

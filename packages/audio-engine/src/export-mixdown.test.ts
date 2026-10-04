@@ -663,7 +663,7 @@ describe('live and offline channel layout parity', () => {
       { ...track('return', []), channelRole: 'return', volume: 0.6 },
     ]
     const masterVolume = 0.7
-    const offline = resolveExportMixerGraph({ tracks, fx: { masterVolume } })
+    const offline = resolveExportMixerGraph({ tracks, fx: { masterVolume, masterFxInstances: [] } })
     const live = resolveLiveMixerGraph(tracks, {}, { masterVolume })
 
     expect(createMixerRoutingPlan(live)).toEqual(createMixerRoutingPlan(offline))

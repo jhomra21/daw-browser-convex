@@ -4,6 +4,7 @@ import {
   normalizeProjectManifest,
   parseProjectManifest,
   PROJECT_MANIFEST_SCHEMA_VERSION,
+  PROJECT_PERSISTENCE_VERSIONS,
   SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS,
   type ProjectManifest,
 } from './project-manifest-contract'
@@ -24,8 +25,12 @@ const manifestV1: ProjectManifest = {
 }
 
 describe('project format boundaries', () => {
-  test('reports the current manifest schema version', () => {
+  test('reports the canonical persistence version inventory', () => {
     expect(SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS).toEqual([1, 2, 3, PROJECT_MANIFEST_SCHEMA_VERSION])
+    expect(PROJECT_PERSISTENCE_VERSIONS).toEqual({
+      manifest: { current: PROJECT_MANIFEST_SCHEMA_VERSION, supported: [1, 2, 3, PROJECT_MANIFEST_SCHEMA_VERSION] },
+      localProject: { schema: 2, indexedDb: 6 },
+    })
   })
 
   test('reads the current manifest schema without migration', () => {

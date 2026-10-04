@@ -1,4 +1,13 @@
 import { isJsonBoolean, isJsonNumber, isJsonObject, isJsonString, type JsonObject, type JsonValue } from './json-value'
+import {
+  PROJECT_MANIFEST_SCHEMA_VERSION,
+  SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS,
+} from './project-persistence-versions'
+
+export {
+  PROJECT_MANIFEST_SCHEMA_VERSION,
+  SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS,
+} from './project-persistence-versions'
 export type ProjectManifestEntityRow = {
   kind: string;
   id: string;
@@ -57,14 +66,6 @@ export type ProjectManifest = {
   syncState: ProjectManifestStateRow[];
   externalPluginArtifacts: ProjectManifestPluginArtifact[];
 };
-
-export const PROJECT_MANIFEST_SCHEMA_VERSION = 4;
-export const SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS: readonly number[] = [
-  1,
-  2,
-  3,
-  PROJECT_MANIFEST_SCHEMA_VERSION,
-];
 
 const isRecord = (value: JsonValue): value is JsonObject =>
   isJsonObject(value);

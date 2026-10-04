@@ -2,9 +2,9 @@ import { readLocalAssetBytes } from '~/lib/local-assets'
 import { assetCloudIdMappingRows, isCloudIdMappingValue } from '~/lib/local-cloud-id-map'
 import { createProjectId, importLocalProject, openLocalProjectDb, replaceLocalProject, setLocalProjectMode, type LocalProjectSyncStateRow } from '~/lib/local-project-db'
 import { buildProjectManifest, CLOUD_BACKUP_LAST_MANIFEST_VERSION_KEY, CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY, createRestoredProjectEntry, isProjectManifestSyncStateKey } from '~/lib/project-manifest'
+import { PROJECT_PERSISTENCE_MIGRATION_AUTHORITY } from '~/lib/project-persistence-migrations'
 import {
   assertProjectManifestPublishIntegrity,
-  normalizeProjectManifest,
   isJsonBoolean,
   isJsonNumber,
   isJsonObject,
@@ -119,7 +119,7 @@ const readCloudBackupSnapshot = (value: JsonValue): CloudBackupSnapshot | null =
   if (!isJsonObject(value) || !isJsonString(value.manifestVersion)) return null
   try {
     return {
-      manifest: normalizeProjectManifest(value.manifest),
+      manifest: PROJECT_PERSISTENCE_MIGRATION_AUTHORITY.manifest(value.manifest),
       manifestVersion: value.manifestVersion,
     }
   } catch {

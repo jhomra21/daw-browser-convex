@@ -11,15 +11,18 @@ import {
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
 import { buildTimelineTrackRow } from '~/lib/timeline-repository/track-row-builder'
-import { normalizeMixedEffectEntityRows } from '~/lib/mixed-effect-order'
+import {
+  LOCAL_PROJECT_SCHEMA_VERSION,
+  PROJECT_PERSISTENCE_MIGRATION_AUTHORITY,
+  PROJECT_PERSISTENCE_VERSIONS,
+} from '~/lib/project-persistence-migrations'
 import { z } from 'zod'
 
-export const LOCAL_PROJECT_SCHEMA_VERSION = 2
+export { LOCAL_PROJECT_SCHEMA_VERSION } from '~/lib/project-persistence-migrations'
 export const LOCAL_CONTROL_PROJECT_METADATA_KEY = 'control-project-metadata'
 
 const GLOBAL_DB_NAME = 'daw-browser-projects'
 const GLOBAL_DB_VERSION = 1
-const PROJECT_DB_VERSION = 6
 const PROJECT_DB_PREFIX = 'daw-browser-project-'
 
 export type LocalProjectMode = 'local-only' | 'backup'
@@ -261,18 +264,6 @@ export const getProjectDbName = (projectId: string) => `${PROJECT_DB_PREFIX}${pr
 const now = () => Date.now()
 let globalDbPromise: Promise<IDBPDatabase<GlobalProjectsDB>> | undefined
 const projectDbPromises = new Map<string, Promise<IDBPDatabase<ProjectDB>>>()
-const normalizeStoredEntityRows = (
-  rows: readonly LocalProjectEntityRow[],
-): LocalProjectEntityRow[] => {
-  const jsonRows = rows.flatMap((row) => {
-    const parsed = z.json().safeParse(row.value)
-    return parsed.success ? [{ ...row, value: parsed.data }] : []
-  })
-  const normalizedByKey = new Map(
-    normalizeMixedEffectEntityRows(jsonRows).map((row) => [`${row.kind}\u0000${row.id}`, row]),
-  )
-  return rows.map((row) => normalizedByKey.get(`${row.kind}\u0000${row.id}`) ?? row)
-}
 const isPositiveInteger = (value: JsonValue): value is number => (
   isJsonNumber(value) && Number.isFinite(value) && Number.isInteger(value) && value > 0
 )
@@ -390,7 +381,7 @@ export const openLocalProjectDb = (projectId: string): Promise<IDBPDatabase<Proj
   const dbName = getProjectDbName(projectId)
   const cached = projectDbPromises.get(dbName)
   if (cached) return cached
-  const promise = openDB<ProjectDB>(dbName, PROJECT_DB_VERSION, {
+  const promise = openDB<ProjectDB>(dbName, PROJECT_PERSISTENCE_VERSIONS.localProject.indexedDb, {
     upgrade(db, oldVersion, _newVersion, transaction) {
       if (!db.objectStoreNames.contains('entities')) {
         const entities = db.createObjectStore('entities', { keyPath: ['kind', 'id'] })
@@ -440,7 +431,7 @@ export const openLocalProjectDb = (projectId: string): Promise<IDBPDatabase<Proj
       if (oldVersion < 6) {
         const store = transaction.objectStore('entities')
         void store.getAll().then((rows) => {
-          const normalized = normalizeStoredEntityRows(rows)
+          const normalized = PROJECT_PERSISTENCE_MIGRATION_AUTHORITY.entities(rows)
           for (const row of normalized) store.put(row)
         })
       }

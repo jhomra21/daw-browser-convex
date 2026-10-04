@@ -1,4 +1,4 @@
-import { createLocalProjectId, normalizeProjectManifest } from '@daw-browser/shared'
+import { createLocalProjectId } from '@daw-browser/shared'
 import { listLocalAssets, readLocalAssetBytes, writeLocalAssetFileUnlocked } from '~/lib/local-assets'
 import { deleteLocalProjectUnlocked, importLocalProjectUnlocked } from '~/lib/local-project-db'
 import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
@@ -7,6 +7,7 @@ import {
   createRestoredProjectEntry,
 } from '~/lib/project-manifest'
 import { readStoredZipEntries, writeStoredZip } from '~/lib/project-archive-stream'
+import { PROJECT_PERSISTENCE_MIGRATION_AUTHORITY } from '~/lib/project-persistence-migrations'
 
 /** Bounded archive writer; the callback owns the destination. */
 export const exportDawProjectArchiveStreamed = async (
@@ -43,7 +44,7 @@ const importStoredDawProjectArchive = async (file: File): Promise<string> => {
   for await (const entry of readStoredZipEntries(file)) entries.set(entry.name, entry.file)
   const manifestFile = entries.get('manifest.json')
   if (!manifestFile) throw new Error('Archive is missing manifest.json.')
-  const manifest = normalizeProjectManifest(JSON.parse(await manifestFile.text()))
+  const manifest = PROJECT_PERSISTENCE_MIGRATION_AUTHORITY.manifest(JSON.parse(await manifestFile.text()))
   const expectedNames = new Set(['manifest.json'])
   for (const asset of manifest.assets) {
     const name = `assets/${asset.id}/${asset.storagePath}`

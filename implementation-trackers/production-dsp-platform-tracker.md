@@ -123,6 +123,8 @@ This tracker predates several later audio-platform branches. Unchecked boxes bel
 - SharedArrayBuffer, cross-origin isolation, output selection, sink routing, and media-track settings are reported with machine-readable evidence.
 - The capability report is embedded in the existing DSP characterization output.
 - COOP/COEP remains explicitly deferred until the authentication, Worker/R2, OAuth, and third-party-resource boundary is audited; SharedArrayBuffer is not made a hard requirement by this slice.
+- Project persistence versions now have one canonical inventory: manifest writer v4 (readers v1-v4), local-project schema v2, and IndexedDB v6.
+- Browser archive/cloud restore and IndexedDB durable-entity upgrade/import now route through one migration authority without changing any persisted format; API/Convex continue to use the shared manifest contract at their server boundary.
 
 ### Terminology
 
@@ -135,7 +137,7 @@ This tracker predates several later audio-platform branches. Unchecked boxes bel
 ### Genuine first-milestone gaps after reconciliation
 
 - Capture browser-run evidence for the new capability report from a production preview, including explicit supported/unsupported results.
-- Consolidate the project manifest, local IndexedDB, and durable entity migration boundaries behind one documented migration authority before increasing any writer version again.
+- Audit the existing migration authority again before any future manifest, local-project, IndexedDB, or durable entity writer version is increased.
 - Centralize numerical tolerance policy so browser-native nodes and owned DSP do not accumulate unrelated ad hoc thresholds.
 - Audit the existing live/offline routing parity coverage and add only the missing equivalence cases; do not rebuild the shared graph contract.
 

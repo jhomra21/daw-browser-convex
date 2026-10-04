@@ -27,63 +27,84 @@ jobs:
         run: |
           bun add --global agent-browser@0.38.2
           agent-browser install
-      - name: Validate production browser characterization
-        env:
-          VITE_CONVEX_URL: https://placeholder-verify.convex.cloud
+      - name: Validate focused browser DSP probes
         run: |
-          bun -e '
-            const root = "dist/client";
+          cat > .tmp-dsp-browser-acceptance.ts <<'EOF'
+          import {
+            characterizeBrowserEq,
+            characterizeBrowserStereoIsolation,
+          } from './packages/audio-engine/src/browser-characterization'
+
+          declare global {
+            interface Window {
+              __dspBrowserAcceptance?: {
+                done: boolean
+                eq?: Awaited<ReturnType<typeof characterizeBrowserEq>>
+                stereoIsolation?: Awaited<ReturnType<typeof characterizeBrowserStereoIsolation>>
+                error?: string
+              }
+            }
+          }
+
+          Promise.all([
+            characterizeBrowserEq(),
+            characterizeBrowserStereoIsolation(),
+          ]).then(([eq, stereoIsolation]) => {
+            window.__dspBrowserAcceptance = { done: true, eq, stereoIsolation }
+          }).catch((error) => {
+            window.__dspBrowserAcceptance = {
+              done: true,
+              error: error instanceof Error ? error.message : String(error),
+            }
+          })
+          EOF
+          mkdir -p "$RUNNER_TEMP/dsp-browser"
+          bun build .tmp-dsp-browser-acceptance.ts --target=browser --format=esm --outfile="$RUNNER_TEMP/dsp-browser/acceptance.js"
+          cat > "$RUNNER_TEMP/dsp-browser/index.html" <<'EOF'
+          <!doctype html><meta charset="utf-8"><script type="module" src="/acceptance.js"></script>
+          EOF
+          RUNNER_TEMP="$RUNNER_TEMP" bun -e '
+            const root = process.env.RUNNER_TEMP + "/dsp-browser";
             const server = Bun.serve({
               hostname: "127.0.0.1",
               port: 4173,
               async fetch(request) {
-                const url = new URL(request.url);
-                const pathname = decodeURIComponent(url.pathname);
-                const file = Bun.file(root + pathname);
-                if (pathname !== "/" && await file.exists()) return new Response(file);
-                return new Response(Bun.file(root + "/index.html"), {
-                  headers: { "content-type": "text/html; charset=utf-8" },
-                });
+                const pathname = decodeURIComponent(new URL(request.url).pathname);
+                const target = pathname === "/" ? "/index.html" : pathname;
+                const file = Bun.file(root + target);
+                if (await file.exists()) return new Response(file);
+                return new Response("Not found", { status: 404 });
               },
             });
             console.log(server.url.toString());
             await new Promise(() => {});
           ' > "$RUNNER_TEMP/dsp-preview.log" 2>&1 &
           preview_pid=$!
-          trap 'agent-browser --session dsp-characterization close >/dev/null 2>&1 || true; kill "$preview_pid" >/dev/null 2>&1 || true' EXIT
-          ready=0
+          trap 'agent-browser --session dsp-characterization close >/dev/null 2>&1 || true; kill "$preview_pid" >/dev/null 2>&1 || true; rm -f .tmp-dsp-browser-acceptance.ts' EXIT
           for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:4173/dsp-characterization?diagnostic=dsp >/dev/null; then
-              ready=1
-              break
-            fi
+            curl --fail --silent http://127.0.0.1:4173/ >/dev/null && break
             sleep 1
           done
-          test "$ready" -eq 1 || { cat "$RUNNER_TEMP/dsp-preview.log"; exit 1; }
-          agent-browser --session dsp-characterization open 'http://127.0.0.1:4173/dsp-characterization?diagnostic=dsp&autorun=1'
+          agent-browser --session dsp-characterization open 'http://127.0.0.1:4173/'
           complete=0
-          for attempt in $(seq 1 90); do
-            state=$(agent-browser --session dsp-characterization eval 'document.querySelector("#dsp-characterization-result")?.dataset.status ?? "pending"')
-            if echo "$state" | grep -q complete; then
+          for attempt in $(seq 1 30); do
+            state=$(agent-browser --session dsp-characterization eval 'window.__dspBrowserAcceptance?.done === true')
+            if echo "$state" | grep -q true; then
               complete=1
               break
             fi
-            alert=$(agent-browser --session dsp-characterization eval 'document.querySelector("[role=alert]")?.textContent ?? ""')
-            if [ "$alert" != '""' ]; then
-              echo "Browser characterization failed: $alert"
-              exit 1
-            fi
             sleep 1
           done
-          test "$complete" -eq 1 || { echo "Browser characterization did not complete."; exit 1; }
-          agent-browser --session dsp-characterization eval 'JSON.stringify(JSON.parse(document.querySelector("#dsp-characterization-result").textContent))' > "$RUNNER_TEMP/dsp-characterization.txt"
+          test "$complete" -eq 1 || { echo "Focused browser DSP probes did not complete."; exit 1; }
+          agent-browser --session dsp-characterization eval 'JSON.stringify(window.__dspBrowserAcceptance)' > "$RUNNER_TEMP/dsp-characterization.txt"
           RUNNER_TEMP="$RUNNER_TEMP" bun -e '
             const fs = require("node:fs");
             const encoded = fs.readFileSync(process.env.RUNNER_TEMP + "/dsp-characterization.txt", "utf8").trim();
-            const report = JSON.parse(JSON.parse(encoded));
-            const eq = report.eq;
-            const stereo = report.stereoIsolation;
-            console.log(JSON.stringify({ eq, stereoIsolation: stereo }, null, 2));
+            const result = JSON.parse(JSON.parse(encoded));
+            console.log(JSON.stringify(result, null, 2));
+            if (result.error) throw new Error(result.error);
+            const eq = result.eq;
+            const stereo = result.stereoIsolation;
             if (eq?.status !== "pass") throw new Error("EQ browser characterization did not pass.");
             if (!(eq.metrics?.gainDb > 5.5 && eq.metrics?.gainDb < 6.5)) throw new Error("EQ gain response is outside the +6 dB gate.");
             if (!(eq.metrics?.thdPlusNoiseDb < -60)) throw new Error("EQ THD+N is outside the release gate.");

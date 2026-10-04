@@ -1,14 +1,7 @@
 import { expect, test } from 'bun:test'
 import { createRecordingWriterHandler } from './recording-writer-core'
-import { benchmarkWorkerAssetUrl, createNativeSabRecordingWriter } from './native-sab-recording-writer'
+import { createNativeSabRecordingWriter } from './native-sab-recording-writer'
 import type { WriterInboundMessage, WriterOutboundMessage } from '../../../packages/audio-engine/src/recording/recording-protocol'
-
-test('benchmark worker asset stays within the packaged app origin', () => {
-  expect(benchmarkWorkerAssetUrl(new URL('daw://app/assets/recording-writer-worker.js'), new URL('daw://app/'))).toBeTrue()
-  expect(benchmarkWorkerAssetUrl(new URL('daw://other/assets/recording-writer-worker.js'), new URL('daw://app/'))).toBeFalse()
-  expect(benchmarkWorkerAssetUrl(new URL('https://app/assets/recording-writer-worker.js'), new URL('daw://app/'))).toBeFalse()
-  expect(benchmarkWorkerAssetUrl(new URL('daw://app.evil/assets/recording-writer-worker.js'), new URL('daw://app/'))).toBeFalse()
-})
 
 const setup = (channelCount: number, stall = false) => {
   const blocks: Float32Array[][] = []

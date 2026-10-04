@@ -1,0 +1,36 @@
+name: Final PR validation
+
+on:
+  push:
+    branches:
+      - perf/30-track-stress
+
+permissions:
+  contents: read
+
+jobs:
+  repository:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - run: bun run knip
+
+  native-plugin-host:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout VST3 SDK
+        run: git clone --depth 1 --recurse-submodules --shallow-submodules https://github.com/steinbergmedia/vst3sdk.git "$RUNNER_TEMP/vst3sdk"
+      - name: Configure native plugin host
+        run: cmake -S native -B native/build/plugin-host-ci -DDAW_BUILD_AUDIO_HOST_MACOS=OFF -DDAW_BUILD_PLUGIN_HOST=ON -DBUILD_TESTING=ON -DVST3_SDK_PATH="$RUNNER_TEMP/vst3sdk"
+      - name: Build worker supervisor tests
+        run: cmake --build native/build/plugin-host-ci --target daw-plugin-host-worker-test -j 3
+      - name: Run worker supervisor tests
+        run: ctest --test-dir native/build/plugin-host-ci --output-on-failure -R daw-plugin-host-worker-test

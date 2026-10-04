@@ -18,7 +18,9 @@ import {
   type CleanupPlan,
 } from "./electron"
 import {
+  assertCdpIdentity,
   processMetrics,
+  processRows,
   selectElectronRenderer,
   terminate,
   waitForCdp,

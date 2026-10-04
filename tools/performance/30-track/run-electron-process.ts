@@ -21,7 +21,7 @@ type ProcessRow = {
   readonly rss: number
 }
 
-const processRows = async (): Promise<ProcessRow[]> => {
+export const processRows = async (): Promise<ProcessRow[]> => {
   const output = await $`ps -axo pid=,ppid=,pgid=,pcpu=,rss=,command=`.text()
   const rows = output.split(/\r?\n/).flatMap((line) => {
     const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+([\d.]+)\s+(\d+)\s+(.+)$/)
@@ -111,7 +111,7 @@ type CdpEndpoint = {
   readonly websocketUrl: string
 }
 
-const assertCdpIdentity = async (
+export const assertCdpIdentity = async (
   profile: string,
   rootPid: number,
   executablePath: string,

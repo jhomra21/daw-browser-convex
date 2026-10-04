@@ -1,0 +1,32 @@
+name: Production DSP Wave A validation
+
+on:
+  push:
+    branches:
+      - production-dsp-platform
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run build:portable-wasm
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run test:anti-slop
+      - run: bun run build
+      - name: Focused characterization contracts
+        env:
+          VITE_CONVEX_URL: https://placeholder-verify.convex.cloud
+        run: bun test packages/audio-engine/src/browser-characterization.test.ts packages/audio-engine/src/worklet-loader.test.ts

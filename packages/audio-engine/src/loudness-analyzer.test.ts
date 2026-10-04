@@ -26,10 +26,9 @@ const exactGatedMean = (energies: readonly number[], relativeOffset: number) => 
 }
 
 const percentile = (sorted: readonly number[], probability: number) => {
-  const position = probability * (sorted.length - 1)
-  const lower = Math.floor(position)
-  const fraction = position - lower
-  return sorted[lower] + (sorted[Math.min(lower + 1, sorted.length - 1)] - sorted[lower]) * fraction
+  const value = sorted[Math.floor((sorted.length - 1) * probability + 0.5)]
+  if (value === undefined) throw new Error('Expected a loudness percentile value.')
+  return value
 }
 
 const exactLoudnessRange = (energies: readonly number[]) => {

@@ -110,14 +110,11 @@ const histogramPercentile = (
   firstBin: number,
   count: number,
   probability: number,
-) => {
-  const position = probability * (count - 1)
-  const lower = Math.floor(position)
-  const fraction = position - lower
-  const lowerValue = histogramValueAtRank(histogram, firstBin, lower)
-  const upperValue = histogramValueAtRank(histogram, firstBin, Math.min(lower + 1, count - 1))
-  return lowerValue + (upperValue - lowerValue) * fraction
-}
+) => histogramValueAtRank(
+  histogram,
+  firstBin,
+  Math.floor((count - 1) * probability + 0.5),
+)
 
 export const gatedHistogramLoudnessRange = (
   histogram: LoudnessEnergyHistogram,

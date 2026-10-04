@@ -98,6 +98,47 @@ Build a production-grade browser audio platform that supports serious music prod
 - `/Users/juan/Documents/dialkit`
 - `/Users/juan/Documents/daw-effect-research`
 
+## Current-Master Reconciliation — 2026-10-04
+
+This tracker predates several later audio-platform branches. Unchecked boxes below are retained as the original requirement map; they are **not** a reliable indicator that the corresponding implementation is still missing. New work must be reconciled against current `master` before changing product behavior.
+
+### Already present on current master
+
+- The browser DSP characterization route already runs through the normal Vite/Worker surface and emits a machine-readable report.
+- Deterministic DSP fixtures already cover silence, impulse, step/DC, sine, sweep, seeded noise, stereo isolation, opposite polarity, and non-finite edge cases; pure metrics cover peak, RMS, DC, frame offset/correlation, leakage, analyzer output, and reverb measurements.
+- Static versioned worklet assets and a package-local once-per-context loader already exist for compressor, meter, recorder, utility, and the broader static processor set.
+- Project manifests currently write schema version 4, read supported versions 1–4, and have idempotent legacy normalization coverage. Local projects currently use schema version 2 and project DB version 6.
+- Effect automation already carries `effectInstanceId` and canonical `automation:v2:` tuple keys.
+- Runtime mixer channel semantics already define and test `ChannelLayout = 'mono' | 'stereo'`.
+- Production recording already includes transferable/SAB transport work, active input settings, calibration infrastructure, and native/portable recording paths.
+- Live and offline routing adapters already consume the shared resolved mixer graph/routing-plan contracts, and export tests include live/offline channel-layout parity.
+- Later roadmap areas also have substantial shipped implementation (PDC/timing, send taps/sidechains, production processors, loudness/true-peak/export fidelity, sampler/granular/spectral work). Audit current code before treating any historical checkbox as an implementation request.
+
+### Added on this branch
+
+- One `AudioPlatformCapabilityReport` now owns browser-audio capability evidence.
+- Chrome stable is the production browser target; current Safari and Firefox are smoke targets.
+- Unsupported optional browser features follow an explicit `report-and-degrade` policy instead of being implied by UI availability.
+- Live AudioWorklet loading, OfflineAudioContext AudioWorklet loading, and transferable ArrayBuffer behavior use active probes.
+- SharedArrayBuffer, cross-origin isolation, output selection, sink routing, and media-track settings are reported with machine-readable evidence.
+- The capability report is embedded in the existing DSP characterization output.
+- COOP/COEP remains explicitly deferred until the authentication, Worker/R2, OAuth, and third-party-resource boundary is audited; SharedArrayBuffer is not made a hard requirement by this slice.
+
+### Terminology
+
+- **requested** — the value or capability the product asks the browser/runtime to use.
+- **active** — the value or route the runtime reports as currently in use.
+- **measured** — a value derived from a characterization or timing measurement.
+- **calibrated** — a measured value accepted and persisted for a specific device/runtime identity.
+- **inferred** — a value derived from contracts or surrounding evidence when the browser cannot expose it directly.
+
+### Genuine first-milestone gaps after reconciliation
+
+- Capture browser-run evidence for the new capability report from a production preview, including explicit supported/unsupported results.
+- Consolidate the project manifest, local IndexedDB, and durable entity migration boundaries behind one documented migration authority before increasing any writer version again.
+- Centralize numerical tolerance policy so browser-native nodes and owned DSP do not accumulate unrelated ad hoc thresholds.
+- Audit the existing live/offline routing parity coverage and add only the missing equivalence cases; do not rebuild the shared graph contract.
+
 ## Opus-Validated Initial Implementation Map
 
 ### Preconditions

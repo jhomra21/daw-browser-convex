@@ -3,7 +3,7 @@ import { drawWaveformSignal } from "@daw-browser/waveforms/draw-waveform-signal"
 import { waveformCanvasSize } from "~/lib/waveform-canvas";
 import {
   incrementPerformanceBenchmarkCounter,
-  measurePerformanceBenchmarkDuration,
+  measurePerformanceBenchmark,
 } from "~/lib/performance-benchmark-telemetry";
 import { resolveWaveformPaintStyle } from "~/lib/waveform-style";
 import { useDevicePixelRatio } from "~/lib/device-pixel-ratio";
@@ -322,10 +322,8 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
   };
 
   createEffect(() => {
-    const startedAt = performance.now();
     incrementPerformanceBenchmarkCounter("sample-detail.raster-calls");
-    draw();
-    measurePerformanceBenchmarkDuration("sample-detail.raster", startedAt);
+    measurePerformanceBenchmark("sample-detail.raster", draw);
   });
 
   return (

@@ -1,0 +1,25 @@
+name: DSP characterization validation
+
+on:
+  push:
+    branches:
+      - production-dsp-characterization
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Focused characterization tests
+        run: bun test packages/audio-engine/src/dsp-characterization.test.ts
+      - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run build

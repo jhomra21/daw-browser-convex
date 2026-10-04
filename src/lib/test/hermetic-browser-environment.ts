@@ -30,33 +30,35 @@ const hasDatabaseEnumeration = (
 )
 
 export const installHermeticWindow = <Value extends object>(value: Value): (() => void) => {
-  const listeners = new Map<string, Set<EventListenerLike>>()
+  const target = new EventTarget()
+  const registrations = new Map<EventListenerLike, Set<string>>()
   const browserWindow = Object.assign(value, {
     addEventListener: (
       type: string,
       listener: EventListenerLike,
+      options?: AddEventListenerOptions | boolean,
     ) => {
-      const typeListeners = listeners.get(type) ?? new Set<EventListenerLike>()
-      typeListeners.add(listener)
-      listeners.set(type, typeListeners)
+      target.addEventListener(type, listener, options)
+      const types = registrations.get(listener) ?? new Set<string>()
+      types.add(type)
+      registrations.set(listener, types)
     },
     removeEventListener: (
       type: string,
       listener: EventListenerLike,
+      options?: EventListenerOptions | boolean,
     ) => {
-      const typeListeners = listeners.get(type)
-      typeListeners?.delete(listener)
-      if (typeListeners?.size === 0) listeners.delete(type)
+      target.removeEventListener(type, listener, options)
+      const types = registrations.get(listener)
+      types?.delete(type)
+      if (types?.size === 0) registrations.delete(listener)
     },
-    dispatchEvent: (event: Event) => {
-      for (const listener of [...(listeners.get(event.type) ?? [])]) {
-        if (typeof listener === 'function') listener.call(browserWindow, event)
-        else listener.handleEvent(event)
-      }
-      return !event.defaultPrevented
-    },
+    dispatchEvent: (event: Event) => target.dispatchEvent(event),
     clearEventListeners: () => {
-      listeners.clear()
+      for (const [listener, types] of registrations) {
+        for (const type of types) target.removeEventListener(type, listener)
+      }
+      registrations.clear()
     },
   }) satisfies HermeticWindow
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')

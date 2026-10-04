@@ -46,7 +46,7 @@ import {
   type ReliabilityCharacterizationReport,
 } from './reliability-characterization'
 
-export type BrowserCharacterizationCase = {
+type BrowserCharacterizationCase = {
   status: 'pass' | 'fail' | 'unsupported'
   metrics?: Readonly<Record<string, number | boolean>>
   message?: string
@@ -260,72 +260,59 @@ const capture = async (run: () => Promise<BrowserCharacterizationCase>): Promise
   }
 }
 
-export const characterizeBrowserStereoIsolation = async (): Promise<BrowserCharacterizationCase> => capture(async () => {
+const connectSingleEqFilter = (context: BaseAudioContext, source: AudioNode, frequencyHz: number) => {
+  const params = normalizeEqParams({
+    enabled: true,
+    channelMode: 'stereo',
+    bands: [{ id: 'characterization', type: 'peaking', frequency: frequencyHz, gainDb: 6, q: 1, enabled: true }],
+  })
+  const [filter, ...rest] = createEqNodes(context, params, 2)
+  if (!filter || rest.length > 0) throw new Error('Characterization EQ must create exactly one filter.')
+  source.connect(filter)
+  filter.connect(context.destination)
+}
+
+const characterizeBrowserStereoIsolation = async (): Promise<BrowserCharacterizationCase> => capture(async () => {
   const rendered = await render(48_000, 2, 128, (context, source) => {
-    if (source.buffer) {
-      source.buffer.getChannelData(0)[0] = 1
-      source.buffer.getChannelData(1)[0] = 0
-    }
-    source.connect(context.destination)
+    source.buffer?.getChannelData(0).set([1])
+    connectSingleEqFilter(context, source, 1_000)
   })
   const left = rendered.getChannelData(0)
   const right = rendered.getChannelData(1)
   const leftPeak = measureAudio([left]).peak
   const rightPeak = measureAudio([right]).peak
-  const crosstalkDb = measureCrosstalkDb(left, right)
+  const crosstalkDb = Math.max(-300, measureCrosstalkDb(left, right))
   return {
-    status: Math.abs(leftPeak - 1) < 1e-3 && rightPeak < 1e-6 ? 'pass' : 'fail',
-    metrics: {
-      leftPeak,
-      rightPeak,
-      crosstalkDb: Number.isFinite(crosstalkDb) ? crosstalkDb : -200,
-    },
+    status: Number.isFinite(leftPeak) && leftPeak > 0 && crosstalkDb <= -120 ? 'pass' : 'fail',
+    metrics: { leftPeak, rightPeak, crosstalkDb },
   }
 })
 
-export const characterizeBrowserEq = async (): Promise<BrowserCharacterizationCase> => capture(async () => {
+const characterizeBrowserEq = async (): Promise<BrowserCharacterizationCase> => capture(async () => {
   const sampleRate = 48_000
   const frequencyHz = 1_000
-  const reference = createSineFixture(4_800, frequencyHz, sampleRate)[0]
-  const input = new Float32Array(reference.length)
-  for (let frame = 0; frame < reference.length; frame += 1) input[frame] = reference[frame] * 0.25
-  const params = normalizeEqParams({
-    enabled: true,
-    channelMode: 'mono',
-    bands: [{ id: 'characterization', type: 'peaking', frequency: frequencyHz, gainDb: 6, q: 1, enabled: true }],
-  })
-  let eqNodeCount = 0
-  const rendered = await render(sampleRate, 1, input.length, (context, source) => {
+  const input = createSineFixture(4_800, frequencyHz, sampleRate)[0].map((sample) => sample * 0.25)
+  const rendered = await render(sampleRate, 2, input.length, (context, source) => {
     source.buffer?.getChannelData(0).set(input)
-    const nodes = createEqNodes(context, params, 1)
-    eqNodeCount = nodes.length
-    let tail: AudioNode = source
-    for (const node of nodes) {
-      tail.connect(node)
-      tail = node
-    }
-    tail.connect(context.destination)
+    source.buffer?.getChannelData(1).set(input)
+    connectSingleEqFilter(context, source, frequencyHz)
   })
   const output = rendered.getChannelData(0)
   const settleFrame = 480
   const settledInput = input.subarray(settleFrame)
   const settledOutput = output.subarray(settleFrame)
-  const metrics = measureAudio([settledOutput])
   const transfer = measureToneTransfer(settledInput, settledOutput, frequencyHz, sampleRate)
-  const distortion = measureThdPlusNoise(settledOutput, frequencyHz, sampleRate)
-  const thdPlusNoiseDb = Number.isFinite(distortion.thdPlusNoiseDb) ? distortion.thdPlusNoiseDb : -200
+  const thdPlusNoiseDb = Math.max(-300, measureThdPlusNoise(settledOutput, frequencyHz, sampleRate))
   return {
-    status: eqNodeCount === 1
-      && !metrics.containsNonFiniteSamples
-      && transfer.finite
+    status: transfer.finite
       && transfer.gainDb > 5.5
       && transfer.gainDb < 6.5
+      && Math.abs(transfer.phaseDegrees) < 5
       && thdPlusNoiseDb < -60
       ? 'pass'
       : 'fail',
     metrics: {
-      eqNodeCount,
-      rms: metrics.rms,
+      rms: measureAudio([settledOutput]).rms,
       gainDb: transfer.gainDb,
       phaseDegrees: transfer.phaseDegrees,
       thdPlusNoiseDb,

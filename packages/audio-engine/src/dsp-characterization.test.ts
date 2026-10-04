@@ -16,7 +16,6 @@ import {
   ANALYZER_SMOOTHING,
   measureAliasingEnergyDb,
   measureAudio,
-  measureChannelLeakageDb,
   measureCrosstalkDb,
   measureFrameOffset,
   measureThdPlusNoise,
@@ -77,13 +76,11 @@ describe('DSP characterization fixtures and metrics', () => {
     expect(measureFrameOffset(new Float32Array([1, 1]), new Float32Array([1, -1]), 0)).toBeNull()
   })
 
-  test('covers stereo, polarity, non-finite, and leakage baselines', () => {
+  test('covers stereo, polarity, and non-finite baselines', () => {
     const isolation = createStereoIsolationFixture(4)
     expect(measureAudio(isolation).dcOffset).toEqual([0.25, 0])
     expect(createOppositePolarityFixture(2)[1]).toEqual(new Float32Array([-1, 1]))
     expect(measureAudio(createEdgeCaseFixture()).containsNonFiniteSamples).toBe(true)
-    expect(measureChannelLeakageDb(1, 0)).toBe(Number.NEGATIVE_INFINITY)
-    expect(measureChannelLeakageDb(1, 0.1)).toBeCloseTo(-20)
   })
 
   test('measures gain, phase, THD+N, harmonic-fold alias energy, and RMS crosstalk', () => {
@@ -106,8 +103,10 @@ describe('DSP characterization fixtures and metrics', () => {
     expect(transfer.gainDb).toBeCloseTo(-6.0206, 3)
     expect(transfer.phaseDegrees).toBeCloseTo(45, 3)
 
-    expect(measureThdPlusNoise(reference, frequencyHz, sampleRate).thdPlusNoiseDb).toBeLessThan(-120)
-    expect(measureThdPlusNoise(clipped, frequencyHz, sampleRate).thdPlusNoiseDb).toBeGreaterThan(-40)
+    expect(measureThdPlusNoise(reference, frequencyHz, sampleRate)).toBeLessThan(-120)
+    expect(measureThdPlusNoise(clipped, frequencyHz, sampleRate)).toBeGreaterThan(-40)
+    expect(() => measureThdPlusNoise(createSineFixture(length, 1_005, sampleRate)[0], 1_005, sampleRate)).toThrow(RangeError)
+    expect(() => measureToneTransfer(reference, shifted, 1_005, sampleRate)).toThrow(RangeError)
     expect(measureCrosstalkDb(reference, leaked)).toBeCloseTo(-40, 3)
 
     const highToneHz = 10_000
@@ -123,12 +122,14 @@ describe('DSP characterization fixtures and metrics', () => {
     }
     expect(measureAliasingEnergyDb(cleanWithInBandHarmonic, highToneHz, sampleRate, 3)).toBeLessThan(-100)
 
-    expect(() => measureAliasingEnergyDb(
-      createSineFixture(length, 8_000, sampleRate)[0],
-      8_000,
-      sampleRate,
-      9,
-    )).toThrow(RangeError)
+    for (const ambiguousHz of [8_000, 3_430, 9_605]) {
+      expect(() => measureAliasingEnergyDb(
+        createSineFixture(length, ambiguousHz, sampleRate)[0],
+        ambiguousHz,
+        sampleRate,
+        9,
+      )).toThrow(RangeError)
+    }
   })
 
   test('characterizes analyzer silence as finite bounded zero output', () => {

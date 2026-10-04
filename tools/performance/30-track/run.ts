@@ -175,6 +175,14 @@ const main = async () => {
   assertThirtyTrackSemanticManifest(thirtyTrackSemanticManifest)
   const archivePath = path.join(root, "tools/performance/fixtures", thirtyTrackArchiveName)
   const hashPath = `${archivePath}.sha256`
+  const fixtureAvailable = await stat(archivePath).then(() => true, () => false)
+  if (!fixtureAvailable) {
+    const message = `Generated 30-track fixture is unavailable at ${archivePath}. Run "bun run perf:30-track:fixture" before the benchmark.`
+    result.phases = { fixtureIntegrity: "failed", probeCollection: "skipped" }
+    result.errors = [message]
+    await writeResult(options.out, result)
+    throw new Error(message)
+  }
   try {
     const archive = await readFile(archivePath)
     const hashLine = (await readFile(hashPath, "utf8")).trim()

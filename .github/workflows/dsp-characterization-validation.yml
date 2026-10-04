@@ -69,7 +69,7 @@ jobs:
               break
             fi
             alert=$(agent-browser --session dsp-characterization eval 'document.querySelector("[role=alert]")?.textContent ?? ""')
-            if ! echo "$alert" | grep -q '^""; then
+            if [ "$alert" != '""' ]; then
               echo "Browser characterization failed: $alert"
               exit 1
             fi

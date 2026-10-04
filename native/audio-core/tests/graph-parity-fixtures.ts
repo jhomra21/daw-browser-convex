@@ -36,6 +36,7 @@ import {
   type SaturatorProcessorState,
   type SpectralProcessorState,
 } from '../../../packages/audio-core-contract/src/index'
+import { OWNED_DSP_NUMERICAL_TOLERANCES } from '../../../packages/audio-engine/src/dsp-tolerance-policy'
 
 export type PortableModulationKind = 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble'
 export type PortableDynamicsKind = 'gate' | 'compressor' | 'limiter'
@@ -609,8 +610,15 @@ const sampleZone = (assetId: string, note: number, overrides: Partial<AudioCoreS
 
 const finite = (output: readonly Float32Array[]) => output.every((plane) => plane.every(Number.isFinite))
 const sampleAt = (output: readonly Float32Array[], frame: number) => output[0]?.[frame] ?? 0
-const closeTo = (value: number, expected: number, tolerance = 1e-4) => Math.abs(value - expected) <= tolerance
-const reverbOnsetFrame = (output: readonly Float32Array[], threshold = 1e-6) => {
+const closeTo = (
+  value: number,
+  expected: number,
+  tolerance = OWNED_DSP_NUMERICAL_TOLERANCES.graphParityAbsolute,
+) => Math.abs(value - expected) <= tolerance
+const reverbOnsetFrame = (
+  output: readonly Float32Array[],
+  threshold = OWNED_DSP_NUMERICAL_TOLERANCES.sampleAbsolute,
+) => {
   for (let frame = 0; frame < (output[0]?.length ?? 0); frame += 1) {
     if (output.some((plane) => Math.abs(plane[frame] ?? 0) >= threshold)) return frame
   }

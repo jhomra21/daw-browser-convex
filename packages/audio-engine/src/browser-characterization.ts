@@ -18,6 +18,7 @@ import {
 } from '@daw-browser/shared'
 import { probeAudioPlatformCapabilities, type AudioPlatformCapabilityReport } from './audio-platform-capabilities'
 import { createCompressorNodeChain } from './effects/chain'
+import { BROWSER_AUDIO_NUMERICAL_TOLERANCES } from './dsp-tolerance-policy'
 import { createStaticWorkletNodeChain } from './effects/static-worklet-chain'
 import type { StaticWorkletKind } from './effects/static-worklet-chain'
 import { measureAudio, measureChannelLeakageDb } from './dsp-characterization'
@@ -221,11 +222,12 @@ const characterizeSampleRateConversion = async (
     }
     const passed = metrics.outputSampleRate === targetSampleRate
       && metrics.outputLength === expectedOutputLength
-      && Math.abs(metrics.gainErrorDb) <= 0.25
-      && metrics.passbandRippleDb <= 0.5
-      && (metrics.aliasLevelDb === null || metrics.aliasLevelDb <= -60)
-      && Math.abs(metrics.phaseDelayFrames) <= 1
-      && metrics.isolationDb <= -120
+      && Math.abs(metrics.gainErrorDb) <= BROWSER_AUDIO_NUMERICAL_TOLERANCES.sampleRateConversion.gainErrorDbMaximum
+      && metrics.passbandRippleDb <= BROWSER_AUDIO_NUMERICAL_TOLERANCES.sampleRateConversion.passbandRippleDbMaximum
+      && (metrics.aliasLevelDb === null
+        || metrics.aliasLevelDb <= BROWSER_AUDIO_NUMERICAL_TOLERANCES.sampleRateConversion.aliasLevelDbMaximum)
+      && Math.abs(metrics.phaseDelayFrames) <= BROWSER_AUDIO_NUMERICAL_TOLERANCES.sampleRateConversion.phaseDelayFramesMaximum
+      && metrics.isolationDb <= BROWSER_AUDIO_NUMERICAL_TOLERANCES.sampleRateConversion.isolationDbMaximum
     return { sourceSampleRate, targetSampleRate, status: passed ? 'pass' : 'fail', metrics }
   } catch (error) {
     return {
@@ -405,7 +407,10 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
       gain.connect(context.destination)
     })
     const metrics = measureAudio(readBuffer(rendered))
-    return { status: Math.abs(metrics.peak - 0.5) < 1e-3 ? 'pass' : 'fail', metrics: { peak: metrics.peak, rms: metrics.rms } }
+    return {
+      status: Math.abs(metrics.peak - 0.5) < BROWSER_AUDIO_NUMERICAL_TOLERANCES.scalarPeakAbsolute ? 'pass' : 'fail',
+      metrics: { peak: metrics.peak, rms: metrics.rms },
+    }
   })
 
   const stereoIsolation = await capture(async () => {
@@ -420,7 +425,8 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
     const rightPeak = measureAudio([rendered.getChannelData(1)]).peak
     const leakageDetected = Number.isFinite(measureChannelLeakageDb(leftPeak, rightPeak))
     return {
-      status: Math.abs(leftPeak - 1) < 1e-3 && rightPeak < 1e-6 ? 'pass' : 'fail',
+      status: Math.abs(leftPeak - 1) < BROWSER_AUDIO_NUMERICAL_TOLERANCES.scalarPeakAbsolute
+        && rightPeak < BROWSER_AUDIO_NUMERICAL_TOLERANCES.silentChannelPeakMaximum ? 'pass' : 'fail',
       metrics: { leftPeak, rightPeak, leakageDetected },
     }
   })
@@ -530,7 +536,8 @@ export async function runBrowserCharacterization(): Promise<BrowserCharacterizat
     const expectedFrame = kind === 'gate' ? Math.ceil(sampleRate * 0.002) : 0
     const left = rendered.getChannelData(0)[expectedFrame]
     const right = rendered.getChannelData(1)[expectedFrame]
-    const matches = Math.abs(left - 0.5) <= 1e-6 && Math.abs(right + 0.25) <= 1e-6
+    const matches = Math.abs(left - 0.5) <= BROWSER_AUDIO_NUMERICAL_TOLERANCES.workletPassthroughAbsolute
+      && Math.abs(right + 0.25) <= BROWSER_AUDIO_NUMERICAL_TOLERANCES.workletPassthroughAbsolute
     return { status: matches ? 'pass' : 'fail', metrics: { sampleRate, expectedFrame, left, right } }
   })
   const utilityWorklet: Record<string, BrowserCharacterizationCase> = {}

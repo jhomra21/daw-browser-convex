@@ -8,6 +8,7 @@
     "./automation": "./src/automation.ts",
     "./bpm-detection": "./src/bpm-detection.ts",
     "./browser-characterization": "./src/browser-characterization.ts",
+    "./dsp-tolerance-policy": "./src/dsp-tolerance-policy.ts",
     "./audio-platform-capabilities": "./src/audio-platform-capabilities.ts",
     "./audio-scheduling": "./src/audio-scheduling.ts",
     "./midi-expression-scheduling": "./src/midi-expression-scheduling.ts",

@@ -16,6 +16,7 @@ import {
 } from './graph-parity-fixtures'
 import type { ReverbProcessorState } from '../../../packages/audio-core-contract/src/index'
 import { portableWasmCapabilityMatrix } from '../../../packages/audio-engine/src/backends/portable-wasm-capabilities'
+import { OWNED_DSP_NUMERICAL_TOLERANCES } from '../../../packages/audio-engine/src/dsp-tolerance-policy'
 import type { JsonValue } from '../../../packages/shared/src/json-value'
 import { computePortableWasmSourceHash } from '../scripts/portable-wasm-source-hash'
 
@@ -1253,7 +1254,7 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
       if (fixture.legacyModulation) {
         const legacyOutput = await renderLegacyModulationFixture(fixture, fixture.legacyModulation)
         const legacyDifference = maximumDifference(output, legacyOutput)
-        const legacyTolerance = fixture.legacyTolerance ?? 5e-4
+        const legacyTolerance = fixture.legacyTolerance ?? OWNED_DSP_NUMERICAL_TOLERANCES.legacyBridgeAbsolute
         if (legacyDifference > legacyTolerance) {
           throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
         }
@@ -1269,7 +1270,7 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
             throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} did not prove the expected mismatch ${fixture.legacyDifferenceMinimum}.`)
           }
         } else {
-          const legacyTolerance = fixture.legacyTolerance ?? 5e-4
+          const legacyTolerance = fixture.legacyTolerance ?? OWNED_DSP_NUMERICAL_TOLERANCES.legacyBridgeAbsolute
           if (legacyDifference > legacyTolerance) {
             throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
           }
@@ -1281,7 +1282,7 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
       if (fixture.legacyDelay) {
         const legacyOutput = renderLegacyDelayFixture(fixture, fixture.legacyDelay)
         const legacyDifference = maximumDifference(output, legacyOutput)
-        const legacyTolerance = fixture.legacyTolerance ?? 5e-4
+        const legacyTolerance = fixture.legacyTolerance ?? OWNED_DSP_NUMERICAL_TOLERANCES.legacyBridgeAbsolute
         if (legacyDifference > legacyTolerance) {
           throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
         }
@@ -1292,7 +1293,7 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
       if (fixture.legacyReverb) {
         const legacyOutput = await renderLegacyReverbFixture(fixture, fixture.legacyReverb)
         const legacyDifference = maximumDifference(output, legacyOutput)
-        const legacyTolerance = fixture.legacyTolerance ?? 5e-4
+        const legacyTolerance = fixture.legacyTolerance ?? OWNED_DSP_NUMERICAL_TOLERANCES.legacyBridgeAbsolute
         if (legacyDifference > legacyTolerance) {
           throw new Error(`${fixture.name} portable/browser-worklet difference ${legacyDifference} exceeded ${legacyTolerance}.`)
         }
@@ -1303,7 +1304,7 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
       if (fixture.legacySpectral) {
         const legacyOutput = await renderLegacySpectralFixture(fixture, fixture.legacySpectral)
         const legacyDifference = maximumDifference(output, legacyOutput)
-        const legacyTolerance = fixture.legacyTolerance ?? 5e-4
+        const legacyTolerance = fixture.legacyTolerance ?? OWNED_DSP_NUMERICAL_TOLERANCES.legacyBridgeAbsolute
         if (legacyDifference > legacyTolerance) {
           throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
         }

@@ -34,7 +34,12 @@ jobs:
       - run: bun run typecheck
       - run: bun run lint
       - name: Full Bun suite
-        run: bun test --timeout 15000
+        env:
+          VITE_CONVEX_URL: https://polite-peccary-245.convex.cloud
+          TMPDIR: ${{ runner.temp }}/daw-bun-suite
+        run: |
+          mkdir -p "$TMPDIR"
+          bun test --timeout 15000 --max-concurrency 1
 
   native-audio-host:
     runs-on: macos-15

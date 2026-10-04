@@ -31,7 +31,24 @@ jobs:
         env:
           VITE_CONVEX_URL: https://placeholder-verify.convex.cloud
         run: |
-          bun run serve -- --host 127.0.0.1 --port 4173 > "$RUNNER_TEMP/dsp-preview.log" 2>&1 &
+          bun -e '
+            const root = "dist/client";
+            const server = Bun.serve({
+              hostname: "127.0.0.1",
+              port: 4173,
+              async fetch(request) {
+                const url = new URL(request.url);
+                const pathname = decodeURIComponent(url.pathname);
+                const file = Bun.file(root + pathname);
+                if (pathname !== "/" && await file.exists()) return new Response(file);
+                return new Response(Bun.file(root + "/index.html"), {
+                  headers: { "content-type": "text/html; charset=utf-8" },
+                });
+              },
+            });
+            console.log(server.url.toString());
+            await new Promise(() => {});
+          ' > "$RUNNER_TEMP/dsp-preview.log" 2>&1 &
           preview_pid=$!
           trap 'agent-browser --session dsp-characterization close >/dev/null 2>&1 || true; kill "$preview_pid" >/dev/null 2>&1 || true' EXIT
           ready=0

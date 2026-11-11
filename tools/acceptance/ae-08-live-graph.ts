@@ -628,15 +628,81 @@ const assemble = async (directory: string, prefix = ""): Promise<Pcm> => {
   return { sampleRate, channels, samples }
 }
 
+const usage = "Usage: ae-08-live-graph.ts --phase 1|2|3|4|5|6|6i|7 [--out /absolute/dir] [--rows a,b,…] [--matrix] [--repetitions N] [--vst-repetitions N]"
+const knownPhases = ["1", "2", "3", "4", "5", "6", "6i", "7"]
+const positiveInteger = (flag: string, value: string) => {
+  const number = Number(value)
+  if (!Number.isInteger(number) || number < 1) throw new Error(`${flag} needs a positive integer, got ${value}`)
+  return number
+}
+// Only phase 5 has rows to filter or repeat, and only phases 6, 6i and 7 will have VST rows. `--matrix` (optionally spelled
+// `--matrix full`) selects every row, so it contradicts `--rows`.
+export const parseRunnerArgs = (args: string[]) => {
+  const values = new Map<string, string>()
+  let matrix = false
+  for (let index = 0; index < args.length; index++) {
+    const key = args[index]
+    if (key === "--matrix") {
+      matrix = true
+      if (args[index + 1] === "full") index++
+      continue
+    }
+    const value = args[index + 1]
+    if (key === undefined || value === undefined || !["--phase", "--out", "--rows", "--repetitions", "--vst-repetitions"].includes(key) || values.has(key))
+      throw new Error(usage)
+    values.set(key, value)
+    index++
+  }
+  const phase = values.get("--phase")
+  if (phase === undefined || !knownPhases.includes(phase)) throw new Error(usage)
+  const out = values.get("--out") ?? `/tmp/ae08-phase-${phase}-${Date.now()}`
+  if (!path.isAbsolute(out)) throw new Error(usage)
+  const rowsValue = values.get("--rows")
+  const rows = rowsValue?.split(",")
+  if (rows && (rows.some((row) => row === "") || new Set(rows).size !== rows.length)) throw new Error(`--rows needs distinct, non-empty names, got ${rowsValue}`)
+  if (rows && matrix) throw new Error("--rows and --matrix contradict each other")
+  if (rows?.some((row) => !phase5Rows.includes(row)) || (rows && phase !== "5")) throw new Error(`--rows names phase 5 rows: ${phase5Rows.join(", ")}`)
+  const repetitionsValue = values.get("--repetitions")
+  const repetitions = repetitionsValue === undefined ? 1 : positiveInteger("--repetitions", repetitionsValue)
+  if (repetitions > 1 && phase !== "5") throw new Error("--repetitions repeats phase 5 rows")
+  const vstValue = values.get("--vst-repetitions")
+  const vstRepetitions = vstValue === undefined ? 1 : positiveInteger("--vst-repetitions", vstValue)
+  if (vstValue !== undefined && !["6", "6i", "7"].includes(phase)) throw new Error("--vst-repetitions repeats the VST rows of phases 6, 6i and 7")
+  return { phase, out, rows, matrix, repetitions, vstRepetitions }
+}
+// Only a complete, single pass over every row can certify: the campaign analysis needs all rows (analyze-ae-08-continuity.ts).
+export const nonCertifyingReason = (parsed: ReturnType<typeof parseRunnerArgs>) =>
+  parsed.rows ? "filtered" : parsed.repetitions > 1 ? "repeated" : undefined
+
+const selfTest = () => {
+  const refused = (args: string[], message: RegExp) => {
+    try { parseRunnerArgs(args) } catch (error) { if (error instanceof Error && message.test(error.message)) return }
+    throw new Error(`Expected ${args.join(" ")} to be refused with ${message}`)
+  }
+  const accepted = parseRunnerArgs(["--phase", "5", "--out", "/tmp/x", "--rows", "held-note,raw-tempo", "--repetitions", "2"])
+  if (accepted.rows?.join() !== "held-note,raw-tempo" || accepted.repetitions !== 2 || !nonCertifyingReason(accepted)) throw new Error("Filtered parse failed")
+  if (nonCertifyingReason(parseRunnerArgs(["--phase", "5", "--out", "/tmp/x", "--matrix"]))) throw new Error("A full single pass must certify")
+  if (nonCertifyingReason(parseRunnerArgs(["--phase", "5", "--out", "/tmp/x", "--matrix", "full"]))) throw new Error("`--matrix full` must stay accepted")
+  if (parseRunnerArgs(["--phase", "6i", "--out", "/tmp/x", "--vst-repetitions", "3"]).vstRepetitions !== 3) throw new Error("6i parse failed")
+  parseRunnerArgs(["--phase", "6", "--out", "/tmp/x"]); parseRunnerArgs(["--phase", "7", "--out", "/tmp/x"])
+  refused(["--phase", "5", "--out", "/tmp/x", "--rows", "nope"], /--rows names phase 5 rows/)
+  refused(["--phase", "4", "--out", "/tmp/x", "--rows", "held-note"], /--rows names phase 5 rows/)
+  refused(["--phase", "5", "--out", "/tmp/x", "--rows", "held-note", "--matrix"], /contradict/)
+  refused(["--phase", "5", "--out", "/tmp/x", "--rows", "held-note,held-note"], /distinct/)
+  refused(["--phase", "5", "--out", "/tmp/x", "--repetitions", "0"], /positive integer/)
+  refused(["--phase", "4", "--out", "/tmp/x", "--repetitions", "2"], /repeats phase 5 rows/)
+  refused(["--phase", "5", "--out", "/tmp/x", "--vst-repetitions", "2"], /VST rows/)
+  refused(["--phase", "8", "--out", "/tmp/x"], /Usage/)
+  refused(["--phase", "5", "--out", "relative"], /Usage/)
+  refused(["--phase", "5", "--bogus", "1"], /Usage/)
+  console.log("ae-08-live-graph argument self-test: pass")
+}
+
 const main = async () => {
-  const args = Bun.argv.slice(2)
-  const flag = (name: string) => { const index = args.indexOf(name); return index < 0 ? undefined : args[index + 1] }
-  const phase = Number(flag("--phase")), out = flag("--out") ?? `/tmp/ae08-phase-${phase}-${Date.now()}`
-  if (!Number.isInteger(phase) || phase < 1 || phase > 10 || !out || !path.isAbsolute(out)
-    || args.length % 2 || args.some((entry, index) => index % 2 === 0 && !["--phase", "--out", "--matrix", "--repetitions", "--vst-repetitions"].includes(entry)))
-    throw new Error("Usage: ae-08-live-graph.ts --phase N --out /absolute/dir [--matrix full --repetitions N --vst-repetitions N]")
-  if (flag("--matrix") || flag("--repetitions") || flag("--vst-repetitions")) throw new Error("Full matrix/repetitions are reserved for phase 9")
-  if (![1, 2, 3, 4, 5].includes(phase)) throw new Error("Only phases 1 through 5 are implemented")
+  const parsed = parseRunnerArgs(Bun.argv.slice(2))
+  const { out } = parsed
+  const phase = Number.parseInt(parsed.phase)
+  if (["6", "6i", "7"].includes(parsed.phase)) throw new Error(`Phase ${parsed.phase} is not implemented yet`)
   const processes = await Bun.$`ps -axo command=`.text()
   if (processes.split("\n").some((line) => line.trim().startsWith(`${executable} `)))
     throw new Error("Another packaged acceptance/app is active; wait for its normal quit")
@@ -659,21 +725,33 @@ const main = async () => {
       provenance.fixture = "Eight public-control source/schedule seam rows plus the effect-state UI row (FFT, gain preview/flush, pause); 180s paged assets; native frame oracle plus offline references"
       provenance.ownedPids = []
       const rows: { row: string; failure?: string }[] = []
-      for (const row of phase5Rows) {
-        try {
-          const result = await run(path.join(out, row), true, row, 5)
-          provenance.ownedPids.push(result.pid)
-          rows.push({ row })
-        } catch (error) {
-          rows.push({ row, failure: error instanceof Error ? error.message : String(error) })
-          // A normally closed failed row retains evidence and does not suppress
-          // the other independent rows. Never launch alongside a surviving app.
-          const active = await Bun.$`ps -axo command=`.text()
-          if (active.split("\n").some((line) => line.trim().startsWith(`${executable} `))) throw error
+      for (const row of parsed.rows ?? phase5Rows) {
+        for (let repetition = 1; repetition <= parsed.repetitions; repetition++) {
+          const name = parsed.repetitions === 1 ? row : `${row}-r${repetition}`
+          try {
+            const result = await run(path.join(out, name), true, row, 5)
+            provenance.ownedPids.push(result.pid)
+            rows.push({ row: name })
+          } catch (error) {
+            rows.push({ row: name, failure: error instanceof Error ? error.message : String(error) })
+            // A normally closed failed row retains evidence and does not suppress
+            // the other independent rows. Never launch alongside a surviving app.
+            const active = await Bun.$`ps -axo command=`.text()
+            if (active.split("\n").some((line) => line.trim().startsWith(`${executable} `))) throw error
+          }
+          await writeFile(path.join(out, "phase5-campaign.json"), JSON.stringify({ phase: 5, rows }, null, 2))
         }
-        await writeFile(path.join(out, "phase5-campaign.json"), JSON.stringify({ phase: 5, rows }, null, 2))
       }
       await verifyPackagedArtifacts(resources, artifacts)
+      const reason = nonCertifyingReason(parsed)
+      if (reason) {
+        const failed = rows.filter((entry) => entry.failure)
+        const verdict = `AE-08 phase 5 NON-CERTIFYING (${reason}): ran ${rows.map((entry) => entry.row).join(", ")}; ${failed.length} failed. The campaign analysis needs every row, once.`
+        await writeFile(path.join(out, "verdict.md"), `# AE-08 phase 5\n\n${verdict}\n\nNo continuity certification.\n${failed.map((entry) => `\n- ${entry.row}: ${entry.failure}`).join("")}\n`)
+        console.log(`${out}\n${verdict}`)
+        if (failed.length) throw new Error(verdict)
+        return
+      }
       const result = await analyzePhase5Campaign(out)
       console.log(`${out}\n${result.verdict}`)
       if (!result.passed) throw new Error(result.verdict)
@@ -764,4 +842,4 @@ const main = async () => {
     await writeFile(path.join(out, "provenance.json"), JSON.stringify(provenance, null, 2))
   }
 }
-if (import.meta.main) await main()
+if (import.meta.main) await (Bun.argv[2] === "--self-test" ? selfTest() : main())

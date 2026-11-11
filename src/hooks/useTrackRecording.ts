@@ -497,10 +497,15 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     let saveTrackId = ctx.trackId
     const keptOnNewTrack = () => saveTrackId !== ctx.trackId
     let targetTrack = existingTracks.find((entry) => entry.id === saveTrackId)
+    let missingTargetMessage = 'Recording target track missing; clip skipped.'
     if (!targetTrack && projectId() === ctx.projectId) {
       // The take is the user's work: keep it on a new track instead of dropping it with the removed target.
       // `ctx.trackId` stays the locked original so cleanup still releases its lock.
-      const keptTrack = await createTrackForRecording().catch(() => null)
+      const keptTrack = await createTrackForRecording().catch((error) => {
+        console.error('[useTrackRecording] kept take track creation failed', error)
+        missingTargetMessage = `The recording target was removed and a new track could not be created: ${error instanceof Error ? error.message : String(error)}`
+        return null
+      })
       if (keptTrack && projectId() === ctx.projectId) {
         ctx.createdTrack = keptTrack
         saveTrackId = keptTrack.id
@@ -508,7 +513,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       } else if (keptTrack) await handleAutoCreatedTrackFailure(keptTrack, ctx)
     }
     if (!targetTrack) {
-      await discardRecording('Recording target track missing; clip skipped.')
+      await discardRecording(missingTargetMessage)
       return
     }
 

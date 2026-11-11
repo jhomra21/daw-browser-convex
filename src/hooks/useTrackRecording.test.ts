@@ -555,3 +555,41 @@ test("a take whose target was removed is kept on a new track as one undoable ent
     } finally { harness.restore() }
   }
 })
+
+test("a take whose kept track cannot be created reports the real cause and logs the error", async () => {
+  let current: Track[] = [track]
+  const notifications: string[] = []
+  const finalization: NonNullable<Parameters<typeof useTrackRecording>[0]["finalization"]> = {
+    storage: { ...createRecordingTempStorage(), open: async (sessionId) => ({ version: 1, sessionId,
+      format: "planar-float32-blocks", sampleRate: 48000, channelCount: 1, capturedFrames: 1,
+      byteLength: 8, createdAtMs: 1, finalizedAtMs: 2 }) },
+    encodeWav: async () => ({ file: new File([new Uint8Array(8)], "take.wav"), fileName: "take.wav", mimeType: "audio/wav", remove: async () => {} }),
+    acquireTrackLock: async () => ({ ok: true }),
+    releaseTrackLock: async () => undefined,
+  }
+  const harness = createHarness({ state: "ready", powerGeneration: 1 }, true, false, false, true, finalization, {
+    projectId: () => "project:test",
+    tracks: () => current,
+    notify: (message) => notifications.push(message),
+    createTrackForRecording: async () => { throw new Error("storage quota exceeded") },
+  })
+  harness.nativeController.stop = async () => ({ capturedFrames: 1, nativeTake: nativeProof })
+  const host = globalThis.window?.dawDesktop?.audioHost
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { ...globalThis.window, dawDesktop: { audioHost: {
+    ...host, recordingSpool: { release: async () => undefined },
+  } } } })
+  const errors: unknown[][] = []
+  const originalError = console.error
+  console.error = (...args: unknown[]) => { errors.push(args) }
+  try {
+    await createRoot(async (dispose) => {
+      await flushLifecycle(); expect(await harness.recording.startRecording(track.id)).toMatchObject({ ok: true })
+      current = []
+      await harness.recording.stopRecording()
+      expect(notifications.some((message) => message.includes("storage quota exceeded"))).toBeTrue()
+      expect(notifications).not.toContain("Recording target track missing; clip skipped.")
+      expect(errors.some((args) => args.some((arg) => arg instanceof Error && arg.message === "storage quota exceeded"))).toBeTrue()
+      dispose()
+    })
+  } finally { console.error = originalError; harness.restore() }
+})

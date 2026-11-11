@@ -1704,10 +1704,66 @@ test("converts native volume ramps into callback-safe processor events", async (
   }
   const { fixture, coordinator } = coordinatorFor(snapshot)
   await coordinator.prime(0)
+  // A 12-frame ramp takes a value per frame, then lands on its end value.
   expect(processorEventsFrom(fixture.payloads)).toMatchObject([
-    { parameterTarget: 26, frame: 0, value: 0.5 },
+    ...Array.from({ length: 12 }, (_, frame) => ({ parameterTarget: 26, frame, value: Math.fround(0.5 + 0.5 * (frame / 12)) })),
     { parameterTarget: 26, frame: 12, value: 1 },
   ])
+})
+
+test("holds a native volume ramp at the smallest stride that keeps each callback inside the processor event cap", async () => {
+  const rampFrames = 2_400
+  const longTrack: RuntimeTrack = {
+    ...sourceTrack,
+    clips: [{
+      ...sourceTrack.clips[0]!,
+      duration: 2 * rampFrames / 48_000,
+      buffer: new LongStereoAudioBuffer(2 * rampFrames),
+    }],
+  }
+  const base = snapshotFor(longTrack)
+  const snapshot = {
+    ...base,
+    mixer: {
+      ...base.mixer,
+      automationEnvelopes: [{
+        id: "track-volume-fade",
+        projectId: "project:1",
+        target: { kind: "track" as const, trackId: longTrack.id },
+        targetKey: "track-volume-fade",
+        parameterId: "volume",
+        enabled: true,
+        points: [
+          { id: "start", timeSec: 0, value: 0, interpolation: "linear" as const },
+          { id: "end", timeSec: rampFrames / 48_000, value: 1, interpolation: "hold" as const },
+        ],
+        updatedAt: 1,
+      }],
+    },
+  }
+  const { fixture, coordinator } = coordinatorFor(snapshot)
+  await coordinator.prime(0)
+  const events = processorEventsFrom(fixture.payloads).filter((event) => event.frame <= rampFrames)
+  const eventsPerBlock = Map.groupBy(events, (event) => Math.floor(event.frame / 512))
+  // One ramp fills a 512-frame callback with 128 values (stride 4); the cap leaves 224 for ramps.
+  expect(Math.max(...[...eventsPerBlock.values()].map((block) => block.length))).toBeLessThanOrEqual(224)
+  const held = new Map(events.map((event) => [event.frame, event.value]))
+  let value = 0
+  const gain = Array.from({ length: rampFrames }, (_, frame) => {
+    value = held.get(frame) ?? value
+    return value
+  })
+  const stride = 4
+  const idealStep = 1 / rampFrames
+  const largestStep = Math.max(...gain.slice(1).map((sample, index) => Math.abs(sample - gain[index]!)))
+  const rmsError = Math.sqrt(gain.reduce((sum, sample, frame) => sum + (sample - frame / rampFrames) ** 2, 0) / rampFrames)
+  const rmsGain = Math.sqrt(gain.reduce((sum, sample) => sum + sample ** 2, 0) / rampFrames)
+  expect([
+    largestStep <= stride * idealStep * 1.001,
+    // Holding each value for a stride lags the ideal by (stride - 1) / 2 steps, so the error sits near -57 dB.
+    20 * Math.log10(rmsGain / rmsError) >= 55,
+    held.get(rampFrames),
+  ]).toEqual([true, true, 1])
 })
 
 test("does not let persisted parameter initialization suppress scheduled automation", () => {

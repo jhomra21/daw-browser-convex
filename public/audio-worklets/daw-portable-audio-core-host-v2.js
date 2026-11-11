@@ -45,6 +45,13 @@ const writeProcessorId = (view, offset, id) => view.setBigUint64(offset, BigInt(
 
 const rampValue = (ramp, frame) => ramp.startValue + (frame - ramp.startFrame) * ramp.valueStep
 
+// The events a ramp takes in the block [startFrame, endFrame) at one value every `stride` frames, plus its landing value.
+const rampEventCount = (ramp, startFrame, endFrame, stride) => {
+  if (ramp.endFrame <= startFrame) return 1
+  const span = Math.min(endFrame, ramp.endFrame) - Math.max(startFrame, ramp.startFrame)
+  return Math.ceil(span / stride) + (ramp.endFrame < endFrame ? 1 : 0)
+}
+
 const byteHash = (bytes) => {
   let hash = 0x811c9dc5
   for (const byte of bytes) {
@@ -120,6 +127,7 @@ export class DawPortableAudioCoreHost {
     this.disposed = false
     this.revision = 0
     this.framesProcessed = 0
+    this.droppedProcessorEvents = 0
     this.transportPositionSequence = 0
     this.lastTransportPositionFrame = 0
     this.transportSessionId = 1
@@ -256,6 +264,7 @@ export class DawPortableAudioCoreHost {
         contractHash: this.contractHash,
         revision: this.revision,
         framesProcessed: this.framesProcessed,
+        droppedProcessorEvents: this.droppedProcessorEvents,
         memoryBytes: this.memory ? this.memory.buffer.byteLength : 0,
         graphPrepare: this.graphPrepareDiagnostics(),
       })
@@ -2086,11 +2095,13 @@ export class DawPortableAudioCoreHost {
   }
 
   // Appends one event to the block's processor events, kept in frame order within its stream (`first` is the stream's first
-  // slot). The core takes 256 per block: past that an event overwrites the last one for the same target, so the block still
-  // renders and ends on the right value, and only the timing inside the block is lost.
+  // slot). The core takes 256 per block: past that an event overwrites the last one for the same target (or is lost when
+  // the target has none), so the block still renders and ends on the right value, and only the timing inside the block is
+  // lost. Each such event is counted in `droppedProcessorEvents`.
   writeProcessorEvent(count, first, instanceIdValue, frameOffset, target, value) {
     const view = this.scheduleEventView
     if (count >= MAX_PROCESSOR_EVENTS) {
+      this.droppedProcessorEvents += 1
       for (let index = count - 1; index >= 0; index -= 1) {
         const offset = 4 + index * PROCESSOR_EVENT_BYTES
         if (view.getBigUint64(offset, true) === instanceIdValue && view.getUint32(offset + 8, true) === target) {
@@ -2115,6 +2126,45 @@ export class DawPortableAudioCoreHost {
     return count + 1
   }
 
+  // A ramp writes its value every `stride` frames and its end value where it lands. The core takes 256 events per block, so
+  // the stride is the smallest power of two that keeps the block's ramp and set events (and the live events merged in
+  // after) inside it: one ramp is sample-exact in a 128-frame block, and many ramps degrade evenly instead of losing events.
+  // Native built-ins hold one value per callback block (see nativeProcessorAutomationEventsAtCallbackBoundaries).
+  processorRampStride(startFrame, endFrame) {
+    const liveCount = this.eventOffset && this.eventByteCount ? this.eventBufferView.getUint32(0, true) : 0
+    const budget = MAX_PROCESSOR_EVENTS - liveCount
+    let stride = 1
+    while (stride < endFrame - startFrame) {
+      let count = 0
+      for (const stream of this.scheduleParameterStreams) {
+        for (const active of stream.activeRamps) {
+          if (active.event) count += rampEventCount(active.event, startFrame, endFrame, stride)
+        }
+        for (let index = stream.cursor; index < stream.events.length && stream.events[index].frame < endFrame; index += 1) {
+          const event = stream.events[index]
+          count += event.ramp ? rampEventCount(event, startFrame, endFrame, stride) : 1
+        }
+      }
+      if (count <= budget) break
+      stride *= 2
+    }
+    return stride
+  }
+
+  writeRamp(count, first, instanceIdValue, ramp, startFrame, endFrame, stride) {
+    if (ramp.endFrame <= startFrame) {
+      return this.writeProcessorEvent(count, first, instanceIdValue, 0, ramp.target, rampValue(ramp, ramp.endFrame))
+    }
+    const to = Math.min(endFrame, ramp.endFrame)
+    let written = count
+    for (let frame = Math.max(startFrame, ramp.startFrame); frame < to; frame += stride) {
+      written = this.writeProcessorEvent(written, first, instanceIdValue, frame - startFrame, ramp.target, rampValue(ramp, frame))
+    }
+    return ramp.endFrame < endFrame
+      ? this.writeProcessorEvent(written, first, instanceIdValue, ramp.endFrame - startFrame, ramp.target, rampValue(ramp, ramp.endFrame))
+      : written
+  }
+
   materializeSchedule(startFrame, frameCount) {
     if (!this.schedule || this.schedule.transportEpoch !== this.transportEpoch || this.schedule.revision !== this.revision
       || !this.scheduleEventView || !this.scheduleInstrumentEventView
@@ -2131,37 +2181,26 @@ export class DawPortableAudioCoreHost {
         stream.cursor += 1
         this.scheduleCursor += 1
       }
+    }
+    const stride = this.processorRampStride(startFrame, endFrame)
+    for (const stream of this.scheduleParameterStreams) {
       const first = processorCount
-      const write = (frame, target, value) => {
-        processorCount = this.writeProcessorEvent(processorCount, first, stream.instanceIdValue, frame - startFrame, target, value)
-      }
-      // A ramp holds one value per block, as the native host does for its automation: its value at the block's first frame
-      // and its end value where it lands. Per-frame values would take 128 events per ramp out of the core's 256 per block.
       for (const active of stream.activeRamps) {
         const ramp = active.event
         if (!ramp) continue
-        if (ramp.endFrame <= startFrame) {
-          write(startFrame, ramp.target, rampValue(ramp, ramp.endFrame))
-          active.event = null
-          continue
-        }
-        write(startFrame, ramp.target, rampValue(ramp, startFrame))
-        if (ramp.endFrame < endFrame) {
-          write(ramp.endFrame, ramp.target, rampValue(ramp, ramp.endFrame))
-          active.event = null
-        }
+        processorCount = this.writeRamp(processorCount, first, stream.instanceIdValue, ramp, startFrame, endFrame, stride)
+        if (ramp.endFrame < endFrame) active.event = null
       }
       while (stream.cursor < stream.events.length && stream.events[stream.cursor].frame < endFrame) {
         const event = stream.events[stream.cursor]
         stream.cursor += 1
         this.scheduleCursor += 1
         if (!event.ramp) {
-          write(event.frame, event.target, event.value)
+          processorCount = this.writeProcessorEvent(processorCount, first, stream.instanceIdValue, event.frame - startFrame, event.target, event.value)
           continue
         }
-        write(event.frame, event.target, event.startValue)
-        if (event.endFrame < endFrame) write(event.endFrame, event.target, rampValue(event, event.endFrame))
-        else stream.activeRamps[event.rampIndex].event = event
+        processorCount = this.writeRamp(processorCount, first, stream.instanceIdValue, event, startFrame, endFrame, stride)
+        if (event.endFrame >= endFrame) stream.activeRamps[event.rampIndex].event = event
       }
     }
     const liveView = this.instrumentEventByteCount > 0 ? this.instrumentEventView : null

@@ -944,8 +944,9 @@ test('B6f5 the v2 host swaps a schedule staged for the prepared revision in at a
 })
 
 // Two tracks fade in opposite directions while a third drops its gain, all through the one 256-event block the core takes.
-// Per-frame ramps would need 128 events each (256 for the two) plus the set: 257, which silenced the block. Each block must
-// stay audible and within one block's slope of the ideal sum, and the fades must land exactly.
+// Per-frame ramps would need 128 events each (256 for the two) plus the set: 257, which silenced the block. The ramps write
+// one value every 2 frames instead: each block must stay audible and within 2 frames of slope (0.0032) of the ideal sum, and
+// the fades must land exactly.
 const rampGain = (trackId: string, sequence: number, startFrame: number, endFrame: number, startValue: number, endValue: number): HostScheduleEvent => ({
   frame: startFrame, sequence, type: 'parameter-ramp', target: { kind: 'parameter', scope: 'track', trackId, parameterId: 'mixer.gain' },
   startFrame, endFrame, interpolation: 'linear', startValue, endValue,
@@ -964,7 +965,7 @@ const rampedSum = (frame: number, cDropFrame: number) =>
   (1 - Math.min(frame / 1280, 1)) + 0.5 * Math.min(frame / 640, 1) + 0.25 * (frame < cDropFrame ? 1 : 0.5)
 const rampEvents = [rampGain('a', 1, 0, 1280, 1, 0), rampGain('b', 2, 0, 640, 0, 1)]
 const rampsStayAudibleAndLand = (blocks: readonly number[][], cDropFrame: number) => [
-  Math.max(...blocks.flatMap((block, index) => block.map((sample, frame) => Math.abs(sample - rampedSum(index * 128 + frame, cDropFrame))))) < 0.21,
+  Math.max(...blocks.flatMap((block, index) => block.map((sample, frame) => Math.abs(sample - rampedSum(index * 128 + frame, cDropFrame))))) < 0.004,
   blocks.every((block) => Math.min(...block.map(Math.abs)) > 0.3),
   blocks.at(-1)?.every((sample) => Math.abs(sample - rampedSum(12 * 128, cDropFrame)) < 1e-5),
 ]
@@ -975,6 +976,73 @@ test('B6f5 phase 6i two overlapping gain ramps stay audible and land exactly on 
 
 test('B6f5 phase 6i two ramps and a gain set in one block (257 events) keep the block audible on the built core', async () => {
   expect(rampsStayAudibleAndLand(await playRamps([...rampEvents, gainSet(3 * 128, 3, 0.5, 'c')]), 3 * 128)).toEqual([true, true, true])
+})
+
+// One ramp has the block to itself, so it writes a value per frame: the worklet is sample-exact, as the ramp is.
+const fadeThrough = async (fadeFrames: number, wave: (frame: number) => number) => {
+  const { host, messages } = await startPortableTracks(['a'])
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [rampGain('a', 1, 0, fadeFrames, 1, 0)] } })
+  const planes = [new Float32Array(48_000).map((_, frame) => wave(frame)), new Float32Array(48_000).map((_, frame) => wave(frame))]
+  host.handleMessage({ version: 2, type: 'register-asset', requestId: 5, generation: 0,
+    asset: { version: 1, assetId: 'fade-wave', frameCount: 48_000, sampleRateHz: 48_000, channelCount: 2 }, planes })
+  host.handleMessage({ version: 2, type: 'schedule-sources', requestId: 6, revision: 1, epoch: 1, events: [{
+    version: 1, epoch: 1, sequence: 1, sourceNodeId: 'a', assetId: 'fade-wave', startFrame: 0, stopFrame: 48_000, sourceOffsetFrame: 0,
+    sourceFrameCount: 48_000, gain: 1, fadeInStartFrame: 0, fadeInEndFrame: 0, fadeOutStartFrame: 48_000, fadeOutEndFrame: 48_000 }] })
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'sources-scheduled', requestId: 6, result: 'scheduled' }))
+  const rendered = Array.from({ length: Math.ceil(fadeFrames / 128) }, () => renderLeft(host)).flat().slice(0, fadeFrames)
+  return { rendered, dropped: droppedProcessorEvents(host, messages) }
+}
+const droppedProcessorEvents = (host: { handleMessage: (message: { version: 2, type: 'diagnostics' }) => void }, messages: readonly PortableWasmStatusMessage[]) => {
+  host.handleMessage({ version: 2, type: 'diagnostics' })
+  const health = messages.findLast((message) => message.type === 'health')
+  return health?.type === 'health' ? health.droppedProcessorEvents : undefined
+}
+
+test('B6f5 phase 6i a single gain fade is sample-exact through the v2 host at 10 ms, 50 ms and 0.5 s on the built core', async () => {
+  for (const fadeFrames of [480, 2_400, 24_000]) {
+    const gain = (await fadeThrough(fadeFrames, () => 1)).rendered
+    const sine = (await fadeThrough(fadeFrames, (frame) => Math.sin(0.05 * frame))).rendered
+    const ideal = (frame: number) => 1 - frame / fadeFrames
+    const rms = (values: readonly number[]) => Math.sqrt(values.reduce((sum, value) => sum + value * value, 0) / values.length)
+    const errorDb = 20 * Math.log10(rms(sine.map((sample, frame) => Math.sin(0.05 * frame) * ideal(frame))) / rms(sine.map((sample, frame) => sample - Math.sin(0.05 * frame) * ideal(frame))))
+    expect([fadeFrames, largestStep(gain) <= 1.01 / fadeFrames, errorDb >= 60]).toEqual([fadeFrames, true, true])
+  }
+})
+
+test('B6f5 phase 6i four concurrent gain ramps and sets in one block render inside the event cap without dropping events on the built core', async () => {
+  const sourceValues = [1, 0.9, 0.8, 0.7, 0.5]
+  const trackIds = ['a', 'b', 'c', 'd', 'e']
+  const { host, messages } = await startPortableTracks(trackIds)
+  const setValues = [0.9, 0.8, 0.7, 0.6, 0.5, 0.25]
+  const setFrame = (index: number) => 130 + 10 * index
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 },
+    events: [
+      ...trackIds.slice(0, 4).map((trackId, index) => rampGain(trackId, index + 1, 0, 1280, 1, 0)),
+      ...setValues.map((value, index) => gainSet(setFrame(index), 5 + index, value, 'e')),
+    ] } })
+  playConstantSources(host, messages, 2, 1, trackIds.map((nodeId, index) => ({ nodeId, value: sourceValues[index] })))
+  const blocks = Array.from({ length: 12 }, () => renderLeft(host))
+  const eGain = (frame: number) => setValues[setValues.findLastIndex((_, index) => setFrame(index) <= frame)] ?? 1
+  const ideal = (frame: number) => sourceValues.slice(0, 4).reduce((sum, value) => sum + value, 0) * (1 - Math.min(frame / 1280, 1)) + 0.5 * eGain(frame)
+  const error = Math.max(...blocks.flatMap((block, index) => block.map((sample, frame) => Math.abs(sample - ideal(index * 128 + frame)))))
+  expect([error < 0.01, blocks.at(-1)?.every((sample) => Math.abs(sample - 0.125) < 1e-5), droppedProcessorEvents(host, messages)]).toEqual([true, true, 0])
+})
+
+test('B6f5 the v2 host counts the processor events the core cannot take in a block and keeps rendering on the built core', async () => {
+  const { host, messages } = await startPortableTracks(['a', 'b'])
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [
+      ...Array.from({ length: 255 }, (_, index) => gainSet(index % 128, index + 1, 0.5, 'a')),
+      rampGain('b', 256, 0, 64, 1, 0),
+    ].toSorted((left, right) => left.frame - right.frame).map((event, index) => ({ ...event, sequence: index + 1 })) } })
+  playConstantSources(host, messages, 2, 1, [{ nodeId: 'a', value: 1 }, { nodeId: 'b', value: 0.5 }])
+  const block = renderLeft(host)
+  expect([droppedProcessorEvents(host, messages), Math.min(...block.map(Math.abs)) > 0]).toEqual([1, true])
 })
 
 test('B6f5 the v2 host refuses an adoption publish the core cannot continue and keeps rendering on the built core', async () => {

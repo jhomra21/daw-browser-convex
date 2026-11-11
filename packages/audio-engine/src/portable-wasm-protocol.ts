@@ -96,7 +96,7 @@ export type PortableWasmStatusMessage =
     pagedSlotCount?: number
     pagedMaxChannels?: number
   }
-  | { version: typeof portableWasmProtocolVersion; type: 'health'; revision: number; framesProcessed: number; memoryBytes: number }
+  | { version: typeof portableWasmProtocolVersion; type: 'health'; revision: number; framesProcessed: number; memoryBytes: number; droppedProcessorEvents?: number }
   | { version: typeof portableWasmProtocolVersion; type: 'asset-registered'; requestId: number; generation: number; assetId: string; result: 'registered'; handle: { slot: number; generation: number } }
   | { version: typeof portableWasmProtocolVersion; type: 'asset-registered'; requestId: number; generation: number; assetId: string; result: 'capacity-exceeded' | 'stale-generation' | 'invalid-pcm' }
   | { version: typeof portableWasmProtocolVersion; type: 'paged-asset-registered'; requestId: number; generation: number; assetId: string; result: 'registered'; handle: { slot: number; generation: number } }

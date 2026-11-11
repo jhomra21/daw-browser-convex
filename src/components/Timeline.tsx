@@ -54,7 +54,6 @@ import { useTrackRecording } from "~/hooks/useTrackRecording";
 import { createRecordingTransportPolicy } from "~/hooks/recording-dispatch";
 import { createRecordingTargetLock } from "~/lib/track-recording-target";
 import { useMidiTrackRecording } from "~/hooks/useMidiTrackRecording";
-import { runTimelineMutationAfterRecordingSettlement } from "~/lib/midi/recording-mutation-guard";
 import { buildClipFadesHistoryEntry, buildClipMidiNotesHistoryEntry } from "~/lib/undo/builders";
 import type { MidiEditorNote } from "~/lib/midi-editor-grid";
 import createTimelineEffectCommit from "~/components/timeline/create-timeline-effect-commit";
@@ -231,11 +230,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     createSignal<string | null>(null);
   const [provisionalMidiClipId, setProvisionalMidiClipId] =
     createSignal<string | null>(null);
-  type RecordingStopOwner = {
-    stop: () => Promise<void>;
-    activeTrackId: () => string | null;
-  };
-  const recordingStopRef: RecordingStopOwner = { stop: async () => {}, activeTrackId: () => null };
   // Bound once during setup after the recording hook, before effects run.
   let recordingKeepLatencyNodeIds: () => ReadonlySet<string> = () => new Set();
   const [masterCollapsed, setMasterCollapsed] = createSignal(true);
@@ -1524,14 +1518,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     sidechainRoutes,
     applyAutomationEnvelope: automation.applyEnvelope,
     grantClipWrites,
-    settleActiveRecording: async (trackIds) => {
-      const activeMidiTrackId = activeMidiRecordingTargetId();
-      const activeAudioTrackId = recordingStopRef.activeTrackId();
-      if (
-        (activeMidiTrackId && trackIds.has(activeMidiTrackId))
-        || (activeAudioTrackId && trackIds.has(activeAudioTrackId))
-      ) await recordingStopRef.stop();
-    },
+    recordingTargetLock,
     notify,
   });
   // Like Ableton's Detail View, a plain click on a clip shows it in an open bottom panel. A press with a modifier, a
@@ -1676,20 +1663,15 @@ const Timeline: Component<TimelineProps> = (props) => {
       navigate: navigateToRoom,
     },
   });
-  recordingStopRef.stop = recordingTransport.stopRecording;
-  recordingStopRef.activeTrackId = audioRecordingTrackId;
   setProjectTransitionSettlement(() => recordingTransport.leaveProject());
   onCleanup(() => setProjectTransitionSettlement(undefined));
   const isRecording = createMemo(() => isAudioRecording() || midiRecording.isRecording());
   const recordingTrackId = createMemo(() => recordingControls.recordingTrackId() ?? midiRecording.recordingTrackId());
   const stopRecording = recordingTransport.stopRecording;
+  // A take keeps running through a delete; the lock refuses a delete of its own track.
   const deleteTimelineSelectionSafely = async () => {
-    await runTimelineMutationAfterRecordingSettlement({
-      isRecording,
-      stopRecording,
-      provisionalClipId: provisionalMidiClipId,
-      mutate: deleteTimelineSelection,
-    });
+    if (provisionalMidiClipId() !== null && !isRecording()) return;
+    await deleteTimelineSelection();
   };
   const toggleLoopSafely = () => {
     if (midiRecording.isRecording() || midiRecording.hasPendingCleanup()) {
@@ -2293,7 +2275,6 @@ const Timeline: Component<TimelineProps> = (props) => {
   );
   const canSelectAllClips = createMemo(() => hasWritableClips());
   const canDeleteSelection = createMemo(() => {
-    // Delete stops an active recording first, so only a provisional clip left after recording blocks it.
     if (provisionalMidiClipId() !== null && !isRecording()) return false;
     if (selection.rangeSelection() !== null) return true;
     if (selection.selectedClipIds().size > 0) return hasWritableSelectedClips();

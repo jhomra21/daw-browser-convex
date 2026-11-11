@@ -25,6 +25,7 @@ import {
 } from '~/lib/timeline-section-edit'
 import { calcNonOverlapStart, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import { buildAutomationEnvelopeHistoryEntry, buildClipDeleteHistoryEntry, buildControlRangeDeleteHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
+import { RECORDING_TARGET_LOCKED_BADGE, type RecordingTargetLock } from '~/lib/track-recording-target'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Clip, ExternalSidechainRoute, SelectedClip, Track } from '@daw-browser/timeline-core/types'
@@ -66,7 +67,7 @@ type TimelineClipActionsOptions = {
   sidechainRoutes: Accessor<ExternalSidechainRoute[]>
   applyAutomationEnvelope: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void
-  settleActiveRecording?: (trackIds: ReadonlySet<Track['id']>) => Promise<void>
+  recordingTargetLock?: RecordingTargetLock
   notify: (title: string, message: string) => void
 }
 
@@ -115,7 +116,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     sidechainRoutes,
     applyAutomationEnvelope,
     grantClipWrites,
-    settleActiveRecording,
+    recordingTargetLock,
     notify,
   } = options
   const sectionClipboard = createTimelineSectionClipboard()
@@ -551,9 +552,16 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     }
   }
 
+  // Synchronous, so a refused delete neither opens the confirmation nor stops the take.
+  const refuseLockedTrackDelete = (snapshot: readonly RuntimeTrack[], trackId: Track['id']) => {
+    const refusal = recordingTargetLock?.refuseDelete(collectTrackDeleteIds(snapshot, trackId))
+    if (refusal) notify(RECORDING_TARGET_LOCKED_BADGE, refusal)
+    return refusal !== undefined
+  }
+
   const performDeleteTrack = async (trackId: Track['id']) => {
     const rid = projectId()
-    if (!rid) return
+    if (!rid || refuseLockedTrackDelete(tracks(), trackId)) return
     await flushMidiProjectWrites(rid)
     const snapshot = tracks()
     const track = snapshot.find(entry => entry.id === trackId)
@@ -578,7 +586,6 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     }
 
     if (rid && isLocalId('project', rid)) {
-      await settleActiveRecording?.(deletedTrackIds)
       const historyEntries: ReturnType<typeof buildTrackDeleteHistoryEntry>[] = []
       try {
         for (const deletedTrack of snapshot.filter((entry) => deletedTrackIds.has(entry.id))) {
@@ -638,7 +645,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
   const requestDeleteTrack = (trackId: Track['id']) => {
     const snapshot = tracks()
     const track = snapshot.find(entry => entry.id === trackId)
-    if (!track) return
+    if (!track || refuseLockedTrackDelete(snapshot, trackId)) return
 
     const deletedTrackIds = collectTrackDeleteIds(snapshot, trackId)
     const hasDeletedClips = snapshot.some((entry) => deletedTrackIds.has(entry.id) && entry.clips.length > 0)

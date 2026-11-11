@@ -16,6 +16,7 @@ import {
   releaseTrackRecordingLock,
   startRecordingLockHeartbeat,
 } from '~/lib/track-recording-session'
+import type { RecordingTargetLock } from '~/lib/track-recording-target'
 import type { MidiAccessContextValue } from '~/context/midi-access'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -49,6 +50,7 @@ export type MidiTrackRecordingControllerOptions = {
   setIsRecording: (value: boolean) => void
   recordingTrackId: Accessor<string | null>
   setRecordingTrackId: (trackId: string | null) => void
+  targetLock?: RecordingTargetLock
 }
 
 type Checkpoint = {
@@ -98,6 +100,15 @@ export const createMidiTrackRecordingController = (
   const options = {
     ...rawOptions,
     notify: (message: string) => { if (!disposed) rawOptions.notify(message) },
+    // The lock follows the target the controller already publishes, so no exit path can leave it held.
+    setActiveRecordingTarget: (trackId: string | null) => {
+      rawOptions.setActiveRecordingTarget(trackId)
+      if (trackId === null) rawOptions.targetLock?.release()
+    },
+    setRecordingTrackId: (trackId: string | null) => {
+      rawOptions.setRecordingTrackId(trackId)
+      if (trackId !== null) rawOptions.targetLock?.recording()
+    },
   }
   let active: ActiveTake | null = null
   let startPromise: Promise<boolean> | null = null
@@ -284,6 +295,7 @@ export const createMidiTrackRecordingController = (
     if (retainedCancelledClip) return settleWith(retryRetainedCleanup())
     const take = active
     if (!take) return Promise.resolve()
+    options.targetLock?.finishing()
     return settleWith((async () => {
       let clearProvisionalClip = true
       let emptyTake = false
@@ -391,6 +403,10 @@ export const createMidiTrackRecordingController = (
     }
     if (track.lockedBy && track.lockedBy !== userId) {
       options.notify('Track is locked by another collaborator.')
+      return false
+    }
+    if (options.targetLock && !options.targetLock.start(track.id)) {
+      options.notify('Another recording is active.')
       return false
     }
     options.setActiveRecordingTarget(track.id)

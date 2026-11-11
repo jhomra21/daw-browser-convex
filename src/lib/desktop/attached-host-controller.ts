@@ -362,6 +362,7 @@ export const createAttachedHostController = (input: {
   pause: () => Promise<void>
   stop: () => Promise<void>
   finishRecording: () => Promise<void>
+  refuseRecordingTargetChange?: Parameters<typeof createLocalControlHandlers>[0]['refuseRecordingTargetChange']
   captureNativeVstStates?: (capture?: { projectId: string; instanceIds: readonly string[] }) => Promise<void>
   exportService: TimelineExportService
   exportQueue: ExportQueue
@@ -458,6 +459,7 @@ export const createAttachedHostController = (input: {
       const handlers = createLocalControlHandlers({
         projectId: mountedProjectId,
         actor: { subject: request_.trustedActorSubject, issuer: "daw-browser-desktop-host" },
+        refuseRecordingTargetChange: input.refuseRecordingTargetChange,
         assertAvailable: () => {
           if (
             request_.signal.aborted

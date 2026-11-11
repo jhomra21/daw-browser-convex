@@ -13,6 +13,7 @@ import { loadHistory, saveHistory, type LocalMixPatch } from '~/lib/timeline-sto
 import { createUndoManager, type UndoManager } from '~/lib/undo/manager'
 import type { HistoryEntry, PersistedHistory } from '~/lib/undo/types'
 import { execRedo, execUndo } from '~/lib/undo/exec'
+import { RECORDING_TARGET_LOCKED_BADGE, type RecordingTargetLock } from '~/lib/track-recording-target'
 import { createProjectControlClient } from '~/lib/project-control-client'
 import {
   applyTrackMixStateInHistoryModel,
@@ -53,6 +54,7 @@ type UseTimelineHistoryOptions = {
   grantClipWrite: (clipId: string | null | undefined, scope?: OptimisticGrantScope | null) => void
   persistLocalMix: (projectId: string, trackId: Track['id'], patch: LocalMixPatch) => void
   getActions: () => TimelineHistoryActions
+  recordingTargetLock?: RecordingTargetLock
   notify?: (title: string, message: string) => void
 }
 
@@ -245,6 +247,13 @@ export function useTimelineHistory(
 
       const entry = mode === 'undo' ? manager.reserveUndo() : manager.reserveRedo()
       if (!entry) return
+      const refusal = options.recordingTargetLock?.refuseHistory(entry)
+      if (refusal) {
+        if (mode === 'undo') manager.restoreUndo(entry)
+        else manager.restoreRedo(entry)
+        options.notify?.(RECORDING_TARGET_LOCKED_BADGE, refusal)
+        return
+      }
       const initializeDeleteOperationId = (candidate: HistoryEntry): boolean => {
         if (candidate.type === 'section-edit') {
           return candidate.data.entries.reduce(

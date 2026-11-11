@@ -5,6 +5,7 @@ import type { JsonValue } from '@daw-browser/shared'
 import { createLocalProject, createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 import { createLocalControlService, LocalControlServiceError } from './local-control-service'
+import { createRecordingTargetLock, RECORDING_TARGET_LOCKED_REASON } from '~/lib/track-recording-target'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 
 const actor = { subject: 'local:00000000-0000-4000-8000-000000000000' }
@@ -247,6 +248,28 @@ test('execution guards prevent transaction reads and writes after availability i
   const db = await openLocalProjectDb(project.id)
   expect(await db.count('controlApprovals')).toBe(0)
   expect(await db.count('controlCommits')).toBe(0)
+})
+
+test('refuses a commit that deletes the recording target and still applies an unrelated one', async () => {
+  const project = await createLocalProject(`Recording lock ${crypto.randomUUID()}`)
+  const track = (await createLocalControlService({ actor }).snapshot({ projectId: project.id })).tracks[0]
+  if (!track) throw new Error('Expected local project track.')
+  const lock = createRecordingTargetLock(() => [{ id: track.id }])
+  lock.start(track.id)
+  const service = createLocalControlService({ actor, refuseRecordingTargetChange: lock.refuseTransition })
+  await expect(service.commit({
+    version: 'v1',
+    projectId: project.id,
+    idempotencyKey: 'locked-delete',
+    actions: [{ kind: 'track.delete', track: { source: 'persisted', id: track.id } }],
+  })).rejects.toMatchObject({ data: { code: 'validation', message: RECORDING_TARGET_LOCKED_REASON } })
+  expect((await service.snapshot({ projectId: project.id })).tracks.map((entry) => entry.id)).toContain(track.id)
+  await expect(service.commit({
+    version: 'v1',
+    projectId: project.id,
+    idempotencyKey: 'unrelated-rename',
+    actions: [{ kind: 'project.rename', name: 'Renamed during take' }],
+  })).resolves.toMatchObject({ applied: true })
 })
 
 test('replays only the original semantic request for an idempotency key', async () => {

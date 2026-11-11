@@ -42,6 +42,7 @@ import {
 import {
   ensureTrackForRecording,
   finalizeAutoCreatedTrackFailure,
+  type RecordingTargetLock,
 } from '~/lib/track-recording-target'
 import { canTrackReceiveAudioClip } from '@daw-browser/timeline-core/track-routing'
 import { calcNonOverlapStart, willOverlap } from '~/lib/timeline-utils'
@@ -140,6 +141,7 @@ type UseTrackRecordingOptions = {
     createUploadedAudioClip?: typeof createUploadedAudioClip
     deleteLocalAsset?: typeof deleteLocalAsset
   }
+  targetLock?: RecordingTargetLock
   createTrackForRecording: () => Promise<Track | null>
   notify: (message: string) => void
   onLocalSaveFailed: (projectId: string, message: string) => void
@@ -192,6 +194,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     requestTransportStop,
     portableRecording,
     nativeRecording,
+    targetLock,
     createTrackForRecording,
     notify,
     onLocalSaveFailed,
@@ -372,7 +375,10 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         lockHeartbeatTimer = clearRecordingLockHeartbeat(lockHeartbeatTimer)
       },
       releaseTrackLock,
-      setIsRecording: setIsRecordingInternal,
+      setIsRecording: (value) => {
+        setIsRecordingInternal(value)
+        if (!value) targetLock?.release()
+      },
       livePreviewPoints,
       setPreviewPoints,
       setPreviewStartSec,
@@ -1042,6 +1048,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     }
 
     setIsRecordingInternal(true)
+    targetLock?.recording()
     setCurrentRecordingTrackId(trackId)
     resetPreviewState()
     setPreviewStartSec(startSec)
@@ -1075,10 +1082,12 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         ? startRecording(trackId, createdTrack)
         : { ok: false, reason: 'Recording start cancelled' })
     }
+    if (targetLock && !targetLock.start(trackId)) return Promise.resolve({ ok: false, reason: 'Another recording is active' })
     startAttemptGeneration = recordingStartGeneration
     setIsStarting(true)
     const attempt = startRecordingAttempt(trackId, createdTrack)
     const guardedAttempt = attempt.finally(() => {
+      if (!isRecordingInternal()) targetLock?.release()
       if (startPromise === guardedAttempt) {
         startPromise = undefined
         cancelPendingSetup = undefined
@@ -1108,6 +1117,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     const existing = saves.get(ctx)
     if (existing) return existing
     recordRecordingTermination("explicit-stop")
+    targetLock?.finishing()
     // Install before control traffic/awaits. Every stop, close, lifecycle cleanup
     // and unmount for this captured context joins exactly this save operation.
     const save = Promise.resolve().then(async () => {

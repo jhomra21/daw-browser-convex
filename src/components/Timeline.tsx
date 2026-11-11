@@ -52,6 +52,7 @@ import { useTimelineActions } from "~/hooks/useTimelineActions";
 import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
 import { useTrackRecording } from "~/hooks/useTrackRecording";
 import { createRecordingTransportPolicy } from "~/hooks/recording-dispatch";
+import { createRecordingTargetLock } from "~/lib/track-recording-target";
 import { useMidiTrackRecording } from "~/hooks/useMidiTrackRecording";
 import { runTimelineMutationAfterRecordingSettlement } from "~/lib/midi/recording-mutation-guard";
 import { buildClipFadesHistoryEntry, buildClipMidiNotesHistoryEntry } from "~/lib/undo/builders";
@@ -337,6 +338,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     rememberClipHistoryRef: identity.rememberClipHistoryRef,
   });
   const [renderTracks, setRenderTracks] = createSignal<Track[]>([]);
+  const recordingTargetLock = createRecordingTargetLock(renderTracks);
   const [bufferVersion, setBufferVersion] = createSignal(0);
   const selection = useTimelineSelectionState({
     projectId,
@@ -691,6 +693,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     grantTrackWrite,
     grantClipWrite,
     notify,
+    recordingTargetLock,
     persistLocalMix: (_projectId, trackId, patch) =>
       localMix.persist(trackId, patch),
     getActions: () => {
@@ -1002,6 +1005,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     canWriteTrack,
     pushHistory,
     onLocalSaveFailed: localProject.setLocalSaveFailure,
+    recordingTargetLock,
+    notify,
     serverTrackState,
   });
 
@@ -1237,6 +1242,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       track: appPreferences.timeline.defaultTrackCreateColor,
       group: appPreferences.timeline.defaultGroupCreateColor,
     },
+    recordingTargetLock,
+    notify,
     automationEnvelopes: automation.envelopes,
     sidechainRoutes,
     applyAutomationEnvelope: automation.applyEnvelope,
@@ -1602,6 +1609,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     convexApi,
     requestTransportPlay: requestPlay,
     requestTransportStop: handleStop,
+    targetLock: recordingTargetLock,
     portableRecording: {
       enabled: () => !requiresNativeAudio && appPreferences.recording.preferences().portableEnabled,
       controller: portableRecording,
@@ -1653,6 +1661,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
     setActiveRecordingTarget: setActiveMidiRecordingTargetId,
     setProvisionalClipId: setProvisionalMidiClipId,
+    targetLock: recordingTargetLock,
   });
   const recordingTransport = createRecordingTransportPolicy({
     audio: recordingControls,
@@ -2234,6 +2243,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       finishRecording: async () => {
         if (isRecording()) await stopRecording();
       },
+      refuseRecordingTargetChange: recordingTargetLock.refuseTransition,
       captureNativeVstStates: async (capture) => {
         const bridge = window.dawDesktop?.audioHost?.session
         if (!bridge || (capture === undefined && !isNativePlaybackPrepared())) return

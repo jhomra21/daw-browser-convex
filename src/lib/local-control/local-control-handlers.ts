@@ -27,6 +27,7 @@ export const createLocalControlHandlers = (input: {
   projectId: string
   actor: { subject: string; issuer?: string; tokenIdentifier?: string }
   assertAvailable?: () => void
+  refuseRecordingTargetChange?: Parameters<typeof createLocalControlService>[0]['refuseRecordingTargetChange']
 }) => {
   const service = createLocalControlService(input)
   const assertBoundProject = (requestedProjectId: string) => {

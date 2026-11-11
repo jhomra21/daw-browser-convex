@@ -12,6 +12,7 @@ import { buildTrackBooleanHistoryEntry, buildTrackRoutingHistoryEntry, buildTrac
 import type { HistoryEntry } from '~/lib/undo/types'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { isTrackRoutingEqual } from '~/lib/track-routing-state'
+import { RECORDING_TARGET_LOCKED_BADGE, type RecordingTargetLock } from '~/lib/track-recording-target'
 import type { Track, TrackRouting, TrackSend } from '@daw-browser/timeline-core/types'
 
 type LocalTrackRouting = TrackRouting & { sends: TrackSend[] }
@@ -39,6 +40,8 @@ type UseTimelineMixerControllerOptions = {
   canWriteTrack: (trackId: Track['id']) => boolean
   pushHistory: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   onLocalSaveFailed?: (projectId: string, message: string) => void
+  recordingTargetLock?: RecordingTargetLock
+  notify?: (title: string, message: string) => void
   serverTrackState: Accessor<{
     serverVolumes: Map<Track['id'], number>
     serverMuted: Map<Track['id'], boolean>
@@ -331,6 +334,13 @@ export function useTimelineMixerController(
     const previous = getTrackRoutingSnapshot(trackId)
     const normalized = normalizeTrackRouting(track, next, options.tracks())
     if (isTrackRoutingEqual(previous, normalized)) return
+    const refusal = options.recordingTargetLock?.refuseChange([{
+      trackId, outputTargetId: normalized.outputTargetId, sends: normalized.sends,
+    }])
+    if (refusal) {
+      options.notify?.(RECORDING_TARGET_LOCKED_BADGE, refusal)
+      return
+    }
 
     applyTrackRouting(trackId, normalized, false)
     const localProject = isLocalId('project', projectId)

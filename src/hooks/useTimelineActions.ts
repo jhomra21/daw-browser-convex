@@ -14,6 +14,7 @@ import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { buildClipColorHistoryEntry, buildTrackColorCascadeHistoryEntry, buildTrackGroupHistoryEntry, buildTrackReorderHistoryEntry, buildTrackUngroupHistoryEntry } from '~/lib/undo/builders'
 import { TIMELINE_DEFAULT_GROUP_COLOR, TIMELINE_DEFAULT_TRACK_COLOR } from '~/lib/preferences/app-preferences'
 import { createTimelineTrackIndex, type TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
+import { RECORDING_TARGET_LOCKED_BADGE, type RecordingTargetLock } from '~/lib/track-recording-target'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
@@ -59,6 +60,8 @@ type UseTimelineActionsOptions = {
     pushHistory: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   }
   defaultColors?: TimelineTrackDefaultColors
+  recordingTargetLock?: RecordingTargetLock
+  notify?: (title: string, message: string) => void
   automationEnvelopes: Accessor<AutomationEnvelope[]>
   sidechainRoutes: Accessor<ExternalSidechainRoute[]>
   applyAutomationEnvelope: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
@@ -243,6 +246,11 @@ export function useTimelineActions(
       : undefined
   }
 
+  const refuseLockedTarget = (refusal: string | undefined) => {
+    if (refusal) options.notify?.(RECORDING_TARGET_LOCKED_BADGE, refusal)
+    return refusal !== undefined
+  }
+
   const persistTrackPatch = async (
     projectId: string,
     trackId: Track['id'],
@@ -321,7 +329,7 @@ export function useTimelineActions(
     if (!projectId) return
     const tracksForReorder = tracks.map((track, index) => ({ ...track, index }))
     const plan = planTrackReorder({ tracks: tracksForReorder, moveRootIds, target })
-    if (!plan) return
+    if (!plan || refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.patches))) return
     const trackById = new Map(tracks.map((track) => [track.id, track]))
     const patchByTrackId = new Map(plan.patches.map((patch) => [patch.trackId, patch]))
     const updates = tracksForReorder.map((track) => {
@@ -364,7 +372,7 @@ export function useTimelineActions(
     const tracks = options.tracks()
     const pendingGroupTrackId = '__pending_group_track__'
     const plan = planGroupTracks({ tracks, selectedTrackIds: trackIds, groupTrackId: pendingGroupTrackId })
-    if (!plan) return
+    if (!plan || refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.childUpdates))) return
     const groupTrack = await createTimelineTrack({
       channelRole: 'group',
       color: plan.groupTrack.color,
@@ -429,7 +437,7 @@ export function useTimelineActions(
     const groupTrack = tracks.find((track) => track.id === groupId)
     if (!groupTrack) return
     const plan = planUngroupTracks({ tracks, groupId })
-    if (!plan) return
+    if (!plan || refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.childUpdates, [groupId]))) return
     const effects = await loadTrackEffectSnapshot(projectId, groupId)
     const automation = options.automationEnvelopes()
       .filter((envelope) => envelope.target.kind === 'track' && envelope.target.trackId === groupId)
@@ -513,7 +521,7 @@ export function useTimelineActions(
     const tracks = options.tracks()
     const plan = planMoveTrackToGroup({ tracks, trackId, groupId })
     const track = tracks.find((entry) => entry.id === trackId)
-    if (!plan || !track) return
+    if (!plan || !track || refuseLockedTarget(options.recordingTargetLock?.refuseChange([plan]))) return
     await persistTrackPatch(projectId, trackId, { groupId: plan.groupId, outputTargetId: plan.outputTargetId }, track.sends)
     applyTrackPatch(track, { groupId: plan.groupId, outputTargetId: plan.outputTargetId })
   }

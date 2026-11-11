@@ -513,10 +513,26 @@ const prune = (
   retainWithin(actorActive, 128)
 }
 
+type RecordingRoutingTrack = {
+  id: string
+  groupId?: string
+  outputTargetId?: string
+  sends: { targetId: string }[]
+}
+
+const recordingRoutingTracks = (tracks: ControlPlanV1['snapshot']['tracks']): RecordingRoutingTrack[] => tracks.map((track) => ({
+  id: track.id,
+  groupId: track.groupId,
+  outputTargetId: track.outputTargetId,
+  sends: track.sends.map((send) => ({ targetId: send.targetTrackId })),
+}))
+
 export const createLocalControlService = (input: {
   actor: { subject: string; issuer?: string; tokenIdentifier?: string }
   projectId?: string
   assertAvailable?: () => void
+  // Names the reason when a commit would delete or reroute the track an active take records into.
+  refuseRecordingTargetChange?: (before: RecordingRoutingTrack[], after: RecordingRoutingTrack[]) => string | undefined
   excludePendingWriteKinds?: readonly PendingWriteKind[]
   removeAssetFile?: typeof removeLocalAssetFileUnlocked
 }) => {
@@ -674,6 +690,11 @@ export const createLocalControlService = (input: {
       const recoveries = loadedRecoveries(context.rows.recoveries, request.projectId, request.actions, Date.now())
       const controlPlan = plan(context.snapshot, request, recoveries)
       validateLocalDestructivePreflight(context, request, controlPlan, recoveries, actor.subject)
+      const lockedReason = input.refuseRecordingTargetChange?.(
+        recordingRoutingTracks(context.snapshot.tracks),
+        recordingRoutingTracks(controlPlan.snapshot.tracks),
+      )
+      if (lockedReason) fail('validation', lockedReason)
       const requirement = controlApprovalRequirementV1(controlPlan, requestDigest)
       if (requirement.required) {
         if (approvalTokenHash === undefined) {

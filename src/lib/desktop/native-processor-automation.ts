@@ -147,31 +147,25 @@ export const nativeProcessorAutomationEventsAtCallbackBoundaries = (
   // A ramp writes one value every `stride` frames of a callback block. Each block takes the smallest power-of-two stride that
   // keeps its events inside the core's per-block capacity, less headroom for the VST automation the coordinator counts with
   // them, so one ramp is near sample-exact and many ramps degrade evenly.
-  const loads = new Map<number, { fixed: number, spans: number[] }>()
-  const loadOf = (block: number) => {
-    const existing = loads.get(block)
-    if (existing) return existing
-    const created: { fixed: number, spans: number[] } = { fixed: 0, spans: [] }
-    loads.set(block, created)
-    return created
-  }
+  const fixedPerBlock = new Map<number, number>()
+  const spansPerBlock = new Map<number, number[]>()
+  const addFixed = (frame: number) => fixedPerBlock.set(blockOf(frame), (fixedPerBlock.get(blockOf(frame)) ?? 0) + 1)
   for (const event of events) {
     if (event.kind === "set") {
-      loadOf(blockOf(event.frame)).fixed += 1
+      addFixed(event.frame)
       continue
     }
     for (let block = blockOf(event.frame); blockStart(block) < event.endFrame; block += 1) {
-      loadOf(block).spans.push(
-        Math.min(event.endFrame, blockStart(block + 1)) - Math.max(event.frame, blockStart(block)),
-      )
+      const span = Math.min(event.endFrame, blockStart(block + 1)) - Math.max(event.frame, blockStart(block))
+      spansPerBlock.set(block, [...spansPerBlock.get(block) ?? [], span])
     }
-    if (event.endFrame < windowEndFrame) loadOf(blockOf(event.endFrame)).fixed += 1
+    if (event.endFrame < windowEndFrame) addFixed(event.endFrame)
   }
   const strides = new Map<number, number>()
-  for (const [block, load] of loads) {
+  for (const [block, spans] of spansPerBlock) {
     let stride = 1
     while (stride < maximumFramesPerBlock
-      && load.fixed + load.spans.reduce((count, span) => count + Math.ceil(span / stride), 0)
+      && (fixedPerBlock.get(block) ?? 0) + spans.reduce((count, span) => count + Math.ceil(span / stride), 0)
         > nativeProcessorEventCapacity - nativeProcessorEventHeadroom) stride *= 2
     strides.set(block, stride)
   }

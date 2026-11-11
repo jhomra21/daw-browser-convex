@@ -943,6 +943,40 @@ test('B6f5 the v2 host swaps a schedule staged for the prepared revision in at a
     .toEqual([{ installed: 'installed', published: 'published' }, new Set([1]), new Set([1]), new Set([0.25])])
 })
 
+// Two tracks fade in opposite directions while a third drops its gain, all through the one 256-event block the core takes.
+// Per-frame ramps would need 128 events each (256 for the two) plus the set: 257, which silenced the block. Each block must
+// stay audible and within one block's slope of the ideal sum, and the fades must land exactly.
+const rampGain = (trackId: string, sequence: number, startFrame: number, endFrame: number, startValue: number, endValue: number): HostScheduleEvent => ({
+  frame: startFrame, sequence, type: 'parameter-ramp', target: { kind: 'parameter', scope: 'track', trackId, parameterId: 'mixer.gain' },
+  startFrame, endFrame, interpolation: 'linear', startValue, endValue,
+})
+const playRamps = async (events: readonly HostScheduleEvent[]) => {
+  const { host, messages } = await startPortableTracks(['a', 'b', 'c'])
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events } })
+  playConstantSources(host, messages, 2, 1, [{ nodeId: 'a', value: 1 }, { nodeId: 'b', value: 0.5 }, { nodeId: 'c', value: 0.25 }])
+  return Array.from({ length: 12 }, () => renderLeft(host))
+}
+// The sources hold 1, 0.5 and 0.25. a's gain falls from 1 to 0 over ten blocks and b's rises from 0 to 1 over five; c's holds 1
+// until `cDropFrame` and is 0.5 from there.
+const rampedSum = (frame: number, cDropFrame: number) =>
+  (1 - Math.min(frame / 1280, 1)) + 0.5 * Math.min(frame / 640, 1) + 0.25 * (frame < cDropFrame ? 1 : 0.5)
+const rampEvents = [rampGain('a', 1, 0, 1280, 1, 0), rampGain('b', 2, 0, 640, 0, 1)]
+const rampsStayAudibleAndLand = (blocks: readonly number[][], cDropFrame: number) => [
+  Math.max(...blocks.flatMap((block, index) => block.map((sample, frame) => Math.abs(sample - rampedSum(index * 128 + frame, cDropFrame))))) < 0.21,
+  blocks.every((block) => Math.min(...block.map(Math.abs)) > 0.3),
+  blocks.at(-1)?.every((sample) => Math.abs(sample - rampedSum(12 * 128, cDropFrame)) < 1e-5),
+]
+
+test('B6f5 phase 6i two overlapping gain ramps stay audible and land exactly on the built core', async () => {
+  expect(rampsStayAudibleAndLand(await playRamps(rampEvents), Infinity)).toEqual([true, true, true])
+})
+
+test('B6f5 phase 6i two ramps and a gain set in one block (257 events) keep the block audible on the built core', async () => {
+  expect(rampsStayAudibleAndLand(await playRamps([...rampEvents, gainSet(3 * 128, 3, 0.5, 'c')]), 3 * 128)).toEqual([true, true, true])
+})
+
 test('B6f5 the v2 host refuses an adoption publish the core cannot continue and keeps rendering on the built core', async () => {
   const { host, messages } = await startPortableTracks(['track'])
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })

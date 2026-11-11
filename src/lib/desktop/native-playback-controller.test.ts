@@ -15339,6 +15339,44 @@ test("C0G a content change while paused after an unchanged adoption still prepar
     .toEqual({ explicit: { status: "unchanged" }, result: "started", cold: c0gCold, revisions: [1, 2, 3] })
 })
 
+// A latency record captures its snapshot before an `unchanged` adoption raises the compile revision; its proof lands after
+// the adoption. The proof's snapshot write must not move the prepared revision back.
+test("C0G Pause then Play after a latency proof that lands behind an unchanged adoption at a newer revision resumes warm", async () => {
+  const fixture = createBridge("runtime-revision-progress")
+  const base = { ...input(), tracks: [sourceTrack(), { ...sourceTrack(), id: "parallel", clips: [] }] }
+  let revision = base.revision ?? 1
+  const gate = Promise.withResolvers<void>()
+  const publish = fixture.bridge.session.revisions.publish
+  fixture.bridge.session.revisions.publish = async (request) => { await gate.promise; return publish(request) }
+  const controller = createObservedController({ bridge: fixture.bridge, getProjectId: () => "local_project",
+    fingerprintSnapshot: (snapshot) => JSON.stringify({ ...snapshot, revision: undefined, processorStateSequence: undefined,
+      transport: { ...snapshot.transport, playheadSec: undefined, state: undefined } }),
+    compileSnapshot: async (transport) => {
+      const compiled = compileLivePlaybackSnapshot({ ...base, revision, transport })
+      return compiled.supported
+        ? { ...compiled, snapshot: { ...compiled.snapshot, nativeExternalAttachmentPlan: nativeAttachmentPlan } } : compiled
+    } })
+  try {
+    expect(await controller.start(base.transport)).toBe("started")
+    const instanceId = nativeAttachmentPlan.attachments[0]?.instanceId
+    const generation = instanceId === undefined ? undefined : controller.attachmentGeneration(instanceId)
+    if (instanceId === undefined || generation === undefined) throw new Error("Missing attachment")
+    const latency = controller.publishAttachmentLatency({ instanceId, generation, latencyFrames: 2048 })
+    await step7Turns()
+    revision += 1
+    expect(await controller.adoptSchedule(migrationIntent("latency-behind-unchanged"), true)).toEqual({ status: "unchanged" })
+    gate.resolve()
+    expect(await latency).toEqual({ handled: true })
+    await controller.pause(1)
+    const mark = fixture.calls.length
+    const resumed = controller.start({ ...base.transport, playheadSec: 1 })
+    await step7Turns()
+    const cold = fixture.calls.slice(mark).filter((call) => c0gCold.includes(call))
+    expect(await resumed).toBe("started")
+    expect(cold).toEqual([])
+  } finally { gate.resolve(); await controller.dispose() }
+})
+
 // C0h: Chromium's AudioBuffer is a platform object that structuredClone refuses ("AudioBuffer object could not be
 // cloned"). Bun clones a class instance as a plain object, so an own function property stands in for that refusal.
 class C0hUncloneableAudioBuffer extends TestAudioBuffer {

@@ -3655,7 +3655,7 @@ export const createNativePlaybackController = (input: {
           preparedGraph = { ...graph, revision: runtimeRevision }
           processorState.published(runtimeRevision)
           if (JSON.stringify(snapshot.nativeExternalAttachmentPlan) !== JSON.stringify(previous.nativeExternalAttachmentPlan))
-            preparedSnapshot = snapshot
+            preparedSnapshot = { ...snapshot, revision: preparedSnapshot?.revision ?? snapshot.revision }
           preparedKeepLatencyNodeIds = serializedKeepLatencyNodeIds
           nativeMeterRevision = runtimeRevision
           const previousStates = new Map(previousGraph.nodes.flatMap(node => node.processorOrder.map(processor => [processor.id, processor])))

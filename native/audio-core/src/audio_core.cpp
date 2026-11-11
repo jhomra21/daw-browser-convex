@@ -488,20 +488,22 @@ struct InstrumentVoice {
   bool released = false;
 };
 
+// A voice names its zone (an index into its own instrument's zones) and reads the
+// zone's end, loop, gain, pan and choke each frame. What it derives from the zone
+// once (the asset, the tuning increment, the start the playhead is offset from) is
+// kept beside the values it was derived from, so `follow_sample_zone` re-derives it
+// when they change.
 struct SampleVoice {
   uint64_t note_id = 0;
   uint32_t note = 0;
+  uint32_t zone = 0;
+  float velocity = 0.0F;
   daw_audio_asset_handle asset = 0;
+  uint32_t start_frame = 0;
+  uint32_t root_note = 0;
+  float tune_cents = 0.0F;
   double position = 0.0;
   double increment = 1.0;
-  uint32_t end_frame = 0;
-  uint32_t loop_start_frame = 0;
-  uint32_t loop_end_frame = 0;
-  uint32_t crossfade_frame_count = 0;
-  uint32_t playback_mode = DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT;
-  uint32_t choke_group = 0;
-  float gain = 0.0F;
-  float pan = 0.0F;
   float amp_level = 0.0F;
   float filter_level = 0.0F;
   uint32_t filter_stage = 0;
@@ -4329,6 +4331,30 @@ void render_instrument_frame(
   *right_output = std::isfinite(right) ? right : 0.0F;
 }
 
+double sample_voice_increment(
+  const Core &core, const AssetSlot &asset, uint32_t note, const daw_audio_sample_zone &zone) {
+  const float cents = (static_cast<float>(note) - static_cast<float>(zone.root_note)) * 100.0F + zone.tune_cents;
+  return std::pow(2.0, cents / 1200.0) * static_cast<double>(asset.sample_rate_hz) / core.config.sample_rate_hz;
+}
+
+// Re-derives what a voice took from its zone when the zone no longer says the same:
+// a swapped asset or a tuning edit changes the step (the playhead stays where it
+// is), and a start edit moves the playhead by the same distance as the start, so the
+// note plays on from the same offset into the sample.
+void follow_sample_zone(
+  const Core &core, SampleVoice &voice, const daw_audio_sample_zone &zone, const AssetSlot &asset) {
+  if (voice.asset != zone.asset || voice.root_note != zone.root_note || voice.tune_cents != zone.tune_cents) {
+    voice.asset = zone.asset;
+    voice.root_note = zone.root_note;
+    voice.tune_cents = zone.tune_cents;
+    voice.increment = sample_voice_increment(core, asset, voice.note, zone);
+  }
+  if (voice.start_frame != zone.start_frame) {
+    voice.position += static_cast<double>(zone.start_frame) - static_cast<double>(voice.start_frame);
+    voice.start_frame = zone.start_frame;
+  }
+}
+
 void render_sample_instrument_frame(
   Core &core,
   InstrumentNodeState &instrument,
@@ -4350,19 +4376,21 @@ void render_sample_instrument_frame(
     voice.amp_level = envelope_step(voice.amp_level, &voice.amp_stage, voice.released, attack, decay, state.amp_sustain, release);
     const float filter_release = 1.0F / std::fmax(1.0F, state.filter_release_ms * core.config.sample_rate_hz / 1000.0F);
     voice.filter_level = envelope_step(voice.filter_level, &voice.filter_stage, voice.released, filter_attack, filter_decay, state.filter_sustain, filter_release);
-    AssetSlot *asset = find_asset(&core, voice.asset);
+    const daw_audio_sample_zone &zone = instrument.zones[voice.zone];
+    AssetSlot *asset = find_asset(&core, zone.asset);
     if (asset == nullptr || (voice.amp_level <= 0.0F && voice.released)) {
       voice = {};
       continue;
     }
-    if (voice.position >= static_cast<double>(voice.end_frame)) {
-      if (voice.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT) {
+    follow_sample_zone(core, voice, zone, *asset);
+    if (voice.position >= static_cast<double>(zone.end_frame)) {
+      if (zone.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT) {
         voice = {};
         continue;
       }
-      const double loop_length = static_cast<double>(voice.loop_end_frame - voice.loop_start_frame);
-      voice.position = static_cast<double>(voice.loop_start_frame) + std::fmod(
-        voice.position - static_cast<double>(voice.loop_start_frame), loop_length);
+      const double loop_length = static_cast<double>(zone.loop_end_frame - zone.loop_start_frame);
+      voice.position = static_cast<double>(zone.loop_start_frame) + std::fmod(
+        voice.position - static_cast<double>(zone.loop_start_frame), loop_length);
     }
     const auto sample_at = [&core, asset](double position, uint32_t channel) {
       return asset_sample(core, *asset, nullptr, position, channel);
@@ -4370,13 +4398,13 @@ void render_sample_instrument_frame(
     const uint32_t right_channel = asset->channel_count > 1 ? 1 : 0;
     float sample_left = sample_at(voice.position, 0);
     float sample_right = sample_at(voice.position, right_channel);
-    if (voice.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_CROSSFADE_LOOP
-      && voice.crossfade_frame_count > 0
-      && voice.position >= static_cast<double>(voice.loop_end_frame - voice.crossfade_frame_count)) {
-      const double fade = (voice.position - static_cast<double>(voice.loop_end_frame - voice.crossfade_frame_count))
-        / static_cast<double>(voice.crossfade_frame_count);
-      const double loop_position = static_cast<double>(voice.loop_start_frame)
-        + (voice.position - static_cast<double>(voice.loop_end_frame - voice.crossfade_frame_count));
+    if (zone.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_CROSSFADE_LOOP
+      && zone.crossfade_frame_count > 0
+      && voice.position >= static_cast<double>(zone.loop_end_frame - zone.crossfade_frame_count)) {
+      const double fade = (voice.position - static_cast<double>(zone.loop_end_frame - zone.crossfade_frame_count))
+        / static_cast<double>(zone.crossfade_frame_count);
+      const double loop_position = static_cast<double>(zone.loop_start_frame)
+        + (voice.position - static_cast<double>(zone.loop_end_frame - zone.crossfade_frame_count));
       sample_left = sample_left * static_cast<float>(1.0 - fade) + sample_at(loop_position, 0) * static_cast<float>(fade);
       sample_right = sample_right * static_cast<float>(1.0 - fade) + sample_at(loop_position, right_channel) * static_cast<float>(fade);
     }
@@ -4400,8 +4428,8 @@ void render_sample_instrument_frame(
       filtered_left = process_biquad(sample_left, coefficients, voice.filter_history[0]);
       filtered_right = process_biquad(sample_right, coefficients, voice.filter_history[1]);
     }
-    const float gain = voice.gain * voice.amp_level * std::fmax(0.0F, 1.0F - lfo * state.lfo_amplitude);
-    const float pan_angle = (std::fmax(-1.0F, std::fmin(1.0F, voice.pan + lfo * state.lfo_pan)) + 1.0F) * 0.7853981633974483096F;
+    const float gain = zone.gain * voice.velocity * voice.amp_level * std::fmax(0.0F, 1.0F - lfo * state.lfo_amplitude);
+    const float pan_angle = (std::fmax(-1.0F, std::fmin(1.0F, zone.pan + lfo * state.lfo_pan)) + 1.0F) * 0.7853981633974483096F;
     left += filtered_left * gain * std::cos(pan_angle) * 1.4142135623730950488F;
     right += filtered_right * gain * std::sin(pan_angle) * 1.4142135623730950488F;
     voice.position += voice.increment * std::pow(2.0, static_cast<double>(lfo * state.lfo_pitch_cents) / 1200.0);
@@ -4604,7 +4632,7 @@ bool apply_sample_instrument_event(
   }
   if (selected->choke_group != 0) {
     for (SampleVoice &voice : instrument.sample_voices) {
-      if (voice.active && voice.choke_group == selected->choke_group) {
+      if (voice.active && instrument.zones[voice.zone].choke_group == selected->choke_group) {
         voice.released = true;
         voice.forced_release_ms = kSampleTerminationFadeMilliseconds;
       }
@@ -4623,13 +4651,10 @@ bool apply_sample_instrument_event(
       if (instrument.sample_voices[index].age < voice->age) voice = &instrument.sample_voices[index];
     }
   }
-  const float cents = (static_cast<float>(event.note) - static_cast<float>(selected->root_note)) * 100.0F + selected->tune_cents;
-  *voice = {.note_id = event.note_id, .note = event.note, .asset = selected->asset, .position = static_cast<double>(selected->start_frame),
-    .increment = std::pow(2.0, cents / 1200.0) * static_cast<double>(asset->sample_rate_hz) / core.config.sample_rate_hz,
-    .end_frame = selected->end_frame, .loop_start_frame = selected->loop_start_frame, .loop_end_frame = selected->loop_end_frame,
-    .crossfade_frame_count = selected->crossfade_frame_count,
-    .playback_mode = selected->playback_mode, .choke_group = selected->choke_group,
-    .gain = selected->gain * event.value, .pan = selected->pan, .age = instrument.next_age++, .active = true};
+  *voice = {.note_id = event.note_id, .note = event.note, .zone = static_cast<uint32_t>(selected - instrument.zones.data()),
+    .velocity = event.value, .asset = selected->asset, .start_frame = selected->start_frame, .root_note = selected->root_note,
+    .tune_cents = selected->tune_cents, .position = static_cast<double>(selected->start_frame),
+    .increment = sample_voice_increment(core, *asset, event.note, *selected), .age = instrument.next_age++, .active = true};
   return true;
 }
 
@@ -8085,6 +8110,146 @@ void carry_node_dip(
   }
 }
 
+// The voices a full instrument of `capacity` would keep out of `voices`, best first
+// by `outranks`; the rest are the ones it would give way.
+template <typename Voice, typename Outranks>
+std::array<bool, kMaximumInstrumentVoices> surviving_voices(
+  const std::array<Voice, kMaximumInstrumentVoices> &voices, uint32_t capacity, Outranks outranks) {
+  std::array<bool, kMaximumInstrumentVoices> keep{};
+  for (uint32_t kept = 0; kept < capacity; ++kept) {
+    int32_t best = -1;
+    for (uint32_t index = 0; index < voices.size(); ++index) {
+      if (voices[index].active && !keep[index] && (best < 0 || outranks(voices[index], voices[static_cast<uint32_t>(best)]))) {
+        best = static_cast<int32_t>(index);
+      }
+    }
+    if (best < 0) break;
+    keep[static_cast<uint32_t>(best)] = true;
+  }
+  return keep;
+}
+
+template <typename Voice>
+void carry_voices(
+  const std::array<Voice, kMaximumInstrumentVoices> &voices, const std::array<bool, kMaximumInstrumentVoices> &keep,
+  std::array<Voice, kMaximumInstrumentVoices> &into) {
+  uint32_t carried = 0;
+  for (uint32_t index = 0; index < voices.size(); ++index) {
+    if (keep[index]) into[carried++] = voices[index];
+  }
+}
+
+// Whether two zones are the same zone of a sampler, edited or not: a zone is named
+// by what it answers to (its keys, velocities and round-robin place), never by its
+// asset, tuning, gain, pan or ranges, which are what an edit changes.
+bool same_sample_zone(const daw_audio_sample_zone &left, const daw_audio_sample_zone &right) {
+  return left.key_low == right.key_low && left.key_high == right.key_high
+    && left.velocity_low == right.velocity_low && left.velocity_high == right.velocity_high
+    && left.round_robin_group == right.round_robin_group && left.round_robin_index == right.round_robin_index;
+}
+
+// Seeds the instrument that replaces another at publish: the replacement keeps its
+// own configuration and takes over what the old one was playing, so a held note goes
+// on at the phase it had and the edit applies to it at once (render reads every
+// configured value per frame). Callback side of publish, floats and integers only,
+// into a slot nothing has rendered yet. Both slots then render the same voices
+// across the 5 ms crossfade, whose weights sum to one, so the seam has no level bump.
+//
+// What carries, and why:
+//
+//  Synth (voices[], sustain, expression, next_age)
+//   voices        carried whole: note, note_id, velocity, references, held and released,
+//                 envelope levels and stages, oscillator, LFO and noise phase, filter
+//                 history. All of it is signal state; every setting (waveform, filter
+//                 mode, envelope times, level, pan) is read from the replacement's configuration
+//                 each frame, so none is stored in a voice.
+//   sustain       carried: the pedal is a held controller, not a setting. A note-off
+//                 after the edit finds its voice by note_id and releases it.
+//   expression    carried (controller state). next_age carried so ages stay ordered.
+//   synth (live)  NOT carried: the replacement's configuration is the authority, as it is for a
+//                 slot with no predecessor.
+//   polyphony     lowered: the voices a full instrument would keep (not released
+//                 first, then newest) carry into slots 0..capacity-1 and the rest stay
+//                 in the old slot, fading with its crossfade. Raised: every voice carries.
+//
+//  Sampler and Drum Rack (sample_voices[], round_robin_cursors, next_age; no pedal)
+//   voices        carried with their zone re-resolved in the replacement's zones by what the
+//                 zone answers to (same index first). A voice whose zone is gone is not
+//                 carried, nor is one a one-shot (or a swapped asset) left past the new
+//                 zone's end: it stays in the old slot and ends on the crossfade.
+//   zone values   end, loop, mode, crossfade, gain, pan and choke are read through the
+//                 zone each frame; asset, tuning and start are re-derived by
+//                 `follow_sample_zone` on the first frame, keeping the playhead (a start
+//                 edit moves it by the same distance).
+//   position, amp/filter/LFO state, forced release, velocity, note, note_id, age:
+//                 carried (signal state and identity).
+//   round_robin_cursors, next_age: carried (place in a rotation, age order).
+//   sampler       NOT carried: configuration.
+//
+//  Granular (grains[], note ids and ages, count, next age, random state, next grain
+//  frame, frozen position)
+//   grains        carried (index below the replacement's max_grains): cursor, step, age, length and pan are
+//                 what a grain was spawned with; window shape and the rest of the state
+//                 are read from the configuration each frame. Grains past a lowered
+//                 max_grains stay in the old slot and fade with it.
+//   note state    carried: the held notes (ids, ages, count, next age) keep sounding and
+//                 a note-off after the edit ends the right one.
+//   random state, next grain frame: carried, so spawning goes on where it was.
+//   frozen position: carried only while freeze is on before and after; otherwise the
+//                 replacement captures it afresh.
+void seed_instrument_runtime(
+  const daw_audio_graph_node_descriptor &plan_node, const InstrumentNodeState &from, InstrumentNodeState &to) {
+  const uint32_t capacity = plan_node.instrument.voice_capacity;
+  switch (plan_node.instrument.kind) {
+    case DAW_AUDIO_INSTRUMENT_KIND_SYNTH:
+      to.sustain = from.sustain;
+      to.expression = from.expression;
+      to.next_age = from.next_age;
+      carry_voices(from.voices, surviving_voices(from.voices, capacity, [](const InstrumentVoice &a, const InstrumentVoice &b) {
+        return a.released != b.released ? !a.released : a.age > b.age;
+      }), to.voices);
+      break;
+    case DAW_AUDIO_INSTRUMENT_KIND_SAMPLER:
+    case DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK: {
+      to.round_robin_cursors = from.round_robin_cursors;
+      to.next_age = from.next_age;
+      std::array<SampleVoice, kMaximumInstrumentVoices> voices = from.sample_voices;
+      for (SampleVoice &voice : voices) {
+        if (!voice.active) continue;
+        const daw_audio_sample_zone &before = from.zones[voice.zone];
+        uint32_t zone = voice.zone;
+        if (zone >= to.sampler.zone_count || !same_sample_zone(before, to.zones[zone])) {
+          for (zone = 0; zone < to.sampler.zone_count && !same_sample_zone(before, to.zones[zone]); ++zone) {}
+        }
+        const bool found = zone < to.sampler.zone_count;
+        const daw_audio_sample_zone &after = found ? to.zones[zone] : before;
+        const double shifted = voice.position + static_cast<double>(after.start_frame) - static_cast<double>(voice.start_frame);
+        const bool past_end = shifted >= static_cast<double>(after.end_frame)
+          && (after.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT || after.asset != voice.asset);
+        voice.zone = zone;
+        voice.active = found && !past_end;
+      }
+      carry_voices(voices, surviving_voices(voices, capacity, [](const SampleVoice &a, const SampleVoice &b) {
+        return a.age > b.age;
+      }), to.sample_voices);
+      break;
+    }
+    case DAW_AUDIO_INSTRUMENT_KIND_GRANULAR: {
+      for (uint32_t index = 0; index < to.granular.max_grains; ++index) to.grains[index] = from.grains[index];
+      to.granular_note_ids = from.granular_note_ids;
+      to.granular_note_ages = from.granular_note_ages;
+      to.granular_note_count = from.granular_note_count;
+      to.granular_next_note_age = from.granular_next_note_age;
+      to.granular_random_state = from.granular_random_state;
+      to.granular_next_frame = from.granular_next_frame;
+      if (from.granular.freeze != 0 && to.granular.freeze != 0) to.granular_frozen_position = from.granular_frozen_position;
+      break;
+    }
+    default:
+      break;
+  }
+}
+
 // Callback side of publish, floats and integers it owns only. Every node starts or
 // carries its dip (a deleted node's ghost too: its stages are ghosts now, and it
 // keeps the order its output was fading through). A replaced instrument's
@@ -8108,6 +8273,9 @@ void begin_node_dips(Core &core, const GraphRevision &replaced, GraphRevision &p
         blend.elapsed = 0;
         blend.descriptor = replaced.nodes[old_index].instrument;
         blend.depth.store(core.node_blends[old_slot].depth.load(std::memory_order_acquire) + 1u, std::memory_order_release);
+        if (replaced.nodes[old_index].instrument.kind == plan.nodes[node].instrument.kind) {
+          seed_instrument_runtime(plan.nodes[node], core.instrument_runtime[old_slot], core.instrument_runtime[slot]);
+        }
       }
     }
     const int32_t previous = graph_node_index(replaced, plan.nodes[node].id);

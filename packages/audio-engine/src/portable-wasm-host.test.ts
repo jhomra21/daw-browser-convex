@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { PortableWasmControlMessage, PortableWasmStatusMessage } from './portable-wasm-protocol'
-import { mixerParameterRegistry, type AudioCoreGraphSnapshot } from '@daw-browser/audio-core-contract'
+import { mixerParameterRegistry, type AudioCoreGraphSnapshot, type AudioCoreInstrumentState } from '@daw-browser/audio-core-contract'
 
 const hostUrl = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v1.js', import.meta.url)
 const hostV2Url = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v2.js', import.meta.url)
@@ -1020,17 +1020,7 @@ test('B6f5 a sounding Synth note survives an adoption publish and ends at its no
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
   expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
-  const synth = {
-    version: 1, kind: 'synth', voiceCapacity: 8, outputLayout: 'stereo', parameterTargets: [],
-    oscillators: [
-      { enabled: true, waveform: 0, level: 0.8, octave: 0, semitone: 0, detuneCents: 0 },
-      { enabled: false, waveform: 0, level: 0, octave: 0, semitone: 0, detuneCents: 0 },
-    ],
-    noiseEnabled: false, noiseLevel: 0, filterEnabled: false, filterMode: 0, filterCutoffHz: 4000, filterResonance: 0.7,
-    filterKeyTracking: 0, filterEnvelopeAmountOctaves: 0, filterAttackMs: 0, filterDecayMs: 0, filterSustain: 1, filterReleaseMs: 0,
-    ampAttackMs: 0, ampDecayMs: 0, ampSustain: 0.8, ampReleaseMs: 1, lfoEnabled: false, lfoWaveform: 0, lfoRateHz: 1,
-    lfoPitchCents: 0, lfoFilterOctaves: 0, lfoAmplitude: 0, lfoPan: 0, outputGain: 0.8, outputPan: 0,
-  }
+  const synth = heldSynth
   const base = portableTrackGraph(['track'])
   const graph = (revision: number) => ({ ...base, revision, nodes: base.nodes.map((node) => node.id === 'track'
     ? { ...node, kind: 'instrument', instrument: synth } : node) })
@@ -1053,6 +1043,101 @@ test('B6f5 a sounding Synth note survives an adoption publish and ends at its no
   const level = before.at(-1) ?? 0
   expect([adoption, level > 0.1, sounding.every((value) => Math.abs(value - level) < level * 0.25), released.at(-1)])
     .toEqual([{ installed: 'installed', published: 'published' }, true, true, 0])
+})
+
+// Phase 6i. An instrument edit that is not live replaces the instrument at an adoption publish. Each case runs the edit
+// against a reference that played the edited configuration from the start, with the same notes held from frame 0, and the
+// output must equal it once the 5 ms replacement crossfade (two 128-frame blocks) is over. 1e-4 is the tolerance the core
+// witnesses settle to; the portable path has no shared parity constant. Granular is not covered: the host writes the
+// granular state with the asset handle at byte 4, while wasm32 aligns it to 8, so the core refuses every granular configure.
+const heldNoteKeys = [48, 49, 50, 51, 52, 53, 54, 55]
+const sineFrames = 48_000
+const heldSynth: Extract<AudioCoreInstrumentState, { kind: 'synth' }> = {
+  version: 1, kind: 'synth', voiceCapacity: 8, outputLayout: 'stereo', parameterTargets: [],
+  oscillators: [
+    { enabled: true, waveform: 0, level: 0.8, octave: 0, semitone: 0, detuneCents: 0 },
+    { enabled: false, waveform: 0, level: 0, octave: 0, semitone: 0, detuneCents: 0 },
+  ],
+  noiseEnabled: false, noiseLevel: 0, filterEnabled: false, filterMode: 0, filterCutoffHz: 4000, filterResonance: 0.7,
+  filterKeyTracking: 0, filterEnvelopeAmountOctaves: 0, filterAttackMs: 0, filterDecayMs: 0, filterSustain: 1, filterReleaseMs: 0,
+  ampAttackMs: 0, ampDecayMs: 0, ampSustain: 0.8, ampReleaseMs: 1, lfoEnabled: false, lfoWaveform: 0, lfoRateHz: 1,
+  lfoPitchCents: 0, lfoFilterOctaves: 0, lfoAmplitude: 0, lfoPan: 0, outputGain: 0.8, outputPan: 0,
+}
+const heldSampler = (kind: 'sampler' | 'drum-rack', zoneGain: number, voiceCapacity: number, filterCutoffHz = 8000): AudioCoreInstrumentState => ({
+  version: 1, kind, voiceCapacity, outputLayout: 'stereo', ampAttackMs: 0, ampDecayMs: 0, ampSustain: 1, ampReleaseMs: 1,
+  filterEnabled: false, filterMode: 'lowpass', filterCutoffHz, filterResonance: 0.7, filterEnvelopeAmount: 0,
+  filterAttackMs: 0, filterDecayMs: 0, filterSustain: 1, filterReleaseMs: 0, lfoEnabled: false, lfoRateHz: 1,
+  lfoPitchCents: 0, lfoFilterHz: 0, lfoAmplitude: 0, lfoPan: 0, retrigger: false,
+  zones: heldNoteKeys.map((key) => ({
+    assetId: 'held-sine', keyLow: key, keyHigh: key, velocityLow: 1, velocityHigh: 127, rootNote: key, tuneCents: 0, gain: zoneGain, pan: 0,
+    roundRobinGroup: 0, roundRobinIndex: 0, playbackMode: 'forward-loop', startFrame: 0, endFrame: sineFrames,
+    loopStartFrame: 0, loopEndFrame: sineFrames, crossfadeFrameCount: 0, chokeGroup: 0,
+  })),
+})
+// Renders 20 blocks of the first configuration, adopts the second (or keeps the first when `adopt` is false) and renders 12
+// more, with `keys` held from frame 0. Returns the left channel from the publication frame on.
+const playHeldNotes = async (
+  states: readonly [AudioCoreInstrumentState, AudioCoreInstrumentState],
+  keys: readonly number[],
+  adopt: boolean,
+) => {
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const messages: PortableWasmStatusMessage[] = []
+  const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
+  expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+  const sine = new Float32Array(sineFrames).map((_, frame) => Math.sin(0.05 * frame))
+  host.handleMessage({ version: 2, type: 'register-asset', requestId: 900, generation: 0,
+    asset: { version: 1, assetId: 'held-sine', frameCount: sineFrames, sampleRateHz: 48_000, channelCount: 2 }, planes: [sine, sine] })
+  const base = portableTrackGraph(['track'])
+  const graph = (revision: number, instrument: AudioCoreInstrumentState) => ({ ...base, revision,
+    nodes: base.nodes.map((node) => node.id === 'track' ? { ...node, kind: 'instrument', instrument } : node) })
+  const notes: HostScheduleEvent[] = keys.map((pitch, index) => ({
+    frame: 0, sequence: index + 1, type: 'note-on', target: { kind: 'instrument', trackId: 'track' }, noteId: index + 1, pitch, velocity: 0.8 }))
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph(1, states[0]) })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
+  expect([states[0].kind, messages.findLast((message) => message.type === 'graph-published')?.result]).toEqual([states[0].kind, 'published'])
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: notes } })
+  for (let block = 0; block < 20; block += 1) renderLeft(host)
+  if (adopt) expect(adoptRevision(host, messages, graph(2, states[1]), notes)).toEqual({ installed: 'installed', published: 'published' })
+  return Array.from({ length: 12 }, () => renderLeft(host)).flat()
+}
+const settledDeviation = (edited: readonly number[], reference: readonly number[]) =>
+  Math.max(...edited.slice(2 * 128).map((sample, index) => Math.abs(sample - reference[index + 2 * 128])))
+const peakOf = (signal: readonly number[]) => Math.max(...signal.map(Math.abs))
+
+const heldEditCases: ReadonlyArray<readonly [string, AudioCoreInstrumentState, AudioCoreInstrumentState]> = [
+  ['synth', heldSynth, { ...heldSynth, filterKeyTracking: 0.25 }],
+  ['sampler', heldSampler('sampler', 1, 8), heldSampler('sampler', 1, 8, 7000)],
+  ['drum rack', heldSampler('drum-rack', 1, 8), heldSampler('drum-rack', 1, 8, 7000)],
+]
+
+test('B6f5 phase 6i a held note keeps sounding at its phase through an instrument edit that is not live on the built core', async () => {
+  for (const [name, before, after] of heldEditCases) {
+    const edited = await playHeldNotes([before, after], [52], true)
+    const reference = await playHeldNotes([before, after], [52], false)
+    expect([name, peakOf(reference) > 0.02, settledDeviation(edited, reference) < 1e-4]).toEqual([name, true, true])
+  }
+})
+
+test('B6f5 phase 6i polyphony 8 to 2 leaves the two newest voices of the chord on the built core', async () => {
+  for (const kind of ['synth', 'sampler', 'drum-rack'] as const) {
+    const at = (voiceCapacity: number): AudioCoreInstrumentState => kind === 'synth' ? { ...heldSynth, voiceCapacity } : heldSampler(kind, 1, voiceCapacity)
+    const edited = await playHeldNotes([at(8), at(2)], heldNoteKeys, true)
+    const newest = await playHeldNotes([at(2), at(2)], heldNoteKeys.slice(-2), false)
+    const chord = await playHeldNotes([at(8), at(8)], heldNoteKeys, false)
+    expect([kind, settledDeviation(chord, newest) > 0.05, settledDeviation(edited, newest) < 1e-4]).toEqual([kind, true, true])
+  }
+})
+
+test('B6f5 phase 6i a sampler zone gain edit reaches a held note on the built core', async () => {
+  for (const kind of ['sampler', 'drum-rack'] as const) {
+    const edited = await playHeldNotes([heldSampler(kind, 1, 8), heldSampler(kind, 0.5, 8)], [52], true)
+    const reference = await playHeldNotes([heldSampler(kind, 0.5, 8), heldSampler(kind, 0.5, 8)], [52], false)
+    const unedited = await playHeldNotes([heldSampler(kind, 1, 8), heldSampler(kind, 1, 8)], [52], false)
+    expect([kind, settledDeviation(unedited, reference) > 0.05, settledDeviation(edited, reference) < 1e-4]).toEqual([kind, true, true])
+  }
 })
 
 // R1: prepare, install and publish run on the AudioWorklet rendering thread. The gate is measured at the core's maximum

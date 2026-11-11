@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <deque>
 #include <map>
+#include <memory>
 #include <new>
 #include <string>
 #include <utility>
@@ -6554,7 +6555,7 @@ struct NodeCapture {
 };
 
 // Checkpoint 32: an instrument whose configuration changes while it plays is
-// replaced by a fresh one with no voices. Its output does not step; the other
+// replaced by one that takes over its voices. Its output does not step; the other
 // instrument is bit-for-bit what it would have been.
 void test_phase3_instrument_replacement_hands_over_without_a_step() {
   const daw_audio_synth_state synth{
@@ -6620,8 +6621,9 @@ void test_phase3_instrument_replacement_hands_over_without_a_step() {
   };
   Side edited;
   Side reference;
-  for (Side *side : {&edited, &reference}) {
-    side->commit(nodes, edges, synth, synth);
+  Side renewed;  // plays the replacement's configuration from the start
+  for (Side *side : {&edited, &reference, &renewed}) {
+    side->commit(nodes, edges, side == &renewed ? replacement : synth, synth);
     const daw_audio_transport_state transport{.epoch = 1, .running = 1};
     expect(daw_audio_core_set_transport(side->core, &transport), DAW_AUDIO_CORE_OK);
   }
@@ -6629,17 +6631,20 @@ void test_phase3_instrument_replacement_hands_over_without_a_step() {
   for (uint32_t block = 0; block < 12; ++block) {
     const auto steady = edited.render(block == 0);
     assert(steady == reference.render(block == 0));
+    renewed.render(block == 0);
     last_before_edit = steady[0][63];
   }
   edited.commit(nodes, edges, replacement, synth);
   const uint32_t fade = 240;
   std::vector<float> total{last_before_edit};
   std::vector<float> reference_total;
+  std::vector<float> renewed_total;
   std::vector<float> witness_total;
   float reference_step = 0.0F;
   for (uint32_t block = 0; block < 16; ++block) {
     const auto actual = edited.render(false);
     const auto expected = reference.render(false);
+    const auto carried = renewed.render(false);
     for (uint32_t frame = 0; frame < 64; ++frame) {
       if (edited.witness.left[frame] != reference.witness.left[frame]
         || edited.witness.right[frame] != reference.witness.right[frame]) {
@@ -6649,6 +6654,7 @@ void test_phase3_instrument_replacement_hands_over_without_a_step() {
       if (!reference_total.empty()) reference_step = std::max(reference_step, std::abs(expected[0][frame] - reference_total.back()));
       total.push_back(actual[0][frame]);
       reference_total.push_back(expected[0][frame]);
+      renewed_total.push_back(carried[0][frame]);
       witness_total.push_back(edited.witness.left[frame]);
     }
   }
@@ -6662,7 +6668,9 @@ void test_phase3_instrument_replacement_hands_over_without_a_step() {
   }
   float replaced_voice = 0.0F;
   for (uint32_t index = static_cast<uint32_t>(total.size()) - 128; index < total.size(); ++index) {
-    assert(std::abs(total[index] - witness_total[index - 1]) <= 1e-6F);
+    // Once the fade has run the edited instrument is the replacement's configuration
+    // on the note it was already holding, beside the untouched one.
+    assert(std::abs(total[index] - renewed_total[index - 1]) <= 1e-5F);
     replaced_voice = std::max(replaced_voice, std::abs(reference_total[index - 1] - witness_total[index - 1]));
   }
   // The oracle above is only meaningful if the instrument was sounding and the edit replaced it.
@@ -8338,8 +8346,9 @@ void test_phase3_layout_change_crossfades_the_waveform(bool to_mono) {
 // Checkpoint 39: a replaced instrument crossfades with the one it replaces. The old
 // instrument keeps rendering its own voices while the new one fades in, so the
 // output over the fade is (1 - g) times what the old one would have played plus g
-// times what a fresh instrument of the new configuration plays: both waveforms are
-// whole, nothing is a DC offset, and a 41 Hz note has no residue.
+// times what an instrument of the new configuration that held the same note all
+// along plays: both waveforms are whole, nothing is a DC offset, and a 41 Hz note
+// has no residue.
 void test_phase3_instrument_replacement_crossfades_the_waveform() {
   const auto build = [](Phase3Rig &rig, float gain) {
     rig.clear();
@@ -8356,14 +8365,15 @@ void test_phase3_instrument_replacement_crossfades_the_waveform() {
   for (Phase3Rig *rig : {&edited, &old_voice, &new_voice}) rig->commit(1);
   edited.note_on(1, 28);
   old_voice.note_on(1, 28);
+  new_voice.note_on(1, 28);
   for (uint32_t index = 0; index < 12; ++index) {
     assert(edited.render(0.0F) == old_voice.render(0.0F));
     new_voice.render(0.0F);
   }
+  // The held note carries into the replacement, so the new instrument's reference is
+  // one that has held the same note since the start.
   build(edited, 0.375F);
   edited.commit(2);
-  edited.note_on(1, 28);
-  new_voice.note_on(1, 28);
   const uint32_t fade = edited.fade_frames();
   float worst = 0.0F;
   float old_peak = 0.0F;
@@ -8425,6 +8435,588 @@ void test_phase3_replacement_depth_is_bounded_and_recovers() {
   rig.commit(revision + 1);
   rig.render(0.0F);
   std::printf("instrument replacements accepted within one fade: %u\n", accepted);
+}
+
+// Phase 6i, Mechanism A: an instrument edited under held notes plays on. Every case
+// below runs an instrument next to references that are never edited, and holds the
+// edited one to what a reference with the edited configuration (that held the same
+// notes all along) plays, blended over the 5 ms fade the publish gives it: a held
+// note keeps its phase, takes the edit at once, and nothing goes silent in between.
+struct HeldRig {
+  static constexpr uint32_t frames = 64;
+  static constexpr uint32_t asset_frames = 20000;
+  static constexpr uint32_t short_frames = 1000;
+  static constexpr uint32_t fade = 240;  // 5 ms at 48 kHz
+  daw_audio_core_handle core = create_core(frames, 2, 4);
+  uint32_t kind;
+  uint32_t capacity;
+  uint32_t revision = 0;
+  uint32_t sequence = 0;
+  daw_audio_synth_state synth = phase3_synth(0.5F);
+  daw_audio_sampler_state sampler{
+    .version = 1, .amp_attack_ms = 0.0F, .amp_decay_ms = 0.0F, .amp_sustain = 1.0F, .amp_release_ms = 1.0F,
+    .filter_mode = DAW_AUDIO_SYNTH_FILTER_MODE_LOWPASS, .filter_cutoff_hz = 20000.0F, .filter_resonance = 0.7F,
+    .lfo_rate_hz = 0.01F, .retrigger = 0,
+  };
+  daw_audio_granular_state granular{};
+  std::vector<daw_audio_sample_zone> zones;
+  // The core reads the planes for as long as the asset lives, so they live here.
+  std::array<std::vector<float>, 3> sources;
+  std::array<std::array<const float *, 1>, 3> plane_tables{};
+  std::array<daw_audio_asset_handle, 3> assets{};
+  std::vector<daw_audio_instrument_event> events;
+  std::array<std::vector<float>, 2> heard;
+
+  explicit HeldRig(uint32_t instrument_kind, uint32_t polyphony = 8) : kind(instrument_kind), capacity(polyphony) {
+    const std::array<uint32_t, 3> lengths{asset_frames, asset_frames, short_frames};
+    const std::array<float, 3> cycles{37.0F, 91.0F, 5.0F};
+    for (uint32_t index = 0; index < 3; ++index) {
+      sources[index].resize(lengths[index]);
+      for (uint32_t frame = 0; frame < lengths[index]; ++frame) {
+        sources[index][frame] = std::sin(6.2831853F * cycles[index] * static_cast<float>(frame) / static_cast<float>(lengths[index]));
+      }
+      plane_tables[index] = {sources[index].data()};
+      const daw_audio_asset_descriptor descriptor{
+        .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .revision = index + 1, .byte_length = lengths[index] * sizeof(float),
+        .content_hash_prefix = 0, .frame_count = lengths[index], .sample_rate_hz = 48000, .channel_count = 1,
+        .planes = plane_tables[index].data(),
+      };
+      expect(daw_audio_core_create_asset(core, &descriptor, &assets[index]), DAW_AUDIO_CORE_OK);
+    }
+    granular = {
+      .version = 1, .asset = assets[0], .seed = 77, .max_grains = 16, .window_shape = DAW_AUDIO_GRANULAR_WINDOW_HANN,
+      .freeze = 0, .grain_size_ms = 20.0F, .density_hz = 100.0F, .position = 0.5F, .spray = 0.3F,
+      .pitch_semitones = 0.0F, .reverse_probability = 0.0F, .stereo_spread = 0.3F,
+    };
+    if (kind == DAW_AUDIO_INSTRUMENT_KIND_SAMPLER) zones.push_back(zone(0, 127));
+    if (kind == DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK) {
+      for (uint32_t note = 48; note <= 55; ++note) zones.push_back(zone(note, note));
+      zones.push_back(zone(60, 60));
+    }
+  }
+  ~HeldRig() { daw_audio_core_destroy(core); }
+  HeldRig(const HeldRig &) = delete;
+  HeldRig &operator=(const HeldRig &) = delete;
+
+  daw_audio_sample_zone zone(uint32_t low, uint32_t high) const {
+    return {.asset = assets[0], .key_low = low, .key_high = high, .velocity_low = 1, .velocity_high = 127,
+      .root_note = 60, .gain = 1.0F, .playback_mode = DAW_AUDIO_SAMPLE_PLAYBACK_FORWARD_LOOP,
+      .end_frame = asset_frames, .loop_end_frame = asset_frames};
+  }
+  daw_audio_core_result commit() {
+    const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
+      {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_INSTRUMENT, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+        .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+        .instrument = {.kind = kind, .version = 1, .voice_capacity = capacity}},
+      {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+        .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO},
+    }};
+    const daw_audio_graph_edge_descriptor edge{
+      .id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER};
+    const daw_audio_graph_prepare_request request{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = revision + 1,
+      .node_count = 2, .edge_count = 1, .nodes = nodes.data(), .edges = &edge,
+    };
+    daw_audio_core_result result = daw_audio_core_prepare_graph(core, &request);
+    if (result != DAW_AUDIO_CORE_OK) return result;
+    daw_audio_sampler_state sampler_state = sampler;
+    sampler_state.zone_count = static_cast<uint32_t>(zones.size());
+    result = kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH ? daw_audio_core_configure_synth(core, 1, &synth)
+      : kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR ? daw_audio_core_configure_granular(core, 1, &granular)
+      : daw_audio_core_configure_sampler(core, 1, &sampler_state, zones.data());
+    if (result != DAW_AUDIO_CORE_OK) {
+      expect(daw_audio_core_cancel_prepared_graph(core, revision + 1), DAW_AUDIO_CORE_OK);
+      return result;
+    }
+    expect(daw_audio_core_publish(core, revision + 1), DAW_AUDIO_CORE_OK);
+    if (++revision == 1) {
+      const daw_audio_transport_state transport{.epoch = 1, .running = 1};
+      expect(daw_audio_core_set_transport(core, &transport), DAW_AUDIO_CORE_OK);
+    }
+    return DAW_AUDIO_CORE_OK;
+  }
+  void push(uint32_t type, uint64_t note_id, uint32_t note, float value) {
+    ++sequence;
+    events.push_back({.node_id = 1, .note_id = note_id, .sequence = sequence, .epoch = 1, .type = type, .note = note, .value = value});
+  }
+  uint64_t note_on(uint32_t note, float velocity = 1.0F) {
+    push(DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON, sequence + 1, note, velocity);
+    return sequence;
+  }
+  void note_off(uint64_t id, uint32_t note) { push(DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF, id, note, 0.0F); }
+  void sustain(bool on) { push(DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN, 0, 0, on ? 1.0F : 0.0F); }
+  void render(uint32_t blocks) {
+    for (uint32_t block = 0; block < blocks; ++block) {
+      std::array<std::array<float, frames>, 2> samples{};
+      float *outputs[]{samples[0].data(), samples[1].data()};
+      const daw_audio_core_process_block request{
+        .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = frames, .channel_count = 2, .outputs = outputs,
+        .graph_revision = revision, .transport_epoch = 1,
+        .instrument_event_count = static_cast<uint32_t>(events.size()),
+        .instrument_events = events.empty() ? nullptr : events.data(),
+      };
+      expect(daw_audio_core_process(core, &request), DAW_AUDIO_CORE_OK);
+      events.clear();
+      for (uint32_t channel = 0; channel < 2; ++channel) heard[channel].insert(heard[channel].end(), samples[channel].begin(), samples[channel].end());
+    }
+  }
+  size_t rendered() const { return heard[0].size(); }
+  // An edit that cannot be heard: a held note must come through it untouched.
+  void quiet_edit() {
+    if (kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) synth.filter_key_tracking += 0.25F;
+    else if (kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) ++granular.seed;
+    else sampler.filter_cutoff_hz -= 1000.0F;
+  }
+};
+
+const char *kind_name(uint32_t kind) {
+  return kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH ? "synth" : kind == DAW_AUDIO_INSTRUMENT_KIND_SAMPLER ? "sampler"
+    : kind == DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK ? "drum rack" : "granular";
+}
+
+void phase6i_require(bool ok, const char *name, const char *what, float actual, float expected) {
+  if (ok) return;
+  std::fprintf(stderr, "phase 6i contract: %s: %s: actual %.6f expected %.6f\n", name, what, actual, expected);
+  std::abort();
+}
+
+float largest_difference(const std::vector<float> &left, const std::vector<float> &right, size_t from) {
+  float largest = 0.0F;
+  for (size_t index = from; index < left.size(); ++index) largest = std::max(largest, std::abs(left[index] - right[index]));
+  return largest;
+}
+
+float peak_after(const std::vector<float> &signal, size_t from) {
+  float peak = 0.0F;
+  for (size_t index = from; index < signal.size(); ++index) peak = std::max(peak, std::abs(signal[index]));
+  return peak;
+}
+
+uint32_t longest_silence(const std::vector<float> &signal, size_t from) {
+  uint32_t longest = 0;
+  uint32_t run = 0;
+  for (size_t index = from; index < signal.size(); ++index) {
+    run = std::abs(signal[index]) < 1e-6F ? run + 1 : 0;
+    longest = std::max(longest, run);
+  }
+  return longest;
+}
+
+// What the edit is blended into: the old instrument's output times the fade-out plus
+// the new one's times the fade-in, the only thing a seeded replacement may play.
+float largest_blend_error(
+  const std::vector<float> &actual, const std::vector<float> &before, const std::vector<float> &after, size_t from) {
+  float largest = 0.0F;
+  for (size_t index = from; index < actual.size(); ++index) {
+    const float entering = std::min(1.0F, static_cast<float>(index - from) / static_cast<float>(HeldRig::fade));
+    largest = std::max(largest, std::abs(actual[index] - (before[index] * (1.0F - entering) + after[index] * entering)));
+  }
+  return largest;
+}
+
+// A held note and an edit that is not live: the output never goes quiet for longer
+// than the unedited reference does, and the voice's phase goes on (no deviation from
+// the reference at all, since the edit is inaudible).
+void test_phase6i_held_note_survives_an_edit(const uint32_t kind) {
+  {
+    HeldRig edited(kind);
+    HeldRig reference(kind);
+    for (HeldRig *rig : {&edited, &reference}) {
+      expect(rig->commit(), DAW_AUDIO_CORE_OK);
+      rig->note_on(60);
+      rig->render(20);
+    }
+    const size_t edit = edited.rendered();
+    edited.quiet_edit();
+    expect(edited.commit(), DAW_AUDIO_CORE_OK);
+    edited.render(20);
+    reference.render(20);
+    phase6i_require(peak_after(reference.heard[0], edit) > 0.05F, kind_name(kind), "the held note was not sounding",
+      peak_after(reference.heard[0], edit), 0.05F);
+    phase6i_require(longest_silence(edited.heard[0], edit) <= longest_silence(reference.heard[0], edit), kind_name(kind),
+      "the output went quiet across the edit", static_cast<float>(longest_silence(edited.heard[0], edit)),
+      static_cast<float>(longest_silence(reference.heard[0], edit)));
+    for (uint32_t channel = 0; channel < 2; ++channel) {
+      const float deviation = largest_difference(edited.heard[channel], reference.heard[channel], edit);
+      phase6i_require(deviation < 1e-5F, kind_name(kind), "the held voice did not go on at its phase", deviation, 0.0F);
+    }
+  }
+}
+
+// The sustain pedal is held across the edit, and a note-off after it releases the
+// copied voice: the edited synth follows the reference through both.
+void test_phase6i_pedal_and_note_off_survive_an_edit() {
+  for (const bool pedal : {true, false}) {
+    HeldRig edited(DAW_AUDIO_INSTRUMENT_KIND_SYNTH);
+    HeldRig reference(DAW_AUDIO_INSTRUMENT_KIND_SYNTH);
+    for (HeldRig *rig : {&edited, &reference}) {
+      expect(rig->commit(), DAW_AUDIO_CORE_OK);
+      if (pedal) rig->sustain(true);
+      const uint64_t note = rig->note_on(60);
+      if (pedal) rig->note_off(note, 60);
+      rig->render(20);
+    }
+    const size_t edit = edited.rendered();
+    edited.quiet_edit();
+    expect(edited.commit(), DAW_AUDIO_CORE_OK);
+    for (HeldRig *rig : {&edited, &reference}) rig->render(20);
+    phase6i_require(peak_after(reference.heard[0], edit) > 0.05F, "synth", "the held note was not sounding",
+      peak_after(reference.heard[0], edit), 0.05F);
+    for (HeldRig *rig : {&edited, &reference}) {
+      if (pedal) rig->sustain(false);
+      else rig->note_off(1, 60);
+      rig->render(20);
+    }
+    const float deviation = largest_difference(edited.heard[0], reference.heard[0], edit);
+    phase6i_require(deviation < 1e-5F, "synth", pedal ? "the pedal did not survive the edit" : "a note-off did not release the copied voice", deviation, 0.0F);
+    phase6i_require(peak_after(edited.heard[0], edited.rendered() - 2 * HeldRig::frames) < 1e-4F, "synth",
+      "the voice was not released", peak_after(edited.heard[0], edited.rendered() - 2 * HeldRig::frames), 1e-4F);
+  }
+}
+
+void play_chord(HeldRig &rig, uint32_t first_note, uint32_t count) {
+  for (uint32_t note = first_note; note < first_note + count; ++note) rig.note_on(note);
+}
+
+// Polyphony 8 -> 2: the two newest voices go on with unbroken phase and the other
+// six leave on the fade; 2 -> 8: the sounding voices are unchanged.
+void test_phase6i_polyphony_change_keeps_the_newest_voices(const uint32_t kind) {
+  {
+    HeldRig edited(kind, 8);
+    HeldRig all(kind, 8);
+    HeldRig newest(kind, 2);
+    for (HeldRig *rig : {&edited, &all, &newest}) expect(rig->commit(), DAW_AUDIO_CORE_OK);
+    play_chord(edited, 48, 8);
+    play_chord(all, 48, 8);
+    play_chord(newest, 54, 2);
+    for (HeldRig *rig : {&edited, &all, &newest}) rig->render(20);
+    const size_t edit = edited.rendered();
+    edited.capacity = 2;
+    expect(edited.commit(), DAW_AUDIO_CORE_OK);
+    for (HeldRig *rig : {&edited, &all, &newest}) rig->render(12);
+    phase6i_require(largest_difference(all.heard[0], newest.heard[0], edit) > 0.1F, kind_name(kind),
+      "the chord and its two newest notes are not told apart", largest_difference(all.heard[0], newest.heard[0], edit), 0.1F);
+    const float blend = largest_blend_error(edited.heard[0], all.heard[0], newest.heard[0], edit);
+    phase6i_require(blend < 1e-4F, kind_name(kind), "polyphony 8 -> 2 is not the old chord fading to its two newest", blend, 0.0F);
+    const float settled = largest_difference(edited.heard[0], newest.heard[0], edit + 2 * HeldRig::fade);
+    phase6i_require(settled < 1e-4F, kind_name(kind), "the two newest voices did not go on", settled, 0.0F);
+
+    HeldRig raised(kind, 2);
+    HeldRig steady(kind, 2);
+    for (HeldRig *rig : {&raised, &steady}) {
+      expect(rig->commit(), DAW_AUDIO_CORE_OK);
+      play_chord(*rig, 54, 2);
+      rig->render(20);
+    }
+    const size_t raise = raised.rendered();
+    raised.capacity = 8;
+    expect(raised.commit(), DAW_AUDIO_CORE_OK);
+    for (HeldRig *rig : {&raised, &steady}) rig->render(12);
+    const float unchanged = largest_difference(raised.heard[0], steady.heard[0], raise);
+    phase6i_require(unchanged < 1e-5F, kind_name(kind), "polyphony 2 -> 8 changed the sounding voices", unchanged, 0.0F);
+  }
+}
+
+// An edit to a zone under a held note applies at once, at the same playhead, with
+// no retrigger. The tuning, start and swapped-asset cases are held to the sample
+// the voice must read at each frame, worked out from the asset.
+void test_phase6i_zone_edit_under_a_held_note(const uint32_t kind) {
+  {
+    const auto held = [kind](auto edit, uint32_t blocks_after) {
+      auto rig = std::make_unique<HeldRig>(kind);
+      expect(rig->commit(), DAW_AUDIO_CORE_OK);
+      rig->note_on(60);
+      rig->render(20);
+      edit(*rig);
+      expect(rig->commit(), DAW_AUDIO_CORE_OK);
+      rig->render(blocks_after);
+      return rig;
+    };
+    const size_t edit = 20 * HeldRig::frames;
+    const auto reference = held([](HeldRig &) {}, 12);
+    const char *name = kind_name(kind);
+    // Gain: the fade-in of the new gain over the old.
+    const auto quieter = held([](HeldRig &rig) { for (auto &zone : rig.zones) zone.gain = 0.5F; }, 12);
+    std::vector<float> half(reference->heard[0].size());
+    for (size_t index = 0; index < half.size(); ++index) half[index] = 0.5F * reference->heard[0][index];
+    phase6i_require(largest_blend_error(quieter->heard[0], reference->heard[0], half, edit) < 1e-4F, name,
+      "a gain edit did not reach the held note", largest_blend_error(quieter->heard[0], reference->heard[0], half, edit), 0.0F);
+    // Pan: hard right takes the left channel to nothing and doubles the right by sqrt 2.
+    const auto panned = held([](HeldRig &rig) { for (auto &zone : rig.zones) zone.pan = 1.0F; }, 12);
+    const size_t settled = edit + 2 * HeldRig::fade;
+    phase6i_require(peak_after(panned->heard[0], settled) < 1e-4F, name, "a pan edit left sound in the left channel",
+      peak_after(panned->heard[0], settled), 0.0F);
+    float pan_error = 0.0F;
+    for (size_t index = settled; index < panned->heard[1].size(); ++index) {
+      pan_error = std::max(pan_error, std::abs(panned->heard[1][index] - 1.41421356F * reference->heard[0][index]));
+    }
+    phase6i_require(pan_error < 1e-4F, name, "a pan edit did not reach the held note", pan_error, 0.0F);
+    // Tuning: an octave up doubles the step from the playhead the voice had.
+    const auto tuned = held([](HeldRig &rig) { for (auto &zone : rig.zones) zone.tune_cents = 1200.0F; }, 12);
+    float tuning_error = 0.0F;
+    for (size_t index = settled; index < tuned->heard[0].size(); ++index) {
+      const size_t position = (edit + 2 * (index - edit)) % HeldRig::asset_frames;
+      tuning_error = std::max(tuning_error, std::abs(tuned->heard[0][index] - tuned->sources[0][position]));
+    }
+    phase6i_require(tuning_error < 1e-4F, name, "a tuning edit did not reach the held note", tuning_error, 0.0F);
+    // Start: the playhead moves by the distance the start moved; the loop is the whole asset, so a one-shot.
+    const auto one_shot = [](HeldRig &rig) {
+      for (auto &zone : rig.zones) {
+        zone.playback_mode = DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT;
+        zone.loop_end_frame = 0;
+      }
+    };
+    const auto started = held([&one_shot](HeldRig &rig) {
+      one_shot(rig);
+      expect(rig.commit(), DAW_AUDIO_CORE_OK);
+      rig.render(1);
+      for (auto &zone : rig.zones) zone.start_frame = 1000;
+    }, 12);
+    const size_t started_edit = 21 * HeldRig::frames;
+    float start_error = 0.0F;
+    for (size_t index = started_edit + 2 * HeldRig::fade; index < started->heard[0].size(); ++index) {
+      start_error = std::max(start_error, std::abs(started->heard[0][index] - started->sources[0][index + 1000]));
+    }
+    phase6i_require(start_error < 1e-4F, name, "a start edit did not move the held note", start_error, 0.0F);
+    // A swapped asset: the same playhead in the new sample, and the old asset stays
+    // resident until the replaced instrument has faded out.
+    HeldRig swapped(kind);
+    expect(swapped.commit(), DAW_AUDIO_CORE_OK);
+    swapped.note_on(60);
+    swapped.render(20);
+    for (auto &zone : swapped.zones) zone.asset = swapped.assets[1];
+    expect(swapped.commit(), DAW_AUDIO_CORE_OK);
+    expect(daw_audio_core_release_asset(swapped.core, swapped.assets[0]), DAW_AUDIO_CORE_ASSET_IN_USE);
+    swapped.render(12);
+    float swap_error = 0.0F;
+    for (size_t index = settled; index < swapped.heard[0].size(); ++index) {
+      swap_error = std::max(swap_error, std::abs(swapped.heard[0][index] - swapped.sources[1][index % HeldRig::asset_frames]));
+    }
+    phase6i_require(swap_error < 1e-4F, name, "a swapped asset did not play at the same position", swap_error, 0.0F);
+    expect(daw_audio_core_release_asset(swapped.core, swapped.assets[0]), DAW_AUDIO_CORE_OK);
+    // A swap to a sample shorter than the playhead ends the voice on the fade.
+    HeldRig shortened(kind);
+    expect(shortened.commit(), DAW_AUDIO_CORE_OK);
+    shortened.note_on(60);
+    shortened.render(20);
+    for (auto &zone : shortened.zones) {
+      zone.asset = shortened.assets[2];
+      zone.end_frame = HeldRig::short_frames;
+      zone.loop_end_frame = HeldRig::short_frames;
+    }
+    expect(shortened.commit(), DAW_AUDIO_CORE_OK);
+    shortened.render(12);
+    phase6i_require(peak_after(shortened.heard[0], settled) < 1e-6F, name, "a voice past the end of the new sample went on",
+      peak_after(shortened.heard[0], settled), 0.0F);
+    phase6i_require(peak_after(shortened.heard[0], edit) > 0.05F, name, "the old voice did not fade out",
+      peak_after(shortened.heard[0], edit), 0.05F);
+  }
+}
+
+// Granular: a parameter edit under a held note keeps the cloud going.
+void test_phase6i_granular_parameter_edit_under_a_held_note() {
+  HeldRig edited(DAW_AUDIO_INSTRUMENT_KIND_GRANULAR);
+  HeldRig reference(DAW_AUDIO_INSTRUMENT_KIND_GRANULAR);
+  for (HeldRig *rig : {&edited, &reference}) {
+    expect(rig->commit(), DAW_AUDIO_CORE_OK);
+    rig->note_on(60);
+    rig->render(40);
+  }
+  const size_t edit = edited.rendered();
+  edited.granular.pitch_semitones = 12.0F;
+  edited.granular.grain_size_ms = 40.0F;
+  expect(edited.commit(), DAW_AUDIO_CORE_OK);
+  for (HeldRig *rig : {&edited, &reference}) rig->render(40);
+  phase6i_require(peak_after(edited.heard[0], edit + 2 * HeldRig::fade) > 0.05F, "granular", "the cloud stopped under the edit",
+    peak_after(edited.heard[0], edit + 2 * HeldRig::fade), 0.05F);
+  phase6i_require(longest_silence(edited.heard[0], edit) <= longest_silence(reference.heard[0], edit), "granular",
+    "the cloud went quiet across the edit", static_cast<float>(longest_silence(edited.heard[0], edit)),
+    static_cast<float>(longest_silence(reference.heard[0], edit)));
+}
+
+// Ten replacements inside 50 ms (three blocks, 4 ms, apart), each starting before the last has finished: all are
+// accepted, the held note never deviates (inaudible edits), and when the edits are
+// gain changes the output never rises above the louder configuration, so the weights
+// of the instruments blended at once sum to no more than one.
+void test_phase6i_replacement_chain_has_no_level_bump() {
+  HeldRig edited(DAW_AUDIO_INSTRUMENT_KIND_SYNTH);
+  HeldRig reference(DAW_AUDIO_INSTRUMENT_KIND_SYNTH);
+  HeldRig bumped(DAW_AUDIO_INSTRUMENT_KIND_SYNTH);
+  HeldRig loud(DAW_AUDIO_INSTRUMENT_KIND_SYNTH);
+  loud.synth.output_gain = 0.5F;
+  for (HeldRig *rig : {&edited, &reference, &bumped, &loud}) {
+    expect(rig->commit(), DAW_AUDIO_CORE_OK);
+    rig->note_on(60);
+    rig->render(20);
+  }
+  const size_t edit = edited.rendered();
+  for (uint32_t step = 0; step < 10; ++step) {
+    edited.synth.filter_key_tracking = step % 2 == 0 ? 0.25F : 0.0F;
+    bumped.synth.output_gain = step % 2 == 0 ? 0.25F : 0.5F;
+    expect(edited.commit(), DAW_AUDIO_CORE_OK);
+    expect(bumped.commit(), DAW_AUDIO_CORE_OK);
+    for (HeldRig *rig : {&edited, &reference, &bumped, &loud}) rig->render(3);  // 4 ms: the previous fade is still running
+  }
+  for (HeldRig *rig : {&edited, &reference, &bumped, &loud}) rig->render(12);
+  const float deviation = largest_difference(edited.heard[0], reference.heard[0], edit);
+  phase6i_require(deviation < 1e-5F, "synth", "ten replacements disturbed the held note", deviation, 0.0F);
+  float excess = 0.0F;
+  for (size_t index = edit; index < bumped.heard[0].size(); ++index) {
+    excess = std::max(excess, std::abs(bumped.heard[0][index]) - std::abs(loud.heard[0][index]));
+  }
+  phase6i_require(excess < 1e-5F, "synth", "a level bump across the seam", excess, 0.0F);
+}
+
+// The cost of seeding on the callback at the maximum: 4 synths of 32 voices, 4
+// samplers of 32 voices over 32 zones and 4 granulars of 128 grains, all sounding and
+// all replaced in one publish. A publish allocates nothing and is timed beside one
+// that replaces nothing, so the difference is what carrying the state costs.
+void test_phase6i_publish_cost_at_the_maximum(const uint32_t revisions = 24) {
+  constexpr uint32_t synths = 4;
+  constexpr uint32_t instruments = 12;
+  const auto core = create_core(HeldRig::frames, 2, 1);
+  std::vector<float> source(HeldRig::asset_frames);
+  for (uint32_t frame = 0; frame < source.size(); ++frame) source[frame] = std::sin(0.05F * static_cast<float>(frame));
+  const std::array<const float *, 1> planes{source.data()};
+  const daw_audio_asset_descriptor descriptor{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .revision = 1, .byte_length = source.size() * sizeof(float),
+    .content_hash_prefix = 0, .frame_count = HeldRig::asset_frames, .sample_rate_hz = 48000, .channel_count = 1, .planes = planes.data(),
+  };
+  daw_audio_asset_handle asset = 0;
+  expect(daw_audio_core_create_asset(core, &descriptor, &asset), DAW_AUDIO_CORE_OK);
+  std::array<daw_audio_graph_node_descriptor, instruments + 1> nodes{};
+  std::array<daw_audio_graph_edge_descriptor, instruments> edges{};
+  for (uint32_t index = 0; index < instruments; ++index) {
+    const uint32_t kind = index < synths ? DAW_AUDIO_INSTRUMENT_KIND_SYNTH
+      : index < 2 * synths ? DAW_AUDIO_INSTRUMENT_KIND_SAMPLER : DAW_AUDIO_INSTRUMENT_KIND_GRANULAR;
+    nodes[index] = {.id = index + 1, .kind = DAW_AUDIO_GRAPH_NODE_INSTRUMENT, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .instrument = {.kind = kind, .version = 1, .voice_capacity = 32}};
+    edges[index] = {.id = index + 1, .from_node_id = index + 1, .to_node_id = instruments + 1, .gain = 0.05F,
+      .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER};
+  }
+  nodes[instruments] = {.id = instruments + 1, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+    .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO};
+  daw_audio_synth_state synth = phase3_synth(0.5F);
+  daw_audio_sampler_state sampler{
+    .version = 1, .zone_count = 32, .amp_sustain = 1.0F, .amp_release_ms = 1.0F, .filter_cutoff_hz = 20000.0F,
+    .filter_resonance = 0.7F, .lfo_rate_hz = 0.01F,
+  };
+  std::array<daw_audio_sample_zone, 32> zones{};
+  for (uint32_t index = 0; index < zones.size(); ++index) {
+    zones[index] = {.asset = asset, .key_low = 40 + index, .key_high = 40 + index, .velocity_low = 1, .velocity_high = 127,
+      .root_note = 60, .gain = 1.0F, .playback_mode = DAW_AUDIO_SAMPLE_PLAYBACK_FORWARD_LOOP,
+      .end_frame = HeldRig::asset_frames, .loop_end_frame = HeldRig::asset_frames};
+  }
+  daw_audio_granular_state granular{
+    .version = 1, .asset = asset, .seed = 77, .max_grains = 128, .window_shape = DAW_AUDIO_GRANULAR_WINDOW_HANN,
+    .grain_size_ms = 1000.0F, .density_hz = 200.0F, .position = 0.5F, .spray = 0.3F, .stereo_spread = 0.3F,
+  };
+  uint32_t revision = 0;
+  const auto commit = [&](bool edit) {
+    if (edit) {
+      synth.filter_key_tracking = synth.filter_key_tracking == 0.0F ? 0.25F : 0.0F;
+      sampler.filter_cutoff_hz = sampler.filter_cutoff_hz == 20000.0F ? 19000.0F : 20000.0F;
+      ++granular.seed;
+    }
+    const daw_audio_graph_prepare_request request{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = revision + 1, .node_count = instruments + 1,
+      .edge_count = instruments, .nodes = nodes.data(), .edges = edges.data(),
+    };
+    expect(daw_audio_core_prepare_graph(core, &request), DAW_AUDIO_CORE_OK);
+    for (uint32_t index = 0; index < instruments; ++index) {
+      expect(index < synths ? daw_audio_core_configure_synth(core, index + 1, &synth)
+        : index < 2 * synths ? daw_audio_core_configure_sampler(core, index + 1, &sampler, zones.data())
+        : daw_audio_core_configure_granular(core, index + 1, &granular), DAW_AUDIO_CORE_OK);
+    }
+    const auto allocations = allocation_count;
+    const auto begin = std::chrono::steady_clock::now();
+    expect(daw_audio_core_publish(core, revision + 1), DAW_AUDIO_CORE_OK);
+    const auto end = std::chrono::steady_clock::now();
+    phase6i_require(allocation_count == allocations, "publish", "a publish allocated", static_cast<float>(allocation_count - allocations), 0.0F);
+    ++revision;
+    return std::chrono::duration<double, std::micro>(end - begin).count();
+  };
+  const auto render = [&](uint32_t blocks, const std::vector<daw_audio_instrument_event> &events) {
+    std::array<std::array<float, HeldRig::frames>, 2> samples{};
+    float *outputs[]{samples[0].data(), samples[1].data()};
+    for (uint32_t block = 0; block < blocks; ++block) {
+      const daw_audio_core_process_block request{
+        .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = HeldRig::frames, .channel_count = 2, .outputs = outputs,
+        .graph_revision = revision, .transport_epoch = 1,
+        .instrument_event_count = block == 0 ? static_cast<uint32_t>(events.size()) : 0u,
+        .instrument_events = block == 0 && !events.empty() ? events.data() : nullptr,
+      };
+      expect(daw_audio_core_process(core, &request), DAW_AUDIO_CORE_OK);
+    }
+  };
+  commit(false);
+  const daw_audio_transport_state transport{.epoch = 1, .running = 1};
+  expect(daw_audio_core_set_transport(core, &transport), DAW_AUDIO_CORE_OK);
+  std::vector<daw_audio_instrument_event> notes;
+  uint64_t sequence = 0;
+  for (uint32_t index = 0; index < instruments; ++index) {
+    const uint32_t count = index < 2 * synths ? 32 : 2;
+    for (uint32_t note = 0; note < count; ++note) {
+      ++sequence;
+      notes.push_back({.node_id = index + 1, .note_id = sequence, .sequence = sequence, .epoch = 1,
+        .type = DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON, .note = 40 + note, .value = 1.0F});
+    }
+  }
+  for (size_t first = 0; first < notes.size(); first += 64) {  // a block takes a bounded number of events
+    render(1, std::vector<daw_audio_instrument_event>(notes.begin() + static_cast<std::ptrdiff_t>(first),
+      notes.begin() + static_cast<std::ptrdiff_t>(std::min(notes.size(), first + 64))));
+  }
+  render(600, {});  // long enough for 128 grains of 1 s to be sounding
+  std::vector<double> replaced;
+  std::vector<double> unchanged;
+  for (uint32_t trial = 0; trial < revisions; ++trial) {
+    replaced.push_back(commit(true));
+    render(5, {});
+    unchanged.push_back(commit(false));
+    render(5, {});
+  }
+  std::sort(replaced.begin(), replaced.end());
+  std::sort(unchanged.begin(), unchanged.end());
+  std::printf("publish with %u sounding instruments replaced (4 x 32 synth voices, 4 x 32 sample voices over 32 zones, 4 x 128 grains): "
+    "median %.1f us, max %.1f us; unchanged graph: median %.1f us, max %.1f us\n",
+    instruments, replaced[replaced.size() / 2], replaced.back(), unchanged[unchanged.size() / 2], unchanged.back());
+  daw_audio_core_destroy(core);
+}
+
+// The blend chain at its limit, with 32 voices held: eight replacements published
+// back to back are accepted and, being inaudible edits, leave the output where the
+// unedited reference has it (every instrument in the chain renders the same voices
+// and the weights sum to one); the ninth is refused at prepare and nothing is cut.
+// Prints what rendering the chain costs against rendering one instrument.
+void test_phase6i_blend_chain_limit_with_held_voices() {
+  HeldRig edited(DAW_AUDIO_INSTRUMENT_KIND_SYNTH, 32);
+  HeldRig reference(DAW_AUDIO_INSTRUMENT_KIND_SYNTH, 32);
+  for (HeldRig *rig : {&edited, &reference}) {
+    expect(rig->commit(), DAW_AUDIO_CORE_OK);
+    play_chord(*rig, 40, 32);
+    rig->render(20);
+  }
+  const size_t edit = edited.rendered();
+  for (uint32_t step = 0; step < 8; ++step) {
+    edited.synth.filter_key_tracking = step % 2 == 0 ? 0.25F : 0.0F;
+    expect(edited.commit(), DAW_AUDIO_CORE_OK);
+  }
+  edited.synth.filter_key_tracking = 0.5F;
+  expect(edited.commit(), DAW_AUDIO_CORE_CAPACITY_EXCEEDED);
+  const auto begin = std::chrono::steady_clock::now();
+  edited.render(4);
+  const auto chain = std::chrono::steady_clock::now();
+  reference.render(4);
+  const auto single = std::chrono::steady_clock::now();
+  edited.render(12);
+  reference.render(12);
+  const float deviation = largest_difference(edited.heard[0], reference.heard[0], edit);
+  phase6i_require(deviation < 1e-4F, "synth", "an eight deep chain disturbed the held voices", deviation, 0.0F);
+  edited.synth.filter_key_tracking = 0.5F;
+  expect(edited.commit(), DAW_AUDIO_CORE_OK);  // the chain has run out: the node takes edits again
+  std::printf("blend chain of 8 replacements over 32 held voices: %.1f us per block against %.1f us for one instrument\n",
+    std::chrono::duration<double, std::micro>(chain - begin).count() / 4.0,
+    std::chrono::duration<double, std::micro>(single - chain).count() / 4.0);
 }
 
 // Checkpoints 28, 40, 42 and 44 (superseded by Checkpoint 47): a reorder dips. A tone
@@ -9506,6 +10098,26 @@ int main(int argc, char **argv) {
     }
     return 0;
   }
+  if (argc == 3 && std::strcmp(argv[1], "--phase-6i-contract") == 0) {
+    // `<case>-<instrument>` runs one case for one instrument, so each is red or green on its own.
+    const std::string contract = argv[2];
+    const auto split = contract.rfind('-');
+    const std::string name = contract.substr(0, split);
+    const std::string instrument = split == std::string::npos ? "" : contract.substr(split + 1);
+    const uint32_t kind = instrument == "synth" ? DAW_AUDIO_INSTRUMENT_KIND_SYNTH
+      : instrument == "sampler" ? DAW_AUDIO_INSTRUMENT_KIND_SAMPLER
+      : instrument == "drum" ? DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK : DAW_AUDIO_INSTRUMENT_KIND_GRANULAR;
+    if (name == "held" && !instrument.empty()) test_phase6i_held_note_survives_an_edit(kind);
+    else if (name == "polyphony" && kind != DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) test_phase6i_polyphony_change_keeps_the_newest_voices(kind);
+    else if (name == "zone" && kind != DAW_AUDIO_INSTRUMENT_KIND_SYNTH && kind != DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) test_phase6i_zone_edit_under_a_held_note(kind);
+    else if (contract == "pedal") test_phase6i_pedal_and_note_off_survive_an_edit();
+    else if (contract == "granular-parameter") test_phase6i_granular_parameter_edit_under_a_held_note();
+    else if (contract == "chain") test_phase6i_replacement_chain_has_no_level_bump();
+    else if (contract == "publish-cost") test_phase6i_publish_cost_at_the_maximum(200);
+    else if (contract == "chain-limit") test_phase6i_blend_chain_limit_with_held_voices();
+    else return 2;
+    return 0;
+  }
   if (argc == 3 && std::strcmp(argv[1], "--phase-3-contract") == 0) {
     if (std::strcmp(argv[2], "connected-topology") == 0)
       test_phase3_long_wet_tail_across_unrelated_edit(true);
@@ -9661,6 +10273,17 @@ int main(int argc, char **argv) {
   test_phase3_layout_change_crossfades_the_waveform(false);
   test_phase3_instrument_replacement_crossfades_the_waveform();
   test_phase3_replacement_depth_is_bounded_and_recovers();
+  for (const uint32_t kind : {DAW_AUDIO_INSTRUMENT_KIND_SYNTH, DAW_AUDIO_INSTRUMENT_KIND_SAMPLER,
+    DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK, DAW_AUDIO_INSTRUMENT_KIND_GRANULAR}) {
+    test_phase6i_held_note_survives_an_edit(kind);
+    if (kind != DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) test_phase6i_polyphony_change_keeps_the_newest_voices(kind);
+    if (kind == DAW_AUDIO_INSTRUMENT_KIND_SAMPLER || kind == DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK) test_phase6i_zone_edit_under_a_held_note(kind);
+  }
+  test_phase6i_pedal_and_note_off_survive_an_edit();
+  test_phase6i_granular_parameter_edit_under_a_held_note();
+  test_phase6i_replacement_chain_has_no_level_bump();
+  test_phase6i_publish_cost_at_the_maximum();
+  test_phase6i_blend_chain_limit_with_held_voices();
   test_phase3_reorder_steps_stay_small_at_every_rate();
   test_phase3_reorder_does_not_replay_expired_transients();
   test_phase3_reorder_during_a_dip_continues_it();

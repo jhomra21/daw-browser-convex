@@ -21,7 +21,7 @@ export const SYNTH_PARAMETER_LIMITS = {
   noiseLevel: { min: 0, max: 1 },
   gain: { min: 0, max: 1.5 },
   pan: { min: -1, max: 1 },
-  polyphony: { min: 1, max: 128 },
+  polyphony: { min: 1, max: 32 }, // the audio core holds 32 voices per instrument
 }
 
 export type SynthWave = 'sine' | 'square' | 'sawtooth' | 'triangle'

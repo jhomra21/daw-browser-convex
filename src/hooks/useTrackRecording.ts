@@ -1,4 +1,4 @@
-import { batch, createEffect, createSignal, onCleanup, type Accessor } from 'solid-js'
+import { batch, createEffect, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
 
 import { createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
 import type { ClipCreateSnapshot } from '@daw-browser/shared'
@@ -1087,7 +1087,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     setIsStarting(true)
     const attempt = startRecordingAttempt(trackId, createdTrack)
     const guardedAttempt = attempt.finally(() => {
-      if (!isRecordingInternal()) targetLock?.release()
+      if (!untrack(isRecordingInternal)) targetLock?.release()
       if (startPromise === guardedAttempt) {
         startPromise = undefined
         cancelPendingSetup = undefined

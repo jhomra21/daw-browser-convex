@@ -1622,7 +1622,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     recordArmTrackId,
     toggleRecordArm: handleToggleRecordArm,
     reconcileRecordArm,
-    recordingTrackId: audioRecordingTrackId,
     previewPoints,
     previewStartSec,
   } = recordingControls;

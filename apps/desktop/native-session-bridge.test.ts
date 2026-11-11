@@ -1,40 +1,133 @@
-import { expect, test } from "bun:test"
+import { expect, mock, test } from "bun:test"
 import { readFile } from "node:fs/promises"
+import {
+  resolveOutputDeviceChannel,
+  sessionConfigureRecordingChannel,
+  sessionInstallAssetChannel,
+  sessionQueueInstrumentEventsChannel,
+  sessionQueueParameterEventsChannel,
+  sessionQueueProcessorStatePatchChannel,
+  sessionSetSpectrumNodeChannel,
+  sessionStopRecordingChannel,
+} from "@daw-browser/desktop-protocol/ipc-channels"
+import type { NativeHostPcmAsset, NativeHostRecordingConfiguration } from "@daw-browser/audio-engine/native-host-wire"
+import type { DesktopBridge } from "../../src/types/desktop-bridge"
 
-const preloadPath = new URL("./preload.ts", import.meta.url)
 const mainPath = new URL("./main.ts", import.meta.url)
-const rendererTypesPath = new URL("../../src/types/desktop-bridge.ts", import.meta.url)
+
+type IpcEnvelope = { value?: object | bigint | number | string | null; transactionToken?: string }
+type Invocation = { channel: string; args: Array<string | IpcEnvelope> }
+const invocations: Invocation[] = []
+const exposed = new Map<string, DesktopBridge>()
+const ipcReply = { ok: true, marker: "from-main" }
+mock.module("electron", () => ({
+  contextBridge: { exposeInMainWorld: (name: string, api: DesktopBridge) => exposed.set(name, api) },
+  ipcRenderer: {
+    invoke: (channel: string, ...args: Array<string | IpcEnvelope>) => {
+      invocations.push({ channel, args })
+      return Promise.resolve(ipcReply)
+    },
+    send: () => undefined,
+    on: () => undefined,
+    removeListener: () => undefined,
+  },
+}))
+
+process.argv.push("--daw-total-memory-bytes=17179869184")
+
+// Each variant is a distinct module instance, so preload re-evaluates its platform gate.
+const bridges = new Map<string, DesktopBridge>()
+const loadPreload = async (platform: string, arch: string) => {
+  const variant = `${platform}-${arch}`
+  const cached = bridges.get(variant)
+  if (cached) return cached
+  const original = { platform: process.platform, arch: process.arch }
+  Object.defineProperty(process, "platform", { value: platform, configurable: true })
+  Object.defineProperty(process, "arch", { value: arch, configurable: true })
+  try {
+    const specifier = `./preload.ts?${variant}`
+    await import(specifier)
+  } finally {
+    Object.defineProperty(process, "platform", { value: original.platform, configurable: true })
+    Object.defineProperty(process, "arch", { value: original.arch, configurable: true })
+  }
+  const bridge = exposed.get("dawDesktop")
+  if (!bridge) throw new Error("preload did not expose dawDesktop")
+  bridges.set(variant, bridge)
+  return bridge
+}
+
+const darwinAudioHost = async () => {
+  const { audioHost } = await loadPreload("darwin", "arm64")
+  if (!audioHost) throw new Error("preload did not expose audioHost on macOS arm64")
+  return audioHost
+}
 
 test("exposes only the macOS arm64 typed PCM asset session surface to renderers", async () => {
-  const [main, preload, rendererTypes] = await Promise.all([
-    readFile(mainPath, "utf8"),
-    readFile(preloadPath, "utf8"),
-    readFile(rendererTypesPath, "utf8"),
-  ])
+  const audioHost = await darwinAudioHost()
+  expect(Object.keys(audioHost.session)).toEqual(expect.arrayContaining(["installAsset", "releaseAsset", "queueSourceEvents", "detachVst"]))
+  expect(Object.keys(audioHost.session)).not.toContain("attachVst")
+  expect(Object.keys(await loadPreload("darwin", "arm64")).filter((key) => /socket/i.test(key))).toEqual([])
+
+  invocations.length = 0
+  await audioHost.resolveOutputDevice("device-1")
+  expect(invocations).toEqual([{ channel: resolveOutputDeviceChannel, args: ["device-1"] }])
+
+  for (const [platform, arch] of [["linux", "arm64"], ["darwin", "x64"], ["win32", "x64"]]) {
+    expect((await loadPreload(platform, arch)).audioHost).toBeUndefined()
+  }
+})
+
+test("sends each native session call as a channel envelope with its transaction token and returns the main reply", async () => {
+  const { session } = await darwinAudioHost()
+  const bytes = new Uint8Array([1, 2, 3])
+  const token = "18446744073709551615"
+  const asset: NativeHostPcmAsset = { sessionAssetId: 7, frameCount: 1, sampleRateHz: 48_000, channelCount: 1, planarPcm: new Uint8Array(4) }
+  const calls: Array<[() => Promise<object>, string, object]> = [
+    [() => session.installAsset(asset, token), sessionInstallAssetChannel, asset],
+    [() => session.queueProcessorStatePatch(bytes, token), sessionQueueProcessorStatePatchChannel, bytes],
+    [() => session.queueParameterEvents(bytes, token), sessionQueueParameterEventsChannel, bytes],
+    [() => session.queueInstrumentEvents(bytes, token), sessionQueueInstrumentEventsChannel, bytes],
+  ]
+  for (const [call, channel, value] of calls) {
+    invocations.length = 0
+    expect(await call()).toBe(ipcReply)
+    expect(invocations).toEqual([{ channel, args: [{ value, transactionToken: token }] }])
+  }
+})
+
+test("keeps spectrum selection on the native session envelope contract", async () => {
+  const { session } = await darwinAudioHost()
+  for (const nodeId of [5n, null]) {
+    invocations.length = 0
+    await session.setSpectrumNode(nodeId)
+    expect(invocations).toEqual([{ channel: sessionSetSpectrumNodeChannel, args: [{ value: nodeId, transactionToken: undefined }] }])
+  }
+})
+
+test("routes recording configure and stop through native session envelopes", async () => {
+  const { session } = await darwinAudioHost()
+  const input: NativeHostRecordingConfiguration & { spoolImportVersion: 1 } = {
+    projectId: "project", deviceUid: "device", generation: 1, sessionId: 1n, channelCount: 2, inputChannels: [0, 1],
+    gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, spoolImportVersion: 1,
+  }
+  invocations.length = 0
+  await session.configureRecording(input)
+  expect(invocations).toEqual([{ channel: sessionConfigureRecordingChannel, args: [{ value: input, transactionToken: undefined }] }])
+  for (const stopFrame of [12, undefined]) {
+    invocations.length = 0
+    await session.stopRecording(stopFrame)
+    expect(invocations).toEqual([{ channel: sessionStopRecordingChannel, args: [{ value: stopFrame, transactionToken: undefined }] }])
+  }
+})
+
+test("gates the native session IPC to the macOS arm64 app origin", async () => {
+  const main = await readFile(mainPath, "utf8")
 
   expect(main).toContain('process.platform === "darwin"')
   expect(main).toContain('process.arch === "arm64"')
   expect(main).toContain('sameAppOrigin(event.senderFrame.url)')
   expect(main).toContain('sendRendererMessage(lossChannel, error)')
-  expect(preload).toContain('process.platform === "darwin" && process.arch === "arm64"')
-  expect(preload).toContain("installAsset")
-  expect(preload).toContain("releaseAsset")
-  expect(preload).toContain("queueSourceEvents")
-  expect(preload).toContain("resolveOutputDevice")
-  expect(preload).not.toContain("attachVst")
-  expect(preload).toContain("detachVst")
-  expect(preload).toContain("offlinePcmMessageSchema")
-  expect(preload).not.toContain("socket")
-  expect(preload).not.toContain("AudioBuffer")
-  expect(preload).not.toContain('from "node:path"')
-  expect(preload).not.toContain("canonicalBundlePath")
-  expect(preload).not.toContain("canonicalExecutablePath")
-  expect(rendererTypes).toContain("audioHost?:")
-  expect(rendererTypes).toContain("resolveOutputDevice")
-  expect(rendererTypes).toContain("NativeHostPcmAsset")
-  expect(rendererTypes).toContain("serializedPlan")
-  expect(rendererTypes).not.toContain("AudioEngine")
-  expect(main).toContain('sameAppOrigin(event.senderFrame.url)')
   expect(main).toContain('catalogViewForRenderer')
 })
 
@@ -64,36 +157,22 @@ test("classifies a failed revision command by its type, never dropping the throw
 })
 
 test("carries the processor patch status and its decimal token to the renderer unchanged", async () => {
-  const [main, preload] = await Promise.all([readFile(mainPath, "utf8"), readFile(preloadPath, "utf8")])
+  const main = await readFile(mainPath, "utf8")
 
   expect(main).toContain("nativeProcessorPatchReply(await supervisor.queueProcessorStatePatch(")
-  expect(preload).toContain("queueProcessorStatePatch: (bytes: Uint8Array, transactionToken?: string) => invokeNativePatch(bytes, transactionToken)")
-  expect(preload).toContain("queueParameterEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeDelivery(")
-  expect(preload).toContain("queueInstrumentEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeDelivery(")
 })
 
-test("keeps spectrum selection on the native session envelope contract", async () => {
-  const [main, preload] = await Promise.all([
-    readFile(mainPath, "utf8"),
-    readFile(preloadPath, "utf8"),
-  ])
+test("validates the spectrum selection envelope in the main process", async () => {
+  const main = await readFile(mainPath, "utf8")
 
-  expect(preload).toContain('setSpectrumNode: (nodeId: bigint | null) => invokeNativeSession(sessionSetSpectrumNodeChannel, nodeId)')
   expect(main).toContain('const envelope = nativeSpectrumNodeEnvelopeSchema.safeParse(value)')
   expect(main).toContain('envelope.data.transactionToken !== undefined')
   expect(main).toContain('await supervisor.setSpectrumNode(envelope.data.value)')
   expect(main).not.toContain('[native-spectrum]')
 })
 
-test("routes recording IPC through production native session envelopes", async () => {
-  const [main, preload] = await Promise.all([
-    readFile(mainPath, "utf8"),
-    readFile(preloadPath, "utf8"),
-  ])
-
-  expect(preload).toContain('configureRecording: (input: NativeHostRecordingConfiguration & { spoolImportVersion: 1 })')
-  expect(preload).toContain('ipcRenderer.invoke(sessionConfigureRecordingChannel, { value: input, transactionToken: undefined })')
-  expect(preload).toContain('stopRecording: (stopFrame?: number) => invokeNativeSession(sessionStopRecordingChannel, stopFrame)')
+test("validates recording IPC through production native session envelopes in the main process", async () => {
+  const main = await readFile(mainPath, "utf8")
 
   const configureStart = main.indexOf('ipcMain.handle(sessionConfigureRecordingChannel')
   const stopStart = main.indexOf('ipcMain.handle(sessionStopRecordingChannel')

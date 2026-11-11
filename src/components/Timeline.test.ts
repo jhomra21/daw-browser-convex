@@ -98,11 +98,24 @@ test("settles preparation before comparing instrument-ready callbacks with the p
   expect(handler).toContain("if (JSON.stringify(previous) === JSON.stringify(instrument)) return;");
 });
 
-test("scopes effect history to the committed project and keeps patch failures silent", async () => {
-  const history = await readFile(new URL("./timeline/create-timeline-effect-commit.ts", import.meta.url), "utf8");
-  expect(history).toContain("const rid = committedProjectId ?? input.projectId();");
-  expect(history).toContain("if (rid !== input.projectId()) return;");
-  expect(history).not.toContain("deliverProcessor(");
+test("scopes effect history to the committed project and keeps patch failures silent", () => {
+  let projectId: string | undefined = "project:a";
+  const pushed: HistoryEntry[] = [];
+  const commit = createTimelineEffectCommit({ projectId: () => projectId,
+    tracks: () => [{ id: "track", historyRef: "history:a", name: "A", volume: 1, clips: [] }],
+    pushHistory: entry => { pushed.push(entry); } });
+  const from = createDefaultUtilityParams();
+  const payload: EffectParamsCommitPayload = { effect: "utility", targetId: "track", instanceId: "utility:1",
+    from: { version: 1, state: from }, to: { version: 1, state: { ...from, gainDb: -6 } } };
+
+  // A patch settling after navigation names the project it was made in; it is dropped without an error.
+  projectId = "project:b";
+  expect(() => commit.committed(payload, "project:a")).not.toThrow();
+  expect(pushed).toHaveLength(0);
+
+  commit.committed(payload, "project:b");
+  commit.committed(payload);
+  expect(pushed.map(entry => entry.projectId)).toEqual(["project:b", "project:b"]);
 });
 
 test("persists captured editor state using its bound project after navigation", async () => {
@@ -158,11 +171,8 @@ test("opens an inserted VST editor only after the matching playback rebuild", as
 test("keeps arrangement and clip selection clicks from seeking during playback", async () => {
   const timeline = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
   const selection = await readFile(new URL("../hooks/useTimelineSelection.ts", import.meta.url), "utf8");
-  const actions = await readFile(new URL("../hooks/useTimelineActions.ts", import.meta.url), "utf8");
 
   expect(timeline).toContain("isPlaying,\n    startScrub,");
   expect(selection).toContain("if (!options.isPlaying()) startScrub(event.clientX, { listen: false });");
   expect(selection).toContain("if (!options.isPlaying()) moveScrub(event.clientX);");
-  expect(actions).toContain("if (!options.navigation.isPlaying()) {");
-  expect(actions).toContain("options.navigation.setPlayhead(targetStartSec, options.tracks())");
 });

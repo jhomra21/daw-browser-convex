@@ -20,12 +20,12 @@
    "src/lib/desktop/native-processor-state-owner.ts": "0e0c7a05c34033c20db38bfabb240aa3e0d07a89391e8101e02e7509c9ce871b",
    "src/hooks/useTimelinePlayback.ts": "19019a87eb53c8fcb84b46e114fc9e0c4aee97e986b10750572212fdbaa0a725",
    "src/lib/desktop/native-playback-controller.test.ts": "b54024913c4f41bffa6f1f22dc29df27fff4ec2ff7c5012336b35b8eea149dcf",
-   "src/hooks/useTimelinePlayback.test.ts": "1f8eb9226fe8b7748f43d6075333f4978f02b1d38f4eb0aa5159b27959e6946d",
+   "src/hooks/useTimelinePlayback.test.ts": "6d5e509c40923a7159ac64a43c7830a507c54c6d40077356c645b9fe303310f5",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "dcffbbda8434de38d9375da914c5b7c4b5cbc8c3255705b3f812242bfbea2669",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "3aaea3d0441e32671ecacddca317166dc192f89c9d00df0dba524eef30c73ce5",
    "src/components/timeline/create-timeline-effect-commit.ts": "c62ae6f5ec087a8abe5a0d1038d71b1172ae060a0c294bcef848c553b278a9c2",
    "src/components/Timeline.tsx": "57de21f1c777bd85eba770582a4fbcb94d96a9c56918529d173d9fc359c93548",
-   "src/components/Timeline.test.ts": "7f125294b30a1fab74ebf3aedac2eb2acb1516a5b9adfa7feb9bae3d8a248d96",
+   "src/components/Timeline.test.ts": "b82519275ba6919910a0a3f6ed341c3f101ad2a8308eb229a5955921a5774317",
    "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "2488292cd8bf35fcf1e3e992f00d4be6300abf975972ddfe4d1ca48e3232f994",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "7f45e3103c2bdf98467bcb6de030a6971cbd6182729f77bf974907c9a1024ef0",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-classes.ts": "3d46c8e6cd6ec9e7dee21ab8e47261a8e1a5b2eebe6e887a44878b2140604c48",
@@ -68,7 +68,7 @@
    "packages/audio-engine/src/native-host-wire.test.ts": "586d06916c7caa630003d88940403d5b356aa57f39965f624693fe34078917d1",
    "packages/audio-engine/src/portable-wasm-host.test.ts": "8c3698d972bed783df85f9a95b041c75f255967178b7ace177200b4a59ffc96f",
    "packages/audio-engine/src/portable-wasm-protocol.test.ts": "7c99cb630f255b0b6050e1275650d95c0f902777556890e3b1b21ea67355c730",
-   "packages/audio-engine/src/portable-wasm-worklet.test.ts": "2ee51eecb72f730eb915f150b2fe235fe8b6c0bbcbab54b80879f8db5f41e6de",
+   "packages/audio-engine/src/portable-wasm-worklet.test.ts": "dd2dff481ec8ba5ac68e48f48dbc4547b3a504a426e304fea3ab41c9c20e024f",
    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": "6bc3f8535fcbcb3619cf4cb8a98255ec099566695dc1d44b72e98c3db8fced6c",
    "tools/acceptance/analyze-ae-08-continuity.ts": "c31a69951a01f22414a6b852ba3c92f6b0257fc4956dba4a022526c316af36eb",
    "tools/acceptance/ae-08-phase-5-fixture.ts": "16d0acf1f5681bef2bdbc687dfa9be095f441f766f990905ebada1ab4196b50a",
@@ -3054,7 +3054,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 396,
+     "pass": 400,
      "skip": 1,
      "fail": 0
     },
@@ -24474,9 +24474,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 201,
+      "pass": 200,
       "skip": 1,
-      "fail": 14
+      "fail": 15
      },
      "fails": [
       "B6d2 a paused structural change requested while the pause is pending is not dropped",
@@ -24491,6 +24491,7 @@
       "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
       "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
       "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does",
+      "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -53007,13 +53008,14 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 210,
       "skip": 1,
-      "fail": 4
+      "fail": 5
      },
      "fails": [
       "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
       "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+      "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -55139,12 +55141,13 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 211,
       "skip": 1,
-      "fail": 3
+      "fail": 4
      },
      "fails": [
       "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+      "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],

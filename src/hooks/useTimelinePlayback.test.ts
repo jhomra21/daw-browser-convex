@@ -7714,16 +7714,7 @@ test('C0F Pause then Play after a staged live publication resumes warm through t
 // property read counts; a whole-object copy (a spread, a rest or structuredClone) does not. Every field a compile reads is
 // named, a named field no compile reads is one the hook reads itself, and no compile reads a name, colour or waveform key.
 test('C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key', async () => {
-  const source = await readFile(new URL("./useTimelinePlayback.ts", import.meta.url), "utf8")
-  const fingerprint = source.slice(
-    source.indexOf("const readNativePreviewTrackFingerprint"),
-    source.indexOf("  const disposeNativePreview", source.indexOf("const readNativePreviewTrackFingerprint")),
-  )
-  const named = fingerprint.match(/const \{ ([^}]+) \} = clip/)?.[1]?.split(/,\s*/).map((field) => field.trim())
-  const returned = fingerprint.match(/return \{ (id, [^}]+?),\s*buffer: readBufferFingerprint\(buffer\) \}/)?.[1]?.split(/,\s*/).map((field) => field.trim())
   const reads = new Set<string>()
-  const stages = new Map<string, Set<string>>()
-  let stage = 'snapshot'
   const recorded = <Clip extends object>(clip: Clip): Clip => {
     const values = new Map(Object.entries(clip))
     let described: string | symbol | undefined
@@ -7736,7 +7727,6 @@ test('C0G the clip fingerprint names every clip field a playback compile reads, 
         const field = [...values.keys()].find((name) => name === key)
         if (field !== undefined && key !== described) {
           reads.add(field)
-          stages.set(stage, new Set([...stages.get(stage) ?? [], field]))
         }
         described = undefined
         return field === undefined ? undefined : values.get(field)
@@ -7760,30 +7750,85 @@ test('C0G the clip fingerprint names every clip field a playback compile reads, 
       automationEnvelopes: [] }, sidechainRoutes: [] })
   if (!compiled.supported) throw new Error(`C0G compile: ${compiled.reasons.join(' ')}`)
   const snapshot = { ...compiled.snapshot, tracks: compiled.snapshot.tracks.map((entry) => ({ ...entry, clips: entry.clips.map(recorded) })) }
-  stage = 'native'
   const native = compileLiveNativeProjection({ tracks: snapshot.tracks, bpm: 120, sampleRateHz: 48_000, revision: 1, epoch: 1,
     firstSequence: 1, fx: snapshot.mixer.fx })
   // The portable session compiles the MIDI track; its audio would need a decoded asset registry.
-  stage = 'portable'
   const portable = compilePreparedPortableLiveSession({ ...snapshot, tracks: snapshot.tracks.filter((entry) => entry.id === instrument.id) },
     { assetRegistry: { projectGeneration: 1, assets: [] },
     sampleRateHz: 48_000, transportEpoch: 1, timeOrigin: { timelineSec: 0, frame: 0 }, rangeEndSec: 4, sourceFirstSequence: 1 })
   const compileRead = [...reads].filter((field) => field !== 'buffer').toSorted()
-  console.log('C0G-CLIP-READS', JSON.stringify({ named, compileRead, native: native.supported, portable: portable.supported,
-    stages: Object.fromEntries([...stages].map(([name, fields]) => [name, [...fields].toSorted()])) }))
-  expect({ named, returned: returned?.join(), native: native.supported, portable: portable.supported,
+  // A native paused preview recompiles exactly when the track fingerprint changes: edit one clip field of a paused preview
+  // and see whether the hook compiles again.
+  type AudioClip = Track<AudioBuffer>['clips'][number]
+  const edits = new Map<string, (clip: AudioClip) => AudioClip>([
+    ['id', (clip) => ({ ...clip, id: 'clip-other' })],
+    ['historyRef', (clip) => ({ ...clip, historyRef: 'clip-history' })],
+    ['mediaStatus', (clip) => ({ ...clip, mediaStatus: 'missing' })],
+    ['startSec', (clip) => ({ ...clip, startSec: 0.5 })],
+    ['duration', (clip) => ({ ...clip, duration: 0.5 })],
+    ['sourceAssetKey', (clip) => ({ ...clip, sourceAssetKey: 'asset-other' })],
+    ['sourceKind', (clip) => ({ ...clip, sourceKind: 'url' })],
+    ['sourceDurationSec', (clip) => ({ ...clip, sourceDurationSec: 2 })],
+    ['sourceSampleRate', (clip) => ({ ...clip, sourceSampleRate: 44_100 })],
+    ['sourceChannelCount', (clip) => ({ ...clip, sourceChannelCount: 2 })],
+    ['leftPadSec', (clip) => ({ ...clip, leftPadSec: 0.25 })],
+    ['bufferOffsetSec', (clip) => ({ ...clip, bufferOffsetSec: 0.25 })],
+    ['audioWarp', (clip) => ({ ...clip, audioWarp: { enabled: true, mode: 'repitch', sourceBpm: 100 } })],
+    ['gain', (clip) => ({ ...clip, gain: 0.5 })],
+    ['fades', (clip) => ({ ...clip, fades: { fadeInSec: 0.1, fadeOutSec: 0, fadeInCurve: 0, fadeOutCurve: 0 } })],
+    ['sampleUrl', (clip) => ({ ...clip, sampleUrl: 'https://r2.example/other.wav' })],
+    ['midi', (clip) => ({ ...clip, midi: b6f5cClip.midi })],
+    ['midiOffsetBeats', (clip) => ({ ...clip, midiOffsetBeats: 1 })],
+    ['name', (clip) => ({ ...clip, name: 'Renamed clip' })],
+    ['color', (clip) => ({ ...clip, color: '#123456' })],
+    ['waveformAssetKey', (clip) => ({ ...clip, waveformAssetKey: 'waveform:other' })],
+  ])
+  const recompilesOnEdit = async (edit: (clip: AudioClip) => AudioClip) => {
+    const previousWindow = globalThis.window
+    const [tracks, setTracks] = createSignal([audioTrack(new TestAudioBuffer())])
+    const fixture = createNativeHookBridge(undefined, undefined, undefined, undefined, "failed", true)
+    let compiles = 0
+    const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]["transport"]) => {
+      compiles += 1
+      return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
+        renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
+    }
+    Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+    let dispose = () => {}
+    try {
+      createRoot((cleanup) => {
+        dispose = cleanup
+        return useTimelinePlayback(createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine, { getTracks: () => tracks() }, {
+          requiresNativeAudio: true, enabled: () => true, projectId: () => "project", compileSnapshot,
+          reportFault: () => undefined,
+        })
+      })
+      await flushMicrotasks()
+      const prepared = compiles
+      setTracks((current) => current.map((entry) => ({ ...entry, clips: entry.clips.map(edit) })))
+      await flushMicrotasks()
+      return compiles > prepared
+    } finally {
+      dispose()
+      Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+    }
+  }
+  const recompiles: Record<string, boolean> = {}
+  for (const [field, edit] of edits) recompiles[field] = await recompilesOnEdit(edit)
+  const named = Object.keys(recompiles).filter((field) => recompiles[field])
+  expect({ native: native.supported, portable: portable.supported,
     compileRead,
-    unnamedReads: compileRead.filter((field) => !named?.includes(field)),
-    namedUnread: named?.filter((field) => !reads.has(field)),
+    uncoveredReads: compileRead.filter((field) => !edits.has(field)),
+    unnamedReads: compileRead.filter((field) => !named.includes(field)),
+    namedUnread: named.filter((field) => !reads.has(field)),
     excludedRead: ['name', 'color', 'waveformAssetKey'].filter((field) => reads.has(field)),
-    excludedNamed: ['name', 'color', 'waveformAssetKey', 'buffer'].filter((field) => named?.includes(field)) })
-    .toEqual({ named: ['id', 'historyRef', 'mediaStatus', 'startSec', 'duration', 'sourceAssetKey', 'sourceKind', 'sourceDurationSec',
-      'sourceSampleRate', 'sourceChannelCount', 'leftPadSec', 'bufferOffsetSec', 'audioWarp', 'gain', 'fades', 'sampleUrl', 'midi',
-      'midiOffsetBeats'], returned: named?.join(), native: true, portable: true,
+    excludedNamed: ['name', 'color', 'waveformAssetKey'].filter((field) => named.includes(field)) })
+    .toEqual({ native: true, portable: true,
       compileRead: ['audioWarp', 'bufferOffsetSec', 'duration', 'fades', 'gain', 'id', 'leftPadSec', 'midi', 'midiOffsetBeats', 'sampleUrl',
         'sourceAssetKey', 'sourceChannelCount', 'sourceDurationSec', 'sourceKind', 'sourceSampleRate', 'startSec'],
+      uncoveredReads: [], unnamedReads: [],
       // The hook reads these itself: mediaStatus gates hydration (hasPendingAudioClipHydration), historyRef names the clip.
-      unnamedReads: [], namedUnread: ['historyRef', 'mediaStatus'], excludedRead: [], excludedNamed: [] })
+      namedUnread: ['historyRef', 'mediaStatus'], excludedRead: [], excludedNamed: [] })
 })
 
 // C0g, step 5c: a clip whose waveform key or key order changes while playing plays what it played, so the playing

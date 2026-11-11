@@ -1,11 +1,65 @@
 import { expect, test } from 'bun:test'
+import { createRoot, createSignal } from 'solid-js'
 
+import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
+import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { planTrackReorder } from '~/lib/track-group-ops'
 import { buildTimelineTrackRow } from '~/lib/timeline-repository/track-row-builder'
 import { toLocalTimelineTrack } from '~/lib/timeline-repository/track-row-adapter'
 import type { TimelineTrackRow } from '~/lib/timeline-repository/types'
 import type { Track } from '@daw-browser/timeline-core/types'
-import { projectLocalTrackCreation } from './useTimelineActions'
+import { projectLocalTrackCreation, useTimelineActions } from './useTimelineActions'
+import { useTimelineSelectionState } from './useTimelineSelectionState'
+
+const jumpToClipWhile = (playing: boolean, startSec: number) => createRoot((dispose) => {
+  const tracks: RuntimeTrack[] = [{
+    id: 'track', name: 'Track', volume: 1,
+    clips: [{ id: 'clip', name: 'Clip', startSec, duration: 2, color: '#ffffff' }],
+  }]
+  const [projectId] = createSignal('project:jump')
+  const selection = useTimelineSelectionState({ projectId, tracks: () => tracks })
+  const playheads: number[] = []
+  const opened: string[] = []
+  const actions = useTimelineActions({
+    tracks: () => tracks,
+    room: { projectId, setProjectId: () => undefined, userId: () => 'user' },
+    creation: {
+      selection,
+      insertLocalTrack: () => undefined,
+      removeLocalTrack: () => undefined,
+      replaceLocalClip: () => undefined,
+      updateLocalTrack: () => undefined,
+      removeCloudTrack: async () => undefined,
+      grantTrackWrite: () => undefined,
+      pushHistory: () => undefined,
+    },
+    automationEnvelopes: () => [],
+    sidechainRoutes: () => [],
+    applyAutomationEnvelope: () => undefined,
+    navigation: {
+      trackLookup: () => createTimelineTrackIndex(tracks),
+      selection,
+      isPlaying: () => playing,
+      setPlayhead: (sec) => { playheads.push(sec) },
+      openClipDetailFor: (clipId) => { opened.push(clipId) },
+      ensureClipBuffer: async () => undefined,
+      getScrollElement: () => undefined,
+      visibleStartSec: () => 0,
+      setVisibleStartSec: () => undefined,
+      pixelsPerSecond: () => 100,
+    },
+  })
+  actions.jumpToClip('track', 'clip', startSec)
+  const selected = selection.selectedClip()
+  dispose()
+  return { playheads, opened, selected }
+})
+
+test('jumping to a clip selects it and moves the playhead only while stopped', () => {
+  expect(jumpToClipWhile(false, 4)).toEqual({ playheads: [4], opened: ['clip'], selected: { trackId: 'track', clipId: 'clip' } })
+  expect(jumpToClipWhile(false, -3).playheads).toEqual([0])
+  expect(jumpToClipWhile(true, 4)).toEqual({ playheads: [], opened: ['clip'], selected: { trackId: 'track', clipId: 'clip' } })
+})
 
 const localTrack = (
   id: string,

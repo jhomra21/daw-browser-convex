@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
-import { createRoot, createSignal, type Accessor } from 'solid-js'
+import { createRoot, createSignal, untrack, type Accessor } from 'solid-js'
 
 import { createLocalProject } from '~/lib/local-project-db'
 import { RECORDING_TARGET_LOCKED_REASON, createRecordingTargetLock, type RecordingTargetLock } from '~/lib/track-recording-target'
@@ -274,8 +274,8 @@ test('track delete refuses when a take starts while the delete is prepared', asy
   await createRoot(async (dispose) => {
     const [projectId] = createSignal(project.id)
     const selection = useTimelineSelectionState({ projectId, tracks: () => tracks })
-    const [, setPendingDeleteTrackId] = createSignal<string | null>(null)
-    const [, setConfirmOpen] = createSignal(false)
+    const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<string | null>(null)
+    const [confirmOpen, setConfirmOpen] = createSignal(false)
     const actions = useTimelineClipActions({
       tracks: () => tracks,
       insertLocalClip: () => undefined,
@@ -311,6 +311,8 @@ test('track delete refuses when a take starts while the delete is prepared', asy
     const pending = actions.performDeleteTrack(created.id)
     lock.start(created.id)
     await pending
+    expect(untrack(pendingDeleteTrackId)).toBeNull()
+    expect(untrack(confirmOpen)).toBe(false)
     dispose()
   })
   expect(notices).toEqual([RECORDING_TARGET_LOCKED_REASON])

@@ -357,6 +357,8 @@ export function useTimelinePlayback(
         const message = result.error ?? "Native Keep Latency update failed."
         if (result.reason === "latency-unsupported") nativeOptions?.reportFault?.({ kind: "latency-unsupported", message })
         else reportNativeStopped(message)
+      }).catch((error) => {
+        reportNativeStopped(error instanceof Error ? error.message : "Native Keep Latency update failed.")
       })
     })
   })

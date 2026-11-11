@@ -21,7 +21,7 @@ import { createDefaultDelayParams, createDefaultDrumRackParams, createDefaultSyn
 import type { AutomationEnvelope, TrackInstrumentParams, UtilityParamsEnvelope } from '@daw-browser/shared'
 import type { AudioCoreGraphSnapshot } from '@daw-browser/audio-core-contract'
 import { externalProcessorSchema, type ExternalProcessor } from '@daw-browser/external-plugins'
-import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackSnapshotInput } from '~/lib/live-playback-snapshot'
+import { compileDesiredNativeProcessorState, compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackSnapshotInput } from '~/lib/live-playback-snapshot'
 import { compilePreparedPortableLiveSession } from '~/lib/portable-live-session'
 import { planSetTrackColor } from '~/lib/track-group-ops'
 import { compileNativeExternalAttachmentPlan } from '~/lib/desktop/native-external-attachment-plan'
@@ -144,6 +144,46 @@ test("B6a3 terminal-routing hook host loss during latency publication preserves 
       } finally { released.resolve(); dispose(); await settleStep5Playback() }
     })
   } finally {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow)
+    else Reflect.deleteProperty(globalThis, "window")
+  }
+})
+
+test("a rejected Keep Latency update is reported as a stopped native session, not an unhandled rejection", async () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
+  const fixture = createNativeHookBridge()
+  const faults: NativePlaybackFault[] = []
+  const unhandled: unknown[] = []
+  const onUnhandled: NodeJS.UnhandledRejectionListener = reason => { unhandled.push(reason) }
+  let failProjection = false
+  const [keep, setKeep] = createSignal(new Set<string>())
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+  process.on("unhandledRejection", onUnhandled)
+  try {
+    await withFakeRaf(async () => {
+      let dispose = () => {}
+      const playback = createRoot(cleanup => {
+        dispose = cleanup
+        return useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+          undefined, { requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
+            keepLatencyNodeIds: keep, compileSnapshot: nativeRequiredSnapshot,
+            getDesiredProcessorState: (snapshot, rate) => {
+              if (failProjection) throw new Error("projection failed")
+              return compileDesiredNativeProcessorState(snapshot, rate, 20)
+            },
+            reportFault: fault => faults.push(fault) })
+      })
+      try {
+        await playback.handlePlay([track])
+        failProjection = true
+        setKeep(new Set([track.id]))
+        await settleStep5Playback()
+        expect(unhandled).toEqual([])
+        expect(faults).toEqual([{ kind: "session-stopped", message: "projection failed" }])
+      } finally { failProjection = false; dispose(); await settleStep5Playback() }
+    })
+  } finally {
+    process.off("unhandledRejection", onUnhandled)
     if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow)
     else Reflect.deleteProperty(globalThis, "window")
   }

@@ -1,9 +1,9 @@
 import { spawn, spawnSync } from "node:child_process"
 import { once } from "node:events"
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, statfsSync, writeFileSync } from "node:fs"
-import { availableParallelism } from "node:os"
 import path from "node:path"
 import { z } from "zod"
+import { jobLimit } from "../jobs"
 import {
   archivedPath, archivedRoot, canonicalJsonSha256, expectationsFile, expectationsSchema, failedTests, fuzzFailures, getAt, jobDirToken, leafName,
   lintSignature, oracleFailures, perFileCounts, repoRoot, runsTestFile, sameJson, sha256, testCounts, tscDiagnostics,
@@ -16,7 +16,7 @@ import { failuresByFile, judgeTestShard, testBaseline, testBaselineFile, testSha
 
 // FAST-CERT: RC7's re-certification as one parallel, tiered run, judged against tools/certification/expectations.json.
 // Usage: bun tools/certification/fast-cert.ts [--plan] [--full] [--tier T0|T1|T2|T2n] [--base-commit <ref>] [--base <manifest.json>]
-//        [--out <dir>] [--changed a,b [--changed-only]] [--seeds N] [--only <job id,…>] [--break <arm id>] [--overlay <spec.json>]
+//        [--out <dir>] [--changed a,b [--changed-only]] [--seeds N] [--only <job id,…>] [--break <arm id>] [--overlay <spec.json>] [--jobs N]
 // The tier comes from the paths that differ from --base-commit (default HEAD) and from manifest drift (tiers.ts); --tier overrides
 // it, --full runs every job. --changed adds simulated changed files; --only runs the named jobs (and what they depend on) from the
 // full set; --break turns one mutant into a no-op overlay (every `to` = `from`), a self-test that must end in FAIL. --overlay
@@ -49,12 +49,14 @@ const simulated = [...new Set([...(option("--changed") ?? "").split(",").filter(
 const exp = expectationsSchema.parse(JSON.parse(readFileSync(expectationsFile, "utf8")))
 const expectationsJson = z.json().parse(JSON.parse(readFileSync(expectationsFile, "utf8")))
 
-// RC7 measured every duration serially. Ten jobs sharing this Mac's 6 performance and 6 efficiency cores run slower (the hook
-// campaigns and seeds also spawn their own children); the estimate multiplies parallel-phase durations by this factor. Isolated
-// jobs run alone and keep RC7's durations. Calibrated in BD/FAST-CERT-VALIDATION.md: measured parallel phase / simulated at x1
-// was 2.00-2.11 in --full, 2.33 change-scoped and 2.49-2.52 in the default mode, where the estimate picks the seed count.
-const parallelSlowdown = 2.5
-const pool = Math.max(1, availableParallelism() - 2)
+// RC7 measured every duration serially. Jobs sharing this Mac's cores run slower (the hook campaigns and seeds also spawn their
+// own children); the estimate multiplies parallel-phase durations by this factor. Isolated jobs run alone and keep RC7's durations.
+// Calibrated at the default pool of 6 (the performance cores) on a T2 run: measured parallel phase 341 s / simulated at x1 237 s
+// = 1.44 (acceptance-reports/ae-08-phase-5-2026-10-18/CPU-LIMIT-REPORT.md). At ten workers on this Mac the same run measured 1.94,
+// as the workers spilled onto the efficiency cores; a larger --jobs than the default makes the estimate optimistic.
+const parallelSlowdown = 1.45
+const pool = Number(option("--jobs") ?? jobLimit())
+if (!Number.isInteger(pool) || pool < 1) throw new Error(`--jobs needs a positive integer, got ${option("--jobs")}`)
 const compareSeconds = 5
 const fixtures: ("controller" | "hook")[] = ["controller", "hook"]
 
@@ -178,9 +180,16 @@ const withProductOverlay = (argv: string[]) => {
   return [...argv.slice(0, at), "--preload", overlayPreload, ...argv.slice(at)]
 }
 
+// Oxlint runs on every core by default; inside the pool each lint takes one thread, so `pool` is the real CPU limit. The root
+// `bun … run lint` script takes the flag as an extra argument.
+const singleThreadedLint = (argv: string[]) => {
+  const oxlint = argv.indexOf("oxlint")
+  if (oxlint >= 0) return [...argv.slice(0, oxlint + 1), "--threads", "1", ...argv.slice(oxlint + 1)]
+  return argv.at(-2) === "run" && argv.at(-1) === "lint" ? [...argv, "--threads", "1"] : argv
+}
 // Every command runs under RC's Perl alarm, so a hung child ends without a timer in this process.
 const runCommand = async (command: Command, dir: string, name: string): Promise<Run> => {
-  const argv = ["perl", "-e", "alarm shift; exec @ARGV", String(command.alarmSeconds), ...withProductOverlay(command.argv.map((value) => fill(value, dir)))]
+  const argv = ["perl", "-e", "alarm shift; exec @ARGV", String(command.alarmSeconds), ...withProductOverlay(singleThreadedLint(command.argv.map((value) => fill(value, dir))))]
   const log = path.join(dir, `${name}.log`)
   const descriptor = openSync(log, "w")
   const started = performance.now()
@@ -644,7 +653,7 @@ const printPlan = () => {
   const lines: string[] = []
   lines.push(`FAST-CERT plan: ${full ? "--full" : `tier ${tier}`}${only.size > 0 ? `, --only ${[...only].join(",")}` : ""}${broken ? `, --break ${broken} (self-test: must FAIL)` : ""}`)
   if (unknownIds.length > 0) lines.push(`UNKNOWN JOB IDS: ${unknownIds.join(", ")}`)
-  lines.push(`pool ${pool} = availableParallelism ${availableParallelism()} - 2; parallel slowdown x${parallelSlowdown}`)
+  lines.push(`pool ${pool} (--jobs, else DAW_JOBS, else the performance-core count); parallel slowdown x${parallelSlowdown}`)
   lines.push(`tier ${everything ? "all (--full or --only)" : tier}: ${everything ? "every job" : tierWhy}`)
   for (const note of exp.notes ?? []) lines.push(`note (${note.topic}, since ${note.since}, drop after ${note.dropAfter}): ${note.text}`)
   lines.push(`${productOverlay ? `product overlay ${productOverlay.spec} (in memory): ${productOverlay.files.join(", ")}\n` : ""}base ${baseFile ?? exp.manifest.path}${

@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process"
 import { once } from "node:events"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { availableParallelism } from "node:os"
 import path from "node:path"
+import { jobLimit } from "../jobs"
 import { expectationsFile, expectationsSchema, repoRoot } from "./expectations"
 import { failuresByFile, testBaselineFile, testShards } from "./test-baseline"
 import { allTestFiles } from "./tiers"
@@ -26,7 +26,7 @@ const run = async (shard: string[], index: number) => {
 const queue = shards.map((shard, index) => ({ shard, index }))
 // Isolated files run last and alone.
 const parallel = queue.slice(0, queue.length - exp.isolatedTests.length)
-await Promise.all(Array.from({ length: Math.max(1, availableParallelism() - 4) }, async () => {
+await Promise.all(Array.from({ length: jobLimit() }, async () => {
   for (let next = parallel.shift(); next; next = parallel.shift()) await run(next.shard, next.index)
 }))
 for (const entry of queue.slice(queue.length - exp.isolatedTests.length)) await run(entry.shard, entry.index)

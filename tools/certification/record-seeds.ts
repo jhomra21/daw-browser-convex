@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process"
 import { once } from "node:events"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
-import { availableParallelism } from "node:os"
 import path from "node:path"
+import { jobLimit } from "../jobs"
 import { expectationsFile, expectationsSchema, repoRoot } from "./expectations"
 import { formatSeedRecords, judgeSeeds, recordOf, seedArgv, seedRecordsFile, seedRecords, type SeedRecord } from "./seed-judge"
 
@@ -15,7 +15,7 @@ const total = Number(option("--seeds") ?? 1000)
 const out = path.resolve(option("--out") ?? path.join("/tmp/fast-cert", `record-seeds-${new Date().toISOString().replaceAll(":", "-")}`))
 const exp = expectationsSchema.parse(JSON.parse(readFileSync(expectationsFile, "utf8")))
 const fixtures: ("controller" | "hook")[] = ["controller", "hook"]
-const pool = Math.max(1, availableParallelism() - 4)
+const pool = jobLimit()
 
 const shards = fixtures.flatMap((fixture) => {
   const size = exp.seeds[fixture].shardCap

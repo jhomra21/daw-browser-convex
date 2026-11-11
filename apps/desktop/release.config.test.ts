@@ -15,6 +15,7 @@ import {
   nativeVst3ScannerArtifactName,
 } from "./native-release-artifacts"
 import { nativeVst3WorkerArtifactId } from "@daw-browser/plugin-host-protocol"
+import { jobLimit } from "../../tools/jobs"
 
 const artifactPaths: NativeReleaseArtifactPaths = {
   scannerPath: `/build/${nativeVst3ScannerArtifactName}`,
@@ -102,6 +103,7 @@ test("rebuilds every native artifact used by desktop packaging", () => {
         "daw-vst3-scanner",
         "daw-vst3-worker",
         "--parallel",
+        String(jobLimit()),
       ],
     },
     {
@@ -126,6 +128,7 @@ test("rebuilds every native artifact used by desktop packaging", () => {
         "--target",
         "daw-audio-host-macos",
         "--parallel",
+        String(jobLimit()),
       ],
     },
   ])

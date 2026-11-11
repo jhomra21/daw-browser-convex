@@ -1233,16 +1233,20 @@ const arrivedPeriod = (signal: readonly number[]) => {
     ? [index - 1 + -signal[index - 1] / (sample - signal[index - 1])] : [])
   return (crosses[crosses.length - 1] - crosses[0]) / (crosses.length - 1)
 }
-const dragged = (values: readonly number[], instrument: (value: number) => AudioCoreInstrumentState) => {
+type DragInstrument = (value: number, index?: number) => AudioCoreInstrumentState
+const dragged = (values: readonly number[], instrument: DragInstrument) => {
   const publications = [...values, ...Array<number>(dragSettleBlocks / dragStepBlocks).fill(values[values.length - 1])]
   return playDragged(publications.map(instrument), [heldDragKey], dragStepBlocks)
 }
-const steady = (value: number, values: readonly number[], instrument: (value: number) => AudioCoreInstrumentState) =>
+const steady = (value: number, values: readonly number[], instrument: DragInstrument) =>
   playDragged([instrument(value)], [heldDragKey], dragStepBlocks * (values.length - 1) + dragSettleBlocks)
 // Resonance 25 with the cutoff above the tone, so the peak never crosses it.
-const cutoffSynth = (filterCutoffHz: number): AudioCoreInstrumentState => ({ ...heldSynth, filterEnabled: true, filterResonance: 25, filterCutoffHz })
-const transposedSynth = (semitone: number): AudioCoreInstrumentState => ({
-  ...heldSynth, oscillators: [{ ...heldSynth.oscillators[0], semitone }, heldSynth.oscillators[1]] })
+const cutoffSynth = (filterCutoffHz: number): typeof heldSynth => ({ ...heldSynth, filterEnabled: true, filterResonance: 25, filterCutoffHz })
+const transposedSynth = (semitone: number): typeof heldSynth => ({
+  ...heldSynth, oscillators: [
+    { enabled: true, waveform: 0, level: 0.8, octave: 0, semitone, detuneCents: 0 },
+    { enabled: false, waveform: 0, level: 0, octave: 0, semitone: 0, detuneCents: 0 },
+  ] })
 
 // The longest run of exact zeros: what a cloud that went quiet leaves.
 const longestSilence = (signal: readonly number[]) => signal.reduce((state, sample) => {
@@ -1272,7 +1276,7 @@ test('B6f5 phase 6i a cutoff drag through repeated publications does not step be
 
 test('B6f5 phase 6i a cutoff drag through live events does not step beyond the steady instruments on the built core', async () => {
   const cutoffs = [12000, 6000, 3000, 1800]
-  const live = (filterCutoffHz: number): AudioCoreInstrumentState => ({
+  const live = (filterCutoffHz: number): typeof heldSynth => ({
     ...cutoffSynth(filterCutoffHz), parameterTargets: [{ id: 'synth.filterCutoffHz', target: 3 }] })
   const events = [...cutoffs.slice(1), ...Array<number>(dragSettleBlocks / dragStepBlocks).fill(1800)]
   const drag = await playDragged([live(cutoffs[0])], [heldDragKey], dragStepBlocks, events)
@@ -1293,7 +1297,7 @@ test('B6f5 phase 6i a pitch drag through repeated publications glides without st
 // already applied, so the glide goes on from where it was and does not jump to the value it is gliding to.
 test('B6f5 phase 6i a pitch drag carried across an instrument replacement keeps gliding on the built core', async () => {
   const semitones = [0, 2, 4, 4, 6]
-  const replaced = (value: number, index: number): AudioCoreInstrumentState => ({ ...transposedSynth(value), lfoWaveform: index === 3 ? 1 : 0 })
+  const replaced = (value: number, index = 0): typeof heldSynth => ({ ...transposedSynth(value), lfoWaveform: index === 3 ? 1 : 0 })
   const drag = await dragged(semitones, replaced)
   const arrived = await steady(6, semitones, transposedSynth)
   expect([widestPeriodStep(drag) < 1.025, Math.abs(arrivedPeriod(drag) / arrivedPeriod(arrived) - 1) < 0.002]).toEqual([true, true])

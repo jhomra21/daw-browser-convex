@@ -81,6 +81,31 @@ test('compensates completed section children in reverse after a later child fail
   expect(persisted).toEqual([0.9, 0.5])
 })
 
+test('refuses a section child when a recording take starts mid-replay and compensates the completed children', async () => {
+  const persisted: number[] = []
+  const reached: string[] = []
+  let checks = 0
+  await expect(execRedo(entry(), {
+    convexClient,
+    convexApi,
+    getTracks: () => tracks,
+    getHistoryEntries: () => [],
+    projectId: 'local:project-1',
+    userId: 'local',
+    persistLocalMix: (_projectId, _trackId, patch) => { if (patch.volume !== undefined) persisted.push(patch.volume) },
+    grantTrackWrite: () => {},
+    grantClipWrite: () => {},
+    refuseStep: (child) => {
+      reached.push(child.type)
+      checks += 1
+      return checks === 2 ? 'Recording target locked' : undefined
+    },
+    actions,
+  })).rejects.toThrow('Recording target locked')
+  expect(reached).toEqual(['track-volume', 'clip-timing'])
+  expect(persisted).toEqual([0.9, 0.5])
+})
+
 test('preserves the original section failure first when compensation fails', async () => {
   const persisted: number[] = []
   let thrown: unknown

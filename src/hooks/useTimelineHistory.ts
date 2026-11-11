@@ -389,6 +389,7 @@ export function useTimelineHistory(
           grantTrackWrite: options.grantTrackWrite,
           grantClipWrite: options.grantClipWrite,
           persistHistory: () => { manager.mutate(() => true) },
+          refuseStep: (child) => options.recordingTargetLock?.refuseHistory(child, mode),
           controlClient: createProjectControlClient({
             projectId: scope.projectId,
             userId: scope.userId,

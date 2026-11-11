@@ -77,6 +77,8 @@ export type Deps = {
   grantTrackWrite: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
   grantClipWrite: (clipId: string, scope?: OptimisticGrantScope | null) => void
   persistHistory?: () => void
+  // Rechecked before each section child: a recording take can start between the replay's awaits.
+  refuseStep?: (entry: HistoryEntry) => string | undefined
   controlClient?: ProjectControlClient
   actions: {
     insertLocalTrack: (track: Track, index: number) => void
@@ -771,6 +773,8 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
       const completed: HistoryEntry[] = []
       try {
         for (const child of entries) {
+          const refusal = deps.refuseStep?.(child)
+          if (refusal) throw new Error(refusal)
           if (trackDeleteContext && child.type === 'track-delete') {
             await applyTrackDeleteEntry(child, deps, direction, trackDeleteContext)
           } else {

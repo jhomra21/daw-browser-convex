@@ -333,6 +333,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   });
   const [renderTracks, setRenderTracks] = createSignal<Track[]>([]);
   const recordingTargetLock = createRecordingTargetLock(renderTracks);
+  onCleanup(recordingTargetLock.release);
   const [bufferVersion, setBufferVersion] = createSignal(0);
   const selection = useTimelineSelectionState({
     projectId,

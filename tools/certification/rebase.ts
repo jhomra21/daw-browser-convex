@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { z } from "zod"
-import { killedRemovals, measurement, provenanceProblems, removableBy, removalManifest, runResult, seedRecordProblems, unfinished, unpaired, weakened, type Provenance } from "./bless-rules"
+import { manifestProblems, measurement, provenanceProblems, removalManifest, removalOf, runResult, seedRecordProblems, unfinished, unpaired, weakened, type Provenance, type Removal } from "./bless-rules"
 import { applyChanges, applyRebase, diffJson, expectationsFile, expectationsSchema, getAt, rebasesDir, repoRoot, sameJson, sha256, type JsonValue, type Rebase } from "./expectations"
 import { overlayIdentity, scopeOf } from "./measure"
 import { formatSeedRecords, seedRecords, seedRecordsFile, seedRecordsKey } from "./seed-judge"
@@ -30,7 +30,7 @@ const fail = (message: string, detail?: JsonValue): never => {
 }
 
 if (!/^[\w-]+$/.test(name) || (blessing ? reverts.length > 0 || args.includes("--rebase") : reverts.length === 0) || reverts.some((entry) => entry.file === "" || !existsSync(entry.entryCopy))) {
-  console.error("usage: fast-cert.ts --bless <name> [scope flags] [--allow-rise <native count field>…] [--allow-rejection <fixture>:<seed>:<class>…] [--allow-removal <manifest.json>] [--reuse] [--out dir]\n       fast-cert.ts --rebase <name> --revert <repo-relative path>=<entry copy> [--revert …] [scope flags] [--reuse] [--out dir]")
+  console.error("usage: fast-cert.ts --bless <name> [scope flags] [--allow-rise <native count field>…] [--allow-rejection <fixture>:<seed>:<class>…] [--reuse] [--out dir]\n       fast-cert.ts --rebase <name> --revert <repo-relative path>=<entry copy> [--revert …] [--allow-removal <manifest.json>] [scope flags] [--reuse] [--out dir]")
   process.exit(2)
 }
 mkdirSync(out, { recursive: true })
@@ -42,15 +42,18 @@ const rejectionNamesFor = (seedPath: string[]) => allowRejection.flatMap(({ matc
   match && match[1] === seedPath[1] && `#${Number(match[2]) - 1}` === seedPath[2] ? [match[3] ?? ""] : [])
 const badRejectionFlag = allowRejection.find(({ match }) => !match)
 if (badRejectionFlag) fail(`--allow-rejection ${badRejectionFlag.spec} is not <controller|hook>:<seed>:<class>`)
-// `--allow-removal <manifest.json>`: tests the parent ruled out (see removalManifest in bless-rules.ts). A removed test that is a killer refuses the whole bless.
+// `--allow-removal <manifest.json>`: tests the parent ruled out (see removalManifest in bless-rules.ts). It needs the paired revert run:
+// the reverted log is what each job ran before, the live log what it runs now, and only the tests the manifest names may be lost between them.
+// A removed test that is a killer, or a duplicate entry, refuses the whole run.
 const removalPath = args.includes("--allow-removal") ? option("--allow-removal") ?? "" : undefined
 const removalText = removalPath === undefined ? undefined : existsSync(path.resolve(removalPath)) ? readFileSync(path.resolve(removalPath), "utf8") : fail(`--allow-removal ${removalPath} names no file`)
 const removals = removalText === undefined ? undefined : removalManifest.safeParse(JSON.parse(removalText))
 if (removals && !removals.success) fail(`--allow-removal ${removalPath} is not { ruling, removed: [{ file, test }] }`)
-const removed = removals?.success ? removals.data.removed : []
-const killed = removals?.success ? killedRemovals(removals.data, expectationsSchema.parse(JSON.parse(readFileSync(expectationsFile, "utf8")))) : []
-if (killed.length > 0) fail(`a killer may not be removed: ${killed.join("; ")}`, killed)
-if (removals?.success && !existsSync(path.join(repoRoot, removals.data.ruling))) fail(`the ruling ${removals.data.ruling} does not exist`)
+if (removals && blessing) fail("--allow-removal needs the paired revert run: use --rebase … --revert")
+const unsound = removals?.success ? manifestProblems(removals.data, expectationsSchema.parse(JSON.parse(readFileSync(expectationsFile, "utf8"))), (file) => existsSync(path.join(repoRoot, file))) : []
+if (unsound.length > 0) fail(`the removal manifest is refused: ${unsound.join("; ")}`, unsound)
+const rulingPath = removals?.success ? path.join(repoRoot, removals.data.ruling) : undefined
+if (rulingPath !== undefined && !existsSync(rulingPath)) fail(`the ruling ${removals?.success ? removals.data.ruling : ""} does not exist`)
 // The expectations with seed-records.json beside them under `seedRecords`, so seed records are observed, diffed and refused like any other field.
 const seedBaseline = z.json().parse(JSON.parse(readFileSync(seedRecordsFile, "utf8")))
 const baselineText = readFileSync(expectationsFile, "utf8")
@@ -83,7 +86,13 @@ const pass = (label: "revert" | "live") => {
   if (!result.success) return fail(`the ${label} run wrote no result.json`)
   const problems = [...unfinished(label, child?.status, measured.data, result.data), ...provenanceProblems(label, measured.data, wanted(label === "revert"), label === "revert", currentHash)]
   if (problems.length > 0) return fail(problems.join("; "), problems)
-  return { dir, seconds: reused ? result.data.wallSeconds : (performance.now() - started) / 1000, resultSha256: sha256(readFileSync(path.join(dir, "result.json"))), ...measured.data }
+  // Each job's latest log, by job id: the identity diff of a removal reads what the job printed.
+  const logs = new Map(z.object({ gates: z.array(z.object({ id: z.string(), log: z.string() })) }).parse(JSON.parse(readFileSync(path.join(dir, "result.json"), "utf8"))).gates.map((gate) => [gate.id, gate.log]))
+  return { dir, logs, seconds: reused ? result.data.wallSeconds : (performance.now() - started) / 1000, resultSha256: sha256(readFileSync(path.join(dir, "result.json"))), ...measured.data }
+}
+const logOf = (run: ReturnType<typeof pass>, job: string) => {
+  const file = run.logs.get(job)
+  return file !== undefined && existsSync(file) ? readFileSync(file, "utf8") : fail(`the ${run.dir} run kept no log for ${job}`)
 }
 const observations = (run: ReturnType<typeof pass>) => run.jobs.flatMap((job) => job.observed.map((entry) => ({ ...entry, job: job.id, reaches: job.reaches })))
 
@@ -111,8 +120,12 @@ if (reverted) {
   const lonely = unpaired(liveObserved, observations(reverted))
   if (lonely.length > 0) fail(`${lonely.length} live observations have no reverted observation, so nothing reproduced them: ${lonely.slice(0, 5).join(" | ")}`, lonely)
 }
-// The argv of the gate or arm an observed path belongs to (its judge or expect sits one level below).
-const commandArgv = (observed: string[]) => z.array(z.string()).safeParse(getAt(baseline, [...observed.slice(0, -1), "command", "argv"])).data ?? []
+// Every paired job's identity diff, whether or not an expectation moved: a passing test the live run lost must be a manifest entry.
+const removalByJob = reverted && removals?.success
+  ? new Map(live.jobs.map((job): [string, Removal] => [job.id, removalOf(logOf(reverted, job.id), logOf(live, job.id), removals.data.removed)]))
+  : undefined
+const unadmitted = removalByJob === undefined ? [] : [...removalByJob].flatMap(([job, removal]) => removal.problems.map((problem) => `${job}: ${problem}`))
+if (unadmitted.length > 0) fail(`the removal is not admissible: ${unadmitted.slice(0, 5).join(" | ")}`, unadmitted)
 for (const entry of liveObserved) {
   const old = getAt(baseline, entry.path)
   const moved = diffJson(old, entry.value, entry.path)
@@ -121,7 +134,8 @@ for (const entry of liveObserved) {
   const reasons = [
     ...(old === undefined ? ["the expectations hold no such field"] : []),
     ...(reverted && !entry.reaches ? ["the overlay cannot reach this job, so its change is not attributed by the revert"] : []),
-    ...(seedRecord ? seedRecordProblems(old, entry.value, allowRise, rejectionNamesFor(entry.path)) : weakened(entry.path, old, entry.value, z.string().safeParse(getAt(arms, [entry.path[2] ?? "", "role"])).data, removableBy(commandArgv(entry.path), removed))),
+    ...(seedRecord ? seedRecordProblems(old, entry.value, allowRise, rejectionNamesFor(entry.path)) : weakened(entry.path, old, entry.value, z.string().safeParse(getAt(arms, [entry.path[2] ?? "", "role"])).data,
+      removalByJob?.get(entry.job))),
   ]
   if (reasons.length > 0) refused.push({ job: entry.job, path: entry.path, reasons })
   // A seed record's changes are paths into seed-records.json, so they leave the `seedRecords` segment behind.
@@ -154,7 +168,8 @@ const rebase: Rebase = {
     // A rejection moved only because the parent ruled it legitimate; the record cites that ruling.
     allowedRejections: allowRejection.map(({ spec }) => spec),
     rejectionRuling: allowRejection.length > 0 ? "acceptance-reports/ae-08-phase-5-2026-10-18/PARENT-RULING-SEED-274.md" : null,
-    allowedRemovals: removals?.success && removalPath !== undefined ? { manifest: path.relative(repoRoot, path.resolve(removalPath)), manifestSha256: sha256(removalText ?? ""), ruling: removals.data.ruling, tests: removed.length } : null,
+    allowedRemovals: removals?.success && removalPath !== undefined && rulingPath !== undefined
+      ? { manifest: path.relative(repoRoot, path.resolve(removalPath)), manifestSha256: sha256(removalText ?? ""), ruling: removals.data.ruling, rulingSha256: sha256(readFileSync(rulingPath)), tests: removals.data.removed.length } : null,
     scope: scope.join(" ") || "default",
     provenance: live.provenance,
     expectationsSha256: baselineSha256,

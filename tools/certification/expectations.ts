@@ -283,6 +283,23 @@ export const failedTests = (log: string) =>
 
 export const leafName = (name: string) => name.split(" > ").at(-1) ?? name
 
+// A `bun test` file header (`<file>.ts:`), keyed by its path without a leading `./`, so every reader of a log keys a file the same way.
+const fileHeader = (line: string) => /^\S.*\.(ts|tsx):$/.test(line) ? line.slice(0, -1).replace(/^\.\//, "") : undefined
+// The passing tests of a `bun test` log by file, in log order: the `(pass) <qualified name>` lines under each file header, without the duration.
+// A header that repeats appends its tests to the file's.
+export const passedTests = (log: string) => {
+  const files = new Map<string, string[]>()
+  let current: string[] | undefined
+  for (const line of log.split("\n")) {
+    const file = fileHeader(line)
+    if (file !== undefined) {
+      current = files.get(file) ?? []
+      files.set(file, current)
+    } else if (current && line.startsWith("(pass) ")) current.push(line.slice("(pass) ".length).replace(/ \[[\d.]+m?s\]$/, ""))
+  }
+  return files
+}
+
 const fuzzOutcome = z.object({ status: z.string().nullable(), failures: z.array(fuzzFailure) })
 
 export const fuzzFailures = (summaryText: string): z.infer<typeof fuzzOutcome> => {
@@ -330,9 +347,10 @@ export const perFileCounts = (log: string) => {
   const files = new Map<string, Counts>()
   let current: Counts | undefined
   for (const line of log.split("\n")) {
-    if (/^\S.*\.(ts|tsx):$/.test(line)) {
-      current = { pass: 0, skip: 0, fail: 0 }
-      files.set(line.slice(0, -1), current)
+    const file = fileHeader(line)
+    if (file !== undefined) {
+      current = files.get(file) ?? { pass: 0, skip: 0, fail: 0 }
+      files.set(file, current)
     } else if (current && line.startsWith("(pass) ")) current.pass++
     else if (current && line.startsWith("(skip) ")) current.skip++
     else if (current && line.startsWith("(fail) ")) current.fail++

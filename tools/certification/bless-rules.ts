@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { z } from "zod"
-import { expectationsSchema, expectationsFile, sameJson, type JsonValue } from "./expectations"
+import { expectationsSchema, expectationsFile, repoRoot, sameJson, type JsonValue } from "./expectations"
 import { measureArm } from "./measure"
 import { seedRecord, type SeedRecord } from "./seed-judge"
 
@@ -41,21 +41,41 @@ const added = (was: string[], now: string[]) => {
   })
 }
 
+// A ruled test removal (`--allow-removal <manifest>`): the parent ruled these tests out in `ruling`, and the bless may record the
+// count drop they cause.
+export const removalManifest = z.object({ ruling: z.string(), removed: z.array(z.object({ file: z.string(), test: z.string() })) })
+export type RemovalManifest = z.infer<typeof removalManifest>
+// A removed test may not be a killer: no arm may list it among the failures it expects.
+export const killedRemovals = (manifest: RemovalManifest, exp: { mutations: { arms: { expect: { fails: string[] | null } }[] } }) => {
+  const killers = new Set(exp.mutations.arms.flatMap((arm) => arm.expect.fails ?? []))
+  return manifest.removed.filter((entry) => killers.has(entry.test)).map((entry) => `${entry.file}: removed test "${entry.test}" is a killer an arm expects to fail`)
+}
+// Manifest entries per file that a command runs: a test file named in argv, or one under a directory named there.
+export const removableBy = (argv: string[], removed: RemovalManifest["removed"]) => {
+  const targets = argv.includes("test") ? argv.map((value) => path.relative(repoRoot, path.resolve(repoRoot, value))) : []
+  const run = removed.map((entry) => entry.file).filter((file) => targets.some((target) => file === target || file.startsWith(`${target}/`)))
+  return Object.fromEntries([...new Set(run)].map((file) => [file, run.filter((other) => other === file).length]))
+}
+// Removable test counts by file for the job under judgement; a count drop beyond them is refused.
+export type Removable = Record<string, number>
+
 // B2: a test or defect count may not fall, a skip may not appear, and no verdict field (exit, failing set, status) may move.
-const lostWitnesses = (was: JsonValue | undefined, now: JsonValue | undefined, what: string) => {
+// A fall is allowed only as a drop in `pass` of at most `allowed` (the removable tests this job runs) with skip and fail unchanged.
+const lostWitnesses = (was: JsonValue | undefined, now: JsonValue | undefined, what: string, allowed = 0) => {
   const before = tally(was)
   const after = tally(now)
   if (!before) return []
   if (!after) return [`${what} counts disappeared`]
-  return [...(sum(after) < sum(before) ? [`${what}: tests were removed (${sum(before)} -> ${sum(after)})`] : []), ...(after.skip > before.skip ? [`${what}: tests were skipped`] : [])]
+  const ruled = after.fail === before.fail && after.skip === before.skip && before.pass - after.pass <= allowed
+  return [...(sum(after) < sum(before) && !ruled ? [`${what}: tests were removed (${sum(before)} -> ${sum(after)})`] : []), ...(after.skip > before.skip ? [`${what}: tests were skipped`] : [])]
 }
-export const weakened = (at: string[], old: JsonValue | undefined, next: JsonValue, role: string | undefined) => {
+export const weakened = (at: string[], old: JsonValue | undefined, next: JsonValue, role: string | undefined, removable: Removable = {}) => {
   const was = record.safeParse(old).data ?? {}
   const now = record.safeParse(next).data ?? {}
   const problems: string[] = []
   if (!sameJson(was.exit, now.exit)) problems.push("exit moved")
   if (was.kind === "tests" && !sameJson(was.fails, now.fails)) problems.push("failing tests moved")
-  problems.push(...lostWitnesses(was.counts, now.counts, "counts"))
+  problems.push(...lostWitnesses(was.counts, now.counts, "counts", Object.values(removable).reduce((total, count) => total + count, 0)))
   const floor = (field: string) => ({ was: z.number().safeParse(was[field]).data, now: z.number().safeParse(now[field]).data })
   const rejected = floor("rejected")
   if (rejected.was !== undefined && !(rejected.now !== undefined && rejected.now >= rejected.was)) problems.push("fewer rejected defects")
@@ -73,7 +93,7 @@ export const weakened = (at: string[], old: JsonValue | undefined, next: JsonVal
       if (!(file in after)) problems.push(`engine file ${file} no longer runs`)
       else {
         if (tally(counts)?.fail !== tally(after[file])?.fail) problems.push(`engine file ${file} failing count moved`)
-        problems.push(...lostWitnesses(counts, after[file], `engine file ${file}`))
+        problems.push(...lostWitnesses(counts, after[file], `engine file ${file}`, removable[file] ?? 0))
       }
     }
   }
@@ -171,6 +191,16 @@ if (import.meta.main) {
     ["B2 a lost witness file", weakened(["gates"], { kind: "engine", exit: 0, files: { f: { pass: 3, skip: 0, fail: 0 } } }, { kind: "engine", exit: 0, files: {} }, undefined).length > 0],
     ["B2 a lost failure in a mutant arm", weakened(["mutations", "arms", "id=m", "expect"], { exit: 1, fails: ["t"] }, { exit: 1, fails: [] }, "mutant").length > 0],
     ["B2 allows additive tests", weakened(["gates"], tests, { ...tests, counts: { pass: 12, skip: 0, fail: 1 } }, undefined).length === 0],
+    ["B2 removal: a named removal within its count passes", weakened(["gates"], tests, { ...tests, counts: { pass: 8, skip: 0, fail: 1 } }, undefined, { "a.test.ts": 2 }).length === 0],
+    ["B2 removal: a drop larger than the named count is refused", weakened(["gates"], tests, { ...tests, counts: { pass: 7, skip: 0, fail: 1 } }, undefined, { "a.test.ts": 2 }).length > 0],
+    ["B2 removal: a drop in a job that runs no manifest file is refused", weakened(["gates"], tests, { ...tests, counts: { pass: 9, skip: 0, fail: 1 } }, undefined, {}).length > 0],
+    ["B2 removal: a skip appearing is still refused", weakened(["gates"], tests, { ...tests, counts: { pass: 8, skip: 1, fail: 1 } }, undefined, { "a.test.ts": 2 }).length > 0],
+    ["B2 removal: a moved failing set is still refused", weakened(["gates"], tests, { ...tests, counts: { pass: 8, skip: 0, fail: 1 }, fails: ["b"] }, undefined, { "a.test.ts": 2 }).length > 0],
+    ["B2 removal: a fail count that moved with the drop is refused", weakened(["gates"], tests, { ...tests, counts: { pass: 9, skip: 0, fail: 0 } }, undefined, { "a.test.ts": 2 }).length > 0],
+    ["B2 removal: an engine file drop is held to that file's own count", weakened(["gates"], { kind: "engine", exit: 0, files: { f: { pass: 3, skip: 0, fail: 0 }, g: { pass: 3, skip: 0, fail: 0 } } }, { kind: "engine", exit: 0, files: { f: { pass: 2, skip: 0, fail: 0 }, g: { pass: 2, skip: 0, fail: 0 } } }, undefined, { f: 1 }).length === 1],
+    ["B2 removal: a named killer test refuses the bless", killedRemovals({ ruling: "r.md", removed: [{ file: "a.test.ts", test: "t1" }] }, { mutations: { arms: [{ expect: { fails: ["t1"] } }] } }).length > 0],
+    ["B2 removal: a manifest with no killer passes", killedRemovals({ ruling: "r.md", removed: [{ file: "a.test.ts", test: "t1" }] }, { mutations: { arms: [{ expect: { fails: ["t2"] } }, { expect: { fails: null } }] } }).length === 0],
+    ["B2 removal: only the files a command runs are removable", sameJson(removableBy(["bun", "test", `${repoRoot}/src/a.test.ts`, `${repoRoot}/lib`], [{ file: "src/a.test.ts", test: "x" }, { file: "src/a.test.ts", test: "y" }, { file: "lib/b.test.ts", test: "z" }, { file: "other/c.test.ts", test: "w" }]), { "src/a.test.ts": 2, "lib/b.test.ts": 1 })],
     ["B2 seed record: a moved status", seedRecordProblems(seed, { ...seed, status: "fail" }, []).length > 0],
     ["B2 seed record: a moved failure", seedRecordProblems(seed, { ...seed, failures: ["I1|x|y"] }, []).length > 0],
     ["B2 seed record: a moved rejection", seedRecordProblems(seed, { ...seed, rejections: ["r|c|d"] }, []).length > 0],

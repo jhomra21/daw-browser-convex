@@ -167,6 +167,7 @@ type UseTrackRecordingReturn = {
   previewStartSec: Accessor<number | null>
   recordingTrackId: Accessor<Track['id'] | null>
   toggleRecordArm: (trackId: Track['id']) => void
+  clearRecordArmForTrack: (trackId: Track['id']) => void
   reconcileRecordArm: (nextTracks: Track[]) => void
   startRecording: (trackId: Track['id']) => Promise<StartRecordingResult>
   stopRecording: (stopTransport?: boolean) => Promise<void>
@@ -1260,6 +1261,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
     previewStartSec,
     recordingTrackId: currentRecordingTrackId,
     toggleRecordArm,
+    clearRecordArmForTrack,
     reconcileRecordArm,
     startRecording,
     stopRecording,

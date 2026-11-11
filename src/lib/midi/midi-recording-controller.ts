@@ -16,7 +16,8 @@ import {
   releaseTrackRecordingLock,
   startRecordingLockHeartbeat,
 } from '~/lib/track-recording-session'
-import { keptOnNewTrackNotice, type RecordingTargetLock } from '~/lib/track-recording-target'
+import { finalizeAutoCreatedTrackFailure, keptOnNewTrackNotice, type RecordingTargetLock } from '~/lib/track-recording-target'
+import type { convexApi, convexClient } from '~/lib/convex'
 import type { MidiAccessContextValue } from '~/context/midi-access'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -38,6 +39,10 @@ export type MidiTrackRecordingControllerOptions = {
   setTrackLock: (trackId: string, lockedBy: string | null) => void
   clearTrackLock: (trackId: string) => void
   createTrackForRecording: () => Promise<Track | null>
+  convexClient: typeof convexClient
+  convexApi: typeof convexApi
+  removeLocalTrack: (trackId: Track['id']) => void
+  clearRecordArmForTrack: (trackId: Track['id']) => void
   insertLocalClip: (trackId: string, clip: Track['clips'][number]) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
   selection: Pick<TimelineSelectionController, 'selectPrimaryClip'>
@@ -253,16 +258,33 @@ export const createMidiTrackRecordingController = (
       midi,
     }
     let clipId: string | null
-    if (take.local) {
-      clipId = (await createLocalTimelineRepository(take.projectId).createClip({ trackId: track.id, ...clip })).id
-    } else {
-      const result = await publishSharedTimelineOperation(take.projectId, {
-        kind: 'clips.create',
-        payload: { trackId: track.id, ...clip, clipKind: 'midi', operationId: crypto.randomUUID() },
+    try {
+      if (take.local) {
+        clipId = (await createLocalTimelineRepository(take.projectId).createClip({ trackId: track.id, ...clip })).id
+      } else {
+        const result = await publishSharedTimelineOperation(take.projectId, {
+          kind: 'clips.create',
+          payload: { trackId: track.id, ...clip, clipKind: 'midi', operationId: crypto.randomUUID() },
+        })
+        clipId = isJsonString(result) ? result : null
+      }
+      if (!clipId) throw new Error('MIDI clip creation was rejected.')
+    } catch (error) {
+      // The new track holds no clip, so it is removed with the audio path's cleanup before the failure reaches settle.
+      await finalizeAutoCreatedTrackFailure({
+        track,
+        tracks: options.tracks(),
+        projectId: take.projectId,
+        userId: take.userId,
+        historyPush: options.historyPush,
+        convexClient: options.convexClient,
+        convexApi: options.convexApi,
+        removeLocalTrack: options.removeLocalTrack,
+        clearRecordArmForTrack: options.clearRecordArmForTrack,
+        emit: options.notify,
       })
-      clipId = isJsonString(result) ? result : null
+      throw error
     }
-    if (!clipId) throw new Error('MIDI clip creation was rejected.')
     options.insertLocalClip(track.id, buildLocalClip({ id: clipId, clip }))
     options.historyPush(buildTrackClipCreateHistoryEntry({
       projectId: take.projectId, track, tracks: options.tracks(), clipId, clip,

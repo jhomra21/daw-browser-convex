@@ -4,6 +4,7 @@ import { isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { buildTrackDeleteMutationInput } from '~/lib/track-mutation-args'
 import { canTrackReceiveAudioClip } from '@daw-browser/timeline-core/track-routing'
+import { applyRoutingPatches, projectTrackStructure, type ClosureTrack, type RoutingPatch } from '~/lib/undo/project-track-structure'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { convexApi, convexClient } from '~/lib/convex'
@@ -23,20 +24,6 @@ export const RECORDING_TARGET_LOCKED_BADGE = 'Recording target locked'
 export const RECORDING_TARGET_LOCKED_REASON = 'Finish recording to delete this track or change its routing.'
 
 export type RecordingTargetLockState = 'starting' | 'recording' | 'finishing' | 'released'
-
-type ClosureTrack = {
-  id: string
-  groupId?: string | null
-  outputTargetId?: string | null
-  sends?: readonly { targetId: string }[]
-}
-
-type RoutingPatch = {
-  trackId: string
-  groupId?: string | null
-  outputTargetId?: string | null
-  sends?: readonly { targetId: string }[]
-}
 
 // What a take is bound to: the target, its group and output chain, and the destinations of its sends.
 // A missing track is part of the key, so a delete changes it like a reroute does.
@@ -63,28 +50,6 @@ const targetClosure = (tracks: readonly ClosureTrack[], targetId: string) => {
   }
   return { key: entries.join('\n'), ids }
 }
-
-export const applyRoutingPatches = (tracks: readonly ClosureTrack[], patches: readonly RoutingPatch[]): ClosureTrack[] => {
-  const patchByTrackId = new Map(patches.map((patch) => [patch.trackId, patch]))
-  return tracks.map((track) => {
-    const patch = patchByTrackId.get(track.id)
-    if (!patch) return track
-    return {
-      ...track,
-      groupId: Object.hasOwn(patch, 'groupId') ? patch.groupId : track.groupId,
-      outputTargetId: Object.hasOwn(patch, 'outputTargetId') ? patch.outputTargetId : track.outputTargetId,
-      sends: Object.hasOwn(patch, 'sends') ? patch.sends : track.sends,
-    }
-  })
-}
-
-const trackStructureHistory = new Set<HistoryEntry['type']>([
-  'track-create', 'track-delete', 'track-routing', 'track-group', 'track-ungroup', 'track-reorder',
-])
-
-const touchesTrackStructure = (entry: HistoryEntry): boolean => entry.type === 'section-edit'
-  ? entry.data.entries.some(touchesTrackStructure)
-  : trackStructureHistory.has(entry.type)
 
 // One lock per timeline. A take holds it from the moment its target is chosen until its clip is saved or discarded.
 // Every refusal is synchronous and a refused edit never stops the take.
@@ -128,9 +93,9 @@ export const createRecordingTargetLock = (tracks: Accessor<readonly ClosureTrack
     refuseTransition,
     refuseChange,
     refuseDelete: (trackIds: Iterable<string>) => refuseChange([], trackIds),
-    refuseHistory: (entry: HistoryEntry) => targetId() !== null && touchesTrackStructure(entry)
-      ? RECORDING_TARGET_LOCKED_REASON
-      : undefined,
+    refuseHistory: (entry: HistoryEntry, direction: 'undo' | 'redo') => (
+      refuseTransition(tracks(), projectTrackStructure(entry, direction, tracks()))
+    ),
   }
 }
 

@@ -247,7 +247,7 @@ export function useTimelineHistory(
 
       const entry = mode === 'undo' ? manager.reserveUndo() : manager.reserveRedo()
       if (!entry) return
-      const refusal = options.recordingTargetLock?.refuseHistory(entry)
+      const refusal = options.recordingTargetLock?.refuseHistory(entry, mode)
       if (refusal) {
         if (mode === 'undo') manager.restoreUndo(entry)
         else manager.restoreRedo(entry)

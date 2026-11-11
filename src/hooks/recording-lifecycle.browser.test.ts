@@ -1914,6 +1914,16 @@ window.lockScenarios = async () => {
     hook.toggleRecordArm('track-audio')
     return { hook, lock, calls, states, startGate, startEntered, stopEntered, stopGate, dispose }
   }
+  const entry = (type, data) => ({ type, projectId: 'project:test', data })
+  const sectionEdit = (...entries) => entry('section-edit', { entries })
+  const routingEntry = (trackRef, fromOutput, toOutput) => entry('track-routing', {
+    trackRef, from: { sends: [], outputTargetRef: fromOutput }, to: { sends: [], outputTargetRef: toOutput },
+  })
+  const createEntry = (trackRef) => entry('track-create', { trackRef, index: 0 })
+  const deleteEntry = (trackRef) => entry('track-delete', { track: { trackRef, index: 0, name: trackRef, volume: 1, routing: { sends: [] } }, clips: [] })
+  const reorderEntry = (trackRef, fromGroupRef, toGroupRef) => entry('track-reorder', {
+    patches: [{ trackRef, fromIndex: 0, toIndex: 0, fromGroupRef, toGroupRef }],
+  })
   const refusals = (lock) => ({
     deleteTarget: lock.refuseDelete(['track-audio']),
     deleteGroup: lock.refuseDelete(['group-a', 'track-audio']),
@@ -1924,20 +1934,29 @@ window.lockScenarios = async () => {
     ungroup: lock.refuseChange([{ trackId: 'track-audio', groupId: undefined }, { trackId: 'track-other', groupId: undefined }]),
     rerouteOther: lock.refuseChange([{ trackId: 'track-other', outputTargetId: 'return-a' }]),
     groupOther: lock.refuseChange([{ trackId: 'track-other', groupId: 'group-a', outputTargetId: 'group-a' }]),
-    undoRoute: lock.refuseHistory({ type: 'section-edit', projectId: 'project:test', data: { entries: [
-      { type: 'track-routing', projectId: 'project:test', data: {} },
-    ] } }),
-    undoClip: lock.refuseHistory({ type: 'clip-timing', projectId: 'project:test', data: {} }),
+    undoRoute: lock.refuseHistory(sectionEdit(routingEntry('track-audio', 'return-a', 'group-a')), 'undo'),
+    redoRoute: lock.refuseHistory(routingEntry('track-audio', 'group-a', 'return-a'), 'redo'),
+    undoCreate: lock.refuseHistory(createEntry('track-audio'), 'undo'),
+    undoReorder: lock.refuseHistory(reorderEntry('track-audio', undefined, 'group-a'), 'undo'),
+    undoOtherCreate: lock.refuseHistory(createEntry('track-other'), 'undo'),
+    undoOtherRoute: lock.refuseHistory(routingEntry('track-other', 'return-a', 'group-a'), 'undo'),
+    undoOtherReorder: lock.refuseHistory(reorderEntry('track-other', undefined, 'group-a'), 'undo'),
+    undoOtherSection: lock.refuseHistory(sectionEdit(createEntry('track-other'), routingEntry('track-other', 'return-a', undefined)), 'undo'),
+    redoOtherDelete: lock.refuseHistory(deleteEntry('track-other'), 'redo'),
+    undoClip: lock.refuseHistory({ type: 'clip-timing', projectId: 'project:test', data: {} }, 'undo'),
     commitDelete: lock.refuseTransition(tracks, tracks.filter(track => track.id !== 'track-audio')),
     commitReroute: lock.refuseTransition(tracks, tracks.map(track => track.id === 'track-audio' ? { ...track, outputTargetId: 'return-a' } : track)),
     commitUnrelated: lock.refuseTransition(tracks, [...tracks.filter(track => track.id !== 'track-other'), { ...tracks[3], outputTargetId: 'return-a' }]),
   })
   const expectLocked = (found) => found.deleteTarget === reason && found.deleteGroup === reason
     && found.deleteOutputRoute === reason && found.reroute === reason && found.group === reason
-    && found.ungroup === reason && found.undoRoute === reason && found.commitDelete === reason
+    && found.ungroup === reason && found.undoRoute === reason && found.redoRoute === reason
+    && found.undoCreate === reason && found.undoReorder === reason && found.commitDelete === reason
     && found.commitReroute === reason
   const expectLive = (found) => found.deleteOther === undefined && found.rerouteOther === undefined
     && found.groupOther === undefined && found.undoClip === undefined && found.commitUnrelated === undefined
+    && found.undoOtherCreate === undefined && found.undoOtherRoute === undefined && found.undoOtherReorder === undefined
+    && found.undoOtherSection === undefined && found.redoOtherDelete === undefined
 
   for (const native of [false, true]) {
     const backend = native ? 'native' : 'portable'

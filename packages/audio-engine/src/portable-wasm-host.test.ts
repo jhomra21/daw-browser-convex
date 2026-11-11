@@ -1063,9 +1063,11 @@ const heldSynth: Extract<AudioCoreInstrumentState, { kind: 'synth' }> = {
   ampAttackMs: 0, ampDecayMs: 0, ampSustain: 0.8, ampReleaseMs: 1, lfoEnabled: false, lfoWaveform: 0, lfoRateHz: 1,
   lfoPitchCents: 0, lfoFilterOctaves: 0, lfoAmplitude: 0, lfoPan: 0, outputGain: 0.8, outputPan: 0,
 }
-const heldSampler = (kind: 'sampler' | 'drum-rack', zoneGain: number, voiceCapacity: number, filterCutoffHz = 8000): AudioCoreInstrumentState => ({
+const heldSampler = (
+  kind: 'sampler' | 'drum-rack', zoneGain: number, voiceCapacity: number, filterCutoffHz = 8000, filterMode: 'lowpass' | 'highpass' = 'lowpass',
+): AudioCoreInstrumentState => ({
   version: 1, kind, voiceCapacity, outputLayout: 'stereo', ampAttackMs: 0, ampDecayMs: 0, ampSustain: 1, ampReleaseMs: 1,
-  filterEnabled: false, filterMode: 'lowpass', filterCutoffHz, filterResonance: 0.7, filterEnvelopeAmount: 0,
+  filterEnabled: false, filterMode, filterCutoffHz, filterResonance: 0.7, filterEnvelopeAmount: 0,
   filterAttackMs: 0, filterDecayMs: 0, filterSustain: 1, filterReleaseMs: 0, lfoEnabled: false, lfoRateHz: 1,
   lfoPitchCents: 0, lfoFilterHz: 0, lfoAmplitude: 0, lfoPan: 0, retrigger: false,
   zones: heldNoteKeys.map((key) => ({
@@ -1074,12 +1076,14 @@ const heldSampler = (kind: 'sampler' | 'drum-rack', zoneGain: number, voiceCapac
     loopStartFrame: 0, loopEndFrame: sineFrames, crossfadeFrameCount: 0, chokeGroup: 0,
   })),
 })
-// Renders 20 blocks of the first configuration, adopts the second (or keeps the first when `adopt` is false) and renders 12
-// more, with `keys` held from frame 0. Returns the left channel from the publication frame on.
-const playHeldNotes = async (
-  states: readonly [AudioCoreInstrumentState, AudioCoreInstrumentState],
+// Renders 20 blocks of the first configuration, adopts each later one in turn rendering `blocksPerState` blocks after each
+// (a lone configuration renders `blocksPerState` more), with `keys` held from frame 0. Returns the left channel from the first
+// publication frame on.
+const playDragged = async (
+  states: readonly AudioCoreInstrumentState[],
   keys: readonly number[],
-  adopt: boolean,
+  blocksPerState: number,
+  liveCutoffs: readonly number[] = [],
 ) => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
@@ -1100,17 +1104,37 @@ const playHeldNotes = async (
   host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
     revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: notes } })
   for (let block = 0; block < 20; block += 1) renderLeft(host)
-  if (adopt) expect(adoptRevision(host, messages, graph(2, states[1]), notes)).toEqual({ installed: 'installed', published: 'published' })
-  return Array.from({ length: 12 }, () => renderLeft(host)).flat()
+  const rendered: number[][] = []
+  const renderBlocks = () => { for (let block = 0; block < blocksPerState; block += 1) rendered.push(renderLeft(host)) }
+  if (states.length === 1 && liveCutoffs.length === 0) renderBlocks()
+  states.slice(1).forEach((state, index) => {
+    expect(adoptRevision(host, messages, graph(index + 2, state), notes)).toEqual({ installed: 'installed', published: 'published' })
+    renderBlocks()
+  })
+  // The cutoff is a live target (3): each value is an event at the head of the block, as a knob drag delivers it.
+  liveCutoffs.forEach((value, index) => {
+    host.handleMessage({ version: 2, type: 'instrument-parameters', requestId: 100 + index, revision: 1, sequence: index + 1, epoch: 1,
+      events: [{ nodeId: 'track', type: 'parameter', noteId: 1, sequence: index + 1, frameOffset: 0, channel: 0, note: 3, value }] })
+    renderBlocks()
+  })
+  return rendered.flat()
 }
-const settledDeviation = (edited: readonly number[], reference: readonly number[]) =>
-  Math.max(...edited.slice(2 * 128).map((sample, index) => Math.abs(sample - reference[index + 2 * 128])))
+const playHeldNotes = (
+  states: readonly [AudioCoreInstrumentState, AudioCoreInstrumentState],
+  keys: readonly number[],
+  adopt: boolean,
+  blocks = 12,
+) => playDragged(adopt ? states : [states[0]], keys, blocks)
+const settledDeviation = (edited: readonly number[], reference: readonly number[], from = 2 * 128) =>
+  Math.max(...edited.slice(from).map((sample, index) => Math.abs(sample - reference[index + from])))
 const peakOf = (signal: readonly number[]) => Math.max(...signal.map(Math.abs))
 
+// Discrete edits (a waveform or filter mode no knob can slew) replace the instrument; the values that move in a knob drag
+// do not, and have their own cases below.
 const heldEditCases: ReadonlyArray<readonly [string, AudioCoreInstrumentState, AudioCoreInstrumentState]> = [
-  ['synth', heldSynth, { ...heldSynth, filterKeyTracking: 0.25 }],
-  ['sampler', heldSampler('sampler', 1, 8), heldSampler('sampler', 1, 8, 7000)],
-  ['drum rack', heldSampler('drum-rack', 1, 8), heldSampler('drum-rack', 1, 8, 7000)],
+  ['synth', heldSynth, { ...heldSynth, lfoWaveform: 1 }],
+  ['sampler', heldSampler('sampler', 1, 8), heldSampler('sampler', 1, 8, 8000, 'highpass')],
+  ['drum rack', heldSampler('drum-rack', 1, 8), heldSampler('drum-rack', 1, 8, 8000, 'highpass')],
 ]
 
 test('B6f5 phase 6i a held note keeps sounding at its phase through an instrument edit that is not live on the built core', async () => {
@@ -1131,13 +1155,97 @@ test('B6f5 phase 6i polyphony 8 to 2 leaves the two newest voices of the chord o
   }
 })
 
+// A zone gain is a value a knob drags: the edit slews onto the held note (about 5 ms per time constant), so it has landed
+// once 40 blocks have passed, where a replacement would have settled in two.
 test('B6f5 phase 6i a sampler zone gain edit reaches a held note on the built core', async () => {
+  const settled = 40 * 128
   for (const kind of ['sampler', 'drum-rack'] as const) {
-    const edited = await playHeldNotes([heldSampler(kind, 1, 8), heldSampler(kind, 0.5, 8)], [52], true)
-    const reference = await playHeldNotes([heldSampler(kind, 0.5, 8), heldSampler(kind, 0.5, 8)], [52], false)
-    const unedited = await playHeldNotes([heldSampler(kind, 1, 8), heldSampler(kind, 1, 8)], [52], false)
-    expect([kind, settledDeviation(unedited, reference) > 0.05, settledDeviation(edited, reference) < 1e-4]).toEqual([kind, true, true])
+    const edited = await playHeldNotes([heldSampler(kind, 1, 8), heldSampler(kind, 0.5, 8)], [52], true, 60)
+    const reference = await playHeldNotes([heldSampler(kind, 0.5, 8), heldSampler(kind, 0.5, 8)], [52], false, 60)
+    const unedited = await playHeldNotes([heldSampler(kind, 1, 8), heldSampler(kind, 1, 8)], [52], false, 60)
+    expect([kind, settledDeviation(unedited, reference, settled) > 0.05, settledDeviation(edited, reference, settled) < 1e-4])
+      .toEqual([kind, true, true])
   }
+})
+
+// Phase 6i, Mechanism B. A drag is a run of publications of one value, a few blocks apart (640 frames, the fastest a pointer
+// delivers them). Held to what a steady instrument at any of the dragged values plays: the output may not step by more than
+// the steepest slope any of them has, and a gliding pitch may not change its period by more than 2.5% between cycles.
+const dragStepBlocks = 5
+const dragSettleBlocks = 40
+const heldDragKey = 84
+const largestStep = (signal: readonly number[]) => Math.max(...signal.slice(1).map((sample, index) => Math.abs(sample - signal[index])))
+// The widest ratio between neighbouring cycles, from interpolated upward zero crossings.
+const widestPeriodStep = (signal: readonly number[]) => {
+  let lastCross = -1
+  let lastPeriod = 0
+  let widest = 1
+  for (let index = 1; index < signal.length; index += 1) {
+    if (!(signal[index - 1] < 0 && signal[index] >= 0)) continue
+    const cross = index - 1 + -signal[index - 1] / (signal[index] - signal[index - 1])
+    if (lastCross >= 0) {
+      const period = cross - lastCross
+      if (lastPeriod > 0) widest = Math.max(widest, period / lastPeriod, lastPeriod / period)
+      lastPeriod = period
+    }
+    lastCross = cross
+  }
+  return widest
+}
+// The values published one after another (the last held for the settle blocks), and what each steady instrument plays over the same span.
+// The mean cycle length over the last 20 blocks (a glide has changed the phase, so only the pitch it arrived at is comparable).
+const arrivedPeriod = (signal: readonly number[]) => {
+  const crosses = signal.flatMap((sample, index) => index >= signal.length - 20 * 128 && signal[index - 1] < 0 && sample >= 0
+    ? [index - 1 + -signal[index - 1] / (sample - signal[index - 1])] : [])
+  return (crosses[crosses.length - 1] - crosses[0]) / (crosses.length - 1)
+}
+const dragged = (values: readonly number[], instrument: (value: number) => AudioCoreInstrumentState) => {
+  const publications = [...values, ...Array<number>(dragSettleBlocks / dragStepBlocks).fill(values[values.length - 1])]
+  return playDragged(publications.map(instrument), [heldDragKey], dragStepBlocks)
+}
+const steady = (value: number, values: readonly number[], instrument: (value: number) => AudioCoreInstrumentState) =>
+  playDragged([instrument(value)], [heldDragKey], dragStepBlocks * (values.length - 1) + dragSettleBlocks)
+// Resonance 25 with the cutoff above the tone, so the peak never crosses it.
+const cutoffSynth = (filterCutoffHz: number): AudioCoreInstrumentState => ({ ...heldSynth, filterEnabled: true, filterResonance: 25, filterCutoffHz })
+const transposedSynth = (semitone: number): AudioCoreInstrumentState => ({
+  ...heldSynth, oscillators: [{ ...heldSynth.oscillators[0], semitone }, heldSynth.oscillators[1]] })
+
+test('B6f5 phase 6i a cutoff drag through repeated publications does not step beyond the steady instruments on the built core', async () => {
+  const cutoffs = [12000, 6000, 3000, 1800]
+  const drag = await dragged(cutoffs, cutoffSynth)
+  const steepest = Math.max(...await Promise.all(cutoffs.map(async (cutoff) => largestStep(await steady(cutoff, cutoffs, cutoffSynth)))))
+  const arrived = await steady(1800, cutoffs, cutoffSynth)
+  expect([steepest > 0.01, largestStep(drag) < 1.25 * steepest, settledDeviation(drag, arrived, drag.length - 20 * 128) < 1e-3])
+    .toEqual([true, true, true])
+})
+
+test('B6f5 phase 6i a cutoff drag through live events does not step beyond the steady instruments on the built core', async () => {
+  const cutoffs = [12000, 6000, 3000, 1800]
+  const live = (filterCutoffHz: number): AudioCoreInstrumentState => ({
+    ...cutoffSynth(filterCutoffHz), parameterTargets: [{ id: 'synth.filterCutoffHz', target: 3 }] })
+  const events = [...cutoffs.slice(1), ...Array<number>(dragSettleBlocks / dragStepBlocks).fill(1800)]
+  const drag = await playDragged([live(cutoffs[0])], [heldDragKey], dragStepBlocks, events)
+  const steepest = Math.max(...await Promise.all(cutoffs.map(async (cutoff) => largestStep(await steady(cutoff, cutoffs, live)))))
+  const arrived = await steady(1800, cutoffs, live)
+  expect([steepest > 0.01, largestStep(drag) < 1.25 * steepest, settledDeviation(drag, arrived, drag.length - 20 * 128) < 1e-3])
+    .toEqual([true, true, true])
+})
+
+test('B6f5 phase 6i a pitch drag through repeated publications glides without stepping on the built core', async () => {
+  const semitones = [0, 2, 4, 6]
+  const drag = await dragged(semitones, transposedSynth)
+  const arrived = await steady(6, semitones, transposedSynth)
+  expect([widestPeriodStep(drag) < 1.025, Math.abs(arrivedPeriod(drag) / arrivedPeriod(arrived) - 1) < 0.002]).toEqual([true, true])
+})
+
+// A discrete edit published while the drag is paused replaces the instrument mid-glide; the replacement carries the values
+// already applied, so the glide goes on from where it was and does not jump to the value it is gliding to.
+test('B6f5 phase 6i a pitch drag carried across an instrument replacement keeps gliding on the built core', async () => {
+  const semitones = [0, 2, 4, 4, 6]
+  const replaced = (value: number, index: number): AudioCoreInstrumentState => ({ ...transposedSynth(value), lfoWaveform: index === 3 ? 1 : 0 })
+  const drag = await dragged(semitones, replaced)
+  const arrived = await steady(6, semitones, transposedSynth)
+  expect([widestPeriodStep(drag) < 1.025, Math.abs(arrivedPeriod(drag) / arrivedPeriod(arrived) - 1) < 0.002]).toEqual([true, true])
 })
 
 // R1: prepare, install and publish run on the AudioWorklet rendering thread. The gate is measured at the core's maximum

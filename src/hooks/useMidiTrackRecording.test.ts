@@ -588,6 +588,67 @@ describe('useMidiTrackRecording transactions', () => {
     }
   })
 
+  test('sizes the kept clip from the take snapshot, not from a clock read after the track is created', async () => {
+    const originalNow = performance.now
+    let nowMs = 0
+    Object.defineProperty(performance, 'now', { configurable: true, value: () => nowMs })
+    try {
+      let current = [track()]
+      const recording = createHarness({
+        tracks: () => current,
+        createTrackForRecording: async () => { nowMs = 9_000; current = [keptTrack()]; return keptTrack() },
+      })
+      setFetch((operation) => {
+        if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock') return json({ ok: true })
+        if (operation.kind === 'clips.create') return json(operation.payload.trackId === 'kept-instrument' ? 'clip-kept' : 'clip-1')
+        throw new Error(`Unexpected ${operation.kind}`)
+      }, recording.operations)
+
+      await recording.controller.startRecording()
+      recording.emit(noteOn('keyboard', 0))
+      recording.emit(noteOff('keyboard', 1_000))
+      current = []
+      nowMs = 2_000
+      await recording.controller.stopRecording()
+
+      const kept = recording.operations.find((operation) => operation.kind === 'clips.create' && operation.payload.trackId === 'kept-instrument')
+      expect(kept?.payload.duration).toBe(2)
+      recording.dispose()
+    } finally {
+      Object.defineProperty(performance, 'now', { configurable: true, value: originalNow })
+    }
+  })
+
+  test('leaves no provisional clip id behind when the kept take fails and the removed target cannot delete it', async () => {
+    let current = [track()]
+    const recording = createHarness({
+      tracks: () => current,
+      createTrackForRecording: async () => { current = [keptTrack()]; return keptTrack() },
+    })
+    const originalMutation = Object.getOwnPropertyDescriptor(convexClient, 'mutation')
+    Object.defineProperty(convexClient, 'mutation', { configurable: true, value: async () => ({ status: 'deleted' }) })
+    try {
+      setFetch((operation) => {
+        if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock') return json({ ok: true })
+        if (operation.kind === 'clips.removeMany') throw new Error('network down')
+        if (operation.kind === 'clips.create') return json(operation.payload.trackId === 'kept-instrument' ? null : 'clip-1')
+        throw new Error(`Unexpected ${operation.kind}`)
+      }, recording.operations)
+
+      await recording.controller.startRecording()
+      recording.emit(noteOn('keyboard', 0))
+      recording.emit(noteOff('keyboard', 1_000))
+      current = []
+      await recording.controller.stopRecording()
+
+      expect(recording.provisional.at(-1)).toBeNull()
+      recording.dispose()
+    } finally {
+      if (originalMutation) Object.defineProperty(convexClient, 'mutation', originalMutation)
+      else Reflect.deleteProperty(convexClient, 'mutation')
+    }
+  })
+
   test('keeps a local take on a new instrument track when its target was removed, as one history entry', async () => {
     const project = await createLocalProject(`MIDI recording ${crypto.randomUUID()}`)
     const repository = createLocalTimelineRepository(project.id)

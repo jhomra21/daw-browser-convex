@@ -247,12 +247,12 @@ export const createMidiTrackRecordingController = (
 
   // The take's target track was removed mid-take: the captured events live in the session, so
   // the take is saved on a fresh instrument track as one undoable track + clip entry.
-  const keepOnNewTrack = async (take: ActiveTake, midi: MidiClip) => {
+  const keepOnNewTrack = async (take: ActiveTake, midi: MidiClip, duration: number) => {
     const track = await options.createTrackForRecording()
     if (!track) throw new Error('A track for the kept MIDI take could not be created.')
     const clip = {
       startSec: take.startSec,
-      duration: Math.max(0.001, currentTimelineTime() - take.startSec),
+      duration,
       name: 'MIDI Recording',
       color: trackColorForClip(track.color) ?? 'clip-midi',
       midi,
@@ -353,19 +353,23 @@ export const createMidiTrackRecordingController = (
     return settleWith((async () => {
       let clearProvisionalClip = true
       let emptyTake = false
+      // Deleting the target removed the provisional clip with it, so a failed keep has nothing left to delete.
+      let targetRemoved = false
       take.checkpoints?.clear()
       take.unsubscribe()
       take.unsubscribeReset()
       take.session.close(currentTimelineTime())
       try {
-        const snapshot = take.session.snapshot(take.bpm, currentTimelineTime())
+        const end = currentTimelineTime()
+        const snapshot = take.session.snapshot(take.bpm, end)
         if (snapshot.eventCount === 0) {
           emptyTake = true
           if (take.local) await createLocalTimelineRepository(take.projectId).deleteClip(take.clipId)
           else await deleteCloudClip(take.projectId, take.userId, take.clipId)
           if (options.projectId() === take.projectId) options.removeLocalClips([take.clipId])
         } else if (options.projectId() === take.projectId && !options.tracks().some((entry) => entry.id === take.track.id)) {
-          await keepOnNewTrack(take, snapshot.midi)
+          targetRemoved = true
+          await keepOnNewTrack(take, snapshot.midi, Math.max(0.001, end - take.startSec))
         } else {
           await take.checkpoints?.request(true)
           const checkpoint = take.checkpoints?.last()
@@ -388,11 +392,13 @@ export const createMidiTrackRecordingController = (
           options.notify(cancelledClipRemovalFailedNotice)
         } else if (take.local || isPermanentSharedOperationError(error)) {
           try {
-            if (take.local) await createLocalTimelineRepository(take.projectId).deleteClip(take.clipId)
-            else await publishSharedTimelineOperation(take.projectId, {
-              kind: 'clips.removeMany',
-              payload: { clipIds: [take.clipId], operationId: crypto.randomUUID() },
-            })
+            if (!targetRemoved) {
+              if (take.local) await createLocalTimelineRepository(take.projectId).deleteClip(take.clipId)
+              else await publishSharedTimelineOperation(take.projectId, {
+                kind: 'clips.removeMany',
+                payload: { clipIds: [take.clipId], operationId: crypto.randomUUID() },
+              })
+            }
             removed = true
           } catch {}
           if (removed && options.projectId() === take.projectId) options.removeLocalClips([take.clipId])

@@ -2286,15 +2286,6 @@ export class DawPortableAudioCoreHost {
       return true
     }
     const materialized = this.materializeSchedule(startFrame, frames)
-    if (materialized === null) {
-      this.flushInstrumentAcks('rejected')
-      this.flushPendingTransport('rejected')
-      this.resetScheduleCursors(startFrame)
-      this.flushProcessorEventAcks('rejected')
-      this.flushProcessorAutomationAcks('rejected')
-      for (let channel = 0; channel < output.length; channel += 1) output[channel].fill(0)
-      return true
-    }
     if (materialized && !this.mergeLiveProcessorEvents()) {
       this.flushInstrumentAcks('rejected')
       this.flushPendingTransport('rejected')

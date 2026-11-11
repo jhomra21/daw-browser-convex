@@ -496,7 +496,9 @@ const armJob = (arm: Arm): Job => ({
     const spec = arm.spec !== null && arm.id === broken ? { ...arm.spec, changes: arm.spec.changes.map((change) => ({ ...change, to: change.from })) } : arm.spec
     if (spec !== null) writeFileSync(path.join(dir, "spec.json"), fill(`${JSON.stringify(spec, null, 1)}\n`, dir))
     // product-overlay.ts applies this arm's spec on top of a simulated product change, and prints its overlay's marker.
-    const run = await runCommand({ ...arm.command, env: { ...arm.command.env, FAST_CERT_ARM_MARKER: arm.marker } }, dir, "run")
+    const preloadAt = arm.command.argv.indexOf("--preload")
+    const armPreload = preloadAt < 0 ? "" : arm.command.argv[preloadAt + 1] ?? ""
+    const run = await runCommand({ ...arm.command, env: { ...arm.command.env, FAST_CERT_ARM_MARKER: arm.marker, FAST_CERT_ARM_PRELOAD: armPreload } }, dir, "run")
     let rejection: [number, number][] | null = null
     if (arm.rejectionGate && arm.expect.fuzz !== null) {
       const gateRun = await runCommand({ argv: ["bun", "--conditions=browser", exp.mutations.rejectionGateScript,

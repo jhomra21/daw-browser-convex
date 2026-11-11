@@ -20,6 +20,7 @@ const jobSpec = readSpec(process.env.DV01_OVERLAY_FILE)
 const job = child && jobSpec.childPreload !== true ? { id: jobSpec.id, changes: [] } : jobSpec
 const jobMarker = process.env.FAST_CERT_ARM_MARKER ?? ""
 const productLog = process.env.FAST_CERT_PRODUCT_LOG ?? ""
+const armPreload = process.env.FAST_CERT_ARM_PRELOAD ?? ""
 
 const apply = (contents: string, edit: z.infer<typeof change>, id: string) => {
   if (edit.contentsFile) return readFileSync(edit.contentsFile, "utf8")
@@ -43,6 +44,13 @@ plugin({ name: `fast-cert-product-${product.id}`, setup(build) {
     for (const edit of job.changes.filter((entry) => path.endsWith(entry.file))) {
       contents = apply(contents, edit, job.id)
       if (jobMarker.length > 0) console.log(jobMarker, job.id, edit.file)
+    }
+    // The arm overlay also makes the test spawn its bun child with that overlay as preload (the child is the second evaluation
+    // of its marker). It cannot do so for a file this plugin loads first, so the same edit is made here.
+    if (job.childPreload && armPreload.length > 0 && path.endsWith("/src/hooks/useTimelinePlayback.test.ts")) {
+      const anchor = '"--conditions=browser", "-e", `'
+      if (contents.split(anchor).length !== 2) throw new Error("Missing child preload anchor")
+      contents = contents.replace(anchor, () => `"--conditions=browser", "--preload", ${JSON.stringify(armPreload)}, "-e", \``)
     }
     for (const { sourceEnv, file, marker } of appends) {
       const source = process.env[sourceEnv]

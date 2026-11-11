@@ -283,11 +283,12 @@ export const failedTests = (log: string) =>
 
 export const leafName = (name: string) => name.split(" > ").at(-1) ?? name
 
-// A `bun test` file header (`<file>.ts:`), keyed by its path without a leading `./`, so every reader of a log keys a file the same way.
-const fileHeader = (line: string) => /^\S.*\.(ts|tsx):$/.test(line) ? line.slice(0, -1).replace(/^\.\//, "") : undefined
-// The passing tests of a `bun test` log by file, in log order: the `(pass) <qualified name>` lines under each file header, without the duration.
+// A `bun test` file header (`<file>.ts:`), keyed by its path without a leading `./` and without the run directory
+// (`…/fast-cert/<run>/[revert|live/][jobs/<job>/]`), so every reader of a log keys a file the same way in every run.
+const fileHeader = (line: string) => /^\S.*\.(ts|tsx):$/.test(line) ? line.slice(0, -1).replace(/^\.\//, "").replace(/^.*?fast-cert\/[^/]+\/(?:(?:revert|live)\/)?(?:jobs\/[^/]+\/)?/, "") : undefined
+// The tests of a `bun test` log by file, in log order: the `(<marker>) <qualified name>` lines under each file header, without the duration.
 // A header that repeats appends its tests to the file's.
-export const passedTests = (log: string) => {
+const testsOf = (log: string, marker: "pass" | "fail") => {
   const files = new Map<string, string[]>()
   let current: string[] | undefined
   for (const line of log.split("\n")) {
@@ -295,10 +296,12 @@ export const passedTests = (log: string) => {
     if (file !== undefined) {
       current = files.get(file) ?? []
       files.set(file, current)
-    } else if (current && line.startsWith("(pass) ")) current.push(line.slice("(pass) ".length).replace(/ \[[\d.]+m?s\]$/, ""))
+    } else if (current && line.startsWith(`(${marker}) `)) current.push(line.slice(marker.length + 3).replace(/ \[[\d.]+m?s\]$/, ""))
   }
   return files
 }
+export const passedTests = (log: string) => testsOf(log, "pass")
+export const failedTestsByFile = (log: string) => testsOf(log, "fail")
 
 const fuzzOutcome = z.object({ status: z.string().nullable(), failures: z.array(fuzzFailure) })
 

@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { z } from "zod"
-import { expectationsSchema, expectationsFile, leafName, passedTests, perFileCounts, sameJson, testCounts, type JsonValue } from "./expectations"
+import { expectationsSchema, expectationsFile, failedTestsByFile, leafName, passedTests, perFileCounts, sameJson, testCounts, type JsonValue } from "./expectations"
 import { measureArm } from "./measure"
 import { seedRecord, type SeedRecord } from "./seed-judge"
 
@@ -76,7 +76,9 @@ const reconciles = (label: string, log: string, tests: Map<string, string[]>) =>
 export const removalOf = (before: string, after: string, removed: RemovalManifest["removed"]): Removal => {
   const was = passedTests(before)
   const now = passedTests(after)
-  const lost = [...was].flatMap(([file, names]) => added(now.get(file) ?? [], names).map((identity) => ({ file, identity })))
+  const failing = failedTestsByFile(after)
+  // A pass that became a fail is a stronger kill, not a removal: the test still exists.
+  const lost = [...was].flatMap(([file, names]) => added(now.get(file) ?? [], names).filter((identity) => !(failing.get(file) ?? []).includes(identity)).map((identity) => ({ file, identity })))
   const gained = [...now].flatMap(([file, names]) => added(was.get(file) ?? [], names).map((identity) => ({ file, identity })))
   const unclaimed = [...removed]
   const claimed: Record<string, number> = {}
@@ -103,12 +105,14 @@ const withinRemoval = (removal: Removal) => Object.values(removal.claimed).reduc
 
 // B2: a test or defect count may not fall, a skip may not appear, and no verdict field (exit, failing set, status) may move.
 // A fall in `pass` is allowed only as far as `claimed` (the lost passing tests the manifest names, see removalOf), with skip and fail unchanged.
-const lostWitnesses = (was: JsonValue | undefined, now: JsonValue | undefined, what: string, claimed = 0) => {
+// A mutant arm may also gain fails (a stronger kill): `pass` may then fall by the fails gained as well.
+const lostWitnesses = (was: JsonValue | undefined, now: JsonValue | undefined, what: string, claimed = 0, mutant = false) => {
   const before = tally(was)
   const after = tally(now)
   if (!before) return []
   if (!after) return [`${what} counts disappeared`]
-  const ruled = before.pass - after.pass <= claimed && after.fail === before.fail && after.skip === before.skip
+  const gained = mutant ? Math.max(0, after.fail - before.fail) : 0
+  const ruled = before.pass - after.pass <= claimed + gained && (mutant ? after.fail >= before.fail : after.fail === before.fail) && after.skip === before.skip
   return [...(sum(after) < sum(before) && !ruled ? [`${what}: tests were removed (${sum(before)} -> ${sum(after)})`] : []), ...(after.skip > before.skip ? [`${what}: tests were skipped`] : [])]
 }
 export const weakened = (at: string[], old: JsonValue | undefined, next: JsonValue, role: string | undefined, removal?: Removal) => {
@@ -116,8 +120,9 @@ export const weakened = (at: string[], old: JsonValue | undefined, next: JsonVal
   const now = record.safeParse(next).data ?? {}
   const problems: string[] = []
   if (!sameJson(was.exit, now.exit)) problems.push("exit moved")
-  if (was.kind === "tests" && !sameJson(was.fails, now.fails)) problems.push("failing tests moved")
-  problems.push(...lostWitnesses(was.counts, now.counts, "counts", removal && withinRemoval(removal)))
+  // A mutant arm's failing set may grow and never shrink; every other observation's failing set may not move.
+  if (was.kind === "tests" && role !== "mutant" && !sameJson(was.fails, now.fails)) problems.push("failing tests moved")
+  problems.push(...lostWitnesses(was.counts, now.counts, "counts", removal && withinRemoval(removal), role === "mutant"))
   const floor = (field: string) => ({ was: z.number().safeParse(was[field]).data, now: z.number().safeParse(now[field]).data })
   const rejected = floor("rejected")
   if (rejected.was !== undefined && !(rejected.now !== undefined && rejected.now >= rejected.was)) problems.push("fewer rejected defects")
@@ -275,6 +280,19 @@ if (import.meta.main) {
     ["B2 log: a repeated file header appends its tests", JSON.stringify([...passedTests("a.test.ts:\n(pass) t1\na.test.ts:\n(pass) t2\n")]) === JSON.stringify([["a.test.ts", ["t1", "t2"]]])],
     ["B2 log: a repeated file header appends its counts", perFileCounts("a.test.ts:\n(pass) t1\na.test.ts:\n(pass) t2\n").get("a.test.ts")?.pass === 2],
     ["B2 log: real bun output parses to its passing identities and reconciles", JSON.stringify([...passedTests(bunLog)]) === JSON.stringify([["a.test.ts", ["t1", "suite > t2"]], ["sub/b.test.ts", ["u1"]]]) && problemsOf(bunLog, bunLog, []).length === 0],
+    ["B2 stronger kill: a pass that becomes a fail is not a lost test", problemsOf(fixture({ "a.test.ts": ["t1", "t2"] }), "a.test.ts:\n(pass) t1 [0.10ms]\n(fail) t2 [0.10ms]\n 1 pass\n 1 fail\n", []).length === 0],
+    ["B2 stronger kill: a test absent from the after log is still lost", problemsOf(fixture({ "a.test.ts": ["t1", "t2"] }), "a.test.ts:\n(pass) t1 [0.10ms]\n 1 pass\n 0 fail\n", []).some((problem) => problem.includes('"t2"'))],
+    ["B2 stronger kill: a mutant arm gaining a fail is recorded", weakened(["mutations", "arms", "id=m", "expect"], { kind: "tests", exit: 1, counts: { pass: 9, skip: 0, fail: 1 }, fails: ["a"] }, { kind: "tests", exit: 1, counts: { pass: 8, skip: 0, fail: 2 }, fails: ["a", "b"] }, "mutant").length === 0],
+    ["B2 stronger kill: a mutant arm gaining a fail beside a ruled removal is recorded", weakened(["mutations", "arms", "id=m", "expect"], { kind: "tests", exit: 1, counts: { pass: 9, skip: 0, fail: 1 }, fails: ["a"] }, { kind: "tests", exit: 1, counts: { pass: 7, skip: 0, fail: 2 }, fails: ["a", "b"] }, "mutant", { claimed: { "a.test.ts": 1 }, problems: [] }).length === 0],
+    ["B2 stronger kill: a control arm gaining a fail is refused", weakened(["mutations", "arms", "id=c", "expect"], { kind: "tests", exit: 1, counts: { pass: 9, skip: 0, fail: 1 }, fails: ["a"] }, { kind: "tests", exit: 1, counts: { pass: 8, skip: 0, fail: 2 }, fails: ["a", "b"] }, "control").length > 0],
+    ["B2 stronger kill: a gate gaining a fail is refused", weakened(["gates"], { kind: "tests", exit: 1, counts: { pass: 9, skip: 0, fail: 1 }, fails: ["a"] }, { kind: "tests", exit: 1, counts: { pass: 8, skip: 0, fail: 2 }, fails: ["a", "b"] }, undefined).length > 0],
+    ["B2 stronger kill: a mutant arm losing a fail is refused", weakened(["mutations", "arms", "id=m", "expect"], { kind: "tests", exit: 1, counts: { pass: 8, skip: 0, fail: 2 }, fails: ["a", "b"] }, { kind: "tests", exit: 1, counts: { pass: 9, skip: 0, fail: 1 }, fails: ["a"] }, "mutant").length > 0],
+    ["B2 stronger kill: a mutant arm whose exit goes to zero is refused", weakened(["mutations", "arms", "id=m", "expect"], { kind: "tests", exit: 1, counts: { pass: 9, skip: 0, fail: 1 }, fails: ["a"] }, { kind: "tests", exit: 0, counts: { pass: 8, skip: 0, fail: 2 }, fails: ["a", "b"] }, "mutant").length > 0],
+    ["B2 log: a run directory is not part of a test's file identity",
+      JSON.stringify([...passedTests("../../../../private/tmp/fast-cert/r1/revert/fixtures/rc5/b/x.test.ts:\n(pass) t1\n")]) === JSON.stringify([...passedTests("../../../../private/tmp/fast-cert/r1/live/fixtures/rc5/b/x.test.ts:\n(pass) t1\n")])
+        && problemsOf("/tmp/fast-cert/r1/revert/fixtures/b/x.test.ts:\n(pass) t1\n 1 pass\n", "/tmp/fast-cert/r1/live/fixtures/b/x.test.ts:\n(pass) t1\n 1 pass\n", []).length === 0],
+    ["B2 log: a job's own directory is not part of a test's file identity", JSON.stringify([...passedTests("/tmp/fast-cert/r1/jobs/arm_x/fixtures/x.test.ts:\n(pass) t1\n")]) === JSON.stringify([["fixtures/x.test.ts", ["t1"]]])],
+    ["B2 log: a repository path named live stays", JSON.stringify([...passedTests("src/live/x.test.ts:\n(pass) t1\n")]) === JSON.stringify([["src/live/x.test.ts", ["t1"]]])],
     ["B2 seed record: a moved status", seedRecordProblems(seed, { ...seed, status: "fail" }, []).length > 0],
     ["B2 seed record: a moved failure", seedRecordProblems(seed, { ...seed, failures: ["I1|x|y"] }, []).length > 0],
     ["B2 seed record: a moved rejection", seedRecordProblems(seed, { ...seed, rejections: ["r|c|d"] }, []).length > 0],

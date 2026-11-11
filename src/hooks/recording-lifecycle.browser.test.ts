@@ -3,9 +3,11 @@ import { mkdir, rm } from 'node:fs/promises'
 import { z } from 'zod'
 import { build } from 'vite'
 import solidPlugin from 'vite-plugin-solid'
+import tailwindcss from '@tailwindcss/vite'
 
 const fixture = `
 import { createComponent, createEffect, createRoot, createSignal, onCleanup } from 'solid-js'
+import { render } from 'solid-js/web'
 import { useTrackRecording } from './useTrackRecording'
 import { useTimelinePlayback } from './useTimelinePlayback'
 import { createRecordingTransportPolicy, dispatchRecordingToggle, dispatchTransportSpace, retryPendingRecordingCleanup } from './recording-dispatch'
@@ -14,6 +16,9 @@ import { useMidiTrackRecording } from './useMidiTrackRecording'
 import { createMidiRecordingCheckpointController } from '../lib/midi/recording-checkpoint'
 import { TransportBar } from '../components/timeline/TransportControls'
 import * as recordingTarget from '../lib/track-recording-target'
+import TrackLane from '../components/timeline/TrackLane'
+import TrackSidebarRow from '../components/timeline/TrackSidebarRow'
+import '~/index.css'
 
 const deferred = () => {
   let resolve
@@ -2059,6 +2064,115 @@ window.lockScenarios = async () => {
   return results
 }
 
+// The real sidebar row and lane, mounted with stubbed props, driven through the take lifecycle.
+const surfaceReason = 'Finish recording to delete this track or change its routing.'
+const surfaceTracks = [
+  { id: 'group-a', kind: 'audio', channelRole: 'group', name: 'Group', volume: 1, clips: [], sends: [] },
+  { id: 'return-a', kind: 'audio', channelRole: 'return', name: 'Return', volume: 1, clips: [], sends: [] },
+  { id: 'track-audio', kind: 'audio', channelRole: 'track', name: 'Audio', volume: 1, clips: [], sends: [], groupId: 'group-a', outputTargetId: 'group-a' },
+  { id: 'track-other', kind: 'audio', channelRole: 'track', name: 'Other', volume: 1, clips: [], sends: [] },
+]
+const surfaceLock = recordingTarget.createRecordingTargetLock(() => surfaceTracks)
+const noop = () => {}
+const surfaceRowModel = {
+  sidebar: () => ({
+    currentUserId: 'user', recordArmTrackId: null, selectedTrackId: '', selectedTrackIds: [], recordingTargetLock: surfaceLock,
+    onToggleTrackCollapsed: noop, onTrackClick: noop, onGroupTracks: noop, onMoveTrackToGroup: noop, onUngroupTrack: noop,
+    onSelectAllClipsInGroup: noop, onSetTrackColor: noop, onResetTrackColor: noop, onAssignTrackColorToClips: noop,
+    onResetClipColors: noop, onToggleMute: noop, onToggleSolo: noop, onToggleRecordArm: noop, onDeleteTrack: noop, onVolumePreview: noop,
+  }),
+  automation: () => ({
+    lanes: { selectedTargetsByOwnerKey: {}, visibleByTrackId: {}, visibleTargetKeysByTrackId: {}, heightsByLaneOwnerKey: {}, effectInstancesByOwnerKey: {} },
+    actions: { toggleTrackVisibility: noop, addTrackLane: noop },
+  }),
+  automationMetaByTrackId: () => new Map(),
+  appPreferences: { timeline: {
+    defaultTrackColor: () => '#3b82f6', defaultTrackColorInput: () => '#3b82f6',
+    defaultGroupColor: () => '#a3a3a3', defaultGroupColorInput: () => '#a3a3a3',
+  } },
+  depthByTrackId: () => new Map(), trackNumbersById: () => new Map(surfaceTracks.map((track, index) => [track.id, index + 1])),
+  layoutByTrackId: () => new Map(), ancestorGroupColorBandsByTrackId: () => new Map(),
+  defaultGroupColor: () => '#a3a3a3', resolveGroupColor: color => color ?? '#a3a3a3',
+  displayTrackName: track => track.name, outputTargetName: () => 'Group', sendTargetName: () => 'None',
+  groupTracks: () => [surfaceTracks[0]], canWriteTrackRouting: () => true,
+  selectedOutputTargetId: track => track.outputTargetId ?? '', selectedSendTargetId: () => '',
+  returnTracks: () => [surfaceTracks[1]], handleTrackCollapseClick: noop, isTrackDragBlockedTarget: () => false,
+  startTrackDrag: noop, updateTrackDrag: noop, finishTrackDrag: noop, cancelTrackDrag: noop,
+  suppressTrackClickId: () => undefined, setSuppressTrackClickId: noop, meters: {},
+  displayVolume: () => 1, displayMeterLevel: () => 0, quantizeVolume: volume => volume,
+  trackVolumeAutomationTargetKey: id => 'track:' + id, previewTrackVolume: noop, commitTrackVolume: noop,
+  startAutomationResize: noop, handleOutputTargetChange: noop, handleSendTargetChange: noop,
+}
+const surfaceLaneProps = track => ({
+  track, layout: { topPx: 0, heightPx: 48, clipLaneHeightPx: 48, automationHeightPx: 0 }, groupClipOverview: [],
+  selectedClipIds: new Set(), rangeSelection: null, onClipPointerDown: noop, onClipPointerUp: noop, onClipResizeStart: noop,
+  clipContextMenu: {}, onRetryMedia: noop, onReplaceMedia: noop, onRemoveMissingMedia: noop, resolveAudioSource: noop,
+  onDeleteTrack: noop, recordingTargetLock: surfaceLock, bpm: 120, pixelsPerSecond: 100,
+  visibleRange: { startSec: 0, endSec: 8 }, clipVisibleRange: { startSec: 0, endSec: 8 }, viewportWidthPx: 800,
+  timeToX: time => time * 100, clientXToTime: clientX => clientX / 100, gridEnabled: false, gridDenominator: 4,
+  viewportRedrawVersion: 0, devicePixelRatio: 1, canEditClipFades: () => false, onCommitClipFades: noop,
+  automation: {
+    projectId: 'project:test', visible: false, selections: [], laneHeightPx: 48, envelopeForSelection: () => undefined,
+    durationSec: 8, onPreview: noop, onCommit: noop, onCancelPreview: noop,
+  },
+})
+const mountSurface = (component, props, style) => {
+  const host = document.createElement('div')
+  host.style.cssText = style
+  document.body.append(host)
+  const dispose = render(() => createComponent(component, props), host)
+  return { host, dispose: () => { dispose(); host.remove() } }
+}
+const openMenu = async element => {
+  element.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 60, clientY: 30, button: 2 }))
+  await macrotask()
+  await macrotask()
+  return [...document.querySelectorAll('[role="menuitem"]')]
+}
+const itemDisabled = (items, label) => {
+  const item = items.find(entry => entry.textContent.includes(label))
+  return item ? item.hasAttribute('data-disabled') || item.getAttribute('aria-disabled') === 'true' : undefined
+}
+const menuHasReason = () => [...document.querySelectorAll('[role="menu"] *')].some(node => node.textContent === surfaceReason)
+const surfaceHosts = {}
+
+window.surfaceMount = () => {
+  surfaceHosts.row = mountSurface(TrackSidebarRow, { track: surfaceTracks[2], model: surfaceRowModel }, 'width:260px')
+  surfaceHosts.other = mountSurface(TrackSidebarRow, { track: surfaceTracks[3], model: surfaceRowModel }, 'width:260px')
+  surfaceHosts.lane = mountSurface(TrackLane, surfaceLaneProps(surfaceTracks[2]), 'position:relative;width:800px;height:48px')
+}
+
+window.surfaceSet = async phase => {
+  if (phase === 'starting') surfaceLock.start('track-audio')
+  if (phase === 'recording') surfaceLock.recording()
+  if (phase === 'finishing') surfaceLock.finishing()
+  if (phase === 'released') surfaceLock.release()
+  await macrotask()
+  const selects = host => [...host.querySelectorAll('select')]
+  const status = host => host.querySelector('[role="status"]')?.textContent.trim() ?? ''
+  const badge = host => [...host.querySelectorAll('span[title]')].find(node => node.title === surfaceReason)?.textContent.trim() ?? ''
+  const rowMenu = mountSurface(TrackSidebarRow, { track: surfaceTracks[2], model: surfaceRowModel }, 'width:260px')
+  const rowItems = await openMenu(rowMenu.host.firstElementChild)
+  const sidebarMenu = { delete: itemDisabled(rowItems, 'Delete track'), ungroup: itemDisabled(rowItems, 'Remove from group'), reason: menuHasReason() }
+  rowMenu.dispose()
+  await macrotask()
+  const laneMenu = mountSurface(TrackLane, surfaceLaneProps(surfaceTracks[2]), 'position:relative;width:800px;height:48px')
+  const laneItems = await openMenu(laneMenu.host.firstElementChild)
+  const laneMenuState = { delete: itemDisabled(laneItems, 'Delete track'), reason: menuHasReason() }
+  laneMenu.dispose()
+  await macrotask()
+  return {
+    outputs: selects(surfaceHosts.row.host).map(select => ({ disabled: select.disabled, title: select.title })),
+    otherOutputs: selects(surfaceHosts.other.host).map(select => select.disabled),
+    status: status(surfaceHosts.row.host),
+    otherStatus: status(surfaceHosts.other.host),
+    badge: badge(surfaceHosts.lane.host),
+    sidebarMenu,
+    laneMenu: laneMenuState,
+  }
+}
+window.surfaceUnmount = () => { for (const host of Object.values(surfaceHosts)) host.dispose() }
+
 window.dispatchScenarios = async () => {
   let audioStarts = 0
   let midiStarts = 0
@@ -2128,6 +2242,8 @@ test('recording startup joins duplicate requests and stop cancels setup immediat
       .replaceAll("'../lib/midi/recording-checkpoint'", `'${import.meta.dir}/../lib/midi/recording-checkpoint.ts'`)
       .replaceAll("'../lib/track-recording-target'", `'${import.meta.dir}/../lib/track-recording-target.ts'`)
       .replaceAll("'../components/timeline/TransportControls'", `'${import.meta.dir}/../components/timeline/TransportControls.tsx'`)
+      .replaceAll("'../components/timeline/TrackLane'", `'${import.meta.dir}/../components/timeline/TrackLane.tsx'`)
+      .replaceAll("'../components/timeline/TrackSidebarRow'", `'${import.meta.dir}/../components/timeline/TrackSidebarRow.tsx'`)
     await Bun.write(`${directory}/fixture.js`, bundledFixture)
     const output = await build({
       configFile: false,
@@ -2135,16 +2251,19 @@ test('recording startup joins duplicate requests and stop cancels setup immediat
       logLevel: 'silent',
       plugins: [
         solidPlugin(),
+        tailwindcss(),
         {
           name: 'recording-browser-boundaries',
           enforce: 'pre',
           resolveId(id) {
             if (id.endsWith('recording-temp-storage')) return '\0recording-test:temp-storage'
             if (/context\/midi-access(\.tsx?)?$/.test(id)) return '\0recording-test:midi-access'
+            if (/context\/app-preferences(\.tsx?)?$/.test(id)) return '\0recording-test:app-preferences'
             return undefined
           },
           load(id) {
             if (id === '\0recording-test:midi-access') return `export const useMidiAccess = () => window.liveMidiAccess`
+            if (id === '\0recording-test:app-preferences') return `export const useAppPreferences = () => ({ appearance: { themeTokens: () => ({}) } })`
             if (id !== '\0recording-test:temp-storage') return undefined
             return `export const decodePlanarPcmBlocks = () => []
 export const isRecordingTempStorageSupported = () => true
@@ -2171,7 +2290,9 @@ export const createRecordingTempStorage = () => ({ cleanupStale: async () => {},
     if (!('output' in output)) throw new Error('Recording lifecycle browser build returned no output.')
     const bundle = output.output.find((entry) => entry.type === 'chunk')
     if (!bundle || bundle.type !== 'chunk') throw new Error('Recording lifecycle browser bundle was not emitted.')
-    await Bun.write(`${directory}/index.html`, `<!doctype html><body><script>window.addEventListener('error', event => document.body.dataset.error = event.message)</script><script>window.unhandledRejectionCount = 0; window.addEventListener('unhandledrejection', () => { window.unhandledRejectionCount += 1 })</script><script>${bundle.code}</script>`)
+    const stylesheet = output.output.find((entry) => entry.type === 'asset' && entry.fileName.endsWith('.css'))
+    if (stylesheet?.type === 'asset') await Bun.write(`${directory}/style.css`, stylesheet.source)
+    await Bun.write(`${directory}/index.html`, `<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="style.css"><body><script>window.addEventListener('error', event => document.body.dataset.error = event.message)</script><script>window.unhandledRejectionCount = 0; window.addEventListener('unhandledrejection', () => { window.unhandledRejectionCount += 1 })</script><script>${bundle.code}</script>`)
     await browser('open', `file://${directory}/index.html`)
     await browser('wait', '--fn', '!!window.recordingScenarios')
     const results = z.record(z.string(), z.boolean()).parse(JSON.parse(await browser('eval', 'window.recordingScenarios()')))
@@ -2179,6 +2300,38 @@ export const createRecordingTempStorage = () => ({ cleanupStale: async () => {},
     Object.assign(results, playResults)
     const lockResults = z.record(z.string(), z.boolean()).parse(JSON.parse(await browser('eval', 'window.lockScenarios()')))
     Object.assign(results, lockResults)
+    const surfaceState = z.object({
+      outputs: z.array(z.object({ disabled: z.boolean(), title: z.string() })),
+      otherOutputs: z.array(z.boolean()),
+      status: z.string(),
+      otherStatus: z.string(),
+      badge: z.string(),
+      sidebarMenu: z.object({ delete: z.boolean().optional(), ungroup: z.boolean().optional(), reason: z.boolean() }),
+      laneMenu: z.object({ delete: z.boolean().optional(), reason: z.boolean() }),
+    })
+    const reason = 'Finish recording to delete this track or change its routing.'
+    await browser('eval', 'window.surfaceMount()')
+    const surfaceStates: Record<string, z.infer<typeof surfaceState>> = {}
+    for (const phase of ['starting', 'recording', 'finishing', 'released'] as const) {
+      const state = surfaceState.parse(JSON.parse(await browser('eval', `window.surfaceSet('${phase}')`)))
+      surfaceStates[phase] = state
+      await browser('screenshot', `${directory}/lock-${phase}.png`)
+      const locked = phase !== 'released'
+      results[`surface-${phase}-sidebar-routing-controls`] = state.outputs.length >= 2
+        && state.outputs.every(output => output.disabled === locked && (output.title === reason) === locked)
+        && state.otherOutputs.every(disabled => !disabled)
+      results[`surface-${phase}-sidebar-menu`] = state.sidebarMenu.delete === locked && state.sidebarMenu.ungroup === locked
+        && state.sidebarMenu.reason === locked
+      results[`surface-${phase}-lane-menu`] = state.laneMenu.delete === locked && state.laneMenu.reason === locked
+      results[`surface-${phase}-badge-and-status`] = locked
+        ? state.badge.startsWith('Recording target locked') && state.status.includes('Recording target locked. ' + reason)
+          && state.badge.includes('Finishing recording…') === (phase === 'finishing')
+          && state.status.includes('Finishing recording…') === (phase === 'finishing')
+          && state.otherStatus === ''
+        : state.badge === '' && state.status === '' && state.otherStatus === ''
+    }
+    await Bun.write(`${directory}/surface-states.json`, JSON.stringify(surfaceStates, null, 2))
+    await browser('eval', 'window.surfaceUnmount()')
     const dispatchResults = z.record(z.string(), z.boolean()).parse(JSON.parse(await browser('eval', 'window.dispatchScenarios()')))
     Object.assign(results, dispatchResults)
     const deltas = z.record(z.string(), z.record(z.string(), z.union([z.boolean(), z.number(), z.string()])))

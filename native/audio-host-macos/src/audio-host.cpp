@@ -1293,9 +1293,6 @@ struct AudioHost::Impl {
     std::uint64_t absolute_frame = 0;
     bool scheduled = false;
     bool cancelled = false;
-    bool processor_linear = false;
-    std::uint64_t processor_end_frame = 0;
-    float processor_end_value = 0.0F;
     std::uint32_t processor_revision = 0;
     std::uint32_t processor_epoch = 0;
     std::uint64_t processor_sequence = 0;
@@ -3840,11 +3837,11 @@ bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload)
     const std::uint64_t processor_end_frame = ReadLeU64(bytes + 24);
     const float start_value = ReadLeFloat(bytes + 32);
     const float end_value = ReadLeFloat(bytes + 36);
-    if (processor_instance == 0 || parameter_target == 0 || kind > 1
+    // The wire still carries a linear kind, but the host only holds values: refuse it here rather than at a render block.
+    if (processor_instance == 0 || parameter_target == 0 || kind != 0
       || frame < start_frame || frame >= end_frame
       || !std::isfinite(start_value) || !std::isfinite(end_value)
-      || (kind == 0 && processor_end_frame != frame)
-      || (kind == 1 && (processor_end_frame <= frame || processor_end_frame > end_frame))
+      || processor_end_frame != frame
       || (has_previous_processor && (frame < previous_processor_frame
         || (frame == previous_processor_frame && (processor_instance < previous_processor_instance
           || (processor_instance == previous_processor_instance
@@ -3855,9 +3852,6 @@ bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload)
     event.window_id = window_id;
     event.absolute_frame = frame;
     event.scheduled = true;
-    event.processor_linear = kind == 1;
-    event.processor_end_frame = processor_end_frame;
-    event.processor_end_value = end_value;
     event.processor_revision = revision;
     event.processor_epoch = epoch;
     event.processor = {
@@ -5506,7 +5500,6 @@ bool AudioHost::ProcessPlanar(
           ? 0
           : static_cast<std::uint32_t>(event.absolute_frame - static_cast<std::uint64_t>(block_start_frame));
         ++processor_event_count;
-        if (event.processor_linear) return false;
         ++read;
       }
       lane.read.store(read, std::memory_order_release);

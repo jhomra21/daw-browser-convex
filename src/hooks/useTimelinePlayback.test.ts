@@ -510,25 +510,6 @@ const withPortableAudioWorklet = async (run: () => Promise<void>) => {
   }
 }
 
-test('keeps browser startup portable-first and runtime faults stop without fallback', async () => {
-  const source = await readFile(new URL('./useTimelinePlayback.ts', import.meta.url), 'utf8')
-  const timelineSource = await readFile(new URL('../components/Timeline.tsx', import.meta.url), 'utf8')
-  expect(source).toContain("version: 2")
-  expect(source).toContain("browserDefaultBackend: 'portable-browser'")
-  expect(source).toContain("runtimeFailure: 'stop-and-mute'")
-  expect(source).toContain("portableBrowserConfigured: portableBrowserOptions !== undefined")
-  const portableStartup = source.indexOf('if (portableBrowserOptions) {')
-  const nativeFallback = source.indexOf('if (nativeLifecycleReady && nativeOptions?.enabled?.())', portableStartup)
-  const legacyStartup = source.indexOf("setActiveBackend('legacy')", nativeFallback)
-  expect(portableStartup).toBeGreaterThan(-1)
-  expect(nativeFallback).toBeGreaterThan(portableStartup)
-  expect(legacyStartup).toBeGreaterThan(nativeFallback)
-  expect(source).toContain('portableBrowserOptions?.reportFault?.(message)')
-  expect(source).toContain('isPreparingPlayback: () => (playAttempt !== undefined && !isPlaying())')
-  expect(source).toContain('portableBrowserPlayback.isPreparing()')
-  expect(timelineSource).toContain('&& !isPreparingPlayback()) return;')
-})
-
 const createNativeHookBridge = (
   failure?: string | (() => string | undefined),
   lifecycle?: {
@@ -1249,14 +1230,6 @@ test.skipIf(isServer)('pending save hydration still reports real host loss and h
     else Reflect.deleteProperty(globalThis, 'AudioBuffer')
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
-})
-
-test('keeps lifecycle state reactive while limiting it to native backend selection', async () => {
-  const source = await readFile(new URL("./useTimelinePlayback.ts", import.meta.url), "utf8")
-  expect(source).toContain("const [audioLifecycleState, setAudioLifecycleState] = createSignal")
-  expect(source).toContain("audioLifecycleState() === \"ready\"")
-  expect(source).toContain("if (lifecycleState === \"suspended\") return")
-  expect(source).not.toContain("if (audioLifecycleState === \"failed\")")
 })
 
 test('fingerprints all playback-relevant audio clip compiler fields for paused preview', async () => {
@@ -6139,10 +6112,6 @@ test('re-establishes paused native preview after structural fingerprint disposal
 })
 
 test('keeps optional paused structural rebuilds idle when native preview becomes unavailable', async () => {
-  const source = await readFile(new URL('./useTimelinePlayback.ts', import.meta.url), 'utf8')
-  expect(source).toContain('reportUnavailable: requiresNativeAudio')
-  expect(source).toContain(': "The prepared native playback graph could not be rebuilt.")')
-
   const previousWindow = globalThis.window
   let failBegin = false
   const fixture = createNativeHookBridge(

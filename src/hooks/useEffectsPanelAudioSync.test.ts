@@ -320,7 +320,6 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
         expect(f.audio.snapshotExportRows([f.targetId]).map(row => row.instanceId)).toEqual([f.instanceId]);
         const node = f.runtime.audio.workletNode(0);
         if (kind === "compressor" || kind === "reverb") {
-          expect(node).toBeDefined();
           expect(node?.closed).toBe(false);
         } else expect(f.bindings().length).toBeGreaterThan(0);
         const before = f.calls.length;

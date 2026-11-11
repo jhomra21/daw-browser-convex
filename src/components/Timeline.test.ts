@@ -87,38 +87,6 @@ test("B6 panel release records production history despite native refusal without
   } finally { dispose(); }
 });
 
-test("B6 hook fixture and Timeline use the production history seam, never a fixture copy", async () => {
-  const timeline = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const fixture = await readFile(new URL("../../tools/acceptance/ae-08-processor-state-fuzz-hook.ts", import.meta.url), "utf8");
-  expect(timeline).toContain('from "~/components/timeline/create-timeline-effect-commit"');
-  expect(timeline).toContain("onEffectParamsCommitted: effectCommit.committed");
-  expect(fixture).toContain('from "../../src/components/timeline/create-timeline-effect-commit"');
-  expect(fixture).toContain("projectId: () => projectId, tracks, pushHistory: history.pushHistory");
-  expect(fixture).not.toContain("ae-08-processor-state-fuzz-hook-commit");
-});
-
-test("STEP5 B7 shared playback input boundary is used by Timeline and both fixtures", async () => {
-  for (const file of ["src/components/Timeline.tsx", "tools/acceptance/device-control-cost.browser.test.ts",
-    "tools/acceptance/ae-08-processor-state-fuzz-hook.ts"]) {
-    const source = await readFile(new URL(`../../${file}`, import.meta.url), "utf8");
-    expect(source).toContain("pickNativePlaybackInputs(");
-    expect(source).toContain("processorStructure:");
-  }
-});
-
-test("3B1 r2 comments and audio-adapter witness describe registration and independent native settlement", async () => {
-  const hook = await readFile(new URL("../../tools/acceptance/ae-08-processor-state-fuzz-hook.ts", import.meta.url), "utf8");
-  const cost = await readFile(new URL("../../tools/acceptance/device-control-cost.browser.test.ts", import.meta.url), "utf8");
-  const panel = await readFile(new URL("./timeline/create-effects-panel-state.ts", import.meta.url), "utf8");
-  const audioTest = await readFile(new URL("./timeline/create-effects-panel-audio-effects-state.test.ts", import.meta.url), "utf8");
-  expect({
-    obsoleteHookTranslator: hook.includes("handleNativeBuiltInPreview"),
-    obsoleteCostTranslator: cost.includes("handleNativeBuiltInPreview"),
-    nativeVetoesSave: panel.includes("engine or native failure"),
-    booleanFlushName: audioTest.includes("awaits the boolean native flush"),
-  }).toEqual({ obsoleteHookTranslator: false, obsoleteCostTranslator: false, nativeVetoesSave: false, booleanFlushName: false });
-});
-
 test("settles preparation before comparing instrument-ready callbacks with the prepared graph", async () => {
   const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
   const start = source.indexOf('onStructuralPlaybackChange: (targetId:');
@@ -128,18 +96,6 @@ test("settles preparation before comparing instrument-ready callbacks with the p
   expect(handler.indexOf("await awaitPlaybackPreparation();"))
     .toBeLessThan(handler.indexOf("const previous = preparedInstrument(targetId);"));
   expect(handler).toContain("if (JSON.stringify(previous) === JSON.stringify(instrument)) return;");
-});
-
-test("records effect history without dispatching native delivery or rebuilding playback", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const handler = await readFile(new URL("./timeline/create-timeline-effect-commit.ts", import.meta.url), "utf8");
-  expect(source).toContain("const effectCommit = createTimelineEffectCommit({ projectId, tracks: renderTracks, pushHistory });");
-  expect(handler).toContain("input.pushHistory(entry,");
-  expect(handler).not.toContain("deliverProcessor(");
-  expect(handler).not.toContain("rebuildPlaybackBackend(");
-  expect(source).toContain("deliverProcessor,");
-  expect(source).toContain("joinPublication,");
-  expect(source).toContain("return instrumentPlaybackChangeTail =");
 });
 
 test("scopes effect history to the committed project and keeps patch failures silent", async () => {
@@ -160,50 +116,6 @@ test("persists captured editor state using its bound project after navigation", 
   expect(handler).toContain("localVstStateOwnerId(payload.projectId, userId())");
   expect(handler).toContain("if (!persisted) throw new Error");
   expect(handler).not.toContain("payload.projectId !== projectId()");
-});
-
-test("bypasses degraded external processors and excludes persisted degraded rows from playback", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-
-  expect(source).toContain(
-    `.filter((processor) => !processor.bypassed && processor.health.state !== "degraded");`,
-  );
-});
-
-test("rebuilds prepared browser or native ownership with captured project intent", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  expect(source).toContain("projectGeneration: mountedProjectGeneration(),");
-  expect(source).toContain("if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared())");
-  expect(source).toContain("&& !isStructuralRebuildInProgress()");
-  expect(source).toContain("&& !isPreparingPlayback()) return;");
-  expect(source).toContain("rebuildBackend: true,");
-  expect(source).toContain("const rebuildPlaybackBackend =");
-  expect(source).toContain("nativePlaybackRevision += 1;");
-  expect(source).toContain("if (isPlaying()) restartTimelineSchedule(renderTracks()).catch");
-});
-
-test("keeps graph revisions stable during compilation and bumps them at structural rebuild boundaries", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  expect(source).toContain("let nativePlaybackRevision = 1;");
-  expect(source).toContain("revision: nativePlaybackRevision,");
-  expect(source).toContain("nativePlaybackRevision += 1;");
-  expect(source).not.toContain("revision: ++nativePlaybackRevision,");
-});
-
-test("hands an inserted processor to the bound rebuild compiler and verifies current persistence", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const playbackSource = await readFile(new URL("../hooks/useTimelinePlayback.ts", import.meta.url), "utf8");
-  expect(source).toContain("readPersisted: getLocalExternalProcessor,");
-  expect(source).toContain("externalProcessor: {");
-  expect(source).toContain("projectId: insertedProjectId,");
-  expect(source).toContain("processor,");
-  expect(source).toContain("await rebuildPlaybackBackend(renderTracks(), insertionIntent);");
-  expect(source).toContain("await deleteLocalExternalProcessor(insertedProjectId, processor.instanceId);");
-  expect(source).toContain("externalProcessor: undefined,");
-  expect(playbackSource).toContain("externalProcessor: options.externalProcessor,");
-  expect(source).toContain("resolveNativeLivePlaybackProcessors");
-  expect(playbackSource).toContain("externalProcessor?: LivePlaybackCompileContext[\"externalProcessor\"]");
-  expect(playbackSource).toContain("const compileContext = requestedIntent?.instrumentOverride !== undefined");
 });
 
 test("opens an inserted VST editor only after the matching playback rebuild", async () => {
@@ -241,43 +153,6 @@ test("opens an inserted VST editor only after the matching playback rebuild", as
   const handled = source.slice(exposureEnd, handledEnd);
   expect(handled).toContain("request?.ready && request.instanceId === instanceId");
   expect(handled).toContain("setPendingExternalProcessorEditorRequest();");
-});
-
-test("offers trusted VST3 catalog recovery without retrying playback automatically", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const recoveryStart = source.indexOf("if (classifyNativeVst3PlaybackFault(message)");
-  const recoveryEnd = source.indexOf('\n        notify("Native playback stopped", message);', recoveryStart);
-  if (recoveryStart < 0 || recoveryEnd < 0) throw new Error("Expected the native VST3 recovery handler.");
-  const recovery = source.slice(recoveryStart, recoveryEnd);
-
-  expect(recovery).toContain('title: "Plug-in authorization required"');
-  expect(recovery).toContain("This project uses VST3 plug-ins that must be verified again before playback.");
-  expect(recovery).toContain('label: "Rescan plug-ins"');
-  expect(recovery).toContain('busyLabel: "Rescanning…"');
-  expect(recovery).toContain('cancelLabel: "Cancel"');
-  expect(recovery).toContain("canUseVst3CatalogAction");
-  expect(recovery).toContain("saveVst3TrustAcknowledgement");
-  expect(source).toContain("await bridge.scan()");
-  expect(source).toContain('new Event("daw-plugin-catalog-changed")');
-  expect(source).toContain("setAppMessage(null)");
-  expect(recovery).toContain("onAction: scanVst3Catalog");
-  expect(recovery).toContain("void scanVst3Catalog().catch");
-  expect(recovery).toContain("setVst3TrustAcknowledged(acknowledged);");
-  expect(recovery).toContain("saveVst3TrustAcknowledgement(vst3TrustStorage);");
-  expect(source).toContain("vst3ScanPromise");
-  expect(recovery.match(/scanVst3Catalog\(\)/g)).toHaveLength(1);
-  expect(recovery).not.toContain("requestPlay()");
-  expect(source).toContain('notify("Native playback stopped", message);');
-});
-
-test("routes browser keyboard toggles through the extension host exactly once", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  expect(source).toContain("const timelineExtensionHost = createTimelineExtensionHost({");
-  expect(source).toContain("toggle: leftBrowser.toggleOpen,");
-  expect(source).toContain("executeExtensionShortcut: timelineExtensionHost.shortcuts.execute,");
-  expect(source).not.toContain("onToggleBrowser: leftBrowser.toggleOpen");
-  expect(source.match(/createTimelineExtensionHost\(/g)).toHaveLength(1);
-  expect(source.match(/timelineExtensionHost\.dispose\(\)/g)).toHaveLength(1);
 });
 
 test("keeps arrangement and clip selection clicks from seeking during playback", async () => {

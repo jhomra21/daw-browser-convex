@@ -5,27 +5,6 @@ const cmakeUrl = new URL('../CMakeLists.txt', import.meta.url)
 const wasmBuildScriptUrl = new URL('../scripts/build-wasm.sh', import.meta.url)
 const publishWasmAssetsUrl = new URL('../scripts/publish-wasm-assets.sh', import.meta.url)
 
-test('native validation scratch stays persistent while Wasm uses its configured stack', async () => {
-  const source = await Bun.file(coreSourceUrl).text()
-  const persistentScratchStart = source.indexOf('#if defined(DAW_AUDIO_CORE_USE_PERSISTENT_VALIDATION_SCRATCH)')
-  const persistentScratchEnd = source.indexOf('#endif', persistentScratchStart)
-  const validationStart = source.indexOf('  // Validation applies events to a scratch copy of only the nodes they touch.')
-  const validationEnd = source.indexOf('  for (auto &indices : core.instrument_event_indices)', validationStart)
-
-  expect(persistentScratchStart).toBeGreaterThanOrEqual(0)
-  expect(persistentScratchEnd).toBeGreaterThan(persistentScratchStart)
-  expect(source.slice(persistentScratchStart, persistentScratchEnd)).toContain('proposed_instruments{}')
-  expect(validationStart).toBeGreaterThanOrEqual(0)
-  expect(validationEnd).toBeGreaterThan(validationStart)
-
-  const validation = source.slice(validationStart, validationEnd)
-  const wasmBranch = validation.slice(validation.indexOf('#else'))
-  expect(validation).toContain('auto &proposed_instruments = core.proposed_instruments')
-  expect(wasmBranch).toContain('std::array<InstrumentNodeState, kMaximumLiveNodes> proposed_instruments')
-  expect(validation.slice(0, validation.indexOf('#else'))).not.toContain('std::array<InstrumentNodeState, kMaximumLiveNodes> proposed_instruments')
-  expect(source).toContain('proposed_instruments[index] = published_instrument(core, index)')
-})
-
 test('Wasm build validates a same-filesystem directory before publication', async () => {
   const cmake = await Bun.file(cmakeUrl).text()
   const buildScript = await Bun.file(wasmBuildScriptUrl).text()

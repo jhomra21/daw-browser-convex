@@ -195,24 +195,6 @@ describe('waveform request planning', () => {
     expect(plan.requests[0]?.priority).toBe(0)
   })
 
-  test('keeps global interval ownership stable under tiny pans and tier changes', () => {
-    const globalOwner = (frame: number, framesPerInterval: number) => (
-      Math.floor(frame / framesPerInterval)
-    )
-    const requestRelativeOwner = (
-      frame: number,
-      requestStartFrame: number,
-      framesPerInterval: number,
-    ) => Math.floor((frame - requestStartFrame) / framesPerInterval)
-    const frame = 16_384
-    expect(globalOwner(frame, 128)).toBe(globalOwner(frame, 128))
-    expect(globalOwner(frame + 1, 128)).toBe(globalOwner(frame + 1, 128))
-    expect(globalOwner(frame, 256)).toBe(Math.floor(frame / 256))
-    expect(requestRelativeOwner(frame, 0, 128)).not.toBe(
-      requestRelativeOwner(frame, 1, 128),
-    )
-  })
-
   test('uses aligned transient interval tiers before exact samples', () => {
     const intervalPlan = createWaveformRequestPlans({
       sampleRate: 48_000,

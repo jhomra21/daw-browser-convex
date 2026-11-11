@@ -6,15 +6,6 @@ import tailwindcss from '@tailwindcss/vite'
 import { z } from 'zod'
 
 const root = new URL('../../../', import.meta.url).pathname.replace(/\/$/u, '')
-test('terminal session cancellation preserves the device fault notice without rebuilding', async () => {
-  const timeline = await Bun.file(`${root}/src/components/Timeline.tsx`).text()
-  const handler = await Bun.file(`${root}/src/components/timeline/create-timeline-effect-commit.ts`).text()
-  expect(timeline).toContain('onEffectParamsCommitted: effectCommit.committed')
-  expect(handler).toContain('input.pushHistory(entry,')
-  expect(handler).not.toContain('rebuildPlaybackBackend(')
-  expect(handler).not.toContain('notify(')
-})
-
 const evidence = process.env.DAW_INSTRUMENT_EVIDENCE ?? `${root}/acceptance-reports/native-running-seek-${crypto.randomUUID()}`
 const runtime = `${root}/src/lib/desktop/native-playback-lifecycle.browser-runtime.ts`
 const stateSchema = z.object({

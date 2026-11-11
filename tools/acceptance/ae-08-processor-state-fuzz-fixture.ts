@@ -1124,6 +1124,16 @@ export default function createControllerFixture(
         fail("I1", `The recovered schedule did not carry the latest latency: ${JSON.stringify({ actual, graph, desired, attachmentLatency })}`, "live", "parked-rebase-stale")
       return
     }
+    if (mode === "attachment-join-lost" || mode === "attachment-undo-startup") {
+      // Both paths end alike: the ready instance is active, the other never binds, and no instance stays staged.
+      checked("I5")
+      const owners = [...h.attachments].map(([id, attachment]) => `${id}:${attachment.state}`).join(",")
+      const ignored = mode === "attachment-join-lost" ? { stale: 0, joinLost: 1 } : { stale: 1, joinLost: 0 }
+      if (owners !== "instance-1:active,instance-2:retired" || JSON.stringify(h.ignoredReady) !== JSON.stringify(ignored))
+        fail("I5", `Attachment ownership ${owners} with ignored ready ${JSON.stringify(h.ignoredReady)}`, undefined, "attachment-ownership")
+      record({ witness: mode, owners, ignoredReady: h.ignoredReady })
+      return
+    }
     if (mode === "attachment") {
       checked("I9"); checked("I1")
       const rebuild = waiters.some((waiter) => waiter.name === "adoption"

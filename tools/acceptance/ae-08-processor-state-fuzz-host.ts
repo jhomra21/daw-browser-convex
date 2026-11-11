@@ -141,6 +141,18 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
   let blockAssetError = "asset-capacity-exceeded"
   let clearOverridesOnPublish = false
   let rejectPrepare = false
+  // VST3 attachment ownership as phase 6 stages it: an instance starts staged against the prepared revision and finishes
+  // its startup off the command loop, so `ready` arrives later. That revision's publication binds a ready instance
+  // (active) and retires one that never became ready; a rollback retires every instance it staged. A ready that arrives
+  // for a retired instance (undo during startup) or whose join was lost binds nothing.
+  const attachments = new Map<string, { state: "staged" | "active" | "retired"; ready: boolean; revision: number; joinLost: boolean }>()
+  const ignoredReady = { stale: 0, joinLost: 0 }
+  const settleAttachments = (revision: number, publishing: boolean) => {
+    for (const attachment of attachments.values()) {
+      if (attachment.state === "staged" && attachment.revision === revision)
+        attachment.state = publishing && attachment.ready ? "active" : "retired"
+    }
+  }
   // A callback split in two, so control work can run between its transport read and its lane drain
   // (audio-host.cpp:5175-5176 and 5385). Only a scenario that asks for it enables the extra actions.
   let splitRender = false
@@ -282,6 +294,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
       if (!asset.released) { asset.released = true; releaseLease(id) }
     }
     dropBank(preparedBank)
+    if (prepared) settleAttachments(prepared.revision, false)
     prepared = undefined; preparedBank = undefined
   }
   // InstallAsset / CreateMappedAsset (audio-host.cpp:4113-4121): a new asset is staged against the prepared revision.
@@ -369,6 +382,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
     }
     retiredBank = activeBank
     publishedConfigs = preparedConfigs
+    settleAttachments(prepared.revision, true)
     active = prepared; prepared = undefined
     if (seam > 0n) {
       if (!preparedBank) throw new Error("Missing prepared schedule bank")
@@ -561,7 +575,7 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
         if (prepared) discardPrepared()
       }),
       teardown: () => simple("teardown", () => {
-        checkOwnership(); endLeases(); assets.clear(); gainOverrides.clear(); activeBank.sources.clear()
+        checkOwnership(); endLeases(); assets.clear(); gainOverrides.clear(); activeBank.sources.clear(); attachments.clear()
         active = undefined; prepared = undefined; retired = undefined; started = false
         publishedConfigs = new Map(); preparedConfigs = new Map()
         if (hookLifetime) {
@@ -768,6 +782,21 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
       callbackMode = action.mode === "not-admitted" ? "not-admitted" : action.mode === "failed" ? "failed" : "normal"
     }
     else if (action.kind === "asset-capacity") assetCapacity = action.value
+    else if (["attachment-stage", "attachment-ready", "attachment-join-lost", "attachment-undo"].includes(action.kind)) {
+      const id = `instance-${action.value ?? 0}`
+      const attachment = attachments.get(id)
+      if (action.kind === "attachment-stage") {
+        if (!prepared) throw new Error("Attachment staging needs a prepared revision")
+        attachments.set(id, { state: "staged", ready: false, revision: prepared.revision, joinLost: false })
+      } else if (!attachment) throw new Error(`Unknown attachment ${id}`)
+      else if (action.kind === "attachment-undo") { if (attachment.state === "staged") attachment.state = "retired" }
+      else if (action.kind === "attachment-join-lost") attachment.joinLost = true
+      else if (action.kind === "attachment-ready") {
+        if (attachment.state === "retired") ignoredReady.stale++
+        else if (attachment.joinLost) ignoredReady.joinLost++
+        else attachment.ready = true
+      }
+    }
     else if (action.kind === "control-wake") take(commands, action.id).execute()
     else if (action.kind === "revision-deadline") {
       const current = pendingControl
@@ -915,6 +944,8 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
     get domain() { return domain }, set domain(value: typeof domain) { domain = value },
     get utilityIncarnation() { return utilityIncarnation },
     get assets() { return assets },
+    get attachments() { return attachments },
+    get ignoredReady() { return ignoredReady },
     get leases() { return leases },
     get counts() { return counts },
     get published() { return published },

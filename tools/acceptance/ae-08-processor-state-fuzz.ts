@@ -58,6 +58,8 @@ const publicationScenarios = ["deferred-outcome-pause", "deferred-outcome-seek",
 const stretchScenarios = ["leases-invalid", "leases-valid"]
 // Microtask turns after the publication's proof at which `publication-cancel-handoff` drops; `handoff-coverage` checks they reach past the settlement.
 const handoffSweep = 24
+// Staged VST3 attachments the host fake owns: a lost join, and an undo during startup.
+const attachmentScenarios = ["attachment-join-lost", "attachment-undo-startup"]
 for (let index = 2; index < process.argv.length; index += 2) {
   const key = process.argv[index]
   if (key === "--unfair-host") { options.unfairHost = true; index--; continue }
@@ -72,7 +74,7 @@ for (let index = 2; index < process.argv.length; index += 2) {
   else if (key === "--replay") options.replay = path.resolve(value)
   else if (key === "--gate") options.gate = value
   else if (key === "--trace") options.trace = traceSchema.parse(value)
-  else if (key === "--scenario" && ["pause-latency", "paused-flush", "attachment", "transport-mismatch", "graph-cache", "host-boundary", "transport-refusal", "prefix-11", "prefix-12", "identity-same", "identity-changed", "ledger-inclusion", "ledger-incarnation", "reenable-automation", "instrument-urgent", "urgent-epoch-drop", "held-urgent-note", "retained-drift", "reconcile-seek", "reconcile-inflight", "reconcile-first", "parameter-preack-epoch", "parameter-epoch-drop", "future-epoch-drop", "unsent-second-domain", "retained-instrument", "retained-override-instrument", "restated-override", "restated-inflight", "restated-queued", "two-rejections", "overlapping-flushes", "synth-replaced", "rollback-values", ...endingScenarios, ...patchScenarios, ...adoptionScenarios, ...parkedScenarios, ...publicationScenarios].includes(value)) options.scenario = value
+  else if (key === "--scenario" && ["pause-latency", "paused-flush", "attachment", "transport-mismatch", "graph-cache", "host-boundary", "transport-refusal", "prefix-11", "prefix-12", "identity-same", "identity-changed", "ledger-inclusion", "ledger-incarnation", "reenable-automation", "instrument-urgent", "urgent-epoch-drop", "held-urgent-note", "retained-drift", "reconcile-seek", "reconcile-inflight", "reconcile-first", "parameter-preack-epoch", "parameter-epoch-drop", "future-epoch-drop", "unsent-second-domain", "retained-instrument", "retained-override-instrument", "restated-override", "restated-inflight", "restated-queued", "two-rejections", "overlapping-flushes", "synth-replaced", "rollback-values", ...attachmentScenarios, ...endingScenarios, ...patchScenarios, ...adoptionScenarios, ...parkedScenarios, ...publicationScenarios].includes(value)) options.scenario = value
   else if (key !== "--fixture" || value !== "controller") throw new Error(`Unknown argument ${key} ${value}`)
 }
 // A host-model plant corrupts the fake host under a fixed schedule rather than wrapping a request.
@@ -349,7 +351,17 @@ async function runSeed(seed: number, plant: Defect | undefined, trace?: SeedTrac
         await act({ kind: "prepare-candidate" }); await drain()
         await act({ kind: "publish-candidate" }); await drain()
         await act({ kind: "check", mode: "attachment" })
-      }    } else if (options.scenario === "host-boundary") {
+      }    } else if (attachmentScenarios.includes(options.scenario ?? "")) {
+      // Two instances staged on one prepared revision; one of them never binds, by a lost join or by an undo during its startup.
+      await act({ kind: "latency", value: 2048, sequence: 10 })
+      await executeNamed("prepare"); await deliverNamed("prepare")
+      await act({ kind: "attachment-stage", value: 1 }); await act({ kind: "attachment-stage", value: 2 })
+      if (options.scenario === "attachment-join-lost") await act({ kind: "attachment-join-lost", value: 2 })
+      else await act({ kind: "attachment-undo", value: 2 })
+      await act({ kind: "attachment-ready", value: 2 }); await act({ kind: "attachment-ready", value: 1 })
+      await drain()
+      await act({ kind: "check", mode: options.scenario })
+    } else if (options.scenario === "host-boundary") {
       await act({ kind: "boundary-probe", mode: "revision" })
       const deadline = fixture.enabled().find((action) => action.kind === "revision-deadline")
       if (!deadline) throw new Error("No revision deadline")
@@ -1615,7 +1627,7 @@ async function runSeed(seed: number, plant: Defect | undefined, trace?: SeedTrac
       await act({ kind: "reset-fixture" }); await act({ kind: "start" }); await drain()
     }
     if (!options.scenario?.startsWith("prefix-") && !options.scenario?.startsWith("identity-")
-      && !["pause-latency", "paused-flush", "attachment", "transport-mismatch", "urgent-epoch-drop", "retained-drift", ...historyScenarios, ...endingScenarios, ...patchScenarios, ...adoptionScenarios, ...parkedScenarios, ...publicationScenarios, "synth-replaced", "rollback-values"].includes(options.scenario ?? "") && !plant) {
+      && !["pause-latency", "paused-flush", "attachment", "transport-mismatch", "urgent-epoch-drop", "retained-drift", ...historyScenarios, ...attachmentScenarios, ...endingScenarios, ...patchScenarios, ...adoptionScenarios, ...parkedScenarios, ...publicationScenarios, "synth-replaced", "rollback-values"].includes(options.scenario ?? "") && !plant) {
       const random = randomFor(seed)
       let sequence = 100
       for (let index = 0; index < options.steps; index++) {

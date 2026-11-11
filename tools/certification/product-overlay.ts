@@ -29,6 +29,10 @@ const apply = (contents: string, edit: z.infer<typeof change>, id: string) => {
   return contents.replace(edit.from, () => to)
 }
 const escaped = product.changes.map((edit) => edit.file.replace(/^\/?/, "/").replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+// Jobs whose own preload appends a file (a bun plugin) never see a file this plugin loads first. The append runs here, on the
+// file's effective contents (reverted when the revert replaced it). One row per appending job: the env var names the source it
+// appends, the suffix names the file it appends to, and the marker is the line the job's judge counts in its log.
+const appends = [{ sourceEnv: "DV01_B6F_PROBE", file: "/src/hooks/useTimelinePlayback.test.ts", marker: "DV01-B6F-PROBE-APPENDED" }]
 plugin({ name: `fast-cert-product-${product.id}`, setup(build) {
   build.onLoad({ filter: new RegExp(`(${escaped.join("|")})$`) }, ({ path }) => {
     let contents = readFileSync(path, "utf8")
@@ -39,6 +43,12 @@ plugin({ name: `fast-cert-product-${product.id}`, setup(build) {
     for (const edit of job.changes.filter((entry) => path.endsWith(entry.file))) {
       contents = apply(contents, edit, job.id)
       if (jobMarker.length > 0) console.log(jobMarker, job.id, edit.file)
+    }
+    for (const { sourceEnv, file, marker } of appends) {
+      const source = process.env[sourceEnv]
+      if (!source || !path.endsWith(file)) continue
+      contents += `\n${readFileSync(source, "utf8")}`
+      console.log(marker)
     }
     return { contents, loader: path.endsWith(".tsx") ? "tsx" : path.endsWith(".js") ? "js" : "ts" }
   })

@@ -379,6 +379,13 @@ export function useTimelineActions(
       index: plan.groupTrack.index,
     }, { pushHistory: false, select: false })
     if (!groupTrack) return
+    // A take can start while the group track is being created; it is discarded instead of rerouting the target.
+    if (refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.childUpdates))) {
+      if (isLocalId('project', projectId)) await createLocalTimelineRepository(projectId).deleteTrack(groupTrack.id)
+      else await options.creation.removeCloudTrack(groupTrack)
+      options.creation.removeLocalTrack(groupTrack.id)
+      return
+    }
     const trackById = new Map(tracks.map((track) => [track.id, track]))
     const childUpdateByTrackId = new Map(plan.childUpdates.map((update) => [update.trackId, update]))
     const reorderUpdates = [
@@ -437,8 +444,12 @@ export function useTimelineActions(
     const groupTrack = tracks.find((track) => track.id === groupId)
     if (!groupTrack) return
     const plan = planUngroupTracks({ tracks, groupId })
-    if (!plan || refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.childUpdates, [groupId]))) return
+    if (!plan) return
+    const refuseUngroup = () => refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.childUpdates, [groupId]))
+    if (refuseUngroup()) return
     const effects = await loadTrackEffectSnapshot(projectId, groupId)
+    // A take can start while the effects load; the write must see the lock as it is now.
+    if (refuseUngroup()) return
     const automation = options.automationEnvelopes()
       .filter((envelope) => envelope.target.kind === 'track' && envelope.target.trackId === groupId)
     const trackById = new Map(tracks.map((track) => [track.id, track]))

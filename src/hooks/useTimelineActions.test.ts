@@ -1,5 +1,12 @@
+import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
-import { createRoot, createSignal } from 'solid-js'
+import { createRoot, createSignal, type Accessor } from 'solid-js'
+
+import { createLocalProject } from '~/lib/local-project-db'
+import { RECORDING_TARGET_LOCKED_REASON, createRecordingTargetLock, type RecordingTargetLock } from '~/lib/track-recording-target'
+import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
+import { convexApi, convexClient } from '~/lib/convex'
+import { useTimelineClipActions } from './useTimelineClipActions'
 
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
@@ -176,4 +183,137 @@ test('projects only repaired local tracks before inserting the created track', (
     { trackId: 'repaired', index: 1, groupId: undefined },
   ])
   expect(inserts).toEqual([{ trackId: 'created', index: 2 }])
+})
+
+// A take that starts while an edit is still preparing its durable write must refuse that write.
+const lockedEditActions = (projectId: Accessor<string>, tracks: RuntimeTrack[], lock: RecordingTargetLock) => {
+  const notices: string[] = []
+  const removed: string[] = []
+  const selection = useTimelineSelectionState({ projectId, tracks: () => tracks })
+  const actions = useTimelineActions({
+    tracks: () => tracks,
+    room: { projectId, setProjectId: () => undefined, userId: () => 'user' },
+    creation: {
+      selection,
+      insertLocalTrack: () => undefined,
+      removeLocalTrack: (trackId) => { removed.push(trackId) },
+      replaceLocalClip: () => undefined,
+      updateLocalTrack: () => undefined,
+      removeCloudTrack: async () => undefined,
+      grantTrackWrite: () => undefined,
+      pushHistory: () => undefined,
+    },
+    recordingTargetLock: lock,
+    notify: (_title, message) => { notices.push(message) },
+    automationEnvelopes: () => [],
+    sidechainRoutes: () => [],
+    applyAutomationEnvelope: () => undefined,
+    navigation: {
+      trackLookup: () => createTimelineTrackIndex(tracks),
+      selection,
+      isPlaying: () => false,
+      setPlayhead: () => undefined,
+      openClipDetailFor: () => undefined,
+      ensureClipBuffer: async () => undefined,
+      getScrollElement: () => undefined,
+      visibleStartSec: () => 0,
+      setVisibleStartSec: () => undefined,
+      pixelsPerSecond: () => 100,
+    },
+  })
+  return { actions, notices, removed }
+}
+
+test('ungroup refuses when a take starts while the group effects load', async () => {
+  const project = await createLocalProject(`Take during ungroup ${crypto.randomUUID()}`)
+  const tracks: RuntimeTrack[] = [
+    { id: 'group', name: 'Group', volume: 1, clips: [], channelRole: 'group' },
+    { id: 'child', name: 'Child', volume: 1, clips: [], groupId: 'group', outputTargetId: 'group' },
+  ]
+  const lock = createRecordingTargetLock(() => tracks)
+  const { notices, removed } = await createRoot(async (dispose) => {
+    const edit = lockedEditActions(() => project.id, tracks, lock)
+    const pending = edit.actions.ungroupTrack('group')
+    lock.start('child')
+    await pending
+    dispose()
+    return edit
+  })
+  expect(notices).toEqual([RECORDING_TARGET_LOCKED_REASON])
+  expect(removed).toEqual([])
+})
+
+test('group discards its new group track when a take starts while it is created', async () => {
+  const project = await createLocalProject(`Take during group ${crypto.randomUUID()}`)
+  const repository = createLocalTimelineRepository(project.id)
+  const created = await repository.createTrack({ index: 0 })
+  const before = (await repository.loadSnapshot()).tracks.map((track) => track.id)
+  const tracks: RuntimeTrack[] = [{ id: created.id, name: 'Child', volume: 1, clips: [] }]
+  const lock = createRecordingTargetLock(() => tracks)
+  const { notices, removed } = await createRoot(async (dispose) => {
+    const edit = lockedEditActions(() => project.id, tracks, lock)
+    const pending = edit.actions.groupSelectedTracks([created.id])
+    lock.start(created.id)
+    await pending
+    dispose()
+    return edit
+  })
+  expect(notices).toEqual([RECORDING_TARGET_LOCKED_REASON])
+  expect(removed).toHaveLength(1)
+  expect((await repository.loadSnapshot()).tracks.map((track) => track.id)).toEqual(before)
+})
+
+test('track delete refuses when a take starts while the delete is prepared', async () => {
+  const project = await createLocalProject(`Take during delete ${crypto.randomUUID()}`)
+  const repository = createLocalTimelineRepository(project.id)
+  const created = await repository.createTrack({ index: 0 })
+  const tracks: RuntimeTrack[] = [{ id: created.id, name: 'Doomed', volume: 1, clips: [] }]
+  const lock = createRecordingTargetLock(() => tracks)
+  const notices: string[] = []
+  const removed: string[] = []
+  await createRoot(async (dispose) => {
+    const [projectId] = createSignal(project.id)
+    const selection = useTimelineSelectionState({ projectId, tracks: () => tracks })
+    const [, setPendingDeleteTrackId] = createSignal<string | null>(null)
+    const [, setConfirmOpen] = createSignal(false)
+    const actions = useTimelineClipActions({
+      tracks: () => tracks,
+      insertLocalClip: () => undefined,
+      removeLocalClips: () => undefined,
+      commitClipTiming: () => undefined,
+      commitClipAudioWarp: () => undefined,
+      removeLocalTrack: (trackId) => { removed.push(trackId) },
+      canWriteClip: () => true,
+      selection,
+      setPendingDeleteTrackId,
+      setConfirmOpen,
+      projectId,
+      userId: () => 'user',
+      convexClient,
+      convexApi,
+      audioBufferCache: {
+        getBuffer: () => undefined,
+        getMediaStatus: () => undefined,
+        preload: async () => undefined,
+        writer: { storeBuffer: () => undefined, storeBuffers: () => undefined, removeBuffer: () => undefined },
+      },
+      bpm: () => 120,
+      playheadSec: () => 0,
+      gridEnabled: () => false,
+      gridDenominator: () => 4,
+      historyPush: () => undefined,
+      automationEnvelopes: () => [],
+      sidechainRoutes: () => [],
+      applyAutomationEnvelope: () => undefined,
+      recordingTargetLock: lock,
+      notify: (_title, message) => { notices.push(message) },
+    })
+    const pending = actions.performDeleteTrack(created.id)
+    lock.start(created.id)
+    await pending
+    dispose()
+  })
+  expect(notices).toEqual([RECORDING_TARGET_LOCKED_REASON])
+  expect(removed).toEqual([])
+  expect((await repository.loadSnapshot()).tracks.map((track) => track.id)).toContain(created.id)
 })

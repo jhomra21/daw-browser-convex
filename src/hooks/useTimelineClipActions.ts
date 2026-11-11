@@ -602,6 +602,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         showTrackDeleteFailure(null)
         return
       }
+      if (refuseLockedTrackDelete(tracks(), trackId)) return
       for (const deletedTrackId of deletedTrackIds) {
         await createLocalTimelineRepository(rid).deleteTrack(deletedTrackId)
       }
@@ -631,6 +632,8 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       return
     }
 
+    // A take can start while the delete is being prepared; the durable write must see the lock as it is now.
+    if (refuseLockedTrackDelete(tracks(), trackId)) return
     const result = await convexClient.mutation(
       convexApi.tracks.remove,
       buildTrackDeleteMutationInput({ trackId }),

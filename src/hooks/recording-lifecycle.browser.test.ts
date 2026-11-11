@@ -13,6 +13,7 @@ import { createMidiTrackRecordingController } from '../lib/midi/midi-recording-c
 import { useMidiTrackRecording } from './useMidiTrackRecording'
 import { createMidiRecordingCheckpointController } from '../lib/midi/recording-checkpoint'
 import { TransportBar } from '../components/timeline/TransportControls'
+import * as recordingTarget from '../lib/track-recording-target'
 
 const deferred = () => {
   let resolve
@@ -1814,6 +1815,230 @@ window.playScenarios = async () => {
   return results
 }
 
+// The recording-target lock: a take keeps its track, group chain and output route until Finish; every other edit stays live.
+window.lockScenarios = async () => {
+  const results = {}
+  const scenario = async (name, run) => {
+    try { results[name] = (await run()) === true } catch (error) { console.error(name, error); results[name] = false }
+  }
+  const reason = 'Finish recording to delete this track or change its routing.'
+  const tracks = [
+    { id: 'group-a', kind: 'audio', channelRole: 'group', name: 'Group', volume: 1, clips: [], sends: [] },
+    { id: 'return-a', kind: 'audio', channelRole: 'return', name: 'Return', volume: 1, clips: [], sends: [] },
+    { id: 'track-audio', kind: 'audio', channelRole: 'track', name: 'Audio', volume: 1, clips: [], sends: [], groupId: 'group-a', outputTargetId: 'group-a' },
+    { id: 'track-other', kind: 'audio', channelRole: 'track', name: 'Other', volume: 1, clips: [], sends: [] },
+    { id: 'track-midi', kind: 'instrument', channelRole: 'track', name: 'MIDI', volume: 1, clips: [], sends: [] },
+  ]
+  const streamTrack = { readyState: 'live', stop: () => {}, getSettings: () => ({ sampleRate: 48000 }) }
+  const stream = { getTracks: () => [streamTrack], getAudioTracks: () => [streamTrack] }
+  Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
+    getSupportedConstraints: () => ({}), getUserMedia: async () => stream,
+  } })
+  const selection = {
+    selectTrackTarget: () => {}, selectPrimaryClip: () => {}, selectedClip: () => null,
+    selectedClipIds: () => new Set(), selectedTrackId: () => '', selectedFXTarget: () => 'master',
+    rangeSelection: () => null, appendClipToSelection: () => {}, selectClipGroup: () => {},
+    selectMasterTarget: () => {}, selectTimeRange: () => {}, clearTimeRange: () => {},
+    setSelectedClipIds: () => {}, setSelectedClip: () => {}, setSelectedTrackId: () => {},
+    setSelectedFXTarget: () => {},
+  }
+  const audioEngine = {
+    ensureAudio: () => {}, resume: async () => {},
+    getAudioContext: () => ({ sampleRate: 48000, currentTime: 0 }),
+    subscribeRecordingStatus: () => () => {},
+    cancelRecordingCapture: () => {}, stopRecordingCapture: async () => {},
+  }
+  const audioHook = (native) => {
+    const calls = []
+    const startGate = deferred()
+    const startEntered = deferred()
+    const stopEntered = deferred()
+    const stopGate = deferred()
+    const lock = recordingTarget.createRecordingTargetLock(() => tracks)
+    const states = []
+    const capture = {
+      start: async () => {
+        startEntered.resolve()
+        await startGate.promise
+        return { sampleRate: 48000, channelCount: 1, startFrame: 0 }
+      },
+      stop: async () => {
+        states.push(lock.state())
+        stopEntered.resolve()
+        await stopGate.promise
+        return { capturedFrames: 1 }
+      },
+      cancel: async () => { calls.push('capture-cancel') },
+      isActive: () => true,
+      sampleRate: () => 48000,
+    }
+    let dispose = () => {}
+    const hook = createRoot(cleanup => {
+      dispose = cleanup
+      return useTrackRecording({
+        requiresNativeAudio: native,
+        audioEngine, tracks: () => tracks, setTrackLock: () => {}, clearTrackLock: () => {},
+        removeLocalTrack: () => {}, insertLocalClip: () => {}, removeLocalClips: () => {},
+        selection, playheadSec: () => 0, uploadToR2: async () => null,
+        audioBufferCache: { storeBuffer: () => {}, storeBuffers: () => {}, removeBuffer: () => {} },
+        projectId: () => 'project:test', userId: () => undefined, convexClient: {}, convexApi: {},
+        requestTransportPlay: async () => { calls.push('play') },
+        requestTransportStop: async () => { calls.push('stop') },
+        portableRecording: { enabled: () => !native, controller: capture },
+        nativeRecording: { enabled: () => native, controller: capture },
+        createTrackForRecording: async () => null, notify: () => {}, onLocalSaveFailed: () => {},
+        historyPush: () => {}, targetLock: lock,
+        audioPreferences: () => ({
+          inputDeviceId: '', outputDeviceId: '', sampleRate: 48000, latencyMode: 'balanced',
+          echoCancellation: false, noiseSuppression: false, autoGainControl: false, nativePlaybackEnabled: native,
+        }),
+        recordingPreferences: () => ({
+          layout: 'mono', inputChannel: 0, monitor: 'off', gainDb: 0, invertPolarity: false,
+          portableEnabled: !native, manualOffsetFrames: 0, calibrations: [],
+        }),
+        finalization: {
+          acquireTrackLock: async () => ({ ok: true }),
+          releaseTrackLock: async () => {},
+          storage: { open: async () => ({ version: 1, sessionId: 'take', format: 'planar-float32-blocks',
+            sampleRate: 48000, channelCount: 1, capturedFrames: 1, byteLength: 8, createdAtMs: 0, finalizedAtMs: 0 }),
+            remove: async () => {}, cleanupStale: async () => {} },
+          encodeWav: async () => ({ file: new File([new Uint8Array(8)], 'take.wav'), fileName: 'take.wav',
+            mimeType: 'audio/wav', remove: async () => {} }),
+          createLocalAsset: async () => ({ id: 'asset:take', name: 'take.wav', mimeType: 'audio/wav',
+            sizeBytes: 8, storagePath: 'take.wav', sourceKind: 'recording', createdAt: 0, updatedAt: 0 }),
+          createLocalAudioClip: async () => ({ clipId: 'clip:take', clip: { name: 'take', startSec: 0, duration: 1 / 48000 } }),
+          deleteLocalAsset: async () => null,
+        },
+      })
+    })
+    hook.toggleRecordArm('track-audio')
+    return { hook, lock, calls, states, startGate, startEntered, stopEntered, stopGate, dispose }
+  }
+  const refusals = (lock) => ({
+    deleteTarget: lock.refuseDelete(['track-audio']),
+    deleteGroup: lock.refuseDelete(['group-a', 'track-audio']),
+    deleteOutputRoute: lock.refuseDelete(['group-a']),
+    deleteOther: lock.refuseDelete(['track-other']),
+    reroute: lock.refuseChange([{ trackId: 'track-audio', outputTargetId: 'return-a' }]),
+    group: lock.refuseChange([{ trackId: 'track-audio', groupId: 'group-b', outputTargetId: 'group-b' }]),
+    ungroup: lock.refuseChange([{ trackId: 'track-audio', groupId: undefined }, { trackId: 'track-other', groupId: undefined }]),
+    rerouteOther: lock.refuseChange([{ trackId: 'track-other', outputTargetId: 'return-a' }]),
+    groupOther: lock.refuseChange([{ trackId: 'track-other', groupId: 'group-a', outputTargetId: 'group-a' }]),
+    undoRoute: lock.refuseHistory({ type: 'section-edit', projectId: 'project:test', data: { entries: [
+      { type: 'track-routing', projectId: 'project:test', data: {} },
+    ] } }),
+    undoClip: lock.refuseHistory({ type: 'clip-timing', projectId: 'project:test', data: {} }),
+    commitDelete: lock.refuseTransition(tracks, tracks.filter(track => track.id !== 'track-audio')),
+    commitReroute: lock.refuseTransition(tracks, tracks.map(track => track.id === 'track-audio' ? { ...track, outputTargetId: 'return-a' } : track)),
+    commitUnrelated: lock.refuseTransition(tracks, [...tracks.filter(track => track.id !== 'track-other'), { ...tracks[3], outputTargetId: 'return-a' }]),
+  })
+  const expectLocked = (found) => found.deleteTarget === reason && found.deleteGroup === reason
+    && found.deleteOutputRoute === reason && found.reroute === reason && found.group === reason
+    && found.ungroup === reason && found.undoRoute === reason && found.commitDelete === reason
+    && found.commitReroute === reason
+  const expectLive = (found) => found.deleteOther === undefined && found.rerouteOther === undefined
+    && found.groupOther === undefined && found.undoClip === undefined && found.commitUnrelated === undefined
+
+  for (const native of [false, true]) {
+    const backend = native ? 'native' : 'portable'
+    await scenario('lock-' + backend + '-starting-refuses-and-cancel-releases', async () => {
+      const take = audioHook(native)
+      const pending = take.hook.toggleRecording()
+      await take.startEntered.promise
+      const starting = take.lock.state() === 'starting' && take.lock.targetId() === 'track-audio'
+        && expectLocked(refusals(take.lock)) && expectLive(refusals(take.lock))
+      const stop = take.hook.stopRecording()
+      take.startGate.resolve()
+      await Promise.all([pending, stop])
+      const released = take.lock.state() === 'released' && take.lock.targetId() === null
+        && take.lock.refuseDelete(['track-audio']) === undefined
+      take.dispose()
+      return starting && released
+    })
+    await scenario('lock-' + backend + '-start-finish-race-ends-released-and-restarts', async () => {
+      const take = audioHook(native)
+      take.stopGate.resolve()
+      const first = take.hook.toggleRecording()
+      const second = take.hook.stopRecording()
+      const third = take.hook.toggleRecording()
+      take.startGate.resolve()
+      await Promise.all([first, second, third])
+      await take.hook.stopRecording()
+      const settled = take.lock.state() === 'released'
+      const again = take.hook.toggleRecording()
+      await settle()
+      const restarted = take.lock.state() !== 'released' && take.lock.targetId() === 'track-audio'
+      await take.hook.stopRecording()
+      await again.catch(() => undefined)
+      take.dispose()
+      return settled && restarted && take.lock.state() === 'released'
+    })
+  }
+
+  await scenario('lock-portable-take-refuses-edits-and-never-stops-recording', async () => {
+    const take = audioHook(false)
+    const pending = take.hook.toggleRecording()
+    await take.startEntered.promise
+    take.startGate.resolve()
+    await pending
+    const recording = take.lock.state() === 'recording' && take.hook.isRecording()
+    const found = refusals(take.lock)
+    const survived = take.hook.isRecording() && !take.calls.includes('stop') && !take.calls.includes('capture-cancel')
+    const finishing = take.hook.stopRecording()
+    await take.stopEntered.promise
+    const whileFinishing = take.states[0] === 'finishing' && take.lock.refuseDelete(['track-audio']) === reason
+    take.stopGate.resolve()
+    await finishing
+    const released = take.lock.state() === 'released' && take.lock.refuseDelete(['track-audio']) === undefined
+      && take.lock.refuseChange([{ trackId: 'track-audio', outputTargetId: 'return-a' }]) === undefined
+    take.dispose()
+    return recording && expectLocked(found) && expectLive(found) && survived && whileFinishing && released
+  })
+
+  await scenario('lock-midi-take-holds-target-until-settled', async () => {
+    const fetchBefore = window.fetch
+    window.fetch = async (_url, init) => {
+      const body = JSON.parse(init.body)
+      if (body.kind === 'clips.create') return new Response(JSON.stringify('clip-lock-midi'))
+      return new Response(JSON.stringify({ ok: true }))
+    }
+    const lock = recordingTarget.createRecordingTargetLock(() => tracks)
+    const [isRecording, setIsRecording] = createSignal(false)
+    const [recordingTrackId, setRecordingTrackId] = createSignal(null)
+    let dispose = () => {}
+    let controller
+    createRoot(cleanup => {
+      dispose = cleanup
+      controller = createMidiTrackRecordingController({
+        audioEngine: { midiEventTimes: () => null },
+        tracks: () => tracks, projectId: () => 'cloud-project', userId: () => 'user-midi',
+        playheadSec: () => 0, bpm: () => 120, loopEnabled: () => false, recordArmTrackId: () => 'track-midi',
+        setTrackLock: () => {}, clearTrackLock: () => {}, insertLocalClip: () => {}, removeLocalClips: () => {},
+        selection: { selectPrimaryClip: () => {} }, requestTransportPlay: async () => {}, pauseTransport: () => {},
+        notify: () => {}, historyPush: () => {}, setActiveRecordingTarget: () => {}, setProvisionalClipId: () => {},
+        isRecording, setIsRecording, recordingTrackId, setRecordingTrackId, targetLock: lock,
+      }, {
+        inputs: () => [], requestAccess: async () => {}, setInputSelected: () => {},
+        subscribe: () => () => {}, subscribeSourceReset: () => () => {}, panic: () => {},
+      })
+    })
+    try {
+      const started = await controller.startRecording()
+      const holding = started && lock.state() === 'recording' && lock.targetId() === 'track-midi'
+        && lock.refuseDelete(['track-midi']) === reason
+        && lock.refuseChange([{ trackId: 'track-midi', outputTargetId: 'return-a' }]) === reason
+        && lock.refuseChange([{ trackId: 'track-other', outputTargetId: 'return-a' }]) === undefined
+      await controller.stopRecording()
+      return holding && lock.state() === 'released' && lock.refuseDelete(['track-midi']) === undefined
+    } finally {
+      dispose()
+      window.fetch = fetchBefore
+    }
+  })
+
+  return results
+}
+
 window.dispatchScenarios = async () => {
   let audioStarts = 0
   let midiStarts = 0
@@ -1881,6 +2106,7 @@ test('recording startup joins duplicate requests and stop cancels setup immediat
       .replaceAll("'./useMidiTrackRecording'", `'${import.meta.dir}/useMidiTrackRecording.ts'`)
       .replaceAll("'../lib/midi/midi-recording-controller'", `'${import.meta.dir}/../lib/midi/midi-recording-controller.ts'`)
       .replaceAll("'../lib/midi/recording-checkpoint'", `'${import.meta.dir}/../lib/midi/recording-checkpoint.ts'`)
+      .replaceAll("'../lib/track-recording-target'", `'${import.meta.dir}/../lib/track-recording-target.ts'`)
       .replaceAll("'../components/timeline/TransportControls'", `'${import.meta.dir}/../components/timeline/TransportControls.tsx'`)
     await Bun.write(`${directory}/fixture.js`, bundledFixture)
     const output = await build({
@@ -1931,6 +2157,8 @@ export const createRecordingTempStorage = () => ({ cleanupStale: async () => {},
     const results = z.record(z.string(), z.boolean()).parse(JSON.parse(await browser('eval', 'window.recordingScenarios()')))
     const playResults = z.record(z.string(), z.boolean()).parse(JSON.parse(await browser('eval', 'window.playScenarios()')))
     Object.assign(results, playResults)
+    const lockResults = z.record(z.string(), z.boolean()).parse(JSON.parse(await browser('eval', 'window.lockScenarios()')))
+    Object.assign(results, lockResults)
     const dispatchResults = z.record(z.string(), z.boolean()).parse(JSON.parse(await browser('eval', 'window.dispatchScenarios()')))
     Object.assign(results, dispatchResults)
     const deltas = z.record(z.string(), z.record(z.string(), z.union([z.boolean(), z.number(), z.string()])))

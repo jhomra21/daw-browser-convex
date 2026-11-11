@@ -42,6 +42,7 @@ import {
 import {
   ensureTrackForRecording,
   finalizeAutoCreatedTrackFailure,
+  keptOnNewTrackNotice,
   type RecordingTargetLock,
 } from '~/lib/track-recording-target'
 import { canTrackReceiveAudioClip } from '@daw-browser/timeline-core/track-routing'
@@ -492,7 +493,19 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       return
     }
     const existingTracks = projectId() === ctx.projectId ? tracks() : ctx.tracks
-    const targetTrack = existingTracks.find((entry) => entry.id === ctx.trackId)
+    let saveTrackId = ctx.trackId
+    const keptOnNewTrack = () => saveTrackId !== ctx.trackId
+    let targetTrack = existingTracks.find((entry) => entry.id === saveTrackId)
+    if (!targetTrack && projectId() === ctx.projectId) {
+      // The take is the user's work: keep it on a new track instead of dropping it with the removed target.
+      // `ctx.trackId` stays the locked original so cleanup still releases its lock.
+      const keptTrack = await createTrackForRecording().catch(() => null)
+      if (keptTrack && projectId() === ctx.projectId) {
+        ctx.createdTrack = keptTrack
+        saveTrackId = keptTrack.id
+        targetTrack = tracks().find((entry) => entry.id === saveTrackId) ?? keptTrack
+      } else if (keptTrack) await handleAutoCreatedTrackFailure(keptTrack, ctx)
+    }
     if (!targetTrack) {
       await discardRecording('Recording target track missing; clip skipped.')
       return
@@ -516,7 +529,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         assetId = asset.id
         const created = await withPerformanceBenchmarkPhase('recording-clip-create', () => (options.finalization?.createLocalAudioClip ?? createLocalAudioClip)({
           projectId: rid,
-          trackId: ctx.trackId,
+          trackId: saveTrackId,
           trackRef: getTrackHistoryRef(targetTrack),
           startSec: nonOverlapStart,
           fileName: file.name,
@@ -532,14 +545,15 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
           skipHistory: Boolean(ctx.createdTrack),
           audioBufferCache,
           color: trackColorForClip(targetTrack.color) ?? 'clip-recording',
-          canProject: () => projectId() === rid && tracks().some((entry) => entry.id === ctx.trackId),
+          canProject: () => projectId() === rid && tracks().some((entry) => entry.id === saveTrackId),
         }))
         await releaseSavedSource({ clipId: created.clipId, sourceAssetKey: asset.id })
         await cleanupRecording(ctx, true)
         await removeTemp().catch(() => undefined)
-        if (ctx.createdTrack && projectId() === rid && tracks().some((entry) => entry.id === ctx.trackId)) {
+        if (ctx.createdTrack && projectId() === rid && tracks().some((entry) => entry.id === saveTrackId)) {
           pushTrackClipCreateHistory(rid, ctx.createdTrack, created.clipId, created.clip)
         }
+        if (keptOnNewTrack()) emit(keptOnNewTrackNotice)
       } catch (err) {
         if (assetId) {
           await (options.finalization?.deleteLocalAsset ?? deleteLocalAsset)(rid, assetId).catch(() => null)
@@ -560,7 +574,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       const createdClip = await (options.finalization?.createUploadedAudioClip ?? createUploadedAudioClip)({
         projectId: rid,
         userId: uid ?? '',
-        trackId: ctx.trackId,
+        trackId: saveTrackId,
         trackRef: getTrackHistoryRef(targetTrack),
         startSec: nonOverlapStart,
         file,
@@ -586,13 +600,14 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
         grantScope: uid ? { projectId: rid, userId: uid } : undefined,
         color: trackColorForClip(targetTrack.color) ?? 'clip-recording',
         pushHistory: false,
-        canProject: () => projectId() === rid && tracks().some((entry) => entry.id === ctx.trackId),
+        canProject: () => projectId() === rid && tracks().some((entry) => entry.id === saveTrackId),
         canCommit: () => !nativeTake || (projectId() === rid && activeCtx === ctx),
       })
       await releaseSavedSource({ clipId: createdClip.clipId, sourceAssetKey: createdClip.clip.sourceAssetKey ?? sourceAssetKey })
       await cleanupRecording(ctx, true)
       await removeTemp().catch(() => undefined)
-      if (projectId() !== rid || !tracks().some((entry) => entry.id === ctx.trackId)) return
+      if (projectId() !== rid || !tracks().some((entry) => entry.id === saveTrackId)) return
+      if (keptOnNewTrack()) emit(keptOnNewTrackNotice)
       if (ctx.createdTrack) {
         pushTrackClipCreateHistory(rid, ctx.createdTrack, createdClip.clipId, createdClip.clip)
         return
@@ -600,7 +615,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       pushClipCreateHistory({
         historyPush,
         projectId: rid,
-        trackId: ctx.trackId,
+        trackId: saveTrackId,
         trackRef: getTrackHistoryRef(targetTrack),
         clipId: createdClip.clipId,
         clip: createdClip.clip,

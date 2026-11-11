@@ -16,10 +16,11 @@ import {
   releaseTrackRecordingLock,
   startRecordingLockHeartbeat,
 } from '~/lib/track-recording-session'
-import type { RecordingTargetLock } from '~/lib/track-recording-target'
+import { keptOnNewTrackNotice, type RecordingTargetLock } from '~/lib/track-recording-target'
 import type { MidiAccessContextValue } from '~/context/midi-access'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
+import { buildTrackClipCreateHistoryEntry } from '~/lib/undo/builders'
 import type { HistoryEntry } from '~/lib/undo/types'
 import { z } from 'zod'
 
@@ -36,6 +37,7 @@ export type MidiTrackRecordingControllerOptions = {
   recordArmTrackId: Accessor<string | null>
   setTrackLock: (trackId: string, lockedBy: string | null) => void
   clearTrackLock: (trackId: string) => void
+  createTrackForRecording: () => Promise<Track | null>
   insertLocalClip: (trackId: string, clip: Track['clips'][number]) => void
   removeLocalClips: (clipIds: Iterable<string>) => void
   selection: Pick<TimelineSelectionController, 'selectPrimaryClip'>
@@ -238,6 +240,36 @@ export const createMidiTrackRecordingController = (
     projectClip(take, checkpoint.duration, checkpoint.midi)
   }
 
+  // The take's target track was removed mid-take: the captured events live in the session, so
+  // the take is saved on a fresh instrument track as one undoable track + clip entry.
+  const keepOnNewTrack = async (take: ActiveTake, midi: MidiClip) => {
+    const track = await options.createTrackForRecording()
+    if (!track) throw new Error('A track for the kept MIDI take could not be created.')
+    const clip = {
+      startSec: take.startSec,
+      duration: Math.max(0.001, currentTimelineTime() - take.startSec),
+      name: 'MIDI Recording',
+      color: trackColorForClip(track.color) ?? 'clip-midi',
+      midi,
+    }
+    let clipId: string | null
+    if (take.local) {
+      clipId = (await createLocalTimelineRepository(take.projectId).createClip({ trackId: track.id, ...clip })).id
+    } else {
+      const result = await publishSharedTimelineOperation(take.projectId, {
+        kind: 'clips.create',
+        payload: { trackId: track.id, ...clip, clipKind: 'midi', operationId: crypto.randomUUID() },
+      })
+      clipId = isJsonString(result) ? result : null
+    }
+    if (!clipId) throw new Error('MIDI clip creation was rejected.')
+    options.insertLocalClip(track.id, buildLocalClip({ id: clipId, clip }))
+    options.historyPush(buildTrackClipCreateHistoryEntry({
+      projectId: take.projectId, track, tracks: options.tracks(), clipId, clip,
+    }))
+    options.notify(keptOnNewTrackNotice)
+  }
+
   const resolveLostOwnership = (take: ActiveTake) => {
     if (active !== take) return
     take.checkpoints?.clear()
@@ -310,6 +342,8 @@ export const createMidiTrackRecordingController = (
           if (take.local) await createLocalTimelineRepository(take.projectId).deleteClip(take.clipId)
           else await deleteCloudClip(take.projectId, take.userId, take.clipId)
           if (options.projectId() === take.projectId) options.removeLocalClips([take.clipId])
+        } else if (options.projectId() === take.projectId && !options.tracks().some((entry) => entry.id === take.track.id)) {
+          await keepOnNewTrack(take, snapshot.midi)
         } else {
           await take.checkpoints?.request(true)
           const checkpoint = take.checkpoints?.last()

@@ -63,6 +63,8 @@ const createHarness = (input: {
   requestAccess?: () => Promise<void>
   requestTransportPlay?: () => Promise<void>
   inputs?: () => Array<{ id: string; selected: boolean; connected: boolean }>
+  tracks?: () => Track[]
+  createTrackForRecording?: () => Promise<Track | null>
 } = {}) => {
   const operations: RecordedOperation[] = []
   const notifications: string[] = []
@@ -90,7 +92,8 @@ const createHarness = (input: {
           scheduledContextTime: timeStamp / 1_000,
         }),
       },
-      tracks: () => [track()],
+      tracks: input.tracks ?? (() => [track()]),
+      createTrackForRecording: input.createTrackForRecording ?? (async () => null),
       projectId: input.openProjectId ?? (() => input.projectId ?? 'cloud-project'),
       userId: () => 'user-1',
       playheadSec: () => 0,
@@ -509,6 +512,71 @@ describe('useMidiTrackRecording transactions', () => {
     expect(final?.payload.midi).toEqual(expect.objectContaining({
       notes: [expect.objectContaining({ length: 1 })],
     }))
+    recording.dispose()
+  })
+
+  const keptNotice = 'The recording target was removed, so the take was kept on a new track.'
+  const keptTrack = (): Track => ({ id: 'kept-instrument', name: 'MIDI 2', volume: 1, clips: [], kind: 'instrument' })
+
+  test('keeps a cloud take on a new instrument track when its target was removed, as one history entry', async () => {
+    let current = [track()]
+    const recording = createHarness({
+      tracks: () => current,
+      createTrackForRecording: async () => { current = [keptTrack()]; return keptTrack() },
+    })
+    setFetch((operation) => {
+      if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock') return json({ ok: true })
+      if (operation.kind === 'clips.create') return json(operation.payload.trackId === 'kept-instrument' ? 'clip-kept' : 'clip-1')
+      throw new Error(`Unexpected ${operation.kind}`)
+    }, recording.operations)
+
+    await recording.controller.startRecording()
+    recording.emit(noteOn('keyboard', 0))
+    recording.emit(noteOff('keyboard', 1_000))
+    current = []
+    await recording.controller.stopRecording()
+
+    const kept = recording.operations.filter((operation) => operation.kind === 'clips.create' && operation.payload.trackId === 'kept-instrument')
+    expect(kept).toHaveLength(1)
+    expect(kept[0]?.payload.startSec).toBe(0)
+    expect(kept[0]?.payload.midi).toEqual(expect.objectContaining({ notes: [expect.objectContaining({ pitch: 60 })] }))
+    expect(recording.operations.map((operation) => operation.kind)).not.toContain('clips.setMidiAndTiming')
+    expect(recording.history).toHaveLength(1)
+    expect(recording.history[0]).toMatchObject({ type: 'track-clip-create' })
+    expect(recording.notifications).toEqual([keptNotice])
+    expect(recording.notifications).not.toContain('MIDI recording could not be saved to this project.')
+    recording.dispose()
+  })
+
+  test('keeps a local take on a new instrument track when its target was removed, as one history entry', async () => {
+    const project = await createLocalProject(`MIDI recording ${crypto.randomUUID()}`)
+    const repository = createLocalTimelineRepository(project.id)
+    await repository.createTrack({ id: 'instrument-track', kind: 'instrument' })
+    let current = [track()]
+    const recording = createHarness({
+      projectId: project.id,
+      tracks: () => current,
+      createTrackForRecording: async () => {
+        const row = await repository.createTrack({ id: 'kept-instrument', kind: 'instrument' })
+        current = [{ ...keptTrack(), id: row.id }]
+        return keptTrack()
+      },
+    })
+
+    await expect(recording.controller.startRecording()).resolves.toBe(true)
+    recording.emit(noteOn('keyboard', 0))
+    recording.emit(noteOff('keyboard', 1_000))
+    await repository.deleteTrack('instrument-track')
+    current = []
+    await recording.controller.stopRecording()
+
+    const snapshot = await repository.loadSnapshot()
+    expect(snapshot.clips.map((clip) => clip.trackId)).toEqual(['kept-instrument'])
+    expect(snapshot.clips[0]?.midi?.notes).toEqual([expect.objectContaining({ pitch: 60 })])
+    expect(recording.history).toHaveLength(1)
+    expect(recording.history[0]).toMatchObject({ type: 'track-clip-create' })
+    expect(recording.notifications).toEqual([keptNotice])
+    expect(recording.saveFailures).toEqual([])
     recording.dispose()
   })
 })

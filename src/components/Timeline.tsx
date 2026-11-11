@@ -1637,6 +1637,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     recordArmTrackId,
     setTrackLock: projection.setTrackLock,
     clearTrackLock: projection.clearTrackLock,
+    createTrackForRecording: async () =>
+      await createTimelineTrack({ kind: "instrument" }, { pushHistory: false, select: false }),
     insertLocalClip: projection.insertLocalClip,
     removeLocalClips: projection.removeLocalClips,
     selection,

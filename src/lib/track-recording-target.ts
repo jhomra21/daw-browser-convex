@@ -102,6 +102,8 @@ export const createRecordingTargetLock = (tracks: Accessor<readonly ClosureTrack
 
 export type RecordingTargetLock = ReturnType<typeof createRecordingTargetLock>
 
+export const keptOnNewTrackNotice = 'The recording target was removed, so the take was kept on a new track.'
+
 export async function ensureTrackForRecording(options: {
   projectId: string | undefined
   userId: string | undefined

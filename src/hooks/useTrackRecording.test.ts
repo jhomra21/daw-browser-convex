@@ -62,7 +62,14 @@ const createHarness = (
   nativeStartFails = false,
   locksAvailable = true,
   finalization?: Parameters<typeof useTrackRecording>[0]["finalization"],
-  behavior?: { projectId?: () => string; userId?: string; notify?: (message: string) => void },
+  behavior?: {
+    projectId?: () => string
+    userId?: string
+    notify?: (message: string) => void
+    tracks?: () => Track[]
+    createTrackForRecording?: () => Promise<Track | null>
+    historyPush?: Parameters<typeof useTrackRecording>[0]["historyPush"]
+  },
 ) => {
   // Bun has no global window; redefining it by value would leave a non-writable `undefined` behind for later files.
   const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window")
@@ -193,7 +200,7 @@ const createHarness = (
   const recording = useTrackRecording({
     audioEngine,
     requiresNativeAudio,
-    tracks: () => [track],
+    tracks: behavior?.tracks ?? (() => [track]),
     setTrackLock: () => undefined,
     clearTrackLock: () => undefined,
     removeLocalTrack: () => undefined,
@@ -226,10 +233,10 @@ const createHarness = (
       enabled: () => nativeEnabled,
       controller: nativeController,
     },
-    createTrackForRecording: async () => null,
+    createTrackForRecording: behavior?.createTrackForRecording ?? (async () => null),
     notify: behavior?.notify ?? (() => undefined),
     onLocalSaveFailed: () => undefined,
-    historyPush: () => undefined,
+    historyPush: behavior?.historyPush ?? (() => undefined),
     audioPreferences,
     recordingPreferences,
   })
@@ -498,4 +505,53 @@ test("M1 exact zero native source releases without asset/clip creation or false 
       dispose()
     })
   } finally { harness.restore(); await rm(directory, { recursive: true, force: true }) }
+})
+
+test("a take whose target was removed is kept on a new track as one undoable entry, local and cloud", async () => {
+  for (const projectKind of ["local", "shared"]) {
+    let current: Track[] = [track]
+    const keptTrack: Track = { id: "kept-track", kind: "audio", name: "Audio 2", volume: 1, clips: [] }
+    const notifications: string[] = []
+    const history: Array<{ type: string; data?: unknown }> = []
+    const clipInputs: Array<{ trackId: string; startSec: number; skipHistory?: boolean; pushHistory?: boolean }> = []
+    const saved = { clipId: "clip:saved", clip: { name: "take", startSec: 0, duration: 1 / 48000, sourceAssetKey: "asset:saved" } }
+    const finalization: NonNullable<Parameters<typeof useTrackRecording>[0]["finalization"]> = {
+      storage: { ...createRecordingTempStorage(), open: async (sessionId) => ({ version: 1, sessionId,
+        format: "planar-float32-blocks", sampleRate: 48000, channelCount: 1, capturedFrames: 1,
+        byteLength: 8, createdAtMs: 1, finalizedAtMs: 2 }) },
+      encodeWav: async () => ({ file: new File([new Uint8Array(8)], "take.wav"), fileName: "take.wav", mimeType: "audio/wav", remove: async () => {} }),
+      acquireTrackLock: async () => ({ ok: true }),
+      releaseTrackLock: async () => undefined,
+      createLocalAsset: async () => savedAsset(),
+      createLocalAudioClip: async (input) => { clipInputs.push(input); return saved },
+      createUploadedAudioClip: async (input) => { clipInputs.push(input); return saved },
+    }
+    const harness = createHarness({ state: "ready", powerGeneration: 1 }, true, false, false, true, finalization, {
+      projectId: () => projectKind === "local" ? "project:test" : "cloud-project",
+      userId: "test-user",
+      tracks: () => current,
+      notify: (message) => notifications.push(message),
+      historyPush: (entry) => history.push(entry),
+      createTrackForRecording: async () => { current = [keptTrack]; return keptTrack },
+    })
+    harness.nativeController.stop = async () => ({ capturedFrames: 1, nativeTake: nativeProof })
+    const host = globalThis.window?.dawDesktop?.audioHost
+    Object.defineProperty(globalThis, "window", { configurable: true, value: { ...globalThis.window, dawDesktop: { audioHost: {
+      ...host, recordingSpool: { release: async () => undefined },
+    } } } })
+    try {
+      await createRoot(async (dispose) => {
+        await flushLifecycle(); expect(await harness.recording.startRecording(track.id)).toMatchObject({ ok: true })
+        current = []
+        await harness.recording.stopRecording()
+        expect(clipInputs.map((input) => input.trackId)).toEqual(["kept-track"])
+        expect(clipInputs[0]?.startSec).toBe(0)
+        expect(notifications).toContain("The recording target was removed, so the take was kept on a new track.")
+        expect(notifications).not.toContain("Recording target track missing; clip skipped.")
+        expect(history).toHaveLength(1)
+        expect(history[0]?.type).toBe("track-clip-create")
+        dispose()
+      })
+    } finally { harness.restore() }
+  }
 })

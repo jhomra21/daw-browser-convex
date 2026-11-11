@@ -23,6 +23,7 @@ const modules = {
   "./control.ts": () => import("./control"),
   "./projects.ts": () => import("./projects"),
   "./r2Deletes.ts": () => import("./r2Deletes"),
+  "./tracks.ts": () => import("./tracks"),
 };
 
 const owner = "owner-1";
@@ -1904,6 +1905,26 @@ test("recovery restore, undo and redo stamp the rows they write with their own r
   });
   expect(await projectRevisionOf(t)).toBe(4);
   expect(await effectStamps(t, trackId)).toEqual([["recover-utility", 4]]);
+});
+
+test("a recording lease refuses reroute and regroup of the leased track, and an unleased track still edits", async () => {
+  const t = await setup();
+  const user = t.withIdentity({ subject: owner });
+  const group = await addTrack(t, { name: "Group", index: 0, channelRole: "group" });
+  const leased = await addTrack(t, { name: "Leased", index: 1, lockedBy: "other-user" });
+  const free = await addTrack(t, { name: "Free", index: 2 });
+  const leasedRow = async () => await t.run(async (ctx) => await ctx.db.get(leased));
+
+  await expect(user.mutation(api.tracks.setRouting, { trackId: leased, outputTargetId: group })).rejects.toThrow("Track locked by another user");
+  await expect(user.mutation(api.tracks.serverSetRouting, { trackId: String(leased), outputTargetId: String(group) })).rejects.toThrow("Track locked by another user");
+  await expect(user.mutation(api.tracks.setGroup, { trackId: leased, groupId: group })).rejects.toThrow("Track locked by another user");
+  await expect(user.mutation(api.tracks.serverSetGroup, { trackId: String(leased), groupId: String(group) })).rejects.toThrow("Track locked by another user");
+  expect((await leasedRow())?.groupId).toBeUndefined();
+
+  await user.mutation(api.tracks.setRouting, { trackId: free, outputTargetId: group });
+  await user.mutation(api.tracks.setGroup, { trackId: free, groupId: group });
+  const freeRow = await t.run(async (ctx) => await ctx.db.get(free));
+  expect(freeRow?.groupId).toBe(group);
 });
 
 test("a created instrument track stamps its default synth row with the creating transaction's revision", async () => {

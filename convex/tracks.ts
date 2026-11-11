@@ -784,6 +784,7 @@ export const setRouting = mutation({
   handler: async (ctx, { trackId, outputTargetId, sends }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
+    await requireTrackNotLockedByOther(ctx, track, userId);
     const result = await setTrackRoutingRow(ctx, {
       projectId: track.projectId,
       trackId,
@@ -823,6 +824,7 @@ export const serverSetRouting = mutation({
     }
 
     const { track } = await requireTrackOwnerForWrite(ctx, normalizedTrackId, userId);
+    await requireTrackNotLockedByOther(ctx, track, userId);
     const result = await setTrackRoutingRow(ctx, {
       projectId: track.projectId,
       trackId: normalizedTrackId,
@@ -984,6 +986,7 @@ export const setGroup = mutation({
   handler: async (ctx, { trackId, groupId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
+    await requireTrackNotLockedByOther(ctx, track, userId);
     const result = await setTrackGroupRow(ctx, { projectId: track.projectId, trackId, groupId });
     if (result.changed) await advanceProjectRevision(ctx, track.projectId);
   },
@@ -1000,6 +1003,7 @@ export const serverSetGroup = mutation({
       : ctx.db.normalizeId("tracks", groupId);
     if (groupId !== null && groupId !== undefined && !normalizedGroupId) throw new Error("Group track not found.");
     const { track } = await requireTrackOwnerForWrite(ctx, normalizedTrackId, userId);
+    await requireTrackNotLockedByOther(ctx, track, userId);
     const result = await setTrackGroupRow(ctx, {
       projectId: track.projectId,
       trackId: normalizedTrackId,
@@ -1195,6 +1199,10 @@ const isTrackLockedByOther = async (ctx: any, track: any, userId: string) => {
   const channel = await ensureMixerChannelForTrack(ctx, track);
   const lockState = normalizeMixerLockState(channel.lockedBy, channel.lockedAt);
   return lockState.isLocked && lockState.lockedBy !== userId;
+};
+
+const requireTrackNotLockedByOther = async (ctx: any, track: any, userId: string) => {
+  if (await isTrackLockedByOther(ctx, track, userId)) throw new Error("Track locked by another user");
 };
 
 const hasRoutingReferenceTo = (track: any, targetTrackId: string) => (

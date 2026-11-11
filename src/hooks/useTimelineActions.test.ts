@@ -263,59 +263,92 @@ test('group discards its new group track when a take starts while it is created'
   expect((await repository.loadSnapshot()).tracks.map((track) => track.id)).toEqual(before)
 })
 
+const deleteHarness = (id: string, tracks: RuntimeTrack[], lock: RecordingTargetLock) => {
+  const notices: string[] = []
+  const removed: string[] = []
+  const [projectId] = createSignal(id)
+  const selection = useTimelineSelectionState({ projectId, tracks: () => tracks })
+  const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<string | null>(null)
+  const [confirmOpen, setConfirmOpen] = createSignal(false)
+  const actions = useTimelineClipActions({
+    tracks: () => tracks,
+    insertLocalClip: () => undefined,
+    removeLocalClips: () => undefined,
+    commitClipTiming: () => undefined,
+    commitClipAudioWarp: () => undefined,
+    removeLocalTrack: (trackId) => { removed.push(trackId) },
+    canWriteClip: () => true,
+    selection,
+    setPendingDeleteTrackId,
+    setConfirmOpen,
+    projectId,
+    userId: () => 'user',
+    convexClient,
+    convexApi,
+    audioBufferCache: {
+      getBuffer: () => undefined,
+      getMediaStatus: () => undefined,
+      preload: async () => undefined,
+      writer: { storeBuffer: () => undefined, storeBuffers: () => undefined, removeBuffer: () => undefined },
+    },
+    bpm: () => 120,
+    playheadSec: () => 0,
+    gridEnabled: () => false,
+    gridDenominator: () => 4,
+    historyPush: () => undefined,
+    automationEnvelopes: () => [],
+    sidechainRoutes: () => [],
+    applyAutomationEnvelope: () => undefined,
+    recordingTargetLock: lock,
+    notify: (_title, message) => { notices.push(message) },
+  })
+  return { actions, notices, removed, pendingDeleteTrackId, confirmOpen }
+}
+
 test('track delete refuses when a take starts while the delete is prepared', async () => {
   const project = await createLocalProject(`Take during delete ${crypto.randomUUID()}`)
   const repository = createLocalTimelineRepository(project.id)
   const created = await repository.createTrack({ index: 0 })
   const tracks: RuntimeTrack[] = [{ id: created.id, name: 'Doomed', volume: 1, clips: [] }]
   const lock = createRecordingTargetLock(() => tracks)
-  const notices: string[] = []
-  const removed: string[] = []
-  await createRoot(async (dispose) => {
-    const [projectId] = createSignal(project.id)
-    const selection = useTimelineSelectionState({ projectId, tracks: () => tracks })
-    const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<string | null>(null)
-    const [confirmOpen, setConfirmOpen] = createSignal(false)
-    const actions = useTimelineClipActions({
-      tracks: () => tracks,
-      insertLocalClip: () => undefined,
-      removeLocalClips: () => undefined,
-      commitClipTiming: () => undefined,
-      commitClipAudioWarp: () => undefined,
-      removeLocalTrack: (trackId) => { removed.push(trackId) },
-      canWriteClip: () => true,
-      selection,
-      setPendingDeleteTrackId,
-      setConfirmOpen,
-      projectId,
-      userId: () => 'user',
-      convexClient,
-      convexApi,
-      audioBufferCache: {
-        getBuffer: () => undefined,
-        getMediaStatus: () => undefined,
-        preload: async () => undefined,
-        writer: { storeBuffer: () => undefined, storeBuffers: () => undefined, removeBuffer: () => undefined },
-      },
-      bpm: () => 120,
-      playheadSec: () => 0,
-      gridEnabled: () => false,
-      gridDenominator: () => 4,
-      historyPush: () => undefined,
-      automationEnvelopes: () => [],
-      sidechainRoutes: () => [],
-      applyAutomationEnvelope: () => undefined,
-      recordingTargetLock: lock,
-      notify: (_title, message) => { notices.push(message) },
-    })
-    const pending = actions.performDeleteTrack(created.id)
+  const { notices, removed } = await createRoot(async (dispose) => {
+    const harness = deleteHarness(project.id, tracks, lock)
+    const pending = harness.actions.performDeleteTrack(created.id)
     lock.start(created.id)
     await pending
-    expect(untrack(pendingDeleteTrackId)).toBeNull()
-    expect(untrack(confirmOpen)).toBe(false)
+    expect(untrack(harness.pendingDeleteTrackId)).toBeNull()
+    expect(untrack(harness.confirmOpen)).toBe(false)
     dispose()
+    return harness
   })
   expect(notices).toEqual([RECORDING_TARGET_LOCKED_REASON])
   expect(removed).toEqual([])
   expect((await repository.loadSnapshot()).tracks.map((track) => track.id)).toContain(created.id)
+})
+
+test('cloud track delete refuses without calling the server when a take starts while the delete is prepared', async () => {
+  const tracks: RuntimeTrack[] = [{ id: 'cloud-track', name: 'Doomed', volume: 1, clips: [] }]
+  const lock = createRecordingTargetLock(() => tracks)
+  const queryDescriptor = Object.getOwnPropertyDescriptor(convexClient, 'query')
+  const mutationDescriptor = Object.getOwnPropertyDescriptor(convexClient, 'mutation')
+  const mutations: unknown[] = []
+  // The effect snapshot reads through the module-level client: the take starts while that read is awaited.
+  Object.defineProperty(convexClient, 'query', { configurable: true, value: async () => { lock.start('cloud-track'); return [] } })
+  Object.defineProperty(convexClient, 'mutation', { configurable: true, value: async (...args: unknown[]) => { mutations.push(args); return { status: 'deleted' } } })
+  try {
+    const { notices, removed } = await createRoot(async (dispose) => {
+      const harness = deleteHarness('cloud-project', tracks, lock)
+      await harness.actions.performDeleteTrack('cloud-track')
+      dispose()
+      return harness
+    })
+    expect(notices).toEqual([RECORDING_TARGET_LOCKED_REASON])
+    expect(mutations).toEqual([])
+    expect(removed).toEqual([])
+  } finally {
+    if (queryDescriptor) Object.defineProperty(convexClient, 'query', queryDescriptor)
+    else Reflect.deleteProperty(convexClient, 'query')
+    if (mutationDescriptor) Object.defineProperty(convexClient, 'mutation', mutationDescriptor)
+    else Reflect.deleteProperty(convexClient, 'mutation')
+  }
 })

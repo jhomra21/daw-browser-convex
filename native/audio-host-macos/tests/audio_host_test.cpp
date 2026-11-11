@@ -561,6 +561,34 @@ std::vector<std::uint8_t> ScheduleProcessorSetWindow(
   return payload;
 }
 
+// A set is a record whose end frame is its frame; a longer one is a linear segment.
+struct ProcessorRecord {
+  std::uint64_t frame;
+  std::uint64_t end_frame;
+  float start_value;
+  float end_value;
+};
+
+std::vector<std::uint8_t> ScheduleProcessorRecordsWindow(
+  const std::uint64_t window_id,
+  const std::uint64_t start_frame,
+  const std::uint64_t end_frame,
+  const std::vector<ProcessorRecord>& records
+) {
+  auto payload = ScheduleWindow(2, 1, window_id, start_frame, end_frame, 0, 1, false);
+  WriteLeU32(payload, 56, static_cast<std::uint32_t>(records.size()));
+  for (const auto& record : records) {
+    AppendLeU64(payload, 77);
+    AppendLeU32(payload, DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB);
+    AppendLeU32(payload, record.end_frame > record.frame ? 1 : 0);
+    AppendLeU64(payload, record.frame);
+    AppendLeU64(payload, record.end_frame);
+    AppendLeFloat(payload, record.start_value);
+    AppendLeFloat(payload, record.end_value);
+  }
+  return payload;
+}
+
 std::vector<std::uint8_t> ScheduleAutomationWindow(
   const std::uint32_t revision,
   const std::uint32_t epoch,
@@ -2193,6 +2221,71 @@ void TestScheduledProcessorSetUsesAbsoluteFrame() {
   assert(host.diagnostics().rejected_blocks == 0);
   host.Stop();
 }
+
+// Renders constant-one input through a utility whose gain ramps 0 to -6 dB over `ramp_frames`, in
+// callbacks of `block_frames`, and returns the output gain per frame.
+std::vector<float> RenderProcessorRamp(
+  const std::uint32_t block_frames, const std::uint64_t ramp_frames, const std::vector<ProcessorRecord>& records
+) {
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48'000,
+    .max_frames_per_block = block_frames, .channel_count = 2, .revision = 1}));
+  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.0F, 0, true)));
+  assert(host.SetTransport(1, false, 0));
+  assert(host.StartDiagnosticMode());
+  assert(host.SetTransport(1, true, 0));
+  const std::uint64_t window_end = (ramp_frames / block_frames + 2) * block_frames;
+  assert(host.QueueScheduleWindow(ScheduleProcessorRecordsWindow(1, 0, window_end, records)));
+  std::vector<float> ones(block_frames, 1.0F), left(block_frames), right(block_frames), gain;
+  const std::array<const float*, 2> input{{ones.data(), ones.data()}};
+  const std::array<float*, 2> output{{left.data(), right.data()}};
+  for (std::uint64_t frame = 0; frame < window_end; frame += block_frames) {
+    assert(host.ProcessPlanar(input, output, block_frames));
+    gain.insert(gain.end(), left.begin(), left.end());
+  }
+  assert(host.diagnostics().rejected_blocks == 0);
+  host.Stop();
+  return gain;
+}
+
+void TestScheduledProcessorRampExpandsAtAdaptiveStride() {
+  constexpr std::uint64_t kRampFrames = 2'400;  // 50 ms at 48 kHz
+  const auto ideal = [](const std::uint64_t frame) {
+    return std::pow(10.0, -6.0 * static_cast<double>(frame) / kRampFrames / 20.0);
+  };
+  double largest_ideal_step = 0.0;
+  for (std::uint64_t frame = 1; frame < kRampFrames; ++frame)
+    largest_ideal_step = std::max(largest_ideal_step, std::abs(ideal(frame) - ideal(frame - 1)));
+  // One ramp at 512 frames needs stride 4 to fit the cap less VST headroom; at 128 frames stride 1 fits.
+  for (const auto [block_frames, stride] : {std::pair{512U, 4U}, std::pair{128U, 1U}}) {
+    const auto gain = RenderProcessorRamp(block_frames, kRampFrames, {
+      {0, kRampFrames, 0.0F, -6.0F}, {kRampFrames, kRampFrames, -6.0F, -6.0F}});
+    double largest_step = 0.0, error = 0.0, signal = 0.0;
+    for (std::uint64_t frame = 0; frame < kRampFrames; ++frame) {
+      if (frame > 0) largest_step = std::max(largest_step, std::abs(double{gain[frame]} - gain[frame - 1]));
+      error += std::pow(gain[frame] - ideal(frame), 2);
+      signal += std::pow(ideal(frame), 2);
+    }
+    std::fprintf(stderr, "ramp block=%u largest_step/ideal=%g snr_db=%g\n", block_frames,
+      largest_step / largest_ideal_step, 10.0 * std::log10(signal / error));
+    assert(largest_step <= stride * largest_ideal_step * 1.01);
+    assert(10.0 * std::log10(signal / error) >= 60.0);
+    assert(std::abs(gain[kRampFrames] - ideal(kRampFrames)) < 1e-6);
+  }
+}
+
+void TestScheduledProcessorRampsStayWithinBlockCap() {
+  constexpr std::uint64_t kRampFrames = 2'400;
+  std::vector<ProcessorRecord> records;
+  // Four overlapping ramps and a set on every fourth frame of the first block: 128 fixed events.
+  for (std::uint64_t index = 0; index < 4; ++index) records.push_back({index, kRampFrames + index, 0.0F, -6.0F});
+  for (std::uint64_t frame = 8; frame < 512; frame += 4) records.push_back({frame, frame, -3.0F, -3.0F});
+  std::stable_sort(records.begin(), records.end(), [](const auto& left, const auto& right) { return left.frame < right.frame; });
+  const auto gain = RenderProcessorRamp(512, kRampFrames, records);
+  // The helper asserts no rejected block; the ramps still descend after the sets.
+  assert(gain[2'300] < gain[1'000] && gain[2'300] > std::pow(10.0F, -6.0F / 20.0F));
+}
+
 
 void TestScheduleWindowCompletionSemantics() {
   daw::audio_host_macos::AudioHost host;
@@ -5379,6 +5472,8 @@ int main() {
   TestRealtimeDurationHistogramBucketsAreBounded();
   TestNativeSessionWireRejectsMalformedFramesAndEvents();
   TestScheduledProcessorSetUsesAbsoluteFrame();
+  TestScheduledProcessorRampExpandsAtAdaptiveStride();
+  TestScheduledProcessorRampsStayWithinBlockCap();
   TestScheduleWindowCompletionSemantics();
   TestScheduleWindowRollback();
   TestLargeFinalScheduleWindowUsesPersistentStaging();

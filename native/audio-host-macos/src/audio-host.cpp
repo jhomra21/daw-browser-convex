@@ -1296,6 +1296,9 @@ struct AudioHost::Impl {
     std::uint32_t processor_revision = 0;
     std::uint32_t processor_epoch = 0;
     std::uint64_t processor_sequence = 0;
+    // A scheduled processor record is a linear segment when it ends after it starts; `processor.value` is its start value.
+    std::uint64_t processor_end_frame = 0;
+    float processor_end_value = 0.0F;
     daw_audio_processor_event processor{};
     daw_audio_instrument_event instrument{};
     daw_audio_sample_source_event source{};
@@ -1405,6 +1408,18 @@ struct AudioHost::Impl {
     std::array<std::uint8_t, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS> rejected_instrument_events{};
     std::array<std::uint16_t, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS> instrument_order{};
   };
+  // A scheduled linear segment the callback holds until it ends, expanding it into core events per block.
+  struct ProcessorRamp {
+    daw_audio_processor_event processor{};
+    std::uint64_t start_frame = 0;
+    std::uint64_t end_frame = 0;
+    float end_value = 0.0F;
+    std::uint32_t revision = 0;
+    std::uint32_t epoch = 0;
+    bool cancelled = false;
+  };
+  std::array<ProcessorRamp, DAW_AUDIO_CORE_MAX_PROCESSOR_EVENTS> processor_ramps{};
+  std::uint32_t processor_ramp_count = 0;
   struct InstalledAsset {
     struct MappedStorage {
       int file_descriptor = -1;
@@ -2286,6 +2301,12 @@ struct AudioHost::Impl {
       reconcile(ActiveSchedule().source_queue);
       reconcile(ActiveSchedule().scheduled_processor_queue);
       reconcile(ActiveSchedule().instrument_queue);
+      for (std::uint32_t index = 0; index < processor_ramp_count; ++index) {
+        auto& ramp = processor_ramps[index];
+        ramp.cancelled = ramp.cancelled || ramp.revision != previous_revision
+          || !daw::audio_core::RetainsScheduledTarget(core, previous_revision, ramp.processor);
+        if (!ramp.cancelled) ramp.revision = revision;
+      }
     }
   }
   // DAW_REALTIME_CALLBACK_HELPER_END reconcile-scheduled-targets
@@ -2559,6 +2580,7 @@ bool AudioHost::Configure(const HostConfig& config) {
   impl_->ActiveSchedule().scheduled_processor_queue.write.store(0, std::memory_order_release);
   impl_->processor_queue.read.store(0, std::memory_order_release);
   impl_->processor_queue.write.store(0, std::memory_order_release);
+  impl_->processor_ramp_count = 0;
   impl_->worker_notifications.mute_requested.store(false, std::memory_order_release);
   return true;
 }
@@ -3837,11 +3859,11 @@ bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload)
     const std::uint64_t processor_end_frame = ReadLeU64(bytes + 24);
     const float start_value = ReadLeFloat(bytes + 32);
     const float end_value = ReadLeFloat(bytes + 36);
-    // The wire still carries a linear kind, but the host only holds values: refuse it here rather than at a render block.
-    if (processor_instance == 0 || parameter_target == 0 || kind != 0
+    if (processor_instance == 0 || parameter_target == 0 || kind > 1
       || frame < start_frame || frame >= end_frame
       || !std::isfinite(start_value) || !std::isfinite(end_value)
-      || processor_end_frame != frame
+      || (kind == 0 && processor_end_frame != frame)
+      || (kind == 1 && (processor_end_frame <= frame || processor_end_frame > end_frame))
       || (has_previous_processor && (frame < previous_processor_frame
         || (frame == previous_processor_frame && (processor_instance < previous_processor_instance
           || (processor_instance == previous_processor_instance
@@ -3852,6 +3874,8 @@ bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload)
     event.window_id = window_id;
     event.absolute_frame = frame;
     event.scheduled = true;
+    event.processor_end_frame = processor_end_frame;
+    event.processor_end_value = end_value;
     event.processor_revision = revision;
     event.processor_epoch = epoch;
     event.processor = {
@@ -5236,6 +5260,7 @@ void AudioHost::Teardown() {
   impl_->ActiveSchedule().schedule_chunk_digests = {};
   impl_->ActiveSchedule().schedule_digest_cursor = 0;
   impl_->ActiveSchedule().schedule_staging.clear();
+  impl_->processor_ramp_count = 0;
   impl_->applied_urgent_sequence.store(0, std::memory_order_release);
   impl_->applied_processor_sequence.store(0, std::memory_order_release);
   impl_->last_queued_processor_sequence.store(0, std::memory_order_release);
@@ -5490,6 +5515,21 @@ bool AudioHost::ProcessPlanar(
         if (!impl_->applied_transport_running.load(std::memory_order_acquire)) break;
         if (event.window_id > published_window) break;
         if (event.absolute_frame >= static_cast<std::uint64_t>(block_end_frame)) break;
+        if (event.processor_end_frame > event.absolute_frame) {
+          if (event.processor_end_frame > static_cast<std::uint64_t>(block_start_frame)) {
+            if (impl_->processor_ramp_count >= impl_->processor_ramps.size()) return false;
+            impl_->processor_ramps[impl_->processor_ramp_count++] = {
+              .processor = event.processor,
+              .start_frame = event.absolute_frame,
+              .end_frame = event.processor_end_frame,
+              .end_value = event.processor_end_value,
+              .revision = event.processor_revision,
+              .epoch = event.processor_epoch,
+            };
+          }
+          ++read;
+          continue;
+        }
         if (event.absolute_frame < static_cast<std::uint64_t>(block_start_frame)) {
           ++read;
           continue;
@@ -5524,6 +5564,44 @@ bool AudioHost::ProcessPlanar(
         ++read;
       }
       lane.read.store(read, std::memory_order_release);
+      return true;
+    };
+    // Each block writes a ramp value every `stride` frames, the smallest power of two that keeps the block's events inside
+    // the core's capacity less headroom for the VST automation the coordinator counts with them. Ramps stay in `processor_ramps`
+    // until they end, so a rejected block retries with the same ramps.
+    constexpr std::uint32_t kRampVstHeadroom = 32;
+    const auto expand_processor_ramps = [&]() {
+      if (!impl_->applied_transport_running.load(std::memory_order_acquire)) return true;
+      const auto& ramps = impl_->processor_ramps;
+      const std::uint64_t block_start = static_cast<std::uint64_t>(block_start_frame);
+      const std::uint64_t block_end = static_cast<std::uint64_t>(block_end_frame);
+      const auto span_of = [&](const Impl::ProcessorRamp& ramp) {
+        return std::min(ramp.end_frame, block_end) - std::max(ramp.start_frame, block_start);
+      };
+      const std::uint32_t reserved = std::min<std::uint32_t>(
+        static_cast<std::uint32_t>(processor_events.size()), processor_event_count + kRampVstHeadroom);
+      const std::uint32_t budget = static_cast<std::uint32_t>(processor_events.size()) - reserved;
+      std::uint32_t stride = 1;
+      for (; stride < frames; stride *= 2) {
+        std::uint64_t needed = 0;
+        for (std::uint32_t index = 0; index < impl_->processor_ramp_count; ++index)
+          needed += (span_of(ramps[index]) + stride - 1) / stride;
+        if (needed <= budget) break;
+      }
+      for (std::uint32_t index = 0; index < impl_->processor_ramp_count; ++index) {
+        const auto& ramp = ramps[index];
+        const std::uint64_t last = std::min(ramp.end_frame, block_end);
+        const double slope = (static_cast<double>(ramp.end_value) - ramp.processor.value)
+          / static_cast<double>(ramp.end_frame - ramp.start_frame);
+        for (std::uint64_t frame = std::max(ramp.start_frame, block_start); frame < last; frame += stride) {
+          if (processor_event_count >= processor_events.size()) return false;
+          processor_events[processor_event_count] = ramp.processor;
+          processor_events[processor_event_count].frame_offset = static_cast<std::uint32_t>(frame - block_start);
+          processor_events[processor_event_count].value = static_cast<float>(
+            ramp.processor.value + slope * static_cast<double>(frame - ramp.start_frame));
+          ++processor_event_count;
+        }
+      }
       return true;
     };
     const auto drain_instrument_lane = [&]<std::size_t Capacity>(
@@ -5581,6 +5659,17 @@ bool AudioHost::ProcessPlanar(
         impl_->SignalRealtimeBridge(Impl::kRealtimeAssetReaders);
       return true;
     };
+    {
+      auto& ramps = impl_->processor_ramps;
+      std::uint32_t kept = 0;
+      for (std::uint32_t index = 0; index < impl_->processor_ramp_count; ++index) {
+        const auto& ramp = ramps[index];
+        if (ramp.cancelled || ramp.revision != impl_->active_revision.load(std::memory_order_acquire)
+          || ramp.epoch != applied_epoch || ramp.end_frame <= static_cast<std::uint64_t>(block_start_frame)) continue;
+        ramps[kept++] = ramp;
+      }
+      impl_->processor_ramp_count = kept;
+    }
     // After a saturation rebase, new live controls cannot starve the finite
     // accepted schedule backlog. All lanes retain excess events for retry.
     if ((impl_->ActiveSchedule().instrument_drain_priority
@@ -5590,10 +5679,12 @@ bool AudioHost::ProcessPlanar(
       || !drain_instrument_lane(impl_->ActiveSchedule().instrument_queue, scheduled_instrument_read, false)
       || !drain_scheduled_processor_lane(impl_->ActiveSchedule().scheduled_processor_queue)
       || !drain_processor_lane(impl_->processor_queue)
+      || !expand_processor_ramps()
       || !drain_source_lane(impl_->ActiveSchedule().source_queue)) {
       const auto reason = instrument_event_count >= instrument_events.size()
         ? RejectedBlockReason::kInstrumentEventCapacity
         : processor_event_count >= processor_events.size()
+          || impl_->processor_ramp_count >= impl_->processor_ramps.size()
           ? RejectedBlockReason::kProcessorEventCapacity
           : RejectedBlockReason::kSourceSchedule;
       impl_->RejectBlock(reason, callback_attempt);

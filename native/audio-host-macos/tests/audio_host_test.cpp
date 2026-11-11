@@ -1677,7 +1677,11 @@ void TestInstrumentResidencyReplacementCapacityRollback() {
   // Publish without processing: each changed configuration adds an unfinished blend.
   for (unsigned revision = 2; revision <= 9; ++revision) {
     assert(host.PrepareGraphRevision(revision, graph(revision)).code == GraphRevisionStatusCode::kPrepared);
-    assert(host.ConfigureInstrumentStates(SampleInstrumentPayload(4, 1, false, revision / 20.0F)));
+    // The window shape is discrete, so each publication replaces the instrument (a
+    // continuous edit such as the position would slew in place and start no blend).
+    auto edited = SampleInstrumentPayload(4, 1, false, revision / 20.0F);
+    WriteLeU32(edited, 28 + 20, revision % 3);
+    assert(host.ConfigureInstrumentStates(edited));
     assert(host.PublishGraphRevision(revision).code == GraphRevisionStatusCode::kPublished);
     assert(host.RetireGraphRevision(revision - 1).code == GraphRevisionStatusCode::kRetired);
   }
@@ -2340,8 +2344,32 @@ void TestMixedInstrumentSequenceDomains(const bool reject_first = false, const b
   std::array<float, 128> reference_left{}, reference_right{};
   const std::array<float*, 2> reference_output{reference_left.data(), reference_right.data()};
   assert(reference.ProcessPlanar(input, reference_output, 128));
-  assert(output_left == reference_left);
-  assert(output_right == reference_right);
+  // The live cutoff moves the applied value over a few milliseconds instead of stepping
+  // it, so the first block cannot equal the compiled reference. After the slew has
+  // settled (40 blocks, far past 5 ms) the output must, and no sample may step by more
+  // than the reference does.
+  float host_step = 0;
+  float reference_step = 0;
+  for (unsigned block = 1; block < 40; ++block) {
+    const float host_before = output_left[127];
+    const float reference_before = reference_left[127];
+    assert(host.ProcessPlanar(input, output, 128));
+    assert(reference.ProcessPlanar(input, reference_output, 128));
+    host_step = std::max(host_step, std::abs(output_left[0] - host_before));
+    reference_step = std::max(reference_step, std::abs(reference_left[0] - reference_before));
+    for (std::size_t frame = 1; frame < 128; ++frame) {
+      host_step = std::max(host_step, std::abs(output_left[frame] - output_left[frame - 1]));
+      reference_step = std::max(reference_step, std::abs(reference_left[frame] - reference_left[frame - 1]));
+    }
+  }
+  float settled_energy = 0;
+  for (std::size_t frame = 0; frame < 128; ++frame) {
+    settled_energy += std::abs(reference_left[frame]);
+    assert(std::abs(output_left[frame] - reference_left[frame]) < 1e-4F);
+    assert(std::abs(output_right[frame] - reference_right[frame]) < 1e-4F);
+  }
+  assert(settled_energy > 0);
+  assert(host_step <= reference_step * 1.05F + 1e-6F);
   reference.Stop();
   host.Stop();
 }

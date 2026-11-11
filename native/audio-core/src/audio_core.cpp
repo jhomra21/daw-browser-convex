@@ -534,7 +534,11 @@ struct InstrumentConfiguration {
   daw_audio_granular_state granular{};
 };
 
+// `synth`, `sampler`, `zones` and `granular` are what the instrument is set to (its
+// targets: a live event or a publish writes them). Render reads `applied`, which
+// moves toward them a little every frame, so a drag has no steps.
 struct InstrumentNodeState {
+  InstrumentConfiguration applied{};
   std::array<InstrumentVoice, kMaximumInstrumentVoices> voices{};
   daw_audio_synth_state synth{};
   bool sustain = false;
@@ -4231,16 +4235,119 @@ float envelope_step(float level, uint32_t *stage, bool released, float attack, f
   return level;
 }
 
-float synth_parameter_value(const InstrumentNodeState &instrument, uint32_t target, float fallback) {
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN) return instrument.synth.output_gain;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_PAN) return instrument.synth.output_pan;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_CUTOFF_HZ) return instrument.synth.filter_cutoff_hz;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_RESONANCE) return instrument.synth.filter_resonance;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_ATTACK_MS) return instrument.synth.amp_attack_ms;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_DECAY_MS) return instrument.synth.amp_decay_ms;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_SUSTAIN) return instrument.synth.amp_sustain;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_RELEASE_MS) return instrument.synth.amp_release_ms;
-  return fallback;
+// The continuous values of an instrument's configuration, the ones a knob drag
+// moves; every other field (waveforms, modes, enables, capacity, zone set, asset) is
+// discrete and replaces the instrument when it changes. `visit(to, from)` is called
+// for each continuous float of `to` and its counterpart in `from`. An oscillator's
+// octave and semitone fold into its detune (cents), so a transposition drags like
+// any other value; `from` is read through that fold and `to` receives the sum.
+float oscillator_cents(const daw_audio_synth_oscillator_state &oscillator) {
+  return static_cast<float>(oscillator.octave * 1200 + oscillator.semitone * 100) + oscillator.detune_cents;
+}
+
+template <typename State, size_t Count, typename Visit>
+void visit_fields(State &to, const State &from, const std::array<float State::*, Count> &fields, Visit &&visit) {
+  for (float State::*field : fields) visit(to.*field, from.*field);
+}
+
+template <typename Visit>
+void visit_synth(daw_audio_synth_state &to, const daw_audio_synth_state &from, Visit &&visit) {
+  visit_fields(to, from, std::array{
+    &daw_audio_synth_state::noise_level, &daw_audio_synth_state::filter_cutoff_hz, &daw_audio_synth_state::filter_resonance,
+    &daw_audio_synth_state::filter_key_tracking, &daw_audio_synth_state::filter_envelope_amount_octaves,
+    &daw_audio_synth_state::filter_attack_ms, &daw_audio_synth_state::filter_decay_ms, &daw_audio_synth_state::filter_sustain,
+    &daw_audio_synth_state::filter_release_ms, &daw_audio_synth_state::amp_attack_ms, &daw_audio_synth_state::amp_decay_ms,
+    &daw_audio_synth_state::amp_sustain, &daw_audio_synth_state::amp_release_ms, &daw_audio_synth_state::lfo_rate_hz,
+    &daw_audio_synth_state::lfo_pitch_cents, &daw_audio_synth_state::lfo_filter_octaves, &daw_audio_synth_state::lfo_amplitude,
+    &daw_audio_synth_state::lfo_pan, &daw_audio_synth_state::output_gain, &daw_audio_synth_state::output_pan}, visit);
+  for (uint32_t index = 0; index < 2; ++index) {
+    visit(to.oscillators[index].level, from.oscillators[index].level);
+    visit(to.oscillators[index].detune_cents, oscillator_cents(from.oscillators[index]));
+  }
+}
+
+template <typename Visit>
+void visit_sampler(daw_audio_sampler_state &to, const daw_audio_sampler_state &from, Visit &&visit) {
+  visit_fields(to, from, std::array{
+    &daw_audio_sampler_state::amp_attack_ms, &daw_audio_sampler_state::amp_decay_ms, &daw_audio_sampler_state::amp_sustain,
+    &daw_audio_sampler_state::amp_release_ms, &daw_audio_sampler_state::filter_cutoff_hz,
+    &daw_audio_sampler_state::filter_resonance, &daw_audio_sampler_state::filter_envelope_amount,
+    &daw_audio_sampler_state::filter_attack_ms, &daw_audio_sampler_state::filter_decay_ms,
+    &daw_audio_sampler_state::filter_sustain, &daw_audio_sampler_state::filter_release_ms,
+    &daw_audio_sampler_state::lfo_rate_hz, &daw_audio_sampler_state::lfo_pitch_cents, &daw_audio_sampler_state::lfo_filter_hz,
+    &daw_audio_sampler_state::lfo_amplitude, &daw_audio_sampler_state::lfo_pan}, visit);
+}
+
+template <typename Visit>
+void visit_zone(daw_audio_sample_zone &to, const daw_audio_sample_zone &from, Visit &&visit) {
+  visit_fields(to, from, std::array{
+    &daw_audio_sample_zone::tune_cents, &daw_audio_sample_zone::gain, &daw_audio_sample_zone::pan}, visit);
+}
+
+template <typename Visit>
+void visit_granular(daw_audio_granular_state &to, const daw_audio_granular_state &from, Visit &&visit) {
+  visit_fields(to, from, std::array{
+    &daw_audio_granular_state::grain_size_ms, &daw_audio_granular_state::density_hz, &daw_audio_granular_state::position,
+    &daw_audio_granular_state::spray, &daw_audio_granular_state::pitch_semitones,
+    &daw_audio_granular_state::reverse_probability, &daw_audio_granular_state::stereo_spread}, visit);
+}
+
+// A kept instrument's targets move at once; `applied` follows them. One pole per
+// value, so a value reverses without overshoot, a burst of events ends where the
+// last one says, and a value within 1e-4 of its target lands on it (nothing decays
+// into subnormals). The time constant is the shortest the drag witnesses accept: at
+// 2 ms a two-semitone step still changes a cycle's period by 3.5%, at 5 ms by less
+// than 2.5%.
+constexpr float kInstrumentSlewSeconds = 0.005F;
+
+void advance_applied(const Core &core, InstrumentNodeState &instrument, uint32_t kind) {
+  const float rate = 1.0F / std::fmax(1.0F, static_cast<float>(core.config.sample_rate_hz) * kInstrumentSlewSeconds);
+  const auto slew = [rate](float &applied, float target) {
+    const float delta = target - applied;
+    applied = std::fabs(delta) <= 1e-4F * std::fmax(1.0F, std::fabs(target)) ? target : applied + delta * rate;
+  };
+  if (kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
+    visit_synth(instrument.applied.synth, instrument.synth, slew);
+  } else if (kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
+    visit_granular(instrument.applied.granular, instrument.granular, slew);
+  } else {
+    visit_sampler(instrument.applied.sampler, instrument.sampler, slew);
+    for (uint32_t index = 0; index < instrument.sampler.zone_count; ++index) {
+      visit_zone(instrument.applied.zones[index], instrument.zones[index], slew);
+    }
+  }
+}
+
+// A configuration with its continuous values cleared: what two configurations must
+// share for one instrument to serve both.
+InstrumentConfiguration discrete_part(const InstrumentConfiguration &configuration) {
+  InstrumentConfiguration discrete = configuration;
+  const InstrumentConfiguration none{};
+  const auto clear = [](float &to, float) { to = 0.0F; };
+  visit_synth(discrete.synth, none.synth, clear);
+  visit_sampler(discrete.sampler, none.sampler, clear);
+  visit_granular(discrete.granular, none.granular, clear);
+  for (uint32_t index = 0; index < discrete.sampler.zone_count; ++index) visit_zone(discrete.zones[index], none.zones[index], clear);
+  for (daw_audio_synth_oscillator_state &oscillator : discrete.synth.oscillators) oscillator.octave = oscillator.semitone = 0;
+  return discrete;
+}
+
+void set_instrument_targets(InstrumentNodeState &runtime, const InstrumentConfiguration &configuration) {
+  runtime.synth = configuration.synth;
+  runtime.sampler = configuration.sampler;
+  runtime.zones = configuration.zones;
+  runtime.granular = configuration.granular;
+}
+
+// An instrument that is set up (not edited) applies what it is set to from its first
+// frame, so nothing slews in from zero.
+void set_up_instrument(InstrumentNodeState &runtime, const InstrumentConfiguration &configuration) {
+  set_instrument_targets(runtime, configuration);
+  runtime.applied = configuration;
+  for (daw_audio_synth_oscillator_state &oscillator : runtime.applied.synth.oscillators) {
+    oscillator.detune_cents = oscillator_cents(oscillator);
+    oscillator.octave = oscillator.semitone = 0;
+  }
 }
 
 bool instrument_declares_target(const daw_audio_instrument_state_descriptor &descriptor, uint32_t target) {
@@ -4272,11 +4379,11 @@ void render_instrument_frame(
   float *right_output) {
   float left = 0.0F;
   float right = 0.0F;
-  const daw_audio_synth_state &synth = instrument.synth;
-  const float amp_attack = 1.0F / std::fmax(1.0F, synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_AMP_ATTACK_MS, synth.amp_attack_ms) * sample_rate_hz / 1000.0F);
-  const float amp_decay = 1.0F / std::fmax(1.0F, synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_AMP_DECAY_MS, synth.amp_decay_ms) * sample_rate_hz / 1000.0F);
-  const float amp_release = 1.0F / std::fmax(1.0F, synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_AMP_RELEASE_MS, synth.amp_release_ms) * sample_rate_hz / 1000.0F);
-  const float amp_sustain = synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_AMP_SUSTAIN, synth.amp_sustain);
+  const daw_audio_synth_state &synth = instrument.applied.synth;
+  const float amp_attack = 1.0F / std::fmax(1.0F, synth.amp_attack_ms * sample_rate_hz / 1000.0F);
+  const float amp_decay = 1.0F / std::fmax(1.0F, synth.amp_decay_ms * sample_rate_hz / 1000.0F);
+  const float amp_release = 1.0F / std::fmax(1.0F, synth.amp_release_ms * sample_rate_hz / 1000.0F);
+  const float amp_sustain = synth.amp_sustain;
   for (uint32_t index = 0; index < descriptor.voice_capacity; ++index) {
     InstrumentVoice &voice = instrument.voices[index];
     if (!voice.active) continue;
@@ -4297,18 +4404,17 @@ void render_instrument_frame(
     for (uint32_t oscillator_index = 0; oscillator_index < 2; ++oscillator_index) {
       const daw_audio_synth_oscillator_state &oscillator = synth.oscillators[oscillator_index];
       if (oscillator.enabled == 0) continue;
-      const float semitones = static_cast<float>(oscillator.octave * 12 + oscillator.semitone)
-        + (oscillator.detune_cents + lfo * synth.lfo_pitch_cents) / 100.0F;
+      const float semitones = (oscillator.detune_cents + lfo * synth.lfo_pitch_cents) / 100.0F;
       const float increment = base_frequency * std::pow(2.0F, semitones / 12.0F) / static_cast<float>(sample_rate_hz);
       voice.oscillator_phase[oscillator_index] += increment;
       voice.oscillator_phase[oscillator_index] -= std::floor(voice.oscillator_phase[oscillator_index]);
       sample += waveform(oscillator.waveform, voice.oscillator_phase[oscillator_index]) * oscillator.level;
     }
-    float cutoff = synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_FILTER_CUTOFF_HZ, synth.filter_cutoff_hz);
+    float cutoff = synth.filter_cutoff_hz;
     cutoff *= std::pow(2.0F, (static_cast<float>(voice.note) - 60.0F) / 12.0F * synth.filter_key_tracking
       + voice.filter_level * synth.filter_envelope_amount_octaves + lfo * synth.lfo_filter_octaves);
     cutoff = std::fmax(20.0F, std::fmin(cutoff, static_cast<float>(sample_rate_hz) * 0.45F));
-    const float resonance = synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_FILTER_RESONANCE, synth.filter_resonance);
+    const float resonance = synth.filter_resonance;
     const uint32_t filter_type = synth.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_HIGHPASS
       ? DAW_AUDIO_EQ_BAND_HIGHPASS
       : synth.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_BANDPASS
@@ -4363,7 +4469,7 @@ void render_sample_instrument_frame(
   float *right_output) {
   float left = 0.0F;
   float right = 0.0F;
-  const daw_audio_sampler_state &state = instrument.sampler;
+  const daw_audio_sampler_state &state = instrument.applied.sampler;
   const float attack = 1.0F / std::fmax(1.0F, state.amp_attack_ms * core.config.sample_rate_hz / 1000.0F);
   const float decay = 1.0F / std::fmax(1.0F, state.amp_decay_ms * core.config.sample_rate_hz / 1000.0F);
   const float filter_attack = 1.0F / std::fmax(1.0F, state.filter_attack_ms * core.config.sample_rate_hz / 1000.0F);
@@ -4376,7 +4482,7 @@ void render_sample_instrument_frame(
     voice.amp_level = envelope_step(voice.amp_level, &voice.amp_stage, voice.released, attack, decay, state.amp_sustain, release);
     const float filter_release = 1.0F / std::fmax(1.0F, state.filter_release_ms * core.config.sample_rate_hz / 1000.0F);
     voice.filter_level = envelope_step(voice.filter_level, &voice.filter_stage, voice.released, filter_attack, filter_decay, state.filter_sustain, filter_release);
-    const daw_audio_sample_zone &zone = instrument.zones[voice.zone];
+    const daw_audio_sample_zone &zone = instrument.applied.zones[voice.zone];
     AssetSlot *asset = find_asset(&core, zone.asset);
     if (asset == nullptr || (voice.amp_level <= 0.0F && voice.released)) {
       voice = {};
@@ -4443,7 +4549,7 @@ void render_granular_instrument_frame(
   InstrumentNodeState &instrument,
   float *left_output,
   float *right_output) {
-  const daw_audio_granular_state &state = instrument.granular;
+  const daw_audio_granular_state &state = instrument.applied.granular;
   AssetSlot *asset = find_asset(&core, state.asset);
   if (asset == nullptr || instrument.granular_note_count == 0) {
     *left_output = 0.0F;
@@ -5191,6 +5297,7 @@ void fold_channels(float level, float &left, float &right) {
 void render_instrument_state(
   Core &core, InstrumentNodeState &state, const daw_audio_instrument_state_descriptor &descriptor,
   float *left, float *right) {
+  advance_applied(core, state, descriptor.kind);
   if (descriptor.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
     render_instrument_frame(state, descriptor, core.config.sample_rate_hz, left, right);
   } else if (descriptor.kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
@@ -7242,15 +7349,17 @@ bool same_instrument_configuration(
   for (uint32_t index = 0; index < DAW_AUDIO_CORE_MAX_INSTRUMENT_PARAMETERS; ++index) {
     if (current_node.instrument.parameter_targets[index] != next_node.instrument.parameter_targets[index]) return false;
   }
+  const InstrumentConfiguration before = discrete_part(current);
+  const InstrumentConfiguration after = discrete_part(next);
   switch (next_node.instrument.kind) {
     case DAW_AUDIO_INSTRUMENT_KIND_SYNTH:
-      return std::memcmp(&current.synth, &next.synth, sizeof(current.synth)) == 0;
+      return std::memcmp(&before.synth, &after.synth, sizeof(before.synth)) == 0;
     case DAW_AUDIO_INSTRUMENT_KIND_SAMPLER:
     case DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK:
-      return std::memcmp(&current.sampler, &next.sampler, sizeof(current.sampler)) == 0
-        && std::memcmp(current.zones.data(), next.zones.data(), sizeof(current.zones)) == 0;
+      return std::memcmp(&before.sampler, &after.sampler, sizeof(before.sampler)) == 0
+        && std::memcmp(before.zones.data(), after.zones.data(), sizeof(before.zones)) == 0;
     case DAW_AUDIO_INSTRUMENT_KIND_GRANULAR:
-      return std::memcmp(&current.granular, &next.granular, sizeof(current.granular)) == 0;
+      return std::memcmp(&before.granular, &after.granular, sizeof(before.granular)) == 0;
     default:
       return true;
   }
@@ -7910,11 +8019,7 @@ bool assign_prepared_node(Core &core, uint32_t index) {
   next.node_generations[index] = core.node_slots[slot_index].generation.load(std::memory_order_relaxed);
   InstrumentNodeState &runtime = core.instrument_runtime[slot_index];
   runtime = {};
-  const auto &configuration = (*core.prepared_instrument_configs)[index];
-  runtime.synth = configuration.synth;
-  runtime.sampler = configuration.sampler;
-  runtime.zones = configuration.zones;
-  runtime.granular = configuration.granular;
+  set_up_instrument(runtime, (*core.prepared_instrument_configs)[index]);
   return true;
 }
 
@@ -8151,7 +8256,9 @@ bool same_sample_zone(const daw_audio_sample_zone &left, const daw_audio_sample_
 // Seeds the instrument that replaces another at publish: the replacement keeps its
 // own configuration and takes over what the old one was playing, so a held note goes
 // on at the phase it had and the edit applies to it at once (render reads every
-// configured value per frame). Callback side of publish, floats and integers only,
+// configured value per frame). It also takes over the continuous values the old one
+// had applied (a zone's only while it is the same zone), so a drag already under way
+// goes on from where it was and the edited targets slew from there. Callback side of publish, floats and integers only,
 // into a slot nothing has rendered yet. Both slots then render the same voices
 // across the 5 ms crossfade, whose weights sum to one, so the seam has no level bump.
 //
@@ -8200,8 +8307,10 @@ bool same_sample_zone(const daw_audio_sample_zone &left, const daw_audio_sample_
 void seed_instrument_runtime(
   const daw_audio_graph_node_descriptor &plan_node, const InstrumentNodeState &from, InstrumentNodeState &to) {
   const uint32_t capacity = plan_node.instrument.voice_capacity;
+  const auto carry = [](float &applied, float before) { applied = before; };
   switch (plan_node.instrument.kind) {
     case DAW_AUDIO_INSTRUMENT_KIND_SYNTH:
+      visit_synth(to.applied.synth, from.applied.synth, carry);
       to.sustain = from.sustain;
       to.expression = from.expression;
       to.next_age = from.next_age;
@@ -8211,6 +8320,10 @@ void seed_instrument_runtime(
       break;
     case DAW_AUDIO_INSTRUMENT_KIND_SAMPLER:
     case DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK: {
+      visit_sampler(to.applied.sampler, from.applied.sampler, carry);
+      for (uint32_t zone = 0; zone < std::min(to.sampler.zone_count, from.sampler.zone_count); ++zone) {
+        if (same_sample_zone(from.zones[zone], to.zones[zone])) visit_zone(to.applied.zones[zone], from.applied.zones[zone], carry);
+      }
       to.round_robin_cursors = from.round_robin_cursors;
       to.next_age = from.next_age;
       std::array<SampleVoice, kMaximumInstrumentVoices> voices = from.sample_voices;
@@ -8235,6 +8348,7 @@ void seed_instrument_runtime(
       break;
     }
     case DAW_AUDIO_INSTRUMENT_KIND_GRANULAR: {
+      visit_granular(to.applied.granular, from.applied.granular, carry);
       for (uint32_t index = 0; index < to.granular.max_grains; ++index) to.grains[index] = from.grains[index];
       to.granular_note_ids = from.granular_note_ids;
       to.granular_note_ages = from.granular_note_ages;
@@ -8285,6 +8399,21 @@ void begin_node_dips(Core &core, const GraphRevision &replaced, GraphRevision &p
     for (uint32_t old = 0; old < replaced.total_node_count(); ++old) {
       if (replaced.node_slots[old] == plan.node_slots[ghost]) carry_node_dip(core, replaced, plan, ghost, old, false);
     }
+  }
+}
+
+// Callback side of publish. A kept instrument whose configuration changed (only in
+// its continuous values, or it would have been replaced) takes the edited one as its
+// targets: its voices go on and the values it applies slew there. An unchanged one
+// keeps what a live event set.
+void begin_instrument_edits(Core &core, const GraphRevision &replaced, const GraphRevision &plan) {
+  for (uint32_t node = 0; node < plan.node_count; ++node) {
+    if (plan.nodes[node].kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT) continue;
+    const int32_t previous = graph_node_index(replaced, plan.nodes[node].id);
+    if (previous < 0 || replaced.node_slots[static_cast<uint32_t>(previous)] != plan.node_slots[node]) continue;
+    const InstrumentConfiguration &before = (*core.published_instrument_configs)[static_cast<uint32_t>(previous)];
+    const InstrumentConfiguration &after = (*core.prepared_instrument_configs)[node];
+    if (std::memcmp(&before, &after, sizeof(after)) != 0) set_instrument_targets(core.instrument_runtime[plan.node_slots[node]], after);
   }
 }
 
@@ -8575,6 +8704,7 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
     }
     hand_off_bypass(*core, *core->published_graph, *core->prepared_graph);
     begin_node_dips(*core, *core->published_graph, *core->prepared_graph);
+    begin_instrument_edits(*core, *core->published_graph, *core->prepared_graph);
     begin_mixer_ramps(*core, *core->published_graph, *core->prepared_graph);
     begin_edge_ramps(*core, *core->published_graph, *core->prepared_graph);
     activate_prepared_runtime(*core, *core->prepared_graph);
@@ -9032,7 +9162,7 @@ extern "C" daw_audio_core_result daw_audio_core_configure_synth(
     return refresh_prepared_node(*core, index);
   }
   (*core->published_instrument_configs)[index].synth = *state;
-  published_instrument(*core, index).synth = *state;
+  set_up_instrument(published_instrument(*core, index), (*core->published_instrument_configs)[index]);
   return DAW_AUDIO_CORE_OK;
 }
 
@@ -9066,8 +9196,7 @@ extern "C" daw_audio_core_result daw_audio_core_configure_sampler(
   for (uint32_t index = state->zone_count; index < configuration.zones.size(); ++index) configuration.zones[index] = {};
   if (core->prepared_revision != 0) return refresh_prepared_node(*core, node_slot);
   InstrumentNodeState &instrument = published_instrument(*core, node_slot);
-  instrument.sampler = configuration.sampler;
-  instrument.zones = configuration.zones;
+  set_up_instrument(instrument, configuration);
   instrument.round_robin_cursors.fill(0);
   return DAW_AUDIO_CORE_OK;
 }
@@ -9091,7 +9220,7 @@ extern "C" daw_audio_core_result daw_audio_core_configure_granular(
     return refresh_prepared_node(*core, index);
   }
   (*core->published_instrument_configs)[index].granular = *state;
-  published_instrument(*core, index).granular = *state;
+  set_up_instrument(published_instrument(*core, index), (*core->published_instrument_configs)[index]);
   return DAW_AUDIO_CORE_OK;
 }
 

@@ -4465,7 +4465,9 @@ void test_instrument_synthesis_lifecycle_determinism_and_boundaries() {
   std::array<float, 1> silent_left{};
   std::array<float, 1> silent_right{};
   expect(render(first, 1, silence.data(), silence.size(), silent_left.data(), silent_right.data()), DAW_AUDIO_CORE_OK);
-  assert(std::abs(silent_left[0]) <= 1e-7F && std::abs(silent_right[0]) <= 1e-7F);
+  // The gain slews to nothing over a few milliseconds, then stays there.
+  for (uint32_t block = 0; block < 100; ++block) expect(render(first, 64, nullptr, 0, first_left.data(), first_right.data()), DAW_AUDIO_CORE_OK);
+  assert(first_left.back() == 0.0F && first_right.back() == 0.0F);
   const std::array<daw_audio_instrument_event, 1> invalid{{
     {.node_id = 1, .note_id = 3, .sequence = 4, .epoch = 1, .frame_offset = 0, .type = DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON, .channel = 0, .note = 61, .value = NAN},
   }};
@@ -6567,6 +6569,7 @@ void test_phase3_instrument_replacement_hands_over_without_a_step() {
   };
   daw_audio_synth_state replacement = synth;
   replacement.output_gain = 0.375F;
+  replacement.lfo_waveform = 1;  // inaudible (the LFO is off) and discrete, so the edit replaces the instrument
   std::array<daw_audio_graph_node_descriptor, 3> nodes{{
     {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_INSTRUMENT, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
@@ -6641,7 +6644,8 @@ void test_phase3_instrument_replacement_hands_over_without_a_step() {
   std::vector<float> renewed_total;
   std::vector<float> witness_total;
   float reference_step = 0.0F;
-  for (uint32_t block = 0; block < 16; ++block) {
+  // Long enough for the seeded gain to finish its slew onto the new configuration.
+  for (uint32_t block = 0; block < 60; ++block) {
     const auto actual = edited.render(false);
     const auto expected = reference.render(false);
     const auto carried = renewed.render(false);
@@ -6677,13 +6681,16 @@ void test_phase3_instrument_replacement_hands_over_without_a_step() {
   assert(replaced_voice > 0.05F);
 }
 
-daw_audio_synth_state phase3_synth(float output_gain) {
+// `edit` marks the synth as another edit of the same instrument: it sets the LFO
+// shape (the LFO is off, so nothing is heard), a discrete field, so a synth with a
+// different `edit` replaces the instrument where a different gain alone only moves it.
+daw_audio_synth_state phase3_synth(float output_gain, uint32_t edit = 0) {
   return {
     .version = 1, .seed = 19,
     .oscillators = {{.enabled = 1, .waveform = DAW_AUDIO_SYNTH_WAVEFORM_SINE, .level = 0.5F}},
     .filter_cutoff_hz = 1000.0F, .filter_resonance = 0.7F,
     .filter_sustain = 0.5F, .amp_sustain = 1.0F, .amp_release_ms = 1.0F,
-    .lfo_rate_hz = 1.0F, .output_gain = output_gain,
+    .lfo_waveform = edit, .lfo_rate_hz = 1.0F, .output_gain = output_gain,
   };
 }
 
@@ -7959,7 +7966,7 @@ void test_phase3_reused_node_slot_starts_clean() {
   rig.witness_node = 5;
   const auto build = [&rig](float gain, bool probe) {
     rig.clear();
-    rig.add_instrument(1, phase3_synth(gain));
+    rig.add_instrument(1, phase3_synth(gain, static_cast<uint32_t>(gain * 4.0F)));
     rig.add_node(2, DAW_AUDIO_GRAPH_NODE_MASTER);
     rig.add_edge(1, 2);
     if (probe) {
@@ -8103,7 +8110,7 @@ void pristine_build(Phase3Rig &rig, const PristineVariant &variant) {
   rig.clear();
   rig.add_node(2, DAW_AUDIO_GRAPH_NODE_MASTER);
   if (variant.empty) return;
-  rig.add_instrument(1, phase3_synth(variant.alternate ? 0.4F : 0.75F));
+  rig.add_instrument(1, phase3_synth(variant.alternate ? 0.4F : 0.75F, variant.alternate ? 1 : 0));
   edge(1, 1, 2);
   if (variant.three) {
     rig.add_node(3, DAW_AUDIO_GRAPH_NODE_SOURCE, 0);
@@ -8350,18 +8357,20 @@ void test_phase3_layout_change_crossfades_the_waveform(bool to_mono) {
 // along plays: both waveforms are whole, nothing is a DC offset, and a 41 Hz note
 // has no residue.
 void test_phase3_instrument_replacement_crossfades_the_waveform() {
-  const auto build = [](Phase3Rig &rig, float gain) {
+  const auto build = [](Phase3Rig &rig, uint32_t waveform) {
+    daw_audio_synth_state synth = phase3_synth(0.75F);
+    synth.oscillators[0].waveform = waveform;
     rig.clear();
-    rig.add_instrument(1, phase3_synth(gain));
+    rig.add_instrument(1, synth);
     rig.add_node(2, DAW_AUDIO_GRAPH_NODE_MASTER);
     rig.add_edge(1, 2);
   };
   Phase3Rig edited;
   Phase3Rig old_voice;
   Phase3Rig new_voice;
-  build(edited, 0.75F);
-  build(old_voice, 0.75F);
-  build(new_voice, 0.375F);
+  build(edited, DAW_AUDIO_SYNTH_WAVEFORM_SINE);
+  build(old_voice, DAW_AUDIO_SYNTH_WAVEFORM_SINE);
+  build(new_voice, DAW_AUDIO_SYNTH_WAVEFORM_TRIANGLE);
   for (Phase3Rig *rig : {&edited, &old_voice, &new_voice}) rig->commit(1);
   edited.note_on(1, 28);
   old_voice.note_on(1, 28);
@@ -8372,7 +8381,7 @@ void test_phase3_instrument_replacement_crossfades_the_waveform() {
   }
   // The held note carries into the replacement, so the new instrument's reference is
   // one that has held the same note since the start.
-  build(edited, 0.375F);
+  build(edited, DAW_AUDIO_SYNTH_WAVEFORM_TRIANGLE);
   edited.commit(2);
   const uint32_t fade = edited.fade_frames();
   float worst = 0.0F;
@@ -8410,7 +8419,7 @@ void test_phase3_replacement_depth_is_bounded_and_recovers() {
   Phase3Rig rig;
   const auto build = [&rig](uint32_t step) {
     rig.clear();
-    rig.add_instrument(1, phase3_synth(0.2F + 0.05F * static_cast<float>(step % 8)));
+    rig.add_instrument(1, phase3_synth(0.2F + 0.05F * static_cast<float>(step % 8), step % 2));
     rig.add_node(2, DAW_AUDIO_GRAPH_NODE_MASTER);
     rig.add_edge(1, 2);
   };
@@ -8452,6 +8461,7 @@ struct HeldRig {
   uint32_t capacity;
   uint32_t revision = 0;
   uint32_t sequence = 0;
+  uint32_t live_targets = 0;  // the first N synth parameters are declared live
   daw_audio_synth_state synth = phase3_synth(0.5F);
   daw_audio_sampler_state sampler{
     .version = 1, .amp_attack_ms = 0.0F, .amp_decay_ms = 0.0F, .amp_sustain = 1.0F, .amp_release_ms = 1.0F,
@@ -8504,10 +8514,12 @@ struct HeldRig {
       .end_frame = asset_frames, .loop_end_frame = asset_frames};
   }
   daw_audio_core_result commit() {
+    daw_audio_instrument_state_descriptor instrument{
+      .kind = kind, .version = 1, .voice_capacity = capacity, .parameter_count = live_targets};
+    for (uint32_t index = 0; index < live_targets; ++index) instrument.parameter_targets[index] = index + 1;
     const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
       {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_INSTRUMENT, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
-        .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
-        .instrument = {.kind = kind, .version = 1, .voice_capacity = capacity}},
+        .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .instrument = instrument},
       {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
         .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO},
     }};
@@ -8545,6 +8557,10 @@ struct HeldRig {
   }
   void note_off(uint64_t id, uint32_t note) { push(DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF, id, note, 0.0F); }
   void sustain(bool on) { push(DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN, 0, 0, on ? 1.0F : 0.0F); }
+  void parameter(uint32_t target, float value, uint32_t frame_offset = 0) {
+    push(DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER, 0, target, value);
+    events.back().frame_offset = frame_offset;
+  }
   void render(uint32_t blocks) {
     for (uint32_t block = 0; block < blocks; ++block) {
       std::array<std::array<float, frames>, 2> samples{};
@@ -8561,11 +8577,13 @@ struct HeldRig {
     }
   }
   size_t rendered() const { return heard[0].size(); }
-  // An edit that cannot be heard: a held note must come through it untouched.
+  // An edit that cannot be heard and replaces the instrument (a discrete field, the
+  // LFO shape or the filter mode of a filter that is off): a held note must come
+  // through it untouched.
   void quiet_edit() {
-    if (kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) synth.filter_key_tracking += 0.25F;
+    if (kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) synth.lfo_waveform ^= 1u;
     else if (kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) ++granular.seed;
-    else sampler.filter_cutoff_hz -= 1000.0F;
+    else sampler.filter_mode ^= 1u;
   }
 };
 
@@ -8733,32 +8751,45 @@ void test_phase6i_zone_edit_under_a_held_note(const uint32_t kind) {
       return rig;
     };
     const size_t edit = 20 * HeldRig::frames;
-    const auto reference = held([](HeldRig &) {}, 12);
-    const char *name = kind_name(kind);
-    // Gain: the fade-in of the new gain over the old.
-    const auto quieter = held([](HeldRig &rig) { for (auto &zone : rig.zones) zone.gain = 0.5F; }, 12);
-    std::vector<float> half(reference->heard[0].size());
-    for (size_t index = 0; index < half.size(); ++index) half[index] = 0.5F * reference->heard[0][index];
-    phase6i_require(largest_blend_error(quieter->heard[0], reference->heard[0], half, edit) < 1e-4F, name,
-      "a gain edit did not reach the held note", largest_blend_error(quieter->heard[0], reference->heard[0], half, edit), 0.0F);
-    // Pan: hard right takes the left channel to nothing and doubles the right by sqrt 2.
-    const auto panned = held([](HeldRig &rig) { for (auto &zone : rig.zones) zone.pan = 1.0F; }, 12);
+    // The continuous values (gain, pan, tuning) slew onto the edit with no retrigger, and
+    // have landed on it once the settle time has run.
+    const uint32_t settle_blocks = 170;  // 20 held blocks, then 150 for the slew to land
+    const size_t slewed = edit + (settle_blocks - 100) * HeldRig::frames;  // the last 80 blocks
     const size_t settled = edit + 2 * HeldRig::fade;
-    phase6i_require(peak_after(panned->heard[0], settled) < 1e-4F, name, "a pan edit left sound in the left channel",
-      peak_after(panned->heard[0], settled), 0.0F);
+    const auto reference = held([](HeldRig &) {}, settle_blocks);
+    const char *name = kind_name(kind);
+    // Gain: half of what the unedited instrument plays.
+    const auto quieter = held([](HeldRig &rig) { for (auto &zone : rig.zones) zone.gain = 0.5F; }, settle_blocks);
+    float gain_error = 0.0F;
+    for (size_t index = slewed; index < quieter->heard[0].size(); ++index) {
+      gain_error = std::max(gain_error, std::abs(quieter->heard[0][index] - 0.5F * reference->heard[0][index]));
+    }
+    phase6i_require(gain_error < 1e-4F, name, "a gain edit did not reach the held note", gain_error, 0.0F);
+    // Pan: hard right takes the left channel to nothing and doubles the right by sqrt 2.
+    const auto panned = held([](HeldRig &rig) { for (auto &zone : rig.zones) zone.pan = 1.0F; }, settle_blocks);
+    phase6i_require(peak_after(panned->heard[0], slewed) < 1e-4F, name, "a pan edit left sound in the left channel",
+      peak_after(panned->heard[0], slewed), 0.0F);
     float pan_error = 0.0F;
-    for (size_t index = settled; index < panned->heard[1].size(); ++index) {
+    for (size_t index = slewed; index < panned->heard[1].size(); ++index) {
       pan_error = std::max(pan_error, std::abs(panned->heard[1][index] - 1.41421356F * reference->heard[0][index]));
     }
     phase6i_require(pan_error < 1e-4F, name, "a pan edit did not reach the held note", pan_error, 0.0F);
-    // Tuning: an octave up doubles the step from the playhead the voice had.
-    const auto tuned = held([](HeldRig &rig) { for (auto &zone : rig.zones) zone.tune_cents = 1200.0F; }, 12);
-    float tuning_error = 0.0F;
-    for (size_t index = settled; index < tuned->heard[0].size(); ++index) {
-      const size_t position = (edit + 2 * (index - edit)) % HeldRig::asset_frames;
-      tuning_error = std::max(tuning_error, std::abs(tuned->heard[0][index] - tuned->sources[0][position]));
+    // Tuning: an octave up halves the period (the asset has 37 cycles over its 20000
+    // frames at the core's rate), measured over the settled stretch.
+    const auto tuned = held([](HeldRig &rig) { for (auto &zone : rig.zones) zone.tune_cents = 1200.0F; }, settle_blocks);
+    const std::vector<float> &tuned_left = tuned->heard[0];
+    double first_cross = -1.0;
+    double last_cross = 0.0;
+    uint32_t crossings = 0;
+    for (size_t index = slewed + 1; index < tuned_left.size(); ++index) {
+      if (!(tuned_left[index - 1] < 0.0F && tuned_left[index] >= 0.0F)) continue;
+      last_cross = static_cast<double>(index - 1) + -tuned_left[index - 1] / (tuned_left[index] - tuned_left[index - 1]);
+      if (first_cross < 0.0) first_cross = last_cross;
+      else ++crossings;
     }
-    phase6i_require(tuning_error < 1e-4F, name, "a tuning edit did not reach the held note", tuning_error, 0.0F);
+    const double period = (last_cross - first_cross) / crossings;
+    phase6i_require(crossings > 10 && std::abs(period - 0.5 * HeldRig::asset_frames / 37.0) < 0.05, name,
+      "a tuning edit did not reach the held note", static_cast<float>(period), static_cast<float>(0.5 * HeldRig::asset_frames / 37.0));
     // Start: the playhead moves by the distance the start moved; the loop is the whole asset, so a one-shot.
     const auto one_shot = [](HeldRig &rig) {
       for (auto &zone : rig.zones) {
@@ -8851,7 +8882,8 @@ void test_phase6i_replacement_chain_has_no_level_bump() {
   }
   const size_t edit = edited.rendered();
   for (uint32_t step = 0; step < 10; ++step) {
-    edited.synth.filter_key_tracking = step % 2 == 0 ? 0.25F : 0.0F;
+    edited.synth.lfo_waveform = step % 2;
+    bumped.synth.lfo_waveform = step % 2;
     bumped.synth.output_gain = step % 2 == 0 ? 0.25F : 0.5F;
     expect(edited.commit(), DAW_AUDIO_CORE_OK);
     expect(bumped.commit(), DAW_AUDIO_CORE_OK);
@@ -8865,6 +8897,319 @@ void test_phase6i_replacement_chain_has_no_level_bump() {
     excess = std::max(excess, std::abs(bumped.heard[0][index]) - std::abs(loud.heard[0][index]));
   }
   phase6i_require(excess < 1e-5F, "synth", "a level bump across the seam", excess, 0.0F);
+}
+
+// Phase 6i, Mechanism B: a drag is smooth. Every case drags one value in a few steps
+// ten blocks apart (a step is what a drag delivers, one per block at the fastest) under
+// a held sine and is held to what a steady instrument at any of the dragged values
+// plays: the output may never step by more than the steepest slope any of them has
+// (a zipper is a step), and a gliding pitch may never change its period by more than
+// a few percent from one cycle to the next. The sine makes both measurable.
+enum class Drag { Gain, Pan, Cutoff, Pitch };
+
+const char *drag_name(Drag drag) {
+  return drag == Drag::Gain ? "gain" : drag == Drag::Pan ? "pan" : drag == Drag::Cutoff ? "cutoff" : "pitch";
+}
+
+std::vector<float> drag_values(uint32_t kind, Drag drag) {
+  switch (drag) {
+    case Drag::Gain: return {0.1F, 0.4F, 0.7F, 1.0F};
+    case Drag::Pan: return {-1.0F, 0.0F, 1.0F};
+    // A synth's key tracking lifts its cutoff above the tone. A sampler's filter has none, and its tone (note 84
+    // on a sine sample, 873 Hz) sits where the resonance peak lands, so the drag moves the level of what is heard.
+    case Drag::Cutoff:
+      return kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH ? std::vector<float>{12000.0F, 6000.0F, 3000.0F, 1800.0F}
+                                                      : std::vector<float>{12000.0F, 3000.0F, 1500.0F, 1000.0F};
+    case Drag::Pitch: return {0.0F, 2.0F, 4.0F, 6.0F};
+  }
+  return {};
+}
+
+void set_drag_value(HeldRig &rig, Drag drag, float value) {
+  const bool synth = rig.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH;
+  if (drag == Drag::Gain) {
+    if (synth) rig.synth.output_gain = value;
+    else for (auto &zone : rig.zones) zone.gain = value;
+  } else if (drag == Drag::Pan) {
+    if (synth) rig.synth.output_pan = value;
+    else for (auto &zone : rig.zones) zone.pan = value;
+  } else if (drag == Drag::Cutoff) {
+    if (synth) {
+      rig.synth.filter_enabled = 1;
+      rig.synth.filter_resonance = 25.0F;
+      rig.synth.filter_cutoff_hz = value;
+    } else {
+      rig.sampler.filter_enabled = 1;
+      rig.sampler.filter_resonance = 25.0F;
+      rig.sampler.filter_cutoff_hz = value;
+    }
+  } else if (synth) {
+    rig.synth.oscillators[0].semitone = static_cast<int32_t>(value);
+  } else {
+    for (auto &zone : rig.zones) zone.tune_cents = 100.0F * value;
+  }
+}
+
+constexpr uint32_t kDragNote = 84;
+constexpr uint32_t kDragStepBlocks = 10;
+constexpr uint32_t kDragSettleBlocks = 150;
+
+std::unique_ptr<HeldRig> held_for_drag(uint32_t kind, Drag drag, float value, bool live) {
+  auto rig = std::make_unique<HeldRig>(kind);
+  rig->live_targets = live ? 8 : 0;
+  for (auto &zone : rig->zones) {
+    zone.asset = rig->assets[1];
+    if (kind == DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK) zone.key_low = zone.key_high = kDragNote;
+  }
+  set_drag_value(*rig, drag, value);
+  expect(rig->commit(), DAW_AUDIO_CORE_OK);
+  rig->note_on(kDragNote);
+  rig->render(20);
+  return rig;
+}
+
+float largest_step(const std::vector<float> &signal, size_t from) {
+  float largest = 0.0F;
+  for (size_t index = from; index < signal.size(); ++index) largest = std::max(largest, std::abs(signal[index] - signal[index - 1]));
+  return largest;
+}
+
+// The widest ratio between two neighbouring cycles, from interpolated upward zero crossings.
+float widest_period_step(const std::vector<float> &signal, size_t from, size_t to) {
+  double last_cross = -1.0;
+  double last_period = 0.0;
+  double widest = 1.0;
+  for (size_t index = from + 1; index < to; ++index) {
+    if (!(signal[index - 1] < 0.0F && signal[index] >= 0.0F)) continue;
+    const double cross = static_cast<double>(index - 1) + -signal[index - 1] / (signal[index] - signal[index - 1]);
+    if (last_cross >= 0.0) {
+      const double period = cross - last_cross;
+      if (last_period > 0.0) widest = std::max({widest, period / last_period, last_period / period});
+      last_period = period;
+    }
+    last_cross = cross;
+  }
+  return static_cast<float>(widest);
+}
+
+// How the dragged values reach the core: as publishes of the edited configuration, or
+// as the live events of a synth (gain, pan and cutoff are live targets).
+void test_phase6i_drag_is_smooth(const uint32_t kind, const Drag drag, const bool live) {
+  const std::vector<float> values = drag_values(kind, drag);
+  const std::array<uint32_t, 4> targets{DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN, DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_PAN,
+    DAW_AUDIO_SYNTH_PARAMETER_FILTER_CUTOFF_HZ, 0};
+  const auto dragged = held_for_drag(kind, drag, values[0], live);
+  const size_t from = dragged->rendered();
+  for (size_t step = 1; step < values.size(); ++step) {
+    if (live) {
+      dragged->parameter(targets[static_cast<size_t>(drag)], values[step]);
+    } else {
+      set_drag_value(*dragged, drag, values[step]);
+      expect(dragged->commit(), DAW_AUDIO_CORE_OK);
+    }
+    dragged->render(kDragStepBlocks);
+  }
+  const size_t drag_end = dragged->rendered();
+  dragged->render(kDragSettleBlocks);
+  const std::string name = std::string(kind_name(kind)) + " " + drag_name(drag) + (live ? " (live)" : "");
+  if (drag == Drag::Pitch) {
+    const float widest = widest_period_step(dragged->heard[0], from, drag_end);
+    phase6i_require(widest < 1.025F, name.c_str(), "the pitch stepped from one cycle to the next", widest, 1.025F);
+    return;
+  }
+  for (uint32_t channel = 0; channel < 2; ++channel) {
+    float steepest = 0.0F;
+    for (const float value : values) {
+      const auto steady = held_for_drag(kind, drag, value, live);
+      steady->render(kDragStepBlocks * static_cast<uint32_t>(values.size() - 1) + kDragSettleBlocks);
+      steepest = std::max(steepest, largest_step(steady->heard[channel], from));
+    }
+    const float step = largest_step(dragged->heard[channel], from);
+    phase6i_require(step < 1.25F * steepest, name.c_str(), "the output stepped during the drag", step, 1.25F * steepest);
+  }
+  const auto arrived = held_for_drag(kind, drag, values.back(), live);
+  arrived->render(kDragStepBlocks * static_cast<uint32_t>(values.size() - 1) + kDragSettleBlocks);
+  const float miss = largest_difference(dragged->heard[0], arrived->heard[0], dragged->rendered() - 20 * HeldRig::frames);
+  phase6i_require(miss < 1e-3F, name.c_str(), "the drag did not arrive at its value", miss, 0.0F);
+}
+
+// 256 events in one block that swing the gain end to end, then a reversal before the
+// first move has finished: no step, no overshoot past the louder value, and the last
+// event wins.
+void test_phase6i_event_burst_and_reversal_are_smooth() {
+  const auto steady = [](float gain) {
+    auto rig = held_for_drag(DAW_AUDIO_INSTRUMENT_KIND_SYNTH, Drag::Gain, gain, true);
+    rig->render(200);
+    return rig;
+  };
+  const auto loud = steady(1.0F);
+  const float steepest = largest_step(loud->heard[0], 20 * HeldRig::frames);
+  const float loudest = peak_after(loud->heard[0], 20 * HeldRig::frames);
+  const auto burst = held_for_drag(DAW_AUDIO_INSTRUMENT_KIND_SYNTH, Drag::Gain, 0.2F, true);
+  for (uint32_t event = 0; event < 256; ++event) {
+    burst->parameter(DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN, event == 255 ? 0.6F : event % 2 == 0 ? 1.0F : 0.2F, event / 4);
+  }
+  burst->render(200);
+  const auto reversed = held_for_drag(DAW_AUDIO_INSTRUMENT_KIND_SYNTH, Drag::Gain, 0.2F, true);
+  reversed->parameter(DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN, 1.0F);
+  reversed->render(2);
+  reversed->parameter(DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN, 0.2F);
+  reversed->render(198);
+  const size_t from = 20 * HeldRig::frames;
+  for (const auto *rig : {burst.get(), reversed.get()}) {
+    const char *name = rig == burst.get() ? "burst of 256 events" : "reversal mid-slew";
+    const float step = largest_step(rig->heard[0], from);
+    phase6i_require(step < 1.25F * steepest, name, "the output stepped", step, 1.25F * steepest);
+    phase6i_require(peak_after(rig->heard[0], from) <= loudest * 1.0001F, name, "the value overshot", peak_after(rig->heard[0], from), loudest);
+  }
+  const auto last = steady(0.6F);
+  const float miss = largest_difference(burst->heard[0], last->heard[0], burst->rendered() - 20 * HeldRig::frames);
+  phase6i_require(miss < 1e-3F, "burst of 256 events", "the last event did not win", miss, 0.0F);
+}
+
+// Automation and a manual drag write the same parameter: events and publishes in turn
+// reach one value, with no step between them.
+void test_phase6i_automation_and_a_drag_share_a_parameter() {
+  const std::vector<float> values = drag_values(DAW_AUDIO_INSTRUMENT_KIND_SYNTH, Drag::Gain);
+  const auto steady = held_for_drag(DAW_AUDIO_INSTRUMENT_KIND_SYNTH, Drag::Gain, values.back(), true);
+  steady->render(kDragStepBlocks * static_cast<uint32_t>(values.size() - 1) + kDragSettleBlocks);
+  const auto mixed = held_for_drag(DAW_AUDIO_INSTRUMENT_KIND_SYNTH, Drag::Gain, values[0], true);
+  const size_t from = mixed->rendered();
+  for (size_t step = 1; step < values.size(); ++step) {
+    if (step % 2 == 0) {
+      mixed->synth.output_gain = values[step];
+      expect(mixed->commit(), DAW_AUDIO_CORE_OK);
+    } else {
+      mixed->parameter(DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN, values[step]);
+    }
+    mixed->render(kDragStepBlocks);
+  }
+  mixed->render(kDragSettleBlocks);
+  const float step = largest_step(mixed->heard[0], from);
+  const float steepest = largest_step(steady->heard[0], from);
+  phase6i_require(step < 1.25F * steepest, "synth gain", "automation and a drag stepped", step, 1.25F * steepest);
+  const float miss = largest_difference(mixed->heard[0], steady->heard[0], mixed->rendered() - 20 * HeldRig::frames);
+  phase6i_require(miss < 1e-3F, "synth gain", "the last write did not win", miss, 0.0F);
+}
+
+// A drag already sliding when a replacement lands: the replacement goes on from the
+// value the old instrument had applied, so the output matches an instrument that was
+// never replaced (the discrete edit is inaudible).
+void test_phase6i_replacement_goes_on_from_the_applied_value(const uint32_t kind) {
+  auto replaced = held_for_drag(kind, Drag::Gain, 0.2F, false);
+  auto kept = held_for_drag(kind, Drag::Gain, 0.2F, false);
+  const size_t from = replaced->rendered();
+  for (HeldRig *rig : {replaced.get(), kept.get()}) {
+    set_drag_value(*rig, Drag::Gain, 1.0F);
+    expect(rig->commit(), DAW_AUDIO_CORE_OK);
+    rig->render(3);
+  }
+  replaced->quiet_edit();
+  expect(replaced->commit(), DAW_AUDIO_CORE_OK);
+  for (HeldRig *rig : {replaced.get(), kept.get()}) rig->render(kDragSettleBlocks);
+  const float deviation = largest_difference(replaced->heard[0], kept->heard[0], from);
+  phase6i_require(deviation < 1e-4F, kind_name(kind), "the replacement jumped from the applied value", deviation, 0.0F);
+}
+
+// Continuous-only edits never replace the instrument: twenty published back to back
+// (a replacement chain would refuse the ninth) are all accepted and leave the output
+// finite.
+void test_phase6i_continuous_edits_do_not_replace_the_instrument(const uint32_t kind) {
+  HeldRig rig(kind);
+  expect(rig.commit(), DAW_AUDIO_CORE_OK);
+  rig.note_on(60);
+  rig.render(20);
+  for (uint32_t edit = 0; edit < 20; ++edit) {
+    const bool high = edit % 2 == 0;
+    if (kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) rig.synth.output_gain = high ? 0.25F : 0.5F;
+    else if (kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) rig.granular.density_hz = high ? 120.0F : 100.0F;
+    else for (auto &zone : rig.zones) zone.gain = high ? 0.5F : 1.0F;
+    const daw_audio_core_result result = rig.commit();
+    phase6i_require(result == DAW_AUDIO_CORE_OK, kind_name(kind), "a continuous edit was refused", static_cast<float>(result), 0.0F);
+  }
+  rig.render(20);
+  phase6i_require(peak_after(rig.heard[0], 0) < 10.0F && std::isfinite(peak_after(rig.heard[1], 0)), kind_name(kind),
+    "the output left the finite range", peak_after(rig.heard[0], 0), 10.0F);
+}
+
+// What cannot be set never reaches the voices: a value that is not a number is refused
+// where it enters, a value dragged to nothing ends at exactly nothing (no subnormal
+// tail), and a polyphony above the 32 voices the core holds is refused at configure.
+void test_phase6i_bad_values_and_the_polyphony_cap() {
+  HeldRig rig(DAW_AUDIO_INSTRUMENT_KIND_SYNTH);
+  rig.live_targets = 8;
+  expect(rig.commit(), DAW_AUDIO_CORE_OK);
+  for (const float bad : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()}) {
+    const daw_audio_instrument_event event{.node_id = 1, .sequence = 1, .epoch = 1, .type = DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER,
+      .note = DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN, .value = bad};
+    phase6i_require(daw_audio_core_validate_instrument_target(rig.core, &event) == DAW_AUDIO_CORE_INVALID_ARGUMENT, "synth",
+      "a value that is not a number was accepted as an event", bad, 0.0F);
+    rig.synth.output_gain = bad;
+    phase6i_require(rig.commit() == DAW_AUDIO_CORE_INVALID_ARGUMENT, "synth", "a value that is not a number was configured", bad, 0.0F);
+  }
+  rig.synth.output_gain = 0.5F;
+  rig.note_on(72);
+  rig.render(5);
+  rig.parameter(DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN, 0.0F);
+  rig.render(300);
+  rig.parameter(DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN, 0.5F);
+  rig.render(300);
+  for (size_t index = 0; index < rig.rendered(); ++index) {
+    phase6i_require(std::fpclassify(rig.heard[0][index]) != FP_SUBNORMAL && std::isfinite(rig.heard[0][index]), "synth",
+      "a subnormal or non-finite sample", rig.heard[0][index], 0.0F);
+    if (index >= 255 * HeldRig::frames && index < 305 * HeldRig::frames) {
+      phase6i_require(rig.heard[0][index] == 0.0F, "synth", "a drag to nothing did not end at nothing", rig.heard[0][index], 0.0F);
+    }
+  }
+  HeldRig too_many(DAW_AUDIO_INSTRUMENT_KIND_SYNTH, DAW_AUDIO_CORE_MAX_INSTRUMENT_VOICES + 1);
+  phase6i_require(too_many.commit() == DAW_AUDIO_CORE_INVALID_ARGUMENT, "synth", "a polyphony above 32 was accepted",
+    static_cast<float>(too_many.capacity), static_cast<float>(DAW_AUDIO_CORE_MAX_INSTRUMENT_VOICES));
+  HeldRig at_cap(DAW_AUDIO_INSTRUMENT_KIND_SYNTH, DAW_AUDIO_CORE_MAX_INSTRUMENT_VOICES);
+  expect(at_cap.commit(), DAW_AUDIO_CORE_OK);
+}
+
+// The cost of the slew, per 64-frame block, with each instrument at its fullest (32
+// voices; the sampler over 32 zones; the granular at 128 grains): once settled, and
+// right after an edit that moves every continuous value. Printed, not asserted: it is
+// a measurement, and timing is not a gate.
+void test_phase6i_slew_cost_at_the_maximum() {
+  for (const uint32_t kind : {DAW_AUDIO_INSTRUMENT_KIND_SYNTH, DAW_AUDIO_INSTRUMENT_KIND_SAMPLER, DAW_AUDIO_INSTRUMENT_KIND_GRANULAR}) {
+    HeldRig rig(kind, 32);
+    if (kind == DAW_AUDIO_INSTRUMENT_KIND_SAMPLER) {
+      rig.zones.clear();
+      for (uint32_t note = 40; note < 72; ++note) rig.zones.push_back(rig.zone(note, note));
+      rig.sampler.filter_enabled = 1;
+    }
+    rig.synth.filter_enabled = 1;
+    rig.granular.max_grains = DAW_AUDIO_CORE_MAX_GRANULAR_GRAINS;
+    rig.granular.density_hz = 200.0F;
+    rig.granular.grain_size_ms = 1000.0F;
+    expect(rig.commit(), DAW_AUDIO_CORE_OK);
+    play_chord(rig, 40, 32);
+    rig.render(200);
+    const auto timed = [&rig](uint32_t blocks) {
+      const auto begin = std::chrono::steady_clock::now();
+      rig.render(blocks);
+      return std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - begin).count() / blocks;
+    };
+    const double steady = timed(30);
+    rig.synth.output_gain = 0.3F;
+    rig.synth.output_pan = 0.5F;
+    rig.synth.filter_cutoff_hz = 800.0F;
+    rig.synth.oscillators[0].semitone = 5;
+    rig.sampler.filter_cutoff_hz = 800.0F;
+    for (auto &zone : rig.zones) {
+      zone.gain = 0.3F;
+      zone.pan = 0.5F;
+      zone.tune_cents = 500.0F;
+    }
+    rig.granular.pitch_semitones = 5.0F;
+    rig.granular.position = 0.2F;
+    expect(rig.commit(), DAW_AUDIO_CORE_OK);
+    const double moving = timed(30);
+    std::printf("slew cost (%s, 32 voices): %.1f us per block settled, %.1f us per block while every value moves\n",
+      kind_name(kind), steady, moving);
+  }
 }
 
 // The cost of seeding on the callback at the maximum: 4 synths of 32 voices, 4
@@ -8998,10 +9343,10 @@ void test_phase6i_blend_chain_limit_with_held_voices() {
   }
   const size_t edit = edited.rendered();
   for (uint32_t step = 0; step < 8; ++step) {
-    edited.synth.filter_key_tracking = step % 2 == 0 ? 0.25F : 0.0F;
+    edited.synth.lfo_waveform = step % 2 + 1;
     expect(edited.commit(), DAW_AUDIO_CORE_OK);
   }
-  edited.synth.filter_key_tracking = 0.5F;
+  edited.synth.lfo_waveform = 3;
   expect(edited.commit(), DAW_AUDIO_CORE_CAPACITY_EXCEEDED);
   const auto begin = std::chrono::steady_clock::now();
   edited.render(4);
@@ -9012,7 +9357,7 @@ void test_phase6i_blend_chain_limit_with_held_voices() {
   reference.render(12);
   const float deviation = largest_difference(edited.heard[0], reference.heard[0], edit);
   phase6i_require(deviation < 1e-4F, "synth", "an eight deep chain disturbed the held voices", deviation, 0.0F);
-  edited.synth.filter_key_tracking = 0.5F;
+  edited.synth.lfo_waveform = 3;
   expect(edited.commit(), DAW_AUDIO_CORE_OK);  // the chain has run out: the node takes edits again
   std::printf("blend chain of 8 replacements over 32 held voices: %.1f us per block against %.1f us for one instrument\n",
     std::chrono::duration<double, std::micro>(chain - begin).count() / 4.0,
@@ -10112,8 +10457,23 @@ int main(int argc, char **argv) {
     else if (name == "zone" && kind != DAW_AUDIO_INSTRUMENT_KIND_SYNTH && kind != DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) test_phase6i_zone_edit_under_a_held_note(kind);
     else if (contract == "pedal") test_phase6i_pedal_and_note_off_survive_an_edit();
     else if (contract == "granular-parameter") test_phase6i_granular_parameter_edit_under_a_held_note();
+    else if (name == "retained" && !instrument.empty()) test_phase6i_continuous_edits_do_not_replace_the_instrument(kind);
+    else if (name == "carry" && kind != DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) test_phase6i_replacement_goes_on_from_the_applied_value(kind);
+    else if (contract == "bad-values") test_phase6i_bad_values_and_the_polyphony_cap();
+    else if (contract == "burst") test_phase6i_event_burst_and_reversal_are_smooth();
+    else if (contract == "mixed") test_phase6i_automation_and_a_drag_share_a_parameter();
+    else if (name.rfind("drag", 0) == 0 && kind != DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
+      // drag<param>[-live]-<instrument>, e.g. dragpitch-sampler or draggain-live-synth
+      std::string param = name.substr(4);
+      const bool live = param.size() > 5 && param.compare(param.size() - 5, 5, "-live") == 0;
+      if (live) param.resize(param.size() - 5);
+      for (const Drag drag : {Drag::Gain, Drag::Pan, Drag::Cutoff, Drag::Pitch}) {
+        if (param == drag_name(drag)) test_phase6i_drag_is_smooth(kind, drag, live);
+      }
+    }
     else if (contract == "chain") test_phase6i_replacement_chain_has_no_level_bump();
     else if (contract == "publish-cost") test_phase6i_publish_cost_at_the_maximum(200);
+    else if (contract == "slew-cost") test_phase6i_slew_cost_at_the_maximum();
     else if (contract == "chain-limit") test_phase6i_blend_chain_limit_with_held_voices();
     else return 2;
     return 0;
@@ -10278,11 +10638,22 @@ int main(int argc, char **argv) {
     test_phase6i_held_note_survives_an_edit(kind);
     if (kind != DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) test_phase6i_polyphony_change_keeps_the_newest_voices(kind);
     if (kind == DAW_AUDIO_INSTRUMENT_KIND_SAMPLER || kind == DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK) test_phase6i_zone_edit_under_a_held_note(kind);
+    test_phase6i_continuous_edits_do_not_replace_the_instrument(kind);
+    if (kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) continue;
+    test_phase6i_replacement_goes_on_from_the_applied_value(kind);
+    for (const Drag drag : {Drag::Gain, Drag::Pan, Drag::Cutoff, Drag::Pitch}) {
+      test_phase6i_drag_is_smooth(kind, drag, false);
+      if (kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH && drag != Drag::Pitch) test_phase6i_drag_is_smooth(kind, drag, true);
+    }
   }
+  test_phase6i_event_burst_and_reversal_are_smooth();
+  test_phase6i_automation_and_a_drag_share_a_parameter();
+  test_phase6i_bad_values_and_the_polyphony_cap();
   test_phase6i_pedal_and_note_off_survive_an_edit();
   test_phase6i_granular_parameter_edit_under_a_held_note();
   test_phase6i_replacement_chain_has_no_level_bump();
   test_phase6i_publish_cost_at_the_maximum();
+  test_phase6i_slew_cost_at_the_maximum();
   test_phase6i_blend_chain_limit_with_held_voices();
   test_phase3_reorder_steps_stay_small_at_every_rate();
   test_phase3_reorder_does_not_replay_expired_transients();

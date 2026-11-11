@@ -67,6 +67,7 @@ describe("device collapse double-tap classifier", () => {
 test("keeps the fold contract at the shell and panel boundaries", async () => {
   const shell = await readFile(new URL("../effects/EffectShell.tsx", import.meta.url), "utf8");
   const panel = await readFile(new URL("./EffectsPanel.tsx", import.meta.url), "utf8");
+  const drumRack = await readFile(new URL("../effects/DrumRack.tsx", import.meta.url), "utf8");
 
   expect(shell).toContain('hidden={collapsed()}');
   expect(shell).toContain('aria-expanded={!collapsed()}');
@@ -75,6 +76,13 @@ test("keeps the fold contract at the shell and panel boundaries", async () => {
   expect(panel).toContain('deviceCollapseIdentity.audioEffect(effect().id)');
   expect(panel).toContain('deviceCollapseIdentity.external(processor().instanceId)');
   expect(panel).toContain('contentId={() => safeDeviceContentId(identity())}');
+  expect(drumRack).toContain('classList={{ "text-destructive": status().state === \'error\' }}');
+  expect(drumRack).toContain('disabled={status().state !== \'error\'}');
+  expect(drumRack).toContain('{status().state}');
+  expect(drumRack).toContain('<p class="py-1 text-destructive" role="alert">{error()}</p>');
+  expect(drumRack).toContain('<Show when={props.nativeStatus?.error}>');
+  expect(drumRack).toContain('onClick={() => props.onRetry()}');
+  expect(panel).toContain('onRetry={props.instrument.state.drumRack.retry}');
 
   const externalEffectStart = panel.indexOf('data-external-effect-id={processor().instanceId}');
   const externalBoundaryStart = panel.indexOf(

@@ -1,11 +1,11 @@
 import { buildLocalClip } from '~/lib/clip-create'
 import { isProjectControlError, isProjectControlRevisionConflict, type ProjectControlClient } from '~/lib/project-control-client'
 import type { ControlActionV1, ControlCommitRequestV1 } from '@daw-browser/control'
-import { flushMidiProjectWrites } from '~/lib/midi/editor-persistence'
+import { commitMidiEditorOperations, flushMidiProjectWrites, type MidiEditorOperation } from '~/lib/midi/editor-persistence'
+import type { MidiEditorNote } from '~/lib/midi-editor-grid'
 import type { OptimisticGrantScope } from '~/lib/optimistic-grant-scope'
 import type { convexApi, convexClient } from '~/lib/convex'
 import type { LocalMixPatch } from '~/lib/timeline-storage'
-import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import {
   AUDIO_EFFECT_ORDER,
   assert,
@@ -23,7 +23,8 @@ import { applyTrackClipCreateEntry, applyTrackDeleteEntry } from './track-entry-
 import { flushSharedOutboxOperation, readQueuedClipDeletionRecoveryIds } from '~/lib/shared-outbox'
 
 import { buildHistoryRefIndex, resolveClipId, resolveStoredTrackId, resolveTrackId, resolveTrackRoutingSnapshot } from './refs'
-import type { EffectParamsByEffect, EffectType, HistoryEntry } from './types'
+import type { EffectParamsByEffect, EffectType, HistoryEntry, MidiNoteHistoryChange } from './types'
+import type { LiveProcessorEditIdentity } from '~/lib/live-processor-control'
 import {
   isLocalHistoryProject,
   persistHistoryEffectParams,
@@ -49,7 +50,6 @@ import {
   removeHistoryTrackOrThrow,
   syncHistoryClipCreateEntryIds,
 } from './history-persistence'
-import type { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
 
 export type Deps = {
   convexClient: typeof convexClient
@@ -59,7 +59,6 @@ export type Deps = {
   projectId: string
   userId: string
   persistLocalMix: (projectId: string, trackId: Track['id'], patch: LocalMixPatch) => void
-  audioEngine: AudioEngine
   isCurrentScope?: () => boolean
   replayInstanceEffectParams?: <Effect extends EffectType>(payload: {
     targetId: string
@@ -67,7 +66,13 @@ export type Deps = {
     instanceId: string
     params: EffectParamsByEffect[Effect]
   }) => boolean
-  drumRackBufferSync?: ReturnType<typeof createDrumRackBufferSync>
+  reserveInstanceEffectEdit?: <Effect extends EffectType>(payload: {
+    targetId: string
+    effect: Effect
+    instanceId?: string
+    params: EffectParamsByEffect[Effect]
+  }) => LiveProcessorEditIdentity | undefined
+  releaseInstanceEffectEdit?: (edit: LiveProcessorEditIdentity) => void
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
   grantTrackWrite: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
   grantClipWrite: (clipId: string, scope?: OptimisticGrantScope | null) => void
@@ -83,6 +88,7 @@ export type Deps = {
     commitClipTiming: (clipId: string, patch: Omit<Extract<HistoryEntry, { type: 'clip-timing' }>['data']['to'], 'audioWarp'>) => void
     commitClipAudioWarp: (clipId: string, audioWarp: Track['clips'][number]['audioWarp']) => void
     commitClipFades: (clipId: string, fades: NonNullable<Track['clips'][number]['fades']>) => void
+    commitClipMidi: (clipId: string, midi: NonNullable<Track['clips'][number]['midi']>) => void
     rescheduleChangedClips: (clipIds: string[]) => void
     rescheduleTimeline?: () => void
     refreshLocalTimeline?: () => Promise<void>
@@ -396,25 +402,6 @@ function applyEffectParamsToEngine(entry: EffectParamsEntry, deps: Deps, targetI
         }
         return
       }
-      case 'synth': {
-        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        deps.audioEngine.setTrackSynth(targetId, params)
-        return
-      }
-      case 'instrument': {
-        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        if (params.kind === 'synth') deps.audioEngine.setTrackInstrument(targetId, { instrument: params })
-        else if (params.kind === 'drum-rack' && deps.drumRackBufferSync && deps.isCurrentScope?.() !== false) deps.drumRackBufferSync.syncTrack(deps.audioEngine, targetId, params.params, params.instanceId)
-        else if (params.kind === 'drum-rack') deps.audioEngine.setTrackInstrument(targetId, { instrument: params })
-        else if (params.kind === 'sampler') deps.audioEngine.setTrackSampler(targetId, params.params, undefined, params.instanceId)
-        else void deps.audioEngine.setTrackGranular(targetId, params.params, undefined, params.instanceId)
-        return
-      }
-      case 'arp': {
-        const params = pickDirectionalValue(direction, entry.data.from, entry.data.to)
-        deps.audioEngine.setTrackArpeggiator(targetId, params)
-        return
-      }
     }
   } catch {}
 }
@@ -427,7 +414,25 @@ async function applyEffectParamsEntry(entry: EffectParamsEntry, deps: Deps, dire
   const targetId = MASTER_EFFECT_TYPES.has(entry.data.effect)
     ? 'master'
     : readEffectTrackId(entry, deps)
-  await persistHistoryEffectParams(deps, entry, targetId, direction)
+  // An instance edit takes its identity at initiation, before persistence
+  // awaits; the post-success replay (or its projection echo) adopts it. If a
+  // newer write lands on the member during the await, the reservation is
+  // retired and the replay is ordered at arrival, after that write, so the
+  // value the panel shows is the value native plays.
+  const edit = !(deps.isCurrentScope && !deps.isCurrentScope())
+    ? deps.reserveInstanceEffectEdit?.({
+      targetId,
+      effect: entry.data.effect,
+      instanceId: entry.data.instanceId,
+      params: pickDirectionalValue(direction, entry.data.from, entry.data.to),
+    })
+    : undefined
+  try {
+    await persistHistoryEffectParams(deps, entry, targetId, direction)
+  } catch (error) {
+    if (edit) deps.releaseInstanceEffectEdit?.(edit)
+    throw error
+  }
   applyEffectParamsToEngine(entry, deps, targetId, direction)
 }
 
@@ -464,6 +469,39 @@ async function applyClipFadesEntry(entry: Extract<HistoryEntry, { type: 'clip-fa
   await persistHistoryClipFadesOrThrow(deps, clipId, fades, 'Failed to apply clip fades during history replay')
   deps.actions.commitClipFades(clipId, fades)
   deps.actions.rescheduleChangedClips([clipId])
+}
+
+// Only the fields the edit changed are written, so a collaborator's edits to other fields survive.
+function changedMidiNoteFields(current: MidiEditorNote, target: MidiEditorNote) {
+  const changes: Partial<Pick<MidiEditorNote, 'beat' | 'length' | 'pitch' | 'velocity' | 'channel'>> = {}
+  if (current.beat !== target.beat) changes.beat = target.beat
+  if (current.length !== target.length) changes.length = target.length
+  if (current.pitch !== target.pitch) changes.pitch = target.pitch
+  if (current.velocity !== target.velocity) changes.velocity = target.velocity
+  if (current.channel !== target.channel) changes.channel = target.channel
+  return changes
+}
+
+// Undo moves each note to `before`, redo to `after`. A note present on only one side is deleted or inserted.
+function midiNoteReplayOperation(change: MidiNoteHistoryChange, direction: HistoryDirection): MidiEditorOperation {
+  const target = pickDirectionalValue(direction, change.before, change.after)
+  const current = pickDirectionalValue(direction, change.after, change.before)
+  if (!target) return { kind: 'delete', id: change.id }
+  if (!current) return { kind: 'insert', note: target }
+  return { kind: 'update', id: change.id, changes: changedMidiNoteFields(current, target) }
+}
+
+async function applyClipMidiNotesEntry(entry: Extract<HistoryEntry, { type: 'clip-midi-notes' }>, deps: Deps, direction: HistoryDirection) {
+  const index = buildRefIndex(deps)
+  const clipId = requireResolved(resolveClipId(index, entry.data.clipRef), 'Clip not found for clip-midi-notes history entry')
+  // Pending editor writes must land first, or they would re-apply on top of this replay.
+  await flushMidiProjectWrites(deps.projectId)
+  const midi = await commitMidiEditorOperations({
+    projectId: deps.projectId,
+    clipId,
+    operations: entry.data.changes.map((change) => midiNoteReplayOperation(change, direction)),
+  })
+  deps.actions.commitClipMidi(clipId, midi)
 }
 
 async function applyClipColorEntry(entry: Extract<HistoryEntry, { type: 'clip-color' }>, deps: Deps, direction: HistoryDirection) {
@@ -851,6 +889,10 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
 
     case 'clip-fades':
       await applyClipFadesEntry(entry, deps, direction)
+      return
+
+    case 'clip-midi-notes':
+      await applyClipMidiNotesEntry(entry, deps, direction)
       return
 
     case 'clip-color':

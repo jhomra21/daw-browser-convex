@@ -2,6 +2,7 @@ import {
   type Accessor,
   type Component,
   type JSX,
+  createComputed,
   createEffect,
   createMemo,
   createSignal,
@@ -20,32 +21,45 @@ import { TIMELINE_HEADER_HEIGHT, timelineDurationSec } from "~/lib/timeline-util
 import { useTimelineViewport } from "~/hooks/useTimelineViewport";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
 import { useNavigate } from "@tanstack/solid-router";
+import { replaceEqualDeep } from "@tanstack/solid-query";
 import { useTimelineClipImport } from "~/hooks/useTimelineClipImport";
 import { useTimelineClipActions } from "~/hooks/useTimelineClipActions";
 import { convexClient, convexApi } from "~/lib/convex";
 import { useTimelineData } from "~/hooks/useTimelineData";
+import {
+  createProjectFromDashboard as createDashboardProject,
+  openProjectFromDashboard as openDashboardProject,
+} from "~/hooks/useTimelineProjectRoute";
 import { usePlayheadControls } from "~/hooks/usePlayheadControls";
 import type { TimelinePlaybackRebuildIntent } from "~/hooks/useTimelinePlayback";
+import type { NativeInstrumentRetryIdentity } from "~/lib/sampler-buffer-sync";
 import { useClipDrag } from "~/hooks/useClipDrag";
 import { useClipResize } from "~/hooks/useClipResize";
 import { useTimelineSelection } from "~/hooks/useTimelineSelection";
 import { useClipBuffers } from "~/hooks/useClipBuffers";
 import {
   collectTrackDescendantIds,
+  isAudioEffectKind,
   isLocalId,
+  normalizeTrackInstrumentParams,
   automationTargetKey,
   createAutomationTarget,
   type TrackInstrumentParams,
 } from "@daw-browser/shared";
+import { createAudioEffectParameterPayload } from "~/components/timeline/audio-effect-parameter-payload";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
 import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
 import { useTrackRecording } from "~/hooks/useTrackRecording";
+import { createRecordingTransportPolicy } from "~/hooks/recording-dispatch";
 import { useMidiTrackRecording } from "~/hooks/useMidiTrackRecording";
 import { runTimelineMutationAfterRecordingSettlement } from "~/lib/midi/recording-mutation-guard";
-import { buildClipFadesHistoryEntry, buildEffectParamsHistoryEntry } from "~/lib/undo/builders";
-import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
-import { encodeNativeBuiltInStateCommit, mapNativeBuiltInParameterCommit } from "~/lib/desktop/native-built-in-parameter-mapper";
+import { buildClipFadesHistoryEntry, buildClipMidiNotesHistoryEntry } from "~/lib/undo/builders";
+import type { MidiEditorNote } from "~/lib/midi-editor-grid";
+import createTimelineEffectCommit from "~/components/timeline/create-timeline-effect-commit";
+import { SYNTH_KIND_ID, type LiveProcessorEditIdentity } from "~/lib/live-processor-control";
+import { createProcessorEditRegistry } from "~/components/timeline/create-processor-edit-registry";
+import { pickNativePlaybackInputs } from "~/components/timeline/native-playback-inputs";
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
 import { useTimelineMidiOverlay } from "~/hooks/useTimelineMidiOverlay";
@@ -73,6 +87,7 @@ import { useTimelineLeftBrowserResize } from "~/hooks/useTimelineLeftBrowserResi
 import { useTimelineLeftBrowserState } from "~/hooks/useTimelineLeftBrowserState";
 import { useTimelineBrowserController } from "~/hooks/useTimelineBrowserController";
 import { useTimelineAutomationController } from "~/hooks/useTimelineAutomationController";
+import { useTimelineFollow } from "~/hooks/useTimelineFollow";
 import { BrowserDragOverlay } from "./timeline/browser/browser-drag-overlay";
 import {
   browserDropTargetTrackId as getBrowserDropTargetTrackId,
@@ -82,10 +97,7 @@ import {
 import type { TimelineDeviceInsertActions } from "./timeline/timeline-device-insert-actions";
 import type { AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
 import type { InstrumentPreset } from "~/lib/instrument-presets";
-import {
-  isTimelineSampleDetailClip,
-  useTimelineSampleDetailController,
-} from "~/hooks/useTimelineSampleDetailController";
+import { useTimelineSampleDetailController } from "~/hooks/useTimelineSampleDetailController";
 import { useLocalProjectActions } from "~/hooks/useLocalProjectActions";
 import { useProjectSamples } from "~/hooks/useProjectSamples";
 import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
@@ -134,13 +146,14 @@ import { createVstParameterFeedbackController } from "~/lib/desktop/vst-paramete
 import { createExportQueue } from "~/lib/export/export-queue";
 import { createImportJobQueue } from "~/lib/desktop/import-job-queue";
 import { createTimelineExportService } from "~/lib/export/timeline-export-service";
-import { createExportRenderStateSnapshot, type ExportAutomationPatch } from "~/lib/export/run-export-job";
+import { createExportRenderStateSnapshot, resolveDesiredPlaybackFx, type ExportAutomationPatch } from "~/lib/export/run-export-job";
 import { createDesktopNativeOfflinePcmRenderer } from "~/lib/export/desktop-native-offline-pcm-renderer";
-import { compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackTransport } from "~/lib/live-playback-snapshot";
+import { compileDesiredNativeProcessorState, compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackTransport } from "~/lib/live-playback-snapshot";
 import { withInstrumentOverride } from "~/lib/export/export-effect-rows";
 import { createTimelineExtensionHost } from "~/lib/extensions";
 import { createSampledInstrumentSession } from "~/lib/sampled-instrument-session";
 import { createAudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
+import { isEventFromDomDescendant } from "~/lib/pointer-event-target";
 
 type TimelineProps = {
   bootstrapIfEmpty: boolean;
@@ -222,10 +235,13 @@ const Timeline: Component<TimelineProps> = (props) => {
     activeTrackId: () => string | null;
   };
   const recordingStopRef: RecordingStopOwner = { stop: async () => {}, activeTrackId: () => null };
+  // Bound once during setup after the recording hook, before effects run.
+  let recordingKeepLatencyNodeIds: () => ReadonlySet<string> = () => new Set();
   const [masterCollapsed, setMasterCollapsed] = createSignal(true);
   // Transport tempo & metronome
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
+  const [followPaused, setFollowPaused] = createSignal(false);
   type ExternalProcessorEditorRequest = {
     instanceId: string;
     projectId: string | undefined;
@@ -266,12 +282,15 @@ const Timeline: Component<TimelineProps> = (props) => {
   const resolveAudioSource = createAudioPcmSourceResolver({ projectId });
   const sampledInstrumentSession = createSampledInstrumentSession({
     projectId,
+    nativeAudio: () => requiresNativeAudio,
+    nativeMemoryPolicy: window.dawDesktop?.audioHost?.instrumentBudgetPolicy,
   });
   onCleanup(sampledInstrumentSession.dispose);
   const localProject = useLocalProjectActions({
     projectId,
     userId,
     navigateToRoom,
+    notify,
   });
   const bottomPanel = useTimelineBottomPanelState({ projectId });
   const {
@@ -360,6 +379,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     localProject,
     projection,
     selection,
+    notify,
   });
   const sidechainRoutes = createMemo<ExternalSidechainRoute[]>(() => {
     const id = projectId();
@@ -410,99 +430,148 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [effectsExportSnapshot, setEffectsExportSnapshot] =
     createSignal<EffectsPanelExportSnapshot>();
   let getAutomationPatches: () => ExportAutomationPatch[] = () => [];
+  const processorEdits = createProcessorEditRegistry(bpm);
+  const desiredFx = createMemo(() => {
+    const data = fullView.data;
+    return resolveDesiredPlaybackFx(
+      { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+      effectsExportSnapshot()?.snapshotEffectsProjection(),
+      data ? { effects: data.effects, automationEnvelopes: data.automationEnvelopes } : undefined,
+    );
+  });
+  // Capture identity at the effective-projection boundary, before any compile or
+  // dispatch reads the desired order. Own writes already hold their identity. A
+  // new mounted project or generation clears membership before its projection
+  // is adopted.
+  let observedScope: string | undefined;
+  createComputed(() => {
+    const scope = `${projectId()}:${mountedProjectGeneration()}`;
+    const fx = desiredFx();
+    untrack(() => {
+      if (scope !== observedScope) {
+        processorEdits.reset();
+        observedScope = scope;
+      }
+      processorEdits.observe(fx);
+    });
+  });
+  const nativePlaybackInputs = createMemo(() => pickNativePlaybackInputs({
+    timeSignature: {
+      numerator: fullView.data?.project.timeSignatureNumerator ?? 4,
+      denominator: fullView.data?.project.timeSignatureDenominator ?? 4,
+    },
+    automationEnvelopes: fullView.data?.automationEnvelopes,
+    masterVolume: masterVolume.volume(),
+    automation: getAutomationPatches(),
+    sidechains: effectsExportSnapshot()?.snapshotSidechainRoutes() ?? sidechainRoutes(),
+    processorStructure: processorEdits.structure(),
+  }), undefined, { equals: (previous, next) => replaceEqualDeep(previous, next) === previous });
   let nativePlaybackRevision = 1;
   const compilePlaybackSnapshot = async (
     transport: LivePlaybackTransport,
     context?: LivePlaybackCompileContext,
   ) => {
     const effects = effectsExportSnapshot();
-    await effects?.flushPending();
-    const effectsProjection = effects?.snapshotEffectsProjection();
-    const projectedEffects = context?.instrumentOverride
-      ? withInstrumentOverride(effectsProjection ?? { replaceAudioEffectTargets: [], upsertDeviceRows: [] }, context.instrumentOverride.targetId, context.instrumentOverride.instrument)
-      : effectsProjection;
-    const renderState = await createExportRenderStateSnapshot({
-      projectId: projectId(),
-      userId: userId(),
-      masterVolume: masterVolume.volume(),
-      externalPluginPolicy: "native-playback",
-      cloudRows: fullView.data
-        ? {
-            effects: fullView.data.effects,
-            automationEnvelopes: fullView.data.automationEnvelopes,
-          }
-        : undefined,
-      effectsProjection: projectedEffects,
-      automationPatches: getAutomationPatches(),
-    });
-    const hydratedRenderState = effects?.hydrateInstrumentBuffers?.(renderState) ?? renderState;
-    const result = compileLivePlaybackSnapshot({
-      revision: nativePlaybackRevision,
-      bpm: bpm(),
-      timeSignature: {
+    // Every playback compile reads the canonical effects draft. Draining its
+    // owner could wait on a structural handoff that awaits this preparation.
+    const instrumentReadiness = await effects?.awaitInstrumentReadiness(context?.instrumentOverride);
+    try {
+      const effectsProjection = instrumentReadiness?.projection ?? effects?.snapshotEffectsProjection();
+      const processorStateSequence = processorEdits.sequence();
+      const snapshotTracks = renderTracks();
+      const snapshotBpm = bpm();
+      const snapshotTimeSignature = {
         numerator: fullView.data?.project.timeSignatureNumerator ?? 4,
         denominator: fullView.data?.project.timeSignatureDenominator ?? 4,
-      },
-      transport,
-      tracks: renderTracks(),
-      renderState: hydratedRenderState,
-      sidechainRoutes: effects?.snapshotSidechainRoutes() ?? sidechainRoutes(),
-    });
-    const compiledProjectId = projectId();
-    if (!result.supported || !isLocalId("project", compiledProjectId)) return result;
-    const liveProcessors = (await listLocalExternalProcessors(compiledProjectId))
-      .filter((processor) => !processor.bypassed && processor.health.state !== "degraded");
-    const processors = await resolveNativeLivePlaybackProcessors({
-      projectId: compiledProjectId,
-      persisted: liveProcessors,
-      seed: context?.externalProcessor,
-      readPersisted: getLocalExternalProcessor,
-    });
-    if (processors.length === 0) return result;
-    const attachmentPlan = compileNativeExternalAttachmentPlan({
-      target: "native",
-      graph: result.snapshot.mixer.graph,
-      processors,
-      workerTransport: {
-        slotCount: 2,
-        maximumFrames: 8_192,
-        maximumEventsPerBlock: 128,
-      },
-    });
-    if (!attachmentPlan.supported) {
+      };
+      const snapshotSidechains = effects?.snapshotSidechainRoutes() ?? sidechainRoutes();
+      const projectedEffects = !instrumentReadiness && context?.instrumentOverride
+        ? withInstrumentOverride(effectsProjection ?? { replaceAudioEffectTargets: [], upsertDeviceRows: [] }, context.instrumentOverride.targetId, context.instrumentOverride.instrument)
+        : effectsProjection;
+      const renderState = await createExportRenderStateSnapshot({
+        projectId: projectId(),
+        userId: userId(),
+        masterVolume: masterVolume.volume(),
+        externalPluginPolicy: "native-playback",
+        cloudRows: fullView.data
+          ? {
+              effects: fullView.data.effects,
+              automationEnvelopes: fullView.data.automationEnvelopes,
+            }
+          : undefined,
+        effectsProjection: projectedEffects,
+        automationPatches: getAutomationPatches(),
+      });
+      const hydratedRenderState = instrumentReadiness?.hydrateInstrumentBuffers(renderState)
+        ?? effects?.hydrateInstrumentBuffers?.(renderState) ?? renderState;
+      const result = compileLivePlaybackSnapshot({
+        revision: nativePlaybackRevision,
+        processorStateSequence,
+        bpm: snapshotBpm,
+        timeSignature: snapshotTimeSignature,
+        transport,
+        tracks: snapshotTracks,
+        renderState: hydratedRenderState,
+        sidechainRoutes: snapshotSidechains,
+      });
+      const compiledProjectId = projectId();
+      if (!result.supported || !isLocalId("project", compiledProjectId)) return result;
+      const liveProcessors = (await listLocalExternalProcessors(compiledProjectId))
+        .filter((processor) => !processor.bypassed && processor.health.state !== "degraded");
+      const processors = await resolveNativeLivePlaybackProcessors({
+        projectId: compiledProjectId,
+        persisted: liveProcessors,
+        seed: context?.externalProcessor,
+        readPersisted: getLocalExternalProcessor,
+      });
+      if (processors.length === 0) return result;
+      const attachmentPlan = compileNativeExternalAttachmentPlan({
+        target: "native",
+        graph: result.snapshot.mixer.graph,
+        processors,
+        workerTransport: {
+          slotCount: 2,
+          maximumFrames: 8_192,
+          maximumEventsPerBlock: 128,
+        },
+      });
+      if (!attachmentPlan.supported) {
+        return {
+          supported: true as const,
+          snapshot: {
+            ...result.snapshot,
+            requiresNativePlayback: true,
+          },
+        };
+      }
+      const nativeExternalAttachmentStates = await Promise.all(attachmentPlan.plan.attachments
+        .filter((attachment) => !attachment.bypassed)
+        .map(async (attachment) => {
+          const processor = processors.find((candidate) => candidate.instanceId === attachment.instanceId)
+          if (!processor?.manifest.supportsState) return undefined
+          const state = processor
+            ? await readLocalExternalProcessorState(compiledProjectId, processor)
+            : undefined
+          return state ? { instanceId: attachment.instanceId, ...state } : undefined
+        }))
+      const nativeExternalAttachmentStateRequirements = processors
+        .filter((processor) => !processor.bypassed
+          && processor.manifest.supportsState
+          && (processor.state !== undefined || processor.launchReference?.state !== undefined))
+        .map((processor) => processor.instanceId)
       return {
         supported: true as const,
         snapshot: {
           ...result.snapshot,
+          nativeExternalAttachmentPlan: attachmentPlan.plan,
+          nativeExternalAttachmentStates: nativeExternalAttachmentStates.filter((state): state is NonNullable<typeof state> => state !== undefined),
+          nativeExternalAttachmentStateRequirements,
           requiresNativePlayback: true,
         },
       };
+    } finally {
+      instrumentReadiness?.release();
     }
-    const nativeExternalAttachmentStates = await Promise.all(attachmentPlan.plan.attachments
-      .filter((attachment) => !attachment.bypassed)
-      .map(async (attachment) => {
-        const processor = processors.find((candidate) => candidate.instanceId === attachment.instanceId)
-        if (!processor?.manifest.supportsState) return undefined
-        const state = processor
-          ? await readLocalExternalProcessorState(compiledProjectId, processor)
-          : undefined
-        return state ? { instanceId: attachment.instanceId, ...state } : undefined
-      }))
-    const nativeExternalAttachmentStateRequirements = processors
-      .filter((processor) => !processor.bypassed
-        && processor.manifest.supportsState
-        && (processor.state !== undefined || processor.launchReference?.state !== undefined))
-      .map((processor) => processor.instanceId)
-    return {
-      supported: true as const,
-      snapshot: {
-        ...result.snapshot,
-        nativeExternalAttachmentPlan: attachmentPlan.plan,
-        nativeExternalAttachmentStates: nativeExternalAttachmentStates.filter((state): state is NonNullable<typeof state> => state !== undefined),
-        nativeExternalAttachmentStateRequirements,
-        requiresNativePlayback: true,
-      },
-    };
   };
   const exportService = createTimelineExportService({
     queue: exportQueue,
@@ -599,19 +668,29 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [replayEffectInstanceParams, setReplayEffectInstanceParams] =
     createSignal<EffectsPanelAudioEffects["replayInstanceParams"]>();
   let historyActions: TimelineHistoryActions | undefined = undefined;
-  const { pushHistory, handleUndo, handleRedo } = useTimelineHistory({
+  const { pushHistory, handleUndo, handleRedo, canUndo, canRedo } = useTimelineHistory({
     projectId,
     userId,
     getTracks: renderTracks,
     convexClient,
     convexApi,
-    audioEngine,
     replayInstanceEffectParams: (payload) =>
       replayEffectInstanceParams()?.(payload) ?? false,
+    releaseInstanceEffectEdit: processorEdits.release,
+    reserveInstanceEffectEdit: ({ targetId, effect, instanceId, params }) => {
+      if (effect === "instrument") {
+        const instrument = normalizeTrackInstrumentParams(params);
+        return instrument && processorEdits.reserve({ targetId, effect, from: instrument, to: instrument });
+      }
+      const kind = effect.replace(/^master-/, "");
+      return instanceId && isAudioEffectKind(kind)
+        ? processorEdits.reserve(createAudioEffectParameterPayload({ targetId, instanceId, kind }, params, params))
+        : undefined;
+    },
     ensureClipBuffer: clipBuffers.preload,
     grantTrackWrite,
     grantClipWrite,
-    drumRackBufferSync: sampledInstrumentSession.drumRackBufferSync,
+    notify,
     persistLocalMix: (_projectId, trackId, patch) =>
       localMix.persist(trackId, patch),
     getActions: () => {
@@ -625,19 +704,22 @@ const Timeline: Component<TimelineProps> = (props) => {
   // Playback & playhead controls
   const {
     isPlaying,
+    isPlayPending,
     isStructuralRebuildInProgress,
+    preparedInstrument,
     isPreparingPlayback,
     isNativePlaybackPrepared,
     schedulerDiagnostics,
     isPortableBrowserPlaybackPrepared,
+    deliverProcessor,
+    joinPublication,
     liveProcessorControl,
     reenableProcessorAutomation,
-    queueLiveProcessorParameters,
-    queueNativeBuiltInStatePatch,
     usesLegacyAudioEngine,
     playheadSec,
     handlePause,
     handleStop,
+    updateNativeLoop,
     setPlayhead,
     requestPlay,
     startScrub,
@@ -646,6 +728,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     setScrollElement,
     rescheduleChangedClips: playbackRescheduleChangedClips,
     restartTimelineSchedule,
+    awaitPlaybackPreparation,
     portableRecording,
     nativeRecording,
     nativeLiveMidi,
@@ -657,6 +740,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     requiresNativeAudio,
     tracks: renderTracks,
     ensureClipBuffer: clipBuffers.preload,
+    bpm,
     resolveAudioSource,
     loopEnabled,
     loopStartSec,
@@ -680,7 +764,21 @@ const Timeline: Component<TimelineProps> = (props) => {
       enabled: () => requiresNativeAudio || appPreferences.audio.preferences().nativePlaybackEnabled,
       projectId,
       projectGeneration: mountedProjectGeneration,
+      keepLatencyNodeIds: (): ReadonlySet<string> => {
+        const ids = new Set(recordingKeepLatencyNodeIds())
+        const midiTarget = activeMidiRecordingTargetId()
+        if (midiTarget) ids.add(midiTarget)
+        return ids
+      },
       compileSnapshot: compilePlaybackSnapshot,
+      getProcessorTarget: processorEdits.target,
+      getDesiredProcessorState: (snapshot, sampleRate) => compileDesiredNativeProcessorState(
+        snapshot, sampleRate, processorEdits.sequence(), effectsExportSnapshot()?.snapshotEffectsProjection(),
+        fullView.data ? { effects: fullView.data.effects, automationEnvelopes: fullView.data.automationEnvelopes } : undefined,
+      ),
+      // Read every reactive input used around the async compiler boundary.
+      // Local adoption replaces the snapshot even for automation/effect-only commits.
+      playbackInputs: nativePlaybackInputs,
       captureNativeVstStates: async ({ projectId: capturedProjectId, instanceIds }) => {
         const bridge = window.dawDesktop?.audioHost?.session
         if (!bridge || instanceIds.length === 0) return
@@ -699,7 +797,25 @@ const Timeline: Component<TimelineProps> = (props) => {
           )
         }
       },
-      reportFault: (message) => {
+      instrumentBudget: sampledInstrumentSession.aggregateBudget,
+      onInstrumentPreparation: sampledInstrumentSession.setNativePreparation,
+      reportFault: (fault) => {
+        switch (fault.kind) {
+          case "delivery-refused":
+            notify("Effect change not applied to playback",
+              `Native audio refused updates to ${fault.targets} device${fault.targets === 1 ? "" : "s"}. Your project keeps the change.`);
+            return;
+          case "delivery-unconfirmed":
+            notify("Playback may not match your latest change",
+              `Native audio did not confirm updates to ${fault.targets} device${fault.targets === 1 ? "" : "s"}.`);
+            return;
+          case "latency-unsupported":
+            notify("Keep Latency unavailable", fault.message);
+            return;
+          case "session-stopped":
+            break;
+        }
+        const { message } = fault;
         if (classifyNativeVst3PlaybackFault(message) === "launch-authorization-required") {
           setAppMessage({
             title: "Plug-in authorization required",
@@ -742,6 +858,16 @@ const Timeline: Component<TimelineProps> = (props) => {
       reportFault: (message) => notify("Portable browser playback stopped", message),
     },
   });
+  createEffect(() => {
+    loopEnabled();
+    loopStartSec();
+    loopEndSec();
+    if (isNativePlaybackPrepared()) {
+      void updateNativeLoop().catch((cause: unknown) => {
+        console.error("[Timeline] failed to reconcile native loop settings", cause);
+      });
+    }
+  });
   const captureStructuralPlaybackIntent = (): TimelinePlaybackRebuildIntent => ({
     resumePlayback: isPlaying(),
     playheadSec: playheadSec(),
@@ -770,6 +896,7 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   function rescheduleChangedClips(clipIds: string[]) {
     if (clipIds.length === 0) return;
+    setFollowPaused(true);
     if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
       void rebuildPlaybackBackend(renderTracks()).catch((cause: unknown) => {
         console.error("[Timeline] failed to rebuild prepared playback after clip edit", cause);
@@ -794,6 +921,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   }
 
   function rescheduleTimeline() {
+    setFollowPaused(true);
     if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
       void rebuildPlaybackBackend(renderTracks()).catch((cause: unknown) => {
         console.error("[Timeline] failed to rebuild prepared playback after structural edit", cause);
@@ -833,10 +961,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     playheadSec,
     selectedTrackId: selection.selectedTrackId,
     pushHistory,
-    onPersistenceError: (error) => {
-      localProject.setLocalSaveFailure(
-        error instanceof Error ? error.message : "Automation could not be saved.",
-      );
+    onPersistenceError: (failedProjectId, error) => {
+      localProject.setLocalSaveFailure(failedProjectId, error.message);
     },
   });
   const vstParameterFeedback = createVstParameterFeedbackController({
@@ -918,6 +1044,16 @@ const Timeline: Component<TimelineProps> = (props) => {
   createEffect(() => {
     setRenderTracks(resolvedRenderTracks());
   });
+  // Cloud clips update from the subscription. An overlay here would wait for the next server snapshot to clear.
+  const handleLocalMidiSaved = (clipId: string, midi: Clip["midi"]) => {
+    if (!isLocalId("project", projectId())) return;
+    const match = trackLookup().clipEntryById.get(clipId);
+    if (!match) return;
+    projection.replaceLocalClip(match.trackId, {
+      ...match.clip,
+      midi,
+    });
+  };
   historyActions = {
     insertLocalTrack: (track, index) => projection.insertLocalTrack(track, index),
     removeLocalTrack: (trackId) => projection.removeLocalTrack(trackId),
@@ -929,6 +1065,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     commitClipAudioWarp: (clipId, audioWarp) =>
       projection.commitClipAudioWarp(clipId, audioWarp),
     commitClipFades: (clipId, fades) => projection.commitClipFades(clipId, fades),
+    commitClipMidi: (clipId, midi) => handleLocalMidiSaved(clipId, midi),
     rescheduleChangedClips,
     rescheduleTimeline,
     refreshLocalTimeline: async () => {
@@ -976,6 +1113,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     userId,
     mode: bottomPanel.mode,
     setMode: bottomPanel.setMode,
+    open: bottomPanel.open,
     setOpen: bottomPanel.setOpen,
     trackLookup,
     selection,
@@ -986,90 +1124,15 @@ const Timeline: Component<TimelineProps> = (props) => {
     pushHistory,
   });
 
-  const handleLocalMidiSaved = (clipId: string, midi: Clip["midi"]) => {
-    const match = trackLookup().clipEntryById.get(clipId);
-    if (!match) return;
-    projection.replaceLocalClip(match.trackId, {
-      ...match.clip,
-      midi,
-    });
+  const handleMidiNotesEdited = (clipId: string, from: MidiEditorNote[], to: MidiEditorNote[]) => {
+    const rid = projectId();
+    const clip = trackLookup().clipById.get(clipId);
+    if (!rid || !clip) return;
+    const entry = buildClipMidiNotesHistoryEntry({ projectId: rid, clip, from, to });
+    if (entry) pushHistory(entry);
   };
 
-  const pushEffectParamsHistory = (
-    payload: EffectParamsCommitPayload,
-    committedProjectId?: string,
-  ) => {
-    const rid = committedProjectId ?? projectId();
-    if (!rid) return;
-    if (rid !== projectId()) return;
-    pushHistory(
-      buildEffectParamsHistoryEntry({
-        projectId: rid,
-        tracks: renderTracks(),
-        payload,
-      }),
-      `fx:${payload.effect}:${payload.targetId}:${payload.instanceId ?? ""}`,
-      600,
-    );
-  };
-
-  const handleNativeBuiltInStatePatchResult = async (
-    payload: EffectParamsCommitPayload,
-  ): Promise<boolean> => {
-    const result = await queueNativeBuiltInStatePatch({ payload, bpm: bpm() });
-    return result.handled;
-  };
-
-  const handleNativeBuiltInPreview = async (
-    payload: EffectParamsCommitPayload<"eq" | "master-eq">,
-  ) => {
-    const mapped = mapNativeBuiltInParameterCommit(payload, bpm());
-    if (mapped) {
-      const result = await queueLiveProcessorParameters(mapped);
-      if (result.accepted) return;
-    }
-    if (!isNativePlaybackPrepared()) return;
-    await handleNativeBuiltInStatePatchResult(payload);
-  };
-
-  const handleNativeBuiltInFlush = async (
-    payload: EffectParamsCommitPayload<"eq" | "master-eq">,
-  ) => {
-    const mapped = mapNativeBuiltInParameterCommit(payload, bpm());
-    if (!mapped || (!isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared())) return;
-    const result = await liveProcessorControl()?.flush(mapped);
-    if (!result?.accepted) throw new Error("The final effect value was not applied to active playback.");
-  };
-
-  async function handleEffectParamsCommitted<Effect extends EffectType>(
-    payload: EffectParamsCommitPayload<Effect>,
-    committedProjectId?: string,
-  ) {
-    pushEffectParamsHistory(payload, committedProjectId);
-    if (payload.effect === "instrument") return;
-    const mapped = mapNativeBuiltInParameterCommit(payload, bpm());
-    if (mapped && (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared())) {
-      const control = liveProcessorControl();
-      const result = await control?.flush(mapped);
-      if (result?.accepted) return;
-    }
-    if (usesLegacyAudioEngine()) return;
-    if (isNativePlaybackPrepared() && encodeNativeBuiltInStateCommit(payload, bpm())) {
-      if (await handleNativeBuiltInStatePatchResult(payload)) return;
-    }
-    if (isPlaying() || isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
-      try {
-        await rebuildPlaybackBackend(renderTracks());
-      } catch (error: unknown) {
-        notify(
-          "Built-in effect update failed",
-          error instanceof Error
-            ? error.message
-            : "The active playback graph could not be rebuilt for the built-in effect change.",
-        );
-      }
-    }
-  }
+  const effectCommit = createTimelineEffectCommit({ projectId, tracks: renderTracks, pushHistory });
 
   // DOM refs
   let scrollRef: HTMLDivElement | undefined;
@@ -1112,11 +1175,6 @@ const Timeline: Component<TimelineProps> = (props) => {
   });
 
   const {
-    midiEditorClipId,
-    midiCard,
-    closeMidiEditor,
-    openMidiEditorFor,
-    changeMidiCardBounds,
     auditionNote,
     midiKeyboard,
   } = useTimelineMidiOverlay({
@@ -1130,7 +1188,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     selection,
     activeRecordingTargetId: activeMidiRecordingTargetId,
     nativeLiveMidi,
-    canOpenMidiEditorFor: (clipId) => clipId !== provisionalMidiClipId(),
+    dockedMidiClipId: () =>
+      bottomPanel.open() && bottomPanel.mode() === "clip-detail"
+        ? (sampleDetail.selectedMidiClip()?.id ?? null)
+        : null,
   });
   const removeCreatedCloudTrack = (track: Track | undefined) =>
     removeAutoCreatedCloudTrack({
@@ -1182,10 +1243,12 @@ const Timeline: Component<TimelineProps> = (props) => {
     navigation: {
       trackLookup,
       selection,
+      isPlaying,
       setPlayhead,
-      openMidiEditorFor,
+      openClipDetailFor: sampleDetail.openClipDetail,
       ensureClipBuffer: clipBuffers.preload,
       getScrollElement: () => scrollRef,
+      visibleStartSec: () => timelineViewportStartSec(),
       setVisibleStartSec: (startSec) => setTimelineVisibleStart(startSec),
       pixelsPerSecond,
     },
@@ -1279,6 +1342,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     rootElement: () => rootRef,
     scrollElement: () => scrollRef,
     onDrop,
+    notify,
   });
 
   let extendRangeSelectionToPointer: (
@@ -1322,13 +1386,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
     grantWrite: grantTrackWrite,
     grantClipWrites,
+    notify,
     onRangeSelectionPointerDown: (trackId, event) =>
       extendRangeSelectionToPointer(event, { element: scrollRef, trackId }),
   });
-  const onClipPointerDown = clipDrag.onClipPointerDown;
 
   const clipResize = useClipResize({
-    tracks: renderTracks,
+    tracks: resolvedTracks,
+    draftClipTiming: (clipId) => projection.draftClipEditsById().get(clipId),
     setDraftClipTiming: projection.setDraftClipTiming,
     commitClipTiming: projection.commitClipTiming,
     canWriteClip,
@@ -1355,9 +1420,24 @@ const Timeline: Component<TimelineProps> = (props) => {
     commitPixelsPerSecond,
     durationSec: duration,
     canZoom: () => !clipDrag.isDragging() && !clipResize.isResizing(),
+    onManualNavigation: () => setFollowPaused(true),
   });
   timelineViewportStartSec = () => timelineViewport.visibleRange().startSec;
   setTimelineVisibleStart = (startSec) => timelineViewport.setVisibleStart(startSec);
+  const timelineFollow = useTimelineFollow({
+    preferences: {
+      follow: appPreferences.timeline.follow,
+      setFollow: appPreferences.timeline.setFollow,
+    },
+    viewport: timelineViewport,
+    playback: { isPlaying, playheadSec },
+    gestureActive: () => clipDrag.isDragging() || clipResize.isResizing(),
+    followPaused,
+    setFollowPaused,
+    scrollElement: () => scrollRef,
+    pixelsPerSecond,
+  });
+  const toggleFollow = timelineFollow.toggle;
 
   const commitClipFades = async (
     clipId: string,
@@ -1386,17 +1466,19 @@ const Timeline: Component<TimelineProps> = (props) => {
       }).setFades(clipId, fades);
       if (!applied) {
         rollback();
+        notify("Fade save failed", "Clip fade could not be saved.");
         return;
       }
       pushHistory(buildClipFadesHistoryEntry({ projectId: rid, clip, from: baseline, to: fades }));
       rescheduleChangedClips([clipId]);
     } catch {
       rollback();
+      notify("Fade save failed", "Clip fade could not be saved.");
     }
   };
 
   const {
-    onClipPointerUp,
+    onClipPointerUp: selectClipOnPointerUp,
     deleteSelectedClips,
     duplicateSelectedClips,
     duplicateTimelineSelection,
@@ -1405,6 +1487,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     pasteTimelineSelection,
     performDeleteTrack,
     requestDeleteTrack,
+    hasWritableSelectedClips,
+    hasWritableClips,
+    selectAllTimelineClips,
+    hasTimelineClipboard,
   } = useTimelineClipActions({
     tracks: renderTracks,
     insertLocalClip: projection.insertLocalClip,
@@ -1441,6 +1527,25 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
     notify,
   });
+  // Like Ableton's Detail View, a plain click on a clip shows it in an open bottom panel. A press with a modifier, a
+  // drag, or a resize does not count. Pointer capture sends a drag's release to the clip, so the release must land
+  // at the press position to count as a click.
+  let plainClipPress: { trackId: string; clipId: string; x: number; y: number } | undefined;
+  const onClipPointerDown = (trackId: string, clipId: string, event: PointerEvent) => {
+    plainClipPress = event.shiftKey || event.ctrlKey || event.metaKey
+      ? undefined
+      : { trackId, clipId, x: event.clientX, y: event.clientY };
+    clipDrag.onClipPointerDown(trackId, clipId, event);
+  };
+  const onClipPointerUp = (trackId: string, clipId: string, event: PointerEvent) => {
+    const press = plainClipPress;
+    plainClipPress = undefined;
+    selectClipOnPointerUp(trackId, clipId, event);
+    if (!press || press.trackId !== trackId || press.clipId !== clipId) return;
+    if (event.clientX !== press.x || event.clientY !== press.y) return;
+    setFollowPaused(false);
+    if (bottomPanel.open()) sampleDetail.openClipDetail(clipId);
+  };
 
   const timelineSelection = useTimelineSelection({
     tracks: renderTracks,
@@ -1451,6 +1556,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     gridDenominator,
     pixelsPerSecond,
     visibleStartSec: () => timelineViewport.visibleRange().startSec,
+    isPlaying,
     startScrub,
     moveScrub,
     stopScrub,
@@ -1463,7 +1569,9 @@ const Timeline: Component<TimelineProps> = (props) => {
     HTMLDivElement,
     PointerEvent
   > = (event) => {
+    if (!isEventFromDomDescendant(event)) return;
     if (event.button !== 0) return;
+    setFollowPaused(false);
     event.stopPropagation();
     bottomPanel.setMode("effects");
     bottomPanel.setOpen(true);
@@ -1504,25 +1612,21 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
     createTrackForRecording: async () =>
       await createTimelineTrack({}, { pushHistory: false, select: false }),
-    notify: (message) => {
-      console.warn("[Timeline][recording]", message);
-      if (message.includes("local") || message.includes("storage")) {
-        localProject.setLocalSaveFailure(message);
-      }
-    },
+    notify: (message) => notify("Recording", message),
+    onLocalSaveFailed: localProject.setLocalSaveFailure,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
     grantClipWrite,
     audioPreferences: appPreferences.audio.preferences,
     recordingPreferences: appPreferences.recording.preferences,
   });
+  recordingKeepLatencyNodeIds = recordingControls.keepLatencyNodeIds;
 
   const {
     isRecording: isAudioRecording,
+    isStarting: audioRecordingStarting,
     recordArmTrackId,
-    toggleRecording: toggleAudioRecording,
     toggleRecordArm: handleToggleRecordArm,
     reconcileRecordArm,
-    stopRecording: stopAudioRecording,
     recordingTrackId: audioRecordingTrackId,
     previewPoints,
     previewStartSec,
@@ -1544,29 +1648,32 @@ const Timeline: Component<TimelineProps> = (props) => {
     selection,
     requestTransportPlay: requestPlay,
     pauseTransport: handlePause,
-    notify: (message) => localProject.setLocalSaveFailure(message),
+    notify: (message) => notify("MIDI recording", message),
+    onLocalSaveFailed: localProject.setLocalSaveFailure,
     historyPush: (entry, key, win) => pushHistory(entry, key, win),
     setActiveRecordingTarget: setActiveMidiRecordingTargetId,
     setProvisionalClipId: setProvisionalMidiClipId,
   });
-  recordingStopRef.stop = async () => {
-    if (isAudioRecording()) await stopAudioRecording();
-    if (midiRecording.isRecording()) await midiRecording.stopRecording();
-  };
-  recordingStopRef.activeTrackId = audioRecordingTrackId;
-  setProjectTransitionSettlement(async () => {
-    importQueue.cancelAll();
-    if (untrack(isAudioRecording)) await stopAudioRecording();
-    if (untrack(midiRecording.isRecording)) await midiRecording.stopRecording();
-    if (untrack(provisionalMidiClipId)) throw new Error("MIDI recording remains protected until it can be finalized.");
+  const recordingTransport = createRecordingTransportPolicy({
+    audio: recordingControls,
+    midi: midiRecording,
+    playback: { isPlaying, play: requestPlay, pause: handlePause, stop: handleStop },
+    armedTrack: () => renderTracks().find((track) => track.id === recordArmTrackId()),
+    notify,
+    project: {
+      id: projectId,
+      provisionalClipId: provisionalMidiClipId,
+      cancelImports: () => importQueue.cancelAll(),
+      navigate: navigateToRoom,
+    },
   });
+  recordingStopRef.stop = recordingTransport.stopRecording;
+  recordingStopRef.activeTrackId = audioRecordingTrackId;
+  setProjectTransitionSettlement(() => recordingTransport.leaveProject());
   onCleanup(() => setProjectTransitionSettlement(undefined));
   const isRecording = createMemo(() => isAudioRecording() || midiRecording.isRecording());
   const recordingTrackId = createMemo(() => recordingControls.recordingTrackId() ?? midiRecording.recordingTrackId());
-  const stopRecording = async () => {
-    if (isAudioRecording()) await stopAudioRecording();
-    if (midiRecording.isRecording()) await midiRecording.stopRecording();
-  };
+  const stopRecording = recordingTransport.stopRecording;
   const deleteTimelineSelectionSafely = async () => {
     await runTimelineMutationAfterRecordingSettlement({
       isRecording,
@@ -1576,51 +1683,41 @@ const Timeline: Component<TimelineProps> = (props) => {
     });
   };
   const toggleLoopSafely = () => {
-    if (midiRecording.isRecording()) {
-      localProject.setLocalSaveFailure("Stop MIDI recording before enabling loop.");
+    if (midiRecording.isRecording() || midiRecording.hasPendingCleanup()) {
+      notify("Loop unavailable", "Stop MIDI recording before enabling loop.");
       return;
     }
     setLoopEnabled((prev) => !prev);
-    if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
+    if (isPortableBrowserPlaybackPrepared()) {
       void rebuildPlaybackBackend(renderTracks()).catch((cause: unknown) => {
         console.error("[Timeline] failed to reconcile loop playback", cause);
         audioEngine.onTransportPause();
         audioEngine.stopAllSources();
         setLoopEnabled(false);
       });
-    } else if (isPlaying()) {
+    } else if (isPlaying() && !isNativePlaybackPrepared()) {
       void restartTimelineSchedule(renderTracks()).catch((cause: unknown) => {
         console.error("[Timeline] failed to reschedule loop playback", cause);
       });
     }
   };
-  const openProject = async (nextProjectId: string) => {
-    if (nextProjectId === projectId()) return;
-    if (isRecording()) await stopRecording();
-    await navigateToRoom(nextProjectId);
-  };
-  const toggleRecording = async () => {
-    if (isRecording()) {
-      await stopRecording();
-      return { ok: true, trackId: recordingTrackId() ?? undefined };
-    }
-    const armed = renderTracks().find((track) => track.id === recordArmTrackId());
-    if (armed?.kind === "instrument") {
-      const ok = await midiRecording.startRecording();
-      return { ok, trackId: ok ? armed.id : undefined };
-    }
-    return await toggleAudioRecording();
-  };
-
-  const handleTransportPause = async () => {
-    if (isRecording()) await stopRecording();
-    return handlePause();
-  };
-
-  const handleTransportStop = async () => {
-    if (isRecording()) await stopRecording();
-    return handleStop();
-  };
+  const openProject = recordingTransport.leaveProject;
+  const dashboardProjectRequest = { current: 0 };
+  const openProjectFromDashboard = (nextProjectId: string) => openDashboardProject({
+    nextProjectId,
+    open: () => openProject(nextProjectId),
+    mountedProjectId: projectId,
+    closeDashboard: () => props.setDashboardParam(null),
+    latestRequest: dashboardProjectRequest,
+  });
+  const createProjectFromDashboard = () => createDashboardProject({
+    create: createProject,
+    closeDashboard: () => props.setDashboardParam(null),
+    latestRequest: dashboardProjectRequest,
+  });
+  const toggleRecording = recordingTransport.record;
+  const handleTransportPause = recordingTransport.pause;
+  const handleTransportStop = recordingTransport.stop;
 
   const addAudioTrack = async () => {
     await createTimelineTrack();
@@ -1637,19 +1734,10 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   useTimelineKeyboard({
     enabled: () => props.dashboardView() === null,
-    onSpace: () => {
-      if (isRecording()) {
-        handleTransportPause();
-      } else {
-        if (isPlaying()) {
-          handlePause();
-        } else {
-          requestPlay();
-        }
-      }
-    },
+    onSpace: recordingTransport.space,
     onDelete: () => {
-      void deleteTimelineSelectionSafely();
+      // Recording settlement already reported any failure before rejecting.
+      deleteTimelineSelectionSafely().catch(() => undefined);
     },
     onDuplicate: () => {
       void duplicateTimelineSelection();
@@ -1693,6 +1781,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       void addInstrumentTrack().catch(() => {});
     },
     onOpenExport: () => setExportOpen(true),
+    onToggleFollow: toggleFollow,
     executeExtensionShortcut: timelineExtensionHost.shortcuts.execute,
   });
 
@@ -1706,12 +1795,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     HTMLDivElement,
     PointerEvent
   > = (event) => {
+    if (!isEventFromDomDescendant(event)) return;
     if (event.button !== 0) return;
     if (
       event.target instanceof Element &&
       event.target.closest('[data-timeline-ruler="1"]')
     )
       return;
+    setFollowPaused(false);
     bottomPanel.setMode("effects");
     timelineSelection.onLanePointerDown(event, {
       kind: "scrolling",
@@ -1724,24 +1815,30 @@ const Timeline: Component<TimelineProps> = (props) => {
     HTMLDivElement,
     PointerEvent
   > = (event) => {
+    if (!isEventFromDomDescendant(event)) return;
     if (event.button !== 0) return;
+    setFollowPaused(false);
     event.stopPropagation();
     bottomPanel.setMode("effects");
     selection.selectMasterTarget();
     startScrub(event.clientX);
   };
-  const addFourBarMidiClipToTrack = (trackId: Track["id"]) => {
+  const addFourBarMidiClipToTrack = (trackId: Track["id"], startSec: number) => {
     const actions = deviceInsertActions();
     if (!actions?.canAddMidiClipToTarget(trackId)) return;
     const secondsPerBeat = 60 / Math.max(1e-6, bpm());
     void actions.addMidiClipToTarget(trackId, {
       durationSec: secondsPerBeat * 16,
+      startSec,
     });
   };
 
   const onRulerPointerDown = (event: PointerEvent) => {
     event.preventDefault();
+    // Resolve the locate against the viewport the user clicked before Follow
+    // can recenter it around the previous playback position.
     startScrub(event.clientX);
+    setFollowPaused(false);
   };
 
   const onFileInput: JSX.EventHandler<HTMLInputElement, Event> = async (e) => {
@@ -2180,10 +2277,24 @@ const Timeline: Component<TimelineProps> = (props) => {
     reconcileRecordArm(nextTracks);
   });
 
+  // Mirrors the actions: selected clips must be writable, and delete reaches the track only when no clips are selected.
+  const canDuplicateSelection = createMemo(() =>
+    selection.rangeSelection() !== null || hasWritableSelectedClips(),
+  );
+  const canSelectAllClips = createMemo(() => hasWritableClips());
+  const canDeleteSelection = createMemo(() => {
+    // Delete stops an active recording first, so only a provisional clip left after recording blocks it.
+    if (provisionalMidiClipId() !== null && !isRecording()) return false;
+    if (selection.rangeSelection() !== null) return true;
+    if (selection.selectedClipIds().size > 0) return hasWritableSelectedClips();
+    return selection.selectedTrackId() !== "";
+  });
+
   const transportProps = () => ({
     isPlaying: isPlaying(),
+    isPlayPending: isPlayPending(),
     playheadSec: playheadSec(),
-    onPlay: () => requestPlay(),
+    onPlay: recordingTransport.play,
     onPause: handleTransportPause,
     onStop: handleTransportStop,
     onAddAudio: () => handleAddAudio(),
@@ -2200,11 +2311,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       currentUserId: userId(),
       canManageSharing: currentProjectRole() === "owner",
       projects: projects(),
-      onOpenProject: openProject,
-      onCreateProject: createProject,
+      onOpenProject: openProjectFromDashboard,
+      onCreateProject: createProjectFromDashboard,
       onDeleteProject: deleteProject,
       onRenameProject: renameProject,
-      onOpenExport: () => setExportOpen(true),
+    onOpenExport: () => setExportOpen(true),
       onOpenDashboard: props.setDashboardParam,
       onSignIn: () => navigate({ to: "/Login" }),
       onLogout: async () => {
@@ -2225,6 +2336,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       onDownloadForOffline: localProject.downloadForOffline,
       cloudBackupStatus: localProject.cloudBackupStatus(),
       sharedOutboxStatus: localProject.sharedOutboxStatus(),
+      saveFailed: localProject.localSaveFailure() !== null,
       onRetrySharedChanges: localProject.retrySharedChanges,
       onExportArchive: localProject.exportArchive,
       onImportArchive: () => archiveInputRef?.click(),
@@ -2242,6 +2354,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     onToggleMetronome: () => setMetronomeEnabled((prev) => !prev),
     gridEnabled: gridEnabled(),
     onToggleGrid: () => setGridEnabled((prev) => !prev),
+    followEnabled: appPreferences.timeline.follow(),
+    onToggleFollow: toggleFollow,
     zoom: {
       onIn: timelineViewport.zoomIn,
       onOut: timelineViewport.zoomOut,
@@ -2252,17 +2366,34 @@ const Timeline: Component<TimelineProps> = (props) => {
     loopEnabled: loopEnabled(),
     onToggleLoop: toggleLoopSafely,
     isRecording: isRecording(),
+    isRecordingPending: audioRecordingStarting() || midiRecording.isStarting(),
     onToggleRecord: toggleRecording,
     onUndo: handleUndo,
     onRedo: handleRedo,
+    canUndo: canUndo(),
+    canRedo: canRedo(),
+    canDuplicateSelection: canDuplicateSelection(),
+    canDeleteSelection: canDeleteSelection(),
+    // Copy uses the same predicate as duplicate: a range or a writable selected clip.
+    canCopySelection: canDuplicateSelection(),
+    canPasteSelection: hasTimelineClipboard(),
+    canSelectAllClips: canSelectAllClips(),
     automationOverrideCount: automation.overrideCount(),
     onReEnableAutomation: automation.reEnable,
     onDeleteSelection: () => {
-      void deleteTimelineSelectionSafely();
+      // Recording settlement already reported any failure before rejecting.
+      deleteTimelineSelectionSafely().catch(() => undefined);
     },
     onDuplicateSelection: () => {
       void duplicateTimelineSelection();
     },
+    onCopySelection: () => {
+      copyTimelineSelection();
+    },
+    onPasteSelection: () => {
+      pasteTimelineSelection();
+    },
+    onSelectAllClips: selectAllTimelineClips,
     onJumpToClip: (clipId: string, trackId: string, startSec: number) =>
       jumpToClip(trackId, clipId, startSec),
     onInsertSample: (payload: Parameters<typeof handleInsertSample>[0]) => {
@@ -2298,6 +2429,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     }),
   );
 
+  // Serialize graph decisions with live flushes so the newest notification wins.
+  let instrumentPlaybackChangeTail = Promise.resolve();
   const panelsProps = () => ({
     exportQueue,
     exportService,
@@ -2321,7 +2454,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         canOpen: Boolean(sampleDetail.selectedClip()),
         onOpen: () => {
           if (!sampleDetail.selectedClip()) return;
-          bottomPanel.setMode("sample-detail");
+          bottomPanel.setMode("clip-detail");
           bottomPanel.setOpen(true);
         },
       },
@@ -2334,6 +2467,17 @@ const Timeline: Component<TimelineProps> = (props) => {
       audioEngine,
       samplerBufferSync: sampledInstrumentSession.samplerBufferSync,
       drumRackBufferSync: sampledInstrumentSession.drumRackBufferSync,
+      retryNativeInstrumentPreparation: async (identity: NativeInstrumentRetryIdentity) => {
+        if (projectId() !== identity.projectId) return;
+        await restartTimelineSchedule(renderTracks(), {
+          rebuildBackend: true,
+          resumePlayback: isPlaying(),
+          playheadSec: playheadSec(),
+          owner: "native",
+          projectId: identity.projectId,
+          projectGeneration: mountedProjectGeneration(),
+        });
+      },
       spectrumProvider: subscribeSpectrum,
       canWriteTrackRouting: canWriteTrack,
       grantClipWrite,
@@ -2344,34 +2488,62 @@ const Timeline: Component<TimelineProps> = (props) => {
         bottomPanel.setMode("effects");
         bottomPanel.setOpen(true);
       },
-      onEffectParamsCommitted: handleEffectParamsCommitted,
-      onStructuralPlaybackChange: (targetId: Track["id"], instrument: TrackInstrumentParams) => {
-        if (!isPlaying() && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()
-          && !isStructuralRebuildInProgress()
-          && !isPreparingPlayback()) return;
-        const tracks = renderTracks();
-        const rebuild = rebuildPlaybackBackend(tracks, undefined, { targetId, instrument });
-        void rebuild.catch((cause: unknown) => {
+      onEffectParamsCommitted: effectCommit.committed,
+      onStructuralPlaybackChange: (targetId: Track["id"], instrument: TrackInstrumentParams | undefined) => {
+        const generation = mountedProjectGeneration();
+        // This event queue reads current state imperatively, not reactively.
+        // eslint-disable-next-line solid/reactivity
+        return instrumentPlaybackChangeTail = instrumentPlaybackChangeTail.then(async () => {
+          await awaitPlaybackPreparation();
+          if (generation !== mountedProjectGeneration()) return;
+          const previous = preparedInstrument(targetId);
+          // Equality is safe only at rest: a queued B must not supersede a newer A.
+          if (!isStructuralRebuildInProgress() && !isPreparingPlayback()) {
+            if (JSON.stringify(previous) === JSON.stringify(instrument)) return;
+          }
+          if (!isPlaying() && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()
+            && !isStructuralRebuildInProgress()
+            && !isPreparingPlayback()) return;
+          await rebuildPlaybackBackend(renderTracks(), captureStructuralPlaybackIntent(),
+            instrument ? { targetId, instrument } : undefined);
+        }).catch((cause: unknown) => {
           notify(
             "Native playback rebuild failed",
             cause instanceof Error
               ? cause.message
-              : "The active playback graph could not be rebuilt for the instrument insertion.",
+              : "The active playback graph could not be updated for the instrument change.",
           );
         });
       },
       usesLegacyAudioEngine,
       projectGeneration: mountedProjectGeneration,
-      onEffectParamsPreview: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => {
-        void handleNativeBuiltInPreview(payload);
+      allocateProcessorEdit: processorEdits.allocate,
+      deliverProcessor,
+      joinPublication,
+      applyPortableProcessor: async (edit: LiveProcessorEditIdentity) => {
+        const control = liveProcessorControl();
+        if (!control) return undefined;
+        const result = await control.flush({
+          instanceId: edit.target.instanceId,
+          values: Object.entries(edit.content.values ?? {}).map(([parameterId, value]) => ({ parameterId, value })),
+          edit,
+        });
+        if (result.accepted) return "applied";
+        if (result.reason === "cancelled" || result.reason === "stale") return "superseded";
+        if (result.reason === "unavailable" || result.reason === "unprepared") return "dropped";
+        if (result.reason !== "unsupported") throw new Error(result.error ?? "The portable processor update failed.");
+        // A synth edit the session cannot take live is carried by the release announce; a preview must never rebuild.
+        if (edit.target.kindId === SYNTH_KIND_ID) return undefined;
+        await rebuildPlaybackBackend(renderTracks());
+        return "applied";
       },
-      onEffectParamsFlush: handleNativeBuiltInFlush,
       onPreviewNote: auditionNote,
       enqueueNativeVstParameter: nativeVstParameterQueue?.enqueue,
       onEffectInstanceParamsReplayChange: (
         replay: EffectsPanelAudioEffects["replayInstanceParams"] | undefined,
       ) => setReplayEffectInstanceParams(() => replay),
       onLocalSaveFailed: localProject.setLocalSaveFailure,
+      onEffectError: notify,
       onDeviceInsertActionsChange: setDeviceInsertActions,
       onExportSnapshotChange: setEffectsExportSnapshot,
       autoOpenExternalProcessorId: (() => {
@@ -2448,8 +2620,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       evaluatedValuesByTargetKey: automation.evaluatedValuesByTargetKey(),
     },
     sampleDetailPanel: {
-      isOpen: bottomPanel.open() && bottomPanel.mode() === "sample-detail",
-      selectedClip: sampleDetail.selectedClip(),
+      isOpen: bottomPanel.open() && bottomPanel.mode() === "clip-detail",
+      selectedClip: sampleDetail.selectedAudioClip(),
       projectBpm: bpm(),
       audioEngine,
       bpmDetection: audioWarpController.bpmDetection,
@@ -2459,6 +2631,33 @@ const Timeline: Component<TimelineProps> = (props) => {
       onChange: sampleDetail.changeWarp,
       onGainChange: sampleDetail.changeGain,
       onMarkerDragStateChange: sampleDetail.setMarkerDragging,
+      shell: {
+        heightPx: bottomPanel.heightPx(),
+        onHeightPreview: bottomPanel.previewHeightPx,
+        onHeightCommit: bottomPanel.commitHeightPx,
+      },
+      onClose: sampleDetail.close,
+      onHide: () => {
+        bottomPanel.setMode("effects");
+        bottomPanel.setOpen(false);
+      },
+    },
+    midiClipPanel: {
+      isOpen: bottomPanel.open() && bottomPanel.mode() === "clip-detail",
+      clip: sampleDetail.selectedMidiClip(),
+      bpm: bpm(),
+      gridDenominator: gridDenominator(),
+      trackId: selection.selectedClip()?.trackId,
+      effectInstancesByOwnerKey: automation.workspace().lanes.effectInstancesByOwnerKey,
+      userId: userId(),
+      projectId: projectId(),
+      canWriteClip: (clipId: string) =>
+        clipId !== provisionalMidiClipId() && canWriteClip(clipId),
+      onAuditionNote: auditionNote,
+      midiKeyboard: { isActive: midiKeyboard.isActive },
+      onLocalMidiSaved: handleLocalMidiSaved,
+      onNotesEdited: handleMidiNotesEdited,
+      onNoteDragStateChange: sampleDetail.setMarkerDragging,
       shell: {
         heightPx: bottomPanel.heightPx(),
         onHeightPreview: bottomPanel.previewHeightPx,
@@ -2508,8 +2707,8 @@ const Timeline: Component<TimelineProps> = (props) => {
         onArchiveInput={localProject.onArchiveInput}
         transport={transportProps()}
         localSaveFailure={localProject.localSaveFailure()}
-        onExportArchive={localProject.exportArchive}
-        onDismissLocalSaveFailure={() => localProject.setLocalSaveFailure(null)}
+        onExportArchive={isLocalId("project", projectId()) ? localProject.exportArchive : undefined}
+        onDismissLocalSaveFailure={() => localProject.setLocalSaveFailure(projectId(), null)}
         panels={panelsProps()}
       />
 
@@ -2607,44 +2806,16 @@ const Timeline: Component<TimelineProps> = (props) => {
         replaceMissingMediaClip={mediaRecovery.replaceMissingMediaClip}
         removeMissingMediaClip={mediaRecovery.removeMissingMediaClip}
         trackLookup={trackLookup()}
-        openMidiEditorFor={openMidiEditorFor}
-        openSampleDetailFor={(clipId) => {
-          const match = trackLookup().clipEntryById.get(clipId);
-          if (!match || !isTimelineSampleDetailClip(match.clip)) return;
-          const selectedClip = selection.selectedClip();
-          if (
-            selectedClip?.clipId === clipId &&
-            selectedClip.trackId === match.trackId &&
-            bottomPanel.open() &&
-            bottomPanel.mode() === "sample-detail"
-          )
-            return;
-          selection.selectPrimaryClip({ trackId: match.trackId, clipId });
-          bottomPanel.setMode("sample-detail");
-          bottomPanel.setOpen(true);
-        }}
+        openClipDetailFor={sampleDetail.openClipDetail}
         marqueeRect={marqueeRect()}
         marqueeSurface={marqueeSurface()}
         recording={{
-          isRecording: isRecording(),
-          previewStartSec: previewStartSec(),
-          previewPoints: previewPoints(),
-          recordingTrackId: recordingTrackId(),
-          recordArmTrackId: recordArmTrackId(),
-        }}
-        midi={{
-          clipId: midiEditorClipId(),
-          card: midiCard(),
-          userId: userId(),
-          projectId: projectId(),
-          canWrite: canWriteClip(midiEditorClipId() ?? ''),
-          close: closeMidiEditor,
-          changeBounds: changeMidiCardBounds,
-          auditionNote,
-          keyboard: {
-            isActive: midiKeyboard.isActive,
-          },
-          onLocalMidiSaved: handleLocalMidiSaved,
+          // Preview samples must not invalidate sidebar consumers of record-arm state.
+          get isRecording() { return isRecording(); },
+          get previewStartSec() { return previewStartSec(); },
+          get previewPoints() { return previewPoints(); },
+          get recordingTrackId() { return recordingTrackId(); },
+          get recordArmTrackId() { return recordArmTrackId(); },
         }}
         sidebar={{
           currentUserId: userId(),

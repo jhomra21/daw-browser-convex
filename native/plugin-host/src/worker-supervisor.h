@@ -295,6 +295,36 @@ enum class WorkerDiagnosticKind : std::uint32_t {
   kScheduledAutomationInput,
 };
 
+// Fault-only value semantics; other diagnostic values retain their contracts.
+// Bits 0..7: origin, 8..15: waitid si_code, 16..23: si_status, 24..31: reserved.
+enum class WorkerFaultOrigin : std::uint32_t {
+  kUnknown = 0,
+  kChildExit = 1,
+  kChildSignal = 2,
+  kTransportFault = 3,
+  kDispatchFailure = 4,
+  kCallbackMissTermination = 5,
+  kStartupFailure = 6,
+  kStartupException = 7,
+  kConfigureFailure = 8,
+  kConfigureException = 9,
+  kProcessFailure = 10,
+  kProcessException = 11,
+  kWorkerNotification = 12,
+  kUnknownWorkerNotification = 13,
+  kOfflineCompletionFailure = 14,
+  kControlIoFailure = 15,
+};
+
+constexpr std::uint32_t EncodeWorkerFault(
+  const WorkerFaultOrigin origin,
+  const std::uint32_t childCode = 0,
+  const std::uint32_t childStatus = 0
+) noexcept {
+  return (static_cast<std::uint32_t>(origin) & 0xffU)
+    | ((childCode & 0xffU) << 8U) | ((childStatus & 0xffU) << 16U);
+}
+
 struct WorkerDiagnostic {
   WorkerDiagnosticKind kind = WorkerDiagnosticKind::kFault;
   std::uint32_t value = 0;
@@ -462,6 +492,7 @@ class WorkerRuntime {
   [[nodiscard]] bool DiscardLate(std::size_t slotIndex, std::uint64_t sequence);
   [[nodiscard]] WorkerHealth callbackHealth() const;
   [[nodiscard]] WorkerHealth health() const;
+  [[nodiscard]] std::uint32_t faultValue() const;
   [[nodiscard]] int processGroupId() const noexcept;
   [[nodiscard]] std::optional<WorkerDiagnostic> ReadDiagnostic();
   [[nodiscard]] std::optional<WorkerTailMetadata> ReadTailMetadata() const;

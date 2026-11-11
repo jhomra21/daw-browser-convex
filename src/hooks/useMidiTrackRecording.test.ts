@@ -51,11 +51,13 @@ const flush = async () => {
 }
 
 const originalFetch = globalThis.fetch
-const originalWindow = globalThis.window
+// Bun has no global window; redefining it by value would leave a non-writable `undefined` behind for later files.
+const originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window')
 let runMidiRecordingHeartbeat: (() => void) | undefined
 
 const createHarness = (input: {
   projectId?: string
+  openProjectId?: () => string
   bpm?: () => number
   loopEnabled?: boolean
   requestAccess?: () => Promise<void>
@@ -64,6 +66,7 @@ const createHarness = (input: {
 } = {}) => {
   const operations: RecordedOperation[] = []
   const notifications: string[] = []
+  const saveFailures: Array<{ projectId: string; message: string }> = []
   const provisional: Array<string | null> = []
   const activeTargets: Array<string | null> = []
   const history: unknown[] = []
@@ -88,7 +91,7 @@ const createHarness = (input: {
         }),
       },
       tracks: () => [track()],
-      projectId: () => input.projectId ?? 'cloud-project',
+      projectId: input.openProjectId ?? (() => input.projectId ?? 'cloud-project'),
       userId: () => 'user-1',
       playheadSec: () => 0,
       bpm: () => input.bpm?.() ?? 120,
@@ -102,6 +105,7 @@ const createHarness = (input: {
       requestTransportPlay: input.requestTransportPlay ?? (async () => {}),
       pauseTransport: () => {},
       notify: (message) => { notifications.push(message) },
+      onLocalSaveFailed: (projectId, message) => { saveFailures.push({ projectId, message }) },
       historyPush: (entry) => { history.push(entry) },
       setActiveRecordingTarget: (trackId) => { activeTargets.push(trackId) },
       setProvisionalClipId: (clipId) => { provisional.push(clipId) },
@@ -136,6 +140,7 @@ const createHarness = (input: {
     projectId: input.projectId ?? 'cloud-project',
     operations,
     notifications,
+    saveFailures,
     provisional,
     activeTargets,
     history,
@@ -169,7 +174,8 @@ beforeEach(() => {
 
 afterEach(() => {
   Object.defineProperty(globalThis, 'fetch', { configurable: true, value: originalFetch })
-  Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow })
+  if (originalWindowDescriptor) Object.defineProperty(globalThis, 'window', originalWindowDescriptor)
+  else Reflect.deleteProperty(globalThis, 'window')
   runMidiRecordingHeartbeat = undefined
 })
 
@@ -229,9 +235,7 @@ describe('useMidiTrackRecording transactions', () => {
     allowAccess()
     await Promise.all([start, transition])
     expect(events).toEqual(['settle', 'resolve'])
-    expect(recording.operations.map((operation) => operation.kind)).toEqual([
-      'tracks.lock', 'clips.create', 'clips.removeMany', 'tracks.unlock',
-    ])
+    expect(recording.operations.map((operation) => operation.kind)).toEqual([])
     recording.dispose()
   })
 
@@ -274,6 +278,26 @@ describe('useMidiTrackRecording transactions', () => {
     expect(clip?.duration).toBeGreaterThan(0)
     expect(recording.history).toHaveLength(1)
     expect(recording.provisional.at(-1)).toBeNull()
+    recording.dispose()
+  })
+
+  test('reports a failed local final checkpoint as a save failure for its own project, not a notice', async () => {
+    const project = await createLocalProject(`MIDI recording ${crypto.randomUUID()}`)
+    const repository = createLocalTimelineRepository(project.id)
+    await repository.createTrack({ id: 'instrument-track', kind: 'instrument' })
+    let openProjectId = project.id
+    const recording = createHarness({ projectId: project.id, openProjectId: () => openProjectId })
+
+    await expect(recording.controller.startRecording()).resolves.toBe(true)
+    const clipId = recording.provisional.at(-1)
+    if (!clipId) throw new Error('Expected a provisional MIDI clip.')
+    await repository.deleteClip(clipId)
+    recording.emit(noteOn('keyboard', 0))
+    openProjectId = 'project:opened-while-settling'
+    await recording.controller.stopRecording()
+
+    expect(recording.saveFailures).toEqual([{ projectId: project.id, message: 'MIDI recording could not be saved to this project.' }])
+    expect(recording.notifications).toEqual([])
     recording.dispose()
   })
 
@@ -353,6 +377,7 @@ describe('useMidiTrackRecording transactions', () => {
     expect(recording.history).toHaveLength(0)
     expect(recording.provisional.at(-1)).toBeNull()
     expect(recording.notifications).toContain('MIDI recording could not be saved to this project.')
+    expect(recording.saveFailures).toEqual([])
     recording.dispose()
   })
 

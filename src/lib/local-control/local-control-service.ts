@@ -37,7 +37,7 @@ import type {
   LocalControlCommitRow,
   LocalControlRecoveryRow,
 } from '~/lib/local-project-db'
-import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
+import { withLocalProjectAssetLock, withLocalStorageRootLock } from '~/lib/local-project-asset-lock'
 import {
   executeLocalControlRequestInTransactionV1,
   localControlPlannerCapabilities,
@@ -643,7 +643,10 @@ export const createLocalControlService = (input: {
     assertAvailable()
     const outcome = await withLocalProjectAssetLock(request.projectId, () => {
       assertAvailable()
-      return withLocalControlTransactionOptions(request.projectId, (context) => {
+      // Recovery/asset deletion atomically moves references between assets and
+      // GC retention. Serialize that publication with shared-root cleanup only,
+      // after pending writes were flushed and the project lock was acquired.
+      const publish = () => withLocalControlTransactionOptions(request.projectId, (context) => {
         assertAvailable()
       const matching = context.rows.commits.filter((row) => (
         row.projectId === request.projectId && row.actorSubject === actor.subject
@@ -726,6 +729,9 @@ export const createLocalControlService = (input: {
         excludePendingWriteKinds: input.excludePendingWriteKinds,
         flushPendingWrites: false,
       })
+      return request.actions.some((action) => action.kind === 'recovery.restore' || action.kind === 'asset.delete')
+        ? withLocalStorageRootLock(publish)
+        : publish()
     })
     let gcFinalized = false
     try {

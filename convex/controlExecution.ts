@@ -58,6 +58,8 @@ import { requireProjectRow } from "./projectRows";
 import { enqueueR2DeleteRows } from "./r2Deletes";
 import { captureRecoveryPayload, createRecovery, isRecoverableAction, restoreRecovery } from "./controlRecovery";
 
+type ExecutedActionChange = { changed: boolean; revision?: number }
+
 const requiredId = (ctx: any, table: string, id: string) => {
   const normalized = ctx.db.normalizeId(table, id)
   if (!normalized) throw new Error(`Invalid ${table} ID.`)
@@ -130,6 +132,7 @@ export async function executeControlPlanV1(
   const resolvedRefs: Array<{ entity: "track" | "clip" | "effect"; clientRef: string; id: string; persisted: true }> = []
   const recoveries: Array<{ actionIndex: number; id: string; kind: string; expiresAt: number }> = []
   const restored: Array<{ actionIndex: number; recoveryId: string; entities: any[] }> = []
+  const effectRevisions: number[] = []
   const recoveryExpiryByAction = new Map<number, number>()
   let changed = false
   for (const entry of input.plan.actions) {
@@ -137,7 +140,7 @@ export async function executeControlPlanV1(
     const timelineRangeDelete = action.kind === "timeline.range.delete" && entry.timelineRangeDelete
       ? resolveRangeDeletePatch(ctx, entry.timelineRangeDelete, clipRefs)
       : undefined
-  let result = { changed: false }
+    let result: ExecutedActionChange = { changed: false }
     let deferredRangeRecovery: any
     if (isRecoverableAction(action)) {
       const payload = await captureRecoveryPayload(ctx, {
@@ -183,6 +186,7 @@ export async function executeControlPlanV1(
           name: action.name,
         })
         result = created
+        if (created.effectRevision !== undefined) effectRevisions.push(created.effectRevision)
         if (entry.generatedInstrumentInstanceId && created.trackId) {
           const instrument = await setTrackInstrumentRow(ctx, {
             projectId: input.projectId,
@@ -193,6 +197,7 @@ export async function executeControlPlanV1(
               params: createDefaultSynthParams(),
             },
           })
+          if (instrument.changed) effectRevisions.push(instrument.revision)
           result = { changed: created.changed || instrument.changed }
         }
         if (action.clientRef) {
@@ -481,7 +486,9 @@ export async function executeControlPlanV1(
           recovery,
           actionIndex: entry.actionIndex,
         })
-        restored.push(restoredResult)
+        const { effectRevisions: restoredEffectRevisions, ...restoredSummary } = restoredResult
+        restored.push(restoredSummary)
+        effectRevisions.push(...restoredEffectRevisions)
         for (const mapping of restoredResult.entities) {
           const refs = mapping.entity === "track" ? trackRefs : mapping.entity === "clip" ? clipRefs : mapping.entity === "effect" ? effectRefs : undefined
           if (!refs) continue
@@ -534,7 +541,8 @@ export async function executeControlPlanV1(
               instanceId,
             })
         result = write
-        if (action.clientRef && write.effectId) {
+        if (write.changed) effectRevisions.push(write.revision)
+        if (action.clientRef && write.status !== "invalid") {
           effectRefs.set(action.clientRef, write.effectId)
           resolvedRefs.push({ entity: "effect", clientRef: action.clientRef, id: String(write.effectId), persisted: true })
         }
@@ -546,6 +554,7 @@ export async function executeControlPlanV1(
         result = action.target.kind === "master"
           ? await removeAudioEffectRow(ctx, { projectId: input.projectId, targetType: "master", effect: action.effectKind, instanceId: row?.instanceId })
           : await removeAudioEffectRow(ctx, { projectId: input.projectId, targetType: "track", trackId: resolveRef(ctx, "tracks", trackRefs, action.target.track), effect: action.effectKind, instanceId: row?.instanceId })
+        if (result.changed && result.revision !== undefined) effectRevisions.push(result.revision)
         break
       }
       case "effect.reorder": {
@@ -563,6 +572,7 @@ export async function executeControlPlanV1(
           trackId: action.target.kind === "track" ? resolveRef(ctx, "tracks", trackRefs, action.target.track) : undefined,
           order,
         })
+        if (result.changed && result.revision !== undefined) effectRevisions.push(result.revision)
         break
       }
       case "instrument.set": {
@@ -570,7 +580,7 @@ export async function executeControlPlanV1(
         const rows = await ctx.db.query("effects").withIndex("by_track", (query: any) => query.eq("trackId", trackId)).collect()
         const existing = rows.find((row: any) => row.targetType === "track" && (row.type === "instrument" || row.type === "synth"))
         const current = existing ? normalizeTrackInstrumentParams(existing.params) : undefined
-        result = await setTrackInstrumentRow(ctx, {
+        const write = await setTrackInstrumentRow(ctx, {
           projectId: input.projectId,
           trackId,
           instrument: {
@@ -579,16 +589,23 @@ export async function executeControlPlanV1(
             params: action.params ?? (current && current.kind === action.instrumentKind ? current.params : {}),
           },
         })
+        result = write
+        if (write.changed) effectRevisions.push(write.revision)
         break
       }
-      case "arpeggiator.set":
-        result = await setArpeggiatorRow(ctx, { projectId: input.projectId, trackId: resolveRef(ctx, "tracks", trackRefs, action.target.track), params: action.params })
+      case "arpeggiator.set": {
+        const write = await setArpeggiatorRow(ctx, { projectId: input.projectId, trackId: resolveRef(ctx, "tracks", trackRefs, action.target.track), params: action.params })
+        result = write
+        if (write.changed) effectRevisions.push(write.revision)
         break
+      }
       case "instrument.remove":
         result = await removeTrackInstrumentRow(ctx, { projectId: input.projectId, trackId: resolveRef(ctx, "tracks", trackRefs, action.target.track) })
+        if (result.changed && result.revision !== undefined) effectRevisions.push(result.revision)
         break
       case "arpeggiator.remove":
         result = await removeArpeggiatorRow(ctx, { projectId: input.projectId, trackId: resolveRef(ctx, "tracks", trackRefs, action.target.track) })
+        if (result.changed && result.revision !== undefined) effectRevisions.push(result.revision)
         break
       case "automation.set": {
         const effect = action.effect === undefined ? undefined : await ctx.db.get(resolveRef(ctx, "effects", effectRefs, action.effect))
@@ -646,5 +663,5 @@ export async function executeControlPlanV1(
     const row = await ctx.db.get(requiredId(ctx, table, ref.id))
     if (row) persistedRefs.push(ref)
   }
-  return { changed, resolvedRefs: persistedRefs, recoveries, restored }
+  return { changed, effectRevisions, resolvedRefs: persistedRefs, recoveries, restored }
 }

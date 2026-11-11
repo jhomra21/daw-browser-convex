@@ -829,3 +829,20 @@ test('accepts bounded sampler and drum-rack state DTOs before the worklet', () =
     state: { ...sampler, kind: 'drum-rack' },
   })).toBeNull()
 })
+
+test('B6f5 publish-graph carries an adoption continuity requirement and prepare-graph a pre-encoded envelope', () => {
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, requireContinuity: true,
+  })).toEqual({ version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, requireContinuity: true })
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, requireContinuity: false,
+  })).toBeNull()
+  const snapshot = {
+    version: audioCoreContractVersion, revision: 1, contractHash: 'test', masterNodeId: 'master', edges: [], assets: [],
+    nodes: [{ id: 'master', kind: 'master', inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: 0, processorOrder: [] }],
+  }
+  const envelope = new Uint8Array([3, 0, 0, 0])
+  expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'prepare-graph', requestId: 1, snapshot, envelope }))
+    .toMatchObject({ type: 'prepare-graph', envelope })
+  expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'prepare-graph', requestId: 1, snapshot, envelope: [3] })).toBeNull()
+})

@@ -38,11 +38,12 @@ export function createCompressorChainState(
       try {
         const normalized = normalizeCompressorParams(params)
         const nextSignature = serializeCompressorParams(normalized)
+        // Every request outdates the construction an earlier one still awaits, an equal one that returns early included.
+        const currentToken = ++token
         const wasFaulted = compressor?.state === 'faulted'
         if (!wasFaulted && signature === nextSignature) return { changed: false, requiresRoutingRebuild: false }
         if (wasFaulted) signature = null
         const requiresRoutingRebuild = wasFaulted || (enabled !== normalized.enabled && (enabled !== null || normalized.enabled))
-        const currentToken = ++token
         if (!normalized.enabled) {
           if (compressor) {
             disconnectCompressorChain(compressor)

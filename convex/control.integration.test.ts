@@ -1838,3 +1838,81 @@ test("a finalized uploaded asset supplies trusted metadata to canonical clip cre
     sourceChannelCount: 2,
   });
 });
+
+const projectRevisionOf = async (t: Awaited<ReturnType<typeof setup>>) => await t.run(async (ctx) => (
+  await ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).unique()
+)?.revision);
+const effectStamps = async (t: Awaited<ReturnType<typeof setup>>, trackId: Id<"tracks">) => await t.run(async (ctx) => (
+  (await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", trackId)).collect())
+    .map((row) => [row.instanceId ?? row.type, row.revision] as const)
+    .sort((left, right) => left[0].localeCompare(right[0]))
+));
+
+test("a multi-effect control commit stamps every written row with its one project revision", async () => {
+  const t = await setup();
+  const trackId = await addTrack(t, { name: "Instrument", index: 0, kind: "instrument" });
+  const target = { kind: "track" as const, track: { source: "persisted" as const, id: String(trackId) } };
+  const result = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request([
+      { kind: "effect.upsert", target, clientRef: "compressor", effectKind: "compressor" },
+      { kind: "effect.upsert", target, clientRef: "utility", effectKind: "utility" },
+      { kind: "instrument.set", target, instrumentKind: "synth" },
+      { kind: "arpeggiator.set", target, params: { enabled: true, pattern: "up", rate: "1/8", octaves: 1, gate: 0.8, hold: false } },
+    ], "multi-effect-stamps"),
+  });
+  expect(result.applied).toBe(true);
+  expect(await projectRevisionOf(t)).toBe(1);
+  const stamps = await effectStamps(t, trackId);
+  expect(stamps).toHaveLength(4);
+  expect(stamps.map(([, revision]) => revision)).toEqual([1, 1, 1, 1]);
+});
+
+test("recovery restore, undo and redo stamp the rows they write with their own revision", async () => {
+  const t = await setup();
+  const trackId = await addTrack(t, { name: "Target", index: 0 });
+  const effectId = await t.run(async (ctx) => await ctx.db.insert("effects", {
+    projectId, targetType: "track", trackId, index: 0, type: "utility",
+    instanceId: "recover-utility", params: normalizeOwnedProcessorParams("utility", {}), createdAt: 1,
+  }));
+  const ref = { source: "persisted" as const, id: String(effectId) };
+  const removal = (key: string, id: string) => approvedRequest(t, [{
+    kind: "effect.remove", target: { kind: "track", track: { source: "persisted", id: String(trackId) } },
+    effect: { source: "persisted", id }, effectKind: "utility",
+  }], key);
+  const user = t.withIdentity({ subject: owner });
+
+  const deleted = await user.mutation(api.control.commitV1, { request: await removal("stamp-delete", ref.id) });
+  expect(await projectRevisionOf(t)).toBe(1);
+  expect(await effectStamps(t, trackId)).toEqual([]);
+
+  // Undo: the recovery recreates the row inside one transaction that advances the project once.
+  await user.mutation(api.control.commitV1, {
+    request: request([{ kind: "recovery.restore", recovery: { id: deleted.recoveries[0]?.id } }], "stamp-undo"),
+  });
+  expect(await projectRevisionOf(t)).toBe(2);
+  expect(await effectStamps(t, trackId)).toEqual([["recover-utility", 2]]);
+
+  // Redo: remove again, then restore again; the new row carries the later revision.
+  const restoredId = (await t.run(async (ctx) => (
+    await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", trackId)).collect()
+  )))[0]?._id;
+  if (!restoredId) throw new Error("Expected the restored row.");
+  const redone = await user.mutation(api.control.commitV1, { request: await removal("stamp-redo", String(restoredId)) });
+  expect(await projectRevisionOf(t)).toBe(3);
+  await user.mutation(api.control.commitV1, {
+    request: request([{ kind: "recovery.restore", recovery: { id: redone.recoveries[0]?.id } }], "stamp-redo-restore"),
+  });
+  expect(await projectRevisionOf(t)).toBe(4);
+  expect(await effectStamps(t, trackId)).toEqual([["recover-utility", 4]]);
+});
+
+test("a created instrument track stamps its default synth row with the creating transaction's revision", async () => {
+  const t = await setup();
+  await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
+    request: request([{ kind: "track.create", clientRef: "synth-track", trackKind: "instrument", name: "Synth" }], "created-synth"),
+  });
+  const revision = await projectRevisionOf(t);
+  const rows = await t.run(async (ctx) => await ctx.db.query("effects").collect());
+  expect(rows.length).toBeGreaterThan(0);
+  expect(rows.map((row) => row.revision)).toEqual(rows.map(() => revision));
+});

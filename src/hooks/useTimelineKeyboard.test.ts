@@ -17,6 +17,7 @@ class TestElement extends EventTarget {
 
 type TestKeyboardEvent = Readonly<{
   target: EventTarget;
+  composedPath: () => EventTarget[];
   key: string;
   code: string;
   ctrlKey: boolean;
@@ -44,6 +45,7 @@ const createKeyboardEvent = (
   let stopped = false;
   return {
     target,
+    composedPath: () => [target],
     key: init.key,
     code: init.code ?? "",
     ctrlKey: init.ctrlKey ?? false,
@@ -87,6 +89,7 @@ test("routes only the exact browser chord and preserves editable-target exclusio
       onUngroupSelectedTrack: () => {},
       onAddInstrumentTrack: () => {},
       onOpenExport: () => {},
+      onToggleFollow: () => {},
       executeExtensionShortcut: (chord, context) => {
         calls.push({
           chord: `${chord.mod}:${chord.alt}:${chord.shift}:${chord.key ?? chord.code}`,

@@ -1,11 +1,61 @@
 import { createHash } from "node:crypto"
+import { mkdtemp, writeFile } from "node:fs/promises"
+import path from "node:path"
 import type { ProjectSnapshotV2 } from "@daw-browser/control"
 import { projectSnapshotSchemaV2, controlCapabilitiesSchemaV2, controlPreviewResultSchemaV1, controlCommitResultSchemaV1 } from "@daw-browser/control"
 import { desktopHostVstInstancesResultSchemaV1, desktopHostVstParametersResultSchemaV1, desktopDiagnosticsSchemaV2 } from "@daw-browser/desktop-protocol"
 import { browserCommand, waitForBrowserValue } from "../browser-harness"
 import type { ProcessMetric } from "./electron"
+import type { OwnedWindowControl, RecordingWindowState } from "./window-occlusion"
 import { z } from "zod"
 import { analyzeTaskSourceEvidence, parseTaskSourceEvidence, taskSourceProbeScript, type TaskSourceEvidence } from "./task-source-liveness"
+import { recordedAudioContentSchema, recordedAudioContentScript, assessRecordedAudioContent } from "./recorded-audio-content"
+
+const deliveryNumber = z.number().finite()
+const deliveryCause = z.enum(["native-fatal", "writer-failure", "lifecycle-cancellation", "controller-cleanup", "explicit-stop", "start-failure", "capture-failure"])
+const recordingDeliverySchema = z.object({
+  version: z.literal(1), capacity: z.literal(512), generation: deliveryNumber, sessionId: z.string().regex(/^\d{1,20}$/),
+  clock: z.literal("performance.timeOrigin+performance.now"),
+  clockOffsetAtStartMs: deliveryNumber, clockOffsetAtEndMs: deliveryNumber,
+  startedAtEpochMs: deliveryNumber, endedAtEpochMs: deliveryNumber, observedFrames: deliveryNumber,
+  totalEvents: deliveryNumber, overwritten: deliveryNumber,
+  firstTermination: z.object({ cause: deliveryCause, atEpochMs: deliveryNumber }).strict().nullable(),
+  firstFatalStatus: z.object({ atEpochMs: deliveryNumber, queuedBlocks: deliveryNumber, capturedFrames: deliveryNumber }).strict().nullable(),
+  nativeProductionTimestampsAvailable: z.literal(false),
+  events: z.array(z.object({
+    kind: z.enum(["block", "enqueue", "status", "writer", "cleanup", "lifecycle-ready", "lifecycle-recovering", "lifecycle-suspended", "lifecycle-failed",
+      "native-fatal", "writer-failure", "lifecycle-cancellation", "controller-cleanup", "explicit-stop", "start-failure", "capture-failure"]),
+    atEpochMs: deliveryNumber, sequence: deliveryNumber, frameCount: deliveryNumber, nativeQueuedBlocks: deliveryNumber,
+    outstanding: deliveryNumber, sendEndEpochMs: deliveryNumber, oldestAgeMs: deliveryNumber, capturedFrames: deliveryNumber,
+    latencyMs: deliveryNumber, deliveryMs: deliveryNumber,
+    returnedAtEpochMs: deliveryNumber, returned: deliveryNumber, active: deliveryNumber, fatal: deliveryNumber, mainArrivalEpochMs: deliveryNumber,
+  }).strict()).max(512),
+}).strict()
+const deliveryClockSchema = z.object({
+  rendererBeforeEpochMs: deliveryNumber, rendererAfterEpochMs: deliveryNumber,
+  mainEpochMs: deliveryNumber, mainMonotonicEpochMs: deliveryNumber,
+  mainMinusRendererLowerMs: deliveryNumber, mainMinusRendererUpperMs: deliveryNumber,
+}).strict()
+const deliveryEvidenceSchema = z.object({
+  trace: recordingDeliverySchema.nullable(), mainTrace: recordingDeliverySchema.nullable(),
+  clockBefore: deliveryClockSchema.nullable(), clockAfter: deliveryClockSchema.nullable(),
+}).strict()
+type RecordingDeliveryEvidence = z.infer<typeof deliveryEvidenceSchema>
+export const parseRecordingDeliveryEvidence = (encoded: string) =>
+  deliveryEvidenceSchema.parse(parseNestedJson(z.string().max(1_000_000).parse(encoded)))
+export const compareRecordingDeliveryClocks = (
+  before: z.infer<typeof deliveryClockSchema> | null,
+  after: z.infer<typeof deliveryClockSchema> | null,
+) => {
+  if (!before || !after) return { status: "unavailable" }
+  const lowerMs = Math.max(before.mainMinusRendererLowerMs, after.mainMinusRendererLowerMs)
+  const upperMs = Math.min(before.mainMinusRendererUpperMs, after.mainMinusRendererUpperMs)
+  return { status: lowerMs > upperMs ? "inconsistent-bounds"
+    : lowerMs <= 0 && upperMs >= 0 ? "zero-offset-compatible" : "nonzero-offset", lowerMs, upperMs }
+}
+// Two requests total, using the existing opt-in heartbeat. Bounds include IPC
+// transit and main stalls; they are not a claim of precise clock synchronization.
+const deliveryClockScript = `(async()=>{const before=performance.timeOrigin+performance.now();const reply=await window.dawDesktop?.benchmarkHeartbeat?.();const after=performance.timeOrigin+performance.now();if(!reply||!Number.isFinite(reply.mainMonotonicEpochMs))return null;return {rendererBeforeEpochMs:before,rendererAfterEpochMs:after,mainEpochMs:reply.mainEpochMs,mainMonotonicEpochMs:reply.mainMonotonicEpochMs,mainMinusRendererLowerMs:reply.mainMonotonicEpochMs-after,mainMinusRendererUpperMs:reply.mainMonotonicEpochMs-before}})()`
 
 const longTaskEvidenceSchema = z.object({
   supported: z.boolean(),
@@ -55,6 +105,7 @@ export class TierThreeRecordingFailure extends Error {
     readonly workerAutomationAtPlayback: WorkerObservation | null = null,
     readonly taskSources: TaskSourceEvidence | null = null,
     readonly nativeAtPlayback: { transportEpoch: number; callbacks: number; submittedVstSegments: number | null; state: string } | null = null,
+    public recordingDelivery: RecordingDeliveryEvidence | null = null,
   ) {
     super(message)
   }
@@ -93,7 +144,65 @@ export const validateTierThreeAudioRecording = (
   return recorded[0].id
 }
 
+export { recordedAudioContentSchema, recordedAudioContentScript, assessRecordedAudioContent } from "./recorded-audio-content"
+
+type WindowRecordingSample = {
+  capturedFrames: number | null; droppedFrames: number | null; overrunFrames: number | null
+  writerReturnMaxMs: number; writerReturnDeliveryMaxMs: number
+  writerReturnDeliveryWorst: { returnedAtEpochMs: number; receivedAtEpochMs: number } | null
+  nativeArrivalGapMaxMs: number; writerOldestOutstandingMs: number; peakQueuedFrames: number
+  termination: { cause: string } | null
+  writerTiming: { storage: { channelWriteMs: { max: number } } | null } | null
+}
+const windowObservationSchema = z.object({
+  raf: z.record(z.string(), z.number().int().nonnegative()),
+  visibility: z.array(z.object({ label: z.string(), state: z.string(), epochMs: z.number() }).strict()).max(32),
+  losses: z.array(z.object({ label: z.string(), error: z.string().max(256), epochMs: z.number() }).strict()).max(8),
+}).strict()
+type WindowObservation = z.infer<typeof windowObservationSchema>
+// Cumulative maxima cannot be split by state; the worst is attributed only when its timestamp falls inside the state.
+export const summarizeRecordingWindowState = (
+  state: RecordingWindowState, startedAtEpochMs: number, endedAtEpochMs: number, sampledVisibility: string,
+  before: WindowRecordingSample, afterTransition: WindowRecordingSample, after: WindowRecordingSample, observation: WindowObservation,
+) => {
+  const worst = after.writerReturnDeliveryWorst
+  const worstInState = worst !== null && worst.returnedAtEpochMs >= startedAtEpochMs && worst.receivedAtEpochMs <= endedAtEpochMs
+  return {
+    state, durationMs: endedAtEpochMs - startedAtEpochMs, sampledVisibility,
+    visibilityTransitions: observation.visibility.filter((entry) => entry.label === state).map((entry) => entry.state),
+    rafCallbacks: observation.raf[state] ?? 0,
+    hostLosses: observation.losses.filter((entry) => entry.label === state)
+      .map((entry) => ({ error: entry.error, afterStateStartMs: entry.epochMs - startedAtEpochMs })),
+    terminationAfterTransition: afterTransition.termination?.cause ?? null,
+    terminationAtEnd: after.termination?.cause ?? null,
+    capturedFramesAtEnd: after.capturedFrames,
+    capturedFrames: (after.capturedFrames ?? 0) - (before.capturedFrames ?? 0),
+    droppedFrames: (after.droppedFrames ?? 0) - (before.droppedFrames ?? 0),
+    overrunFrames: (after.overrunFrames ?? 0) - (before.overrunFrames ?? 0),
+    writerReturnDeliveryWorstInStateMs: worstInState ? worst.receivedAtEpochMs - worst.returnedAtEpochMs : null,
+    writerReturnDeliveryMaxMsUpperBound: after.writerReturnDeliveryMaxMs,
+    writerReturnMaxMsCumulative: after.writerReturnMaxMs,
+    storageChannelWriteMaxMsCumulative: after.writerTiming?.storage?.channelWriteMs.max ?? null,
+    nativeArrivalGapMaxMsCumulative: after.nativeArrivalGapMaxMs,
+    writerOldestOutstandingMsCumulative: after.writerOldestOutstandingMs,
+    peakQueuedFramesCumulative: after.peakQueuedFrames,
+  }
+}
+// Host-loss reasons are observed through the existing read-only preload subscription.
+const windowObservationInstallScript = "(()=>{const o={label:'visible',raf:{},visibility:[],losses:[]};window.__tier3WindowObservation=o;const tick=()=>{o.raf[o.label]=(o.raf[o.label]??0)+1;o.frame=requestAnimationFrame(tick)};o.frame=requestAnimationFrame(tick);o.onVisibility=()=>{if(o.visibility.length<32)o.visibility.push({label:o.label,state:document.visibilityState,epochMs:Date.now()})};document.addEventListener('visibilitychange',o.onVisibility);o.offLoss=window.dawDesktop.audioHost.session.onLoss((error)=>{if(o.losses.length<8)o.losses.push({label:o.label,error:String(error??'').slice(0,256),epochMs:Date.now()})});return true})()"
+const windowObservationCollectScript = "(()=>{const o=window.__tier3WindowObservation;if(!o)return null;cancelAnimationFrame(o.frame);document.removeEventListener('visibilitychange',o.onVisibility);o.offLoss();delete window.__tier3WindowObservation;return JSON.stringify({raf:o.raf,visibility:o.visibility,losses:o.losses})})()"
+
 type Json = string | number | boolean | null | Json[] | { readonly [key: string]: Json }
+// agent-browser may JSON-encode eval results, so string results arrive encoded zero or more times.
+const parseNestedJson = (output: string): Json => {
+  let value: Json = output.trim()
+  for (let depth = 0; depth < 4; depth += 1) {
+    const encoded = z.string().safeParse(value)
+    if (!encoded.success) return value
+    try { value = JSON.parse(encoded.data) } catch { return value }
+  }
+  return value
+}
 type Command = (args: readonly string[], input?: string) => Promise<Json>
 type Data = <T>(schema: z.ZodType<T>, value: Json) => T
 
@@ -130,6 +239,7 @@ export const runTierThree = async (
   sampleProcesses: () => Promise<ProcessMetric[]>,
   aroundRecording?: <T>(work: () => Promise<T>) => Promise<T>,
   startRecordingTrace?: () => Promise<void>,
+  recordingWindow?: { control: OwnedWindowControl; states: readonly RecordingWindowState[] },
 ) => {
   const diagnostics = async (stage: string) => {
     try {
@@ -321,6 +431,7 @@ export const runTierThree = async (
   await browserCommand(session, ["eval", `(()=>{const button=document.querySelector(${JSON.stringify(`button[aria-label="Arm track ${audioIndex} for recording"]`)});if(!(button instanceof HTMLButtonElement))throw new Error('Audio track record-arm control is unavailable.');button.click();return true})()`])
   const record = async () => {
   const recordingBefore = await diagnostics("before-recording")
+  await browserCommand(session, ["eval", `(async()=>{delete window.__dawRecordingDeliveryEvidence;delete window.__dawRecordingMainDeliveryEvidence;const clock=await ${deliveryClockScript};window.__tier3RecordingDeliveryClock=clock;window.__dawRecordingDeliveryTraceEnabled=clock!==null;return true})()`])
   await browserCommand(session, ["eval", taskSourceProbeScript()])
   if (aroundRecording) await browserCommand(session, ["eval", `(()=>{const evidence={supported:false,truncated:false,intervals:[]};window.__tier3LongTasks=evidence;if(!PerformanceObserver.supportedEntryTypes?.includes('longtask'))return;const observer=new PerformanceObserver((list)=>{for(const entry of list.getEntries()){if(evidence.intervals.length===64){evidence.truncated=true;continue}evidence.intervals.push({startEpochMs:performance.timeOrigin+entry.startTime,endEpochMs:performance.timeOrigin+entry.startTime+entry.duration})}});observer.observe({type:'longtask'});evidence.supported=true;window.__tier3LongTaskObserver=observer})()`])
   await browserCommand(session, ["find", "role", "button", "click", "--name", "Start recording"])
@@ -332,7 +443,46 @@ export const runTierThree = async (
   }, startRecordingTrace ?? (async () => undefined))
   if (!recordingEarly) throw new Error("Five-second recording snapshot is unavailable.")
   const recordingEarlyActive = (await browserCommand(session, ["eval", "document.querySelector('button[aria-label=\"Stop recording\"]') !== null"])).trim() === "true"
-  if (recordingEarlyActive) await new Promise((resolve) => setTimeout(resolve, 55_000))
+  const windowStates: ReturnType<typeof summarizeRecordingWindowState>[] = []
+  if (recordingEarlyActive && recordingWindow) {
+    // Each requested state lasts 25 s; the remainder of the 55 s after the five-second sample stays
+    // visible so the take length matches the foreground run.
+    const windowScheduleStartedAtEpochMs = Date.now()
+    await browserCommand(session, ["eval", windowObservationInstallScript])
+    let observation: WindowObservation = { raf: {}, visibility: [], losses: [] }
+    const samples: { state: RecordingWindowState; startedAtEpochMs: number; endedAtEpochMs: number; visibility: string; before: WindowRecordingSample; afterTransition: WindowRecordingSample; after: WindowRecordingSample }[] = []
+    try {
+      let before: WindowRecordingSample = recordingEarly.recording
+      for (const state of recordingWindow.states) {
+        await browserCommand(session, ["eval", `window.__tier3WindowObservation.label=${JSON.stringify(state)}`])
+        const startedAtEpochMs = Date.now()
+        await recordingWindow.control.enter(state, 40)
+        const afterTransition = (await diagnostics(`recording-${state}-transition`)).recording
+        await new Promise((resolve) => setTimeout(resolve, Math.max(0, startedAtEpochMs + 2_000 - Date.now())))
+        const visibility = z.string().parse(parseNestedJson(await browserCommand(session, ["eval", "document.visibilityState"])))
+        await new Promise((resolve) => setTimeout(resolve, Math.max(0, startedAtEpochMs + 25_000 - Date.now())))
+        const after = (await diagnostics(`recording-${state}`)).recording
+        const endedAtEpochMs = Date.now()
+        await recordingWindow.control.restore()
+        await browserCommand(session, ["eval", "window.__tier3WindowObservation.label='visible'"])
+        samples.push({ state, startedAtEpochMs, endedAtEpochMs, visibility, before, afterTransition, after })
+        before = after
+        if (after.termination) break
+      }
+      if (!before.termination) {
+        await new Promise((resolve) => setTimeout(resolve, Math.max(5_000, windowScheduleStartedAtEpochMs + 55_000 - Date.now())))
+      }
+    } finally {
+      await recordingWindow.control.restore()
+      const collected = await browserCommand(session, ["eval", windowObservationCollectScript]).catch(() => "null")
+      const parsed = windowObservationSchema.safeParse(parseNestedJson(collected))
+      if (parsed.success) observation = parsed.data
+    }
+    for (const sample of samples) {
+      windowStates.push(summarizeRecordingWindowState(sample.state, sample.startedAtEpochMs, sample.endedAtEpochMs,
+        sample.visibility, sample.before, sample.afterTransition, sample.after, observation))
+    }
+  } else if (recordingEarlyActive) await new Promise((resolve) => setTimeout(resolve, 55_000))
   const recordingDuring = await diagnostics("after-sixty-seconds-recording")
   const taskSources = parseTaskSourceEvidence(await browserCommand(session, ["eval", "(()=>{const probe=window.__tier3TaskSourceProbe;delete window.__tier3TaskSourceProbe;return JSON.stringify(probe.stop())})()"]))
   const longTasks = aroundRecording ? parseLongTaskEvidence(await browserCommand(session, ["eval", `(()=>{const observer=window.__tier3LongTaskObserver;if(observer){const evidence=window.__tier3LongTasks;for(const entry of observer.takeRecords()){if(evidence.intervals.length===64){evidence.truncated=true;continue}evidence.intervals.push({startEpochMs:performance.timeOrigin+entry.startTime,endEpochMs:performance.timeOrigin+entry.startTime+entry.duration})}observer.disconnect()}delete window.__tier3LongTaskObserver;const evidence=window.__tier3LongTasks;delete window.__tier3LongTasks;return JSON.stringify(evidence)})()`])) : null
@@ -358,13 +508,25 @@ export const runTierThree = async (
         failure: recordingDuring.recording.lastFailurePresent,
       },
       newClipCount: snapshot.clips.filter((clip) => !beforeClips.some((before) => before.id === clip.id)).length,
+      windowStates,
     })}`, longTasks, longTasks ? correlateRecordingStall(recordingDuring.recording.writerReturnDeliveryWorst, longTasks) : "unknown", issue48LiveReEnableReason, initial, taskSources, nativeAtPlayback)
   }
   const recordedClipId = validateTierThreeAudioRecording(beforeClips, snapshot.clips, audioTrack.id, capturedFrames, recordingDuring.recording.activeSampleRate ?? 0)
   if (recordingDuring.recording.droppedFrames !== 0 || recordingDuring.recording.overrunFrames !== 0
     || recordingDuring.recording.lastFailurePresent) throw new Error("Native recording diagnostics reported dropped frames, overruns, or failure.")
-  return { recordedClipId, capturedFrames, recordingDuring, longTasks, taskSources,
+  return { recordedClipId, capturedFrames, recordingDuring, longTasks, taskSources, windowStates,
     stallCorrelation: longTasks ? correlateRecordingStall(recordingDuring.recording.writerReturnDeliveryWorst, longTasks) : "unknown" }
+  }
+  const collectRecordingDelivery = async () => parseRecordingDeliveryEvidence(
+    await browserCommand(session, ["eval", `(async()=>{const clockAfter=await ${deliveryClockScript};const evidence={trace:window.__dawRecordingDeliveryEvidence??null,mainTrace:window.__dawRecordingMainDeliveryEvidence??null,clockBefore:window.__tier3RecordingDeliveryClock??null,clockAfter};delete window.__dawRecordingDeliveryTraceEnabled;delete window.__dawRecordingDeliveryEvidence;delete window.__dawRecordingMainDeliveryEvidence;delete window.__tier3RecordingDeliveryClock;return JSON.stringify(evidence)})()`]))
+  const saveRecordingDelivery = async (evidence: RecordingDeliveryEvidence) => {
+    // Independent of run.ts's abbreviated failure message/console tail. Private,
+    // bounded scalar evidence survives renderer reload and every failure gate.
+    const directory = await mkdtemp("/tmp/daw-recording-delivery-")
+    const file = path.join(directory, "delivery.json")
+    await writeFile(file, JSON.stringify({ ...evidence, clockComparison: compareRecordingDeliveryClocks(evidence.clockBefore, evidence.clockAfter) }), { mode: 0o600 })
+    console.error(`[quiet-recording-delivery-evidence] ${file}`)
+    return file
   }
   const captured = await (async () => {
     try {
@@ -374,10 +536,34 @@ export const runTierThree = async (
         }
       }) : await record()
     } catch (error) {
-      throw retainTierThreeRecordingFailure(error, issue48LiveReEnableReason, initial, nativeAtPlayback)
+      const failure = retainTierThreeRecordingFailure(error, issue48LiveReEnableReason, initial, nativeAtPlayback)
+      failure.recordingDelivery = await collectRecordingDelivery().catch(() => null)
+      if (failure.recordingDelivery) {
+        const file = await saveRecordingDelivery(failure.recordingDelivery).catch(() => null)
+        if (file) failure.message = `Recording delivery evidence: ${file}; ${failure.message}`
+      }
+      throw failure
     }
   })()
-  const { recordedClipId, capturedFrames, recordingDuring, longTasks, taskSources, stallCorrelation } = captured
+  const { recordedClipId, capturedFrames, recordingDuring, longTasks, taskSources, stallCorrelation, windowStates } = captured
+  const recordingDelivery = await collectRecordingDelivery()
+  const recordingDeliveryEvidencePath = await saveRecordingDelivery(recordingDelivery)
+  await browserCommand(session, ["reload"])
+  await waitForBrowserValue(session, `new URL(location.href).searchParams.get('projectId') === ${JSON.stringify(projectId)} && document.querySelector('[data-timeline-left-browser="1"]') !== null ? true : null`, 30_000)
+  snapshot = await readSnapshot()
+  if (validateTierThreeAudioRecording(beforeClips, snapshot.clips, audioTrack.id, capturedFrames,
+    recordingDuring.recording.activeSampleRate ?? 0) !== recordedClipId) {
+    throw new Error("Native recording clip changed after project reload.")
+  }
+  const assetId = snapshot.clips.find((clip) => clip.id === recordedClipId)?.source?.assetId
+  const asset = snapshot.assets.find((entry) => entry.id === assetId)
+  if (!assetId || !asset || asset.sourceKind !== "recording") throw new Error("Reloaded recording clip has no recording asset.")
+  const audioContent = recordedAudioContentSchema.parse(parseNestedJson(
+    await browserCommand(session, ["eval", recordedAudioContentScript(projectId, assetId)])))
+  const audioContentFailures = assessRecordedAudioContent(asset, audioContent, capturedFrames, recordingDuring.recording.activeSampleRate ?? 0)
+  if (audioContentFailures.length > 0) {
+    throw new Error(`Reloaded recording audio does not match its asset: ${audioContentFailures.join(", ")}; ${JSON.stringify(audioContent)}`)
+  }
   return {
     status: "complete" as const,
     plugin: { name: instance.identity.name, version: instance.identity.version, instanceId: instance.instanceId, health: instance.health.state },
@@ -387,7 +573,8 @@ export const runTierThree = async (
       nativeCallbackIncrease: afterPlayback.native.diagnostics.callbacks - beforePlayback.native.diagnostics.callbacks,
       processes: duringPlayback,
     },
-    recording: { trackId: audioTrack.id, clipId: recordedClipId, capturedFrames, sampleRate: recordingDuring.recording.activeSampleRate,
+    recording: { trackId: audioTrack.id, clipId: recordedClipId, persistedAfterReload: true, capturedFrames, sampleRate: recordingDuring.recording.activeSampleRate,
+      persistedAudio: { assetId, ...audioContent }, windowStates, recordingDelivery, recordingDeliveryEvidencePath,
       writerReturnDeliveryWorst: recordingDuring.recording.writerReturnDeliveryWorst, longTasks, stallCorrelation,
       taskSources: analyzeTaskSourceEvidence(taskSources, recordingDuring.recording.writerReturnDeliveryWorst) },
     issue48LiveReEnableCertification,

@@ -6,6 +6,7 @@ export const portableWasmBuildInputPaths = [
   'native/CMakeLists.txt',
   'native/audio-core/CMakeLists.txt',
   'native/audio-core/include/daw/audio_core.h',
+  'native/audio-core/include/daw/graph_latency.h',
   'native/audio-core/generated/processor_contract_generated.h',
   'native/audio-core/src/audio_core.cpp',
   'native/audio-core/src/wasm_entry.cpp',

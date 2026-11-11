@@ -9,7 +9,7 @@ import {
   type ProjectManifestPluginArtifact,
 } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
+import { withLocalProjectAssetLock, withLocalProjectAssetLockIfAvailable, withLocalStorageRootLock, withLocalProjectCleanupRunner } from '~/lib/local-project-asset-lock'
 import { buildTimelineTrackRow } from '~/lib/timeline-repository/track-row-builder'
 import { normalizeMixedEffectEntityRows } from '~/lib/mixed-effect-order'
 import { z } from 'zod'
@@ -18,7 +18,7 @@ export const LOCAL_PROJECT_SCHEMA_VERSION = 2
 export const LOCAL_CONTROL_PROJECT_METADATA_KEY = 'control-project-metadata'
 
 const GLOBAL_DB_NAME = 'daw-browser-projects'
-const GLOBAL_DB_VERSION = 1
+const GLOBAL_DB_VERSION = 2
 const PROJECT_DB_VERSION = 6
 const PROJECT_DB_PREFIX = 'daw-browser-project-'
 
@@ -39,6 +39,7 @@ export type LocalProjectEntry = {
 export type LocalProjectDirectoryEntry = {
   projectId: string
   handle: FileSystemDirectoryHandle
+  copyingTo?: FileSystemDirectoryHandle
   updatedAt: number
 }
 
@@ -187,6 +188,16 @@ export type LocalControlProjectMetadata = {
 }
 
 type GlobalProjectsDB = DBSchema & {
+  projectDeletions: {
+    key: string
+    value: {
+      projectId: string
+      assetPaths: string[]
+      directoryHandle?: FileSystemDirectoryHandle
+      lastAttemptAt?: number
+      attemptCount?: number
+    }
+  }
   projects: {
     key: string
     value: LocalProjectEntry
@@ -259,7 +270,10 @@ export const createProjectId = createLocalProjectId
 export const getProjectDbName = (projectId: string) => `${PROJECT_DB_PREFIX}${projectId}`
 
 const now = () => Date.now()
+// Connection and runner caches are process-local; Web Locks coordinate storage across tabs.
 let globalDbPromise: Promise<IDBPDatabase<GlobalProjectsDB>> | undefined
+let deletionCleanupPromise: Promise<void> | undefined
+const MAX_DELETION_CLEANUPS_PER_RUN = 8
 const projectDbPromises = new Map<string, Promise<IDBPDatabase<ProjectDB>>>()
 const normalizeStoredEntityRows = (
   rows: readonly LocalProjectEntityRow[],
@@ -365,19 +379,65 @@ const reconcileProjectCache = async (project: LocalProjectEntry) => {
   return next
 }
 
+export class LocalProjectCatalogVersionError extends Error {
+  constructor() {
+    super('Local projects were saved by a newer version of this app. Update or reload the app, then retry. Your projects have not been changed.')
+    this.name = 'LocalProjectCatalogVersionError'
+  }
+}
+
+export class LocalProjectCatalogBlockedError extends Error {
+  constructor() {
+    super('Local projects could not be loaded. Close or reload other tabs using this app, then retry.')
+    this.name = 'LocalProjectCatalogBlockedError'
+  }
+}
+
+export const isLocalProjectCatalogOpenError = (error: Error): error is
+  LocalProjectCatalogVersionError | LocalProjectCatalogBlockedError => (
+  error instanceof LocalProjectCatalogVersionError || error instanceof LocalProjectCatalogBlockedError
+)
+
+export const localProjectCatalogOpenError = (error: Error): Error => {
+  if (error instanceof DOMException && error.name === 'VersionError') {
+    return new LocalProjectCatalogVersionError()
+  }
+  return error
+}
+
 const openGlobalProjectsDb = () => {
   if (globalDbPromise) return globalDbPromise
-  const promise = openDB<GlobalProjectsDB>(GLOBAL_DB_NAME, GLOBAL_DB_VERSION, {
-    upgrade(db) {
-      if (!db.objectStoreNames.contains('projects')) {
-        const projects = db.createObjectStore('projects', { keyPath: 'id' })
-        projects.createIndex('by-last-opened', 'lastOpenedAt')
-        projects.createIndex('by-updated-at', 'updatedAt')
-      }
-      if (!db.objectStoreNames.contains('directoryHandles')) {
-        db.createObjectStore('directoryHandles', { keyPath: 'projectId' })
-      }
-    },
+  const promise = new Promise<IDBPDatabase<GlobalProjectsDB>>((resolve, reject) => {
+    let blocked = false
+    void openDB<GlobalProjectsDB>(GLOBAL_DB_NAME, GLOBAL_DB_VERSION, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains('projects')) {
+          const projects = db.createObjectStore('projects', { keyPath: 'id' })
+          projects.createIndex('by-last-opened', 'lastOpenedAt')
+          projects.createIndex('by-updated-at', 'updatedAt')
+        }
+        if (!db.objectStoreNames.contains('directoryHandles')) {
+          db.createObjectStore('directoryHandles', { keyPath: 'projectId' })
+        }
+        if (!db.objectStoreNames.contains('projectDeletions')) {
+          db.createObjectStore('projectDeletions', { keyPath: 'projectId' })
+        }
+      },
+      blocked() {
+        blocked = true
+        reject(new LocalProjectCatalogBlockedError())
+      },
+      blocking(_currentVersion, _blockedVersion, event) {
+        if (globalDbPromise === promise) globalDbPromise = undefined
+        const target = event.target
+        if (target instanceof IDBDatabase) target.close()
+      },
+    }).then((db) => {
+      // IndexedDB cannot cancel a blocked open request. Close its eventual
+      // connection so a failed attempt cannot block a later retry or upgrade.
+      if (blocked) db.close()
+      else resolve(db)
+    }, (error: Error) => reject(localProjectCatalogOpenError(error)))
   })
   globalDbPromise = promise
   void promise.catch(() => {
@@ -460,12 +520,14 @@ export const openLocalProjectDb = (projectId: string): Promise<IDBPDatabase<Proj
 
 export const listLocalProjects = async (): Promise<LocalProjectEntry[]> => {
   const db = await openGlobalProjectsDb()
+  startLocalProjectDeletionCleanup(db)
   const projects = await db.getAllFromIndex('projects', 'by-last-opened')
   return (await Promise.all(projects.map(reconcileProjectCache))).reverse()
 }
 
 export const getLocalProject = async (projectId: string): Promise<LocalProjectEntry | undefined> => {
   const db = await openGlobalProjectsDb()
+  startLocalProjectDeletionCleanup(db)
   const project = await db.get('projects', projectId)
   return project ? reconcileProjectCache(project) : undefined
 }
@@ -509,6 +571,7 @@ export const createLocalProject = async (name: string): Promise<LocalProjectEntr
 
 export const markLocalProjectOpened = async (projectId: string): Promise<LocalProjectEntry | undefined> => {
   const db = await openGlobalProjectsDb()
+  startLocalProjectDeletionCleanup(db)
   const project = await db.get('projects', projectId)
   if (!project) return undefined
   const next = { ...project, lastOpenedAt: now() }
@@ -580,17 +643,21 @@ export const importLocalProjectUnlocked = async (
   const projectDb = await openLocalProjectDb(project.id)
   const entities = normalizeStoredEntityRows(rows.entities)
   const projectState = normalizedProjectState(project, rows.projectState)
-  const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'syncState', 'externalPluginArtifacts'], 'readwrite')
-  await Promise.all([
-    ...entities.map((row) => tx.objectStore('entities').put(row)),
-    ...rows.assets.map((row) => tx.objectStore('assets').put(row)),
-    ...projectState.map((row) => tx.objectStore('projectState').put(row)),
-    ...rows.syncState.map((row) => tx.objectStore('syncState').put(row)),
-    ...(rows.externalPluginArtifacts ?? []).map((row) => tx.objectStore('externalPluginArtifacts').put(row)),
-    tx.done,
-  ])
-  const globalDb = await openGlobalProjectsDb()
-  await globalDb.put('projects', project)
+  // The caller owns the project lock. Only reference publication takes root;
+  // archive decoding and file materialization stay outside this critical section.
+  await withLocalStorageRootLock(async () => {
+    const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'syncState', 'externalPluginArtifacts'], 'readwrite')
+    await Promise.all([
+      ...entities.map((row) => tx.objectStore('entities').put(row)),
+      ...rows.assets.map((row) => tx.objectStore('assets').put(row)),
+      ...projectState.map((row) => tx.objectStore('projectState').put(row)),
+      ...rows.syncState.map((row) => tx.objectStore('syncState').put(row)),
+      ...(rows.externalPluginArtifacts ?? []).map((row) => tx.objectStore('externalPluginArtifacts').put(row)),
+      tx.done,
+    ])
+    const globalDb = await openGlobalProjectsDb()
+    await globalDb.put('projects', project)
+  })
 }
 
 export const importLocalProject = (
@@ -622,27 +689,29 @@ const replaceLocalProjectUnlocked = async (
   const staleAssetPaths = previousAssetPaths.filter((path) => !nextAssetPaths.has(path))
   const projectState = normalizedProjectState(project, rows.projectState)
   const entities = normalizeStoredEntityRows(rows.entities)
-  const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'history', 'syncState', 'externalPluginArtifacts', 'controlState', 'controlCommits', 'controlApprovals', 'controlRecoveries', 'controlAssetGc'], 'readwrite')
-  await Promise.all([
-    tx.objectStore('entities').clear(),
-    tx.objectStore('assets').clear(),
-    tx.objectStore('projectState').clear(),
-    tx.objectStore('history').clear(),
-    tx.objectStore('syncState').clear(),
-    tx.objectStore('externalPluginArtifacts').clear(),
-    tx.objectStore('controlState').clear(),
-    tx.objectStore('controlCommits').clear(),
-    tx.objectStore('controlApprovals').clear(),
-    tx.objectStore('controlRecoveries').clear(),
-    tx.objectStore('controlAssetGc').clear(),
-    ...entities.map((row) => tx.objectStore('entities').put(row)),
-    ...rows.assets.map((row) => tx.objectStore('assets').put(row)),
-    ...projectState.map((row) => tx.objectStore('projectState').put(row)),
-    ...rows.syncState.map((row) => tx.objectStore('syncState').put(row)),
-    ...(rows.externalPluginArtifacts ?? []).map((row) => tx.objectStore('externalPluginArtifacts').put(row)),
-    tx.done,
-  ])
-  await globalDb.put('projects', project)
+  await withLocalStorageRootLock(async () => {
+    const tx = projectDb.transaction(['entities', 'assets', 'projectState', 'history', 'syncState', 'externalPluginArtifacts', 'controlState', 'controlCommits', 'controlApprovals', 'controlRecoveries', 'controlAssetGc'], 'readwrite')
+    await Promise.all([
+      tx.objectStore('entities').clear(),
+      tx.objectStore('assets').clear(),
+      tx.objectStore('projectState').clear(),
+      tx.objectStore('history').clear(),
+      tx.objectStore('syncState').clear(),
+      tx.objectStore('externalPluginArtifacts').clear(),
+      tx.objectStore('controlState').clear(),
+      tx.objectStore('controlCommits').clear(),
+      tx.objectStore('controlApprovals').clear(),
+      tx.objectStore('controlRecoveries').clear(),
+      tx.objectStore('controlAssetGc').clear(),
+      ...entities.map((row) => tx.objectStore('entities').put(row)),
+      ...rows.assets.map((row) => tx.objectStore('assets').put(row)),
+      ...projectState.map((row) => tx.objectStore('projectState').put(row)),
+      ...rows.syncState.map((row) => tx.objectStore('syncState').put(row)),
+      ...(rows.externalPluginArtifacts ?? []).map((row) => tx.objectStore('externalPluginArtifacts').put(row)),
+      tx.done,
+    ])
+    await globalDb.put('projects', project)
+  })
   notifyLocalProjectChanged(project.id)
   await deleteLocalProjectAssetFiles(project.id, directoryEntry?.handle, staleAssetPaths)
 }
@@ -674,50 +743,209 @@ const deleteLocalProjectAssetFiles = async (
   projectId: string,
   directoryHandle: FileSystemDirectoryHandle | undefined,
   assetPaths: string[],
-  options: { removeProjectRoot?: boolean } = {},
 ): Promise<void> => {
-  await Promise.all([
-    (async () => {
+  if (assetPaths.length === 0) return
+  const projectDir = await (async () => {
+    const root = await navigator.storage.getDirectory()
+    return root.getDirectoryHandle(projectId)
+  })().catch(() => undefined)
+  for (const directory of [projectDir, directoryHandle]) {
+    if (!directory) continue
+    await withLocalStorageRootLock(async () => {
       try {
-        const root = await navigator.storage.getDirectory()
-        if (options.removeProjectRoot) {
-          await root.removeEntry(projectId, { recursive: true })
-          return
+        const retained = await retainedAssetPaths(directory)
+        const assetsDir = await directory.getDirectoryHandle('assets')
+        for (const path of assetPaths) {
+          if (!retained.has(path)) await assetsDir.removeEntry(path).catch(ignoreMissingFile)
         }
-        const projectDir = await root.getDirectoryHandle(projectId)
-        const assetsDir = await projectDir.getDirectoryHandle('assets')
-        await Promise.all(assetPaths.map((path) => assetsDir.removeEntry(path).catch(() => undefined)))
       } catch {}
-    })(),
-    (async () => {
-      if (!directoryHandle) return
-      try {
-        const assetsDir = await directoryHandle.getDirectoryHandle('assets')
-        await Promise.all(assetPaths.map((path) => assetsDir.removeEntry(path).catch(() => undefined)))
-      } catch {}
-    })(),
-  ])
+    })
+  }
 }
 
 export const deleteLocalProjectUnlocked = async (projectId: string): Promise<void> => {
   const db = await openGlobalProjectsDb()
+  if (await db.get('projectDeletions', projectId) && !await db.get('projects', projectId)) {
+    await finishLocalProjectDeletion(projectId)
+    return
+  }
   const directoryEntry = await db.get('directoryHandles', projectId)
-  const dbName = getProjectDbName(projectId)
   const projectDb = await openLocalProjectDb(projectId)
-  try {
-    const assetPaths = (await projectDb.getAll('assets')).map((asset) => asset.storagePath)
-    await deleteLocalProjectAssetFiles(projectId, directoryEntry?.handle, assetPaths, { removeProjectRoot: true })
-    const tx = db.transaction(['projects', 'directoryHandles'], 'readwrite')
+  const assetPaths = [
+    ...(await projectDb.getAll('assets')).map((asset) => asset.storagePath),
+    ...(await projectDb.getAll('controlAssetGc')).map((asset) => asset.storagePath),
+  ]
+  // Catalog removal and the durable cleanup job must commit before touching files.
+  await withLocalStorageRootLock(async () => {
+    const tx = db.transaction(['projects', 'directoryHandles', 'projectDeletions'], 'readwrite')
     await Promise.all([
       tx.objectStore('projects').delete(projectId),
       tx.objectStore('directoryHandles').delete(projectId),
+      tx.objectStore('projectDeletions').put({
+        projectId, assetPaths, directoryHandle: directoryEntry?.handle,
+      }),
       tx.done,
     ])
-  } finally {
-    projectDb.close()
-    projectDbPromises.delete(dbName)
+  })
+  await finishLocalProjectDeletion(projectId)
+}
+
+const ignoreMissingFile = (error: Error) => {
+  if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error
+}
+
+const startLocalProjectDeletionCleanup = (db: IDBPDatabase<GlobalProjectsDB>): void => {
+  if (deletionCleanupPromise) return
+  // A list/open starts one bounded pass. Failed jobs wait for the next user
+  // operation, never an automatic retry loop, and cannot reject the listing.
+  deletionCleanupPromise = withLocalProjectCleanupRunner(async () => {
+    await recoverAbandonedDirectoryCopies(db)
+    const jobs = (await db.getAll('projectDeletions'))
+      .sort((left, right) => (left.lastAttemptAt ?? 0) - (right.lastAttemptAt ?? 0)
+        || left.projectId.localeCompare(right.projectId))
+      .slice(0, MAX_DELETION_CLEANUPS_PER_RUN)
+    for (const { projectId } of jobs) {
+      const acquired = await withLocalProjectAssetLockIfAvailable(projectId, () => finishLocalProjectDeletion(projectId))
+      if (!acquired) {
+        const job = await db.get('projectDeletions', projectId)
+        if (job) await db.put('projectDeletions', { ...job, lastAttemptAt: now() })
+      }
+    }
+  }).catch((error: Error) => {
+    console.warn('Local project cleanup could not be completed.', error)
+  }).finally(() => { deletionCleanupPromise = undefined })
+}
+
+const recoverAbandonedDirectoryCopies = async (db: IDBPDatabase<GlobalProjectsDB>): Promise<void> => {
+  const reservations = (await db.getAll('directoryHandles')).filter((entry) => entry.copyingTo)
+  for (const { projectId } of reservations) {
+    // Copies hold their owner lock until every file settles. Web Locks release
+    // on realm death; skip a live owner rather than delaying this cleanup pass.
+    await withLocalProjectAssetLockIfAvailable(projectId, () => withLocalStorageRootLock(async () => {
+      const current = await db.get('directoryHandles', projectId)
+      if (!current?.copyingTo) return
+      const root = await navigator.storage.getDirectory()
+      const opfs = await root.getDirectoryHandle(projectId).catch((error: Error) => {
+        ignoreMissingFile(error)
+        return undefined
+      })
+      // OPFS copies temporarily publish their source root as a directory entry.
+      // Restore implicit OPFS storage, or retain the original chosen folder.
+      const handle = opfs && await opfs.isSameEntry(current.handle) ? undefined : current.handle
+      await saveProjectDirectoryHandleUnlocked(projectId, handle)
+    }))
   }
-  await deleteDB(dbName)
+}
+
+/** Caller holds the project asset lock. Recheck root ownership under the global lock. */
+const finishLocalProjectDeletion = async (projectId: string): Promise<void> => {
+  try {
+    const db = await openGlobalProjectsDb()
+    const job = await db.get('projectDeletions', projectId)
+    if (!job) return
+    // Persist before attempting I/O, including failures and interrupted passes.
+    await db.put('projectDeletions', {
+      ...job, lastAttemptAt: now(), attemptCount: (job.attemptCount ?? 0) + 1,
+    })
+    const filesRemoved = await withLocalStorageRootLock(() => removeDeletedProjectFiles(projectId))
+    if (!filesRemoved) return
+    // Database teardown needs only the project lock, not the storage-root lock.
+    const dbName = getProjectDbName(projectId)
+    const cached = await projectDbPromises.get(dbName)
+    cached?.close()
+    projectDbPromises.delete(dbName)
+    // Another tab can hold an old connection. Leave the durable job in place
+    // instead of keeping an already committed deletion waiting.
+    const deleted = await new Promise<boolean>((resolve, reject) => {
+      void deleteDB(dbName, { blocked: () => resolve(false) }).then(() => resolve(true), reject)
+    })
+    if (!deleted) return
+    await db.delete('projectDeletions', projectId)
+  } catch (error) {
+    // Logical deletion already succeeded. Retain the durable job for another pass.
+    console.warn('Local project cleanup could not be completed.', error)
+  }
+}
+
+/** Caller holds root, so the atomic reference snapshots stay valid until removal. */
+export const retainedAssetPaths = async (
+  directory: FileSystemDirectoryHandle | undefined,
+  owner?: { projectId: string; excludingAssetGcId?: string },
+): Promise<Set<string>> => {
+  const db = await openGlobalProjectsDb()
+  const handles = await db.getAll('directoryHandles')
+  const retained = new Set<string>()
+  const projectIds = new Set<string>(owner ? [owner.projectId] : [])
+  // Resolve implicit OPFS only when other directory references need comparison.
+  const root = directory ?? (handles.length > 0 && owner ? await getProjectOpfsRoot(owner.projectId) : undefined)
+  if (root) {
+    const path = await (await navigator.storage.getDirectory()).resolve(root)
+    const implicitProjectId = path?.length === 1 ? path[0] : undefined
+    if (implicitProjectId && !handles.some((entry) => entry.projectId === implicitProjectId)
+      && await db.get('projects', implicitProjectId)) projectIds.add(implicitProjectId)
+  }
+  for (const entry of handles) {
+    if (root && (await root.isSameEntry(entry.handle)
+      || entry.copyingTo && await root.isSameEntry(entry.copyingTo))) projectIds.add(entry.projectId)
+  }
+  for (const projectId of projectIds) {
+    const otherDb = await openLocalProjectDb(projectId)
+    // A recovery moves GC retention into assets. Observe both stores at the
+    // same IDB revision, never the gap between two independent transactions.
+    const tx = otherDb.transaction(['assets', 'controlAssetGc'], 'readonly')
+    const [live, gc] = await Promise.all([
+      tx.objectStore('assets').getAll(),
+      tx.objectStore('controlAssetGc').getAll(),
+    ])
+    await tx.done
+    for (const asset of live) retained.add(asset.storagePath)
+    for (const asset of gc) {
+      if (projectId !== owner?.projectId || asset.id !== owner.excludingAssetGcId) retained.add(asset.storagePath)
+    }
+  }
+  return retained
+}
+
+const removeDeletedProjectFiles = async (projectId: string): Promise<boolean> => {
+  const db = await openGlobalProjectsDb()
+  const job = await db.get('projectDeletions', projectId)
+  if (!job) return false
+  // An explicitly restored project must never be removed by an older cleanup job.
+  if (await db.get('projects', projectId)) {
+    await db.delete('projectDeletions', projectId)
+    return false
+  }
+  const root = await navigator.storage.getDirectory()
+  const handles = await db.getAll('directoryHandles')
+  const roots = handles.flatMap((entry) => entry.copyingTo ? [entry.handle, entry.copyingTo] : [entry.handle])
+  const projectRoot = await root.getDirectoryHandle(projectId).catch((error: Error) => {
+    ignoreMissingFile(error)
+    return undefined
+  })
+  if (projectRoot) {
+    for (const handle of roots) {
+      // A chosen folder can even point inside another project's OPFS root.
+      // Retain that root while it is in use rather than deleting shared bytes.
+      if (await projectRoot.resolve(handle) !== null) return false
+    }
+  }
+  await root.removeEntry(projectId, { recursive: true }).catch(ignoreMissingFile)
+  if (job.directoryHandle) {
+    const directoryHandle = job.directoryHandle
+    // Directory-backed projects may share a folder. OPFS roots are project-scoped.
+    const retainedPaths = await retainedAssetPaths(directoryHandle)
+    try {
+      const assets = await directoryHandle.getDirectoryHandle('assets')
+      for (const path of job.assetPaths) {
+        // All publishers honor the root lock held throughout this snapshot and
+        // removal. Recheck each path immediately before deleting its bytes.
+        if (!retainedPaths.has(path)) await assets.removeEntry(path).catch(ignoreMissingFile)
+      }
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error
+    }
+  }
+  return true
 }
 
 export const deleteLocalProject = (projectId: string): Promise<void> => (
@@ -738,12 +966,15 @@ export const purgeLocalProjectCache = async (projectId: string): Promise<void> =
   await deleteDB(dbName)
 }
 
-export const saveProjectDirectoryHandle = async (
+/** Caller holds project, then storage-root lock for reference publication. */
+export const saveProjectDirectoryHandleUnlocked = async (
   projectId: string,
-  handle: FileSystemDirectoryHandle,
+  handle: FileSystemDirectoryHandle | undefined,
+  copyingTo?: FileSystemDirectoryHandle,
 ): Promise<void> => {
   const db = await openGlobalProjectsDb()
-  await db.put('directoryHandles', { projectId, handle, updatedAt: now() })
+  if (handle) await db.put('directoryHandles', { projectId, handle, copyingTo, updatedAt: now() })
+  else await db.delete('directoryHandles', projectId)
 }
 
 export const getProjectDirectoryHandle = async (

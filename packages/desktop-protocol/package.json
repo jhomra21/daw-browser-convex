@@ -6,10 +6,12 @@
   "exports": {
     ".": "./src/index.ts",
     "./application-menu": "./src/application-menu.ts",
+    "./ipc-channels": "./src/ipc-channels.ts",
     "./socket": "./src/socket.ts",
     "./reply-chunks": "./src/reply-chunks.ts",
     "./client": "./src/client.ts",
-    "./native-audio-host": "./src/native-audio-host.ts"
+    "./native-audio-host": "./src/native-audio-host.ts",
+    "./native-revision": "./src/native-revision.ts"
   },
   "scripts": {
     "check": "bun --bun tsc --noEmit"

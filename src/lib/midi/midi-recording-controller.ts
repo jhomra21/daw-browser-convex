@@ -1,4 +1,4 @@
-import type { Accessor } from 'solid-js'
+import { createSignal, onCleanup, type Accessor } from 'solid-js'
 import { buildLocalClip, pushClipCreateHistory } from '~/lib/clip-create'
 import { trackColorForClip } from '~/lib/clip-color'
 import { createMidiRecordingSession } from '~/lib/midi/recording-session'
@@ -20,6 +20,7 @@ import type { MidiAccessContextValue } from '~/context/midi-access'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { HistoryEntry } from '~/lib/undo/types'
+import { z } from 'zod'
 
 import type { TimelineSelectionController } from '~/hooks/useTimelineSelectionState'
 
@@ -40,6 +41,7 @@ export type MidiTrackRecordingControllerOptions = {
   requestTransportPlay: () => Promise<void>
   pauseTransport: () => void
   notify: (message: string) => void
+  onLocalSaveFailed?: (projectId: string, message: string) => void
   historyPush: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   setActiveRecordingTarget: (trackId: string | null) => void
   setProvisionalClipId: (clipId: string | null) => void
@@ -74,21 +76,46 @@ type ActiveTake = {
   lockHeartbeatTimer: number | null
 }
 
+type RetainedCancelledClip = {
+  projectId: string
+  userId: string | undefined
+  local: boolean
+  clipId: string
+  trackId: string
+  lockAcquired: boolean
+}
+
+const recordingUnlockResultSchema = z.object({ ok: z.boolean().optional() })
+const cancelledClipRemovalFailedNotice = 'Empty MIDI recording could not be removed from this project.'
+
 export const createMidiTrackRecordingController = (
-  options: MidiTrackRecordingControllerOptions,
+  rawOptions: MidiTrackRecordingControllerOptions,
   midiAccess: MidiAccessContextValue,
 ) => {
+  // Cleanup can fail after the owning Timeline unmounts; its notices must not reach the UI then.
+  let disposed = false
+  onCleanup(() => { disposed = true })
+  const options = {
+    ...rawOptions,
+    notify: (message: string) => { if (!disposed) rawOptions.notify(message) },
+  }
   let active: ActiveTake | null = null
   let startPromise: Promise<boolean> | null = null
   let settlingPromise: Promise<void> | null = null
-
+  let retainedCancelledClip: RetainedCancelledClip | null = null
+  let cancelledCleanupPromise: Promise<boolean> | null = null
+  const [isStarting, setIsStarting] = createSignal(false)
+  const [isSettling, setIsSettling] = createSignal(false)
+  const [hasPendingCleanup, setHasPendingCleanup] = createSignal(false)
+  let startGeneration = 0
+  let pendingStartGeneration = 0
   const timelineTime = (timeStamp: number) => (
     options.audioEngine.midiEventTimes(timeStamp)?.timelineTime ?? options.playheadSec()
   )
   const currentTimelineTime = () => timelineTime(performance.now())
 
   const projectClip = (take: ActiveTake, duration: number, midi: MidiClip) => {
-    if (options.projectId() !== take.projectId) return
+    if (active !== take || options.projectId() !== take.projectId) return
     options.removeLocalClips([take.clipId])
     options.insertLocalClip(take.track.id, buildLocalClip({
       id: take.clipId,
@@ -127,7 +154,48 @@ export const createMidiTrackRecordingController = (
     }
   }
 
-  const persist = async (take: ActiveTake, checkpoint: Checkpoint, final: boolean) => {
+  const retryCancelledClipCleanup = (): Promise<boolean> => {
+    if (cancelledCleanupPromise) return cancelledCleanupPromise
+    const retained = retainedCancelledClip
+    if (!retained) return Promise.resolve(true)
+    const cleanup = (async () => {
+      try {
+        if (retained.local) {
+          await createLocalTimelineRepository(retained.projectId).deleteClip(retained.clipId)
+        } else {
+          await deleteCloudClip(retained.projectId, retained.userId, retained.clipId)
+        }
+      } catch {
+        return false
+      }
+      if (retained.lockAcquired && !retained.local) {
+        try {
+          const response = await publishSharedTimelineOperation(retained.projectId, {
+            kind: 'tracks.unlock',
+            payload: { trackId: retained.trackId },
+          })
+          if (recordingUnlockResultSchema.safeParse(response).data?.ok !== true) return false
+          options.setTrackLock(retained.trackId, null)
+        } catch {
+          return false
+        }
+      }
+      if (retainedCancelledClip !== retained) return false
+      if (options.projectId() === retained.projectId) options.removeLocalClips([retained.clipId])
+      options.setProvisionalClipId(null)
+      retainedCancelledClip = null
+      setHasPendingCleanup(false)
+      return true
+    })()
+    cancelledCleanupPromise = cleanup
+    void cleanup.finally(() => {
+      if (cancelledCleanupPromise === cleanup) cancelledCleanupPromise = null
+    })
+    return cleanup
+  }
+
+  const persist = async (take: ActiveTake, checkpoint: Checkpoint, final: boolean, signal: AbortSignal) => {
+    if (signal.aborted || active !== take) return
     if (take.local) {
       const row = await createLocalTimelineRepository(take.projectId).updateClip({
         clipId: take.clipId,
@@ -148,14 +216,14 @@ export const createMidiTrackRecordingController = (
         },
       }
       try {
-        await publishSharedTimelineOperation(take.projectId, operation)
+        await publishSharedTimelineOperation(take.projectId, operation, { signal })
       } catch (error) {
         if (!final || isPermanentSharedOperationError(error) || !take.userId) throw error
         await enqueueSharedTimelineOperationOnFailure({ projectId: take.projectId, userId: take.userId, operation, error })
         options.notify('MIDI recording was queued and will retry when sync resumes.')
       }
     }
-    if (checkpoint.version < take.eventVersion) return
+    if (signal.aborted || active !== take || checkpoint.version < take.eventVersion) return
     projectClip(take, checkpoint.duration, checkpoint.midi)
   }
 
@@ -176,12 +244,47 @@ export const createMidiTrackRecordingController = (
     options.notify('MIDI recording could not be saved because the track lock was lost.')
   }
 
-  const settle = (): Promise<void> => {
-    if (settlingPromise) return settlingPromise
-    if (startPromise) return startPromise.then(() => settle())
+  const cancelStarting = () => {
+    if (!startPromise) return
+    startGeneration += 1
+  }
+
+  const retryRetainedCleanup = (): Promise<void> => retryCancelledClipCleanup().then((removed) => {
+    if (!removed) {
+      options.notify(cancelledClipRemovalFailedNotice)
+      throw new Error('MIDI recording remains protected until its cancelled clip can be removed.')
+    }
+  })
+
+  const settleWith = (settlement: Promise<void>): Promise<void> => {
+    setIsSettling(true)
+    settlingPromise = settlement.finally(() => {
+      settlingPromise = null
+      setIsSettling(false)
+    })
+    return settlingPromise
+  }
+
+  const settle = (stopTransport = true): Promise<void> => {
+    if (settlingPromise) {
+      cancelStarting()
+      return settlingPromise
+    }
+    if (startPromise) {
+      // Cancel synchronously so a late setup cannot create a take or start transport, then wait
+      // for the cancelled setup to release its lock and provisional clip before callers proceed.
+      const cancelledStart = startPromise
+      cancelStarting()
+      if (stopTransport) options.pauseTransport()
+      const settlement = cancelledStart.then(() => {
+        if (retainedCancelledClip) return retryRetainedCleanup()
+      })
+      return settleWith(settlement)
+    }
+    if (retainedCancelledClip) return settleWith(retryRetainedCleanup())
     const take = active
     if (!take) return Promise.resolve()
-    settlingPromise = (async () => {
+    return settleWith((async () => {
       let clearProvisionalClip = true
       let emptyTake = false
       take.checkpoints?.clear()
@@ -214,7 +317,7 @@ export const createMidiTrackRecordingController = (
         if (emptyTake && !take.local && isPermanentSharedOperationError(error)) {
           if (options.projectId() === take.projectId) options.removeLocalClips([take.clipId])
           removed = true
-          options.notify('Empty MIDI recording could not be removed from this project.')
+          options.notify(cancelledClipRemovalFailedNotice)
         } else if (take.local || isPermanentSharedOperationError(error)) {
           try {
             if (take.local) await createLocalTimelineRepository(take.projectId).deleteClip(take.clipId)
@@ -225,7 +328,9 @@ export const createMidiTrackRecordingController = (
             removed = true
           } catch {}
           if (removed && options.projectId() === take.projectId) options.removeLocalClips([take.clipId])
-          options.notify('MIDI recording could not be saved to this project.')
+          const message = 'MIDI recording could not be saved to this project.'
+          if (take.local && options.onLocalSaveFailed) options.onLocalSaveFailed(take.projectId, message)
+          else options.notify(message)
         } else {
           options.notify('MIDI recording could not be finalized.')
         }
@@ -247,16 +352,30 @@ export const createMidiTrackRecordingController = (
         options.setActiveRecordingTarget(null)
         if (clearProvisionalClip) options.setProvisionalClipId(null)
       }
-    })().finally(() => { settlingPromise = null })
-    return settlingPromise
+    })())
   }
 
-  const startRecording = () => {
-    if (startPromise) return startPromise
+  const startRecording = (): Promise<boolean> => {
+    if (startPromise) {
+      if (pendingStartGeneration === startGeneration) return startPromise
+      const generation = startGeneration
+      return (settlingPromise ?? startPromise).then(
+        () => generation === startGeneration ? startRecording() : false,
+        () => false,
+      )
+    }
     if (active || settlingPromise) return Promise.resolve(false)
+    if (retainedCancelledClip) {
+      options.notify('Finishing cleanup of a cancelled MIDI recording… retry.')
+      return Promise.resolve(false)
+    }
     let completeStart: (value: boolean) => void = () => {}
     const pendingStart = new Promise<boolean>((resolve) => { completeStart = resolve })
     startPromise = pendingStart
+    const generation = startGeneration
+    pendingStartGeneration = generation
+    const isStartCurrent = () => generation === startGeneration
+    setIsStarting(true)
     void (async () => {
     const projectId = options.projectId()
     const userId = options.userId()
@@ -277,11 +396,23 @@ export const createMidiTrackRecordingController = (
     options.setActiveRecordingTarget(track.id)
     try {
       await midiAccess.requestAccess()
+      if (!isStartCurrent()) {
+        options.setActiveRecordingTarget(null)
+        return false
+      }
       if (!local) {
         const lock = await acquireTrackRecordingLock({
           projectId, trackId: track.id, locker: userId ?? '',
           setTrackLock: options.setTrackLock, clearTrackLock: options.clearTrackLock,
         })
+        if (!isStartCurrent()) {
+          if (lock.ok) await releaseTrackRecordingLock({
+            projectId, trackId: track.id, locker: userId ?? '',
+            setTrackLock: options.setTrackLock, clearTrackLock: options.clearTrackLock,
+          })
+          options.setActiveRecordingTarget(null)
+          return false
+        }
         if (!lock.ok) {
           options.setActiveRecordingTarget(null)
           return false
@@ -289,7 +420,7 @@ export const createMidiTrackRecordingController = (
       }
     } catch {
       options.setActiveRecordingTarget(null)
-      options.notify('Unable to start MIDI recording.')
+      if (isStartCurrent()) options.notify('Unable to start MIDI recording.')
       return false
     }
     options.pauseTransport()
@@ -315,6 +446,23 @@ export const createMidiTrackRecordingController = (
         })
         clipId = isJsonString(result) ? result : null
       }
+      if (!isStartCurrent()) {
+        if (clipId) {
+          options.setProvisionalClipId(clipId)
+          retainedCancelledClip = {
+            projectId, userId, local, clipId, trackId: track.id, lockAcquired: !local,
+          }
+          setHasPendingCleanup(true)
+          const cleanupDeferred = settlingPromise !== null
+          const removed = cleanupDeferred ? false : await retryCancelledClipCleanup()
+          if (!removed && !cleanupDeferred) options.notify(cancelledClipRemovalFailedNotice)
+        } else if (!local) await releaseTrackRecordingLock({
+          projectId, trackId: track.id, locker: userId,
+          setTrackLock: options.setTrackLock, clearTrackLock: options.clearTrackLock,
+        })
+        options.setActiveRecordingTarget(null)
+        return false
+      }
       if (!clipId) throw new Error('MIDI clip creation was rejected.')
       const session = createMidiRecordingSession(startSec)
       const take: ActiveTake = {
@@ -331,7 +479,7 @@ export const createMidiTrackRecordingController = (
           return { checkpoint, eventCount: checkpoint.eventCount, version: checkpoint.version }
         },
         state: () => ({ eventCount: take.session.eventCount(), version: take.eventVersion }),
-        persist: (checkpoint, final) => persist(take, checkpoint, final),
+        persist: (checkpoint, final, signal) => persist(take, checkpoint, final, signal),
         isActive: () => active === take,
       })
       startedTake = take
@@ -362,9 +510,11 @@ export const createMidiTrackRecordingController = (
       if (!local) {
         take.lockHeartbeatTimer = startRecordingLockHeartbeat({
           projectId, trackId: track.id, locker: userId ?? '',
-          onError: () => options.notify('MIDI recording lock could not be refreshed.'),
+          onError: () => {
+            if (active === take && isStartCurrent()) options.notify('MIDI recording lock could not be refreshed.')
+          },
           onLost: () => {
-            resolveLostOwnership(take)
+            if (active === take && isStartCurrent()) resolveLostOwnership(take)
           },
         })
       }
@@ -373,6 +523,9 @@ export const createMidiTrackRecordingController = (
       options.setActiveRecordingTarget(track.id)
       options.setProvisionalClipId(clipId)
       await options.requestTransportPlay()
+      if (!isStartCurrent()) {
+        throw new Error('MIDI recording start was cancelled.')
+      }
       return true
     } catch {
       if (startedTake) {
@@ -381,27 +534,36 @@ export const createMidiTrackRecordingController = (
         startedTake.unsubscribeReset()
         if (active === startedTake) active = null
         startedTake.lockHeartbeatTimer = clearRecordingLockHeartbeat(startedTake.lockHeartbeatTimer)
+        await startedTake.checkpoints?.cancel()
       }
+      let clipWasRemoved = clipId === null
       if (clipId) {
-        options.removeLocalClips([clipId])
-        if (local) await createLocalTimelineRepository(projectId).deleteClip(clipId).catch(() => undefined)
-        else await deleteCloudClip(projectId, userId, clipId).catch(() => undefined)
+        retainedCancelledClip = {
+          projectId, userId, local, clipId, trackId: track.id, lockAcquired: !local,
+        }
+        setHasPendingCleanup(true)
+        const cleanupDeferred = settlingPromise !== null
+        clipWasRemoved = cleanupDeferred ? false : await retryCancelledClipCleanup()
+        if (!clipWasRemoved && !cleanupDeferred) options.notify(cancelledClipRemovalFailedNotice)
       }
-      if (!local) await releaseTrackRecordingLock({ projectId, trackId: track.id, locker: userId, setTrackLock: options.setTrackLock, clearTrackLock: options.clearTrackLock })
+      if (!local && !clipId) await releaseTrackRecordingLock({ projectId, trackId: track.id, locker: userId, setTrackLock: options.setTrackLock, clearTrackLock: options.clearTrackLock })
       options.setIsRecording(false)
       options.setRecordingTrackId(null)
       options.setActiveRecordingTarget(null)
-      options.setProvisionalClipId(null)
-      options.notify('Unable to start MIDI recording.')
+      if (clipWasRemoved) options.setProvisionalClipId(null)
+      else if (clipId) options.setProvisionalClipId(clipId)
+      if (isStartCurrent()) options.notify('Unable to start MIDI recording.')
       return false
     }
     })().then(
       (result) => {
         if (startPromise === pendingStart) startPromise = null
+        setIsStarting(false)
         completeStart(result)
       },
       () => {
         if (startPromise === pendingStart) startPromise = null
+        setIsStarting(false)
         completeStart(false)
       },
     )
@@ -409,7 +571,12 @@ export const createMidiTrackRecordingController = (
   }
 
   return {
-    isRecording: () => options.isRecording() || startPromise !== null || settlingPromise !== null,
+    isRecording: () => options.isRecording() || isStarting() || isSettling(),
+    // A take from creation until its final settle; cancelled-clip cleanup retries are not takes.
+    // Plain read for event handlers, not reactive.
+    hasLiveTake: () => active !== null,
+    hasPendingCleanup,
+    isStarting,
     recordingTrackId: options.recordingTrackId,
     startRecording,
     stopRecording: settle,

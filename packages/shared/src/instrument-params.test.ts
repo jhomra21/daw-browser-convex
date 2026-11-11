@@ -31,14 +31,37 @@ describe('instrument identity', () => {
       ...createDefaultGranularParams(),
       zone: {
         id: 'zone',
-        sample: { assetKey: 'asset:granular', url: '/sample.wav' },
+        sample: {
+          assetKey: 'asset:granular',
+          url: '/sample.wav',
+          sourceKind: 'upload',
+          source: { durationSec: 3, sampleRate: 48000, channelCount: 2 },
+        },
+        keyLow: 0,
+        keyHigh: 127,
+        velocityLow: 1,
+        velocityHigh: 127,
+        rootNote: 60,
+        tuneCents: 0,
+        gain: 1,
+        pan: 0,
+        roundRobinGroup: 0,
+        roundRobinIndex: 0,
+        playbackMode: 'one-shot',
+        startSec: 0,
+        endSec: 3,
+        crossfadeSec: 0,
+        chokeGroup: 0,
       },
     }
     const first = normalizeTrackInstrumentParams({ kind: 'granular', instanceId: 'instrument:granular', params })
     const second = normalizeTrackInstrumentParams({ kind: 'granular', instanceId: 'instrument:granular', params })
     expect(first).toEqual(second)
     expect(first?.instanceId).toBe('instrument:granular')
-    expect(first?.params).toMatchObject({ version: 1, zone: params.zone })
+    expect(first?.params).toMatchObject({
+      version: 1,
+      zone: { id: 'zone', sample: { assetKey: 'asset:granular' }, endSec: 3 },
+    })
   })
 
   test('synth normalization rejects non-finite persisted legacy values', () => {

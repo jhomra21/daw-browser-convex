@@ -25,6 +25,7 @@ type TimelineSelectionOptions = {
   gridDenominator: Accessor<number>;
   pixelsPerSecond: Accessor<number>;
   visibleStartSec?: Accessor<number>;
+  isPlaying: Accessor<boolean>;
   startScrub: (clientX: number, options?: { listen?: boolean }) => void;
   moveScrub: (clientX: number) => void;
   stopScrub: () => void;
@@ -208,7 +209,7 @@ export function useTimelineSelection(
       }
     }
     marqueeActive = false;
-    startScrub(event.clientX, { listen: false });
+    if (!options.isPlaying()) startScrub(event.clientX, { listen: false });
     return true;
   };
 
@@ -249,7 +250,7 @@ export function useTimelineSelection(
     }
 
     if (!marqueeActive) {
-      moveScrub(event.clientX);
+      if (!options.isPlaying()) moveScrub(event.clientX);
       return;
     }
 

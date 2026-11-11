@@ -213,12 +213,18 @@ export function createMeteringRuntime(options: {
       node.port.onmessage = (event) => {
         const frame = readTrackMeterFrame(event.data)
         if (!frame) return
+        // Late frame subscribers replay workletFrames, so the latest frame is always kept current.
         workletFrames.set(trackId, frame)
-        pendingFrames.set(trackId, frame)
-        const next = {
-          left: Math.min(1, Math.max(0, frame.channels[0].rms)),
-          right: Math.min(1, Math.max(0, frame.channels[1].rms)),
+        if (frameListeners.size > 0) pendingFrames.set(trackId, frame)
+        const left = Math.min(1, Math.max(0, frame.channels[0].rms))
+        const right = Math.min(1, Math.max(0, frame.channels[1].rms))
+        const previous = workletLevels.get(trackId)
+        // Published level records are shared with listeners, so a changed level gets a new record instead of a mutated one.
+        if (previous?.left === left && previous.right === right) {
+          if (frameListeners.size > 0) scheduleFlush()
+          return
         }
+        const next = { left, right }
         workletLevels.set(trackId, next)
         queueLevels(trackId, next)
       }

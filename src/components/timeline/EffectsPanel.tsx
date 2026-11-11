@@ -1,3 +1,4 @@
+import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery, PublicationJoin } from "~/lib/live-processor-control";
 import {
   type Component,
   Show,
@@ -36,11 +37,12 @@ import Synth from "~/components/effects/Synth";
 import DrumRack from "~/components/effects/DrumRack";
 import Sampler from "~/components/effects/Sampler";
 import Granular from "~/components/effects/Granular";
-import type { AudioEngine, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
+import type { AudioEngine, EngineDisposition, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import type { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
-import type { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
-import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
+import type { createSamplerBufferSync, NativeInstrumentRetryIdentity } from "~/lib/sampler-buffer-sync";
+import type { EffectParamsCommitOptions, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
+import type { NativeBuiltInParameterPayload } from "~/lib/desktop/native-built-in-parameter-mapper";
 import TimelineBottomPanelShell, { type TimelineBottomPanelShellControls } from "~/components/timeline/TimelineBottomPanelShell";
 import TimelineBottomPanelFooter from "~/components/timeline/TimelineBottomPanelFooter";
 import type { Clip, ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
@@ -52,6 +54,7 @@ import {
   type EffectsPanelAudioEffects,
   type EffectsPanelInstrumentDevice,
 } from "~/components/timeline/create-effects-panel-controller";
+import { registerAudioEffectCardInteractionCleanup } from "~/components/timeline/create-effects-panel-audio-effects-state";
 import {
   createEffectCardReorderDrag,
   type EffectCardReorderPreview,
@@ -88,6 +91,7 @@ import {
   type DeviceCollapseIdentity,
 } from "~/components/timeline/create-effects-panel-device-collapse";
 import { isDeviceInteractiveTarget } from "~/components/timeline/device-interaction";
+import { ParameterGestureProvider } from "~/components/effects/effect-parameter-interaction";
 
 type EffectsPanelProps = {
   isOpen: boolean;
@@ -111,15 +115,18 @@ type EffectsPanelProps = {
   playheadSec?: number;
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
-  onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
-  onStructuralPlaybackChange?: (targetId: Track["id"], next: TrackInstrumentParams) => void;
+  onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string, options?: EffectParamsCommitOptions) => void;
+  onStructuralPlaybackChange?: (targetId: Track["id"], next: TrackInstrumentParams | undefined, edit?: LiveProcessorEditIdentity) => Promise<void>;
   usesLegacyAudioEngine?: () => boolean;
   projectGeneration?: () => number;
-  onEffectParamsPreview?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void;
-  onEffectParamsFlush?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void | Promise<void>;
+  allocateProcessorEdit?: (payload: NativeBuiltInParameterPayload) => LiveProcessorEditIdentity | undefined;
+  deliverProcessor?: (edit: LiveProcessorEditIdentity, gesture?: ProcessorDelivery["gesture"]) => DeliveryRegistration;
+  applyPortableProcessor?: (edit: LiveProcessorEditIdentity) => Promise<EngineDisposition | undefined>;
+  joinPublication?: (join: PublicationJoin) => DeliveryRegistration;
   onPreviewNote?: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void;
   onEffectInstanceParamsReplayChange?: Parameters<typeof createEffectsPanelController>[0]["onEffectInstanceParamsReplayChange"];
-  onLocalSaveFailed?: (message: string) => void;
+  onLocalSaveFailed?: (projectId: string, message: string) => void;
+  onEffectError?: (title: string, message: string) => void;
   onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void;
   onExportSnapshotChange?: Parameters<typeof createEffectsPanelController>[0]["onExportSnapshotChange"];
   onEffectChainElementChange?: (element: HTMLElement | undefined) => void;
@@ -140,6 +147,7 @@ type EffectsPanelProps = {
   spectrumProvider?: (targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void;
   samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
   drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>;
+  retryNativeInstrumentPreparation?: (identity: NativeInstrumentRetryIdentity) => Promise<void>;
 };
 
 const EffectsPanelClosedFooter: Component<{
@@ -243,22 +251,24 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
             },
           ]}
         >
-          <Arpeggiator
-            params={params()}
-            onChange={(updates) => {
-              if (!props.instrument.canWrite) return;
-              props.instrument.state.arp.change(updates);
-            }}
-            onToggleEnabled={(enabled) => {
-              if (!props.instrument.canWrite) return;
-              props.instrument.state.arp.toggle(enabled);
-            }}
-            onReset={() => {
-              if (!props.instrument.canWrite) return;
-              props.instrument.state.arp.reset();
-            }}
-            disabled={!props.instrument.canWrite}
-          />
+          <ParameterGestureProvider owner={props.instrument.state.arp.gestureOwner}>
+            <Arpeggiator
+              params={params()}
+              onChange={(updates) => {
+                if (!props.instrument.canWrite) return;
+                props.instrument.state.arp.change(updates);
+              }}
+              onToggleEnabled={(enabled) => {
+                if (!props.instrument.canWrite) return;
+                props.instrument.state.arp.toggle(enabled);
+              }}
+              onReset={() => {
+                if (!props.instrument.canWrite) return;
+                props.instrument.state.arp.reset();
+              }}
+              disabled={!props.instrument.canWrite}
+            />
+          </ParameterGestureProvider>
         </EffectsPanelDeviceBoundary>
       )}
     </Show>
@@ -274,19 +284,23 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
             { kind: "item", label: "Reset device", disabled: !props.instrument.canWrite, onSelect: props.instrument.state.drumRack.reset },
           ]}
         >
-          <DrumRack
-            params={params()}
-            targetId={props.targetId}
-            projectId={props.projectId}
-            audioEngine={props.audioEngine}
-            onPreviewNote={props.onPreviewNote}
-            canWrite={props.instrument.canWrite}
-            onAssignSampleToPad={props.instrument.state.drumRack.assignSampleToPad}
-            buffers={() => props.instrument.state.drumRack.buffers(props.targetId, params())}
-            subscribeBuffers={props.instrument.state.drumRack.subscribeBuffers}
-            onReset={props.instrument.state.drumRack.reset}
-            onUpdatePad={props.instrument.state.drumRack.updatePad}
-          />
+          <ParameterGestureProvider owner={props.instrument.state.gestureOwner}>
+            <DrumRack
+              params={params()}
+              targetId={props.targetId}
+              projectId={props.projectId}
+              audioEngine={props.audioEngine}
+              onPreviewNote={props.onPreviewNote}
+              canWrite={props.instrument.canWrite}
+              onAssignSampleToPad={props.instrument.state.drumRack.assignSampleToPad}
+              buffers={() => props.instrument.state.drumRack.buffers(props.targetId, params())}
+              subscribeBuffers={props.instrument.state.drumRack.subscribeBuffers}
+              nativeStatus={props.instrument.state.drumRack.nativeStatus()}
+              onRetry={props.instrument.state.drumRack.retry}
+              onReset={props.instrument.state.drumRack.reset}
+              onUpdatePad={props.instrument.state.drumRack.updatePad}
+            />
+          </ParameterGestureProvider>
         </EffectsPanelDeviceBoundary>
       )}
     </Show>
@@ -301,17 +315,19 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
             { kind: "item", label: "Reset device", disabled: !props.instrument.canWrite, onSelect: props.instrument.state.sampler.reset },
           ]}
         >
-          <Sampler
-            params={params()}
-            status={props.instrument.state.sampler.status()}
-            canWrite={props.instrument.canWrite}
-            onAddZone={props.instrument.state.sampler.addZone}
-            onRemoveZone={props.instrument.state.sampler.removeZone}
-            onReset={props.instrument.state.sampler.reset}
-            onRetryZone={props.instrument.state.sampler.retryZone}
-            onUpdate={props.instrument.state.sampler.update}
-            onUpdateZone={props.instrument.state.sampler.updateZone}
-          />
+          <ParameterGestureProvider owner={props.instrument.state.gestureOwner}>
+            <Sampler
+              params={params()}
+              status={props.instrument.state.sampler.status()}
+              canWrite={props.instrument.canWrite}
+              onAddZone={props.instrument.state.sampler.addZone}
+              onRemoveZone={props.instrument.state.sampler.removeZone}
+              onReset={props.instrument.state.sampler.reset}
+              onRetryZone={props.instrument.state.sampler.retryZone}
+              onUpdate={props.instrument.state.sampler.update}
+              onUpdateZone={props.instrument.state.sampler.updateZone}
+            />
+          </ParameterGestureProvider>
         </EffectsPanelDeviceBoundary>
       )}
     </Show>
@@ -326,14 +342,16 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
             { kind: "item", label: "Reset device", disabled: !props.instrument.canWrite, onSelect: props.instrument.state.granular.reset },
           ]}
         >
-          <Granular
-            params={params()}
-            status={props.instrument.state.granular.status()}
-            canWrite={props.instrument.canWrite}
-            onReset={props.instrument.state.granular.reset}
-            onRetry={props.instrument.state.granular.retry}
-            onUpdate={props.instrument.state.granular.update}
-          />
+          <ParameterGestureProvider owner={props.instrument.state.gestureOwner}>
+            <Granular
+              params={params()}
+              status={props.instrument.state.granular.status()}
+              canWrite={props.instrument.canWrite}
+              onReset={props.instrument.state.granular.reset}
+              onRetry={props.instrument.state.granular.retry}
+              onUpdate={props.instrument.state.granular.update}
+            />
+          </ParameterGestureProvider>
         </EffectsPanelDeviceBoundary>
       )}
     </Show>
@@ -349,28 +367,30 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
             { kind: "item", label: "Reset device", disabled: !props.instrument.canWrite, onSelect: props.instrument.state.synth.reset },
           ]}
         >
-          <Synth
-            instanceId={props.instrument.state.synth.instanceId()}
-            params={props.synthAutomationDisplayParams ?? params()}
-            onChange={(updates) => {
-              if (!props.instrument.canWrite) return;
-              props.instrument.state.synth.change(updates);
-            }}
-            onReset={() => {
-              if (!props.instrument.canWrite) return;
-              props.instrument.state.synth.reset();
-            }}
-            disabled={!props.instrument.canWrite}
-            automationRangesByParameterId={props.synthAutomationRangesByParameterId}
-            onAutomationParameterTouch={(parameterId) => {
-              const automationParameterId = props.synthAutomationParameterIds?.get(parameterId)
-              if (automationParameterId) props.onSelectSynthAutomationParameter?.(automationParameterId)
-            }}
-            onManualAutomationOverride={(parameterId) => {
-              const automationParameterId = props.synthAutomationParameterIds?.get(parameterId)
-              if (automationParameterId) props.onManualSynthAutomationOverride?.(automationParameterId)
-            }}
-          />
+          <ParameterGestureProvider owner={props.instrument.state.gestureOwner}>
+            <Synth
+              instanceId={props.instrument.state.synth.instanceId()}
+              params={props.synthAutomationDisplayParams ?? params()}
+              onChange={(updates) => {
+                if (!props.instrument.canWrite) return;
+                props.instrument.state.synth.change(updates);
+              }}
+              onReset={() => {
+                if (!props.instrument.canWrite) return;
+                props.instrument.state.synth.reset();
+              }}
+              disabled={!props.instrument.canWrite}
+              automationRangesByParameterId={props.synthAutomationRangesByParameterId}
+              onAutomationParameterTouch={(parameterId) => {
+                const automationParameterId = props.synthAutomationParameterIds?.get(parameterId)
+                if (automationParameterId) props.onSelectSynthAutomationParameter?.(automationParameterId)
+              }}
+              onManualAutomationOverride={(parameterId) => {
+                const automationParameterId = props.synthAutomationParameterIds?.get(parameterId)
+                if (automationParameterId) props.onManualSynthAutomationOverride?.(automationParameterId)
+              }}
+            />
+          </ParameterGestureProvider>
         </EffectsPanelDeviceBoundary>
       )}
     </Show>
@@ -379,6 +399,7 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
 
 type EffectsPanelEffectCardsProps = {
   projectId?: string;
+  projectGeneration: number;
   audioEffects: EffectsPanelAudioEffects;
   externalProcessors: ExternalProcessor[];
   externalInstrument?: ExternalProcessor;
@@ -406,6 +427,8 @@ type EffectsPanelEffectCardsProps = {
 type EffectsPanelAudioEffectCardProps = {
   effect: AudioEffectInstance;
   audioEffects: EffectsPanelAudioEffects;
+  projectId?: string;
+  projectGeneration: number;
   spectrum: SpectrumFrame | null;
   audioEngine?: AudioEngine;
   targetId?: Track["id"] | "master";
@@ -544,6 +567,12 @@ const createAudioEffectContextMenuControls = (
 };
 
 const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> = (props) => {
+  registerAudioEffectCardInteractionCleanup({
+    effectId: () => props.effect.id,
+    audioEffects: () => props.audioEffects,
+    targetId: () => props.targetId,
+    ownerKey: () => `${props.projectId ?? ""}:${props.projectGeneration}:${props.effect.id}`,
+  });
   const params = () => props.audioEffects.paramsForInstance(props.effect);
   const displayedParams = () => {
     let next = effectParamsInput(params());
@@ -572,9 +601,18 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
     )?.sourceTrackId
   );
   return (
+    <ParameterGestureProvider owner={props.audioEffects.gestureOwner(props.effect.id, props.effect.kind, props.targetId)}>
     <Switch>
       <Match when={props.effect.kind === "utility"}>
-        <Show when={displayedParams()}>{(value) => <Utility params={normalizeUtilityParamsEnvelope(value()).state} onChange={(updates) => props.audioEffects.utility.changeInstance(props.effect.id, (prev) => normalizeUtilityParamsEnvelope({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.utility.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.utility.changeInstance(props.effect.id, () => normalizeUtilityParamsEnvelope({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>
+        <Show when={displayedParams()}>{(value) => <Utility
+          params={normalizeUtilityParamsEnvelope(value()).state}
+          onChange={(updates) => props.audioEffects.utility.changeInstance(props.effect.id, (prev) => normalizeUtilityParamsEnvelope({ ...prev, state: { ...prev.state, ...updates } }))}
+          onToggleEnabled={(enabled) => props.audioEffects.utility.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))}
+          onReset={() => props.audioEffects.utility.changeInstance(props.effect.id, () => normalizeUtilityParamsEnvelope({}))}
+          automationRangesByParameterId={props.automationRangesByParameterId}
+          onAutomationParameterTouch={props.onSelectAutomationParameter}
+          onManualAutomationOverride={props.onManualAutomationOverride}
+        />}</Show>
       </Match>
       <Match when={props.effect.kind === "gate"}>
         <Show when={displayedParams()}>{(value) => <Gate params={normalizeGateParamsEnvelope(value()).state} tracks={props.tracks ?? []} targetId={props.targetId ?? "master"} effectInstanceId={props.effect.id} audioEngine={props.audioEngine} sourceTrackId={sidechainSourceTrackId()} onSourceChange={(source) => void props.audioEffects.gate.setSidechainSource(props.effect.id, source)} onChange={(updates) => props.audioEffects.gate.changeInstance(props.effect.id, (prev) => normalizeGateParamsEnvelope({ ...prev, state: { ...prev.state, ...updates } }))} onToggleEnabled={(enabled) => props.audioEffects.gate.changeInstance(props.effect.id, (prev) => ({ ...prev, state: { ...prev.state, enabled } }))} onReset={() => props.audioEffects.gate.changeInstance(props.effect.id, () => normalizeGateParamsEnvelope({}))} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />}</Show>
@@ -610,7 +648,7 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
       <Show when={displayedParams()}>
         {(value) => {
           const eq = () => normalizeEqParams(effectParamsInput(value()));
-          return <Eq bands={eq().bands} enabled={eq().enabled} channelMode={eq().channelMode} onBandChange={(bandId, updates) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, ...updates } : band) }))} onPreviewBandChange={(bandId, updates) => props.audioEffects.eq.previewInteraction(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, ...updates } : band) }))} onBeginInteraction={() => props.audioEffects.eq.beginInteraction(props.effect.id)} onCommitInteraction={() => props.audioEffects.eq.commitInteraction(props.effect.id)} onCancelInteraction={() => props.audioEffects.eq.cancelInteraction(props.effect.id)} onChannelModeChange={(channelMode) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => prev.channelMode === channelMode ? prev : normalizeEqParams({ ...prev, channelMode }))} onBandToggle={(bandId) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, enabled: !band.enabled } : band) }))} onToggleEnabled={(enabled) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.eq.changeInstance(props.effect.id, () => normalizeEqParams({}))} spectrumData={props.spectrum} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />
+          return <Eq bands={eq().bands} enabled={eq().enabled} channelMode={eq().channelMode} onBandChange={(bandId, updates) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, ...updates } : band) }))} onChannelModeChange={(channelMode) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => prev.channelMode === channelMode ? prev : normalizeEqParams({ ...prev, channelMode }))} onBandToggle={(bandId) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, bands: prev.bands.map((band) => band.id === bandId ? { ...band, enabled: !band.enabled } : band) }))} onToggleEnabled={(enabled) => props.audioEffects.eq.changeInstance(props.effect.id, (prev) => ({ ...prev, enabled }))} onReset={() => props.audioEffects.eq.changeInstance(props.effect.id, () => normalizeEqParams({}))} spectrumData={props.spectrum} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onSelectAutomationParameter} onManualAutomationOverride={props.onManualAutomationOverride} />
         }}
       </Show>
       </Match>
@@ -654,6 +692,7 @@ const EffectsPanelAudioEffectCard: Component<EffectsPanelAudioEffectCardProps> =
         </Show>
       </Match>
     </Switch>
+    </ParameterGestureProvider>
   );
 };
 
@@ -902,6 +941,8 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                               <EffectsPanelAudioEffectCard
                                 effect={effect()}
                                 audioEffects={props.audioEffects}
+                                projectId={props.projectId}
+                                projectGeneration={props.projectGeneration}
                                 spectrum={props.spectrum}
                                 audioEngine={props.audioEngine}
                                 targetId={props.targetId}
@@ -954,7 +995,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                     collapse={props.deviceCollapse}
                     menuItems={() => contextMenuItems(effect())}
                   >
-                    <EffectsPanelAudioEffectCard effect={effect()} audioEffects={props.audioEffects} spectrum={props.spectrum} />
+                    <EffectsPanelAudioEffectCard effect={effect()} audioEffects={props.audioEffects} projectId={props.projectId} projectGeneration={props.projectGeneration} spectrum={props.spectrum} targetId={props.targetId} />
                   </EffectsPanelDeviceBoundary>
                 )}
               </Show>
@@ -1084,6 +1125,10 @@ const EffectsPanelEmptyState: Component<EffectsPanelEmptyStateProps> = (props) =
 const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const samplerBufferSync = untrack(() => props.samplerBufferSync);
   const drumRackBufferSync = untrack(() => props.drumRackBufferSync);
+  const retryNativeInstrumentPreparation = untrack(() => props.retryNativeInstrumentPreparation);
+  const allocateProcessorEdit = untrack(() => props.allocateProcessorEdit);
+  const deliverProcessor = untrack(() => props.deliverProcessor);
+  const joinPublication = untrack(() => props.joinPublication);
   const controller = createEffectsPanelController({
     isOpen: () => props.isOpen,
     selectedFXTarget: () => props.selectedFXTarget,
@@ -1098,14 +1143,18 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     onClose: () => props.onClose(),
     onSelectClip: (trackId, clipId, startSec) => props.onSelectClip?.(trackId, clipId, startSec),
     insertLocalClip: (trackId, clip) => props.insertLocalClip?.(trackId, clip),
-    onEffectParamsCommitted: (payload, projectId) => props.onEffectParamsCommitted?.(payload, projectId),
-    onStructuralPlaybackChange: (targetId, next) => props.onStructuralPlaybackChange?.(targetId, next),
+    onEffectParamsCommitted: (payload, projectId, options) => props.onEffectParamsCommitted?.(payload, projectId, options),
+    onStructuralPlaybackChange: async (targetId, next, edit) => props.onStructuralPlaybackChange?.(targetId, next, edit),
     usesLegacyAudioEngine: () => props.usesLegacyAudioEngine?.() ?? true,
     projectGeneration: () => props.projectGeneration?.() ?? 0,
-    onEffectParamsPreview: (payload) => props.onEffectParamsPreview?.(payload),
-    onEffectParamsFlush: (payload) => props.onEffectParamsFlush?.(payload),
+    allocateProcessorEdit,
+    deliverProcessor,
+    applyPortableProcessor: (edit) => props.applyPortableProcessor?.(edit) ?? Promise.resolve(undefined),
+    joinPublication,
+    retryNativeInstrumentPreparation,
     onEffectInstanceParamsReplayChange: (replay) => props.onEffectInstanceParamsReplayChange?.(replay),
-    onLocalSaveFailed: (message) => props.onLocalSaveFailed?.(message),
+    onLocalSaveFailed: (projectId, message) => props.onLocalSaveFailed?.(projectId, message),
+    onEffectError: (title, message) => props.onEffectError?.(title, message),
     onDeviceInsertActionsChange: (actions) => props.onDeviceInsertActionsChange?.(actions),
     onExportSnapshotChange: (snapshot) => props.onExportSnapshotChange?.(snapshot),
     spectrumProvider: () => props.spectrumProvider,
@@ -1276,6 +1325,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                     </Show>
                     <EffectsPanelEffectCards
                       projectId={props.projectId}
+                      projectGeneration={props.projectGeneration?.() ?? 0}
                       audioEffects={audioEffects}
                       externalProcessors={externalProcessorsForTarget()}
                       externalInstrument={externalProcessorsForTarget().find((processor) => processor.manifest.role === "instrument")}

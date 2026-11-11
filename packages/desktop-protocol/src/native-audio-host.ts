@@ -2,7 +2,9 @@ export const nativeAudioHostMagic = 0x44415748
 import { nativeExternalAttachmentPlanSchema, maxNativeExternalAttachments } from "@daw-browser/plugin-host-protocol"
 import { z } from "zod"
 
-export const nativeAudioHostProtocolVersion = 22
+export const nativeAudioHostProtocolVersion = 29
+export const nativeAudioHostArtifactId = "daw-audio-host-macos/v10"
+export const nativeKeepLatencyDivergentMixedBusDiagnostic = 3
 export const nativeAudioHostFrameHeaderBytes = 16
 export const nativeAudioHostMaximumPayloadBytes = 1_048_576
 export const nativeAudioHostMaximumMeterEntries = 64
@@ -70,6 +72,7 @@ export const nativeAudioHostControlTypes = {
   mappedAssetWritePage: 58,
   mappedAssetPrepareRange: 59,
   mappedAssetRelease: 60,
+  processorStatePatchStatus: 61,
 } as const
 
 export const nativeAudioHostMaximumDeviceIdBytes = 4_096
@@ -106,8 +109,17 @@ export const nativeAudioHostMaximumProcessorEvents = 256
 export const nativeAudioHostMaximumInstrumentEvents = 256
 export const nativeAudioHostMaximumSourceEvents = 256
 export const nativeAudioHostMaximumScheduleInstanceIdBytes = 256
-export const nativeAudioHostScheduleWindowHeaderBytes = 60
+export const nativeAudioHostScheduleWindowHeaderBytes = 72
 export const nativeAudioHostScheduleProgressBytes = 80
+export const nativeAudioHostScheduleProgressCapacityBytes = 88
+export const nativeAudioHostScheduleProgressLatencyBytes = 96
+export const nativeAudioHostScheduleProgressResolutionBytes = 112
+export const nativeAudioHostProcessorPatchStatusBytes = 20
+/**
+ * The status word of a control ACK (`ControlAckStatus`, audio_host_macos.h). `unavailable` is a negative ACK that
+ * says no audio session or core existed to take the request. ACK text is for people and is never classified.
+ */
+export const nativeAudioHostAckStatus = { refused: 0, accepted: 1, unavailable: 2 } as const
 export const nativeAudioHostMaximumSampleRateHz = 384_000
 export const nativeAudioHostMaximumFramesPerBlock = 8_192
 /**

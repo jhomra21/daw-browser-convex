@@ -11,7 +11,7 @@ import type {
   NativeSourceEvent,
   NativeVstAutomationSegment,
 } from "@daw-browser/audio-engine/native-host-wire"
-import { compilePortableFrameScheduleWindow } from "~/lib/portable-frame-schedule"
+import { createPortableFrameScheduleWindowCompiler } from "~/lib/portable-frame-schedule"
 import {
   nativeProcessorAutomationEventsAtCallbackBoundaries,
   nativeProcessorAutomationEventsForSchedule,
@@ -27,8 +27,10 @@ import type { PreparedStretchProjectionMetadata } from "@daw-browser/audio-engin
 import type { AudioAssetRef, AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import { parseExternalAutomationParameterId, valueAtAutomationTime } from "@daw-browser/shared"
 import type { LivePlaybackSnapshot } from "~/lib/live-playback-snapshot"
+import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 import { maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
 import type { NativeTimelinePageManager } from "./native-timeline-page-manager"
+import { NativePlaybackAbortError } from "./native-playback-abort"
 import { nativeMappedSourceCoverage } from "~/lib/native-source-coverage"
 import {
   arrangementFrameForLoop,
@@ -53,11 +55,31 @@ export type NativeScheduleCapacity = {
   maximumVstEventsPerBlock?: number
 }
 
+type NativeCandidateResources = {
+  assets: readonly NativeSessionAsset[]
+  assetSourceKeys: ReadonlyMap<string, string>
+  nativePcmChunkDescriptors: readonly NativePcmChunkDescriptor[]
+  preparedStretchAssets?: readonly PreparedStretchProjectionMetadata[]
+}
+
 export type NativeScheduleCoordinator = {
+  coverThrough: (frame: number) => Promise<void>
+  stageRevision: (snapshot: LivePlaybackSnapshot, graph: AudioCoreGraphSnapshot, frame: number,
+    onRejected?: () => Promise<void>, resources?: NativeCandidateResources) => NativeScheduleCoordinator
+  activateRevision: (proof: Pick<NativeGraphRevisionStatus, "status" | "activeRevision" | "publicationFrame">) => boolean
+  suspendGraphPublication: () => Promise<void>
+  resumeGraphPublication: (revision: number) => void
   install: () => void
   dispose: () => void
+  abortPreparation: () => void
   preflight: (graph: AudioCoreGraphSnapshot) => void
   queueInitialSynthState: (frame: number, transactionToken?: string) => Promise<void>
+  /**
+   * Makes the pages a publication bound anywhere in `fromFrame`..`seamFrame` will read resident, submitting no window.
+   * Aborting `signal` detaches from the preparation at once; page decodes already running stay shared with the page manager.
+   */
+  prepareCandidatePages: (snapshot: LivePlaybackSnapshot, graph: AudioCoreGraphSnapshot, fromFrame: number, seamFrame: number,
+    resources: NativeCandidateResources, signal: AbortSignal) => Promise<void>
   prime: (frame: number, transactionToken?: string) => Promise<void>
   onProgress: (progress: NativeScheduleProgress) => void
   waitForAccepted: (minimumFrame: number) => Promise<void>
@@ -88,7 +110,6 @@ const nativeScheduleRefillThresholdSec = 1
 const nativeInstrumentEventCapacity = 256
 const nativeProcessorEventCapacity = 256
 const nativeSourceCapacity = 256
-const nativeVoiceCapacity = 32
 const nativeSourceLedgerCapacity = 1024
 
 const assertReply = (reply: NativeSessionReply) => {
@@ -196,8 +217,9 @@ const sourceKey = (event: NativeSourceEvent) => (
 )
 
 type ScheduleLedgers = {
-  activeNoteIds: Set<string>
+  activeNoteIds: Map<string, { pitch: number; velocity: number }>
   emittedSources: Map<string, number>
+  sourceOrigins: Map<string, { signature: string; event: NativeSourceEvent }>
 }
 
 export type NativeLoopFrames = LoopFrames
@@ -264,8 +286,8 @@ type ScheduleWindowCandidate = {
   sampleSourceEvents: NativeSourceEvent[]
   vstAutomationSegments: NativeVstAutomationSegment[]
   processorAutomationEvents: NativeProcessorAutomationEvent[]
-  noteChanges: Array<[string, boolean]>
-  sourceChanges: Array<[string, number]>
+  sourceChanges: Array<[string, number, number]>
+  sourceOrigins: ScheduleLedgers["sourceOrigins"]
   sequenceCount: number
 }
 
@@ -329,7 +351,11 @@ export const scheduleEndFrameFor = (
 
 const capacityError = (message: string) => new Error(`Native schedule capacity exceeded: ${message}`)
 
-export const createNativeScheduleCoordinator = (input: {
+type PagePreparingCoordinator = NativeScheduleCoordinator & {
+  preparePages: (fromFrame: number, seamFrame: number) => Promise<void>
+}
+
+const buildNativeScheduleCoordinator = (input: {
   bridge: NativeScheduleCoordinatorBridge
   snapshot: LivePlaybackSnapshot
   graph?: AudioCoreGraphSnapshot
@@ -344,19 +370,25 @@ export const createNativeScheduleCoordinator = (input: {
   pageManager?: NativeSchedulePageManager
   projectGeneration?: number
   startFrame: number
+  preparedPublicationFrame?: number
+  initialOwnership?: ScheduleLedgers
+  initialSequence?: number
   onFault?: (error: Error) => void
   onHostLoss?: (error?: string) => void
   onRenderedFrame?: (frame: number) => void
   onRefillDiagnostics?: (snapshot: NativeRefillDiagnostics) => void
-}) => {
+}, onPreparedWindowRejected?: () => Promise<void>) => {
   let disposed = false
+  let graphRevision = input.snapshot.revision
+  let graphPublicationSuspended = false
+  let preparedPublicationFrame = input.preparedPublicationFrame
   const hydrationAbortController = new AbortController()
   let installed = false
   let unsubscribeProgress: (() => void) | undefined
   let unsubscribeLoss: (() => void) | undefined
   let latestProgress: NativeScheduleProgress | undefined
   let nextWindowStartFrame = input.startFrame
-  let nextSequence = 9
+  let nextSequence = input.initialSequence ?? 9
   let nextWindowId = 1
   let refillInFlight: Promise<void> | undefined
   let refillRequested = false
@@ -373,8 +405,15 @@ export const createNativeScheduleCoordinator = (input: {
   const refillDiagnostics = (): NativeRefillDiagnostics => ({
     progressCount, compileCount, compileTotalMs, compileMaxMs, submittedVstSegments,
   })
-  const activeNoteIds = new Set<string>()
-  const emittedSources = new Map<string, number>()
+  const activeNoteIds = new Map(input.initialOwnership?.activeNoteIds)
+  const emittedSources = new Map(input.initialOwnership?.emittedSources)
+  const sourceOrigins = new Map(input.initialOwnership?.sourceOrigins)
+  const acceptedWindows: Array<{
+    startFrame: number
+    endFrame: number
+    before: ScheduleLedgers
+    window: ScheduleWindowCandidate
+  }> = []
   const transitionWaiters = new Set<{
     transitionId: bigint
     running: boolean
@@ -391,11 +430,23 @@ export const createNativeScheduleCoordinator = (input: {
     resolve: () => void
     reject: (error: Error) => void
   }>()
-  const scheduleEndFrame = scheduleEndFrameFor(input.snapshot, input.sampleRateHz, input.graph)
+  // Even deleting the final clip needs a complete empty prepared window so
+  // native can prove coverage and reconcile the old audible set at the seam.
+  const scheduleEndFrame = Math.max(scheduleEndFrameFor(input.snapshot, input.sampleRateHz, input.graph),
+    input.preparedPublicationFrame === undefined ? 0 : input.startFrame + input.capacity.maximumFramesPerBlock)
   const acceptsLiveMidi = input.acceptsLiveMidi === true
   const ownedScheduleEndFrame = acceptsLiveMidi ? Number.MAX_SAFE_INTEGER : scheduleEndFrame
   const loop = nativeLoopFramesForSnapshot(input.snapshot, input.sampleRateHz)
   const arpeggiators = new Map(Object.entries(input.snapshot.mixer.fx.trackFx ?? {}).map(([trackId, fx]) => [trackId, fx.arp]))
+  const compilePortableWindow = createPortableFrameScheduleWindowCompiler({
+    revision: input.snapshot.revision,
+    transportEpoch: input.epoch,
+    sampleRateHz: input.sampleRateHz,
+    bpm: input.snapshot.bpm,
+    tracks: input.snapshot.tracks,
+    automationEnvelopes: input.snapshot.mixer.automationEnvelopes,
+    arpeggiators,
+  })
   const assetEntries: [string, AudioAssetRef][] = []
   for (const snapshotAsset of input.snapshot.assets) {
     const asset = input.assets.find(({ asset: candidate }) => (
@@ -404,6 +455,8 @@ export const createNativeScheduleCoordinator = (input: {
     if (asset) assetEntries.push([snapshotAsset.assetId, asset])
   }
   const assets = new Map(assetEntries)
+  const sessionAssetIds = new Map(input.assets.map(({ asset, sessionAssetId }) => [asset.assetId, sessionAssetId]))
+  const sourceRates = new Map(input.assets.map(({ asset }) => [asset.assetId, asset.sampleRateHz]))
   const preparedStretchAssets = new Map(
     (input.preparedStretchAssets ?? []).map((asset) => [asset.clipId, asset]),
   )
@@ -440,12 +493,14 @@ export const createNativeScheduleCoordinator = (input: {
   const compileWindow = (
     startFrame: number,
     endFrame: number,
-    ledgers: ScheduleLedgers = { activeNoteIds, emittedSources },
+    ledgers: ScheduleLedgers = { activeNoteIds, emittedSources, sourceOrigins },
   ): ScheduleWindowCandidate => {
     const instrumentEvents: NativeInstrumentEvent[] = []
     const instrumentEventKeys: string[] = []
     const noteChanges = new Map<string, boolean>()
     const sourceChanges = new Map<string, number>()
+    const sourceStarts = new Map<string, number>()
+    const candidateOrigins: ScheduleLedgers["sourceOrigins"] = new Map()
     const sampleSourceEvents: NativeSourceEvent[] = []
     const vstAutomationSegments: NativeVstAutomationSegment[] = []
     const processorAutomationEvents: NativeProcessorAutomationEvent[] = []
@@ -477,12 +532,11 @@ export const createNativeScheduleCoordinator = (input: {
     const slices = splitNativeScheduleRange(startFrame, endFrame, loop)
     for (const slice of slices) {
       const arrangementStartSec = slice.arrangementStartFrame / input.sampleRateHz
-      const arrangementEndSec = slice.arrangementEndFrame / input.sampleRateHz
       if (slice.iteration > 0 && slice.nativeStartFrame >= (loop?.endFrame ?? Number.MAX_SAFE_INTEGER)) {
         const previousIteration = `${slice.iteration - 1}\u0000`
         const carriedKeys = new Set([
           ...noteChanges.keys(),
-          ...ledgers.activeNoteIds,
+          ...ledgers.activeNoteIds.keys(),
         ])
         for (const key of carriedKeys) {
           const active = noteChanges.has(key)
@@ -491,23 +545,33 @@ export const createNativeScheduleCoordinator = (input: {
           if (active && key.startsWith(previousIteration)) releaseBoundaryNote(key, slice.nativeStartFrame)
         }
       }
-      const schedule = compilePortableFrameScheduleWindow({
-        revision: input.snapshot.revision,
-        transportEpoch: input.epoch,
-        sampleRateHz: input.sampleRateHz,
-        bpm: input.snapshot.bpm,
+      const schedule = compilePortableWindow({
         timeOrigin: { timelineSec: arrangementStartSec, frame: slice.nativeStartFrame },
         rangeStartFrame: slice.nativeStartFrame,
         rangeEndFrame: slice.nativeEndFrame,
-        rangeEndSec: arrangementEndSec,
-        tracks: input.snapshot.tracks,
-        automationEnvelopes: input.snapshot.mixer.automationEnvelopes,
-        arpeggiators,
-        stableNoteIds: true,
-        eventRangeStartSec: arrangementStartSec,
-        noteScheduleStartSec: 0,
-        clipSpanningNoteOn: true,
       })
+      if (input.preparedPublicationFrame !== undefined && slice.nativeStartFrame === input.startFrame) {
+        const desiredNotes = new Map(schedule.events.flatMap((event) => event.type === "note-on"
+          && event.frame === slice.nativeStartFrame ? [[loop
+            ? `${slice.iteration}\u0000${event.target.trackId}\u0000${event.noteId}`
+            : `${event.target.trackId}\u0000${event.noteId}`, event] satisfies [string, typeof event]] : []))
+        const targets = new Set(scheduleGraph?.nodes.filter((node) => node.kind === "instrument").map((node) => node.id))
+        for (const [key, voice] of ledgers.activeNoteIds) {
+          const desired = desiredNotes.get(key)
+          if (desired?.pitch === voice.pitch && desired.velocity === voice.velocity) continue
+          const parts = key.split("\u0000")
+          const nodeId = parts[loop ? 1 : 0]
+          const noteId = Number(parts[loop ? 2 : 1])
+          noteChanges.set(key, false)
+          if (!nodeId || !targets.has(nodeId)) continue
+          instrumentEvents.push({
+            nodeId, noteId: loop ? noteId + Number(parts[0]) * 0x1_0000_0000 : noteId,
+            sequence: nextSequence + instrumentEvents.length, frameOffset: startFrame,
+            type: "note-off", channel: 0, note: voice.pitch, value: 0,
+          })
+          instrumentEventKeys.push(key)
+        }
+      }
       if (scheduleGraph) {
         processorAutomationEvents.push(
           ...sliceNativeProcessorAutomationEvents(
@@ -565,10 +629,8 @@ export const createNativeScheduleCoordinator = (input: {
           bpm: input.snapshot.bpm,
           sampleRateHz: input.sampleRateHz,
           rangeStartSec: 0,
-          rangeEndSec: arrangementEndSec,
           epoch: input.epoch,
           firstSequence: nextSequence + instrumentEvents.length + sampleSourceEvents.length,
-          emitStartFrame: { start: slice.arrangementStartFrame, end: slice.arrangementEndFrame },
           allowInstruments: false,
           includeStableIdentity: true,
           preparedStretchAssets,
@@ -586,33 +648,52 @@ export const createNativeScheduleCoordinator = (input: {
         const eventStart = Math.max(event.startFrame, slice.arrangementStartFrame)
         const eventEnd = Math.min(event.stopFrame, slice.arrangementEndFrame)
         if (eventEnd <= eventStart) continue
-        const duration = event.stopFrame - event.startFrame
+        const sourceRate = sourceRates.get(event.assetId) ?? input.sampleRateHz
         const sourceStart = event.sourceOffsetFrame + (event.sourceOffsetFraction ?? 0)
-          + event.sourceFrameCount * (eventStart - event.startFrame) / duration
+          + (eventStart - event.startFrame) * sourceRate / input.sampleRateHz
         const sourceEnd = event.sourceOffsetFrame + (event.sourceOffsetFraction ?? 0)
-          + event.sourceFrameCount * (eventEnd - event.startFrame) / duration
+          + (eventEnd - event.startFrame) * sourceRate / input.sampleRateHz
         const sourceOffsetFrame = Math.floor(sourceStart)
+        const wireFraction = Math.fround(sourceStart - sourceOffsetFrame)
+        const fractionCarry = wireFraction === 1 ? 1 : 0
         const sourceFrameCount = Math.ceil(sourceEnd - sourceStart)
         const key = `${slice.iteration}\u0000${event.sourceIdentity ?? sourceKey(event)}`
+        const signature = JSON.stringify([
+          event.sourceNodeId, event.assetId,
+          sessionAssetIds.get(event.assetId),
+          shiftFrame(event.startFrame), event.sourceOffsetFrame, Math.fround(event.sourceOffsetFraction ?? 0),
+          event.gain, shiftFrame(event.fadeInStartFrame), shiftFrame(event.fadeInEndFrame),
+          shiftFrame(event.fadeOutStartFrame), shiftFrame(event.fadeOutEndFrame),
+          event.fadeInCurve, event.fadeInCurvePosition, event.fadeOutCurve, event.fadeOutCurvePosition,
+        ])
+        const seamDeclaration = preparedPublicationFrame !== undefined && startFrame === input.startFrame
+          && slice.nativeStartFrame === startFrame
         const previousStop = sourceChanges.get(key) ?? ledgers.emittedSources.get(key)
-        if (previousStop !== undefined && previousStop > startFrame) continue
+        if (!seamDeclaration && previousStop !== undefined && previousStop > startFrame) continue
         if (!sourceChanges.has(key) && ledgers.emittedSources.size >= nativeSourceLedgerCapacity) {
           throw capacityError(`the source ledger exceeds its fixed capacity of ${nativeSourceLedgerCapacity}.`)
         }
         if (sourceFrameCount <= 0) continue
         sourceChanges.set(key, shiftFrame(eventEnd))
-        sampleSourceEvents.push({
+        sourceStarts.set(key, shiftFrame(eventStart))
+        const accepted = seamDeclaration ? ledgers.sourceOrigins.get(key) : undefined
+        const origin = accepted?.signature === signature ? accepted.event : undefined
+        const candidate = {
           ...event,
-          startFrame: shiftFrame(eventStart),
+          startFrame: origin?.startFrame ?? shiftFrame(eventStart),
           stopFrame: shiftFrame(eventEnd),
-          sourceOffsetFrame,
-          sourceOffsetFraction: sourceStart - sourceOffsetFrame,
-          sourceFrameCount,
+          sourceOffsetFrame: origin?.sourceOffsetFrame ?? sourceOffsetFrame + fractionCarry,
+          sourceOffsetFraction: origin?.sourceOffsetFraction ?? (fractionCarry ? 0 : wireFraction),
+          sourceFrameCount: origin
+            ? Math.ceil(sourceEnd - origin.sourceOffsetFrame - (origin.sourceOffsetFraction ?? 0))
+            : sourceFrameCount,
           fadeInStartFrame: shiftFrame(event.fadeInStartFrame),
           fadeInEndFrame: shiftFrame(event.fadeInEndFrame),
           fadeOutStartFrame: shiftFrame(event.fadeOutStartFrame),
           fadeOutEndFrame: shiftFrame(event.fadeOutEndFrame),
-        })
+        }
+        candidateOrigins.set(key, { signature, event: candidate })
+        sampleSourceEvents.push(candidate)
       }
       vstAutomationSegments.push(...nativeVstAutomationSegmentsForSnapshot(
         input.snapshot,
@@ -626,7 +707,7 @@ export const createNativeScheduleCoordinator = (input: {
       })))
     }
     const orderedSampleSourceEvents = sampleSourceEvents.toSorted((left, right) => (
-      left.startFrame - right.startFrame || left.sequence - right.sequence
+      Math.max(startFrame, left.startFrame) - Math.max(startFrame, right.startFrame) || left.sequence - right.sequence
     )).map((event, index) => ({
       ...event,
       sequence: nextSequence + instrumentEvents.length + index,
@@ -637,10 +718,64 @@ export const createNativeScheduleCoordinator = (input: {
       sampleSourceEvents: orderedSampleSourceEvents,
       vstAutomationSegments,
       processorAutomationEvents,
-      noteChanges: [...noteChanges],
-      sourceChanges: [...sourceChanges],
+      sourceChanges: [...sourceChanges].map(([key, stop]) => [key, stop, sourceStarts.get(key) ?? startFrame]),
+      sourceOrigins: candidateOrigins,
       sequenceCount: instrumentEvents.length + sampleSourceEvents.length,
     }
+  }
+
+  const preflightCallbackStarts = function* (blockSize: number, endFrame: number) {
+    // Between arrangement boundaries, raw session-rate sources occupy the same
+    // slots, notes keep the same voice ledger, and automation only repeats its
+    // callback seed. Validate the boundary block and its neighbors, including
+    // the first ordinary callback after initialization. Complex projections
+    // retain the exhaustive gate: this is not a lookahead or capacity reduction.
+    const canSkipUnchangedCallbacks = !loop
+      && (input.nativePcmChunkDescriptors?.length ?? 0) === 0
+      && [...assets.values()].every((asset) => asset.sampleRateHz === input.sampleRateHz)
+      && input.snapshot.tracks.every((track) => track.clips.every((clip) => (
+        (clip.midi?.mappings?.length ?? 0) === 0 && clip.audioWarp?.enabled !== true
+      )))
+    if (!canSkipUnchangedCallbacks) {
+      for (let frame = input.startFrame; frame < endFrame; frame += blockSize) yield frame
+      return
+    }
+    const starts = new Set<number>()
+    const addBoundary = (frame: number) => {
+      const block = Math.floor((frame - input.startFrame) / blockSize)
+      for (const neighbor of [block - 1, block, block + 1]) {
+        const start = input.startFrame + neighbor * blockSize
+        if (start >= input.startFrame && start < endFrame) starts.add(start)
+      }
+    }
+    addBoundary(input.startFrame)
+    addBoundary(endFrame - 1)
+    const schedule = compilePortableWindow({
+      timeOrigin: { timelineSec: input.startFrame / input.sampleRateHz, frame: input.startFrame },
+      rangeStartFrame: input.startFrame,
+      rangeEndFrame: endFrame,
+    })
+    for (const event of schedule.events) {
+      addBoundary(event.frame)
+      if (event.type === "parameter-ramp") addBoundary(event.endFrame)
+    }
+    const projection = projectPortableClipEvents({
+      tracks: audioTracks, assets, bpm: input.snapshot.bpm, sampleRateHz: input.sampleRateHz,
+      rangeStartSec: 0, rangeEndSec: endFrame / input.sampleRateHz,
+      epoch: input.epoch, firstSequence: nextSequence, allowInstruments: false,
+      warpContext: "offline", assetRatePolicy: "asset-rate",
+    })
+    if (!projection.supported) throw new Error(projection.reasons.join(" "))
+    for (const event of projection.events) {
+      addBoundary(event.startFrame)
+      addBoundary(event.stopFrame)
+    }
+    // External envelopes are projected separately from native processor events.
+    for (const envelope of input.snapshot.mixer.automationEnvelopes) {
+      if (!envelope.enabled) continue
+      for (const point of envelope.points) addBoundary(Math.round(point.timeSec * input.sampleRateHz))
+    }
+    yield* [...starts].sort((left, right) => left - right)
   }
 
   const validateCallbackCapacity = (graph: AudioCoreGraphSnapshot) => {
@@ -648,14 +783,17 @@ export const createNativeScheduleCoordinator = (input: {
     if (!Number.isSafeInteger(blockSize) || blockSize <= 0) throw capacityError("the device callback block size is invalid.")
     const attachments = input.snapshot.nativeExternalAttachmentPlan?.attachments ?? []
     const preflightLedgers: ScheduleLedgers = {
-      activeNoteIds: new Set<string>(),
+      activeNoteIds: new Map(),
       emittedSources: new Map<string, number>(),
+      sourceOrigins: new Map(),
     }
     const activeByNode = new Map<string, number>()
-    const voiceCapacityByNode = new Map(
-      graph.nodes
-        .filter((node) => node.kind === "instrument")
-        .map((node) => [node.id, node.instrument?.voiceCapacity ?? nativeVoiceCapacity]),
+    const vstNodeIds = new Set(attachments.map((attachment) => attachment.graphNodeId))
+    // Built-in instruments steal voices. Only the independent native VST
+    // event ledger constrains note admission.
+    const heldNoteCapacityByNode = new Map(
+      graph.nodes.filter((node) => node.kind === "instrument" && vstNodeIds.has(node.id))
+        .map((node) => [node.id, 256]),
     )
     const preflightEnd = loop
       ? Math.max(
@@ -663,7 +801,7 @@ export const createNativeScheduleCoordinator = (input: {
         loop.endFrame + Math.max(blockSize * 2, loop.lengthFrames * 2),
       )
       : scheduleEndFrame
-    for (let start = input.startFrame; start < preflightEnd; start += blockSize) {
+    for (const start of preflightCallbackStarts(blockSize, preflightEnd)) {
         const end = Math.min(preflightEnd, start + blockSize)
         const window = compileWindow(start, end, preflightLedgers)
         const initial = start === input.startFrame ? synthStateEvents(input.snapshot, start) : []
@@ -688,7 +826,7 @@ export const createNativeScheduleCoordinator = (input: {
         for (const [eventIndex, event] of window.instrumentEvents.entries()) {
           const noteKey = window.instrumentEventKeys[eventIndex] ?? `${event.nodeId}\u0000${event.noteId}`
           if (event.type === "note-on") {
-            preflightLedgers.activeNoteIds.add(noteKey)
+            preflightLedgers.activeNoteIds.set(noteKey, { pitch: event.note, velocity: event.value })
             activeByNode.set(event.nodeId, (activeByNode.get(event.nodeId) ?? 0) + 1)
           } else {
             if (preflightLedgers.activeNoteIds.delete(noteKey)) {
@@ -698,7 +836,7 @@ export const createNativeScheduleCoordinator = (input: {
             }
           }
           const active = activeByNode.get(event.nodeId) ?? 0
-          const capacity = voiceCapacityByNode.get(event.nodeId)
+          const capacity = heldNoteCapacityByNode.get(event.nodeId)
           if (capacity !== undefined && active > capacity) {
             throw capacityError(`instrument ${event.nodeId} needs ${active} simultaneous voices; its fixed ledger capacity is ${capacity}.`)
           }
@@ -738,21 +876,32 @@ export const createNativeScheduleCoordinator = (input: {
     validateCallbackCapacity(graph)
   }
 
-  const queueWindow = async (
-    startFrame: number,
-    endFrame: number,
-    window: ScheduleWindowCandidate,
-    token?: string,
-  ) => {
+  const awaitPreparation = async <Value>(operation: Promise<Value>): Promise<Value> => {
+    const signal = hydrationAbortController.signal
+    let onAbort: (() => void) | undefined
+    try {
+      return await Promise.race([operation, new Promise<never>((_, reject) => {
+        if (signal.aborted) { reject(signal.reason); return }
+        onAbort = () => reject(signal.reason)
+        signal.addEventListener("abort", onAbort, { once: true })
+      })])
+    } finally {
+      if (onAbort) signal.removeEventListener("abort", onAbort)
+    }
+  }
+
+  const hydrationRangesFor = (startFrame: number, window: ScheduleWindowCandidate) => {
     const frameCountByAssetId = new Map(
       input.assets.map(({ asset }) => [asset.assetId, asset.frameCount]),
     )
-    const hydrationRanges = window.sampleSourceEvents.flatMap((event) => {
+    return window.sampleSourceEvents.flatMap((event) => {
       const sourceAssetKey = input.assetSourceKeys?.get(event.assetId)
       const totalFrames = frameCountByAssetId.get(event.assetId)
       if (!sourceAssetKey || totalFrames === undefined) return []
-      const sourceStart = event.sourceOffsetFrame + (event.sourceOffsetFraction ?? 0)
-      const coverage = nativeMappedSourceCoverage(sourceStart, event.sourceFrameCount, totalFrames)
+      const elapsedFrames = Math.max(0, startFrame - event.startFrame)
+        * (sourceRates.get(event.assetId) ?? input.sampleRateHz) / input.sampleRateHz
+      const sourceStart = event.sourceOffsetFrame + (event.sourceOffsetFraction ?? 0) + elapsedFrames
+      const coverage = nativeMappedSourceCoverage(sourceStart, Math.max(0, Math.ceil(event.sourceFrameCount - elapsedFrames)), totalFrames)
       if (!coverage || coverage.frameCount === 0) return []
       return [{
         sourceAssetKey,
@@ -760,8 +909,19 @@ export const createNativeScheduleCoordinator = (input: {
         endFrame: coverage.startFrame + coverage.frameCount,
       }]
     })
+  }
+
+  const queueWindow = async (
+    startFrame: number,
+    endFrame: number,
+    window: ScheduleWindowCandidate,
+    token?: string,
+  ) => {
+    const hydrationRanges = hydrationRangesFor(startFrame, window)
     if (input.pageManager && hydrationRanges.length > 0) {
-      await input.pageManager.ensureRanges(hydrationRanges, hydrationAbortController.signal)
+      const hydration = input.pageManager.ensureRanges(hydrationRanges, hydrationAbortController.signal)
+      if (preparedPublicationFrame === undefined) await hydration
+      else await awaitPreparation(hydration)
     }
     const chunkCount = Math.max(
       Math.ceil(window.instrumentEvents.length / nativeInstrumentEventBatchSize),
@@ -792,7 +952,9 @@ export const createNativeScheduleCoordinator = (input: {
         (chunk + 1) * nativeInstrumentEventBatchSize,
       )
       const payload = serializeNativeScheduleWindow({
-        revision: input.snapshot.revision,
+        revision: graphRevision,
+        preparedRevision: preparedPublicationFrame === undefined ? 0 : graphRevision,
+        requestedPublicationFrame: preparedPublicationFrame ?? 0,
         epoch: input.epoch,
         windowId,
         startFrame,
@@ -808,29 +970,51 @@ export const createNativeScheduleCoordinator = (input: {
       })
       let lastError: Error | undefined
       for (let attempt = 0; attempt < nativeScheduleSubmissionAttempts; attempt += 1) {
-        const reply = await input.bridge.queueScheduleWindow(payload, token)
+        hydrationAbortController.signal.throwIfAborted()
+        if (disposed) throw new NativePlaybackAbortError("coordinator-disposed")
+        const submission = input.bridge.queueScheduleWindow(payload, token)
+        const reply = preparedPublicationFrame === undefined ? await submission : await awaitPreparation(submission)
+        hydrationAbortController.signal.throwIfAborted()
+        if (disposed) throw new NativePlaybackAbortError("coordinator-disposed")
         if (reply.ok) {
           lastError = undefined
           break
         }
-        lastError = new Error(reply.error)
+        lastError = new Error(`Native schedule window ${windowId} (${startFrame}-${endFrame}) was rejected: ${reply.error}`)
+        if (preparedPublicationFrame !== undefined && onPreparedWindowRejected) {
+          await onPreparedWindowRejected()
+          if (disposed) throw new NativePlaybackAbortError("coordinator-disposed")
+        }
         if (attempt === 0 && input.pageManager && hydrationRanges.length > 0
           && /mapped|written|hydration|range/i.test(reply.error)) {
           input.pageManager.invalidateRanges(hydrationRanges)
-          await input.pageManager.ensureRanges(hydrationRanges, hydrationAbortController.signal)
+          const hydration = input.pageManager.ensureRanges(hydrationRanges, hydrationAbortController.signal)
+          if (preparedPublicationFrame === undefined) await hydration
+          else await awaitPreparation(hydration)
         }
       }
       if (lastError) throw lastError
       submittedVstSegments += vstAutomationSegments.length
     }
+    acceptedWindows.push({
+      startFrame, endFrame, window,
+      before: { activeNoteIds: new Map(activeNoteIds), emittedSources: new Map(emittedSources), sourceOrigins: new Map(sourceOrigins) },
+    })
     nextWindowId += 1
-    for (const [key, active] of window.noteChanges) {
-      if (active) activeNoteIds.add(key)
-      else activeNoteIds.delete(key)
+    for (const [index, event] of window.instrumentEvents.entries()) {
+      const key = window.instrumentEventKeys[index]
+      if (!key) continue
+      if (event.type === "note-on") activeNoteIds.set(key, { pitch: event.note, velocity: event.value })
+      else if (event.type === "note-off") activeNoteIds.delete(key)
     }
     for (const [key, stopFrame] of window.sourceChanges) emittedSources.set(key, stopFrame)
+    if (preparedPublicationFrame !== undefined && startFrame === input.startFrame) sourceOrigins.clear()
+    for (const [key, origin] of window.sourceOrigins) sourceOrigins.set(key, origin)
     for (const [key, stopFrame] of emittedSources) {
-      if (stopFrame <= startFrame) emittedSources.delete(key)
+      if (stopFrame <= startFrame) {
+        emittedSources.delete(key)
+        sourceOrigins.delete(key)
+      }
     }
     nextSequence += window.sequenceCount
     nextWindowStartFrame = endFrame
@@ -862,7 +1046,9 @@ export const createNativeScheduleCoordinator = (input: {
     const threshold = renderedFrame + Math.round(input.sampleRateHz * nativeScheduleRefillThresholdSec)
     if (nextWindowStartFrame >= threshold) return
     while (!disposed && !scheduleComplete && nextWindowStartFrame < targetEnd) {
-      let endFrame = targetEnd
+      // A retained source already has a native cursor through its old window.
+      // Split at that cursor's end, then schedule its continuation, not a replay.
+      let endFrame = Math.min(targetEnd, ...[...emittedSources.values()].filter((stop) => stop > nextWindowStartFrame))
       let candidate = compileRefillWindow(nextWindowStartFrame, endFrame)
       for (;;) {
         const chunkCount = Math.max(
@@ -912,7 +1098,7 @@ export const createNativeScheduleCoordinator = (input: {
     }
     refillInFlight = undefined
     release()
-    if (!refillRequested || !refillEnabled || disposed || scheduleComplete) return
+    if (!refillRequested || !refillEnabled || disposed || scheduleComplete || graphPublicationSuspended) return
     refillRequested = false
     const latest = latestProgress
     if (latest) requestRefill(latest, true)
@@ -920,7 +1106,7 @@ export const createNativeScheduleCoordinator = (input: {
 
   const requestRefill = (progress: NativeScheduleProgress, force = false) => {
     if (disposed) return
-    if (progress.revision !== input.snapshot.revision || progress.epoch !== input.epoch) return
+    if (progress.revision !== graphRevision || progress.epoch !== input.epoch) return
     if (!force && progress.progressSequence <= (latestProgress?.progressSequence ?? 0n)) return
     if (!force && input.onRefillDiagnostics) progressCount += 1
     latestProgress = progress
@@ -929,9 +1115,10 @@ export const createNativeScheduleCoordinator = (input: {
       refillRequested = false
     }
     refillFrame = Number(progress.renderedThroughFrame)
+    while (acceptedWindows[0] && acceptedWindows[0].endFrame <= refillFrame) acceptedWindows.shift()
     input.onRenderedFrame?.(refillFrame)
     resolveWaiters(progress)
-    if (!refillEnabled || scheduleComplete || refillFaulted) return
+    if (!refillEnabled || scheduleComplete || refillFaulted || graphPublicationSuspended) return
     if (refillInFlight !== undefined) {
       refillRequested = true
       return
@@ -981,11 +1168,14 @@ export const createNativeScheduleCoordinator = (input: {
   const dispose = () => {
     if (disposed) return
     disposed = true
-    hydrationAbortController.abort()
+    const reason = new NativePlaybackAbortError("coordinator-disposed")
+    hydrationAbortController.abort(reason)
     unsubscribeListeners()
     activeNoteIds.clear()
     emittedSources.clear()
-    failWaiters(new Error("Native schedule coordinator was disposed."))
+    sourceOrigins.clear()
+    acceptedWindows.length = 0
+    failWaiters(reason)
   }
 
   const wait = <T extends { resolve: () => void; reject: (error: Error) => void }>(
@@ -993,7 +1183,7 @@ export const createNativeScheduleCoordinator = (input: {
     waiter: T,
   ) => new Promise<void>((resolve, reject) => {
     if (disposed) {
-      reject(new Error("Native schedule coordinator was disposed."))
+      reject(new NativePlaybackAbortError("coordinator-disposed"))
       return
     }
     waiter.resolve = resolve
@@ -1002,9 +1192,78 @@ export const createNativeScheduleCoordinator = (input: {
     if (latestProgress) resolveWaiters(latestProgress)
   })
 
-  const coordinator: NativeScheduleCoordinator = {
+  const coordinator: PagePreparingCoordinator = {
+    async coverThrough(frame) {
+      while (refillInFlight) await refillInFlight
+      if (disposed) throw new NativePlaybackAbortError("coordinator-disposed")
+      const { marker, operation, release } = beginRefill(frame)
+      try { await operation } finally { finishRefill(marker, release) }
+    },
+    stageRevision(snapshot, graph, frame, onRejected, resources) {
+      const accepted = acceptedWindows.find((window) => window.startFrame <= frame && window.endFrame > frame)
+      if (!accepted) throw new Error("Native active schedule does not cover the publication seam.")
+      const ownership = {
+        activeNoteIds: new Map(accepted.before.activeNoteIds),
+        emittedSources: new Map(accepted.before.emittedSources),
+        sourceOrigins: new Map(accepted.before.sourceOrigins),
+      }
+      if (input.preparedPublicationFrame !== undefined && accepted.startFrame === input.startFrame)
+        ownership.sourceOrigins.clear()
+      for (const [index, event] of accepted.window.instrumentEvents.entries()) {
+        if (event.frameOffset >= frame) continue
+        const key = accepted.window.instrumentEventKeys[index]
+        if (!key) continue
+        if (event.type === "note-on") ownership.activeNoteIds.set(key, { pitch: event.note, velocity: event.value })
+        else if (event.type === "note-off") ownership.activeNoteIds.delete(key)
+      }
+      for (const [key, stop, start] of accepted.window.sourceChanges) {
+        if (start < frame && stop > frame) {
+          ownership.emittedSources.set(key, stop)
+          const origin = accepted.window.sourceOrigins.get(key)
+          if (origin) ownership.sourceOrigins.set(key, origin)
+        }
+      }
+      const oldInstruments = new Map(input.graph?.nodes.map((node) => [node.id, node.instrument]))
+      const candidateAssetIds = new Map((resources?.assets ?? input.assets)
+        .map(({ asset, sessionAssetId }) => [asset.assetId, sessionAssetId]))
+      const retainedInstruments = new Set(graph.nodes.filter((node) => node.instrument
+        && JSON.stringify(node.instrument) === JSON.stringify(oldInstruments.get(node.id))
+        && (node.instrument.kind === "synth" || (
+          node.instrument.kind === "granular" ? [node.instrument.assetId] : node.instrument.zones.map((zone) => zone.assetId)
+        ).every((assetId) => sessionAssetIds.get(assetId) === candidateAssetIds.get(assetId)))).map((node) => node.id))
+      for (const key of ownership.activeNoteIds.keys()) {
+        const nodeId = key.split("\u0000")[loop ? 1 : 0]
+        if (!nodeId || !retainedInstruments.has(nodeId)) ownership.activeNoteIds.delete(key)
+      }
+      // The candidate declares the complete audible set, independently of the
+      // active bank's accepted horizon. Its origins remain private until proof.
+      ownership.emittedSources.clear()
+      return createNativeScheduleCoordinator({
+        ...input, ...resources, snapshot, graph, startFrame: frame,
+        preparedPublicationFrame: frame, initialOwnership: ownership,
+        // Publication retains the transport epoch and the core's source sequence floor.
+        initialSequence: nextSequence,
+      }, onRejected)
+    },
+    activateRevision(proof) {
+      if (disposed || preparedPublicationFrame === undefined || proof.status !== "published"
+        || proof.activeRevision !== graphRevision || proof.publicationFrame !== BigInt(preparedPublicationFrame)) return false
+      preparedPublicationFrame = undefined
+      onPreparedWindowRejected = undefined
+      return true
+    },
+    async suspendGraphPublication() {
+      graphPublicationSuspended = true
+      if (refillInFlight) await refillInFlight
+    },
+    resumeGraphPublication(revision) {
+      graphRevision = revision
+      graphPublicationSuspended = false
+      if (latestProgress?.revision === revision) requestRefill(latestProgress, true)
+    },
     install,
     dispose,
+    abortPreparation: () => hydrationAbortController.abort(new NativePlaybackAbortError("coordinator-disposed")),
     preflight,
     async queueInitialSynthState(frame, transactionToken) {
       const events = synthStateEvents(input.snapshot, frame)
@@ -1014,6 +1273,32 @@ export const createNativeScheduleCoordinator = (input: {
         transactionToken,
       ))
       nextSequence = Math.max(nextSequence, events.length + 1)
+    },
+    async preparePages(fromFrame, seamFrame) {
+      const end = Math.min(ownedScheduleEndFrame, seamFrame + Math.max(
+        input.capacity.maximumFramesPerBlock,
+        Math.round(input.sampleRateHz * nativeScheduleLookaheadSec),
+      ))
+      const ranges = hydrationRangesFor(fromFrame, compileWindow(fromFrame, end))
+      if (input.pageManager && ranges.length > 0)
+        await awaitPreparation(input.pageManager.ensureRanges(ranges, hydrationAbortController.signal))
+    },
+    async prepareCandidatePages(snapshot, graph, fromFrame, seamFrame, resources, signal) {
+      // Compiled on private, empty ledgers: every audible source is declared from `fromFrame`, as a published bank would.
+      const candidate = buildNativeScheduleCoordinator({
+        ...input, ...resources, snapshot, graph, startFrame: fromFrame, preparedPublicationFrame: fromFrame,
+        initialOwnership: { activeNoteIds: new Map(), emittedSources: new Map(), sourceOrigins: new Map() },
+        initialSequence: nextSequence,
+      })
+      const abort = () => candidate.abortPreparation()
+      signal.addEventListener("abort", abort, { once: true })
+      try {
+        if (signal.aborted) abort()
+        await candidate.preparePages(fromFrame, seamFrame)
+      } finally {
+        signal.removeEventListener("abort", abort)
+        candidate.dispose()
+      }
     },
     async prime(frame, transactionToken) {
       nextWindowStartFrame = frame
@@ -1077,3 +1362,6 @@ export const createNativeScheduleCoordinator = (input: {
   }
   return coordinator
 }
+
+export const createNativeScheduleCoordinator = (...args: Parameters<typeof buildNativeScheduleCoordinator>): NativeScheduleCoordinator =>
+  buildNativeScheduleCoordinator(...args)

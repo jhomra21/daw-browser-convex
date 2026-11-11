@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron"
+import { nativeInstrumentBudgetPolicy } from "../../src/lib/desktop/native-instrument-budget-policy"
 import {
   desktopCancelSchemaV1,
   desktopExportTerminalSchemaV1,
@@ -17,6 +18,88 @@ import {
   type DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu"
 import {
+  applicationMenuCommandChannel,
+  applicationMenuStateChannel,
+  benchmarkHeartbeatChannel,
+  benchmarkRendererPingChannel,
+  benchmarkRendererPongChannel,
+  capabilityAbortChannel,
+  capabilityBeginWriteChannel,
+  capabilityCommitChannel,
+  capabilityReadChunkChannel,
+  capabilityWriteChunkChannel,
+  diagnosticsChannel,
+  diagnosticsV2TraceChannel,
+  exportPickOutputDirectoryChannel,
+  exportPickOutputFileChannel,
+  exportReleaseOutputChannel,
+  hostRequestChannel,
+  hostResponseChannel,
+  lifecycleChannel,
+  lossChannel,
+  meterBatchChannel,
+  offlineCancelChannel,
+  offlineMappedPageRequestChannel,
+  offlineMappedPageResponseChannel,
+  offlinePcmAckChannel,
+  offlinePcmChannel,
+  offlineRenderChannel,
+  pluginCatalogChooseDirectoryChannel,
+  pluginCatalogPreflightInsertionChannel,
+  pluginCatalogReadChannel,
+  pluginCatalogRemoveDirectoryChannel,
+  pluginCatalogScanChannel,
+  recordingFailureChannel,
+  recordingSpoolListChannel,
+  recordingSpoolReadChannel,
+  recordingSpoolReleaseChannel,
+  recordingStatusChannel,
+  recoveryCompleteChannel,
+  recoveryRetryChannel,
+  resolveInputDeviceChannel,
+  resolveOutputDeviceChannel,
+  scheduleProgressChannel,
+  sessionBeginTransactionChannel,
+  sessionCancelRecordingChannel,
+  sessionCommitTransactionChannel,
+  sessionConfigureChannel,
+  sessionConfigureInstrumentStatesChannel,
+  sessionConfigureRecordingChannel,
+  sessionCoordinateVstAttachmentsChannel,
+  sessionCreateMappedAssetChannel,
+  sessionDetachVstChannel,
+  sessionEditorChannel,
+  sessionGetVstStateChannel,
+  sessionInstallAssetChannel,
+  sessionPrepareMappedAssetRangeChannel,
+  sessionPublishGraphChannel,
+  sessionPrepareGraphRevisionChannel, sessionPublishGraphRevisionChannel, sessionInspectGraphRevisionChannel,
+  sessionRollbackGraphRevisionChannel, sessionRetireGraphRevisionChannel,
+  sessionQueueInstrumentEventsChannel,
+  sessionQueueParameterEventsChannel,
+  sessionQueueProcessorStatePatchChannel,
+  sessionQueueScheduleWindowChannel,
+  sessionQueueSourceEventsChannel,
+  sessionQueueVstParameterEventsChannel,
+  sessionReenableVstScheduleAutomationChannel,
+  sessionReleaseAssetChannel,
+  sessionReleaseMappedAssetChannel,
+  sessionRollbackTransactionChannel,
+  sessionSetSpectrumNodeChannel,
+  sessionSetTransportChannel,
+  sessionStartChannel,
+  sessionStartRecordingChannel,
+  sessionStopChannel,
+  sessionStopRecordingChannel,
+  sessionTeardownChannel,
+  sessionWriteMappedAssetPageChannel,
+  spectrumFrameChannel,
+  vstEditorCapturedStateAckChannel,
+  vstEditorCapturedStateChannel,
+  vstEditorStateChannel,
+  vstParameterEditChannel,
+} from "@daw-browser/desktop-protocol/ipc-channels"
+import {
   nativeAudioHostMappedAssetPageHeaderBytes,
   nativeAudioHostMaximumMappedAssetRanges,
   nativeAudioHostMaximumPayloadBytes,
@@ -27,7 +110,6 @@ import type {
   NativeHostPcmAsset,
   NativeHostMappedAsset,
   NativeHostMappedAssetPage,
-  NativeHostRecordingBlock,
   NativeHostRecordingConfiguration,
   NativeHostRecordingStatus,
   NativeHostMeterBatch,
@@ -46,21 +128,24 @@ import type {
 } from "@daw-browser/plugin-host-protocol"
 import { isExportAudioFormat, type ExportAudioFormat } from "@daw-browser/shared"
 import { z } from "zod"
-import type { DesktopBridge, DesktopVstEditorCapturedState, DesktopVstEditorState } from "../../src/types/desktop-bridge"
+import type {
+  DesktopBridge,
+  DesktopVstEditorCapturedState,
+  DesktopVstEditorState,
+  NativeDeliveryReply,
+  NativeProcessorPatchReply,
+} from "../../src/types/desktop-bridge"
 import { createRequestQueue, type PreloadHostRequest, type PreloadHostResponse } from "./request-queue"
 import { offlinePcmMessageSchema } from "./offline-pcm-protocol"
 import { deliverOfflinePcmChunk } from "./offline-pcm-ack"
 import { diagnosticValidationPaths } from "./diagnostics-trace"
 import { safePreloadReply } from "./preload-reply"
 
-const incomingChannel = "daw:host-request"
-const outgoingChannel = "daw:host-response"
-const diagnosticsTraceChannel = "daw:diagnostics-v2-trace"
 if (process.env.DAW_BENCHMARK_HEARTBEAT === "1") {
-  ipcRenderer.on("daw:benchmark:renderer-ping", (_event, sequence) => {
+  ipcRenderer.on(benchmarkRendererPingChannel, (_event, sequence) => {
     const parsed = z.number().int().safe().safeParse(sequence)
     if (parsed.success) {
-      ipcRenderer.send("daw:benchmark:renderer-pong", parsed.data)
+      ipcRenderer.send(benchmarkRendererPongChannel, parsed.data)
     }
   })
 }
@@ -68,14 +153,10 @@ const diagnosticsTraceStarts = new Map<string, number>()
 const traceDiagnostics = (id: string, stage: string) => {
   const start = diagnosticsTraceStarts.get(id)
   if (start === undefined) return
-  ipcRenderer.send(diagnosticsTraceChannel, { stage, elapsedMs: Math.max(0, Date.now() - start) })
+  ipcRenderer.send(diagnosticsV2TraceChannel, { stage, elapsedMs: Math.max(0, Date.now() - start) })
   if (stage === "preload-reply-sent" || stage === "preload-reply-invalid") diagnosticsTraceStarts.delete(id)
 }
-const offlinePcmAckChannel = "daw:audio-host:offline-pcm-ack"
-const offlineMappedPageRequestChannel = "daw:audio-host:offline-mapped-page-request"
 const maximumNativeMappedPageBytes = nativeAudioHostMaximumPayloadBytes - nativeAudioHostMappedAssetPageHeaderBytes
-const applicationMenuCommandChannel = "daw:application-menu:command"
-const applicationMenuStateChannel = "daw:application-menu:state"
 const queueLimit = 32
 let closeHandler: (() => Promise<{ flushed: boolean }>) | undefined
 let activeGeneration = 0
@@ -114,13 +195,18 @@ type PluginCatalogReply = Awaited<ReturnType<NonNullable<DesktopBridge["pluginCa
 const invokePluginCatalog = (channel: string, value?: { directory: string }): Promise<PluginCatalogReply> =>
   ipcRenderer.invoke(channel, value)
 
+import { createNativeRevisionSession } from "../../src/lib/desktop/native-revision-session"
+
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
+type NativeConfigureReply =
+  | { ok: true; hostIdentity: { pid: number; generation: number; configurationGeneration: number } }
+  | { ok: false; error: string }
 type NativeTransactionReply = { ok: true; transactionToken: string } | { ok: false; error: string }
 type DeclaredAudioHostBridge = NonNullable<DesktopBridge["audioHost"]>
 type PreloadDesktopBridge = Omit<DesktopBridge, "audioHost"> & {
   audioHost?: {
     session: Omit<DeclaredAudioHostBridge["session"], "setRequestHandler" | "onPrepareToClose"> & {
-      configure(input: NativeHostDeviceConfiguration, transactionToken?: string): Promise<NativeSessionReply>
+      configure(input: NativeHostDeviceConfiguration, transactionToken?: string): Promise<NativeConfigureReply>
       beginTransaction(): Promise<NativeTransactionReply>
     }
   } & Omit<DeclaredAudioHostBridge, "session">
@@ -132,14 +218,18 @@ type NativeInputDeviceReply = { ok: true; device: NativeInputDevice | null } | {
 type NativeVstAttachmentCoordinationInput = Parameters<NonNullable<DesktopBridge["audioHost"]>["session"]["coordinateVstAttachments"]>[0]
 const invokeNativeSession = <Value>(channel: string, value?: Value, transactionToken?: string): Promise<NativeSessionReply> =>
   ipcRenderer.invoke(channel, { value, transactionToken })
+const invokeNativeDelivery = (channel: string, value: Uint8Array, transactionToken?: string): Promise<NativeDeliveryReply> =>
+  ipcRenderer.invoke(channel, { value, transactionToken })
+const invokeNativePatch = (value: Uint8Array, transactionToken?: string): Promise<NativeProcessorPatchReply> =>
+  ipcRenderer.invoke(sessionQueueProcessorStatePatchChannel, { value, transactionToken })
 const invokeNativeTransaction = (): Promise<NativeTransactionReply> =>
-  ipcRenderer.invoke("daw:audio-host:session:begin-transaction", { value: undefined, transactionToken: undefined })
+  ipcRenderer.invoke(sessionBeginTransactionChannel, { value: undefined, transactionToken: undefined })
 const invokeNativeEditor = (input: NativeVstEditorCommand, transactionToken?: string): Promise<NativeVstEditorReply> =>
-  ipcRenderer.invoke("daw:audio-host:session:editor", { value: input, transactionToken })
+  ipcRenderer.invoke(sessionEditorChannel, { value: input, transactionToken })
 const invokeNativeOutputDevice = (preferredDeviceId?: string): Promise<NativeOutputDeviceReply> =>
-  ipcRenderer.invoke("daw:audio-host:resolve-output-device", preferredDeviceId)
+  ipcRenderer.invoke(resolveOutputDeviceChannel, preferredDeviceId)
 const invokeNativeInputDevice = (preferredDeviceId?: string): Promise<NativeInputDeviceReply> =>
-  ipcRenderer.invoke("daw:audio-host:resolve-input-device", preferredDeviceId)
+  ipcRenderer.invoke(resolveInputDeviceChannel, preferredDeviceId)
 const validExportRequestId = (requestId: string) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(requestId)
 const invalidExportRequest = () => Promise.reject(new Error("Invalid export output request."))
 
@@ -152,14 +242,14 @@ const reply = (generation: number, response: PreloadHostResponse) => {
     ...(response.error === undefined ? { result: response.result } : { error: response.error }),
   })
   if (parsed.success) {
-    ipcRenderer.send(outgoingChannel, { generation, frame: parsed.data })
+    ipcRenderer.send(hostResponseChannel, { generation, frame: parsed.data })
     traceDiagnostics(response.id, "preload-reply-sent")
   } else {
     if (diagnosticsTraceStarts.has(response.id)) {
       traceDiagnostics(response.id, "preload-reply-invalid")
-      ipcRenderer.send(diagnosticsTraceChannel, { stage: "preload-reply-invalid-path", elapsedMs: 0, paths: diagnosticValidationPaths(parsed.error) })
+      ipcRenderer.send(diagnosticsV2TraceChannel, { stage: "preload-reply-invalid-path", elapsedMs: 0, paths: diagnosticValidationPaths(parsed.error) })
     }
-    ipcRenderer.send(outgoingChannel, { generation, frame: safePreloadReply(response) })
+    ipcRenderer.send(hostResponseChannel, { generation, frame: safePreloadReply(response) })
   }
 }
 
@@ -174,7 +264,7 @@ const dispatchLifecycle = (
     .catch(() => reply(generation, { id: request.id, error: hostError("internal", "The timeline could not prepare to close.") }))
 }
 
-ipcRenderer.on(incomingChannel, (_event, message) => {
+ipcRenderer.on(hostRequestChannel, (_event, message) => {
   const incoming = incomingMessageSchema.safeParse(message)
   if (!incoming.success) return
   const { generation, frame } = incoming.data
@@ -203,8 +293,9 @@ ipcRenderer.on(incomingChannel, (_event, message) => {
 
 const desktopBridge = {
   benchmarkSabRecording: process.env.DAW_BENCHMARK_SAB_RECORDING === "1",
+  acceptanceExternalNativeSession: process.env.DAW_AE08_EXTERNAL_NATIVE_SESSION === "1",
   benchmarkHeartbeat: (): Promise<{ mainEpochMs: number } | null> =>
-    process.env.DAW_BENCHMARK_HEARTBEAT === "1" ? ipcRenderer.invoke("daw:benchmark:heartbeat") : Promise.resolve(null),
+    process.env.DAW_BENCHMARK_HEARTBEAT === "1" ? ipcRenderer.invoke(benchmarkHeartbeatChannel) : Promise.resolve(null),
   traceDiagnosticsV2(id: string, stage: "controller-before-native" | "controller-after-native" | "controller-parsed") {
     traceDiagnostics(id, stage)
   },
@@ -225,38 +316,38 @@ const desktopBridge = {
   },
   pickOutputFile(requestId: string, format: ExportAudioFormat) {
     if (!validExportRequestId(requestId) || !isExportAudioFormat(format)) return invalidExportRequest()
-    return ipcRenderer.invoke("daw:export:pick-output-file", { requestId, format })
+    return ipcRenderer.invoke(exportPickOutputFileChannel, { requestId, format })
   },
   pickOutputDirectory(requestId: string) {
     if (!validExportRequestId(requestId)) return invalidExportRequest()
-    return ipcRenderer.invoke("daw:export:pick-output-directory", { requestId })
+    return ipcRenderer.invoke(exportPickOutputDirectoryChannel, { requestId })
   },
   releaseExportOutput(requestId: string) {
     if (!validExportRequestId(requestId)) return invalidExportRequest()
-    return ipcRenderer.invoke("daw:export:release-output", { requestId })
+    return ipcRenderer.invoke(exportReleaseOutputChannel, { requestId })
   },
   readChunk(requestId: string, token: string, offset: number, length: number) {
-    return ipcRenderer.invoke("daw:capability:readChunk", { requestId, token, offset, length })
+    return ipcRenderer.invoke(capabilityReadChunkChannel, { requestId, token, offset, length })
   },
   beginWrite(requestId: string, token: string, relativePath?: string) {
-    return ipcRenderer.invoke("daw:capability:beginWrite", { requestId, token, relativePath })
+    return ipcRenderer.invoke(capabilityBeginWriteChannel, { requestId, token, relativePath })
   },
   writeChunk(requestId: string, writerId: string, offset: number, chunk: Uint8Array) {
-    return ipcRenderer.invoke("daw:capability:writeChunk", { requestId, writerId, offset, chunk })
+    return ipcRenderer.invoke(capabilityWriteChunkChannel, { requestId, writerId, offset, chunk })
   },
   commit(requestId: string, writerId: string) {
-    return ipcRenderer.invoke("daw:capability:commit", { requestId, writerId })
+    return ipcRenderer.invoke(capabilityCommitChannel, { requestId, writerId })
   },
   abort(requestId: string, writerId: string) {
-    return ipcRenderer.invoke("daw:capability:abort", { requestId, writerId })
+    return ipcRenderer.invoke(capabilityAbortChannel, { requestId, writerId })
   },
   exportTerminal(jobId: string, status: "success" | "canceled" | "error") {
     const frame = desktopExportTerminalSchemaV1.parse({ version: "v1", type: "export-terminal", jobId, status })
-    ipcRenderer.send(outgoingChannel, { generation: activeGeneration, frame })
+    ipcRenderer.send(hostResponseChannel, { generation: activeGeneration, frame })
   },
   importTerminal(jobId: string) {
     const frame = desktopImportTerminalSchemaV1.parse({ version: "v1", type: "import-terminal", jobId })
-    ipcRenderer.send(outgoingChannel, { generation: activeGeneration, frame })
+    ipcRenderer.send(hostResponseChannel, { generation: activeGeneration, frame })
   },
   applicationMenu: {
       onCommand(listener: (command: DesktopApplicationMenuMessage) => void) {
@@ -273,82 +364,102 @@ const desktopBridge = {
     },
   },
   audioHost: process.platform === "darwin" && process.arch === "arm64" ? {
-      diagnostics: (): Promise<NativeAudioHostDiagnosticsReply> => ipcRenderer.invoke("daw:audio-host:diagnostics"),
+      instrumentBudgetPolicy: nativeInstrumentBudgetPolicy(Number(
+        process.argv.find((argument) => argument.startsWith("--daw-total-memory-bytes="))?.split("=")[1],
+      )),
+      recordingSpool: {
+        list: (scope, cursor) => ipcRenderer.invoke(recordingSpoolListChannel, { scope, cursor }),
+        read: (scope, takeId, offset, length) => ipcRenderer.invoke(recordingSpoolReadChannel, { scope, takeId, offset, length }),
+        release: (scope, takeId, acknowledgment) => ipcRenderer.invoke(recordingSpoolReleaseChannel, { scope, takeId, acknowledgment }),
+      },
+      diagnostics: (): Promise<NativeAudioHostDiagnosticsReply> => ipcRenderer.invoke(diagnosticsChannel),
       resolveOutputDevice: invokeNativeOutputDevice,
       resolveInputDevice: invokeNativeInputDevice,
       session: {
-        configure: (input: NativeHostDeviceConfiguration, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:configure", input, transactionToken),
+        revisions: createNativeRevisionSession((operation, input) => ipcRenderer.invoke({
+          prepare: sessionPrepareGraphRevisionChannel, publish: sessionPublishGraphRevisionChannel,
+          inspect: sessionInspectGraphRevisionChannel, rollback: sessionRollbackGraphRevisionChannel,
+          retire: sessionRetireGraphRevisionChannel,
+        }[operation], input)),
+        configure: (input: NativeHostDeviceConfiguration, transactionToken?: string): Promise<NativeConfigureReply> =>
+          ipcRenderer.invoke(sessionConfigureChannel, { value: input, transactionToken }),
         beginTransaction: invokeNativeTransaction,
-        commitTransaction: (transactionToken: string) => invokeNativeSession("daw:audio-host:session:commit-transaction", undefined, transactionToken),
-        rollbackTransaction: (transactionToken: string) => invokeNativeSession("daw:audio-host:session:rollback-transaction", undefined, transactionToken),
-        detachVst: (instanceId: string, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:detach-vst", instanceId, transactionToken),
-        captureVstState: (instanceId: string) => ipcRenderer.invoke("daw:audio-host:session:get-vst-state", instanceId),
+        commitTransaction: (transactionToken: string) => invokeNativeSession(sessionCommitTransactionChannel, undefined, transactionToken),
+        rollbackTransaction: (transactionToken: string) => invokeNativeSession(sessionRollbackTransactionChannel, undefined, transactionToken),
+        detachVst: (instanceId: string, transactionToken?: string) => invokeNativeSession(sessionDetachVstChannel, instanceId, transactionToken),
+        captureVstState: (instanceId: string) => ipcRenderer.invoke(sessionGetVstStateChannel, instanceId),
         editor: (input: NativeVstEditorCommand): Promise<NativeVstEditorReply> => invokeNativeEditor(input, input.transactionToken),
-        installAsset: (input: NativeHostPcmAsset, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:install-asset", input, transactionToken),
-        releaseAsset: (sessionAssetId: number, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:release-asset", sessionAssetId, transactionToken),
-        createMappedAsset: (input: NativeHostMappedAsset, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:create-mapped-asset", input, transactionToken),
-        writeMappedAssetPage: (input: NativeHostMappedAssetPage, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:write-mapped-asset-page", input, transactionToken),
-        prepareMappedAssetRange: (sessionAssetId: number, startFrame: number, frameCount: number, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:prepare-mapped-asset-range", { sessionAssetId, startFrame, frameCount }, transactionToken),
-        releaseMappedAsset: (sessionAssetId: number, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:release-mapped-asset", sessionAssetId, transactionToken),
-        publishGraph: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:publish-graph", bytes, transactionToken),
-        configureInstrumentStates: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:configure-instrument-states", bytes, transactionToken),
-        queueParameterEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:queue-parameter-events", bytes, transactionToken),
-        queueProcessorStatePatch: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:queue-processor-state-patch", bytes, transactionToken),
-        queueVstParameterEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:queue-vst-parameter-events", bytes, transactionToken),
-        queueInstrumentEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:queue-instrument-events", bytes, transactionToken),
-        queueScheduleWindow: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:queue-schedule-window", bytes, transactionToken),
-        reenableVstScheduleAutomation: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:reenable-vst-schedule-automation", bytes, transactionToken),
-        queueSourceEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:queue-source-events", bytes, transactionToken),
-        coordinateVstAttachments: (input: NativeVstAttachmentCoordinationInput, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:coordinate-vst-attachments", input, transactionToken),
-        setTransport: (input: NativeHostTransport, transactionToken?: string) => invokeNativeSession("daw:audio-host:session:set-transport", input, transactionToken),
-        configureRecording: (input: NativeHostRecordingConfiguration) => invokeNativeSession("daw:audio-host:session:configure-recording", input),
-        startRecording: () => invokeNativeSession("daw:audio-host:session:start-recording"),
-        stopRecording: (stopFrame?: number) => invokeNativeSession("daw:audio-host:session:stop-recording", stopFrame),
-        cancelRecording: () => invokeNativeSession("daw:audio-host:session:cancel-recording"),
-        start: () => invokeNativeSession("daw:audio-host:session:start"),
-        stop: () => invokeNativeSession("daw:audio-host:session:stop"),
-        teardown: () => invokeNativeSession("daw:audio-host:session:teardown"),
+        installAsset: (input: NativeHostPcmAsset, transactionToken?: string) => invokeNativeSession(sessionInstallAssetChannel, input, transactionToken),
+        releaseAsset: (sessionAssetId: number, transactionToken?: string) => invokeNativeSession(sessionReleaseAssetChannel, sessionAssetId, transactionToken),
+        createMappedAsset: (input: NativeHostMappedAsset, transactionToken?: string) => invokeNativeSession(sessionCreateMappedAssetChannel, input, transactionToken),
+        writeMappedAssetPage: (input: NativeHostMappedAssetPage, transactionToken?: string) => invokeNativeSession(sessionWriteMappedAssetPageChannel, input, transactionToken),
+        prepareMappedAssetRange: (sessionAssetId: number, startFrame: number, frameCount: number, transactionToken?: string) => invokeNativeSession(sessionPrepareMappedAssetRangeChannel, { sessionAssetId, startFrame, frameCount }, transactionToken),
+        releaseMappedAsset: (sessionAssetId: number, transactionToken?: string) => invokeNativeSession(sessionReleaseMappedAssetChannel, sessionAssetId, transactionToken),
+        publishGraph: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(sessionPublishGraphChannel, bytes, transactionToken),
+        configureInstrumentStates: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(sessionConfigureInstrumentStatesChannel, bytes, transactionToken),
+        queueParameterEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeDelivery(sessionQueueParameterEventsChannel, bytes, transactionToken),
+        queueProcessorStatePatch: (bytes: Uint8Array, transactionToken?: string) => invokeNativePatch(bytes, transactionToken),
+        queueVstParameterEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(sessionQueueVstParameterEventsChannel, bytes, transactionToken),
+        queueInstrumentEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeDelivery(sessionQueueInstrumentEventsChannel, bytes, transactionToken),
+        queueScheduleWindow: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(sessionQueueScheduleWindowChannel, bytes, transactionToken),
+        reenableVstScheduleAutomation: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(sessionReenableVstScheduleAutomationChannel, bytes, transactionToken),
+        queueSourceEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(sessionQueueSourceEventsChannel, bytes, transactionToken),
+        coordinateVstAttachments: (input: NativeVstAttachmentCoordinationInput, transactionToken?: string) => invokeNativeSession(sessionCoordinateVstAttachmentsChannel, input, transactionToken),
+        setTransport: (input: NativeHostTransport, transactionToken?: string) => invokeNativeSession(sessionSetTransportChannel, input, transactionToken),
+        configureRecording: (input: NativeHostRecordingConfiguration & { spoolImportVersion: 1 }): ReturnType<DeclaredAudioHostBridge["session"]["configureRecording"]> =>
+          ipcRenderer.invoke(sessionConfigureRecordingChannel, { value: input, transactionToken: undefined }),
+        startRecording: (binding?: Pick<NativeHostRecordingConfiguration, "projectId" | "projectGeneration" | "generation" | "sessionId">) =>
+          invokeNativeSession(sessionStartRecordingChannel, binding),
+        stopRecording: (stopFrame?: number) => invokeNativeSession(sessionStopRecordingChannel, stopFrame),
+        cancelRecording: () => invokeNativeSession(sessionCancelRecordingChannel),
+        start: () => invokeNativeSession(sessionStartChannel),
+        stop: (reason?: string) => invokeNativeSession(sessionStopChannel, reason ?? "unspecified"),
+        teardown: (reason: string) => invokeNativeSession(sessionTeardownChannel, reason),
         onLoss: (listener: (error?: string) => void) => {
           const notify = ipcRendererListener((_event, value) => {
             const parsed = hostLossSchema.safeParse(value)
             listener(parsed.success ? parsed.data : undefined)
           })
-          ipcRenderer.on("daw:audio-host:loss", notify)
-          return () => ipcRenderer.removeListener("daw:audio-host:loss", notify)
+          ipcRenderer.on(lossChannel, notify)
+          return () => ipcRenderer.removeListener(lossChannel, notify)
         },
-        onRecordingBlock: (listener: (block: NativeHostRecordingBlock) => void) => {
-          const notify = (_event: Electron.IpcRendererEvent, block: NativeHostRecordingBlock) => listener(block)
-          ipcRenderer.on("daw:audio-host:recording-block", notify)
-          return () => ipcRenderer.removeListener("daw:audio-host:recording-block", notify)
+        onRecordingFailure: (listener) => {
+          const schema = z.object({ generation: z.number().int().nonnegative(), sessionId: z.bigint().positive(), message: z.string().max(256) }).strict()
+          const notify = ipcRendererListener((_event, value) => {
+            const parsed = schema.safeParse(value)
+            if (parsed.success) listener(parsed.data)
+          })
+          ipcRenderer.on(recordingFailureChannel, notify)
+          return () => ipcRenderer.removeListener(recordingFailureChannel, notify)
         },
         onRecordingStatus: (listener: (status: NativeHostRecordingStatus) => void) => {
           const notify = (_event: Electron.IpcRendererEvent, status: NativeHostRecordingStatus) => listener(status)
-          ipcRenderer.on("daw:audio-host:recording-status", notify)
-          return () => ipcRenderer.removeListener("daw:audio-host:recording-status", notify)
+          ipcRenderer.on(recordingStatusChannel, notify)
+          return () => ipcRenderer.removeListener(recordingStatusChannel, notify)
         },
         onMeterBatch: (listener: (batch: NativeHostMeterBatch) => void) => {
           const notify = (_event: Electron.IpcRendererEvent, batch: NativeHostMeterBatch) => listener(batch)
-          ipcRenderer.on("daw:audio-host:meter-batch", notify)
-          return () => ipcRenderer.removeListener("daw:audio-host:meter-batch", notify)
+          ipcRenderer.on(meterBatchChannel, notify)
+          return () => ipcRenderer.removeListener(meterBatchChannel, notify)
         },
-        setSpectrumNode: (nodeId: bigint | null) => invokeNativeSession("daw:audio-host:session:set-spectrum-node", nodeId),
+        setSpectrumNode: (nodeId: bigint | null) => invokeNativeSession(sessionSetSpectrumNodeChannel, nodeId),
         onSpectrumFrame: (listener: (frame: NativeHostSpectrumFrame) => void) => {
           const notify = (_event: Electron.IpcRendererEvent, frame: NativeHostSpectrumFrame) => listener(frame)
-          ipcRenderer.on("daw:audio-host:spectrum-frame", notify)
-          return () => ipcRenderer.removeListener("daw:audio-host:spectrum-frame", notify)
+          ipcRenderer.on(spectrumFrameChannel, notify)
+          return () => ipcRenderer.removeListener(spectrumFrameChannel, notify)
         },
         onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
           const notify = (_event: Electron.IpcRendererEvent, progress: NativeScheduleProgress) => listener(progress)
-          ipcRenderer.on("daw:audio-host:schedule-progress", notify)
-          return () => ipcRenderer.removeListener("daw:audio-host:schedule-progress", notify)
+          ipcRenderer.on(scheduleProgressChannel, notify)
+          return () => ipcRenderer.removeListener(scheduleProgressChannel, notify)
         },
         onVstParameterEdit: (listener: (payload: DesktopVstParameterEditPayload) => void) => {
           const notify = ipcRendererListener((_event, value) => {
             const payload = desktopVstParameterEditPayloadSchema.safeParse(value)
             if (payload.success) listener(payload.data)
           })
-          ipcRenderer.on("daw:audio-host:vst-parameter-edit", notify)
-          return () => ipcRenderer.removeListener("daw:audio-host:vst-parameter-edit", notify)
+          ipcRenderer.on(vstParameterEditChannel, notify)
+          return () => ipcRenderer.removeListener(vstParameterEditChannel, notify)
         },
       },
       offlineRender: {
@@ -369,7 +480,7 @@ const desktopBridge = {
           const notify = ipcRendererListener((_event, value) => {
             const parsed = offlinePcmMessageSchema.safeParse(value)
             if (!parsed.success) {
-              void ipcRenderer.invoke("daw:audio-host:offline-cancel", jobId).catch(() => undefined)
+              void ipcRenderer.invoke(offlineCancelChannel, jobId).catch(() => undefined)
               return
             }
             if (parsed.data.jobId !== jobId
@@ -382,10 +493,10 @@ const desktopBridge = {
               listener,
               (ack) => ipcRenderer.send(offlinePcmAckChannel, ack),
             ).catch(() => {
-              void ipcRenderer.invoke("daw:audio-host:offline-cancel", jobId).catch(() => undefined)
+              void ipcRenderer.invoke(offlineCancelChannel, jobId).catch(() => undefined)
             })
           })
-          ipcRenderer.on("daw:audio-host:offline-pcm", notify)
+          ipcRenderer.on(offlinePcmChannel, notify)
           const pageNotify = ipcRendererListener((_event, value) => {
             const request = z.object({
               jobId: z.string(),
@@ -423,12 +534,12 @@ const desktopBridge = {
               request.data.startFrame,
               request.data.frameCount,
             ).then(
-              (page) => ipcRenderer.invoke("daw:audio-host:offline-mapped-page-response", {
+              (page) => ipcRenderer.invoke(offlineMappedPageResponseChannel, {
                 jobId,
                 requestId: request.data.requestId,
                 page,
               }),
-              (error) => ipcRenderer.invoke("daw:audio-host:offline-mapped-page-response", {
+              (error) => ipcRenderer.invoke(offlineMappedPageResponseChannel, {
                 jobId,
                 requestId: request.data.requestId,
                 error: error instanceof Error ? error.message : "Offline mapped page hydration failed.",
@@ -437,32 +548,32 @@ const desktopBridge = {
           })
           ipcRenderer.on(offlineMappedPageRequestChannel, pageNotify)
           try {
-            return await ipcRenderer.invoke("daw:audio-host:offline-render", { jobId, plan })
+            return await ipcRenderer.invoke(offlineRenderChannel, { jobId, plan })
           } finally {
-            ipcRenderer.removeListener("daw:audio-host:offline-pcm", notify)
+            ipcRenderer.removeListener(offlinePcmChannel, notify)
             ipcRenderer.removeListener(offlineMappedPageRequestChannel, pageNotify)
           }
         },
-        cancel: (jobId: string) => ipcRenderer.invoke("daw:audio-host:offline-cancel", jobId),
+        cancel: (jobId: string) => ipcRenderer.invoke(offlineCancelChannel, jobId),
       },
       onVstEditorState: (listener: (payload: DesktopVstEditorState) => void) => {
         const notify = ipcRendererListener((_event, value) => {
           const parsed = vstEditorStateSchema.safeParse(value)
           if (parsed.success) listener(parsed.data)
         })
-        ipcRenderer.on("daw:audio-host:vst-editor-state", notify)
-        return () => ipcRenderer.removeListener("daw:audio-host:vst-editor-state", notify)
+        ipcRenderer.on(vstEditorStateChannel, notify)
+        return () => ipcRenderer.removeListener(vstEditorStateChannel, notify)
       },
       onVstEditorCapturedState: (listener: (payload: DesktopVstEditorCapturedState) => Promise<void> | void) => {
         const notify = ipcRendererListener((_event, value) => {
           const parsed = vstEditorCapturedStateSchema.safeParse(value)
           if (parsed.success) {
             void Promise.resolve(listener(parsed.data)).then(
-              () => ipcRenderer.invoke("daw:audio-host:vst-editor-captured-state-ack", {
+              () => ipcRenderer.invoke(vstEditorCapturedStateAckChannel, {
                 requestId: parsed.data.requestId,
                 ok: true,
               }),
-              (error) => ipcRenderer.invoke("daw:audio-host:vst-editor-captured-state-ack", {
+              (error) => ipcRenderer.invoke(vstEditorCapturedStateAckChannel, {
                 requestId: parsed.data.requestId,
                 ok: false,
                 error: error instanceof Error ? error.message : "Editor state persistence failed.",
@@ -470,30 +581,30 @@ const desktopBridge = {
             )
           }
         })
-        ipcRenderer.on("daw:audio-host:vst-editor-captured-state", notify)
-        return () => ipcRenderer.removeListener("daw:audio-host:vst-editor-captured-state", notify)
+        ipcRenderer.on(vstEditorCapturedStateChannel, notify)
+        return () => ipcRenderer.removeListener(vstEditorCapturedStateChannel, notify)
       },
-      getLifecycle: () => ipcRenderer.invoke("daw:audio-host:lifecycle"),
+      getLifecycle: () => ipcRenderer.invoke(lifecycleChannel),
       completeRecovery: (powerGeneration: number, result: "ready" | "failed") => (
-        ipcRenderer.invoke("daw:audio-host:recovery-complete", { powerGeneration, result })
+        ipcRenderer.invoke(recoveryCompleteChannel, { powerGeneration, result })
       ),
-      retryRecovery: () => ipcRenderer.invoke("daw:audio-host:recovery-retry"),
+      retryRecovery: () => ipcRenderer.invoke(recoveryRetryChannel),
       onLifecycle: (listener: Parameters<NonNullable<DesktopBridge["audioHost"]>["onLifecycle"]>[0]) => {
         const notify = ipcRendererListener((_event, value) => {
           const parsed = audioLifecycleSchema.safeParse(value)
           if (parsed.success) listener(parsed.data)
         })
-        ipcRenderer.on("daw:audio-host:lifecycle", notify)
-        return () => ipcRenderer.removeListener("daw:audio-host:lifecycle", notify)
+        ipcRenderer.on(lifecycleChannel, notify)
+        return () => ipcRenderer.removeListener(lifecycleChannel, notify)
       },
     } : undefined,
     pluginCatalog: {
-      read: () => invokePluginCatalog("daw:plugin-catalog:read"),
-      chooseDirectory: () => invokePluginCatalog("daw:plugin-catalog:choose-directory"),
-      removeDirectory: (directory: string) => invokePluginCatalog("daw:plugin-catalog:remove-directory", { directory }),
-      scan: () => invokePluginCatalog("daw:plugin-catalog:scan"),
+      read: () => invokePluginCatalog(pluginCatalogReadChannel),
+      chooseDirectory: () => invokePluginCatalog(pluginCatalogChooseDirectoryChannel),
+      removeDirectory: (directory: string) => invokePluginCatalog(pluginCatalogRemoveDirectoryChannel, { directory }),
+      scan: () => invokePluginCatalog(pluginCatalogScanChannel),
       preflightInsertion: (input: NativeVst3InsertionPreflightRequest): Promise<NativeVst3InsertionPreflightResult> => (
-        ipcRenderer.invoke("daw:plugin-catalog:preflight-insertion", input)
+        ipcRenderer.invoke(pluginCatalogPreflightInsertionChannel, input)
       ),
     },
 } satisfies PreloadDesktopBridge

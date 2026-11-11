@@ -335,11 +335,13 @@ test("serializes empty sampled instruments without staged assets", () => {
 
 test("serializes bounded native schedule ownership events", () => {
   const bytes = serializeNativeScheduleWindow({
-    revision: 4,
+    revision: 8,
     epoch: 2,
-    startFrame: 100,
+    startFrame: 120,
     endFrame: 200,
     windowId: 9,
+    preparedRevision: 8,
+    requestedPublicationFrame: 120,
     instrumentEvents: [{
       nodeId: "track",
       noteId: 1,
@@ -352,10 +354,20 @@ test("serializes bounded native schedule ownership events", () => {
     }],
   })
   const view = new DataView(bytes.buffer)
-  expect(bytes.byteLength).toBe(108)
-  expect(view.getUint32(0, true)).toBe(4)
+  expect(bytes.byteLength).toBe(120)
+  expect(view.getUint32(0, true)).toBe(8)
   expect(view.getUint32(40, true)).toBe(1)
-  expect(view.getUint32(60 + 32, true)).toBe(104)
+  expect(view.getUint32(60, true)).toBe(8)
+  expect(view.getBigUint64(64, true)).toBe(120n)
+  expect(view.getUint32(72 + 32, true)).toBe(104)
+  expect(() => serializeNativeScheduleWindow({
+    revision: 8, epoch: 2, preparedRevision: 8, requestedPublicationFrame: 120,
+    startFrame: 200, endFrame: 300, windowId: 10,
+  })).not.toThrow()
+  expect(() => serializeNativeScheduleWindow({
+    revision: 8, epoch: 2, preparedRevision: 8, requestedPublicationFrame: 120,
+    startFrame: 100, endFrame: 200, windowId: 10,
+  })).toThrow()
   expect(() => serializeNativeScheduleWindow({
     revision: 4, epoch: 2, startFrame: 100, endFrame: 200, windowId: 9,
     instrumentEvents: [{ nodeId: "track", noteId: 1, sequence: 1, frameOffset: 200, type: "live-note-off", channel: 0, note: 60, value: 0 }],
@@ -391,9 +403,18 @@ test("prefixes each native graph envelope with a big-endian revision and payload
   expect(view.getBigUint64(0, false)).toBe(7n)
   expect(view.getUint32(8, false)).toBe(bytes.byteLength - 12)
   expect(view.getUint32(12, true)).toBe(3)
+
+  const kept = serializeNativeGraph(snapshot, new Set(["source"]))
+  const keptView = new DataView(kept.buffer)
+  expect(keptView.getUint32(12, true)).toBe(5)
+  expect(keptView.getUint32(12 + 24 + 32, true)).toBe(1)
+  expect(keptView.getUint32(12 + 24 + 140 + 32, true)).toBe(0)
+  expect(keptView.getUint32(8, false)).toBe(kept.byteLength - 12)
+  // The native flag cannot leak into the portable/browser descriptor.
+  expect(new DataView(encodePortableGraphEnvelope(snapshot).buffer).getUint32(0, true)).toBe(3)
 })
 
-test("keeps portable playback source buses sequential", () => {
+test("keeps portable playback sources off the live input buses", () => {
   const sourceNodes: AudioCoreGraphSnapshot["nodes"] = Array.from(
     { length: 6 },
     (_, index): AudioCoreGraphSnapshot["nodes"][number] => ({
@@ -427,8 +448,10 @@ test("keeps portable playback source buses sequential", () => {
   const bytes = encodePortableGraphEnvelope(snapshot)
   const view = new DataView(bytes.buffer)
 
+  // The worklet's live input carries the recording microphone; a source reading
+  // it would play the microphone into the mix.
   for (let index = 0; index < sourceNodes.length; index += 1) {
-    expect(view.getUint32(24 + index * 132 + 20, true)).toBe(index)
+    expect(view.getUint32(24 + index * 132 + 20, true)).toBe(0xffff_ffff)
   }
   expect(view.getUint32(24 + sourceNodes.length * 132 + 20, true)).toBe(0)
 })

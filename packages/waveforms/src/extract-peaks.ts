@@ -1,4 +1,4 @@
-import type { AudioPcmSourceDescriptor, DecodedAudioPage } from '@daw-browser/audio-engine/media-pages'
+import type { AudioPcmSourceDescriptor, DecodedAudioPage } from '@daw-browser/shared'
 import {
   peakAssetFormatVersion,
   waveformIntervalsPerChunk,

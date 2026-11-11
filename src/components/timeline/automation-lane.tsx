@@ -11,6 +11,9 @@ import {
   type AutomationPoint,
   type AutomationTarget,
 } from '@daw-browser/shared'
+import { formatDeviceDb, formatDeviceFrequency, formatDevicePercent } from '~/lib/device-value-format'
+import { formatBarsBeatsSixteenths } from '~/lib/musical-time-format'
+import { isEventFromDomDescendant } from '~/lib/pointer-event-target'
 import { windowAutomationPoints } from './automation-lane-geometry'
 import TimelineContextMenu, { type TimelineContextMenuItem } from './context-menu/timeline-context-menu'
 
@@ -20,6 +23,7 @@ type AutomationLaneProps = {
   parameterId: string
   envelope: AutomationEnvelope | undefined
   durationSec: number
+  bpm: number
   heightPx: number
   pixelsPerSecond: number
   visibleStartSec?: number
@@ -34,12 +38,10 @@ const VERTICAL_PADDING = 7
 const POINT_TIME_NUDGE_SEC = 0.05
 const POINT_VALUE_NUDGE_RATIO = 0.01
 
-const formatTime = (timeSec: number) => `${timeSec.toFixed(2)}s`
-
 const formatValue = (value: number, unit: AutomationParameterDescriptor['unit']) => {
-  if (unit === 'percent') return `${Math.round(value * 100)}%`
-  if (unit === 'db') return `${value.toFixed(1)} dB`
-  if (unit === 'hz') return value >= 1000 ? `${(value / 1000).toFixed(2)} kHz` : `${Math.round(value)} Hz`
+  if (unit === 'percent') return formatDevicePercent(value)
+  if (unit === 'db') return formatDeviceDb(value, 1)
+  if (unit === 'hz') return formatDeviceFrequency(value, 2)
   if (unit === 'seconds') return `${value.toFixed(2)}s`
   return value.toFixed(2)
 }
@@ -133,7 +135,7 @@ export default function AutomationLane(props: AutomationLaneProps) {
     const point = displayedPoint()
     const desc = descriptor()
     if (!point || !desc) return undefined
-    return `${formatTime(point.timeSec)} · ${formatValue(point.value, desc.unit)} · ${point.interpolation}`
+    return `${formatBarsBeatsSixteenths(point.timeSec, props.bpm)} · ${formatValue(point.value, desc.unit)} · ${point.interpolation}`
   })
   const path = createMemo(() => {
     const ordered = displayPoints()
@@ -372,10 +374,12 @@ export default function AutomationLane(props: AutomationLaneProps) {
       data-timeline-keyboard-local="true"
       class="absolute inset-0 z-20 touch-none"
       onPointerDown={(event) => {
+        if (!isEventFromDomDescendant(event)) return
         event.stopPropagation()
         root?.focus()
       }}
       onDblClick={(event) => {
+        if (!isEventFromDomDescendant(event)) return
         event.stopPropagation()
         event.preventDefault()
         addPoint(event)

@@ -11,7 +11,7 @@ import {
   retainWaveformData,
 } from './retained-waveform'
 import { loadWaveformSourceData } from '@daw-browser/waveforms/select-waveform-window'
-import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 
 describe('waveform request planning', () => {
   const intervalDataFor = (

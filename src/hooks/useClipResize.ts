@@ -7,6 +7,7 @@ import { audioWarpEqual, isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { buildClipTimingHistoryEntry } from '~/lib/undo/builders'
 import { quantizeSecToGrid } from '~/lib/timeline-utils'
+import { isKeyboardEventOwnedByOverlay } from '~/lib/keyboard-event-target'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { clipFadesEqual, transformClipFadesForDuration, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
@@ -24,6 +25,7 @@ type ResizeState = {
 
 type ClipResizeOptions = {
   tracks: Accessor<RuntimeTrack[]>
+  draftClipTiming?: (clipId: string) => Partial<RuntimeTrack['clips'][number]> | undefined
   setDraftClipTiming: (clipId: string, patch: { startSec?: number; duration?: number; leftPadSec?: number; bufferOffsetSec?: number; audioWarp?: RuntimeTrack['clips'][number]['audioWarp']; fades?: ClipFades; midiOffsetBeats?: number } | null) => void
   commitClipTiming: (clipId: string, patch: { startSec: number; duration: number; leftPadSec?: number; bufferOffsetSec?: number; audioWarp?: RuntimeTrack['clips'][number]['audioWarp']; fades?: ClipFades; midiOffsetBeats?: number }) => void
   canWriteClip: (clipId: string) => boolean
@@ -74,15 +76,22 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   let resizeOrigMidiOffsetBeats = 0
   let resizeOrigFades: ClipFades | undefined
   let resizeBaselineAudioClip: RuntimeTrack['clips'][number] | null = null
+  let resizeTrackIndex = -1
+  let resizeClip: RuntimeTrack['clips'][number] | null = null
+  let resizeClipArraySnapshot: RuntimeTrack['clips'] | null = null
+  let resizePreviousClipEnd = 0
+  let resizeNextClipStart = Number.POSITIVE_INFINITY
   let activeResizePointerId: number | null = null
   let activeResizeCaptureTarget: HTMLElement | null = null
 
   const removeResizeListeners = () => {
     window.removeEventListener('pointermove', onResizePointerMove)
     window.removeEventListener('pointerup', onResizePointerUp, { capture: true })
-    window.removeEventListener('pointercancel', onResizePointerUp, { capture: true })
-    window.removeEventListener('blur', onResizePointerUp)
+    window.removeEventListener('pointercancel', onResizePointerCancel, { capture: true })
+    window.removeEventListener('keydown', onResizeKeyDown, { capture: true })
+    window.removeEventListener('blur', cancelResize)
     if (activeResizeCaptureTarget && activeResizePointerId !== null) {
+      activeResizeCaptureTarget.removeEventListener('lostpointercapture', onResizePointerCancel)
       try {
         if (activeResizeCaptureTarget.hasPointerCapture(activeResizePointerId)) {
           activeResizeCaptureTarget.releasePointerCapture(activeResizePointerId)
@@ -96,7 +105,8 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
   const onClipResizeStart = (trackId: Track['id'], clipId: string, edge: 'left' | 'right', event: PointerEvent) => {
     event.preventDefault()
     event.stopPropagation()
-    const track = tracks().find(t => t.id === trackId)
+    const currentTracks = tracks()
+    const track = currentTracks.find(t => t.id === trackId)
     const clip = track?.clips.find(c => c.id === clipId)
     if (!track || !clip) return
     if (canEditClip && !canEditClip(clipId)) return
@@ -114,6 +124,21 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     resizeOrigMidiOffsetBeats = clip.midiOffsetBeats ?? 0
     resizeOrigFades = clip.fades
     resizeBaselineAudioClip = { ...clip }
+    resizeTrackIndex = currentTracks.indexOf(track)
+    resizeClip = clip
+    resizeClipArraySnapshot = track.clips
+    resizePreviousClipEnd = 0
+    resizeNextClipStart = Number.POSITIVE_INFINITY
+    for (const other of track.clips) {
+      if (other.id === clip.id) continue
+      const end = other.startSec + other.duration
+      if (end <= resizeOrigStart && end > resizePreviousClipEnd) {
+        resizePreviousClipEnd = end
+      }
+      if (other.startSec >= resizeOrigStart && other.startSec < resizeNextClipStart) {
+        resizeNextClipStart = other.startSec
+      }
+    }
 
     selection.selectPrimaryClip({ trackId, clipId })
 
@@ -123,25 +148,89 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
       try {
         event.currentTarget.setPointerCapture(event.pointerId)
       } catch {}
+      event.currentTarget.addEventListener('lostpointercapture', onResizePointerCancel)
     }
     window.addEventListener('pointermove', onResizePointerMove)
     window.addEventListener('pointerup', onResizePointerUp, { capture: true })
-    window.addEventListener('pointercancel', onResizePointerUp, { capture: true })
-    window.addEventListener('blur', onResizePointerUp)
+    window.addEventListener('pointercancel', onResizePointerCancel, { capture: true })
+    window.addEventListener('keydown', onResizeKeyDown, { capture: true })
+    window.addEventListener('blur', cancelResize)
+  }
+
+  const isForeignResizePointer = (event: PointerEvent) => (
+    activeResizePointerId !== null && event.pointerId !== activeResizePointerId
+  )
+
+  const readResizeTrack = (trackId: Track['id'], currentTracks: RuntimeTrack[]) => {
+    const indexedTrack = currentTracks[resizeTrackIndex]
+    if (indexedTrack?.id === trackId) {
+      return indexedTrack
+    }
+    const trackIndex = currentTracks.findIndex((track) => track.id === trackId)
+    resizeTrackIndex = trackIndex
+    return trackIndex >= 0 ? currentTracks[trackIndex] ?? null : null
+  }
+
+  const cancelResize = () => {
+    const active = resizing
+    clipResizing = false
+    resizing = null
+    resizeBaselineAudioClip = null
+    resizeTrackIndex = -1
+    resizeClip = null
+    resizeClipArraySnapshot = null
+    removeResizeListeners()
+    if (active) setDraftClipTiming(active.clipId, null)
+  }
+
+  const onResizePointerCancel = (event: PointerEvent) => {
+    if (!isForeignResizePointer(event)) cancelResize()
+  }
+
+  const onResizeKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape') return
+    if (isKeyboardEventOwnedByOverlay(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    cancelResize()
   }
 
   const onResizePointerMove = (event: PointerEvent) => {
+    if (isForeignResizePointer(event)) return
     if (!clipResizing || !resizing) return
     const scroll = getScrollElement()
     if (!scroll) return
 
     const activeResize = resizing
-    const track = tracks().find(t => t.id === activeResize.trackId)
-    if (!track) return
-    const clip = track.clips.find(c => c.id === activeResize.clipId)
-    if (!clip) return
-
-    const others = track.clips.filter(c => c.id !== clip.id)
+    const currentTracks = tracks()
+    const track = readResizeTrack(activeResize.trackId, currentTracks)
+    if (!track) {
+      cancelResize()
+      return
+    }
+    if (track.clips !== resizeClipArraySnapshot) {
+      resizeClip = track.clips.find((candidate) => candidate.id === activeResize.clipId) ?? null
+      resizeClipArraySnapshot = track.clips
+      resizePreviousClipEnd = 0
+      resizeNextClipStart = Number.POSITIVE_INFINITY
+      if (resizeClip) {
+        for (const other of track.clips) {
+          if (other.id === resizeClip.id) continue
+          const end = other.startSec + other.duration
+          if (end <= resizeOrigStart && end > resizePreviousClipEnd) {
+            resizePreviousClipEnd = end
+          }
+          if (other.startSec >= resizeOrigStart && other.startSec < resizeNextClipStart) {
+            resizeNextClipStart = other.startSec
+          }
+        }
+      }
+    }
+    const clip = resizeClip
+    if (!clip) {
+      cancelResize()
+      return
+    }
 
     const rect = scroll.getBoundingClientRect()
     const x = event.clientX - rect.left
@@ -150,11 +239,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     if (resizing.edge === 'left') {
       const right = resizeFixedRight
       const maxStartByLen = right - MIN_CLIP_SEC
-      let neighborEnd = 0
-      for (const other of others) {
-        const end = other.startSec + other.duration
-        if (end <= resizeOrigStart && end > neighborEnd) neighborEnd = end
-      }
+      const neighborEnd = resizePreviousClipEnd
       const minStartBound = Math.max(0, neighborEnd + 0.0001)
       const maxStartBound = maxStartByLen
 
@@ -224,10 +309,7 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     } else {
       const left = resizeFixedLeft
       const minRightByLen = left + MIN_CLIP_SEC
-      let neighborStart = Number.POSITIVE_INFINITY
-      for (const other of others) {
-        if (other.startSec >= resizeOrigStart && other.startSec < neighborStart) neighborStart = other.startSec
-      }
+      const neighborStart = resizeNextClipStart
 
       let newRight: number
       if (options.gridEnabled()) {
@@ -265,8 +347,8 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     }
   }
 
-  const onResizePointerUp = (event?: PointerEvent | FocusEvent) => {
-    if (event instanceof PointerEvent && activeResizePointerId !== null && event.pointerId !== activeResizePointerId) return
+  const onResizePointerUp = (event: PointerEvent) => {
+    if (isForeignResizePointer(event)) return
     if (!clipResizing || !resizing) {
       clipResizing = false
       resizing = null
@@ -275,12 +357,25 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     }
 
     const active = resizing
-    const track = tracks().find(t => t.id === active.trackId)
-    const clip = track?.clips.find(c => c.id === active.clipId)
+    const currentTracks = tracks()
+    const track = readResizeTrack(active.trackId, currentTracks)
+    const currentClip = track?.clips.find((candidate) => candidate.id === active.clipId)
+    if (!track || !currentClip) {
+      cancelResize()
+      return
+    }
+    if (track.clips !== resizeClipArraySnapshot) {
+      resizeClip = currentClip
+      resizeClipArraySnapshot = track.clips
+    }
+    const clip = { ...currentClip, ...options.draftClipTiming?.(active.clipId) }
 
     clipResizing = false
     resizing = null
     resizeBaselineAudioClip = null
+    resizeTrackIndex = -1
+    resizeClip = null
+    resizeClipArraySnapshot = null
     removeResizeListeners()
 
     if (clip) {
@@ -406,6 +501,9 @@ export function useClipResize(options: ClipResizeOptions): ClipResizeHandlers {
     clipResizing = false
     resizing = null
     resizeBaselineAudioClip = null
+    resizeTrackIndex = -1
+    resizeClip = null
+    resizeClipArraySnapshot = null
     resizeOrigFades = undefined
     removeResizeListeners()
   })

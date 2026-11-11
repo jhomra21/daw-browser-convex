@@ -1,5 +1,6 @@
 import { DELAY_MAX_DELAY_TIME_SEC, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { applyDelayNodeParams, applySaturatorNodeParams } from './dsp'
+import { scheduleAudioParamRamp } from '../audio-param-ramp'
 import { ensureCompressorWorklet, postCompressorParams } from './compressor-worklet'
 import { compressorWorklet, reverbWorklet, resolveWorkletModuleUrl } from '../worklet-manifest'
 import type { StaticWorkletNodeChain } from './static-worklet-chain'
@@ -56,7 +57,7 @@ type GainTransitionNode = {
   gain: CompressorFaultAudioParam
 }
 
-type GainTransitionScheduler = {
+export type GainTransitionScheduler = {
   schedule: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
   clear: (timer: ReturnType<typeof setTimeout>) => void
 }
@@ -69,7 +70,8 @@ const defaultGainTransitionScheduler: GainTransitionScheduler = {
 }
 
 export type GainTransitionOwner = {
-  request: (reconnect: () => void) => void
+  request: (reconnect: () => void, onSettled?: () => void) => void
+  pending: () => boolean
   cancel: () => void
   dispose: () => void
 }
@@ -101,15 +103,13 @@ export function createGainTransitionOwner(
   }
 
   return {
-    request: (reconnect) => {
+    request: (reconnect, onSettled) => {
       if (disposed) return
       invalidate()
       const requestVersion = transitionVersion
       const currentTime = getCurrentTime()
       const fadeOutEnd = currentTime + fadeOutSec
-      node.gain.cancelScheduledValues(currentTime)
-      node.gain.setValueAtTime(node.gain.value, currentTime)
-      node.gain.linearRampToValueAtTime(0, fadeOutEnd)
+      scheduleAudioParamRamp(node.gain, 0, currentTime, fadeOutSec)
       timer = scheduler.schedule(() => {
         timer = undefined
         if (disposed || transitionVersion !== requestVersion) return
@@ -117,8 +117,10 @@ export function createGainTransitionOwner(
         const reconnectTime = Math.max(fadeOutEnd, getCurrentTime())
         node.gain.setValueAtTime(0, reconnectTime)
         node.gain.linearRampToValueAtTime(1, reconnectTime + fadeInSec)
+        onSettled?.()
       }, fadeOutSec * 1000)
     },
+    pending: () => timer !== undefined,
     cancel,
     dispose: () => {
       if (disposed) return
@@ -444,14 +446,14 @@ export function connectFxChain(
     const eqNodes = stageConfig.eqNodes ?? []
     const compressor = stageConfig.compressorChain?.enabled ? stageConfig.compressorChain : null
     const saturator = stageConfig.saturatorChain?.enabled ? stageConfig.saturatorChain : null
-    const delay = stageConfig.delayChain?.enabled ? stageConfig.delayChain : null
+    // A disabled delay stays in the chain on a dry output so it keeps hearing its input.
+    const delay = stageConfig.delayChain ?? null
     const reverb = stageConfig.reverbChain?.enabled ? stageConfig.reverbChain : null
     const staticWorklet = stageConfig.staticWorkletChain?.state === 'active' ? stageConfig.staticWorkletChain : null
 
     if (saturator) connectSaturatorInternals(saturator)
     else if (stageConfig.saturatorChain) disconnectSaturatorChain(stageConfig.saturatorChain)
     if (delay) connectDelayInternals(delay)
-    else if (stageConfig.delayChain) disconnectDelayChain(stageConfig.delayChain)
     if (reverb) connectReverbInternals(reverb)
     else if (stageConfig.reverbChain) disconnectReverbChain(stageConfig.reverbChain)
 

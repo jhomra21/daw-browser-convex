@@ -90,6 +90,44 @@ const createBrowserSection = (id: string, label: string, rows: BrowserTreeRow[])
   leafCount: countBrowserTreeLeaves(rows),
 });
 
+const createPresetFolderRows = (
+  items: BrowserItem[],
+  folderNameForItem: (itemId: string) => string | undefined,
+  folderRowIdPrefix: string,
+  folderSearchLabel: string,
+): BrowserTreeRow[] => {
+  const folders = new Map<string, { name: string; items: BrowserItem[] }>();
+  const unfiled: BrowserItem[] = [];
+  for (const item of items) {
+    const folderName = folderNameForItem(item.id);
+    if (!item.folderId || !folderName) {
+      unfiled.push(item);
+      continue;
+    }
+    const folder = folders.get(item.folderId);
+    if (folder) {
+      folder.name = folderName;
+      folder.items.push(item);
+    } else {
+      folders.set(item.folderId, { name: folderName, items: [item] });
+    }
+  }
+  const rows: BrowserTreeRow[] = [];
+  for (const [folderId, folder] of folders) {
+    rows.push({
+      kind: "folder",
+      id: `${folderRowIdPrefix}:${folderId}`,
+      source: "builtin",
+      label: folder.name,
+      searchText: `${folder.name} ${folderSearchLabel} builtin`.toLowerCase(),
+      folderId,
+      leafCount: folder.items.length,
+      children: folder.items.map(createBrowserLeafRow),
+    });
+  }
+  return [...rows, ...unfiled.map(createBrowserLeafRow)];
+};
+
 const buildBrowserSampleRow = (
   sample: {
     key: string;
@@ -352,35 +390,12 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     for (const preset of BUILTIN_AUDIO_EFFECT_CHAIN_PRESETS) map.set(effectChainItemId(preset), preset);
     return map;
   });
-  const browserEffectChainRows = createMemo<BrowserTreeRow[]>(() => {
-    const itemsByFolderId = new Map<string, BrowserItem[]>();
-    const folderNamesById = new Map<string, string>();
-    const unfiled: BrowserItem[] = [];
-    for (const item of browserEffectChainItems()) {
-      const preset = browserEffectChainPresetByItemId().get(item.id);
-      if (!item.folderId || !preset?.folderName) {
-        unfiled.push(item);
-        continue;
-      }
-      folderNamesById.set(item.folderId, preset.folderName);
-      const rows = itemsByFolderId.get(item.folderId);
-      if (rows) rows.push(item); else itemsByFolderId.set(item.folderId, [item]);
-    }
-    const folders: BrowserTreeRow[] = [];
-    for (const [folderId, items] of itemsByFolderId) {
-      folders.push({
-        kind: "folder",
-        id: `builtin-audio-effect-chain-folder:${folderId}`,
-        source: "builtin",
-        label: folderNamesById.get(folderId) ?? folderId,
-        searchText: `${folderNamesById.get(folderId) ?? folderId} audio effect chains builtin`.toLowerCase(),
-        folderId,
-        leafCount: items.length,
-        children: items.map(createBrowserLeafRow),
-      });
-    }
-    return [...folders, ...unfiled.map(createBrowserLeafRow)];
-  });
+  const browserEffectChainRows = createMemo(() => createPresetFolderRows(
+    browserEffectChainItems(),
+    (itemId) => browserEffectChainPresetByItemId().get(itemId)?.folderName,
+    "builtin-audio-effect-chain-folder",
+    "audio effect chains",
+  ));
   const browserEffectSections = createMemo(() => {
     const audioEffectItems: BrowserItem[] = [];
     const midiEffectItems: BrowserItem[] = [];
@@ -466,35 +481,12 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     for (const preset of BUILTIN_INSTRUMENT_PRESETS) map.set(instrumentPresetItemId(preset), preset);
     return map;
   });
-  const browserInstrumentPresetRows = createMemo<BrowserTreeRow[]>(() => {
-    const itemsByFolderId = new Map<string, BrowserItem[]>();
-    const folderNamesById = new Map<string, string>();
-    const unfiled: BrowserItem[] = [];
-    for (const item of browserInstrumentPresetItems()) {
-      const preset = browserInstrumentPresetByItemId().get(item.id);
-      if (!item.folderId || !preset?.folderName) {
-        unfiled.push(item);
-        continue;
-      }
-      folderNamesById.set(item.folderId, preset.folderName);
-      const rows = itemsByFolderId.get(item.folderId);
-      if (rows) rows.push(item); else itemsByFolderId.set(item.folderId, [item]);
-    }
-    const folders: BrowserTreeRow[] = [];
-    for (const [folderId, items] of itemsByFolderId) {
-      folders.push({
-        kind: "folder",
-        id: `builtin-instrument-preset-folder:${folderId}`,
-        source: "builtin",
-        label: folderNamesById.get(folderId) ?? folderId,
-        searchText: `${folderNamesById.get(folderId) ?? folderId} instrument presets builtin`.toLowerCase(),
-        folderId,
-        leafCount: items.length,
-        children: items.map(createBrowserLeafRow),
-      });
-    }
-    return [...folders, ...unfiled.map(createBrowserLeafRow)];
-  });
+  const browserInstrumentPresetRows = createMemo(() => createPresetFolderRows(
+    browserInstrumentPresetItems(),
+    (itemId) => browserInstrumentPresetByItemId().get(itemId)?.folderName,
+    "builtin-instrument-preset-folder",
+    "instrument presets",
+  ));
   const browserInstrumentSections = createMemo(() => {
     const instrumentItems = browserInstrumentItems();
     const presetRows = browserInstrumentPresetRows();
@@ -545,9 +537,12 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     event.dataTransfer.setData(SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData(sample));
   };
 
-  const runAssetFolderAction = (action: () => Promise<void>) => {
+  const runAssetFolderAction = (failureTitle: string, action: () => Promise<void>) => {
     void action().catch((error) => {
-      console.warn("Asset folder action failed", error);
+      options.onExternalPluginInsertionResult?.(
+        failureTitle,
+        error instanceof Error ? error.message : "The project could not be updated.",
+      );
     });
   };
 
@@ -579,7 +574,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
 
   const createAssetFolder = () => {
     const name = nextAssetFolderName();
-    runAssetFolderAction(async () => {
+    runAssetFolderAction("Folder creation failed", async () => {
       const projectId = currentProjectId();
       if (!projectId) return;
       if (isLocalId("project", projectId)) {
@@ -615,7 +610,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       return;
     }
     setRenameFolderBusy(true);
-    runAssetFolderAction(async () => {
+    runAssetFolderAction("Folder rename failed", async () => {
       try {
         if (isLocalId("project", projectId)) {
           await renameLocalAssetFolder(projectId, draft.folderId, name);
@@ -633,7 +628,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
   const deleteAssetFolder = (folderId: string) => {
     const projectId = currentProjectId();
     const folderHasSamples = Boolean(folderSampleCountById().get(folderId));
-    runAssetFolderAction(async () => {
+    runAssetFolderAction("Folder deletion failed", async () => {
       if (!projectId || folderHasSamples) return;
       if (isLocalId("project", projectId)) {
         await deleteEmptyLocalAssetFolder(projectId, folderId);
@@ -648,7 +643,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
     const item = browserAssetItemById().get(itemId);
     if (!item || item.source !== "project") return;
     if (folderId && !browserProjectFolderById().has(folderId)) return;
-    runAssetFolderAction(async () => {
+    runAssetFolderAction("Sample move failed", async () => {
       const projectId = currentProjectId();
       if (!projectId || !item.assetKey) return;
       if (isLocalId("project", projectId)) {

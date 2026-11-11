@@ -1,5 +1,8 @@
 const GRAPH_ENVELOPE_VERSION = 3
 const GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY = 4
+// DAW_AUDIO_GRAPH_INPUT_BUS_DISCONNECTED. Sources play their sample sources; the
+// live input carries the recording microphone, which only monitoring may hear.
+const DISCONNECTED_INPUT_BUS = 0xffffffff
 
 const graphNodeKind = (kind) => kind === 'source' ? 1 : kind === 'instrument' ? 2 : kind === 'master' ? 6 : 3
 const instrumentKind = (kind) => kind === 'synth' ? 1 : kind === 'sampler' ? 2 : kind === 'drum-rack' ? 3 : kind === 'granular' ? 4 : 0
@@ -46,13 +49,12 @@ export const graphEnvelope = (snapshot) => {
   view.setUint32(12, snapshot.edges.length, true)
   view.setUint32(16, processors.length, true)
   let offset = 24
-  let sourceBus = 0
   for (const node of snapshot.nodes) {
     writeId(view, offset, node.id)
     view.setUint32(offset + 8, graphNodeKind(node.kind), true)
     view.setUint32(offset + 12, node.inputLayout === 'mono' ? 1 : 2, true)
     view.setUint32(offset + 16, node.outputLayout === 'mono' ? 1 : 2, true)
-    view.setUint32(offset + 20, node.kind === 'source' ? sourceBus++ : 0, true)
+    view.setUint32(offset + 20, node.kind === 'source' ? DISCONNECTED_INPUT_BUS : 0, true)
     view.setUint32(offset + 24, node.latencyFrames, true)
     if (hasExtendedNode) view.setUint32(offset + 28, node.externalLatencyFrames || 0, true)
     const instrument = node.kind === 'instrument' ? node.instrument : null

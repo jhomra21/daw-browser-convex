@@ -1,4 +1,5 @@
 import { isJsonObject, isJsonString, type JsonValue, type SharedTimelineOperation } from '@daw-browser/shared'
+import { z } from 'zod'
 
 export type {
   SharedTimelineOperation,
@@ -17,6 +18,31 @@ export class SharedTimelineOperationRejectedError extends Error {
     super(detail ?? 'Shared timeline operation was rejected.')
     this.name = 'SharedTimelineOperationRejectedError'
   }
+}
+
+export type EffectsOperationResult =
+  | { status: 'invalid' }
+  | {
+    status: 'applied'
+    effectId: string
+    revision: { kind: 'committed-unordered' } | { kind: 'ordered'; revision: number }
+  }
+
+export const decodeEffectsOperationResult = (value: JsonValue): EffectsOperationResult => {
+  if (!isJsonObject(value)) throw new Error('Malformed effects operation result.')
+  if (value.status === 'invalid') return { status: 'invalid' }
+  if (value.status !== 'applied' || !isJsonString(value.effectId) || value.effectId.length === 0) {
+    throw new Error('Malformed effects operation result.')
+  }
+  const revision = value.revision
+  if (revision === undefined || revision === 0) {
+    return { status: 'applied', effectId: value.effectId, revision: { kind: 'committed-unordered' } }
+  }
+  const orderedRevision = z.number().int().positive().safeParse(revision)
+  if (!orderedRevision.success) {
+    throw new Error('Malformed effects operation revision.')
+  }
+  return { status: 'applied', effectId: value.effectId, revision: { kind: 'ordered', revision: orderedRevision.data } }
 }
 
 export const isAppliedSharedTimelineOperationResult = (value: JsonValue) => (
@@ -67,6 +93,9 @@ export const publishSharedTimelineOperation = async (
   if (isJsonObject(result) && result.status === 'rejected') {
     const detail = isJsonString(result.reason) ? result.reason : undefined
     throw new SharedTimelineOperationRejectedError(detail)
+  }
+  if (operation.kind.startsWith('effects.set') || operation.kind === 'instruments.setTrackInstrument') {
+    return decodeEffectsOperationResult(result)
   }
   assertValidClipCreateResult(operation, result)
   return result

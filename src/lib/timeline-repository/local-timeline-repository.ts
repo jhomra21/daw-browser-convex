@@ -7,7 +7,11 @@ import {
 import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, isLocalProjectAssetKey, midiClipEquals, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeMidiClip, normalizeTrackRouting, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushRegisteredLocalProjectWrites } from '~/lib/local-project-write-flushers'
-import { LocalEntityWriteQueue } from '~/lib/local-write-queue'
+import {
+  getAllLocalEntityWriteQueues,
+  getLocalEntityWriteQueue,
+  getLocalEntityWriteQueueIfCreated,
+} from '~/lib/local-write-queue'
 import { normalizeClipFades, clipFadesEqual, transformClipFadesForDuration } from '@daw-browser/timeline-core/clip-fades'
 import type {
   CreateClipInput,
@@ -45,7 +49,6 @@ const AUTOMATION_KIND = 'automation-envelope'
 const SIDECHAIN_KIND = 'sidechain-route'
 const pendingLocalTimelineFlushers = new Map<string, Set<() => Promise<void>>>()
 const pendingRepositoryWritesByProject = new Map<string, Set<Promise<unknown>>>()
-const entityWriteQueuesByProject = new Map<string, LocalEntityWriteQueue>()
 const projectMutationTails = new Map<string, Promise<void>>()
 let lifecycleFlushAttached = false
 
@@ -356,16 +359,12 @@ const requireValidReorderAndGroupUpdates = (
 }
 
 const getEntityWriteQueue = (projectId: string) => {
-  const existing = entityWriteQueuesByProject.get(projectId)
-  if (existing) return existing
-  const queue = new LocalEntityWriteQueue(projectId)
-  entityWriteQueuesByProject.set(projectId, queue)
-  return queue
+  return getLocalEntityWriteQueue(projectId)
 }
 
 const flushEntityWriteQueues = async (projectId?: string) => {
-  const queue = projectId ? entityWriteQueuesByProject.get(projectId) : undefined
-  const queues = projectId ? (queue ? [queue] : []) : Array.from(entityWriteQueuesByProject.values())
+  const queue = projectId ? getLocalEntityWriteQueueIfCreated(projectId) : undefined
+  const queues = projectId ? (queue ? [queue] : []) : getAllLocalEntityWriteQueues()
   await Promise.all(queues.map((queue) => queue.flush()))
 }
 

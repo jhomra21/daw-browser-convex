@@ -11,7 +11,7 @@ export type AudioRuntimeOptions = {
   latencyHint: AudioContextLatencyCategory
 }
 
-export const CANONICAL_DECODE_SAMPLE_RATE = 44_100
+const CANONICAL_DECODE_SAMPLE_RATE = 44_100
 
 export function createAudioRuntime(options: AudioRuntimeOptions): AudioRuntime {
   let ctx: AudioContext

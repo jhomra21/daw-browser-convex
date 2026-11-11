@@ -349,19 +349,24 @@ test('rejects a 129th protected asset recovery without orphaning its GC job', as
     updatedAt: 1,
   })))
   const service = createLocalControlService({ actor })
-  for (let index = 0; index < 128; index += 1) {
+  const deleteRange = async (start: number, end: number, idempotencyKey: string) => {
     const request = {
       version: 'v1' as const,
       projectId: project.id,
-      actions: [{ kind: 'asset.delete' as const, asset: { source: 'persisted' as const, id: `protected-${index}` } }],
+      actions: Array.from({ length: end - start }, (_, offset) => ({
+        kind: 'asset.delete' as const,
+        asset: { source: 'persisted' as const, id: `protected-${start + offset}` },
+      })),
     }
     const approval = await service.requestApproval(request)
     await service.commit({
       ...request,
-      idempotencyKey: `protected-${index}`,
+      idempotencyKey,
       approvalToken: approval.approvalToken,
     })
   }
+  await deleteRange(0, 100, 'protected-0-99')
+  await deleteRange(100, 128, 'protected-100-127')
   const request = {
     version: 'v1' as const,
     projectId: project.id,
@@ -389,11 +394,12 @@ test('rejects a 129th protected asset recovery without orphaning its GC job', as
     actions: balancedActions,
   }
   const balancedApproval = await service.requestApproval(balancedRequest)
-  await expect(service.commit({
+  const balancedCommit = await service.commit({
     ...balancedRequest,
     idempotencyKey: 'protected-balanced-replace',
     approvalToken: balancedApproval.approvalToken,
-  })).resolves.toMatchObject({ applied: true })
+  })
+  expect(balancedCommit).toMatchObject({ applied: true })
   expect(await db.count('controlRecoveries')).toBe(129)
   expect(await db.count('controlAssetGc')).toBe(128)
 })

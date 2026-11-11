@@ -17,12 +17,28 @@ import {
   createDefaultSpectralParams,
   createDefaultTremoloParams,
   createDefaultUtilityParams,
+  createDefaultSynthParams,
 } from '@daw-browser/shared'
 import type { EffectParamsCommitPayload } from '~/lib/undo/types'
 import { encodeNativeBuiltInStateCommit, mapNativeBuiltInParameterCommit } from './native-built-in-parameter-mapper'
 
 type StateEnvelope<State> = { version: 1; state: State }
 const envelope = <State>(state: State): StateEnvelope<State> => ({ version: 1, state })
+
+test('clamps live synth cutoff and resonance to native parameter ranges', () => {
+  const params = createDefaultSynthParams()
+  const from = { kind: 'synth', instanceId: 'synth-1', params } satisfies EffectParamsCommitPayload<'instrument'>['from']
+  const payload = {
+    targetId: 'track-1',
+    effect: 'instrument',
+    from,
+    to: { ...from, params: { ...params, filter: { ...params.filter, frequencyHz: 0, q: 0 } } },
+  } satisfies EffectParamsCommitPayload<'instrument'>
+  expect(mapNativeBuiltInParameterCommit(payload, 120)?.values).toEqual([
+    { parameterId: 'synth.filterCutoffHz', value: 20 },
+    { parameterId: 'synth.filterResonance', value: 0.0001 },
+  ])
+})
 
 test('maps changed nested built-in values and filters unchanged fields', () => {
   const from = envelope(createDefaultAutoFilterParams())

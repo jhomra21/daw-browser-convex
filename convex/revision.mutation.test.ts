@@ -4,6 +4,7 @@ import { AUDIO_EFFECT_CONTRACTS, createDefaultSynthParams } from "@daw-browser/s
 import type { FunctionArgs } from "convex/server";
 
 import { api } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 
 const modules = {
@@ -134,11 +135,16 @@ test("advances revision once for restore-ungroup and replays its result", async 
   const t = newTest();
   await createProject(t, "project-1");
   const childId = await seedTrack(t, { projectId: "project-1", index: 0 });
-  const input = {
+  const input: FunctionArgs<typeof api.tracks.serverRestoreUngroup> = {
     projectId: "project-1",
     group: { index: 0, volume: 0.8, sends: [] },
     children: [{ trackId: childId, outputToGroup: false }],
-    effects: [],
+    effects: [{
+      type: "utility",
+      instanceId: "restore-ungroup-utility",
+      index: 0,
+      params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams(),
+    }],
     automation: [],
     operationId: "restore-ungroup-1",
   };
@@ -146,6 +152,10 @@ test("advances revision once for restore-ungroup and replays its result", async 
   const replay = await t.withIdentity({ subject: owner }).mutation(api.tracks.serverRestoreUngroup, input);
   expect(first).toEqual(replay);
   expect(await projectRevision(t, "project-1")).toBe(1);
+  const restoredEffect = await t.run(async (ctx) => (await ctx.db.query("effects")
+    .withIndex("by_room", (query) => query.eq("projectId", "project-1"))
+    .collect()).find((effect) => effect.instanceId === "restore-ungroup-utility"));
+  expect(restoredEffect?.revision).toBe(1);
 });
 
 test("rejects mixed-project create and move batches without writes or revisions", async () => {
@@ -341,4 +351,277 @@ test("restores an effect chain once and no-ops across operation identities", asy
   expect(await projectRevision(t, "project-1")).toBe(1);
   expect(await user.mutation(api.effects.serverRestoreChain, { ...input, operationId: "restore-2" })).toEqual({ status: "noop" });
   expect(await projectRevision(t, "project-1")).toBe(1);
+});
+const effectRowsOf = async (t: TestConvex, trackId: Id<"tracks">) => await t.run(async (ctx) => (
+  await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", trackId)).collect()
+));
+const effectRowByInstance = async (t: TestConvex, trackId: Id<"tracks">, instanceId: string) => {
+  const row = (await effectRowsOf(t, trackId)).find((entry) => entry.instanceId === instanceId);
+  if (!row) throw new Error(`Missing effect row ${instanceId}.`);
+  return row;
+};
+
+test("stamps a row with the project revision its own transaction produced and returns it", async () => {
+  const t = newTest();
+  await createProject(t, "project-1");
+  const trackId = await seedTrack(t, { projectId: "project-1", index: 0 });
+  const user = t.withIdentity({ subject: owner });
+  const gateParams = AUDIO_EFFECT_CONTRACTS.gate.createDefaultParams();
+  const utilityParams = AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams();
+  const setGate = (thresholdDb: number) => user.mutation(api.effects.serverSetProcessorParams, {
+    projectId: "project-1", trackId, effect: "gate", instanceId: "gate-1",
+    params: { ...gateParams, state: { ...gateParams.state, thresholdDb } },
+  });
+
+  const first = await setGate(-20);
+  const gate = await effectRowByInstance(t, trackId, "gate-1");
+  expect(first).toEqual({ status: "applied", effectId: gate._id, revision: 1 });
+  expect(gate.revision).toBe(1);
+  expect(await projectRevision(t, "project-1")).toBe(1);
+
+  // A no-op returns the row's own stamp and does not advance the project.
+  expect(await setGate(-20)).toEqual({ status: "applied", effectId: gate._id, revision: 1 });
+  expect(await projectRevision(t, "project-1")).toBe(1);
+
+  const utility = await user.mutation(api.effects.serverSetProcessorParams, {
+    projectId: "project-1", trackId, effect: "utility", instanceId: "utility-1", params: utilityParams,
+  });
+  expect(utility).toMatchObject({ status: "applied", revision: 2 });
+  expect(await projectRevision(t, "project-1")).toBe(2);
+  // The unrelated edit leaves the first row's stamp alone.
+  expect((await effectRowByInstance(t, trackId, "gate-1")).revision).toBe(1);
+
+  // Two rows in one query carry their own stamps, not the query-wide maximum.
+  const listed = await user.query(api.effects.listByRoom, { projectId: "project-1" });
+  expect(listed.map((row) => [row.instanceId, row.revision]).sort()).toEqual([["gate-1", 1], ["utility-1", 2]]);
+
+  expect(await setGate(-10)).toMatchObject({ status: "applied", effectId: gate._id, revision: 3 });
+  expect((await effectRowByInstance(t, trackId, "gate-1")).revision).toBe(3);
+  expect((await effectRowByInstance(t, trackId, "utility-1")).revision).toBe(2);
+  expect(await projectRevision(t, "project-1")).toBe(3);
+});
+
+test("a legacy row without a revision stays unstamped on a no-op and is stamped by its next material write", async () => {
+  const t = newTest();
+  await createProject(t, "project-1");
+  const trackId = await seedTrack(t, { projectId: "project-1", index: 0 });
+  const user = t.withIdentity({ subject: owner });
+  const gateParams = AUDIO_EFFECT_CONTRACTS.gate.createDefaultParams();
+  const legacyId = await t.run(async (ctx) => await ctx.db.insert("effects", {
+    projectId: "project-1", targetType: "track", trackId, index: 0, type: "gate", instanceId: "gate-1",
+    params: gateParams, createdAt: 1,
+  }));
+  await user.mutation(api.effects.serverSetProcessorParams, {
+    projectId: "project-1", trackId, effect: "utility", instanceId: "utility-1",
+    params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams(),
+  });
+  expect(await projectRevision(t, "project-1")).toBe(1);
+
+  // The no-op reports revision 0 (committed, unordered) and does not invent a stamp or advance the project.
+  expect(await user.mutation(api.effects.serverSetProcessorParams, {
+    projectId: "project-1", trackId, effect: "gate", instanceId: "gate-1", params: gateParams,
+  })).toEqual({ status: "applied", effectId: legacyId, revision: 0 });
+  expect((await effectRowByInstance(t, trackId, "gate-1")).revision).toBeUndefined();
+  expect(await projectRevision(t, "project-1")).toBe(1);
+
+  // A query mixes the missing and the present stamp.
+  const listed = await user.query(api.effects.listByRoom, { projectId: "project-1" });
+  expect(listed.map((row) => [row.instanceId, row.revision]).sort()).toEqual([["gate-1", undefined], ["utility-1", 1]]);
+
+  expect(await user.mutation(api.effects.serverSetProcessorParams, {
+    projectId: "project-1", trackId, effect: "gate", instanceId: "gate-1",
+    params: { ...gateParams, state: { ...gateParams.state, thresholdDb: -12 } },
+  })).toEqual({ status: "applied", effectId: legacyId, revision: 2 });
+  expect((await effectRowByInstance(t, trackId, "gate-1")).revision).toBe(2);
+});
+
+test("param setters answer invalid for a missing or foreign target and write nothing", async () => {
+  const t = newTest();
+  await createProject(t, "project-1");
+  await createProject(t, "project-2");
+  const foreignTrack = await seedTrack(t, { projectId: "project-2", index: 0 });
+  const user = t.withIdentity({ subject: owner });
+  const params = AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams();
+
+  expect(await user.mutation(api.effects.serverSetProcessorParams, {
+    projectId: "project-1", trackId: "not-a-track-id", effect: "utility", instanceId: "utility-1", params,
+  })).toEqual({ status: "invalid" });
+  expect(await user.mutation(api.effects.serverSetProcessorParams, {
+    projectId: "project-1", trackId: foreignTrack, effect: "utility", instanceId: "utility-1", params,
+  })).toEqual({ status: "invalid" });
+  expect(await user.mutation(api.effects.serverSetTrackInstrument, {
+    projectId: "project-1", trackId: "not-a-track-id",
+    instrument: { kind: "synth", instanceId: "instrument-1", params: createDefaultSynthParams() },
+  })).toEqual({ status: "invalid" });
+  expect(await projectRevision(t, "project-1")).toBe(0);
+  expect(await effectRowsOf(t, foreignTrack)).toHaveLength(0);
+});
+
+test("direct setters keep their legacy ID result while server setters return revision provenance", async () => {
+  const t = newTest();
+  await createProject(t, "project-direct-contract");
+  await createProject(t, "project-direct-foreign");
+  const trackId = await seedTrack(t, { projectId: "project-direct-contract", index: 0 });
+  const foreignTrackId = await seedTrack(t, { projectId: "project-direct-foreign", index: 0 });
+  const user = t.withIdentity({ subject: owner });
+
+  const directResult = await user.mutation(api.effects.setReverbParams, {
+    projectId: "project-direct-contract",
+    trackId,
+    instanceId: "direct-reverb",
+    params: AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams(),
+  });
+  const directRow = (await effectRowsOf(t, trackId)).find((row) => row.instanceId === "direct-reverb");
+  expect(directResult).toBe(directRow?._id ?? null);
+  expect(await user.mutation(api.effects.setReverbParams, {
+    projectId: "project-direct-contract",
+    trackId: foreignTrackId,
+    instanceId: "foreign-reverb",
+    params: AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams(),
+  })).toBeNull();
+
+  const serverResult = await user.mutation(api.effects.serverSetReverbParams, {
+    projectId: "project-direct-contract",
+    trackId,
+    instanceId: "server-reverb",
+    params: AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams(),
+  });
+  expect(serverResult).toMatchObject({ status: "applied", revision: 2 });
+});
+
+test("a master effect and a track instrument return their own stamped revisions", async () => {
+  const t = newTest();
+  await createProject(t, "project-1");
+  const trackId = await seedTrack(t, { projectId: "project-1", index: 0, kind: "instrument" });
+  const user = t.withIdentity({ subject: owner });
+  const master = await user.mutation(api.effects.serverSetMasterProcessorParams, {
+    projectId: "project-1", effect: "utility", instanceId: "master-utility-1",
+    params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams(),
+  });
+  expect(master).toMatchObject({ status: "applied", revision: 1 });
+  const instrument = await user.mutation(api.effects.serverSetTrackInstrument, {
+    projectId: "project-1", trackId,
+    instrument: { kind: "synth", instanceId: "instrument-1", params: createDefaultSynthParams() },
+  });
+  expect(instrument).toMatchObject({ status: "applied", revision: 2 });
+  const masterRow = (await user.query(api.effects.listByRoom, { projectId: "project-1" }))
+    .find((row) => row.targetType === "master");
+  expect(masterRow?.revision).toBe(1);
+  expect((await effectRowsOf(t, trackId))[0]?.revision).toBe(2);
+  expect(await projectRevision(t, "project-1")).toBe(2);
+});
+
+test("a restored chain stamps every row it writes with the one revision its transaction produced", async () => {
+  const t = newTest();
+  await createProject(t, "project-1");
+  const trackId = await seedTrack(t, { projectId: "project-1", index: 0, kind: "instrument" });
+  const user = t.withIdentity({ subject: owner });
+  await user.mutation(api.effects.serverSetProcessorParams, {
+    projectId: "project-1", trackId, effect: "utility", instanceId: "old-utility",
+    params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams(),
+  });
+  await user.mutation(api.effects.serverRestoreChain, {
+    projectId: "project-1", trackId, operationId: "restore-stamps-1",
+    audioEffects: [
+      { id: "restored-utility", kind: "utility", params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams() },
+      { id: "restored-gate", kind: "gate", params: AUDIO_EFFECT_CONTRACTS.gate.createDefaultParams() },
+    ],
+    instrument: { kind: "synth", instanceId: "restored-instrument", params: createDefaultSynthParams() },
+    arpeggiator: { enabled: true, pattern: "up", rate: "1/8", octaves: 1, gate: 0.8, hold: false },
+  });
+  expect(await projectRevision(t, "project-1")).toBe(2);
+  const rows = await effectRowsOf(t, trackId);
+  expect(rows).toHaveLength(4);
+  expect(rows.map((row) => row.revision)).toEqual([2, 2, 2, 2]);
+});
+
+test("reorder and audio-effect removal stamp only rows their writers change", async () => {
+  const t = newTest();
+  await createProject(t, "project-effect-owner-writers");
+  const trackId = await seedTrack(t, { projectId: "project-effect-owner-writers", index: 0 });
+  const user = t.withIdentity({ subject: owner });
+  const params = AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams();
+  for (const instanceId of ["effect-a", "effect-b", "effect-c"]) {
+    await user.mutation(api.effects.serverSetProcessorParams, {
+      projectId: "project-effect-owner-writers", trackId, effect: "utility", instanceId, params,
+    });
+  }
+
+  await user.mutation(api.effects.serverReorderAudioEffects, {
+    projectId: "project-effect-owner-writers",
+    targetType: "track",
+    trackId,
+    order: [{ id: "effect-c", kind: "utility" }, { id: "effect-b", kind: "utility" }, { id: "effect-a", kind: "utility" }],
+  });
+  const reorderRevision = await projectRevision(t, "project-effect-owner-writers");
+  const reordered = await effectRowsOf(t, trackId);
+  expect(reordered.filter((row) => row.instanceId !== "effect-b").map((row) => row.revision))
+    .toEqual([reorderRevision, reorderRevision]);
+
+  await user.mutation(api.effects.serverRemoveAudioEffect, {
+    projectId: "project-effect-owner-writers", targetType: "track", trackId, effect: "utility", instanceId: "effect-c",
+  });
+  const removalRevision = await projectRevision(t, "project-effect-owner-writers");
+  const survivors = await effectRowsOf(t, trackId);
+  expect(survivors.find((row) => row.instanceId === "effect-a")?.revision).toBe(removalRevision);
+  expect(survivors.find((row) => row.instanceId === "effect-b")?.revision).toBe(removalRevision);
+});
+
+test("instrument removal compaction returns owner-stamped processor rows", async () => {
+  const t = newTest();
+  await createProject(t, "project-device-owner-writer");
+  const trackId = await seedTrack(t, { projectId: "project-device-owner-writer", index: 0, kind: "instrument" });
+  const user = t.withIdentity({ subject: owner });
+  await user.mutation(api.effects.serverSetTrackInstrument, {
+    projectId: "project-device-owner-writer", trackId,
+    instrument: { kind: "synth", instanceId: "remove-me", params: createDefaultSynthParams() },
+  });
+  await user.mutation(api.effects.serverSetProcessorParams, {
+    projectId: "project-device-owner-writer", trackId, effect: "utility", instanceId: "survivor",
+    params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams(),
+  });
+  await user.mutation(api.effects.serverRemoveTrackInstrument, {
+    projectId: "project-device-owner-writer", trackId,
+  });
+  const revision = await projectRevision(t, "project-device-owner-writer");
+  expect((await effectRowsOf(t, trackId)).find((row) => row.instanceId === "survivor")?.revision).toBe(revision);
+});
+
+test("instrument track creation stamps its default row with the single owner advance", async () => {
+  const t = newTest();
+  await createProject(t, "project-create-owner-writer");
+  const trackId = await t.withIdentity({ subject: owner }).mutation(api.tracks.create, {
+    projectId: "project-create-owner-writer",
+    kind: "instrument",
+  });
+  const project = await projectRevision(t, "project-create-owner-writer");
+  const rows = await t.run(async (ctx) => {
+    const normalizedTrackId = ctx.db.normalizeId("tracks", trackId);
+    if (!normalizedTrackId) throw new Error("Created track ID was invalid.");
+    return await ctx.db.query("effects").withIndex("by_track", (query) => query.eq("trackId", normalizedTrackId)).collect();
+  });
+  expect(rows).toHaveLength(1);
+  expect(rows[0]?.revision).toBe(project);
+});
+
+test("N1 data plane (cloud): a later foreign commit is ordered after our acknowledged write by revision", async () => {
+  const t = newTest();
+  await createProject(t, "project-1");
+  const trackId = await seedTrack(t, { projectId: "project-1", index: 0 });
+  const user = t.withIdentity({ subject: owner });
+  const gateParams = AUDIO_EFFECT_CONTRACTS.gate.createDefaultParams();
+  const setGate = (thresholdDb: number) => user.mutation(api.effects.serverSetProcessorParams, {
+    projectId: "project-1", trackId, effect: "gate", instanceId: "gate-1",
+    params: { ...gateParams, state: { ...gateParams.state, thresholdDb } },
+  });
+  const ours = await setGate(-1);
+  const foreign = await setGate(-7);
+  const row = await effectRowByInstance(t, trackId, "gate-1");
+  if (ours.status !== "applied" || foreign.status !== "applied") throw new Error("Both writes must apply.");
+  // The panel holds our acknowledgement (revision ours.revision) while the room already shows the foreign write.
+  // The row's stamp is newer than the acknowledgement, so the row is authority and our echo must not be kept over it.
+  expect(row.params.state.thresholdDb).toBe(-7);
+  expect(row.revision).toBe(foreign.revision);
+  expect(foreign.revision).toBeGreaterThan(ours.revision);
+  expect(row.revision !== undefined && row.revision > ours.revision).toBe(true);
 });

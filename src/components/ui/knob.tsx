@@ -16,9 +16,6 @@ type KnobProps = {
   unit?: string
   disabled?: boolean
   onValueChange: (value: number) => void
-  onInteractionStart?: (value: number) => void
-  onInteractionEnd?: (value: number) => void
-  onInteractionCancel?: (value: number) => void
   logarithmic?: boolean
   zeroAwareLogarithmic?: boolean
   bipolar?: boolean
@@ -111,9 +108,6 @@ export default function Knob(props: KnobProps) {
     step,
     disabled: () => props.disabled ?? false,
     onValueChange: (value) => props.onValueChange(value),
-    onInteractionStart: (value) => props.onInteractionStart?.(value),
-    onInteractionEnd: (value) => props.onInteractionEnd?.(value),
-    onInteractionCancel: (value) => props.onInteractionCancel?.(value),
     valueFromDrag: ({ startValue, startPosition, currentPosition, fine }) => {
       const deltaY = startPosition.y - currentPosition.y
       return knobValueFromDrag(
@@ -177,10 +171,6 @@ export default function Knob(props: KnobProps) {
     const unit = props.unit ?? ''
     const value = visualValue()
     
-    if (props.logarithmic && value >= 1000) {
-      return `${(value / 1000).toFixed(1)}k${unit}`
-    }
-    
     if (bipolar() && value > 0) {
       return `+${value.toFixed(1)}${unit}`
     }
@@ -191,7 +181,7 @@ export default function Knob(props: KnobProps) {
   const handleDoubleClick = () => {
     if (props.disabled) return
     
-    control.setVisualValue(props.resetValue ?? (bipolar() ? (props.min + props.max) / 2 : props.min))
+    control.commitValue(props.resetValue ?? (bipolar() ? (props.min + props.max) / 2 : props.min))
   }
 
   return (
@@ -228,6 +218,8 @@ export default function Knob(props: KnobProps) {
           control.onPointerDown(event)
         }}
         onKeyDown={control.handleKeyDown}
+        onKeyUp={control.handleKeyUp}
+        onBlur={control.handleBlur}
         onWheel={control.handleWheel}
         onDblClick={handleDoubleClick}
         onContextMenu={(e) => e.preventDefault()}

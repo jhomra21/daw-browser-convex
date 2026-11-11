@@ -17,6 +17,7 @@ import {
 } from '~/components/effects/synth-visualizations'
 import Knob from '~/components/ui/knob'
 import { cn } from '~/lib/utils'
+import { formatDeviceFrequency, formatDeviceMilliseconds, formatDevicePercent } from '~/lib/device-value-format'
 
 type SynthProps = {
   params: SynthParams
@@ -39,13 +40,11 @@ type SourceTab = 'lfo' | 'voice' | 'noise'
 const envelopeTabs = ['amp', 'filter'] satisfies readonly EnvelopeTab[]
 const sourceTabs = ['lfo', 'voice', 'noise'] satisfies readonly SourceTab[]
 
-const formatFrequency = (frequencyHz: number) => (
-  frequencyHz >= 1000 ? `${(frequencyHz / 1000).toFixed(1)} kHz` : `${Math.round(frequencyHz)} Hz`
-)
+const formatFrequency = (frequencyHz: number) => formatDeviceFrequency(frequencyHz, 1)
 const formatSeconds = (seconds: number) => (
-  seconds < 1 ? `${Math.round(seconds * 1000)} ms` : `${seconds.toFixed(2)} s`
+  seconds < 1 ? formatDeviceMilliseconds(seconds * 1000, 0) : `${seconds.toFixed(2)} s`
 )
-const formatPercent = (value: number) => `${Math.round(value * 100)}%`
+const formatPercent = formatDevicePercent
 const formatCents = (value: number) => `${value > 0 ? '+' : ''}${Math.round(value)} ct`
 const formatOctaves = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)} oct`
 

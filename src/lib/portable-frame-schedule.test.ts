@@ -5,7 +5,7 @@ import { eventsForPortableFrameBlock, isPortableFrameScheduleCurrent, portableFr
 import { resolveTrackMidiExpressionSchedule } from '@daw-browser/audio-engine/midi-expression-scheduling'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
-import { compilePortableFrameSchedule } from '~/lib/portable-frame-schedule'
+import { compilePortableFrameSchedule, compilePortableFrameScheduleWindow, createPortableFrameScheduleWindowCompiler } from '~/lib/portable-frame-schedule'
 
 const automation: AutomationEnvelope = {
   id: 'automation-a',
@@ -58,6 +58,55 @@ const input = {
   automationEnvelopes: [automation],
   arpeggiators: new Map(),
 }
+
+// Failure modes: callback-end note-offs, seek seeds, mapped-expression restore,
+// overlapping clips, MIDI trim, arp identity, non-integral frames, and loop shifts.
+test('prepared native windows exactly match independent portable compilation', () => {
+  for (const sampleRateHz of [44_100, 48_000, 96_000]) {
+    for (const bpm of [60, 123]) {
+      const tracks: RuntimeTrack[] = [{
+        ...track,
+        clips: [
+          ...track.clips,
+          { ...track.clips[0]!, id: 'overlap', startSec: 0.213, duration: 3.1, midiOffsetBeats: 0.35 },
+        ],
+      }]
+      const base = { ...input, sampleRateHz, bpm, tracks }
+      const compileWindow = createPortableFrameScheduleWindowCompiler(base)
+      for (const frame of [0, 1, 511, 512, 9_731, 44_100, 48_000, 96_000, 150_000]) {
+        for (const frameCount of [128, 512, 96_000]) {
+          for (const shift of [0, 24_001]) {
+            const window = {
+              timeOrigin: { timelineSec: frame / sampleRateHz, frame: frame + shift },
+              rangeStartFrame: frame + shift,
+              rangeEndFrame: frame + shift + frameCount,
+            }
+            expect(compileWindow(window)).toEqual(compilePortableFrameScheduleWindow({
+              ...base, ...window,
+              eventRangeStartSec: window.timeOrigin.timelineSec,
+              stableNoteIds: true,
+              noteScheduleStartSec: 0,
+              clipSpanningNoteOn: true,
+            }))
+          }
+        }
+      }
+    }
+  }
+})
+
+test('prepared compiler owns no cache across replacement snapshots', () => {
+  const window = { timeOrigin: input.timeOrigin, rangeStartFrame: 0, rangeEndFrame: 48_000 }
+  const before = createPortableFrameScheduleWindowCompiler(input)(window)
+  const changed = {
+    ...input, revision: input.revision + 1, bpm: 123,
+    tracks: [{ ...track, clips: [{ ...track.clips[0]!, midi: { wave: 'sine', notes: [{ beat: 0, length: 1, pitch: 72 }] } }] } satisfies RuntimeTrack],
+  }
+  const after = createPortableFrameScheduleWindowCompiler(changed)(window)
+  expect(after.revision).toBe(changed.revision)
+  expect(after.events.filter((event) => event.type === 'note-on').map((event) => event.pitch)).toEqual([72])
+  expect(after.events).not.toEqual(before.events)
+})
 
 test('projects timeline, expression, and automation authorities into stable frame events', () => {
   const schedule = compilePortableFrameSchedule(input)

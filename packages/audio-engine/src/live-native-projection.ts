@@ -1,20 +1,27 @@
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { AudioAssetRef, AudioCoreGraphSnapshot, PlanarPcm } from '../../audio-core-contract/src/index'
-import { normalizeDelayParams, normalizeReverbParams, normalizeSynthParams } from '@daw-browser/shared'
+import {
+  createDefaultSynthParams,
+  normalizeDelayParams,
+  normalizeReverbParams,
+  normalizeSynthParams,
+} from '@daw-browser/shared'
 import { resolveLiveMixerGraph } from './live-mixer-runtime'
 import { createPortableGraphSnapshot } from './mixer/graph-contract'
 import {
-  compilePortableSessionInput,
+  compilePortableSynthConfiguration,
+  compilePortableSamplerConfiguration,
+  compilePortableDrumRackConfiguration,
+  compilePortableGranularConfiguration,
   graphWithInstruments,
-  instrumentConfigurations,
 } from './portable-session-compiler'
 import { projectPortableClipEvents } from './portable-clip-projector'
 import { audioCoreContractVersion } from '../../audio-core-contract/src/index'
 import { nativeAudioCoreProcessorKinds } from './backends/native-audio-core-capabilities'
-import { nativeAudioHostMaximumAssetFramesForChannels } from '@daw-browser/desktop-protocol/native-audio-host'
 import type { ExportFx } from './export-types'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import type { ExternalNodeLatencyFrames } from './mixer/resolve-timing'
+export { resolveMixerTiming } from './mixer/resolve-timing'
 import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
 import type { NativePreparedStretchAsset } from './native-stretch-preparation'
 import { validatePreparedStretchProjectionMetadata } from './prepared-stretch-artifact'
@@ -27,11 +34,17 @@ export type LiveNativePcmAsset = {
   preparedStretchArtifactId?: string
 }
 
+export type NativeInstrumentRegionSource = {
+  sourceAssetKey: string
+  buffer: AudioBuffer
+}
+
 export type LiveNativeProjection =
   | {
     supported: true
     graph: AudioCoreGraphSnapshot
     assets: readonly LiveNativePcmAsset[]
+    instrumentRegionSources?: readonly NativeInstrumentRegionSource[]
     events: readonly NativeProjectedSourceEvent[]
     nativePcmChunkDescriptors: readonly NativePcmChunkDescriptor[]
   }
@@ -49,6 +62,7 @@ export type LiveNativeProjectionInput = {
    * playback snapshot boundary.
    */
   fx?: ExportFx
+  instrumentRegionMode?: 'metadata'
   externalLatencyFrames?: ExternalNodeLatencyFrames
   projectGeneration?: number
   preparedStretchAssets?: readonly (PortablePreparedStretchAsset | NativePreparedStretchAsset)[]
@@ -119,10 +133,14 @@ const nativeProcessorIsEnabled = (instance: AudioEffectRuntimeInstance) => {
   return instance.params.state.enabled
 }
 
-const normalizeNativeFx = (fx: ExportFx | undefined): ExportFx | undefined => {
-  if (!fx) return fx
+const normalizeNativeFx = (
+  fx: ExportFx | undefined,
+  tracks: readonly Track<AudioBuffer | null>[],
+): ExportFx | undefined => {
+  if (!fx && !tracks.some((track) => track.kind === 'instrument' && track.clips.length > 0)) return fx
+  const currentFx = fx ?? { masterVolume: 1, masterFxInstances: [], trackFx: {} }
   let changed = false
-  const trackFx = Object.fromEntries(Object.entries(fx.trackFx ?? {}).map(([trackId, entry]) => {
+  const trackFx = Object.fromEntries(Object.entries(currentFx.trackFx ?? {}).map(([trackId, entry]) => {
     let nextEntry = entry
     if (entry.instrument === undefined && entry.synth !== undefined) {
       changed = true
@@ -145,14 +163,93 @@ const normalizeNativeFx = (fx: ExportFx | undefined): ExportFx | undefined => {
     }
     return [trackId, nextEntry]
   }))
-  const masterFxInstances = fx.masterFxInstances.filter((instance) => (
+  for (const track of tracks) {
+    if (track.kind !== 'instrument' || track.clips.length === 0 || trackFx[track.id]?.instrument) continue
+    trackFx[track.id] = {
+      ...(trackFx[track.id] ?? { instances: [] }),
+      instrument: {
+        kind: 'synth',
+        instanceId: `default-synth:${track.id}`,
+        params: createDefaultSynthParams(),
+      },
+    }
+    changed = true
+  }
+  const masterFxInstances = currentFx.masterFxInstances.filter((instance) => (
     nativeAudioCoreProcessorKinds.has(instance.kind)
     || nativeProcessorIsEnabled(instance)
   ))
-  if (masterFxInstances.length !== fx.masterFxInstances.length) changed = true
-  return changed ? { ...fx, masterFxInstances, trackFx } : fx
+  if (masterFxInstances.length !== currentFx.masterFxInstances.length) changed = true
+  return changed ? { ...currentFx, masterFxInstances, trackFx } : fx
 }
 
+/** Instrument-only native compilation. Inputs already contain localized region facts.
+ * No arrangement assets, clip projection, Stretch preparation or mixer graph is needed.
+ * Keep failures per node so one unavailable instrument cannot hide another desired entry.
+ */
+export const compileLiveNativeInstrumentConfigurations = (
+  tracks: readonly Track<AudioBuffer | null>[],
+  inputFx?: ExportFx,
+  projectGeneration = 1,
+) => {
+  const fx = normalizeNativeFx(inputFx, tracks)
+  const instrumentAssets = new Map<string, AudioBuffer>()
+  const reasons: string[] = []
+  const configurations: Parameters<typeof graphWithInstruments>[1][number][] = []
+  for (const [nodeId, entry] of Object.entries(fx?.trackFx ?? {})) {
+    const assets = new Map<string, AudioBuffer>()
+    const failures: string[] = []
+    const add = (key: string, buffer: AudioBuffer | undefined) => {
+      if (!buffer) {
+        if (!unavailable.has(key)) failures.push(`${nodeId}: Sample asset "${key}" is missing its authoritative audio buffer.`)
+        return
+      }
+      const existing = instrumentAssets.get(key)
+      if (existing && (existing.length !== buffer.length || existing.sampleRate !== buffer.sampleRate
+        || existing.numberOfChannels !== buffer.numberOfChannels)) {
+        failures.push(`Instrument region "${key}" resolves inconsistently.`)
+        return
+      }
+      assets.set(key, buffer)
+      instrumentAssets.set(key, buffer)
+    }
+    const unavailable = new Set(entry.unavailableSampleAssetKeys ?? [])
+    const instrument = entry.instrument
+    if (instrument?.kind === 'sampler') for (const zone of instrument.params.zones) {
+      add(zone.sample.assetKey, entry.samplerBuffers?.get(zone.id)?.buffer)
+    }
+    if (instrument?.kind === 'drum-rack') for (const pad of instrument.params.pads) {
+      if (pad.sample) add(pad.sample.assetKey, entry.drumRackBuffers?.get(pad.id)?.buffer)
+    }
+    if (instrument?.kind === 'granular' && instrument.params.zone) {
+      add(instrument.params.zone.sample.assetKey, entry.granularBuffer?.buffer)
+    }
+    const registry = {
+      projectGeneration,
+      unavailableProjectAssetIds: [...unavailable],
+      assets: [...assets].map(([key, buffer], slot) => ({
+        projectAssetId: key, portableAssetId: `portable-export:${key}`, projectGeneration,
+        handle: { slot, generation: 1 },
+        decoded: { sampleRateHz: buffer.sampleRate, channelCount: buffer.numberOfChannels, frameCount: buffer.length },
+      })),
+    }
+    // Preserve the portable compiler's legacy synth fallback, including FX entries with sampled instruments.
+    if (instrument?.kind === 'synth') configurations.push(compilePortableSynthConfiguration(nodeId, instrument.instanceId, instrument.params))
+    else if (entry.synth !== undefined) configurations.push(compilePortableSynthConfiguration(nodeId, `legacy-synth:${nodeId}`, entry.synth))
+    if (failures.length > 0) {
+      reasons.push(...failures)
+      continue
+    }
+    try {
+      if (instrument?.kind === 'sampler') configurations.push(compilePortableSamplerConfiguration(nodeId, instrument.instanceId, instrument.params, registry))
+      if (instrument?.kind === 'drum-rack') configurations.push(compilePortableDrumRackConfiguration(nodeId, instrument.instanceId, instrument.params, registry))
+      if (instrument?.kind === 'granular') configurations.push(compilePortableGranularConfiguration(nodeId, instrument.instanceId, instrument.params, registry))
+    } catch (error) {
+      reasons.push(`${nodeId}: ${error instanceof Error ? error.message : 'portable instrument compilation failed.'}`)
+    }
+  }
+  return { configurations, instrumentAssets, reasons }
+}
 /**
  * The live-native boundary keeps decoded audio, mixer topology, and instrument
  * state portable; active unsupported processors and external plug-ins remain
@@ -160,25 +257,10 @@ const normalizeNativeFx = (fx: ExportFx | undefined): ExportFx | undefined => {
  * contract rather than browser/Wasm fixture coverage.
  */
 export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): LiveNativeProjection => {
-  const fx = normalizeNativeFx(input.fx)
+  const fx = normalizeNativeFx(input.fx, input.tracks)
   const tracks = input.tracks
-  const instrumentReasons = tracks.flatMap((track) => (
-    track.kind === 'instrument'
-      && track.clips.length > 0
-      && !fx?.trackFx?.[track.id]?.instrument
-      ? [`${track.id}: native instrument state is unavailable.`]
-      : []
-  ))
-  if (instrumentReasons.length > 0) return { supported: false, reasons: instrumentReasons }
   const reasons: string[] = []
   const sourceAssets = new Map<string, LiveNativePcmAsset>()
-  const registryAssets: {
-    projectAssetId: string
-    portableAssetId: string
-    projectGeneration: number
-    handle: { slot: number; generation: number }
-    decoded: { sampleRateHz: number; channelCount: number; frameCount: number }
-  }[] = []
   const addAsset = (
     sourceAssetKey: string,
     source: { durationSec: number; sampleRate: number; channelCount: number },
@@ -220,22 +302,7 @@ export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): L
         ),
       }
       : undefined
-    if (pcm && frameCount > nativeAudioHostMaximumAssetFramesForChannels(source.channelCount)) {
-      reasons.push(`Instrument audio asset "${sourceAssetKey}" exceeds the bounded native instrument capacity.`)
-      return
-    }
     sourceAssets.set(sourceAssetKey, { asset, pcm, sourceAssetKey })
-    registryAssets.push({
-      projectAssetId: sourceAssetKey,
-      portableAssetId: asset.assetId,
-      projectGeneration: input.projectGeneration ?? 1,
-      handle: { slot: registryAssets.length, generation: 1 },
-      decoded: {
-        sampleRateHz: asset.sampleRateHz,
-        channelCount: asset.channelCount,
-        frameCount: asset.frameCount,
-      },
-    })
   }
   for (const track of tracks) {
     for (const clip of track.clips) {
@@ -263,30 +330,15 @@ export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): L
       addAsset(clip.sourceAssetKey, source, clip.buffer, false)
     }
   }
-  const instrumentAssets = new Map<string, AudioBuffer>()
-  for (const entry of Object.values(fx?.trackFx ?? {})) {
-    if (entry.instrument?.kind === 'sampler') {
-      for (const zone of entry.instrument.params.zones) {
-        const buffer = entry.samplerBuffers?.get(zone.id)
-        if (buffer) instrumentAssets.set(zone.sample.assetKey, buffer.buffer)
-      }
-    }
-    if (entry.instrument?.kind === 'drum-rack') {
-      for (const pad of entry.instrument.params.pads) {
-        const buffer = pad.sample ? entry.drumRackBuffers?.get(pad.id) : undefined
-        if (buffer && pad.sample) instrumentAssets.set(pad.sample.assetKey, buffer.buffer)
-      }
-    }
-    if (entry.instrument?.kind === 'granular' && entry.granularBuffer && entry.instrument.params.zone) {
-      instrumentAssets.set(entry.instrument.params.zone.sample.assetKey, entry.granularBuffer.buffer)
-    }
-  }
+  const instruments = compileLiveNativeInstrumentConfigurations(tracks, fx, input.projectGeneration)
+  const { instrumentAssets } = instruments
+  reasons.push(...instruments.reasons)
   for (const [assetId, buffer] of instrumentAssets) {
     addAsset(assetId, {
       durationSec: buffer.duration,
       sampleRate: buffer.sampleRate,
       channelCount: buffer.numberOfChannels,
-    }, buffer, true)
+    }, buffer, input.instrumentRegionMode !== 'metadata')
   }
   const preparedStretchAssets = new Map<string, PortablePreparedStretchAsset | NativePreparedStretchAsset>()
   for (const prepared of input.preparedStretchAssets ?? []) {
@@ -315,33 +367,12 @@ export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): L
       sourceAssetKey: sourceKey,
       preparedStretchArtifactId: prepared.preparedStretchArtifactId ?? prepared.asset.assetId,
     })
-    registryAssets.push({
-      projectAssetId: sourceKey,
-      portableAssetId: prepared.asset.assetId,
-      projectGeneration: input.projectGeneration ?? 1,
-      handle: { slot: registryAssets.length, generation: 1 },
-      decoded: {
-        sampleRateHz: prepared.asset.sampleRateHz,
-        channelCount: prepared.asset.channelCount,
-        frameCount: prepared.asset.frameCount,
-      },
-    })
   }
   if (reasons.length > 0) return { supported: false, reasons }
   const mixer = resolveLiveMixerGraph(tracks, fx?.trackFx ?? {}, {
     masterFxInstances: fx?.masterFxInstances,
     masterVolume: fx?.masterVolume,
   })
-  const session = compilePortableSessionInput({
-    mixer,
-    fx: fx ?? { masterVolume: 1, masterFxInstances: [], trackFx: {} },
-    automationEnvelopes: [],
-    assetRegistry: {
-      projectGeneration: input.projectGeneration ?? 1,
-      assets: registryAssets,
-    },
-  })
-  if (session.unsupportedInstruments.length > 0) return { supported: false, reasons: session.unsupportedInstruments }
   const baseGraph = createPortableGraphSnapshot({
     graph: mixer,
     revision: input.revision,
@@ -351,7 +382,7 @@ export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): L
     includeInstruments: false,
     externalLatencyFrames: input.externalLatencyFrames,
   })
-  const instrumentGraph = graphWithInstruments(baseGraph, instrumentConfigurations(session))
+  const instrumentGraph = graphWithInstruments(baseGraph, instruments.configurations)
   if (!instrumentGraph.graph) return { supported: false, reasons: instrumentGraph.reasons }
   const clipProjection = projectPortableClipEvents({
     tracks,
@@ -370,11 +401,19 @@ export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): L
     assetRatePolicy: 'asset-rate',
   })
   if (!clipProjection.supported) return clipProjection
-  return {
+  const projection = {
     supported: true,
     graph: instrumentGraph.graph,
     assets: [...sourceAssets.values()],
     events: clipProjection.events,
     nativePcmChunkDescriptors: [],
+  } satisfies Extract<LiveNativeProjection, { supported: true }>
+  if (input.instrumentRegionMode !== 'metadata') return projection
+  return {
+    ...projection,
+    instrumentRegionSources: [...instrumentAssets].map(([sourceAssetKey, buffer]) => ({
+      sourceAssetKey,
+      buffer,
+    })),
   }
 }

@@ -1,44 +1,152 @@
 import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
+import "fake-indexeddb/auto";
+import { createRoot } from "solid-js";
+import { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
+import { createDefaultUtilityParams } from "@daw-browser/shared";
+import type { Track } from "@daw-browser/timeline-core/types";
+import type { HistoryEntry, EffectParamsCommitPayload } from "~/lib/undo/types";
+import { setLocalEffectInstance, listLocalEffects } from "~/lib/local-effects";
+import { createProcessorEditRegistry } from "./timeline/create-processor-edit-registry";
+import { createEffectsPanelAudioDevice } from "./timeline/create-effects-panel-audio-effects-state";
+import { createLocalEffectsView } from "./timeline/create-local-effects-view";
+import createTimelineEffectCommit from "./timeline/create-timeline-effect-commit";
 
-test("patches supported native built-in commits and rebuilds unsupported commits", async () => {
+// Failure-first B6 seam inventory: stale/missing project history, captured
+// tracks, incorrect merge key/window, no-merge ignored, native refusal vetoing
+// a durable panel commit, and a fixture copy bypassing the production callback.
+test("B6 production effect commit reads current project/tracks and preserves merge history", () => {
+  let projectId: string | undefined;
+  let tracks: Track[] = [];
+  const calls: { entry: HistoryEntry; mergeKey?: string; mergeWindowMs?: number }[] = [];
+  const commit = createTimelineEffectCommit({ projectId: () => projectId, tracks: () => tracks,
+    pushHistory: (entry, mergeKey, mergeWindowMs) => calls.push({ entry, mergeKey, mergeWindowMs }) });
+  const from = createDefaultUtilityParams();
+  const payload: EffectParamsCommitPayload = { effect: "utility", targetId: "track", instanceId: "utility:1",
+    from: { version: 1, state: from }, to: { version: 1, state: { ...from, gainDb: -6 } } };
+  commit.committed(payload);
+  expect(calls).toHaveLength(0);
+  projectId = "project:current";
+  tracks = [{ id: "track", historyRef: "history:current", name: "Current", volume: 1, clips: [] }];
+  commit.committed(payload, "project:previous");
+  expect(calls).toHaveLength(0);
+  commit.committed(payload);
+  expect(calls[0]).toMatchObject({ entry: { type: "effect-params", projectId: "project:current",
+    data: { effect: "utility", instanceId: "utility:1", trackRef: "history:current", from: payload.from, to: payload.to } },
+    mergeKey: "fx:utility:track:utility:1", mergeWindowMs: 600 });
+  tracks = [{ id: "track", historyRef: "history:new", name: "New", volume: 1, clips: [] }];
+  commit.committed(payload, projectId, { mergeHistory: false });
+  expect(calls[1]).toMatchObject({ entry: { data: { trackRef: "history:new" } } });
+  expect(calls[1]?.mergeKey).toBeUndefined();
+  expect(calls[1]?.mergeWindowMs).toBeUndefined();
+  projectId = "project:navigated";
+  commit.committed(payload, "project:current");
+  expect(calls).toHaveLength(2);
+});
+
+test("B6 panel release records production history despite native refusal without duplicate delivery", async () => {
+  const projectId = `project:b6-history-${crypto.randomUUID()}`;
+  const instanceId = "utility:1";
+  const params = { version: 1, state: createDefaultUtilityParams() };
+  await setLocalEffectInstance(projectId, "track", "utility", params, { instanceId });
+  const history: HistoryEntry[] = [];
+  let deliveries = 0;
+  let dispose = () => {};
+  const mounted = createRoot(end => {
+    dispose = end;
+    const view = createLocalEffectsView({ projectId: () => projectId });
+    const registry = createProcessorEditRegistry(() => 120);
+    const commit = createTimelineEffectCommit({ projectId: () => projectId, tracks: () => [],
+      pushHistory: entry => { history.push(entry); } });
+    const device = createEffectsPanelAudioDevice({
+      audioEngine: () => new AudioEngine(), projectId: () => projectId, userId: () => "local",
+      projectGeneration: () => 1, roomEffects: () => [], sidechainRoutes: () => [],
+      canWriteCurrentTargetEffects: () => true, usesLegacyAudioEngine: () => false, localEffectsView: view,
+      allocateProcessorEdit: registry.allocate,
+      deliverProcessor: () => {
+        deliveries++;
+        return { receipt: { key: instanceId, serial: deliveries },
+          settled: Promise.resolve({ state: "refused", reason: "native-refused" }) };
+      },
+      onEffectParamsCommitted: commit.committed,
+    }, () => "track", () => undefined);
+    return { view, device };
+  });
+  try {
+    await mounted.view.reload();
+    mounted.device.utility.changeInstance(instanceId, value => ({ ...value, state: { ...value.state, gainDb: -6 } }));
+    await mounted.device.flushPending();
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ type: "effect-params", projectId, data: { to: { state: { gainDb: -6 } } } });
+    expect((await listLocalEffects(projectId)).find(row => row.instanceId === instanceId)?.params)
+      .toMatchObject({ state: { gainDb: -6 } });
+    const atRelease = deliveries;
+    await mounted.device.flushPending();
+    expect(deliveries).toBe(atRelease);
+    expect(history).toHaveLength(1);
+  } finally { dispose(); }
+});
+
+test("B6 hook fixture and Timeline use the production history seam, never a fixture copy", async () => {
+  const timeline = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
+  const fixture = await readFile(new URL("../../tools/acceptance/ae-08-processor-state-fuzz-hook.ts", import.meta.url), "utf8");
+  expect(timeline).toContain('from "~/components/timeline/create-timeline-effect-commit"');
+  expect(timeline).toContain("onEffectParamsCommitted: effectCommit.committed");
+  expect(fixture).toContain('from "../../src/components/timeline/create-timeline-effect-commit"');
+  expect(fixture).toContain("projectId: () => projectId, tracks, pushHistory: history.pushHistory");
+  expect(fixture).not.toContain("ae-08-processor-state-fuzz-hook-commit");
+});
+
+test("STEP5 B7 shared playback input boundary is used by Timeline and both fixtures", async () => {
+  for (const file of ["src/components/Timeline.tsx", "tools/acceptance/device-control-cost.browser.test.ts",
+    "tools/acceptance/ae-08-processor-state-fuzz-hook.ts"]) {
+    const source = await readFile(new URL(`../../${file}`, import.meta.url), "utf8");
+    expect(source).toContain("pickNativePlaybackInputs(");
+    expect(source).toContain("processorStructure:");
+  }
+});
+
+test("3B1 r2 comments and audio-adapter witness describe registration and independent native settlement", async () => {
+  const hook = await readFile(new URL("../../tools/acceptance/ae-08-processor-state-fuzz-hook.ts", import.meta.url), "utf8");
+  const cost = await readFile(new URL("../../tools/acceptance/device-control-cost.browser.test.ts", import.meta.url), "utf8");
+  const panel = await readFile(new URL("./timeline/create-effects-panel-state.ts", import.meta.url), "utf8");
+  const audioTest = await readFile(new URL("./timeline/create-effects-panel-audio-effects-state.test.ts", import.meta.url), "utf8");
+  expect({
+    obsoleteHookTranslator: hook.includes("handleNativeBuiltInPreview"),
+    obsoleteCostTranslator: cost.includes("handleNativeBuiltInPreview"),
+    nativeVetoesSave: panel.includes("engine or native failure"),
+    booleanFlushName: audioTest.includes("awaits the boolean native flush"),
+  }).toEqual({ obsoleteHookTranslator: false, obsoleteCostTranslator: false, nativeVetoesSave: false, booleanFlushName: false });
+});
+
+test("settles preparation before comparing instrument-ready callbacks with the prepared graph", async () => {
   const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const handlerStart = source.indexOf("function handleEffectParamsCommitted");
-  if (handlerStart < 0) throw new Error("Expected the effect commit handler.");
-  const handlerEnd = source.indexOf("\n  // DOM refs", handlerStart);
-  if (handlerEnd < 0) throw new Error("Expected the effect commit handler boundary.");
-  const handler = source.slice(handlerStart, handlerEnd);
+  const start = source.indexOf('onStructuralPlaybackChange: (targetId:');
+  const end = source.indexOf('\n      usesLegacyAudioEngine,', start);
+  const handler = source.slice(start, end);
+  expect(handler).toContain("await awaitPlaybackPreparation();");
+  expect(handler.indexOf("await awaitPlaybackPreparation();"))
+    .toBeLessThan(handler.indexOf("const previous = preparedInstrument(targetId);"));
+  expect(handler).toContain("if (JSON.stringify(previous) === JSON.stringify(instrument)) return;");
+});
 
-  expect(handler).toContain("pushEffectParamsHistory(payload, committedProjectId);");
-  expect(handler).toContain('if (payload.effect === "instrument") return;');
-  expect(handler.indexOf('if (payload.effect === "instrument") return;'))
-    .toBeGreaterThan(handler.indexOf("pushEffectParamsHistory(payload, committedProjectId);"));
-  expect(handler).toContain("encodeNativeBuiltInStateCommit(payload, bpm())");
-  expect(handler).toContain("isNativePlaybackPrepared()");
-  expect(handler).toContain("isPortableBrowserPlaybackPrepared()");
-  expect(handler).toContain("handleNativeBuiltInStatePatchResult(payload)");
-  expect(handler.match(/rebuildPlaybackBackend\(renderTracks\(\)\)/g))
-    .toHaveLength(1);
-  expect(handler.indexOf("pushEffectParamsHistory(payload, committedProjectId);"))
-    .toBeLessThan(handler.indexOf("mapNativeBuiltInParameterCommit(payload, bpm())"));
-  expect(handler.indexOf("const result = await control?.flush(mapped);"))
-    .toBeLessThan(handler.indexOf("handleNativeBuiltInStatePatchResult(payload)"));
-  expect(handler).toContain("if (isPlaying() || isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared())");
-  expect(handler).toContain('notify(\n          "Built-in effect update failed"');
+test("records effect history without dispatching native delivery or rebuilding playback", async () => {
+  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
+  const handler = await readFile(new URL("./timeline/create-timeline-effect-commit.ts", import.meta.url), "utf8");
+  expect(source).toContain("const effectCommit = createTimelineEffectCommit({ projectId, tracks: renderTracks, pushHistory });");
+  expect(handler).toContain("input.pushHistory(entry,");
+  expect(handler).not.toContain("deliverProcessor(");
+  expect(handler).not.toContain("rebuildPlaybackBackend(");
+  expect(source).toContain("deliverProcessor,");
+  expect(source).toContain("joinPublication,");
+  expect(source).toContain("return instrumentPlaybackChangeTail =");
 });
 
 test("scopes effect history to the committed project and keeps patch failures silent", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const historyStart = source.indexOf("const pushEffectParamsHistory");
-  const historyEnd = source.indexOf("\n  const handleNativeBuiltInStatePatchResult", historyStart);
-  if (historyStart < 0 || historyEnd < 0) throw new Error("Expected the effect history boundary.");
-  const history = source.slice(historyStart, historyEnd);
-  expect(history).toContain("const rid = committedProjectId ?? projectId();");
-  expect(history).toContain("if (rid !== projectId()) return;");
-  const patchStart = source.indexOf("const handleNativeBuiltInStatePatchResult");
-  const patchEnd = source.indexOf("\n  const handleNativeBuiltInPreview", patchStart);
-  if (patchStart < 0 || patchEnd < 0) throw new Error("Expected the state patch boundary.");
-  expect(source.slice(patchStart, patchEnd)).not.toContain("notify(");
+  const history = await readFile(new URL("./timeline/create-timeline-effect-commit.ts", import.meta.url), "utf8");
+  expect(history).toContain("const rid = committedProjectId ?? input.projectId();");
+  expect(history).toContain("if (rid !== input.projectId()) return;");
+  expect(history).not.toContain("deliverProcessor(");
 });
 
 test("persists captured editor state using its bound project after navigation", async () => {
@@ -170,4 +278,16 @@ test("routes browser keyboard toggles through the extension host exactly once", 
   expect(source).not.toContain("onToggleBrowser: leftBrowser.toggleOpen");
   expect(source.match(/createTimelineExtensionHost\(/g)).toHaveLength(1);
   expect(source.match(/timelineExtensionHost\.dispose\(\)/g)).toHaveLength(1);
+});
+
+test("keeps arrangement and clip selection clicks from seeking during playback", async () => {
+  const timeline = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
+  const selection = await readFile(new URL("../hooks/useTimelineSelection.ts", import.meta.url), "utf8");
+  const actions = await readFile(new URL("../hooks/useTimelineActions.ts", import.meta.url), "utf8");
+
+  expect(timeline).toContain("isPlaying,\n    startScrub,");
+  expect(selection).toContain("if (!options.isPlaying()) startScrub(event.clientX, { listen: false });");
+  expect(selection).toContain("if (!options.isPlaying()) moveScrub(event.clientX);");
+  expect(actions).toContain("if (!options.navigation.isPlaying()) {");
+  expect(actions).toContain("options.navigation.setPlayhead(targetStartSec, options.tracks())");
 });

@@ -46,15 +46,15 @@ describe('independent true-peak scanner', () => {
     }
   })
 
-  test('accepts and rejects against the configured tolerance', () => {
+  test('accepts and rejects against the configured tolerance', async () => {
     const samples = Float32Array.from([0, 0.9, -0.9, 0.9, -0.9, 0])
     const buffer = createBuffer([samples])
     const peakDbtp = scanTruePeak(buffer).peakDbtp
-    expect(() => assertExportTruePeakWithinLimiterCeiling(buffer, peakDbtp - 0.1)).not.toThrow()
-    expect(() => assertExportTruePeakWithinLimiterCeiling(buffer, peakDbtp - 0.11)).toThrow(
+    await expect(assertExportTruePeakWithinLimiterCeiling(buffer, peakDbtp - 0.1)).resolves.toBeUndefined()
+    await expect(assertExportTruePeakWithinLimiterCeiling(buffer, peakDbtp - 0.11)).rejects.toThrow(
       /exceeds the reachable limiter ceiling/,
     )
-    expect(() => assertExportTruePeakWithinLimiterCeiling(buffer, undefined)).not.toThrow()
+    await expect(assertExportTruePeakWithinLimiterCeiling(buffer, undefined)).resolves.toBeUndefined()
   })
 
   test('honors cancellation', () => {

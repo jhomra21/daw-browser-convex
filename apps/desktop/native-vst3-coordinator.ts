@@ -10,7 +10,6 @@ import { serializeNativeGraph } from "@daw-browser/audio-engine/native-host-wire
 import {
   NativeAudioHostCommandError,
   type NativeAudioHostSupervisor,
-  type NativeWorkerNotification,
   type ResolvedVst3Attachment,
 } from "./audio-host"
 import type { PluginCatalogData } from "./plugin-catalog"
@@ -102,61 +101,6 @@ export type NativeVst3RevisionCoordinatorInput = {
 export type NativeVst3RevisionCoordinatorCreation =
   | { ok: true; coordinator: NativeVst3RevisionCoordinator }
   | { ok: false; status: Extract<NativeVst3PlaybackStatus, { active: false }> }
-
-export const nativeVst3RevisionHost = (
-  supervisor: Pick<NativeAudioHostSupervisor,
-    "prepareGraphRevision" | "publishGraphRevision" | "rollbackGraphRevision" | "retireGraphRevision" | "stopAudio">,
-): NativeVst3RevisionHost => {
-  const expectStatus = (
-    status: Awaited<ReturnType<NativeAudioHostSupervisor["prepareGraphRevision"]>>,
-    expected: typeof status.status,
-  ) => {
-    if (status.status !== expected) throw new Error(`Native graph revision ${status.status}.`)
-  }
-  return {
-    async prepareRevision(input) {
-      expectStatus(await supervisor.prepareGraphRevision(input.serializedGraph), "prepared")
-    },
-    async publishRevision(revision) {
-      expectStatus(await supervisor.publishGraphRevision(revision), "published")
-    },
-    async rollbackRevision(revision) {
-      expectStatus(await supervisor.rollbackGraphRevision(revision), "rolled-back")
-    },
-    async retireRevision(revision) {
-      expectStatus(await supervisor.retireGraphRevision(revision), "retired")
-    },
-    async stopAudio() {
-      await supervisor.stopAudio()
-    },
-  }
-}
-
-export const nativeVst3WorkerRevisionNotification = (
-  notification: NativeWorkerNotification,
-): NativeVst3WorkerRevisionNotification | undefined => {
-  if (notification.kind === "editor-interaction" || notification.kind === "parameter-edit") return undefined
-  const identity = {
-    instanceId: notification.instanceId,
-    revision: notification.graphRevision,
-  }
-  if (notification.kind === "latency") return { kind: "latency", ...identity, frames: notification.value }
-  if (notification.kind === "tail") return { kind: "tail", ...identity, frames: notification.value }
-  if (notification.kind === "buses") return { kind: "buses", ...identity }
-  if (notification.kind === "restart") return { kind: "restart", ...identity }
-  if (notification.kind === "miss") return { kind: "miss", ...identity }
-  if (notification.kind === "fault") return { kind: "fault", ...identity }
-  return undefined
-}
-
-export const connectNativeVst3RevisionCoordinator = (
-  supervisor: Pick<NativeAudioHostSupervisor, "onWorkerNotification">,
-  coordinator: NativeVst3RevisionCoordinator,
-) => supervisor.onWorkerNotification((notification) => {
-  const revisionNotification = nativeVst3WorkerRevisionNotification(notification)
-  if (!revisionNotification) return
-  void coordinator.handleNotification(revisionNotification)
-})
 
 const canonicalAttachments = (attachments: readonly Attachment[]) => [...attachments].sort((left, right) => (
   left.graphNodeId.localeCompare(right.graphNodeId)

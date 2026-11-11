@@ -75,6 +75,14 @@ export async function ensureOwnedProjectRow(
   return { status: "created" as const, project: created };
 }
 
+// The revision the owning mutation's single advance will produce. Row writers stamp it; only the owner advances.
+export async function prospectiveRevision(
+  ctx: ProjectRowReadCtx,
+  projectId: string,
+) {
+  return (await requireProjectRow(ctx, projectId)).revision + 1;
+}
+
 export async function advanceProjectRevision(
   ctx: MutationCtx,
   projectId: string,
@@ -86,4 +94,13 @@ export async function advanceProjectRevision(
     updatedAt,
   });
   return { revision: project.revision + 1, updatedAt };
+}
+
+export function assertEffectWriterRevisions(
+  revisions: readonly number[],
+  ownerRevision: number,
+) {
+  if (revisions.some((revision) => revision !== ownerRevision)) {
+    throw new Error("Effect row stamp diverged from the owning project revision.");
+  }
 }

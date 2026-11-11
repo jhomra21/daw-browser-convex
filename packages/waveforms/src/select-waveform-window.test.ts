@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto'
 import { beforeEach, describe, expect, test } from 'bun:test'
-import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import { clearWaveformAssetCache, ensurePeakAsset } from './asset-store'
 import { getPeakChunkRecord } from './extract-peaks'
 import { loadPeakAssetRecord, storePeakChunk } from './peak-db'

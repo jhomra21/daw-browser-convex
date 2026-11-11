@@ -10,6 +10,7 @@ type UseTimelineDragDropOptions = {
   rootElement: () => HTMLDivElement | undefined
   scrollElement: () => HTMLDivElement | undefined
   onDrop: (event: DragEvent) => Promise<void> | void
+  notify?: (title: string, message: string) => void
 }
 
 type UseTimelineDragDropReturn = {
@@ -31,6 +32,17 @@ export function useTimelineDragDrop(
   const clearDropTarget = () => {
     setDropTargetLane(null)
     setDropAtNewTrack(false)
+  }
+
+  const runDrop = async (event: DragEvent) => {
+    try {
+      await options.onDrop(event)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'The dropped file could not be imported.'
+      options.notify?.('Audio import failed', message)
+    } finally {
+      clearDropTarget()
+    }
   }
 
   const updateDropTarget = (clientY: number) => {
@@ -92,8 +104,7 @@ export function useTimelineDragDrop(
   const handleRootDrop = async (event: DragEvent) => {
     if (event.defaultPrevented) return
     if (!isSupportedDragInsideTimeline(event)) return
-    await options.onDrop(event)
-    clearDropTarget()
+    await runDrop(event)
   }
 
   const handleGlobalDragOver = (event: DragEvent) => {
@@ -106,8 +117,7 @@ export function useTimelineDragDrop(
   const handleWindowDrop = (event: DragEvent) => {
     if (!isSupportedDragInsideTimeline(event)) return
     event.preventDefault()
-    void options.onDrop(event)
-    clearDropTarget()
+    void runDrop(event)
   }
 
   const handleGlobalDragEnd = () => {

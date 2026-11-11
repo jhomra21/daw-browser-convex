@@ -25,7 +25,6 @@ import AutomationLane from "~/components/timeline/automation-lane";
 import { TimelineLeftBrowser } from "~/components/timeline/browser/timeline-left-browser";
 import type { TimelineLeftBrowserModel } from "~/components/timeline/browser/browser-types";
 import TimelineOverlays from "~/components/timeline/timeline-overlays";
-import type { TimelineMidiBounds } from "~/lib/timeline-midi-bounds";
 import {
   DEFAULT_AUTOMATION_LANE_HEIGHT,
   LANE_HEIGHT,
@@ -34,7 +33,6 @@ import {
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionState";
 import type {
-  Clip,
   Track,
   TrackId,
   TrackSend,
@@ -48,7 +46,7 @@ import TimelineContextMenu, {
   type TimelineContextMenuItem,
 } from "./context-menu/timeline-context-menu";
 import {
-  buildGroupClipOverview,
+  buildGroupClipOverviews,
   trackIdsInYRange,
   type TimelineTrackLayout,
   type TimelineTrackLayoutRow,
@@ -151,7 +149,7 @@ type Props = {
   ) => void;
   canEditClipFades: (clipId: string) => boolean;
   onCommitClipFades: (clipId: string, fades: ClipFades, baseline: ClipFades) => void;
-  onAddMidiClipToTrack?: (trackId: Track["id"]) => void;
+  onAddMidiClipToTrack?: (trackId: Track["id"], startSec: number) => void;
   onDeleteTrack: (trackId: Track["id"]) => void;
   clipContextMenu: ClipContextMenuActions;
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>;
@@ -165,8 +163,7 @@ type Props = {
     clipId: string,
   ) => Promise<void>;
   trackLookup: TimelineTrackIndex<AudioBuffer>;
-  openMidiEditorFor: (clipId: string) => void;
-  openSampleDetailFor: (clipId: string) => void;
+  openClipDetailFor: (clipId: string) => void;
   marqueeRect: { x: number; y: number; width: number; height: number } | null;
   marqueeSurface: "scrolling" | "return" | null;
   recording: {
@@ -175,20 +172,6 @@ type Props = {
     previewPoints: Array<{ offset: number; amplitude: number }>;
     recordingTrackId: TrackId | null;
     recordArmTrackId: TrackId | null;
-  };
-  midi: {
-    clipId: string | null;
-    card: TimelineMidiBounds;
-    userId: string;
-    projectId: string;
-    canWrite: boolean;
-    close: () => void;
-    changeBounds: (bounds: TimelineMidiBounds) => void;
-    auditionNote: (trackId: string, note: number, velocity?: number, durSec?: number) => void;
-    keyboard: {
-      isActive: (pitch: number) => boolean;
-    };
-    onLocalMidiSaved: (clipId: string, midi: Clip["midi"]) => void;
   };
   sidebar: {
     currentUserId: string;
@@ -236,6 +219,7 @@ type Props = {
 
 export default function TimelineWorkspace(props: Props) {
   let sidebarScrollElement: HTMLDivElement | undefined;
+  let timelineScrollElement: HTMLDivElement | undefined;
   const viewportRedrawState = createViewportRedrawState();
   const [verticalScrollTop, setVerticalScrollTop] = createSignal(0);
   const [verticalClientHeight, setVerticalClientHeight] = createSignal(0);
@@ -243,6 +227,7 @@ export default function TimelineWorkspace(props: Props) {
     onCanonicalScrollTop: setVerticalScrollTop,
   });
   const observeScrollViewport = (element: HTMLDivElement) => {
+    timelineScrollElement = element;
     props.scrollRef(element);
     verticalScrollSync.bindTimeline(element);
     setVerticalClientHeight(element.clientHeight);
@@ -273,17 +258,25 @@ export default function TimelineWorkspace(props: Props) {
     const selectedTrackId = props.selection.selectedTrackId();
     return selectedTrackId ? [selectedTrackId] : [];
   });
-  const groupClipOverviewByTrackId = createMemo(() => {
-    const overviews = new Map<
-      Track["id"],
-      ReturnType<typeof buildGroupClipOverview>
-    >();
+  const collapsedGroupIds = createMemo(() => new Set(
+    props.tracks
+      .filter((track) => track.channelRole === "group" && track.collapsed === true)
+      .map((track) => track.id),
+  ));
+  const trackHierarchyById = createMemo(() => {
+    const hierarchy = new Map<string, string>();
     for (const track of props.tracks) {
-      if (track.channelRole !== "group" || track.collapsed !== true) continue;
-      overviews.set(track.id, buildGroupClipOverview(track.id, props.tracks));
+      if (track.groupId) hierarchy.set(track.id, track.groupId);
     }
-    return overviews;
+    return hierarchy;
   });
+  const groupClipOverviewByTrackId = createMemo(() => (
+    buildGroupClipOverviews(
+      props.tracks,
+      collapsedGroupIds(),
+      trackHierarchyById(),
+    )
+  ));
   const trackAreaHeight = () =>
     props.trackLayout.scrollingHeightPx +
     (props.dropAtNewTrack ? LANE_HEIGHT : 0);
@@ -368,6 +361,14 @@ export default function TimelineWorkspace(props: Props) {
             clipVisibleRange={props.viewport.overscanRange}
             viewportWidthPx={props.viewport.width}
             timeToX={props.viewport.timeToX}
+            clientXToTime={(clientX) => {
+              const scrollElement = timelineScrollElement;
+              return scrollElement
+                ? props.viewport.xToTime(clientX - scrollElement.getBoundingClientRect().left)
+                : 0;
+            }}
+            gridEnabled={props.gridEnabled}
+            gridDenominator={props.gridDenominator}
             viewportRedrawVersion={viewportRedrawState.version()}
             devicePixelRatio={viewportRedrawState.devicePixelRatio()}
             waveformVisible={
@@ -399,14 +400,7 @@ export default function TimelineWorkspace(props: Props) {
               onCommit: props.automation.envelopes.commit,
               onCancelPreview: props.automation.envelopes.cancelPreview,
             }}
-            onClipDblClick={(_, clipId) => {
-              const match = props.trackLookup.clipEntryById.get(clipId);
-              if (match?.clip.midi) {
-                props.openMidiEditorFor(clipId);
-                return;
-              }
-              props.openSampleDetailFor(clipId);
-            }}
+            onClipDblClick={(_, clipId) => props.openClipDetailFor(clipId)}
           />
         )}
       </Show>
@@ -518,8 +512,6 @@ export default function TimelineWorkspace(props: Props) {
                     range: props.selection.rangeSelection(),
                   }}
                   recording={props.recording}
-                  midi={props.midi}
-                  effectInstancesByOwnerKey={props.automation.lanes.effectInstancesByOwnerKey}
                 />
               </div>
               <div
@@ -657,6 +649,7 @@ export default function TimelineWorkspace(props: Props) {
                           masterTargetKey(),
                         )}
                         durationSec={props.durationSec}
+                        bpm={props.bpm}
                         pixelsPerSecond={props.pixelsPerSecond}
                         visibleStartSec={props.viewport.visibleRange.startSec}
                         viewportWidthPx={props.viewport.width}

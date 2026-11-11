@@ -65,11 +65,13 @@ type UseTimelineActionsOptions = {
   navigation: {
     trackLookup: Accessor<TimelineTrackIndex<AudioBuffer>>
     selection: TimelineSelectionController
+    isPlaying: Accessor<boolean>
     setPlayhead: (nextSec: number, tracks: RuntimeTrack[]) => void
-    openMidiEditorFor: (clipId: string) => void
+    openClipDetailFor: (clipId: string) => void
     ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
     getScrollElement: () => HTMLDivElement | undefined
-      setVisibleStartSec: (startSec: number) => void
+    visibleStartSec: Accessor<number>
+    setVisibleStartSec: (startSec: number) => void
     pixelsPerSecond: Accessor<number>
   }
 }
@@ -683,11 +685,14 @@ export function useTimelineActions(
 
   function jumpToClip(trackId: Track['id'], clipId: string, startSec: number): void {
     options.navigation.selection.selectPrimaryClip({ trackId, clipId })
-    options.navigation.setPlayhead(Math.max(0, startSec), options.tracks())
-    options.navigation.openMidiEditorFor(clipId)
+    const targetStartSec = Math.max(0, startSec)
+    if (!options.navigation.isPlaying()) {
+      options.navigation.setPlayhead(targetStartSec, options.tracks())
+    }
+    options.navigation.openClipDetailFor(clipId)
 
+    const match = options.navigation.trackLookup().clipEntryById.get(clipId)
     try {
-      const match = options.navigation.trackLookup().clipEntryById.get(clipId)
       if (match && match.trackId === trackId && !match.clip.buffer) {
         void options.navigation.ensureClipBuffer(clipId, match.clip.sampleUrl)
       }
@@ -696,11 +701,11 @@ export function useTimelineActions(
     try {
       const scrollElement = options.navigation.getScrollElement()
       if (!scrollElement) return
-      const width = scrollElement.clientWidth
-      options.navigation.setVisibleStartSec(Math.max(
-        0,
-        startSec - width / Math.max(1e-9, options.navigation.pixelsPerSecond()) / 2,
-      ))
+      const visibleStartSec = options.navigation.visibleStartSec()
+      const visibleSec = scrollElement.clientWidth / Math.max(1e-9, options.navigation.pixelsPerSecond())
+      const targetEndSec = targetStartSec + (match?.clip.duration ?? 0)
+      if (targetEndSec > visibleStartSec && targetStartSec < visibleStartSec + visibleSec) return
+      options.navigation.setVisibleStartSec(Math.max(0, targetStartSec - visibleSec / 2))
     } catch {}
   }
 

@@ -1,0 +1,51 @@
+import { plugin } from "bun"
+import { readFileSync } from "node:fs"
+
+// RC4 copy of /tmp/dv01-b6/rc2/overlay.ts with only the child-preload path moved to rc4/mut.
+// RC2 in-memory mutation overlay: /tmp/dv01-b6/c2/overlay.ts with only the child-preload path moved to rc2.
+// The applied marker keeps its B6c2 name so marker counts stay comparable across checkpoints.
+// Every change is an exact text anchor that must occur exactly once; nothing is written to disk.
+// `bounded` reproduces /tmp/dv01-step6r3/mutation-overlay.ts's test-side bounded waits verbatim,
+// which the historical step-7 controls and mutants ran under.
+const spec: { id: string; changes: { file: string; from: string; to: string }[]; bounded?: boolean; childPreload?: boolean } =
+  JSON.parse(readFileSync(process.env.DV01_OVERLAY_FILE ?? "", "utf8"))
+console.log("DV01-C2-OVERLAY-LOADED", spec.id, spec.changes.length)
+plugin({ name: `dv01-c2-${spec.id}`, setup(build) {
+  build.onLoad({ filter: /\.(ts|tsx)$/ }, ({ path }) => {
+    let contents = readFileSync(path, "utf8")
+    for (const change of spec.changes.filter(change => path.endsWith(change.file))) {
+      if (contents.split(change.from).length !== 2) throw new Error("Overlay requires one exact anchor: " + spec.id + " " + change.file)
+      contents = contents.replace(change.from, change.to)
+      console.log("DV01-C2-OVERLAY-APPLIED", spec.id, change.file)
+    }
+    if (spec.childPreload && path.endsWith("/src/hooks/useTimelinePlayback.test.ts")) {
+      const anchor = '"--conditions=browser", "-e", `'
+      if (contents.split(anchor).length !== 2) throw new Error("Missing child preload anchor")
+      contents = contents.replace(anchor, '"--conditions=browser", "--preload", "/tmp/dv01-b6/rc7/mut/overlay.ts", "-e", `')
+    }
+    if (spec.bounded && (path.endsWith("/native-playback-controller.test.ts") || path.endsWith("/create-effects-panel-audio-effects-state.test.ts"))) {
+      contents = `const mutationBounded = async <Value>(pending: Promise<Value>): Promise<Value> => {
+        let settled = false
+        void pending.then(() => { settled = true }, () => { settled = true })
+        for (let turn = 0; turn < 200 && !settled; turn++)
+          await new Promise<void>(done => setImmediate(done))
+        expect(settled, "Caller must settle after bounded fixture progress, without native rescue").toBe(true)
+        return pending
+      }\n` + contents
+      contents = contents.replaceAll("await adoption", "await mutationBounded(adoption)")
+        .replaceAll("await f.controller.pause(0)", "await mutationBounded(f.controller.pause(0))")
+        .replaceAll("await fixture.device.flushPending()", "await mutationBounded(fixture.device.flushPending())")
+        .replaceAll("const outcome = await controller.adoptSchedule(", "const outcome = await mutationBounded(controller.adoptSchedule(")
+      contents = contents.replace('loop: { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 } })\n      console.log("STEP6-EVIDENCE", JSON.stringify({ test: "session-alive-generation"',
+        'loop: { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 } }))\n      console.log("STEP6-EVIDENCE", JSON.stringify({ test: "session-alive-generation"')
+      const marker = 'const outcome = await mutationBounded(controller.adoptSchedule('
+      let found = contents.indexOf(marker)
+      while (found !== -1) {
+        const end = contents.indexOf('\n      console.log("STEP6-EVIDENCE", JSON.stringify({ test: "session-alive-generation"', found)
+        if (end === -1 || end-found > 350) contents = contents.slice(0,found) + contents.slice(found).replace(marker, 'const outcome = await controller.adoptSchedule(')
+        found = contents.indexOf(marker, found+marker.length)
+      }
+    }
+    return { contents, loader: path.endsWith(".tsx") ? "tsx" : "ts" }
+  })
+} })

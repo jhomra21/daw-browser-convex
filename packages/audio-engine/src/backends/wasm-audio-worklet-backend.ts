@@ -27,6 +27,7 @@ import {
   type PortableWasmPreparedSourceEvent,
   type PortableWasmProcessorEvent,
   type PortableWasmStatusMessage,
+  type PortableWasmInstrumentEvent,
 } from '../portable-wasm-protocol'
 import type { PortableFrameSchedule } from '../portable-frame-scheduling'
 import {
@@ -35,6 +36,7 @@ import {
   resolveWorkletModuleUrl,
 } from '../worklet-manifest'
 import { portableWasmCapabilityMatrix } from './portable-wasm-capabilities'
+import { encodePortableGraphEnvelope } from '../native-host-wire'
 
 export type PortableWasmPagedCapabilities = {
   pagedAbi: number
@@ -299,7 +301,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       result: value.result,
     }
   }
-  if (value.type === 'processor-events-applied'
+  if ((value.type === 'processor-events-applied' || value.type === 'instrument-events-applied')
     && isPositiveInteger(value.revision)
     && isPositiveInteger(value.epoch)
     && isPositiveInteger(value.sequence)
@@ -438,7 +440,7 @@ export class PortableWasmPlaybackSession {
     request.resolve(response)
   }
 
-  private request(message: PortableRequestMessage): Promise<PortableRequestStatus> {
+  private request(message: PortableRequestMessage, transfer: Transferable[] = []): Promise<PortableRequestStatus> {
     return new Promise((resolve, reject) => {
       if (this.disposed) {
         reject(new Error('Portable playback session was disposed.'))
@@ -454,19 +456,22 @@ export class PortableWasmPlaybackSession {
         this.fail(new Error('Portable playback control request timed out.'))
       }, this.controlTimeoutMs)
       this.pending.set(requestId, { resolve, reject, deadline })
-      this.node.port.postMessage({ ...message, version: portableWasmProtocolVersion, requestId })
+      this.node.port.postMessage({ ...message, version: portableWasmProtocolVersion, requestId }, transfer)
     })
   }
 
   async prepareGraph(snapshot: AudioCoreGraphSnapshot) {
-    const response = await this.request({ type: 'prepare-graph', snapshot })
+    // The worklet prepares on the audio rendering thread, so the envelope is encoded here and its bytes transferred.
+    const envelope = encodePortableGraphEnvelope(snapshot)
+    const response = await this.request({ type: 'prepare-graph', snapshot, envelope }, [envelope.buffer])
     if (response.type !== 'graph-prepared' || response.result !== 'prepared') {
       throw new Error('Portable playback graph-prepared was rejected.')
     }
   }
 
-  async publishGraph(revision: number) {
-    const response = await this.request({ type: 'publish-graph', revision })
+  // An adoption republishes onto the playing graph and requires the core to continue it; the worklet refuses otherwise.
+  async publishGraph(revision: number, options?: { requireContinuity: true }) {
+    const response = await this.request({ type: 'publish-graph', revision, ...options })
     if (response.type !== 'graph-published' || response.result !== 'published') {
       throw new Error('Portable playback graph-published was rejected.')
     }
@@ -628,6 +633,19 @@ export class PortableWasmPlaybackSession {
     if (response.type !== 'processor-events-applied' || response.result !== 'applied') {
       throw new Error('Portable playback processor-events-applied was rejected.')
     }
+  }
+
+  async queueInstrumentEvents(epoch: number, events: readonly PortableWasmInstrumentEvent[], batch?: { revision: number; sequence: number }) {
+    if (this.disposed) throw new Error('Portable playback session was disposed.')
+    if (batch) {
+      const response = await this.request({ type: 'instrument-parameters', ...batch, epoch, events })
+      if (response.type !== 'instrument-events-applied' || response.result !== 'applied'
+        || response.revision !== batch.revision || response.epoch !== epoch || response.sequence !== batch.sequence) {
+        throw new Error('Portable playback instrument-events-applied was rejected.')
+      }
+      return
+    }
+    this.node.port.postMessage({ version: portableWasmProtocolVersion, type: 'instrument-events', epoch, events })
   }
 
   async reenableProcessorAutomation(

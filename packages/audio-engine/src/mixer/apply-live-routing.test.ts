@@ -36,7 +36,7 @@ const createGain = () => Object.assign(createNode(), { gain: createParam(1) })
 const createDelay = () => Object.assign(createNode(), { delayTime: createParam() })
 
 describe('live mixer edge runtime', () => {
-  test('creates stable delay edges, ramps timing updates, and disposes removed edges immediately', () => {
+  test('creates stable delay edges, ramps timing updates, and disposes removed sends after their fade', () => {
     const graph = resolveMixerGraph({
       channels: createMixerChannels([
         { id: 'dry', name: 'Dry', clips: [], volume: 1, sends: [{ targetId: 'return', amount: 0.5 }] },
@@ -49,14 +49,14 @@ describe('live mixer edge runtime', () => {
       ['return', { input: createGain(), postFx: createGain(), gain: createGain(), output: createGain() }],
     ])
     const edgeRuntimes = new Map()
-    const apply = (nextGraph = graph) => applyLiveMixerGraph({
+    const apply = (nextGraph = graph, currentTime = 2) => applyLiveMixerGraph({
       graph: nextGraph,
       masterInput,
       trackNodes,
       edgeRuntimes,
       createGain,
       createDelay,
-      currentTime: 2,
+      currentTime,
       sampleRate: 48_000,
       reconnectTrackMeters: () => {},
     })
@@ -76,6 +76,9 @@ describe('live mixer edge runtime', () => {
     })
     const sendEdge = originalEdges.find((edge) => edge.gain)
     apply(withoutSend)
+    expect(edgeRuntimes.size).toBe(3)
+    expect(sendEdge?.delay.disconnectCount).toBe(0)
+    apply(withoutSend, 2.01)
     expect(edgeRuntimes.size).toBe(2)
     expect(sendEdge?.delay.disconnectCount).toBeGreaterThan(0)
 

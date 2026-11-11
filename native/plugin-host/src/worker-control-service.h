@@ -158,9 +158,11 @@ class WorkerControlService {
   [[nodiscard]] WorkerHealth ReadHealthFromCallback() const noexcept;
   void Run();
   void NotifyService() noexcept;
-  void PublishFault() noexcept;
+  void PublishFault(std::uint32_t value, std::uint64_t sequence = 0) noexcept;
 
   WorkerRuntime runtime_;
+  // Control-plane ordinal only; never log the shared-memory authentication token.
+  std::uint64_t incidentWorkerGeneration_ = 0;
   SpscQueue<QueuedSubmission, kQueueCapacity> submissions_;
   SpscQueue<WorkerCompletion, kQueueCapacity> completions_;
   SpscQueue<WorkerDiagnostic, kQueueCapacity> callbackDiagnostics_;

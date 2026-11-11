@@ -200,7 +200,7 @@ test('compiles crossfade loops with the same loop bounds as forward loops', () =
   })
 })
 
-test('validates muted drum pad assets without emitting muted zones', () => {
+test('omits muted and explicitly unavailable drum pad assets without emitting their zones', () => {
   const params = createDefaultDrumRackParams()
   const pad = params.pads[0]
   if (!pad) throw new Error('Expected default drum pad.')
@@ -212,10 +212,16 @@ test('validates muted drum pad assets without emitting muted zones', () => {
     { ...params, pads: [mutedPad] },
     assets,
   ).state.zones).toEqual([])
-  expect(() => compilePortableDrumRackConfiguration(
+  expect(compilePortableDrumRackConfiguration(
     'track-a',
     'drums:a',
     { ...params, pads: [{ ...mutedPad, sample: { ...sample, assetKey: 'missing' } }] },
+    { ...assets, unavailableProjectAssetIds: ['missing'] },
+  ).state.zones).toEqual([])
+  expect(() => compilePortableDrumRackConfiguration(
+    'track-a',
+    'drums:a',
+    { ...params, pads: [{ ...mutedPad, sample: { ...sample, assetKey: 'not-loaded' } }] },
     assets,
   )).toThrow('not registered')
   expect(() => compilePortableDrumRackConfiguration(
@@ -250,7 +256,7 @@ test('compiles empty sampled instruments as silent portable configurations', () 
   expect(granular.state.assetId).toBe('')
 })
 
-test('compiles fixture-proven granular controls and rejects absent or stale assets', () => {
+test('compiles fixture-proven granular controls and rejects stale assets', () => {
   const asset = assets.assets[0]
   if (!asset) throw new Error('Expected registered portable asset.')
   const state = compilePortableGranularConfiguration('track-a', 'granular:a', {
@@ -283,12 +289,24 @@ test('compiles fixture-proven granular controls and rejects absent or stale asse
     { ...createDefaultGranularParams(), zone: samplerZone },
     { ...assets, assets: [{ ...asset, projectGeneration: 6 }] },
   )).toThrow('stale')
-  expect(() => compilePortableSamplerConfiguration(
+  expect(compilePortableSamplerConfiguration(
     'track-a',
     'sampler:a',
     { ...createDefaultSamplerParams(), zones: [{ ...samplerZone, sample: { ...sample, assetKey: 'missing' } }] },
+    { ...assets, unavailableProjectAssetIds: ['missing'] },
+  ).state.zones).toEqual([])
+  expect(() => compilePortableSamplerConfiguration(
+    'track-a',
+    'sampler:a',
+    { ...createDefaultSamplerParams(), zones: [{ ...samplerZone, sample: { ...sample, assetKey: 'not-loaded' } }] },
     assets,
   )).toThrow('not registered')
+  expect(compilePortableGranularConfiguration(
+    'track-a',
+    'granular:a',
+    { ...createDefaultGranularParams(), zone: { ...samplerZone, sample: { ...sample, assetKey: 'missing' } } },
+    { ...assets, unavailableProjectAssetIds: ['missing'] },
+  ).state.assetId).toBe('')
   expect(() => compilePortableSamplerConfiguration(
     'track-a',
     'sampler:a',
@@ -301,6 +319,28 @@ test('compiles fixture-proven granular controls and rejects absent or stale asse
     { ...createDefaultSamplerParams(), zones: [samplerZone], lfo: { ...createDefaultSamplerParams().lfo, enabled: true } },
     assets,
   ).state.lfoEnabled).toBe(true)
+})
+
+test('compiles available drum pads when another pad sample is missing', () => {
+  const params = createDefaultDrumRackParams()
+  const firstPad = params.pads[0]
+  const secondPad = params.pads[1]
+  if (!firstPad || !secondPad) throw new Error('Expected default drum pads.')
+  const state = compilePortableDrumRackConfiguration(
+    'track-a',
+    'drums:partial',
+    {
+      ...params,
+      pads: [
+        { ...firstPad, sample: { ...sample, assetKey: 'missing' } },
+        { ...secondPad, sample },
+      ],
+    },
+    { ...assets, unavailableProjectAssetIds: ['missing'] },
+  )
+
+  expect(state.state.zones).toHaveLength(1)
+  expect(state.state.zones[0]?.keyLow).toBe(secondPad.note)
 })
 
 test('reports only unsupported browser fields or rejected asset state in portable sessions', () => {

@@ -1,0 +1,1148 @@
+{
+ "name": "rc-p5a-fixes",
+ "sequence": 2,
+ "createdAt": "2026-11-10T22:58:40.357Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "packages/audio-engine/src/native-host-wire.ts",
+   "from": "f84ac7b93f5bd73fcfda1d43eced8ea99d64c20cf274aaaa219ddb025da3f1a5",
+   "to": "5b778de12274d66ffb6c1e11e765466a72f0a8324012f1b3cc9fcc00cfc2e21f"
+  },
+  {
+   "file": "src/components/timeline/create-persisted-effect-state.test.ts",
+   "from": "94ddd4dae11d181c11195907255c7d6f92f1d50e66e02da4cafc9f908d270667",
+   "to": "c0e4537b838f002de09d0284d187171693a8357a8939f89a7739eeb320151bbb"
+  },
+  {
+   "file": "src/components/timeline/parameter-gesture-owner.ts",
+   "from": "cc7d69b68109b867b300d01018de14bc2d9fada103db4aa9f99dfead3a8b317f",
+   "to": "72733156f94affd25ba19e11dbe6ebe074c758a52e392f55d25af260422fc9d9"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.test.ts",
+   "from": "3dc526843d2cdc7d6db648c1048f6078f40b85964fb52fc129cb407e91ebc27e",
+   "to": "88a86e46f7db2c39d857fb08bf23ce2bbb8f7a5a89e15f6b6a664834ae8ffaac"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.test.ts",
+   "from": "d90dcd5cf22326610f628438e75981f977ae673b1d7f0a55ad8819f17474a709",
+   "to": "e9c6e419f750a925c7b7c2dc31ab9fae10220c7d2e95e59552c6e9170546e9ca"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.ts",
+   "from": "53d9fff0de02f4e70ed9ea43b8095b0390532a5571c7d627ea18cc29cc06b6b8",
+   "to": "4134d325e7ac751349ba8474d10ef58101562636469804dcead1f5f8620e5f9d"
+  },
+  {
+   "file": "src/lib/desktop/native-schedule-coordinator.ts",
+   "from": "e09417427bd66e0c9cfbec1ad4ac4e0c3dc09293876f5aa940df30eeb58cb9a7",
+   "to": "f6ae3b2a66226d02dd7e2b374df7aef626ebf0a749ad3de4113a7a8e18acda67"
+  },
+  {
+   "file": "tools/acceptance/ae-08-live-graph.ts",
+   "from": "a960141318a511d762f0edf5088fb951157a38299552b0803fb43c78af0fb9be",
+   "to": "d75438b59bd80b26d08abd165fe641a81d8274e79e7cfdc133b45e3c74caee69"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "campaigns",
+    "name=trace-controller-b",
+    "judge",
+    "summarySha256"
+   ],
+   "old": "fe2dd3f1d175f10391666f75790bf6f58a5cad26339c6aba303c5e87a4be4480",
+   "new": "1a8bb302fb199750340c1e6ee058554f82c861c95ab4abb7ad7fb63402077a0b"
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-controller-a",
+    "judge",
+    "summarySha256"
+   ],
+   "old": "fe2dd3f1d175f10391666f75790bf6f58a5cad26339c6aba303c5e87a4be4480",
+   "new": "1a8bb302fb199750340c1e6ee058554f82c861c95ab4abb7ad7fb63402077a0b"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#177"
+   ],
+   "old": "42e8604a96d9690e6dfd1f21f5be2be42b919e1306def95735c21e02bd242a4f",
+   "new": "ecd33b3daec400179ff093f46232770693f1b2093a45ada3bf5a40e129a1a9d6"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#135"
+   ],
+   "old": "82afb018bfa77004165609a9afe2adb9d9e6d86a177bdda0f94b093eb1cb822a",
+   "new": "d7c939bc07cd2383c7bb5215fddde55ef9f0dcd9759f1e415481d904ca5a6cf9"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#139"
+   ],
+   "old": "aad61a3d3b6133bda993c39fa3f09389f1b6be767a3a8905b776e93a9d216a3a",
+   "new": "6f1bcb65c65ae9b848bf350705587c1158d6e6c792ab0ec96cfd70c6b1f8f2d1"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#149"
+   ],
+   "old": "0088ebabb63396b9a2d310183b8852383d766d7e7448f23139efc55366a4510c",
+   "new": "717280707939bfaf2610cffa4f17d41cd64d2c0c16d9a10a1e25abf803b4f8ae"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#193"
+   ],
+   "old": "08d1462ca3fdb261acc3856c5a46095bd4746645888862e312cc5faeb1e43461",
+   "new": "ab4891d9823d7176417ee067c3655c4093d5e8474882c6f580755b608ae43a2d"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#205"
+   ],
+   "old": "7631d9a1f1d7fe715a289f16c39d0a6b3f8b8c3af9cb8b3505059ed132cfffe6",
+   "new": "980fbe5b1229c34aba883a1820422a5a17a2854cd13b5e66fde8d66d1c1da93d"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#218"
+   ],
+   "old": "764cc626e0e45051c2cd78e403b7c6510bdba52fedc24178136cc7b0a7234b56",
+   "new": "d92a94fd4da369e70827c4891c8831d66c2f0d99e93b3d7fb69557f33bc271c7"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook206",
+    "ids",
+    "#0"
+   ],
+   "old": 240,
+   "new": 241
+  },
+  {
+   "path": [
+    "seeds",
+    "hook206",
+    "ids",
+    "#1"
+   ],
+   "old": 244,
+   "new": 245
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#287"
+   ],
+   "old": "0a8ff8bfbdde161eac42cda84a54a9809e81a9741b0cb8888334b0358b8ee8e0",
+   "new": "968e463346f269d79e426a43ae8e12a3fed750e8b84e9ed75ac830bb0c6020a6"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#232"
+   ],
+   "old": "844952a16843e2c7b84498d9db25b526cd4693e9ab9b3887100c1dd4d33f5cf3",
+   "new": "b0f104821a2bcc05d03151e1785acc39013e04018d89a7e6ec493fbc0fe7ee69"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#247"
+   ],
+   "old": "bb5ed5133db6c92f4f8b9dfeb2c00cd6c1f09be767884eca3e90be1da6aee36e",
+   "new": "1d0a8d9fa86d35727dec9798511808d58faea1c64218e2fc05f89469dabeaf72"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#261"
+   ],
+   "old": "24c7598b07c4bbb07f91a49350f3a9e87a36bc9715d6bda360f41d8176e44f71",
+   "new": "8f15c54de571ed769c90df2e273cc4f94b35c4dd91ea585ac92ae34b1dd3613e"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#269"
+   ],
+   "old": "60849a6daefb41b76dc7cb360f9f6e1b15ac25c1b0bc17bcfe5787b63b9e4f2c",
+   "new": "7f0d968073af7eac8fae532a61f71ede3e330c2a3abc01fe8ad8090a967cf7e9"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#273"
+   ],
+   "old": "12f3fab2c4de2d57c31dd77b4399c64991a76a5ea0eb3560f27b0e75c97e23ef",
+   "new": "dfd3ec71ea1f61ab60bd8b8e02d9f2952f953f61f7372b9577819e3a39817b52"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#328"
+   ],
+   "old": "bf81fbf16194f5b6850debdce11a04ffb17eea2b0357968112ccf1916ac571dc",
+   "new": "754fb3eea1f37c4ae820a3b159d797f777f9dfd46b186190bb85960a40c59b84"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#330"
+   ],
+   "old": "a7fdd907a03ddf595f093e00a8cb53cef9751cabaedf17b34254975ab256ecd7",
+   "new": "1f30e05e476a4833ea95a1e4e5f45859170a3114a22980045f2306218201bd85"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#331"
+   ],
+   "old": "548a40cc66a22e558e6b550cb4a8d9ca7b7d12c12a5373c3ab20df6156421a8b",
+   "new": "3af55a41c78c478b52d0031529dab01b05c96ac89cd70bef5254e1bc6677e112"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#332"
+   ],
+   "old": "ac4b78a4a9d49ba5a1e6de71dddef64d6327013964a558a3f1104784015ad889",
+   "new": "a2b37b424841a115d7eb0292245649db3c7a6f65ede85edbf3fd357b7efa2344"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#345"
+   ],
+   "old": "6e747b49325d5574fc039106bcd3ba08742fbe2d870eb6d99415aa7231849c4c",
+   "new": "045d442bfdfa2e3a58080bc41fca0e5f1b5ae14b1c5ecc1aa6fe1c9a14d0028d"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#349"
+   ],
+   "old": "3baeab2c5d4f610b80dae3b811f334d570ae6df7e2ac8ba0c92ad4b7beb04cee",
+   "new": "c2350c52a2f12c73f5c666413f6798e02527b5217f7f56cf35530043b827fe09"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#360"
+   ],
+   "old": "36c11f1c9628bc0aff4b8f8fa799a75d4050188143697808e00594981aa2aaa7",
+   "new": "5db8b47275ae46a6608a35099ea6257023ad7babf08542c38edfe267ed220b1f"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#362"
+   ],
+   "old": "5b26d14a5d2e2882aa1e5c71642f113390224f655810b7da77013b34e4721db6",
+   "new": "11c84ba1d00c1dda6b054a14c4ce8f9b8da2a07b8d6032b89f95b5aba06ef1d5"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#371"
+   ],
+   "old": "fd5d8a487c6563313242585ee8dd0339ff81e7aeabdad953cbefffbb94f881e4",
+   "new": "16ed1b17e0910cdafdf5e7e417e999c0cda3ef5d5d1a6c8400fd678b97f80b1d"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#380"
+   ],
+   "old": "f1c0c96639e4e7580dabe3338b754ffddeb0ad5af3daa0529b42bf579cbe5020",
+   "new": "8e9446015915a29d83b7caeba730d92ddd47653fa06f5e82bdc7ce53e8d6ca89"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#391"
+   ],
+   "old": "0942676d3bd6c1bd17129592df524ff3ead78de86b61cb16d659b88e43be4839",
+   "new": "1a54760958d7cf4aeadc8c6def8d16e1a4acb6857299a66366fa0992fc57b1f0"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#398"
+   ],
+   "old": "23eff3ae942cebe2825cba9c9dd9d7c109d4444f0dfc6417a6f3a764a38ad3c3",
+   "new": "42b1aee7d350a70e482c648a86a6cd8a553f2f7f16a7c8fe329fd031af040a67"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#418"
+   ],
+   "old": "c3bd5ebdb3c8ca8721afd4ddbec655b79ac15ea15f0a6c8dc46bcbefcb24ad76",
+   "new": "6f177ed7300d57b81f9c7a2aa7a76d5e84d98d2485f33ffa8389ea9b3049d621"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#420"
+   ],
+   "old": "b6752dd4c66af078ef3c5eaec3fecb47d909e62a8b5a33676a46c6605243206e",
+   "new": "cf00d2b44c932ed9e91e5eb4457ffff8d4d5833d8a6445c04ac73659ddff2329"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#439"
+   ],
+   "old": "025415bd722f0223b0f0b44f97d985c412a9d6513720403f6da61b1fa545f165",
+   "new": "2afa146567ce3cf0722e1891b0f1e18ffe9c3bf5b0ba63998b97c2d2fcc996a6"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#443"
+   ],
+   "old": "d61fbc115f1d37d4a9703d5470b8f53698430a9be88e3a637d89010e411d41ca",
+   "new": "f9d4f3134d55dda1e88e42cc2d48e7f07d1879baa65e8f578e885659030fc4e9"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#474"
+   ],
+   "old": "3bd5b80be17d04ff380e6c3a6ea34a801df40a230f0c929f701b04870feff90f",
+   "new": "6ed4b1bd6742c527b80b664f6cde2d08ef27a8ed6d550721c3d6216fddd7c63f"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#487"
+   ],
+   "old": "3d1c592f10d89ab4abf3614c273ca3c1e9279dcbcf8d0d4fb6170c84128937aa",
+   "new": "7dad7f19d672a91c930be4ecc6afa573e06e39dfdc63ededf3c3ebb7855a199f"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#532"
+   ],
+   "old": "7970083c4cef5aecce7aee826cc1a24344447e2c9fc1933dad1a2358a670c590",
+   "new": "5b4d3a8da17c7aabe60fba12556765d84e06b557d6ecf113b901734986dc35cc"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#534"
+   ],
+   "old": "219ec7d5aed70981d208e4749f20d1f97228da68f2a5f680d2917ec988626eaf",
+   "new": "341d31c6a69bcd6bf732ecca3cf499811ca4d58815960bf66a46d0f7ae7419a4"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#546"
+   ],
+   "old": "bf1ae064f948d3b19ea0a20057bd11f2db0af92f87f242819b29b7fbd9d753fc",
+   "new": "0e6c7efb4ea1af1647ee19b014eeee1a6d86be3636fb4991a77125d2727034f8"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#506"
+   ],
+   "old": "92484190e596bd17f02bc7aa145b6d9780fe7559c03fda999a42bd8963fb04a6",
+   "new": "4efc442c360d12dcc81ef5f557e6fe0d462ba64dac67318930a726b0ea53e76c"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#513"
+   ],
+   "old": "c6cc72c130697238b8b484b6c569a21b977a2e7d0ef1712a9980a0c7a555bfce",
+   "new": "bc1cbd612b45190b450ebf949c72fce33b1af4a25ca966e49da32ccf5e0e76ad"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#570"
+   ],
+   "old": "d1cb0c5fb1c55c13f77d6d78e48425978ca3e3fc6f4300d343a32e9c88c6b4bd",
+   "new": "1dc1f9ebca75e3d1d14d742ea2513a5ab5a2961d954f6ae4f18a9fcb870a5936"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#603"
+   ],
+   "old": "bfd5044fd11f8fe6f6a852b2806af852e59624eaee62cffb686dc7a2b1514094",
+   "new": "0420902fc50ae6b98a010859820b99a848da5f5d7d3485c2067aa43894e9a93a"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#605"
+   ],
+   "old": "8c1f98701fdf87bf05c46a16e6dce3c3ee896d8bf54bdf36056e3e1be445c739",
+   "new": "e951804b62b93654b343711b8056d42abc7eb04cff9c09e382c3ead2b490b36a"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#607"
+   ],
+   "old": "b43a7fa7ac508a6e6c9f37da0028db56d5fe18c26d835456fdc42f4988cf316c",
+   "new": "699231c7c60cc25f95f7b64daeb14511a08aa4e9ce29e652165a8a6ce8429a62"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#608"
+   ],
+   "old": "0f791cd91646d78d1d3126c4f41bc1213109fe534cc0a535065bd6983271e2c6",
+   "new": "ab07d86c99e476154ae7894c9220f5351f22b98b440e124b1655ee3ec258e86b"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#609"
+   ],
+   "old": "63e003e7c6431e92f2bf7ffe466f573410a8f7270361efffea0445e4c03ff481",
+   "new": "092c775b0c255b1061567d453cb35f743dea222ef4fdd094702844232680d25d"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#615"
+   ],
+   "old": "5086dfd3cb218df1f821d5975d78290f51ecf178357215a92eec0a2e7f1801b7",
+   "new": "0406be70f8216cbf27c4a3e7916ac443674baff8dc51be79df22056d607b6577"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#622"
+   ],
+   "old": "1eca81bc80aa0943a601d6ae0c7c795685169507120e472d8a721e6774dcee16",
+   "new": "bd6c9cb5a2ee86be55c8faf60ea61ee4edcb8251613a0901048b7f981733e451"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#631"
+   ],
+   "old": "fee6460ea8548b5ea803e3e3a3464ae239361e6c1008cb7ee84b67f57aecdbca",
+   "new": "ab3d6ba3e25fbbb7df3beb94cfb91e3f00e8c72c792bb06d08ce8e1806ab0363"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#637"
+   ],
+   "old": "9cc9761d2b14f1fda9f9997eaf4d82be89b40a107568bad9c0265af1b79abba9",
+   "new": "9d3044861cf36505110a602f52038cecd51e5b3c694023c4cc36b28ce3e34326"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#685"
+   ],
+   "old": "8c76143a4e4f057834ecf33d451fc13943f49f63636d64aaf40278b016c7f69d",
+   "new": "cdfb8447df384a3ca1f7faf84e5fdd51dc2dc19d956b7843acc2e8ba0034a029"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#732"
+   ],
+   "old": "e5e2b6ce42716cef90482afdf5837f088ad57ab7d0b4296df41af925223648ad",
+   "new": "b97e87fc1af740de0f48136cb371e8a4884add8e0202aa21e12b2b83754e2baa"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#738"
+   ],
+   "old": "13142076c3debb59403c028d584c5b531df8ac38ec48045c97cca97ed86e96bc",
+   "new": "177e7a3896a5932a91d145a575cbd1c5793b2aa4d6b583151f9859e98435bcf9"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#743"
+   ],
+   "old": "9a1eb1ee681d889beb09e0b1b6a4725efa4c64abf56ef8ea231541fff5afd5dc",
+   "new": "7e83babe57d18a99c0d1970d6485f7df49b040fc98c75d012969a82713dbfad7"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#752"
+   ],
+   "old": "663b37c62cf5c1d70eb7d0f4b7197189ee599a0fc29523e3f047697579defb1e",
+   "new": "eb79f2bee3fdbad9635a45b77d5ccd316401b1eeabb23d33697694906b9a94ab"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#712"
+   ],
+   "old": "b804f708378a8d65f84b3368a2ba0e8d42b6f989a23891016523db97b9515567",
+   "new": "9e5d584ff450248aafb0192912a7c9ef025dac27a140fa6b4e80ac4f1079d0a1"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#762"
+   ],
+   "old": "88da11e48350d44f04ac38a7a8e9ae40ed9f0f9fef1e22b4b9de312871ec4830",
+   "new": "07865b6b41d35e33f5bfa95a34af1cfeca97d0f13abc3d6fa72e12d58d9b7e4a"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#772"
+   ],
+   "old": "b657bb2866d328901a57d338e5fe5f2a78e0170833368c91c48b3096009d3385",
+   "new": "89783b100256bc11f35bc46edc1b4108c931cd7f73d9ca0ca13725e27720e754"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#787"
+   ],
+   "old": "beaa184ddaa25c6772559c0bc35605b813c4cf829124b8e12fdce5d9296aec69",
+   "new": "bf1ef4c1e84e972062381bdbd33174626c733d52961ff679b1addc0a1f960ab0"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#789"
+   ],
+   "old": "9ee645c3ef542954c6f45d0c5523df2ebf1df0cba90b784dc5093726c4595750",
+   "new": "8b0e57897eafc31ebc843c7993d8ebca0a6168f454a53e68362db8bb7e56298d"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#807"
+   ],
+   "old": "d04ee4a071dd2f3dd3970f6578b4952e7ed0cd29736311d33c64447cd33101ec",
+   "new": "f3c64408b5ca700573b3fbda8317b90812dc074a2fc7eb6f0658b5862871f7f3"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#818"
+   ],
+   "old": "0813b3d2461f922aa8a6fab1018fbd793aced190eeb6a825d460583142daf416",
+   "new": "881270162ab26e8fed13cf6919d769cf42961075ebfd3fc431536b749677f9ec"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#844"
+   ],
+   "old": "a6cb6c7b451e135837f011b3247eacbff46b9743390451c5ec4efab5ae8e1548",
+   "new": "cdc35c6bdee17747e7ab3f1fddc029565dd162d9aa5f05f683aa94dd61e7f541"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#882"
+   ],
+   "old": "8b201d0e97918ca1aa96e99d4962e1a8a67b73b7062771f58011d91bf5733418",
+   "new": "ea642b5d12a2784f4be6993279f8c61f1cf590ee02b97e25c103408982f91c30"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#895"
+   ],
+   "old": "1dddab48b39e78836d3e6f9b26853e86b3e2ba3477dc5a81ea8e77969ffb0a91",
+   "new": "8b7d6460b4d58e70aba06119dbb06302573152c0e1cc908434400f8c6c9174c3"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#934"
+   ],
+   "old": "941738d0c68fccbd6e05bd9ff2843c83017008d39bb4c4ba0128271ea022432c",
+   "new": "4981acf7ca79235e5906e570142ec57c7750fd1b594c9a102a61d3f2ade57c40"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#935"
+   ],
+   "old": "2cb190255fbead66aa6499e132d7e708237da3a901cc216c261c019f0f226017",
+   "new": "df9995e55bf7863f2a7ffb9afa91ab2cf87881ffd8a881d35a1ccef9ee3ff7a5"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#937"
+   ],
+   "old": "72ffaba4a970c62a8efd401c154a81615ccbe6b9b78154db8188c83e0db7b542",
+   "new": "0fe9f39a9b2ab59b2adfd038846b0eb382bbe02bd532e5e5582e8ec7a100fbdd"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#963"
+   ],
+   "old": "74f980b97e057fcbfd739c89d5847f7c4ddbafab04733de2993996b5da54c6c5",
+   "new": "f80234335ca7ce066c7661478edcaf90f1f9792ecc3ec5094e7a2c3670ddfa5b"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#964"
+   ],
+   "old": "18f8c79f80bc8f4fe42a44af544073f74b7536fe54272f495cfe024a6d0070dc",
+   "new": "b7445acf6a21e22ac56b47df4ab305470e5c9daff878670a3e26dd3fe27ae15b"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#979"
+   ],
+   "old": "d608364b393b8f4a8df4cc50ceb8f9830ada3a8eae772fefd0e580db3daab7ae",
+   "new": "203e3cf08484c0fc30c975eda2533c7db9db5cc2d636a74fab8c9aac120e4851"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#983"
+   ],
+   "old": "aa45f147073297de55685d574814b5374c27c589b58cbd8c5f6afda60ae85931",
+   "new": "84be0cff8a44a6335cb1ef4d7520dd22c3786b6c0d7c3036d6076357f0fd4766"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#991"
+   ],
+   "old": "9a4e9fe94f3f348e17dc07e381e27ce10df82588156865c1ae84c96c7ed78d2d",
+   "new": "7b6207328d0e3be275447567e3caeb390ab29b3640779535f9f0a24a4a66f85f"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 705,
+   "new": 715
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 705,
+   "new": 715
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 705,
+   "new": 715
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 705,
+   "new": 715
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 705,
+   "new": 715
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 705,
+   "new": 715
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 705,
+   "new": 715
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 704,
+   "new": 714
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 704,
+   "new": 714
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 704,
+   "new": 714
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 704,
+   "new": 714
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 704,
+   "new": 714
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 704,
+   "new": 714
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:275:0:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 625,
+   "new": 635
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 705,
+   "new": 715
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 703,
+   "new": 713
+  },
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "be5de8442ad6c8e988092993085089c9dbfd1e7cfaaec3f435a2405e234e0af8",
+   "new": "e135e90fec7757bf37530765b8b344f5b06e7196e10b7485adc434361ebb4f81"
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-controller",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 625,
+   "new": 635
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-g-controller",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 640,
+   "new": 650
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:275:0:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 624,
+   "new": 634
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 704,
+   "new": 714
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-b",
+    "judge",
+    "logSha256"
+   ],
+   "old": "617ccad183f03dc906bcbcda3a2b251733b7ceed5b1baf344e0d27bd6cc245ea",
+   "new": "d397cc3347a3456102c5dc7156ce1592c4f9ef37e35a1ca94b96a1dd9be32578"
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-b",
+    "judge",
+    "summarySha256"
+   ],
+   "old": "882a2ea1b1ad0474d5245654cdd0de0d4fdc56fb633189ef3ac5012da01998c8",
+   "new": "de32eb092e19f9c280d30a3b5cf1e665436d0a11e372e623b50ef3161ed41119"
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-a",
+    "judge",
+    "logSha256"
+   ],
+   "old": "617ccad183f03dc906bcbcda3a2b251733b7ceed5b1baf344e0d27bd6cc245ea",
+   "new": "d397cc3347a3456102c5dc7156ce1592c4f9ef37e35a1ca94b96a1dd9be32578"
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-a",
+    "judge",
+    "summarySha256"
+   ],
+   "old": "882a2ea1b1ad0474d5245654cdd0de0d4fdc56fb633189ef3ac5012da01998c8",
+   "new": "de32eb092e19f9c280d30a3b5cf1e665436d0a11e372e623b50ef3161ed41119"
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "358b66364308ffc6a3f00ed95add29f8ee7aad079ab5e7f245f2a3f0250311cd",
+   "new": "1ad4c097ba90a89d221598d4236cec12d78b355191bb0c1c254e753b8a2a41b0"
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i4-consumers",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 294,
+   "new": 295
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:394:0:mutant",
+    "expect",
+    "rejection",
+    "#0",
+    "#1"
+   ],
+   "old": 240,
+   "new": 241
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:394:0:mutant",
+    "expect",
+    "rejection",
+    "#1",
+    "#1"
+   ],
+   "old": 244,
+   "new": 245
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-persisted",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 38,
+   "new": 39
+  }
+ ],
+ "evidence": {
+  "mode": "bless",
+  "scope": "--full --base-commit HEAD",
+  "provenance": {
+   "scope": [
+    "--full",
+    "--base-commit",
+    "HEAD"
+   ],
+   "head": "78e5734a653f034f3997dcf5b2ad9d3966a92ce7",
+   "gitStatusSha256": "7cc6a769a1c566944c60a8996fa410259bcdaa841fdd7bbee2320f96f17fcd12",
+   "expectationsSha256": "bad52019555f7a64d7942819de3245acaa3858798164d1b210a8a088c90f168a",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "bad52019555f7a64d7942819de3245acaa3858798164d1b210a8a088c90f168a",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/bless-rc-p5a-fixes-3/live",
+   "resultSha256": "4b35c725b626ba956c88f05980f020f1bfd2785808e130140db9791112b10cfc",
+   "seconds": 805.0595138750001,
+   "observations": 2702
+  },
+  "unreachedByOverlay": []
+ }
+}

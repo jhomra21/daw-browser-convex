@@ -11,7 +11,7 @@ type TimelineChromeProps = {
   onArchiveInput: JSX.EventHandler<HTMLInputElement, Event>;
   transport: TransportControlsProps;
   localSaveFailure: string | null;
-  onExportArchive: () => void | Promise<void>;
+  onExportArchive?: () => void | Promise<void>;
   onDismissLocalSaveFailure: () => void;
   panels: TimelinePanelsProps;
 };

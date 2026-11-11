@@ -1,3 +1,4 @@
+import { clamp } from './numeric'
 import { isJsonBoolean, isJsonNumber, isJsonObject, type JsonObject, type JsonValue } from './json-value'
 
 export const SYNTH_STATE_VERSION = 2
@@ -109,7 +110,6 @@ const finiteNumber = (value: JsonValue | undefined) => (
   isJsonNumber(value) && Number.isFinite(value) ? value : undefined
 )
 
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 const integer = (value: JsonValue | undefined, fallback: number, min: number, max: number) => {
   const number = finiteNumber(value)
   return number === undefined ? fallback : clamp(Math.round(number), min, max)
@@ -151,7 +151,7 @@ export const createDefaultSynthParams = (): SynthParams => ({
   noise: { enabled: false, level: 0.25 },
   gain: 0.8,
   pan: 0,
-  polyphony: 1,
+  polyphony: 16,
   retrigger: true,
 })
 

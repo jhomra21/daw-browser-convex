@@ -29,7 +29,7 @@ export const createClipDragPersistence = (input: Input) => {
 
   const deleteEmptyTrack = async (
     trackId: Track["id"],
-    scope: { projectId: string; userId: string } = { projectId: input.projectId(), userId: input.userId() },
+    scope: { projectId: string; userId: string },
   ) => {
     if (isLocalId("project", scope.projectId)) {
       await createLocalTimelineRepository(scope.projectId).deleteTrack(trackId);
@@ -44,7 +44,9 @@ export const createClipDragPersistence = (input: Input) => {
     if (result?.status === "deleted") input.removeLocalTrack(trackId);
   };
 
-  const createTrackForDrag = async (kind: Track["kind"]) => {
+  // `isCurrent` reports whether the requesting gesture still owns the result;
+  // an obsolete creation is removed instead of being projected or granted.
+  const createTrackForDrag = async (kind: Track["kind"], isCurrent: () => boolean) => {
     const projectId = input.projectId();
     const userId = input.userId();
     const index = input.placementTrackCount();
@@ -52,7 +54,7 @@ export const createClipDragPersistence = (input: Input) => {
     if (isLocalId("project", projectId)) {
       const repository = createLocalTimelineRepository(projectId);
       const row = await repository.createTrack({ index, kind, color });
-      if (input.projectId() !== projectId) {
+      if (!isCurrent()) {
         await repository.deleteTrack(row.id).catch(() => null);
         return null;
       }
@@ -64,12 +66,14 @@ export const createClipDragPersistence = (input: Input) => {
     const track = await createOptimisticTrack({
       projectId,
       insertLocalTrack: (track, trackIndex) => {
-        if (input.projectId() !== projectId) return;
+        if (!isCurrent()) return;
         inserted = true;
         input.insertLocalTrack(track, trackIndex);
       },
       index,
-      grantWrite: input.grantWrite,
+      grantWrite: (trackId, scope) => {
+        if (isCurrent()) input.grantWrite?.(trackId, scope);
+      },
       grantScope: { projectId, userId },
       kind,
       color,

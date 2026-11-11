@@ -1,4 +1,4 @@
-import { onCleanup, type Accessor } from 'solid-js'
+import { createEffect, on, onCleanup, type Accessor } from 'solid-js'
 import { assertDefined } from '@daw-browser/shared'
 
 import type { convexApi, convexClient } from '~/lib/convex'
@@ -69,24 +69,12 @@ type ClipDragOptions = {
   audioBufferCache: ClipBuffers
   // Notify timeline that a set of clip moves has been committed (drop finished)
   onCommitMoves?: (clipIds: string[]) => void
+  notify?: (title: string, message: string) => void
   // optional history push
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   grantWrite?: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void
   onRangeSelectionPointerDown?: (trackId: Track['id'], event: PointerEvent) => boolean
-}
-
-function teardownClipDragSession(input: {
-  draftClipIds: Iterable<string>
-  clearDraftClipMoves: (clipIds: Iterable<string>) => void
-  setPreviewClipsByTrack: (previews: Map<TrackId, Clip[]>) => void
-  cleanupUnusedAddedTrack: () => void
-  resetLocals?: () => void
-}) {
-  input.clearDraftClipMoves(input.draftClipIds)
-  input.setPreviewClipsByTrack(new Map<TrackId, Clip[]>())
-  input.cleanupUnusedAddedTrack()
-  input.resetLocals?.()
 }
 
 export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
@@ -127,6 +115,9 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
   })
 
   let dragging = false
+  // Identity of the active gesture and the project scope it edits. Async
+  // continuations compare their captured gesture with this before writing.
+  let gesture: { projectId: string; userId: string } | null = null
   let dragDeltaX = 0
   let draggingIds: { trackId: Track['id']; clipId: string } | null = null
   let addedTrackDuringDrag: Track['id'] | null = null
@@ -134,8 +125,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
   let multiDragging: MultiDragSnapshot | null = null
   // Ctrl-drag duplication state
   let duplicationActive = false
-  let creatingTrackDuringDrag = false
-  let addedTrackDuringDragScope: { projectId: string; userId: string } | null = null
+  let pendingAddedTrack: Promise<Track['id'] | null> | null = null
   let lastDraftMoves: Array<{ clipId: string; trackId: Track['id']; startSec: number }> | null = null
   const dragLookupCache = createDragTrackLookupCache()
   let visiblePlacementTracksCache: {
@@ -184,51 +174,55 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     return allMidi ? 'instrument' : 'audio'
   }
 
-  const cleanupUnusedAddedTrack = (trackId = addedTrackDuringDrag) => {
-    if (!trackId) return
+  // Emptiness is only proven for a track visible in its own, still-current
+  // project; a missing track or a switched project is left untouched.
+  const cleanupUnusedAddedTrack = (trackId: Track['id'] | null, scope: typeof gesture) => {
+    if (!trackId || !scope || scope.projectId !== projectId()) return
     const track = resolvedTracks().find(entry => entry.id === trackId)
-    if (track && track.clips.length > 0) return
-    void persistence.deleteEmptyTrack(trackId, addedTrackDuringDragScope ?? undefined).catch(() => null)
+    if (!track || track.clips.length > 0) return
+    void persistence.deleteEmptyTrack(trackId, scope).catch(() => null)
   }
 
-  const clearDragLocals = () => {
+  const resetDragState = () => {
+    clearDraftClipMoves(prePositions.keys())
+    setPreviewClipsByTrack(new Map<TrackId, Clip[]>())
+    cleanupUnusedAddedTrack(addedTrackDuringDrag, gesture)
+    gesture = null
     dragging = false
     duplicationActive = false
     multiDragging = null
     addedTrackDuringDrag = null
-    addedTrackDuringDragScope = null
-    creatingTrackDuringDrag = false
+    pendingAddedTrack = null
     draggingIds = null
     lastDraftMoves = null
     dragLookupCache.clear()
   }
 
-  const resetDragState = () => {
-    teardownClipDragSession({
-      draftClipIds: prePositions.keys(),
-      clearDraftClipMoves,
-      setPreviewClipsByTrack,
-      cleanupUnusedAddedTrack,
-      resetLocals: clearDragLocals,
-    })
+  // Resolves to null when creation fails or the gesture is superseded; a
+  // failure cancels the gesture, so callers only need to recheck ownership.
+  const createAddedTrack = async (kind: Track['kind']) => {
+    const owner = gesture
+    try {
+      const trackId = await persistence.createTrackForDrag(kind, () => owner === gesture)
+      if (owner !== gesture) return null
+      addedTrackDuringDrag = trackId
+      return trackId
+    } catch {
+      if (owner === gesture) {
+        cancelPointerDrag()
+        resetDragState()
+      }
+      return null
+    } finally {
+      if (owner === gesture) pendingAddedTrack = null
+    }
   }
 
+  // One creation per gesture: a release joins the creation a move started.
   const ensureAddedTrackDuringDrag = async (ts: Track[], lookup = createTimelineTrackIndex(ts)) => {
     if (addedTrackDuringDrag) return addedTrackDuringDrag
-    if (creatingTrackDuringDrag) return null
-
-    creatingTrackDuringDrag = true
-    try {
-      const kind = getDraggedTrackKind(ts, lookup)
-      const scope = { projectId: projectId(), userId: userId() }
-      const trackId = await persistence.createTrackForDrag(kind)
-      if (!trackId) return null
-      addedTrackDuringDrag = trackId
-      addedTrackDuringDragScope = scope
-      return trackId
-    } finally {
-      creatingTrackDuringDrag = false
-    }
+    pendingAddedTrack ??= createAddedTrack(getDraggedTrackKind(ts, lookup))
+    return await pendingAddedTrack
   }
 
   const {
@@ -240,6 +234,12 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     onDragCancel: resetDragState,
     dragCursorClass: 'cursor-grabbing',
   })
+
+  createEffect(on([projectId, userId], () => {
+    if (!gesture) return
+    cancelPointerDrag()
+    resetDragState()
+  }, { defer: true }))
 
   const onClipPointerDown = (trackId: Track['id'], clipId: string, event: PointerEvent) => {
     if (event.button !== 0) return
@@ -282,6 +282,13 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       selection.setSelectedClipIds(new Set(dragStart.prePositions.keys()))
     }
 
+    // A released gesture can still be awaiting track creation or its commit;
+    // tear it down so its continuation cannot write into this gesture.
+    if (gesture) {
+      cancelPointerDrag()
+      resetDragState()
+    }
+    gesture = { projectId: projectId(), userId: uid }
     dragging = true
     duplicationActive = !!event.ctrlKey
     draggingIds = dragStart.draggingIds
@@ -291,9 +298,6 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       { trackId, clipId },
       { preserveClipIds: dragStart.preserveSelection },
     )
-
-    addedTrackDuringDrag = null
-    creatingTrackDuringDrag = false
 
     const scroll = getScrollRef()
     if (!scroll) {
@@ -314,6 +318,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
   const onPointerDragMove = async (event: PointerEvent) => {
     if (!dragging || !draggingIds) return
+    const owner = gesture
     const scroll = getScrollRef()
     if (!scroll) return
 
@@ -337,8 +342,9 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     }
 
     if (laneIdx >= snapshot.length) {
-      if (!addedTrackDuringDrag && !creatingTrackDuringDrag) {
+      if (!addedTrackDuringDrag && !pendingAddedTrack) {
         await ensureAddedTrackDuringDrag(snapshot, dragLookupCache.get(snapshot))
+        if (owner !== gesture) return
         snapshot = visiblePlacementTracks()
         dragLookupCache.clear()
       }
@@ -435,6 +441,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       resetDragState()
       return
     }
+    const owner = gesture
     const activeDraggingIds = draggingIds
     const scroll = getScrollRef()
     if (!scroll) {
@@ -462,14 +469,9 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
       // If dropping beyond last lane and no track was created during move, create one now
       if (laneIdx >= base.length && !addedTrackDuringDrag) {
-        try {
-          await ensureAddedTrackDuringDrag(placementTracks())
-          base = visiblePlacementTracks()
-        } catch {
-          // if failed to create new track, cancel duplication cleanly
-          cancelDuplicationDrag()
-          return
-        }
+        await ensureAddedTrackDuringDrag(placementTracks())
+        if (owner !== gesture) return
+        base = visiblePlacementTracks()
       }
 
       // Determine target track id
@@ -511,13 +513,17 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
         resetDragState()
         return
       }
+      // The released duplication owns its added track from here on, so a
+      // superseding gesture's teardown cannot delete it while clips are created.
+      const addedTrackId = addedTrackDuringDrag
+      addedTrackDuringDrag = null
       try {
         const created = await commitDuplicatedClipDrag({
           projectId: rid,
           userId: createUserId,
           items: plan,
           baseTracks: base,
-          addedTrackId: addedTrackDuringDrag,
+          addedTrackId,
           placementTracks,
           insertLocalClip,
           removeLocalClips,
@@ -531,21 +537,12 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
           },
           selection,
         })
-        setPreviewClipsByTrack(new Map<TrackId, Clip[]>())
-        if (addedTrackDuringDrag && created.some((item) => item.trackId === addedTrackDuringDrag)) {
-          addedTrackDuringDrag = null
-        }
-        dragging = false
-        resetDragState()
-        return
+        if (!created.some((item) => item.trackId === addedTrackId)) cleanupUnusedAddedTrack(addedTrackId, owner)
       } catch {
-        setPreviewClipsByTrack(new Map<TrackId, Clip[]>())
-        if (addedTrackDuringDrag) {
-          cleanupUnusedAddedTrack(addedTrackDuringDrag)
-        }
-        resetDragState()
-        return
+        cleanupUnusedAddedTrack(addedTrackId, owner)
       }
+      if (owner === gesture) resetDragState()
+      return
     }
 
     const currentTracks = visiblePlacementTracks()
@@ -566,6 +563,7 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     let finalTracks = currentTracks
     if (plannedPlacement.status === 'needs-track') {
       const newTrackId = await ensureAddedTrackDuringDrag(currentTracks)
+      if (owner !== gesture) return
       if (!newTrackId) {
         resetDragState()
         return
@@ -592,7 +590,15 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       return
     }
 
-    const plannedMoves = plannedPlacement.moves
+    const plannedMoves = plannedPlacement.moves.filter(move => {
+      const previous = prePositions.get(move.clipId)
+      return !previous || previous.trackId !== move.trackId || Math.abs(previous.startSec - move.startSec) > 1e-9
+    })
+    // A plain selection click must not persist a move or rebuild playback.
+    if (plannedMoves.length === 0) {
+      resetDragState()
+      return
+    }
     const previousPositions = new Map(prePositions)
     const previousMoves = previousMovesFrom(plannedMoves, previousPositions)
     const selectionAfterCommit = plannedPlacement.selection
@@ -612,7 +618,15 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       { trackId: selectionAfterCommit.trackId, clipId: selectionAfterCommit.clipId },
       preserveCommittedSelection,
     )
+    // The committed move now owns this track; teardown must not delete it.
+    if (plannedMoves.some(move => move.trackId === addedTrackIdForCommit)) addedTrackDuringDrag = null
     resetDragState()
+    let moveFailureNotified = false
+    const notifyMoveFailure = () => {
+      if (moveFailureNotified) return
+      moveFailureNotified = true
+      options.notify?.("Clip move failed", "Clip move could not be saved.")
+    }
 
     void commitMovedClipDrag({
       projectId: historyProjectId,
@@ -624,36 +638,31 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       addedTrackId: addedTrackIdForCommit,
       trackSnapshotForHistory,
       commitClipMoves,
-      cleanupUnusedAddedTrack,
+      cleanupUnusedAddedTrack: (trackId) => cleanupUnusedAddedTrack(trackId ?? null, owner),
       onCommitMoves: options.onCommitMoves,
       historyPush: options.historyPush,
       moveLocalClips: persistence.moveLocalClips,
-      moveCloudClip: persistence.moveCloudClip,
+      moveCloudClip: async (move) => {
+        try {
+          const applied = await persistence.moveCloudClip(move)
+          if (!applied) notifyMoveFailure()
+          return applied
+        } catch {
+          notifyMoveFailure()
+          return false
+        }
+      },
       selection,
     }).catch(() => {
       commitClipMoves(previousMoves)
+      notifyMoveFailure()
       if (addedTrackIdForCommit && plannedMoves.some((move) => move.trackId === addedTrackIdForCommit)) {
-        cleanupUnusedAddedTrack(addedTrackIdForCommit)
+        cleanupUnusedAddedTrack(addedTrackIdForCommit, owner)
       }
     })
   }
 
-  onCleanup(() => {
-    teardownClipDragSession({
-      draftClipIds: prePositions.keys(),
-      clearDraftClipMoves,
-      setPreviewClipsByTrack,
-      cleanupUnusedAddedTrack,
-      resetLocals: () => {
-        dragging = false
-        duplicationActive = false
-        multiDragging = null
-        addedTrackDuringDrag = null
-        creatingTrackDuringDrag = false
-        draggingIds = null
-      },
-    })
-  })
+  onCleanup(resetDragState)
 
   return {
     onClipPointerDown,

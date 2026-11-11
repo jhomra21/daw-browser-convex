@@ -2,6 +2,7 @@ import { createEffect, createSignal, For, onCleanup, Show, type Component, untra
 import { drawWaveformSignal } from "@daw-browser/waveforms/draw-waveform-signal";
 import { loadWaveformSourceData } from "@daw-browser/waveforms/select-waveform-window";
 import type { WaveformSourceData } from "@daw-browser/waveforms/types";
+import { formatDeviceFrequency } from "~/lib/device-value-format";
 import { resolveWaveformPaintStyle } from "~/lib/waveform-style";
 import {
   sampledInstrumentRegion,
@@ -23,6 +24,7 @@ import Knob from "~/components/ui/knob";
 import { useAppPreferences } from "~/context/app-preferences";
 import { parseSampleDragData, SAMPLE_DRAG_DATA_TYPE, type SampleDragData } from "~/lib/sample-drag-data";
 import { useDevicePixelRatio } from "~/lib/device-pixel-ratio";
+import type { NativeInstrumentPreparation } from "~/lib/desktop/native-instrument-budget-policy";
 import {
   getDrumRackWaveformBufferIdentity,
   SAMPLE_WAVEFORM_BINS,
@@ -39,8 +41,10 @@ type DrumRackProps = {
   onAssignSampleToPad: (padId: string, sample: DrumRackSampleAssignment) => void;
   onReset: () => void;
   onUpdatePad: (padId: string, updates: Partial<DrumRackPadParams>) => void;
+  onRetry: () => void;
   buffers?: () => ReadonlyMap<string, SampledInstrumentBuffer> | undefined;
   subscribeBuffers: (listener: () => void) => () => void;
+  nativeStatus?: NativeInstrumentPreparation;
 };
 
 const sampleToAssignment = (sample: SampleDragData): DrumRackSampleAssignment => ({
@@ -68,7 +72,7 @@ const formatPan = (value: number) => {
 
 const formatTranspose = (value: number) => `${value > 0 ? "+" : ""}${value} st`;
 
-const formatSampleRate = (sampleRate: number) => `${Math.round(sampleRate / 1000)}kHz`;
+const formatSampleRate = (sampleRate: number) => formatDeviceFrequency(sampleRate, 0);
 
 const sampleChannelLabel = (channelCount: number) => channelCount === 1 ? "Mono" : "Stereo";
 
@@ -272,6 +276,23 @@ const DrumRack: Component<DrumRackProps> = (props) => {
     >
       <div class="flex h-full min-h-0 text-xs text-muted-foreground">
         <div class="flex w-72 flex-col border-r border-border p-3">
+          <Show when={props.nativeStatus}>
+            {(status) => (
+              <div class="mb-2 text-2xs">
+                <button
+                  classList={{ "text-destructive": status().state === 'error' }}
+                  title={status().error}
+                  disabled={status().state !== 'error'}
+                  onClick={() => props.onRetry()}
+                >
+                  {status().state}
+                </button>
+              </div>
+            )}
+          </Show>
+          <Show when={props.nativeStatus?.error}>
+            {(error) => <p class="py-1 text-destructive" role="alert">{error()}</p>}
+          </Show>
           <div class="flex items-center justify-between">
             <div class="text-2xs uppercase tracking-widest text-muted-foreground">{DRUM_RACK_PAD_COUNT} pads</div>
             <div class="text-2xs text-muted-foreground">

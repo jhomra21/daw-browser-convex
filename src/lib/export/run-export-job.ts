@@ -1,7 +1,7 @@
 import type { AudioEffectRuntimeInstance, ExportFx, StemMode, StemRecombinationMetadata } from '@daw-browser/audio-engine/export-mixdown'
 import { getExportRangeBounds, type ExportRange } from '@daw-browser/audio-engine/export-range'
 import { getExportTailMaximumSec, type ExportAnalysisReport } from '@daw-browser/audio-engine/export-fidelity'
-import { AUDIO_EFFECT_CONTRACTS, type AutomationEnvelope, arpeggiatorParamsSchema, automationEnvelopeFromRow, type ExportAudioFormat, formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isJsonObject, isLocalId, isLossyExportAudioFormat, type JsonValue, normalizeArpeggiatorParams, normalizeCompressorParams,
+import { AUDIO_EFFECT_CONTRACTS, type AudioPcmSourceDescriptor, type AutomationEnvelope, arpeggiatorParamsSchema, automationEnvelopeFromRow, type ExportAudioFormat, formatExportFileTimestamp, getExportAudioFormatMetadata, isAudioEffectKind, isJsonObject, isLocalId, isLossyExportAudioFormat, type JsonValue, normalizeArpeggiatorParams, normalizeCompressorParams,
   normalizeAutoFilterParamsEnvelope, normalizeAutoPanParamsEnvelope, normalizeChorusParamsEnvelope, normalizeDelayParams,
   normalizeEnsembleParamsEnvelope, normalizeEqParams, normalizeFlangerParamsEnvelope, normalizeGateParamsEnvelope, normalizeLimiterParamsEnvelope,
   normalizeLoFiParamsEnvelope, normalizePhaserParamsEnvelope, normalizeReverbParams, normalizeSaturatorParams,
@@ -54,10 +54,10 @@ import {
 import {
   createAudioPcmSourceDescriptor,
   getAudioBufferSessionIdentity,
-  type AudioPcmSourceDescriptor,
 } from '@daw-browser/audio-engine/media-pages'
 import type { AudioStretchRuntimeClip } from '@daw-browser/audio-engine/audio-stretch-rendering'
 import type { SampledInstrumentRegionBudgetScope } from '~/lib/sampled-instrument-region-budget'
+import { nativeInstrumentDeviceDecodedBytes } from '~/lib/desktop/native-instrument-budget-policy'
 import {
   createNativeTimelinePageManager,
   type NativeTimelinePageManager,
@@ -284,6 +284,7 @@ const cloneExportFx = (fx: ExportFx): ExportFx => {
           arp: entry.arp ? normalizeArpeggiatorParams(entry.arp) : undefined,
           synth: entry.synth ? normalizeSynthParams(entry.synth) : undefined,
           instrument: instrument ? instrument : undefined,
+          unavailableSampleAssetKeys: entry.unavailableSampleAssetKeys?.slice(),
           drumRackBuffers: entry.drumRackBuffers ? cloneAudioBufferMap(entry.drumRackBuffers) : undefined,
           samplerBuffers: entry.samplerBuffers ? cloneAudioBufferMap(entry.samplerBuffers) : undefined,
           granularBuffer: entry.granularBuffer ? {
@@ -361,6 +362,7 @@ const cloneExportEffectRow = (row: ExportEffectRow): ExportEffectRow => {
 export const cloneExportEffectsProjection = (projection: ExportEffectsProjection | undefined): ExportEffectsProjection | undefined => (
   projection
     ? {
+      clearInstrumentTargets: projection.clearInstrumentTargets?.slice(),
       replaceAudioEffectTargets: projection.replaceAudioEffectTargets.map((replacement) => ({
         targetId: replacement.targetId,
         rows: replacement.rows.map(cloneExportEffectRow),
@@ -561,10 +563,30 @@ const applyProjectedEffectRowsToFx = (fx: ExportFx, rows: readonly ExportEffectR
 
 const applyEffectsProjectionToFx = (fx: ExportFx, projection: ExportEffectsProjection | undefined) => {
   if (!projection) return
+  for (const targetId of projection.clearInstrumentTargets ?? []) {
+    const entry = fx.trackFx?.[targetId]
+    if (entry) {
+      delete entry.instrument
+      delete entry.synth
+      delete entry.arp
+    }
+  }
   for (const replacement of projection.replaceAudioEffectTargets) {
     replaceExportEffectInstancesForTarget(fx, replacement.targetId, replacement.rows)
   }
   applyProjectedEffectRowsToFx(fx, projection.upsertDeviceRows)
+}
+
+/** Synchronous desired-model read for native adoption, without persistence I/O. */
+export const resolveDesiredPlaybackFx = (
+  previous: ExportFx,
+  projection: ExportEffectsProjection | undefined,
+  cloudRows: ExportCloudRenderRowsSnapshot | undefined,
+) => {
+  const fx = cloneExportFx(previous)
+  if (cloudRows) applyRoomEffectRowsToFx(fx, cloudRows.effects)
+  applyEffectsProjectionToFx(fx, projection)
+  return fx
 }
 
 const applyAutomationPatches = (
@@ -679,7 +701,10 @@ export const createExportRenderStateSnapshot = async (input: {
   const localProject = projectId ? await getLocalProject(projectId) : undefined
   const localOnly = projectId ? isLocalId('project', projectId) || localProject !== undefined : false
   if (localOnly && projectId) {
-    const rows = await captureLocalExportRenderRowsSnapshot(projectId)
+    // Playback reads the effects draft without draining its preparation-dependent
+    // owner. Other write kinds, and every write kind for export, still flush.
+    const rows = await captureLocalExportRenderRowsSnapshot(projectId,
+      externalPluginPolicy === 'native-playback' && effectsProjection ? { excludeKinds: ['effects'] } : undefined)
     if (externalPluginPolicy === 'browser-export') {
       assertBrowserExportHasNoLiveExternalPlugins(await listLocalExternalProcessors(projectId))
     }
@@ -711,6 +736,7 @@ export async function loadInstrumentExportBuffers(
   allowedTrackIds?: ReadonlySet<string>,
   projectId?: string,
   sampledInstrumentRegionScope?: SampledInstrumentRegionBudgetScope,
+  nativeExport = false,
 ): Promise<void> {
   const trackFx = fx.trackFx
   if (!trackFx) return
@@ -787,7 +813,7 @@ export async function loadInstrumentExportBuffers(
             input: sample,
             bounds: region,
             decodedBytes: sampledInstrumentRegionBytes(region, sample.source.channelCount),
-            maxDecodedBytes: 64 * 1024 * 1024,
+            maxDecodedBytes: nativeExport ? nativeInstrumentDeviceDecodedBytes : 64 * 1024 * 1024,
             current: matchesRegion(buffers.get(pad.id), sample, region) ? buffers.get(pad.id) : undefined,
             install: (buffer) => buffers.set(pad.id, buffer),
           })
@@ -800,7 +826,8 @@ export async function loadInstrumentExportBuffers(
         localRegions.set(sampledInstrumentRegionIdentity(pad.sample, region), sampledInstrumentRegionBytes(region, pad.sample.source.channelCount))
       }
       const localBytes = [...localRegions.values()].reduce((total, bytes) => total + bytes, 0)
-      if (localBytes > 64 * 1024 * 1024) throw new Error(`Drum Rack regions exceed the ${64 * 1024 * 1024} byte limit.`)
+      const limit = nativeExport ? nativeInstrumentDeviceDecodedBytes : 64 * 1024 * 1024
+      if (localBytes > limit) throw new Error(`Drum Rack regions exceed the ${limit} byte limit.`)
     }
     if (entry.instrument?.kind === 'sampler') {
       const buffers = new Map<string, SampledInstrumentBuffer>(entry.samplerBuffers ?? [])
@@ -815,14 +842,15 @@ export async function loadInstrumentExportBuffers(
           input: zone.sample,
           bounds: region,
           decodedBytes: bytes,
-          maxDecodedBytes: entry.instrument.params.maxDecodedBytes,
+          maxDecodedBytes: nativeExport ? nativeInstrumentDeviceDecodedBytes : entry.instrument.params.maxDecodedBytes,
           current: matchesRegion(buffers.get(zone.id), zone.sample, region) ? buffers.get(zone.id) : undefined,
           install: (buffer) => buffers.set(zone.id, buffer),
         })
       }
       const localBytes = [...localRegions.values()].reduce((total, bytes) => total + bytes, 0)
-      if (localBytes > entry.instrument.params.maxDecodedBytes) {
-        throw new Error(`Sampler regions exceed the ${entry.instrument.params.maxDecodedBytes} byte limit.`)
+      const limit = nativeExport ? nativeInstrumentDeviceDecodedBytes : entry.instrument.params.maxDecodedBytes
+      if (localBytes > limit) {
+        throw new Error(`Sampler regions exceed the ${limit} byte limit.`)
       }
     }
     if (entry.instrument?.kind === 'granular') {
@@ -834,11 +862,11 @@ export async function loadInstrumentExportBuffers(
         const existing = entry.granularBuffer
         const currentIdentity = sampledInstrumentRegionIdentity(zone.sample, region)
         const decodedBytes = sampledInstrumentRegionBytes(region, zone.sample.source.channelCount)
-        addConsumer(currentIdentity, sampledInstrumentRetainedBytes(decodedBytes, 2), {
+        addConsumer(currentIdentity, nativeExport ? decodedBytes : sampledInstrumentRetainedBytes(decodedBytes, 2), {
           input: zone.sample,
           bounds: region,
           decodedBytes,
-          maxDecodedBytes: entry.instrument.params.maxDecodedBytes,
+          maxDecodedBytes: nativeExport ? nativeInstrumentDeviceDecodedBytes : entry.instrument.params.maxDecodedBytes,
           current: existing?.assetKey === currentIdentity && matchesRegion(existing, zone.sample, region) ? existing : undefined,
           install: (buffer) => {
             entry.granularBuffer = {
@@ -849,14 +877,32 @@ export async function loadInstrumentExportBuffers(
             }
           },
         })
-        if (decodedBytes > entry.instrument.params.maxDecodedBytes) {
-          throw new Error(`Granular regions exceed the ${entry.instrument.params.maxDecodedBytes} byte limit.`)
+        const limit = nativeExport ? nativeInstrumentDeviceDecodedBytes : entry.instrument.params.maxDecodedBytes
+        if (decodedBytes > limit) {
+          throw new Error(`Granular regions exceed the ${limit} byte limit.`)
         }
       }
     }
   }
   const jobs = [...jobsByIdentity.values()]
   if (jobs.length === 0) return
+  if (nativeExport) {
+    if (!budget) throw new Error('Native export sample memory accounting is unavailable. Restart desktop audio and retry.')
+    try {
+      budget.lease(jobs.flatMap((job) => job.existing ? [{
+        key: job.key, buffer: job.existing.buffer, bytes: job.bytes,
+      }] : []), true)
+      // Separate child-host mappings from physical renderer PCM. Offline does
+      // not lock memory; conservatively charge the same 16 KiB mapping pages.
+      budget.set('native-export-page-staging', 2 * 1024 ** 2, () => undefined)
+      for (const job of jobs) {
+        budget.set(`native-export-mapping:${job.key}`, Math.ceil(job.bytes / 16_384) * 16_384, () => undefined)
+      }
+      budget.ensureCapacityFor(new Map(jobs.filter((job) => !job.existing).map((job) => [job.key, job.bytes])))
+    } catch {
+      throw new Error('Not enough sample memory to export. Shorten sample regions or remove unused samples, then retry. No export was completed.')
+    }
+  }
   const leasedExisting = (job: RegionJob) => (
     job.existing !== undefined
     && budget?.isLeased(job.existing.buffer) === true
@@ -879,21 +925,38 @@ export async function loadInstrumentExportBuffers(
     for (const job of loads) reservations.set(job.key, budget.reserve(job.key, job.bytes))
   }
   try {
+    let loadError: unknown
+    const loading = new AbortController()
+    const loadSignal = AbortSignal.any([signal, loading.signal])
     await runWithConcurrency(loads, MAX_CONCURRENT_BUFFER_LOADS, async (job) => {
-    throwIfExportAborted(signal)
-    const buffer = await loadSampledInstrumentRegion(
-      job.consumers[0]?.input ?? (() => { throw new Error('Export sample job has no consumer.') })(),
-      job.consumers[0]?.bounds ?? (() => { throw new Error('Export sample job has no bounds.') })(),
-      job.consumers[0]?.maxDecodedBytes ?? 0,
-      signal,
-      projectId ? { projectId: () => projectId } : {},
-    )
-    if (!buffer) throw new Error(`Failed to preload export sample ${job.consumers[0]?.input.url ?? job.key}`)
-    const reservation = reservations.get(job.key)
-    reservation?.commit()
-    budget?.set(job.key, job.bytes, () => undefined, buffer.buffer)
-    for (const consumer of job.consumers) consumer.install(buffer)
+      try {
+        throwIfExportAborted(loadSignal)
+        const result = await loadSampledInstrumentRegion(
+          job.consumers[0]?.input ?? (() => { throw new Error('Export sample job has no consumer.') })(),
+          job.consumers[0]?.bounds ?? (() => { throw new Error('Export sample job has no bounds.') })(),
+          job.consumers[0]?.maxDecodedBytes ?? 0,
+          loadSignal,
+          projectId ? { projectId: () => projectId } : {},
+        )
+        throwIfExportAborted(loadSignal)
+        if (result.status === 'missing') {
+          throw new Error(`Failed to preload export sample ${job.consumers[0]?.input.url ?? job.key}`)
+        }
+        const buffer = result.buffer
+        const reservation = reservations.get(job.key)
+        reservation?.commit()
+        budget?.set(job.key, job.bytes, () => undefined, buffer.buffer)
+        if (nativeExport) budget?.lease([{ key: job.key, buffer: buffer.buffer, bytes: job.bytes }], true)
+        for (const consumer of job.consumers) consumer.install(buffer)
+      } catch (error) {
+        if (!loading.signal.aborted) {
+          loadError = error
+          loading.abort(error)
+        }
+      }
     })
+    // Drain sibling decodes before their owning export scope may be released.
+    if (loading.signal.aborted) throw loadError
     throwIfExportAborted(signal)
   } finally {
     for (const reservation of reservations.values()) reservation.release()
@@ -972,6 +1035,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
   let nativeStretchLeaseDispose: (() => Promise<void>) | undefined
   let portableRepository: PreparedStretchArtifactRepository | undefined
   let portableWorkerCleanup: (() => Promise<void>) | undefined
+  const nativeInstrumentSources = new Map<string, AudioBuffer>()
   const removeNativeSpool = async () => {
     if (!nativeSpool || nativeSpoolRemoved) return
     await nativeSpool.remove()
@@ -1045,7 +1109,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       && input.renderStateSnapshot.automationEnvelopes.length === 0
       && input.sidechainRoutes.length === 0
       && Boolean(input.resolveAudioSource)
-    const [exportMixdown] = await Promise.all([
+    const preparation = await Promise.allSettled([
       mixdownModule,
       input.nativeRendererRequired
         ? ensureNativeStretchBuffers({
@@ -1060,8 +1124,13 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         undefined,
         localProjectId,
         input.sampledInstrumentRegionScope,
+        input.nativeRendererRequired,
       ),
     ])
+    for (const result of preparation) if (result.status === 'rejected') throw result.reason
+    const mixdown = preparation[0]
+    if (mixdown.status === 'rejected') throw mixdown.reason
+    const exportMixdown = mixdown.value
     throwIfExportAborted(input.signal)
     let preparedStretchAssets: readonly NativePreparedStretchAsset[] = []
     if (input.nativeRendererRequired && nativeTracks.some((track) => track.clips.some(isPortableStretchClip))) {
@@ -1108,6 +1177,9 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         preparedStretchAssets,
         externalAttachments: input.renderStateSnapshot.nativeExternalAttachments,
         capturedVstStates: input.renderStateSnapshot.capturedVstStates,
+        onInstrumentRegionSources: (sources) => {
+          for (const source of sources) nativeInstrumentSources.set(source.sourceAssetKey, source.buffer)
+        },
       })
       : undefined
     outputTarget = await input.outputTargets.createMixdownTarget({
@@ -1170,6 +1242,8 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       const nativeRenderer = input.nativeOfflinePcmRenderer
       if (nativePlan && !nativeRenderer) throw new Error(NATIVE_EXPORT_UNAVAILABLE_MESSAGE)
       const sourceByKey = new Map<string, NativeOfflineMappedAsset>()
+      const clipsBySourceKey = new Map(preloadTracks.flatMap((track) => track.clips)
+        .filter((clip) => clip.sourceAssetKey !== undefined).map((clip) => [clip.sourceAssetKey, clip]))
       if (nativePlan?.mappedAssets && nativePlan.mappedAssets.length > 0) {
         for (const asset of nativePlan.mappedAssets) {
           const previous = sourceByKey.get(asset.sourceAssetKey)
@@ -1194,8 +1268,16 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
             descriptor: asset.preparedStretchArtifactId
               ? undefined
               : await (async () => {
-                const clip = preloadTracks.flatMap((track) => track.clips)
-                  .find((candidate) => candidate.sourceAssetKey === asset.sourceAssetKey)
+                const buffer = nativeInstrumentSources.get(asset.sourceAssetKey)
+                if (buffer) {
+                  return createAudioPcmSourceDescriptor({
+                    identity: asset.sourceAssetKey,
+                    durationSec: buffer.duration, frameCount: buffer.length,
+                    sampleRate: buffer.sampleRate, channelCount: buffer.numberOfChannels,
+                    source: buffer,
+                  })
+                }
+                const clip = clipsBySourceKey.get(asset.sourceAssetKey)
                 if (!clip) {
                   throw new Error(`Native export source "${asset.sourceAssetKey}" is not present in the timeline.`)
                 }
@@ -1233,6 +1315,13 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
           frameCount: number
           signal: AbortSignal
         }): Promise<NativeHostMappedAssetPage> => {
+          const registered = sourceByKey.get(request.asset.sourceAssetKey)
+          if (!registered || registered.sessionAssetId !== request.asset.sessionAssetId
+            || registered.frameCount !== request.asset.frameCount
+            || registered.sampleRateHz !== request.asset.sampleRateHz
+            || registered.channelCount !== request.asset.channelCount) {
+            throw new NativeOfflineRenderError('Native offline instrument/source identity changed. Reload samples and retry.')
+          }
           const page = await nativeTimelinePageManager?.readPage(
             request.asset.sourceAssetKey,
             request.startFrame,
@@ -1395,6 +1484,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       console.error('[export] native Stretch cleanup failed after export', cleanupError)
     }
     input.sampledInstrumentRegionScope?.release()
+    nativeInstrumentSources.clear()
   }
 }
 

@@ -18,8 +18,8 @@ import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
 import {
   createAudioPcmSourceDescriptor,
   defaultDecodedAudioPageFrames,
-  type AudioPcmSourceDescriptor,
 } from './media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import { createAudioStretchReadPlan, type AudioStretchReadPlan } from './audio-stretch-read-plan'
 import type { PortableAssetRegistryEntry } from './portable-session-compiler'
 import { WSOLA_MAX_PIPELINE_WORKING_MEMORY_BYTES } from './audio-stretching'

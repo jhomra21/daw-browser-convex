@@ -41,7 +41,7 @@ describe("normalizeAppPreferences", () => {
       version: APP_PREFERENCES_VERSION,
       appearance: { theme: "dark", themeId: "catppuccin" },
       sidebar: { open: false },
-      timeline: { defaultTrackColor: "#123456", defaultGroupColor: "#abcdef" },
+      timeline: { defaultTrackColor: "#123456", defaultGroupColor: "#abcdef", follow: true },
       audio: defaultAppPreferences.audio,
       recording: defaultAppPreferences.recording,
       midi: defaultAppPreferences.midi
@@ -76,7 +76,7 @@ describe("normalizeAppPreferences", () => {
       version: APP_PREFERENCES_VERSION,
       appearance: { theme: "dark", themeId: "default" },
       sidebar: { open: false },
-      timeline: { defaultTrackColor: defaultAppPreferences.timeline.defaultTrackColor, defaultGroupColor: "#fedcba" },
+      timeline: { defaultTrackColor: defaultAppPreferences.timeline.defaultTrackColor, defaultGroupColor: "#fedcba", follow: true },
       audio: defaultAppPreferences.audio,
       recording: defaultAppPreferences.recording,
       midi: defaultAppPreferences.midi

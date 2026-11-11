@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-protocol'
-import { externalAutomationParameterId, type AutomationEnvelope } from '@daw-browser/shared'
+import { createDefaultSamplerParams, createDefaultGranularParams, createDefaultDrumRackParams, externalAutomationParameterId, type AutomationEnvelope, type SamplerZone } from '@daw-browser/shared'
+import type { ExportFx } from '@daw-browser/audio-engine/export-mixdown'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { PortablePreparedStretchAsset } from '@daw-browser/audio-engine/portable-stretch-preparation'
 import type { NativePreparedStretchAsset } from '@daw-browser/audio-engine/native-stretch-preparation'
@@ -229,7 +230,7 @@ const automationSegmentsFromSchedule = (payload: Uint8Array): DecodedAutomationS
   const sourceCount = view.getUint32(48, true)
   const automationCount = view.getUint32(52, true)
   const decoder = new TextDecoder()
-  let offset = 60 + instrumentCount * 48 + sourceCount * 112
+  let offset = 72 + instrumentCount * 48 + sourceCount * 112
   return Array.from({ length: automationCount }, () => {
     const instanceLength = view.getUint32(offset, true)
     offset += 4
@@ -256,7 +257,7 @@ const sourceEventsFromSchedule = (payload: Uint8Array) => {
   const instrumentCount = view.getUint32(44, true)
   const sourceCount = view.getUint32(48, true)
   return Array.from({ length: sourceCount }, (_, index) => {
-    const offset = 60 + instrumentCount * 48 + index * 112
+    const offset = 72 + instrumentCount * 48 + index * 112
     return {
       assetSessionId: view.getUint32(offset + 20, true),
       sequence: Number(view.getBigUint64(offset + 4, true)),
@@ -593,6 +594,63 @@ test('preserves the existing no-warp native source projection', () => {
     sourceOffsetFrame: 0,
     sourceFrameCount: 4,
   })
+})
+
+test('maps complete instrument-only regions without changing portable PCM defaults', () => {
+  const frameCount = 8 * 48_000
+  const buffer = new TestAudioBuffer([new Float32Array(frameCount).fill(0.25), new Float32Array(frameCount).fill(-0.5)])
+  const zone: SamplerZone = {
+    id: 'zone', sample: { assetKey: 'instrument-only', url: 'https://example.test/sample.wav', sourceKind: 'url',
+      source: { durationSec: 8, sampleRate: 48_000, channelCount: 2 } },
+    keyLow: 0, keyHigh: 127, velocityLow: 1, velocityHigh: 127, rootNote: 60,
+    tuneCents: 0, gain: 1, pan: 0, roundRobinGroup: 0, roundRobinIndex: 0,
+    playbackMode: 'one-shot', startSec: 0, crossfadeSec: 0, chokeGroup: 0,
+  }
+  const drum = createDefaultDrumRackParams()
+  const entries: NonNullable<ExportFx['trackFx']>[string][] = [
+    { instances: [], instrument: { kind: 'sampler', instanceId: 'sampler', params: { ...createDefaultSamplerParams(), zones: [zone, { ...zone, id: 'shared' }] } },
+      samplerBuffers: new Map([['zone', { buffer, sourceStartFrame: 0 }], ['shared', { buffer, sourceStartFrame: 0 }]]) },
+    { instances: [], instrument: { kind: 'granular', instanceId: 'granular', params: { ...createDefaultGranularParams(), zone } },
+      granularBuffer: { assetKey: zone.sample.assetKey, buffer, sourceStartFrame: 0 } },
+    { instances: [], instrument: { kind: 'drum-rack', instanceId: 'drums', params: { ...drum, pads: drum.pads.map((pad, index) => index < 2 ? { ...pad, sample: zone.sample } : pad) } },
+      drumRackBuffers: new Map(drum.pads.slice(0, 2).map((pad) => [pad.id, { buffer, sourceStartFrame: 0 }])) },
+  ]
+  for (const entry of entries) {
+    const fx: ExportFx = { trackFx: { 'track-1': entry }, masterFxInstances: [], masterVolume: 1 }
+    const tracks: Track<AudioBuffer>[] = [{ ...track, kind: 'instrument', clips: [] }]
+    const sources = new Map<string, AudioBuffer>()
+    const plan = compileNativeOfflineRenderPlan({
+      tracks, fx, automationEnvelopes: [], sidechainRoutes: [], bpm: 120,
+      range: { mode: 'custom', startSec: 2, endSec: 3 }, sampleRateHz: 48_000,
+      channelCount: 2, tailFrames: 123, projectGeneration: 1,
+      onInstrumentRegionSources: (regions) => { for (const region of regions) sources.set(region.sourceAssetKey, region.buffer) },
+    })
+    expect(plan.assets).toEqual([])
+    expect(plan.mappedAssets).toHaveLength(1)
+    expect(plan.mappedAssets?.[0]?.ranges).toEqual([{ startFrame: 0, frameCount }])
+    expect(plan.totalFrames).toBe(48_123)
+    expect(sources.get(plan.mappedAssets?.[0]?.sourceAssetKey ?? '')).toBe(buffer)
+    expect(structuredClone(plan)).toEqual(plan)
+    const portable = compilePortableExportSnapshot({
+      tracks, fx, bpm: 120, range: { mode: 'custom', startSec: 2, endSec: 3 },
+      sampleRateHz: 48_000, revision: 1, epoch: 1, firstSequence: 1, allowInstruments: true,
+    })
+    if (!portable.supported) throw new Error(portable.reasons.join(' '))
+    expect(portable.assets[0]?.pcm?.planes[0]?.length).toBe(frameCount)
+    expect(portable.assets[0]?.transferables).toHaveLength(2)
+    const sourceAssetKey = plan.mappedAssets?.[0]?.sourceAssetKey
+    if (!sourceAssetKey) throw new Error('Expected regional identity.')
+    const shared = compileNativeOfflineRenderPlan({
+      tracks: [{ ...track, clips: [{ ...track.clips[0]!, sourceAssetKey, buffer, duration: 8,
+        sourceDurationSec: 8, sourceSampleRate: 48_000, sourceChannelCount: 2 }] }],
+      fx, automationEnvelopes: [], sidechainRoutes: [], bpm: 120,
+      range: { mode: 'custom', startSec: 2, endSec: 3 }, sampleRateHz: 48_000,
+      channelCount: 2, tailFrames: 0, projectGeneration: 1,
+    })
+    expect(shared.assets).toEqual([])
+    expect(shared.mappedAssets).toHaveLength(1)
+    expect(shared.mappedAssets?.[0]?.ranges).toEqual([{ startFrame: 0, frameCount }])
+  }
 })
 
 test('maps a six-minute mono local asset instead of retaining its full PCM', () => {
@@ -1003,7 +1061,7 @@ test('renders track volume automation into native processor schedule events', ()
   })
   const view = new DataView(exportPlan.schedule.buffer, exportPlan.schedule.byteOffset, exportPlan.schedule.byteLength)
   expect(view.getUint32(56, true)).toBe(1)
-  const processorOffset = 60 + view.getUint32(48, true) * 112
+  const processorOffset = 72 + view.getUint32(48, true) * 112
   expect(Number(view.getBigUint64(processorOffset, true))).toBeGreaterThan(0)
   expect(view.getUint32(processorOffset + 8, true)).toBe(26)
   expect(view.getUint32(processorOffset + 12, true)).toBe(0)

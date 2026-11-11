@@ -51,6 +51,7 @@ import { runTierThree, TierThreeRecordingFailure } from "./tier-three"
 import { analyzeTaskSourceEvidence, diagnosticReturnInterval } from "./task-source-liveness"
 import { startRendererProfile } from "./renderer-profile"
 import { startRendererTrace } from "./renderer-trace"
+import { createOwnedWindowControl, type RecordingWindowState } from "./window-occlusion"
 import { desktopDiagnosticsSchemaV2, desktopHostStatusSchemaV1, desktopTransportStatusSchemaV1 } from "@daw-browser/desktop-protocol"
 import { projectSnapshotSchemaV2 } from "@daw-browser/control"
 
@@ -81,6 +82,8 @@ type CliOptions = {
   readonly rendererProfile: boolean
   readonly rendererTrace: boolean
   readonly commandTimings: boolean
+  readonly recordingWindowStates: readonly RecordingWindowState[]
+  readonly playbackProfile: boolean
 }
 export type BaselineRunResult = {
   version: "30-track-baseline-v1"
@@ -111,9 +114,21 @@ const parseOptions = (arguments_: readonly string[]): CliOptions => {
   let rendererProfile = false
   let rendererTrace = false
   let commandTimings = false
+  let recordingWindowStates: readonly RecordingWindowState[] = []
+  let playbackProfile = false
   for (let index = 0; index < arguments_.length; index += 1) {
     const argument = arguments_[index]
     if (argument === "--command-timings" && !commandTimings) { commandTimings = true; continue }
+    if (argument === "--recording-window-states" && recordingWindowStates.length === 0) {
+      const states = (arguments_[index + 1] ?? "").split(",").filter((state) => state === "occluded" || state === "minimized")
+      if (states.length === 0 || new Set(states).size !== states.length || states.join(",") !== arguments_[index + 1]) {
+        throw new Error("--recording-window-states takes a comma-separated list of occluded and minimized.")
+      }
+      recordingWindowStates = states
+      index += 1
+      continue
+    }
+    if (argument === "--playback-profile" && !playbackProfile) { playbackProfile = true; continue }
     if (argument === "--renderer-profile" && !rendererProfile) { rendererProfile = true; continue }
     if (argument === "--renderer-trace" && !rendererTrace) { rendererTrace = true; continue }
     if (argument === "--tier3" && !tier3) {
@@ -137,8 +152,9 @@ const parseOptions = (arguments_: readonly string[]): CliOptions => {
     }
     throw new Error(`Unknown argument: ${argument}`)
   }
-  if (surface === undefined || out === undefined || (tier3 && surface !== "electron") || ((rendererProfile || rendererTrace || sabRecording) && (!tier3 || surface !== "electron"))) throw new Error("Usage: run.ts --surface browser|electron --out <absolute-path> [--tier3 --sab-recording --renderer-profile --renderer-trace (Electron only)].")
-  return { surface, out, tier3, sabRecording, rendererProfile, rendererTrace, commandTimings }
+  if (surface === undefined || out === undefined || (tier3 && surface !== "electron") || ((rendererProfile || rendererTrace || sabRecording || recordingWindowStates.length > 0) && (!tier3 || surface !== "electron"))
+    || (playbackProfile && surface !== "electron")) throw new Error("Usage: run.ts --surface browser|electron --out <absolute-path> [--playback-profile] [--tier3 --sab-recording --renderer-profile --renderer-trace --recording-window-states occluded,minimized] (Electron only).")
+  return { surface, out, tier3, sabRecording, rendererProfile, rendererTrace, commandTimings, recordingWindowStates, playbackProfile }
 }
 
 const main = async () => {
@@ -365,7 +381,7 @@ const main = async () => {
         entrypoint: path.join(import.meta.dir, "run-runtime.ts"),
         name: "30-track-probe",
       })
-      const evidence = await runElectronBenchmark(root, archivePath, runId, runtimePath, options.tier3, options.sabRecording, options.rendererProfile, options.rendererTrace, (progress) => {
+      const evidence = await runElectronBenchmark(root, archivePath, runId, runtimePath, options.tier3, options.sabRecording, options.rendererProfile, options.rendererTrace, options, (progress) => {
         result.electron = progress
         if (progress.rendererProbe) result.probe = progress.rendererProbe
         if (progress.tier3) result.tier3 = progress.tier3
@@ -524,6 +540,7 @@ const runElectronBenchmark = async (
   sabRecording: boolean,
   rendererProfile: boolean,
   rendererTrace: boolean,
+  instrumentation: Pick<CliOptions, "recordingWindowStates" | "playbackProfile" | "out">,
   reportProgress: ElectronProgressReporter,
 ): Promise<ElectronBenchmarkEvidence> => {
   const packageRoot = path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64")
@@ -586,7 +603,7 @@ const runElectronBenchmark = async (
     cleanupPlan = createCleanupPlan(await processRows(), app.pid)
     if (!cleanupPlan) throw new Error("Electron cleanup ownership could not be established.")
     await selectElectronRenderer(browserCommand, session, () => appOutput)
-    await browserCommand(session, ["set", "viewport", "1440", "900"])
+    // No viewport override: Electron is measured in the real maximized window at the display's pixel ratio.
     await browserCommand(session, ["wait", "--load", "networkidle"])
     const runtime = await readFile(runtimePath, "utf8")
     const runtimeChunks = runtime.match(/[\s\S]{1,8192}/g) ?? []
@@ -646,7 +663,15 @@ const runElectronBenchmark = async (
     await browserCommand(session, ["eval", `window.__thirtyTrackBenchmark.setIntegrity({semanticManifestVerified:true,tier2SemanticSnapshotVerified:true,starterProjectId:${JSON.stringify(starterProjectId)},importedProjectId:${JSON.stringify(imported.localProjectId)},importedProjectDifferent:${JSON.stringify(imported.localProjectId !== starterProjectId)},trackCount:${thirtyTrackTotalTrackCount},clipCount:${thirtyTrackTotalClipCount},expectedTrackLabels:${thirtyTrackTotalTrackCount},expectedClipTitles:${thirtyTrackTotalClipCount},serviceWorkerControllerAbsent:${String(imported.serviceWorkerControllerAbsent)}});window.__thirtyTrackBenchmark.finishPhase()`])
     const tier2VisibleWorkload = await runTier2VisibleWorkload(session)
     await browserCommand(session, ["eval", `window.__thirtyTrackBenchmark.setIntegrity({tier2VisibleWorkload:${JSON.stringify(tier2VisibleWorkload)}})`])
-    const waitForState = async (expression: string) => waitForBrowserValue(session, expression, 30_000)
+    // Capture native geometry outside measured phases; never emulate a device.
+    const artifactPrefix = instrumentation.out.replace(/\.json$/, "")
+    await writePrivateArtifact(`${artifactPrefix}.window.json`, await browserCommand(session, ["eval",
+      "({innerWidth,innerHeight,outerWidth,outerHeight,devicePixelRatio,screen:{width:screen.width,height:screen.height,availWidth:screen.availWidth,availHeight:screen.availHeight},visualViewport:visualViewport?{width:visualViewport.width,height:visualViewport.height,scale:visualViewport.scale}:null,body:document.body.getBoundingClientRect().toJSON(),timeline:window.__thirtyTrackBenchmark.state().timeline?.getBoundingClientRect().toJSON(),ruler:window.__thirtyTrackBenchmark.state().ruler?.getBoundingClientRect().toJSON()})",
+    ]))
+    await browserCommand(session, ["screenshot", `${artifactPrefix}.window.png`])
+    // waitForBrowserValue accepts any non-null value, including false.
+    // Boolean readiness must remain null until the condition actually holds.
+    const waitForState = async (expression: string) => waitForBrowserValue(session, `(${expression}) ? true : null`, 30_000)
     const scroll = async (position: "top" | "bottom", durationMs: number) => {
       const value = parseJsonOutput(z.object({ timeline: z.number(), sidebar: z.number() }).strict(), await browserCommand(session, ["eval", `(async()=>{const s=window.__thirtyTrackBenchmark.state();if(!s.timeline||!s.sidebar)throw new Error('Timeline/sidebar unavailable.');s.timeline.scrollTop=${position === "top" ? "0" : "Math.max(0,s.timeline.scrollHeight-s.timeline.clientHeight)"};s.timeline.dispatchEvent(new Event('scroll'));await new Promise(requestAnimationFrame);return {timeline:s.timeline.scrollTop,sidebar:s.sidebar.scrollTop}})()`]), "Electron scroll state")
       if (Math.abs(value.timeline - value.sidebar) > 1) throw new Error("Timeline/sidebar vertical scroll synchronization failed.")
@@ -675,8 +700,55 @@ const runElectronBenchmark = async (
     stage = "diagnostics-before-playback"
     const beforePlayback = commandData(desktopDiagnosticsSchemaV2, await commandJson(root, profile, ["host", "diagnostics-v2"]))
     report({ ...progress, stage, host: { ...progress.host, beforePlayback } })
-    await browserCommand(session, ["find", "role", "button", "click", "--name", "Play"])
-    await waitForState("document.querySelector(\"button[aria-label='Pause']\") !== null")
+    const startPlayback = async (label: "first" | "repeat") => {
+      // Mutation/event observers measure click-to-Pause UI, not audible latency.
+      // They are disconnected on collection; app teardown bounds failed runs.
+      await browserCommand(session, ["eval", `(()=>{
+        const sample={label:${JSON.stringify(label)},clickAt:null,pauseAt:null,tasks:[]};
+        sample.onClick=(event)=>{if(event.target instanceof Element&&event.target.closest("button[aria-label='Play']"))sample.clickAt=performance.now()};
+        sample.mutations=new MutationObserver(()=>{if(sample.clickAt!==null&&sample.pauseAt===null&&document.querySelector("button[aria-label='Pause']"))sample.pauseAt=performance.now()});
+        sample.mutations.observe(document.body,{attributes:true,childList:true,subtree:true});
+        sample.observer=new PerformanceObserver((list)=>{for(const entry of list.getEntries())if(sample.tasks.length<64)sample.tasks.push({startTime:entry.startTime,duration:entry.duration})});
+        sample.observer.observe({type:'longtask'});
+        document.addEventListener('click',sample.onClick,true);
+        window.__playbackLatencySample=sample;
+        return true;
+      })()`])
+      const startedAt = performance.now()
+      await browserCommand(session, ["find", "role", "button", "click", "--name", "Play"])
+      await waitForState("document.querySelector(\"button[aria-label='Pause']\") !== null")
+      return { label, clickCommandAndUiWaitMs: performance.now() - startedAt }
+    }
+    const collectPlaybackStart = async () => parseJsonOutput(z.object({
+      label: z.enum(["first", "repeat"]), clickToPauseUiMs: z.number().nonnegative(),
+      longTasksFirst1500Ms: z.array(z.object({ startTime: z.number(), duration: z.number() }).strict()),
+    }).strict(), await browserCommand(session, ["eval", `(()=>{
+      const s=window.__playbackLatencySample;
+      s.mutations.disconnect();s.observer.disconnect();document.removeEventListener('click',s.onClick,true);
+      for(const e of s.observer.takeRecords())if(s.tasks.length<64)s.tasks.push({startTime:e.startTime,duration:e.duration});
+      delete window.__playbackLatencySample;
+      if(s.clickAt===null||s.pauseAt===null)throw new Error('Play click/Pause transition was not observed.');
+      return JSON.stringify({label:s.label,clickToPauseUiMs:s.pauseAt-s.clickAt,longTasksFirst1500Ms:s.tasks.filter(e=>e.startTime>=s.clickAt&&e.startTime<s.clickAt+1500)});
+    })()`]), "Playback start latency")
+    // Opt-in attribution of playback-start long tasks; profiler overhead makes this run unsuitable for frame metrics.
+    const profilePlaybackStart = async (label: "first" | "repeat") => {
+      if (!app?.pid) throw new Error("Playback profiler requires runner-owned Electron.")
+      retainFailureEvidence = true
+      await assertCdpIdentity(profile, app.pid, executablePath, Number(new URL(cdp.websocketUrl).port), cdp.websocketUrl)
+      await browserCommand(session, ["eval", "(()=>{const o={installedAtNow:performance.now(),installedAtEpochMs:Date.now(),tasks:[]};o.observer=new PerformanceObserver((list)=>{for(const e of list.getEntries())if(o.tasks.length<64)o.tasks.push({startTime:e.startTime,duration:e.duration})});o.observer.observe({type:'longtask'});window.__playbackStartLongTasks=o;return true})()"])
+      const stopProfile = await startRendererProfile(cdp.websocketUrl, path.join(runDirectory, `playback-start-${label}.profile.json`), "code-locations")
+      try {
+        await startPlayback(label)
+        await new Promise((resolve) => setTimeout(resolve, 1_500))
+      } finally {
+        await stopProfile()
+      }
+      await writePrivateArtifact(path.join(runDirectory, `playback-start-${label}.longtasks.json`), await browserCommand(session, ["eval",
+        "(()=>{const o=window.__playbackStartLongTasks;o.observer.disconnect();for(const e of o.observer.takeRecords())if(o.tasks.length<64)o.tasks.push({startTime:e.startTime,duration:e.duration});delete window.__playbackStartLongTasks;return JSON.stringify({installedAtNow:o.installedAtNow,installedAtEpochMs:o.installedAtEpochMs,tasks:o.tasks})})()"]))
+    }
+    const firstStartCommand = instrumentation.playbackProfile
+      ? (await profilePlaybackStart("first"), null)
+      : await startPlayback("first")
     let maxTier2MeterHeight = await selectedTier2MeterHeight(session)
     for (let index = 0; index < 5; index += 1) {
       await zoom("Zoom In")
@@ -714,6 +786,29 @@ const runElectronBenchmark = async (
     stage = "probe-result"
     const parsed = parseJsonOutput(browserProbeOutputSchema, await waitForBrowserValue(session, "window.__thirtyTrackProbeResult", 30_000), "Electron probe output")
     if ("error" in parsed) throw new Error(parsed.error)
+    const firstStart = { ...await collectPlaybackStart(), command: firstStartCommand }
+    let repeatStart
+    if (instrumentation.playbackProfile) {
+      // A second start in the same page distinguishes one-time preparation from per-start cost.
+      await profilePlaybackStart("repeat")
+      repeatStart = { ...await collectPlaybackStart(), command: null }
+      await browserCommand(session, ["find", "role", "button", "click", "--name", "Stop"])
+      await waitForState("document.querySelector(\"button[aria-label='Play']\") !== null")
+    } else {
+      const command = await startPlayback("repeat")
+      // Bounded observation after the completed main probe catches per-start
+      // long tasks without attributing this extra activation to phase metrics.
+      await new Promise((resolve) => setTimeout(resolve, 1_500))
+      const transport = commandData(desktopTransportStatusSchemaV1, await commandJson(root, profile, ["host", "transport-status"]))
+      repeatStart = { ...await collectPlaybackStart(), command, transport }
+      if (transport.state !== "playing") throw new Error("Repeat Play did not reach playing transport.")
+      await browserCommand(session, ["find", "role", "button", "click", "--name", "Stop"])
+      await waitForState("document.querySelector(\"button[aria-label='Play']\") !== null")
+    }
+    await writePrivateArtifact(`${artifactPrefix}.playback-start.json`, JSON.stringify({
+      profiled: instrumentation.playbackProfile, firstStart, repeatStart,
+      interpretation: "Click-to-Pause UI and command wall time, not audible-output latency.",
+    }, null, 2))
     const delta = afterPlayback.native.status === "available" && beforePlayback.native.status === "available"
       ? createNativeDiagnosticDelta(
         { state: beforePlayback.native.diagnostics.state, sampleRate: beforePlayback.audio.sampleRate, workletFaultCount: beforePlayback.audio.workletFaultCount, inferredApplicationStallCount: beforePlayback.audio.inferredApplicationStallCount, callbacks: beforePlayback.native.diagnostics.callbacks, rejectedBlocks: beforePlayback.native.diagnostics.rejectedBlocks },
@@ -777,6 +872,11 @@ const runElectronBenchmark = async (
             if (!app?.pid) throw new Error("Renderer tracer requires runner-owned Electron.")
             stopTrace = await startRendererTrace(cdp.websocketUrl, path.join(runDirectory, "tier3-renderer-trace.json"))
           } : undefined,
+          instrumentation.recordingWindowStates.length > 0
+            ? { control: createOwnedWindowControl(app.pid,
+              process.env.DAW_PERF_SAMPLE_MINIMIZE_MAIN === "1" ? path.join(runDirectory, "minimize-main.sample.txt") : undefined),
+              states: instrumentation.recordingWindowStates }
+            : undefined,
         )
         report({ ...progress, stage: "tier3-complete", tier3: tier3Evidence })
       } catch (error) {

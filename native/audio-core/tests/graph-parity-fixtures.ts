@@ -56,13 +56,20 @@ export type PortableLegacyDynamicsFixture =
 export type PortableLegacyDelayFixture = {
   kind: 'delay'
   state: DelayProcessorState
+  // The shipped chain state is told at each of these frames, as the host does on a toggle.
+  enabledEdits?: readonly { frame: number; enabled: boolean }[]
 }
 
 export type PortableLegacySpectralFixture = {
   kind: 'spectral'
   state: SpectralProcessorState
   mixValues?: Float32Array
+  // The worklet is told at each of these frames, as the host does on a toggle.
+  enabledEdits?: readonly { frame: number; enabled: boolean }[]
 }
+
+// Published as the next revision just before the block that starts at `frame`.
+export type PortableGraphEdit = { frame: number; graph: Uint8Array }
 
 export type PortableGraphParityFixture = {
   name: string
@@ -75,6 +82,7 @@ export type PortableGraphParityFixture = {
   graph: Uint8Array
   frames: number
   blockPartitions?: readonly number[]
+  graphEdits?: readonly PortableGraphEdit[]
   input: Float32Array
   parameters?: Uint8Array
   events?: Uint8Array
@@ -92,6 +100,10 @@ export type PortableGraphParityFixture = {
   legacyDelay?: PortableLegacyDelayFixture
   legacySpectral?: PortableLegacySpectralFixture
   legacyTolerance?: number
+  // The legacy worklets are constructed wet and ramp to a bypass requested up front;
+  // the portable core is dry from its first sample. Frames before this one are not
+  // compared against the legacy render.
+  legacyStartFrame?: number
   legacyDifferenceMinimum?: number
   stateRestoreDirtyInput?: Float32Array
   knownGapIds?: readonly string[]
@@ -134,9 +146,10 @@ export const encodePortableGraphParityFixture = (fixture: PortableGraphParityFix
   const assets = encodeFixtureAssets(fixture.assets ?? [])
   const instrumentStates = encodeFixtureInstrumentStates(fixture.instrumentStates ?? [])
   const blockPartitions = encodeFixtureBlockPartitions(fixture.blockPartitions)
+  const graphEdits = encodeFixtureGraphEdits(fixture.graphEdits)
   const bytes = new Uint8Array(80 + fixture.graph.byteLength + fixture.input.byteLength
     + parameters.byteLength + events.byteLength + instrumentEvents.byteLength + assets.byteLength
-    + instrumentStates.byteLength + blockPartitions.byteLength)
+    + instrumentStates.byteLength + blockPartitions.byteLength + graphEdits.byteLength)
   const view = new DataView(bytes.buffer)
   view.setUint32(0, 0x44474631, true)
   view.setUint32(4, 3, true)
@@ -156,7 +169,7 @@ export const encodePortableGraphParityFixture = (fixture: PortableGraphParityFix
   view.setUint32(64, assets.byteLength, true)
   view.setUint32(68, instrumentStates.byteLength, true)
   view.setUint32(72, blockPartitions.byteLength, true)
-  view.setUint32(76, 0, true)
+  view.setUint32(76, graphEdits.byteLength, true)
   let offset = 80
   offset = copyBytes(bytes, offset, fixture.graph)
   offset = copyBytes(bytes, offset, new Uint8Array(fixture.input.buffer, fixture.input.byteOffset, fixture.input.byteLength))
@@ -165,8 +178,26 @@ export const encodePortableGraphParityFixture = (fixture: PortableGraphParityFix
   offset = copyBytes(bytes, offset, instrumentEvents)
   offset = copyBytes(bytes, offset, assets)
   offset = copyBytes(bytes, offset, instrumentStates)
-  copyBytes(bytes, offset, blockPartitions)
+  offset = copyBytes(bytes, offset, blockPartitions)
+  copyBytes(bytes, offset, graphEdits)
   return bytes
+}
+
+const encodeFixtureGraphEdits = (edits: readonly PortableGraphEdit[] | undefined) => {
+  if (!edits) return new Uint8Array()
+  const output = new Uint8Array(4 + edits.reduce((total, edit) => total + 8 + edit.graph.byteLength, 0))
+  const view = new DataView(output.buffer)
+  view.setUint32(0, edits.length, true)
+  let offset = 4
+  for (const [index, edit] of edits.entries()) {
+    view.setUint32(offset, edit.frame, true)
+    view.setUint32(offset + 4, edit.graph.byteLength, true)
+    const graphOffset = offset + 8
+    offset = copyBytes(output, graphOffset, edit.graph)
+    // The fixture graph is revision 1; each edit is the next revision after it.
+    view.setUint32(graphOffset + 4, index + 2, true)
+  }
+  return output
 }
 
 const encodeFixtureBlockPartitions = (partitions: readonly number[] | undefined) => {
@@ -826,6 +857,16 @@ const liveControlPair = (
 
 const bypassInput = stereo(sine(16, 1_000, 48_000), sine(16, 2_000, 48_000, 0.25))
 
+// A Saturator or EQ that is bypassed when its graph is first built has nothing
+// sounding to ramp away from, so it passes its input dry from the first sample.
+const rampedBypassFrames = 960
+const rampedBypassInput = stereo(
+  sine(rampedBypassFrames, 1_000, 48_000),
+  sine(rampedBypassFrames, 2_000, 48_000, 0.25),
+)
+const dryFromTheStart = (plane: Float32Array, channel: number) => plane.every((sample, frame) =>
+  closeTo(sample, rampedBypassInput[channel * rampedBypassFrames + frame] ?? 0))
+
 const variableBlockFixture = (frames: number): PortableGraphParityFixture => ({
   name: `variable-block-${frames}`,
   capability: 'variableBlocks',
@@ -1013,9 +1054,10 @@ const modulationFixtures = modulationDefinitions.flatMap((definition): PortableG
     stereo(sine(960, 997, 48_000), sine(960, 1_993, 48_000, 0.25)),
     { legacy: bypassState, maxFramesPerBlock: 480, blockPartitions: [17, 463, 480], bypassed: true },
   )
+  bypass.legacyStartFrame = 480
   bypass.assertOutput = (output) => finite(output)
-    && output.every((plane, channel) => plane.slice(480).every((sample, frame) =>
-      closeTo(sample, bypass.input[channel * plane.length + 480 + frame] ?? 0, 1e-5)))
+    && output.every((plane, channel) => plane.every((sample, frame) =>
+      closeTo(sample, bypass.input[channel * plane.length + frame] ?? 0, 1e-5)))
   const nonfinite = modulationFixture(
     definition,
     'nonfinite',
@@ -1564,10 +1606,28 @@ const timeEffectFixture = (
     assertReset?: boolean
     bypassed?: boolean
     parameters?: Uint8Array
+    // Delay toggles, each compiled the way the product does: the plan's bypass flag
+    // and the state's own enabled flag together.
+    enabledEdits?: readonly { frame: number; enabled: boolean }[]
   } = {},
 ): PortableGraphParityFixture => {
   const state = options.state ?? (kind === 'delay' ? delayState : reverbState)
   const frames = input.length / 2
+  const graphFor = (processorState: DelayProcessorState | ReverbProcessorState, bypassed: boolean | undefined) =>
+    processorSourceMaster({
+      nodeId: 2n,
+      instanceId: 11,
+      kindId: kind === 'delay' ? 13 : 14,
+      state: kind === 'delay'
+        ? encodeDelayProcessorState(processorState)
+        : encodeReverbProcessorState(processorState),
+      parameterTargets: kind === 'delay'
+        ? [5, 6, 7, 8, 9]
+        : [10, 11, 12, 13, 14, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142],
+      latencyFrames: 0,
+      tailFrames: timeEffectTailFrames(kind, state, sampleRateHz),
+      bypassed,
+    })
   return {
     name: `${kind}-${name}`,
     capability,
@@ -1576,20 +1636,11 @@ const timeEffectFixture = (
     maxFramesPerBlock: options.maxFramesPerBlock ?? frames,
     inputBusCount: 1,
     channelCount: 2,
-    graph: processorSourceMaster({
-      nodeId: 2n,
-      instanceId: 11,
-      kindId: kind === 'delay' ? 13 : 14,
-      state: kind === 'delay'
-        ? encodeDelayProcessorState(state)
-        : encodeReverbProcessorState(state),
-      parameterTargets: kind === 'delay'
-        ? [5, 6, 7, 8, 9]
-        : [10, 11, 12, 13, 14, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142],
-      latencyFrames: 0,
-      tailFrames: timeEffectTailFrames(kind, state, sampleRateHz),
-      bypassed: options.bypassed,
-    }),
+    graph: graphFor(state, options.bypassed),
+    graphEdits: options.enabledEdits?.map(({ frame, enabled }) => ({
+      frame,
+      graph: graphFor({ ...state, enabled }, !enabled),
+    })),
     frames,
     blockPartitions: options.blockPartitions,
     input,
@@ -1598,7 +1649,7 @@ const timeEffectFixture = (
     expectedLatencyFrames: 0,
     expectedTailFrames: timeEffectTailFrames(kind, state, sampleRateHz),
     nativeWasmTolerance: kind === 'reverb' ? 2e-4 : 5e-5,
-    legacyDelay: kind === 'delay' ? { kind, state } : undefined,
+    legacyDelay: kind === 'delay' ? { kind, state, enabledEdits: options.enabledEdits } : undefined,
     legacyReverb: kind === 'reverb'
       && state.wet === 0.5
       && state.enabled
@@ -1812,6 +1863,48 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
     fixture.assertOutput = (output) => finite(output)
       && output.every((plane, channel) => plane.slice(480).every((sample, frame) =>
         closeTo(sample, fixture.input[channel * plane.length + 480 + frame] ?? 0, 1e-5)))
+    return fixture
+  })(),
+  (() => {
+    // Audio before the disable (an impulse at 20), audio received while disabled (one at
+    // 3900), then enabled again at 4096. A disabled delay keeps running on its input and
+    // only its output is dry, so the echo of the second impulse (960 frames later, past
+    // the 10 ms bypass ramp the legacy chain does not have) is heard on re-enable. At a
+    // feedback of 0.3 the echoes of the first have decayed to nothing by then, so what is
+    // heard cannot be a tail from before the disable. The legacy render is compared
+    // from the end of the ramp.
+    const frames = 6_144
+    const left = Array.from({ length: frames }, () => 0)
+    const right = Array.from({ length: frames }, () => 0)
+    left[20] = 1
+    right[20] = -0.5
+    left[3_900] = 0.8
+    right[3_900] = 0.4
+    const fixture = timeEffectFixture(
+      'delay',
+      'toggle-keeps-running',
+      'chains',
+      48_000,
+      stereo(left, right),
+      {
+        state: { ...delayState, delayMs: 20, feedback: 0.3, pingPong: false },
+        maxFramesPerBlock: 512,
+        blockPartitions: Array.from({ length: frames / 512 }, () => 512),
+        enabledEdits: [{ frame: 1_024, enabled: false }, { frame: 4_096, enabled: true }],
+      },
+    )
+    fixture.legacyStartFrame = 4_608
+    const energy = (plane: Float32Array, start: number, end: number) =>
+      plane.slice(start, end).some((sample) => Math.abs(sample) > 0.05)
+    fixture.assertOutput = (output) => finite(output)
+      && output.every((plane, channel) =>
+        // Enabled: the first echo is there.
+        energy(plane, 960, 1_000)
+        // Disabled, past the ramp: only the dry input is left.
+        && plane.slice(1_024 + 480, 4_096).every((sample, frame) =>
+          closeTo(sample, fixture.input[channel * frames + 1_024 + 480 + frame] ?? 0, 1e-5))
+        // Enabled again: the echo of what was heard while disabled.
+        && energy(plane, 4_860, 4_900))
     return fixture
   })(),
   (() => {
@@ -2051,6 +2144,9 @@ const spectralFixture = (
     mixValues?: Float32Array
     assertReset?: boolean
     bypassed?: boolean
+    // Toggles of the stage, each compiled the way the product does: the plan's
+    // bypass flag and the state's own enabled flag together.
+    enabledEdits?: readonly { frame: number; enabled: boolean }[]
   } = {},
 ): PortableGraphParityFixture => {
   const inputBusCount = options.inputBusCount ?? 1
@@ -2064,6 +2160,10 @@ const spectralFixture = (
     inputBusCount,
     channelCount: 2,
     graph: spectralGraph(state, inputBusCount, options.bypassed),
+    graphEdits: options.enabledEdits?.map(({ frame, enabled }) => ({
+      frame,
+      graph: spectralGraph({ ...state, enabled }, inputBusCount, !enabled),
+    })),
     frames,
     blockPartitions: options.blockPartitions,
     input,
@@ -2074,7 +2174,7 @@ const spectralFixture = (
     // A 512-point FFT accumulates native-libm versus Wasm-libm rounding across
     // nine butterfly stages; this remains below one ten-thousandth full scale.
     nativeWasmTolerance: 1e-4,
-    legacySpectral: { kind: 'spectral', state, mixValues: options.mixValues },
+    legacySpectral: { kind: 'spectral', state, mixValues: options.mixValues, enabledEdits: options.enabledEdits },
     // The shipped worklet computes FFT state in Float64Array while the portable
     // core stores it as float; keep the bound below five ten-thousandths FS.
     legacyTolerance: 5e-4,
@@ -2104,6 +2204,39 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
     fixture.assertOutput = (output) => finite(output)
       && output.every((plane) => plane.slice(0, 512).every((sample) => sample === 0))
       && output.some((plane) => plane.slice(512).some((sample) => Math.abs(sample) > 1e-6))
+    return fixture
+  })(),
+  (() => {
+    // Capture, silence, disable, enable. Disabling a stage is a bypass, so the sound
+    // it froze is still there when it is switched back on. The windows around the two
+    // toggles differ by design (the portable core ramps its bypass and keeps its
+    // overlap-add running underneath; the worklet switches at once and refills its
+    // rings), so the legacy render is compared once both are back in the steady frozen state.
+    const frames = 3_072
+    const impulse = Array.from({ length: frames }, () => 0)
+    impulse[256] = 1
+    const fixture = spectralFixture(
+      'freeze-toggle-keeps-capture',
+      'chains',
+      48_000,
+      stereo(impulse, impulse.map((sample) => sample * -0.5)),
+      spectralState({ mode: 'freeze', freeze: 1 }),
+      {
+        maxFramesPerBlock: 512,
+        blockPartitions: [7, 505, 512, 512, 512, 512, 512],
+        enabledEdits: [{ frame: 1_024, enabled: false }, { frame: 1_536, enabled: true }],
+      },
+    )
+    fixture.legacyStartFrame = 2_560
+    const energy = (plane: Float32Array, start: number, end: number) =>
+      plane.slice(start, end).some((sample) => Math.abs(sample) > 1e-3)
+    fixture.assertOutput = (output) => finite(output)
+      && output.every((plane) => plane.slice(0, 512).every((sample) => sample === 0)
+        && energy(plane, 512, 1_024)
+        // Disabled: the bypass ramp is over and only the (silent) dry input is left.
+        && plane.slice(1_024 + 480, 1_536).every((sample) => Math.abs(sample) < 1e-6)
+        // Enabled again: the frozen capture is sounding, not a recapture of silence.
+        && energy(plane, 2_560, frames))
     return fixture
   })(),
   (() => {
@@ -2495,7 +2628,8 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
     capability: 'chains',
     processorKind: 'saturator',
     sampleRateHz: 48_000,
-    maxFramesPerBlock: 16,
+    maxFramesPerBlock: 480,
+    blockPartitions: [480, 480],
     inputBusCount: 1,
     channelCount: 2,
     graph: processorSourceMaster({
@@ -2506,11 +2640,9 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       parameterTargets: [],
       bypassed: true,
     }),
-    frames: 16,
-    input: bypassInput,
-    assertOutput: (output) => finite(output)
-      && output.every((plane, channel) => plane.every((sample, frame) =>
-        closeTo(sample, bypassInput[channel * plane.length + frame] ?? 0))),
+    frames: rampedBypassFrames,
+    input: rampedBypassInput,
+    assertOutput: (output) => finite(output) && output.every(dryFromTheStart),
   },
   {
     name: 'saturator-nonfinite',
@@ -2644,7 +2776,8 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
     capability: 'chains',
     processorKind: 'eq',
     sampleRateHz: 48_000,
-    maxFramesPerBlock: 16,
+    maxFramesPerBlock: 480,
+    blockPartitions: [480, 480],
     inputBusCount: 1,
     channelCount: 2,
     graph: processorSourceMaster({
@@ -2655,11 +2788,9 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       parameterTargets: [],
       bypassed: true,
     }),
-    frames: 16,
-    input: bypassInput,
-    assertOutput: (output) => finite(output)
-      && output.every((plane, channel) => plane.every((sample, frame) =>
-        closeTo(sample, bypassInput[channel * plane.length + frame] ?? 0))),
+    frames: rampedBypassFrames,
+    input: rampedBypassInput,
+    assertOutput: (output) => finite(output) && output.every(dryFromTheStart),
   },
   {
     name: 'eq-nonfinite',
@@ -3101,6 +3232,63 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
     instrumentEvents: midiEnvelope(),
     nativeWasmTolerance: 1e-5,
     assertOutput: (output) => finite(output) && output.some((plane) => plane.some((sample) => Math.abs(sample) > 0)),
+  },
+  {
+    name: 'granular-voice-stealing-stolen-note-off',
+    capability: 'sampledInstruments',
+    sampleRateHz: 48_000,
+    maxFramesPerBlock: 8,
+    inputBusCount: 0,
+    channelCount: 2,
+    graph: instrumentGraph(4),
+    frames: 8,
+    input: new Float32Array(),
+    assets: [sampleAsset(1, 'install', Array.from({ length: 512 }, () => 1))],
+    instrumentStates: [{
+      nodeId: 1n,
+      kind: 4,
+      state: {
+        version: 1,
+        kind: 'granular',
+        voiceCapacity: 2,
+        outputLayout: 'stereo',
+        assetId: 'fixture:1:1',
+        seed: 77,
+        maxGrains: 2,
+        'windowShape': 'hann',
+        freeze: true,
+        grainSizeMs: 5,
+        densityHz: 200,
+        position: 0.5,
+        spray: 0,
+        pitchSemitones: 0,
+        reverseProbability: 0,
+        stereoSpread: 0,
+      },
+    }],
+    instrumentEvents: instrumentEventEnvelope([
+      ...Array.from({ length: 33 }, (_, index) => ({
+        nodeId: 1n,
+        noteId: BigInt(index + 1),
+        sequence: BigInt(index + 1),
+        frameOffset: 0,
+        type: 1,
+        note: 36 + index,
+        value: 1,
+      })),
+      ...Array.from({ length: 32 }, (_, index) => ({
+        nodeId: 1n,
+        noteId: BigInt(index + 1),
+        sequence: BigInt(index + 34),
+        frameOffset: 1,
+        type: 2,
+        note: 36 + index,
+        value: 0,
+      })),
+      { nodeId: 1n, noteId: 33n, sequence: 66n, frameOffset: 2, type: 2, note: 68, value: 0 },
+    ]),
+    nativeWasmTolerance: 1e-5,
+    assertOutput: (output) => finite(output) && sampleAt(output, 1) > 0 && closeTo(sampleAt(output, 7), 0),
   },
   {
     name: 'granular-stable-note-lifecycle',

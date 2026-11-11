@@ -40,6 +40,7 @@ export type ExportEffectRow =
   | ExportSynthEffectRow
 
 export type ExportEffectsProjection = {
+  clearInstrumentTargets?: string[]
   replaceAudioEffectTargets: Array<{
     targetId: string
     rows: ExportEffectRow[]
@@ -52,6 +53,7 @@ export const withInstrumentOverride = (
   targetId: string,
   instrument: TrackInstrumentParams,
 ): ExportEffectsProjection => ({
+  clearInstrumentTargets: projection.clearInstrumentTargets,
   replaceAudioEffectTargets: projection.replaceAudioEffectTargets,
   upsertDeviceRows: [
     ...projection.upsertDeviceRows,

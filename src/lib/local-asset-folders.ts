@@ -1,6 +1,6 @@
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { openLocalProjectDb, type LocalProjectAssetRow, type LocalProjectStoredValue } from '~/lib/local-project-db'
-import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
+import { withLocalProjectAssetLock, withLocalStorageRootLock } from '~/lib/local-project-asset-lock'
 import { z } from 'zod'
 
 type LocalAssetFolderRow = {
@@ -125,7 +125,7 @@ export const moveLocalAssetToFolder = async (
       folderId,
       updatedAt: timestamp,
     }
-    await db.put('assets', next)
+    await withLocalStorageRootLock(() => db.put('assets', next))
     notifyLocalProjectChanged(projectId)
     return next
   })

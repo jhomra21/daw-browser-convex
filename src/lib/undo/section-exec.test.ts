@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test'
 
-import { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { convexApi, convexClient } from '~/lib/convex'
 
@@ -30,6 +29,7 @@ const actions = {
   commitClipTiming: () => {},
   commitClipAudioWarp: () => {},
   commitClipFades: () => {},
+  commitClipMidi: () => {},
   rescheduleChangedClips: () => {},
   cancelTrackVolumeWrite: () => {},
   cancelTrackRoutingWrite: () => {},
@@ -74,7 +74,6 @@ test('compensates completed section children in reverse after a later child fail
     projectId: 'local:project-1',
     userId: 'local',
     persistLocalMix: (_projectId, _trackId, patch) => { if (patch.volume !== undefined) persisted.push(patch.volume) },
-    audioEngine: new AudioEngine(),
     grantTrackWrite: () => {},
     grantClipWrite: () => {},
     actions,
@@ -97,7 +96,6 @@ test('preserves the original section failure first when compensation fails', asy
         if (patch.volume === 0.5) throw new Error('compensation failure')
         if (patch.volume !== undefined) persisted.push(patch.volume)
       },
-      audioEngine: new AudioEngine(),
       grantTrackWrite: () => {},
       grantClipWrite: () => {},
       actions,

@@ -207,7 +207,7 @@
       "name": "@daw-browser/waveforms",
       "version": "0.0.0",
       "dependencies": {
-        "@daw-browser/audio-engine": "workspace:*",
+        "@daw-browser/shared": "workspace:*",
       },
     },
   },

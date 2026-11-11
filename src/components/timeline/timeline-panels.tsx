@@ -1,25 +1,30 @@
+import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery, PublicationJoin } from "~/lib/live-processor-control";
 import { type Component, Show, Suspense, createEffect, lazy } from 'solid-js'
 import { Button } from '~/components/ui/button'
-import type { AudioEngine, SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
-import { isLocalId, type AutomationEnvelope, type TrackInstrumentParams } from '@daw-browser/shared'
+import type { AudioEngine, EngineDisposition, SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
+import { isLocalId, type AutomationEnvelope, type AutomationTargetDeviceInstance, type TrackInstrumentParams } from '@daw-browser/shared'
 import { ExportProvider } from '~/context/export'
 import ExportProgressOverlay from '~/components/export/ExportProgressOverlay'
+import MidiClipEditor from '~/components/midi/MidiClipEditor'
+import type { MidiEditorNote } from '~/lib/midi-editor-grid'
 import EffectsPanel from '~/components/timeline/EffectsPanel'
 import SampleDetailPanel from '~/components/timeline/SampleDetailPanel'
+import TimelineBottomPanelFooter from '~/components/timeline/TimelineBottomPanelFooter'
+import TimelineBottomPanelShell, { type TimelineBottomPanelShellControls } from '~/components/timeline/TimelineBottomPanelShell'
 import ExportDialog from '~/components/timeline/ExportDialog'
 import type { OptimisticGrantWrite } from '~/lib/optimistic-grant-scope'
-import type { EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
+import type { EffectParamsCommitOptions, EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
+import type { NativeBuiltInParameterPayload } from '~/lib/desktop/native-built-in-parameter-mapper'
 import type { BpmDetectionService } from '~/lib/bpm-detection-service'
 import type { Clip, ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import type { ExternalProcessor } from '@daw-browser/external-plugins'
-import type { TimelineBottomPanelShellControls } from '~/components/timeline/TimelineBottomPanelShell'
 import type { TimelineDeviceInsertActions } from '~/components/timeline/timeline-device-insert-actions'
 import type { TimelinePlaybackRebuildIntent } from '~/hooks/useTimelinePlayback'
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from '~/components/timeline/create-effects-panel-controller'
 import type { ExportQueue } from '~/lib/export/export-queue'
 import type { TimelineExportService } from '~/lib/export/timeline-export-service'
 import type { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
-import type { createSamplerBufferSync } from '~/lib/sampler-buffer-sync'
+import type { createSamplerBufferSync, NativeInstrumentRetryIdentity } from '~/lib/sampler-buffer-sync'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type { NativeVstParameterQueue } from '~/lib/desktop/native-vst-parameter-queue'
 
@@ -53,6 +58,7 @@ export type TimelinePanelsProps = {
     audioEngine: AudioEngine
     samplerBufferSync: ReturnType<typeof createSamplerBufferSync>
     drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>
+    retryNativeInstrumentPreparation?: (identity: NativeInstrumentRetryIdentity) => Promise<void>
     spectrumProvider?: (targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void
     canWriteTrackRouting: (trackId: Track['id']) => boolean
     grantClipWrite: OptimisticGrantWrite
@@ -60,15 +66,18 @@ export type TimelinePanelsProps = {
     insertLocalClip: (trackId: Track['id'], clip: Clip) => void
     onClose: () => void
     onOpen: () => void
-    onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void
-    onStructuralPlaybackChange?: (targetId: Track['id'], next: TrackInstrumentParams) => void
+    onEffectParamsCommitted: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string, options?: EffectParamsCommitOptions) => void
+    onStructuralPlaybackChange?: (targetId: Track['id'], next: TrackInstrumentParams | undefined, edit?: LiveProcessorEditIdentity) => Promise<void>
     usesLegacyAudioEngine?: () => boolean
     projectGeneration?: () => number
-    onEffectParamsPreview?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void
-    onEffectParamsFlush?: (payload: EffectParamsCommitPayload<"eq" | "master-eq">) => void | Promise<void>
+    allocateProcessorEdit?: (payload: NativeBuiltInParameterPayload) => LiveProcessorEditIdentity | undefined
+    deliverProcessor?: (edit: LiveProcessorEditIdentity, gesture?: ProcessorDelivery["gesture"]) => DeliveryRegistration
+    applyPortableProcessor?: (edit: LiveProcessorEditIdentity) => Promise<EngineDisposition | undefined>
+    joinPublication?: (join: PublicationJoin) => DeliveryRegistration
     onPreviewNote?: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void
     onEffectInstanceParamsReplayChange?: (replay: EffectsPanelAudioEffects['replayInstanceParams'] | undefined) => void
-    onLocalSaveFailed?: (message: string) => void
+    onLocalSaveFailed?: (projectId: string, message: string) => void
+    onEffectError?: (title: string, message: string) => void
     onDeviceInsertActionsChange?: (actions: TimelineDeviceInsertActions) => void
     onExportSnapshotChange?: (snapshot: EffectsPanelExportSnapshot | undefined) => void
     onEffectChainElementChange?: (element: HTMLElement | undefined) => void
@@ -99,6 +108,25 @@ export type TimelinePanelsProps = {
     onChange: (clip: Clip, audioWarp: NonNullable<Clip['audioWarp']>) => Promise<boolean> | boolean | void
     onGainChange: (clip: Clip, gain: number) => Promise<boolean> | boolean | void
     onMarkerDragStateChange?: (dragging: boolean) => void
+    shell: TimelineBottomPanelShellControls
+    onClose: () => void
+    onHide: () => void
+  }
+  midiClipPanel: {
+    isOpen: boolean
+    clip?: Clip<AudioBuffer>
+    bpm: number
+    gridDenominator: number
+    trackId?: Track['id']
+    effectInstancesByOwnerKey: Record<string, AutomationTargetDeviceInstance[]>
+    userId?: string
+    projectId?: string
+    canWriteClip: (clipId: string) => boolean
+    onAuditionNote: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void
+    midiKeyboard: { isActive: (pitch: number) => boolean }
+    onLocalMidiSaved: (clipId: string, midi: Clip['midi']) => void
+    onNotesEdited: (clipId: string, from: MidiEditorNote[], to: MidiEditorNote[]) => void
+    onNoteDragStateChange: (dragging: boolean) => void
     shell: TimelineBottomPanelShellControls
     onClose: () => void
     onHide: () => void
@@ -178,6 +206,7 @@ const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
         audioEngine={panels().effectsPanel.audioEngine}
         samplerBufferSync={panels().effectsPanel.samplerBufferSync}
         drumRackBufferSync={panels().effectsPanel.drumRackBufferSync}
+        retryNativeInstrumentPreparation={panels().effectsPanel.retryNativeInstrumentPreparation}
         spectrumProvider={panels().effectsPanel.spectrumProvider}
         projectId={panels().effectsPanel.projectId}
         userId={panels().effectsPanel.userId}
@@ -190,11 +219,14 @@ const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
         onStructuralPlaybackChange={panels().effectsPanel.onStructuralPlaybackChange}
         usesLegacyAudioEngine={panels().effectsPanel.usesLegacyAudioEngine}
         projectGeneration={panels().effectsPanel.projectGeneration}
-        onEffectParamsPreview={panels().effectsPanel.onEffectParamsPreview}
-        onEffectParamsFlush={panels().effectsPanel.onEffectParamsFlush}
+        allocateProcessorEdit={panels().effectsPanel.allocateProcessorEdit}
+        deliverProcessor={panels().effectsPanel.deliverProcessor}
+        applyPortableProcessor={panels().effectsPanel.applyPortableProcessor}
+        joinPublication={panels().effectsPanel.joinPublication}
         onPreviewNote={panels().effectsPanel.onPreviewNote}
         onEffectInstanceParamsReplayChange={panels().effectsPanel.onEffectInstanceParamsReplayChange}
         onLocalSaveFailed={panels().effectsPanel.onLocalSaveFailed}
+        onEffectError={panels().effectsPanel.onEffectError}
         onDeviceInsertActionsChange={panels().effectsPanel.onDeviceInsertActionsChange}
         onExportSnapshotChange={panels().effectsPanel.onExportSnapshotChange}
         onEffectChainElementChange={panels().effectsPanel.onEffectChainElementChange}
@@ -227,6 +259,46 @@ const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
             onClose={panels().sampleDetailPanel.onClose}
             onHide={panels().sampleDetailPanel.onHide}
           />
+        )}
+      </Show>
+
+      <Show when={panels().midiClipPanel.isOpen && panels().midiClipPanel.clip}>
+        {(clip) => (
+          <TimelineBottomPanelShell
+            controls={panels().midiClipPanel.shell}
+            resizeLabel="Resize MIDI clip panel"
+            footer={
+              <TimelineBottomPanelFooter
+                activeTab="clip"
+                toggleLabel="Hide"
+                onEffectsTabClick={panels().midiClipPanel.onClose}
+                onToggle={panels().midiClipPanel.onHide}
+              />
+            }
+          >
+            <MidiClipEditor
+              clipId={clip().id}
+              clipName={clip().name || 'Clip'}
+              bpm={panels().midiClipPanel.bpm}
+              gridDenominator={panels().midiClipPanel.gridDenominator}
+              clipDurationSec={clip().duration}
+              midi={clip().midi}
+              userId={panels().midiClipPanel.userId}
+              projectId={panels().midiClipPanel.projectId}
+              canWrite={panels().midiClipPanel.canWriteClip(clip().id)}
+              onAuditionNote={panels().midiClipPanel.onAuditionNote}
+              midiKeyboard={panels().midiClipPanel.midiKeyboard}
+              onLocalMidiSaved={panels().midiClipPanel.onLocalMidiSaved}
+              onNotesEdited={panels().midiClipPanel.onNotesEdited}
+              onNoteDragStateChange={panels().midiClipPanel.onNoteDragStateChange}
+              trackId={panels().midiClipPanel.trackId}
+              effectInstances={
+                panels().midiClipPanel.trackId
+                  ? panels().midiClipPanel.effectInstancesByOwnerKey[panels().midiClipPanel.trackId ?? '']
+                  : undefined
+              }
+            />
+          </TimelineBottomPanelShell>
         )}
       </Show>
 

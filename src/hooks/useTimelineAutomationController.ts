@@ -102,7 +102,7 @@ type TimelineAutomationControllerOptions = {
   playheadSec: Accessor<number>;
   selectedTrackId: Accessor<Track["id"] | "">;
   pushHistory: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void;
-  onPersistenceError?: (error: Error) => void;
+  onPersistenceError?: (projectId: string, error: Error) => void;
 };
 
 export type TimelineWorkspaceAutomationModel = {
@@ -420,7 +420,6 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     }
   };
   const overrideAutomationTarget = (targetKey: string) => {
-    if (!options.isPlaying()) return;
     const envelope = automationEnvelopesByTargetKey().get(targetKey);
     if (!envelope?.enabled) return;
     setOverriddenAutomationTargetKeys((current) => {
@@ -563,7 +562,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       seededAutomationTargetKeys.add(targetKey);
       void persistedAutomation.commitEnvelope(envelope).catch((cause: unknown) => {
         seededAutomationTargetKeys.delete(targetKey);
-        options.onPersistenceError?.(cause instanceof Error ? cause : new Error("Automation could not be saved."));
+        options.onPersistenceError?.(rid, cause instanceof Error ? cause : new Error("Automation could not be saved."));
       });
     };
 
@@ -956,8 +955,9 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       byTargetKey: automationEnvelopesByTargetKey(),
       preview: persistedAutomation.previewEnvelope,
       commit: (envelope, targetKey) => {
+        const rid = options.projectId();
         void persistedAutomation.commitEnvelope(envelope, targetKey).catch((cause: unknown) => {
-          options.onPersistenceError?.(cause instanceof Error ? cause : new Error("Automation could not be saved."));
+          options.onPersistenceError?.(rid, cause instanceof Error ? cause : new Error("Automation could not be saved."));
         });
       },
       cancelPreview: persistedAutomation.cancelPreview,

@@ -12,12 +12,9 @@ export const listLatest = query({
     const rows = await ctx.db
       .query("projectMessages")
       .withIndex("by_room_createdAt", (q) => q.eq("projectId", projectId))
-      .collect();
-
-    const n = Math.max(1, Math.min(500, limit ?? 200));
-    const start = rows.length > n ? rows.length - n : 0;
-    const recent = rows.slice(start);
-    recent.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+      .order("desc")
+      .take(Math.floor(Math.max(1, Math.min(500, limit ?? 200))));
+    const recent = rows.reverse();
     return recent;
   },
 });

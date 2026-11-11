@@ -9,6 +9,7 @@ import {
   zoomRangeAtAnchor,
   type TimelineRange,
 } from '~/lib/timeline-view'
+import { WHEEL_IDLE_MS } from '~/lib/wheel-idle'
 import {
   createTimelineViewport,
   MAX_PIXELS_PER_SECOND,
@@ -30,6 +31,7 @@ type UseTimelineViewportOptions = {
   commitPixelsPerSecond: (value: number) => void
   durationSec: Accessor<number>
   canZoom: () => boolean
+  onManualNavigation?: () => void
 }
 
 type TimelineScrollElement = {
@@ -100,6 +102,7 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     if (!element || suppressScroll) return
     const deltaPx = element.scrollLeft - physicalAnchor
     if (Math.abs(deltaPx) < 0.5) return
+    options.onManualNavigation?.()
     const next = visibleStartAfterScrollDelta({
       visibleStartSec: visibleStartSec(),
       viewportWidthPx: viewportWidth(),
@@ -140,6 +143,7 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
   })
 
   const applyVisibleRange = (range: TimelineRange, commit: boolean, isWheelPreview = false) => {
+    options.onManualNavigation?.()
     const benchmarkStartedAt = beginPerformanceBenchmark()
     incrementPerformanceBenchmarkCounter('timeline.viewport-computations')
     const width = viewportWidth()
@@ -217,7 +221,7 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     wheelCommitTimeout = setTimeout(() => {
       wheelCommitTimeout = undefined
       options.commitPixelsPerSecond(previewedScale)
-    }, 150)
+    }, WHEEL_IDLE_MS)
   }
 
   const onWheel = (event: TimelineWheelEvent) => {

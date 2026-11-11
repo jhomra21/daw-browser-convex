@@ -30,6 +30,7 @@ import {
   REVERB_WET_MIN,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
+import { formatDeviceFrequency, formatDeviceHertz, formatDeviceMilliseconds, formatDevicePercent } from '~/lib/device-value-format'
 
 type ReverbProps = {
   params: ReverbParams
@@ -55,13 +56,13 @@ const normalizeDiffusionLowCut = (value: number) => Math.round(clamp(value, REVE
 const normalizeDiffusionHighCut = (value: number) => Math.round(clamp(value, REVERB_DIFFUSION_HIGH_CUT_HZ_MIN, REVERB_DIFFUSION_HIGH_CUT_HZ_MAX) / 100) * 100
 const normalizeStereoWidth = (value: number) => Math.round(clamp(value, REVERB_STEREO_WIDTH_MIN, REVERB_STEREO_WIDTH_MAX) * 100) / 100
 
-const formatPercent = (value: number) => `${Math.round(normalizeWet(value) * 100)}%`
-const formatUnitPercent = (value: number) => `${Math.round(normalizeUnitParam(value) * 100)}%`
+const formatPercent = (value: number) => formatDevicePercent(normalizeWet(value))
+const formatUnitPercent = (value: number) => formatDevicePercent(normalizeUnitParam(value))
 const formatSeconds = (value: number) => `${normalizeDecay(value).toFixed(1)}s`
-const formatMilliseconds = (value: number) => `${normalizePreDelay(value)}ms`
-const formatReflectionMilliseconds = (value: number) => `${normalizeReflectionModAmount(value).toFixed(1)}ms`
-const formatHertz = (value: number) => `${normalizeReflectionModRate(value).toFixed(2)}Hz`
-const formatFrequencyWithUnit = (value: number) => value >= 1000 ? `${(value / 1000).toFixed(1)}k Hz` : `${Math.round(value)} Hz`
+const formatMilliseconds = (value: number) => formatDeviceMilliseconds(normalizePreDelay(value), 0)
+const formatReflectionMilliseconds = (value: number) => formatDeviceMilliseconds(normalizeReflectionModAmount(value), 1)
+const formatHertz = (value: number) => formatDeviceHertz(normalizeReflectionModRate(value), 2)
+const formatFrequencyWithUnit = (value: number) => formatDeviceFrequency(value, 1)
 const formatStereoWidth = (value: number) => `${normalizeStereoWidth(value).toFixed(2)}x`
 const LOW_CUT_TOGGLE_HZ = 830
 const HIGH_CUT_TOGGLE_HZ = 6000

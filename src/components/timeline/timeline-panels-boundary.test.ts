@@ -25,4 +25,5 @@ test("keeps the complete panels model across panel replacement", async () => {
   expect(readStablePanels(stableContainer)).toBe(replacement);
   expect(readStablePanels(stableContainer).effectsPanel.projectId).toBe("project-b");
   expect(panelSource).toContain("const panels = () => props.panels");
+  expect(panelSource).toContain("<MidiClipEditor");
 });

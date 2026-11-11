@@ -100,7 +100,7 @@ const instrumentEventEnvelope = (events) => {
     view.setBigUint64(offset + 16, BigInt(event.sequence), true)
     view.setUint32(offset + 24, event.epoch, true)
     view.setUint32(offset + 28, event.frameOffset, true)
-    view.setUint32(offset + 32, event.type === 'note-on' ? 1 : event.type === 'note-off' ? 2 : event.type === 'sustain' ? 3 : 4, true)
+    view.setUint32(offset + 32, event.type === 'note-on' ? 1 : event.type === 'note-off' ? 2 : event.type === 'sustain' ? 3 : event.type === 'parameter' ? 5 : 4, true)
     view.setUint32(offset + 36, event.channel, true)
     view.setUint32(offset + 40, event.note, true)
     view.setFloat32(offset + 44, event.value, true)
@@ -154,8 +154,7 @@ export class DawPortableAudioCoreHost {
     this.scheduleInstrumentCursor = 0
     this.scheduleEventCount = 0
     this.scheduleInstrumentEventCount = 0
-    this.preparedInputBusCount = 0
-    this.liveInputBusCount = 0
+    this.stagedSchedule = null
     this.stagedInputBusCount = 0
     this.parameterOffset = 0
     this.parameterByteCount = 0
@@ -185,7 +184,15 @@ export class DawPortableAudioCoreHost {
     this.processorAutomationAckRequestIds = new Uint32Array(MAX_PROCESSOR_EVENT_ACKS)
     this.instrumentEventOffset = 0
     this.instrumentEventByteCount = 0
-    this.graphPrepareDiagnostics = null
+    this.liveInstrumentEvents = []
+    this.instrumentParameterValues = new Map()
+    this.instrumentAcks = []
+    this.instrumentLiveDeferred = false
+    this.instrumentEventView = null
+    this.graphPrepareEnvelope = null
+    this.graphPrepareSnapshot = null
+    this.graphPrepareAllocation = 0
+    this.graphPrepareResult = 0
     this.graphContinuity = null
     this.graphCancel = null
     this.preparedSnapshot = null
@@ -233,6 +240,7 @@ export class DawPortableAudioCoreHost {
   handleMessage(message) {
     if (!isRecord(message) || message.version !== PROTOCOL_VERSION) return this.fault('malformed-message')
     if (message.type === 'dispose') {
+      this.flushInstrumentAcks('rejected')
       this.releaseAllAssets()
       this.disposed = true
       this.close()
@@ -247,7 +255,7 @@ export class DawPortableAudioCoreHost {
         revision: this.revision,
         framesProcessed: this.framesProcessed,
         memoryBytes: this.memory ? this.memory.buffer.byteLength : 0,
-        graphPrepare: this.graphPrepareDiagnostics,
+        graphPrepare: this.graphPrepareDiagnostics(),
       })
       return
     }
@@ -284,13 +292,19 @@ export class DawPortableAudioCoreHost {
     }
     if (message.type === 'recording-capture-drain') return this.drainRecordingCapture()
     if (message.type === 'publish-graph' && Number.isInteger(message.requestId) && Number.isInteger(message.revision) && message.revision > this.revision) {
-      if (!this.preparedSnapshot || this.preparedSnapshot.revision !== message.revision || !this.configureInstruments(this.preparedSnapshot)) {
+      const staged = this.stagedSchedule
+      this.stagedSchedule = null
+      const prepared = this.preparedSnapshot !== null && this.preparedSnapshot.revision === message.revision
+      const continuityResult = prepared && this.graphContinuity && this.graphContinuity() === 0 ? 'fallback' : 'accepted'
+      // An adoption republishes onto the graph that is playing, so, as the native host does, it publishes only a
+      // revision the core can continue, and refuses before any instrument of the playing graph is reconfigured.
+      const refused = message.requireContinuity === true && continuityResult === 'fallback'
+      if (!prepared || refused || !this.configureInstruments(this.preparedSnapshot)) {
         if (this.graphCancel) this.graphCancel(message.revision)
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'rejected' })
-        this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision: message.revision, result: 'rejected' })
+        this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision: message.revision, result: refused ? 'fallback' : 'rejected' })
         return
       }
-      const continuityResult = this.graphContinuity && this.graphContinuity() === 0 ? 'fallback' : 'accepted'
       const publishResult = this.graphPublish ? this.graphPublish(message.revision) : -1
       if (publishResult !== 0) {
         if (this.graphCancel) this.graphCancel(message.revision)
@@ -303,14 +317,19 @@ export class DawPortableAudioCoreHost {
         })
         return
       }
-      this.flushProcessorEventAcks('rejected')
-      this.flushProcessorAutomationAcks('rejected')
-      this.processorOverrideCount = 0
-      this.processorOverrideActive.fill(0)
-      this.eventByteCount = 0
+      // An adoption keeps every target of the playing graph, so live edits in flight render on the next block and are
+      // acknowledged then. Any other publish starts a graph that owns no live state.
+      if (message.requireContinuity !== true) {
+        this.flushProcessorEventAcks('rejected')
+        this.flushProcessorAutomationAcks('rejected')
+        this.processorOverrideCount = 0
+        this.processorOverrideActive.fill(0)
+        this.eventByteCount = 0
+        this.resetInstrumentEvents(false)
+      }
       this.revision = message.revision
       this.publishedSnapshot = this.preparedSnapshot
-      this.liveInputBusCount = this.preparedInputBusCount
+      if (staged && staged.schedule.revision === message.revision) this.commitSchedule(staged, true)
       this.postMessage({
         version: PROTOCOL_VERSION,
         type: 'graph-continuity',
@@ -320,16 +339,23 @@ export class DawPortableAudioCoreHost {
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'published' })
       return
     }
+    // Prepare runs here, on the AudioWorklet rendering thread between render quanta (the processor's port.onmessage),
+    // where the native host prepares on its control thread. The core's prepare is bounded and allocates nothing after the
+    // first publish; at the core's maximum graph (64 nodes, 483 processors, 243 edges) it measured 0.4 ms p50 and
+    // 0.7 ms p95 against a 2.9 ms quantum at 44.1 kHz (bun; gated in portable-wasm-host.test.ts). So the backend
+    // encodes the envelope on the main thread and posts its bytes, and diagnostics are derived only when asked for.
     if (message.type === 'prepare-graph') {
       const snapshot = message.snapshot
       if (!Number.isInteger(message.requestId) || !snapshot || snapshot.version !== 1 || !Number.isInteger(snapshot.revision) || snapshot.revision < 1 || !Array.isArray(snapshot.nodes) || !Array.isArray(snapshot.edges)) return this.fault('malformed-message')
       if (!this.graphPrepare || !this.malloc || !this.free || !this.memory) return this.fault('initialization-failed')
-      let envelope
-      try {
-        envelope = graphEnvelope(snapshot)
-      } catch {
-        this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-prepared', requestId: message.requestId, revision: snapshot.revision, result: 'rejected' })
-        return
+      let envelope = message.envelope
+      if (!(envelope instanceof Uint8Array)) {
+        try {
+          envelope = graphEnvelope(snapshot)
+        } catch {
+          this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-prepared', requestId: message.requestId, revision: snapshot.revision, result: 'rejected' })
+          return
+        }
       }
       const envelopeView = new DataView(envelope.buffer, envelope.byteOffset, envelope.byteLength)
       if (!SUPPORTED_GRAPH_ENVELOPE_VERSIONS.has(envelopeView.getUint32(0, true))) {
@@ -343,18 +369,10 @@ export class DawPortableAudioCoreHost {
       }
       new Uint8Array(this.memory.buffer, allocation, envelope.byteLength).set(envelope)
       const result = this.graphPrepare(allocation, envelope.byteLength)
-      const view = envelopeView
-      const edgeOffset = 24 + snapshot.nodes.length * (envelopeView.getUint32(0, true) === GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY ? 136 : 132)
-      this.graphPrepareDiagnostics = {
-        byteLength: envelope.byteLength,
-        byteHash: byteHash(envelope),
-        header: Array.from({ length: 6 }, (_, index) => view.getUint32(index * 4, true)),
-        allocation,
-        nodeOffset: 24,
-        edgeOffset,
-        firstEdgeTargetProcessorIdPresent: snapshot.edges.length > 0 && view.getBigUint64(edgeOffset + 24, true) !== 0n,
-        result,
-      }
+      this.graphPrepareEnvelope = envelope
+      this.graphPrepareSnapshot = snapshot
+      this.graphPrepareAllocation = allocation
+      this.graphPrepareResult = result
       this.free(allocation)
       if (result !== 0) {
         if (this.graphCancel) this.graphCancel(snapshot.revision)
@@ -368,10 +386,6 @@ export class DawPortableAudioCoreHost {
         return
       }
       this.preparedSnapshot = snapshot
-      this.preparedInputBusCount = Math.min(
-        snapshot.nodes.reduce((count, node) => count + (node.kind === 'source' ? 1 : 0), 0),
-        MAX_INPUT_BUSES,
-      )
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-prepared', requestId: message.requestId, revision: snapshot.revision, result: 'prepared' })
       return
     }
@@ -493,7 +507,9 @@ export class DawPortableAudioCoreHost {
         return
       }
       this.flushPendingTransport('rejected')
+      const epochChanged = this.transportEpoch !== message.epoch
       this.transportEpoch = message.epoch
+      if (epochChanged) this.resetInstrumentEvents(true)
       this.transportRunning = message.running
       this.transportFrame = message.frame
       this.transportProcessOrigin = this.framesProcessed
@@ -512,22 +528,25 @@ export class DawPortableAudioCoreHost {
       if (!this.configureInstrument(message.nodeId, state)) return this.fault('core-error')
       return
     }
-    if (message.type === 'instrument-events') {
-      if (!Number.isInteger(message.epoch) || message.epoch !== this.transportEpoch || !Array.isArray(message.events) || message.events.length > 256) return this.fault('event-overflow')
-      let previousOffset = -1
-      let previousSequence = 0
-      for (const event of message.events) {
-        if (!event || !isString(event.nodeId)
-          || !Number.isInteger(event.noteId) || event.noteId < 1 || !Number.isInteger(event.sequence) || event.sequence < 1
-          || event.sequence <= previousSequence || !Number.isInteger(event.frameOffset) || event.frameOffset < previousOffset || event.frameOffset >= this.maxFramesPerBlock
-          || !['note-on', 'note-off', 'sustain', 'expression'].includes(event.type)
-          || !Number.isInteger(event.channel) || event.channel < 0 || event.channel > 15
-          || !Number.isInteger(event.note) || event.note < 0 || event.note > 127
-          || !Number.isFinite(event.value) || event.value < 0 || event.value > 1) return this.fault('malformed-message')
-        previousSequence = event.sequence
-        previousOffset = event.frameOffset
+    if (message.type === 'instrument-parameters') {
+      const ack = { version: PROTOCOL_VERSION, type: 'instrument-events-applied', requestId: message.requestId,
+        revision: message.revision, epoch: message.epoch, sequence: message.sequence, result: 'rejected' }
+      if (!Number.isSafeInteger(message.requestId) || !Number.isSafeInteger(message.sequence)
+        || message.requestId < 1 || message.sequence < 1
+        || message.revision !== this.revision || message.epoch !== this.transportEpoch
+        || this.instrumentAcks.length >= 256 || !Array.isArray(message.events)
+        || message.events.some(event => event.type !== 'parameter' || event.frameOffset !== 0)
+        || !this.queueInstrumentEvents(message)) {
+        this.postMessage(ack)
+        return
       }
-      return this.replaceRenderEnvelope('instrumentEvent', instrumentEventEnvelope(message.events))
+      ack.result = 'applied'
+      this.instrumentAcks.push(ack)
+      return
+    }
+    if (message.type === 'instrument-events') {
+      if (!this.queueInstrumentEvents(message)) this.fault('event-overflow')
+      return
     }
     if (message.type === 'install-schedule') {
       return this.installSchedule(message)
@@ -584,6 +603,54 @@ export class DawPortableAudioCoreHost {
       this.fault('initialization-failed')
       return false
     })
+  }
+
+  queueInstrumentEvents(message) {
+    if (!this.ready || message.epoch !== this.transportEpoch || !Array.isArray(message.events) || message.events.length > 256) return false
+    let previousOffset = -1
+    let previousSequence = 0
+    for (const event of message.events) {
+      if (!event || !isString(event.nodeId) || !Number.isSafeInteger(event.sequence) || event.sequence < 1
+        || !Number.isSafeInteger(event.noteId) || event.noteId < 1
+        || !Number.isInteger(event.frameOffset) || event.frameOffset < 0 || event.frameOffset >= this.maxFramesPerBlock
+        || !['note-on', 'note-off', 'sustain', 'expression', 'parameter'].includes(event.type)
+        || !Number.isInteger(event.channel) || event.channel < 0 || event.channel > 15
+        || !Number.isInteger(event.note) || event.note < 0 || event.note > 127 || !Number.isFinite(event.value)
+        || event.type !== 'parameter' && (event.value < 0 || event.value > 1)
+        || event.frameOffset < previousOffset || event.sequence <= previousSequence) return false
+      previousOffset = event.frameOffset
+      previousSequence = event.sequence
+    }
+    if (this.liveInstrumentEvents.length + message.events.length > 256) return false
+    const values = new Map(this.instrumentParameterValues)
+    for (const event of message.events) if (event.type === 'parameter') values.set(`${event.nodeId}:${event.note}`, event)
+    if (values.size > 256) return false
+    this.instrumentParameterValues = values
+    this.liveInstrumentEvents.push(...message.events.map(event => ({ ...event, epoch: message.epoch })))
+    this.liveInstrumentEvents.sort((a, b) => a.frameOffset - b.frameOffset || a.sequence - b.sequence)
+    this.replaceRenderEnvelope('instrumentEvent', instrumentEventEnvelope(this.liveInstrumentEvents))
+    return true
+  }
+
+  flushInstrumentAcks(result) {
+    // Ack objects are allocated at the message boundary, never in process().
+    for (let index = 0; index < this.instrumentAcks.length; index += 1) {
+      const ack = this.instrumentAcks[index]
+      ack.result = result
+      this.postMessage(ack)
+    }
+    this.instrumentAcks.length = 0
+  }
+
+  resetInstrumentEvents(replay) {
+    this.flushInstrumentAcks('rejected')
+    this.liveInstrumentEvents = replay
+      ? Array.from(this.instrumentParameterValues.values(), event => ({ ...event, epoch: this.transportEpoch }))
+      : []
+    this.liveInstrumentEvents.sort((a, b) => a.frameOffset - b.frameOffset || a.sequence - b.sequence)
+    this.instrumentLiveDeferred = false
+    if (!replay) this.instrumentParameterValues.clear()
+    this.replaceRenderEnvelope('instrumentEvent', instrumentEventEnvelope(this.liveInstrumentEvents))
   }
 
   initializeWasm(message) {
@@ -985,6 +1052,16 @@ export class DawPortableAudioCoreHost {
     return this.appendProcessorOverrideEvents(this.eventBufferView)
   }
 
+  // The value an installed stream gives one target at a frame: its last set, or where its last ramp stands.
+  automationValueAt(stream, target, frame) {
+    let value
+    for (const event of stream.events) {
+      if (event.target !== target || event.frame > frame) continue
+      value = event.ramp ? event.startValue + (Math.min(frame, event.endFrame) - event.startFrame) * event.valueStep : event.value
+    }
+    return value
+  }
+
   materializeCurrentAutomationValue(processorId, targets) {
     if (!this.eventOffset) return false
     const view = this.eventBufferView
@@ -995,18 +1072,10 @@ export class DawPortableAudioCoreHost {
     let count = view.getUint32(0, true)
     for (const target of targets) {
       let value
-      const streams = this.scheduleParameterStreams || []
-      for (const stream of streams) {
+      for (const stream of this.scheduleParameterStreams || []) {
         if (stream.instanceIdValue !== processorId) continue
-        for (let index = 0; index < stream.events.length; index += 1) {
-          const event = stream.events[index]
-          if (event.target !== target || event.frame > this.currentTransportFrame()) continue
-          if (event.ramp && this.currentTransportFrame() < event.endFrame) {
-            value = event.startValue + (this.currentTransportFrame() - event.startFrame) * event.valueStep
-          } else {
-            value = event.ramp ? event.startValue + (event.endFrame - event.startFrame) * event.valueStep : event.value
-          }
-        }
+        const streamValue = this.automationValueAt(stream, target, this.currentTransportFrame())
+        if (streamValue !== undefined) value = streamValue
       }
       if (value === undefined) continue
       if (count >= MAX_PROCESSOR_EVENTS) continue
@@ -1065,6 +1134,25 @@ export class DawPortableAudioCoreHost {
     if (this[offset]) this.free(this[offset])
     this[offset] = allocation
     this[byteCount] = envelope.byteLength
+    if (kind === 'instrumentEvent') this.instrumentEventView = new DataView(this.memory.buffer, allocation, envelope.byteLength)
+  }
+
+  graphPrepareDiagnostics() {
+    const envelope = this.graphPrepareEnvelope
+    const snapshot = this.graphPrepareSnapshot
+    if (!envelope || !snapshot) return null
+    const envelopeView = new DataView(envelope.buffer, envelope.byteOffset, envelope.byteLength)
+    const edgeOffset = 24 + snapshot.nodes.length * (envelopeView.getUint32(0, true) === GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY ? 136 : 132)
+    return {
+      byteLength: envelope.byteLength,
+      byteHash: byteHash(envelope),
+      header: Array.from({ length: 6 }, (_, index) => envelopeView.getUint32(index * 4, true)),
+      allocation: this.graphPrepareAllocation,
+      nodeOffset: 24,
+      edgeOffset,
+      firstEdgeTargetProcessorIdPresent: snapshot.edges.length > 0 && envelopeView.getBigUint64(edgeOffset + 24, true) !== 0n,
+      result: this.graphPrepareResult,
+    }
   }
 
   configureInstruments(snapshot) {
@@ -1106,14 +1194,18 @@ export class DawPortableAudioCoreHost {
 
   installSchedule(message) {
     const schedule = message.schedule
-    if (!this.ready || !this.preparedSnapshot || !Number.isInteger(message.requestId)
-      || !schedule || !Number.isInteger(schedule.revision) || schedule.revision !== this.revision
+    // A schedule for the prepared revision is staged: the publish of that revision swaps it in, so no block plays the
+    // new graph with the old schedule.
+    const staged = schedule && this.preparedSnapshot && schedule.revision === this.preparedSnapshot.revision && schedule.revision > this.revision
+    const snapshot = staged ? this.preparedSnapshot : this.publishedSnapshot
+    if (!this.ready || !snapshot || !Number.isInteger(message.requestId)
+      || !schedule || !Number.isInteger(schedule.revision) || (!staged && schedule.revision !== this.revision)
       || !Number.isInteger(schedule.transportEpoch) || schedule.transportEpoch !== this.transportEpoch
       || !Array.isArray(schedule.events) || schedule.events.length > 256) return this.scheduleResult(message, 'rejected')
     const targets = new Map()
     const parameterStreams = new Map()
     const instrumentEvents = []
-    for (const node of this.preparedSnapshot.nodes) {
+    for (const node of snapshot.nodes) {
       if (node.mixer) {
         for (const target of node.mixer.parameterTargets) {
           targets.set(`parameter:${node.id}::${target.id}`, {
@@ -1148,7 +1240,7 @@ export class DawPortableAudioCoreHost {
       const key = targetsInstrument
         ? `instrument:${event.target.trackId}`
         : event.target && event.target.scope === 'master'
-          ? `parameter:${this.preparedSnapshot.masterNodeId}:${event.target.effectInstanceId || ''}:${event.target.parameterId}`
+          ? `parameter:${snapshot.masterNodeId}:${event.target.effectInstanceId || ''}:${event.target.parameterId}`
           : event.target ? `parameter:${event.target.trackId}:${event.target.effectInstanceId || ''}:${event.target.parameterId}` : ''
       const malformedRamp = event.type === 'parameter-ramp'
         && (!Number.isSafeInteger(event.startFrame) || !Number.isSafeInteger(event.endFrame)
@@ -1219,12 +1311,37 @@ export class DawPortableAudioCoreHost {
         })
       }
     }
-    this.schedule = schedule
-    this.scheduleParameterStreams = Array.from(parameterStreams.values())
-      .sort((left, right) => left.instanceId - right.instanceId)
-    this.scheduleInstrumentEvents = instrumentEvents
-    this.resetScheduleCursors(this.currentTransportFrame())
+    const built = {
+      schedule,
+      parameterStreams: Array.from(parameterStreams.values()).sort((left, right) => left.instanceId - right.instanceId),
+      instrumentEvents,
+    }
+    if (staged) this.stagedSchedule = built
+    else this.commitSchedule(built, false)
     this.scheduleResult(message, 'installed')
+  }
+
+  commitSchedule({ schedule, parameterStreams, instrumentEvents }, seed) {
+    this.schedule = schedule
+    this.scheduleParameterStreams = parameterStreams
+    this.scheduleInstrumentEvents = instrumentEvents
+    const frame = this.currentTransportFrame()
+    this.resetScheduleCursors(frame)
+    if (seed) this.seedScheduleValues(frame)
+  }
+
+  // A publish drops the core's held mixer values for every retained node. Each automated target that is not ramping
+  // gets the value it holds now as a set at this frame, ahead of the events the schedule already has here.
+  seedScheduleValues(frame) {
+    for (const stream of this.scheduleParameterStreams) {
+      const seeds = []
+      for (const target of new Set(stream.events.slice(0, stream.cursor).map((event) => event.target))) {
+        const ramp = stream.rampTargets.get(target)
+        if (ramp !== undefined && stream.activeRamps[ramp].event) continue
+        seeds.push({ frame, ramp: false, target, value: this.automationValueAt(stream, target, frame) })
+      }
+      stream.events.splice(stream.cursor, 0, ...seeds)
+    }
   }
 
   scheduleResult(message, result) {
@@ -2021,21 +2138,39 @@ export class DawPortableAudioCoreHost {
         }
       }
     }
-    while (this.scheduleInstrumentCursor < this.scheduleInstrumentEvents.length
-      && this.scheduleInstrumentEvents[this.scheduleInstrumentCursor].frame < startFrame) {
-      this.scheduleInstrumentCursor += 1
-      this.scheduleCursor += 1
-    }
-    while (this.scheduleInstrumentCursor < this.scheduleInstrumentEvents.length) {
+    const liveView = this.instrumentEventByteCount > 0 ? this.instrumentEventView : null
+    const liveCount = liveView ? liveView.getUint32(0, true) : 0
+    // A full scheduled quantum owns all 256 slots. Defer the entire live
+    // envelope without moving its cursor or acknowledging it.
+    let scheduledEnd = this.scheduleInstrumentCursor
+    while (scheduledEnd < this.scheduleInstrumentEvents.length
+      && scheduledEnd - this.scheduleInstrumentCursor <= 256
+      && this.scheduleInstrumentEvents[scheduledEnd].frame < endFrame) scheduledEnd += 1
+    const liveLimit = this.instrumentLiveDeferred || scheduledEnd - this.scheduleInstrumentCursor + liveCount <= 256 ? liveCount : 0
+    this.materializedLiveInstrumentCount = liveLimit
+    let liveCursor = 0
+    while (this.scheduleInstrumentCursor < this.scheduleInstrumentEvents.length || liveCursor < liveLimit) {
+      if (instrumentCount >= 256) break
       const event = this.scheduleInstrumentEvents[this.scheduleInstrumentCursor]
-      if (event.frame >= endFrame) break
-      if (instrumentCount >= 256) return null
+      const liveFrame = liveCursor < liveLimit ? liveView.getUint32(4 + liveCursor * 48 + 28, true) : Infinity
+      // Merge immediate instrument controls with the schedule, rather than
+      // discarding them whenever a timeline schedule is materialized.
+      if (liveCursor < liveLimit && (!event || event.frame >= endFrame || liveFrame < Math.max(0, event.frame - startFrame)
+        || 256 - instrumentCount <= liveLimit - liveCursor)) {
+        for (let word = 0; word < 48; word += 4) {
+          this.scheduleInstrumentEventView.setUint32(4 + instrumentCount * 48 + word, liveView.getUint32(4 + liveCursor * 48 + word, true), true)
+        }
+        liveCursor += 1
+        instrumentCount += 1
+        continue
+      }
+      if (!event || event.frame >= endFrame) break
       const offset = 4 + instrumentCount * 48
       this.scheduleInstrumentEventView.setBigUint64(offset, event.nodeId, true)
       this.scheduleInstrumentEventView.setBigUint64(offset + 8, event.noteId, true)
       this.scheduleInstrumentEventView.setBigUint64(offset + 16, event.sequence, true)
       this.scheduleInstrumentEventView.setUint32(offset + 24, this.transportEpoch, true)
-      this.scheduleInstrumentEventView.setUint32(offset + 28, event.frame - startFrame, true)
+      this.scheduleInstrumentEventView.setUint32(offset + 28, Math.max(0, event.frame - startFrame), true)
       this.scheduleInstrumentEventView.setUint32(offset + 32, event.type, true)
       this.scheduleInstrumentEventView.setUint32(offset + 36, 0, true)
       this.scheduleInstrumentEventView.setUint32(offset + 40, event.pitch, true)
@@ -2045,6 +2180,12 @@ export class DawPortableAudioCoreHost {
       instrumentCount += 1
     }
     this.scheduleEventView.setUint32(0, processorCount, true)
+    // Live and timeline events have independent sequence domains. The core
+    // requires one increasing sequence for the merged render block.
+    for (let index = 0; index < instrumentCount; index += 1) {
+      this.scheduleInstrumentEventView.setUint32(4 + index * 48 + 16, index + 1, true)
+      this.scheduleInstrumentEventView.setUint32(4 + index * 48 + 20, 0, true)
+    }
     this.scheduleInstrumentEventView.setUint32(0, instrumentCount, true)
     this.scheduleEventCount = processorCount
     this.scheduleInstrumentEventCount = instrumentCount
@@ -2072,13 +2213,14 @@ export class DawPortableAudioCoreHost {
     if (this.pendingTransportRendered) this.flushPendingTransport('applied')
     const frames = output[0] ? output[0].length : 0
     if (frames > this.maxFramesPerBlock) {
+      this.flushInstrumentAcks('rejected')
       this.flushPendingTransport('rejected')
       for (let channel = 0; channel < output.length; channel += 1) output[channel].fill(0)
       return true
     }
     const inputBusCount = Math.min(inputs.length, MAX_INPUT_BUSES)
     const stagedInputBusCount = Math.min(
-      Math.max(inputBusCount, this.liveInputBusCount, this.recordingCaptureActive ? this.recordingInputBusCount : 0),
+      Math.max(inputBusCount, this.recordingCaptureActive ? this.recordingInputBusCount : 0),
       MAX_INPUT_BUSES,
     )
     const busesToWrite = Math.max(stagedInputBusCount, this.stagedInputBusCount)
@@ -2111,6 +2253,7 @@ export class DawPortableAudioCoreHost {
       }
     }
     if (!this.prepareLiveProcessorEvents()) {
+      this.flushInstrumentAcks('rejected')
       this.flushPendingTransport('rejected')
       this.fault('event-overflow')
       for (let channel = 0; channel < output.length; channel += 1) output[channel].fill(0)
@@ -2118,6 +2261,7 @@ export class DawPortableAudioCoreHost {
     }
     const materialized = this.materializeSchedule(startFrame, frames)
     if (materialized === null) {
+      this.flushInstrumentAcks('rejected')
       this.flushPendingTransport('rejected')
       this.resetScheduleCursors(startFrame)
       this.flushProcessorEventAcks('rejected')
@@ -2126,6 +2270,7 @@ export class DawPortableAudioCoreHost {
       return true
     }
     if (materialized && !this.mergeLiveProcessorEvents()) {
+      this.flushInstrumentAcks('rejected')
       this.flushPendingTransport('rejected')
       this.resetScheduleCursors(startFrame)
       this.flushProcessorEventAcks('rejected')
@@ -2135,12 +2280,16 @@ export class DawPortableAudioCoreHost {
       return true
     }
     if (!materialized) this.sortProcessorEvents(this.eventBufferView)
-    const eventOffset = materialized ? this.scheduleEventOffset : this.eventOffset
+    // The core rejects a buffer pointer that comes with no bytes.
+    const eventOffset = materialized ? this.scheduleEventOffset : this.eventByteCount ? this.eventOffset : 0
     const eventByteCount = materialized ? 4 + this.scheduleEventCount * 20 : this.eventByteCount
-    const instrumentEventOffset = materialized ? this.scheduleInstrumentEventOffset : this.instrumentEventOffset
+    const instrumentEventOffset = materialized ? this.scheduleInstrumentEventOffset : this.instrumentEventByteCount ? this.instrumentEventOffset : 0
     const instrumentEventByteCount = materialized ? 4 + this.scheduleInstrumentEventCount * 48 : this.instrumentEventByteCount
     const result = this.coreProcess(frames, stagedInputBusCount, CHANNEL_COUNT, this.inputPointerOffset, this.outputPointerOffset, this.revision, this.parameterOffset, this.parameterByteCount, eventOffset, eventByteCount, instrumentEventOffset, instrumentEventByteCount)
     if (result !== 0) {
+      this.flushInstrumentAcks('rejected')
+      this.instrumentEventByteCount = 0
+      this.liveInstrumentEvents.length = 0
       this.flushPendingTransport('rejected')
       this.flushProcessorEventAcks('rejected')
       this.flushProcessorAutomationAcks('rejected')
@@ -2148,7 +2297,14 @@ export class DawPortableAudioCoreHost {
       return true
     }
     this.eventByteCount = 0
-    this.instrumentEventByteCount = 0
+    // At most one full scheduled block may defer controls. On the next block,
+    // reserve their slots and retain excess scheduled notes at their cursor.
+    this.instrumentLiveDeferred = materialized && this.liveInstrumentEvents.length > 0 && this.materializedLiveInstrumentCount === 0
+    if (!materialized || this.materializedLiveInstrumentCount > 0 || this.liveInstrumentEvents.length === 0) {
+      this.instrumentEventByteCount = 0
+      this.liveInstrumentEvents.length = 0
+      this.flushInstrumentAcks('applied')
+    }
     this.flushProcessorEventAcks('applied')
     this.flushProcessorAutomationAcks('applied')
     for (let frame = 0; frame < frames; frame += 1) {

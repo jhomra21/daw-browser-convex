@@ -91,6 +91,10 @@ const cancelled = (id: string): HostResponse => ({
 const mountedProjectRequired = () => hostError("unavailable", "A mounted local project is required.")
 const controlUnavailable = () => hostError("cancelled", "The local control request was cancelled.")
 const controlFailure = () => hostError("internal", "The local control request could not be completed.")
+const committedButNotReconciled = () => hostError(
+  "internal",
+  "The change was saved, but the open project could not refresh. Read a fresh snapshot before making another change.",
+)
 const safeRuntimeFaults = (runtime: ReturnType<AudioEngine["getRuntimeSnapshot"]>["runtimeFaults"]) => ({
   ...runtime,
   last: runtime.last === null
@@ -269,12 +273,42 @@ const safeImportStatus = (job: ReturnType<ImportJobQueue["status"]>) => {
     id: job.id,
     name: job.name,
   }
+  const safeMessage = (message: string) => {
+    const structuredMessage = job.summary?.outcomes
+      .reduce((safe, outcome) => {
+        const fileName = outcome.fileName.split(/[/\\]/u).at(-1)
+        return fileName && outcome.fileName !== fileName
+          ? safe.replaceAll(outcome.fileName, fileName)
+          : safe
+      }, message) ?? message
+    return structuredMessage
+      .replace(/https?:\/\/\S+/gu, "[url]")
+      // Multiple paths on one line may redact intervening text too, conservatively preventing directory leaks.
+      .replace(/(?:^|(?<=[\s("'=:]))(?:\\\\|file:\/\/|~\/|[A-Za-z]:[\\/]|\/)[^\r\n]*[\\/]/gu, "[path]/")
+      .replace(/[\r\n\t]+/gu, " ")
+      .trim()
+      .slice(0, 512)
+  }
   if (job.summary) {
     safeJob.count = job.summary.outcomes.filter((outcome) => (
       outcome.status === "created" || outcome.status === "queued"
     )).length
+    const failures = job.summary.outcomes
+      .filter((outcome) => outcome.status === "failed" || outcome.status === "local-save-failed" || outcome.status === "skipped")
+      .slice(0, 8)
+      .flatMap((outcome) => {
+        const message = safeMessage(outcome.message ?? "Audio import failed.")
+        const fileName = outcome.fileName.split(/[/\\]/u).at(-1)?.slice(0, 256)
+        return fileName && message ? [`${fileName} (${message})`] : []
+      })
+    if (failures.length > 0) {
+      const failureCount = job.summary.outcomes.filter((outcome) => outcome.status === "failed" || outcome.status === "local-save-failed" || outcome.status === "skipped").length
+      const remaining = failureCount - failures.length
+      const summary = `${failureCount} files failed or skipped: ${failures.join("; ")}${remaining > 0 ? `; and ${remaining} more` : ""}`
+      safeJob.error = summary.slice(0, 512)
+    }
   }
-  if (job.error) safeJob.error = job.error.slice(0, 512)
+  if (job.error && safeJob.error === undefined) safeJob.error = safeMessage(job.error) || "Audio import failed."
   return { status: job.status, job: safeJob }
 }
 
@@ -444,6 +478,16 @@ export const createAttachedHostController = (input: {
           },
         },
       })
+      if (request_.operation === "control.commit" && input.reconcileMountedLocalTimeline) {
+        // Retire reflected UI overlays before this commit can supersede their
+        // persisted values. A post-commit snapshot alone can miss that echo.
+        await flushLocalProjectPendingWrites(mountedProjectId)
+        await input.reconcileMountedLocalTimeline({
+          projectId: mountedProjectId,
+          mountedProjectGeneration: mountedGeneration,
+          signal: request_.signal,
+        })
+      }
       const result = await invokeCanonicalControl(invoker, request_.operation, requestInput)
       if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
         return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectError(request_, mountedProjectId) }
@@ -484,17 +528,20 @@ export const createAttachedHostController = (input: {
         } catch {}
       }
       if (request_.operation === "control.commit" && input.reconcileMountedLocalTimeline) {
-        try {
-          const commitResult = controlCommitResultSchemaV1.safeParse(result)
-          if (commitResult.success && commitResult.data.applied && !commitResult.data.idempotencyReplay
-            && await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+        const commitResult = controlCommitResultSchemaV1.safeParse(result)
+        if (commitResult.success && commitResult.data.applied && !commitResult.data.idempotencyReplay
+          && await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+          try {
             await input.reconcileMountedLocalTimeline({
               projectId: mountedProjectId,
               mountedProjectGeneration: mountedGeneration,
               signal: request_.signal,
             })
+          } catch {
+            if (request_.signal.aborted) return { id: request_.id, error: controlUnavailable() }
+            return { id: request_.id, error: committedButNotReconciled() }
           }
-        } catch {}
+        }
       }
       const rendererProtocolVersion = (
         request_.operation === "control.capabilities"
@@ -814,6 +861,11 @@ export const createAttachedHostController = (input: {
       } else {
         const runtime = input.audioEngine.getRuntimeSnapshot()
         const recording = getRecordingDiagnostics()
+        // V1 cannot represent native spool ownership. Preserve its existing
+        // schema rather than disguising native capture as SAB or transferable.
+        if (recording.transport === "native-spool") {
+          return { id: request_.id, error: hostError("unavailable", "Native recording diagnostics require diagnostics.snapshot.v2.") }
+        }
         result = {
           audio: { state: runtime.state, sampleRate: runtime.sampleRate ?? null },
           recording: { transport: recording.transport, capturedFrames: recording.capturedFrames, droppedFrames: recording.droppedFrames, deviceLost: recording.deviceLost },

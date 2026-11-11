@@ -22,6 +22,7 @@ export type ClipFadeOverlayClip = {
 
 type ClipFadeOverlayProps = {
   clip: FadeOverlayInput
+  bpm: number
   canEdit: Accessor<boolean>
   onCommit: (fades: ClipFades, baseline: ClipFades) => void
 }
@@ -322,7 +323,7 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
             aria-valuemin={0}
             aria-valuemax={props.clip.duration}
             aria-valuenow={endpointValue('fadeInStart')}
-            aria-valuetext={clipFadeControlValueText(currentFades(), 'fadeInStart')}
+            aria-valuetext={clipFadeControlValueText(currentFades(), 'fadeInStart', props.bpm)}
             class="pointer-events-auto absolute bottom-0 z-40 size-4 -translate-x-1/2 translate-y-1/2 cursor-ew-resize rounded-full bg-transparent touch-none"
             style={{ left: `${endpointPosition('fadeInStart')}%` }}
             on:pointerdown={(event) => begin('fadeIn', 'fadeInStart', event)}
@@ -338,7 +339,7 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
             aria-valuemin={0}
             aria-valuemax={props.clip.duration}
             aria-valuenow={endpointValue('fadeInEnd')}
-            aria-valuetext={clipFadeControlValueText(currentFades(), 'fadeInEnd')}
+            aria-valuetext={clipFadeControlValueText(currentFades(), 'fadeInEnd', props.bpm)}
             class="pointer-events-auto absolute top-0 z-40 size-4 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-full bg-transparent touch-none"
             style={{ left: `${endpointPosition('fadeInEnd')}%` }}
             on:pointerdown={(event) => begin('fadeIn', 'fadeInEnd', event)}
@@ -354,7 +355,7 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
             aria-valuemin={0}
             aria-valuemax={props.clip.duration}
             aria-valuenow={endpointValue('fadeOutStart')}
-            aria-valuetext={clipFadeControlValueText(currentFades(), 'fadeOutStart')}
+            aria-valuetext={clipFadeControlValueText(currentFades(), 'fadeOutStart', props.bpm)}
             class="pointer-events-auto absolute top-0 z-40 size-4 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize rounded-full bg-transparent touch-none"
             style={{ left: `${endpointPosition('fadeOutStart')}%` }}
             on:pointerdown={(event) => begin('fadeOut', 'fadeOutStart', event)}
@@ -370,7 +371,7 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
             aria-valuemin={0}
             aria-valuemax={props.clip.duration}
             aria-valuenow={endpointValue('fadeOutEnd')}
-            aria-valuetext={clipFadeControlValueText(currentFades(), 'fadeOutEnd')}
+            aria-valuetext={clipFadeControlValueText(currentFades(), 'fadeOutEnd', props.bpm)}
             class="pointer-events-auto absolute bottom-0 z-40 size-4 -translate-x-1/2 translate-y-1/2 cursor-ew-resize rounded-full bg-transparent touch-none"
             style={{ left: `${endpointPosition('fadeOutEnd')}%` }}
             on:pointerdown={(event) => begin('fadeOut', 'fadeOutEnd', event)}

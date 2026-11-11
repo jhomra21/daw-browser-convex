@@ -28,7 +28,7 @@ export const portableAudioCoreWorklet = {
   modulePath: 'audio-worklets/daw-portable-audio-core-processor-v2.js',
 }
 
-export const portableAudioCoreWasmManifest = {
+const portableAudioCoreWasmManifest = {
   manifestPath: 'audio-core/daw-audio-core.manifest.json',
 }
 

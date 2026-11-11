@@ -15,6 +15,7 @@ import {
   measurePerformanceBenchmark,
 } from "~/lib/performance-benchmark-telemetry";
 import { createClipVisualColors, resolveClipColor } from "~/lib/clip-color";
+import { isEventFromDomDescendant } from "~/lib/pointer-event-target";
 import { LANE_HEIGHT } from "~/lib/timeline-utils";
 import { getTimelineClipViewportSlice } from "~/lib/timeline-viewport-geometry";
 import { waveformCanvasSize } from "~/lib/waveform-canvas";
@@ -109,6 +110,9 @@ let lastClipTap:
 let lastClipDoubleOpen:
   | ClipOpenState
   | undefined;
+// Modifier clicks select only: they never arm a double-tap or open the clip.
+const isModifiedClipPress = (event: Pick<MouseEvent, "shiftKey" | "ctrlKey" | "metaKey">) =>
+  event.shiftKey || event.ctrlKey || event.metaKey;
 
 const ClipComponent: Component<ClipComponentProps> = (props) => {
   const appPreferences = useAppPreferences();
@@ -527,29 +531,36 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
         ...clipVisualColors(),
       }}
       onPointerDown={(e) => {
+        if (!isEventFromDomDescendant(e)) return;
         if (e.button !== 0) {
           e.stopPropagation();
           selectedTapStart = undefined;
           return;
         }
-        if (e.detail >= 2 || isDoubleTap(e)) {
+        const modified = isModifiedClipPress(e);
+        // A modified press must not leave a stale tap that turns the next plain click into a double-tap.
+        if (modified) lastClipTap = undefined;
+        if (!modified && (e.detail >= 2 || isDoubleTap(e))) {
           e.stopPropagation();
           e.preventDefault();
           selectedTapStart = undefined;
           openFromDoubleTap();
           return;
         }
-        selectedTapStart = props.isSelected
+        selectedTapStart = props.isSelected && !modified
           ? { x: e.clientX, y: e.clientY, at: performance.now() }
           : undefined;
         props.onPointerDown(props.trackId, props.clip.id, e);
       }}
       onDblClick={(e) => {
+        if (!isEventFromDomDescendant(e)) return;
+        if (isModifiedClipPress(e)) return;
         e.stopPropagation();
         e.preventDefault();
         openFromDoubleTap();
       }}
       onPointerUp={(e) => {
+        if (!isEventFromDomDescendant(e)) return;
         if (e.button !== 0) {
           e.stopPropagation();
           selectedTapStart = undefined;
@@ -606,6 +617,7 @@ const ClipComponent: Component<ClipComponentProps> = (props) => {
       </Show>
       <ClipFadeOverlay
         clip={fadeOverlayInput()}
+        bpm={props.bpm}
         canEdit={() => props.canEditFades()}
         onCommit={(fades, baseline) => props.onCommitFades(props.clip.id, fades, baseline)}
       />

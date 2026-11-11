@@ -1,5 +1,54 @@
 import { expect, test } from 'bun:test'
 import { createSampledInstrumentRegionBudget } from './sampled-instrument-region-budget'
+import { nativeInstrumentBudgetPolicy } from './desktop/native-instrument-budget-policy'
+
+test('native policy matches the host fraction and accounts resident, renderer, export and replacement ownership', () => {
+  const policy = nativeInstrumentBudgetPolicy(18 * 1024 ** 3)
+  expect(policy).toEqual({ deviceDecodedBytes: 1024 ** 3, aggregateBytes: 18 * 1024 ** 3 / 8 })
+  expect(() => nativeInstrumentBudgetPolicy(0)).toThrow()
+  const budget = createSampledInstrumentRegionBudget(24)
+  const buffer = new TestAudioBuffer()
+  const live = budget.createScope('live')
+  live.lease([{ key: 'pcm', buffer, bytes: 8 }], true)
+  live.set('resident', 8, () => undefined)
+  const exporting = budget.createScope('export')
+  exporting.lease([{ key: 'pcm', buffer, bytes: 8 }])
+  exporting.set('resident', 8, () => undefined)
+  expect(budget.totalBytes()).toBe(24)
+  const replacement = budget.createScope('replacement')
+  expect(() => replacement.lease([{ key: 'next', buffer: new TestAudioBuffer(), bytes: 8 }])).toThrow('aggregate')
+  replacement.release()
+  exporting.release()
+  expect(budget.totalBytes()).toBe(16)
+  live.release()
+  expect(budget.totalBytes()).toBe(0)
+})
+
+test('keeps the co-shipped host admission backstop aligned with the native policy', async () => {
+  const host = await Bun.file(new URL('../../native/audio-host-macos/src/audio-host.cpp', import.meta.url)).text()
+  expect(host).toContain('bytes / 8 : 0')
+  expect(host).toContain('kInstrumentDeviceBytes = 1ULL << 30')
+  expect(nativeInstrumentBudgetPolicy(16 * 1024 ** 3)).toEqual({
+    deviceDecodedBytes: 1024 ** 3, aggregateBytes: 2 * 1024 ** 3,
+  })
+})
+
+test('native physical leases keep decoded cache registrations from eviction until retirement', () => {
+  const budget = createSampledInstrumentRegionBudget(8)
+  const buffer = new TestAudioBuffer()
+  let evictions = 0
+  budget.set('decoded', 8, () => { evictions += 1 }, buffer)
+  const live = budget.createScope('native')
+  live.lease([{ key: 'pcm', buffer, bytes: 8 }], true)
+  expect(() => budget.reserve('replacement', 8)).toThrow('aggregate')
+  expect(evictions).toBe(0)
+  expect(budget.keys()).toContain('decoded')
+  live.release()
+  const reservation = budget.reserve('replacement', 8)
+  expect(evictions).toBe(1)
+  reservation.release()
+  expect(budget.totalBytes()).toBe(0)
+})
 
 class TestAudioBuffer implements AudioBuffer {
   readonly duration = 1

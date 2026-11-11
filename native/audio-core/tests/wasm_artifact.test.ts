@@ -15,6 +15,7 @@ import {
   type PortableModulationKind,
 } from './graph-parity-fixtures'
 import type { ReverbProcessorState } from '../../../packages/audio-core-contract/src/index'
+import { createDelayChainState } from '../../../packages/audio-engine/src/effects/delay-chain-state'
 import { portableWasmCapabilityMatrix } from '../../../packages/audio-engine/src/backends/portable-wasm-capabilities'
 import type { JsonValue } from '../../../packages/shared/src/json-value'
 import { computePortableWasmSourceHash } from '../scripts/portable-wasm-source-hash'
@@ -209,8 +210,9 @@ const renderLegacyModulationFixture = async (
 const maximumDifference = (
   left: readonly Float32Array[],
   right: readonly Float32Array[],
+  startFrame = 0,
 ) => left.reduce((maximum, plane, channel) => plane.reduce((channelMaximum, sample, frame) =>
-  Math.max(channelMaximum, Math.abs(sample - (right[channel]?.[frame] ?? 0))), maximum), 0)
+  frame < startFrame ? channelMaximum : Math.max(channelMaximum, Math.abs(sample - (right[channel]?.[frame] ?? 0))), maximum), 0)
 
 type LegacyDynamicsProcessor = {
   port: LegacyModulationPort
@@ -367,6 +369,11 @@ const renderLegacySpectralFixture = async (
   const render = (sourceInput: Float32Array, target: readonly Float32Array[]) => {
     let frameOffset = 0
     for (const frames of partitions) {
+      for (const edit of spectral.enabledEdits ?? []) {
+        if (edit.frame === frameOffset) {
+          processor.port.onmessage?.({ data: { type: 'configure', version: 1, state: { ...spectral.state, enabled: edit.enabled } } })
+        }
+      }
       const inputs = Array.from({ length: fixture.inputBusCount }, (_, bus) =>
         Array.from({ length: fixture.channelCount }, (_, channel) => {
           const plane = bus * fixture.channelCount + channel
@@ -461,15 +468,45 @@ const delayParameterValues = (
   return undefined
 }
 
+// Just enough of a BaseAudioContext for the shipped delay chain to be built from.
+const legacyDelayContext = () => {
+  const param = () => ({ value: 0 })
+  const node = () => Object.create(null)
+  return Object.assign(Object.create(null), {
+    createGain: () => Object.assign(node(), { gain: param() }),
+    createDelay: () => Object.assign(node(), { delayTime: param() }),
+    createBiquadFilter: () => Object.assign(node(), { frequency: param(), Q: param(), gain: param() }),
+    createChannelSplitter: node,
+    createChannelMerger: node,
+  })
+}
+
 /**
  * Test-only reference for the shipped Web Audio DelayNode -> highpass Biquad ->
- * lowpass Biquad graph.
+ * lowpass Biquad graph. Toggles go through the shipped chain state, whose chain is
+ * the graph that is running (or none), so what a disable or enable does to the
+ * delay's history is the product's, not this reference's.
  */
 const renderLegacyDelayFixture = (
   fixture: PortableGraphParityFixture,
   delay: PortableLegacyDelayFixture,
 ) => {
   const state = delay.state
+  const context = legacyDelayContext()
+  const lifecycle = createDelayChainState()
+  const setEnabled = (enabled: boolean) => lifecycle.set(context, {
+    enabled,
+    mode: 'time',
+    timeMs: state.delayMs,
+    syncDivision: '1/8',
+    feedback: state.feedback,
+    dryWet: state.dryWet,
+    pingPong: state.pingPong,
+    filterEnabled: state.filterEnabled,
+    lowCutHz: state.lowCutHz,
+    highCutHz: state.highCutHz,
+  }, 120)
+  setEnabled(state.enabled)
   const delayValues = delayParameterValues(fixture, 5)
   const feedbackValues = delayParameterValues(fixture, 6)
   const dryWetValues = delayParameterValues(fixture, 7)
@@ -477,12 +514,33 @@ const renderLegacyDelayFixture = (
   const highCutValues = delayParameterValues(fixture, 9)
   const maximumDelayMs = Math.max(state.delayMs, ...(delayValues ?? []))
   const bufferLength = Math.ceil(Math.min(3_000, maximumDelayMs) * fixture.sampleRateHz / 1_000) + 2
-  const buffers = Array.from({ length: fixture.channelCount }, () => new Float64Array(bufferLength))
-  const highpassStates = Array.from({ length: fixture.channelCount }, (): BiquadState => ({ x1: 0, x2: 0, y1: 0, y2: 0 }))
-  const lowpassStates = Array.from({ length: fixture.channelCount }, (): BiquadState => ({ x1: 0, x2: 0, y1: 0, y2: 0 }))
+  const emptyHistory = () => ({
+    buffers: Array.from({ length: fixture.channelCount }, () => new Float64Array(bufferLength)),
+    highpassStates: Array.from({ length: fixture.channelCount }, (): BiquadState => ({ x1: 0, x2: 0, y1: 0, y2: 0 })),
+    lowpassStates: Array.from({ length: fixture.channelCount }, (): BiquadState => ({ x1: 0, x2: 0, y1: 0, y2: 0 })),
+  })
+  let running = lifecycle.chain()
+  let { buffers, highpassStates, lowpassStates } = emptyHistory()
   const output = Array.from({ length: fixture.channelCount }, () => new Float32Array(fixture.frames))
   let write = 0
   for (let frame = 0; frame < fixture.frames; frame += 1) {
+    for (const edit of delay.enabledEdits ?? []) {
+      if (edit.frame === frame) setEnabled(edit.enabled)
+    }
+    const chain = lifecycle.chain()
+    // A chain the state built anew starts from empty lines.
+    if (chain !== running) {
+      running = chain
+      ;({ buffers, highpassStates, lowpassStates } = emptyHistory())
+      write = 0
+    }
+    if (!chain) {
+      for (let channel = 0; channel < fixture.channelCount; channel += 1) {
+        const plane = output[channel]
+        if (plane) plane[frame] = fixture.input[channel * fixture.frames + frame] ?? 0
+      }
+      continue
+    }
     const delayFrames = Math.max(1, Math.min(3_000, delayValues?.[frame] ?? state.delayMs) * fixture.sampleRateHz / 1_000)
     const delayBase = Math.floor(write - delayFrames)
     const delayFraction = write - delayFrames - delayBase
@@ -507,8 +565,12 @@ const renderLegacyDelayFixture = (
       const buffer = buffers[channel]
       if (buffer) buffer[write] = dry + feedback * Math.max(0, Math.min(0.95, feedbackValues?.[frame] ?? state.feedback))
       const plane = output[channel]
-      const dryWet = Math.max(0, Math.min(1, dryWetValues?.[frame] ?? state.dryWet))
-      if (plane) plane[frame] = dry * (1 - dryWet) + (wet[channel] ?? 0) * dryWet
+      // The chain's own gains: wet only while enabled, dry alone otherwise.
+      const wetGain = chain.enabled
+        ? Math.max(0, Math.min(1, dryWetValues?.[frame] ?? chain.wetGain.gain.value))
+        : chain.wetGain.gain.value
+      const dryGain = chain.enabled ? 1 - wetGain : chain.dryGain.gain.value
+      if (plane) plane[frame] = dry * dryGain + (wet[channel] ?? 0) * wetGain
     }
     write = (write + 1) % bufferLength
   }
@@ -1252,7 +1314,7 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
       }
       if (fixture.legacyModulation) {
         const legacyOutput = await renderLegacyModulationFixture(fixture, fixture.legacyModulation)
-        const legacyDifference = maximumDifference(output, legacyOutput)
+        const legacyDifference = maximumDifference(output, legacyOutput, fixture.legacyStartFrame)
         const legacyTolerance = fixture.legacyTolerance ?? 5e-4
         if (legacyDifference > legacyTolerance) {
           throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
@@ -1280,7 +1342,7 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
       }
       if (fixture.legacyDelay) {
         const legacyOutput = renderLegacyDelayFixture(fixture, fixture.legacyDelay)
-        const legacyDifference = maximumDifference(output, legacyOutput)
+        const legacyDifference = maximumDifference(output, legacyOutput, fixture.legacyStartFrame)
         const legacyTolerance = fixture.legacyTolerance ?? 5e-4
         if (legacyDifference > legacyTolerance) {
           throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
@@ -1302,7 +1364,7 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
       }
       if (fixture.legacySpectral) {
         const legacyOutput = await renderLegacySpectralFixture(fixture, fixture.legacySpectral)
-        const legacyDifference = maximumDifference(output, legacyOutput)
+        const legacyDifference = maximumDifference(output, legacyOutput, fixture.legacyStartFrame)
         const legacyTolerance = fixture.legacyTolerance ?? 5e-4
         if (legacyDifference > legacyTolerance) {
           throw new Error(`${fixture.name} portable/legacy difference ${legacyDifference} exceeded ${legacyTolerance}.`)
@@ -1315,7 +1377,8 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
           }
         }
       }
-      if (fixture.blockPartitions) {
+      // Graph edits land on partition boundaries, so there is no unpartitioned render to compare.
+      if (fixture.blockPartitions && !fixture.graphEdits) {
         const referenceBytes = encodePortableGraphParityFixture({
           ...fixture,
           maxFramesPerBlock: fixture.frames,
@@ -1347,7 +1410,9 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
       exports.free(allocation)
     }
   }
-}, 20_000)
+// Native fixtures initialize the complete stateful-spectral retention capacity.
+// Keep the whole cross-backend campaign bounded without a 20 s machine-speed gate.
+}, 120_000)
 
 test('the shared graph fixture wire preserves portable tap, latency, and PDC declarations', () => {
   const fixture = portableGraphParityFixtures.find((candidate) => candidate.name === 'groups-returns-master-all-send-taps-sidechain-disabled-latency')

@@ -1,4 +1,4 @@
-import { getMidiNoteLabel } from '@daw-browser/shared'
+import { clamp, getMidiNoteLabel } from '@daw-browser/shared'
 
 export type MidiEditorNote = {
   id: string
@@ -27,9 +27,9 @@ const BLACK_KEY_INDICES = new Set([1, 3, 6, 8, 10])
 const MIDI_EDITOR_MIN_PITCH = 12
 const MIDI_EDITOR_MAX_PITCH = 108
 const MIDI_EDITOR_ROW_HEIGHT = 20
-const DEFAULT_NOTE_VELOCITY = 0.9
+export const DEFAULT_NOTE_VELOCITY = 0.9
+const MIDI_VELOCITY_VALUE_MAX = 127
 
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 const pitchIndex = (pitch: number) => ((pitch % 12) + 12) % 12
 
 const getMidiEditorRowCount = () => MIDI_EDITOR_MAX_PITCH - MIDI_EDITOR_MIN_PITCH + 1
@@ -84,6 +84,7 @@ export const createMidiEditorGrid = (
   return {
     rows: createMidiEditorRowIndexes(),
     cells: createMidiEditorGridCells(columns, stepsPerBeat),
+    clipBeats,
     contentHeight: getMidiEditorContentHeight(),
     rowTemplate: `repeat(${getMidiEditorRowCount()}, ${MIDI_EDITOR_ROW_HEIGHT}px)`,
     columnTemplate: `repeat(${columns}, minmax(0, 1fr))`,
@@ -177,7 +178,7 @@ const getMidiNoteWidthPercent = (
   stepsPerBeat: number,
 ) => Math.max(1 / (clipBeats * stepsPerBeat), note.length / clipBeats) * 100
 
-const midiNotesEqual = (a: MidiEditorNote, b: MidiEditorNote) => (
+export const midiNotesEqual = (a: MidiEditorNote, b: MidiEditorNote) => (
   a.beat === b.beat
   && a.length === b.length
   && a.pitch === b.pitch
@@ -201,3 +202,21 @@ const replaceNoteById = (
 const removeNoteById = (notes: MidiEditorNote[], id: string) => (
   notes.filter((note) => note.id !== id)
 )
+
+export const midiNoteVelocity = (note: MidiEditorNote) => note.velocity ?? DEFAULT_NOTE_VELOCITY
+
+// Shown as 1..127; stored as 0..1.
+export const midiVelocityValue = (velocity: number) => (
+  Math.max(1, Math.round(velocity * MIDI_VELOCITY_VALUE_MAX))
+)
+
+// Relative drag: moving the pointer up raises the value. Snaps to one value step.
+export const midiVelocityFromDrag = (input: {
+  startVelocity: number
+  startY: number
+  y: number
+  laneHeight: number
+}) => {
+  const raw = input.startVelocity + (input.startY - input.y) / Math.max(1, input.laneHeight)
+  return midiVelocityValue(clamp(raw, 0, 1)) / MIDI_VELOCITY_VALUE_MAX
+}

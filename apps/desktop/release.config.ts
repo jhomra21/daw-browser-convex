@@ -198,7 +198,7 @@ export const resolveNativeArtifactPaths = (
   }
 }
 
-export const getNativeReleaseArtifacts = (
+const getNativeReleaseArtifacts = (
   artifactPaths: NativeReleaseArtifactPaths,
 ): NativeReleaseArtifact[] => [
   { name: nativeVst3ScannerArtifactName, sourcePath: artifactPaths.scannerPath },

@@ -1,0 +1,25 @@
+import { plugin } from "bun"
+import { readFileSync } from "node:fs"
+
+// Option A mutation overlay (copied from /tmp/dv01-p1-impl/overlay.ts). Applies the spec's exact-anchor changes
+// in memory (each anchor must occur exactly once). Nothing is written to disk.
+const specFile = process.env.DV01_OVERLAY_FILE ?? ""
+const spec: { id: string; changes: { file: string; from?: string; to?: string; contentsFile?: string }[] } = specFile
+  ? JSON.parse(readFileSync(specFile, "utf8")) : { id: "none", changes: [] }
+console.log("DV01-P1I-OVERLAY-LOADED", spec.id, spec.changes.length)
+plugin({ name: `dv01-p1i-${spec.id}`, setup(build) {
+  build.onLoad({ filter: /\.(ts|tsx)$/ }, ({ path }) => {
+    let contents = readFileSync(path, "utf8")
+    for (const change of spec.changes.filter(change => path.endsWith(change.file))) {
+      if (change.contentsFile) contents = readFileSync(change.contentsFile, "utf8")
+      else {
+        if (change.from === undefined || change.to === undefined || contents.split(change.from).length !== 2) {
+          throw new Error("Overlay requires one exact anchor: " + spec.id + " " + change.file)
+        }
+        contents = contents.replace(change.from, change.to)
+      }
+      console.log("DV01-P1I-OVERLAY-APPLIED", spec.id, change.file)
+    }
+    return { contents, loader: path.endsWith(".tsx") ? "tsx" : "ts" }
+  })
+} })

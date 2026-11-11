@@ -4,9 +4,10 @@ import {
   type DesktopApplicationMenuMessage,
   type DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu";
-import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 import { isLocalId } from "@daw-browser/shared";
 import type { TransportControlsProps } from "~/components/timeline/transport-types";
+import { keyboardTargetOwner } from "~/lib/keyboard-event-target";
 
 const gridDenominatorForState = (
   value: number,
@@ -15,6 +16,42 @@ const gridDenominatorForState = (
     return value;
   }
   return 4;
+};
+
+// Walks open shadow roots so a text field inside one still counts as the focus owner.
+const focusedKeyboardPath = () => {
+  const path: Element[] = [];
+  for (let element = document.activeElement; element; element = element.shadowRoot?.activeElement ?? null) {
+    path.push(element);
+  }
+  return path;
+};
+
+const editableFocusOwner = () => keyboardTargetOwner(focusedKeyboardPath()) === "editable";
+
+const editableOrOverlayFocused = () => keyboardTargetOwner(focusedKeyboardPath()) !== null;
+
+const focusedLocalKeyboardOwner = () => {
+  const path = focusedKeyboardPath();
+  const focusedElement = path.find((element) => element.closest('[data-timeline-keyboard-local="true"]'));
+  return focusedElement?.closest('[data-timeline-keyboard-local="true"]') ?? null;
+};
+
+// Menu undo/redo arrive without a keyboard event: text fields use native undo/redo, local editors use timeline history,
+// overlays own their commands, and otherwise history belongs to the timeline.
+const runEditCommand = (command: "undo" | "redo" | "duplicate" | "delete", runTimeline: () => void) => {
+  const owner = keyboardTargetOwner(focusedKeyboardPath());
+  if (owner === "editable") {
+    if (command !== "duplicate") document.execCommand(command);
+    return;
+  }
+  const localOwner = focusedLocalKeyboardOwner();
+  if (localOwner) {
+    if (command === "duplicate") localOwner.dispatchEvent(new Event("timeline-local-duplicate"));
+    else if (command === "undo" || command === "redo") runTimeline();
+    return;
+  }
+  if (owner === null) runTimeline();
 };
 
 const dispatchApplicationMenuCommand = (
@@ -66,16 +103,26 @@ const dispatchApplicationMenuCommand = (
       void transport.projectMenu.onLogout();
       return;
     case "undo":
-      transport.onUndo();
+      runEditCommand("undo", () => transport.onUndo());
       return;
     case "redo":
-      transport.onRedo();
+      runEditCommand("redo", () => transport.onRedo());
       return;
     case "duplicate":
-      transport.onDuplicateSelection();
+      runEditCommand("duplicate", () => transport.onDuplicateSelection());
+      return;
+    // A focused field is handled by the menu click in the main process. This runs the timeline only when no field or overlay owns focus.
+    case "copy":
+      if (!editableOrOverlayFocused()) transport.onCopySelection();
+      return;
+    case "paste":
+      if (!editableOrOverlayFocused()) transport.onPasteSelection();
+      return;
+    case "select-all":
+      if (!editableOrOverlayFocused()) transport.onSelectAllClips();
       return;
     case "delete":
-      transport.onDeleteSelection();
+      runEditCommand("delete", () => transport.onDeleteSelection());
       return;
     case "keyboard-shortcuts":
       transport.projectMenu.onOpenDashboard("keyboard");
@@ -100,6 +147,9 @@ const dispatchApplicationMenuCommand = (
       return;
     case "toggle-grid":
       transport.onToggleGrid();
+      return;
+    case "toggle-follow":
+      transport.onToggleFollow();
       return;
     case "zoom-in":
       transport.zoom.onIn();
@@ -155,6 +205,10 @@ const dispatchApplicationMenuCommand = (
   }
 };
 
+// transportProps rebuilds on every playhead publish, so the memo re-runs; equal state keeps the IPC send from following it.
+const sameMenuState = (prev: DesktopApplicationMenuState, next: DesktopApplicationMenuState) =>
+  JSON.stringify(prev) === JSON.stringify(next);
+
 export const useDesktopApplicationMenu = (
   transportProps: Accessor<TransportControlsProps>,
   extensionMenu?: Readonly<{
@@ -174,33 +228,77 @@ export const useDesktopApplicationMenu = (
     dispatchApplicationMenuCommand(command, transportProps, extensionMenu);
   });
 
-  createEffect(() => {
+  // A focused text field keeps Edit > Undo/Redo enabled, so the macOS key equivalent reaches runEditCommand.
+  // The focus signal is only a trigger: the memo reads the current focus owner itself, so a removed field cannot leave a stale value.
+  const [focusVersion, setFocusVersion] = createSignal(0);
+  const onFocusChange = () => setFocusVersion((version) => version + 1);
+  // focusout fires with focus already on body when focus moves to another field; that field's focusin follows, so skip it.
+  const onFocusOut = (event: FocusEvent) => {
+    if (event.relatedTarget === null) onFocusChange();
+  };
+  document.addEventListener("focusin", onFocusChange);
+  document.addEventListener("focusout", onFocusOut);
+  window.addEventListener("timeline-local-duplicate-state-change", onFocusChange);
+
+  const menuState = createMemo<DesktopApplicationMenuState, undefined>(() => {
     extensionVersion();
+    focusVersion();
     const transport = transportProps();
-    const state: DesktopApplicationMenuState = {
+    const editable = editableFocusOwner();
+    const localOwner = focusedLocalKeyboardOwner();
+    return {
       ready: true,
       canExportArchive: isLocalId("project", transport.projectMenu.currentProjectId),
+      canUndo: transport.canUndo || editable,
+      canRedo: transport.canRedo || editable,
+      canCut: editable,
+      canCopy: editable || transport.canCopySelection,
+      canPaste: editable || transport.canPasteSelection,
+      canSelectAll: editable || transport.canSelectAllClips,
+      canDuplicateSelection: !editable && localOwner
+        ? localOwner.getAttribute("data-timeline-keyboard-duplicate-enabled") === "true"
+        : !editable && transport.canDuplicateSelection,
+      // A focused local editor owns the Delete key itself; the menu item would not reach it.
+      canDeleteSelection: !editable && !localOwner && transport.canDeleteSelection,
+      editableFocused: editable,
       signedIn: Boolean(transport.projectMenu.currentUserId),
       metronomeEnabled: transport.metronomeEnabled,
       loopEnabled: transport.loopEnabled,
       gridEnabled: transport.gridEnabled,
+      followEnabled: transport.followEnabled,
       syncMix: transport.tracksMenu.syncMix,
       gridDenominator: gridDenominatorForState(transport.gridDenominator),
       extensionContributions: [...(extensionMenu?.contributions() ?? [])],
     };
-    bridge.setState(state);
+  }, undefined, { equals: sameMenuState });
+
+  createEffect(() => {
+    bridge.setState(menuState());
   });
 
   onCleanup(() => {
     removeCommandListener();
     removeExtensionListener?.();
+    document.removeEventListener("focusin", onFocusChange);
+    document.removeEventListener("focusout", onFocusOut);
+    window.removeEventListener("timeline-local-duplicate-state-change", onFocusChange);
     bridge.setState({
       ready: false,
       canExportArchive: false,
+      canUndo: false,
+      canRedo: false,
+      canCut: false,
+      canCopy: false,
+      canPaste: false,
+      canSelectAll: false,
+      canDuplicateSelection: false,
+      canDeleteSelection: false,
+      editableFocused: false,
       signedIn: false,
       metronomeEnabled: false,
       loopEnabled: false,
       gridEnabled: false,
+      followEnabled: false,
       syncMix: false,
       gridDenominator: 4,
     });

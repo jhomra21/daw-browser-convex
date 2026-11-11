@@ -30,7 +30,11 @@
  * audio-core-contract encoders. The caller supplies output planes because
  * fixture bytes are immutable. Version three uses header offset 72 for an
  * optional block-partition envelope: u32 count followed by u32 frame counts
- * whose sum must equal the fixture frame count. */
+ * whose sum must equal the fixture frame count. Version three also uses header
+ * offset 76 for an optional graph-edit envelope: u32 count followed by (u32
+ * frame, u32 graph_bytes, graph bytes) records. Each edit prepares and publishes
+ * its graph as the next revision just before the partition that starts at its
+ * frame, so a stage's state can change mid-render the way a live edit does. */
 #ifdef __cplusplus
 extern "C" {
 #endif

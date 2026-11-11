@@ -75,11 +75,11 @@ class DawSpectralProcessor extends AudioWorkletProcessor {
       return
     }
     if (message.type === 'configure' && message.state) {
-      const enabled = message.state.enabled !== false
-      const enabledChanged = enabled !== this.enabled
-      this.enabled = enabled
+      // Disabling only bypasses (the 10 ms ramp in process()); the rings, noise
+      // profile and a frozen capture are kept so enabling again resumes them, as the
+      // portable core does.
+      this.enabled = message.state.enabled !== false
       this.mode = message.state.mode
-      if (enabledChanged) this.reset()
     }
   }
 

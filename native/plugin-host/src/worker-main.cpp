@@ -1,5 +1,6 @@
 #include "vst3-worker.h"
 #include "worker-control-protocol.h"
+#include "../../acceptance-evidence.h"
 
 #include <cerrno>
 #include <charconv>
@@ -140,6 +141,7 @@ bool WritePreflightHello(const daw::plugin_host::WorkerHello& hello) {
 }  // namespace
 
 int main(const int argc, char* argv[]) {
+  daw::acceptance::Event("worker-process-entry");
   const rlimit coreLimit{.rlim_cur = 0, .rlim_max = 0};
   if (setrlimit(RLIMIT_CORE, &coreLimit) != 0) return EXIT_FAILURE;
   const rlimit noFileLimit{.rlim_cur = kWorkerNoFileLimit, .rlim_max = kWorkerNoFileLimit};
@@ -214,12 +216,26 @@ int main(const int argc, char* argv[]) {
   if (wakeFlags < 0 || fcntl(wakeFileDescriptor, F_SETFL, wakeFlags | O_NONBLOCK) != 0) return EXIT_FAILURE;
   auto transport = daw::plugin_host::WorkerTransport::MapInherited(transportFileDescriptor, token);
   if (!transport) return EXIT_FAILURE;
-  const auto startup = daw::plugin_host::ReadWorkerStartupRequest(controlFileDescriptor, token);
+  using daw::plugin_host::WorkerFaultOrigin;
+  const auto publishFault = [&](const WorkerFaultOrigin origin, const std::uint64_t sequence = 0) {
+    transport->PublishHealth(daw::plugin_host::WorkerHealth::kFaulted);
+    static_cast<void>(transport->PublishDiagnostic({
+      .kind = daw::plugin_host::WorkerDiagnosticKind::kFault,
+      .value = daw::plugin_host::EncodeWorkerFault(origin),
+      .sequence = sequence,
+    }));
+  };
+  std::optional<daw::plugin_host::WorkerStartupRequest> startup;
+  try {
+    startup = daw::plugin_host::ReadWorkerStartupRequest(controlFileDescriptor, token);
+  } catch (...) {
+    publishFault(WorkerFaultOrigin::kStartupException);
+    return EXIT_FAILURE;
+  }
   if (!startup || startup->setup.maximumBlockFrames != transport->maximumFrames()
     || startup->setup.inputChannels != transport->inputChannels()
     || startup->setup.outputChannels != transport->outputChannels()) {
-    transport->PublishHealth(daw::plugin_host::WorkerHealth::kFaulted);
-    static_cast<void>(transport->PublishDiagnostic({.kind = daw::plugin_host::WorkerDiagnosticKind::kFault}));
+    publishFault(WorkerFaultOrigin::kStartupFailure);
     return EXIT_FAILURE;
   }
 
@@ -230,12 +246,16 @@ int main(const int argc, char* argv[]) {
       .classId = startup->classId,
       .setup = startup->setup,
     };
-    if (!plugin.Instantiate(instance) || !plugin.ConfigureTransport(
-      *transport,
-      startup->state ? &*startup->state : nullptr
-    )) {
-      transport->PublishHealth(daw::plugin_host::WorkerHealth::kFaulted);
-      static_cast<void>(transport->PublishDiagnostic({.kind = daw::plugin_host::WorkerDiagnosticKind::kFault}));
+    try {
+      if (!plugin.Instantiate(instance) || !plugin.ConfigureTransport(
+        *transport,
+        startup->state ? &*startup->state : nullptr
+      )) {
+        publishFault(WorkerFaultOrigin::kConfigureFailure);
+        return EXIT_FAILURE;
+      }
+    } catch (...) {
+      publishFault(WorkerFaultOrigin::kConfigureException);
       return EXIT_FAILURE;
     }
   }
@@ -264,7 +284,11 @@ int main(const int argc, char* argv[]) {
           : daw::plugin_host::WorkerDiagnosticKind::kFault;
       static_cast<void>(transport->PublishDiagnostic({
         .kind = kind,
-        .value = notification.value,
+        .value = kind == daw::plugin_host::WorkerDiagnosticKind::kFault
+          ? daw::plugin_host::EncodeWorkerFault(
+            notification.kind == daw::plugin_host::WorkerNotificationKind::kFault
+              ? WorkerFaultOrigin::kWorkerNotification : WorkerFaultOrigin::kUnknownWorkerNotification
+          ) : notification.value,
         .parameter_id = notification.parameter_id,
         .normalized_value = notification.normalized_value,
       }));
@@ -289,6 +313,7 @@ int main(const int argc, char* argv[]) {
   publishNotifications();
   publishEditorFeedback();
   transport->PublishHealth(daw::plugin_host::WorkerHealth::kReady);
+  daw::acceptance::Event("worker-ready");
   static_cast<void>(transport->PublishDiagnostic({.kind = daw::plugin_host::WorkerDiagnosticKind::kReady}));
   bool editorOpen = false;
   for (;;) {
@@ -313,6 +338,7 @@ int main(const int argc, char* argv[]) {
     if (pollResult < 0 && errno == EINTR) continue;
     if (pollResult < 0) continue;
     if ((ready[0].revents | ready[1].revents) & POLLNVAL) {
+      publishFault(WorkerFaultOrigin::kControlIoFailure);
       std::cerr << "[vst-worker-lifecycle] invalid poll descriptor control_revents="
         << ready[0].revents << " wake_revents=" << ready[1].revents << '\n';
       return EXIT_FAILURE;
@@ -322,7 +348,10 @@ int main(const int argc, char* argv[]) {
     if (wakeClosed) {
       std::cerr << "[vst-worker-lifecycle] wake descriptor closed revents="
         << ready[1].revents << '\n';
-      if (!controlReady) return EXIT_FAILURE;
+      if (!controlReady) {
+        publishFault(WorkerFaultOrigin::kControlIoFailure);
+        return EXIT_FAILURE;
+      }
     }
     if (ready[0].revents & (POLLHUP | POLLERR)) {
       std::cerr << "[vst-worker-lifecycle] control descriptor closed revents="
@@ -334,6 +363,7 @@ int main(const int argc, char* argv[]) {
     if (pollResult > 0 && controlReady) {
       const auto command = daw::plugin_host::ReadWorkerControlCommand(controlFileDescriptor);
       if (!command || command->command == daw::plugin_host::WorkerControlCommand::kStop) {
+        if (!command) publishFault(WorkerFaultOrigin::kControlIoFailure);
         plugin.Dispose();
         transport->PublishHealth(daw::plugin_host::WorkerHealth::kStopped);
         static_cast<void>(transport->PublishDiagnostic({.kind = daw::plugin_host::WorkerDiagnosticKind::kStopped}));
@@ -343,6 +373,7 @@ int main(const int argc, char* argv[]) {
         const auto state = daw::plugin_host::ReadWorkerState(controlFileDescriptor);
         const auto success = !startup->noPluginTestMode && state && plugin.SetState(*state);
         if (!daw::plugin_host::WriteWorkerEditorResponse(responseFileDescriptor, {.success = success})) {
+          publishFault(WorkerFaultOrigin::kControlIoFailure);
           return EXIT_FAILURE;
         }
       }
@@ -351,6 +382,7 @@ int main(const int argc, char* argv[]) {
           ? std::optional<daw::plugin_host::WorkerState>{}
           : plugin.GetState();
         if (!state || !daw::plugin_host::WriteWorkerState(responseFileDescriptor, *state)) {
+          publishFault(WorkerFaultOrigin::kControlIoFailure);
           return EXIT_FAILURE;
         }
       }
@@ -382,6 +414,7 @@ int main(const int argc, char* argv[]) {
           responseFileDescriptor,
           {.success = success, .status = status}
         )) {
+          publishFault(WorkerFaultOrigin::kControlIoFailure);
           return EXIT_FAILURE;
         }
       }
@@ -399,6 +432,7 @@ int main(const int argc, char* argv[]) {
       if (!sequence) continue;
       processedSequence = *sequence;
       const auto processingStarted = std::chrono::steady_clock::now();
+      auto processOrigin = WorkerFaultOrigin::kProcessFailure;
       try {
         if (startup->noPluginTestMode) {
           // CTest-only transport verification; regular launches always use Vst3Worker.
@@ -439,6 +473,7 @@ int main(const int argc, char* argv[]) {
         }
       } catch (...) {
         failed = true;
+        processOrigin = WorkerFaultOrigin::kProcessException;
       }
       const auto processingNanoseconds = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -457,21 +492,20 @@ int main(const int argc, char* argv[]) {
         continue;
       }
       if (failed) {
-        transport->PublishHealth(daw::plugin_host::WorkerHealth::kFaulted);
-        static_cast<void>(transport->PublishDiagnostic({.kind = daw::plugin_host::WorkerDiagnosticKind::kFault, .sequence = *sequence}));
+        publishFault(processOrigin, *sequence);
         plugin.Dispose();
         return EXIT_FAILURE;
       }
       if (startup->setup.mode == daw::plugin_host::WorkerProcessSetup::Mode::kOffline
         && !daw::plugin_host::WriteWorkerProcessResponse(responseFileDescriptor, *sequence, true)) {
+        publishFault(WorkerFaultOrigin::kControlIoFailure, *sequence);
         plugin.Dispose();
         return EXIT_FAILURE;
       }
     }
     if (startup->setup.mode == daw::plugin_host::WorkerProcessSetup::Mode::kOffline
       && processedSequence == 0) {
-      transport->PublishHealth(daw::plugin_host::WorkerHealth::kFaulted);
-      static_cast<void>(transport->PublishDiagnostic({.kind = daw::plugin_host::WorkerDiagnosticKind::kFault}));
+      publishFault(WorkerFaultOrigin::kProcessFailure);
       plugin.Dispose();
       return EXIT_FAILURE;
     }

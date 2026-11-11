@@ -1,3 +1,5 @@
+import { linearFromDb } from '@daw-browser/shared'
+
 type AudioFixture = readonly Float32Array[]
 
 type AudioMetrics = {
@@ -425,7 +427,7 @@ export const measureReverbCharacterization = (
     }
     return first
   }, null)
-  const decayThreshold = peak * Math.pow(10, (options.decayThresholdDb ?? -60) / 20)
+  const decayThreshold = peak * linearFromDb(options.decayThresholdDb ?? -60)
   let decayFrameAtMinus60Db: number | null = null
   if (peak > 0) {
     for (const channel of channels) {

@@ -2,6 +2,8 @@ import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
 import { externalProcessorSchema } from '@daw-browser/external-plugins'
 import { createLocalProject, createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
+import { createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams, normalizeTrackInstrumentParams } from '@daw-browser/shared'
+import type { DrumRackPadSample, SamplerZone, TrackInstrumentParams } from '@daw-browser/shared'
 import type { LocalProjectStoredValue } from '~/lib/local-project-db'
 import {
   appendLocalExternalProcessor,
@@ -14,13 +16,261 @@ import {
   setLocalExternalProcessor,
   setLocalExternalProcessorBypassed,
 } from './external-plugins'
-import { reorderLocalMixedEffects, setLocalEffectInstance } from './local-effects'
+import { getLocalEffect, reorderLocalMixedEffects, restoreLocalTrackEffectChain, setLocalEffect, setLocalEffectInstance } from './local-effects'
+import { readInstrumentParamsFromEffectRow } from './effect-row-instrument-params'
 import { z } from 'zod'
 import { sha256 } from '@noble/hashes/sha2.js'
 
 const storedObjectSchema = z.record(z.string(), z.custom<LocalProjectStoredValue>())
 const indexedStoredObjectSchema = z.object({ index: z.number() }).passthrough()
 const identifiedStoredObjectSchema = z.object({ id: z.string() }).passthrough()
+
+test('persists and restores normalized Sampler and Drum Rack instruments', async () => {
+  const project = await createLocalProject(`Instrument persistence ${crypto.randomUUID()}`)
+  const sample: DrumRackPadSample = {
+    assetKey: 'sample:persist',
+    url: 'local-asset:sample:persist',
+    sourceKind: 'upload',
+    source: { durationSec: 2, sampleRate: 48000, channelCount: 2 },
+  }
+  const sampler = normalizeTrackInstrumentParams({
+    kind: 'sampler',
+    instanceId: 'instrument:sampler:persist',
+    params: { ...createDefaultSamplerParams(), zones: [{ id: 'zone:persist', sample }] },
+  })
+  const drumRack = normalizeTrackInstrumentParams({
+    kind: 'drum-rack',
+    instanceId: 'instrument:drum-rack:persist',
+    params: { ...createDefaultDrumRackParams(), pads: [{ sample }] },
+  })
+  if (!sampler || !drumRack) throw new Error('Expected normalized instruments.')
+
+  await setLocalEffect(project.id, 'track:sampler', 'instrument', sampler)
+  await setLocalEffect(project.id, 'track:drum-rack', 'instrument', drumRack)
+  expect((await getLocalEffect(project.id, 'track:sampler', 'instrument'))?.params).toEqual(sampler)
+  expect((await getLocalEffect(project.id, 'track:drum-rack', 'instrument'))?.params).toEqual(drumRack)
+
+  const legacyId = 'track:legacy-instrument'
+  const legacyInstrument: TrackInstrumentParams = {
+    kind: 'sampler',
+    instanceId: 'instrument:sampler:legacy',
+    params: {
+      ...createDefaultSamplerParams(),
+      zones: [{
+        id: 'zone:legacy',
+        sample: {
+          assetKey: sample.assetKey,
+          url: sample.url,
+          name: undefined,
+          sourceKind: 'upload',
+          source: sample.source,
+        },
+        keyLow: 0,
+        keyHigh: 127,
+        velocityLow: 1,
+        velocityHigh: 127,
+        rootNote: 60,
+        tuneCents: 0,
+        gain: 1,
+        pan: 0,
+        roundRobinGroup: 0,
+        roundRobinIndex: 0,
+        playbackMode: 'one-shot',
+        startSec: 0,
+        endSec: 2,
+        loopStartSec: undefined,
+        loopEndSec: undefined,
+        crossfadeSec: 0,
+        chokeGroup: 0,
+      }],
+    },
+  }
+  const db = await openLocalProjectDb(project.id)
+  const legacyRow = {
+    id: `${legacyId}:instrument`,
+    targetId: legacyId,
+    effect: 'instrument',
+    params: legacyInstrument,
+    updatedAt: Date.now(),
+  }
+  await db.put('entities', createLocalProjectEntityRow('effect', legacyRow.id, legacyRow, legacyRow.updatedAt))
+  expect((await getLocalEffect(project.id, legacyId, 'instrument'))?.params).toMatchObject({
+    kind: 'sampler',
+    instanceId: 'instrument:sampler:legacy',
+    params: { zones: [{ id: 'zone:legacy', playbackMode: 'one-shot' }] },
+  })
+
+  await restoreLocalTrackEffectChain(project.id, 'track:sampler', {
+    audioEffects: [],
+    instrument: sampler,
+  })
+  await restoreLocalTrackEffectChain(project.id, 'track:drum-rack', {
+    audioEffects: [],
+    instrument: drumRack,
+  })
+  expect((await getLocalEffect(project.id, 'track:sampler', 'instrument'))?.params).toEqual(sampler)
+  expect((await getLocalEffect(project.id, 'track:drum-rack', 'instrument'))?.params).toEqual(drumRack)
+})
+
+test('normalizes nested Granular zone metadata through save, reload, and restore', async () => {
+  const project = await createLocalProject(`Granular persistence ${crypto.randomUUID()}`)
+  const sample = {
+    assetKey: 'sample:granular',
+    url: 'local-asset:sample:granular',
+    sourceKind: 'upload',
+    source: { durationSec: 2, sampleRate: 48000, channelCount: 2 },
+  }
+  const granular = normalizeTrackInstrumentParams({
+    kind: 'granular',
+    instanceId: 'instrument:granular:persist',
+    params: {
+      ...createDefaultGranularParams(),
+      zone: {
+        id: 'zone:granular',
+        sample,
+        keyLow: 0,
+        keyHigh: 127,
+        velocityLow: 1,
+        velocityHigh: 127,
+        rootNote: 60,
+        tuneCents: 0,
+        gain: 1,
+        pan: 0,
+        roundRobinGroup: 0,
+        roundRobinIndex: 0,
+        playbackMode: 'one-shot',
+        startSec: 0,
+        crossfadeSec: 0,
+        chokeGroup: 0,
+      },
+    },
+  })
+  if (!granular) throw new Error('Expected normalized Granular instrument.')
+
+  if (granular.kind !== 'granular') throw new Error('Expected Granular instrument params.')
+  const granularWithUndefined = structuredClone(granular)
+  const zone = granularWithUndefined.params.zone
+  if (zone) {
+    zone.sample.name = undefined
+    zone.endSec = undefined
+    zone.loopStartSec = undefined
+    zone.loopEndSec = undefined
+  }
+  const normalized = readInstrumentParamsFromEffectRow({
+    effect: 'instrument',
+    params: granularWithUndefined,
+  })
+  if (!normalized) throw new Error('Expected nested Granular zone normalization.')
+  if (normalized.kind !== 'granular') throw new Error('Expected Granular instrument params.')
+  const edited = { ...normalized, params: { ...normalized.params, grainSizeMs: 120 } }
+
+  await setLocalEffect(project.id, 'track:granular', 'instrument', edited)
+  expect((await getLocalEffect(project.id, 'track:granular', 'instrument'))?.params).toEqual(edited)
+  await restoreLocalTrackEffectChain(project.id, 'track:granular', {
+    audioEffects: [],
+    instrument: edited,
+  })
+  expect((await getLocalEffect(project.id, 'track:granular', 'instrument'))?.params).toEqual(edited)
+})
+
+test('round-trips nested undefined instrument fields through edits and chain restore', async () => {
+  const project = await createLocalProject(`Undefined instrument persistence ${crypto.randomUUID()}`)
+  const sample: DrumRackPadSample = {
+    assetKey: 'sample:undefined',
+    url: 'local-asset:sample:undefined',
+    sourceKind: 'upload',
+    source: { durationSec: 2, sampleRate: 48000, channelCount: 2 },
+  }
+  const sampler: TrackInstrumentParams = {
+    kind: 'sampler',
+    instanceId: 'instrument:sampler:undefined',
+    params: {
+      ...createDefaultSamplerParams(),
+      zones: [{
+        id: 'zone:sampler',
+        sample: { ...sample, name: undefined },
+        keyLow: 0,
+        keyHigh: 127,
+        velocityLow: 1,
+        velocityHigh: 127,
+        rootNote: 60,
+        tuneCents: 0,
+        gain: 1,
+        pan: 0,
+        roundRobinGroup: 0,
+        roundRobinIndex: 0,
+        playbackMode: 'one-shot',
+        startSec: 0,
+        endSec: undefined,
+        crossfadeSec: 0,
+        chokeGroup: 0,
+      }],
+    },
+  }
+  const drumRack: TrackInstrumentParams = {
+    kind: 'drum-rack',
+    instanceId: 'instrument:drum-rack:undefined',
+    params: {
+      ...createDefaultDrumRackParams(),
+      pads: [{ ...createDefaultDrumRackParams().pads[0], sample: { ...sample, name: undefined }, endSec: undefined }],
+    },
+  }
+  const granularZone: SamplerZone = {
+    id: 'zone:granular',
+    sample: { ...sample, name: undefined },
+    keyLow: 0,
+    keyHigh: 127,
+    velocityLow: 1,
+    velocityHigh: 127,
+    rootNote: 60,
+    tuneCents: 0,
+    gain: 1,
+    pan: 0,
+    roundRobinGroup: 0,
+    roundRobinIndex: 0,
+    playbackMode: 'one-shot',
+    startSec: 0,
+    endSec: undefined,
+    crossfadeSec: 0,
+    chokeGroup: 0,
+  }
+  const granular: TrackInstrumentParams = {
+    kind: 'granular',
+    instanceId: 'instrument:granular:undefined',
+    params: {
+      ...createDefaultGranularParams(),
+      zone: granularZone,
+    },
+  }
+
+  const instruments: Array<{ targetId: string; instrument: TrackInstrumentParams }> = [
+    { targetId: 'track:sampler-undefined', instrument: sampler },
+    { targetId: 'track:drum-rack-undefined', instrument: drumRack },
+    { targetId: 'track:granular-undefined', instrument: granular },
+  ]
+  for (const { targetId, instrument } of instruments) {
+    const normalized = readInstrumentParamsFromEffectRow({ effect: 'instrument', params: instrument })
+    if (!normalized) throw new Error('Expected instrument normalization.')
+    let edited: TrackInstrumentParams
+    if (normalized.kind === 'granular') {
+      edited = { ...normalized, params: { ...normalized.params, grainSizeMs: 140 } }
+    } else if (normalized.kind === 'sampler') {
+      edited = { ...normalized, params: { ...normalized.params, polyphony: 12 } }
+    } else if (normalized.kind === 'drum-rack') {
+      edited = { ...normalized, params: { ...normalized.params, pads: [...normalized.params.pads] } }
+    } else {
+      throw new Error('Unexpected instrument kind.')
+    }
+    await setLocalEffect(project.id, targetId, 'instrument', edited)
+    const reloaded = await getLocalEffect(project.id, targetId, 'instrument')
+    expect(reloaded?.params).toEqual(edited)
+    await restoreLocalTrackEffectChain(project.id, targetId, {
+      audioEffects: [],
+      instrument: edited,
+    })
+    expect((await getLocalEffect(project.id, targetId, 'instrument'))?.params).toEqual(edited)
+  }
+})
 
 const createProcessor = (instanceId: string) => externalProcessorSchema.parse({
   instanceId,

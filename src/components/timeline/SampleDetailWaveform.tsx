@@ -141,8 +141,9 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     onCleanup(() => resizeObserver.disconnect());
   });
 
+  const onMarkerDragStateChange = props.onMarkerDragStateChange;
   onCleanup(() => {
-    if (dragMarker() || isDraggingMarker()) props.onMarkerDragStateChange?.(false);
+    if (dragMarker() || isDraggingMarker()) onMarkerDragStateChange?.(false);
   });
 
   const clipTimeFromPointer = (event: Pick<PointerEvent, "clientX">) => {

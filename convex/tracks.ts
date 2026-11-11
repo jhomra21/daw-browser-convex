@@ -18,7 +18,7 @@ import { getTrackWriteAccess, requireTrackOwnerForWrite } from "./trackWrites";
 import { getClipWriteAccess } from "./clipWrites";
 import { requireAuthenticatedUserId, requireProjectAccess, requireProjectRole } from "./projectAccess";
 import { runSharedOperationOnce } from "./sharedOperationResults";
-import { advanceProjectRevision } from "./projectRows";
+import { advanceProjectRevision, assertEffectWriterRevisions, prospectiveRevision } from "./projectRows";
 import { effectiveControlMixerBoolean } from "./controlEffectiveValues";
 import {
   deriveTrackDeletionAfterStatesV1,
@@ -406,9 +406,12 @@ export const createTrackRow = async (
     ownerUserId: input.ownerUserId,
     trackId,
   });
+  let effectRevision: number | undefined;
   if (input.kind === "instrument" && channelRole === "track") {
+    effectRevision = await prospectiveRevision(ctx, input.projectId);
     const instanceId = createInstrumentInstanceId();
     await ctx.db.insert("effects", {
+      revision: effectRevision,
       projectId: input.projectId,
       targetType: "track",
       trackId,
@@ -423,7 +426,7 @@ export const createTrackRow = async (
       createdAt: Date.now(),
     });
   }
-  return { changed: true, status: "created" as const, trackId };
+  return { changed: true, status: "created" as const, trackId, effectRevision };
 };
 
 const createTrackForUser = async (
@@ -447,7 +450,11 @@ const createTrackForUser = async (
   run: async () => {
     await requireProjectRole(ctx, input.projectId, input.userId, ["owner", "editor"]);
     const result = await createTrackRow(ctx, { ...input, ownerUserId: input.userId });
-    await advanceProjectRevision(ctx, input.projectId);
+    const advanced = await advanceProjectRevision(ctx, input.projectId);
+    assertEffectWriterRevisions(
+      result.effectRevision === undefined ? [] : [result.effectRevision],
+      advanced.revision,
+    );
     return result.trackId;
   },
 });
@@ -1716,8 +1723,10 @@ export const serverRestoreUngroup = mutation({
             : (child.outputTargetId ? trackById.get(child.outputTargetId)?._id : undefined);
           await ctx.db.patch(channel._id, { outputTargetId: childOutputTargetId });
         }
+        const effectRevision = await prospectiveRevision(ctx, input.projectId);
         for (const effect of effects) {
           await ctx.db.insert("effects", {
+            revision: effectRevision,
             projectId: input.projectId,
             targetType: "track",
             trackId: groupId,
@@ -1753,7 +1762,8 @@ export const serverRestoreUngroup = mutation({
             effectInstanceId: route.effectInstanceId,
           });
         }
-        await advanceProjectRevision(ctx, input.projectId);
+        const advanced = await advanceProjectRevision(ctx, input.projectId);
+        assertEffectWriterRevisions([effectRevision], advanced.revision);
         return { status: "applied" as const, groupId: String(groupId) };
       },
     });

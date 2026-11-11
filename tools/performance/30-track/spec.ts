@@ -260,7 +260,8 @@ const tierTwoNotes: ThirtyTrackSemanticManifest["tier2"]["midiClip"]["notes"] = 
   }),
 )
 
-const tierTwoSynthParams = synthParamsSchema.parse(createDefaultSynthParams())
+// The benchmark workload is pinned to the original monophonic synth so results stay comparable across default changes.
+const tierTwoSynthParams = synthParamsSchema.parse({ ...createDefaultSynthParams(), polyphony: 1 })
 const tierTwoSaturatorParams = saturatorParamsSchema.parse(AUDIO_EFFECT_CONTRACTS.saturator.createDefaultParams())
 const utilityDefaults = AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams()
 const tierTwoUtilityParams = utilityParamsSchema.parse({

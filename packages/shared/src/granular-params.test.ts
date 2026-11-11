@@ -24,4 +24,13 @@ describe('granular params', () => {
     expect(params.maxGrains).toBe(GRANULAR_MAX_GRAINS)
     expect(params.maxDecodedBytes).toBe(createDefaultGranularParams().maxDecodedBytes)
   })
+
+  test('preserves minimal and inverted-range granular zones without Sampler filtering', () => {
+    const sample = { assetKey: 'sample', url: 'local-asset:sample', sourceKind: 'upload', source: { durationSec: 2, sampleRate: 48000, channelCount: 2 } }
+    const minimalZone = { id: 'minimal', sample }
+    const invertedZone = { id: 'inverted', sample, keyLow: 100, keyHigh: 20, velocityLow: 100, velocityHigh: 10 }
+
+    expect(normalizeGranularParams({ zone: minimalZone }).zone).toMatchObject(minimalZone)
+    expect(normalizeGranularParams({ zone: invertedZone }).zone).toMatchObject(invertedZone)
+  })
 })

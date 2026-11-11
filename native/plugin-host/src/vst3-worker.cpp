@@ -1,5 +1,7 @@
 #include "vst3-worker.h"
+#include "../../audio-core/include/daw/graph_latency.h"
 #include "automation-observation.h"
+#include "../../acceptance-evidence.h"
 
 #include "vst3-bus-arrangement.h"
 #include "public.sdk/source/vst/hosting/eventlist.h"
@@ -548,7 +550,10 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
     static_cast<void>(PrepareVst3EditorRuntime());
   }
   std::string error;
-  implementation_->module = VST3::Hosting::Module::create(request.eligibility.canonicalBundlePath, error);
+  {
+    daw::acceptance::Step timing("module-load");
+    implementation_->module = VST3::Hosting::Module::create(request.eligibility.canonicalBundlePath, error);
+  }
   if (!implementation_->module) return false;
   const auto factory = implementation_->module->getFactory();
   const auto classInfos = factory.classInfos();
@@ -564,6 +569,7 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
     ? WorkerPluginRole::kEffect
     : WorkerPluginRole::kInstrument;
   implementation_->module->getFactory().setHostContext(static_cast<IHostApplication*>(&implementation_->context));
+  daw::acceptance::Step initialization_timing("component-init");
   implementation_->component = implementation_->module->getFactory().createInstance<IComponent>(*classId);
   if (!implementation_->component || implementation_->component->initialize(static_cast<IHostApplication*>(&implementation_->context)) != Steinberg::kResultOk) {
     Dispose();
@@ -574,6 +580,8 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
     Dispose();
     return false;
   }
+  initialization_timing.Finish();
+  daw::acceptance::Step controller_timing("controller-init");
   implementation_->controller = Steinberg::FUnknownPtr<IEditController>(implementation_->component);
   implementation_->controllerIsComponent = static_cast<bool>(implementation_->controller);
   if (!implementation_->controller) {
@@ -690,7 +698,10 @@ std::optional<WorkerManifest> Vst3Worker::PreflightManifest(
     static_cast<Steinberg::int32>(implementation_->setup.maximumBlockFrames),
     implementation_->setup.sampleRate,
   };
-  if (implementation_->processor->setupProcessing(setup) != Steinberg::kResultOk) return std::nullopt;
+  {
+    daw::acceptance::Step timing("preflight-setupProcessing");
+    if (implementation_->processor->setupProcessing(setup) != Steinberg::kResultOk) return std::nullopt;
+  }
   implementation_->processContextRequirements =
     Steinberg::FUnknownPtr<IProcessContextRequirements>(implementation_->processor);
   implementation_->processContextRequirementsFlags = implementation_->processContextRequirements
@@ -699,7 +710,11 @@ std::optional<WorkerManifest> Vst3Worker::PreflightManifest(
   const auto latency = implementation_->processor->getLatencySamples();
   const auto tail = implementation_->processor->getTailSamples();
   const auto normalizedTail = NormalizeWorkerTailFrames(tail);
-  if (latency > 10'000'000 || !normalizedTail) return std::nullopt;
+  if (latency > kMaximumGraphLatencyFrames) {
+    std::fprintf(stderr, "This plug-in reports %u frames of latency. The product maximum is 65,536 frames (1.37 s at 48 kHz).\n", latency);
+    return std::nullopt;
+  }
+  if (!normalizedTail) return std::nullopt;
   std::vector<WorkerParameterDescriptor> parameters;
   bool supportsBypass = false;
   if (implementation_->controller) {
@@ -810,7 +825,10 @@ bool Vst3Worker::ConfigureTransport(WorkerTransport& transport, const WorkerStat
     static_cast<Steinberg::int32>(implementation_->setup.maximumBlockFrames),
     implementation_->setup.sampleRate
   };
-  if (implementation_->processor->setupProcessing(setup) != Steinberg::kResultOk) return false;
+  {
+    daw::acceptance::Step timing("setupProcessing");
+    if (implementation_->processor->setupProcessing(setup) != Steinberg::kResultOk) return false;
+  }
 
   const auto prepare = [&](const Steinberg::Vst::BusDirection direction, std::vector<AudioBusBuffers>& buses, std::vector<std::vector<Steinberg::Vst::Sample32*>>& pointers, const std::size_t expectedChannels) {
     const auto count = implementation_->component->getBusCount(Steinberg::Vst::kAudio, direction);
@@ -847,18 +865,26 @@ bool Vst3Worker::ConfigureTransport(WorkerTransport& transport, const WorkerStat
     implementation_->editorView = nullptr;
     return false;
   }
-  if (initialState && !ApplyState(*initialState)) {
-    implementation_->editorView = nullptr;
-    return false;
+  {
+    daw::acceptance::Step timing(initialState ? "setState" : "setState-not-required");
+    if (initialState && !ApplyState(*initialState)) {
+      implementation_->editorView = nullptr;
+      return false;
+    }
   }
-  if (implementation_->component->setActive(true) != Steinberg::kResultOk) {
-    implementation_->editorView = nullptr;
-    return false;
-  }
-  const auto processingResult = implementation_->processor->setProcessing(true);
-  if (!IsAcceptedWorkerProcessingTransitionResult(processingResult)) {
-    implementation_->editorView = nullptr;
-    return false;
+  {
+    daw::acceptance::Step activation_timing("setActive");
+    if (implementation_->component->setActive(true) != Steinberg::kResultOk) {
+      implementation_->editorView = nullptr;
+      return false;
+    }
+    activation_timing.Finish();
+    daw::acceptance::Step processing_timing("setProcessing");
+    const auto processingResult = implementation_->processor->setProcessing(true);
+    if (!IsAcceptedWorkerProcessingTransitionResult(processingResult)) {
+      implementation_->editorView = nullptr;
+      return false;
+    }
   }
   implementation_->active = true;
   implementation_->processing = true;

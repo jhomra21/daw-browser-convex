@@ -6,6 +6,7 @@ import {
   runProjectBackup,
 } from "~/lib/cloud-backup";
 import { downloadCloudAssetsForOffline } from "~/lib/cloud-asset-cache";
+import { isAbortError } from "~/lib/dom-errors";
 import { setLocalProjectAssetDirectory } from "~/lib/local-assets";
 import { isLocalId } from "@daw-browser/shared";
 import { chooseLocalExportFile, createLocalExportWritable, downloadBlob } from "~/lib/local-export";
@@ -17,34 +18,49 @@ type Input = {
   projectId: Accessor<string>;
   userId: Accessor<string | undefined>;
   navigateToRoom: (projectId: string) => void;
+  notify: (title: string, message: string) => void;
 };
 
 export type CloudBackupStatus = "idle" | "backing-up" | "backed-up" | "failed";
 
 export const useLocalProjectActions = (input: Input) => {
-  const [localSaveFailure, setLocalSaveFailure] = createSignal<string | null>(null);
+  // Persistence producers report failures without a success signal, so each project's
+  // failure stays until it is dismissed while that project is open.
+  const [saveFailures, setSaveFailures] = createSignal<ReadonlyMap<string, string>>(new Map());
+  const localSaveFailure = () => saveFailures().get(input.projectId()) ?? null;
+  const setLocalSaveFailure = (projectId: string, message: string | null) => {
+    setSaveFailures((current) => {
+      const next = new Map(current);
+      if (message === null) next.delete(projectId);
+      else next.set(projectId, message);
+      return next;
+    });
+  };
   const [backupConflictProjectId, setBackupConflictProjectId] = createSignal<string | null>(null);
   const [cloudBackupDialog, setCloudBackupDialog] = createSignal<CloudBackupDialogState | null>(null);
   const [cloudBackupBusy, setCloudBackupBusy] = createSignal(false);
   const [cloudBackupStatus, setCloudBackupStatus] = createSignal<CloudBackupStatus>("idle");
-  const [sharedOutboxStatus, setSharedOutboxStatus] = createSignal({ pending: 0, failed: 0 });
+  const [sharedOutboxStatus, setSharedOutboxStatus] = createSignal<{ pending: number; failed: number } | null>(null);
   const [localTimelineReloadVersion, setLocalTimelineReloadVersion] = createSignal(0);
 
   createEffect(() => {
     const rid = input.projectId();
     const uid = input.userId();
-    if (!rid || !uid || isLocalId("project", rid)) {
-      setSharedOutboxStatus({ pending: 0, failed: 0 });
-      return;
-    }
+    setSharedOutboxStatus(null);
+    if (!rid || !uid || isLocalId("project", rid)) return;
+    let active = true;
+    let latestRequest = 0;
+    onCleanup(() => { active = false; });
     const refresh = () => {
-      void readSharedOutboxSummary(rid, uid)
-        .then(setSharedOutboxStatus)
-        .catch(() => setSharedOutboxStatus({ pending: 0, failed: 0 }));
+      const request = ++latestRequest;
+      const isCurrent = () => active && request === latestRequest;
+      void readSharedOutboxSummary(rid, uid).then(
+        (summary) => { if (isCurrent()) setSharedOutboxStatus(summary); },
+        () => { if (isCurrent()) setSharedOutboxStatus(null); },
+      );
     };
     refresh();
-    const unsubscribe = subscribeToLocalProjectChanges(rid, refresh);
-    onCleanup(unsubscribe);
+    onCleanup(subscribeToLocalProjectChanges(rid, refresh));
   });
 
   const describeBackupConflict = (conflict: Awaited<ReturnType<typeof runProjectBackup>>["conflict"]) => {
@@ -63,16 +79,15 @@ export const useLocalProjectActions = (input: Input) => {
     const rid = input.projectId();
     const openDirectoryPicker = window.showDirectoryPicker;
     if (!rid || !isLocalId("project", rid) || !openDirectoryPicker) {
-      setLocalSaveFailure("Folder storage is not supported in this browser.");
+      input.notify("Project folder not changed", "Folder storage is not supported in this browser.");
       return;
     }
 
     try {
       const handle = await openDirectoryPicker();
       await setLocalProjectAssetDirectory(rid, handle);
-      setLocalSaveFailure("Project storage folder is ready.");
-    } catch {
-      setLocalSaveFailure("Project storage folder was not changed.");
+    } catch (error) {
+      if (!isAbortError(error)) input.notify("Project folder not changed", "Project storage folder was not changed.");
     }
   };
 
@@ -85,7 +100,7 @@ export const useLocalProjectActions = (input: Input) => {
         const nextProjectId = await importDawProjectArchive(file);
         input.navigateToRoom(nextProjectId);
       } catch (error) {
-        setLocalSaveFailure(error instanceof Error ? error.message : "Archive import failed.");
+        input.notify("Archive import failed", error instanceof Error ? error.message : "Archive import failed.");
       }
     }
     inputElement.value = "";
@@ -98,14 +113,13 @@ export const useLocalProjectActions = (input: Input) => {
     const result = await runProjectBackup(rid, "detect", options);
     if (!result.ok) {
       setBackupConflictProjectId(result.conflict ? rid : null);
-      const message = result.conflict ? describeBackupConflict(result.conflict) : result.error ?? "Cloud backup failed.";
-      setLocalSaveFailure(message);
-      if (result.conflict) setCloudBackupDialog({ type: "conflict", message });
+      if (result.conflict) setCloudBackupDialog({ type: "conflict", message: describeBackupConflict(result.conflict) });
+      // Background sync ticks pass skipIfUnchanged; their failures surface through the badge, not a dialog per tick.
+      else if (!options.skipIfUnchanged) setCloudBackupDialog({ type: "message", title: "Cloud backup failed", message: result.error ?? "Cloud backup failed." });
       setCloudBackupStatus("failed");
       return;
     }
     setBackupConflictProjectId(null);
-    setLocalSaveFailure(null);
     setCloudBackupStatus("backed-up");
   };
 
@@ -116,15 +130,14 @@ export const useLocalProjectActions = (input: Input) => {
     setCloudBackupStatus("backing-up");
     const result = await runProjectBackup(rid, "overwrite");
     if (!result.ok) {
-      const message = result.conflict ? describeBackupConflict(result.conflict) : result.error ?? "Cloud backup failed.";
-      setLocalSaveFailure(message);
-      if (result.conflict) setCloudBackupDialog({ type: "conflict", message });
+      setCloudBackupDialog(result.conflict
+        ? { type: "conflict", message: describeBackupConflict(result.conflict) }
+        : { type: "message", title: "Cloud backup failed", message: result.error ?? "Cloud backup failed." });
       setCloudBackupStatus("failed");
       setCloudBackupBusy(false);
       return;
     }
     setBackupConflictProjectId(null);
-    setLocalSaveFailure(null);
     setCloudBackupDialog(null);
     setCloudBackupStatus("backed-up");
     setCloudBackupBusy(false);
@@ -134,7 +147,6 @@ export const useLocalProjectActions = (input: Input) => {
     const rid = input.projectId();
     if (!rid || !isLocalId("project", rid)) return;
     await disableProjectBackup(rid);
-    setLocalSaveFailure(null);
     setCloudBackupStatus("idle");
   };
 
@@ -150,10 +162,13 @@ export const useLocalProjectActions = (input: Input) => {
       await restoreCloudBackupToLocalProject(rid);
       setLocalTimelineReloadVersion((version) => version + 1);
       setBackupConflictProjectId(null);
-      setLocalSaveFailure(null);
       setCloudBackupDialog(null);
     } catch (error) {
-      setLocalSaveFailure(error instanceof Error ? error.message : "Cloud backup restore failed.");
+      setCloudBackupDialog({
+        type: "message",
+        title: "Cloud backup restore failed",
+        message: error instanceof Error ? error.message : "Cloud backup restore failed.",
+      });
     } finally {
       setCloudBackupBusy(false);
     }
@@ -166,11 +181,14 @@ export const useLocalProjectActions = (input: Input) => {
     try {
       const nextProjectId = await duplicateCloudBackupAsLocalProject(rid);
       setBackupConflictProjectId(null);
-      setLocalSaveFailure(null);
       setCloudBackupDialog(null);
       input.navigateToRoom(nextProjectId);
     } catch (error) {
-      setLocalSaveFailure(error instanceof Error ? error.message : "Cloud backup duplicate failed.");
+      setCloudBackupDialog({
+        type: "message",
+        title: "Cloud backup duplicate failed",
+        message: error instanceof Error ? error.message : "Cloud backup duplicate failed.",
+      });
     } finally {
       setCloudBackupBusy(false);
     }
@@ -181,14 +199,17 @@ export const useLocalProjectActions = (input: Input) => {
     if (!rid || !isLocalId("project", rid)) return;
     try {
       const downloaded = await downloadCloudAssetsForOffline(rid);
-      setLocalSaveFailure(null);
       setCloudBackupDialog({
         type: "message",
         title: "Download for offline complete",
         message: downloaded === 0 ? "All cloud assets are already available offline." : `Downloaded ${downloaded} cloud asset${downloaded === 1 ? "" : "s"} for offline use.`,
       });
     } catch (error) {
-      setLocalSaveFailure(error instanceof Error ? error.message : "Download for offline failed.");
+      setCloudBackupDialog({
+        type: "message",
+        title: "Download for offline failed",
+        message: error instanceof Error ? error.message : "Download for offline failed.",
+      });
     }
   };
 
@@ -197,7 +218,7 @@ export const useLocalProjectActions = (input: Input) => {
     const uid = input.userId();
     if (!rid || isLocalId("project", rid) || !uid) return;
     const status = await flushSharedOutbox(rid, uid, { retryFailed: true });
-    setSharedOutboxStatus(status);
+    if (input.projectId() === rid && input.userId() === uid) setSharedOutboxStatus(status);
   };
 
   const exportArchive = async () => {
@@ -206,7 +227,13 @@ export const useLocalProjectActions = (input: Input) => {
     const suggestedName = `${rid}.dawproject`;
     try {
       const { exportDawProjectArchive, exportDawProjectArchiveStreamed } = await import("~/lib/project-archive");
-      const handle = await chooseLocalExportFile({ suggestedName });
+      let handle: FileSystemFileHandle | undefined;
+      try {
+        handle = await chooseLocalExportFile({ suggestedName });
+      } catch (error) {
+        if (isAbortError(error)) return;
+        throw error;
+      }
       if (!handle) {
         const blob = await exportDawProjectArchive(rid);
         downloadBlob({ blob, suggestedName });
@@ -227,7 +254,7 @@ export const useLocalProjectActions = (input: Input) => {
         throw error;
       }
     } catch (error) {
-      setLocalSaveFailure(error instanceof Error ? error.message : "Archive export failed.");
+      input.notify("Archive export failed", error instanceof Error ? error.message : "Archive export failed.");
     }
   };
 

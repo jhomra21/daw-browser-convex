@@ -15,7 +15,7 @@ test("exposes only the macOS arm64 typed PCM asset session surface to renderers"
   expect(main).toContain('process.platform === "darwin"')
   expect(main).toContain('process.arch === "arm64"')
   expect(main).toContain('sameAppOrigin(event.senderFrame.url)')
-  expect(main).toContain('"daw:audio-host:loss"')
+  expect(main).toContain('sendRendererMessage(lossChannel, error)')
   expect(preload).toContain('process.platform === "darwin" && process.arch === "arm64"')
   expect(preload).toContain("installAsset")
   expect(preload).toContain("releaseAsset")
@@ -46,7 +46,30 @@ test("preserves bounded native request diagnostics through session IPC", async (
 
   expect(audioHost).toContain("requestName")
   expect(main).toContain("error.requestName")
-  expect(main).toContain("NativeAudioHostCommandError ? error : undefined")
+  expect(main).toContain('error.requestName === "instrumentStates" ? ` ${error.message.slice(0, 256)}`')
+  expect(main).toContain("thrown instanceof NativeAudioHostCommandError ? thrown : undefined")
+  expect(main).toContain("kind: nativeDeliveryFailureKind(thrown)")
+})
+
+test("classifies a failed revision command by its type, never dropping the thrown error", async () => {
+  const main = await readFile(mainPath, "utf8")
+  const handler = main.slice(main.indexOf("for (const [operation, channel] of Object.entries(revisionChannels))"))
+  const revisionHandler = handler.slice(0, handler.indexOf("registerNativeSessionBytes(sessionPublishGraphChannel"))
+
+  // A refused, unavailable or lost reply keeps its kind: the renderer classifies the publication from it.
+  expect(revisionHandler).toContain("} catch (error) { return nativeSessionFailure(error) }")
+  expect(revisionHandler).not.toContain("catch { return nativeSessionFailure() }")
+  // The command ran, but this renderer no longer owns the result: it may have been taken.
+  expect(revisionHandler).toContain("return nativeSessionFailure(new Error(")
+})
+
+test("carries the processor patch status and its decimal token to the renderer unchanged", async () => {
+  const [main, preload] = await Promise.all([readFile(mainPath, "utf8"), readFile(preloadPath, "utf8")])
+
+  expect(main).toContain("nativeProcessorPatchReply(await supervisor.queueProcessorStatePatch(")
+  expect(preload).toContain("queueProcessorStatePatch: (bytes: Uint8Array, transactionToken?: string) => invokeNativePatch(bytes, transactionToken)")
+  expect(preload).toContain("queueParameterEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeDelivery(")
+  expect(preload).toContain("queueInstrumentEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeDelivery(")
 })
 
 test("keeps spectrum selection on the native session envelope contract", async () => {
@@ -55,7 +78,7 @@ test("keeps spectrum selection on the native session envelope contract", async (
     readFile(preloadPath, "utf8"),
   ])
 
-  expect(preload).toContain('setSpectrumNode: (nodeId: bigint | null) => invokeNativeSession("daw:audio-host:session:set-spectrum-node", nodeId)')
+  expect(preload).toContain('setSpectrumNode: (nodeId: bigint | null) => invokeNativeSession(sessionSetSpectrumNodeChannel, nodeId)')
   expect(main).toContain('const envelope = nativeSpectrumNodeEnvelopeSchema.safeParse(value)')
   expect(main).toContain('envelope.data.transactionToken !== undefined')
   expect(main).toContain('await supervisor.setSpectrumNode(envelope.data.value)')
@@ -68,11 +91,12 @@ test("routes recording IPC through production native session envelopes", async (
     readFile(preloadPath, "utf8"),
   ])
 
-  expect(preload).toContain('configureRecording: (input: NativeHostRecordingConfiguration) => invokeNativeSession("daw:audio-host:session:configure-recording", input)')
-  expect(preload).toContain('stopRecording: (stopFrame?: number) => invokeNativeSession("daw:audio-host:session:stop-recording", stopFrame)')
+  expect(preload).toContain('configureRecording: (input: NativeHostRecordingConfiguration & { spoolImportVersion: 1 })')
+  expect(preload).toContain('ipcRenderer.invoke(sessionConfigureRecordingChannel, { value: input, transactionToken: undefined })')
+  expect(preload).toContain('stopRecording: (stopFrame?: number) => invokeNativeSession(sessionStopRecordingChannel, stopFrame)')
 
-  const configureStart = main.indexOf('ipcMain.handle("daw:audio-host:session:configure-recording"')
-  const stopStart = main.indexOf('ipcMain.handle("daw:audio-host:session:stop-recording"')
+  const configureStart = main.indexOf('ipcMain.handle(sessionConfigureRecordingChannel')
+  const stopStart = main.indexOf('ipcMain.handle(sessionStopRecordingChannel')
   const controlStart = main.indexOf("  const registerNativeSessionControl", stopStart)
   const configureHandler = main.slice(configureStart, stopStart)
   const stopHandler = main.slice(stopStart, controlStart)
@@ -80,7 +104,7 @@ test("routes recording IPC through production native session envelopes", async (
   expect(configureHandler).toContain("nativeSessionEnvelopeSchema(nativeSessionRecordingConfigurationSchema).safeParse(value)")
   expect(configureHandler).toContain("envelope.data.transactionToken !== undefined")
   expect(configureHandler).toContain("nativeSessionRecordingConfiguration(envelope.data.value)")
-  expect(configureHandler).toContain("await supervisor.configureRecording(configuration)")
+  expect(configureHandler).toContain("await supervisor.configureRecording(configuration, { rootPath: take.rootPath")
   expect(configureHandler).not.toContain("nativeSessionRecordingConfigurationSchema.safeParse(value)")
 
   expect(stopHandler).toContain("nativeSessionEnvelopeSchema(z.number().int().safe().min(0).optional()).safeParse(value)")
@@ -94,6 +118,12 @@ test("preserves renderer transport transition IDs through native IPC mapping", a
 
   expect(main).toContain("transitionId: z.bigint().positive().max(0xffff_ffff_ffff_ffffn).optional()")
   expect(main).toContain("transitionId: value.transitionId")
+})
+
+test("scopes configuration identity to each native host process generation", async () => {
+  const main = await readFile(mainPath, "utf8")
+  expect(main).toContain("const configurationGeneration = currentGeneration + 1")
+  expect(main).toContain("configuredHost = nativeHostConfigurationIdentityFor(configuredHost, host)")
 })
 
 test("routes editor commands through the isolated session before the playback host", async () => {
@@ -113,5 +143,5 @@ test("commits renderer navigation before native transaction registration", async
   expect(didNavigate).toBeGreaterThanOrEqual(0)
   expect(navigationHandler).toContain("rendererLifecycle.commitMainFrameNavigation(url)")
   expect(navigationHandler).not.toContain("activateInitialCommittedDocument")
-  expect(main).toContain('ipcMain.handle("daw:audio-host:session:begin-transaction"')
+  expect(main).toContain('ipcMain.handle(sessionBeginTransactionChannel')
 })

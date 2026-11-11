@@ -1,5 +1,5 @@
 import type { FunctionReturnType } from 'convex/server'
-import { batch, type Accessor, type Setter } from 'solid-js'
+import { batch, createSignal, type Accessor, type Setter } from 'solid-js'
 
 import { buildClipCreateSnapshot, buildCreatedClipSelection, createProjectedClips, createProjectedLocalClips, pushClipCreateHistory, type BatchClipCreateItem } from '~/lib/clip-create'
 import type { ClipBuffers } from '~/lib/clip-buffer-cache'
@@ -80,6 +80,10 @@ type TimelineClipActionsHandlers = {
   pasteTimelineSelection: () => boolean
   performDeleteTrack: (trackId: Track['id']) => Promise<void>
   requestDeleteTrack: (trackId: Track['id']) => void
+  hasWritableSelectedClips: () => boolean
+  hasWritableClips: () => boolean
+  selectAllTimelineClips: () => void
+  hasTimelineClipboard: Accessor<boolean>
 }
 
 const buildSectionHistoryEntry = (projectId: string, entries: HistoryEntry[]): HistoryEntry | null => (
@@ -316,11 +320,54 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     automation: rangeAutomationFragments(range.trackIds, range),
   })
 
+  const [hasTimelineClipboard, setHasTimelineClipboard] = createSignal(false)
+
+  const writeTimelineClipboard = (clipboard: TimelineSectionClipboard) => {
+    sectionClipboard.write(clipboard)
+    setHasTimelineClipboard(true)
+    return true
+  }
+
+  // Clips copy as a bounding range of their own. Only the selected clips enter the fragments, so neighbours inside the box stay out.
+  const buildSelectedClipsClipboard = (clipIds: Set<string>): TimelineSectionClipboard => {
+    const selectedTracks = tracks().flatMap((track) => {
+      const clips = track.clips.filter((clip) => clipIds.has(clip.id))
+      return clips.length > 0 ? [{ ...track, clips }] : []
+    })
+    const startSec = Math.min(...selectedTracks.flatMap((track) => track.clips.map((clip) => clip.startSec)))
+    const endSec = Math.max(...selectedTracks.flatMap((track) => track.clips.map((clip) => clip.startSec + clip.duration)))
+    const trackIds = selectedTracks.map((track) => track.id)
+    return {
+      durationSec: endSec - startSec,
+      trackIds,
+      clips: buildSectionClipFragments({ tracks: selectedTracks, section: { range: { startSec, endSec }, trackIds }, bpm: bpm() }),
+      automation: [],
+    }
+  }
+
   const copyTimelineSelection = () => {
     const range = selection.rangeSelection()
-    if (!range) return false
-    sectionClipboard.write(buildTimelineSectionClipboard(range))
-    return true
+    if (range) return writeTimelineClipboard(buildTimelineSectionClipboard(range))
+    const clipIds = getWritableSelectedClipIds(selectedClipIds())
+    if (clipIds.size === 0) return false
+    return writeTimelineClipboard(buildSelectedClipsClipboard(clipIds))
+  }
+
+  const writableTimelineClipEntries = () => {
+    const entries = tracks().flatMap((track) => track.clips.map((clip) => ({ trackId: track.id, clipId: clip.id })))
+    const writableIds = getWritableSelectedClipIds(new Set(entries.map((entry) => entry.clipId)))
+    return entries.filter((entry) => writableIds.has(entry.clipId))
+  }
+
+  const selectAllTimelineClips = () => {
+    const entries = writableTimelineClipEntries()
+    const first = entries[0]
+    if (!first) return
+    selection.selectClipGroup({
+      trackId: first.trackId,
+      clipIds: entries.map((entry) => entry.clipId),
+      primaryClipId: first.clipId,
+    })
   }
 
   const pasteTimelineSectionAt = async (clipboard: TimelineSectionClipboard | null, destinationStartSec: number) => {
@@ -614,5 +661,9 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     pasteTimelineSelection,
     performDeleteTrack,
     requestDeleteTrack,
+    hasWritableSelectedClips: () => getWritableSelectedClipIds(selectedClipIds()).size > 0,
+    hasWritableClips: () => writableTimelineClipEntries().length > 0,
+    selectAllTimelineClips,
+    hasTimelineClipboard,
   }
 }

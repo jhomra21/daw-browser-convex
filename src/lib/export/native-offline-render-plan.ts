@@ -79,10 +79,16 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
   const byAssetId = new Map(snapshot.assets.map((entry) => [entry.asset.assetId, entry]))
   const assets: NativeHostPcmAsset[] = []
   const mappedAssets: NativeOfflineMappedAsset[] = []
+  const eventsByAssetId = Map.groupBy(snapshot.events, (event) => event.assetId)
+  const instrumentAssetIds = new Set(snapshot.graph.nodes.flatMap((node) => {
+    const state = node.instrument
+    if (!state || state.kind === 'synth') return []
+    return state.kind === 'granular' ? [state.assetId] : state.zones.map((zone) => zone.assetId)
+  }))
   for (const { asset, sessionAssetId } of sessionAssets) {
     const entry = byAssetId.get(asset.assetId)
     if (!entry) throw new Error(`Native export asset "${asset.assetId}" is missing.`)
-    if (entry.pcm) {
+    if (entry.pcm && !instrumentAssetIds.has(asset.assetId)) {
       assets.push({
         sessionAssetId,
         frameCount: asset.frameCount,
@@ -94,8 +100,7 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
     }
     const sourceAssetKey = entry.sourceAssetKey
     if (!sourceAssetKey) throw new Error(`Native export mapped asset "${asset.assetId}" is missing its source identity.`)
-    const ranges = snapshot.events
-      .filter((event) => event.assetId === asset.assetId)
+    const ranges = (eventsByAssetId.get(asset.assetId) ?? [])
       .map((event) => {
         const sourceOffsetFraction = event.sourceOffsetFraction ?? 0
         if (
@@ -118,6 +123,7 @@ const nativeAssets = (snapshot: Extract<PortableExportSnapshot, { supported: tru
         }
         return mappedSourceCoverage(sourceStart, event.sourceFrameCount, asset.frameCount)
       })
+      .concat(instrumentAssetIds.has(asset.assetId) ? [{ startFrame: 0, frameCount: asset.frameCount }] : [])
       .filter((range) => range.frameCount > 0)
       .toSorted((left, right) => left.startFrame - right.startFrame)
       .reduce<{ startFrame: number; frameCount: number }[]>((merged, range) => {
@@ -218,6 +224,7 @@ export const compileNativeOfflineRenderPlan = (input: {
   tailFrames: number
   projectGeneration: number
   projectId?: string
+  onInstrumentRegionSources?: (sources: readonly { sourceAssetKey: string; buffer: AudioBuffer }[]) => void
   preparedStretchAssets?: readonly (PortablePreparedStretchAsset | NativePreparedStretchAsset)[]
   externalAttachments?: NativeExternalAttachmentPlan
   capturedVstStates?: readonly {
@@ -259,6 +266,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     projectGeneration: input.projectGeneration,
     preparedStretchAssets: input.preparedStretchAssets,
     capabilityTarget: 'native',
+    instrumentRegionMode: 'metadata',
     retainOrdinaryPcm: false,
     metadataSourceAssets: input.tracks.flatMap((track) => track.clips.flatMap((clip) => (
       clip.midi || !clip.sourceAssetKey || clip.sourceDurationSec === undefined
@@ -273,6 +281,11 @@ export const compileNativeOfflineRenderPlan = (input: {
     ))),
   })
   if (!snapshot.supported) throw new Error(snapshot.reasons.join(' '))
+  input.onInstrumentRegionSources?.(snapshot.instrumentRegionSources ?? [])
+  const instrumentSourceKeys = new Set(snapshot.instrumentRegionSources?.map((source) => source.sourceAssetKey))
+  const instrumentAssetIds = new Set(snapshot.assets.flatMap((entry) => (
+    entry.sourceAssetKey && instrumentSourceKeys.has(entry.sourceAssetKey) ? [entry.asset.assetId] : []
+  )))
   const schedule = compilePortableFrameSchedule({
     revision: 1,
     transportEpoch: 1,
@@ -295,7 +308,7 @@ export const compileNativeOfflineRenderPlan = (input: {
   }
   const chunked = chunkNativePcmProjection({
     graph: snapshot.graph,
-    assets: snapshot.assets.flatMap(({ asset, pcm }) => pcm ? [{ asset, pcm }] : []),
+    assets: snapshot.assets.flatMap(({ asset, pcm }) => pcm && !instrumentAssetIds.has(asset.assetId) ? [{ asset, pcm }] : []),
     events: snapshot.events,
     firstSequence: 1,
   })
@@ -311,7 +324,7 @@ export const compileNativeOfflineRenderPlan = (input: {
       ...snapshot.graph,
       assets: [
         ...chunked.assets.map(({ asset }) => asset),
-        ...snapshot.assets.flatMap(({ asset, pcm }) => pcm ? [] : [asset]),
+        ...snapshot.assets.flatMap(({ asset, pcm }) => pcm && !instrumentAssetIds.has(asset.assetId) ? [] : [asset]),
       ],
     },
     assets: [
@@ -320,7 +333,8 @@ export const compileNativeOfflineRenderPlan = (input: {
         pcm,
         transferables: pcm.planes.map(transferableBuffer),
       })),
-      ...snapshot.assets.flatMap((entry) => entry.pcm ? [] : [entry]),
+      ...snapshot.assets.flatMap((entry) => entry.pcm && !instrumentAssetIds.has(entry.asset.assetId)
+        ? [] : [{ ...entry, pcm: undefined, transferables: [] }]),
     ],
     events: chunked.events,
   }

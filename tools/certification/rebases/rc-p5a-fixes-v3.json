@@ -1,0 +1,2551 @@
+{
+ "name": "rc-p5a-fixes-v3",
+ "sequence": 3,
+ "createdAt": "2026-11-11T01:33:54.488Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "packages/audio-engine/src/native-host-wire.ts",
+   "from": "5b778de12274d66ffb6c1e11e765466a72f0a8324012f1b3cc9fcc00cfc2e21f",
+   "to": "f84ac7b93f5bd73fcfda1d43eced8ea99d64c20cf274aaaa219ddb025da3f1a5"
+  },
+  {
+   "file": "src/components/timeline/create-persisted-effect-state.test.ts",
+   "from": "c0e4537b838f002de09d0284d187171693a8357a8939f89a7739eeb320151bbb",
+   "to": "5d3ae312c861ac660a4a81b47d18d223397a7b473dca0ac73168f1cce0086fa7"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.test.ts",
+   "from": "88a86e46f7db2c39d857fb08bf23ce2bbb8f7a5a89e15f6b6a664834ae8ffaac",
+   "to": "f26b208583ae871201caedc47e827c20d4275af1c91a7563a993c20ca09edbc0"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.ts",
+   "from": "d57917f6437192abc6adcd7ac06013e55ef4a4385c248f480253473a9964e8b0",
+   "to": "19019a87eb53c8fcb84b46e114fc9e0c4aee97e986b10750572212fdbaa0a725"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.test.ts",
+   "from": "e9c6e419f750a925c7b7c2dc31ab9fae10220c7d2e95e59552c6e9170546e9ca",
+   "to": "540bc44e010f144bb2a44719bfef331f1063201f7c6d1e894399258b10ef712c"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.ts",
+   "from": "4134d325e7ac751349ba8474d10ef58101562636469804dcead1f5f8620e5f9d",
+   "to": "ecc2126c0a123bac60e0c989a33666bc50fb58056545149064b958c3df8c2606"
+  },
+  {
+   "file": "src/lib/desktop/native-schedule-coordinator.ts",
+   "from": "f6ae3b2a66226d02dd7e2b374df7aef626ebf0a749ad3de4113a7a8e18acda67",
+   "to": "d5b43368161d86af2a60d18f89a36cd01ab95ce3cddbdcbc76e3c613aa0b231f"
+  },
+  {
+   "file": "tools/acceptance/ae-08-live-graph.ts",
+   "from": "d75438b59bd80b26d08abd165fe641a81d8274e79e7cfdc133b45e3c74caee69",
+   "to": "d9a2817075014b632c8b7dbb3eefd46d4011c8daa3e33fe6d59bb6c7fa811bab"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#177"
+   ],
+   "old": "ecd33b3daec400179ff093f46232770693f1b2093a45ada3bf5a40e129a1a9d6",
+   "new": "42e8604a96d9690e6dfd1f21f5be2be42b919e1306def95735c21e02bd242a4f"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#205"
+   ],
+   "old": "980fbe5b1229c34aba883a1820422a5a17a2854cd13b5e66fde8d66d1c1da93d",
+   "new": "7631d9a1f1d7fe715a289f16c39d0a6b3f8b8c3af9cb8b3505059ed132cfffe6"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#218"
+   ],
+   "old": "d92a94fd4da369e70827c4891c8831d66c2f0d99e93b3d7fb69557f33bc271c7",
+   "new": "764cc626e0e45051c2cd78e403b7c6510bdba52fedc24178136cc7b0a7234b56"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook206",
+    "ids",
+    "#0"
+   ],
+   "old": 241,
+   "new": 240
+  },
+  {
+   "path": [
+    "seeds",
+    "hook206",
+    "ids",
+    "#1"
+   ],
+   "old": 245,
+   "new": 244
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#232"
+   ],
+   "old": "b0f104821a2bcc05d03151e1785acc39013e04018d89a7e6ec493fbc0fe7ee69",
+   "new": "844952a16843e2c7b84498d9db25b526cd4693e9ab9b3887100c1dd4d33f5cf3"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#269"
+   ],
+   "old": "7f0d968073af7eac8fae532a61f71ede3e330c2a3abc01fe8ad8090a967cf7e9",
+   "new": "bc4e9cffb031394553e94810782e4bc3ba6674f39032f2474e4e022d7d9206e9"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#345"
+   ],
+   "old": "045d442bfdfa2e3a58080bc41fca0e5f1b5ae14b1c5ecc1aa6fe1c9a14d0028d",
+   "new": "6e747b49325d5574fc039106bcd3ba08742fbe2d870eb6d99415aa7231849c4c"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#349"
+   ],
+   "old": "c2350c52a2f12c73f5c666413f6798e02527b5217f7f56cf35530043b827fe09",
+   "new": "3baeab2c5d4f610b80dae3b811f334d570ae6df7e2ac8ba0c92ad4b7beb04cee"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#360"
+   ],
+   "old": "5db8b47275ae46a6608a35099ea6257023ad7babf08542c38edfe267ed220b1f",
+   "new": "36c11f1c9628bc0aff4b8f8fa799a75d4050188143697808e00594981aa2aaa7"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#391"
+   ],
+   "old": "1a54760958d7cf4aeadc8c6def8d16e1a4acb6857299a66366fa0992fc57b1f0",
+   "new": "0942676d3bd6c1bd17129592df524ff3ead78de86b61cb16d659b88e43be4839"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#418"
+   ],
+   "old": "6f177ed7300d57b81f9c7a2aa7a76d5e84d98d2485f33ffa8389ea9b3049d621",
+   "new": "c3bd5ebdb3c8ca8721afd4ddbec655b79ac15ea15f0a6c8dc46bcbefcb24ad76"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#443"
+   ],
+   "old": "f9d4f3134d55dda1e88e42cc2d48e7f07d1879baa65e8f578e885659030fc4e9",
+   "new": "d61fbc115f1d37d4a9703d5470b8f53698430a9be88e3a637d89010e411d41ca"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#474"
+   ],
+   "old": "6ed4b1bd6742c527b80b664f6cde2d08ef27a8ed6d550721c3d6216fddd7c63f",
+   "new": "3bd5b80be17d04ff380e6c3a6ea34a801df40a230f0c929f701b04870feff90f"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#534"
+   ],
+   "old": "341d31c6a69bcd6bf732ecca3cf499811ca4d58815960bf66a46d0f7ae7419a4",
+   "new": "219ec7d5aed70981d208e4749f20d1f97228da68f2a5f680d2917ec988626eaf"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#605"
+   ],
+   "old": "e951804b62b93654b343711b8056d42abc7eb04cff9c09e382c3ead2b490b36a",
+   "new": "8c1f98701fdf87bf05c46a16e6dce3c3ee896d8bf54bdf36056e3e1be445c739"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#685"
+   ],
+   "old": "cdfb8447df384a3ca1f7faf84e5fdd51dc2dc19d956b7843acc2e8ba0034a029",
+   "new": "8c76143a4e4f057834ecf33d451fc13943f49f63636d64aaf40278b016c7f69d"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#787"
+   ],
+   "old": "bf1ef4c1e84e972062381bdbd33174626c733d52961ff679b1addc0a1f960ab0",
+   "new": "80eb51581abb9066589fd9a312f6a4a68c56ae460f8018436712b578c1ce63e7"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#789"
+   ],
+   "old": "8b0e57897eafc31ebc843c7993d8ebca0a6168f454a53e68362db8bb7e56298d",
+   "new": "9ee645c3ef542954c6f45d0c5523df2ebf1df0cba90b784dc5093726c4595750"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#844"
+   ],
+   "old": "cdc35c6bdee17747e7ab3f1fddc029565dd162d9aa5f05f683aa94dd61e7f541",
+   "new": "a6cb6c7b451e135837f011b3247eacbff46b9743390451c5ec4efab5ae8e1548"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#935"
+   ],
+   "old": "df9995e55bf7863f2a7ffb9afa91ab2cf87881ffd8a881d35a1ccef9ee3ff7a5",
+   "new": "2cb190255fbead66aa6499e132d7e708237da3a901cc216c261c019f0f226017"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#964"
+   ],
+   "old": "b7445acf6a21e22ac56b47df4ab305470e5c9daff878670a3e26dd3fe27ae15b",
+   "new": "696537438d5ce67d850ba1b36d821ff6dc9b43e91c91c70143356db75dfa4156"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook",
+    "summaries",
+    "#979"
+   ],
+   "old": "203e3cf08484c0fc30c975eda2533c7db9db5cc2d636a74fab8c9aac120e4851",
+   "new": "d608364b393b8f4a8df4cc50ceb8f9830ada3a8eae772fefd0e580db3daab7ae"
+  },
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "e135e90fec7757bf37530765b8b344f5b06e7196e10b7485adc434361ebb4f81",
+   "new": "030a7a9fb7982d6788d7faba3dce415cce055fb9bbc0c8119d9e1e4facec6ed4"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:418:418-repeat-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:418:418-plus-427-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 191,
+   "new": 192
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-repeat",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-423",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:418:427-alone-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 193,
+   "new": 194
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-424",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-425",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-426",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-427",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 193,
+   "new": 194
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:427-alone",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 193,
+   "new": 194
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-428",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 210,
+   "new": 211
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-429",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-432",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-433",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-434",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-436",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-435",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:428:control-repeat",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:437-alone",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:428:428-repeat",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 210,
+   "new": 211
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:434-repeat-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:435-alone-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:436-alone-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:434-plus-436-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 211,
+   "new": 212
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:434-plus-435-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:434-plus-437-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 209,
+   "new": 210
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:437-alone-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-437",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 211,
+   "new": 212
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:467:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-b",
+    "judge",
+    "logSha256"
+   ],
+   "old": "d397cc3347a3456102c5dc7156ce1592c4f9ef37e35a1ca94b96a1dd9be32578",
+   "new": "6d8eb4109abf2e6ce3f71a19ff67c4c00c26d1d184de5b69fbb7017be6074ed8"
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-b",
+    "judge",
+    "summarySha256"
+   ],
+   "old": "de32eb092e19f9c280d30a3b5cf1e665436d0a11e372e623b50ef3161ed41119",
+   "new": "4a507220b8aaf72cf92f575c286cdea93d454cfe82cb7bf07aac38356919a922"
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-a",
+    "judge",
+    "logSha256"
+   ],
+   "old": "d397cc3347a3456102c5dc7156ce1592c4f9ef37e35a1ca94b96a1dd9be32578",
+   "new": "6d8eb4109abf2e6ce3f71a19ff67c4c00c26d1d184de5b69fbb7017be6074ed8"
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-a",
+    "judge",
+    "summarySha256"
+   ],
+   "old": "de32eb092e19f9c280d30a3b5cf1e665436d0a11e372e623b50ef3161ed41119",
+   "new": "4a507220b8aaf72cf92f575c286cdea93d454cfe82cb7bf07aac38356919a922"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:502:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:486:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:462:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-g-playback",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "1ad4c097ba90a89d221598d4236cec12d78b355191bb0c1c254e753b8a2a41b0",
+   "new": "f65b8447dbd5592b89ed33e5582fea2468c412024065d51caac270ed589b7b67"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:468:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:417:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:505:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:470:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:507:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:464:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:459:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:450:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:460:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:468:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:509:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:508:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:455:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:464:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:459:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:488:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:481:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:508:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:492:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:413:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:414:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:415:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:433:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:428:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:504:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:457:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:481:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:414:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:467:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:428:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 210,
+   "new": 211
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:452:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:457:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:471:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:504:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:462:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:495:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:503:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:439:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:440:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:484:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:497:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:439:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 209,
+   "new": 210
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:440:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:503:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:454:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:484:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:461:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:506:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:463:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:404:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:406:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:463:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:407:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:404:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 202,
+   "new": 203
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:406:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:408:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:410:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:415:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 209,
+   "new": 210
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:420:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:421:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:425:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:427:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:429:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:421:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 208,
+   "new": 209
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:434:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:427:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 193,
+   "new": 194
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:436:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:435:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:450:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:451:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:478:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:435:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 210,
+   "new": 211
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:483:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:477:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:485:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:488:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:478:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:483:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:506:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:492:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 211,
+   "new": 212
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:451:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:477:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:485:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:407:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:471:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 211,
+   "new": 212
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:410:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 209,
+   "new": 210
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:413:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 211,
+   "new": 212
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:420:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:417:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:433:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:429:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:434:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:436:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:437:3:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:507:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:465:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:480:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:497:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:437:3:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:453:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:465:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 211,
+   "new": 212
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:470:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:454:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:480:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:495:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:461:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:453:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:425:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:460:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:505:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:502:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 212,
+   "new": 213
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:509:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:408:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-playback",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:486:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 207,
+   "new": 208
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i4-consumers",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 295,
+   "new": 300
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:394:0:mutant",
+    "expect",
+    "rejection",
+    "#0",
+    "#1"
+   ],
+   "old": 241,
+   "new": 240
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:394:0:mutant",
+    "expect",
+    "rejection",
+    "#1",
+    "#1"
+   ],
+   "old": 245,
+   "new": 244
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:455:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 211,
+   "new": 212
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 206,
+   "new": 207
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:452:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 199,
+   "new": 200
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 188,
+   "new": 189
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-persisted",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 39,
+   "new": 44
+  }
+ ],
+ "seedRecordChanges": [
+  {
+   "path": [
+    "hook",
+    "#135",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 25,
+   "new": 24
+  },
+  {
+   "path": [
+    "hook",
+    "#139",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#273",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#330",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 23,
+   "new": 25
+  },
+  {
+   "path": [
+    "hook",
+    "#371",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 24,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#398",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#420",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#487",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#506",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 25,
+   "new": 24
+  },
+  {
+   "path": [
+    "hook",
+    "#513",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#608",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#622",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#631",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 24,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#637",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#712",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 24,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#732",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#752",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#807",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#937",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 21
+  }
+ ],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [
+   "hook:274:latency|cancelled|ending-transport-domain"
+  ],
+  "rejectionRuling": "acceptance-reports/ae-08-phase-5-2026-10-18/PARENT-RULING-SEED-274.md",
+  "scope": "--full --base-commit HEAD --allow-rejection hook:274:latency|cancelled|ending-transport-domain",
+  "provenance": {
+   "scope": [
+    "--full",
+    "--base-commit",
+    "HEAD",
+    "--allow-rejection",
+    "hook:274:latency|cancelled|ending-transport-domain"
+   ],
+   "head": "78e5734a653f034f3997dcf5b2ad9d3966a92ce7",
+   "gitStatusSha256": "d89070ab165303a5a11b2314c63c6338a31b1f1f5972da66eca5dae1ecebf7f7",
+   "expectationsSha256": "eaf7fb08cd3294caf821628ee847fd65f0ccb33af0864b2d88d125608f7ea3c8",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "eaf7fb08cd3294caf821628ee847fd65f0ccb33af0864b2d88d125608f7ea3c8",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/bless-rc-p5a-fixes-v3-2026-11-11T01-18-10.130Z/live",
+   "resultSha256": "f8a87f43845049fa2c4c94b71af94d4b8a87b1c523d83179c7a188a9d8c30159",
+   "seconds": 944.283627958,
+   "observations": 4902
+  },
+  "unreachedByOverlay": []
+ }
+}

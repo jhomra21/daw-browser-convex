@@ -6,8 +6,8 @@ const PCM_FILE = 'render.f32'
 const METADATA_FILE = 'metadata.json'
 const RECOVERY_CURSOR_FILE = 'recovery.cursor'
 const FLOAT_BYTES = Float32Array.BYTES_PER_ELEMENT
-export const nativeOfflinePcmSpoolReplayFrames = 16_384
-export const nativeOfflinePcmSpoolRecoveryBatchSize = 8
+const nativeOfflinePcmSpoolReplayFrames = 16_384
+const nativeOfflinePcmSpoolRecoveryBatchSize = 8
 export const nativeOfflinePcmSpoolRecoveryTtlMs = 24 * 60 * 60 * 1000
 
 type NativeOfflinePcmSpoolFailure =

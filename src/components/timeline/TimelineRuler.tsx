@@ -1,7 +1,8 @@
-import { createMemo, type Component, Index, Show, onCleanup } from 'solid-js'
+import { createMemo, createSignal, type Component, Index, Show, onCleanup } from 'solid-js'
 import { ARRANGEMENT_OVERVIEW_HEIGHT, RULER_HEIGHT, quantizeSecToGrid } from '~/lib/timeline-utils'
 import { musicalBarLabelAtTime, selectTimelineGridIntervals } from '~/lib/timeline-view'
 import { timelineGridPhasePx } from '~/lib/timeline-grid-phase'
+import { isKeyboardEventOwnedByOverlay } from '~/lib/keyboard-event-target'
 
 type TimelineRulerProps = {
   durationSec: number
@@ -51,8 +52,9 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   const barStepPx = () => Math.max(0.5, intervals().majorSec * props.pixelsPerSecond)
 
   const rulerWidthPx = () => Math.max(0, props.viewportWidthPx)
-  const loopStartPx = () => Math.max(0, props.timeToX(props.loopStartSec ?? 0))
-  const loopEndPx = () => Math.min(rulerWidthPx(), Math.max(loopStartPx(), props.timeToX(props.loopEndSec ?? 0)))
+  const [loopPreview, setLoopPreview] = createSignal<{ startSec: number; endSec: number }>()
+  const loopStartPx = () => Math.max(0, props.timeToX(loopPreview()?.startSec ?? props.loopStartSec ?? 0))
+  const loopEndPx = () => Math.min(rulerWidthPx(), Math.max(loopStartPx(), props.timeToX(loopPreview()?.endSec ?? props.loopEndSec ?? 0)))
   const loopWidthPx = () => Math.max(0, loopEndPx() - loopStartPx())
   const showLoop = () => props.loopEnabled && loopWidthPx() > 1
 
@@ -69,15 +71,41 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     if (!listenersAttached) return
     try { window.removeEventListener('pointermove', onPointerMove) } catch {}
     try { window.removeEventListener('pointerup', onPointerUp) } catch {}
-    try { window.removeEventListener('pointercancel', onPointerUp) } catch {}
+    try { window.removeEventListener('pointercancel', onPointerCancel) } catch {}
+    try { window.removeEventListener('keydown', onKeyDown, true) } catch {}
+    try { window.removeEventListener('blur', onBlur) } catch {}
     listenersAttached = false
   }
+
+  const finishGesture = () => {
+    dragging = false
+    dragMode = 'none'
+    setLoopPreview(undefined)
+    detachPointerListeners()
+  }
+
+  const cancelGesture = () => {
+    if (!dragging) return
+    finishGesture()
+  }
+
+  const onPointerCancel = () => cancelGesture()
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== 'Escape') return
+    if (isKeyboardEventOwnedByOverlay(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    cancelGesture()
+  }
+  const onBlur = () => cancelGesture()
 
   const attachPointerListeners = () => {
     if (listenersAttached) return
     try { window.addEventListener('pointermove', onPointerMove) } catch {}
     try { window.addEventListener('pointerup', onPointerUp) } catch {}
-    try { window.addEventListener('pointercancel', onPointerUp) } catch {}
+    try { window.addEventListener('pointercancel', onPointerCancel) } catch {}
+    try { window.addEventListener('keydown', onKeyDown, true) } catch {}
+    try { window.addEventListener('blur', onBlur) } catch {}
     listenersAttached = true
   }
 
@@ -91,9 +119,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   const onPointerMove = (e: PointerEvent) => {
     if (!dragging || dragMode === 'none') return
     if (!props.loopEnabled) {
-      dragging = false
-      dragMode = 'none'
-      detachPointerListeners()
+      cancelGesture()
       return
     }
     const sec = clientXToSecLocal(e.clientX)
@@ -105,7 +131,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
         s = quantizeSecToGrid(s, props.bpm, props.denom, 'round')
         ed = quantizeSecToGrid(ed, props.bpm, props.denom, 'round')
       }
-      props.onSetLoopRegion(s, Math.max(s + 0.05, ed))
+      setLoopPreview({ startSec: s, endSec: Math.max(s + 0.05, ed) })
       return
     }
     const curStart = props.loopStartSec ?? 0
@@ -113,26 +139,27 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     if (dragMode === 'resize-start') {
       let nextStart = Math.min(sec, curEnd - 0.05)
       if (props.gridEnabled) nextStart = quantizeSecToGrid(nextStart, props.bpm, props.denom, 'round')
-      props.onSetLoopRegion(nextStart, curEnd)
+      setLoopPreview({ startSec: nextStart, endSec: curEnd })
     } else if (dragMode === 'resize-end') {
       let nextEnd = Math.max(sec, curStart + 0.05)
       if (props.gridEnabled) nextEnd = quantizeSecToGrid(nextEnd, props.bpm, props.denom, 'round')
-      props.onSetLoopRegion(curStart, nextEnd)
+      setLoopPreview({ startSec: curStart, endSec: nextEnd })
     } else if (dragMode === 'move') {
       const length = dragLoopLen > 0 ? dragLoopLen : Math.max(0.05, (props.loopEndSec ?? 0) - (props.loopStartSec ?? 0))
       let nextStart = sec - dragOffsetFromStart
       if (props.gridEnabled) nextStart = quantizeSecToGrid(nextStart, props.bpm, props.denom, 'round')
       nextStart = Math.max(0, Math.min(nextStart, (props.durationSec || 0) - length))
       const nextEnd = nextStart + length
-      props.onSetLoopRegion(nextStart, nextEnd)
+      setLoopPreview({ startSec: nextStart, endSec: nextEnd })
     }
   }
 
   const onPointerUp = () => {
     if (!dragging) return
-    dragging = false
-    dragMode = 'none'
-    detachPointerListeners()
+    const committed = loopPreview()
+    // Only the released brace reaches persistence and the playback observer.
+    if (committed) props.onSetLoopRegion?.(committed.startSec, committed.endSec)
+    finishGesture()
   }
 
   const onLocalPointerDown = (e: PointerEvent) => {
@@ -159,7 +186,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     } else {
       dragging = true; dragMode = 'create'; dragStartSec = sec; e.preventDefault(); e.stopPropagation()
       // Initialize a minimal loop so feedback is visible immediately
-      props.onSetLoopRegion?.(sec, sec + 0.1)
+      setLoopPreview({ startSec: sec, endSec: sec + 0.1 })
     }
     attachPointerListeners()
   }
@@ -190,7 +217,7 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   }
 
   onCleanup(() => {
-    detachPointerListeners()
+    cancelGesture()
   })
 
   const backgroundStyle = () => {

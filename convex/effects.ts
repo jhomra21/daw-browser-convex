@@ -5,7 +5,7 @@ import { z } from "zod";
 import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProjectAccess } from "./projectAccess";
 import { getTrackWriteAccess } from "./trackWrites";
 import { runSharedOperationOnce } from "./sharedOperationResults";
-import { advanceProjectRevision } from "./projectRows";
+import { advanceProjectRevision, assertEffectWriterRevisions, prospectiveRevision } from "./projectRows";
 import { legacySynthParamsValidator, synthParamsValidator, trackInstrumentValidator } from "./synthValidators";
 import {
   normalizeEqParamsForUpdate,
@@ -140,20 +140,25 @@ type TrackAudioEffectType = 'instrument' | 'synth' | 'arpeggiator' | AudioEffect
 type MasterAudioEffectType = AudioEffectKind
 type SharedAudioEffectType = TrackAudioEffectType | MasterAudioEffectType
 type AudioEffectOrderItem = AudioEffectKind | { id: string; kind: AudioEffectKind }
-type EffectRowWriteResult = {
-  changed: boolean
-  status: 'created' | 'updated' | 'noop' | 'invalid'
-  effectId?: Id<'effects'>
-}
+// A written or unchanged row answers with the revision it carries: the stamp of this transaction when it wrote, its own
+// earlier stamp (0 when it never had one) when it did not.
+type EffectRowWriteResult =
+  | { changed: false; status: 'invalid' }
+  | { changed: boolean; status: 'created' | 'updated' | 'noop'; effectId: Id<'effects'>; revision: number }
 type EffectRowRemoveResult = {
   changed: boolean
   status: 'deleted' | 'not-found'
+  revision?: number
   effectId?: Id<'effects'>
 }
 type EffectRowReorderResult = {
   changed: boolean
   status: 'applied' | 'noop'
+  revision?: number
 }
+type ReorderRowsResult =
+  | { changed: false }
+  | { changed: true; revision: number }
 const isCanonicalAudioEffectKind = (type: string): type is AudioEffectKind => (
   type === 'utility' || type === 'eq' || type === 'autofilter' || type === 'gate' || type === 'compressor' || type === 'saturator' || type === 'limiter'
   || type === 'lofi' || type === 'chorus' || type === 'flanger' || type === 'phaser' || type === 'tremolo' || type === 'autopan' || type === 'ensemble'
@@ -215,18 +220,51 @@ const notFoundStatus = () => ({ status: 'not-found' })
 const effectRowWriteResult = (
   status: 'created' | 'updated' | 'noop',
   effectId: Id<'effects'>,
+  revision: number,
 ): EffectRowWriteResult => ({
   changed: status !== 'noop',
   status,
   effectId,
+  revision,
 })
+const invalidEffectWrite: EffectRowWriteResult = { changed: false, status: 'invalid' }
+
+type EffectWriteOutcome =
+  | { status: 'invalid' }
+  | { status: 'applied'; effectId: Id<'effects'>; revision: number }
+
+// The owner of a param write: advances the project once and checks the stamp the row writer derived is the revision it produced.
+const finishEffectWrite = async (
+  ctx: any,
+  projectId: string,
+  result: EffectRowWriteResult,
+): Promise<EffectWriteOutcome> => {
+  if (result.status === 'invalid') return { status: 'invalid' }
+  if (result.changed) {
+    const advanced = await advanceProjectRevision(ctx, projectId)
+    assertEffectWriterRevisions([result.revision], advanced.revision)
+  }
+  return { status: 'applied', effectId: result.effectId, revision: result.revision }
+}
+
+const finishLegacyEffectWrite = async (
+  ctx: any,
+  projectId: string,
+  result: EffectRowWriteResult,
+): Promise<Id<'effects'> | undefined> => {
+  const outcome = await finishEffectWrite(ctx, projectId, result)
+  return outcome.status === 'invalid' ? undefined : outcome.effectId
+}
 
 const finishEffectMutation = async <Value>(
   ctx: any,
   projectId: string,
-  result: { changed: boolean; value: Value },
+  result: { changed: boolean; value: Value; revision?: number },
 ) => {
-  if (result.changed) await advanceProjectRevision(ctx, projectId)
+  if (result.changed) {
+    const advanced = await advanceProjectRevision(ctx, projectId)
+    assertEffectWriterRevisions(result.revision === undefined ? [] : [result.revision], advanced.revision)
+  }
   return result.value
 }
 
@@ -290,6 +328,7 @@ export const upsertTrackEffectRow = async (
     instanceId?: string
   },
 ): Promise<EffectRowWriteResult> => {
+  const revision = await prospectiveRevision(ctx, input.projectId)
   const existing = (await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect())
     .sort((left: EffectOrderRow, right: EffectOrderRow) => (
       (left.index ?? 0) - (right.index ?? 0)
@@ -320,21 +359,23 @@ export const upsertTrackEffectRow = async (
         : []
     )))
   }
-  if (consolidated) await compactTrackProcessorIndexes(ctx, input.trackId)
+  if (consolidated) await compactTrackProcessorIndexes(ctx, input.trackId, revision)
   if (row) {
     const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
-    if (row.type === input.type && stableEffectParams(row.params) === stableEffectParams(params)) {
-      return effectRowWriteResult(consolidated ? 'updated' : 'noop', row._id)
-    }
-    if (row.type === 'instrument' && row.instanceId === input.instanceId && areEffectParamsEqual(input.type, row.params, params)) {
-      return effectRowWriteResult(consolidated ? 'updated' : 'noop', row._id)
+    const sameContent = (row.type === input.type && stableEffectParams(row.params) === stableEffectParams(params))
+      || (row.type === 'instrument' && row.instanceId === input.instanceId && areEffectParamsEqual(input.type, row.params, params))
+    if (sameContent) {
+      if (!consolidated) return effectRowWriteResult('noop', row._id, row.revision ?? 0)
+      // Removing its duplicates changed what the survivor stands for.
+      await ctx.db.patch(row._id, { revision })
+      return effectRowWriteResult('updated', row._id, revision)
     }
     if (row.type === 'instrument' && areEffectParamsEqual(input.type, row.params, params)) {
-      await ctx.db.patch(row._id, { instanceId: input.instanceId, targetType: 'track' })
-      return effectRowWriteResult('updated', row._id)
+      await ctx.db.patch(row._id, { instanceId: input.instanceId, targetType: 'track', revision })
+      return effectRowWriteResult('updated', row._id, revision)
     }
-    await ctx.db.patch(row._id, { params, targetType: 'track', type: input.type, instanceId: input.instanceId })
-    return effectRowWriteResult('updated', row._id)
+    await ctx.db.patch(row._id, { params, targetType: 'track', type: input.type, instanceId: input.instanceId, revision })
+    return effectRowWriteResult('updated', row._id, revision)
   }
   const params = normalizeEffectParamsForUpdate(input.type, input.params)
   const effectId = await ctx.db.insert('effects', {
@@ -346,8 +387,9 @@ export const upsertTrackEffectRow = async (
     instanceId: input.instanceId,
     params,
     createdAt: Date.now(),
+    revision,
   })
-  return effectRowWriteResult('created', effectId)
+  return effectRowWriteResult('created', effectId, revision)
 }
 
 export const setTrackInstrumentRow = async (
@@ -359,7 +401,7 @@ export const setTrackInstrumentRow = async (
   },
 ): Promise<EffectRowWriteResult> => {
   const params = normalizeTrackInstrumentParams(input.instrument)
-  if (!params) return { changed: false, status: 'invalid' }
+  if (!params) return invalidEffectWrite
   return await upsertTrackEffectRow(ctx, { ...input, type: 'instrument', params })
 }
 
@@ -386,6 +428,7 @@ export const upsertMasterEffectRow = async (
     instanceId?: string
   },
 ): Promise<EffectRowWriteResult> => {
+  const revision = await prospectiveRevision(ctx, input.projectId)
   const existing = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
   if (input.instanceId) {
     const audioRows = existing.filter((entry: EffectOrderRow) => isCanonicalAudioEffectKind(entry.type))
@@ -396,9 +439,9 @@ export const upsertMasterEffectRow = async (
     : existing.find((entry: EffectOrderRow) => entry.type === input.type && !entry.instanceId) ?? null
   if (row) {
     const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
-    if (areEffectParamsEqual(input.type, row.params, params)) return effectRowWriteResult('noop', row._id)
-    await ctx.db.patch(row._id, { params, targetType: 'master' })
-    return effectRowWriteResult('updated', row._id)
+    if (areEffectParamsEqual(input.type, row.params, params)) return effectRowWriteResult('noop', row._id, row.revision ?? 0)
+    await ctx.db.patch(row._id, { params, targetType: 'master', revision })
+    return effectRowWriteResult('updated', row._id, revision)
   }
   const params = normalizeEffectParamsForUpdate(input.type, input.params)
   const effectId = await ctx.db.insert('effects', {
@@ -409,14 +452,10 @@ export const upsertMasterEffectRow = async (
     instanceId: input.instanceId,
     params,
     createdAt: Date.now(),
+    revision,
   })
-  return effectRowWriteResult('created', effectId)
+  return effectRowWriteResult('created', effectId, revision)
 }
-
-const legacyEffectWriteResult = (result: EffectRowWriteResult) => ({
-  changed: result.changed,
-  value: result.effectId,
-})
 
 const upsertTrackEffectForUser = async (
   ctx: any,
@@ -430,8 +469,8 @@ const upsertTrackEffectForUser = async (
   },
 ) => {
   const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
-  if (!access || access.track.projectId !== input.projectId) return { changed: false, value: undefined }
-  return legacyEffectWriteResult(await upsertTrackEffectRow(ctx, input))
+  if (!access || access.track.projectId !== input.projectId) return invalidEffectWrite
+  return await upsertTrackEffectRow(ctx, input)
 }
 
 const setTrackInstrumentForUser = async (
@@ -444,8 +483,8 @@ const setTrackInstrumentForUser = async (
   },
 ) => {
   const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
-  if (!access || access.track.projectId !== input.projectId) return { changed: false, value: undefined }
-  return legacyEffectWriteResult(await setTrackInstrumentRow(ctx, input))
+  if (!access || access.track.projectId !== input.projectId) return invalidEffectWrite
+  return await setTrackInstrumentRow(ctx, input)
 }
 
 const setArpeggiatorForUser = async (
@@ -458,8 +497,8 @@ const setArpeggiatorForUser = async (
   },
 ) => {
   const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
-  if (!access || access.track.projectId !== input.projectId) return { changed: false, value: undefined }
-  return legacyEffectWriteResult(await setArpeggiatorRow(ctx, input))
+  if (!access || access.track.projectId !== input.projectId) return invalidEffectWrite
+  return await setArpeggiatorRow(ctx, input)
 }
 
 const upsertMasterEffectForUser = async (
@@ -473,7 +512,7 @@ const upsertMasterEffectForUser = async (
   },
 ) => {
   await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
-  return legacyEffectWriteResult(await upsertMasterEffectRow(ctx, input))
+  return await upsertMasterEffectRow(ctx, input)
 }
 
 const getTrackEffect = async (
@@ -517,11 +556,17 @@ export const validateAudioEffectInstanceId = (
 
 type EffectOrderContext = {
   db: {
-    patch: (id: string, value: { index: number }) => Promise<void>
+    patch: (id: string, value: { index: number; revision: number }) => Promise<void>
   }
 }
 
-const reorderRows = async (ctx: EffectOrderContext, rows: EffectOrderRow[], order: AudioEffectOrderItem[]) => {
+// Rows whose index moves are rewritten, so they carry the stamp of the transaction that moved them.
+const reorderRows = async (
+  ctx: EffectOrderContext,
+  rows: EffectOrderRow[],
+  order: AudioEffectOrderItem[],
+  revision: number,
+): Promise<ReorderRowsResult> => {
   const audioRows = rows
     .filter((row) => isCanonicalAudioEffectKind(row.type))
     .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
@@ -543,8 +588,8 @@ const reorderRows = async (ctx: EffectOrderContext, rows: EffectOrderRow[], orde
   const nextIndex = (index: number) => index
   const changed = nextRows.some((row, index) => row.index !== index)
   if (!changed) return { changed: false }
-  await Promise.all(nextRows.map((row, index) => row.index === nextIndex(index) ? undefined : ctx.db.patch(row._id, { index: nextIndex(index) })))
-  return { changed: true }
+  await Promise.all(nextRows.map((row, index) => row.index === nextIndex(index) ? undefined : ctx.db.patch(row._id, { index: nextIndex(index), revision })))
+  return { changed: true, revision }
 }
 
 export const reorderAudioEffectRows = async (
@@ -556,14 +601,15 @@ export const reorderAudioEffectRows = async (
     order: AudioEffectOrderItem[]
   },
 ): Promise<EffectRowReorderResult> => {
+  const revision = await prospectiveRevision(ctx, input.projectId)
   if (input.targetType === 'track') {
     const rows = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
-    const result = await reorderRows(ctx, rows.filter((row: EffectOrderRow) => row.targetType === 'track'), input.order)
+    const result = await reorderRows(ctx, rows.filter((row: EffectOrderRow) => row.targetType === 'track'), input.order, revision)
     const status: 'applied' | 'noop' = result.changed ? 'applied' : 'noop'
     return { ...result, status }
   }
   const rows = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
-  const result = await reorderRows(ctx, rows, input.order)
+  const result = await reorderRows(ctx, rows, input.order, revision)
   const status: 'applied' | 'noop' = result.changed ? 'applied' : 'noop'
   return { ...result, status }
 }
@@ -597,6 +643,7 @@ export const removeAudioEffectRow = async (
     instanceId?: string
   },
 ): Promise<EffectRowRemoveResult> => {
+  const revision = await prospectiveRevision(ctx, input.projectId)
   const deleteEffectAutomation = async (instanceId: string, targetType: 'track' | 'master', trackId?: Id<'tracks'>) => {
     const automationRows = await ctx.db.query('automationEnvelopes').withIndex('by_project', (q: any) => q.eq('projectId', input.projectId)).collect()
     for (const envelope of automationRows) {
@@ -623,8 +670,8 @@ export const removeAudioEffectRow = async (
     if (!row) return { changed: false, status: 'not-found' }
     await ctx.db.delete(row._id)
     if (row.instanceId) await deleteEffectAutomation(row.instanceId, 'track', input.trackId)
-    await reorderRows(ctx, rows.filter((entry: EffectOrderRow) => entry._id !== row._id && entry.targetType === 'track'), [])
-    return { changed: true, status: 'deleted', effectId: row._id }
+    const compacted = await reorderRows(ctx, rows.filter((entry: EffectOrderRow) => entry._id !== row._id && entry.targetType === 'track'), [], revision)
+    return { changed: true, status: 'deleted', effectId: row._id, revision: compacted.changed ? compacted.revision : undefined }
   }
   const rows = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
   const row = input.instanceId
@@ -633,17 +680,17 @@ export const removeAudioEffectRow = async (
   if (!row) return { changed: false, status: 'not-found' }
   await ctx.db.delete(row._id)
   if (row.instanceId) await deleteEffectAutomation(row.instanceId, 'master')
-  await reorderRows(ctx, rows.filter((entry: EffectOrderRow) => entry._id !== row._id), [])
-  return { changed: true, status: 'deleted', effectId: row._id }
+  const compacted = await reorderRows(ctx, rows.filter((entry: EffectOrderRow) => entry._id !== row._id), [], revision)
+  return { changed: true, status: 'deleted', effectId: row._id, revision: compacted.changed ? compacted.revision : undefined }
 }
 
-async function compactTrackProcessorIndexes(ctx: any, trackId: Id<'tracks'>) {
+async function compactTrackProcessorIndexes(ctx: any, trackId: Id<'tracks'>, revision: number) {
   const rows = (await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', trackId)).collect())
     .filter((row: EffectOrderRow) => row.targetType === 'track')
     .sort((left: EffectOrderRow, right: EffectOrderRow) => (left.index ?? 0) - (right.index ?? 0))
-  for (const [index, row] of rows.entries()) {
-    if (row.index !== index) await ctx.db.patch(row._id, { index })
-  }
+  const changed = rows.filter((row: EffectOrderRow, index: number) => row.index !== index);
+  for (const [index, row] of rows.entries()) if (row.index !== index) await ctx.db.patch(row._id, { index, revision });
+  return changed.length > 0 ? revision : undefined;
 }
 
 export const removeTrackInstrumentRow = async (
@@ -671,8 +718,9 @@ export const removeTrackInstrumentRow = async (
     if (key && instanceIds.has(key.instanceId)) await ctx.db.delete(envelope._id)
   }
   for (const row of instruments) await ctx.db.delete(row._id)
-  await compactTrackProcessorIndexes(ctx, input.trackId)
-  return { changed: true }
+  const revision = await prospectiveRevision(ctx, input.projectId)
+  const compactedRevision = await compactTrackProcessorIndexes(ctx, input.trackId, revision)
+  return { changed: true, revision: compactedRevision }
 }
 
 export const removeArpeggiatorRow = async (
@@ -683,8 +731,9 @@ export const removeArpeggiatorRow = async (
   const arpeggiators = rows.filter((entry: any) => entry.targetType === 'track' && entry.type === 'arpeggiator')
   if (arpeggiators.length === 0) return { changed: false }
   for (const row of arpeggiators) await ctx.db.delete(row._id)
-  await compactTrackProcessorIndexes(ctx, input.trackId)
-  return { changed: true }
+  const revision = await prospectiveRevision(ctx, input.projectId)
+  const compactedRevision = await compactTrackProcessorIndexes(ctx, input.trackId, revision)
+  return { changed: true, revision: compactedRevision }
 }
 
 const removeTrackDeviceForUser = async (
@@ -709,7 +758,8 @@ const removeTrackDeviceForUser = async (
         ? await removeTrackInstrumentRow(ctx, { projectId: input.projectId, trackId })
         : await removeArpeggiatorRow(ctx, { projectId: input.projectId, trackId })
       if (!result.changed) return { status: 'noop' as const }
-      await advanceProjectRevision(ctx, input.projectId)
+      const advanced = await advanceProjectRevision(ctx, input.projectId)
+      assertEffectWriterRevisions(result.revision === undefined ? [] : [result.revision], advanced.revision)
       return { status: 'applied' as const }
     },
   })
@@ -746,6 +796,7 @@ const removeAudioEffectForUser = async (
   return {
     changed: result.changed,
     value: result.status === 'deleted' ? deletedStatus() : notFoundStatus(),
+    revision: result.revision,
   }
 }
 
@@ -857,7 +908,7 @@ export const setSynthParams = mutation({
     const existing = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', trackId)).collect()
     const existingInstrument = existing.find((row: any) => row.type === 'instrument' && row.targetType === 'track')
       ?? existing.find((row: any) => row.type === 'synth' && row.targetType === 'track')
-    return await finishEffectMutation(ctx, projectId, await setTrackInstrumentForUser(ctx, {
+    return await finishLegacyEffectWrite(ctx, projectId, await setTrackInstrumentForUser(ctx, {
       projectId,
       userId,
       trackId,
@@ -878,7 +929,7 @@ export const setTrackInstrument = mutation({
   },
   handler: async (ctx, { projectId, trackId, instrument }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await finishEffectMutation(ctx, projectId, await setTrackInstrumentForUser(ctx, { projectId, userId, trackId, instrument }))
+    return await finishLegacyEffectWrite(ctx, projectId, await setTrackInstrumentForUser(ctx, { projectId, userId, trackId, instrument }))
   },
 })
 
@@ -908,7 +959,7 @@ export const setArpeggiatorParams = mutation({
   },
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await finishEffectMutation(ctx, projectId, await setArpeggiatorForUser(ctx, { projectId, userId, trackId, params }))
+    return await finishLegacyEffectWrite(ctx, projectId, await setArpeggiatorForUser(ctx, { projectId, userId, trackId, params }))
   },
 })
 
@@ -922,7 +973,7 @@ export const setReverbParams = mutation({
   },
   handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await finishEffectMutation(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId, type: 'reverb', instanceId, params }));
+    return await finishLegacyEffectWrite(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId, type: 'reverb', instanceId, params }));
   },
 });
 
@@ -934,7 +985,7 @@ export const setMasterReverbParams = mutation({
   },
   handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await finishEffectMutation(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'reverb', instanceId, params }))
+    return await finishLegacyEffectWrite(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'reverb', instanceId, params }))
   },
 });
 
@@ -1003,7 +1054,7 @@ export const setEqParams = mutation({
   },
   handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx);
-    return await finishEffectMutation(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId, type: 'eq', instanceId, params }));
+    return await finishLegacyEffectWrite(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId, type: 'eq', instanceId, params }));
   },
 });
 
@@ -1016,7 +1067,7 @@ export const setMasterEqParams = mutation({
   },
   handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await finishEffectMutation(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'eq', instanceId, params }))
+    return await finishLegacyEffectWrite(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'eq', instanceId, params }))
   }
 })
 
@@ -1031,7 +1082,10 @@ export const reorderAudioEffects = mutation({
     const userId = await requireAuthenticatedUserId(ctx)
     if (targetType === 'track' && !trackId) return
     const result = await reorderAudioEffectsForUser(ctx, { projectId, userId, targetType, trackId, order })
-    if (result.changed) await advanceProjectRevision(ctx, projectId)
+    if (result.changed) {
+      const advanced = await advanceProjectRevision(ctx, projectId)
+      assertEffectWriterRevisions(result.revision === undefined ? [] : [result.revision], advanced.revision)
+    }
     return { status: 'applied' }
   },
 })
@@ -1061,12 +1115,12 @@ export const serverSetSynthParams = mutation({
   handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
-    if (!normalizedTrackId) return
+    if (!normalizedTrackId) return { status: 'invalid' as const }
     const sanitized = normalizeSynthParams(params)
     const existing = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', normalizedTrackId)).collect()
     const existingInstrument = existing.find((row: any) => row.type === 'instrument' && row.targetType === 'track')
       ?? existing.find((row: any) => row.type === 'synth' && row.targetType === 'track')
-    return await finishEffectMutation(ctx, projectId, await setTrackInstrumentForUser(ctx, {
+    return await finishEffectWrite(ctx, projectId, await setTrackInstrumentForUser(ctx, {
       projectId,
       userId,
       trackId: normalizedTrackId,
@@ -1088,8 +1142,8 @@ export const serverSetTrackInstrument = mutation({
   handler: async (ctx, { projectId, trackId, instrument }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
-    if (!normalizedTrackId) return
-    return await finishEffectMutation(ctx, projectId, await setTrackInstrumentForUser(ctx, { projectId, userId, trackId: normalizedTrackId, instrument }))
+    if (!normalizedTrackId) return { status: 'invalid' as const }
+    return await finishEffectWrite(ctx, projectId, await setTrackInstrumentForUser(ctx, { projectId, userId, trackId: normalizedTrackId, instrument }))
   },
 })
 
@@ -1109,8 +1163,8 @@ export const serverSetArpeggiatorParams = mutation({
   handler: async (ctx, { projectId, trackId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
-    if (!normalizedTrackId) return
-    return await finishEffectMutation(ctx, projectId, await setArpeggiatorForUser(ctx, { projectId, userId, trackId: normalizedTrackId, params }))
+    if (!normalizedTrackId) return { status: 'invalid' as const }
+    return await finishEffectWrite(ctx, projectId, await setArpeggiatorForUser(ctx, { projectId, userId, trackId: normalizedTrackId, params }))
   },
 })
 
@@ -1124,8 +1178,8 @@ export const serverSetReverbParams = mutation({
   handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
-    if (!normalizedTrackId) return
-    return await finishEffectMutation(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'reverb', instanceId, params }))
+    if (!normalizedTrackId) return { status: 'invalid' as const }
+    return await finishEffectWrite(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'reverb', instanceId, params }))
   },
 })
 
@@ -1139,8 +1193,8 @@ export const serverSetEqParams = mutation({
   handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
-    if (!normalizedTrackId) return
-    return await finishEffectMutation(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'eq', instanceId, params }))
+    if (!normalizedTrackId) return { status: 'invalid' as const }
+    return await finishEffectWrite(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'eq', instanceId, params }))
   },
 })
 
@@ -1149,8 +1203,8 @@ export const serverSetUtilityParams = mutation({
   handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
-    if (!normalizedTrackId) return
-    return await finishEffectMutation(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'utility', instanceId, params }))
+    if (!normalizedTrackId) return { status: 'invalid' as const }
+    return await finishEffectWrite(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'utility', instanceId, params }))
   },
 })
 
@@ -1159,8 +1213,8 @@ export const serverSetProcessorParams = mutation({
   handler: async (ctx, { projectId, trackId, effect, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
-    if (!normalizedTrackId) return
-    return await finishEffectMutation(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: effect, instanceId, params }))
+    if (!normalizedTrackId) return { status: 'invalid' as const }
+    return await finishEffectWrite(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: effect, instanceId, params }))
   },
 })
 
@@ -1169,8 +1223,8 @@ export const serverSetModulationParams = mutation({
   handler: async (ctx, { projectId, trackId, effect, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
-    if (!normalizedTrackId) return
-    return await finishEffectMutation(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: effect, instanceId, params }))
+    if (!normalizedTrackId) return { status: 'invalid' as const }
+    return await finishEffectWrite(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: effect, instanceId, params }))
   },
 })
 
@@ -1179,8 +1233,8 @@ export const serverSetGateParams = mutation({
   handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
-    if (!normalizedTrackId) return
-    return await finishEffectMutation(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'gate', instanceId, params }))
+    if (!normalizedTrackId) return { status: 'invalid' as const }
+    return await finishEffectWrite(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'gate', instanceId, params }))
   },
 })
 
@@ -1192,7 +1246,7 @@ export const serverSetMasterReverbParams = mutation({
   },
   handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await finishEffectMutation(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'reverb', instanceId, params }))
+    return await finishEffectWrite(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'reverb', instanceId, params }))
   },
 })
 
@@ -1204,7 +1258,7 @@ export const serverSetMasterEqParams = mutation({
   },
   handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await finishEffectMutation(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'eq', instanceId, params }))
+    return await finishEffectWrite(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'eq', instanceId, params }))
   },
 })
 
@@ -1212,7 +1266,7 @@ export const serverSetMasterUtilityParams = mutation({
   args: { projectId: v.string(), instanceId: v.string(), params: processorEnvelopeValidator },
   handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await finishEffectMutation(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'utility', instanceId, params }))
+    return await finishEffectWrite(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'utility', instanceId, params }))
   },
 })
 
@@ -1220,7 +1274,7 @@ export const serverSetMasterProcessorParams = mutation({
   args: { projectId: v.string(), effect: processorEffectValidator, instanceId: v.string(), params: processorEnvelopeValidator },
   handler: async (ctx, { projectId, effect, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await finishEffectMutation(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: effect, instanceId, params }))
+    return await finishEffectWrite(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: effect, instanceId, params }))
   },
 })
 
@@ -1228,7 +1282,7 @@ export const serverSetMasterModulationParams = mutation({
   args: { projectId: v.string(), effect: modulationEffectValidator, instanceId: v.string(), params: processorEnvelopeValidator },
   handler: async (ctx, { projectId, effect, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await finishEffectMutation(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: effect, instanceId, params }))
+    return await finishEffectWrite(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: effect, instanceId, params }))
   },
 })
 
@@ -1236,7 +1290,7 @@ export const serverSetMasterGateParams = mutation({
   args: { projectId: v.string(), instanceId: v.string(), params: processorEnvelopeValidator },
   handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await finishEffectMutation(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'gate', instanceId, params }))
+    return await finishEffectWrite(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'gate', instanceId, params }))
   },
 })
 
@@ -1245,8 +1299,8 @@ export const serverSetCompressorParams = mutation({
   handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
-    if (!normalizedTrackId) return
-    return await finishEffectMutation(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'compressor', instanceId, params }))
+    if (!normalizedTrackId) return { status: 'invalid' as const }
+    return await finishEffectWrite(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'compressor', instanceId, params }))
   },
 })
 
@@ -1255,8 +1309,8 @@ export const serverSetSaturatorParams = mutation({
   handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
-    if (!normalizedTrackId) return
-    return await finishEffectMutation(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'saturator', instanceId, params }))
+    if (!normalizedTrackId) return { status: 'invalid' as const }
+    return await finishEffectWrite(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'saturator', instanceId, params }))
   },
 })
 
@@ -1265,8 +1319,8 @@ export const serverSetDelayParams = mutation({
   handler: async (ctx, { projectId, trackId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
-    if (!normalizedTrackId) return
-    return await finishEffectMutation(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'delay', instanceId, params }))
+    if (!normalizedTrackId) return { status: 'invalid' as const }
+    return await finishEffectWrite(ctx, projectId, await upsertTrackEffectForUser(ctx, { projectId, userId, trackId: normalizedTrackId, type: 'delay', instanceId, params }))
   },
 })
 
@@ -1274,7 +1328,7 @@ export const serverSetMasterCompressorParams = mutation({
   args: { projectId: v.string(), instanceId: v.optional(v.string()), params: compressorParamsValidator },
   handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await finishEffectMutation(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'compressor', instanceId, params }))
+    return await finishEffectWrite(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'compressor', instanceId, params }))
   },
 })
 
@@ -1282,7 +1336,7 @@ export const serverSetMasterSaturatorParams = mutation({
   args: { projectId: v.string(), instanceId: v.optional(v.string()), params: saturatorParamsValidator },
   handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await finishEffectMutation(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'saturator', instanceId, params }))
+    return await finishEffectWrite(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'saturator', instanceId, params }))
   },
 })
 
@@ -1290,7 +1344,7 @@ export const serverSetMasterDelayParams = mutation({
   args: { projectId: v.string(), instanceId: v.optional(v.string()), params: delayParamsValidator },
   handler: async (ctx, { projectId, instanceId, params }) => {
     const userId = await requireAuthenticatedUserId(ctx)
-    return await finishEffectMutation(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'delay', instanceId, params }))
+    return await finishEffectWrite(ctx, projectId, await upsertMasterEffectForUser(ctx, { projectId, userId, type: 'delay', instanceId, params }))
   },
 })
 
@@ -1308,11 +1362,17 @@ export const serverReorderAudioEffects = mutation({
       const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
       if (!normalizedTrackId) return
       const result = await reorderAudioEffectsForUser(ctx, { projectId, userId, targetType, trackId: normalizedTrackId, order })
-      if (result.changed) await advanceProjectRevision(ctx, projectId)
+      if (result.changed) {
+        const advanced = await advanceProjectRevision(ctx, projectId)
+        assertEffectWriterRevisions(result.revision === undefined ? [] : [result.revision], advanced.revision)
+      }
       return { status: 'applied' }
     }
     const result = await reorderAudioEffectsForUser(ctx, { projectId, userId, targetType, order })
-    if (result.changed) await advanceProjectRevision(ctx, projectId)
+    if (result.changed) {
+      const advanced = await advanceProjectRevision(ctx, projectId)
+      assertEffectWriterRevisions(result.revision === undefined ? [] : [result.revision], advanced.revision)
+    }
     return { status: 'applied' }
   },
 })
@@ -1432,6 +1492,7 @@ export const serverRestoreChain = mutation({
             ? [effect.instanceId]
             : []
         )))
+        const revision = await prospectiveRevision(ctx, projectId)
         const [automation, sidechains] = await Promise.all([
           ctx.db.query('automationEnvelopes').withIndex('by_project_track', (q: any) => (
             q.eq('projectId', projectId).eq('trackId', normalizedTrackId)
@@ -1460,18 +1521,20 @@ export const serverRestoreChain = mutation({
             instanceId: effect.id,
             params,
             createdAt: Date.now(),
+            revision,
           })
         }
-        if (instrument) await setTrackInstrumentRow(ctx, { projectId, trackId: normalizedTrackId, instrument })
-        if (sanitizedArpeggiator) {
-          await upsertTrackEffectRow(ctx, {
-            projectId,
-            trackId: normalizedTrackId,
-            type: 'arpeggiator',
-            params: sanitizedArpeggiator,
-          })
-        }
-        await advanceProjectRevision(ctx, projectId)
+        const deviceWrites = [
+          ...instrument ? [await setTrackInstrumentRow(ctx, { projectId, trackId: normalizedTrackId, instrument })] : [],
+          ...sanitizedArpeggiator
+            ? [await upsertTrackEffectRow(ctx, { projectId, trackId: normalizedTrackId, type: 'arpeggiator', params: sanitizedArpeggiator })]
+            : [],
+        ]
+        const advanced = await advanceProjectRevision(ctx, projectId)
+        assertEffectWriterRevisions([
+          revision,
+          ...deviceWrites.flatMap((write) => write.status !== 'invalid' && write.changed ? [write.revision] : []),
+        ], advanced.revision)
         return { status: 'applied' }
       },
     })

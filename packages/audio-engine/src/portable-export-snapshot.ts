@@ -51,6 +51,7 @@ export type PortableExportSnapshot =
     supported: true
     graph: AudioCoreGraphSnapshot
     assets: readonly PortableExportAsset[]
+    instrumentRegionSources?: readonly { sourceAssetKey: string; buffer: AudioBuffer }[]
     events: readonly AudioCoreSampleSourceEventDto[]
   }
   | {
@@ -83,6 +84,7 @@ export type PortableExportSnapshotInput = {
   }[]
   retainOrdinaryPcm?: boolean
   mixerGraph?: ResolvedMixerGraph
+  instrumentRegionMode?: 'metadata'
 }
 
 type MetadataSourceAsset = NonNullable<PortableExportSnapshotInput['metadataSourceAssets']>[number]
@@ -196,6 +198,7 @@ type CollectedPortableAssets = {
   assets: readonly PortableExportAsset[]
   rawAssetsBySourceAssetKey: ReadonlyMap<string, AudioAssetRef>
   preparedAssetsByClipId: ReadonlyMap<string, AudioAssetRef>
+  instrumentRegionSources: ReadonlyMap<string, AudioBuffer>
   reasons: readonly string[]
 }
 
@@ -206,11 +209,23 @@ const collectAssets = (
   metadataSourceAssets: readonly MetadataSourceAsset[],
   retainOrdinaryPcm: boolean,
   nativePreparedAssets: boolean,
+  nativeInstrumentRegionMetadata: boolean,
 ): CollectedPortableAssets => {
   const assets: PortableExportAsset[] = []
+  const assetIndexesById = new Map<string, number>()
   const rawAssetsBySourceAssetKey = new Map<string, AudioAssetRef>()
   const preparedAssetsByClipId = new Map<string, AudioAssetRef>()
+  const instrumentRegionSources = new Map<string, AudioBuffer>()
   const reasons: string[] = []
+  const addOrReplaceAsset = (asset: PortableExportAsset) => {
+    const existingIndex = assetIndexesById.get(asset.asset.assetId)
+    if (existingIndex === undefined) {
+      assetIndexesById.set(asset.asset.assetId, assets.length)
+      assets.push(asset)
+      return
+    }
+    assets[existingIndex] = asset
+  }
   const addAsset = (sourceAssetKey: string, buffer: AudioBuffer) => {
     const existing = rawAssetsBySourceAssetKey.get(sourceAssetKey)
     if (existing) {
@@ -220,16 +235,14 @@ const collectAssets = (
       if (!consistent) {
         reasons.push(`Source asset "${sourceAssetKey}" resolves to inconsistent decoded audio.`)
       }
-      const existingIndex = assets.findIndex((entry) => entry.asset.assetId === existing.assetId)
-      if (consistent && existingIndex >= 0 && !assets[existingIndex]?.pcm) {
-        assets[existingIndex] = createAsset(sourceAssetKey, buffer)
+      const existingIndex = assetIndexesById.get(existing.assetId)
+      if (consistent && existingIndex !== undefined && !assets[existingIndex]?.pcm) {
+        addOrReplaceAsset(createAsset(sourceAssetKey, buffer))
       }
       return
     }
     const exportAsset = createAsset(sourceAssetKey, buffer)
-    const metadataIndex = assets.findIndex((entry) => entry.asset.assetId === exportAsset.asset.assetId)
-    if (metadataIndex >= 0) assets[metadataIndex] = exportAsset
-    else assets.push(exportAsset)
+    addOrReplaceAsset(exportAsset)
     rawAssetsBySourceAssetKey.set(sourceAssetKey, exportAsset.asset)
   }
   const addMetadataAsset = (sourceAssetKey: string, metadata: MetadataSourceAsset) => {
@@ -243,11 +256,12 @@ const collectAssets = (
       return
     }
     const exportAsset = createMetadataAsset(sourceAssetKey, metadata)
-    assets.push(exportAsset)
+    addOrReplaceAsset(exportAsset)
     rawAssetsBySourceAssetKey.set(sourceAssetKey, exportAsset.asset)
   }
   const addPreparedAsset = (clipId: string, prepared: PortableExportAsset) => {
-    const existing = assets.find((entry) => entry.asset.assetId === prepared.asset.assetId)
+    const existingIndex = assetIndexesById.get(prepared.asset.assetId)
+    const existing = existingIndex === undefined ? undefined : assets[existingIndex]
     if (existing) {
       if (existing.asset.frameCount !== prepared.asset.frameCount
         || existing.asset.sampleRateHz !== prepared.asset.sampleRateHz
@@ -255,7 +269,7 @@ const collectAssets = (
         reasons.push(`Prepared asset "${prepared.asset.assetId}" resolves to conflicting metadata.`)
       }
     } else {
-      assets.push(prepared)
+      addOrReplaceAsset(prepared)
     }
     preparedAssetsByClipId.set(clipId, prepared.asset)
   }
@@ -337,25 +351,57 @@ const collectAssets = (
       }
     }
   }
+  const addInstrumentRegion = (sourceAssetKey: string, buffer: AudioBuffer) => {
+    const metadata = {
+      frameCount: buffer.length,
+      sampleRateHz: buffer.sampleRate,
+      channelCount: buffer.numberOfChannels,
+    }
+    const registered = rawAssetsBySourceAssetKey.get(sourceAssetKey)
+    if (registered && (registered.frameCount !== metadata.frameCount
+      || registered.sampleRateHz !== metadata.sampleRateHz
+      || registered.channelCount !== metadata.channelCount)) {
+      reasons.push(`Instrument region "${sourceAssetKey}" resolves inconsistently.`)
+      return
+    }
+    const existing = instrumentRegionSources.get(sourceAssetKey)
+    if (existing && (existing.length !== buffer.length
+      || existing.sampleRate !== buffer.sampleRate
+      || existing.numberOfChannels !== buffer.numberOfChannels)) {
+      reasons.push(`Instrument region "${sourceAssetKey}" resolves inconsistently.`)
+      return
+    }
+    instrumentRegionSources.set(sourceAssetKey, buffer)
+    if (nativeInstrumentRegionMetadata) {
+      const metadataAsset = createMetadataAsset(sourceAssetKey, metadata)
+      const existingIndex = assetIndexesById.get(metadataAsset.asset.assetId)
+      if (existingIndex === undefined || !assets[existingIndex]?.pcm) {
+        addOrReplaceAsset(metadataAsset)
+      }
+      rawAssetsBySourceAssetKey.set(sourceAssetKey, metadataAsset.asset)
+      return
+    }
+    addAsset(sourceAssetKey, buffer)
+  }
   for (const entry of Object.values(fx?.trackFx ?? {})) {
     const instrument = entry.instrument
     if (instrument?.kind === 'sampler' && entry.samplerBuffers) {
       for (const zone of instrument.params.zones) {
         const buffer = entry.samplerBuffers.get(zone.id)
-        if (buffer) addAsset(zone.sample.assetKey, buffer.buffer)
+        if (buffer) addInstrumentRegion(zone.sample.assetKey, buffer.buffer)
       }
     }
     if (instrument?.kind === 'drum-rack' && entry.drumRackBuffers) {
       for (const pad of instrument.params.pads) {
         const buffer = pad.sample ? entry.drumRackBuffers.get(pad.id) : undefined
-        if (pad.sample && buffer) addAsset(pad.sample.assetKey, buffer.buffer)
+        if (pad.sample && buffer) addInstrumentRegion(pad.sample.assetKey, buffer.buffer)
       }
     }
     if (instrument?.kind === 'granular' && entry.granularBuffer && instrument.params.zone) {
-      addAsset(instrument.params.zone.sample.assetKey, entry.granularBuffer.buffer)
+      addInstrumentRegion(instrument.params.zone.sample.assetKey, entry.granularBuffer.buffer)
     }
   }
-  return { assets, rawAssetsBySourceAssetKey, preparedAssetsByClipId, reasons }
+  return { assets, rawAssetsBySourceAssetKey, preparedAssetsByClipId, reasons, instrumentRegionSources }
 }
 
 const unsupportedProcessorReasons = (
@@ -459,13 +505,20 @@ export const compilePortableExportSnapshot = (
     portableAssetIds.add(preparedIdentity)
   }
   if (diagnostics.length > 0) return unsupported(reasons, diagnostics)
-  const { assets, rawAssetsBySourceAssetKey, preparedAssetsByClipId, reasons: assetReasons } = collectAssets(
+  const {
+    assets,
+    rawAssetsBySourceAssetKey,
+    preparedAssetsByClipId,
+    instrumentRegionSources,
+    reasons: assetReasons,
+  } = collectAssets(
     input.tracks,
     portableFx,
     preparedStretchAssets,
     input.metadataSourceAssets ?? [],
     input.retainOrdinaryPcm !== false,
     capabilityTarget === 'native',
+    input.instrumentRegionMode === 'metadata',
   )
   reasons.push(...assetReasons)
 
@@ -571,11 +624,19 @@ export const compilePortableExportSnapshot = (
         `The ${targetLabel} supports at most ${audioCoreMaxGraphProcessors} aggregate graph processors.`,
       ], diagnostics)
     }
-    return {
+    const snapshot = {
       supported: true,
       graph: instrumentGraph.graph,
       assets,
       events,
+    } satisfies Extract<PortableExportSnapshot, { supported: true }>
+    if (input.instrumentRegionMode !== 'metadata') return snapshot
+    return {
+      ...snapshot,
+      instrumentRegionSources: [...instrumentRegionSources].map(([sourceAssetKey, buffer]) => ({
+        sourceAssetKey,
+        buffer,
+      })),
     }
   } catch (error) {
     return unsupported(

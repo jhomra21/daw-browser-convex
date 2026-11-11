@@ -18,10 +18,13 @@ export function createReverbChainState(): ReverbChainState {
   let reverb: ReverbNodeChain | null = null
   let signature: string | null = null
   let topologySignature: 'enabled' | 'disabled' | null = null
+  let generation = 0
 
   return {
     chain: () => reverb,
     set: async (ctx, params) => {
+      // Every request outdates the construction an earlier one still awaits, an equal one that returns early included.
+      const current = ++generation
       const nextSignature = serializeReverbParams(params)
       const topology = params.enabled ? 'enabled' : 'disabled'
       const previousTopology = topologySignature
@@ -46,8 +49,16 @@ export function createReverbChainState(): ReverbChainState {
         }
       }
 
-      if (!reverb) reverb = await createReverbNodeChain(ctx, params)
-      else applyReverbNodeChainParams(reverb, params)
+      // The signature names what the node holds only once every write has landed.
+      signature = null
+      if (!reverb) {
+        const created = await createReverbNodeChain(ctx, params)
+        if (current !== generation) {
+          disconnectReverbChain(created)
+          return { changed: false, requiresRoutingRebuild: false }
+        }
+        reverb = created
+      } else applyReverbNodeChainParams(reverb, params)
       signature = nextSignature
       topologySignature = topology
       return {
@@ -56,6 +67,7 @@ export function createReverbChainState(): ReverbChainState {
       }
     },
     close: () => {
+      generation++
       signature = null
       topologySignature = null
       if (reverb) {

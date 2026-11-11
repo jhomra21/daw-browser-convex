@@ -112,6 +112,8 @@ export function applyStaticWorkletNodeParams(
   const normalizedState = normalizeOwnedProcessorAudioState(chain.kind, params)
   const stateKey = JSON.stringify(normalizedState)
   if (chain.normalizedStateKey === stateKey) return
+  chain.normalizedState = undefined
+  chain.normalizedStateKey = undefined
   if (chain.kind === 'spectral' && isSpectralState(normalizedState)) {
     const fftSize = normalizedState.fftSize
     const overlap = normalizedState.overlap
@@ -128,18 +130,25 @@ export function applyStaticWorkletNodeParams(
     processorKind: isModulationKind(chain.kind) ? chain.kind : undefined,
     state: normalizedState,
   })
-  chain.normalizedState = normalizedState
-  chain.normalizedStateKey = stateKey
   for (const { parameterId, value } of ownedProcessorAudioParamValuesFromState(chain.kind, normalizedState)) {
     const param = chain.node.parameters.get(parameterId)
     if (param && isJsonNumber(value)) param.value = value
   }
+  chain.normalizedState = normalizedState
+  chain.normalizedStateKey = stateKey
 }
 
 export function disconnectStaticWorkletNodeChain(chain: StaticWorkletNodeChain) {
   if (chain.state === 'closed') return
   chain.state = 'closed'
-  publishGateMeterReset(chain)
+  let resetFailed = false
+  let resetError: unknown
+  try {
+    publishGateMeterReset(chain)
+  } catch (error) {
+    resetFailed = true
+    resetError = error
+  }
   chain.gateMeterListeners.clear()
   chain.normalizedState = undefined
   chain.normalizedStateKey = undefined
@@ -149,6 +158,7 @@ export function disconnectStaticWorkletNodeChain(chain: StaticWorkletNodeChain) 
   try { chain.node.port.postMessage({ type: 'release', version: 1 }) } catch {}
   try { chain.node.port.close() } catch {}
   disconnectAudioNodes([chain.node])
+  if (resetFailed) throw resetError
 }
 
 function readGateMeterFrame(data: JsonValue): GateMeterFrame | null {

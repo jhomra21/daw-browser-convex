@@ -1,0 +1,583 @@
+// B6f probe (appended in memory to src/hooks/useTimelinePlayback.test.ts; module-scope helpers are the file's own).
+// Product shape of the browser build (Timeline.tsx:167, :763-781, :855-859): requiresNativeAudio false, native options
+// with `enabled` (default true, app-preferences-core.ts:88) and no desktop bridge, portable options set, getTracks set.
+// The rule (PARENT-NOTE-USER-CONFIRMATION-PORTABLE-LIVE-2026-11-08): every paused or stopped route ends with one live,
+// prepared, paused portable session at the transport playhead, compiled from the newest tracks, with no running
+// transport after Stop; a locate never cancels Play.
+type B6fNode = { index: number; createdSeq: number; closed: boolean; graphs: string[]; positions: { seq: number; sec: number; running: boolean; via: string }[] }
+type B6fGate = { armed: boolean; held: (() => void)[] }
+const b6fGate = (): B6fGate => ({ armed: false, held: [] })
+const b6fRelease = (gate: B6fGate) => {
+  gate.armed = false
+  for (const resume of gate.held.splice(0)) resume()
+}
+const b6fEditedTracks: Track[] = [track, { id: 'track-f1', name: 'B6f edit', volume: 1, clips: [] }]
+let b6fSeq = 0
+
+const withB6fWorklet = async (run: (nodes: B6fNode[], transportGate: B6fGate) => Promise<void>) => {
+  const previous = {
+    AudioContext: Object.getOwnPropertyDescriptor(globalThis, 'AudioContext'),
+    AudioWorkletNode: Object.getOwnPropertyDescriptor(globalThis, 'AudioWorkletNode'),
+    fetch: Object.getOwnPropertyDescriptor(globalThis, 'fetch'),
+  }
+  const nodes: B6fNode[] = []
+  const transportGate = b6fGate()
+  class FakeAudioContext {
+    readonly sampleRate = 48_000
+    readonly destination = {}
+    readonly audioWorklet = { addModule: async () => undefined }
+  }
+  class FakeAudioWorkletNode {
+    readonly port: { onmessage: ((event: { data: PortableWasmStatusMessage }) => void) | null; postMessage: (message: PortableWasmControlMessage) => void; close: () => void }
+    constructor() {
+      const record: B6fNode = { index: nodes.length, createdSeq: ++b6fSeq, closed: false, graphs: [], positions: [] }
+      nodes.push(record)
+      this.port = {
+        onmessage: null,
+        postMessage: (message) => {
+          b6fSeq += 1
+          if (message.type === 'prepare-graph') record.graphs.push(JSON.stringify(message.snapshot))
+          if (message.type === 'install-schedule') record.positions.push({ seq: b6fSeq, sec: message.schedule.timeOrigin.timelineSec, running: false, via: 'schedule' })
+          if (message.type === 'transport') record.positions.push({ seq: b6fSeq, sec: message.frame / 48_000, running: message.running, via: 'transport' })
+          const response = portableResponseFor(message)
+          if (!response) return
+          const deliver = () => queueMicrotask(() => this.port.onmessage?.({ data: response }))
+          if (message.type === 'transport' && message.running && transportGate.armed) transportGate.held.push(deliver)
+          else deliver()
+        },
+        close: () => { record.closed = true },
+      }
+    }
+    onprocessorerror: (() => {}) | null = null
+    connect = () => {}
+    disconnect = () => {}
+  }
+  const manifest = await readFile(new URL("../../public/audio-core/daw-audio-core.manifest.json", import.meta.url), "utf8")
+  const wasm = await readFile(new URL("../../public/audio-core/daw-audio-core.wasm", import.meta.url))
+  Object.defineProperty(globalThis, "AudioContext", { configurable: true, value: FakeAudioContext })
+  Object.defineProperty(globalThis, "AudioWorkletNode", { configurable: true, value: FakeAudioWorkletNode })
+  Object.defineProperty(globalThis, "fetch", { configurable: true, value: async (input: string | URL) => (
+    String(input).endsWith(".manifest.json") ? new Response(manifest, { status: 200 }) : new Response(wasm, { status: 200 })) })
+  try {
+    await run(nodes, transportGate)
+  } finally {
+    for (const [key, descriptor] of Object.entries(previous)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else Object.defineProperty(globalThis, key, { configurable: true, value: undefined })
+    }
+  }
+}
+
+type B6fContext = Awaited<ReturnType<typeof mountB6f>>
+const mountB6f = (nodes: B6fNode[], transportGate: B6fGate, options: { nativeEnabled?: boolean; lifecycleBridge?: ReturnType<typeof createNativeHookBridge> } = {}) => {
+  const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+  const audioContext = new AudioContext()
+  const resumeGate = b6fGate()
+  const compileGate = b6fGate()
+  const [tracks, setTracks] = createSignal<Track[]>([track])
+  const [nativeEnabled, setNativeEnabled] = createSignal(options.nativeEnabled ?? true)
+  const [projectId, setProjectId] = createSignal('project-a')
+  const [generation, setGeneration] = createSignal(1)
+  const faults: string[] = []
+  const compiles: { seq: number; state: string; playheadSec: number; trackIds: string[]; volumes: number[] }[] = []
+  const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => {
+    if (compileGate.armed) await new Promise<void>((resolve) => compileGate.held.push(resolve))
+    compiles.push({ seq: ++b6fSeq, state: transport.state, playheadSec: transport.playheadSec, trackIds: tracks().map((entry) => entry.id), volumes: tracks().map((entry) => entry.volume) })
+    return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
+      renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
+  }
+  // AudioEngine.getAudioContext is null until ensureAudio creates the context (audio-engine.ts:476-478, :607-613).
+  let audioCreated = false
+  const engine = {
+    ...fake.engine,
+    ensureAudio: () => { audioCreated = true },
+    getAudioContext: () => audioCreated ? audioContext : null,
+    resume: async () => { if (resumeGate.armed) await new Promise<void>((resolve) => resumeGate.held.push(resolve)) },
+  }
+  const playback = useTimelinePlayback(engine, { getTracks: () => tracks() }, {
+    enabled: nativeEnabled,
+    projectId,
+    projectGeneration: generation,
+    compileSnapshot,
+    reportFault: (fault) => faults.push('native: ' + nativePlaybackFaultText(fault)),
+  }, {
+    projectGeneration: generation,
+    compileSnapshot,
+    reportFault: (message) => faults.push('portable: ' + message),
+  })
+  const settle = async () => {
+    let quiet = 0
+    for (let turn = 0; turn < 600 && quiet < 10; turn += 1) {
+      const before = b6fSeq
+      await flushMicrotasks()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      quiet = b6fSeq === before ? quiet + 1 : 0
+    }
+  }
+  const waitHeld = async (gate: B6fGate) => {
+    for (let turn = 0; turn < 600 && gate.held.length === 0; turn += 1) {
+      await flushMicrotasks()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+    expect(gate.held.length).toBeGreaterThan(0)
+  }
+  // Timeline.tsx:871-881 and :923-934: a structural edit rebuilds a prepared backend with the captured intent.
+  const timelineReschedule = () => {
+    if (!playback.isNativePlaybackPrepared() && !playback.isPortableBrowserPlaybackPrepared()) return Promise.resolve()
+    return playback.restartTimelineSchedule(tracks(), {
+      rebuildBackend: true,
+      resumePlayback: playback.isPlaying(),
+      playheadSec: playback.playheadSec(),
+      owner: playback.isNativePlaybackPrepared() ? 'native' : playback.isPortableBrowserPlaybackPrepared() ? 'portable-browser' : undefined,
+      projectId: projectId(),
+      projectGeneration: generation(),
+    })
+  }
+  const live = () => nodes.filter((node) => !node.closed)
+  const summary = (route: string, mark: number) => {
+    const open = live()
+    const session = open.at(-1)
+    return { route, faults: [...faults], playing: playback.isPlaying(), portableActive: playback.isPortableBrowserPlayback(),
+      portablePrepared: playback.isPortableBrowserPlaybackPrepared(), nativePrepared: playback.isNativePlaybackPrepared(),
+      playhead: playback.playheadSec(), openSessions: open.length, sessionPosition: session?.positions.at(-1),
+      sessionTracks: session ? (session.graphs.at(-1)?.includes('"track-f1"') ? 'edited' : 'original') : undefined,
+      sessionCreatedSeq: session?.createdSeq,
+      sessionGain: session ? JSON.parse(session.graphs.at(-1) ?? '{}').nodes?.find((node: { id: string }) => node.id === 'track-1')?.mixer?.gain : undefined,
+      runningAfterMark: nodes.flatMap((node) => node.positions.filter((position) => position.seq > mark && position.running)).length,
+      compilesAfterMark: compiles.filter((entry) => entry.seq > mark), nodes: nodes.length }
+  }
+  const expectLivePaused = (route: string, mark: number, expectedSec: number, edited: boolean) => {
+    const result = summary(route, mark)
+    console.log('B6FPROBE-RESULT', JSON.stringify(result))
+    expect(result.faults).toEqual([])
+    expect(result.playing).toBeFalse()
+    expect(result.portableActive).toBeFalse()
+    expect(result.runningAfterMark).toBe(0)
+    expect(result.playhead).toBeCloseTo(expectedSec, 6)
+    expect(result.portablePrepared).toBeTrue()
+    expect(result.openSessions).toBe(1)
+    expect(result.sessionPosition?.running).toBeFalse()
+    expect(result.sessionPosition?.sec ?? Number.NaN).toBeCloseTo(expectedSec, 6)
+    expect(result.sessionTracks).toBe(edited ? 'edited' : 'original')
+  }
+  const expectLivePlaying = (route: string, mark: number, expectedSec: number, edited: boolean) => {
+    const result = summary(route, mark)
+    console.log('B6FPROBE-RESULT', JSON.stringify(result))
+    expect(result.faults).toEqual([])
+    expect(result.playing).toBeTrue()
+    expect(result.portableActive).toBeTrue()
+    expect(result.openSessions).toBe(1)
+    expect(result.sessionPosition?.running).toBeTrue()
+    expect(result.sessionPosition?.sec ?? Number.NaN).toBeCloseTo(expectedSec, 6)
+    expect(result.sessionTracks).toBe(edited ? 'edited' : 'original')
+  }
+  const playFrom = async (sec: number) => {
+    playback.setPlayhead(sec, tracks())
+    await settle()
+    await playback.handlePlay(tracks())
+    await settle()
+    expect(playback.isPlaying()).toBeTrue()
+    expect(playback.isPortableBrowserPlayback()).toBeTrue()
+  }
+  const pausedAt = async (sec: number) => {
+    await playFrom(sec)
+    await playback.handlePause()
+    await settle()
+    expect(playback.isPortableBrowserPlaybackPrepared()).toBeTrue()
+  }
+  return { playback, fake, tracks, setTracks, setNativeEnabled, setProjectId, setGeneration, generation, faults, compiles,
+    resumeGate, compileGate, transportGate, settle, waitHeld, timelineReschedule, summary, expectLivePaused, expectLivePlaying,
+    playFrom, pausedAt, mark: () => b6fSeq }
+}
+
+const runB6f = async (body: (ctx: B6fContext) => Promise<void>, options: { nativeEnabled?: boolean; lifecycle?: boolean } = {}) => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  const lifecycleBridge = options.lifecycle ? createNativeHookBridge(undefined, {
+    initial: { state: 'ready', powerGeneration: 1 },
+    completeRecovery: async () => ({ accepted: true }),
+    retryRecovery: async () => ({ accepted: true }),
+  }) : undefined
+  Object.defineProperty(globalThis, 'window', { configurable: true,
+    value: lifecycleBridge ? { dawDesktop: { audioHost: lifecycleBridge.audioHost } } : {} })
+  try {
+    await withB6fWorklet(async (nodes, transportGate) => {
+      await withFakeRaf(async () => {
+        await createRoot(async (dispose) => {
+          const ctx = mountB6f(nodes, transportGate, { nativeEnabled: options.nativeEnabled })
+          await ctx.settle()
+          try {
+            await body(Object.assign(ctx, { lifecycleBridge }))
+          } finally {
+            dispose()
+          }
+        })
+      })
+    })
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
+    else Reflect.deleteProperty(globalThis, 'window')
+  }
+}
+
+test('B6FPROBE info mount: no portable session exists before the first Play', async () => {
+  await runB6f(async (ctx) => {
+    console.log('B6FPROBE-INFO', JSON.stringify(ctx.summary('mount', 0)))
+  })
+})
+
+test('B6FPROBE debug graph carries track ids', async () => {
+  await runB6f(async (ctx) => {
+    await ctx.pausedAt(1)
+    ctx.setTracks(b6fEditedTracks)
+    await ctx.timelineReschedule()
+    await ctx.settle()
+    console.log('B6FPROBE-DEBUG', JSON.stringify(ctx.summary('debug', 0)))
+  })
+})
+
+// Control: Pause while playing keeps the session (C:1801-1821, H:1015-1050).
+test('B6FPROBE pause-playing', async () => {
+  await runB6f(async (ctx) => {
+    await ctx.playFrom(1)
+    const mark = ctx.mark()
+    await ctx.playback.handlePause()
+    await ctx.settle()
+    ctx.expectLivePaused('pause-playing', mark, 1, false)
+  })
+})
+
+for (const from of ['playing', 'paused'] as const)
+  test(`B6FPROBE stop-${from}`, async () => {
+    await runB6f(async (ctx) => {
+      if (from === 'playing') await ctx.playFrom(1)
+      else await ctx.pausedAt(1)
+      const mark = ctx.mark()
+      await ctx.playback.handleStop()
+      await ctx.settle()
+      ctx.expectLivePaused(`stop-${from}`, mark, 0, false)
+    })
+  })
+
+// A Play pending on a live paused session (warm) or on no session (cold), held at the browser context resume
+// (H:868/H:894), the portable compile (cold, C:1041) or the portable transport start (warm, C:1310).
+for (const start of ['warm', 'cold'] as const)
+  for (const gate of start === 'warm' ? ['resume', 'transport'] as const : ['resume', 'compile'] as const)
+    for (const action of ['pause', 'stop', 'locate'] as const)
+      test(`B6FPROBE pending-play ${start} gate=${gate} ${action}`, async () => {
+        await runB6f(async (ctx) => {
+          if (start === 'warm') await ctx.pausedAt(1)
+          else {
+            ctx.playback.setPlayhead(1, ctx.tracks())
+            await ctx.settle()
+          }
+          const held = gate === 'resume' ? ctx.resumeGate : gate === 'compile' ? ctx.compileGate : ctx.transportGate
+          held.armed = true
+          const play = ctx.playback.handlePlay(ctx.tracks())
+          await ctx.waitHeld(held)
+          const mark = ctx.mark()
+          let action_: Promise<unknown> = Promise.resolve()
+          if (action === 'pause') action_ = ctx.playback.handlePause()
+          if (action === 'stop') action_ = ctx.playback.handleStop()
+          if (action === 'locate') ctx.playback.setPlayhead(3, ctx.tracks())
+          await ctx.settle()
+          b6fRelease(held)
+          await Promise.allSettled([play, action_])
+          await ctx.settle()
+          if (action === 'locate') ctx.expectLivePlaying(`pending-play ${start} ${gate} locate`, mark, 3, false)
+          else ctx.expectLivePaused(`pending-play ${start} ${gate} ${action}`, mark, action === 'stop' ? 0 : 1, false)
+        })
+      })
+
+// The B6d8/F1/F1b analog: an edit while playing and, in the same tick, the Timeline's resuming rebuild. The action
+// lands `delay` microtask turns later, or while the rebuild's Play is held at its portable compile or transport start.
+const b6fRebuildRoute = async (ctx: B6fContext, action: 'pause' | 'stop' | 'locate', delay: number, gate?: 'compile' | 'transport') => {
+  await ctx.playFrom(1)
+  ctx.setTracks(b6fEditedTracks)
+  const held = gate === 'compile' ? ctx.compileGate : gate === 'transport' ? ctx.transportGate : undefined
+  if (held) held.armed = true
+  const rebuild = ctx.playback.restartTimelineSchedule(ctx.tracks(), { rebuildBackend: true, resumePlayback: true, playheadSec: 2,
+    owner: 'portable-browser', projectId: 'project-a', projectGeneration: ctx.generation() })
+  if (held) await ctx.waitHeld(held)
+  else for (let turn = 0; turn < delay; turn += 1) await Promise.resolve()
+  const mark = ctx.mark()
+  let action_: Promise<unknown> = Promise.resolve()
+  if (action === 'pause') action_ = ctx.playback.handlePause()
+  if (action === 'stop') action_ = ctx.playback.handleStop()
+  if (action === 'locate') ctx.playback.setPlayhead(3, ctx.tracks())
+  const playheadAtAction = ctx.playback.playheadSec()
+  await ctx.settle()
+  if (held) b6fRelease(held)
+  await Promise.allSettled([rebuild, action_])
+  await ctx.settle()
+  const name = `rebuild ${action} ${gate ?? 'delay=' + delay}`
+  if (action === 'locate') ctx.expectLivePlaying(name, mark, 3, true)
+  else ctx.expectLivePaused(name, mark, action === 'stop' ? 0 : playheadAtAction, true)
+}
+for (const action of ['pause', 'stop', 'locate'] as const) {
+  for (let delay = 0; delay <= 40; delay += 1)
+    test(`B6FPROBE rebuild ${action} delay=${delay}`, async () => {
+      await runB6f((ctx) => b6fRebuildRoute(ctx, action, delay))
+    })
+  for (const gate of ['compile', 'transport'] as const)
+    test(`B6FPROBE rebuild ${action} gate=${gate}`, async () => {
+      await runB6f((ctx) => b6fRebuildRoute(ctx, action, 0, gate))
+    })
+}
+
+for (const nativeEnabled of [true, false])
+  test(`B6FPROBE paused structural edit native-enabled=${nativeEnabled}`, async () => {
+    await runB6f(async (ctx) => {
+      await ctx.pausedAt(1)
+      const mark = ctx.mark()
+      ctx.setTracks(b6fEditedTracks)
+      await ctx.timelineReschedule()
+      await ctx.settle()
+      ctx.expectLivePaused(`paused structural edit native-enabled=${nativeEnabled}`, mark, 1, true)
+    }, { nativeEnabled })
+  })
+
+// A track edit that the Timeline does not route through a rebuild (a mixer volume change,
+// useTimelineMixerController.ts:411-450) still changes the native preview fingerprint (H:1999-2016, H:2118).
+for (const when of ['paused', 'playing-then-pause'] as const)
+  test(`B6FPROBE volume edit without a Timeline rebuild ${when}`, async () => {
+    await runB6f(async (ctx) => {
+      if (when === 'paused') await ctx.pausedAt(1)
+      else await ctx.playFrom(1)
+      const mark = ctx.mark()
+      ctx.setTracks([{ ...track, volume: 0.5 }])
+      await ctx.settle()
+      if (when === 'playing-then-pause') {
+        await ctx.playback.handlePause()
+        await ctx.settle()
+      }
+      const result = ctx.summary(`volume edit ${when}`, mark)
+      console.log('B6FPROBE-RESULT', JSON.stringify(result))
+      expect(result.faults).toEqual([])
+      expect(result.playing).toBeFalse()
+      expect(result.portablePrepared).toBeTrue()
+      expect(result.openSessions).toBe(1)
+      expect(result.sessionPosition?.running).toBeFalse()
+      expect(result.sessionPosition?.sec ?? Number.NaN).toBeCloseTo(1, 6)
+      // The live session was created after the newest compile, and that compile carried the edited volume.
+      const newest = ctx.compiles.at(-1)
+      expect(newest?.volumes).toEqual([0.5])
+      // B6f5: or the playing session adopted that compile in place (its graph carries the volume).
+      expect((result.sessionCreatedSeq ?? 0) > (newest?.seq ?? Number.POSITIVE_INFINITY)
+        || (when === 'playing-then-pause' && newest?.state === 'playing' && result.sessionGain === 0.5)).toBeTrue()
+    })
+  })
+
+test('B6FPROBE locate-playing', async () => {
+  await runB6f(async (ctx) => {
+    await ctx.playFrom(1)
+    const mark = ctx.mark()
+    ctx.playback.setPlayhead(3, ctx.tracks())
+    await ctx.settle()
+    ctx.expectLivePlaying('locate-playing', mark, 3, false)
+  })
+})
+
+test('B6FPROBE locate-paused', async () => {
+  await runB6f(async (ctx) => {
+    await ctx.pausedAt(1)
+    const mark = ctx.mark()
+    ctx.playback.setPlayhead(3, ctx.tracks())
+    await ctx.settle()
+    ctx.expectLivePaused('locate-paused', mark, 3, false)
+  })
+})
+
+// useTimelineProjectRoute.ts:79-81 bumps the generation, then the project id; the new project's tracks load later.
+for (const kind of ['project-switch', 'generation-bump'] as const)
+  for (const nativeEnabled of [true, false])
+  test(`B6FPROBE ${kind} native-enabled=${nativeEnabled}`, async () => {
+    await runB6f(async (ctx) => {
+      await ctx.pausedAt(1)
+      const mark = ctx.mark()
+      ctx.setGeneration(2)
+      if (kind === 'project-switch') ctx.setProjectId('project-b')
+      await ctx.settle()
+      ctx.setTracks(b6fEditedTracks)
+      await ctx.timelineReschedule()
+      await ctx.settle()
+      ctx.expectLivePaused(kind, mark, kind === 'project-switch' ? 0 : 1, true)
+    }, { nativeEnabled })
+  })
+
+// Lifecycle routes need a desktop lifecycle bridge (H:176-178); the browser build has none (Timeline.tsx:167).
+for (const path of ['suspended-recovering-ready', 'suspended-ready'] as const)
+  test(`B6FPROBE lifecycle ${path}`, async () => {
+    await runB6f(async (ctx) => {
+      const bridge = (ctx as B6fContext & { lifecycleBridge?: ReturnType<typeof createNativeHookBridge> }).lifecycleBridge
+      if (!bridge) throw new Error('lifecycle bridge missing')
+      await ctx.pausedAt(1)
+      const mark = ctx.mark()
+      bridge.emitLifecycle({ state: 'suspended', powerGeneration: 2 })
+      await ctx.settle()
+      if (path === 'suspended-recovering-ready') bridge.emitLifecycle({ state: 'recovering', powerGeneration: 3 })
+      else bridge.emitLifecycle({ state: 'ready', powerGeneration: 3 })
+      await ctx.settle()
+      ctx.expectLivePaused(`lifecycle ${path}`, mark, 1, false)
+    }, { nativeEnabled: false, lifecycle: true })
+  })
+
+for (const toggle of ['disable', 'enable'] as const)
+  test(`B6FPROBE native-toggle ${toggle}`, async () => {
+    await runB6f(async (ctx) => {
+      await ctx.pausedAt(1)
+      const mark = ctx.mark()
+      ctx.setNativeEnabled(toggle === 'enable')
+      await ctx.settle()
+      ctx.expectLivePaused(`native-toggle ${toggle}`, mark, 1, false)
+    }, { nativeEnabled: toggle === 'disable' })
+  })
+
+// ---- B6f3 route probe (scratch, appended after the B6f probe; no repository write) ----
+import { batch as b6f3Batch } from 'solid-js'
+
+// Records every worklet node the portable backend creates, so a route can fault the live one (C:1095-1105;
+// wasm-audio-worklet-backend.ts:397, :401-411). runB6fLive restores the global after the body.
+const b6f3TrackNodes = () => {
+  const nodes: AudioWorkletNode[] = []
+  const Base = globalThis.AudioWorkletNode
+  Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: class extends Base {
+    constructor(...args: ConstructorParameters<typeof AudioWorkletNode>) {
+      super(...args)
+      nodes.push(this)
+    }
+  } })
+  return nodes
+}
+const b6f3Fault = 'Portable audio-core AudioWorklet processing failed.'
+const b6f3Expect = async (live: ReturnType<typeof mountB6fLive>, mark: number, expected: ReturnType<ReturnType<typeof mountB6fLive>['summary']>, route: string) => {
+  await live.until(() => !live.playback.isPreparingPlayback() && Bun.deepEquals(live.summary(mark), expected))
+  console.log('B6F3PROBE-RESULT', route, JSON.stringify(live.summary(mark)))
+  expect(live.summary(mark)).toEqual(expected)
+}
+const b6f3Live = (sec: number, edit: B6fLiveEdit, faults: string[] = []) => ({
+  faults, playing: false, portableActive: false, prepared: true, playhead: sec, openSessions: 1,
+  position: { sec, running: false }, edit, runningAfterMark: 0,
+})
+
+for (const ne of [false, true]) {
+  test(`B6F3PROBE mount ne=${ne}`, async () => {
+    await runB6fLive(async (live) => {
+      await live.until(() => live.summary(0).openSessions > 0)
+      expect(live.summary(0)).toMatchObject({ openSessions: 0, prepared: false, faults: [] })
+    }, ne)
+  })
+  test(`B6F3PROBE pause ne=${ne}`, async () => {
+    await runB6fLive(async (live) => {
+      await live.playFrom(1)
+      const mark = live.mark()
+      await live.playback.handlePause()
+      await b6f3Expect(live, mark, b6f3Live(1, 'none'), 'pause')
+    }, ne)
+  })
+  for (const from of ['playing', 'paused'] as const)
+    test(`B6F3PROBE stop-${from} ne=${ne}`, async () => {
+      await runB6fLive(async (live) => {
+        if (from === 'playing') await live.playFrom(1)
+        else await live.pausedAt(1)
+        const mark = live.mark()
+        await live.playback.handleStop()
+        await b6f3Expect(live, mark, b6f3Live(0, 'none'), 'stop')
+      }, ne)
+    })
+  test(`B6F3PROBE locate-paused ne=${ne}`, async () => {
+    await runB6fLive(async (live) => {
+      await live.pausedAt(1)
+      const mark = live.mark()
+      live.playback.setPlayhead(3, live.tracks())
+      await b6f3Expect(live, mark, b6f3Live(3, 'none'), 'locate-paused')
+    }, ne)
+  })
+  for (const [start, hold, action] of [['warm', 'transport', 'pause'], ['cold', 'compile', 'stop']] as const)
+    test(`B6F3PROBE cancel-pending-play ${start} ${action} ne=${ne}`, async () => {
+      await runB6fLive(async (live) => {
+        if (start === 'warm') await live.pausedAt(1)
+        else live.playback.setPlayhead(1, live.tracks())
+        live.holds[hold].armed = true
+        const play = live.playback.handlePlay(live.tracks())
+        await live.holds[hold].reached.promise
+        const mark = live.mark()
+        const cancel = action === 'pause' ? live.playback.handlePause() : live.playback.handleStop()
+        releaseB6fLive(live.holds[hold])
+        await Promise.allSettled([play, cancel])
+        await b6f3Expect(live, mark, b6f3Live(action === 'stop' ? 0 : 1, 'none'), 'cancel-pending-play')
+      }, ne)
+    })
+  for (const [hold, action] of [['compile', 'pause'], ['transport', 'stop']] as const)
+    test(`B6F3PROBE rebuild ${action} ne=${ne}`, async () => {
+      await runB6fLive(async (live) => {
+        await live.playFrom(1)
+        live.setTracks(b6fLiveEditedTracks)
+        live.holds[hold].armed = true
+        const rebuild = live.resumingRebuild()
+        await live.holds[hold].reached.promise
+        const mark = live.mark()
+        const cancel = action === 'pause' ? live.playback.handlePause() : live.playback.handleStop()
+        const at = live.playback.playheadSec()
+        releaseB6fLive(live.holds[hold])
+        await Promise.allSettled([rebuild, cancel])
+        await b6f3Expect(live, mark, b6f3Live(action === 'stop' ? 0 : at, 'structure'), 'rebuild')
+      }, ne)
+    })
+  // Liveness only: with native disabled nothing disposes the paused session on a mixer edit (REVIEW-B6F §8.3).
+  test(`B6F3PROBE mixer-edit-paused ne=${ne}`, async () => {
+    await runB6fLive(async (live) => {
+      await live.pausedAt(1)
+      const mark = live.mark()
+      live.setTracks([{ ...track, volume: 0.5 }])
+      await live.until(() => false)
+      const result = live.summary(mark)
+      console.log('B6F3PROBE-RESULT', 'mixer-edit-paused', ne, JSON.stringify(result))
+      expect(result).toMatchObject({ faults: [], playing: false, prepared: true, openSessions: 1, position: { sec: 1, running: false }, runningAfterMark: 0 })
+    }, ne)
+  })
+  test(`B6F3PROBE structural-edit-paused ne=${ne}`, async () => {
+    await runB6fLive(async (live) => {
+      await live.pausedAt(1)
+      const mark = live.mark()
+      live.setTracks(b6fLiveEditedTracks)
+      await live.timelineReschedule()
+      await b6f3Expect(live, mark, b6f3Live(1, 'structure'), 'structural-edit-paused')
+    }, ne)
+  })
+  for (const order of ['batched', 'sequential', 'generation-only'] as const)
+    test(`B6F3PROBE project ${order} unchanged tracks ne=${ne}`, async () => {
+      await runB6fLive(async (live) => {
+        await live.pausedAt(1)
+        const previous = live.liveSession()
+        const mark = live.mark()
+        if (order === 'batched') b6f3Batch(() => { live.setGeneration(2); live.setProjectId('project-b') })
+        else {
+          live.setGeneration(2)
+          if (order === 'sequential') live.setProjectId('project-b')
+        }
+        await live.until(() => previous?.closed === true)
+        await b6f3Expect(live, mark, b6f3Live(order === 'generation-only' ? 1 : 0, 'none'), `project ${order}`)
+      }, ne)
+    })
+  test(`B6F3PROBE fault-playing ne=${ne}`, async () => {
+    await runB6fLive(async (live) => {
+      const nodes = b6f3TrackNodes()
+      await live.playFrom(1)
+      const mark = live.mark()
+      const node = nodes.at(-1)
+      node?.onprocessorerror?.(new Event('processorerror'))
+      await b6f3Expect(live, mark, b6f3Live(1, 'none', [b6f3Fault]), 'fault-playing')
+    }, ne)
+  })
+  // Information only: a fault while paused changes no signal the hook reads, so neither G6 nor G7 runs.
+  test(`B6F3PROBE info fault-paused ne=${ne}`, async () => {
+    await runB6fLive(async (live) => {
+      const nodes = b6f3TrackNodes()
+      await live.pausedAt(1)
+      const mark = live.mark()
+      nodes.at(-1)?.onprocessorerror?.(new Event('processorerror'))
+      await live.until(() => false)
+      console.log('B6F3PROBE-INFO', 'fault-paused', ne, JSON.stringify(live.summary(mark)))
+    }, ne)
+  })
+}

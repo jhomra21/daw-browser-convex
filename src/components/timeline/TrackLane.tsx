@@ -1,4 +1,4 @@
-import { createMemo, type Accessor, type Component, For, Show } from 'solid-js'
+import { createMemo, createSignal, type Accessor, type Component, For, Show } from 'solid-js'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { useAppPreferences } from '~/context/app-preferences'
 import { createClipVisualColors, resolveClipColor } from '~/lib/clip-color'
@@ -12,6 +12,7 @@ import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import { intersectTimelineRangeWithViewport } from '~/lib/timeline-viewport-geometry'
 import { isClipWithinRenderRange } from './clip-render-range'
+import { quantizeSecToGrid } from '~/lib/timeline-utils'
 
 type TrackLaneProps = {
   track: Track
@@ -29,7 +30,7 @@ type TrackLaneProps = {
   onReplaceMedia: (trackId: Track['id'], clipId: string) => void
   onRemoveMissingMedia: (trackId: Track['id'], clipId: string) => void
   resolveAudioSource: AudioPcmSourceResolver
-  onAddMidiClip?: (trackId: Track['id']) => void
+  onAddMidiClip?: (trackId: Track['id'], startSec: number) => void
   onDeleteTrack?: (trackId: Track['id']) => void
   bpm: number
   pixelsPerSecond: number
@@ -37,6 +38,9 @@ type TrackLaneProps = {
   clipVisibleRange: { startSec: number; endSec: number }
   viewportWidthPx: number
   timeToX: (timeSec: number) => number
+  clientXToTime: (clientX: number) => number
+  gridEnabled: boolean
+  gridDenominator: number
   viewportRedrawVersion: number
   devicePixelRatio: number
   waveformVisible?: boolean
@@ -57,6 +61,7 @@ type TrackLaneProps = {
 
 const TrackLane: Component<TrackLaneProps> = (props) => {
   const appPreferences = useAppPreferences()
+  const [insertStartSec, setInsertStartSec] = createSignal(0)
   const contextMenuItems = (): TimelineContextMenuItem[] => {
     const items: TimelineContextMenuItem[] = [
       { kind: 'label', label: props.track.name },
@@ -65,7 +70,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
       items.push({
         kind: 'item',
         label: 'Add MIDI clip',
-        onSelect: () => props.onAddMidiClip?.(props.track.id),
+        onSelect: () => props.onAddMidiClip?.(props.track.id, insertStartSec()),
       })
     }
     if (props.onDeleteTrack) {
@@ -101,9 +106,22 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
 
   const laneContainer = () => (
     <div
+      data-timeline-track-lane={props.track.id}
       class="absolute left-0 right-0 overflow-hidden bg-timeline-background"
       classList={{ 'bg-green-500/10': props.isDropTarget?.() }}
       style={{ top: `${props.layout.topPx}px`, height: `${props.layout.heightPx}px` }}
+      onContextMenu={(event) => {
+        if (
+          !(event.target instanceof Element) ||
+          event.target.closest('[data-timeline-clip="1"]')
+        ) return
+        const timeSec = props.clientXToTime(event.clientX)
+        setInsertStartSec(
+          props.gridEnabled
+            ? quantizeSecToGrid(timeSec, props.bpm, props.gridDenominator, 'round')
+            : timeSec,
+        )
+      }}
     >
       <div class="absolute left-0 right-0 h-px bg-timeline-surface-muted" style={{ top: `${props.layout.clipLaneHeightPx - 1}px` }} />
       {props.automation.visible && props.layout.automationHeightPx > 0 ? (
@@ -128,6 +146,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
                   parameterId={selection.parameterId}
                   envelope={props.automation.envelopeForSelection(selection)}
                   durationSec={props.automation.durationSec}
+                  bpm={props.bpm}
                   pixelsPerSecond={props.pixelsPerSecond}
                   visibleStartSec={props.visibleRange.startSec}
                   viewportWidthPx={(props.visibleRange.endSec - props.visibleRange.startSec) * props.pixelsPerSecond}

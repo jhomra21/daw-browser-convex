@@ -1,9 +1,101 @@
 import { expect, test } from 'bun:test'
-import type { PortableWasmStatusMessage } from './portable-wasm-protocol'
+import type { PortableWasmControlMessage, PortableWasmStatusMessage } from './portable-wasm-protocol'
+import { mixerParameterRegistry, type AudioCoreGraphSnapshot } from '@daw-browser/audio-core-contract'
 
 const hostUrl = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v1.js', import.meta.url)
 const hostV2Url = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v2.js', import.meta.url)
 const wasmUrl = new URL('../../../native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm', import.meta.url)
+type InstrumentHostStatus = Omit<Extract<PortableWasmStatusMessage, { type: 'instrument-events-applied' }>, 'version'> & { version: number }
+type HostControl<Type extends PortableWasmControlMessage['type']> = Omit<Extract<PortableWasmControlMessage, { type: Type }>, 'version'> & { version: number }
+
+test('both hosts preserve a full scheduled block and acknowledge live parameters only after rendering', async () => {
+  for (const version of [1, 2]) {
+    const { DawPortableAudioCoreHost } = await import(version === 1 ? hostUrl.href : hostV2Url.href)
+    const messages: Array<PortableWasmStatusMessage | InstrumentHostStatus> = []
+    const host = new DawPortableAudioCoreHost({
+      sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined,
+    })
+    Object.assign(host, {
+      ready: true, revision: 1, maxFramesPerBlock: 128, transportEpoch: 1,
+      memory: { buffer: new ArrayBuffer(65536) }, malloc: () => 8, free: () => undefined,
+      graphSetTransport: () => 0,
+      inputPlanes: Array.from({ length: 128 }, () => new Float32Array(128)),
+      leftOutput: new Float32Array(128), rightOutput: new Float32Array(128),
+      eventOffset: 1,
+      eventBufferView: new DataView(new ArrayBuffer(4)),
+    })
+    host.handleMessage({ version, type: 'instrument-parameters', requestId: 7, revision: 1, sequence: 1, epoch: 1,
+      events: [{ nodeId: 'track', type: 'parameter', noteId: 1, sequence: 1, frameOffset: 0, channel: 0, note: 3, value: 913 }] })
+    expect(messages).not.toContainEqual(expect.objectContaining({ type: 'instrument-events-applied' }))
+    Object.assign(host, {
+      schedule: { transportEpoch: 1, revision: 1 },
+      scheduleEventView: new DataView(new ArrayBuffer(4 + 256 * 20)),
+      scheduleInstrumentEventView: new DataView(new ArrayBuffer(4 + 256 * 48)),
+      scheduleParameterStreams: [],
+      scheduleInstrumentEvents: Array.from({ length: 512 }, (_, index) => ({
+        frame: index < 256 ? 0 : 128, nodeId: 1n, noteId: BigInt(index + 1), sequence: BigInt(index + 1), type: 1, pitch: 60, value: 1,
+      })),
+    })
+    const rendered: number[] = []
+    let notes = 0
+    host.coreProcess = () => {
+      const view = host.scheduleInstrumentEventView
+      for (let index = 0; index < view.getUint32(0, true); index += 1) {
+        if (view.getUint32(4 + index * 48 + 32, true) === 5) rendered.push(view.getFloat32(4 + index * 48 + 44, true))
+        else notes += 1
+      }
+      return 0
+    }
+    host.transportRunning = true
+    host.process([], [[new Float32Array(128), new Float32Array(128)]])
+    expect(notes).toBe(256)
+    expect(rendered).toEqual([])
+    expect(messages).not.toContainEqual(expect.objectContaining({ type: 'instrument-events-applied', result: 'applied' }))
+    host.process([], [[new Float32Array(128), new Float32Array(128)]])
+    expect(rendered).toEqual([913])
+    host.process([], [[new Float32Array(128), new Float32Array(128)]])
+    expect(notes).toBe(512)
+    expect(rendered).toEqual([913])
+    expect(host.framesProcessed).toBe(384)
+    expect(messages).toContainEqual({ version, type: 'instrument-events-applied', requestId: 7, revision: 1, epoch: 1, sequence: 1, result: 'applied' })
+  }
+})
+
+test('both hosts replay pending and applied parameter values under a new epoch', async () => {
+  for (const version of [1, 2]) {
+    const { DawPortableAudioCoreHost } = await import(version === 1 ? hostUrl.href : hostV2Url.href)
+    const messages: Array<PortableWasmStatusMessage | InstrumentHostStatus> = []
+    const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
+    Object.assign(host, { ready: true, revision: 1, maxFramesPerBlock: 128, transportEpoch: 1,
+      memory: { buffer: new ArrayBuffer(65536) }, malloc: () => 8, free: () => undefined, graphSetTransport: () => 0 })
+    host.handleMessage({ version, type: 'instrument-parameters', requestId: 8, revision: 1, sequence: 2, epoch: 1,
+      events: [{ nodeId: 'track', type: 'parameter', noteId: 1, sequence: 2, frameOffset: 0, channel: 0, note: 3, value: 913 }] })
+    host.handleMessage({ version, type: 'transport', requestId: 9, epoch: 2, running: true, frame: 0 })
+    expect(host.instrumentEventView.getUint32(28, true)).toBe(2)
+    expect(host.instrumentEventView.getFloat32(48, true)).toBe(913)
+    expect(messages).toContainEqual({ version, type: 'instrument-events-applied', requestId: 8, revision: 1, epoch: 1, sequence: 2, result: 'rejected' })
+    Object.assign(host, {
+      eventOffset: 1, eventBufferView: new DataView(new ArrayBuffer(4)),
+      inputPlanes: Array.from({ length: 128 }, () => new Float32Array(128)),
+      leftOutput: new Float32Array(128), rightOutput: new Float32Array(128),
+    })
+    const epochs: number[] = []
+    host.coreProcess = () => {
+      if (host.instrumentEventByteCount > 4) {
+        const deliveredEpoch = host.instrumentEventView.getUint32(28, true)
+        if (deliveredEpoch !== host.transportEpoch) return 1
+        epochs.push(deliveredEpoch)
+      }
+      return 0
+    }
+    host.process([], [[new Float32Array(128), new Float32Array(128)]])
+    host.process([], [[new Float32Array(128), new Float32Array(128)]])
+    host.handleMessage({ version, type: 'transport', requestId: 10, epoch: 3, running: true, frame: 256 })
+    host.process([], [[new Float32Array(128), new Float32Array(128)]])
+    expect(epochs).toEqual([2, 3])
+    expect(host.instrumentEventByteCount).toBe(0)
+  }
+})
 
 const createTransportHost = async (
   graphSetTransport: (epoch: number, running: number, frame: bigint) => number,
@@ -383,15 +475,224 @@ test('the actual portable Wasm host renders built-in effects without native hook
     revision: 1,
     result: 'accepted',
   }))
-  const left = new Float32Array([1])
-  const right = new Float32Array([1])
+  host.handleMessage({ version: 1, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  playConstantSources(host, messages, 1, 1, [{ nodeId: 'track', value: 1 }])
   const outputLeft = new Float32Array(1)
   const outputRight = new Float32Array(1)
-  host.process([[left, right]], [[outputLeft, outputRight]])
+  host.process([], [[outputLeft, outputRight]])
   expect(outputLeft[0]).toBeCloseTo(1.995, 3)
   expect(outputRight[0]).toBeCloseTo(1.995, 3)
 })
 
+const portableMixerTargets = [
+  { id: 'mixer.gain', target: 26, minValue: 0, maxValue: 4 },
+  { id: 'mixer.pan', target: 27, minValue: -1, maxValue: 1 },
+  { id: 'mixer.mute', target: 28, minValue: 0, maxValue: 1 },
+  { id: 'mixer.solo', target: 29, minValue: 0, maxValue: 1 },
+]
+const portableTrackGraph = (trackIds: readonly string[]) => ({
+  version: 1,
+  revision: 1,
+  masterNodeId: 'master',
+  assets: [],
+  nodes: [
+    ...trackIds.map((id, index) => ({
+      id, kind: 'source', inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: 0, processorOrder: [],
+      mixer: { instanceId: 100 + index, gain: 1, pan: 0, muted: false, soloed: false, parameterTargets: portableMixerTargets },
+    })),
+    {
+      id: 'master', kind: 'master', inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: 0, processorOrder: [],
+      mixer: { instanceId: 900, gain: 1, pan: 0, muted: false, soloed: false, parameterTargets: portableMixerTargets },
+    },
+  ],
+  edges: trackIds.map((id) => ({
+    version: 1, id: `${id}-master`, fromNodeId: id, toNodeId: 'master', gain: 1, tap: 'post-fader', sidechain: false, pdcDelayFrames: 0,
+  })),
+})
+const startPortableTracks = async (trackIds: readonly string[]) => {
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const messages: PortableWasmStatusMessage[] = []
+  const host = new DawPortableAudioCoreHost({
+    sampleRate: 48_000,
+    postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
+    close: () => undefined,
+  })
+  expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: portableTrackGraph(trackIds) })
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-prepared', requestId: 1, result: 'prepared' }))
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-published', requestId: 2, result: 'published' }))
+  return { host, messages }
+}
+// Plays a constant on each listed source through a registered PCM asset and a
+// scheduled sample source, as the product feeds clips: portable sources never
+// read the worklet's live input.
+const playConstantSources = (
+  host: { handleMessage: (message: HostControl<'register-asset'> | HostControl<'schedule-sources'>) => void },
+  messages: readonly PortableWasmStatusMessage[],
+  version: number,
+  revision: number,
+  sources: ReadonlyArray<{ nodeId: string, value: number }>,
+) => {
+  const frames = 48_000
+  const requestId = 1_000 + revision
+  for (const { value } of sources) host.handleMessage({
+    version, type: 'register-asset', requestId, generation: 0,
+    asset: { version: 1, assetId: `constant-${value}`, frameCount: frames, sampleRateHz: 48_000, channelCount: 2 },
+    planes: [new Float32Array(frames).fill(value), new Float32Array(frames).fill(value)],
+  })
+  host.handleMessage({ version, type: 'schedule-sources', requestId, revision, epoch: 1, events: sources.map(({ nodeId, value }, index) => ({
+    version: 1, epoch: 1, sequence: index + 1, sourceNodeId: nodeId, assetId: `constant-${value}`,
+    startFrame: 0, stopFrame: frames, sourceOffsetFrame: 0, sourceFrameCount: frames, gain: 1,
+    fadeInStartFrame: 0, fadeInEndFrame: 0, fadeOutStartFrame: frames, fadeOutEndFrame: frames,
+  })) })
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'sources-scheduled', requestId, result: 'scheduled' }))
+}
+
+test('the v2 host prepares and renders one source per audio track on the built core', async () => {
+  for (const trackCount of [1, 2, 3, 8]) {
+    const trackIds = Array.from({ length: trackCount }, (_, index) => `track-${index}`)
+    const { host, messages } = await startPortableTracks(trackIds)
+    host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+    playConstantSources(host, messages, 2, 1, [{ nodeId: trackIds[trackCount - 1], value: 0.5 }])
+    const left = new Float32Array(1)
+    const right = new Float32Array(1)
+    host.process([], [[left, right]])
+    expect([trackCount, left[0], right[0]]).toEqual([trackCount, 0.5, 0.5])
+  }
+})
+
+test('the v2 host hears the recording input once, only when monitoring, and still captures it on the built core', async () => {
+  const heard: unknown[] = []
+  for (const trackCount of [1, 3]) {
+    for (const monitoring of [false, true]) {
+      const trackIds = Array.from({ length: trackCount }, (_, index) => `track-${index}`)
+      const { host, messages } = await startPortableTracks(trackIds)
+      host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+      playConstantSources(host, messages, 2, 1, [{ nodeId: trackIds[trackCount - 1], value: 0.5 }])
+      host.handleMessage({
+        version: 2, type: 'recording-capture-configure', generation: 1, sessionId: 7, channelCount: 1, inputChannels: [0],
+        gain: 1, polarity: 1, monitoring, punchStartFrame: 0, punchEndFrame: null,
+      })
+      expect(messages).toContainEqual(expect.objectContaining({ type: 'recording-capture-applied', action: 'configured' }))
+      const left = new Float32Array(8)
+      const right = new Float32Array(8)
+      // The worklet node has one input, which carries the microphone; a mono capture monitors on the left.
+      host.process([[new Float32Array(8).fill(0.25)]], [[left, right]])
+      heard.push([trackCount, monitoring, [...new Set(left)], [...new Set(right)]])
+      host.handleMessage({ version: 2, type: 'recording-capture-finalize', stopFrame: 8 })
+      expect(messages).toContainEqual(expect.objectContaining({
+        type: 'recording-capture-block', sessionId: 7, frameCount: 8, planes: [new Float32Array(8).fill(0.25)],
+      }))
+    }
+  }
+  expect(heard).toEqual([
+    [1, false, [0.5], [0.5]], [1, true, [0.75], [0.5]],
+    [3, false, [0.5], [0.5]], [3, true, [0.75], [0.5]],
+  ])
+})
+
+test('the v2 host holds a scheduled mixer set-point across blocks on the built core', async () => {
+  const { host, messages } = await startPortableTracks(['track'])
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    version: 1, revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 },
+    events: [{ frame: 2, sequence: 1, type: 'parameter-set', target: { kind: 'parameter', scope: 'track', trackId: 'track', parameterId: 'mixer.gain' }, value: 0.25 }],
+  } })
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'schedule-installed', result: 'installed' }))
+  playConstantSources(host, messages, 2, 1, [{ nodeId: 'track', value: 1 }])
+  const render = () => {
+    const left = new Float32Array(8)
+    host.process([], [[left, new Float32Array(8)]])
+    return Array.from(left)
+  }
+  expect(render()).toEqual([1, 1, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25])
+  expect(render()).toEqual(Array.from({ length: 8 }, () => 0.25))
+  expect(render()).toEqual(Array.from({ length: 8 }, () => 0.25))
+})
+
+test('the v2 host ramps a product mute, unmute and solo flip published while playing on the built core', async () => {
+  const trackIds = ['track-0', 'track-1']
+  const { host, messages } = await startPortableTracks(trackIds)
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  let revision = 1
+  const installSchedule = () => {
+    host.handleMessage({ version: 2, type: 'install-schedule', requestId: revision * 2 + 2, schedule: {
+      version: 1, revision, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [],
+    } })
+    expect(messages).toContainEqual(expect.objectContaining({ type: 'schedule-installed', revision, result: 'installed' }))
+  }
+  installSchedule()
+  playConstantSources(host, messages, 2, 1, trackIds.map((nodeId) => ({ nodeId, value: 1 })))
+  const fade = 240
+  const composite = (2 * fade - 1) / (fade * fade)
+  let previous = 2
+  const render = () => {
+    const left = new Float32Array(128)
+    host.process([], [[left, new Float32Array(128)]])
+    return Array.from(left)
+  }
+  // Each track as the product compiles it (resolve-routing.ts): a mute zeroes the
+  // fader and the output edge; a solo elsewhere zeroes only the output edge.
+  const publish = (tracks: ReadonlyArray<{ gain: number, muted: boolean, edgeGain: number }>, target: number, bound: number) => {
+    revision += 1
+    const graph = portableTrackGraph(trackIds)
+    const snapshot = {
+      ...graph,
+      revision,
+      nodes: graph.nodes.map((node, index) => index < tracks.length
+        ? { ...node, mixer: { ...node.mixer, gain: tracks[index].gain, muted: tracks[index].muted } } : node),
+      edges: graph.edges.map((edge, index) => ({ ...edge, gain: tracks[index].edgeGain })),
+    }
+    host.handleMessage({ version: 2, type: 'prepare-graph', requestId: revision * 2, snapshot })
+    host.handleMessage({ version: 2, type: 'publish-graph', requestId: revision * 2 + 1, revision })
+    expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-published', revision, result: 'published' }))
+    installSchedule()
+    const samples = [...render(), ...render()]
+    let step = 0
+    for (const sample of samples) {
+      step = Math.max(step, Math.abs(sample - previous))
+      previous = sample
+    }
+    expect([revision, step <= bound + 1e-6 ? 'within bound' : step, samples[fade - 1], samples.at(-1)])
+      .toEqual([revision, 'within bound', target, target])
+    expect(render()).toEqual(Array.from({ length: 128 }, () => target))
+  }
+  expect(render()).toEqual(Array.from({ length: 128 }, () => 2))
+  const open = { gain: 1, muted: false, edgeGain: 1 }
+  publish([{ gain: 0, muted: true, edgeGain: 0 }, open], 1, composite)
+  publish([open, open], 2, composite)
+  publish([open, { ...open, edgeGain: 0 }], 1, 1 / fade)
+  publish([open, open], 2, 1 / fade)
+  publish([open, { ...open, edgeGain: 0.5 }], 1.5, 0.5 / fade)
+  publish([open, { ...open, edgeGain: 0.25 }], 1.25, 0.25 / fade)
+})
+
+test('the v2 host keeps rendering a published revision whose schedule has not arrived on the built core', async () => {
+  const { host, messages } = await startPortableTracks(['track'])
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    version: 1, revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [],
+  } })
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 5, snapshot: { ...portableTrackGraph(['track']), revision: 2 } })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 6, revision: 2 })
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-published', revision: 2, result: 'published' }))
+  playConstantSources(host, messages, 2, 2, [{ nodeId: 'track', value: 0.5 }])
+  const results: number[] = []
+  const coreProcess = host.coreProcess
+  host.coreProcess = (...args: unknown[]) => {
+    const result = coreProcess(...args)
+    results.push(result)
+    return result
+  }
+  const render = () => {
+    const left = new Float32Array(128)
+    host.process([], [[left, new Float32Array(128)]])
+    return Array.from(left)
+  }
+  const blocks = [render(), render(), render()]
+  expect([results, blocks.map((block) => block.filter((sample) => sample === 0.5).length)]).toEqual([[0, 0, 0], [128, 128, 128]])
+})
 test('the portable host drains one block per acknowledgement before finalizing', async () => {
   const { DawPortableAudioCoreHost } = await import(hostUrl.href)
   const messages: PortableWasmStatusMessage[] = []
@@ -592,4 +893,235 @@ test('process stages only live buses, clears removed buses, and preserves record
   host.process([[Float32Array.from([7, 8])]], output)
   expect(inputBusCounts.at(-1)).toBe(2)
   expect(recordingPlaneCounts).toEqual([4])
+})
+
+// An adoption publish (requireContinuity) on the same playing core, as the portable controller sends it: prepare the
+// next revision, stage its schedule, then publish. Nothing renders between the three messages.
+type HostSchedule = HostControl<'install-schedule'>['schedule']
+type HostScheduleEvent = HostSchedule['events'][number]
+type AdoptionMessage =
+  | { version: number; type: 'prepare-graph'; requestId: number; snapshot: { revision: number } }
+  | { version: number; type: 'install-schedule'; requestId: number; schedule: HostSchedule }
+  | { version: number; type: 'publish-graph'; requestId: number; revision: number; requireContinuity: true }
+const adoptRevision = <Snapshot extends { revision: number }>(
+  host: { handleMessage: (message: AdoptionMessage) => void },
+  messages: readonly PortableWasmStatusMessage[],
+  snapshot: Snapshot,
+  events: readonly HostScheduleEvent[],
+) => {
+  const revision = snapshot.revision
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: revision * 10, snapshot })
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-prepared', requestId: revision * 10, result: 'prepared' }))
+  const schedule: HostSchedule = { revision, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events }
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: revision * 10 + 1, schedule })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: revision * 10 + 2, revision, requireContinuity: true })
+  return {
+    installed: messages.flatMap((message) => message.type === 'schedule-installed' && message.requestId === revision * 10 + 1 ? [message.result] : [])[0],
+    published: messages.flatMap((message) => message.type === 'graph-published' && message.requestId === revision * 10 + 2 ? [message.result] : [])[0],
+  }
+}
+const renderLeft = (host: { process: (inputs: Float32Array[][], outputs: Float32Array[][]) => boolean }, frames = 128) => {
+  const left = new Float32Array(frames)
+  host.process([], [[left, new Float32Array(frames)]])
+  return Array.from(left)
+}
+const gainSet = (frame: number, sequence: number, value: number, trackId = 'track'): HostScheduleEvent => ({
+  frame, sequence, type: 'parameter-set', target: { kind: 'parameter', scope: 'track', trackId, parameterId: 'mixer.gain' }, value,
+})
+
+test('B6f5 the v2 host swaps a schedule staged for the prepared revision in at an adoption publish on the built core', async () => {
+  const { host, messages } = await startPortableTracks(['track'])
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [gainSet(256, 1, 0.5)],
+  } })
+  playConstantSources(host, messages, 2, 1, [{ nodeId: 'track', value: 1 }])
+  const first = renderLeft(host)
+  const adoption = adoptRevision(host, messages, { ...portableTrackGraph(['track']), revision: 2 }, [gainSet(256, 1, 0.25)])
+  // The old schedule never plays under the new revision and the new one lands at its frame.
+  expect([adoption, new Set(first), new Set(renderLeft(host)), new Set(renderLeft(host))])
+    .toEqual([{ installed: 'installed', published: 'published' }, new Set([1]), new Set([1]), new Set([0.25])])
+})
+
+test('B6f5 the v2 host refuses an adoption publish the core cannot continue and keeps rendering on the built core', async () => {
+  const { host, messages } = await startPortableTracks(['track'])
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [],
+  } })
+  playConstantSources(host, messages, 2, 1, [{ nodeId: 'track', value: 0.5 }])
+  renderLeft(host)
+  const graph = portableTrackGraph(['track'])
+  // A latency change is a revision the core reports as `fallback`: it cannot continue the playing graph.
+  const adoption = adoptRevision(host, messages, { ...graph, revision: 2, nodes: graph.nodes.map((node) => node.id === 'track' ? { ...node, latencyFrames: 64 } : node) }, [])
+  const results: number[] = []
+  const coreProcess = host.coreProcess
+  host.coreProcess = (...args: number[]) => {
+    const result = coreProcess(...args)
+    results.push(result)
+    return result
+  }
+  const blocks = [renderLeft(host), renderLeft(host)]
+  expect([adoption.published, messages.findLast((message) => message.type === 'graph-continuity')?.result, host.revision, results,
+    blocks.map((block) => block.every((sample) => sample === 0.5))]).toEqual(['rejected', 'fallback', 1, [0, 0], [true, true]])
+})
+
+test('B6f5 the v2 host keeps a pending live acknowledgement across an adoption publish on the built core', async () => {
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const messages: PortableWasmStatusMessage[] = []
+  const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
+  expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+  const utilityState = new Uint8Array(40)
+  const utilityView = new DataView(utilityState.buffer)
+  utilityView.setUint32(0, 1, true)
+  utilityView.setFloat32(24, 1, true)
+  const base = portableTrackGraph(['track'])
+  const graph = (revision: number) => ({ ...base, revision, nodes: base.nodes.map((node) => node.id === 'track' ? { ...node, processorOrder: [{
+    id: 'track-utility', instanceId: 31, kind: 'utility', kindId: 1, stateVersion: 1, state: utilityState,
+    parameterTargets: [{ id: 'gainDb', target: 1 }], bypassed: false, latencyFrames: 0, tailFrames: 0,
+  }] } : node) })
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph(1) })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [],
+  } })
+  playConstantSources(host, messages, 2, 1, [{ nodeId: 'track', value: 1 }])
+  renderLeft(host)
+  // A knob edit posted before the adoption, acknowledged only once a block renders it.
+  host.handleMessage({ version: 2, type: 'processor-events', requestId: 9, revision: 1, epoch: 1, sequence: 1,
+    events: [{ processorInstanceId: 31, parameterTarget: 1, frameOffset: 0, value: -6 }] })
+  const adoption = adoptRevision(host, messages, graph(2), [])
+  const acknowledgedBeforeRender = messages.filter((message) => message.type === 'processor-events-applied').map((message) => message.result)
+  const blocks = [renderLeft(host), renderLeft(host), renderLeft(host)]
+  expect([adoption.published, acknowledgedBeforeRender,
+    messages.filter((message) => message.type === 'processor-events-applied').map((message) => message.result)])
+    .toEqual(['published', [], ['applied']])
+  expect(blocks[2].at(-1)).toBeCloseTo(10 ** (-6 / 20), 3)
+})
+
+test('B6f5 the v2 host seeds a held automation value at an adoption publish on the built core', async () => {
+  const { host, messages } = await startPortableTracks(['track'])
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [gainSet(0, 1, 0.25)],
+  } })
+  playConstantSources(host, messages, 2, 1, [{ nodeId: 'track', value: 1 }])
+  const held = [renderLeft(host), renderLeft(host)]
+  // The same envelope compiled at the same time origin: its hold point is in the past when the swap happens.
+  const adoption = adoptRevision(host, messages, { ...portableTrackGraph(['track']), revision: 2 }, [gainSet(0, 1, 0.25)])
+  const after = [renderLeft(host), renderLeft(host), renderLeft(host)]
+  expect([adoption, held.map((block) => [...new Set(block)]), after.map((block) => [...new Set(block)])])
+    .toEqual([{ installed: 'installed', published: 'published' }, [[0.25], [0.25]], [[0.25], [0.25], [0.25]]])
+})
+
+test('B6f5 a sounding Synth note survives an adoption publish and ends at its note-off on the built core', async () => {
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const messages: PortableWasmStatusMessage[] = []
+  const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
+  expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+  const synth = {
+    version: 1, kind: 'synth', voiceCapacity: 8, outputLayout: 'stereo', parameterTargets: [],
+    oscillators: [
+      { enabled: true, waveform: 0, level: 0.8, octave: 0, semitone: 0, detuneCents: 0 },
+      { enabled: false, waveform: 0, level: 0, octave: 0, semitone: 0, detuneCents: 0 },
+    ],
+    noiseEnabled: false, noiseLevel: 0, filterEnabled: false, filterMode: 0, filterCutoffHz: 4000, filterResonance: 0.7,
+    filterKeyTracking: 0, filterEnvelopeAmountOctaves: 0, filterAttackMs: 0, filterDecayMs: 0, filterSustain: 1, filterReleaseMs: 0,
+    ampAttackMs: 0, ampDecayMs: 0, ampSustain: 0.8, ampReleaseMs: 1, lfoEnabled: false, lfoWaveform: 0, lfoRateHz: 1,
+    lfoPitchCents: 0, lfoFilterOctaves: 0, lfoAmplitude: 0, lfoPan: 0, outputGain: 0.8, outputPan: 0,
+  }
+  const base = portableTrackGraph(['track'])
+  const graph = (revision: number) => ({ ...base, revision, nodes: base.nodes.map((node) => node.id === 'track'
+    ? { ...node, kind: 'instrument', instrument: synth } : node) })
+  // Note-on before the adoption, note-off after it, as the schedule compiled at the active time origin carries them.
+  const notes: HostScheduleEvent[] = [
+    { frame: 0, sequence: 1, type: 'note-on', target: { kind: 'instrument', trackId: 'track' }, noteId: 1, pitch: 72, velocity: 0.8 },
+    { frame: 2048, sequence: 2, type: 'note-off', target: { kind: 'instrument', trackId: 'track' }, noteId: 1, pitch: 72 },
+  ]
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph(1) })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: notes,
+  } })
+  const peak = (block: number[]) => Math.max(...block.map(Math.abs))
+  const before = Array.from({ length: 4 }, () => peak(renderLeft(host)))
+  const adoption = adoptRevision(host, messages, graph(2), notes)
+  const sounding = Array.from({ length: 11 }, () => peak(renderLeft(host)))
+  const released = Array.from({ length: 4 }, () => peak(renderLeft(host)))
+  const level = before.at(-1) ?? 0
+  expect([adoption, level > 0.1, sounding.every((value) => Math.abs(value - level) < level * 0.25), released.at(-1)])
+    .toEqual([{ installed: 'installed', published: 'published' }, true, true, 0])
+})
+
+// R1: prepare, install and publish run on the AudioWorklet rendering thread. The gate is measured at the core's maximum
+// graph (64 nodes, 483 processors, 243 edges) with the envelope encoded off that thread, as the backend posts it.
+test('B6f5 R1 an adoption at the core maximum graph stays inside the audio-thread budget on the built core', async () => {
+  const { encodePortableGraphEnvelope } = await import('./native-host-wire')
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const messages: PortableWasmStatusMessage[] = []
+  const host = new DawPortableAudioCoreHost({ sampleRate: 44_100, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
+  expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+  const utilityState = new Uint8Array(40)
+  new DataView(utilityState.buffer).setUint32(0, 1, true)
+  new DataView(utilityState.buffer).setFloat32(24, 1, true)
+  type GraphNode = AudioCoreGraphSnapshot['nodes'][number]
+  type GraphEdge = AudioCoreGraphSnapshot['edges'][number]
+  const maximumGraph = (revision: number): AudioCoreGraphSnapshot => {
+    let instanceId = 1000
+    const utility = (id: string): GraphNode['processorOrder'][number] => ({ id, instanceId: instanceId++, kind: 'utility', kindId: 1, stateVersion: 1,
+      state: utilityState, parameterTargets: [{ id: 'gainDb', target: 1 }], bypassed: false, latencyFrames: 0, tailFrames: 0 })
+    const node = (id: string, kind: GraphNode['kind'], fx: number, mixerId: number, gain: number): GraphNode => ({ id, kind,
+      inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: 0, processorOrder: Array.from({ length: fx }, (_, index) => utility(`${id}-fx${index}`)),
+      mixer: { instanceId: mixerId, gain, pan: 0, muted: false, soloed: false, parameterTargets: mixerParameterRegistry } })
+    const edge = (from: string, to: string, kind: GraphEdge['kind'], gain: number): GraphEdge => ({ version: 1, id: `${from}>${to}`, fromNodeId: from,
+      toNodeId: to, gain, kind, tap: 'post-fader', sidechain: false, pdcDelayFrames: 0 })
+    const tracks = Array.from({ length: 60 }, (_, index) => node(`t${index}`, 'source', 8, 100 + index, (revision + index) % 2 ? 1 : 0.5))
+    const groups = Array.from({ length: 3 }, (_, index) => node(`group${index}`, 'group', 1, 500 + index, 1))
+    return { version: 1, revision, contractHash: 'test-contract', masterNodeId: 'master', assets: [],
+      nodes: [...tracks, ...groups, node('master', 'master', 0, 900, 1)],
+      edges: [...tracks.flatMap((track) => [edge(track.id, 'master', 'output', 1), ...groups.map((group) => edge(track.id, group.id, 'send', 0.3))]),
+        ...groups.map((group) => edge(group.id, 'master', 'output', 1))] }
+  }
+  const prepare = (revision: number) => {
+    const snapshot = maximumGraph(revision)
+    const envelope = encodePortableGraphEnvelope(snapshot)
+    const started = performance.now()
+    host.handleMessage({ version: 2, type: 'prepare-graph', requestId: revision * 10, snapshot, envelope })
+    return performance.now() - started
+  }
+  const largest = maximumGraph(1)
+  prepare(1)
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  const schedule = (revision: number): HostSchedule => ({ revision, transportEpoch: 1, sampleRateHz: 44_100, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 },
+    events: Array.from({ length: 256 }, (_, index) => gainSet(index * 64, index + 1, 0.25 + (index % 3) * 0.2, `t${index % 60}`)) })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: schedule(1) })
+  for (let block = 0; block < 8; block += 1) renderLeft(host)
+  const timings = { prepare: new Array<number>(), install: new Array<number>(), publish: new Array<number>(), adoption: new Array<number>() }
+  for (let revision = 2; revision < 42; revision += 1) {
+    const prepareMs = prepare(revision)
+    let started = performance.now()
+    host.handleMessage({ version: 2, type: 'install-schedule', requestId: revision * 10 + 1, schedule: schedule(revision) })
+    const installMs = performance.now() - started
+    started = performance.now()
+    host.handleMessage({ version: 2, type: 'publish-graph', requestId: revision * 10 + 2, revision, requireContinuity: true })
+    const publishMs = performance.now() - started
+    expect(messages.findLast((message) => message.type === 'graph-published')).toMatchObject({ revision, result: 'published' })
+    timings.prepare.push(prepareMs)
+    timings.install.push(installMs)
+    timings.publish.push(publishMs)
+    timings.adoption.push(prepareMs + installMs + publishMs)
+    renderLeft(host)
+    renderLeft(host)
+  }
+  const quantile = (values: number[], q: number) => [...values].sort((left, right) => left - right)[Math.min(values.length - 1, Math.floor(q * values.length))] ?? Infinity
+  const summary = Object.fromEntries(Object.entries(timings).map(([name, values]) => [name,
+    { p50: +quantile(values, 0.5).toFixed(3), p95: +quantile(values, 0.95).toFixed(3), max: +quantile(values, 1).toFixed(3) }]))
+  console.log('B6F5-R1-TIMING', JSON.stringify({ nodes: largest.nodes.length, processors: largest.nodes.reduce((count, node) => count + node.processorOrder.length, 0),
+    edges: largest.edges.length, budgetMs: +(128 / 44_100 * 1000).toFixed(3), ...summary }))
+  expect([largest.nodes.length, largest.nodes.reduce((count, node) => count + node.processorOrder.length, 0), largest.edges.length]).toEqual([64, 483, 243])
+  expect(quantile(timings.prepare, 0.95)).toBeLessThan(1.5)
+  expect(quantile(timings.adoption, 0.95)).toBeLessThan(2)
 })

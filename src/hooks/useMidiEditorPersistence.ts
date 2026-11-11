@@ -123,10 +123,6 @@ export function useMidiEditorPersistence(options: MidiEditorPersistenceOptions) 
       adapter?.dismissError()
       setError()
     },
-    pendingOperations: () => {
-      pendingVersion()
-      return adapter?.pendingOperations() ?? []
-    },
     reconcile: (midi: NormalizedLegacyMidiClip) => adapter?.reconcile(midi),
     project: (midi: NormalizedLegacyMidiClip) => {
       pendingVersion()

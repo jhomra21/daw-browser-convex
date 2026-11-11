@@ -1,0 +1,17 @@
+{
+ "knownRed": {
+  "src/hooks/useLocalTimelineMediaRecovery.test.ts": [
+   "a newer same-generation reload supersedes an older queued local snapshot",
+   "mount hydration bounds concurrent media loads",
+   "mount hydration restores persisted local media through the canonical asset ID",
+   "reconciliation reloads the canonical local repository snapshot"
+  ],
+  "src/hooks/useTimelinePlayback.test.ts": [
+   "failed lifecycle transition cancels delayed native startup",
+   "preserves an explicitly captured native owner across queued generation rebuilds"
+  ],
+  "src/lib/waveform-ribbon.browser.test.ts": [
+   "rasterizes the shared CSS floor and raw-center geometry consistently in Chromium"
+  ]
+ }
+}

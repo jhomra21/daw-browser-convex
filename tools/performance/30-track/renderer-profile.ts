@@ -5,7 +5,11 @@ import { writePrivateArtifact } from "./electron"
 const rawProfile = z.object({
   startTime: z.number(), endTime: z.number(),
   nodes: z.array(z.object({
-    id: z.number().int(), callFrame: z.object({ functionName: z.string() }).passthrough(),
+    id: z.number().int(),
+    callFrame: z.object({
+      functionName: z.string(), url: z.string().optional(),
+      lineNumber: z.number().int().optional(), columnNumber: z.number().int().optional(),
+    }).passthrough(),
     children: z.array(z.number().int()).optional(),
   }).passthrough()).max(100_000),
   samples: z.array(z.number().int()).max(100_000),
@@ -52,6 +56,25 @@ export const sanitizeRendererProfile = (input: RendererProfile) => {
   }
 }
 
+// Code locations are needed for source-map attribution; URLs are reduced to
+// packaged app script paths so no query strings or non-app origins persist.
+const appScriptPath = (url: string) => /^daw:\/\/app\/[^?#]*\.js$/.test(url) ? new URL(url).pathname : ""
+export const codeLocationRendererProfile = (input: RendererProfile) => {
+  const parsed = rawProfile.parse(input)
+  return {
+    startTime: parsed.startTime, endTime: parsed.endTime,
+    nodes: parsed.nodes.map((node) => ({
+      id: node.id,
+      functionName: node.callFrame.functionName.slice(0, 128),
+      scriptPath: appScriptPath(node.callFrame.url ?? ""),
+      lineNumber: node.callFrame.lineNumber ?? -1,
+      columnNumber: node.callFrame.columnNumber ?? -1,
+      children: node.children,
+    })),
+    samples: parsed.samples, timeDeltas: parsed.timeDeltas,
+  }
+}
+
 const profileActivitySchema = z.object({
   startedAtEpochMs: z.number().finite(),
   nodes: z.array(z.object({ id: z.number().int(), nameHash: z.string() }).passthrough()).max(100_000),
@@ -83,7 +106,9 @@ export const rendererActivityDuringReturn = (
 
 // Profiler sampling is intentionally narrow: CDP tracing can contain arbitrary
 // request payloads and has no reliable bounded in-memory event queue.
-export const startRendererProfile = async (browserUrl: string, artifactPath: string) => {
+export const startRendererProfile = async (
+  browserUrl: string, artifactPath: string, frames: "hashed" | "code-locations" = "hashed",
+) => {
   const startedAtEpochMs = Date.now()
   const socketUrl = await verifiedRendererSocket(browserUrl)
   const socket = new WebSocket(socketUrl)
@@ -121,16 +146,20 @@ export const startRendererProfile = async (browserUrl: string, artifactPath: str
   })
   socket.addEventListener("close", failPending)
   socket.addEventListener("error", failPending)
-  const send = (method: string) => new Promise<CdpReply>((resolve, reject) => {
+  const send = (method: string, params?: { interval: number }) => new Promise<CdpReply>((resolve, reject) => {
     const id = ++nextId
     pending.set(id, { resolve, reject })
-    try { socket.send(JSON.stringify({ id, method })) } catch {
+    try { socket.send(JSON.stringify({ id, method, params })) } catch {
       pending.delete(id)
       reject(new Error("Renderer profiler command could not be sent."))
     }
   })
+  // Code-location profiles attribute sub-frame tasks, so they sample at 250 us instead of the 1 ms default.
+  const start = () => send("Profiler.enable")
+    .then(() => frames === "code-locations" ? send("Profiler.setSamplingInterval", { interval: 250 }) : undefined)
+    .then(() => send("Profiler.start"))
   try {
-    await Promise.race([send("Profiler.enable").then(() => send("Profiler.start")), new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Renderer profiler start timed out.")), 3_000))])
+    await Promise.race([start(), new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Renderer profiler start timed out.")), 3_000))])
   } catch (error) {
     socket.close()
     throw error
@@ -145,7 +174,9 @@ export const startRendererProfile = async (browserUrl: string, artifactPath: str
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000)),
       ])
       if (result?.result?.profile) {
-        const sanitized = sanitizeRendererProfile(result.result.profile)
+        const sanitized = frames === "hashed"
+          ? sanitizeRendererProfile(result.result.profile)
+          : codeLocationRendererProfile(result.result.profile)
         const contents = JSON.stringify({ ...sanitized, startedAtEpochMs })
         if (Buffer.byteLength(contents) <= 8_000_000) await writePrivateArtifact(artifactPath, contents)
       }

@@ -1,6 +1,6 @@
 import { arrangementWaveformScheduler } from '@daw-browser/waveforms/arrangement-waveform'
 import type { WaveformSourceData } from '@daw-browser/waveforms/types'
-import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 
 export const requestWaveformData = (input: {
   readonly assetKey: string

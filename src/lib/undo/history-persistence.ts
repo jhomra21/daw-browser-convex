@@ -26,7 +26,7 @@ import {
 } from "@daw-browser/shared";
 import { buildClipMoveManyMutationInput, buildClipRemoveManyMutationInput } from "~/lib/clip-mutation-args";
 import { persistClipAudioWarp, persistClipTiming, persistClipTimingAndAudioWarp } from "~/lib/clip-mutations";
-import { localEffectRowId, restoreLocalTrackEffectChain, setLocalEffectInstance } from "~/lib/local-effects";
+import { localEffectRowId, restoreLocalTrackEffectChain, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects";
 import { deleteLocalAutomationEnvelope, setLocalAutomationEnvelope } from "~/lib/local-automation";
 import { buildSharedClipCreateOperation, buildSharedTrackCreateOperation, isAppliedSharedTimelineOperationResult, publishSharedTimelineOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
@@ -557,6 +557,14 @@ export const persistHistoryEffectParams = async (
   targetId: Track["id"] | "master",
   direction: HistoryDirection,
 ) => {
+  // Instruments are a single track slot. Their identity lives in the params,
+  // not the multi-instance audio-effect row key (including older history).
+  if (entry.data.effect === "instrument") {
+    const instrument = pickDirectionalValue(direction, entry.data.from, entry.data.to);
+    if (isLocalHistoryProject(deps)) await setLocalEffect(deps.projectId, targetId, "instrument", instrument);
+    else await publishHistoryOperation(deps, { kind: "instruments.setTrackInstrument", payload: { trackId: targetId, instrument } });
+    return;
+  }
   const instanceId = assertDefined(entry.data.instanceId, "Effect history requires an instance ID");
   if (isLocalHistoryProject(deps)) {
     if (entry.data.effect === "reverb" || entry.data.effect === "master-reverb") {
@@ -713,11 +721,6 @@ export const persistHistoryEffectParams = async (
     case "synth": {
       const params = pickDirectionalValue(direction, entry.data.from, entry.data.to);
       await publishHistoryOperation(deps, { kind: "effects.setSynthParams", payload: { trackId: targetId, params, instanceId: instanceId } });
-      return;
-    }
-    case "instrument": {
-      const instrument = pickDirectionalValue(direction, entry.data.from, entry.data.to);
-      await publishHistoryOperation(deps, { kind: "instruments.setTrackInstrument", payload: { trackId: targetId, instrument } });
       return;
     }
     case "arp": {

@@ -5,7 +5,8 @@ import {
   controlApprovalResultSchemaV1,
   projectSnapshotSchemaV1,
 } from "@daw-browser/control"
-import type { DesktopOperationMapV1 } from "@daw-browser/desktop-protocol"
+import { desktopDiagnosticsSchemaV1, desktopDiagnosticsSchemaV2, desktopJsonValueSchema, parseDesktopResult, type DesktopOperationMapV1 } from "@daw-browser/desktop-protocol"
+import { resetRecordingDiagnostics, updateRecordingDiagnostics } from "~/lib/recording/recording-diagnostics"
 import { setLocalExternalProcessor } from "~/lib/external-plugins"
 import {
   installHermeticWindow,
@@ -20,6 +21,7 @@ import {
   createAttachedHostController,
   registerAttachedHostController,
 } from "~/lib/desktop/attached-host-controller"
+import { serializeNativeDiagnostics } from "~/lib/desktop/native-diagnostics-serialization"
 import { createImportJobQueue, type ImportJobQueue } from "~/lib/desktop/import-job-queue"
 import type {
   PreparedTimelineExport,
@@ -128,6 +130,7 @@ const createController = (
     signal: AbortSignal;
   }) => Promise<void>,
   importQueue?: ImportJobQueue,
+  audioEngine = new AudioEngine(),
 ) => {
   const queue = createExportQueue()
   return {
@@ -137,7 +140,7 @@ const createController = (
       isPlaying: () => false,
       playheadSec: () => 0,
       tracks: () => [],
-      audioEngine: new AudioEngine(),
+      audioEngine,
       requestPlay: async () => undefined,
       pause: async () => undefined,
       stop: async () => undefined,
@@ -564,6 +567,138 @@ test("does not start a queued import after its project binding changes", async (
   queue.dispose()
 })
 
+test("reports bounded import failure details without exposing source paths", async () => {
+  installBridge([])
+  const importQueue = createImportJobQueue(() => "failed-import")
+  const submitted = importQueue.submit("samples", async () => ({
+    outcomes: [{
+      fileName: "/Users/Jane Doe/Private Audio/failure.wav",
+      status: "failed",
+      message: "Decoder failed at /Users/Jane Doe/Private Audio/failure.wav",
+    }, {
+      fileName: "C:\\Users\\Jane Doe\\Private Audio\\second.wav",
+      status: "local-save-failed",
+      message: "Could not save C:\\Users\\Jane Doe\\Private Audio\\second.wav",
+    }, {
+      fileName: "punctuation.wav",
+      status: "failed",
+      message: [
+        "/Jane Doe/spaced.wav",
+        "/O'Connor/apostrophe.wav",
+        "/Jane, Doe/comma.wav",
+        "/Jane (Studio)/parentheses.wav",
+        "/Jane; Doe/semicolon.wav",
+        "C:\\Jane Doe\\drive.wav",
+        "C:/Jane Doe/drive-forward.wav",
+        "\\\\server\\share\\unc.wav",
+        "file:///Jane Doe/file-url.wav",
+        "~/Jane Doe/home.wav",
+        "/Users/x/a.wav.",
+        "/Users/x/O'Brien (final), v2.wav",
+        "and/or",
+      ].join("\n"),
+    }],
+  }))
+  await submitted.completion
+  const { controller, dispose } = createController(() => "project-1", undefined, () => 0, undefined, undefined, importQueue)
+  const unregister = registerController(controller)
+  const response = await controller.request({
+    id: "failed-import-status",
+    operation: "host.import.status",
+    input: {},
+    signal: new AbortController().signal,
+  })
+  expect(response.result).toMatchObject({
+    status: "failed",
+    job: { id: "failed-import" },
+  })
+  const error = JSON.stringify(response.result)
+  for (const directoryFragment of [
+    "Jane Doe",
+    "O'Connor",
+    "Jane, Doe",
+    "Jane (Studio)",
+    "Jane; Doe",
+    "Private Audio",
+    "server",
+    "share",
+    "Users",
+  ]) {
+    expect(error).not.toContain(directoryFragment)
+  }
+  expect(error).toContain("failure.wav")
+  expect(error).toContain("second.wav")
+  expect(error).toContain("drive.wav")
+  expect(error).toContain("drive-forward.wav")
+  expect(error).toContain("unc.wav")
+  expect(error).toContain("file-url.wav")
+  expect(error).toContain("home.wav")
+  expect(error).toContain("a.wav.")
+  expect(error).toContain("O'Brien (final), v2.wav")
+  expect(error).toContain("and/or")
+  expect(error.length).toBeLessThanOrEqual(512)
+  unregister()
+  controller.dispose()
+  dispose()
+})
+
+test("includes skipped import reasons in bounded host status", async () => {
+  installBridge([])
+  const importQueue = createImportJobQueue(() => "skipped-import")
+  const submitted = importQueue.submit("unsupported-target.wav", async () => ({
+    outcomes: [{
+      fileName: "unsupported-target.wav",
+      status: "skipped",
+      message: "The requested track cannot receive audio clips.",
+    }],
+  }))
+  await submitted.completion
+  const { controller, dispose } = createController(() => "project-1", undefined, () => 0, undefined, undefined, importQueue)
+  const unregister = registerController(controller)
+  const response = await controller.request({
+    id: "skipped-import-status",
+    operation: "host.import.status",
+    input: {},
+    signal: new AbortController().signal,
+  })
+  expect(response.result).toMatchObject({
+    status: "failed",
+    job: { error: "1 files failed or skipped: unsupported-target.wav (The requested track cannot receive audio clips.)" },
+  })
+  unregister()
+  controller.dispose()
+  dispose()
+})
+
+test("sanitizes import errors when the job has no summary", async () => {
+  installBridge([])
+  const importQueue: ImportJobQueue = {
+    submit: () => ({ id: "unused", completion: Promise.resolve({ outcomes: [] }) }),
+    cancel: () => undefined,
+    cancelAll: () => undefined,
+    status: () => ({
+      id: "failed-import-without-summary",
+      name: "samples",
+      status: "failed",
+      error: "Failed /Users/x/a.wav",
+    }),
+    dispose: () => undefined,
+  }
+  const { controller, dispose } = createController(() => "project-1", undefined, () => 0, undefined, undefined, importQueue)
+  const unregister = registerController(controller)
+  const response = await controller.request({
+    id: "failed-import-without-summary-status",
+    operation: "host.import.status",
+    input: {},
+    signal: new AbortController().signal,
+  })
+  expect(JSON.stringify(response.result)).toContain("Failed [path]/a.wav")
+  expect(JSON.stringify(response.result)).not.toContain("/Users/x")
+  unregister()
+  controller.dispose()
+  dispose()
+})
+
 test("cancels active import file work during project transition", async () => {
   installBridge([])
   let projectId = "project-a"
@@ -727,7 +862,7 @@ test("runs the complete local control flow with the trusted actor", async () => 
   dispose()
 })
 
-test("reconciles the mounted timeline once for an applied non-replay commit", async () => {
+test("reconciles persisted overlays before commit and adopts the applied non-replay result", async () => {
   installBridge([])
   const project = await createLocalProject(`Reconcile external commit ${crypto.randomUUID()}`)
   const service = createLocalControlService({ actor: { subject: controlActor } })
@@ -771,20 +906,61 @@ test("reconciles the mounted timeline once for an applied non-replay commit", as
   expect(reconciliations).toEqual([{
     projectId: project.id,
     mountedProjectGeneration: 7,
+    name: "Track 1",
+  }, {
+    projectId: project.id,
+    mountedProjectGeneration: 7,
     name: "Drums Acceptance",
   }])
   expect((await requestControl(controller, "control.commit", input, undefined, controlActor)).result).toMatchObject({
     applied: true,
     idempotencyReplay: true,
   })
-  expect(reconciliations).toHaveLength(1)
+  expect(reconciliations).toHaveLength(3)
 
   expect((await requestControl(controller, "control.commit", {
     ...input,
     idempotencyKey: "reconcile-track-rename-failed",
     expectedRevision: 0,
   }, undefined, controlActor)).error).toMatchObject({ code: "revision-conflict" })
-  expect(reconciliations).toHaveLength(1)
+  expect(reconciliations).toHaveLength(4)
+
+  unregister()
+  dispose()
+})
+
+test("surfaces mounted timeline reconciliation failures after an applied commit", async () => {
+  installBridge([])
+  const project = await createLocalProject(`Failed reconciliation ${crypto.randomUUID()}`)
+  const initial = await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id })
+  const track = initial.tracks[0]
+  if (!track) throw new Error("Expected initial track.")
+  let reconciliations = 0
+  const { controller, dispose } = createController(
+    () => project.id,
+    undefined,
+    () => 1,
+    undefined,
+    async () => {
+      if (++reconciliations === 2) throw new Error("Injected timeline reconciliation failure.")
+    },
+  )
+  const unregister = registerController(controller)
+
+  const result = await requestControl(controller, "control.commit", {
+    version: "v1",
+    projectId: project.id,
+    idempotencyKey: "failed-timeline-reconciliation",
+    actions: [{ kind: "track.rename", track: { source: "persisted", id: track.id }, name: "Renamed" }],
+  }, undefined, controlActor)
+
+  expect(result.error).toEqual({
+    version: "v1",
+    code: "internal",
+    message: "The change was saved, but the open project could not refresh. Read a fresh snapshot before making another change.",
+  })
+  expect((await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id }))
+    .tracks[0]?.name).toBe("Renamed")
 
   unregister()
   dispose()
@@ -869,7 +1045,7 @@ test("suppresses reconciliation when native delivery changes the mounted generat
   }, undefined, controlActor)
   expect(result.result).toMatchObject({ applied: true })
   expect(deliveries).toBe(1)
-  expect(reconciliations).toBe(0)
+  expect(reconciliations).toBe(1)
 
   unregister()
   dispose()
@@ -1504,4 +1680,93 @@ test("discovers only mounted VST instances and paginates safe parameter values",
 
   unregister()
   dispose()
+})
+
+
+test("strict attached diagnostics preserves native-spool and interrupted; legacy transport is not mislabeled", async () => {
+  bridgeCleanups.add(installHermeticWindow({}))
+  const engine = new AudioEngine()
+  const snapshot = engine.getRuntimeSnapshot()
+  engine.getRuntimeSnapshot = () => ({ ...snapshot, state: "interrupted" })
+  const f = createController(() => "cloud-project", undefined, undefined, undefined, undefined, undefined, engine)
+  registerController(f.controller)
+  const transports: DesktopOperationMapV1["diagnostics.snapshot.v2"]["result"]["recording"]["transport"][] = [null, "sab", "transferable", "native-spool"]
+  try {
+    for (const transport of transports) {
+      resetRecordingDiagnostics(); updateRecordingDiagnostics({ transport })
+      const reply = await f.controller.request({ id: "diagnostic-v2", operation: "diagnostics.snapshot.v2", input: {}, signal: new AbortController().signal })
+      const parsed = desktopDiagnosticsSchemaV2.parse(parseDesktopResult("diagnostics.snapshot.v2", desktopJsonValueSchema.parse(reply.result)))
+      expect(parsed.recording.transport).toBe(transport)
+      expect(parsed.audio.state).toBe("interrupted")
+      const legacy = await f.controller.request({ id: "diagnostic-v1", operation: "diagnostics.snapshot", input: {}, signal: new AbortController().signal })
+      if (transport === "native-spool") {
+        expect(legacy.error).toMatchObject({ code: "unavailable", message: "Native recording diagnostics require diagnostics.snapshot.v2." })
+      } else {
+        expect(desktopDiagnosticsSchemaV1.parse(parseDesktopResult("diagnostics.snapshot", desktopJsonValueSchema.parse(legacy.result))).recording.transport).toBe(transport)
+      }
+    }
+  } finally { resetRecordingDiagnostics(); f.dispose() }
+})
+
+test("maps the main-process native diagnostics reply through strict diagnostics v2", async () => {
+  const nativeDiagnostics = {
+    transportFrame: 10n,
+    realtimePerformance: {
+      sampleRateHz: 48_000, framesPerCallback: 128, observationCount: 0n,
+      processingP50Nanoseconds: 0n, processingP95Nanoseconds: 0n,
+      processingP99Nanoseconds: 0n, processingMaximumNanoseconds: 0n, deadlineMisses: 0n,
+    },
+    vstWorkerPerformance: {
+      activeWorkers: 0, observationCount: 0n, processingP50Nanoseconds: 0n,
+      processingP95Nanoseconds: 0n, processingP99Nanoseconds: 0n,
+      processingMaximumNanoseconds: 0n, deadlineMisses: 0n, watchdogMisses: 0n,
+      faults: 0n, restarts: 0n,
+    },
+    workerAutomation: null,
+    state: "running" as const,
+    activeRevision: 1,
+    preparedRevision: 0,
+    retiredRevision: 0,
+    transportEpoch: 2,
+    renderEpoch: 3n,
+    installedAssets: 0,
+    callbacks: 1,
+    rejectedBlocks: 0,
+    lastRejectedReason: 0,
+    lastRejectedCallback: 0n,
+    lastRejectedRenderEpoch: 0n,
+    lastRejectedTransportEpoch: 0,
+    lastRejectedCoreResult: 0,
+    lastRejectedFrameCount: 0,
+    lastRejectedChannelCount: 0,
+    lastRejectedProcessorEventCount: 0,
+    lastRejectedInstrumentEventCount: 0,
+    lastRejectedGraphRevision: 0,
+  }
+  const mainProcessReply = {
+    ok: true,
+    hello: {
+      capabilities: 0, abiVersion: 1, processorContractHash: "", graphContractHash: "",
+      artifactId: "", deviceState: "configured", readinessReason: "ready",
+    },
+    status: { running: true, generation: 7, pid: 123 },
+    configurationGeneration: 1,
+    diagnostics: nativeDiagnostics,
+    artifactVerification: { status: "verified" },
+  }
+  const mapped = {
+    ...desktopDiagnosticsSchemaV2.parse({
+      version: "v2",
+      audio: { state: "uninitialized", sampleRate: null, requestedSampleRate: null, latencyHint: null, baseLatencySec: null, outputLatencySec: null, totalOutputLatencySec: null, graphPdcLatencyFrames: null, workletFaultCount: 0, runtimeFaults: { eventCount: 0, uniqueSignatureCount: 0, byKind: { compressor: 0, "owned-processor": 0, "track-meter": 0, recorder: 0 }, last: null }, inferredApplicationStallCount: 0 },
+      recording: { requestedFormat: "pcm", activeFormat: "pcm", requestedLayout: "mono", activeChannels: null, requestedSampleRate: null, activeSampleRate: null, transport: null, capturedFrames: null, overrunFrames: null, droppedFrames: null, queuedFrames: null, peakQueuedFrames: 0, writerReturnedBuffers: 0, writerOutstandingBuffers: 0, nativeReceivedBlocks: 0, nativeArrivalGapMaxMs: 0, nativeHandlerMaxMs: 0, peakWriterOutstandingBuffers: 0, writerReturnMaxMs: 0, writerReturnDeliveryMaxMs: 0, writerReturnDeliveryWorst: null, writerOldestOutstandingMs: 0, writerTiming: null, muted: false, deviceLost: false, lastFailurePresent: false, termination: null, lifecycleTransitions: [], lastNativeStatus: null },
+      counts: { tracks: 0, clips: 0 },
+      waveform: { available: false, reason: "not-exposed-at-controller-boundary" },
+      native: {
+        status: "available",
+        artifactVerification: mainProcessReply.artifactVerification,
+        diagnostics: serializeNativeDiagnostics(mainProcessReply.diagnostics),
+      },
+    }),
+  }
+  expect(mapped.native.status).toBe("available")
 })

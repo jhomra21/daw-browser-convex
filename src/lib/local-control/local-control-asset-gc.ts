@@ -2,8 +2,8 @@ import { removeLocalAssetFileUnlocked } from '~/lib/local-assets'
 import { isJsonNumber, isJsonString, type JsonValue } from '@daw-browser/shared'
 import { assetCloudIdMappingKey, isAssetCloudMappingRow } from '~/lib/local-cloud-id-map'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import type { LocalControlAssetGcRow } from '~/lib/local-project-db'
-import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
+import { getProjectDirectoryHandle, retainedAssetPaths, type LocalControlAssetGcRow } from '~/lib/local-project-db'
+import { withLocalProjectAssetLock, withLocalStorageRootLock } from '~/lib/local-project-asset-lock'
 import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
 import { parseLocalControlRecoveryRow } from './local-control-rows'
 import { withLocalControlTransaction, withLocalControlTransactionOptions } from './local-control-state'
@@ -124,7 +124,7 @@ export const runLocalControlAssetGc = async (
     for (const job of due) {
       try {
         await flushLocalProjectPendingWrites(projectId)
-        const completed = await withLocalProjectAssetLock(projectId, async () => {
+        const completed = await withLocalProjectAssetLock(projectId, () => withLocalStorageRootLock(async () => {
           const stillEligible = await withLocalControlTransactionOptions(projectId, (context) => {
             const current = context.rows.assetGc
               .map(parseAssetGcRow)
@@ -136,8 +136,13 @@ export const runLocalControlAssetGc = async (
               && inactiveRecoveryFor(current, context.rows.recoveries, Date.now()) !== undefined
           }, { pendingWritesFlushedUnderAssetLock: true })
           if (!stillEligible) return false
-          const removal = await (options.removeAssetFile ?? removeLocalAssetFileUnlocked)(projectId, job.storagePath)
-          if (removal.status !== 'deleted' && removal.status !== 'already-missing') return false
+          const retained = await retainedAssetPaths(await getProjectDirectoryHandle(projectId), {
+            projectId, excludingAssetGcId: job.id,
+          })
+          if (!retained.has(job.storagePath)) {
+            const removal = await (options.removeAssetFile ?? removeLocalAssetFileUnlocked)(projectId, job.storagePath)
+            if (removal.status !== 'deleted' && removal.status !== 'already-missing') return false
+          }
           return withLocalControlTransactionOptions(projectId, (context) => {
             const current = context.rows.assetGc
               .map(parseAssetGcRow)
@@ -159,7 +164,7 @@ export const runLocalControlAssetGc = async (
             context.remove.recovery(recovery.id)
             return true
           }, { pendingWritesFlushedUnderAssetLock: true })
-        })
+        }))
         finalized = finalized || completed
       } catch {}
     }

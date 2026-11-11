@@ -1,3 +1,5 @@
+import { dbFromLinear } from '@daw-browser/shared'
+
 export type SampleRateConversionStatus = 'pass' | 'fail' | 'unsupported'
 
 export type SampleRateConversionMetrics = {
@@ -46,8 +48,6 @@ type SampleRateConversionMetricFields = {
   aliasLevelDb?: unknown
   elapsedMs?: unknown
 }
-
-const dbFromRatio = (value: number) => value > 0 ? 20 * Math.log10(value) : Number.NEGATIVE_INFINITY
 
 const isRecord = <Value>(value: Value): value is Value & object => (
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -134,7 +134,7 @@ export const measureIsolationDb = (source: Float32Array, isolated: Float32Array)
   let isolatedPeak = 0
   for (const sample of source) sourcePeak = Math.max(sourcePeak, Math.abs(sample))
   for (const sample of isolated) isolatedPeak = Math.max(isolatedPeak, Math.abs(sample))
-  return dbFromRatio(isolatedPeak / sourcePeak)
+  return dbFromLinear(isolatedPeak / sourcePeak)
 }
 
 export const isSampleRateConversionResult = <Value>(value: Value): value is Value & SampleRateConversionResult => {

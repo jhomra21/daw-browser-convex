@@ -3,6 +3,7 @@ import type { AutomationEnvelope, ClipCreateSnapshot } from '@daw-browser/shared
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { ExternalSidechainRoute, Track, TrackRouting } from '@daw-browser/timeline-core/types'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
+import { midiNotesEqual, type MidiEditorNote } from '~/lib/midi-editor-grid'
 
 import { buildTrackRoutingHistorySnapshot, getClipHistoryRef, getTrackHistoryRef } from './refs'
 import type {
@@ -10,6 +11,7 @@ import type {
   EffectParamsHistoryEntry,
   HistoryEntry,
   HistoryScope,
+  MidiNoteHistoryChange,
   TrackAutomationSnapshot,
   TrackEffectSnapshot,
   SidechainRouteHistorySnapshot,
@@ -382,7 +384,7 @@ type EffectParamsHistoryEntryInput = {
 export function buildEffectParamsHistoryEntry(input: EffectParamsHistoryEntryInput): EffectParamsHistoryEntry {
   const track = input.tracks.find((entry) => entry.id === input.payload.targetId)
   const trackRef = track ? getTrackHistoryRef(track) : undefined
-  const { targetId: _targetId, ...data } = input.payload
+  const { targetId: _targetId, edit: _edit, ...data } = input.payload
   return {
     type: 'effect-params',
     projectId: input.projectId,
@@ -494,6 +496,33 @@ export function buildClipFadesHistoryEntry(input: {
       clipRef: getClipHistoryRef(input.clip),
       from: input.from,
       to: input.to,
+    },
+  }
+}
+
+function diffMidiNotesById(from: MidiEditorNote[], to: MidiEditorNote[]): MidiNoteHistoryChange[] {
+  const fromById = new Map<string, MidiEditorNote>(from.map((note) => [note.id, note]))
+  const toById = new Map<string, MidiEditorNote>(to.map((note) => [note.id, note]))
+  const ids = new Set([...fromById.keys(), ...toById.keys()])
+  return Array.from(ids, (id) => ({ id, before: fromById.get(id), after: toById.get(id) }))
+    .filter(({ before, after }) => !(before && after && midiNotesEqual(before, after)))
+}
+
+// Returns undefined when no note changed, so the caller pushes no history entry.
+export function buildClipMidiNotesHistoryEntry(input: {
+  projectId: string
+  clip: Track['clips'][number]
+  from: MidiEditorNote[]
+  to: MidiEditorNote[]
+}): Extract<HistoryEntry, { type: 'clip-midi-notes' }> | undefined {
+  const changes = diffMidiNotesById(input.from, input.to)
+  if (changes.length === 0) return undefined
+  return {
+    type: 'clip-midi-notes',
+    projectId: input.projectId,
+    data: {
+      clipRef: getClipHistoryRef(input.clip),
+      changes,
     },
   }
 }

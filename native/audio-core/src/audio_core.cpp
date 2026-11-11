@@ -7337,6 +7337,34 @@ bool same_float(float left, float right) {
   return left == right;
 }
 
+// The synth and sampler states are packed 4-byte words, so a byte compare is a value compare. A sample zone and the granular
+// state open with a 64-bit handle that sits on an 8-byte boundary: they carry padding that the caller leaves as its heap held
+// it, so they compare by field.
+static_assert(sizeof(daw_audio_synth_state) == 156 && sizeof(daw_audio_sampler_state) == 88);
+
+bool same_zone(const daw_audio_sample_zone &left, const daw_audio_sample_zone &right) {
+  return left.asset == right.asset && left.key_low == right.key_low && left.key_high == right.key_high
+    && left.velocity_low == right.velocity_low && left.velocity_high == right.velocity_high
+    && left.root_note == right.root_note && left.tune_cents == right.tune_cents && left.gain == right.gain
+    && left.pan == right.pan && left.round_robin_group == right.round_robin_group
+    && left.round_robin_index == right.round_robin_index && left.playback_mode == right.playback_mode
+    && left.start_frame == right.start_frame && left.end_frame == right.end_frame
+    && left.loop_start_frame == right.loop_start_frame && left.loop_end_frame == right.loop_end_frame
+    && left.crossfade_frame_count == right.crossfade_frame_count && left.choke_group == right.choke_group;
+}
+
+bool same_granular(const daw_audio_granular_state &left, const daw_audio_granular_state &right) {
+  return left.version == right.version && left.asset == right.asset && left.seed == right.seed
+    && left.max_grains == right.max_grains && left.window_shape == right.window_shape && left.freeze == right.freeze
+    && left.grain_size_ms == right.grain_size_ms && left.density_hz == right.density_hz && left.position == right.position
+    && left.spray == right.spray && left.pitch_semitones == right.pitch_semitones
+    && left.reverse_probability == right.reverse_probability && left.stereo_spread == right.stereo_spread;
+}
+
+bool same_zones(const InstrumentConfiguration &left, const InstrumentConfiguration &right) {
+  return std::equal(left.zones.begin(), left.zones.end(), right.zones.begin(), same_zone);
+}
+
 bool same_instrument_configuration(
   const daw_audio_graph_node_descriptor &current_node,
   const daw_audio_graph_node_descriptor &next_node,
@@ -7357,9 +7385,9 @@ bool same_instrument_configuration(
     case DAW_AUDIO_INSTRUMENT_KIND_SAMPLER:
     case DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK:
       return std::memcmp(&before.sampler, &after.sampler, sizeof(before.sampler)) == 0
-        && std::memcmp(before.zones.data(), after.zones.data(), sizeof(before.zones)) == 0;
+        && same_zones(before, after);
     case DAW_AUDIO_INSTRUMENT_KIND_GRANULAR:
-      return std::memcmp(&before.granular, &after.granular, sizeof(before.granular)) == 0;
+      return same_granular(before.granular, after.granular);
     default:
       return true;
   }
@@ -8413,7 +8441,10 @@ void begin_instrument_edits(Core &core, const GraphRevision &replaced, const Gra
     if (previous < 0 || replaced.node_slots[static_cast<uint32_t>(previous)] != plan.node_slots[node]) continue;
     const InstrumentConfiguration &before = (*core.published_instrument_configs)[static_cast<uint32_t>(previous)];
     const InstrumentConfiguration &after = (*core.prepared_instrument_configs)[node];
-    if (std::memcmp(&before, &after, sizeof(after)) != 0) set_instrument_targets(core.instrument_runtime[plan.node_slots[node]], after);
+    const bool same = std::memcmp(&before.synth, &after.synth, sizeof(after.synth)) == 0
+      && std::memcmp(&before.sampler, &after.sampler, sizeof(after.sampler)) == 0
+      && same_zones(before, after) && same_granular(before.granular, after.granular);
+    if (!same) set_instrument_targets(core.instrument_runtime[plan.node_slots[node]], after);
   }
 }
 

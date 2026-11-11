@@ -1418,9 +1418,10 @@ export class DawPortableAudioCoreHost {
       const asset = state.assetId === '' ? undefined : this.assets.get(state.assetId)
       if ((state.assetId !== '' && !asset) || !this.granularConfigure) return false
       // daw_audio_granular_state as wasm32 lays it out: the 64-bit asset handle sits on an 8-byte boundary (offset 8), which
-      // pads the struct to 64 bytes. The sampler's zone, which opens with its handle, has no such gap.
+      // pads the struct to 64 bytes. The padding is zeroed: the core compares by value, but a heap's leftovers should not reach it.
       const allocation = this.malloc(64)
       if (!allocation) return false
+      new Uint8Array(this.memory.buffer, allocation, 64).fill(0)
       const view = new DataView(this.memory.buffer, allocation, 64)
       view.setUint32(0, 1, true)
       view.setBigUint64(8, asset?.handle.value ?? 0n, true)
@@ -1438,6 +1439,8 @@ export class DawPortableAudioCoreHost {
     if (!this.samplerConfigure || !Array.isArray(state.zones) || state.zones.length > 32) return false
     const allocation = this.malloc(88 + state.zones.length * 80)
     if (!allocation) return false
+    // Each 80-byte zone ends in 4 bytes of padding after its 8-byte-aligned handle.
+    new Uint8Array(this.memory.buffer, allocation, 88 + state.zones.length * 80).fill(0)
     const view = new DataView(this.memory.buffer, allocation, 88 + state.zones.length * 80)
     view.setUint32(0, 1, true)
     view.setUint32(4, state.zones.length, true)

@@ -1186,11 +1186,32 @@ const playDragged = async (
   keys: readonly number[],
   blocksPerState: number,
   liveCutoffs: readonly number[] = [],
+  paddingByte?: (configuration: number) => number,
 ) => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
   expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+  if (paddingByte) {
+    // Sets the padding of every state the host hands the core (a granular state's bytes 4..8 and 60..64, each sample zone's
+    // last four) before each configuration: a heap's leftovers, or a clean heap.
+    let configurations = 0
+    const pad = (bytes: Uint8Array, offsets: readonly number[]) => {
+      configurations += 1
+      offsets.forEach((offset) => { bytes[offset] = paddingByte(configurations) })
+    }
+    const configureGranular = host.granularConfigure
+    host.granularConfigure = (node: bigint, state: number) => {
+      pad(new Uint8Array(host.memory.buffer, state, 64), [4, 5, 6, 7, 60, 61, 62, 63])
+      return configureGranular(node, state)
+    }
+    const configureSampler = host.samplerConfigure
+    host.samplerConfigure = (node: bigint, state: number, zones: number) => {
+      const zoneCount = new DataView(host.memory.buffer).getUint32(state + 4, true)
+      pad(new Uint8Array(host.memory.buffer, zones, zoneCount * 80), Array.from({ length: zoneCount * 4 }, (_, index) => Math.floor(index / 4) * 80 + 76 + index % 4))
+      return configureSampler(node, state, zones)
+    }
+  }
   const sine = new Float32Array(sineFrames).map((_, frame) => Math.sin(0.05 * frame))
   host.handleMessage({ version: 2, type: 'register-asset', requestId: 900, generation: 0,
     asset: { version: 1, assetId: 'held-sine', frameCount: sineFrames, sampleRateHz: 48_000, channelCount: 2 }, planes: [sine, sine] })
@@ -1322,15 +1343,33 @@ const longestSilence = (signal: readonly number[]) => signal.reduce((state, samp
   return { run, longest: Math.max(state.longest, run) }
 }, { run: 0, longest: 0 }).longest
 
+const granularCloud = (grainWindow: 'hann' | 'tukey', position = 0.5, grainSizeMs = 20): AudioCoreInstrumentState => ({
+  version: 1, kind: 'granular', voiceCapacity: 2, outputLayout: 'stereo', assetId: 'held-sine', seed: 77, maxGrains: 16,
+  'windowShape': grainWindow, freeze: false, grainSizeMs, densityHz: 100, position, spray: 0.3, pitchSemitones: 0,
+  reverseProbability: 0, stereoSpread: 0.3,
+})
+
 test('B6f5 phase 6i a granular cloud configures through the host and keeps sounding through a non-live edit on the built core', async () => {
-  const granular = (grainWindow: 'hann' | 'tukey'): AudioCoreInstrumentState => ({
-    version: 1, kind: 'granular', voiceCapacity: 2, outputLayout: 'stereo', assetId: 'held-sine', seed: 77, maxGrains: 16,
-    'windowShape': grainWindow, freeze: false, grainSizeMs: 20, densityHz: 100, position: 0.5, spray: 0.3, pitchSemitones: 0,
-    reverseProbability: 0, stereoSpread: 0.3,
-  })
-  const edited = await playHeldNotes([granular('hann'), granular('tukey')], [60], true)
-  const reference = await playHeldNotes([granular('hann'), granular('tukey')], [60], false)
+  const edited = await playHeldNotes([granularCloud('hann'), granularCloud('tukey')], [60], true)
+  const reference = await playHeldNotes([granularCloud('hann'), granularCloud('tukey')], [60], false)
   expect([peakOf(edited) > 0.05, longestSilence(edited) <= longestSilence(reference)]).toEqual([true, true])
+})
+
+// The padding in a configuration (a 64-bit handle sits on an 8-byte boundary) is whatever the wasm heap held. A drag of one
+// continuous value must keep its instrument and slew, as it does on a clean heap, when each publication's padding differs:
+// a configuration compared by bytes would see a changed instrument, replace it and crossfade.
+test('B6f5 phase 6i a granular or sampler drag keeps its instrument whatever bytes the heap held in the padding on the built core', async () => {
+  const drags: ReadonlyArray<readonly [string, ReadonlyArray<AudioCoreInstrumentState>]> = [
+    ['granular position', [0.2, 0.35, 0.5, 0.65, 0.8, 0.8, 0.8, 0.8, 0.8].map((position) => granularCloud('hann', position))],
+    ['granular grain size', [20, 30, 40, 50, 60, 60, 60, 60, 60].map((size) => granularCloud('hann', 0.5, size))],
+    ['sampler zone gain', [1, 0.8, 0.6, 0.4, 0.2, 0.2, 0.2, 0.2, 0.2].map((gain) => heldSampler('sampler', gain, 8))],
+  ]
+  for (const [name, states] of drags) {
+    const key = states[0].kind === 'sampler' ? 52 : 60
+    const dirty = await playDragged(states, [key], dragStepBlocks, [], (configuration) => 0xA5 ^ configuration)
+    const clean = await playDragged(states, [key], dragStepBlocks, [], () => 0)
+    expect([name, peakOf(clean) > 0.02, settledDeviation(dirty, clean, 0)]).toEqual([name, true, 0])
+  }
 })
 
 test('B6f5 phase 6i a cutoff drag through repeated publications does not step beyond the steady instruments on the built core', async () => {

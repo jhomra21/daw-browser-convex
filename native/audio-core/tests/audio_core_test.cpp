@@ -9132,6 +9132,68 @@ void test_phase6i_continuous_edits_do_not_replace_the_instrument(const uint32_t 
     "the output left the finite range", peak_after(rig.heard[0], 0), 10.0F);
 }
 
+// The padding of a state (a 64-bit handle sits on an 8-byte boundary, so the granular state and each sample zone carry some)
+// is whatever the caller's memory held. Overwrites it, in the rig's granular state and zones, with `byte`.
+void fill_padding(HeldRig &rig, const unsigned char byte) {
+  const auto fill = [byte](auto &state, const size_t from, const size_t to) {
+    std::memset(reinterpret_cast<unsigned char *>(&state) + from, byte, to - from);
+  };
+  fill(rig.granular, offsetof(daw_audio_granular_state, version) + sizeof(uint32_t), offsetof(daw_audio_granular_state, asset));
+  fill(rig.granular, offsetof(daw_audio_granular_state, stereo_spread) + sizeof(float), sizeof(daw_audio_granular_state));
+  for (daw_audio_sample_zone &zone : rig.zones) {
+    fill(zone, offsetof(daw_audio_sample_zone, choke_group) + sizeof(uint32_t), sizeof(daw_audio_sample_zone));
+  }
+}
+
+// A drag of one continuous value keeps the instrument and slews, whatever the padding of each published state holds: the
+// output is exactly what it is when every state's padding is clean.
+void test_phase6i_padding_is_not_part_of_a_configuration(const uint32_t kind) {
+  const auto dragged = [kind](const bool noisy) {
+    auto rig = std::make_unique<HeldRig>(kind);
+    expect(rig->commit(), DAW_AUDIO_CORE_OK);
+    rig->note_on(60);
+    rig->render(20);
+    for (uint32_t step = 0; step < 6; ++step) {
+      if (kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) rig->granular.position = 0.2F + 0.1F * static_cast<float>(step);
+      else for (auto &zone : rig->zones) zone.gain = 1.0F - 0.15F * static_cast<float>(step);
+      fill_padding(*rig, noisy ? static_cast<unsigned char>(0xA5 ^ step) : 0);
+      expect(rig->commit(), DAW_AUDIO_CORE_OK);
+      rig->render(5);
+    }
+    return rig;
+  };
+  const auto noisy = dragged(true);
+  const auto clean = dragged(false);
+  phase6i_require(peak_after(clean->heard[0], 0) > 0.02F, kind_name(kind), "the instrument was not sounding", peak_after(clean->heard[0], 0), 0.02F);
+  const float deviation = largest_difference(noisy->heard[0], clean->heard[0], 0);
+  phase6i_require(deviation == 0.0F, kind_name(kind), "padding in a published state replaced the instrument", deviation, 0.0F);
+}
+
+#if defined(DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS)
+// Replacements that shrink a drum rack's zone count under held notes: no sounding sample voice may name a zone the
+// instrument no longer has (the render path indexes the zone table by it).
+void test_phase6i_replacement_leaves_no_voice_on_a_missing_zone() {
+  HeldRig rig(DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK);
+  expect(rig.commit(), DAW_AUDIO_CORE_OK);
+  play_chord(rig, 48, 8);
+  rig.render(10);
+  uint32_t sounding = 0;
+  for (const size_t zone_count : {7u, 4u, 2u, 1u}) {
+    rig.zones.resize(zone_count);
+    expect(rig.commit(), DAW_AUDIO_CORE_OK);
+    rig.render(12);
+    const InstrumentNodeState &runtime = published_instrument(*to_core(rig.core), 0);
+    for (const SampleVoice &voice : runtime.sample_voices) {
+      if (!voice.active) continue;
+      ++sounding;
+      phase6i_require(voice.zone < runtime.sampler.zone_count, "drum rack", "a sounding voice names a zone that is gone",
+        static_cast<float>(voice.zone), static_cast<float>(runtime.sampler.zone_count));
+    }
+  }
+  phase6i_require(sounding > 0, "drum rack", "no voice was sounding after the replacements", static_cast<float>(sounding), 1.0F);
+}
+#endif
+
 // What cannot be set never reaches the voices: a value that is not a number is refused
 // where it enters, a value dragged to nothing ends at exactly nothing (no subnormal
 // tail), and a polyphony above the 32 voices the core holds is refused at configure.
@@ -10458,6 +10520,10 @@ int main(int argc, char **argv) {
     else if (contract == "pedal") test_phase6i_pedal_and_note_off_survive_an_edit();
     else if (contract == "granular-parameter") test_phase6i_granular_parameter_edit_under_a_held_note();
     else if (name == "retained" && !instrument.empty()) test_phase6i_continuous_edits_do_not_replace_the_instrument(kind);
+    else if (name == "padding" && (kind == DAW_AUDIO_INSTRUMENT_KIND_SAMPLER || kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR)) test_phase6i_padding_is_not_part_of_a_configuration(kind);
+#if defined(DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS)
+    else if (contract == "zones-gone") test_phase6i_replacement_leaves_no_voice_on_a_missing_zone();
+#endif
     else if (name == "carry" && kind != DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) test_phase6i_replacement_goes_on_from_the_applied_value(kind);
     else if (contract == "bad-values") test_phase6i_bad_values_and_the_polyphony_cap();
     else if (contract == "burst") test_phase6i_event_burst_and_reversal_are_smooth();
@@ -10639,6 +10705,7 @@ int main(int argc, char **argv) {
     if (kind != DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) test_phase6i_polyphony_change_keeps_the_newest_voices(kind);
     if (kind == DAW_AUDIO_INSTRUMENT_KIND_SAMPLER || kind == DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK) test_phase6i_zone_edit_under_a_held_note(kind);
     test_phase6i_continuous_edits_do_not_replace_the_instrument(kind);
+    if (kind == DAW_AUDIO_INSTRUMENT_KIND_SAMPLER || kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) test_phase6i_padding_is_not_part_of_a_configuration(kind);
     if (kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) continue;
     test_phase6i_replacement_goes_on_from_the_applied_value(kind);
     for (const Drag drag : {Drag::Gain, Drag::Pan, Drag::Cutoff, Drag::Pitch}) {

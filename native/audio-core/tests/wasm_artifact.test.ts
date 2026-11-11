@@ -585,6 +585,7 @@ test('the production Wasm artifact omits native and fixture-only exports', async
     'RegisterNativeGraphHook',
     'daw_audio_core_register_native_graph_hook',
     'daw_audio_core_wasm_harness_abi_version',
+    'daw_audio_core_wasm_harness_struct_layout',
     'daw_audio_core_wasm_fixture_protocol_version',
     'daw_audio_core_graph_fixture_protocol_version',
     'daw_audio_core_run_utility_fixture',
@@ -592,6 +593,27 @@ test('the production Wasm artifact omits native and fixture-only exports', async
   ]) {
     expect(exports).not.toContain(absent)
   }
+})
+
+// The browser host (`configureInstrument` in daw-portable-audio-core-host-v2.js) writes these structs at literal byte offsets,
+// so a field added to one of them in the core moves what it writes unless the host moves with it. These are the sizes and
+// offsets that host writes, in the order the harness reports them.
+test('the structs the browser host writes at literal offsets have the wasm32 layout it assumes', async () => {
+  const instance = await WebAssembly.instantiate(await Bun.file(fixtureArtifactUrl).arrayBuffer())
+  const layout = instance.instance.exports.daw_audio_core_wasm_harness_struct_layout
+  if (!isWasmFunctionExport(layout)) throw new Error('The struct layout export is unavailable.')
+  const reported = Array.from({ length: 28 }, (_, index) => layout(index))
+  expect(layout(28)).toBe(-1)
+  expect(reported).toEqual([
+    // synth: size, oscillators, oscillator stride, noise_enabled, filter_enabled, amp_attack_ms, lfo_enabled, output_gain, output_pan
+    156, 8, 24, 56, 64, 104, 120, 148, 152,
+    // sampler: size, zone_count, filter_enabled, filter_cutoff_hz, lfo_rate_hz, retrigger
+    88, 4, 24, 32, 64, 84,
+    // sample zone: size, key_low, tune_cents, round_robin_group, choke_group
+    80, 8, 28, 40, 72,
+    // granular: size, asset, seed, max_grains, window_shape, freeze, grain_size_ms, stereo_spread
+    64, 8, 16, 20, 24, 28, 32, 56,
+  ])
 })
 
 test('the fixed-memory Wasm artifact matches the Utility fixture vector', async () => {

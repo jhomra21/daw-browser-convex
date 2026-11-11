@@ -655,7 +655,7 @@ const printPlan = () => {
   const lines: string[] = []
   lines.push(`FAST-CERT plan: ${full ? "--full" : `tier ${tier}`}${only.size > 0 ? `, --only ${[...only].join(",")}` : ""}${broken ? `, --break ${broken} (self-test: must FAIL)` : ""}`)
   if (unknownIds.length > 0) lines.push(`UNKNOWN JOB IDS: ${unknownIds.join(", ")}`)
-  lines.push(`pool ${pool} (--jobs, else DAW_JOBS, else the performance-core count); parallel slowdown x${parallelSlowdown}`)
+  lines.push(`pool ${pool} (--jobs, else DAW_JOBS, else the performance-core count minus one); parallel slowdown x${parallelSlowdown}`)
   lines.push(`tier ${everything ? "all (--full or --only)" : tier}: ${everything ? "every job" : tierWhy}`)
   for (const note of exp.notes ?? []) lines.push(`note (${note.topic}, since ${note.since}, drop after ${note.dropAfter}): ${note.text}`)
   lines.push(`${productOverlay ? `product overlay ${productOverlay.spec} (in memory): ${productOverlay.files.join(", ")}\n` : ""}base ${baseFile ?? exp.manifest.path}${

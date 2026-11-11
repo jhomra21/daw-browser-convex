@@ -21,6 +21,7 @@ type RecordingTrackTarget = {
 }
 
 export const RECORDING_TARGET_LOCKED_BADGE = 'Recording target locked'
+export const RECORDING_TARGET_FINISHING = 'Finishing recording…'
 export const RECORDING_TARGET_LOCKED_REASON = 'Finish recording to delete this track or change its routing.'
 
 export type RecordingTargetLockState = 'starting' | 'recording' | 'finishing' | 'released'

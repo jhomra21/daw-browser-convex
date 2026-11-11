@@ -13,7 +13,7 @@ import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import { intersectTimelineRangeWithViewport } from '~/lib/timeline-viewport-geometry'
 import { isClipWithinRenderRange } from './clip-render-range'
 import { quantizeSecToGrid } from '~/lib/timeline-utils'
-import { RECORDING_TARGET_LOCKED_BADGE, RECORDING_TARGET_LOCKED_REASON, type RecordingTargetLock } from '~/lib/track-recording-target'
+import { RECORDING_TARGET_FINISHING, RECORDING_TARGET_LOCKED_BADGE, RECORDING_TARGET_LOCKED_REASON, type RecordingTargetLock } from '~/lib/track-recording-target'
 
 type TrackLaneProps = {
   track: Track
@@ -135,6 +135,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
           class="pointer-events-none absolute right-2 top-1 z-20 border border-border bg-timeline-background px-1.5 text-[10px] leading-4 text-muted-foreground"
         >
           {RECORDING_TARGET_LOCKED_BADGE}
+          <Show when={props.recordingTargetLock.state() === 'finishing'}> · {RECORDING_TARGET_FINISHING}</Show>
         </span>
       </Show>
       {props.automation.visible && props.layout.automationHeightPx > 0 ? (

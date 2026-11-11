@@ -28,7 +28,7 @@ import {
   LANE_HEIGHT,
 } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
-import { RECORDING_TARGET_LOCKED_BADGE, RECORDING_TARGET_LOCKED_REASON } from "~/lib/track-recording-target";
+import { RECORDING_TARGET_FINISHING, RECORDING_TARGET_LOCKED_BADGE, RECORDING_TARGET_LOCKED_REASON } from "~/lib/track-recording-target";
 import { parseHexColor } from "~/lib/color";
 import { trackColorForClip } from "~/lib/clip-color";
 import type { TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
@@ -504,6 +504,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
           </button>
           <Show when={isRecordingTarget()}>
             <span role="status" class="sr-only">
+              <Show when={sidebar().recordingTargetLock.state() === "finishing"}>{RECORDING_TARGET_FINISHING} </Show>
               {RECORDING_TARGET_LOCKED_BADGE}. {RECORDING_TARGET_LOCKED_REASON}
             </span>
           </Show>

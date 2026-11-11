@@ -2132,7 +2132,7 @@ export class DawPortableAudioCoreHost {
   // A ramp writes its value every `stride` frames and its end value where it lands. The core takes 256 events per block, so
   // the stride is the smallest power of two that keeps the block's ramp and set events (and the live events merged in
   // after) inside it: one ramp is sample-exact in a 128-frame block, and many ramps degrade evenly instead of losing events.
-  // Native built-ins hold one value per callback block (see nativeProcessorAutomationEventsAtCallbackBoundaries).
+  // The native host expands each linear processor segment per callback block the same way (see expand_processor_ramps).
   processorRampStride(startFrame, endFrame) {
     const liveCount = this.eventOffset && this.eventByteCount ? this.eventBufferView.getUint32(0, true) : 0
     const budget = MAX_PROCESSOR_EVENTS - liveCount

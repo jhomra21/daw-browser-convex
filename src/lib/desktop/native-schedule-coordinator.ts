@@ -13,8 +13,8 @@ import type {
 } from "@daw-browser/audio-engine/native-host-wire"
 import { createPortableFrameScheduleWindowCompiler } from "~/lib/portable-frame-schedule"
 import {
-  nativeProcessorAutomationEventsAtCallbackBoundaries,
   nativeProcessorAutomationEventsForSchedule,
+  nativeProcessorAutomationEventsWithRampEnds,
   sliceNativeProcessorAutomationEvents,
 } from "~/lib/desktop/native-processor-automation"
 import { projectPortableClipEvents } from "@daw-browser/audio-engine/portable-clip-projector"
@@ -575,10 +575,8 @@ const buildNativeScheduleCoordinator = (input: {
       if (scheduleGraph) {
         processorAutomationEvents.push(
           ...sliceNativeProcessorAutomationEvents(
-            nativeProcessorAutomationEventsAtCallbackBoundaries(
+            nativeProcessorAutomationEventsWithRampEnds(
               nativeProcessorAutomationEventsForSchedule(scheduleGraph, schedule.events),
-              input.capacity.maximumFramesPerBlock,
-              input.startFrame,
               slice.nativeEndFrame,
             ),
             slice.nativeStartFrame,
@@ -817,8 +815,8 @@ const buildNativeScheduleCoordinator = (input: {
             + (segment.interpolation === "linear" && segment.endFrame < end ? 1 : 0)
         ), 0) + window.processorAutomationEvents.reduce((count, event) => {
           if (event.kind === "set") return count + (event.frame >= start && event.frame < end ? 1 : 0)
-          if (event.frame >= end || event.endFrame <= start) return count
-          return count + 1 + (event.endFrame < end ? 1 : 0)
+          // The host writes the segment's values, at least one per callback, and its end set is counted as a set.
+          return count + (event.frame < end && event.endFrame > start ? 1 : 0)
         }, 0)
         if (processorCount > nativeProcessorEventCapacity) {
           throw capacityError(`callback at frame ${start} contains ${processorCount} processor events; the native limit is 256.`)

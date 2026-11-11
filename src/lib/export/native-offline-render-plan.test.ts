@@ -1117,3 +1117,56 @@ test('partitions many uniquely timed source events without rescanning earlier ev
 
   expect(plan.scheduleWindows?.length).toBe(2)
 })
+
+test('clips a native volume ramp to each export window so it renders as it plays', () => {
+  const sourceTrack: Track<AudioBuffer> = {
+    id: track.id,
+    name: 'Source Track',
+    volume: 1,
+    clips: Array.from({ length: 300 }, (_, index) => ({
+      id: `source-clip-${index}`,
+      name: 'Source Clip',
+      color: '#fff',
+      startSec: index * 0.01,
+      duration: 4 / 48_000,
+      sourceAssetKey: 'asset-1',
+      buffer: new TestAudioBuffer(),
+    } satisfies Clip<AudioBuffer>)),
+  }
+  const plan = compileNativeOfflineRenderPlan({
+    tracks: [sourceTrack],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [automationEnvelope('volume', [
+      { id: 'start', timeSec: 0, value: 0, interpolation: 'linear' },
+      { id: 'end', timeSec: 2, value: 1, interpolation: 'hold' },
+    ])],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 1,
+  })
+  const windows = (plan.scheduleWindows ?? []).map((payload) => {
+    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
+    const offset = 72 + view.getUint32(44, true) * 48 + view.getUint32(48, true) * 112
+    return {
+      startFrame: Number(view.getBigUint64(16, true)),
+      endFrame: Number(view.getBigUint64(24, true)),
+      ramps: Array.from({ length: view.getUint32(56, true) }, (_, index) => ({
+        linear: view.getUint32(offset + index * 40 + 12, true) === 1,
+        frame: Number(view.getBigUint64(offset + index * 40 + 16, true)),
+        endFrame: Number(view.getBigUint64(offset + index * 40 + 24, true)),
+        value: view.getFloat32(offset + index * 40 + 32, true),
+        endValue: view.getFloat32(offset + index * 40 + 36, true),
+      })),
+    }
+  })
+  expect(windows.length).toBe(2)
+  // The ramp is one segment per window, ending where the window ends, and the second picks up its value.
+  const [first, second] = windows
+  expect(first?.ramps).toMatchObject([{ linear: true, frame: 0, endFrame: first!.endFrame, value: 0 }])
+  expect(second?.ramps[0]).toMatchObject({ linear: true, frame: second!.startFrame, endFrame: 96_000, endValue: 1 })
+  expect(second?.ramps[0]?.value).toBeCloseTo(first!.ramps[0]!.endValue, 6)
+})

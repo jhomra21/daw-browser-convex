@@ -18,8 +18,9 @@ import {
 } from '@daw-browser/audio-engine/native-host-wire'
 import { compilePortableFrameSchedule } from '~/lib/portable-frame-schedule'
 import {
-  nativeProcessorAutomationEventsAtCallbackBoundaries,
   nativeProcessorAutomationEventsForSchedule,
+  nativeProcessorAutomationEventsWithRampEnds,
+  sliceNativeProcessorAutomationEvents,
 } from '~/lib/desktop/native-processor-automation'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { ExportFx } from '@daw-browser/audio-engine/export-mixdown'
@@ -371,10 +372,8 @@ export const compileNativeOfflineRenderPlan = (input: {
   }
   const totalFrames = Math.ceil((renderRange.endSec - renderRange.startSec) * input.sampleRateHz)
   const blockFrames = nativeOfflineBlockFrames(totalFrames, externalAttachments)
-  const processorAutomationEvents = nativeProcessorAutomationEventsAtCallbackBoundaries(
+  const processorAutomationEvents = nativeProcessorAutomationEventsWithRampEnds(
     nativeProcessorAutomationEventsForSchedule(snapshot.graph, schedule.events),
-    blockFrames,
-    0,
     totalFrames,
   )
   const noteEvents = schedule.events.filter((event): event is Extract<typeof event, { type: 'note-on' | 'note-off' }> => (
@@ -420,6 +419,7 @@ export const compileNativeOfflineRenderPlan = (input: {
     let nextInstrumentOffset = instrumentOffset
     let nextSourceOffset = sourceOffset
     let windowAutomation = automationForWindow(windowStart, windowEnd)
+    let windowProcessorAutomation = sliceNativeProcessorAutomationEvents(processorAutomationEvents, windowStart, windowEnd)
     for (;;) {
       nextInstrumentOffset = instrumentOffset
       while (sortedInstrumentEvents[nextInstrumentOffset]?.frameOffset < windowEnd) {
@@ -432,9 +432,7 @@ export const compileNativeOfflineRenderPlan = (input: {
       const instrumentCount = nextInstrumentOffset - instrumentOffset
       const sourceCount = nextSourceOffset - sourceOffset
       windowAutomation = automationForWindow(windowStart, windowEnd)
-      const windowProcessorAutomation = processorAutomationEvents.filter((event) => (
-        event.frame >= windowStart && event.frame < windowEnd
-      ))
+      windowProcessorAutomation = sliceNativeProcessorAutomationEvents(processorAutomationEvents, windowStart, windowEnd)
       const fits = instrumentCount <= nativeAudioHostMaximumInstrumentEvents
         && sourceCount <= nativeAudioHostMaximumSourceEvents
         && windowAutomation.length <= nativeAudioHostMaximumScheduleAutomationSegments
@@ -458,9 +456,7 @@ export const compileNativeOfflineRenderPlan = (input: {
       instrumentEvents: sortedInstrumentEvents.slice(instrumentOffset, nextInstrumentOffset),
       sampleSourceEvents: sortedSourceEvents.slice(sourceOffset, nextSourceOffset),
       vstAutomationSegments: windowAutomation,
-      processorAutomationEvents: processorAutomationEvents.filter((event) => (
-        event.frame >= windowStart && event.frame < Math.min(totalFrames, windowEnd)
-      )),
+      processorAutomationEvents: windowProcessorAutomation,
       assets: sessionAssets,
     }))
     instrumentOffset = nextInstrumentOffset

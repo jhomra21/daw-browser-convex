@@ -126,69 +126,19 @@ export const sliceNativeProcessorAutomationEvents = (
   return sortNativeProcessorAutomationEvents(sliced)
 }
 
-const nativeProcessorEventCapacity = 256
-const nativeProcessorEventHeadroom = 32
-
-export const nativeProcessorAutomationEventsAtCallbackBoundaries = (
+// The host expands a linear segment into values per callback block and never writes its end frame, so a segment that ends
+// inside the window gets a set that lands on its end value.
+export const nativeProcessorAutomationEventsWithRampEnds = (
   events: readonly NativeProcessorAutomationEvent[],
-  maximumFramesPerBlock: number,
-  callbackStartFrame: number,
   windowEndFrame: number,
 ): NativeProcessorAutomationEvent[] => {
-  if (!Number.isSafeInteger(maximumFramesPerBlock) || maximumFramesPerBlock <= 0) {
-    throw new Error("Native processor automation callback block size is invalid.")
-  }
-  if (!Number.isSafeInteger(callbackStartFrame) || callbackStartFrame < 0
-    || !Number.isSafeInteger(windowEndFrame) || windowEndFrame <= callbackStartFrame) {
+  if (!Number.isSafeInteger(windowEndFrame) || windowEndFrame <= 0) {
     throw new Error("Native processor automation window end is invalid.")
-  }
-  const blockOf = (frame: number) => Math.floor((frame - callbackStartFrame) / maximumFramesPerBlock)
-  const blockStart = (block: number) => callbackStartFrame + block * maximumFramesPerBlock
-  // A ramp writes one value every `stride` frames of a callback block. Each block takes the smallest power-of-two stride that
-  // keeps its events inside the core's per-block capacity, less headroom for the VST automation the coordinator counts with
-  // them, so one ramp is near sample-exact and many ramps degrade evenly.
-  const fixedPerBlock = new Map<number, number>()
-  const spansPerBlock = new Map<number, number[]>()
-  const addFixed = (frame: number) => fixedPerBlock.set(blockOf(frame), (fixedPerBlock.get(blockOf(frame)) ?? 0) + 1)
-  for (const event of events) {
-    if (event.kind === "set") {
-      addFixed(event.frame)
-      continue
-    }
-    for (let block = blockOf(event.frame); blockStart(block) < event.endFrame; block += 1) {
-      const span = Math.min(event.endFrame, blockStart(block + 1)) - Math.max(event.frame, blockStart(block))
-      spansPerBlock.set(block, [...spansPerBlock.get(block) ?? [], span])
-    }
-    if (event.endFrame < windowEndFrame) addFixed(event.endFrame)
-  }
-  const strides = new Map<number, number>()
-  for (const [block, spans] of spansPerBlock) {
-    let stride = 1
-    while (stride < maximumFramesPerBlock
-      && (fixedPerBlock.get(block) ?? 0) + spans.reduce((count, span) => count + Math.ceil(span / stride), 0)
-        > nativeProcessorEventCapacity - nativeProcessorEventHeadroom) stride *= 2
-    strides.set(block, stride)
   }
   const projected: NativeProcessorAutomationEvent[] = []
   for (const event of events) {
-    if (event.kind === "set") {
-      projected.push(event)
-      continue
-    }
-    for (let block = blockOf(event.frame); blockStart(block) < event.endFrame; block += 1) {
-      const stride = strides.get(block) ?? 1
-      const end = Math.min(event.endFrame, blockStart(block + 1))
-      for (let frame = Math.max(event.frame, blockStart(block)); frame < end; frame += stride) {
-        projected.push({
-          kind: "set",
-          processorInstanceId: event.processorInstanceId,
-          parameterTarget: event.parameterTarget,
-          frame,
-          value: linearValueAtFrame(event, frame),
-        })
-      }
-    }
-    if (event.endFrame < windowEndFrame) {
+    projected.push(event)
+    if (event.kind === "linear" && event.endFrame < windowEndFrame) {
       projected.push({
         kind: "set",
         processorInstanceId: event.processorInstanceId,

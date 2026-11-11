@@ -1048,8 +1048,8 @@ test('B6f5 a sounding Synth note survives an adoption publish and ends at its no
 // Phase 6i. An instrument edit that is not live replaces the instrument at an adoption publish. Each case runs the edit
 // against a reference that played the edited configuration from the start, with the same notes held from frame 0, and the
 // output must equal it once the 5 ms replacement crossfade (two 128-frame blocks) is over. 1e-4 is the tolerance the core
-// witnesses settle to; the portable path has no shared parity constant. Granular is not covered: the host writes the
-// granular state with the asset handle at byte 4, while wasm32 aligns it to 8, so the core refuses every granular configure.
+// witnesses settle to; the portable path has no shared parity constant. Granular is held to a looser rule (the cloud keeps
+// sounding), since its grains are scattered.
 const heldNoteKeys = [48, 49, 50, 51, 52, 53, 54, 55]
 const sineFrames = 48_000
 const heldSynth: Extract<AudioCoreInstrumentState, { kind: 'synth' }> = {
@@ -1209,6 +1209,23 @@ const steady = (value: number, values: readonly number[], instrument: (value: nu
 const cutoffSynth = (filterCutoffHz: number): AudioCoreInstrumentState => ({ ...heldSynth, filterEnabled: true, filterResonance: 25, filterCutoffHz })
 const transposedSynth = (semitone: number): AudioCoreInstrumentState => ({
   ...heldSynth, oscillators: [{ ...heldSynth.oscillators[0], semitone }, heldSynth.oscillators[1]] })
+
+// The longest run of exact zeros: what a cloud that went quiet leaves.
+const longestSilence = (signal: readonly number[]) => signal.reduce((state, sample) => {
+  const run = sample === 0 ? state.run + 1 : 0
+  return { run, longest: Math.max(state.longest, run) }
+}, { run: 0, longest: 0 }).longest
+
+test('B6f5 phase 6i a granular cloud configures through the host and keeps sounding through a non-live edit on the built core', async () => {
+  const granular = (grainWindow: 'hann' | 'tukey'): AudioCoreInstrumentState => ({
+    version: 1, kind: 'granular', voiceCapacity: 2, outputLayout: 'stereo', assetId: 'held-sine', seed: 77, maxGrains: 16,
+    'windowShape': grainWindow, freeze: false, grainSizeMs: 20, densityHz: 100, position: 0.5, spray: 0.3, pitchSemitones: 0,
+    reverseProbability: 0, stereoSpread: 0.3,
+  })
+  const edited = await playHeldNotes([granular('hann'), granular('tukey')], [60], true)
+  const reference = await playHeldNotes([granular('hann'), granular('tukey')], [60], false)
+  expect([peakOf(edited) > 0.05, longestSilence(edited) <= longestSilence(reference)]).toEqual([true, true])
+})
 
 test('B6f5 phase 6i a cutoff drag through repeated publications does not step beyond the steady instruments on the built core', async () => {
   const cutoffs = [12000, 6000, 3000, 1800]

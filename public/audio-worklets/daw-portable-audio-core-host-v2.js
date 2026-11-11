@@ -1406,18 +1406,20 @@ export class DawPortableAudioCoreHost {
     if (state.kind === 'granular') {
       const asset = state.assetId === '' ? undefined : this.assets.get(state.assetId)
       if ((state.assetId !== '' && !asset) || !this.granularConfigure) return false
-      const allocation = this.malloc(60)
+      // daw_audio_granular_state as wasm32 lays it out: the 64-bit asset handle sits on an 8-byte boundary (offset 8), which
+      // pads the struct to 64 bytes. The sampler's zone, which opens with its handle, has no such gap.
+      const allocation = this.malloc(64)
       if (!allocation) return false
-      const view = new DataView(this.memory.buffer, allocation, 60)
+      const view = new DataView(this.memory.buffer, allocation, 64)
       view.setUint32(0, 1, true)
-      view.setBigUint64(4, asset?.handle.value ?? 0n, true)
-      view.setUint32(12, state.seed, true)
-      view.setUint32(16, state.maxGrains, true)
+      view.setBigUint64(8, asset?.handle.value ?? 0n, true)
+      view.setUint32(16, state.seed, true)
+      view.setUint32(20, state.maxGrains, true)
       const grainWindow = state['window' + 'Shape']
-      view.setUint32(20, grainWindow === 'hann' ? 0 : grainWindow === 'tukey' ? 1 : 2, true)
-      view.setUint32(24, state.freeze ? 1 : 0, true)
+      view.setUint32(24, grainWindow === 'hann' ? 0 : grainWindow === 'tukey' ? 1 : 2, true)
+      view.setUint32(28, state.freeze ? 1 : 0, true)
       ;[state.grainSizeMs, state.densityHz, state.position, state.spray, state.pitchSemitones, state.reverseProbability, state.stereoSpread]
-        .forEach((value, index) => view.setFloat32(28 + index * 4, value, true))
+        .forEach((value, index) => view.setFloat32(32 + index * 4, value, true))
       const result = this.granularConfigure(node, allocation) === 0
       this.free(allocation)
       return result

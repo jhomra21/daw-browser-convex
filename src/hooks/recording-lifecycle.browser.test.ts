@@ -1982,6 +1982,7 @@ window.lockScenarios = async () => {
     take.startGate.resolve()
     await pending
     const recording = take.lock.state() === 'recording' && take.hook.isRecording()
+      && take.lock.holds('track-audio') && take.lock.holds('group-a') && !take.lock.holds('track-other')
     const found = refusals(take.lock)
     const survived = take.hook.isRecording() && !take.calls.includes('stop') && !take.calls.includes('capture-cancel')
     const finishing = take.hook.stopRecording()

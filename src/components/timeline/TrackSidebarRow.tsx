@@ -28,6 +28,7 @@ import {
   LANE_HEIGHT,
 } from "~/lib/timeline-utils";
 import { cn } from "~/lib/utils";
+import { RECORDING_TARGET_LOCKED_BADGE, RECORDING_TARGET_LOCKED_REASON } from "~/lib/track-recording-target";
 import { parseHexColor } from "~/lib/color";
 import { trackColorForClip } from "~/lib/clip-color";
 import type { TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
@@ -154,6 +155,8 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
   const lockedByOther =
     !!track.lockedBy && track.lockedBy !== sidebar().currentUserId;
   const isRecordArmed = () => sidebar().recordArmTrackId === track.id;
+  const recordingLocked = () => sidebar().recordingTargetLock.holds(track.id);
+  const isRecordingTarget = () => sidebar().recordingTargetLock.targetId() === track.id;
   const channelRole = getTrackChannelRole(track);
   const trackNumber = () => trackNumbersById().get(track.id) ?? 0;
   const isReturnTrack = channelRole === "return";
@@ -254,6 +257,9 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
     );
   const trackContextMenuItems = (): TimelineContextMenuItem[] => [
     { kind: "label", label: displayTrackName(track) },
+    ...(recordingLocked()
+      ? [{ kind: "label" as const, label: RECORDING_TARGET_LOCKED_REASON }]
+      : []),
     {
       kind: "item",
       label: "Open effects",
@@ -266,7 +272,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
           ? "Expand group"
           : "Collapse group"
         : "Group track",
-      disabled: isReturnTrack,
+      disabled: isReturnTrack || (!isGroupTrack && recordingLocked()),
       onSelect: () => {
         if (isGroupTrack) sidebar().onToggleTrackCollapsed(track.id);
         else sidebar().onGroupTracks([track.id]);
@@ -275,13 +281,13 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
     {
       kind: "item",
       label: track.groupId ? "Remove from group" : "No group",
-      disabled: !track.groupId,
+      disabled: !track.groupId || recordingLocked(),
       onSelect: () => sidebar().onMoveTrackToGroup(track.id, undefined),
     },
     {
       kind: "item",
       label: "Ungroup tracks",
-      disabled: !isGroupTrack,
+      disabled: !isGroupTrack || recordingLocked(),
       onSelect: () => sidebar().onUngroupTrack(track.id),
     },
     {
@@ -356,6 +362,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
       kind: "item",
       label: "Delete track",
       shortcut: "⌫",
+      disabled: recordingLocked(),
       onSelect: () => sidebar().onDeleteTrack(track.id),
     },
   ];
@@ -495,6 +502,11 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
           >
             <span class="truncate">{displayTrackName(track)}</span>
           </button>
+          <Show when={isRecordingTarget()}>
+            <span role="status" class="sr-only">
+              {RECORDING_TARGET_LOCKED_BADGE}. {RECORDING_TARGET_LOCKED_REASON}
+            </span>
+          </Show>
         </div>
 
         <Show when={!track.collapsed}>
@@ -523,13 +535,13 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 </div>
                 <select
                   value={selectedOutputTargetId(track)}
-                  disabled={!canWriteTrackRouting(track)}
+                  disabled={!canWriteTrackRouting(track) || recordingLocked()}
                   onClick={(event) => event.stopPropagation()}
                   onChange={(event) =>
                     handleOutputTargetChange(track, event.currentTarget.value)
                   }
                   class="absolute inset-0 h-7 w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
-                  title="Track output"
+                  title={recordingLocked() ? RECORDING_TARGET_LOCKED_REASON : "Track output"}
                 >
                   <option value="">Master</option>
                   <For each={groupTracks()}>
@@ -570,7 +582,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 <select
                   value={currentSendTargetId()}
                   disabled={
-                    !canWriteTrackRouting(track) || returnTracks().length === 0
+                    !canWriteTrackRouting(track) || returnTracks().length === 0 || recordingLocked()
                   }
                   onClick={(event) => event.stopPropagation()}
                   onChange={(event) =>
@@ -578,9 +590,11 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                   }
                   class="absolute inset-0 h-7 w-full cursor-pointer opacity-0 disabled:cursor-not-allowed"
                   title={
-                    returnTracks().length === 0
-                      ? "Add a Return track to create sends"
-                      : "Track send"
+                    recordingLocked()
+                      ? RECORDING_TARGET_LOCKED_REASON
+                      : returnTracks().length === 0
+                        ? "Add a Return track to create sends"
+                        : "Track send"
                   }
                 >
                   <option value="">None</option>

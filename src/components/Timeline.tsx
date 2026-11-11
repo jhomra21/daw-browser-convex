@@ -2807,6 +2807,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           get previewPoints() { return previewPoints(); },
           get recordingTrackId() { return recordingTrackId(); },
           get recordArmTrackId() { return recordArmTrackId(); },
+          recordingTargetLock,
         }}
         sidebar={{
           currentUserId: userId(),

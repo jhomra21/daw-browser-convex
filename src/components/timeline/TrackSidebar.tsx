@@ -55,6 +55,7 @@ import {
 } from "./track-send-targets";
 import { trackNumberById } from "~/lib/track-sidebar-mixer";
 import TrackSidebarRow from "./TrackSidebarRow";
+import type { RecordingTargetLock } from "~/lib/track-recording-target";
 
 export type TrackSidebarProps = {
   scrollRef: (el: HTMLDivElement) => void;
@@ -83,6 +84,7 @@ export type TrackSidebarProps = {
     onToggleMute: (trackId: Track["id"]) => void;
     onToggleSolo: (trackId: Track["id"]) => void;
     recordArmTrackId: Track["id"] | null;
+    recordingTargetLock: RecordingTargetLock;
     onToggleRecordArm: (trackId: Track["id"]) => void;
     onToggleTrackCollapsed: (trackId: Track["id"]) => void;
     onSetTracksCollapsed: (

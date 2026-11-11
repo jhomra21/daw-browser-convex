@@ -13,6 +13,7 @@ import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import { intersectTimelineRangeWithViewport } from '~/lib/timeline-viewport-geometry'
 import { isClipWithinRenderRange } from './clip-render-range'
 import { quantizeSecToGrid } from '~/lib/timeline-utils'
+import { RECORDING_TARGET_LOCKED_BADGE, RECORDING_TARGET_LOCKED_REASON, type RecordingTargetLock } from '~/lib/track-recording-target'
 
 type TrackLaneProps = {
   track: Track
@@ -32,6 +33,7 @@ type TrackLaneProps = {
   resolveAudioSource: AudioPcmSourceResolver
   onAddMidiClip?: (trackId: Track['id'], startSec: number) => void
   onDeleteTrack?: (trackId: Track['id']) => void
+  recordingTargetLock: RecordingTargetLock
   bpm: number
   pixelsPerSecond: number
   visibleRange: { startSec: number; endSec: number }
@@ -75,10 +77,13 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
     }
     if (props.onDeleteTrack) {
       if (items.length > 1) items.push({ kind: 'separator' })
+      const locked = props.recordingTargetLock.holds(props.track.id)
+      if (locked) items.push({ kind: 'label', label: RECORDING_TARGET_LOCKED_REASON })
       items.push({
         kind: 'item',
         label: 'Delete track',
         shortcut: '⌫',
+        disabled: locked,
         onSelect: () => props.onDeleteTrack?.(props.track.id),
       })
     }
@@ -124,6 +129,14 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
       }}
     >
       <div class="absolute left-0 right-0 h-px bg-timeline-surface-muted" style={{ top: `${props.layout.clipLaneHeightPx - 1}px` }} />
+      <Show when={props.recordingTargetLock.targetId() === props.track.id}>
+        <span
+          title={RECORDING_TARGET_LOCKED_REASON}
+          class="pointer-events-none absolute right-2 top-1 z-20 border border-border bg-timeline-background px-1.5 text-[10px] leading-4 text-muted-foreground"
+        >
+          {RECORDING_TARGET_LOCKED_BADGE}
+        </span>
+      </Show>
       {props.automation.visible && props.layout.automationHeightPx > 0 ? (
         <div
           data-timeline-automation-surface="true"

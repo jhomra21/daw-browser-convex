@@ -15,6 +15,7 @@ import ArrangementOverview from "~/components/timeline/ArrangementOverview";
 import TrackLane from "~/components/timeline/TrackLane";
 import type { ClipContextMenuActions } from "~/components/timeline/ClipComponent";
 import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
+import type { RecordingTargetLock } from "~/lib/track-recording-target";
 import {
   masterAreaHeight,
   masterRowHeight,
@@ -172,6 +173,7 @@ type Props = {
     previewPoints: Array<{ offset: number; amplitude: number }>;
     recordingTrackId: TrackId | null;
     recordArmTrackId: TrackId | null;
+    recordingTargetLock: RecordingTargetLock;
   };
   sidebar: {
     currentUserId: string;
@@ -344,6 +346,7 @@ export default function TimelineWorkspace(props: Props) {
             onCommitClipFades={props.onCommitClipFades}
             onAddMidiClip={props.onAddMidiClipToTrack}
             onDeleteTrack={props.onDeleteTrack}
+            recordingTargetLock={props.recording.recordingTargetLock}
             clipContextMenu={props.clipContextMenu}
             onRetryMedia={(clipId) => {
               void props.ensureClipBuffer(clipId);
@@ -691,6 +694,7 @@ export default function TimelineWorkspace(props: Props) {
           stickyFooterHeightPx: stickyFooterHeight(),
           master: props.sidebar.master,
           recordArmTrackId: props.recording.recordArmTrackId,
+          recordingTargetLock: props.recording.recordingTargetLock,
           currentUserId: props.sidebar.currentUserId,
           subscribeTrackLevels: props.sidebar.subscribeTrackLevels,
           subscribeMasterLevels: props.sidebar.subscribeMasterLevels,

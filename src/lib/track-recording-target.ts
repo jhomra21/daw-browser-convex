@@ -1,4 +1,4 @@
-import { createSignal, type Accessor } from 'solid-js'
+import { createMemo, createSignal, type Accessor } from 'solid-js'
 import { pushTrackCreateHistory } from '~/lib/tracks'
 import { isLocalId } from '@daw-browser/shared'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
@@ -40,27 +40,28 @@ type RoutingPatch = {
 
 // What a take is bound to: the target, its group and output chain, and the destinations of its sends.
 // A missing track is part of the key, so a delete changes it like a reroute does.
-const targetClosureKey = (tracks: readonly ClosureTrack[], targetId: string) => {
+const targetClosure = (tracks: readonly ClosureTrack[], targetId: string) => {
   const trackById = new Map(tracks.map((track) => [track.id, track]))
-  const visited = new Set<string>()
+  const chain = new Set<string>()
+  const ids = new Set<string>()
   const entries: string[] = []
   const pending = [targetId]
   for (const id of pending) {
-    if (visited.has(id)) continue
-    visited.add(id)
+    if (chain.has(id)) continue
+    chain.add(id)
+    ids.add(id)
     const track = trackById.get(id)
     if (!track) {
       entries.push(`${id}:missing`)
       continue
     }
-    const sends = id === targetId
-      ? (track.sends ?? []).map((send) => `${send.targetId}${trackById.has(send.targetId) ? '' : ':missing'}`).sort().join(',')
-      : ''
-    entries.push(`${id}|${track.groupId ?? ''}|${track.outputTargetId ?? ''}|${sends}`)
+    const sends = id === targetId ? (track.sends ?? []).map((send) => send.targetId).sort() : []
+    for (const send of sends) ids.add(send)
+    entries.push(`${id}|${track.groupId ?? ''}|${track.outputTargetId ?? ''}|${sends.map((send) => `${send}${trackById.has(send) ? '' : ':missing'}`).join(',')}`)
     if (track.groupId) pending.push(track.groupId)
     if (track.outputTargetId) pending.push(track.outputTargetId)
   }
-  return entries.join('\n')
+  return { key: entries.join('\n'), ids }
 }
 
 export const applyRoutingPatches = (tracks: readonly ClosureTrack[], patches: readonly RoutingPatch[]): ClosureTrack[] => {
@@ -90,9 +91,13 @@ const touchesTrackStructure = (entry: HistoryEntry): boolean => entry.type === '
 export const createRecordingTargetLock = (tracks: Accessor<readonly ClosureTrack[]>) => {
   const [state, setState] = createSignal<RecordingTargetLockState>('released')
   const [targetId, setTargetId] = createSignal<string | null>(null)
+  const heldTrackIds = createMemo(() => {
+    const target = targetId()
+    return target === null ? new Set<string>() : targetClosure(tracks(), target).ids
+  })
   const refuseTransition = (before: readonly ClosureTrack[], after: readonly ClosureTrack[]) => {
     const target = targetId()
-    if (target === null || targetClosureKey(before, target) === targetClosureKey(after, target)) return undefined
+    if (target === null || targetClosure(before, target).key === targetClosure(after, target).key) return undefined
     return RECORDING_TARGET_LOCKED_REASON
   }
   const refuseChange = (patches: readonly RoutingPatch[], removedTrackIds: Iterable<string> = []) => {
@@ -118,6 +123,8 @@ export const createRecordingTargetLock = (tracks: Accessor<readonly ClosureTrack
       setTargetId(null)
       setState('released')
     },
+    // Whether a take binds this track: the target, its group and output chain, and its send destinations.
+    holds: (trackId: string) => heldTrackIds().has(trackId),
     refuseTransition,
     refuseChange,
     refuseDelete: (trackIds: Iterable<string>) => refuseChange([], trackIds),

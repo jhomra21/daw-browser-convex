@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import 'fake-indexeddb/auto'
-import { isJsonString } from '@daw-browser/shared'
+import { isJsonString, normalizeMidiClip } from '@daw-browser/shared'
 import type { LocalProjectStoredValue } from './local-project-db'
 import type { Clip } from '@daw-browser/timeline-core/types'
-import { buildClipCreateSnapshot, buildClipHistorySnapshot, createUploadedAudioClip } from './clip-create'
+import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
+import { buildLocalClip, buildClipCreateSnapshot, buildClipHistorySnapshot, createUploadedAudioClip } from './clip-create'
 import { buildDuplicateClipCreateItems } from './clip-drag-session'
 import { openLocalProjectDb } from './local-project-db'
 import { SharedOutboxQueuedError } from './shared-outbox'
@@ -18,6 +19,15 @@ const clip = (input: Partial<Clip> & Pick<Clip, 'id' | 'name' | 'startSec' | 'du
 })
 
 describe('clip create snapshots', () => {
+  test('a projected clip carries the same normalized midi and fades the repository stores', () => {
+    const midi = { wave: 'sine' as const, notes: [{ id: 'n1', beat: 0, length: 1, pitch: 60, velocity: 0.8 }] }
+    const fades = { fadeInSec: 5, fadeOutSec: 0, fadeInCurve: 0, fadeOutCurve: 0 }
+    const projected = buildLocalClip({ id: 'take', clip: { startSec: 0, duration: 2, name: 'Take', color: 'clip-midi', midi, fades } })
+
+    expect(projected.midi).toEqual(normalizeMidiClip(midi))
+    expect(projected.fades).toEqual(normalizeClipFades(fades, 2))
+  })
+
   test('preserves explicit clip colors for create and history consumers', () => {
     const sourceClip = clip({
       id: 'clip-1',

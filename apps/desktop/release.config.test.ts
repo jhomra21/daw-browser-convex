@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
 import {
   assembleReleaseEnvironment,
   defaultNotaryProfile,
@@ -66,6 +67,27 @@ test("resolves release artifact candidates with the release audio host preferred
     workerPath: "/project/native/build/vst3-worker-debug/plugin-host/daw-vst3-worker",
     audioHostPath: "/project/native/build/audio-host-macos-debug/audio-host-macos/daw-audio-host-macos",
   })
+})
+
+test("never builds or packages the AE-08 failure-injection test plug-in", () => {
+  const calls: string[] = []
+  rebuildNativePackageArtifacts(
+    "/project",
+    (command, arguments_) => {
+      calls.push([command, ...arguments_].join(" "))
+      return { status: 0 }
+    },
+    { VST3_SDK_PATH: "/sdk" },
+  )
+  expect(calls.length).toBeGreaterThan(0)
+  expect(calls.filter((call) => /ae08|AE08/.test(call))).toEqual([])
+  const productionCmake = readFileSync(new URL("../../native/plugin-host/CMakeLists.txt", import.meta.url), "utf8")
+  expect(productionCmake).toMatch(/option\(DAW_BUILD_AE08_TEST_PLUGIN "[^"]*" OFF\)/)
+  const packagedSources = [
+    readFileSync(new URL("./release.config.ts", import.meta.url), "utf8"),
+    readFileSync(new URL("./native-release-artifacts.ts", import.meta.url), "utf8"),
+  ]
+  expect(packagedSources.filter((source) => /ae08-test-effect|dev\.daw\.ae08/.test(source))).toEqual([])
 })
 
 test("rebuilds every native artifact used by desktop packaging", () => {

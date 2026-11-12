@@ -92,6 +92,52 @@ target_include_directories(daw-vst3-scanner PRIVATE "${VST3_SDK_PATH}")
 target_compile_options(daw-vst3-scanner PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(daw-vst3-scanner PRIVATE daw-vst3-sdk-hosting)
 
+# A failure-injection plug-in for host tests. It is not part of the production plug-in set:
+# nothing installs, signs, packages or catalogs it.
+option(DAW_BUILD_AE08_TEST_PLUGIN "Build the AE-08 failure-injection test VST3 (never packaged)." OFF)
+if(DAW_BUILD_AE08_TEST_PLUGIN)
+  set(AE08_SDK "${VST3_SDK_PATH}")
+  add_library(ae08-test-effect MODULE
+    test-plugin/ae08-test-effect.cpp
+    "${AE08_SDK}/public.sdk/source/main/pluginfactory.cpp"
+    "${AE08_SDK}/public.sdk/source/main/macmain.cpp"
+    "${AE08_SDK}/public.sdk/source/main/moduleinit.cpp"
+    "${AE08_SDK}/public.sdk/source/vst/vstsinglecomponenteffect.cpp"
+    "${AE08_SDK}/public.sdk/source/vst/vstaudioeffect.cpp"
+    "${AE08_SDK}/public.sdk/source/vst/vstcomponent.cpp"
+    "${AE08_SDK}/public.sdk/source/vst/vstcomponentbase.cpp"
+    "${AE08_SDK}/public.sdk/source/vst/vstbus.cpp"
+    "${AE08_SDK}/public.sdk/source/vst/vstparameters.cpp"
+    "${AE08_SDK}/public.sdk/source/vst/vstinitiids.cpp"
+    "${AE08_SDK}/base/source/baseiids.cpp"
+    "${AE08_SDK}/base/source/fbuffer.cpp"
+    "${AE08_SDK}/base/source/fdebug.cpp"
+    "${AE08_SDK}/base/source/fobject.cpp"
+    "${AE08_SDK}/base/source/fstreamer.cpp"
+    "${AE08_SDK}/base/source/fstring.cpp"
+    "${AE08_SDK}/base/source/updatehandler.cpp"
+    "${AE08_SDK}/base/thread/source/fcondition.cpp"
+    "${AE08_SDK}/base/thread/source/flock.cpp"
+    "${AE08_SDK}/pluginterfaces/base/conststringtable.cpp"
+    "${AE08_SDK}/pluginterfaces/base/coreiids.cpp"
+    "${AE08_SDK}/pluginterfaces/base/funknown.cpp"
+    "${AE08_SDK}/pluginterfaces/base/ustring.cpp"
+    "${AE08_SDK}/public.sdk/source/common/pluginview.cpp"
+    "${AE08_SDK}/public.sdk/source/common/commoniids.cpp"
+  )
+  target_include_directories(ae08-test-effect PRIVATE "${AE08_SDK}")
+  target_compile_definitions(ae08-test-effect PRIVATE RELEASE=1)
+  target_compile_options(ae08-test-effect PRIVATE -Wno-deprecated-declarations -Wno-unnecessary-virtual-specifier)
+  set_target_properties(ae08-test-effect PROPERTIES
+    BUNDLE TRUE
+    BUNDLE_EXTENSION vst3
+    PREFIX ""
+    SUFFIX ""
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/test-plugin/Info.plist.in"
+  )
+  target_link_libraries(ae08-test-effect PRIVATE "-framework CoreFoundation")
+endif()
+
 if(BUILD_TESTING)
   add_executable(daw-plugin-host-worker-test
     tests/worker_supervisor_test.cpp

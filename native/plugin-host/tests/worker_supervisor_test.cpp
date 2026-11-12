@@ -458,6 +458,24 @@ int main(int argc, char* argv[]) {
     "realtime worker incorrectly disables editor runtime")) return EXIT_FAILURE;
   if (!Check(!daw::plugin_host::WorkerProcessModeUsesEditorRuntime(WorkerProcessSetup::Mode::kOffline),
     "offline worker enables editor runtime")) return EXIT_FAILURE;
+  {
+    using daw::plugin_host::DecodeRestartFlags;
+    namespace flag = daw::plugin_host::RestartFlag;
+    const auto parameterOnly = DecodeRestartFlags(flag::kParamValuesChanged | flag::kParamTitlesChanged);
+    if (!Check(parameterOnly.refreshMetadata && !parameterOnly.latencyChanged && !parameterOnly.componentRestart,
+      "parameter-only restart was not decoded as a metadata refresh")) return EXIT_FAILURE;
+    const auto latencyOnly = DecodeRestartFlags(flag::kLatencyChanged);
+    if (!Check(!latencyOnly.refreshMetadata && latencyOnly.latencyChanged && !latencyOnly.componentRestart,
+      "latency restart was not decoded as a latency report")) return EXIT_FAILURE;
+    const auto component = DecodeRestartFlags(flag::kReloadComponent | flag::kLatencyChanged);
+    if (!Check(component.componentRestart && component.latencyChanged && !component.refreshMetadata,
+      "component restart was not decoded as a worker-local re-setup")) return EXIT_FAILURE;
+    const auto ioChanged = DecodeRestartFlags(flag::kIoChanged);
+    if (!Check(ioChanged.componentRestart, "bus change was not decoded as a component restart")) return EXIT_FAILURE;
+    const auto ignored = DecodeRestartFlags(flag::kMidiCCAssignmentChanged | flag::kNoteExpressionChanged);
+    if (!Check(!ignored.refreshMetadata && !ignored.latencyChanged && !ignored.componentRestart,
+      "unrelated restart flags had an effect")) return EXIT_FAILURE;
+  }
   auto invalidStartup = NoPluginStartup();
   invalidStartup.classId = "not-allowed";
   if (!Check(!daw::plugin_host::IsValidWorkerStartupRequest(invalidStartup), "no-plugin startup accepted plugin data")) return EXIT_FAILURE;

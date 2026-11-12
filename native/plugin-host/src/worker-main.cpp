@@ -262,6 +262,7 @@ int main(const int argc, char* argv[]) {
   std::size_t notificationCount = 0;
   const auto publishNotifications = [&] {
     if (startup->noPluginTestMode) return;
+    plugin.ApplyPendingRestart();
     const auto& notifications = plugin.notifications();
     while (notificationCount < notifications.size()) {
       const auto notification = notifications[notificationCount++];
@@ -292,9 +293,6 @@ int main(const int argc, char* argv[]) {
         .parameter_id = notification.parameter_id,
         .normalized_value = notification.normalized_value,
       }));
-      if (notification.kind == daw::plugin_host::WorkerNotificationKind::kRestart) {
-        plugin.RefreshLifecycleMetadata();
-      }
     }
   };
   const auto publishEditorFeedback = [&] {

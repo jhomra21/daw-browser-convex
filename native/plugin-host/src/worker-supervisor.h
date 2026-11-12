@@ -295,6 +295,34 @@ enum class WorkerDiagnosticKind : std::uint32_t {
   kScheduledAutomationInput,
 };
 
+// VST3 `IComponentHandler::restartComponent` flags; vst3-worker.cpp asserts they match the SDK.
+namespace RestartFlag {
+constexpr std::uint32_t kReloadComponent = 1U << 0U;
+constexpr std::uint32_t kIoChanged = 1U << 1U;
+constexpr std::uint32_t kParamValuesChanged = 1U << 2U;
+constexpr std::uint32_t kLatencyChanged = 1U << 3U;
+constexpr std::uint32_t kParamTitlesChanged = 1U << 4U;
+constexpr std::uint32_t kMidiCCAssignmentChanged = 1U << 5U;
+constexpr std::uint32_t kNoteExpressionChanged = 1U << 6U;
+}  // namespace RestartFlag
+
+// What a plug-in's restart request asks of the worker. Only a component restart
+// needs the worker to re-set the component up; the others refresh what the host
+// already knows and never reach the host as a restart.
+struct RestartEffects {
+  bool refreshMetadata = false;
+  bool latencyChanged = false;
+  bool componentRestart = false;
+};
+
+constexpr RestartEffects DecodeRestartFlags(const std::uint32_t flags) noexcept {
+  return {
+    .refreshMetadata = (flags & (RestartFlag::kParamValuesChanged | RestartFlag::kParamTitlesChanged)) != 0,
+    .latencyChanged = (flags & RestartFlag::kLatencyChanged) != 0,
+    .componentRestart = (flags & (RestartFlag::kReloadComponent | RestartFlag::kIoChanged)) != 0,
+  };
+}
+
 // Fault-only value semantics; other diagnostic values retain their contracts.
 // Bits 0..7: origin, 8..15: waitid si_code, 16..23: si_status, 24..31: reserved.
 enum class WorkerFaultOrigin : std::uint32_t {

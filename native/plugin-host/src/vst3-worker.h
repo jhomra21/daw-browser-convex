@@ -60,6 +60,8 @@ class Vst3Worker {
   [[nodiscard]] std::optional<WorkerState> GetState();
   [[nodiscard]] bool SetState(const WorkerState& state);
   void RefreshLifecycleMetadata();
+  // Acts, on the worker thread, on restart flags the plug-in recorded since the last call.
+  void ApplyPendingRestart();
   [[nodiscard]] bool EditorCommandSupported() const;
   [[nodiscard]] WorkerEditorStatus EditorStatus() const;
   [[nodiscard]] bool ExecuteEditorCommand(
@@ -77,6 +79,7 @@ class Vst3Worker {
  private:
   class Implementation;
   [[nodiscard]] bool ApplyState(const WorkerState& state);
+  [[nodiscard]] bool ReactivateComponent(const WorkerState* state);
   Implementation* implementation_;
 };
 

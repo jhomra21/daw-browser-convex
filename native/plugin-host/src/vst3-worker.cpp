@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cmath>
 #include <cstdio>
@@ -67,6 +68,15 @@ using Steinberg::Vst::ProcessData;
 using Steinberg::Vst::ProcessSetup;
 
 constexpr std::size_t kMaximumPluginBinaryBytes = 2U * 1024U * 1024U * 1024U;
+
+static_assert(RestartFlag::kReloadComponent == Steinberg::Vst::kReloadComponent
+  && RestartFlag::kIoChanged == Steinberg::Vst::kIoChanged
+  && RestartFlag::kParamValuesChanged == Steinberg::Vst::kParamValuesChanged
+  && RestartFlag::kLatencyChanged == Steinberg::Vst::kLatencyChanged
+  && RestartFlag::kParamTitlesChanged == Steinberg::Vst::kParamTitlesChanged
+  && RestartFlag::kMidiCCAssignmentChanged == Steinberg::Vst::kMidiCCAssignmentChanged
+  && RestartFlag::kNoteExpressionChanged == Steinberg::Vst::kNoteExpressionChanged,
+  "RestartFlag must mirror the VST3 SDK restart flags");
 
 class BoundedStateStream final : public IBStream {
  public:
@@ -175,11 +185,14 @@ class WorkerHostContext final : public IHostApplication, public IComponentHandle
     return QueueEditorParameterEdit(id, value) ? Steinberg::kResultOk : Steinberg::kResultFalse;
   }
   Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID) override { return Steinberg::kResultOk; }
+  // A plug-in may call this from any thread. The flags are only recorded here;
+  // the worker thread decodes and acts on them in Vst3Worker::ApplyPendingRestart.
   Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32 flags) override {
-    if (notifications_.size() < notifications_.capacity()) {
-      notifications_.push_back({.kind = WorkerNotificationKind::kRestart, .message = "Plugin requested a bounded component restart.", .value = static_cast<std::uint32_t>(flags)});
-    }
+    pendingRestartFlags_.fetch_or(static_cast<std::uint32_t>(flags), std::memory_order_acq_rel);
     return Steinberg::kResultOk;
+  }
+  std::uint32_t TakePendingRestartFlags() {
+    return pendingRestartFlags_.exchange(0, std::memory_order_acq_rel);
   }
   Steinberg::tresult PLUGIN_API queryInterface(const TUID iid, void** object) override {
     if (!object) return Steinberg::kInvalidArgument;
@@ -221,6 +234,7 @@ class WorkerHostContext final : public IHostApplication, public IComponentHandle
 
  private:
   std::vector<WorkerNotification>& notifications_;
+  std::atomic<std::uint32_t> pendingRestartFlags_{0};
   BoundedEditorParameterState<kMaximumWorkerEvents> editorParameterState_;
 };
 
@@ -1152,6 +1166,32 @@ bool Vst3Worker::ApplyState(const WorkerState& state) {
 }
 
 bool Vst3Worker::SetState(const WorkerState& state) {
+  return ReactivateComponent(&state);
+}
+
+void Vst3Worker::ApplyPendingRestart() {
+  const auto effects = DecodeRestartFlags(implementation_->context.TakePendingRestartFlags());
+  if (!ready()) return;
+  const auto notify = [this](const WorkerNotificationKind kind, const char* const message, const std::uint32_t value) {
+    if (implementation_->notifications.size() < implementation_->notifications.capacity()) {
+      implementation_->notifications.push_back({.kind = kind, .message = message, .value = value});
+    }
+  };
+  if (effects.componentRestart) {
+    notify(WorkerNotificationKind::kRestart, "Plugin requested a bounded component restart.", 0);
+    if (!ReactivateComponent(nullptr)) {
+      notify(WorkerNotificationKind::kFault, "Plugin component restart failed.", 0);
+      return;
+    }
+  } else if (effects.refreshMetadata) {
+    RefreshLifecycleMetadata();
+  }
+  if (effects.latencyChanged || effects.componentRestart) {
+    notify(WorkerNotificationKind::kLatency, "Plugin latency.", implementation_->processor->getLatencySamples());
+  }
+}
+
+bool Vst3Worker::ReactivateComponent(const WorkerState* const state) {
   if (!ready()) return false;
   const auto wasActive = implementation_->active;
   const auto wasProcessing = implementation_->processing;
@@ -1159,7 +1199,7 @@ bool Vst3Worker::SetState(const WorkerState& state) {
   implementation_->processing = false;
   if (wasActive && implementation_->component->setActive(false) != Steinberg::kResultOk) return false;
   implementation_->active = false;
-  if (!ApplyState(state)) return false;
+  if (state && !ApplyState(*state)) return false;
   if (wasActive && implementation_->component->setActive(true) != Steinberg::kResultOk) return false;
   implementation_->active = wasActive;
   if (wasProcessing && !IsAcceptedWorkerProcessingTransitionResult(implementation_->processor->setProcessing(true))) return false;

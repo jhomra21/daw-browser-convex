@@ -2521,8 +2521,8 @@ test('B6f5 step5b R6 without a content fingerprint a Timeline revision bump stil
 type W8Note = NonNullable<RuntimeTrack['clips'][number]['midi']>['notes'][number]
 type W8Loop = typeof noLoop
 const w8Note = (id: string, beat: number, length = 1): W8Note => ({ id, beat, length, pitch: 60, velocity: 0.8 })
-const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loop?: W8Loop; audioStartSec?: number; clipSec?: number } = {}, options: { refuse?: () => boolean; failInstall?: () => boolean } = {}) => {
-  const state = { bpm: initial.bpm ?? 120, notes: initial.notes ?? [w8Note('note', 0)], audioStartSec: initial.audioStartSec, warped: false }
+const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loop?: W8Loop; audioStartSec?: number; clipSec?: number } = {}, options: { refuse?: () => boolean; failInstall?: () => boolean; failTransport?: (epoch: number, running: boolean) => boolean } = {}) => {
+  const state = { bpm: initial.bpm ?? 120, notes: initial.notes ?? [w8Note('note', 0)], audioStartSec: initial.audioStartSec, warped: false, projectGeneration: 0 }
   const calls: string[] = []
   const graphs: AudioCoreGraphSnapshot[] = []
   const publishes: B6f5Publish[] = []
@@ -2544,7 +2544,7 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
   }
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => compile(transport),
-    fingerprintSnapshot: b6f5Fingerprint,
+    fingerprintSnapshot: b6f5Fingerprint, getProjectGeneration: () => state.projectGeneration,
     getAudioContext: () => context, select: async () => selected, reportFault: (message) => faults.push(message),
     backend: { createPlaybackSession: async () => {
       sessions += 1
@@ -2556,7 +2556,11 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
         installs.push(schedule)
       }) }
       return { ...withInstall, prepareGraph: base.prepareGraph, publishGraph: base.publishGraph,
-        setTransport: async (epoch: number, running: boolean, frame: number) => { epochs.push(epoch); await withInstall.setTransport(epoch, running, frame) },
+        setTransport: async (epoch: number, running: boolean, frame: number) => {
+          epochs.push(epoch)
+          if (options.failTransport?.(epoch, running)) throw new Error('Portable playback transport was rejected.')
+          await withInstall.setTransport(epoch, running, frame)
+        },
         onTransportPosition: (listener: (message: Extract<PortableWasmStatusMessage, { type: 'transport-position' }>) => void) => {
           positionListener = listener
           return withInstall.onTransportPosition(listener)
@@ -3185,4 +3189,60 @@ test('W-E3-pos a seek restarts the position map: the resubmit starts where the n
     for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
     expect(f.installs.at(-1)?.timeOrigin.frame).toBe(75_000)
   } finally { warn.mockRestore(); f.controller.dispose() }
+})
+
+// R1: the pages a seek prepared are released when the seek fails after preparing them, not left pinned in the worklet.
+test('W-R1 a seek that fails after preparing the target pages releases them, however often it is tried', async () => {
+  let failing = false
+  const calls: string[] = []
+  const base = createSession(calls, async () => { if (failing) throw new Error('Portable playback install-schedule was rejected.') }, undefined, true)
+  const faults: string[] = []
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async (transport) => pagedCompilation(transport),
+    getAudioContext: () => context, scheduleHorizonSec: 4, select: async () => selected, reportFault: (message) => faults.push(message),
+    resolveSource: async (clip) => pagedDescriptor(clip.sourceAssetKey ?? 'missing', []),
+    backend: { createPlaybackSession: async () => base },
+  })
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  try {
+    expect(await controller.start(pagedCompilation().snapshot.transport)).toBe('started')
+    failing = true
+    const held: number[] = []
+    for (const sec of [20, 21, 22]) {
+      expect(await controller.seek(sec, noLoop)).toBe('unavailable')
+      held.push(base.preparations.size)
+    }
+    expect({ held, faults, prepared: controller.isPrepared() }).toEqual({ held: [0, 0, 0], faults: [], prepared: true })
+  } finally { warn.mockRestore(); controller.dispose() }
+})
+
+// R2: a stop the worklet rejected changed nothing, so the old position keeps playing and the retry goes to the target.
+test('W-R2 a seek whose first stop is rejected leaves the transport playing and retries the target, not the position', async () => {
+  let failures = 0
+  const f = await w8Fixture({}, { failTransport: () => failures-- > 0 })
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    f.position(60_000, 1, 1)
+    failures = 1
+    const before = f.calls.length
+    const result = await f.controller.seek(1.5, f.noLoop)
+    const transports = f.calls.slice(before).filter((call) => call.endsWith('-transport'))
+    f.position(75_000, 1, 2)
+    for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
+    expect({ result, transports, origin: f.installs.at(-1)?.timeOrigin.frame, epoch: f.epochs.at(-1), sessions: f.sessions(), faults: f.faults })
+      .toEqual({ result: 'unavailable', transports: [], origin: 72_000, epoch: 2, sessions: 1, faults: [] })
+  } finally { warn.mockRestore(); f.controller.dispose() }
+})
+
+// R9: a seek the session refuses without having failed (nothing was touched) is the caller's to rebuild.
+test('W-R9 a seek on a session of another project generation answers rebuild and touches nothing', async () => {
+  const f = await w8Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    f.state.projectGeneration = 1
+    const before = f.calls.length
+    const result: string = await f.controller.seek(1.5, f.noLoop)
+    expect({ result, calls: f.calls.slice(before), prepared: f.controller.isPrepared() }).toEqual({ result: 'rebuild', calls: [], prepared: true })
+  } finally { f.controller.dispose() }
 })

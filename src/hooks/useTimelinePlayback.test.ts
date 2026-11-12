@@ -2,7 +2,7 @@ import { createProcessorEditRegistry } from "~/components/timeline/create-proces
 import { mountStep5Playback, settleStep5Playback } from "../../tools/acceptance/b5c-playback-witness-support";
 import { resolveDesiredPlaybackFx } from "~/lib/export/run-export-job";
 import type { ExportEffectsProjection } from "~/lib/export/export-effect-rows";
-import { afterEach, describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
 import { createComputed, createMemo, createRoot, createSignal, untrack } from 'solid-js'
 import { isServer } from 'solid-js/web'
@@ -6999,6 +6999,8 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
   const audioContext = new AudioContext()
   let audioCreated = false
+  // A context the session cannot reach until the next ensureAudio: a seek then has nothing to compile with.
+  let audioHidden = false
   const resumeHold = b6fLiveHold()
   const compileHold = b6fLiveHold()
   const [tracks, setTracks] = createSignal<Track[]>([track, b6f5TrackS])
@@ -7035,8 +7037,8 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   }
   const engine = {
     ...fake.engine,
-    ensureAudio: () => { audioCreated = true },
-    getAudioContext: () => audioCreated ? audioContext : null,
+    ensureAudio: () => { audioCreated = true; audioHidden = false },
+    getAudioContext: () => audioCreated && !audioHidden ? audioContext : null,
     resume: async () => { if (resumeHold.armed) await new Promise<void>((resolve) => holdB6fLive(resumeHold, resolve)) },
   }
   const playback = useTimelinePlayback(engine, { getTracks: () => tracks(), bpm, loopEnabled: () => loop().enabled,
@@ -7190,7 +7192,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const resumingRebuild = () => playback.restartTimelineSchedule(tracks(), {
     rebuildBackend: true, resumePlayback: true, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
-  return { playback, edit, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, mark: () => world.seq,
+  return { playback, edit, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, mark: () => world.seq,
     locate: (sec: number) => playback.setPlayhead(sec, tracks()),
     liveSession: () => world.sessions.filter((session) => !session.closed).at(-1),
     holds: { resume: resumeHold, compile: compileHold, transport: world.transportHold, pause: world.pauseHold } }
@@ -7479,6 +7481,28 @@ test('E3 W-E3-6 a locate while playing seeks the same session without a dispose 
       located: session?.positions.some((entry) => entry.sec === 3 && !entry.running) && session?.positions.some((entry) => entry.sec === 3 && entry.running) })
       .toEqual({ same: true, closed: false, adoptions: 1, sessionsAfterMark: 0, located: true })
   }, false)
+})
+
+// R9: a locate the session refuses without having failed (here its audio context is out of reach) is rebuilt at the target, as
+// every locate was before the seek moved in place.
+test('E3 W-E3-R9 a locate the live session refuses without a failure rebuilds at the target and keeps playing', async () => {
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  try {
+    await runB6f5(async (live, world) => {
+      await live.playFrom(1)
+      const session = live.liveSession()
+      const mark = live.mark()
+      live.hideAudioContext()
+      live.locate(3)
+      const rebuilt = () => session?.closed === true && live.playback.isPortableBrowserPlayback() && !live.playback.isPreparingPlayback()
+        && !live.playback.isStructuralRebuildInProgress()
+      await live.until(rebuilt)
+      const now = live.liveSession()
+      expect({ closed: session?.closed, playing: live.playback.isPlaying(), sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length,
+        position: now?.positions.at(-1) && { sec: now.positions.at(-1)?.sec, running: now.positions.at(-1)?.running }, warned: warn.mock.calls.length })
+        .toEqual({ closed: true, playing: true, sessionsAfterMark: 1, position: { sec: 3, running: true }, warned: 1 })
+    }, false)
+  } finally { warn.mockRestore() }
 })
 
 test('B6f5 A an edit the playing portable session cannot carry live rebuilds it once', async () => {

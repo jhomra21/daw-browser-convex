@@ -52,6 +52,8 @@ import type { AudioEffectRuntimeInstance } from "@daw-browser/audio-engine/audio
 import { createAudioEffectParameterPayload } from "~/components/timeline/audio-effect-parameter-payload"
 
 type PortableStartResult = "started" | "unavailable"
+// A locate the session cannot take without having failed (nothing was touched) is the caller's to rebuild.
+type PortableSeekResult = PortableStartResult | "rebuild"
 export type PortableAdoptionResult = "adopted" | "unchanged" | "rebuild" | "failed" | "unavailable"
 type PortablePreparedStretch = PortablePreparedStretchAsset | PortablePagedStretchAsset
 type PortableOrdinaryDescriptor = {
@@ -2159,7 +2161,7 @@ export const createPortableBrowserPlaybackController = (input: {
   // A locate in place, in native's order: stop at the new position and epoch (the core clears its sources there), free the
   // old pages and prepare the target's, install the schedule and its sources, then run. It compiles the snapshot the
   // session holds, not the project: an edit that landed meanwhile is adopted by the follow after the locate.
-  const seekAttempt = async (sec: number, loop: AdoptionLoop, intent: number, resubmits: number): Promise<PortableStartResult> => {
+  const seekAttempt = async (sec: number, loop: AdoptionLoop, intent: number, resubmits: number): Promise<PortableSeekResult> => {
     while (refreshPromise) await refreshPromise
     await adoptionTail
     const session = active
@@ -2167,7 +2169,7 @@ export const createPortableBrowserPlaybackController = (input: {
     const snapshot = activeSnapshot
     const revision = activeRevision
     if (!session || !audioContext || !snapshot || revision === undefined
-      || activeProjectGeneration !== (input.getProjectGeneration?.() ?? 0)) return "unavailable"
+      || activeProjectGeneration !== (input.getProjectGeneration?.() ?? 0)) return "rebuild"
     const generation = lifecycleGeneration
     const superseded = () => active !== session || generation !== lifecycleGeneration
     const sampleRate = audioContext.sampleRate
@@ -2183,8 +2185,9 @@ export const createPortableBrowserPlaybackController = (input: {
     }
     if (!compile(horizonSec)) {
       console.warn("[portable-playback] seek refused: the active snapshot does not compile at the target")
-      return "unavailable"
+      return "rebuild"
     }
+    let paged: Awaited<ReturnType<typeof preparePagedSources>> | undefined
     try {
       await session.setTransport(nextEpoch, false, frame)
       if (superseded()) return "unavailable"
@@ -2212,6 +2215,7 @@ export const createPortableBrowserPlaybackController = (input: {
         }),
       })
       if (fit === "refused" || fit === "no-fit") throw new Error("Portable playback could not fit the window at the seek target.")
+      paged = fit.paged
       await session.installSchedule(fit.candidate.schedule)
       const ordinary = ordinarySourcesOf(fit.sources, activePreparedStretchAssets, activeOrdinaryDescriptors)
       await replaceSourcesAtomically({ session, revision, epoch: nextEpoch, ordinary, prepared: fit.paged.events })
@@ -2233,14 +2237,23 @@ export const createPortableBrowserPlaybackController = (input: {
       return "started"
     } catch (cause) {
       if (superseded()) return "unavailable"
-      // The old schedule belongs to the old epoch, and what was installed may be partial: nothing may refresh, adopt or
-      // resume on it until a locate completes.
-      activeScheduleRange = undefined
-      activeFrameSchedule = undefined
+      // A rejected first stop changed nothing: the old position keeps playing on its old schedule and the retry targets
+      // the locate. Once the transport stands at the new epoch, the old schedule belongs to the old epoch and what was
+      // installed may be partial: nothing may refresh, adopt or resume on it until a locate completes.
+      const stopped = epoch === nextEpoch
+      if (stopped) {
+        activeScheduleRange = undefined
+        activeFrameSchedule = undefined
+      }
+      if (paged) {
+        activePreparations = [...new Set([...activePreparations, ...paged.preparations])]
+        await releaseExpiredPreparations(session, Number.POSITIVE_INFINITY)
+      }
       const failure = cause instanceof Error ? cause : new Error("Portable playback could not seek.")
-      // Rendered-frame reports are the retry clock, so a running transport keeps running (silent) while it waits.
+      // Rendered-frame reports are the retry clock, so a running transport keeps running while it waits: after the stop,
+      // it plays whatever of the target's content was installed.
       const waiting = running && resubmits < maxAdoptionResubmits
-        && await session.setTransport(epoch, true, frame).then(() => true, () => false)
+        && (!stopped || await session.setTransport(epoch, true, frame).then(() => true, () => false))
       if (waiting) {
         session.markActive()
         console.warn(`[portable-playback] seek failed; resubmit ${resubmits + 1} of ${maxAdoptionResubmits} at a later block boundary`)
@@ -2248,7 +2261,7 @@ export const createPortableBrowserPlaybackController = (input: {
           resubmits,
           wait: retryWaitReports(resubmits),
           run: (done) => intent === transportIntent && generation === lifecycleGeneration
-            ? queueSeek(arrangementFrame() / sampleRate, loop, intent, done + 1).then((result) => {
+            ? queueSeek(stopped ? arrangementFrame() / sampleRate : sec, loop, intent, done + 1).then((result) => {
               if (result === "started") input.onAdoptionResubmitted?.(result)
             })
             : Promise.resolve(),
@@ -2262,17 +2275,17 @@ export const createPortableBrowserPlaybackController = (input: {
     }
   }
 
-  const queueSeek = (sec: number, loop: AdoptionLoop, intent: number, resubmits: number): Promise<PortableStartResult> => {
+  const queueSeek = (sec: number, loop: AdoptionLoop, intent: number, resubmits: number): Promise<PortableSeekResult> => {
     pendingSeeks += 1
     const run = seekTail
-      .then((): Promise<PortableStartResult> | PortableStartResult =>
+      .then((): Promise<PortableSeekResult> | PortableSeekResult =>
         intent === transportIntent ? seekAttempt(sec, loop, intent, resubmits) : active ? "started" : "unavailable")
       .finally(() => { pendingSeeks -= 1 })
     seekTail = run.catch(() => undefined)
     return run
   }
 
-  const seek = async (sec: number, loop: AdoptionLoop): Promise<PortableStartResult> => {
+  const seek = async (sec: number, loop: AdoptionLoop): Promise<PortableSeekResult> => {
     if (recording) throw new Error("Portable recording must stop before playback can seek.")
     retries.delete("seek")
     return queueSeek(sec, loop, ++transportIntent, 0)
@@ -2322,7 +2335,7 @@ export const createPortableBrowserPlaybackController = (input: {
     }
     const generation = lifecycleGeneration
     const projectGeneration = input.getProjectGeneration?.() ?? 0
-    const request = keptPaused ? seek(transport.playheadSec, transport)
+    const request = keptPaused ? seek(transport.playheadSec, transport).then((result): PortableStartResult => result === "rebuild" ? "unavailable" : result)
       : startAttempt(transport, generation, projectGeneration, false, compileContext)
     pendingStart = request
     pendingStartMode = "preview"

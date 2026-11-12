@@ -1380,6 +1380,20 @@ export function useTimelinePlayback(
       // The live session moves in place; an edit that landed meanwhile is adopted by the follow after the locate.
       const { isActive, start, end } = getLoopParams()
       void portableBrowserPlayback.seek(sec, { loopEnabled: isActive, loopStartSec: start, loopEndSec: end })
+        .then((result) => {
+          // A session that refused the locate without failing was not touched: rebuild at the target, as every locate did.
+          if (result !== "rebuild" || seekSequence !== nativeSeekSequence) return
+          console.warn("[portable-playback] locate refused by the live session; rebuilding at the target")
+          return restartTimelineSchedule(tracks, {
+            rebuildBackend: true,
+            resumePlayback: true,
+            playheadSec: sec,
+            owner: 'portable-browser',
+            projectId: nativeOptions?.projectId?.(),
+            projectGeneration: nativeOptions?.projectGeneration?.()
+              ?? portableBrowserOptions?.projectGeneration?.(),
+          })
+        })
         .catch((cause: unknown) => {
           portableBrowserOptions?.reportFault?.(cause instanceof Error ? cause.message : 'Playback could not seek while active.')
         })

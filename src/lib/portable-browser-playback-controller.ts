@@ -44,13 +44,13 @@ import {
   type PreparedStretchArtifactRepository,
 } from "@daw-browser/audio-engine/prepared-stretch-store"
 import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver"
-import { isLiveParameterChange, mapNativeBuiltInParameterCommit, nativeBuiltInLiveStateCovered } from "~/lib/desktop/native-built-in-parameter-mapper"
+import { isLiveEventOnlyInstrumentChange, isLiveParameterChange, mapNativeBuiltInParameterCommit, nativeBuiltInLiveStateCovered } from "~/lib/desktop/native-built-in-parameter-mapper"
 import { normalizeTrackInstrumentParams, parseJsonValue } from "@daw-browser/shared"
 import type { AudioEffectRuntimeInstance } from "@daw-browser/audio-engine/audio-engine"
 import { createAudioEffectParameterPayload } from "~/components/timeline/audio-effect-parameter-payload"
 
 type PortableStartResult = "started" | "unavailable"
-export type PortableAdoptionResult = "adopted" | "unchanged" | "rebuild" | "unavailable"
+export type PortableAdoptionResult = "adopted" | "unchanged" | "rebuild" | "failed" | "unavailable"
 type PortablePreparedStretch = PortablePreparedStretchAsset | PortablePagedStretchAsset
 type PortableOrdinaryDescriptor = {
   asset: AudioAssetRef
@@ -305,13 +305,17 @@ const preparedSession = (
   loop: snapshot.transport,
 })
 
+const instrumentsOf = (snapshot: LivePlaybackSnapshot) =>
+  JSON.stringify(Object.entries(snapshot.mixer.fx.trackFx ?? {}).map(([id, entry]) => [id, entry.instrument]))
+
 // A live instrument edit the session accepted (rememberInstrumentParameters) outlives a compile that read the
 // desired state before it.
 const withAcceptedInstruments = (snapshot: LivePlaybackSnapshot, accepted: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const fx = snapshot.mixer.fx
   const trackFx = Object.fromEntries(Object.entries(fx.trackFx ?? {}).map(([id, entry]) => {
     const instrument = accepted.mixer.fx.trackFx?.[id]?.instrument
-    return [id, instrument?.instanceId === entry.instrument?.instanceId && instrument?.kind === entry.instrument?.kind
+    // A compile that differs elsewhere read newer content, which carries the live values itself.
+    return [id, instrument && entry.instrument && isLiveEventOnlyInstrumentChange(instrument, entry.instrument)
       ? { ...entry, instrument } : entry]
   }))
   return { ...snapshot, mixer: { ...snapshot.mixer, fx: { ...fx, trackFx } } }
@@ -1819,6 +1823,10 @@ export const createPortableBrowserPlaybackController = (input: {
     const generation = lifecycleGeneration
     const intent = transportIntent
     const current = () => active === session && playing && generation === lifecycleGeneration && intent === transportIntent
+    // An instrument edit that cannot be installed leaves the old graph playing for the next adoption to retry; a
+    // rebuild would end the take and gap the audio for an edit the user expects to hear without either.
+    let instrumentEdit = false
+    const failed = (): PortableAdoptionResult => !current() ? "unavailable" : instrumentEdit ? "failed" : "rebuild"
     adopting = true
     try {
       const compilation = await compileSnapshot({ ...transport, state: "playing", playheadSec: schedule.timeOrigin.timelineSec },
@@ -1827,6 +1835,7 @@ export const createPortableBrowserPlaybackController = (input: {
       if (!compilation.supported) return "rebuild"
       const next = compilation.snapshot
       if (fingerprint(next) === fingerprint(previous)) return "unchanged"
+      instrumentEdit = instrumentsOf(next) !== instrumentsOf(previous)
       const candidate = preparedSession({ ...next, revision: revision + 1 }, audioContext.sampleRate, epoch,
         safeProjectGeneration(activeProjectGeneration ?? 0), (range.endFrame - range.startFrame) / audioContext.sampleRate,
         1, activePreparedStretchAssets, undefined, activeOrdinaryDescriptors)
@@ -1851,12 +1860,12 @@ export const createPortableBrowserPlaybackController = (input: {
           activeRevision = revision
           activeGraph = graph
         }
-        return current() ? "rebuild" : "unavailable"
+        return failed()
       })
       adoptionPublish = published
       return await published
     } catch {
-      return current() ? "rebuild" : "unavailable"
+      return failed()
     } finally {
       adopting = false
       adoptionPublish = undefined
@@ -2248,8 +2257,8 @@ export const createPortableBrowserPlaybackController = (input: {
       const session = active
       const node = activeGraph.nodes.find((entry) => entry.id === instrumentEntry[0])
       if (node?.instrument?.kind !== "synth" || !session.queueInstrumentEvents) return { accepted: false, reason: "unsupported" }
-      // An edit is taken live only when it differs from the instrument this session compiled in live parameters
-      // alone. Anything else (an oscillator, voices, retrigger, another instance) is heard only after a rebuild.
+      // The live events carry the eight live parameters; every other change to the instrument reaches the session
+      // through the published configuration of the next adoption, so it stays out of the prepared snapshot until then.
       const prepared = instrumentEntry[1].instrument
       const edited = request.edit && normalizeTrackInstrumentParams(parseJsonValue(request.edit.content.params) ?? null)
       if (request.edit && !(prepared && edited
@@ -2286,7 +2295,7 @@ export const createPortableBrowserPlaybackController = (input: {
         }
         if (active !== session || activeRevision !== revision || epoch !== deliveryEpoch) return { accepted: false, reason: "stale" }
         // The session now plays the edit; the prepared snapshot follows, so the release announce finds nothing to rebuild.
-        if (edited) rememberInstrumentParameters(node.id, edited)
+        if (edited && prepared && isLiveEventOnlyInstrumentChange(prepared, edited)) rememberInstrumentParameters(node.id, edited)
         return { accepted: true, sequence, appliedSequence: sequence }
       } catch (error) {
         return { accepted: false, reason: "bridge-error", error: String(error) }

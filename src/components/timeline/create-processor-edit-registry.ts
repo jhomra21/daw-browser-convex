@@ -5,6 +5,7 @@ import {
   captureNativeBuiltInParameterValues,
   encodeNativeBuiltInStateCommit,
   nativeBuiltInPatchTiming,
+  isLiveEventOnlyInstrumentChange,
   isLiveParameterChange,
   type NativeBuiltInParameterPayload,
 } from "~/lib/desktop/native-built-in-parameter-mapper";
@@ -72,7 +73,8 @@ export const createProcessorEditRegistry = (readBpm: () => number) => {
     const from = parseJsonValue(previous.edit.content.params);
     if (payload.effect === "instrument") {
       const instrument = normalizeTrackInstrumentParams(from ?? null);
-      return instrument !== undefined && isLiveParameterChange({ ...payload, from: instrument }, readBpm());
+      // A change the live events do not carry is structure: it advances the playback inputs so the session adopts it.
+      return instrument !== undefined && isLiveEventOnlyInstrumentChange(instrument, payload.to);
     }
     const timing = nativeBuiltInPatchTiming(payload);
     return timing !== undefined && isLiveParameterChange(createAudioEffectParameterPayload({

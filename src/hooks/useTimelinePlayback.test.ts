@@ -6974,7 +6974,7 @@ type B6f5World = { seq: number; sessions: B6f5Session[]; transportHold: B6fLiveH
 type B6f5Kind = 'mixer' | 'master' | 'automation' | 'structural' | 'proc-live' | 'proc-nonlive' | 'synth-live' | 'synth-nonlive' | 'sampled'
 const b6f5LiveKinds = new Set<B6f5Kind>(['proc-live', 'synth-live'])
 // What a playing session adopts on its own core (D5); elsewhere these reach the session as any edit does.
-const b6f5AdoptedKinds = new Set<B6f5Kind>(['mixer', 'master', 'automation'])
+const b6f5AdoptedKinds = new Set<B6f5Kind>(['mixer', 'master', 'automation', 'synth-nonlive', 'sampled'])
 const b6f5TrackS: Track = { ...track, id: 'track-s', name: 'Sampled' }
 const b6f5TrackB: Track = { ...track, id: 'track-b6f', name: 'B6f5 edit' }
 const b6f5Utility0: UtilityParamsEnvelope = { version: 1, state: createDefaultUtilityParams() }
@@ -7374,7 +7374,7 @@ const b6f5Cell = (state: B6f5State, kind: B6f5Kind, nativeEnabled: boolean) => r
   return live.expectEnd(false, 3, mark, kind, false)
 }, nativeEnabled)
 
-test('B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session', async () => {
+test('B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session', async () => {
   for (const nativeEnabled of [false, true]) for (const kind of b6f5AdoptedKinds) await runB6f5(async (live) => {
     await live.playFrom(1)
     const session = live.liveSession()

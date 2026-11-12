@@ -40,6 +40,17 @@ test('clamps live synth cutoff and resonance to native parameter ranges', () => 
   ])
 })
 
+test('maps a non-live synth edit to no live values and a changed instance or kind to nothing', () => {
+  const params = createDefaultSynthParams()
+  const from = { kind: 'synth', instanceId: 'synth-1', params } satisfies EffectParamsCommitPayload<'instrument'>['from']
+  const edit = (to: EffectParamsCommitPayload<'instrument'>['to']) =>
+    mapNativeBuiltInParameterCommit({ targetId: 'track-1', effect: 'instrument', from, to }, 120)?.values
+  expect(edit({ ...from, params: { ...params, polyphony: 4 } })).toEqual([])
+  expect(edit({ ...from, params: { ...params, retrigger: !params.retrigger } })).toEqual([])
+  expect(edit({ ...from, params: { ...params, filter: { ...params.filter, mode: 'highpass' } } })).toEqual([])
+  expect(edit({ ...from, instanceId: 'synth-2' })).toBeUndefined()
+})
+
 test('maps changed nested built-in values and filters unchanged fields', () => {
   const from = envelope(createDefaultAutoFilterParams())
   const to = envelope({

@@ -1560,6 +1560,8 @@ export function useTimelinePlayback(
       if (outcome === "rebuild" && !portableBrowserPlayback.isRecording()) {
         await applyTimelineSchedule(tracks, { rebuildBackend: true })
       } else if (outcome === "adopted" || outcome === "unchanged") previewProjectionBaseline = key
+      // The baseline stays behind, so the next follow compiles the newest state and stages it again.
+      else if (outcome === "failed") console.warn("[portable-playback] instrument adoption failed; the playing graph is kept and staging retries on the next follow")
       return
     }
     const key = readDesiredScheduleFingerprint(tracks)

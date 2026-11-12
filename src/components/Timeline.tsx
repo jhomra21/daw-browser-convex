@@ -2501,6 +2501,10 @@ const Timeline: Component<TimelineProps> = (props) => {
           if (!isPlaying() && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()
             && !isStructuralRebuildInProgress()
             && !isPreparingPlayback()) return;
+          // A playing session carries an edit to the same instrument as a published configuration: the schedule
+          // follow adopts it, so there is no graph to rebuild.
+          if (isPlaying() && previous && instrument && previous.kind === instrument.kind
+            && previous.instanceId === instrument.instanceId) return;
           await rebuildPlaybackBackend(renderTracks(), captureStructuralPlaybackIntent(),
             instrument ? { targetId, instrument } : undefined);
         }).catch((cause: unknown) => {

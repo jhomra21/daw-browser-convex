@@ -1,4 +1,4 @@
-import { createEqBandParameterId, normalizeDelayParams, normalizeReverbParams, parseJsonValue, type EqParams } from '@daw-browser/shared'
+import { createEqBandParameterId, normalizeDelayParams, normalizeReverbParams, parseJsonValue, type EqParams, type TrackInstrumentParams } from '@daw-browser/shared'
 import { createAudioEffectParameterPayload } from '~/components/timeline/audio-effect-parameter-payload'
 import type { EffectTimingInput } from '@daw-browser/audio-engine/effects/timing'
 import type { EffectParamsCommitPayload } from '~/lib/undo/types'
@@ -148,24 +148,35 @@ const instanceIdOf = (payload: EffectParamsCommitPayload) =>
   payload.effect === 'instrument' ? payload.to.instanceId
     : payload.instanceId && payload.instanceId.length > 0 ? payload.instanceId : undefined
 
+// Compilation normalizes every live target to SYNTH_PARAMETER_LIMITS,
+// matching native set_synth_parameter, including cutoff >= 20 and Q > 0.
+const splitSynthLiveFields = (params: Extract<TrackInstrumentParams, { kind: 'synth' }>['params']) => {
+  const {
+    outputGain, outputPan, filterCutoffHz, filterResonance, ampAttackMs, ampDecayMs, ampSustain, ampReleaseMs, ...state
+  } = compilePortableSynthState(params)
+  return { live: { outputGain, outputPan, filterCutoffHz, filterResonance, ampAttackMs, ampDecayMs, ampSustain, ampReleaseMs }, state }
+}
+
+// True when an edit changes only what the live events carry: the session then plays it as it stands, with no
+// published configuration to follow.
+export const isLiveEventOnlyInstrumentChange = (from: TrackInstrumentParams, to: TrackInstrumentParams) =>
+  from.kind === 'synth' && to.kind === 'synth' && from.instanceId === to.instanceId
+  && from.params.retrigger === to.params.retrigger
+  && JSON.stringify(splitSynthLiveFields(from.params).state) === JSON.stringify(splitSynthLiveFields(to.params).state)
+
 const mapInstrument = (payload: EffectParamsCommitPayload<'instrument'>) => {
-  if (payload.from.kind !== 'synth' || payload.to.kind !== 'synth'
-    || payload.from.instanceId !== payload.to.instanceId) return undefined
-  if (payload.from.params.retrigger !== payload.to.params.retrigger
-    || payload.from.params.polyphony !== payload.to.params.polyphony) return undefined
-  // Compilation normalizes every live target to SYNTH_PARAMETER_LIMITS,
-  // matching native set_synth_parameter, including cutoff >= 20 and Q > 0.
+  if (payload.from.kind !== payload.to.kind || payload.from.instanceId !== payload.to.instanceId) return undefined
+  // Only the eight synth fields below have live event targets. Every other change to the same instrument travels in
+  // the published configuration: the core slews continuous values and replaces the slot, seeded, for discrete ones.
+  if (payload.from.kind !== 'synth' || payload.to.kind !== 'synth') return []
   const {
     outputGain: fromGain, outputPan: fromPan, filterCutoffHz: fromCutoff, filterResonance: fromResonance,
     ampAttackMs: fromAttack, ampDecayMs: fromDecay, ampSustain: fromSustain, ampReleaseMs: fromRelease,
-    ...fromState
-  } = compilePortableSynthState(payload.from.params)
+  } = splitSynthLiveFields(payload.from.params).live
   const {
     outputGain: toGain, outputPan: toPan, filterCutoffHz: toCutoff, filterResonance: toResonance,
     ampAttackMs: toAttack, ampDecayMs: toDecay, ampSustain: toSustain, ampReleaseMs: toRelease,
-    ...toState
-  } = compilePortableSynthState(payload.to.params)
-  if (JSON.stringify(fromState) !== JSON.stringify(toState)) return undefined
+  } = splitSynthLiveFields(payload.to.params).live
   return [
     { parameterId: 'synth.outputGain', from: fromGain ?? 1, to: toGain ?? 1 },
     { parameterId: 'synth.outputPan', from: fromPan ?? 0, to: toPan ?? 0 },

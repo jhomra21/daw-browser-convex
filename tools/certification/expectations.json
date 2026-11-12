@@ -1719,7 +1719,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 657,
+     "pass": 662,
      "skip": 1,
      "fail": 0
     },
@@ -2801,7 +2801,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 673,
+     "pass": 678,
      "skip": 1,
      "fail": 0
     },
@@ -10086,7 +10086,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 3,
+      "pass": 5,
       "skip": 0,
       "fail": 0
      },
@@ -10149,7 +10149,7 @@
      "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 3,
+      "pass": 5,
       "skip": 0,
       "fail": 0
      },
@@ -10182,7 +10182,7 @@
       "5000",
       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
       "-t",
-      "STEP7B3 real paused structural edit during held publication then queued start"
+      "STEP7B3 real paused structural edit during held publication then queued start that replaces"
      ],
      "alarmSeconds": 120,
      "env": {},
@@ -10237,7 +10237,7 @@
       "5000",
       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
       "-t",
-      "STEP7B3 real paused structural edit during held publication then queued start"
+      "STEP7B3 real paused structural edit during held publication then queued start that replaces"
      ],
      "alarmSeconds": 120,
      "env": {
@@ -10270,7 +10270,7 @@
       "fail": 1
      },
      "fails": [
-      "STEP7B3 real paused structural edit during held publication then queued start"
+      "STEP7B3 real paused structural edit during held publication then queued start that replaces the preview"
      ],
      "fuzz": null,
      "rejection": null,
@@ -18455,7 +18455,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 657,
+      "pass": 662,
       "skip": 1,
       "fail": 0
      },
@@ -18516,7 +18516,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 656,
+      "pass": 661,
       "skip": 1,
       "fail": 1
      },
@@ -19224,7 +19224,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -19288,7 +19288,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -19490,7 +19490,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 4,
+      "pass": 5,
       "skip": 0,
       "fail": 0
      },
@@ -19553,7 +19553,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 3,
+      "pass": 4,
       "skip": 0,
       "fail": 1
      },
@@ -19769,7 +19769,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 740,
+      "pass": 745,
       "skip": 1,
       "fail": 0
      },
@@ -19836,7 +19836,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 738,
+      "pass": 743,
       "skip": 1,
       "fail": 2
      },
@@ -19896,7 +19896,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 4,
+      "pass": 5,
       "skip": 0,
       "fail": 0
      },
@@ -19959,7 +19959,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 3,
+      "pass": 4,
       "skip": 0,
       "fail": 1
      },
@@ -20175,7 +20175,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 740,
+      "pass": 745,
       "skip": 1,
       "fail": 0
      },
@@ -20242,7 +20242,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 739,
+      "pass": 744,
       "skip": 1,
       "fail": 1
      },
@@ -20301,7 +20301,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 4,
+      "pass": 5,
       "skip": 0,
       "fail": 0
      },
@@ -20364,7 +20364,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 3,
+      "pass": 4,
       "skip": 0,
       "fail": 1
      },
@@ -20580,7 +20580,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 740,
+      "pass": 745,
       "skip": 1,
       "fail": 0
      },
@@ -20647,7 +20647,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 739,
+      "pass": 744,
       "skip": 1,
       "fail": 1
      },
@@ -20970,7 +20970,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 740,
+      "pass": 745,
       "skip": 1,
       "fail": 0
      },
@@ -21037,7 +21037,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 739,
+      "pass": 744,
       "skip": 1,
       "fail": 1
      },
@@ -21096,7 +21096,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -21159,7 +21159,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 18,
+      "pass": 19,
       "skip": 0,
       "fail": 2
      },
@@ -21357,7 +21357,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -21420,7 +21420,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 1
      },
@@ -21617,7 +21617,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -21680,7 +21680,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 1
      },
@@ -21877,7 +21877,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -21940,7 +21940,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 1
      },
@@ -21999,7 +21999,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -22062,7 +22062,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 1
      },
@@ -22259,7 +22259,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -22322,7 +22322,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 1
      },
@@ -22666,7 +22666,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -22729,7 +22729,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 1
      },
@@ -22788,7 +22788,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -22851,7 +22851,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 1
      },
@@ -22910,7 +22910,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -22973,7 +22973,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 1
      },
@@ -22997,7 +22997,7 @@
      "src/lib/desktop/native-playback-controller.ts"
     ],
     "witnesses": [
-     "src/hooks/useTimelinePlayback.test.ts"
+     "src/lib/desktop/native-playback-controller.test.ts"
     ],
     "command": {
      "argv": [
@@ -23008,9 +23008,9 @@
       "/tmp/dv01-b6/rc7/mut/overlay.ts",
       "--timeout",
       "30000",
-      "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+      "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
       "-t",
-      "B6d2 "
+      "W43 paused-preview maintenance"
      ],
      "alarmSeconds": 240,
      "env": {
@@ -23054,7 +23054,7 @@
      "src/lib/desktop/native-playback-controller.ts"
     ],
     "witnesses": [
-     "src/hooks/useTimelinePlayback.test.ts"
+     "src/lib/desktop/native-playback-controller.test.ts"
     ],
     "command": {
      "argv": [
@@ -23065,9 +23065,9 @@
       "/tmp/dv01-b6/rc7/mut/overlay.ts",
       "--timeout",
       "30000",
-      "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+      "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
       "-t",
-      "B6d2 "
+      "W43 paused-preview maintenance"
      ],
      "alarmSeconds": 240,
      "env": {
@@ -23100,7 +23100,7 @@
       "fail": 1
      },
      "fails": [
-      "B6d2 a paused structural change requested while the pause is pending is not dropped"
+      "W43 paused-preview maintenance cannot dispose the active publication during pause"
      ],
      "fuzz": null,
      "rejection": null,
@@ -23540,7 +23540,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -23603,7 +23603,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 1
      },
@@ -24186,7 +24186,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -24249,7 +24249,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 1
      },
@@ -24371,12 +24371,11 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 3,
+      "pass": 4,
       "skip": 0,
-      "fail": 3
+      "fail": 2
      },
      "fails": [
-      "B6d2 a paused structural change requested while the pause is pending is not dropped",
       "B6d3 a paused structural replacement prepares at the playhead a Stop published while it waited",
       "B6d3 a seek made while Play waits on a structural replacement preview leaves the hook and native in agreement"
      ],
@@ -24430,7 +24429,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -24494,12 +24493,11 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 204,
+      "pass": 216,
       "skip": 1,
-      "fail": 14
+      "fail": 13
      },
      "fails": [
-      "B6d2 a paused structural change requested while the pause is pending is not dropped",
       "B6d3 a paused structural replacement prepares at the playhead a Stop published while it waited",
       "B6d3 a seek made while Play waits on a structural replacement preview leaves the hook and native in agreement",
       "B6d4 a Play superseded by a locate on a structural replacement preview keeps playing from the locate",
@@ -24566,7 +24564,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -24629,7 +24627,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 1
      },
@@ -24692,7 +24690,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 740,
+      "pass": 745,
       "skip": 1,
       "fail": 0
      },
@@ -24759,7 +24757,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 739,
+      "pass": 744,
       "skip": 1,
       "fail": 1
      },
@@ -24939,7 +24937,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -25003,7 +25001,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -25193,7 +25191,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -25263,7 +25261,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -25443,7 +25441,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -25507,7 +25505,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -25567,7 +25565,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -25630,7 +25628,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 1
      },
@@ -25654,7 +25652,7 @@
      "src/lib/desktop/native-playback-controller.ts"
     ],
     "witnesses": [
-     "src/hooks/useTimelinePlayback.test.ts"
+     "src/lib/desktop/native-playback-controller.test.ts"
     ],
     "command": {
      "argv": [
@@ -25665,9 +25663,9 @@
       "/tmp/dv01-b6/rc7/mut/overlay.ts",
       "--timeout",
       "30000",
-      "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+      "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
       "-t",
-      "B6d2 |B6d3 |reconciles a paused seek superseded"
+      "W43 paused-preview maintenance"
      ],
      "alarmSeconds": 240,
      "env": {
@@ -25689,7 +25687,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 6,
+      "pass": 1,
       "skip": 0,
       "fail": 0
      },
@@ -25711,7 +25709,7 @@
      "src/lib/desktop/native-playback-controller.ts"
     ],
     "witnesses": [
-     "src/hooks/useTimelinePlayback.test.ts"
+     "src/lib/desktop/native-playback-controller.test.ts"
     ],
     "command": {
      "argv": [
@@ -25722,9 +25720,9 @@
       "/tmp/dv01-b6/rc7/mut/overlay.ts",
       "--timeout",
       "30000",
-      "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
+      "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
       "-t",
-      "B6d2 |B6d3 |reconciles a paused seek superseded"
+      "W43 paused-preview maintenance"
      ],
      "alarmSeconds": 240,
      "env": {
@@ -25752,12 +25750,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 5,
+      "pass": 0,
       "skip": 0,
       "fail": 1
      },
      "fails": [
-      "B6d2 a paused structural change requested while the pause is pending is not dropped"
+      "W43 paused-preview maintenance cannot dispose the active publication during pause"
      ],
      "fuzz": null,
      "rejection": null,
@@ -25934,7 +25932,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -25997,7 +25995,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 1
      },
@@ -26054,7 +26052,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -26118,7 +26116,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 222,
       "skip": 1,
       "fail": 7
      },
@@ -26183,7 +26181,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -26246,7 +26244,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 1
      },
@@ -26309,7 +26307,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 740,
+      "pass": 745,
       "skip": 1,
       "fail": 0
      },
@@ -26376,7 +26374,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 739,
+      "pass": 744,
       "skip": 1,
       "fail": 1
      },
@@ -26435,7 +26433,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 21,
+      "pass": 22,
       "skip": 0,
       "fail": 0
      },
@@ -26498,7 +26496,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 1
      },
@@ -26561,7 +26559,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 740,
+      "pass": 745,
       "skip": 1,
       "fail": 0
      },
@@ -26628,7 +26626,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 739,
+      "pass": 744,
       "skip": 1,
       "fail": 1
      },
@@ -26808,7 +26806,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -26872,7 +26870,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 224,
       "skip": 1,
       "fail": 5
      },
@@ -27055,7 +27053,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -27119,7 +27117,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -27304,7 +27302,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -27368,7 +27366,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 222,
       "skip": 1,
       "fail": 7
      },
@@ -27703,7 +27701,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -27779,7 +27777,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -27975,7 +27973,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -28051,7 +28049,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 210,
+      "pass": 221,
       "skip": 1,
       "fail": 8
      },
@@ -28237,7 +28235,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -28301,7 +28299,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -28966,7 +28964,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 23,
       "skip": 0,
       "fail": 0
      },
@@ -29029,7 +29027,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 22,
       "skip": 0,
       "fail": 1
      },
@@ -29210,7 +29208,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 23,
       "skip": 0,
       "fail": 0
      },
@@ -29273,7 +29271,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 22,
       "skip": 0,
       "fail": 1
      },
@@ -29336,7 +29334,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 740,
+      "pass": 745,
       "skip": 1,
       "fail": 0
      },
@@ -29403,7 +29401,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 739,
+      "pass": 744,
       "skip": 1,
       "fail": 1
      },
@@ -29583,7 +29581,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -29647,7 +29645,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -29955,7 +29953,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -30019,7 +30017,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 195,
+      "pass": 206,
       "skip": 1,
       "fail": 23
      },
@@ -30218,7 +30216,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -30282,7 +30280,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 223,
       "skip": 1,
       "fail": 6
      },
@@ -30464,7 +30462,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -30528,7 +30526,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -31068,7 +31066,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -31132,7 +31130,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -31312,7 +31310,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -31376,7 +31374,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -31681,7 +31679,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -31745,7 +31743,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -32049,7 +32047,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -32113,7 +32111,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -32538,7 +32536,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -32602,7 +32600,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -32770,7 +32768,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -32959,7 +32957,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 222,
       "skip": 1,
       "fail": 7
      },
@@ -33130,7 +33128,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -33317,7 +33315,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -34867,7 +34865,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -35055,7 +35053,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -35224,7 +35222,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -35412,7 +35410,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -35581,7 +35579,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -35774,7 +35772,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 202,
+      "pass": 213,
       "skip": 1,
       "fail": 16
      },
@@ -35956,7 +35954,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -36145,7 +36143,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -36315,7 +36313,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -36503,7 +36501,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -36673,7 +36671,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -36861,7 +36859,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 224,
       "skip": 1,
       "fail": 5
      },
@@ -37032,7 +37030,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -37220,7 +37218,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -37388,7 +37386,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -37577,7 +37575,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 223,
       "skip": 1,
       "fail": 6
      },
@@ -37749,7 +37747,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -37939,7 +37937,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -38109,7 +38107,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -38297,7 +38295,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -38466,7 +38464,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -38654,7 +38652,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -38823,7 +38821,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -39011,7 +39009,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -39180,7 +39178,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -39368,7 +39366,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -39537,7 +39535,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -39725,7 +39723,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -39949,7 +39947,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -40198,7 +40196,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -40422,7 +40420,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -40673,7 +40671,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -40898,7 +40896,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -41147,7 +41145,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -41426,7 +41424,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -41737,13 +41735,14 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 224,
       "skip": 1,
-      "fail": 4
+      "fail": 5
      },
      "fails": [
       "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
       "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+      "B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -42017,7 +42016,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -42334,9 +42333,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 187,
+      "pass": 190,
       "skip": 1,
-      "fail": 31
+      "fail": 39
      },
      "fails": [
       "B6f a project switch leaves a live paused portable session of the new project at the start",
@@ -42349,12 +42348,16 @@
       "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
       "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
       "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session",
+      "B6f5 E5 a note and a tempo edit while playing are adopted at a seam without a dispose or a restart",
       "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+      "B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session",
       "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
       "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+      "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
       "B6f5 a resume after an adoption plays the newest state",
       "B6f5 renaming and recolouring a track while playing is neither adopted nor rebuilt",
       "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+      "B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped",
       "B6f5c a failed take followed by the caller stop or cancel adopts or rebuilds each edit once",
       "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
       "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
@@ -42363,6 +42366,10 @@
       "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
       "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
       "C0G a clip waveform key or key order change while playing is neither adopted nor rebuilt",
+      "E3 W-E3-6 a locate while playing seeks the same session without a dispose or a Play, and the follow adopts the edit after it",
+      "E3 W-E3-R9 a locate the live session refuses without a failure rebuilds at the target and keeps playing",
+      "F20 W-F20b changing the loop end while playing is adopted at a seam and the schedule loops at the new end",
+      "F20 W-F20f toggling the loop on and off while playing is adopted without a dispose or a restart",
       "failed lifecycle transition cancels delayed native startup",
       "keeps a paused portable session compatible when enabling a loop",
       "native-required play retries failed recovery and stays stopped while recovery runs",
@@ -42641,7 +42648,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -42951,7 +42958,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -43230,7 +43237,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -43540,12 +43547,17 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 221,
       "skip": 1,
-      "fail": 4
+      "fail": 8
      },
      "fails": [
+      "B6f a project switch leaves a live paused portable session of the new project at the start",
+      "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
       "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+      "B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session",
+      "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
+      "B6f5 a resume after an adoption plays the newest state",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -44720,7 +44732,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 24,
+      "pass": 27,
       "skip": 0,
       "fail": 0
      },
@@ -44833,7 +44845,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -44901,7 +44913,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 24,
       "skip": 0,
       "fail": 3
      },
@@ -45065,7 +45077,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 224,
       "skip": 1,
       "fail": 5
      },
@@ -45130,7 +45142,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 24,
+      "pass": 27,
       "skip": 0,
       "fail": 0
      },
@@ -45243,7 +45255,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -45311,7 +45323,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 22,
+      "pass": 25,
       "skip": 0,
       "fail": 2
      },
@@ -45462,7 +45474,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -45526,7 +45538,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 24,
+      "pass": 27,
       "skip": 0,
       "fail": 0
      },
@@ -45639,7 +45651,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -45707,7 +45719,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 23,
+      "pass": 26,
       "skip": 0,
       "fail": 1
      },
@@ -45837,7 +45849,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -45900,7 +45912,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 24,
+      "pass": 27,
       "skip": 0,
       "fail": 0
      },
@@ -46013,7 +46025,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -46081,7 +46093,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 23,
+      "pass": 26,
       "skip": 0,
       "fail": 1
      },
@@ -46231,7 +46243,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -46294,7 +46306,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 24,
+      "pass": 27,
       "skip": 0,
       "fail": 0
      },
@@ -46407,7 +46419,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -46475,7 +46487,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 23,
+      "pass": 26,
       "skip": 0,
       "fail": 1
      },
@@ -46607,7 +46619,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -46670,7 +46682,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 24,
+      "pass": 27,
       "skip": 0,
       "fail": 0
      },
@@ -46783,7 +46795,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -46851,15 +46863,18 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 18,
+      "pass": 19,
       "skip": 0,
-      "fail": 6
+      "fail": 8
      },
      "fails": [
       "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
       "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+      "B6f5 E5 a note and a tempo edit while playing are adopted at a seam without a dispose or a restart",
       "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
       "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+      "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
+      "B6f5 a resume after an adoption plays the newest state",
       "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces"
      ],
      "fuzz": null,
@@ -46995,20 +47010,25 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 206,
+      "pass": 213,
       "skip": 1,
-      "fail": 12
+      "fail": 16
      },
      "fails": [
       "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
       "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+      "B6f5 E5 a note and a tempo edit while playing are adopted at a seam without a dispose or a restart",
       "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
       "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+      "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
+      "B6f5 a resume after an adoption plays the newest state",
       "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
       "B6f5c a failed take followed by the caller stop or cancel adopts or rebuilds each edit once",
       "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
       "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
       "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
+      "F20 W-F20b changing the loop end while playing is adopted at a seam and the schedule loops at the new end",
+      "F20 W-F20f toggling the loop on and off while playing is adopted without a dispose or a restart",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -47066,7 +47086,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 24,
+      "pass": 27,
       "skip": 0,
       "fail": 0
      },
@@ -47179,7 +47199,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -47247,7 +47267,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 23,
+      "pass": 26,
       "skip": 0,
       "fail": 1
      },
@@ -47390,7 +47410,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -47566,7 +47586,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -47825,7 +47845,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -47949,7 +47969,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 24,
+      "pass": 27,
       "skip": 0,
       "fail": 0
      },
@@ -48062,7 +48082,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -48130,7 +48150,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 23,
+      "pass": 26,
       "skip": 0,
       "fail": 1
      },
@@ -48266,7 +48286,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -48329,7 +48349,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 24,
+      "pass": 27,
       "skip": 0,
       "fail": 0
      },
@@ -48442,7 +48462,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -48510,16 +48530,19 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 17,
+      "pass": 18,
       "skip": 0,
-      "fail": 7
+      "fail": 9
      },
      "fails": [
       "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
       "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
       "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
       "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from",
+      "B6f5 E5 a note and a tempo edit while playing are adopted at a seam without a dispose or a restart",
       "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+      "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
+      "B6f5 a resume after an adoption plays the newest state",
       "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces"
      ],
      "fuzz": null,
@@ -48717,17 +48740,22 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 209,
+      "pass": 216,
       "skip": 1,
-      "fail": 9
+      "fail": 13
      },
      "fails": [
       "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
       "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
       "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
       "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from",
+      "B6f5 E5 a note and a tempo edit while playing are adopted at a seam without a dispose or a restart",
       "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+      "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
+      "B6f5 a resume after an adoption plays the newest state",
       "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+      "E3 W-E3-6 a locate while playing seeks the same session without a dispose or a Play, and the follow adopts the edit after it",
+      "F20 W-F20f toggling the loop on and off while playing is adopted without a dispose or a restart",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -48895,7 +48923,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -49089,7 +49117,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -50020,7 +50048,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 9,
+      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -50129,7 +50157,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -50195,7 +50223,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 6,
+      "pass": 5,
       "skip": 0,
       "fail": 3
      },
@@ -50323,7 +50351,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 224,
       "skip": 1,
       "fail": 5
      },
@@ -50386,7 +50414,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 9,
+      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -50505,7 +50533,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 7,
+      "pass": 6,
       "skip": 0,
       "fail": 2
      },
@@ -50630,7 +50658,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 24,
+      "pass": 27,
       "skip": 0,
       "fail": 0
      },
@@ -50749,15 +50777,16 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 17,
+      "pass": 19,
       "skip": 0,
-      "fail": 7
+      "fail": 8
      },
      "fails": [
       "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
       "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
       "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
       "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+      "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
       "B6f5 a resume after an adoption plays the newest state",
       "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does",
       "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces"
@@ -50819,15 +50848,16 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 218,
+      "pass": 216,
       "skip": 0,
-      "fail": 20
+      "fail": 22
      },
      "fails": [
       "B6F5PROBE cost native-off fader drag while playing",
       "B6F5PROBE cost native-on fader drag while playing",
       "B6F5PROBE native-off paused mixer",
       "B6F5PROBE native-off paused-reprepare-postcompile mixer",
+      "B6F5PROBE native-off paused-reprepare-precompile mixer",
       "B6F5PROBE native-off pending-cold-play-postcompile mixer",
       "B6F5PROBE native-off pending-pause mixer",
       "B6F5PROBE native-off pending-warm-play mixer",
@@ -50837,6 +50867,7 @@
       "B6F5PROBE native-off stopped mixer",
       "B6F5PROBE native-on paused mixer",
       "B6F5PROBE native-on paused-reprepare-postcompile mixer",
+      "B6F5PROBE native-on paused-reprepare-precompile mixer",
       "B6F5PROBE native-on pending-cold-play-postcompile mixer",
       "B6F5PROBE native-on pending-pause mixer",
       "B6F5PROBE native-on pending-warm-play mixer",
@@ -50897,7 +50928,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 24,
+      "pass": 27,
       "skip": 0,
       "fail": 0
      },
@@ -51006,7 +51037,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -51072,7 +51103,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 23,
+      "pass": 26,
       "skip": 0,
       "fail": 1
      },
@@ -51195,7 +51226,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -51256,7 +51287,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 9,
+      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -51375,7 +51406,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 8,
+      "pass": 7,
       "skip": 0,
       "fail": 1
      },
@@ -51605,7 +51636,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -51794,11 +51825,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
      "fails": [
+      "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -52328,7 +52360,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 10,
+      "pass": 9,
       "skip": 0,
       "fail": 0
      },
@@ -52385,7 +52417,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 24,
+      "pass": 27,
       "skip": 0,
       "fail": 0
      },
@@ -52504,7 +52536,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 9,
+      "pass": 8,
       "skip": 0,
       "fail": 1
      },
@@ -52569,7 +52601,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 23,
+      "pass": 26,
       "skip": 0,
       "fail": 1
      },
@@ -52690,7 +52722,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 10,
+      "pass": 9,
       "skip": 0,
       "fail": 0
      },
@@ -52809,7 +52841,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 9,
+      "pass": 8,
       "skip": 0,
       "fail": 1
      },
@@ -52928,7 +52960,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -52981,7 +53013,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -53045,7 +53077,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 5,
+      "pass": 6,
       "skip": 0,
       "fail": 2
      },
@@ -53107,7 +53139,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 224,
       "skip": 1,
       "fail": 5
      },
@@ -53168,7 +53200,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -53221,7 +53253,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -53287,9 +53319,10 @@
      "counts": {
       "pass": 6,
       "skip": 0,
-      "fail": 1
+      "fail": 2
      },
      "fails": [
+      "B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped",
       "B6f5c a structural edit held by a portable take reaches the playing session once the take stops or is cancelled"
      ],
      "fuzz": null,
@@ -53346,11 +53379,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 225,
       "skip": 1,
-      "fail": 3
+      "fail": 4
      },
      "fails": [
+      "B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped",
       "B6f5c a structural edit held by a portable take reaches the playing session once the take stops or is cancelled",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
@@ -53405,7 +53439,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -53458,7 +53492,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -53522,7 +53556,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 6,
+      "pass": 7,
       "skip": 0,
       "fail": 1
      },
@@ -53583,7 +53617,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -53642,7 +53676,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -53695,7 +53729,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -53815,7 +53849,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 6,
+      "pass": 7,
       "skip": 0,
       "fail": 1
      },
@@ -53876,7 +53910,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -53997,7 +54031,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -54050,7 +54084,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -54170,7 +54204,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 6,
+      "pass": 7,
       "skip": 0,
       "fail": 1
      },
@@ -54231,7 +54265,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -54352,7 +54386,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -54405,7 +54439,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -54525,7 +54559,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 6,
+      "pass": 7,
       "skip": 0,
       "fail": 1
      },
@@ -54586,7 +54620,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -54707,7 +54741,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -54760,7 +54794,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -54880,7 +54914,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 6,
+      "pass": 7,
       "skip": 0,
       "fail": 1
      },
@@ -54941,7 +54975,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -55062,7 +55096,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -55115,7 +55149,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -55179,7 +55213,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 6,
+      "pass": 7,
       "skip": 0,
       "fail": 1
      },
@@ -55240,7 +55274,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -56789,7 +56823,7 @@
      "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 3,
+      "pass": 5,
       "skip": 0,
       "fail": 0
      },
@@ -56852,7 +56886,7 @@
      "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 3,
+      "pass": 5,
       "skip": 0,
       "fail": 0
      },
@@ -56921,13 +56955,12 @@
      "exit": 1,
      "applied": 4,
      "counts": {
-      "pass": 1,
+      "pass": 4,
       "skip": 0,
-      "fail": 2
+      "fail": 1
      },
      "fails": [
-      "STEP7B3 real host paused edit during claimed latency",
-      "STEP7B3 real paused structural edit during held publication"
+      "STEP7B3 real paused structural edit during held publication that replaces the preview"
      ],
      "fuzz": null,
      "rejection": null,
@@ -57322,14 +57355,22 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 2,
      "counts": null,
      "fails": null,
      "fuzz": {
       "seed": 120,
-      "status": "pass",
-      "failures": []
+      "status": "fail",
+      "failures": [
+       {
+        "invariant": "I5",
+        "detail": "Duplicate acquisition 1",
+        "class": null,
+        "domain": "live",
+        "step": null
+       }
+      ]
      },
      "rejection": null,
      "tsErrors": null,
@@ -65845,7 +65886,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -65915,7 +65956,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 193,
+      "pass": 204,
       "skip": 1,
       "fail": 25
      },
@@ -66002,7 +66043,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 195,
+      "pass": 206,
       "skip": 1,
       "fail": 23
      },
@@ -66087,7 +66128,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -66157,7 +66198,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -66229,7 +66270,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -66299,7 +66340,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -66371,7 +66412,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -66442,7 +66483,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 195,
+      "pass": 206,
       "skip": 1,
       "fail": 23
      },
@@ -66527,7 +66568,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 195,
+      "pass": 206,
       "skip": 1,
       "fail": 23
      },
@@ -66618,7 +66659,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 212,
+      "pass": 223,
       "skip": 1,
       "fail": 6
      },
@@ -66692,7 +66733,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -66762,7 +66803,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -66833,7 +66874,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -66903,7 +66944,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -66974,7 +67015,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -67046,7 +67087,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -67117,7 +67158,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 213,
+      "pass": 224,
       "skip": 1,
       "fail": 5
      },
@@ -67184,7 +67225,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -67242,7 +67283,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
       "fail": 2
      },
@@ -67306,7 +67347,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 223,
       "skip": 1,
       "fail": 6
      },
@@ -67842,7 +67883,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -67913,7 +67954,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 213,
+      "pass": 224,
       "skip": 1,
       "fail": 5
      },
@@ -67980,7 +68021,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -68052,7 +68093,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },
@@ -68118,7 +68159,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 215,
+      "pass": 226,
       "skip": 1,
       "fail": 3
      },
@@ -68189,7 +68230,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 211,
+      "pass": 222,
       "skip": 1,
       "fail": 7
      },
@@ -68258,7 +68299,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 225,
       "skip": 1,
       "fail": 4
      },

@@ -488,7 +488,6 @@ type PortablePagedPreparation = {
   assetId: string
   pageKeys: readonly string[]
   stopFrame: number
-  epoch: number
   released: boolean
 }
 
@@ -897,7 +896,6 @@ const preparePagedSources = async (input: {
         assetId: source.assetId,
         pageKeys: coverage.pageKeys,
         stopFrame: source.stopFrame,
-        epoch: input.generation,
         released: false,
       })
     }
@@ -1033,6 +1031,9 @@ export const createPortableBrowserPlaybackController = (input: {
   let lifecycleGeneration = 0
   let recording: PortableRecordingSession | undefined
   let epoch = 0
+  // Paged assets and their preparations belong to the session's creation epoch. The transport epoch moves on a locate and
+  // must not: the worklet answers a paged call under any other generation as stale, or releases every asset.
+  let assetGeneration = 0
   let positionFrame = 0
   // Oldest first; the segment in effect is the last one that starts at or before the reported raw frame.
   let positionSegments: readonly PositionSegment[] = []
@@ -1073,7 +1074,6 @@ export const createPortableBrowserPlaybackController = (input: {
 
   const clearActiveSessionState = () => {
     const session = active
-    const generation = epoch
     const cleanup: Promise<unknown>[] = []
     active = undefined
     activeProjectGeneration = undefined
@@ -1085,10 +1085,10 @@ export const createPortableBrowserPlaybackController = (input: {
     activeSnapshot = undefined
     activeFrameSchedule = undefined
     adoptionRetry = undefined
-    if (session?.releaseAssetPreparation && generation !== undefined) {
+    if (session?.releaseAssetPreparation) {
       for (const preparation of activePreparations) {
         if (!preparation.released) {
-          cleanup.push(session.releaseAssetPreparation(preparation.id, generation).then((result) => {
+          cleanup.push(session.releaseAssetPreparation(preparation.id, assetGeneration).then((result) => {
             if (result === "released") preparation.released = true
           }).catch(() => undefined))
         }
@@ -1129,7 +1129,7 @@ export const createPortableBrowserPlaybackController = (input: {
     const releases: Promise<unknown>[] = []
     for (const preparation of runtime.preparations) {
       if (!preparation.released) {
-        const release = runtime.session.releaseAssetPreparation?.(preparation.id, runtime.epoch)
+        const release = runtime.session.releaseAssetPreparation?.(preparation.id, runtime.assetGeneration)
         if (release) {
           releases.push(release.then((result) => {
             if (result === "released") preparation.released = true
@@ -1143,12 +1143,12 @@ export const createPortableBrowserPlaybackController = (input: {
     runtime.session.dispose()
   }
 
-  const releaseExpiredPreparations = async (session: PortableSession, frame: number, generation: number) => {
+  const releaseExpiredPreparations = async (session: PortableSession, frame: number) => {
     const expired = activePreparations.filter((preparation) => !preparation.released && preparation.stopFrame <= frame)
     if (!session.releaseAssetPreparation || expired.length === 0) return
     const results = await Promise.all(expired.map(async (preparation) => ({
       preparation,
-      result: await session.releaseAssetPreparation?.(preparation.id, generation),
+      result: await session.releaseAssetPreparation?.(preparation.id, assetGeneration),
     })))
     const released = new Set(
       results.filter((entry) => entry.result === "released").map((entry) => entry.preparation.id),
@@ -1217,6 +1217,7 @@ export const createPortableBrowserPlaybackController = (input: {
     snapshot: LivePlaybackSnapshot
     projectGeneration: number
     epoch: number
+    assetGeneration: number
     transport: LivePlaybackTransport
     requestedFrame: number
     unsubscribeFault: () => void
@@ -1414,7 +1415,7 @@ export const createPortableBrowserPlaybackController = (input: {
         if (position.frame < positionFrame && position.running) return
         positionSequence = position.sequence
         positionFrame = position.frame
-        void releaseExpiredPreparations(playbackSession, position.frame, nextEpoch).catch(() => undefined)
+        void releaseExpiredPreparations(playbackSession, position.frame).catch(() => undefined)
         if (adoptionRetry && --adoptionRetry.wait <= 0) {
           const { resubmits } = adoptionRetry
           adoptionRetry = undefined
@@ -1429,6 +1430,7 @@ export const createPortableBrowserPlaybackController = (input: {
         snapshot: compilation.snapshot,
         projectGeneration,
         epoch: nextEpoch,
+        assetGeneration: nextEpoch,
         transport: { ...transport },
         requestedFrame,
         unsubscribeFault: unsubscribeSessionFault,
@@ -1484,6 +1486,7 @@ export const createPortableBrowserPlaybackController = (input: {
     activePreparations = runtime.preparations
     playing = runTransport
     epoch = runtime.epoch
+    assetGeneration = runtime.assetGeneration
     positionFrame = runTransport ? runtime.requestedFrame : runtime.prepared.schedule.timeOrigin.frame
     positionSequence = 0
     unsubscribeFault = runtime.unsubscribeFault
@@ -1603,7 +1606,7 @@ export const createPortableBrowserPlaybackController = (input: {
     const request: Promise<PortableStartResult> = (async (): Promise<PortableStartResult> => {
       if (recording) {
         const nextEpoch = epoch
-        await releaseExpiredPreparations(previousSession, currentFrame, nextEpoch)
+        await releaseExpiredPreparations(previousSession, currentFrame)
         activeOrdinarySources = activeOrdinarySources.filter((source) => source.stopFrame > currentFrame)
         activePreparedSources = activePreparedSources.filter((source) => !source.preparation.released)
         const baselineOrdinarySources = activeOrdinarySources
@@ -1667,7 +1670,7 @@ export const createPortableBrowserPlaybackController = (input: {
                 preparedStretchAssets: activePreparedStretchAssets,
                 ordinaryDescriptors: activeOrdinaryDescriptors,
                 repository: stretchRepository,
-                generation: nextEpoch,
+                generation: assetGeneration,
                 preparationCapacity: previousSession.pagedCapabilities?.preparationCount ?? portablePagedPreparationCapacity,
                 baselinePreparationCount: baselinePreparations.length,
                 signal: refreshAbortController.signal,
@@ -1738,7 +1741,7 @@ export const createPortableBrowserPlaybackController = (input: {
           if (paged) {
             await Promise.all(paged.preparations.map(async (preparation) => {
               if (!preparation.released) {
-                const result = await previousSession.releaseAssetPreparation?.(preparation.id, nextEpoch)
+                const result = await previousSession.releaseAssetPreparation?.(preparation.id, assetGeneration)
                 if (result === "released") preparation.released = true
               }
             }))
@@ -2215,7 +2218,7 @@ export const createPortableBrowserPlaybackController = (input: {
     if (!context || !baselineSchedule || !baselineScheduleRange || activeRevision === undefined || !activeGraph) {
       throw new Error("Portable recording requires an active schedule.")
     }
-    await releaseExpiredPreparations(playbackSession, positionFrame, epoch)
+    await releaseExpiredPreparations(playbackSession, positionFrame)
     const projectGeneration = input.getProjectGeneration?.() ?? 0
     const transport: LivePlaybackTransport = {
       ...(activeTransport ?? {

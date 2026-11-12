@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <fstream>
 #include <chrono>
 #include <cstring>
 #include <cstdio>
@@ -5532,7 +5533,38 @@ void TestRapidInsertUndoBurstKeepsEveryInstanceOwned() {
   host.Stop();
 }
 
+// A child that ignores the stop request and SIGTERM needs about 500 ms before SIGKILL.
+void TestRetiringASlowWorkerDoesNotBlockTheCommandLoop() {
+  const std::string slow_worker = "/tmp/ae08-slow-exit-worker.sh";
+  {
+    std::ofstream script(slow_worker);
+    script << "#!/bin/sh\ntrap '' TERM\nexec /bin/sleep 30\n";
+  }
+  assert(chmod(slow_worker.c_str(), 0700) == 0);
+  AudioHostTestAccess::UseWorkerExecutable(slow_worker);
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  StartRunningHostWithGraph(host);
+  assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 2)));
+  const int slow_group = AudioHostTestAccess::WorkerProcessGroup(host, kFirstVstInstance);
+  assert(slow_group > 0);
+  const auto started = std::chrono::steady_clock::now();
+  assert(host.DetachVstReference(kFirstVstInstance));
+  host.ProcessNativeVstControl();
+  const auto elapsed = std::chrono::steady_clock::now() - started;
+  assert(elapsed < std::chrono::milliseconds(100));
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kAbsent);
+  // The slow child is still being retired, yet it ends without anyone waiting on the command loop.
+  for (int attempt = 0; attempt < 400 && kill(-slow_group, 0) == 0; ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  assert(kill(-slow_group, 0) != 0 && errno == ESRCH);
+  host.Stop();
+  AudioHostTestAccess::UseWorkerExecutable({});
+}
+
 int main() {
+  if (std::getenv("DAW_AE08_RETIRE_ONLY")) { TestRetiringASlowWorkerDoesNotBlockTheCommandLoop(); return 0; }
   if (const auto* mode = std::getenv("DAW_AE08_OBSERVATION_ONLY")) {
     TestCheckpoint4ObservationHandoff(*mode); return 0;
   }
@@ -5740,5 +5772,6 @@ int main() {
   TestRollbackRetiresEveryStagedAttachment();
   TestUndoBeforePublicationBindsNothing();
   TestRapidInsertUndoBurstKeepsEveryInstanceOwned();
+  TestRetiringASlowWorkerDoesNotBlockTheCommandLoop();
   return 0;
 }

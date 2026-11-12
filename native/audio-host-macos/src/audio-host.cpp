@@ -90,6 +90,9 @@ std::atomic<void (*)(std::uint64_t, std::uint32_t)> test_patch_ack_hook{nullptr}
 std::atomic<bool> test_patch_claim_discard{false};
 // Starts attached workers without a plug-in, so the host's worker handling runs in CTest.
 std::atomic<bool> test_no_plugin_workers{false};
+// Replaces the worker executable (a child that is slow to exit). Set from the test thread
+// before any attach; the command thread is that same thread.
+std::string test_worker_executable;
 #endif
 #endif
 
@@ -117,6 +120,9 @@ Diagnostics::DurationQuantiles DurationQuantiles(
 }
 
 std::optional<std::string> WorkerExecutablePath() {
+#if defined(DAW_AUDIO_HOST_TEST_PATCH_CLAIM) && DAW_AUDIO_HOST_TEST_PATCH_CLAIM == 1
+  if (!test_worker_executable.empty()) return test_worker_executable;
+#endif
   std::uint32_t size = 0;
   if (_NSGetExecutablePath(nullptr, &size) != -1 || size == 0 || size > 16U * 1024U) return std::nullopt;
   std::vector<char> executable(size);
@@ -1264,6 +1270,49 @@ std::optional<std::string> CoreAudioDeviceUid(std::string_view device_id) {
   return std::string(device_id.substr(prefix.size()));
 }
 
+// Destroys retired attachments off the command thread: a worker's Stop() waits up to about
+// 500 ms for its child to exit. Event driven; the thread sleeps on the queue.
+class RetiredAttachmentReaper {
+ public:
+  RetiredAttachmentReaper() : thread_([this] { Run(); }) {}
+  ~RetiredAttachmentReaper() {
+    {
+      const std::lock_guard lock(mutex_);
+      stopping_ = true;
+    }
+    wake_.notify_one();
+    thread_.join();
+  }
+  RetiredAttachmentReaper(const RetiredAttachmentReaper&) = delete;
+  RetiredAttachmentReaper& operator=(const RetiredAttachmentReaper&) = delete;
+  void Reap(std::unique_ptr<NativeVstWorkerAttachment> attachment) {
+    {
+      const std::lock_guard lock(mutex_);
+      queue_.push_back(std::move(attachment));
+    }
+    wake_.notify_one();
+  }
+
+ private:
+  void Run() {
+    std::unique_lock lock(mutex_);
+    for (;;) {
+      wake_.wait(lock, [this] { return stopping_ || !queue_.empty(); });
+      if (queue_.empty()) return;
+      auto attachment = std::move(queue_.front());
+      queue_.pop_front();
+      lock.unlock();
+      attachment.reset();  // stops its worker
+      lock.lock();
+    }
+  }
+  std::mutex mutex_;
+  std::condition_variable wake_;
+  std::deque<std::unique_ptr<NativeVstWorkerAttachment>> queue_;
+  bool stopping_ = false;
+  std::thread thread_;
+};
+
 struct AudioHost::Impl {
   std::unique_ptr<AcceptanceOutputTap> acceptance_tap = daw::acceptance::Enabled()
     ? std::make_unique<AcceptanceOutputTap>() : nullptr;
@@ -1842,6 +1891,8 @@ struct AudioHost::Impl {
   // Set while the workers run, so an instance added to a live graph starts at once.
   std::optional<daw::plugin_host::WorkerProcessSetup::Mode> native_worker_mode;
   WorkerNotificationSink worker_notifications{};
+  // Declared after the sink its attachments report to, so it is destroyed first.
+  std::optional<RetiredAttachmentReaper> retired_attachment_reaper;
   std::atomic<daw_audio_core_handle> recording_capture = 0;
   std::atomic<bool> recording_started = false;
   std::atomic<bool> recording_monitoring = false;
@@ -2189,21 +2240,24 @@ struct AudioHost::Impl {
     native_worker_mode = mode;
     return true;
   }
-  // A retired instance stops now unless the live plan still renders it, then is freed
-  // once no plan holds its address. Control thread only.
+  // A retired instance is handed to the reaper (which stops its worker) once no plan
+  // holds its address. Control thread only.
   void RetireNativeVst(NativeVstWorkerAttachment& attachment) {
     attachment.ownership = NativeVstWorkerAttachment::Ownership::kRetired;
-    if (!attachment.bound_active) attachment.worker.Stop();
   }
   void ReclaimRetiredNativeVsts() {
     if (HasRetiredPlan()) return;
-    std::erase_if(native_vst_attachments, [](const auto& entry) {
-      auto& attachment = *entry.second;
+    for (auto entry = native_vst_attachments.begin(); entry != native_vst_attachments.end();) {
+      const auto& attachment = *entry->second;
       if (attachment.ownership != NativeVstWorkerAttachment::Ownership::kRetired
-        || attachment.bound_active || attachment.bound_prepared) return false;
-      attachment.worker.Stop();
-      return true;
-    });
+        || attachment.bound_active || attachment.bound_prepared) {
+        ++entry;
+        continue;
+      }
+      if (!retired_attachment_reaper) retired_attachment_reaper.emplace();
+      retired_attachment_reaper->Reap(std::move(entry->second));
+      entry = native_vst_attachments.erase(entry);
+    }
   }
   // The prepared revision became the active plan: staged instances it bound are now
   // active, and a staged instance it could not bind (not ready) is retired.
@@ -3360,6 +3414,10 @@ void SetTestPatchClaimDiscard(const bool discard) {
 
 void AudioHostTestAccess::UseNoPluginWorkers(const bool use) {
   test_no_plugin_workers.store(use, std::memory_order_release);
+}
+
+void AudioHostTestAccess::UseWorkerExecutable(std::string path) {
+  test_worker_executable = std::move(path);
 }
 
 bool AudioHostTestAccess::PublishWorkerDiagnostic(

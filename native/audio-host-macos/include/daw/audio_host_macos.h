@@ -570,6 +570,7 @@ struct AudioHostTestAccess {
   enum class Ownership { kAbsent, kStaged, kActive, kRetired };
   static Ownership AttachmentOwnership(AudioHost& host, std::string_view instance_id);
   static void UseNoPluginWorkers(bool use);
+  static void UseWorkerExecutable(std::string path);
   static bool PublishWorkerDiagnostic(AudioHost& host, std::string_view instance_id,
     const daw::plugin_host::WorkerDiagnostic& diagnostic);
   static std::uint64_t WorkerGeneration(AudioHost& host, std::string_view instance_id);

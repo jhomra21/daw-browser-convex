@@ -5427,6 +5427,111 @@ void TestWorkerFaultIsolatesOnlyThatAttachment() {
   host.Stop();
 }
 
+namespace {
+using Ownership = daw::audio_host_macos::AudioHostTestAccess::Ownership;
+using daw::audio_host_macos::GraphRevisionStatusCode;
+
+Ownership OwnershipOf(daw::audio_host_macos::AudioHost& host, const std::string_view instance_id) {
+  return AudioHostTestAccess::AttachmentOwnership(host, instance_id);
+}
+
+void RenderBlock(daw::audio_host_macos::AudioHost& host) {
+  std::array<float, 4> silence{}, left{}, right{};
+  const std::array<const float*, 2> input{silence.data(), silence.data()};
+  const std::array<float*, 2> output{left.data(), right.data()};
+  assert(host.ProcessPlanar(input, output, 4));
+}
+
+// Runs a published graph with the transport rolling, ready for live revisions.
+void StartRunningHostWithGraph(daw::audio_host_macos::AudioHost& host) {
+  ConfigureDiagnosticHost(host);
+  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.0F)));
+  assert(host.SetTransport(1, false, 0));
+  assert(host.StartDiagnosticMode());
+  assert(host.SetTransport(1, true, 0));
+  RenderBlock(host);
+}
+
+void PublishRunningRevision(daw::audio_host_macos::AudioHost& host, const std::uint32_t revision, const std::uint32_t latency) {
+  assert(host.PrepareGraphRevision(revision, GraphSnapshot(revision, 1.0F, latency)).code == GraphRevisionStatusCode::kPrepared);
+  assert(host.PublishGraphRevision(revision).code == GraphRevisionStatusCode::kPublishPending);
+  RenderBlock(host);
+  assert(host.InspectGraphRevision(revision).code == GraphRevisionStatusCode::kPublished);
+}
+}
+
+void TestStagedAttachmentJoinsAPublishedGraph() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  StartRunningHostWithGraph(host);
+  assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 2)));
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kStaged);
+  assert(WaitForVstHealth(host, kFirstVstInstance, NativeVstWorkerHealth::kReady));
+  PublishRunningRevision(host, 3, 36);
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kActive);
+  assert(host.NativeVstHealth(kFirstVstInstance) == NativeVstWorkerHealth::kReady);
+  host.Stop();
+}
+
+void TestStagedAttachmentThatIsNotReadyIsRetiredAtPublication() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  ConfigureDiagnosticHost(host);
+  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.0F)));
+  assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 2)));
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kStaged);
+  assert(host.PrepareAndPublishGraph(3, GraphSnapshot(3, 1.0F)));
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kRetired);
+  host.ProcessNativeVstControl();
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kAbsent);
+}
+
+void TestRollbackRetiresEveryStagedAttachment() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  StartRunningHostWithGraph(host);
+  assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 2)));
+  assert(WaitForVstHealth(host, kFirstVstInstance, NativeVstWorkerHealth::kReady));
+  assert(host.PrepareGraphRevision(3, GraphSnapshot(3, 1.0F, 36)).code == GraphRevisionStatusCode::kPrepared);
+  assert(host.RollbackGraphRevision(3).code == GraphRevisionStatusCode::kRolledBack);
+  host.ProcessNativeVstControl();
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kAbsent);
+  host.Stop();
+}
+
+void TestUndoBeforePublicationBindsNothing() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  StartRunningHostWithGraph(host);
+  // Deleted while its worker is still starting.
+  assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 2)));
+  assert(host.DetachVstReference(kFirstVstInstance));
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kAbsent);
+  // Undone after its worker became ready: the late ready must not reach the graph,
+  // which a binding would reject because the node declares no external latency.
+  assert(host.AttachNativeVst(PlaybackVstAttachment(kSecondVstInstance, 2)));
+  assert(WaitForVstHealth(host, kSecondVstInstance, NativeVstWorkerHealth::kReady));
+  assert(host.DetachVstReference(kSecondVstInstance));
+  PublishRunningRevision(host, 3, 0);
+  host.ProcessNativeVstControl();
+  assert(OwnershipOf(host, kSecondVstInstance) == Ownership::kAbsent);
+  host.Stop();
+}
+
+void TestRapidInsertUndoBurstKeepsEveryInstanceOwned() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  StartRunningHostWithGraph(host);
+  for (unsigned burst = 0; burst < 70; ++burst) {
+    char id[40];
+    std::snprintf(id, sizeof(id), "b0c4db1e-bd48-46d4-a4bc-%012u", burst);
+    assert(host.AttachNativeVst(PlaybackVstAttachment(id, 2)));
+    assert(host.DetachVstReference(id));
+    assert(OwnershipOf(host, id) == Ownership::kAbsent);
+  }
+  host.Stop();
+}
+
 int main() {
   if (const auto* mode = std::getenv("DAW_AE08_OBSERVATION_ONLY")) {
     TestCheckpoint4ObservationHandoff(*mode); return 0;
@@ -5630,5 +5735,10 @@ int main() {
   TestLatencyReportPublishesWithoutStop();
   TestComponentRestartIsWorkerLocal();
   TestWorkerFaultIsolatesOnlyThatAttachment();
+  TestStagedAttachmentJoinsAPublishedGraph();
+  TestStagedAttachmentThatIsNotReadyIsRetiredAtPublication();
+  TestRollbackRetiresEveryStagedAttachment();
+  TestUndoBeforePublicationBindsNothing();
+  TestRapidInsertUndoBurstKeepsEveryInstanceOwned();
   return 0;
 }

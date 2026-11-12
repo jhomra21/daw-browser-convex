@@ -329,6 +329,14 @@ struct NativeVstWorkerAttachment {
     bool active = false;
   };
   static constexpr std::size_t kActiveNoteCapacity = 256;
+  // An instance added to a live graph is staged until a published revision binds it,
+  // then active; it is retired when it was never ready, was undone, or its revision
+  // rolled back. Control thread only.
+  enum class Ownership : std::uint8_t { kStaged, kActive, kRetired };
+  Ownership ownership = Ownership::kActive;
+  // Which plans still hold this object's address. Retired objects are freed once neither does.
+  bool bound_prepared = false;
+  bool bound_active = false;
   NativeVstAttachment metadata;
   std::optional<Diagnostics::WorkerAutomation> worker_automation;
   bool offline = false;
@@ -1831,6 +1839,8 @@ struct AudioHost::Impl {
       [](const auto& entry) { return entry.second.release_requested; }), std::memory_order_release);
   }
   std::unordered_map<std::string, std::unique_ptr<NativeVstWorkerAttachment>> native_vst_attachments;
+  // Set while the workers run, so an instance added to a live graph starts at once.
+  std::optional<daw::plugin_host::WorkerProcessSetup::Mode> native_worker_mode;
   WorkerNotificationSink worker_notifications{};
   std::atomic<daw_audio_core_handle> recording_capture = 0;
   std::atomic<bool> recording_started = false;
@@ -2069,6 +2079,87 @@ struct AudioHost::Impl {
     recording_started.store(false, std::memory_order_release);
     return true;
   }
+  // Spawns one worker. The plug-in loads inside that process, so this never waits for it.
+  [[nodiscard]] bool StartNativeVstWorker(
+    NativeVstWorkerAttachment* const attachment,
+    const daw::plugin_host::WorkerProcessSetup::Mode mode,
+    const std::string& worker_executable
+  ) {
+    attachment->offline = mode == daw::plugin_host::WorkerProcessSetup::Mode::kOffline;
+    attachment->offline_started = false;
+    attachment->offline_parameters_applied = false;
+    attachment->realtime_started = false;
+    attachment->missed_callbacks.fill(0);
+    attachment->missed_frames.fill(0);
+    const auto& metadata = attachment->metadata;
+    const auto initial_state = metadata.initial_state_sha256.empty()
+      ? std::optional<daw::plugin_host::WorkerState>{}
+      : std::optional<daw::plugin_host::WorkerState>(
+        daw::plugin_host::WorkerState{
+          .bytes = metadata.initial_state,
+          .sha256 = metadata.initial_state_sha256,
+        });
+    daw::plugin_host::WorkerStartupRequest startup{
+      .eligibility = {
+        .canonicalBundlePath = metadata.canonical_bundle_path,
+        .canonicalExecutablePath = metadata.canonical_executable_path,
+        .bundleFingerprint = HexFingerprint(metadata.bundle_fingerprint),
+        .binaryFingerprint = HexFingerprint(metadata.binary_fingerprint),
+        .arm64 = metadata.architecture == 1,
+        .codeSignVerified = true,
+        .quarantinePresent = false,
+        .scannerProtocolVersion = metadata.scanner_catalog_version,
+      },
+      .classId = metadata.class_id,
+      .setup = {
+        .sampleRate = static_cast<double>(config.sample_rate_hz),
+        .maximumBlockFrames = metadata.transport.maximum_frames,
+        .inputChannels = metadata.transport.input_channels,
+        .outputChannels = metadata.transport.output_channels,
+        .mode = mode,
+      },
+      .state = initial_state,
+    };
+#if defined(DAW_AUDIO_HOST_TEST_PATCH_CLAIM) && DAW_AUDIO_HOST_TEST_PATCH_CLAIM == 1
+    if (test_no_plugin_workers.load(std::memory_order_acquire)) {
+      startup.eligibility = {};
+      startup.classId.clear();
+      startup.state.reset();
+      startup.noPluginTestMode = true;
+    }
+#endif
+    const daw::plugin_host::WorkerTransportRequest transport{
+      .slotCount = metadata.transport.slot_count,
+      .maximumFrames = metadata.transport.maximum_frames,
+      .inputChannels = metadata.transport.input_channels,
+      .outputChannels = metadata.transport.output_channels,
+      .maximumEventsPerBlock = static_cast<std::uint32_t>(std::min<std::size_t>(
+        daw::plugin_host::kMaximumWorkerEvents,
+        metadata.transport.maximum_events_per_block + metadata.initial_parameter_values.size()
+      )),
+    };
+    const daw::plugin_host::WorkerHostConfiguration worker_configuration{
+      .executable = worker_executable,
+      .artifact = {
+        .id = std::string(daw::plugin_host::kWorkerArtifactId),
+        .version = std::string(daw::plugin_host::kWorkerArtifactVersion),
+      },
+    };
+    attachment->worker.SetDiagnosticListener(ForwardWorkerDiagnostic, attachment);
+    if (!attachment->worker.Start(startup, worker_configuration, transport)) return false;
+    if (attachment->worker.workerGeneration() == 0) {
+      attachment->worker.Stop();
+      return false;
+    }
+    if (daw::acceptance::Enabled()) {
+      char fields[256];
+      std::snprintf(fields, sizeof(fields), ",\"workerGeneration\":\"%llu\",\"nodeId\":\"%llu\"",
+        static_cast<unsigned long long>(++acceptance_worker_ordinal),
+        static_cast<unsigned long long>(metadata.graph_node_id));
+      daw::acceptance::Event("worker-supervisor-started", fields);
+    }
+    return true;
+  }
   [[nodiscard]] bool StartNativeVstWorkers(
     const daw::plugin_host::WorkerProcessSetup::Mode mode
   ) {
@@ -2076,7 +2167,10 @@ struct AudioHost::Impl {
     const bool has_enabled_attachment = std::any_of(
       native_vst_attachments.begin(),
       native_vst_attachments.end(),
-      [](const auto& entry) { return entry.second->metadata.playback_enabled; }
+      [](const auto& entry) {
+        return entry.second->metadata.playback_enabled
+          && entry.second->ownership != NativeVstWorkerAttachment::Ownership::kRetired;
+      }
     );
     const auto worker_executable = has_enabled_attachment ? WorkerExecutablePath() : std::optional<std::string>{};
     if (has_enabled_attachment && !worker_executable) return false;
@@ -2084,93 +2178,58 @@ struct AudioHost::Impl {
     std::size_t started_count = 0;
     for (auto& [instance_id, attachment] : native_vst_attachments) {
       static_cast<void>(instance_id);
-      if (!attachment->metadata.playback_enabled) continue;
-      attachment->offline = mode == daw::plugin_host::WorkerProcessSetup::Mode::kOffline;
-      attachment->offline_started = false;
-      attachment->offline_parameters_applied = false;
-      attachment->realtime_started = false;
-      attachment->missed_callbacks.fill(0);
-      attachment->missed_frames.fill(0);
-      const auto& metadata = attachment->metadata;
-      const auto initial_state = metadata.initial_state_sha256.empty()
-        ? std::optional<daw::plugin_host::WorkerState>{}
-        : std::optional<daw::plugin_host::WorkerState>(
-          daw::plugin_host::WorkerState{
-            .bytes = metadata.initial_state,
-            .sha256 = metadata.initial_state_sha256,
-          });
-      daw::plugin_host::WorkerStartupRequest startup{
-        .eligibility = {
-          .canonicalBundlePath = metadata.canonical_bundle_path,
-          .canonicalExecutablePath = metadata.canonical_executable_path,
-          .bundleFingerprint = HexFingerprint(metadata.bundle_fingerprint),
-          .binaryFingerprint = HexFingerprint(metadata.binary_fingerprint),
-          .arm64 = metadata.architecture == 1,
-          .codeSignVerified = true,
-          .quarantinePresent = false,
-          .scannerProtocolVersion = metadata.scanner_catalog_version,
-        },
-        .classId = metadata.class_id,
-        .setup = {
-          .sampleRate = static_cast<double>(config.sample_rate_hz),
-          .maximumBlockFrames = metadata.transport.maximum_frames,
-          .inputChannels = metadata.transport.input_channels,
-          .outputChannels = metadata.transport.output_channels,
-          .mode = mode,
-        },
-        .state = initial_state,
-      };
-#if defined(DAW_AUDIO_HOST_TEST_PATCH_CLAIM) && DAW_AUDIO_HOST_TEST_PATCH_CLAIM == 1
-      if (test_no_plugin_workers.load(std::memory_order_acquire)) {
-        startup.eligibility = {};
-        startup.classId.clear();
-        startup.state.reset();
-        startup.noPluginTestMode = true;
-      }
-#endif
-      const daw::plugin_host::WorkerTransportRequest transport{
-        .slotCount = metadata.transport.slot_count,
-        .maximumFrames = metadata.transport.maximum_frames,
-        .inputChannels = metadata.transport.input_channels,
-        .outputChannels = metadata.transport.output_channels,
-        .maximumEventsPerBlock = static_cast<std::uint32_t>(std::min<std::size_t>(
-          daw::plugin_host::kMaximumWorkerEvents,
-          metadata.transport.maximum_events_per_block + metadata.initial_parameter_values.size()
-        )),
-      };
-      const daw::plugin_host::WorkerHostConfiguration worker_configuration{
-        .executable = *worker_executable,
-        .artifact = {
-          .id = std::string(daw::plugin_host::kWorkerArtifactId),
-          .version = std::string(daw::plugin_host::kWorkerArtifactVersion),
-        },
-      };
-      attachment->worker.SetDiagnosticListener(ForwardWorkerDiagnostic, attachment.get());
-      if (!attachment->worker.Start(startup, worker_configuration, transport)) {
-        for (std::size_t index = 0; index < started_count; ++index) {
-          started[index]->worker.Stop();
-        }
-        return false;
-      }
-      if (attachment->worker.workerGeneration() == 0) {
-        attachment->worker.Stop();
-        for (std::size_t index = 0; index < started_count; ++index) {
-          started[index]->worker.Stop();
-        }
+      if (!attachment->metadata.playback_enabled
+        || attachment->ownership == NativeVstWorkerAttachment::Ownership::kRetired) continue;
+      if (!StartNativeVstWorker(attachment.get(), mode, *worker_executable)) {
+        for (std::size_t index = 0; index < started_count; ++index) started[index]->worker.Stop();
         return false;
       }
       started[started_count++] = attachment.get();
-      if (daw::acceptance::Enabled()) {
-        char fields[256];
-        std::snprintf(fields, sizeof(fields), ",\"workerGeneration\":\"%llu\",\"nodeId\":\"%llu\"",
-          static_cast<unsigned long long>(++acceptance_worker_ordinal),
-          static_cast<unsigned long long>(metadata.graph_node_id));
-        daw::acceptance::Event("worker-supervisor-started", fields);
-      }
     }
+    native_worker_mode = mode;
     return true;
   }
+  // A retired instance stops now unless the live plan still renders it, then is freed
+  // once no plan holds its address. Control thread only.
+  void RetireNativeVst(NativeVstWorkerAttachment& attachment) {
+    attachment.ownership = NativeVstWorkerAttachment::Ownership::kRetired;
+    if (!attachment.bound_active) attachment.worker.Stop();
+  }
+  void ReclaimRetiredNativeVsts() {
+    if (HasRetiredPlan()) return;
+    std::erase_if(native_vst_attachments, [](const auto& entry) {
+      auto& attachment = *entry.second;
+      if (attachment.ownership != NativeVstWorkerAttachment::Ownership::kRetired
+        || attachment.bound_active || attachment.bound_prepared) return false;
+      attachment.worker.Stop();
+      return true;
+    });
+  }
+  // The prepared revision became the active plan: staged instances it bound are now
+  // active, and a staged instance it could not bind (not ready) is retired.
+  void AdoptPublishedNativeVsts() {
+    for (auto& [instance_id, attachment] : native_vst_attachments) {
+      static_cast<void>(instance_id);
+      attachment->bound_active = attachment->bound_prepared;
+      attachment->bound_prepared = false;
+      if (attachment->ownership != NativeVstWorkerAttachment::Ownership::kStaged) continue;
+      if (attachment->bound_active || !attachment->metadata.playback_enabled) {
+        attachment->ownership = NativeVstWorkerAttachment::Ownership::kActive;
+      } else {
+        RetireNativeVst(*attachment);
+      }
+    }
+  }
+  // The prepared revision was dropped: everything it staged is retired.
+  void RollbackStagedNativeVsts() {
+    for (auto& [instance_id, attachment] : native_vst_attachments) {
+      static_cast<void>(instance_id);
+      attachment->bound_prepared = false;
+      if (attachment->ownership == NativeVstWorkerAttachment::Ownership::kStaged) RetireNativeVst(*attachment);
+    }
+  }
   void StopNativeVstWorkers() {
+    native_worker_mode.reset();
     for (auto& [instance_id, attachment] : native_vst_attachments) {
       static_cast<void>(instance_id);
       attachment->worker.Stop();
@@ -2324,7 +2383,12 @@ struct AudioHost::Impl {
     std::unordered_map<std::uint64_t, std::vector<NativeVstWorkerAttachment*>> chains;
     for (auto& [instance_id, attachment] : native_vst_attachments) {
       static_cast<void>(instance_id);
-      if (!attachment->metadata.playback_enabled) continue;
+      if (!attachment->metadata.playback_enabled
+        || attachment->ownership == NativeVstWorkerAttachment::Ownership::kRetired) continue;
+      // A staged instance binds only once its worker is ready; otherwise it is left out
+      // and retired when this revision publishes.
+      if (attachment->ownership == NativeVstWorkerAttachment::Ownership::kStaged
+        && attachment->worker.health() != daw::plugin_host::WorkerHealth::kReady) continue;
       if (attachment->metadata.transport.maximum_frames < config.max_frames_per_block) return false;
       chains[attachment->metadata.graph_node_id].push_back(attachment.get());
     }
@@ -2364,7 +2428,7 @@ struct AudioHost::Impl {
         });
       }
     }
-    return daw::audio_core::RegisterNativeGraphHook(
+    if (daw::audio_core::RegisterNativeGraphHook(
       core,
       {
         .graph_revision = revision,
@@ -2373,7 +2437,14 @@ struct AudioHost::Impl {
         .observer = NativeTelemetryObserver::Dispatch,
         .observer_attachment = &telemetry_observer,
       }
-    ) == DAW_AUDIO_CORE_OK;
+    ) != DAW_AUDIO_CORE_OK) return false;
+    std::unordered_set<const void*> bound;
+    for (const auto& binding : bindings) bound.insert(binding.attachment);
+    for (auto& [instance_id, attachment] : native_vst_attachments) {
+      static_cast<void>(instance_id);
+      attachment->bound_prepared = bound.contains(attachment.get());
+    }
+    return true;
   }
 };
 
@@ -3046,6 +3117,7 @@ GraphRevisionStatus AudioHost::PublishGraphRevision(const std::uint32_t revision
       impl_->prepared_revision.store(0, std::memory_order_release);
       impl_->last_graph_revision.store(revision, std::memory_order_release);
       impl_->graph_prepared = true;
+      impl_->AdoptPublishedNativeVsts();
       return true;
     }
     if (daw_audio_core_publish(impl_->prepared_core, revision) != DAW_AUDIO_CORE_OK) return false;
@@ -3059,6 +3131,7 @@ GraphRevisionStatus AudioHost::PublishGraphRevision(const std::uint32_t revision
     impl_->retired_after_epoch.store(impl_->completed_render_epoch.load(std::memory_order_acquire), std::memory_order_release);
     impl_->last_graph_revision.store(revision, std::memory_order_release);
     impl_->graph_prepared = true;
+    impl_->AdoptPublishedNativeVsts();
     return true;
   };
   const auto publish_asset_handles = [this] {
@@ -3114,6 +3187,7 @@ GraphRevisionStatus AudioHost::InspectGraphRevision(const std::uint32_t revision
       impl_->prepared_asset_handles.clear();
       impl_->published_instrument_assets = std::move(impl_->prepared_instrument_assets);
       impl_->graph_prepared = true;
+      impl_->AdoptPublishedNativeVsts();
     } else {
       impl_->publication_in_flight = 0;
       impl_->schedule_owner.store(0, std::memory_order_release);
@@ -3160,6 +3234,7 @@ GraphRevisionStatus AudioHost::RollbackGraphRevision(const std::uint32_t revisio
     impl_->prepared_revision.store(0, std::memory_order_release);
     impl_->prepared_asset_handles.clear();
     impl_->prepared_instrument_assets.clear();
+    impl_->RollbackStagedNativeVsts();
     for (auto& [id, asset] : impl_->assets) {
       static_cast<void>(id);
       if (asset.staged_revision == revision) {
@@ -3300,6 +3375,20 @@ bool AudioHostTestAccess::PublishWorkerDiagnostic(
 std::uint64_t AudioHostTestAccess::WorkerGeneration(AudioHost& host, const std::string_view instance_id) {
   const auto attachment = host.impl_->native_vst_attachments.find(std::string(instance_id));
   return attachment == host.impl_->native_vst_attachments.end() ? 0 : attachment->second->worker.workerGeneration();
+}
+
+AudioHostTestAccess::Ownership AudioHostTestAccess::AttachmentOwnership(
+  AudioHost& host,
+  const std::string_view instance_id
+) {
+  const auto attachment = host.impl_->native_vst_attachments.find(std::string(instance_id));
+  if (attachment == host.impl_->native_vst_attachments.end()) return Ownership::kAbsent;
+  switch (attachment->second->ownership) {
+    case NativeVstWorkerAttachment::Ownership::kStaged: return Ownership::kStaged;
+    case NativeVstWorkerAttachment::Ownership::kActive: return Ownership::kActive;
+    case NativeVstWorkerAttachment::Ownership::kRetired: return Ownership::kRetired;
+  }
+  return Ownership::kAbsent;
 }
 
 int AudioHostTestAccess::WorkerProcessGroup(AudioHost& host, const std::string_view instance_id) {
@@ -4180,6 +4269,7 @@ std::optional<std::vector<std::uint8_t>> AudioHost::GetNativeVstState(const std:
 
 void AudioHost::ProcessNativeVstControl() {
   impl_->ReclaimAssets();
+  impl_->ReclaimRetiredNativeVsts();
   for (auto& [instance_id, attachment] : impl_->native_vst_attachments) {
     while (const auto diagnostic = attachment->worker.ReadDiagnostic()) {
       if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kScheduledAutomationInput) {
@@ -5053,7 +5143,8 @@ std::uint64_t AudioHost::appliedUrgentSequence() const {
 
 bool AudioHost::AttachNativeVst(const NativeVstAttachment& attachment) {
   NativeVstAttachment normalized = attachment;
-  if (impl_->graph_prepared || !ValidNativeVstAttachment(normalized)
+  impl_->ReclaimRetiredNativeVsts();
+  if (!ValidNativeVstAttachment(normalized)
     || impl_->native_vst_attachments.contains(normalized.instance_id)
     || impl_->native_vst_attachments.size() >= kMaximumNativeVstAttachments) return false;
   auto worker_attachment = std::make_unique<NativeVstWorkerAttachment>();
@@ -5061,7 +5152,16 @@ bool AudioHost::AttachNativeVst(const NativeVstAttachment& attachment) {
   worker_attachment->metadata = normalized;
   worker_attachment->notification_sink = &impl_->worker_notifications;
   worker_attachment->offline_failure = &impl_->offline_failure;
+  // Added to a graph that is already live, the instance waits for a published revision to bind it.
+  if (impl_->graph_prepared) worker_attachment->ownership = NativeVstWorkerAttachment::Ownership::kStaged;
+  auto* const staged = worker_attachment.get();
   impl_->native_vst_attachments.emplace(normalized.instance_id, std::move(worker_attachment));
+  if (impl_->native_worker_mode && staged->metadata.playback_enabled) {
+    // A spawn failure leaves the instance not ready, so no revision binds it.
+    if (const auto executable = WorkerExecutablePath()) {
+      static_cast<void>(impl_->StartNativeVstWorker(staged, *impl_->native_worker_mode, *executable));
+    }
+  }
   return true;
 }
 
@@ -5115,8 +5215,11 @@ std::optional<NativeVstEditorStatus> AudioHost::ExecuteNativeVstEditorCommand(
 }
 
 bool AudioHost::DetachVstReference(const std::string_view instance_id) {
-  if (impl_->graph_prepared) return false;
-  return impl_->native_vst_attachments.erase(std::string(instance_id)) == 1;
+  const auto attachment = impl_->native_vst_attachments.find(std::string(instance_id));
+  if (attachment == impl_->native_vst_attachments.end()) return false;
+  impl_->RetireNativeVst(*attachment->second);
+  impl_->ReclaimRetiredNativeVsts();
+  return true;
 }
 
 bool AudioHost::Start() {

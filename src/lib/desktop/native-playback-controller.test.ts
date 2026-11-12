@@ -7440,6 +7440,17 @@ test("keeps released live-note ownership separate across focused instrument targ
   await Bun.sleep(0)
   await expect(controller.seekPrepared(0.5)).resolves.toBe("started")
   const second = controller.startLiveMidiNote({ trackId: "instrument-b", pitch: 60, velocity: 0.8 })
+test("B6d an adoption answers a request of an ended incarnation unavailable, never applied", () => {
+  const owner = createNativeProcessorStateOwner()
+  owner.configured(1, new Map([["fx", b6dInstalled(3)]]))
+  // Submitted for incarnation 1; the published bank carries the target at incarnation 2, whose desired edit the owner has not seen.
+  const ended = owner.deliver({ key: "fx", editId: "fx-6", order: 6, kindId: 1, incarnation: 1, epoch: 1, values: { gainDb: 0 } })
+  expect(ended.receipt.answered).toBeUndefined()
+  owner.adopted(new Map([["fx", 1]]), new Set(), new Set(), 5, () => true,
+    new Map([["fx", { kindId: 1, state: new Uint8Array([0]), values: { gainDb: 0 }, incarnation: 2 }]]))
+  expect(ended.receipt.answered).toEqual({ state: "unavailable" })
+})
+
   if (!second) throw new Error("Second native live note did not start.")
   await Bun.sleep(0)
 

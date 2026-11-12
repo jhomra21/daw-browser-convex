@@ -1816,7 +1816,10 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
             }
             continue
           }
-          if (proves(target, receipt.spec)
+          // A target no desired edit has registered since it ended has no incarnation the bank could carry for this
+          // request: the bank's equal values belong to another processor. An instrument's incarnation is proven below.
+          if (!receipt.spec.instrument && target.registryIncarnation === undefined) answerReceipt(receipt, { state: "unavailable" })
+          else if (proves(target, receipt.spec)
             && (receipt.carrier?.strategy.kind === "patch" && target.inflight.size === 0
               || coverage(target, receipt.spec, receipt.contentKey, receipt.carrier?.epoch ?? 0).kind === "proven"))
             answerReceipt(receipt, { state: "applied" })

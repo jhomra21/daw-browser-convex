@@ -33378,7 +33378,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 7,
+      "pass": 15,
       "skip": 0,
       "fail": 0
      },
@@ -33494,16 +33494,13 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 2,
+      "pass": 13,
       "skip": 0,
-      "fail": 5
+      "fail": 2
      },
      "fails": [
-      "P1 a Synth portable bridge error is still reported and an unsupported Synth preview does not rebuild",
-      "P1 a non-live Synth oscillator level edit is refused and the prepared portable snapshot is unchanged",
-      "P1 a non-live Synth polyphony edit is refused and the prepared portable snapshot is unchanged",
-      "P1 a non-live Synth retrigger edit is refused and the prepared portable snapshot is unchanged",
-      "P1 live then non-live Synth edits in one gesture keep the last live state and release rebuilds once"
+      "P1 an edit that replaces the Synth with another instance is refused and sends no live events",
+      "P1 an edit that replaces the Synth with another kind is refused and sends no live events"
      ],
      "fuzz": null,
      "rejection": null,
@@ -34103,7 +34100,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 7,
+      "pass": 15,
       "skip": 0,
       "fail": 0
      },
@@ -34254,12 +34251,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 6,
+      "pass": 14,
       "skip": 0,
       "fail": 1
      },
      "fails": [
-      "P1 a Synth portable bridge error is still reported and an unsupported Synth preview does not rebuild"
+      "P1 a Synth portable bridge error is still reported and never rebuilds"
      ],
      "fuzz": null,
      "rejection": null,
@@ -42024,7 +42021,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -42341,9 +42338,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 188,
+      "pass": 187,
       "skip": 1,
-      "fail": 28
+      "fail": 31
      },
      "fails": [
       "B6f a project switch leaves a live paused portable session of the new project at the start",
@@ -42351,7 +42348,7 @@
       "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
       "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
       "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
-      "B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session",
+      "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
       "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
       "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
       "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
@@ -42362,9 +42359,12 @@
       "B6f5 a warm resume after an adoption plays the newest state without another compile",
       "B6f5 renaming and recolouring a track while playing is neither adopted nor rebuilt",
       "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+      "B6f5c a failed take followed by the caller stop or cancel adopts or rebuilds each edit once",
       "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
       "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
       "B6f5c a structural edit held by a portable take reaches the playing session once the take stops or is cancelled",
+      "B6f5c a take ended by a device fault follows the edit it held",
+      "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
       "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
       "C0G a clip waveform key or key order change while playing is neither adopted nor rebuilt",
       "failed lifecycle transition cancels delayed native startup",
@@ -46637,7 +46637,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -46750,7 +46750,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -46818,12 +46818,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 16,
+      "pass": 18,
       "skip": 0,
       "fail": 6
      },
      "fails": [
-      "B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session",
+      "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
       "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
       "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
       "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
@@ -46961,16 +46961,18 @@
      "counts": {
       "pass": 206,
       "skip": 1,
-      "fail": 10
+      "fail": 12
      },
      "fails": [
-      "B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session",
+      "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
       "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
       "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
       "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
       "B6f5 a warm resume after an adoption plays the newest state without another compile",
       "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+      "B6f5c a failed take followed by the caller stop or cancel adopts or rebuilds each edit once",
       "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
+      "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
       "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
@@ -48292,7 +48294,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -48405,7 +48407,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -48473,12 +48475,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 15,
+      "pass": 17,
       "skip": 0,
       "fail": 7
      },
      "fails": [
-      "B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session",
+      "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
       "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
       "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
       "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from",
@@ -48655,12 +48657,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 207,
+      "pass": 209,
       "skip": 1,
       "fail": 9
      },
      "fails": [
-      "B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session",
+      "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
       "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
       "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
       "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from",
@@ -49327,7 +49329,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -49501,10 +49503,10 @@
      "counts": {
       "pass": 12,
       "skip": 0,
-      "fail": 10
+      "fail": 12
      },
      "fails": [
-      "B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session",
+      "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
       "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
       "B6f5 R2 a live send crossing an adoption publish never faults the session",
       "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
@@ -49513,6 +49515,8 @@
       "B6f5 a refused or structural adoption asks for a rebuild and keeps the session revision",
       "B6f5 a warm resume after an adoption plays the newest state without another compile",
       "B6f5 adoptions coalesce to one in flight and one queued that carries the newest edit",
+      "B6f5 m1 a live synth send while the adoption prepares waits for the publish and reaches the revision that carries it",
+      "B6f5 m1 a live synth value accepted during an adoption compile is in the configuration the adoption publishes",
       "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces"
      ],
      "fuzz": null,
@@ -50550,7 +50554,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -50669,12 +50673,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 15,
+      "pass": 17,
       "skip": 0,
       "fail": 7
      },
      "fails": [
-      "B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session",
+      "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
       "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
       "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
       "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",

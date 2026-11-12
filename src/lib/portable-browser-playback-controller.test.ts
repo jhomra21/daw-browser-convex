@@ -2139,7 +2139,7 @@ test('B6f5 a playing portable session adopts a mixer edit on the same session an
     const again = await controller.adoptSchedule(noLoop)
     expect({ adopted, again, sessions, calls: calls.slice(before), publishes: publishes.slice(1), gain: b6f5Gain(graphs.at(-1)), revision: graphs.at(-1)?.revision })
       .toEqual({ adopted: 'adopted', again: 'unchanged', sessions: 1, calls: ['prepare-graph', 'install-schedule:1', 'publish-graph'],
-        publishes: [{ revision: 2, options: { requireContinuity: true, publicationFrame: 12_000 } }], gain: 0.5, revision: 2 })
+        publishes: [{ revision: 2, options: { requireContinuity: true, publicationFrame: 12_000, sources: { epoch: 1, ordinary: [], prepared: [] } } }], gain: 0.5, revision: 2 })
   } finally { controller.dispose() }
 })
 
@@ -3338,3 +3338,142 @@ test('W-R8a a loop edit during a take is held, and adopted once the take has end
   } finally { f.controller.dispose() }
 })
 
+
+// AE-08 phase 8 step 9a: an adoption carries the sources of its candidate with the publish and commits them with it.
+// Two paged clips: one spans every seam, the other starts after them.
+type C9Publish = { revision: number; options?: Parameters<PortableWasmPlaybackSession['publishGraph']>[1] }
+const c9Tracks = (volume: number): RuntimeTrack[] => [
+  { id: 'audio-0', kind: 'audio', name: 'Audio 0', volume, clips: [{ id: 'clip-0', name: 'Clip 0', color: '#fff', startSec: 0, duration: 30, sourceAssetKey: 'asset-a' }] },
+  { id: 'audio-1', kind: 'audio', name: 'Audio 1', volume: 1, clips: [{ id: 'clip-1', name: 'Clip 1', color: '#fff', startSec: 5, duration: 10, sourceAssetKey: 'asset-b' }] },
+]
+const c9Fixture = async (options: { refusals?: number } = {}) => {
+  const state = { volume: 1, refusals: options.refusals ?? 0 }
+  const calls: string[] = []
+  const publishes: C9Publish[] = []
+  const scheduled: PortableWasmPreparedSourceEventsOf[] = []
+  const faults: string[] = []
+  const base = createSession(calls, async () => undefined, undefined, true)
+  const session = {
+    ...base,
+    prepareGraph: async () => { calls.push('prepare-graph') },
+    publishGraph: async (revision: number, publishOptions?: C9Publish['options']) => {
+      publishes.push({ revision, options: publishOptions })
+      if (publishOptions && state.refusals-- > 0) throw new Error('Portable playback graph-published was rejected.')
+    },
+    schedulePreparedSources: async (_revision: number, _epoch: number, events: PortableWasmPreparedSourceEventsOf) => { scheduled.push(events) },
+  }
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async (transport) => {
+      const compiled = pagedCompilation(transport)
+      const tracks = c9Tracks(state.volume)
+      return { ...compiled, snapshot: { ...compiled.snapshot, tracks, mixer: { ...compiled.snapshot.mixer, graph: resolveLiveMixerGraph(tracks, {}) } } }
+    },
+    fingerprintSnapshot: b6f5Fingerprint, getAudioContext: () => context, scheduleHorizonSec: 8, select: async () => selected,
+    reportFault: (message) => faults.push(message),
+    resolveSource: async (clip) => pagedDescriptor(clip.sourceAssetKey ?? 'missing', []),
+    backend: { createPlaybackSession: async () => session },
+  })
+  const transport = pagedCompilation().snapshot.transport
+  let reports = 0
+  const report = async (frame: number, count = 1) => {
+    for (let index = 0; index < count; index += 1) {
+      reports += 1
+      base.emitPosition(frame, reports)
+      await Bun.sleep(0)
+    }
+  }
+  const sources = (publish?: C9Publish) => publish?.options?.sources
+  return { state, controller, transport, base, publishes, scheduled, faults, report, sources }
+}
+type PortableWasmPreparedSourceEventsOf = Parameters<PortableWasmPlaybackSession['schedulePreparedSources']>[2]
+const c9Starts = (events: readonly { sourceNodeId: string; startFrame: number; sourceOffsetFrame: number }[] | undefined) =>
+  (events ?? []).map((event) => [event.sourceNodeId, event.startFrame, event.sourceOffsetFrame])
+
+test('C9a-1 an adoption ships the sources compiled at its seam with the publish; a clip after the seam is the source the start scheduled', async () => {
+  const f = await c9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(96_000)
+    f.state.volume = 0.5
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
+    const sources = f.sources(f.publishes.at(-1))
+    const startup = f.scheduled[0]?.find((event) => event.sourceNodeId === 'audio-1')
+    const shipped = sources?.prepared.find((event) => event.sourceNodeId === 'audio-1')
+    expect({ epoch: sources?.epoch, ordinary: sources?.ordinary, prepared: c9Starts(sources?.prepared), same: { ...shipped, preparationId: 0 } })
+      .toEqual({ epoch: 1, ordinary: [], prepared: [['audio-0', 108_000, 108_000], ['audio-1', 240_000, 0]], same: { ...startup, preparationId: 0 } })
+  } finally { f.controller.dispose() }
+})
+
+test('C9a-2 the preparations of the old sources are released once the position reaches the seam, the candidate\'s stay, and teardown releases all', async () => {
+  const f = await c9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    const held: number[] = [f.base.preparations.size]
+    await f.report(96_000)
+    f.state.volume = 0.5
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
+    held.push(f.base.preparations.size)
+    await f.report(107_000)
+    held.push(f.base.preparations.size)
+    await f.report(108_000)
+    held.push(f.base.preparations.size)
+    f.controller.dispose()
+    await Bun.sleep(0)
+    held.push(f.base.preparations.size)
+    expect(held).toEqual([2, 4, 4, 2, 0])
+  } finally { f.controller.dispose() }
+})
+
+test('C9a-3 a refused publish keeps the old sources and their preparations, and a resubmit reuses the candidate preparations it still matches', async () => {
+  const f = await c9Fixture({ refusals: 1 })
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(96_000)
+    f.state.volume = 0.5
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('failed')
+    const afterRefusal = f.base.preparations.size
+    await f.report(120_000)
+    await f.report(300_000)
+    const first = f.sources(f.publishes[1])?.prepared.find((event) => event.sourceNodeId === 'audio-1')
+    const second = f.sources(f.publishes[2])?.prepared.find((event) => event.sourceNodeId === 'audio-1')
+    expect({ afterRefusal, publishes: f.publishes.length, reusedAfterTheSeam: first?.preparationId === second?.preparationId, held: f.base.preparations.size })
+      .toEqual({ afterRefusal: 4, publishes: 3, reusedAfterTheSeam: true, held: 2 })
+  } finally { warn.mockRestore(); f.controller.dispose() }
+})
+
+test('C9a-4 the candidate preparations a failed attempt kept are released when the desired state changes', async () => {
+  const f = await c9Fixture({ refusals: 1 })
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(96_000)
+    f.state.volume = 0.5
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('failed')
+    f.state.volume = 0.25
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
+    const first = f.sources(f.publishes[1])?.prepared.find((event) => event.sourceNodeId === 'audio-1')
+    const second = f.sources(f.publishes[2])?.prepared.find((event) => event.sourceNodeId === 'audio-1')
+    expect({ reused: first?.preparationId === second?.preparationId, held: f.base.preparations.size }).toEqual({ reused: false, held: 4 })
+  } finally { warn.mockRestore(); f.controller.dispose() }
+})
+
+test('C9a-5 the candidate preparations are released when the resubmits run out, and when the session is torn down', async () => {
+  const f = await c9Fixture({ refusals: 100 })
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  const error = spyOn(console, 'error').mockImplementation(() => undefined)
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(96_000)
+    f.state.volume = 0.5
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('failed')
+    const kept = f.base.preparations.size
+    await f.report(120_000, 300)
+    expect({ kept, publishes: f.publishes.length - 1, faults: f.faults.length, held: f.base.preparations.size }).toEqual({ kept: 4, publishes: 9, faults: 1, held: 2 })
+    f.state.refusals = 1
+    await f.controller.adoptSchedule(noLoop)
+    f.controller.dispose()
+    await Bun.sleep(0)
+    expect(f.base.preparations.size).toBe(0)
+  } finally { warn.mockRestore(); error.mockRestore(); f.controller.dispose() }
+})

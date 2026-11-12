@@ -320,7 +320,11 @@ export class DawPortableAudioCoreHost {
       const refused = message.requireContinuity === true && continuityResult === 'fallback'
       const publicationFrame = message.publicationFrame
       const framed = publicationFrame !== undefined
-      if (!prepared || refused || (framed && (message.requireContinuity !== true || !stagedForRevision || !Number.isSafeInteger(publicationFrame) || publicationFrame < 0))) {
+      // The sources of the revision are checked against its prepared graph now and held with the publication.
+      const sources = prepared && message.sources !== undefined && message.requireContinuity === true
+        ? this.encodeSources(message.sources, new Set(this.preparedSnapshot.nodes.filter((node) => node.kind === 'source').map((node) => node.id)))
+        : undefined
+      if (!prepared || refused || sources === null || (message.sources !== undefined && message.requireContinuity !== true) || (framed && (message.requireContinuity !== true || !stagedForRevision || !Number.isSafeInteger(publicationFrame) || publicationFrame < 0))) {
         if (this.graphCancel) this.graphCancel(message.revision)
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'rejected' })
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision: message.revision, result: refused ? 'fallback' : 'rejected' })
@@ -332,10 +336,10 @@ export class DawPortableAudioCoreHost {
           this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'late' })
           return
         }
-        this.pendingPublication = { requestId: message.requestId, revision: message.revision, continuous: true, staged, continuityResult, seam: publicationFrame }
+        this.pendingPublication = { requestId: message.requestId, revision: message.revision, continuous: true, staged, continuityResult, seam: publicationFrame, sources }
         return
       }
-      this.publishPrepared({ requestId: message.requestId, revision: message.revision, continuous: message.requireContinuity === true, staged, continuityResult })
+      this.publishPrepared({ requestId: message.requestId, revision: message.revision, continuous: message.requireContinuity === true, staged, continuityResult, sources })
       return
     }
     // Prepare runs here, on the AudioWorklet rendering thread between render quanta (the processor's port.onmessage),
@@ -1162,8 +1166,9 @@ export class DawPortableAudioCoreHost {
   }
 
   // The publish steps of a prepared revision. A framed publish (`seam` set) runs them at the first block starting at or
-  // after the seam. Returns whether the revision was published.
-  publishPrepared({ requestId, revision, continuous, staged, continuityResult, seam }) {
+  // after the seam, before that block renders, so the graph, its sources and its schedule change together. Returns whether
+  // the revision was published.
+  publishPrepared({ requestId, revision, continuous, staged, continuityResult, seam, sources }) {
     // A prepare-graph for another revision while the publish waited replaced the prepared graph.
     if (this.preparedSnapshot === null || this.preparedSnapshot.revision !== revision) {
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'rejected' })
@@ -1194,6 +1199,9 @@ export class DawPortableAudioCoreHost {
     }
     this.revision = revision
     this.publishedSnapshot = this.preparedSnapshot
+    // The core takes a source table only for the graph it has published, so it follows the publish. The graph cannot be
+    // taken back by now, so a table the core refuses leaves the session inconsistent and is a fault.
+    if (sources && !this.applySources(sources, revision, this.transportEpoch)) this.fault('core-error')
     if (staged && staged.schedule.revision === revision) this.commitSchedule(staged, true, seam)
     this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision, result: continuityResult })
     this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'published' })
@@ -1739,14 +1747,20 @@ export class DawPortableAudioCoreHost {
   }
 
   replaceSources(message) {
+    const bytes = this.ready && message.revision === this.revision ? this.encodeSources(message) : null
+    const applied = bytes !== null && this.applySources(bytes, message.revision, message.epoch)
+    this.sourcesReplacedResult(message, applied ? 'replaced' : 'rejected')
+  }
+
+  // The core's byte table for a set of sources, or null when the set is invalid for the transport epoch or the assets and
+  // preparations registered now. `nodeIds` names the source nodes of a graph that is not published yet, which a table
+  // held for its publication must target.
+  encodeSources(message, nodeIds) {
     const all = [
       ...(Array.isArray(message.ordinary) ? message.ordinary.map((event) => ({ kind: 0, event })) : []),
       ...(Array.isArray(message.prepared) ? message.prepared.map((event) => ({ kind: 1, event })) : []),
     ].sort((left, right) => left.event.sequence - right.event.sequence)
-    if (!this.ready || !this.sourceReplace || message.revision !== this.revision
-      || message.epoch !== this.transportEpoch || all.length > 256) {
-      return this.sourcesReplacedResult(message, 'rejected')
-    }
+    if (!this.sourceReplace || message.epoch !== this.transportEpoch || all.length > 256) return null
     const handles = []
     let previousSequence = 0
     for (const entry of all) {
@@ -1754,7 +1768,7 @@ export class DawPortableAudioCoreHost {
       const preparation = entry.kind === 1 ? this.pagedPreparations.get(event.preparationId) : null
       if (!event || event.version !== 1 || event.epoch !== message.epoch
         || !Number.isSafeInteger(event.sequence) || event.sequence <= previousSequence
-        || !isString(event.sourceNodeId) || event.sourceNodeId.length === 0
+        || !isString(event.sourceNodeId) || event.sourceNodeId.length === 0 || nodeIds && !nodeIds.has(event.sourceNodeId)
         || entry.kind === 0 && (!isString(event.assetId) || !this.assets.has(event.assetId))
         || entry.kind === 1 && !preparation
         || !Number.isSafeInteger(event.startFrame) || !Number.isSafeInteger(event.stopFrame) || event.stopFrame <= event.startFrame
@@ -1767,7 +1781,7 @@ export class DawPortableAudioCoreHost {
         || event.fadeInCurvePosition !== undefined && (!Number.isFinite(event.fadeInCurvePosition) || event.fadeInCurvePosition < 0 || event.fadeInCurvePosition > 1)
         || event.fadeOutCurve !== undefined && (!Number.isFinite(event.fadeOutCurve) || event.fadeOutCurve < -1 || event.fadeOutCurve > 1)
         || event.fadeOutCurvePosition !== undefined && (!Number.isFinite(event.fadeOutCurvePosition) || event.fadeOutCurvePosition < 0 || event.fadeOutCurvePosition > 1)) {
-        return this.sourcesReplacedResult(message, 'rejected')
+        return null
       }
       const asset = entry.kind === 0 ? this.assets.get(event.assetId) : null
       handles.push({ entry, handle: entry.kind === 0 ? asset.handle.value : preparation.handle })
@@ -1800,12 +1814,17 @@ export class DawPortableAudioCoreHost {
       view.setFloat32(offset + 116, event.fadeOutCurvePosition ?? 0.5, true)
       offset += 120
     }
+    return new Uint8Array(bytes)
+  }
+
+  // Swaps the core's source table for an encoded one. The core validates it against the graph published now.
+  applySources(bytes, revision, epoch) {
     const allocation = this.malloc(bytes.byteLength)
-    if (!allocation) return this.sourcesReplacedResult(message, 'rejected')
-    new Uint8Array(this.memory.buffer, allocation, bytes.byteLength).set(new Uint8Array(bytes))
-    const result = this.sourceReplace(message.revision, message.epoch, allocation, bytes.byteLength)
+    if (!allocation) return false
+    new Uint8Array(this.memory.buffer, allocation, bytes.byteLength).set(bytes)
+    const result = this.sourceReplace(revision, epoch, allocation, bytes.byteLength)
     this.free(allocation)
-    return this.sourcesReplacedResult(message, result === CORE_OK ? 'replaced' : 'rejected')
+    return result === CORE_OK
   }
 
   releaseAssetPreparation(message) {

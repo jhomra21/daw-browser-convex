@@ -26,6 +26,7 @@ import {
   type PortableWasmControlMessage,
   type PortableWasmPreparedSourceEvent,
   type PortableWasmProcessorEvent,
+  type PortableWasmSourceTable,
   type PortableWasmStatusMessage,
   type PortableWasmInstrumentEvent,
 } from '../portable-wasm-protocol'
@@ -479,7 +480,9 @@ export class PortableWasmPlaybackSession {
   // With a publicationFrame the worklet swaps exactly there, or answers late when the transport has already passed it. It
   // answers from the render thread, so a stalled context leaves the publication late: it is cancelled, never applied
   // after the caller gave up, and the session lives on.
-  async publishGraph(revision: number, options?: { requireContinuity: true; publicationFrame?: number }) {
+  // `sources` is the source table of that revision: the worklet applies it in the block that publishes, right after the
+  // graph, and drops it with a publication that is refused, late or cancelled.
+  async publishGraph(revision: number, options?: { requireContinuity: true; publicationFrame?: number; sources?: PortableWasmSourceTable }) {
     const response = await this.request({ type: 'publish-graph', revision, ...options }, [], options?.publicationFrame === undefined ? undefined : () => {
       this.node.port.postMessage({ version: portableWasmProtocolVersion, type: 'cancel-publication', revision })
       return new Error('Portable playback graph-published was late.')

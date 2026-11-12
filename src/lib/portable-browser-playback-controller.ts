@@ -488,6 +488,9 @@ const reconcileAtSeam = (input: {
 type PortablePagedPreparation = {
   id: number
   assetId: string
+  // The range it prepared: a source with the same offset and coverage can play from it.
+  sourceOffsetFrame: number
+  coverageEnd: number
   pageKeys: readonly string[]
   stopFrame: number
   released: boolean
@@ -748,6 +751,17 @@ const readPortableWasmPages = async function* (input: {
   }
 }
 
+const preparedRangeKey = (assetId: string, sourceOffsetFrame: number, coverageEnd: number) =>
+  `${assetId}:${sourceOffsetFrame}:${coverageEnd}`
+
+const releasePreparations = async (session: PortableSession, preparations: readonly PortablePagedPreparation[], generation: number) => {
+  await Promise.all(preparations.map(async (preparation) => {
+    if (preparation.released) return
+    const result = await Promise.resolve(session.releaseAssetPreparation?.(preparation.id, generation)).catch(() => undefined)
+    if (result === "released") preparation.released = true
+  }))
+}
+
 const preparePagedSources = async (input: {
   session: PortableSession
   sources: readonly Extract<PreparedPortableSession, { supported: true }>["sources"][number][]
@@ -758,6 +772,9 @@ const preparePagedSources = async (input: {
   preparationCapacity: number
   baselinePreparationCount?: number
   pinnedPageKeys?: ReadonlySet<string>
+  // Preparations of an earlier attempt: a source whose range one of them holds plays from it, and the caller releases the
+  // ones left over. The pages of those ranges are resident already.
+  reusable?: readonly PortablePagedPreparation[]
   signal?: AbortSignal
 }): Promise<{
   events: readonly PortableWasmPreparedSourceEvent[]
@@ -798,11 +815,22 @@ const preparePagedSources = async (input: {
     baselinePreparationCount: input.baselinePreparationCount,
   })
   if (capacityError) throw capacityError
+  const spare = new Map<string, PortablePagedPreparation[]>()
+  for (const preparation of input.reusable ?? []) {
+    const key = preparedRangeKey(preparation.assetId, preparation.sourceOffsetFrame, preparation.coverageEnd)
+    spare.set(key, [...spare.get(key) ?? [], preparation])
+  }
+  const reused = new Map<typeof input.sources[number], PortablePagedPreparation>()
   for (const source of input.sources) {
     const asset = pagedAssets.get(source.assetId)
     if (!asset) continue
     const coverage = pagedSourceCoverage(asset, source)
     if (!coverage) throw new Error(`Portable Stretch source range for "${source.sourceIdentity}" is invalid.`)
+    const held = spare.get(preparedRangeKey(source.assetId, source.sourceOffsetFrame, coverage.coverageEnd))?.pop()
+    if (held) {
+      reused.set(source, held)
+      continue
+    }
     const pages = requiredPages.get(source.assetId) ?? new Set<number>()
     for (let page = coverage.firstPage; page <= coverage.lastPage; page += 1) pages.add(page)
     requiredPages.set(source.assetId, pages)
@@ -812,6 +840,7 @@ const preparePagedSources = async (input: {
     throw new Error(`Portable paged playback requires ${unionPageCount} resident pages, but only ${availableSlots} are available.`)
   }
   const preparations: PortablePagedPreparation[] = []
+  const created: PortablePagedPreparation[] = []
   try {
     input.signal?.throwIfAborted()
     for (const [assetId, pages] of requiredPages) {
@@ -876,6 +905,12 @@ const preparePagedSources = async (input: {
       input.signal?.throwIfAborted()
       const asset = pagedAssets.get(source.assetId)
       if (!asset) continue
+      const held = reused.get(source)
+      if (held) {
+        events.push({ ...source, preparationId: held.id })
+        preparations.push({ ...held, stopFrame: source.stopFrame })
+        continue
+      }
       const coverage = pagedSourceCoverage(asset, source)
       if (!coverage) throw new Error(`Portable Stretch source range for "${source.sourceIdentity}" is invalid.`)
       const range = await input.session.prepareAssetRange(
@@ -893,17 +928,21 @@ const preparePagedSources = async (input: {
         ...source,
         preparationId: range.preparationId,
       })
-      preparations.push({
+      const preparation = {
         id: range.preparationId,
         assetId: source.assetId,
+        sourceOffsetFrame: source.sourceOffsetFrame,
+        coverageEnd: coverage.coverageEnd,
         pageKeys: coverage.pageKeys,
         stopFrame: source.stopFrame,
         released: false,
-      })
+      }
+      preparations.push(preparation)
+      created.push(preparation)
     }
     return { events, preparations }
   } catch (error) {
-    await Promise.all(preparations.map((preparation) => input.session.releaseAssetPreparation?.(preparation.id, input.generation)))
+    await Promise.all(created.map((preparation) => input.session.releaseAssetPreparation?.(preparation.id, input.generation)))
     throw error
   }
 }
@@ -1101,6 +1140,10 @@ export const createPortableBrowserPlaybackController = (input: {
   let activeOrdinaryDescriptors: ReadonlyMap<string, PortableOrdinaryDescriptor> = new Map()
   let activePreparedSources: readonly PortablePreparedSource[] = []
   let activePreparations: readonly PortablePagedPreparation[] = []
+  // The preparations a failed adoption attempt made stay for the resubmit of the same desired state (UD 8), so a slow
+  // preparation converges instead of starting over. They go when the desired state changes, when the resubmits run out,
+  // and with the session.
+  let adoptionCache: { fingerprint: string; preparations: readonly PortablePagedPreparation[] } | undefined
   let nextLiveProcessorSequence = 0
   let adopting = false
   let adoptionQueued: Promise<PortableAdoptionResult> | undefined
@@ -1125,9 +1168,15 @@ export const createPortableBrowserPlaybackController = (input: {
     await Promise.all([...leases].map((lease) => lease.release().catch(() => undefined)))
   }
 
+  const disposeAdoptionCache = (session: PortableSession | undefined) => {
+    const cache = adoptionCache
+    adoptionCache = undefined
+    return session && cache ? releasePreparations(session, cache.preparations, assetGeneration) : Promise.resolve()
+  }
+
   const clearActiveSessionState = () => {
     const session = active
-    const cleanup: Promise<unknown>[] = []
+    const cleanup: Promise<unknown>[] = [disposeAdoptionCache(session)]
     active = undefined
     activeProjectGeneration = undefined
     activeTransport = undefined
@@ -1997,6 +2046,11 @@ export const createPortableBrowserPlaybackController = (input: {
     const sampleRate = audioContext.sampleRate
     const projectGeneration = safeProjectGeneration(activeProjectGeneration ?? 0)
     const publishing = Promise.withResolvers<PortableAdoptionResult>()
+    // What the candidate is compiled and prepared with. Only content the session already carries is adopted so far, so it
+    // is the session's own.
+    const resources = { preparedStretchAssets: activePreparedStretchAssets, ordinaryDescriptors: activeOrdinaryDescriptors }
+    let attempt: typeof adoptionCache
+    let committed = false
     adopting = true
     try {
       // A run keeps its loop off while the playhead is at or past the loop's end, as a start would. A take keeps the loop
@@ -2011,7 +2065,9 @@ export const createPortableBrowserPlaybackController = (input: {
       // carried at a seam yet; those still rebuild.
       if (!compilation.supported) return "rebuild"
       const next = compilation.snapshot
-      if (fingerprint(next) === fingerprint(previous)) return "unchanged"
+      const desired = fingerprint(next)
+      if (adoptionCache && adoptionCache.fingerprint !== desired) await disposeAdoptionCache(session)
+      if (desired === fingerprint(previous)) return "unchanged"
       // From here live sends wait for the publish (R2) and so reach the revision that carries them; sends already in
       // flight settle first, so the candidate holds every live value the session accepted while the compile ran.
       adoptionPublish = publishing.promise
@@ -2021,7 +2077,7 @@ export const createPortableBrowserPlaybackController = (input: {
       // The schedule plays the arrangement from `arrangementAt` at raw frame `rawFrame`, with the loop as given.
       const compileFrom = (rawFrame: number, arrangementAt: number, scheduleLoop: AdoptionLoop, horizonFrames: number) => preparedSession(
         { ...folded, revision: revision + 1, transport: { ...folded.transport, ...scheduleLoop, playheadSec: arrangementAt / sampleRate } },
-        sampleRate, epoch, projectGeneration, horizonFrames / sampleRate, 1, activePreparedStretchAssets, undefined, activeOrdinaryDescriptors, rawFrame)
+        sampleRate, epoch, projectGeneration, horizonFrames / sampleRate, 1, resources.preparedStretchAssets, undefined, resources.ordinaryDescriptors, rawFrame)
       // The graph does not depend on the origin, so it is prepared first and the seam is chosen after that round trip.
       const provisional = compileFrom(positionFrame, arrangementNow, folded.transport, range.endFrame - positionFrame)
       if (!provisional.supported) return "rebuild"
@@ -2045,26 +2101,52 @@ export const createPortableBrowserPlaybackController = (input: {
       }
       // The recording refresh reads raw frames as arrangement frames.
       if (recording && deltaFrames !== 0) return failed()
-      // The window shrinks until the schedule fits what the worklet installs; the next refresh extends it. A seam too
-      // close to the end of the schedule, or a graph that depends on the origin, leaves nothing to publish.
-      const fitted = (() => {
+      // The window shrinks until the schedule fits what the worklet installs and its paged sources fit the pages and
+      // preparations the session holds beside the active ones; the next refresh extends it. A seam too close to the end of
+      // the schedule, or a graph that depends on the origin, leaves nothing to publish.
+      const reusable = adoptionCache?.preparations ?? []
+      const fitted = await (async () => {
         for (let horizonFrames = range.endFrame - seamFrame; horizonFrames > leadFrames; horizonFrames = Math.floor(horizonFrames / 2)) {
           const compiled = compileFrom(seamFrame, seamArrangement, scheduleLoop, horizonFrames)
           if (!compiled.supported || JSON.stringify(compiled.graph) !== JSON.stringify(provisional.graph)) return undefined
           const reconciled = reconcileAtSeam({ previous: schedule, next: compiled.schedule, seamFrame, keepsVoices })
-          if (reconciled.events.length <= maxScheduleEvents) return { candidate: compiled, adopted: reconciled }
+          if (reconciled.events.length > maxScheduleEvents) continue
+          try {
+            const paged = await preparePagedSources({
+              session,
+              sources: compiled.sources,
+              ...resources,
+              repository: stretchRepository,
+              generation: assetGeneration,
+              preparationCapacity: session.pagedCapabilities?.preparationCount ?? portablePagedPreparationCapacity,
+              baselinePreparationCount: activePreparations.length,
+              pinnedPageKeys: new Set(activePreparations.flatMap((preparation) => preparation.pageKeys)),
+              reusable,
+            })
+            return { candidate: compiled, adopted: reconciled, paged }
+          } catch (error) {
+            if (!(error instanceof Error) || !error.message.includes("requires ")) throw error
+          }
         }
         return undefined
       })()
       if (!fitted) return failed()
-      const { candidate, adopted } = fitted
+      const { candidate, adopted, paged } = fitted
+      // From here the attempt owns its preparations: the commit keeps them, a failed attempt leaves them to the resubmit.
+      adoptionCache = undefined
+      attempt = { fingerprint: desired, preparations: paged.preparations }
+      const reusedIds = new Set(paged.preparations.map((preparation) => preparation.id))
+      await releasePreparations(session, reusable.filter((preparation) => !reusedIds.has(preparation.id)), assetGeneration)
       await session.installSchedule(adopted)
       if (!current()) return "unavailable"
       // Once posted, the publish decides which revision the worklet plays, whatever the transport did meanwhile.
       const graph = activeGraph
       activeRevision = candidate.graph.revision
       activeGraph = candidate.graph
-      const published = session.publishGraph(candidate.graph.revision, wasPlaying ? { requireContinuity: true, publicationFrame: seamFrame } : { requireContinuity: true }).then((): PortableAdoptionResult => {
+      const ordinary = ordinarySourcesOf(candidate.sources, resources.preparedStretchAssets, resources.ordinaryDescriptors)
+      // The sources travel with the publish: the worklet swaps them in with the graph, so no block plays one without the other.
+      const sources = { epoch, ordinary, prepared: paged.events }
+      const published = session.publishGraph(candidate.graph.revision, wasPlaying ? { requireContinuity: true, publicationFrame: seamFrame, sources } : { requireContinuity: true, sources }).then((): PortableAdoptionResult => {
         if (active !== session) return "unavailable"
         // The compiled schedule, not the installed one: it still holds the note-on of a voice that continues from before
         // the seam, which the next reconcile needs to know that voice sounds.
@@ -2080,6 +2162,19 @@ export const createPortableBrowserPlaybackController = (input: {
           ...positionSegments.slice(positionSegmentIndex(positionSegments, positionFrame)),
           { fromFrame: seamFrame, loop: loopFramesForTransport(scheduleLoop, sampleRate), deltaFrames },
         ]
+        // The old sources stop at the seam, so their preparations end there; the position reports release them once the
+        // position reaches it, and a paused session is at it already.
+        activePreparations = [
+          ...activePreparations.map((preparation) => ({ ...preparation, stopFrame: Math.min(preparation.stopFrame, seamFrame) })),
+          ...paged.preparations,
+        ]
+        activeOrdinarySources = ordinary
+        activePreparedSources = withPreparations(paged.events, paged.preparations)
+        activeSourceSequence = candidate.sources.at(-1)?.sequence ?? 0
+        activePreparedStretchAssets = resources.preparedStretchAssets
+        activeOrdinaryDescriptors = resources.ordinaryDescriptors
+        committed = true
+        void releaseExpiredPreparations(session, positionFrame).catch(() => undefined)
         return "adopted"
       }, (): PortableAdoptionResult => {
         // A refusal, or a publication that came too late, leaves the worklet on the revision it plays; so does the session.
@@ -2094,6 +2189,7 @@ export const createPortableBrowserPlaybackController = (input: {
     } catch {
       return failed()
     } finally {
+      if (attempt && !committed && active === session) adoptionCache = attempt
       adopting = false
       publishing.resolve("unavailable")
       adoptionPublish = undefined
@@ -2125,6 +2221,7 @@ export const createPortableBrowserPlaybackController = (input: {
       const message = `instrument adoption failed after ${maxAdoptionResubmits} resubmits; the edit applies on the next successful publication`
       console.error(`[portable-playback] defect: ${message}`)
       input.reportFault?.(`Playback could not apply an edit: ${message}`)
+      void disposeAdoptionCache(active)
       return
     }
     console.warn(`[portable-playback] instrument adoption failed; resubmit ${resubmits + 1} of ${maxAdoptionResubmits} at a later block boundary`)

@@ -270,3 +270,28 @@ test("B6f5 posts the graph envelope encoded on the main thread and the adoption 
     { version: portableWasmProtocolVersion, type: "publish-graph", requestId: 5, revision: 5, requireContinuity: true, publicationFrame: 200 },
   ])
 })
+
+test("C9a an adoption publish posts the sources of its revision with it", async () => {
+  const posted: PortableWasmControlMessage[] = []
+  let handler: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null = null
+  const node: AudioWorkletNode = Object.assign(Object.create(null), {
+    port: {
+      get onmessage() { return handler },
+      set onmessage(next: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null) { handler = next },
+      postMessage(message: PortableWasmControlMessage) {
+        posted.push(message)
+        if (isPortableRequest(message)) handler?.(new MessageEvent("message", { data: responseFor(message) }))
+      },
+      close() {},
+    },
+    onprocessorerror: null,
+    connect() {},
+    disconnect() {},
+  })
+  const session = new PortableWasmPlaybackSession(node)
+  const sources = { epoch: 2, ordinary: [], prepared: [] }
+  await session.publishGraph(2, { requireContinuity: true, publicationFrame: 100, sources })
+  expect(posted).toEqual([
+    { version: portableWasmProtocolVersion, type: "publish-graph", requestId: 1, revision: 2, requireContinuity: true, publicationFrame: 100, sources },
+  ])
+})

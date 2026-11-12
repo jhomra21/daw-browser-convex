@@ -858,3 +858,25 @@ test('B6f5 publish-graph carries an adoption continuity requirement and prepare-
     .toMatchObject({ type: 'prepare-graph', envelope })
   expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'prepare-graph', requestId: 1, snapshot, envelope: [3] })).toBeNull()
 })
+
+// AE-08 phase 8 step 9a: the sources of a published revision ride on its adoption publish.
+test('C9a publish-graph carries the source table of its revision, only with an adoption, in one epoch and sequence order', () => {
+  const event = (sequence: number, epoch = 2) => ({
+    version: audioCoreContractVersion, epoch, sequence, sourceNodeId: 'track-1', assetId: 'asset:one', startFrame: 0, stopFrame: 128,
+    sourceOffsetFrame: 0, sourceFrameCount: 128, gain: 1, fadeInStartFrame: 0, fadeInEndFrame: 0, fadeOutStartFrame: 128, fadeOutEndFrame: 128,
+  })
+  const prepared = { ...event(2), preparationId: 4, assetId: undefined }
+  const publish = (sources: { epoch?: number; ordinary: readonly object[]; prepared: readonly object[] }, publicationFrame?: number, requireContinuity: boolean = true) => parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, ...(requireContinuity && { requireContinuity }), publicationFrame, sources,
+  })
+  const table = { epoch: 2, ordinary: [event(1)], prepared: [prepared] }
+  expect(publish(table, 256)).toMatchObject({ type: 'publish-graph', publicationFrame: 256, sources: table })
+  expect(publish(table)).toMatchObject({ type: 'publish-graph', sources: table })
+  expect(publish({ epoch: 2, ordinary: [], prepared: [] })).toMatchObject({ sources: { ordinary: [], prepared: [] } })
+  expect(publish(table, 256, false)).toBeNull()
+  expect(publish({ ...table, epoch: 3 })).toBeNull()
+  expect(publish({ ...table, prepared: [{ ...prepared, sequence: 1 }] })).toBeNull()
+  expect(publish({ ...table, ordinary: [{ ...event(1), gain: Number.NaN }] })).toBeNull()
+  expect(publish({ epoch: 2, ordinary: Array.from({ length: 257 }, (_, index) => event(index + 1)), prepared: [] })).toBeNull()
+  expect(publish({ ordinary: [], prepared: [] })).toBeNull()
+})

@@ -902,7 +902,7 @@ type HostScheduleEvent = HostSchedule['events'][number]
 type AdoptionMessage =
   | { version: number; type: 'prepare-graph'; requestId: number; snapshot: { revision: number } }
   | { version: number; type: 'install-schedule'; requestId: number; schedule: HostSchedule }
-  | { version: number; type: 'publish-graph'; requestId: number; revision: number; requireContinuity: true; publicationFrame?: number }
+  | { version: number; type: 'publish-graph'; requestId: number; revision: number; requireContinuity: true; publicationFrame?: number; sources?: { epoch: number; ordinary: readonly object[]; prepared: readonly object[] } }
 const adoptRevision = <Snapshot extends { revision: number }>(
   host: { handleMessage: (message: AdoptionMessage) => void },
   messages: readonly PortableWasmStatusMessage[],
@@ -1724,4 +1724,118 @@ test('W-E3-3 a note held across a transport epoch change decays through its rele
   host.handleMessage({ version: 2, type: 'transport', requestId: 5, epoch: 2, running: true, frame: 96_000 })
   const tail = [peakOf(renderLeft(host)), peakOf(renderLeft(host)), peakOf(renderLeft(host))]
   expect({ audible: level > 0.1, tailStartsNearLevel: tail[0] > level * 0.5, decaying: tail[2] < tail[0] && tail[2] > 0 }).toEqual({ audible: true, tailStartsNearLevel: true, decaying: true })
+})
+
+// AE-08 phase 8 step 9a: the sources of a published revision travel with its (framed) publish. The worklet holds them
+// with the pending publication and applies them right after the graph swap, inside the one block that publishes, so no
+// block plays the new graph with the old table or the old graph with the new table. The playing table ends at 512; an
+// unchanged clip continues past it only through the swapped-in table.
+const rampFrames = 4_096
+const rampAsset = new Float32Array(rampFrames).map((_, frame) => Math.fround(frame * 1e-4))
+const rampSource = (sequence: number, startFrame: number, stopFrame: number, gain = 1, sourceNodeId = 'track') => ({
+  version: 1, epoch: 1, sequence, sourceNodeId, assetId: 'ramp', startFrame, stopFrame, sourceOffsetFrame: startFrame,
+  sourceFrameCount: stopFrame - startFrame, gain, fadeInStartFrame: startFrame, fadeInEndFrame: startFrame,
+  fadeOutStartFrame: stopFrame, fadeOutEndFrame: stopFrame,
+})
+const playRamp = async (trackIds: readonly string[] = ['track'], running = true) => {
+  const { host, messages } = await startPortableTracks(trackIds)
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running, frame: 0 })
+  host.handleMessage({ version: 2, type: 'register-asset', requestId: 5, generation: 0,
+    asset: { version: 1, assetId: 'ramp', frameCount: rampFrames, sampleRateHz: 48_000, channelCount: 2 }, planes: [rampAsset, rampAsset] })
+  host.handleMessage({ version: 2, type: 'schedule-sources', requestId: 6, revision: 1, epoch: 1, events: [rampSource(1, 0, 512)] })
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'sources-scheduled', requestId: 6, result: 'scheduled' }))
+  return { host, messages }
+}
+const publishWithSources = (
+  host: { handleMessage: (message: AdoptionMessage) => void },
+  trackIds: readonly string[],
+  sources: readonly ReturnType<typeof rampSource>[],
+  publicationFrame?: number,
+) => {
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 20, snapshot: { ...portableTrackGraph(trackIds), revision: 2 } })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 21, schedule: {
+    revision: 2, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [] } })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 22, revision: 2, requireContinuity: true, publicationFrame,
+    sources: { epoch: 1, ordinary: sources, prepared: [] } })
+}
+// A framed publish is answered by the block that applies it.
+const sourcePublication = (messages: readonly PortableWasmStatusMessage[]) =>
+  messages.flatMap((message) => message.type === 'graph-published' && message.requestId === 22 ? [message.result] : [])
+const rampLevel = (frame: number, gain = 1) => Math.fround(rampAsset[frame] * gain)
+const matchesRamp = (rendered: readonly number[], expected: (frame: number) => number) =>
+  rendered.every((sample, frame) => Math.abs(sample - expected(frame)) < 1e-6)
+
+test('W-C9-clip-3a a framed swap of an unchanged spanning clip is sample-exact where the old table ends', async () => {
+  const { host, messages } = await playRamp()
+  const rendered = renderBlocks(host, 1)
+  publishWithSources(host, ['track'], [rampSource(1, 384, 1_024)], 384)
+  rendered.push(...renderBlocks(host, 7))
+  expect({ published: sourcePublication(messages), continuous: matchesRamp(rendered, (frame) => frame < 1_024 ? rampLevel(frame) : 0), revision: host.revision })
+    .toEqual({ published: ['published'], continuous: true, revision: 2 })
+})
+
+test('W-C9-clip-3b a framed swap changes the table exactly at its frame', async () => {
+  const { host, messages } = await playRamp()
+  const rendered = renderBlocks(host, 1)
+  publishWithSources(host, ['track'], [rampSource(1, 384, 1_024, 0.5)], 384)
+  rendered.push(...renderBlocks(host, 7))
+  const published = sourcePublication(messages)
+  expect({ published, exact: matchesRamp(rendered, (frame) => frame < 384 ? rampLevel(frame) : frame < 1_024 ? rampLevel(frame, 0.5) : 0) })
+    .toEqual({ published: ['published'], exact: true })
+})
+
+test('W-C9-clip-3c a source of a node the new graph adds plays from the seam, so the apply follows the publish', async () => {
+  const { host, messages } = await playRamp()
+  const rendered = renderBlocks(host, 1)
+  publishWithSources(host, ['track', 'extra'], [rampSource(1, 384, 1_024), rampSource(2, 384, 1_024, 1, 'extra')], 384)
+  rendered.push(...renderBlocks(host, 7))
+  const published = sourcePublication(messages)
+  expect({ published, before: matchesRamp(rendered.slice(0, 384), rampLevel), after: rendered[1_000] > rampLevel(1_000) * 1.9 })
+    .toEqual({ published: ['published'], before: true, after: true })
+})
+
+test('W-C9-clip-3d a late framed publish applies nothing: the old table keeps playing', async () => {
+  const { host, messages } = await playRamp()
+  const rendered = renderBlocks(host, 3)
+  publishWithSources(host, ['track'], [rampSource(1, 128, 1_024, 0.5)], 128)
+  rendered.push(...renderBlocks(host, 5))
+  const published = sourcePublication(messages)
+  expect({ published, revision: host.revision, oldTable: matchesRamp(rendered, (frame) => frame < 512 ? rampLevel(frame) : 0) })
+    .toEqual({ published: ['late'], revision: 1, oldTable: true })
+})
+
+test('W-C9-clip-3e sources for a node the prepared graph lacks are refused with the publish and nothing is applied', async () => {
+  const { host, messages } = await playRamp()
+  const rendered = renderBlocks(host, 1)
+  publishWithSources(host, ['track'], [rampSource(1, 384, 1_024), rampSource(2, 384, 1_024, 1, 'ghost')], 384)
+  rendered.push(...renderBlocks(host, 7))
+  const published = sourcePublication(messages)
+  expect({ published, revision: host.revision, pending: host.pendingPublication, oldTable: matchesRamp(rendered, (frame) => frame < 512 ? rampLevel(frame) : 0) })
+    .toEqual({ published: ['rejected'], revision: 1, pending: null, oldTable: true })
+})
+
+test('W-C9-clip-3f a cancelled or transport-rejected pending publication drops its sources, which no later publish applies', async () => {
+  for (const drop of ['cancel', 'transport'] as const) {
+    const { host, messages } = await playRamp()
+    const rendered = renderBlocks(host, 1)
+    publishWithSources(host, ['track'], [rampSource(1, 384, 1_024, 0.5)], 4_096)
+    expect(sourcePublication(messages)).toEqual([])
+    host.handleMessage(drop === 'cancel'
+      ? { version: 2, type: 'cancel-publication', revision: 2 }
+      : { version: 2, type: 'transport', requestId: 30, epoch: 1, running: true, frame: 128 })
+    host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 31, snapshot: { ...portableTrackGraph(['track']), revision: 3 } })
+    host.handleMessage({ version: 2, type: 'publish-graph', requestId: 32, revision: 3, requireContinuity: true })
+    rendered.push(...renderBlocks(host, 7))
+    expect([drop, sourcePublication(messages), host.pendingPublication, host.revision, matchesRamp(rendered.slice(0, 128), rampLevel), rendered[600] === 0])
+      .toEqual([drop, ['rejected'], null, 3, true, true])
+  }
+})
+
+test('W-C9-clip-3g a publish while paused applies its sources at once, in the order publish then apply', async () => {
+  const { host, messages } = await playRamp(['track'], false)
+  publishWithSources(host, ['track'], [rampSource(1, 0, 1_024, 0.5)])
+  const published = sourcePublication(messages)
+  host.handleMessage({ version: 2, type: 'transport', requestId: 40, epoch: 1, running: true, frame: 0 })
+  const rendered = renderBlocks(host, 8)
+  expect({ published, table: matchesRamp(rendered, (frame) => frame < 1_024 ? rampLevel(frame, 0.5) : 0) }).toEqual({ published: ['published'], table: true })
 })

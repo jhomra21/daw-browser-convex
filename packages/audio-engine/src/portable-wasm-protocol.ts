@@ -40,6 +40,13 @@ export type PortableWasmPreparedSourceEvent = Omit<AudioCoreSampleSourceEventDto
   preparationId: number
 }
 
+// The sources a revision plays: ordinary ones from a registered asset, prepared ones from paged assets.
+export type PortableWasmSourceTable = {
+  epoch: number
+  ordinary: readonly AudioCoreSampleSourceEventDto[]
+  prepared: readonly PortableWasmPreparedSourceEvent[]
+}
+
 type RecordingCaptureConfigureFields = {
   type: 'recording-capture-configure'
   generation: number
@@ -55,7 +62,7 @@ type RecordingCaptureConfigureFields = {
 
 export type PortableWasmControlMessage =
   | { version: typeof portableWasmProtocolVersion; type: 'initialize'; abiVersion: number; contractHash: string; maxFramesPerBlock: number }
-  | { version: typeof portableWasmProtocolVersion; type: 'publish-graph'; requestId: number; revision: number; requireContinuity?: true; publicationFrame?: number }
+  | { version: typeof portableWasmProtocolVersion; type: 'publish-graph'; requestId: number; revision: number; requireContinuity?: true; publicationFrame?: number; sources?: PortableWasmSourceTable }
   | { version: typeof portableWasmProtocolVersion; type: 'cancel-publication'; revision: number }
   | { version: typeof portableWasmProtocolVersion; type: 'prepare-graph'; requestId: number; snapshot: AudioCoreGraphSnapshot; envelope?: Uint8Array }
   | { version: typeof portableWasmProtocolVersion; type: 'processor-state'; revision: number; envelope: AudioCoreProcessorStateEnvelope }
@@ -255,6 +262,15 @@ const isPreparedSourceEvent = <Value>(value: Value): value is Value & PortableWa
   && (value.fadeInCurvePosition === undefined || isBoundedFinite(value.fadeInCurvePosition, 0, 1))
   && (value.fadeOutCurve === undefined || isBoundedFinite(value.fadeOutCurve, -1, 1))
   && (value.fadeOutCurvePosition === undefined || isBoundedFinite(value.fadeOutCurvePosition, 0, 1))
+
+// One table of both kinds of source, in a single epoch, with strictly increasing sequences across the two kinds.
+const isSourceTable = <Value>(value: Value): value is Value & PortableWasmSourceTable => {
+  if (!isRecord(value) || !isPositiveInteger(value.epoch) || !Array.isArray(value.ordinary) || !Array.isArray(value.prepared)
+    || value.ordinary.length + value.prepared.length > portableWasmMaxPendingEvents
+    || !value.ordinary.every(isSampleSourceEvent) || !value.prepared.every(isPreparedSourceEvent)) return false
+  const events = [...value.ordinary, ...value.prepared].sort((left, right) => left.sequence - right.sequence)
+  return events.every((event, index) => event.epoch === value.epoch && event.sequence > (events[index - 1]?.sequence ?? 0))
+}
 
 const isParameterBlock = <Value>(value: Value): value is Value & PortableWasmParameterBlock =>
   isRecord(value)
@@ -492,10 +508,12 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
   if (value.type === 'publish-graph' && isPositiveInteger(value.requestId) && isPositiveInteger(value.revision)
     && (value.requireContinuity === undefined || value.requireContinuity === true)
     && (value.publicationFrame === undefined
-      || (value.requireContinuity === true && isProtocolNumber(value.publicationFrame) && Number.isSafeInteger(value.publicationFrame) && value.publicationFrame >= 0))) {
+      || (value.requireContinuity === true && isProtocolNumber(value.publicationFrame) && Number.isSafeInteger(value.publicationFrame) && value.publicationFrame >= 0))
+    && (value.sources === undefined || (value.requireContinuity === true && isSourceTable(value.sources)))) {
     return { version: portableWasmProtocolVersion, type: 'publish-graph', requestId: value.requestId, revision: value.revision,
       ...(value.requireContinuity === true && { requireContinuity: true }),
-      ...(value.publicationFrame !== undefined && { publicationFrame: value.publicationFrame }) }
+      ...(value.publicationFrame !== undefined && { publicationFrame: value.publicationFrame }),
+      ...(isSourceTable(value.sources) && { sources: value.sources }) }
   }
   if (value.type === 'cancel-publication' && isPositiveInteger(value.revision)) {
     return { version: portableWasmProtocolVersion, type: 'cancel-publication', revision: value.revision }
@@ -606,15 +624,7 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
     return { version: portableWasmProtocolVersion, type: 'schedule-sources', requestId: value.requestId, revision: value.revision, epoch: value.epoch, events: value.events }
   }
   if (value.type === 'replace-sources' && isPositiveInteger(value.requestId) && isPositiveInteger(value.revision)
-    && isPositiveInteger(value.epoch) && Array.isArray(value.ordinary) && Array.isArray(value.prepared)
-    && value.ordinary.length + value.prepared.length <= portableWasmMaxPendingEvents
-    && value.ordinary.every(isSampleSourceEvent) && value.prepared.every(isPreparedSourceEvent)) {
-    const events = [...value.ordinary, ...value.prepared].sort((left, right) => left.sequence - right.sequence)
-    let previousSequence = 0
-    for (const event of events) {
-      if (event.epoch !== value.epoch || event.sequence <= previousSequence) return null
-      previousSequence = event.sequence
-    }
+    && isSourceTable(value)) {
     return {
       version: portableWasmProtocolVersion,
       type: 'replace-sources',

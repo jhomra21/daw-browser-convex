@@ -44402,7 +44402,7 @@
      "changes": [
       {
        "file": "public/audio-worklets/daw-portable-audio-core-host-v2.js",
-       "from": "      if (staged && staged.schedule.revision === message.revision) this.commitSchedule(staged, true)\n",
+       "from": "    if (staged && staged.schedule.revision === revision) this.commitSchedule(staged, true, seam)\n",
        "to": ""
       }
      ]

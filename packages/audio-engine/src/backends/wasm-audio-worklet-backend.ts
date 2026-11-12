@@ -138,15 +138,25 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
       result: value.result,
     }
   }
-  if (value.type === 'graph-published'
-    && isPositiveInteger(value.revision)
-    && (value.result === 'published' || value.result === 'rejected')) {
-    return {
-      version: portableWasmProtocolVersion,
-      type: value.type,
-      requestId: value.requestId,
-      revision: value.revision,
-      result: value.result,
+  if (value.type === 'graph-published' && isPositiveInteger(value.revision)) {
+    if (value.result === 'published' && (value.appliedFrame === undefined || isNonNegativeInteger(value.appliedFrame))) {
+      return {
+        version: portableWasmProtocolVersion,
+        type: value.type,
+        requestId: value.requestId,
+        revision: value.revision,
+        result: value.result,
+        ...(value.appliedFrame !== undefined && { appliedFrame: value.appliedFrame }),
+      }
+    }
+    if (value.result === 'rejected' || value.result === 'late') {
+      return {
+        version: portableWasmProtocolVersion,
+        type: value.type,
+        requestId: value.requestId,
+        revision: value.revision,
+        result: value.result,
+      }
     }
   }
   if (value.type === 'asset-registered'
@@ -470,10 +480,11 @@ export class PortableWasmPlaybackSession {
   }
 
   // An adoption republishes onto the playing graph and requires the core to continue it; the worklet refuses otherwise.
-  async publishGraph(revision: number, options?: { requireContinuity: true }) {
+  // With a publicationFrame the worklet swaps exactly there, or answers late when the transport has already passed it.
+  async publishGraph(revision: number, options?: { requireContinuity: true; publicationFrame?: number }) {
     const response = await this.request({ type: 'publish-graph', revision, ...options })
     if (response.type !== 'graph-published' || response.result !== 'published') {
-      throw new Error('Portable playback graph-published was rejected.')
+      throw new Error(`Portable playback graph-published was ${response.type === 'graph-published' ? response.result : 'rejected'}.`)
     }
   }
 

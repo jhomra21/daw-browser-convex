@@ -1536,20 +1536,52 @@ const m1Playing = async () => {
 }
 // B takes over at frame 256: A plays every event before it and none from it on.
 const m1Next = [gainSet(256, 1, 0.25), gainSet(600, 2, 0.125)]
+// The core eases the gain from 0.5 to 0.25 over the 240 frames after the swap (the same with an immediate publish), so that
+// stretch is bounded rather than exact.
 const m1Expected = (frame: number) => frame < 200 ? 1 : frame < 256 ? 0.5 : frame < 600 ? 0.25 : 0.125
 
-test.failing('W-M1a a publication frame swaps the schedule exactly there: old events before it play, new events from it play', async () => {
+test('W-M1a a publication frame swaps the schedule exactly there: old events before it play, new events from it play', async () => {
   const { host, messages } = await m1Playing()
   const rendered = renderBlocks(host, 1)
-  // The publish is handled while the transport stands at frame 128, ahead of the swap frame 256.
+  // The publish is handled while the transport stands at frame 128, ahead of the swap frame 256: it is held, and answered
+  // by the block that applies it.
   const adoption = adoptRevision(host, messages, { ...portableTrackGraph(['track']), revision: 2 }, m1Next, 256)
   rendered.push(...renderBlocks(host, 6))
-  expect({ adoption, applied: messages.some((message) => message.type === 'graph-published' && message.requestId === 22 && 'appliedFrame' in message && message.appliedFrame === 256),
-    seamless: rendered.slice(0, 700).every((sample, frame) => Math.abs(sample - m1Expected(frame)) < 1e-6) })
-    .toEqual({ adoption: { installed: 'installed', published: 'published' }, applied: true, seamless: true })
+  expect({ installed: adoption.installed, published: publishedResults(messages, 2), applied: messages.some((message) => message.type === 'graph-published' && message.requestId === 22 && 'appliedFrame' in message && message.appliedFrame === 256),
+    seamless: rendered.slice(0, 700).every((sample, frame) => frame >= 256 && frame < 496 ? sample >= 0.25 - 1e-6 && sample <= 0.5 + 1e-6 : Math.abs(sample - m1Expected(frame)) < 1e-6) })
+    .toEqual({ installed: 'installed', published: ['published'], applied: true, seamless: true })
 })
 
-test.failing('W-M1b a publication frame already behind the transport is answered late and leaves the old revision playing', async () => {
+test('W-M1e a publication frame inside a block caps the old schedule there and applies at the next block start', async () => {
+  const { host, messages } = await m1Playing()
+  const rendered = renderBlocks(host, 1)
+  // Frame 200 lies inside the block 128..256. The old gain-set at 200 must not play, and the new one lands at frame 256.
+  adoptRevision(host, messages, { ...portableTrackGraph(['track']), revision: 2 }, [gainSet(200, 1, 0.25), gainSet(600, 2, 0.125)], 200)
+  rendered.push(...renderBlocks(host, 6))
+  expect({ applied: messages.flatMap((message) => message.type === 'graph-published' && message.requestId === 22 ? [message] : []).map((message) => 'appliedFrame' in message ? message.appliedFrame : undefined),
+    levels: [rendered[199], rendered[200], rendered[255], rendered[256], rendered[599], rendered[600]] })
+    .toEqual({ applied: [256], levels: [1, 1, 1, 0.25, 0.25, 0.125] })
+})
+
+test('W-M1f a pending publication is rejected when the session is disposed', async () => {
+  const { host, messages } = await m1Playing()
+  renderBlocks(host, 1)
+  adoptRevision(host, messages, { ...portableTrackGraph(['track']), revision: 2 }, m1Next, 4_096)
+  host.handleMessage({ version: 2, type: 'dispose' })
+  expect(publishedResults(messages, 2)).toEqual(['rejected'])
+})
+
+test('W-M1g a publication frame for a revision other than the staged one is rejected and leaves the old revision playing', async () => {
+  const { host, messages } = await m1Playing()
+  renderBlocks(host, 1)
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 20, snapshot: { ...portableTrackGraph(['track']), revision: 2 } })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 21, schedule: {
+    revision: 2, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: m1Next } })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 32, revision: 3, requireContinuity: true, publicationFrame: 4_096 })
+  expect({ results: publishedResults(messages, 3), revision: host.revision, pending: host.pendingPublication }).toEqual({ results: ['rejected'], revision: 1, pending: null })
+})
+
+test('W-M1b a publication frame already behind the transport is answered late and leaves the old revision playing', async () => {
   const { host, messages } = await m1Playing()
   renderBlocks(host, 2)
   const adoption = adoptRevision(host, messages, { ...portableTrackGraph(['track']), revision: 2 }, m1Next, 128)
@@ -1558,7 +1590,7 @@ test.failing('W-M1b a publication frame already behind the transport is answered
     .toEqual({ adoption: 'late', revision: 1, laterEventsPlay: true })
 })
 
-test.failing('W-M1c a transport message while a publication is pending rejects it and keeps the old revision playing', async () => {
+test('W-M1c a transport message while a publication is pending rejects it and keeps the old revision playing', async () => {
   const { host, messages } = await m1Playing()
   renderBlocks(host, 1)
   adoptRevision(host, messages, { ...portableTrackGraph(['track']), revision: 2 }, m1Next, 4_096)
@@ -1566,7 +1598,7 @@ test.failing('W-M1c a transport message while a publication is pending rejects i
   expect({ results: publishedResults(messages, 2), revision: host.revision }).toEqual({ results: ['rejected'], revision: 1 })
 })
 
-test.failing('W-M1d a note-off between an early publish and its swap frame still plays, so the note does not stick', async () => {
+test('W-M1d a note-off between an early publish and its swap frame still plays, so the note does not stick', async () => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
@@ -1582,8 +1614,9 @@ test.failing('W-M1d a note-off between an early publish and its swap frame still
       { frame: 200, sequence: 2, type: 'note-off', target: { kind: 'instrument', trackId: 'track' }, noteId: 1, pitch: 72 }] } })
   renderBlocks(host, 1)
   // The next revision starts at frame 256 and carries nothing of the note: the old schedule must end it at 200.
-  expect(adoptRevision(host, messages, graph(2), [], 256)).toEqual({ installed: 'installed', published: 'published' })
+  expect(adoptRevision(host, messages, graph(2), [], 256).installed).toBe('installed')
   renderBlocks(host, 6)
+  expect(publishedResults(messages, 2)).toEqual(['published'])
   expect(peakOf(renderBlocks(host, 4))).toBeLessThan(1e-4)
 })
 

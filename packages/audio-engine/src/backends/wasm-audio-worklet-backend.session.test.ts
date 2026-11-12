@@ -223,7 +223,11 @@ test("B6f5 posts the graph envelope encoded on the main thread and the adoption 
         transfers.push(transfer)
         if (isPortableRequest(message)) handler?.(new MessageEvent("message", { data: message.type === "publish-graph" && message.revision === 3
           ? { version: portableWasmProtocolVersion, type: "graph-published", requestId: message.requestId, revision: 3, result: "rejected" }
-          : responseFor(message) }))
+          : message.type === "publish-graph" && message.revision === 4
+            ? { version: portableWasmProtocolVersion, type: "graph-published", requestId: message.requestId, revision: 4, result: "late" }
+            : message.type === "publish-graph" && message.publicationFrame !== undefined
+              ? { version: portableWasmProtocolVersion, type: "graph-published", requestId: message.requestId, revision: message.revision, result: "published", appliedFrame: message.publicationFrame }
+              : responseFor(message) }))
       },
       close() {},
     },
@@ -239,11 +243,15 @@ test("B6f5 posts the graph envelope encoded on the main thread and the adoption 
   await session.prepareGraph(snapshot)
   await session.publishGraph(2, { requireContinuity: true })
   await expect(session.publishGraph(3, { requireContinuity: true })).rejects.toThrow("graph-published was rejected")
+  await expect(session.publishGraph(4, { requireContinuity: true, publicationFrame: 100 })).rejects.toThrow("graph-published was late")
+  await session.publishGraph(5, { requireContinuity: true, publicationFrame: 200 })
   const prepare = posted[0]
   expect(prepare?.type === "prepare-graph" ? [prepare.envelope, transfers[0]] : undefined)
     .toEqual([encodePortableGraphEnvelope(snapshot), [encodePortableGraphEnvelope(snapshot).buffer]])
   expect(posted.slice(1)).toEqual([
     { version: portableWasmProtocolVersion, type: "publish-graph", requestId: 2, revision: 2, requireContinuity: true },
     { version: portableWasmProtocolVersion, type: "publish-graph", requestId: 3, revision: 3, requireContinuity: true },
+    { version: portableWasmProtocolVersion, type: "publish-graph", requestId: 4, revision: 4, requireContinuity: true, publicationFrame: 100 },
+    { version: portableWasmProtocolVersion, type: "publish-graph", requestId: 5, revision: 5, requireContinuity: true, publicationFrame: 200 },
   ])
 })

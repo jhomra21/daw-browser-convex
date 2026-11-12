@@ -165,6 +165,7 @@ export class DawPortableAudioCoreHost {
     this.scheduleEventCount = 0
     this.scheduleInstrumentEventCount = 0
     this.stagedSchedule = null
+    this.pendingPublication = null
     this.stagedInputBusCount = 0
     this.parameterOffset = 0
     this.parameterByteCount = 0
@@ -250,6 +251,7 @@ export class DawPortableAudioCoreHost {
   handleMessage(message) {
     if (!isRecord(message) || message.version !== PROTOCOL_VERSION) return this.fault('malformed-message')
     if (message.type === 'dispose') {
+      this.rejectPendingPublication()
       this.flushInstrumentAcks('rejected')
       this.releaseAllAssets()
       this.disposed = true
@@ -303,51 +305,36 @@ export class DawPortableAudioCoreHost {
     }
     if (message.type === 'recording-capture-drain') return this.drainRecordingCapture()
     if (message.type === 'publish-graph' && Number.isInteger(message.requestId) && Number.isInteger(message.revision) && message.revision > this.revision) {
+      if (this.pendingPublication) {
+        this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'rejected' })
+        return
+      }
       const staged = this.stagedSchedule
       this.stagedSchedule = null
+      const stagedForRevision = staged !== null && staged.schedule.revision === message.revision
       const prepared = this.preparedSnapshot !== null && this.preparedSnapshot.revision === message.revision
       const continuityResult = prepared && this.graphContinuity && this.graphContinuity() === 0 ? 'fallback' : 'accepted'
       // An adoption republishes onto the graph that is playing, so, as the native host does, it publishes only a
       // revision the core can continue, and refuses before any instrument of the playing graph is reconfigured.
       const refused = message.requireContinuity === true && continuityResult === 'fallback'
-      if (!prepared || refused || !this.configureInstruments(this.preparedSnapshot)) {
+      const publicationFrame = message.publicationFrame
+      const framed = publicationFrame !== undefined
+      if (!prepared || refused || (framed && (message.requireContinuity !== true || !stagedForRevision || !Number.isSafeInteger(publicationFrame) || publicationFrame < 0))) {
         if (this.graphCancel) this.graphCancel(message.revision)
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'rejected' })
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision: message.revision, result: refused ? 'fallback' : 'rejected' })
         return
       }
-      const publishResult = this.graphPublish ? this.graphPublish(message.revision) : -1
-      if (publishResult !== 0) {
-        if (this.graphCancel) this.graphCancel(message.revision)
-        this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'rejected' })
-        this.postMessage({
-          version: PROTOCOL_VERSION,
-          type: 'graph-continuity',
-          revision: message.revision,
-          result: continuityResultForCoreResult(publishResult),
-        })
+      if (framed) {
+        if (!this.transportRunning || publicationFrame < this.currentTransportFrame()) {
+          if (this.graphCancel) this.graphCancel(message.revision)
+          this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'late' })
+          return
+        }
+        this.pendingPublication = { requestId: message.requestId, revision: message.revision, continuous: true, staged, continuityResult, seam: publicationFrame }
         return
       }
-      // An adoption keeps every target of the playing graph, so live edits in flight render on the next block and are
-      // acknowledged then. Any other publish starts a graph that owns no live state.
-      if (message.requireContinuity !== true) {
-        this.flushProcessorEventAcks('rejected')
-        this.flushProcessorAutomationAcks('rejected')
-        this.processorOverrideCount = 0
-        this.processorOverrideActive.fill(0)
-        this.eventByteCount = 0
-        this.resetInstrumentEvents(false)
-      }
-      this.revision = message.revision
-      this.publishedSnapshot = this.preparedSnapshot
-      if (staged && staged.schedule.revision === message.revision) this.commitSchedule(staged, true)
-      this.postMessage({
-        version: PROTOCOL_VERSION,
-        type: 'graph-continuity',
-        revision: message.revision,
-        result: continuityResult,
-      })
-      this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'published' })
+      this.publishPrepared({ requestId: message.requestId, revision: message.revision, continuous: message.requireContinuity === true, staged, continuityResult })
       return
     }
     // Prepare runs here, on the AudioWorklet rendering thread between render quanta (the processor's port.onmessage),
@@ -512,6 +499,7 @@ export class DawPortableAudioCoreHost {
     }
     if (message.type === 'transport') {
       if (!Number.isInteger(message.requestId) || !Number.isInteger(message.epoch) || message.epoch < 1 || !isBoolean(message.running) || !Number.isSafeInteger(message.frame) || message.frame < 0) return this.fault('malformed-message')
+      this.rejectPendingPublication()
       const resetSchedule = message.epoch !== this.transportEpoch || message.frame !== this.currentTransportFrame()
       if (message.epoch < this.transportEpoch || !this.graphSetTransport || this.graphSetTransport(message.epoch, message.running ? 1 : 0, BigInt(message.frame)) !== 0) {
         this.postMessage({ version: PROTOCOL_VERSION, type: 'transport-applied', requestId: message.requestId, epoch: message.epoch, result: 'rejected' })
@@ -1172,18 +1160,65 @@ export class DawPortableAudioCoreHost {
       .every((node) => this.configureInstrument(node.id, node.instrument))
   }
 
+  // The publish steps of a prepared revision. A framed publish (`seam` set) runs them at the first block starting at or
+  // after the seam, and reports that block's start as `appliedFrame`.
+  publishPrepared({ requestId, revision, continuous, staged, continuityResult, seam, appliedFrame }) {
+    // A prepare-graph for another revision while the publish waited replaced the prepared graph.
+    if (this.preparedSnapshot === null || this.preparedSnapshot.revision !== revision) {
+      this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'rejected' })
+      return
+    }
+    if (!this.configureInstruments(this.preparedSnapshot)) {
+      if (this.graphCancel) this.graphCancel(revision)
+      this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'rejected' })
+      this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision, result: 'rejected' })
+      return
+    }
+    const publishResult = this.graphPublish ? this.graphPublish(revision) : -1
+    if (publishResult !== 0) {
+      if (this.graphCancel) this.graphCancel(revision)
+      this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'rejected' })
+      this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision, result: continuityResultForCoreResult(publishResult) })
+      return
+    }
+    // An adoption keeps every target of the playing graph, so live edits in flight render on the next block and are
+    // acknowledged then. Any other publish starts a graph that owns no live state.
+    if (!continuous) {
+      this.flushProcessorEventAcks('rejected')
+      this.flushProcessorAutomationAcks('rejected')
+      this.processorOverrideCount = 0
+      this.processorOverrideActive.fill(0)
+      this.eventByteCount = 0
+      this.resetInstrumentEvents(false)
+    }
+    this.revision = revision
+    this.publishedSnapshot = this.preparedSnapshot
+    if (staged && staged.schedule.revision === revision) this.commitSchedule(staged, true, seam)
+    this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision, result: continuityResult })
+    this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'published', ...(appliedFrame !== undefined && { appliedFrame }) })
+  }
+
+  // Rejects a framed publish that has not reached its seam: the prepared graph is cancelled as a refusal does.
+  rejectPendingPublication() {
+    const pending = this.pendingPublication
+    if (!pending) return
+    this.pendingPublication = null
+    if (this.graphCancel) this.graphCancel(pending.revision)
+    this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: pending.requestId, revision: pending.revision, result: 'rejected' })
+  }
+
   currentTransportFrame() {
     return this.transportRunning
       ? this.transportFrame + this.framesProcessed - this.transportProcessOrigin
       : this.transportFrame
   }
 
-  resetScheduleCursors(frame) {
+  resetScheduleCursors(frame, instrumentFrame = frame) {
     this.scheduleCursor = 0
     this.scheduleInstrumentCursor = 0
     if (this.scheduleInstrumentEvents) {
       while (this.scheduleInstrumentCursor < this.scheduleInstrumentEvents.length
-        && this.scheduleInstrumentEvents[this.scheduleInstrumentCursor].frame < frame) {
+        && this.scheduleInstrumentEvents[this.scheduleInstrumentCursor].frame < instrumentFrame) {
         this.scheduleInstrumentCursor += 1
       }
       this.scheduleCursor = this.scheduleInstrumentCursor
@@ -1332,12 +1367,15 @@ export class DawPortableAudioCoreHost {
     this.scheduleResult(message, 'installed')
   }
 
-  commitSchedule({ schedule, parameterStreams, instrumentEvents }, seed) {
+  // Instrument events resume at `instrumentFrame`: a framed publish's seam, which is behind the block that applies it, so
+  // the events in between fire at that block's first sample. Parameter events and seeds stay at the block start, because
+  // the render drops a parameter event already behind it; the seed there already holds the value those events set.
+  commitSchedule({ schedule, parameterStreams, instrumentEvents }, seed, instrumentFrame) {
     this.schedule = schedule
     this.scheduleParameterStreams = parameterStreams
     this.scheduleInstrumentEvents = instrumentEvents
     const frame = this.currentTransportFrame()
-    this.resetScheduleCursors(frame)
+    this.resetScheduleCursors(frame, instrumentFrame)
     if (seed) this.seedScheduleValues(frame)
   }
 
@@ -2174,7 +2212,8 @@ export class DawPortableAudioCoreHost {
       || !this.scheduleParameterStreams || !this.scheduleInstrumentEvents) return false
     let processorCount = 0
     let instrumentCount = 0
-    const endFrame = startFrame + frameCount
+    // A pending framed publish takes over at its seam: this schedule plays every event before it and none from it on.
+    const endFrame = Math.min(startFrame + frameCount, this.pendingPublication ? this.pendingPublication.seam : Infinity)
     for (const stream of this.scheduleParameterStreams) {
       while (stream.cursor < stream.events.length && stream.events[stream.cursor].frame < startFrame) {
         const expired = stream.events[stream.cursor]
@@ -2319,6 +2358,11 @@ export class DawPortableAudioCoreHost {
           this.postMessage(this.recordingCaptureAvailableMessage)
         }
       }
+    }
+    if (this.pendingPublication && startFrame >= this.pendingPublication.seam) {
+      const pending = this.pendingPublication
+      this.pendingPublication = null
+      this.publishPrepared({ ...pending, appliedFrame: startFrame })
     }
     if (!this.prepareLiveProcessorEvents()) {
       this.flushInstrumentAcks('rejected')

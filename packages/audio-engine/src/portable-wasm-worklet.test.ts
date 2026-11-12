@@ -252,8 +252,9 @@ test('B6f5 the portable worklet stages schedules, refuses discontinuous adoption
   expect(prepareBody).not.toContain('.reduce(')
   // An adoption is refused before any instrument of the playing graph is reconfigured, and swaps its staged schedule in.
   expect(publishBody).toContain('message.requireContinuity === true')
-  expect(publishBody.indexOf('const refused')).toBeLessThan(publishBody.indexOf('this.configureInstruments('))
-  expect(publishBody).toContain('this.commitSchedule(staged, true)')
+  expect(publishBody.indexOf('const refused')).toBeLessThan(publishBody.indexOf('this.publishPrepared('))
+  expect(publishBody).not.toContain('this.configureInstruments(')
+  expect(source).toContain('this.commitSchedule(staged, true, seam)')
   expect(source).toContain('if (staged) this.stagedSchedule = built')
   // The source-bus counters left unused when portable sources stopped reading live buses.
   expect(source).not.toContain('liveInputBusCount')

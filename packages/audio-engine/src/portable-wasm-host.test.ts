@@ -1620,6 +1620,60 @@ test('W-M1d a note-off between an early publish and its swap frame still plays, 
   expect(peakOf(renderBlocks(host, 4))).toBeLessThan(1e-4)
 })
 
+// An adoption at a seam while note 1 sounds (pitch 52, held since frame 0): `events` is what the adopted schedule carries from
+// the seam on. The seam sits 55 blocks in, where the sampler's sine is a whole number of periods from its start, so a second
+// voice would add in phase. Returns the peak of the sounding note before the seam and the peaks of the next ten blocks.
+const noteSeam = 7_040
+const seamNoteOn = (frame: number, sequence: number): HostScheduleEvent => ({
+  frame, sequence, type: 'note-on', target: { kind: 'instrument', trackId: 'track' }, noteId: 1, pitch: 52, velocity: 0.8,
+})
+const seamNoteOff = (frame: number, sequence: number): HostScheduleEvent => ({
+  frame, sequence, type: 'note-off', target: { kind: 'instrument', trackId: 'track' }, noteId: 1, pitch: 52,
+})
+const playAcrossSeam = async (instrument: AudioCoreInstrumentState, events: readonly HostScheduleEvent[]) => {
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const messages: PortableWasmStatusMessage[] = []
+  const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
+  expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+  const sine = new Float32Array(sineFrames).map((_, frame) => Math.sin(0.05 * frame))
+  host.handleMessage({ version: 2, type: 'register-asset', requestId: 900, generation: 0,
+    asset: { version: 1, assetId: 'held-sine', frameCount: sineFrames, sampleRateHz: 48_000, channelCount: 2 }, planes: [sine, sine] })
+  const base = portableTrackGraph(['track'])
+  const graph = (revision: number) => ({ ...base, revision, nodes: base.nodes.map((node) => node.id === 'track' ? { ...node, kind: 'instrument', instrument } : node) })
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph(1) })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [seamNoteOn(0, 1)] } })
+  const before = peakOf(renderBlocks(host, noteSeam / 128).slice(-1280))
+  expect(adoptRevision(host, messages, graph(2), events, noteSeam).installed).toBe('installed')
+  return { before, after: Array.from({ length: 10 }, () => peakOf(renderLeft(host))), published: publishedResults(messages, 2) }
+}
+const seamInstruments = [['synth', heldSynth], ['sampler', heldSampler('sampler', 1, 8)]] as const
+
+// A note that survives the edit keeps its voice: the reconciled schedule carries only its note-off. Repeating the note-on
+// sticks a Synth (it then needs two note-offs) and layers a second Sampler voice.
+test('W-E5-4 a kept held note is not re-triggered at the seam: one note-off silences a Synth and a Sampler plays one voice', async () => {
+  for (const [name, instrument] of seamInstruments) {
+    const kept = await playAcrossSeam(instrument, [seamNoteOff(noteSeam + 640, 1)])
+    const repeated = await playAcrossSeam(instrument, [seamNoteOn(noteSeam, 1), seamNoteOff(noteSeam + 640, 2)])
+    expect(kept.published).toEqual(['published'])
+    // The note-off lands in block 5 after the seam.
+    expect([name, kept.after.slice(0, 5).every((peak) => peak > kept.before * 0.9 && peak < kept.before * 1.1), kept.after[6] < 1e-3])
+      .toEqual([name, true, true])
+    expect([name, name === 'sampler' ? repeated.after[0] > repeated.before * 1.5 : repeated.after[6] > 0.02]).toEqual([name, true])
+  }
+})
+
+// A note deleted while it sounds is released by a note-off at the seam; without one the voice hangs.
+test('W-E5-3 a removed held note is released by the note-off at the seam and hangs without it', async () => {
+  for (const [name, instrument] of seamInstruments) {
+    const released = await playAcrossSeam(instrument, [seamNoteOff(noteSeam, 1)])
+    const forgotten = await playAcrossSeam(instrument, [])
+    expect([name, released.before > 0.02, released.after[2] < 1e-3, forgotten.after[9] > 0.02]).toEqual([name, true, true, true])
+  }
+})
+
 // D4: a locate while playing releases held notes with their tails, as native does. The WASM core hard-clears voices on an
 // epoch change today.
 test.failing('W-E3-3 a note held across a transport epoch change decays through its release tail instead of cutting', async () => {

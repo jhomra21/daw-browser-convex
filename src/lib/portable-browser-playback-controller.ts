@@ -304,12 +304,12 @@ const preparedSession = (
   ),
   sourceRangeStartSec,
   clipSpanningNoteOn: true,
+  // An id that depends on the note and not on the compile origin lets a seam reconcile match a sounding note to the
+  // same note in a schedule compiled from a later origin.
+  stableNoteIds: true,
   sourceFirstSequence,
   loop: snapshot.transport,
 })
-
-const instrumentsOf = (snapshot: LivePlaybackSnapshot) =>
-  JSON.stringify(Object.entries(snapshot.mixer.fx.trackFx ?? {}).map(([id, entry]) => [id, entry.instrument]))
 
 // A live instrument edit the session accepted (rememberInstrumentParameters) outlives a compile that read the
 // desired state before it.
@@ -392,9 +392,81 @@ const withLiveContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSna
   }
 }
 
-// A sounding note ends only at the note-off with its id, so an adopted schedule must carry the same notes at the same frames.
-const scheduledNotes = (schedule: PortableSchedule) => JSON.stringify([schedule.timeOrigin, schedule.events.flatMap((event) => (
-  event.type === "note-on" || event.type === "note-off" ? [{ ...event, sequence: 0 }] : []))])
+const hasWarpedAudio = (snapshot: LivePlaybackSnapshot) =>
+  snapshot.tracks.some((track) => track.clips.some((clip) => clip.audioWarp?.enabled === true))
+
+// What a playing session adopts at a seam, beyond what it takes live: the tempo, the loop fields and the MIDI clips of
+// tracks it already plays. `next` with that taken from `previous` fingerprints as `previous` when nothing else changed.
+// A tempo moves warped audio, which needs new sources (a class the seam does not carry), so with warped audio the tempo
+// stays in `next` and the gate refuses it.
+const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
+  const previousTracks = new Map(previous.tracks.map((track) => [track.id, track]))
+  return {
+    ...next,
+    bpm: hasWarpedAudio(next) || hasWarpedAudio(previous) ? next.bpm : previous.bpm,
+    transport: {
+      ...next.transport,
+      loopEnabled: previous.transport.loopEnabled,
+      loopStartSec: previous.transport.loopStartSec,
+      loopEndSec: previous.transport.loopEndSec,
+    },
+    tracks: next.tracks.map((track) => {
+      const installed = previousTracks.get(track.id)
+      if (!installed) return track
+      const other = track.clips.filter((clip) => !clip.midi)
+      let taken = 0
+      const clips = installed.clips.flatMap((clip) => clip.midi ? [clip] : taken < other.length ? [other[taken++]] : [])
+      return { ...track, clips: [...clips, ...other.slice(taken)] }
+    }),
+  }
+}
+
+// The worklet rejects a schedule with more events than this.
+const maxScheduleEvents = 256
+
+// How far before the end of its schedule a session extends it.
+const scheduleLeadSec = (horizonSec: number) => Math.min(5, Math.max(0.05, horizonSec * 0.25))
+
+// Rendered frames between the last position report and the seam an adoption publishes at: covers the report lag (up to
+// max(block, sampleRate / 20) frames) and the prepare, install and publish round trips.
+const adoptionSeamLeadSec = 0.25
+
+// An adopted schedule starts at `seamFrame` while the session keeps sounding what the old schedule started before it.
+// A note that sounds at the seam and is not the same note in `next` gets a note-off at the seam; one that survives keeps
+// its voice, because a repeated note-on would stick a Synth (it then needs two note-offs) and double a Sampler.
+const reconcileAtSeam = (input: {
+  previous: PortableSchedule
+  next: PortableSchedule
+  seamFrame: number
+  keepsVoices: (trackId: string) => boolean
+}): PortableSchedule => {
+  const { previous, next, seamFrame } = input
+  const noteKey = (event: { target: { trackId: string }; noteId: number }) => `${event.target.trackId}\0${event.noteId}`
+  const sounding = new Map<string, Extract<PortableSchedule["events"][number], { type: "note-on" }>>()
+  for (const event of previous.events) {
+    if (event.frame >= seamFrame) continue
+    if (event.type === "note-on") sounding.set(noteKey(event), event)
+    else if (event.type === "note-off") sounding.delete(noteKey(event))
+  }
+  const continued = new Set<PortableSchedule["events"][number]>()
+  for (const event of next.events) {
+    if (event.type !== "note-on" || event.frame !== seamFrame) continue
+    const held = sounding.get(noteKey(event))
+    if (held && held.pitch === event.pitch && held.velocity === event.velocity && input.keepsVoices(event.target.trackId)) {
+      continued.add(event)
+      sounding.delete(noteKey(event))
+    }
+  }
+  const releases = [...sounding.values()].map((held): PortableSchedule["events"][number] => ({
+    type: "note-off", target: held.target, noteId: held.noteId, pitch: held.pitch, frame: seamFrame, sequence: 0,
+  }))
+  // `next` starts at the seam, so the releases go first: a release precedes a note-on at the same frame.
+  return {
+    ...next,
+    events: [...releases, ...next.events.filter((event) => !continued.has(event))]
+      .map((event, index) => ({ ...event, sequence: index + 1 })),
+  }
+}
 
 type PortablePagedPreparation = {
   id: number
@@ -1022,7 +1094,9 @@ export const createPortableBrowserPlaybackController = (input: {
     const compilation = await input.compileSnapshot(transport, context)
     const fingerprint = input.fingerprintSnapshot
     if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation
-    if (fingerprint(withLiveContentOf(compilation.snapshot, activeSnapshot)) !== fingerprint(activeSnapshot)) {
+    // An adoption installs its schedule at a seam, so it also takes tempo, loop and MIDI edits; a refresh or a start does not.
+    const adoptable = context?.liveAdoption ? withSeamContentOf(compilation.snapshot, activeSnapshot) : compilation.snapshot
+    if (fingerprint(withLiveContentOf(adoptable, activeSnapshot)) !== fingerprint(activeSnapshot)) {
       return { supported: false, reasons: ["Portable playback requires a schedule rebuild."] }
     }
     return { ...compilation, snapshot: { ...compilation.snapshot, revision: activeRevision } }
@@ -1471,7 +1545,7 @@ export const createPortableBrowserPlaybackController = (input: {
     const context = input.getAudioContext()
     if (!context) return Promise.resolve("started")
     const horizonSec = input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC
-    const leadSec = Math.min(5, Math.max(0.05, horizonSec * 0.25))
+    const leadSec = scheduleLeadSec(horizonSec)
     const currentFrame = positionFrame
     const endFrame = activeScheduleRange?.endFrame
     if (failedRefreshEndFrame !== undefined && currentFrame >= failedRefreshEndFrame) {
@@ -1853,9 +1927,10 @@ export const createPortableBrowserPlaybackController = (input: {
     return request
   }
 
-  // Native adoption on the portable session: compile the newest desired state at the active schedule's time origin, so
-  // every note keeps its id and frame, then prepare, stage its schedule and publish on the same core. What the session
-  // cannot carry live, and a revision the core cannot continue, is a rebuild.
+  // Native adoption on the portable session: compile the newest desired state from a seam a quarter second ahead of the
+  // rendered position, reconcile the notes sounding at the seam against the schedule they started in, then prepare,
+  // install and publish at exactly that frame on the same core. A publication that is refused or late is a failed
+  // adoption that a resubmit retries; what the session cannot carry yet is a rebuild.
   const adoptLive = async (): Promise<PortableAdoptionResult> => {
     while (refreshPromise) await refreshPromise
     const session = active
@@ -1871,46 +1946,70 @@ export const createPortableBrowserPlaybackController = (input: {
     const generation = lifecycleGeneration
     const intent = transportIntent
     const current = () => active === session && playing && generation === lifecycleGeneration && intent === transportIntent
-    // A compile that throws has changed nothing, and an instrument edit that cannot be installed leaves the old graph
-    // playing for the next adoption to retry; a rebuild would end the take and gap the audio for an edit the user
-    // expects to hear without either.
-    let retainsGraph = true
-    const failed = (): PortableAdoptionResult => !current() ? "unavailable" : retainsGraph ? "failed" : "rebuild"
+    // A compile that throws has changed nothing, and an edit that cannot be installed leaves the old graph playing for
+    // the next adoption to retry; a rebuild would end the take and gap the audio for an edit the user expects to hear
+    // without either.
+    const failed = (): PortableAdoptionResult => current() ? "failed" : "unavailable"
+    const sampleRate = audioContext.sampleRate
+    const projectGeneration = safeProjectGeneration(activeProjectGeneration ?? 0)
     const publishing = Promise.withResolvers<PortableAdoptionResult>()
     adopting = true
     try {
-      const compilation = await compileSnapshot({ ...transport, state: "playing", playheadSec: schedule.timeOrigin.timelineSec },
+      const compilation = await compileSnapshot({ ...transport, state: "playing", playheadSec: positionFrame / sampleRate },
         { liveAdoption: true })
       if (!current()) return "unavailable"
+      // Audio clips, tracks, instrument kinds, assets, effect structure and warped audio under a tempo edit are not
+      // carried at a seam yet; those still rebuild.
       if (!compilation.supported) return "rebuild"
       const next = compilation.snapshot
       if (fingerprint(next) === fingerprint(previous)) return "unchanged"
-      retainsGraph = instrumentsOf(next) !== instrumentsOf(previous)
       // From here live sends wait for the publish (R2) and so reach the revision that carries them; sends already in
       // flight settle first, so the candidate holds every live value the session accepted while the compile ran.
       adoptionPublish = publishing.promise
       await Promise.all(liveInstrumentSends)
       if (!current()) return "unavailable"
       const folded = withAcceptedLiveSynthValues(next, previous, activeSnapshot ?? previous)
-      const candidate = preparedSession({ ...folded, revision: revision + 1 }, audioContext.sampleRate, epoch,
-        safeProjectGeneration(activeProjectGeneration ?? 0), (range.endFrame - range.startFrame) / audioContext.sampleRate,
-        1, activePreparedStretchAssets, undefined, activeOrdinaryDescriptors)
-      if (!candidate.supported || scheduledNotes(candidate.schedule) !== scheduledNotes(schedule)) return "rebuild"
-      await session.prepareGraph(candidate.graph)
+      const compileFrom = (frame: number, horizonFrames: number) => preparedSession(
+        { ...folded, revision: revision + 1, transport: { ...folded.transport, playheadSec: frame / sampleRate } },
+        sampleRate, epoch, projectGeneration, horizonFrames / sampleRate, 1, activePreparedStretchAssets, undefined, activeOrdinaryDescriptors)
+      // The graph does not depend on the origin, so it is prepared first and the seam is chosen after that round trip.
+      const provisional = compileFrom(positionFrame, range.endFrame - positionFrame)
+      if (!provisional.supported) return "rebuild"
+      await session.prepareGraph(provisional.graph)
       if (!current()) return "unavailable"
-      await session.installSchedule(candidate.schedule)
+      const leadFrames = Math.round(scheduleLeadSec(input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC) * sampleRate)
+      const seamFrame = positionFrame + Math.round(adoptionSeamLeadSec * sampleRate)
+      const keepsVoices = (trackId: string) => previous.mixer.fx.trackFx?.[trackId]?.instrument?.instanceId
+        === folded.mixer.fx.trackFx?.[trackId]?.instrument?.instanceId
+      // The window shrinks until the schedule fits what the worklet installs; the next refresh extends it. A seam too
+      // close to the end of the schedule, or a graph that depends on the origin, leaves nothing to publish.
+      const fitted = (() => {
+        for (let horizonFrames = range.endFrame - seamFrame; horizonFrames > leadFrames; horizonFrames = Math.floor(horizonFrames / 2)) {
+          const compiled = compileFrom(seamFrame, horizonFrames)
+          if (!compiled.supported || JSON.stringify(compiled.graph) !== JSON.stringify(provisional.graph)) return undefined
+          const reconciled = reconcileAtSeam({ previous: schedule, next: compiled.schedule, seamFrame, keepsVoices })
+          if (reconciled.events.length <= maxScheduleEvents) return { candidate: compiled, adopted: reconciled }
+        }
+        return undefined
+      })()
+      if (!fitted) return failed()
+      const { candidate, adopted } = fitted
+      await session.installSchedule(adopted)
       if (!current()) return "unavailable"
       // Once posted, the publish decides which revision the worklet plays, whatever the transport did meanwhile.
       const graph = activeGraph
       activeRevision = candidate.graph.revision
       activeGraph = candidate.graph
-      const published = session.publishGraph(candidate.graph.revision, { requireContinuity: true }).then((): PortableAdoptionResult => {
+      const published = session.publishGraph(candidate.graph.revision, { requireContinuity: true, publicationFrame: seamFrame }).then((): PortableAdoptionResult => {
         if (active !== session) return "unavailable"
+        // The compiled schedule, not the installed one: it still holds the note-on of a voice that continues from before
+        // the seam, which the next reconcile needs to know that voice sounds.
         activeFrameSchedule = candidate.schedule
+        activeScheduleRange = candidate.scheduleRange
         activeSnapshot = { ...folded, revision: candidate.graph.revision }
         return "adopted"
       }, (): PortableAdoptionResult => {
-        // A refusal leaves the worklet on the revision it plays; so does the session.
+        // A refusal, or a publication that came too late, leaves the worklet on the revision it plays; so does the session.
         if (active === session) {
           activeRevision = revision
           activeGraph = graph

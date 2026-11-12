@@ -6955,7 +6955,7 @@ test('B6f4 a paused-preview re-run with native playback off and no edit keeps th
 // rebuild or re-prepare ends carrying the newest edit (AE-08). The fixture is the browser build's, as B6f's, with the
 // Timeline's processor and instrument bindings (Timeline.tsx:447-468) and a worklet that records what each session holds.
 type B6f5Session = { createdSeq: number; closed: boolean; graph: AudioCoreGraphSnapshot | undefined; publishedRevision: number | undefined
-  parameters: string; adoptions: number; positions: { seq: number; sec: number; running: boolean }[]
+  parameters: string; adoptions: number; installedBpm: number[]; positions: { seq: number; sec: number; running: boolean }[]
   proc: { seq: number; values: number[] }[]; inst: { seq: number; values: number[] }[] }
 type B6f5World = { seq: number; sessions: B6f5Session[]; transportHold: B6fLiveHold
   pauseHold: B6fLiveHold; onNode?: () => void }
@@ -6999,6 +6999,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const [tracks, setTracks] = createSignal<Track[]>([track, b6f5TrackS])
   const [projectId] = createSignal('project-a')
   const [generation] = createSignal(1)
+  const [bpm, setBpm] = createSignal(120)
   const [utility, setUtility] = createSignal(b6f5Utility0)
   const [synth, setSynth] = createSignal(b6f5Synth0)
   const [sampler, setSampler] = createSignal(b6f5Sampler0)
@@ -7023,7 +7024,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport'], context?: LivePlaybackCompileContext) => {
     if (compileHold.armed) await new Promise<void>((resolve) => holdB6fLive(compileHold, resolve))
     compiles += 1
-    return compileLivePlaybackSnapshot({ revision: compiles, bpm: 120, transport, tracks: tracks(),
+    return compileLivePlaybackSnapshot({ revision: compiles, bpm: bpm(), transport, tracks: tracks(),
       renderState: { fx: fxOf(context?.instrumentOverride), automationEnvelopes: automation() }, sidechainRoutes: [] })
   }
   const engine = {
@@ -7032,7 +7033,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     getAudioContext: () => audioCreated ? audioContext : null,
     resume: async () => { if (resumeHold.armed) await new Promise<void>((resolve) => holdB6fLive(resumeHold, resolve)) },
   }
-  const playback = useTimelinePlayback(engine, { getTracks: () => tracks() }, {
+  const playback = useTimelinePlayback(engine, { getTracks: () => tracks(), bpm }, {
     enabled: () => nativeEnabled, projectId, projectGeneration: generation, compileSnapshot, playbackInputs,
     reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
   }, { projectGeneration: generation, compileSnapshot, reportFault: (message) => faults.push(message) })
@@ -7182,7 +7183,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const resumingRebuild = () => playback.restartTimelineSchedule(tracks(), {
     rebuildBackend: true, resumePlayback: true, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
-  return { playback, edit, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, mark: () => world.seq,
+  return { playback, edit, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, mark: () => world.seq,
     liveSession: () => world.sessions.filter((session) => !session.closed).at(-1),
     holds: { resume: resumeHold, compile: compileHold, transport: world.transportHold, pause: world.pauseHold } }
 }
@@ -7205,7 +7206,7 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
     readonly port: { onmessage: ((event: { data: PortableWasmStatusMessage }) => void) | null; postMessage: (message: PortableWasmControlMessage) => void; close: () => void }
     constructor() {
       const session: B6f5Session = { createdSeq: ++world.seq, closed: false, graph: undefined, publishedRevision: undefined, parameters: '',
-        adoptions: 0, positions: [], proc: [], inst: [] }
+        adoptions: 0, installedBpm: [], positions: [], proc: [], inst: [] }
       world.sessions.push(session)
       world.onNode?.()
       this.port = {
@@ -7218,6 +7219,7 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
             if (message.requireContinuity) session.adoptions += 1
           }
           if (message.type === 'install-schedule') {
+            session.installedBpm.push(message.schedule.bpm)
             session.parameters = JSON.stringify(message.schedule.events.filter((event) => event.type.startsWith('parameter')))
             // A schedule staged for the next revision moves no transport: the publish swaps it in at the playing frame.
             const staged = session.publishedRevision !== undefined && message.schedule.revision > session.publishedRevision
@@ -7373,6 +7375,28 @@ test('B6f5 A a mixer, master, automation or instrument edit while playing is ado
   }, nativeEnabled)
 })
 
+// E5: a note or tempo edit while playing is a seam adoption on the same core: no session is disposed and Play is not
+// run again.
+test('B6f5 E5 a note and a tempo edit while playing are adopted at a seam without a dispose or a restart', async () => {
+  await runB6f5(async (live, world) => {
+    const emptyClip = { id: 'clip-e5', name: 'MIDI', color: '#fff', startSec: 0, duration: 4, midiOffsetBeats: 0, midi: { wave: 'sine' as const, notes: [] } }
+    live.setTracks((current) => current.map((entry) => entry.id === track.id ? { ...entry, kind: 'instrument', clips: [emptyClip] } : entry))
+    await live.playFrom(1)
+    const session = live.liveSession()
+    const mark = live.mark()
+    const note = { id: 'note-e5', pitch: 60, beat: 4, length: 1, velocity: 0.8 }
+    live.setTracks((current) => current.map((entry) => entry.id === track.id
+      ? { ...entry, clips: [{ ...emptyClip, midi: { ...emptyClip.midi, notes: [note] } }] } : entry))
+    await live.until(() => session?.adoptions === 1)
+    live.setBpm(90)
+    await live.until(() => session?.adoptions === 2)
+    await live.settle()
+    expect({ adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session, playing: live.playback.isPortableBrowserPlayback(),
+      sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length, installedBpm: session?.installedBpm.slice(-2) })
+      .toEqual({ adoptions: 2, closed: false, same: true, playing: true, sessionsAfterMark: 0, installedBpm: [120, 90] })
+  }, false)
+})
+
 test('B6f5 A an edit the playing portable session cannot carry live rebuilds it once', async () => {
   await runB6f5(async (live, world) => {
     await live.playFrom(1)
@@ -7486,9 +7510,11 @@ test('B6f5 renaming a track while paused on native does not recompile the paused
   }
 })
 
-// B6f5 step 5b: a warm resume compiles nothing, so its commit takes the state the last compile read, an adoption's
-// included. After an adopted edit it plays the newest state at once, with no follow compiling it again.
-test('B6f5 a warm resume after an adoption plays the newest state without another compile', async () => {
+// B6f5 step 5b: a resume takes the state the last compile read, an adoption's included. An adoption's schedule starts at
+// its seam, ahead of where the session stood, and ends where the schedule it replaces ended, so a paused session no
+// longer resumes in place at a playhead inside the seam's range plus a horizon: the Play prepares once, and it plays the
+// newest state.
+test('B6f5 a resume after an adoption plays the newest state', async () => {
   for (const nativeEnabled of [false, true]) await runB6f5(async (live, world) => {
     await live.playFrom(1)
     const session = live.liveSession()
@@ -7498,15 +7524,11 @@ test('B6f5 a warm resume after an adoption plays the newest state without anothe
     for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
     await live.playback.handlePause()
     await live.settle()
-    live.holds.compile.armed = true
     await live.playback.handlePlay([])
-    for (let turn = 0; turn < 3_000; turn += 1) await Promise.resolve()
-    const compiles = live.holds.compile.held.length
-    releaseB6fLive(live.holds.compile)
     await live.until(() => live.playback.isPortableBrowserPlayback() && !live.playback.isPreparingPlayback())
-    expect({ nativeEnabled, compiles, sessions: world.sessions.length, same: live.liveSession() === session, playing: live.playback.isPlaying(),
+    expect({ nativeEnabled, sessions: world.sessions.length, playing: live.playback.isPlaying(),
       gain: live.liveSession()?.graph?.nodes.find((node) => node.id === track.id)?.mixer?.gain })
-      .toEqual({ nativeEnabled, compiles: 0, sessions: 1, same: true, playing: true, gain: 0.5 })
+      .toEqual({ nativeEnabled, sessions: 2, playing: true, gain: 0.5 })
   }, nativeEnabled)
 })
 
@@ -7563,18 +7585,18 @@ const b6f5cEditOutcome = async (live: ReturnType<typeof mountB6f5>, world: B6f5W
   return { rebuilds: world.sessions.length - sessions, adoptions: session?.adoptions, open: session?.closed === false, playing: live.playback.isPlaying() }
 }
 
-test('B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds', async () => {
+test('B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam', async () => {
   const edits: [string, (clip: Track['clips'][number]) => Track['clips'][number], number][] = [
     ['color', (clip) => ({ ...clip, color: '#123456' }), 0],
     ['name', (clip) => ({ ...clip, name: 'Renamed clip' }), 0],
     ['startSec', (clip) => ({ ...clip, startSec: 0.25 }), 1],
   ]
-  for (const nativeEnabled of [false, true]) for (const [field, patch, rebuilds] of edits) await runB6f5(async (live, world) => {
+  for (const nativeEnabled of [false, true]) for (const [field, patch, adoptions] of edits) await runB6f5(async (live, world) => {
     live.setTracks((current) => current.map((entry) => entry.id === track.id ? { ...entry, kind: 'instrument', clips: [b6f5cClip] } : entry))
     await live.playFrom(1)
     const outcome = await b6f5cEditOutcome(live, world, () => live.setTracks((current) => current.map((entry) => entry.id === track.id
       ? { ...entry, clips: entry.clips.map(patch) } : entry)))
-    expect({ nativeEnabled, field, ...outcome }).toEqual({ nativeEnabled, field, rebuilds, adoptions: 0, open: rebuilds === 0, playing: true })
+    expect({ nativeEnabled, field, ...outcome }).toEqual({ nativeEnabled, field, rebuilds: 0, adoptions, open: true, playing: true })
   }, nativeEnabled)
 })
 

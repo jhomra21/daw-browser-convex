@@ -25,7 +25,7 @@ import { createAudioStretchCache } from "@daw-browser/audio-engine/audio-stretch
 import { createPreparedStretchArtifactRepository } from "@daw-browser/audio-engine/prepared-stretch-store"
 import { compileLiveNativeProjection } from "@daw-browser/audio-engine/live-native-projection"
 import { getEffectTiming } from "@daw-browser/audio-engine/effects/timing"
-import { automationTargetKey, createDefaultDelayParams, normalizeDelayParams, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams, createDefaultReverbParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultUtilityParams, AUDIO_EFFECT_CONTRACTS, externalAutomationParameterId, type AudioPcmSourceDescriptor, type TrackInstrumentParams, type SamplerZone } from "@daw-browser/shared"
+import { automationTargetKey, createDefaultDelayParams, normalizeDelayParams, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams, createDefaultReverbParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultUtilityParams, mergeSynthParams, AUDIO_EFFECT_CONTRACTS, externalAutomationParameterId, type AudioPcmSourceDescriptor, type TrackInstrumentParams, type SamplerZone, type SynthParamsUpdate } from "@daw-browser/shared"
 import { nativeGraphNodeId, serializeNativeGraph, serializeNativeInstrumentStates, serializeNativeProcessorEvents, type NativeHostMappedAsset, type NativeHostMappedAssetPage, type NativeHostMeterBatch, type NativeHostPcmAsset, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeHostTransport, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import { listLocalEffects, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects"
 import { AudioEngine, type AudioEffectRuntimeInstance, type SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
@@ -3092,6 +3092,23 @@ describe("DV01 instrument truth", () => {
     expect(answer.value).toEqual({ state: "applied" })
     await f.controller.dispose()
   })
+  for (const [name, change] of [
+    ["polyphony", { polyphony: 4 }],
+    ["waveform", { oscillators: [{ wave: "square" }] }],
+  ] satisfies readonly [string, SynthParamsUpdate][]) test(`a non-live Synth ${name} edit while playing is adopted through the instrument-state configuration, with no new session`, async () => {
+    const f = setup()
+    await f.controller.start(f.base.transport)
+    const before = f.fixture.calls.length
+    f.set(synth(mergeSynthParams(createDefaultSynthParams(), change)))
+    let configurations = 0
+    const configure = f.fixture.bridge.session.configureInstrumentStates
+    f.fixture.bridge.session.configureInstrumentStates = async bytes => { configurations++; return configure(bytes) }
+    acknowledgeStagedPublication(f.fixture)
+    expect(await f.controller.adoptSchedule(migrationIntent(`synth-${name}`), true)).toEqual({ status: "adopted" })
+    expect(configurations).toBe(1)
+    expect(f.fixture.calls.slice(before).filter(call => ["graph", "stop", "teardown", "begin"].includes(call))).toEqual([])
+    await f.controller.dispose()
+  })
   test("synth-retrigger-equal-native-content", async () => {
     const f = setup()
     await f.controller.start(f.base.transport)
@@ -5416,7 +5433,43 @@ const acknowledgeStagedPublication = (fixture: ReturnType<typeof createBridge>) 
   fixture.bridge.session.revisions.inspect = async () => reply()
 }
 
+// AE-08 6i: a playing native session adopts a sampled instrument's zone edit through the staged instrument-state
+// configuration of the same session; none of them begins, stops or rebuilds a session.
+const editedSampledInput = (kind: 'sampler' | 'granular' | 'drum-rack'): LivePlaybackSnapshotInput => {
+  const base = sampledNativeInput(kind, 0.1)
+  const entry = base.renderState?.fx.trackFx?.instrument
+  if (!entry?.instrument) throw new Error('The sampled fixture has no instrument.')
+  const { instrument } = entry
+  const edited: TrackInstrumentParams = instrument.kind === 'sampler'
+    ? { ...instrument, params: { ...instrument.params, zones: instrument.params.zones.map(zone => ({ ...zone, tuneCents: 200 })) } }
+    : instrument.kind === 'granular'
+      ? { ...instrument, params: { ...instrument.params, grainSizeMs: 90 } }
+      : instrument.kind === 'drum-rack'
+        ? { ...instrument, params: { ...instrument.params, pads: instrument.params.pads.map((pad, index) => index === 0 ? { ...pad, tuneCents: 200 } : pad) } }
+        : instrument
+  return { ...base, revision: 2, renderState: { ...base.renderState, fx: { ...base.renderState.fx, trackFx: { instrument: { ...entry, instrument: edited } } } } }
+}
+
 for (const kind of ['sampler', 'granular', 'drum-rack'] satisfies readonly ('sampler' | 'granular' | 'drum-rack')[]) {
+  test(`a ${kind} zone edit while playing is adopted through the instrument-state configuration, with no new session`, async () => {
+    const fixture = createBridge("runtime-revision-progress")
+    let desired = sampledNativeInput(kind, 0.1)
+    const controller = createObservedController({ bridge: fixture.bridge, getProjectId: () => "local_project",
+      compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ ...desired, transport }) })
+    try {
+      expect(await controller.start(desired.transport)).toBe("started")
+      const before = fixture.calls.length
+      desired = editedSampledInput(kind)
+      let configurations = 0
+      const configure = fixture.bridge.session.configureInstrumentStates
+      fixture.bridge.session.configureInstrumentStates = async (bytes) => { configurations++; return configure(bytes) }
+      acknowledgeStagedPublication(fixture)
+      expect(await controller.adoptSchedule(migrationIntent(`zone-edit-${kind}`), true)).toEqual({ status: "adopted" })
+      expect(configurations).toBe(1)
+      expect(fixture.calls.slice(before).filter((call) => ["graph", "stop", "teardown", "begin"].includes(call))).toEqual([])
+    } finally { await controller.dispose() }
+  })
+
   test(`same-key ${kind} PCM replacement stages a fresh configured handle`, async () => {
     const fixture = createBridge("runtime-revision-progress")
     let desired = sampledNativeInput(kind, 0.1)

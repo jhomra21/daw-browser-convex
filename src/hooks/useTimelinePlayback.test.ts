@@ -6868,12 +6868,16 @@ test('B6f2 a paused locate whose re-prepare settles after a Play committed keeps
   })
 })
 
-test('B6f2 two paused locates in a row end at the second', async () => {
-  await runB6f2Live(async (live) => {
+test('B6f2 two paused locates while the first seek is pending end at the second', async () => {
+  await runB6f2Live(async (live, root) => {
     await live.pausedAt(1)
     const mark = live.mark()
+    // The seek stops the transport first: holding that answer holds the seek.
+    root.pauseHold.armed = true
     live.playback.setPlayhead(3, live.tracks())
+    await root.pauseHold.reached.promise
     live.playback.setPlayhead(5, live.tracks())
+    releaseB6fLive(root.pauseHold)
     await live.expectLive(false, 5, mark, 'none')
   })
 })

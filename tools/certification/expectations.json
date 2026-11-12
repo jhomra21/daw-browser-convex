@@ -35790,11 +35790,11 @@
       "B6f2 a paused locate whose re-prepare settles after a Play committed keeps the Play running",
       "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
       "B6f2 an unmount during the Stop re-prepare leaves no portable session behind",
-      "B6f2 two paused locates while the first compile is pending end at the second",
+      "B6f2 two paused locates while the first seek is pending end at the second",
       "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
       "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
       "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
-      "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits",
+      "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -36870,7 +36870,7 @@
      "fails": [
       "B6f a paused locate moves the live paused portable session to the locate",
       "B6f2 a paused locate whose re-prepare settles after a Play committed keeps the Play running",
-      "B6f2 two paused locates while the first compile is pending end at the second",
+      "B6f2 two paused locates while the first seek is pending end at the second",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -37445,8 +37445,8 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "    // A paused session is prepared only where it stands: another playhead seeks it or prepares it again.\n    const context = input.getAudioContext()\n    if (active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0)\n      && context && positionFrame === Math.round(transport.playheadSec * context.sampleRate)) {\n",
-       "to": "    if (active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0)) {\n"
+       "from": "    // A paused session is prepared only where it stands: another playhead seeks it in place.\n    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused && positionFrame === Math.round(transport.playheadSec * keptPaused.sampleRate)) {\n",
+       "to": "    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused) {\n"
       }
      ]
     },
@@ -37507,8 +37507,8 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "    // A paused session is prepared only where it stands: another playhead seeks it or prepares it again.\n    const context = input.getAudioContext()\n    if (active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0)\n      && context && positionFrame === Math.round(transport.playheadSec * context.sampleRate)) {\n",
-       "to": "    if (active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0)) {\n"
+       "from": "    // A paused session is prepared only where it stands: another playhead seeks it in place.\n    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused && positionFrame === Math.round(transport.playheadSec * keptPaused.sampleRate)) {\n",
+       "to": "    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused) {\n"
       }
      ]
     },
@@ -37568,8 +37568,8 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "    // A paused session is prepared only where it stands: another playhead seeks it or prepares it again.\n    const context = input.getAudioContext()\n    if (active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0)\n      && context && positionFrame === Math.round(transport.playheadSec * context.sampleRate)) {\n",
-       "to": "    if (active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0)) {\n"
+       "from": "    // A paused session is prepared only where it stands: another playhead seeks it in place.\n    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused && positionFrame === Math.round(transport.playheadSec * keptPaused.sampleRate)) {\n",
+       "to": "    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused) {\n"
       }
      ]
     },
@@ -37586,8 +37586,8 @@
      "fails": [
       "B6f a paused locate moves the live paused portable session to the locate",
       "B6f2 a paused locate during a pending Pause moves the live paused portable session to the locate",
-      "B6f2 two paused locates while the first compile is pending end at the second",
-      "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits",
+      "B6f2 two paused locates while the first seek is pending end at the second",
+      "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -38894,7 +38894,7 @@
       "fail": 1
      },
      "fails": [
-      "B6f2 two paused locates while the first compile is pending end at the second"
+      "B6f2 two paused locates while the first seek is pending end at the second"
      ],
      "fuzz": null,
      "rejection": null,
@@ -39018,7 +39018,7 @@
       "fail": 3
      },
      "fails": [
-      "B6f2 two paused locates while the first compile is pending end at the second",
+      "B6f2 two paused locates while the first seek is pending end at the second",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -42353,7 +42353,7 @@
       "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
       "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
       "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session",
-      "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits",
+      "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
       "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
       "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
       "B6f5 a resume after an adoption plays the newest state",
@@ -47699,7 +47699,7 @@
       "fail": 1
      },
      "fails": [
-      "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits"
+      "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits"
      ],
      "fuzz": null,
      "rejection": null,
@@ -47760,19 +47760,15 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 224,
+      "pass": 228,
       "skip": 0,
-      "fail": 12
+      "fail": 8
      },
      "fails": [
-      "B6F5PROBE native-off paused-reprepare-postcompile proc-live",
-      "B6F5PROBE native-off paused-reprepare-postcompile synth-live",
       "B6F5PROBE native-off pending-cold-play-postcompile proc-live",
       "B6F5PROBE native-off pending-cold-play-postcompile synth-live",
       "B6F5PROBE native-off rebuild-before-commit proc-live",
       "B6F5PROBE native-off rebuild-before-commit synth-live",
-      "B6F5PROBE native-on paused-reprepare-postcompile proc-live",
-      "B6F5PROBE native-on paused-reprepare-postcompile synth-live",
       "B6F5PROBE native-on pending-cold-play-postcompile proc-live",
       "B6F5PROBE native-on pending-cold-play-postcompile synth-live",
       "B6F5PROBE native-on rebuild-before-commit proc-live",
@@ -47839,7 +47835,7 @@
       "fail": 3
      },
      "fails": [
-      "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits",
+      "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -48144,7 +48140,7 @@
       "fail": 1
      },
      "fails": [
-      "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits"
+      "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits"
      ],
      "fuzz": null,
      "rejection": null,
@@ -48205,19 +48201,15 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 224,
+      "pass": 228,
       "skip": 0,
-      "fail": 12
+      "fail": 8
      },
      "fails": [
-      "B6F5PROBE native-off paused-reprepare-postcompile proc-live",
-      "B6F5PROBE native-off paused-reprepare-postcompile synth-live",
       "B6F5PROBE native-off pending-cold-play-postcompile proc-live",
       "B6F5PROBE native-off pending-cold-play-postcompile synth-live",
       "B6F5PROBE native-off rebuild-before-commit proc-live",
       "B6F5PROBE native-off rebuild-before-commit synth-live",
-      "B6F5PROBE native-on paused-reprepare-postcompile proc-live",
-      "B6F5PROBE native-on paused-reprepare-postcompile synth-live",
       "B6F5PROBE native-on pending-cold-play-postcompile proc-live",
       "B6F5PROBE native-on pending-cold-play-postcompile synth-live",
       "B6F5PROBE native-on rebuild-before-commit proc-live",
@@ -48284,7 +48276,7 @@
       "fail": 3
      },
      "fails": [
-      "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits",
+      "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -51489,7 +51481,7 @@
       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.test.ts",
       "-t",
-      "B6f5 step5b |B6f5 D6 |B6f5 renaming|B6f5 a warm resume|B6f5 a rename coalesced|fingerprints all playback-relevant audio clip compiler fields"
+      "B6f5 step5b |B6f5 D6 |B6f5 renaming|B6f5 a warm resume|B6f5 a rename coalesced|fingerprints all playback-relevant audio clip compiler fields|B6f5 a resume after an adoption and a paused locate"
      ],
      "alarmSeconds": 400,
      "env": {
@@ -51658,7 +51650,7 @@
       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
       "/Users/juan/Documents/daw-browser-convex/src/lib/portable-browser-playback-controller.test.ts",
       "-t",
-      "B6f5 step5b |B6f5 D6 |B6f5 renaming|B6f5 a warm resume|B6f5 a rename coalesced|fingerprints all playback-relevant audio clip compiler fields"
+      "B6f5 step5b |B6f5 D6 |B6f5 renaming|B6f5 a warm resume|B6f5 a rename coalesced|fingerprints all playback-relevant audio clip compiler fields|B6f5 a resume after an adoption and a paused locate"
      ],
      "alarmSeconds": 400,
      "env": {
@@ -51689,7 +51681,7 @@
       "fail": 1
      },
      "fails": [
-      "B6f5 a warm resume after an adoption plays the newest state without another compile"
+      "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session"
      ],
      "fuzz": null,
      "rejection": null,

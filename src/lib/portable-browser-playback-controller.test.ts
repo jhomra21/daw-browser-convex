@@ -3066,3 +3066,41 @@ test('W-E3-D6 a seek that keeps failing is a logged defect and the transport-fau
       .toEqual({ attempts: 9, prepared: false, faults: ['Portable playback install-schedule was rejected.'], disposed: true, warned: 8, defects: 1 })
   } finally { warn.mockRestore(); error.mockRestore(); f.controller.dispose() }
 })
+
+// N1 and the position map: the seek moves the transport epoch on its session. A report from the epoch it left is not a
+// position of the new one, and positions of the new epoch read through the target's loop, not the loop the session ran.
+test('W-E3-N1 a position report from the epoch a seek left does not tick the retry or move the position', async () => {
+  let failures = 0
+  const f = await w8Fixture({}, { failInstall: () => failures-- > 0 })
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    const left = f.epochs.at(-1) ?? 0
+    failures = 1
+    expect(await f.controller.seek(1.5, f.noLoop)).toBe('unavailable')
+    const epoch = f.epochs.at(-1) ?? 0
+    const attempts = f.epochs.length
+    f.position(100_000, left, 1)
+    for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
+    const afterStale = f.epochs.length - attempts
+    f.position(75_000, epoch, 1)
+    for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
+    expect({ moved: epoch !== left, afterStale, origin: f.installs.at(-1)?.timeOrigin.frame })
+      .toEqual({ moved: true, afterStale: 0, origin: 75_000 })
+  } finally { warn.mockRestore(); f.controller.dispose() }
+})
+
+test('W-E3-pos a seek restarts the position map: the resubmit starts where the new epoch stands, not through the loop the session ran', async () => {
+  let failures = 0
+  const f = await w8Fixture({}, { failInstall: () => failures-- > 0 })
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  try {
+    expect(await f.controller.start({ ...f.transport, loopEnabled: true, loopStartSec: 0, loopEndSec: 1 })).toBe('started')
+    f.position(60_000, f.epochs.at(-1) ?? 0, 1)
+    failures = 1
+    expect(await f.controller.seek(1.5, f.noLoop)).toBe('unavailable')
+    f.position(75_000, f.epochs.at(-1) ?? 0, 1)
+    for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
+    expect(f.installs.at(-1)?.timeOrigin.frame).toBe(75_000)
+  } finally { warn.mockRestore(); f.controller.dispose() }
+})

@@ -7583,6 +7583,33 @@ test('B6f5 a resume after an adoption plays the newest state', async () => {
   }, nativeEnabled)
 })
 
+// E3: a paused locate seeks the kept session in place, and its window covers the Play that follows, so that Play resumes
+// the same session and takes the state the last compile read, an adoption's included: nothing adopts or rebuilds it again.
+test('B6f5 a resume after an adoption and a paused locate plays the newest state on the same session', async () => {
+  await runB6f5(async (live, world) => {
+    await live.playFrom(1)
+    const session = live.liveSession()
+    live.setVolume(0.5)
+    await live.until(() => session?.adoptions === 1)
+    for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
+    await live.playback.handlePause()
+    await live.settle()
+    live.locate(2)
+    await live.settle()
+    await live.playback.handlePlay([])
+    await live.until(() => live.playback.isPortableBrowserPlayback() && !live.playback.isPreparingPlayback())
+    await live.settle()
+    const resumed = { sessions: world.sessions.length, same: live.liveSession() === session, adoptions: session?.adoptions, playing: live.playback.isPlaying(),
+      gain: live.liveSession()?.graph?.nodes.find((node) => node.id === track.id)?.mixer?.gain }
+    // Back to the volume the session started with: a resume that took a baseline older than the adopted edit sees no change here.
+    live.setVolume(1)
+    await live.until(() => session?.adoptions === 2)
+    await live.settle()
+    expect({ resumed, adoptions: session?.adoptions, gain: live.liveSession()?.graph?.nodes.find((node) => node.id === track.id)?.mixer?.gain })
+      .toEqual({ resumed: { sessions: 1, same: true, adoptions: 1, playing: true, gain: 0.5 }, adoptions: 2, gain: 1 })
+  }, false)
+})
+
 // B6f5 step 5b: an adoption that only finds a renamed track, after an edit and its undo coalesce, plays what it played:
 // the resolved mixer graph's channel label is not content.
 test('B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt', async () => {

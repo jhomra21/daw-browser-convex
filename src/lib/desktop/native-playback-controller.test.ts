@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import "fake-indexeddb/auto"
 import { z } from "zod"
 import { convexTest } from "convex-test"
@@ -3899,6 +3899,25 @@ describe("DV01 instrument truth", () => {
       expect(answer.value).toEqual({ state: "refused", reason: "native-refused" })
       expect(f.faults.filter(fault => fault.kind === "delivery-refused")).toHaveLength(1)
     } finally { await f.controller.dispose() }
+  })
+
+  test("an adoption refused because a take locks the routing is blocked, not logged as a defect", async () => {
+    const f = setup(synth())
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      await f.controller.start(f.base.transport)
+      f.set(synth({ ...createDefaultSynthParams(), polyphony: 4 }))
+      f.fixture.bridge.session.revisions.prepare = async () => {
+        const reply = f.fixture.revisionReply("capture-target-locked")
+        return reply.ok ? { ...reply, revision: { ...reply.revision, requestedRevision: 2, preparedRevision: 0 } } : reply
+      }
+      const outcome = await f.controller.adoptSchedule(step6Intent("REVIEW6-capture-locked"))
+      expect(outcome.status).toBe("blocked")
+      expect(warn.mock.calls.filter(([message]) => String(message).includes("adoption failed"))).toHaveLength(0)
+    } finally {
+      warn.mockRestore()
+      await f.controller.dispose()
+    }
   })
 
   test("W31 transient urgent refusal wakes at the named publication terminal", async () => {

@@ -3941,7 +3941,9 @@ export const createNativePlaybackController = (input: {
         if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
         if (ready.revision.status !== "prepared" || ready.revision.continuity !== "accepted") {
           const reason = `Native live prepare was ${ready.revision.status}/${ready.revision.continuity}.`
-          failure = { outcome: { status: "failed", reason }, reason: "native-refused" }
+          // A take bound to a node on the route keeps its routing: that is an expected refusal, not a defect to log.
+          const takeLocked = ready.revision.status === "capture-target-locked"
+          failure = { outcome: { status: takeLocked ? "blocked" : "failed", reason }, reason: "native-refused" }
           throw new Error(reason)
         }
         if (!binding) throw new Error("Native live prepare did not create the requested bank.")

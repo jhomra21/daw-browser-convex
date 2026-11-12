@@ -467,6 +467,48 @@ export const nativeVst3InstanceEvent = (
   }
 }
 
+type NativeVst3HostEventOutputs = {
+  sendInstanceEvent: (event: DesktopVstInstanceEvent) => void
+  sendParameterEdit: (input: { projectId: string; instanceId: string; parameterId: number; normalizedValue: number }) => void
+  // The project that owns an active instance, if any: a parameter edit of an unowned one is dropped.
+  projectFor: (instanceId: string) => string | undefined
+  // Only a lost host ends the native session; one plug-in's fault never does.
+  endSession: (error: Error) => void
+  reportDefect?: (defect: NativeVst3Defect) => void
+}
+
+const logWorkerIncident = (notification: Extract<NativeWorkerNotification, { value: number }>) => {
+  // Fault-only value bytes match WorkerFaultOrigin; miss/restart values retain their original contracts.
+  const fault = notification.kind === "fault"
+  console.error("[native-vst3-worker-incident]", JSON.stringify({
+    kind: notification.kind,
+    originCode: fault ? notification.value & 0xff : 0,
+    childCode: fault ? (notification.value >>> 8) & 0xff : 0,
+    childStatus: fault ? (notification.value >>> 16) & 0xff : 0,
+    value: notification.value,
+    graphRevision: notification.graphRevision,
+  }))
+}
+
+// What the audio host's two event streams do in the desktop main process.
+export const createNativeVst3HostEventHandlers = (outputs: NativeVst3HostEventOutputs) => ({
+  onNotification: (notification: NativeWorkerNotification) => {
+    if (notification.kind === "fault" || notification.kind === "miss" || notification.kind === "restart") logWorkerIncident(notification)
+    const instanceEvent = nativeVst3InstanceEvent(notification, outputs.reportDefect)
+    if (instanceEvent) outputs.sendInstanceEvent(instanceEvent)
+    if (notification.kind !== "parameter-edit") return
+    const projectId = outputs.projectFor(notification.instanceId)
+    if (!projectId) return
+    outputs.sendParameterEdit({
+      projectId,
+      instanceId: notification.instanceId,
+      parameterId: notification.parameterId,
+      normalizedValue: notification.normalizedValue,
+    })
+  },
+  onLoss: outputs.endSession,
+})
+
 export const nativeVst3PlaybackDefaultStatus = (
   revision: number,
 ): Extract<NativeVst3PlaybackStatus, { active: false }> => ({
@@ -734,6 +776,18 @@ export const createNativeVst3AttachmentLedger = (
 }
 
 export type NativeVst3AttachmentLedger = ReturnType<typeof createNativeVst3AttachmentLedger>
+
+// One ledger per native session: a transaction begin starts a new one, a live coordination continues it, and the
+// transaction commit, a published revision and a rollback reach the one in force.
+export const createNativeVst3SessionLedger = () => {
+  let ledger: NativeVst3AttachmentLedger | undefined
+  return {
+    begin: () => { ledger = undefined },
+    forHost: (host: Pick<NativeAudioHostSupervisor, "detachVst">) => ledger ??= createNativeVst3AttachmentLedger(host),
+    published: () => ledger?.published(),
+    rolledBack: () => ledger?.rolledBack(),
+  }
+}
 
 type CoordinationInput = {
   serializedPlan: string

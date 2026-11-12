@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test"
+import { expect, spyOn, test } from "bun:test"
+import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
 import { createHash } from "node:crypto"
 import {
   encodeNativeExternalAttachmentPlan,
@@ -18,7 +19,9 @@ import { parsePluginCatalogData, type PluginCatalogData } from "./plugin-catalog
 import {
   coordinateNativeVst3Attachments,
   createNativeVst3AttachmentLedger,
+  createNativeVst3HostEventHandlers,
   createNativeVst3RevisionCoordinator,
+  createNativeVst3SessionLedger,
   nativeVst3PlaybackDefaultStatus,
   resolveNativeVst3AttachmentPlan,
   nativeVst3CoordinatorFailureOrigin,
@@ -1122,4 +1125,77 @@ test("host notifications reach the renderer as typed instance events and never e
   expect(notify("fault", faultOrigin.transportFault)).toBeUndefined()
   expect(notify("miss", 0)).toBeUndefined()
   expect(defects.map((defect) => defect.source)).toEqual(["worker-fault", "worker-miss"])
+})
+
+const hostEventFixture = () => {
+  const sent: DesktopVstInstanceEvent[] = []
+  const edits: unknown[] = []
+  const ended: Error[] = []
+  const defects: NativeVst3Defect[] = []
+  const handlers = createNativeVst3HostEventHandlers({
+    sendInstanceEvent: (event) => { sent.push(event) },
+    sendParameterEdit: (input) => { edits.push(input) },
+    projectFor: (instanceId) => instanceId === first.instanceId ? "project-1" : undefined,
+    endSession: (error) => { ended.push(error) },
+    reportDefect: (defect) => { defects.push(defect) },
+  })
+  const notify = (kind: "latency" | "fault" | "miss" | "restart", value: number, instanceId = first.instanceId) =>
+    handlers.onNotification({ kind, value, graphRevision: 10, graphNodeId: 1n, instanceId })
+  return { sent, edits, ended, defects, handlers, notify }
+}
+
+test("main host events: a latency notification reaches the renderer channel with the instance and value", () => {
+  const { sent, ended, notify } = hostEventFixture()
+  notify("latency", 512)
+  expect(sent).toEqual([{ kind: "latency", instanceId: first.instanceId, latencyFrames: 512 }])
+  expect(ended).toEqual([])
+})
+
+test("main host events: a plug-in fault marks only that instance and does not end the session", () => {
+  const { sent, ended, notify } = hostEventFixture()
+  const logged = spyOn(console, "error").mockImplementation(() => undefined)
+  try { notify("fault", faultOrigin.childSignal | (11 << 8), "other-instance") } finally { logged.mockRestore() }
+  expect(sent).toEqual([{ kind: "failed", instanceId: "other-instance" }])
+  expect(ended).toEqual([])
+})
+
+test("main host events: our-side failures are logged as defects and never surfaced as a plug-in fault", () => {
+  const { sent, ended, defects, notify } = hostEventFixture()
+  const logged = spyOn(console, "error").mockImplementation(() => undefined)
+  try {
+    notify("fault", faultOrigin.transportFault)
+    notify("miss", 0)
+    notify("restart", 1)
+  } finally { logged.mockRestore() }
+  expect(sent).toEqual([])
+  expect(ended).toEqual([])
+  expect(defects.map((defect) => defect.source)).toEqual(["worker-fault", "worker-miss"])
+})
+
+test("main host events: a parameter edit goes out only for an instance a project owns", () => {
+  const { edits, handlers } = hostEventFixture()
+  const edit = (instanceId: string) => handlers.onNotification({
+    kind: "parameter-edit", graphRevision: 10, graphNodeId: 1n, instanceId, parameterId: 7, normalizedValue: 0.25,
+  })
+  edit("unowned")
+  edit(first.instanceId)
+  expect(edits).toEqual([{ projectId: "project-1", instanceId: first.instanceId, parameterId: 7, normalizedValue: 0.25 }])
+})
+
+test("main host events: a lost host ends the session", () => {
+  const { ended, handlers } = hostEventFixture()
+  const lost = new Error("host lost")
+  handlers.onLoss(lost)
+  expect(ended).toEqual([lost])
+})
+
+test("the session ledger starts per transaction, continues across live coordinations and tolerates a revision before any plan", async () => {
+  const session = createNativeVst3SessionLedger()
+  const host = { detachVst: async () => undefined }
+  await session.published()
+  session.rolledBack()
+  const live = session.forHost(host)
+  expect(session.forHost(host)).toBe(live)
+  session.begin()
+  expect(session.forHost(host)).not.toBe(live)
 })

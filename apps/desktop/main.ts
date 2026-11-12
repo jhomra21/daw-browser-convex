@@ -123,9 +123,8 @@ import { preflightVst3Insertion } from "./vst3-insertion-preflight"
 import { packagedVst3WorkerPath } from "./vst3-preflight"
 import {
   coordinateNativeVst3Attachments,
-  createNativeVst3AttachmentLedger,
-  nativeVst3InstanceEvent,
-  type NativeVst3AttachmentLedger,
+  createNativeVst3HostEventHandlers,
+  createNativeVst3SessionLedger,
   resolveNativeVst3AttachmentPlan,
 } from "./native-vst3-coordinator"
 import {
@@ -495,6 +494,7 @@ let removeAudioHostSpectrumListener: (() => void) | undefined
 let removeAudioHostScheduleProgressListener: (() => void) | undefined
 let removeAudioHostWorkerNotificationListener: (() => void) | undefined
 const activeEditorProjectBindings = createNativeVstProjectBindings()
+const attachmentLedger = createNativeVst3SessionLedger()
 const activeRendererTransactions = new Map<string, { generation: number; senderId: number }>()
 const nativeFileCapabilityHelper = createNativeFileCapabilityHelper()
 const fileCapabilities = createFileCapabilityManager({
@@ -1702,7 +1702,6 @@ const registerIpc = () => {
   })
   // What this native session has attached, so a live plan reaches the host as a delta. Every session begins in a
   // transaction, which starts a ledger; a live coordination (no transaction) continues it.
-  let attachmentLedger: NativeVst3AttachmentLedger | undefined
   ipcMain.handle(sessionCoordinateVstAttachmentsChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeAttachmentEnvelopeSchema.safeParse(value)
@@ -1715,8 +1714,7 @@ const registerIpc = () => {
     ) return nativeSessionFailure()
     const sessionValue = envelope.data.value
     let result: Awaited<ReturnType<typeof coordinateNativeVst3Attachments>>
-    attachmentLedger ??= createNativeVst3AttachmentLedger(supervisor)
-    const ledger = attachmentLedger
+    const ledger = attachmentLedger.forHost(supervisor)
     try {
       result = await coordinateNativeVst3Attachments({
         serializedPlan: sessionValue.serializedPlan,
@@ -1822,8 +1820,8 @@ const registerIpc = () => {
             : await supervisor.retireGraphRevision(revision)
         }
         // The host detaches and parks what the live graph dropped, and retires what a rollback left staged.
-        if (result.status === "published") await attachmentLedger?.published()
-        if (operation === "rollback") attachmentLedger?.rolledBack()
+        if (result.status === "published") await attachmentLedger.published()
+        if (operation === "rollback") attachmentLedger.rolledBack()
         const current = supervisor.status()
         if (generation !== rendererGeneration || current.generation !== owner.generation
           || current.pid !== owner.pid || !ownsRevisionProject(event, parsed.data.projectId)) {
@@ -2055,7 +2053,7 @@ const registerIpc = () => {
     const senderId = event.sender.id
     try {
       const transactionToken = await supervisor.beginTransaction()
-      attachmentLedger = undefined
+      attachmentLedger.begin()
       if (
         generation !== requestGeneration
         || !window_
@@ -2087,7 +2085,7 @@ const registerIpc = () => {
       await supervisor.commitTransaction(envelope.data.transactionToken)
       activeRendererTransactions.delete(envelope.data.transactionToken)
       activeEditorProjectBindings.commit(envelope.data.transactionToken)
-      await attachmentLedger?.published()
+      await attachmentLedger.published()
       return { ok: true as const }
     } catch (error) {
       activeRendererTransactions.delete(envelope.data.transactionToken)
@@ -2108,7 +2106,7 @@ const registerIpc = () => {
     ) return nativeSessionFailure()
     try {
       await supervisor.rollbackTransaction(envelope.data.transactionToken)
-      attachmentLedger?.rolledBack()
+      attachmentLedger.rolledBack()
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error)
@@ -2482,31 +2480,13 @@ else {
     }) => {
       sendRendererMessage(vstParameterEditChannel, input)
     }
-    removeAudioHostWorkerNotificationListener = audioHostSupervisor?.onWorkerNotification((notification) => {
-      if (notification.kind === "fault" || notification.kind === "miss" || notification.kind === "restart") {
-        // Fault-only value bytes match WorkerFaultOrigin; miss/restart values retain their original contracts.
-        console.error("[native-vst3-worker-incident]", JSON.stringify({
-          kind: notification.kind,
-          originCode: notification.kind === "fault" ? notification.value & 0xff : 0,
-          childCode: notification.kind === "fault" ? (notification.value >>> 8) & 0xff : 0,
-          childStatus: notification.kind === "fault" ? (notification.value >>> 16) & 0xff : 0,
-          value: notification.value,
-          graphRevision: notification.graphRevision,
-        }))
-      }
-      const instanceEvent = nativeVst3InstanceEvent(notification)
-      if (instanceEvent) sendRendererMessage(vstInstanceEventChannel, instanceEvent)
-      if (notification.kind !== "parameter-edit") return
-      const projectId = activeEditorProjectBindings.projectFor(notification.instanceId)
-      if (!projectId) return
-      sendVstParameterEdit({
-        projectId,
-        source: "active-playback",
-        instanceId: notification.instanceId,
-        parameterId: notification.parameterId,
-        normalizedValue: notification.normalizedValue,
-      })
+    const hostEvents = createNativeVst3HostEventHandlers({
+      sendInstanceEvent: (event) => { sendRendererMessage(vstInstanceEventChannel, event) },
+      sendParameterEdit: (input) => sendVstParameterEdit({ ...input, source: "active-playback" }),
+      projectFor: (instanceId) => activeEditorProjectBindings.projectFor(instanceId),
+      endSession: (error) => publishNativeSessionLoss(sanitizeNativeVst3DiagnosticError(error)),
     })
+    removeAudioHostWorkerNotificationListener = audioHostSupervisor?.onWorkerNotification(hostEvents.onNotification)
     const editorHostPath = audioHostPath
     nativeVst3EditorSessionManager = editorHostPath && vst3WorkerPath
       ? createNativeVst3EditorSessionManager({
@@ -2572,9 +2552,7 @@ else {
     }
     powerMonitor.on("suspend", handleSuspend)
     powerMonitor.on("resume", handleResume)
-    removeAudioHostLossListener = audioHostSupervisor?.onLoss((error) => {
-      publishNativeSessionLoss(sanitizeNativeVst3DiagnosticError(error))
-    })
+    removeAudioHostLossListener = audioHostSupervisor?.onLoss(hostEvents.onLoss)
     const recordingBenchmark = createBenchmarkRecordingTelemetry()
     removeAudioHostRecordingStatusListener = audioHostSupervisor?.onRecordingStatus((status) => {
       recordingBenchmark.recordStatus(status)

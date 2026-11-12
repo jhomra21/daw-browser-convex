@@ -2035,6 +2035,25 @@ test('UD 8 a persistent staging failure stops after 8 resubmits with a defect lo
   } finally { warn.mockRestore(); error.mockRestore(); f.controller.dispose() }
 })
 
+// A Synth's non-live fields travel in the published configuration, so any edit of the same instrument is live-eligible.
+// An edit that replaces the instrument itself (another kind or another instance) is not an edit of it and sends nothing.
+test.each<[string, TrackInstrumentParams]>([
+  ['another kind', { kind: 'sampler', instanceId: 'synth:1', params: createDefaultSamplerParams() }],
+  ['another instance', { ...p1Initial, instanceId: 'synth:2' }],
+])('P1 an edit that replaces the Synth with %s is refused and sends no live events', async (_name, replacement) => {
+  const f = await p1Fixture()
+  try {
+    const allocated = f.allocate(p1Initial)
+    const result = await f.controller.liveProcessorControl.flush({
+      instanceId: allocated.target.instanceId,
+      values: [{ parameterId: 'synth.outputGain', value: 0.5 }],
+      edit: { ...allocated, content: { ...allocated.content, params: replacement } },
+    })
+    expect({ result, batches: f.batches.length, prepared: f.controller.preparedInstrument('synth') })
+      .toEqual({ result: { accepted: false, reason: 'unsupported' }, batches: 0, prepared: p1Initial })
+  } finally { f.controller.dispose() }
+})
+
 test('P1 a Synth portable bridge error is still reported and never rebuilds', async () => {
   const f = await p1Fixture({ failBatches: true })
   try {

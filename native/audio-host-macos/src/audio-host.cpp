@@ -337,9 +337,12 @@ struct NativeVstWorkerAttachment {
   static constexpr std::size_t kActiveNoteCapacity = 256;
   // An instance added to a live graph is staged until a published revision binds it,
   // then active; it is retired when it was never ready, was undone, or its revision
-  // rolled back. Control thread only.
-  enum class Ownership : std::uint8_t { kStaged, kActive, kRetired };
+  // rolled back. A detached ready instance is parked for a bounded count and age so an
+  // undo rejoins it without loading the plug-in again. Control thread only.
+  enum class Ownership : std::uint8_t { kStaged, kActive, kParked, kRetired };
   Ownership ownership = Ownership::kActive;
+  std::chrono::steady_clock::time_point parked_at{};
+  [[nodiscard]] bool Detached() const { return ownership == Ownership::kParked || ownership == Ownership::kRetired; }
   // Which plans still hold this object's address. Retired objects are freed once neither does.
   bool bound_prepared = false;
   bool bound_active = false;
@@ -1890,6 +1893,9 @@ struct AudioHost::Impl {
   std::unordered_map<std::string, std::unique_ptr<NativeVstWorkerAttachment>> native_vst_attachments;
   // Set while the workers run, so an instance added to a live graph starts at once.
   std::optional<daw::plugin_host::WorkerProcessSetup::Mode> native_worker_mode;
+  static constexpr std::size_t kMaximumParkedNativeVsts = 4;
+  std::chrono::steady_clock::duration parked_age = std::chrono::seconds(60);
+  std::uint64_t superseded_vst_ordinal = 0;
   WorkerNotificationSink worker_notifications{};
   // Declared after the sink its attachments report to, so it is destroyed first.
   std::optional<RetiredAttachmentReaper> retired_attachment_reaper;
@@ -2219,8 +2225,7 @@ struct AudioHost::Impl {
       native_vst_attachments.begin(),
       native_vst_attachments.end(),
       [](const auto& entry) {
-        return entry.second->metadata.playback_enabled
-          && entry.second->ownership != NativeVstWorkerAttachment::Ownership::kRetired;
+        return entry.second->metadata.playback_enabled && !entry.second->Detached();
       }
     );
     const auto worker_executable = has_enabled_attachment ? WorkerExecutablePath() : std::optional<std::string>{};
@@ -2229,8 +2234,7 @@ struct AudioHost::Impl {
     std::size_t started_count = 0;
     for (auto& [instance_id, attachment] : native_vst_attachments) {
       static_cast<void>(instance_id);
-      if (!attachment->metadata.playback_enabled
-        || attachment->ownership == NativeVstWorkerAttachment::Ownership::kRetired) continue;
+      if (!attachment->metadata.playback_enabled || attachment->Detached()) continue;
       if (!StartNativeVstWorker(attachment.get(), mode, *worker_executable)) {
         for (std::size_t index = 0; index < started_count; ++index) started[index]->worker.Stop();
         return false;
@@ -2245,7 +2249,70 @@ struct AudioHost::Impl {
   void RetireNativeVst(NativeVstWorkerAttachment& attachment) {
     attachment.ownership = NativeVstWorkerAttachment::Ownership::kRetired;
   }
+  [[nodiscard]] static bool SameLoadedPlugin(const NativeVstAttachment& left, const NativeVstAttachment& right) {
+    return left.class_id == right.class_id && left.vendor_id == right.vendor_id
+      && left.canonical_bundle_path == right.canonical_bundle_path
+      && left.canonical_executable_path == right.canonical_executable_path
+      && left.architecture == right.architecture
+      && left.bundle_fingerprint == right.bundle_fingerprint && left.binary_fingerprint == right.binary_fingerprint
+      && left.scanner_catalog_version == right.scanner_catalog_version
+      && left.role == right.role && left.input_layout == right.input_layout && left.output_layout == right.output_layout
+      && left.playback_enabled == right.playback_enabled
+      && left.initial_state_sha256 == right.initial_state_sha256
+      && left.parameter_ids == right.parameter_ids
+      && left.initial_parameter_values == right.initial_parameter_values
+      && left.transport.slot_count == right.transport.slot_count
+      && left.transport.maximum_frames == right.transport.maximum_frames
+      && left.transport.input_channels == right.transport.input_channels
+      && left.transport.output_channels == right.transport.output_channels
+      && left.transport.maximum_events_per_block == right.transport.maximum_events_per_block;
+  }
+  [[nodiscard]] static bool SameBinding(const NativeVstAttachment& left, const NativeVstAttachment& right) {
+    return left.graph_node_id == right.graph_node_id && left.stage_index == right.stage_index
+      && left.source_index == right.source_index && left.render_enabled == right.render_enabled
+      && left.declared_latency_frames == right.declared_latency_frames
+      && left.declared_tail_frames == right.declared_tail_frames && left.infinite_tail == right.infinite_tail
+      && left.transport_latency_frames == right.transport_latency_frames;
+  }
+  // A ready instance parks instead of retiring; the newest kMaximumParkedNativeVsts stay.
+  void ParkNativeVst(NativeVstWorkerAttachment& attachment) {
+    attachment.ownership = NativeVstWorkerAttachment::Ownership::kParked;
+    attachment.parked_at = std::chrono::steady_clock::now();
+    std::vector<NativeVstWorkerAttachment*> parked;
+    for (auto& [instance_id, held] : native_vst_attachments) {
+      static_cast<void>(instance_id);
+      if (held->ownership == NativeVstWorkerAttachment::Ownership::kParked) parked.push_back(held.get());
+    }
+    if (parked.size() <= kMaximumParkedNativeVsts) return;
+    std::sort(parked.begin(), parked.end(), [](const auto* left, const auto* right) {
+      return left->parked_at < right->parked_at;
+    });
+    for (std::size_t index = 0; index + kMaximumParkedNativeVsts < parked.size(); ++index) RetireNativeVst(*parked[index]);
+  }
+  // Takes back a parked instance of the same loaded plug-in. A plan still holding the
+  // object's address needs an identical binding, because the callback reads its metadata.
+  [[nodiscard]] bool RejoinParkedNativeVst(NativeVstWorkerAttachment& parked, const NativeVstAttachment& attachment) {
+    if (parked.ownership != NativeVstWorkerAttachment::Ownership::kParked
+      || parked.worker.health() != daw::plugin_host::WorkerHealth::kReady
+      || !SameLoadedPlugin(parked.metadata, attachment)) return false;
+    const bool held_by_plan = parked.bound_active || parked.bound_prepared;
+    if (held_by_plan && !SameBinding(parked.metadata, attachment)) return false;
+    if (!held_by_plan) parked.metadata = attachment;
+    parked.ownership = parked.bound_active || !graph_prepared
+      ? NativeVstWorkerAttachment::Ownership::kActive
+      : NativeVstWorkerAttachment::Ownership::kStaged;
+    return true;
+  }
+  void ExpireParkedNativeVsts() {
+    const auto now = std::chrono::steady_clock::now();
+    for (auto& [instance_id, attachment] : native_vst_attachments) {
+      static_cast<void>(instance_id);
+      if (attachment->ownership == NativeVstWorkerAttachment::Ownership::kParked
+        && now - attachment->parked_at >= parked_age) RetireNativeVst(*attachment);
+    }
+  }
   void ReclaimRetiredNativeVsts() {
+    ExpireParkedNativeVsts();
     if (HasRetiredPlan()) return;
     for (auto entry = native_vst_attachments.begin(); entry != native_vst_attachments.end();) {
       const auto& attachment = *entry->second;
@@ -2437,8 +2504,7 @@ struct AudioHost::Impl {
     std::unordered_map<std::uint64_t, std::vector<NativeVstWorkerAttachment*>> chains;
     for (auto& [instance_id, attachment] : native_vst_attachments) {
       static_cast<void>(instance_id);
-      if (!attachment->metadata.playback_enabled
-        || attachment->ownership == NativeVstWorkerAttachment::Ownership::kRetired) continue;
+      if (!attachment->metadata.playback_enabled || attachment->Detached()) continue;
       // A staged instance binds only once its worker is ready; otherwise it is left out
       // and retired when this revision publishes.
       if (attachment->ownership == NativeVstWorkerAttachment::Ownership::kStaged
@@ -3416,6 +3482,10 @@ void AudioHostTestAccess::UseNoPluginWorkers(const bool use) {
   test_no_plugin_workers.store(use, std::memory_order_release);
 }
 
+void AudioHostTestAccess::SetParkedAge(AudioHost& host, const std::chrono::milliseconds age) {
+  host.impl_->parked_age = age;
+}
+
 void AudioHostTestAccess::UseWorkerExecutable(std::string path) {
   test_worker_executable = std::move(path);
 }
@@ -3444,6 +3514,7 @@ AudioHostTestAccess::Ownership AudioHostTestAccess::AttachmentOwnership(
   switch (attachment->second->ownership) {
     case NativeVstWorkerAttachment::Ownership::kStaged: return Ownership::kStaged;
     case NativeVstWorkerAttachment::Ownership::kActive: return Ownership::kActive;
+    case NativeVstWorkerAttachment::Ownership::kParked: return Ownership::kParked;
     case NativeVstWorkerAttachment::Ownership::kRetired: return Ownership::kRetired;
   }
   return Ownership::kAbsent;
@@ -4328,7 +4399,8 @@ std::optional<std::vector<std::uint8_t>> AudioHost::GetNativeVstState(const std:
 void AudioHost::ProcessNativeVstControl() {
   impl_->ReclaimAssets();
   impl_->ReclaimRetiredNativeVsts();
-  for (auto& [instance_id, attachment] : impl_->native_vst_attachments) {
+  for (auto& [map_key, attachment] : impl_->native_vst_attachments) {
+    static_cast<void>(map_key);
     while (const auto diagnostic = attachment->worker.ReadDiagnostic()) {
       if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kScheduledAutomationInput) {
         const auto epoch = diagnostic->transport_epoch;
@@ -4337,7 +4409,8 @@ void AudioHost::ProcessNativeVstControl() {
           && (!attachment->worker_automation || attachment->worker_automation->transport_epoch != epoch
             || diagnostic->sequence > attachment->worker_automation->sequence)) {
           attachment->worker_automation = Diagnostics::WorkerAutomation{
-            diagnostic->value, diagnostic->parameter_id, epoch, diagnostic->sequence, instance_id,
+            diagnostic->value, diagnostic->parameter_id, epoch, diagnostic->sequence,
+            attachment->metadata.instance_id,
           };
         }
       } else if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kLatency) {
@@ -5202,9 +5275,19 @@ std::uint64_t AudioHost::appliedUrgentSequence() const {
 bool AudioHost::AttachNativeVst(const NativeVstAttachment& attachment) {
   NativeVstAttachment normalized = attachment;
   impl_->ReclaimRetiredNativeVsts();
-  if (!ValidNativeVstAttachment(normalized)
-    || impl_->native_vst_attachments.contains(normalized.instance_id)
-    || impl_->native_vst_attachments.size() >= kMaximumNativeVstAttachments) return false;
+  if (!ValidNativeVstAttachment(normalized)) return false;
+  if (const auto held = impl_->native_vst_attachments.find(normalized.instance_id);
+    held != impl_->native_vst_attachments.end()) {
+    if (impl_->RejoinParkedNativeVst(*held->second, normalized)) return true;
+    if (!held->second->Detached()) return false;
+    // A parked or retired object that cannot be reused is moved aside, still owned until
+    // reclaimed, so the instance ID is free for the new load.
+    auto superseded = impl_->native_vst_attachments.extract(held);
+    impl_->RetireNativeVst(*superseded.mapped());
+    superseded.key() = "superseded:" + std::to_string(++impl_->superseded_vst_ordinal);
+    impl_->native_vst_attachments.insert(std::move(superseded));
+  }
+  if (impl_->native_vst_attachments.size() >= kMaximumNativeVstAttachments) return false;
   auto worker_attachment = std::make_unique<NativeVstWorkerAttachment>();
   worker_attachment->active_schedule_bank = &impl_->active_schedule_bank;
   worker_attachment->metadata = normalized;
@@ -5275,7 +5358,12 @@ std::optional<NativeVstEditorStatus> AudioHost::ExecuteNativeVstEditorCommand(
 bool AudioHost::DetachVstReference(const std::string_view instance_id) {
   const auto attachment = impl_->native_vst_attachments.find(std::string(instance_id));
   if (attachment == impl_->native_vst_attachments.end()) return false;
-  impl_->RetireNativeVst(*attachment->second);
+  auto& detached = *attachment->second;
+  if (detached.Detached() || detached.worker.health() != daw::plugin_host::WorkerHealth::kReady) {
+    impl_->RetireNativeVst(detached);
+  } else {
+    impl_->ParkNativeVst(detached);
+  }
   impl_->ReclaimRetiredNativeVsts();
   return true;
 }

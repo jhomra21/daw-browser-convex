@@ -5458,6 +5458,14 @@ void PublishRunningRevision(daw::audio_host_macos::AudioHost& host, const std::u
   assert(host.PublishGraphRevision(revision).code == GraphRevisionStatusCode::kPublishPending);
   RenderBlock(host);
   assert(host.InspectGraphRevision(revision).code == GraphRevisionStatusCode::kPublished);
+  // The previous plan retires once the callback has moved past any latency transition.
+  for (unsigned block = 0; block < 20000; ++block) {
+    RenderBlock(host);
+    const auto retired = host.RetireGraphRevision(revision - 1);
+    if (retired.code == GraphRevisionStatusCode::kRetired) return;
+    assert(retired.code == GraphRevisionStatusCode::kRetirementNotSafe);
+  }
+  assert(false);
 }
 }
 
@@ -5500,14 +5508,32 @@ void TestRollbackRetiresEveryStagedAttachment() {
   host.Stop();
 }
 
+// A worker that never becomes ready and, once asked to stop, ignores SIGTERM: it needs
+// about 500 ms to retire.
+struct NeverReadyWorkers {
+  NeverReadyWorkers() {
+    const std::string script_path = "/tmp/ae08-never-ready-worker.sh";
+    {
+      std::ofstream script(script_path);
+      script << "#!/bin/sh\ntrap '' TERM\nexec /bin/sleep 30\n";
+    }
+    assert(chmod(script_path.c_str(), 0700) == 0);
+    AudioHostTestAccess::UseWorkerExecutable(script_path);
+  }
+  ~NeverReadyWorkers() { AudioHostTestAccess::UseWorkerExecutable({}); }
+};
+
 void TestUndoBeforePublicationBindsNothing() {
   const NoPluginWorkers no_plugin;
   daw::audio_host_macos::AudioHost host;
   StartRunningHostWithGraph(host);
-  // Deleted while its worker is still starting.
-  assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 2)));
-  assert(host.DetachVstReference(kFirstVstInstance));
-  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kAbsent);
+  {
+    // Deleted while its worker is still starting: nothing to park.
+    const NeverReadyWorkers starting;
+    assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 2)));
+    assert(host.DetachVstReference(kFirstVstInstance));
+    assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kAbsent);
+  }
   // Undone after its worker became ready: the late ready must not reach the graph,
   // which a binding would reject because the node declares no external latency.
   assert(host.AttachNativeVst(PlaybackVstAttachment(kSecondVstInstance, 2)));
@@ -5515,7 +5541,7 @@ void TestUndoBeforePublicationBindsNothing() {
   assert(host.DetachVstReference(kSecondVstInstance));
   PublishRunningRevision(host, 3, 0);
   host.ProcessNativeVstControl();
-  assert(OwnershipOf(host, kSecondVstInstance) == Ownership::kAbsent);
+  assert(OwnershipOf(host, kSecondVstInstance) == Ownership::kParked);
   host.Stop();
 }
 
@@ -5523,25 +5549,115 @@ void TestRapidInsertUndoBurstKeepsEveryInstanceOwned() {
   const NoPluginWorkers no_plugin;
   daw::audio_host_macos::AudioHost host;
   StartRunningHostWithGraph(host);
-  for (unsigned burst = 0; burst < 70; ++burst) {
+  constexpr unsigned kBursts = 70;
+  const auto id_for = [](const unsigned burst) {
     char id[40];
     std::snprintf(id, sizeof(id), "b0c4db1e-bd48-46d4-a4bc-%012u", burst);
-    assert(host.AttachNativeVst(PlaybackVstAttachment(id, 2)));
-    assert(host.DetachVstReference(id));
-    assert(OwnershipOf(host, id) == Ownership::kAbsent);
+    return std::string(id);
+  };
+  for (unsigned burst = 0; burst < kBursts; ++burst) {
+    assert(host.AttachNativeVst(PlaybackVstAttachment(id_for(burst), 2)));
+    assert(host.DetachVstReference(id_for(burst)));
   }
+  unsigned parked = 0;
+  for (unsigned burst = 0; burst < kBursts; ++burst) {
+    const auto ownership = OwnershipOf(host, id_for(burst));
+    assert(ownership == Ownership::kAbsent || ownership == Ownership::kParked);
+    parked += ownership == Ownership::kParked ? 1U : 0U;
+  }
+  assert(parked <= 4);
+  host.Stop();
+}
+
+// Brings `ids.size()` ready instances to a running host's graph, all on node 2.
+void AttachReadyInstances(daw::audio_host_macos::AudioHost& host, const std::vector<std::string_view>& ids) {
+  for (const auto id : ids) assert(host.AttachNativeVst(PlaybackVstAttachment(id, 2)));
+  for (const auto id : ids) assert(WaitForVstHealth(host, id, NativeVstWorkerHealth::kReady));
+}
+
+void TestParkedInstanceRejoinsWithoutAReload() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  StartRunningHostWithGraph(host);
+  AttachReadyInstances(host, {kFirstVstInstance});
+  PublishRunningRevision(host, 3, 36);
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kActive);
+  const auto generation = AudioHostTestAccess::WorkerGeneration(host, kFirstVstInstance);
+  // Deleted: the instance parks, and the revision that drops it does not bind it.
+  assert(host.DetachVstReference(kFirstVstInstance));
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kParked);
+  PublishRunningRevision(host, 4, 0);
+  host.ProcessNativeVstControl();
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kParked);
+  // Undone: the same object rejoins, is staged for the next publication, and is never reloaded.
+  assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 2)));
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kStaged);
+  assert(AudioHostTestAccess::WorkerGeneration(host, kFirstVstInstance) == generation);
+  PublishRunningRevision(host, 5, 36);
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kActive);
+  assert(AudioHostTestAccess::WorkerGeneration(host, kFirstVstInstance) == generation);
+  host.Stop();
+}
+
+void TestUndoBeforeTheDeletePublishesKeepsTheLiveBinding() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  StartRunningHostWithGraph(host);
+  AttachReadyInstances(host, {kFirstVstInstance});
+  PublishRunningRevision(host, 3, 36);
+  const auto generation = AudioHostTestAccess::WorkerGeneration(host, kFirstVstInstance);
+  assert(host.DetachVstReference(kFirstVstInstance));
+  // The live plan still renders it, so only an identical binding may take it back.
+  assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 2)));
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kActive);
+  assert(AudioHostTestAccess::WorkerGeneration(host, kFirstVstInstance) == generation);
+  // A different binding cannot mutate an object the live plan reads: it loads again.
+  assert(host.DetachVstReference(kFirstVstInstance));
+  auto moved = PlaybackVstAttachment(kFirstVstInstance, 2);
+  moved.stage_index = 1;
+  assert(host.AttachNativeVst(moved));
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kStaged);
+  assert(AudioHostTestAccess::WorkerGeneration(host, kFirstVstInstance) != generation);
+  host.Stop();
+}
+
+void TestParkedInstanceThatChangedIsLoadedAgain() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  StartRunningHostWithGraph(host);
+  AttachReadyInstances(host, {kFirstVstInstance});
+  const auto generation = AudioHostTestAccess::WorkerGeneration(host, kFirstVstInstance);
+  assert(host.DetachVstReference(kFirstVstInstance));
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kParked);
+  // A different state hash is a different instance: the parked one is released, not reused.
+  auto changed = PlaybackVstAttachment(kFirstVstInstance, 2);
+  changed.initial_state_sha256 = std::string(64, 'a');
+  assert(host.AttachNativeVst(changed));
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kStaged);
+  assert(AudioHostTestAccess::WorkerGeneration(host, kFirstVstInstance) != generation);
+  host.Stop();
+}
+
+void TestParkingIsBoundedByCountAndAge() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  StartRunningHostWithGraph(host);
+  const std::vector<std::string> ids{"id-0", "id-1", "id-2", "id-3", "id-4"};
+  for (const auto& id : ids) assert(host.AttachNativeVst(PlaybackVstAttachment(id, 2)));
+  for (const auto& id : ids) assert(WaitForVstHealth(host, id, NativeVstWorkerHealth::kReady));
+  for (const auto& id : ids) assert(host.DetachVstReference(id));
+  assert(OwnershipOf(host, "id-0") == Ownership::kAbsent);
+  for (std::size_t index = 1; index < ids.size(); ++index) assert(OwnershipOf(host, ids[index]) == Ownership::kParked);
+  AudioHostTestAccess::SetParkedAge(host, std::chrono::milliseconds(50));
+  std::this_thread::sleep_for(std::chrono::milliseconds(80));
+  host.ProcessNativeVstControl();
+  for (const auto& id : ids) assert(OwnershipOf(host, id) == Ownership::kAbsent);
   host.Stop();
 }
 
 // A child that ignores the stop request and SIGTERM needs about 500 ms before SIGKILL.
 void TestRetiringASlowWorkerDoesNotBlockTheCommandLoop() {
-  const std::string slow_worker = "/tmp/ae08-slow-exit-worker.sh";
-  {
-    std::ofstream script(slow_worker);
-    script << "#!/bin/sh\ntrap '' TERM\nexec /bin/sleep 30\n";
-  }
-  assert(chmod(slow_worker.c_str(), 0700) == 0);
-  AudioHostTestAccess::UseWorkerExecutable(slow_worker);
+  const NeverReadyWorkers slow;
   const NoPluginWorkers no_plugin;
   daw::audio_host_macos::AudioHost host;
   StartRunningHostWithGraph(host);
@@ -5560,11 +5676,19 @@ void TestRetiringASlowWorkerDoesNotBlockTheCommandLoop() {
   }
   assert(kill(-slow_group, 0) != 0 && errno == ESRCH);
   host.Stop();
-  AudioHostTestAccess::UseWorkerExecutable({});
 }
 
 int main() {
-  if (std::getenv("DAW_AE08_RETIRE_ONLY")) { TestRetiringASlowWorkerDoesNotBlockTheCommandLoop(); return 0; }
+  if (std::getenv("DAW_AE08_RETIRE_ONLY")) {
+    TestRetiringASlowWorkerDoesNotBlockTheCommandLoop();
+    TestUndoBeforePublicationBindsNothing();
+    TestRapidInsertUndoBurstKeepsEveryInstanceOwned();
+    TestParkedInstanceRejoinsWithoutAReload();
+    TestUndoBeforeTheDeletePublishesKeepsTheLiveBinding();
+    TestParkedInstanceThatChangedIsLoadedAgain();
+    TestParkingIsBoundedByCountAndAge();
+    return 0;
+  }
   if (const auto* mode = std::getenv("DAW_AE08_OBSERVATION_ONLY")) {
     TestCheckpoint4ObservationHandoff(*mode); return 0;
   }
@@ -5773,5 +5897,9 @@ int main() {
   TestUndoBeforePublicationBindsNothing();
   TestRapidInsertUndoBurstKeepsEveryInstanceOwned();
   TestRetiringASlowWorkerDoesNotBlockTheCommandLoop();
+  TestParkedInstanceRejoinsWithoutAReload();
+  TestUndoBeforeTheDeletePublishesKeepsTheLiveBinding();
+  TestParkedInstanceThatChangedIsLoadedAgain();
+  TestParkingIsBoundedByCountAndAge();
   return 0;
 }

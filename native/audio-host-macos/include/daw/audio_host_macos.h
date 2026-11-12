@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <array>
+#include <chrono>
 #include <algorithm>
 #include <bit>
 #include <deque>
@@ -567,7 +568,8 @@ namespace daw::plugin_host { struct WorkerDiagnostic; }
 namespace daw::audio_host_macos {
 // Private test copy only: drives attached workers that run without a plug-in.
 struct AudioHostTestAccess {
-  enum class Ownership { kAbsent, kStaged, kActive, kRetired };
+  enum class Ownership { kAbsent, kStaged, kActive, kParked, kRetired };
+  static void SetParkedAge(AudioHost& host, std::chrono::milliseconds age);
   static Ownership AttachmentOwnership(AudioHost& host, std::string_view instance_id);
   static void UseNoPluginWorkers(bool use);
   static void UseWorkerExecutable(std::string path);

@@ -4449,7 +4449,8 @@ void AudioHost::ProcessNativeVstControl() {
       } else if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kFault) {
         // A faulted worker is no longer ready, so its callback writes silence for
         // this instance only. Every other attachment and the graph keep rendering.
-        impl_->Evidence("attachment-fault-isolated", "plugin-fault");
+        impl_->Evidence("attachment-fault-isolated",
+          daw::plugin_host::IsPluginFaultOrigin(diagnostic->value) ? "plugin-fault" : "host-defect");
         attachment->worker_automation.reset();
         impl_->vst_worker_faults.fetch_add(1, std::memory_order_relaxed);
       }

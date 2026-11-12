@@ -353,6 +353,25 @@ constexpr std::uint32_t EncodeWorkerFault(
     | ((childCode & 0xffU) << 8U) | ((childStatus & 0xffU) << 16U);
 }
 
+// Only the plug-in's own process or API is the plug-in's fault: the child exiting or being killed,
+// setup or processing failing, and a failed component restart. Transport, dispatch, callback-miss,
+// startup, control IO and unknown-notification origins are ours. The TypeScript coordinator keeps the
+// same set (apps/desktop/native-vst3-coordinator.ts, pluginFaultOrigins).
+constexpr bool IsPluginFaultOrigin(const std::uint32_t faultValue) noexcept {
+  switch (static_cast<WorkerFaultOrigin>(faultValue & 0xffU)) {
+    case WorkerFaultOrigin::kChildExit:
+    case WorkerFaultOrigin::kChildSignal:
+    case WorkerFaultOrigin::kConfigureFailure:
+    case WorkerFaultOrigin::kConfigureException:
+    case WorkerFaultOrigin::kProcessFailure:
+    case WorkerFaultOrigin::kProcessException:
+    case WorkerFaultOrigin::kWorkerNotification:
+      return true;
+    default:
+      return false;
+  }
+}
+
 struct WorkerDiagnostic {
   WorkerDiagnosticKind kind = WorkerDiagnosticKind::kFault;
   std::uint32_t value = 0;

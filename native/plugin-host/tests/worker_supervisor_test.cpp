@@ -476,6 +476,26 @@ int main(int argc, char* argv[]) {
     if (!Check(!ignored.refreshMetadata && !ignored.latencyChanged && !ignored.componentRestart,
       "unrelated restart flags had an effect")) return EXIT_FAILURE;
   }
+  {
+    using daw::plugin_host::EncodeWorkerFault;
+    using daw::plugin_host::IsPluginFaultOrigin;
+    using daw::plugin_host::WorkerFaultOrigin;
+    for (const auto origin : {
+      WorkerFaultOrigin::kChildExit, WorkerFaultOrigin::kChildSignal, WorkerFaultOrigin::kConfigureFailure,
+      WorkerFaultOrigin::kConfigureException, WorkerFaultOrigin::kProcessFailure,
+      WorkerFaultOrigin::kProcessException, WorkerFaultOrigin::kWorkerNotification,
+    }) {
+      if (!Check(IsPluginFaultOrigin(EncodeWorkerFault(origin, 2, 9)), "a plug-in origin was attributed to us")) return EXIT_FAILURE;
+    }
+    for (const auto origin : {
+      WorkerFaultOrigin::kUnknown, WorkerFaultOrigin::kTransportFault, WorkerFaultOrigin::kDispatchFailure,
+      WorkerFaultOrigin::kCallbackMissTermination, WorkerFaultOrigin::kStartupFailure,
+      WorkerFaultOrigin::kStartupException, WorkerFaultOrigin::kUnknownWorkerNotification,
+      WorkerFaultOrigin::kOfflineCompletionFailure, WorkerFaultOrigin::kControlIoFailure,
+    }) {
+      if (!Check(!IsPluginFaultOrigin(EncodeWorkerFault(origin, 2, 9)), "our own origin was attributed to the plug-in")) return EXIT_FAILURE;
+    }
+  }
   auto invalidStartup = NoPluginStartup();
   invalidStartup.classId = "not-allowed";
   if (!Check(!daw::plugin_host::IsValidWorkerStartupRequest(invalidStartup), "no-plugin startup accepted plugin data")) return EXIT_FAILURE;

@@ -398,6 +398,7 @@ export function useTimelinePlayback(
         : { supported: false, reasons: ['Portable browser playback is not configured.'] }
     },
     fingerprintSnapshot: loopOptions?.getTracks ? (snapshot) => readScheduleSnapshotFingerprint(snapshot) : undefined,
+    onAdoptionResubmitted: () => followPortableEdits(),
     getAudioContext: () => audioEngine.getAudioContext?.() ?? null,
     getProjectGeneration: portableBrowserOptions?.projectGeneration,
     resolveSource: portableBrowserOptions?.resolveAudioSource,
@@ -1560,8 +1561,7 @@ export function useTimelinePlayback(
       if (outcome === "rebuild" && !portableBrowserPlayback.isRecording()) {
         await applyTimelineSchedule(tracks, { rebuildBackend: true })
       } else if (outcome === "adopted" || outcome === "unchanged") previewProjectionBaseline = key
-      // The baseline stays behind, so the next follow compiles the newest state and stages it again.
-      else if (outcome === "failed") console.warn("[portable-playback] instrument adoption failed; the playing graph is kept and staging retries on the next follow")
+      // A failed staging leaves the baseline behind: the controller resubmits it at block boundaries and logs each one.
       return
     }
     const key = readDesiredScheduleFingerprint(tracks)

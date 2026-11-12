@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { expect, spyOn, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
 import { extractTimelineBindings } from '~/lib/timeline-source-test-support'
 import { createProcessorEditRegistry } from '~/components/timeline/create-processor-edit-registry'
@@ -13,6 +13,7 @@ import {
   createDefaultUtilityParams,
   mergeSynthParams,
   type DrumRackPadSample,
+  type SamplerZone,
   type SynthParamsUpdate,
   type TrackInstrumentParams,
   type UtilityParamsEnvelope,
@@ -37,7 +38,7 @@ import type { PortableWasmBackendSelection, PortableWasmPlaybackSession } from '
 import { portableWasmPagedPreparationCount } from '@daw-browser/audio-engine/wasm-audio-worklet-backend'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { LivePlaybackTransport } from '~/lib/live-playback-snapshot'
-import { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
+import { createPortableBrowserPlaybackController, type PortableAdoptionResult } from '~/lib/portable-browser-playback-controller'
 
 test("3B1 r3 extraction ignores stale commented callbacks and rejects missing or ambiguous bindings", async () => {
   const source = await readFile(new URL("../components/Timeline.tsx", import.meta.url), "utf8")
@@ -1750,7 +1751,7 @@ test('preserves caller-owned recording streams when portable writer startup fail
 const p1Initial: TrackInstrumentParams = { kind: 'synth', instanceId: 'synth:1', params: createDefaultSynthParams() }
 const p1Synth = (from: TrackInstrumentParams, update: SynthParamsUpdate): TrackInstrumentParams =>
   from.kind === 'synth' ? { ...from, params: mergeSynthParams(from.params, update) } : from
-const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: boolean; initial?: TrackInstrumentParams } = {}) => {
+const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number; initial?: TrackInstrumentParams; assetKeys?: readonly string[] } = {}) => {
   const source = await readFile(new URL("../components/Timeline.tsx", import.meta.url), "utf8")
   const { portable, structural } = extractTimelineBindings(source)
   const transpile = (code: string) => new Bun.Transpiler({ loader: "ts" }).transformSync(code)
@@ -1769,25 +1770,40 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: boolean
     const base = compilation()
     const trackFx = { synth: { ...base.snapshot.mixer.fx.trackFx.synth, instrument: projected } }
     const fx = { ...base.snapshot.mixer.fx, trackFx }
-    return { ...base.snapshot, revision, mixer: { ...base.snapshot.mixer, fx,
+    const assets = (options.assetKeys ?? []).map(assetId => ({ assetId, source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 }, buffer: new TestAudioBuffer() }))
+    return { ...base.snapshot, revision, assets, mixer: { ...base.snapshot.mixer, fx,
       graph: resolveLiveMixerGraph([track], fx.trackFx, { masterFxInstances: [] }) } }
   }
+  let refused = 0, settled = 0
+  let registered: readonly string[] = []
+  let emitPosition = (_frame: number, _sequence: number) => {}
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async () => ({ supported: true, snapshot: snapshot() }),
     fingerprintSnapshot: next => JSON.stringify({ ...next, revision: 0, mixer: { ...next.mixer, graph: undefined } }),
     getAudioContext: () => context, select: async () => selected,
-    backend: { createPlaybackSession: async () => ({
-      ...createSession(calls, async () => {}),
-      prepareGraph: async graph => {
-        if (options.failPrepare && graphs.length > 0) { options.failPrepare = false; throw new Error('P1 prepare refused') }
-        graphs.push(graph)
-      },
-      queueInstrumentEvents: async (_epoch: number, events: readonly unknown[]) => {
-        if (options.failBatches) throw new Error('P1 portable bridge down')
-        batches.push(events)
-      },
-    }) },
+    onAdoptionResubmitted: () => { settled++ },
+    backend: { createPlaybackSession: async () => {
+      const session = createSession(calls, async () => {})
+      emitPosition = (frame, sequence) => session.emitPosition(frame, sequence)
+      registered = session.registeredAssets
+      return {
+        ...session,
+        prepareGraph: async graph => {
+          if (graphs.length > 0 && refused < (options.failPrepare ?? 0)) { refused++; throw new Error('P1 prepare refused') }
+          graphs.push(graph)
+        },
+        queueInstrumentEvents: async (_epoch: number, events: readonly unknown[]) => {
+          if (options.failBatches) throw new Error('P1 portable bridge down')
+          batches.push(events)
+        },
+      }
+    } },
   })
+  // One transport-position report per call, as the worklet sends them; the retry waits on these.
+  let reports = 0
+  const report = async (count = 1) => {
+    for (let index = 0; index < count; index++) { emitPosition(1_000 + ++reports, reports); await Bun.sleep(0) }
+  }
   expect(await controller.start(snapshot().transport)).toBe('started')
   const rebuild = async () => {
     rebuilds++
@@ -1824,7 +1840,8 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: boolean
   }
   const structureOf = (instrument: TrackInstrumentParams) =>
     instrument.kind === 'synth' ? nativeSynthStructureKey(compilePortableSynthState(instrument.params)) : undefined
-  return { controller, apply, announce, edit, flush, setProjected: (instrument: TrackInstrumentParams) => { projected = instrument }, batches, graphs, notes, rebuilds: () => rebuilds, sessionStructure, structureOf }
+  return { controller, apply, announce, edit, flush, setProjected: (instrument: TrackInstrumentParams) => { projected = instrument }, batches, graphs, notes, rebuilds: () => rebuilds, sessionStructure, structureOf,
+    report, refused: () => refused, settled: () => settled, registered: () => registered }
 }
 
 test('P1 a live Synth edit is accepted and the prepared portable snapshot follows it', async () => {
@@ -1911,8 +1928,35 @@ test.each<[string, TrackInstrumentParams, TrackInstrumentParams]>([
   } finally { f.controller.dispose() }
 })
 
+test('P1 a Sampler zone edit and a sample swap with real buffers are adopted on the same session, never rebuilt', async () => {
+  const sampler = (zone: Partial<SamplerZone>, assetKey = 'asset-a'): TrackInstrumentParams => ({
+    kind: 'sampler', instanceId: 'sampler:1',
+    params: { ...createDefaultSamplerParams(), zones: [{
+      id: 'zone', keyLow: 0, keyHigh: 127, velocityLow: 1, velocityHigh: 127, rootNote: 60, tuneCents: 0, gain: 1, pan: 0,
+      // A looped zone: the portable contract refuses a one-shot zone whose start is after frame 0 (loopStartFrame stays 0).
+      roundRobinGroup: 0, roundRobinIndex: 0, playbackMode: 'forward-loop', startSec: 0, crossfadeSec: 0, chokeGroup: 0,
+      sample: { assetKey, url: `local-asset:${assetKey}`, sourceKind: 'upload', source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 } },
+      ...zone,
+    }] },
+  })
+  const initial = sampler({})
+  const f = await p1Fixture({ initial, assetKeys: ['asset-a', 'asset-b'] })
+  try {
+    const steps = [sampler({ startSec: 0.25 }), sampler({ startSec: 0.25, tuneCents: 200 }), sampler({ startSec: 0.25, tuneCents: 200 }, 'asset-b')]
+    const results: PortableAdoptionResult[] = []
+    for (const next of steps) {
+      await f.announce('synth', next)
+      f.setProjected(next)
+      results.push(await f.controller.adoptSchedule())
+    }
+    expect({ results, rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes, registered: f.registered() })
+      .toEqual({ results: ['adopted', 'adopted', 'adopted'], rebuilds: 0, graphs: 4, notes: [], registered: ['asset-a', 'asset-b'] })
+    expect(f.controller.preparedInstrument('synth')).toEqual(steps[2])
+  } finally { f.controller.dispose() }
+})
+
 test('P1 a failed adoption of an instrument edit keeps the playing graph, never rebuilds, and the next adoption stages it', async () => {
-  const f = await p1Fixture({ failPrepare: true })
+  const f = await p1Fixture({ failPrepare: 1 })
   try {
     const next = p1Synth(p1Initial, { polyphony: 4 })
     expect(await f.apply(f.edit(next))).toBe('applied')
@@ -1924,6 +1968,46 @@ test('P1 a failed adoption of an instrument edit keeps the playing graph, never 
     expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length }).toEqual({ rebuilds: 0, graphs: 2 })
     expect(f.sessionStructure()).toBe(f.structureOf(next))
   } finally { f.controller.dispose() }
+})
+
+test('UD 8 a transient staging failure is retried at the next block boundary and applies', async () => {
+  const f = await p1Fixture({ failPrepare: 1 })
+  try {
+    const next = p1Synth(p1Initial, { polyphony: 4 })
+    expect(await f.apply(f.edit(next))).toBe('applied')
+    await f.announce('synth', next)
+    expect(await f.controller.adoptSchedule()).toBe('failed')
+    expect(f.graphs.length).toBe(1)
+    await f.report()
+    await Bun.sleep(0)
+    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length, settled: f.settled(), notes: f.notes }).toEqual({ rebuilds: 0, graphs: 2, settled: 1, notes: [] })
+    expect(f.sessionStructure()).toBe(f.structureOf(next))
+  } finally { f.controller.dispose() }
+})
+
+test('UD 8 a persistent staging failure stops after 8 resubmits with a defect log, keeps the old graph, and the next publication applies it', async () => {
+  const f = await p1Fixture({ failPrepare: 9 })
+  const logged: string[] = []
+  const warn = spyOn(console, 'warn').mockImplementation((message: string) => { logged.push(`warn ${message}`) })
+  const error = spyOn(console, 'error').mockImplementation((message: string) => { logged.push(`error ${message}`) })
+  try {
+    const next = p1Synth(p1Initial, { polyphony: 4 })
+    expect(await f.apply(f.edit(next))).toBe('applied')
+    await f.announce('synth', next)
+    expect(await f.controller.adoptSchedule()).toBe('failed')
+    // Waits grow as min(2^r, 16(r+1)) reports: 1, 2, 4, ... 128 over eight resubmits.
+    await f.report(300)
+    await Bun.sleep(0)
+    expect({ refused: f.refused(), graphs: f.graphs.length, rebuilds: f.rebuilds(), notes: f.notes, active: f.controller.isActive() })
+      .toEqual({ refused: 9, graphs: 1, rebuilds: 0, notes: [], active: true })
+    expect(logged.filter(line => line.startsWith('warn')).length).toBe(8)
+    expect(logged.filter(line => line.startsWith('error')).length).toBe(1)
+    await f.report(300)
+    expect(f.refused()).toBe(9)
+    expect(await f.controller.adoptSchedule()).toBe('adopted')
+    expect({ graphs: f.graphs.length, rebuilds: f.rebuilds() }).toEqual({ graphs: 2, rebuilds: 0 })
+    expect(f.sessionStructure()).toBe(f.structureOf(next))
+  } finally { warn.mockRestore(); error.mockRestore(); f.controller.dispose() }
 })
 
 test('P1 a Synth portable bridge error is still reported and never rebuilds', async () => {

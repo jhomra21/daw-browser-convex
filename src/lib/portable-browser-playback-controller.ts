@@ -95,6 +95,7 @@ type PortableBackend = {
 }
 
 const portableRecordingControlTimeoutMs = 2_000
+const maxAdoptionResubmits = 8
 // The native portable core reserves this fixed preparation table. It is not
 // part of the wire capability payload, so the backend exposes the local
 // default alongside the runtime paged capabilities.
@@ -888,6 +889,8 @@ export const createPortableBrowserPlaybackController = (input: {
   createBuffer?: (channels: number, frames: number, sampleRate: number) => AudioBuffer
   reportFault?: (message: string) => void
   onGraphContinuity?: (message: Extract<PortableWasmStatusMessage, { type: "graph-continuity" }>) => void
+  // A resubmitted adoption ended without failing: the caller compares its baseline against what is now playing.
+  onAdoptionResubmitted?: (result: PortableAdoptionResult) => void
   backend?: PortableBackend
   select?: (project: PortablePreparedQualification) => Promise<PortableWasmBackendSelection>
   createRecordingWriter?: typeof createPortableRecordingWriter
@@ -927,6 +930,7 @@ export const createPortableBrowserPlaybackController = (input: {
   let adoptionQueued: Promise<PortableAdoptionResult> | undefined
   let adoptionTail: Promise<unknown> = Promise.resolve()
   let adoptionPublish: Promise<PortableAdoptionResult> | undefined
+  let adoptionRetry: { resubmits: number; wait: number } | undefined
   let nextRecordingSessionId = 1
   let unsubscribeFault: (() => void) | undefined
   let startupAbortController: AbortController | undefined
@@ -949,6 +953,7 @@ export const createPortableBrowserPlaybackController = (input: {
     activeGraph = undefined
     activeSnapshot = undefined
     activeFrameSchedule = undefined
+    adoptionRetry = undefined
     if (session?.releaseAssetPreparation && generation !== undefined) {
       for (const preparation of activePreparations) {
         if (!preparation.released) {
@@ -1277,6 +1282,11 @@ export const createPortableBrowserPlaybackController = (input: {
         positionSequence = position.sequence
         positionFrame = position.frame
         void releaseExpiredPreparations(playbackSession, position.frame, nextEpoch).catch(() => undefined)
+        if (adoptionRetry && --adoptionRetry.wait <= 0) {
+          const { resubmits } = adoptionRetry
+          adoptionRetry = undefined
+          void resubmitAdoption(resubmits).catch(() => undefined)
+        }
       })
       playbackSession.onGraphContinuity?.((message) => input.onGraphContinuity?.(message))
       if (runTransport) playbackSession.markActive()
@@ -1873,7 +1883,7 @@ export const createPortableBrowserPlaybackController = (input: {
   }
 
   // At most one adoption runs and one waits; the waiting one compiles when it starts, so it carries the newest edit.
-  const adoptSchedule = (): Promise<PortableAdoptionResult> => {
+  const adoptQueued = (): Promise<PortableAdoptionResult> => {
     if (adoptionQueued) return adoptionQueued
     const run = adoptionTail.then(() => {
       adoptionQueued = undefined
@@ -1882,6 +1892,32 @@ export const createPortableBrowserPlaybackController = (input: {
     adoptionQueued = run
     adoptionTail = run.catch(() => undefined)
     return run
+  }
+
+  // UD 8: a failed instrument staging keeps the playing graph and is resubmitted after min(2^r, 16(r+1)) rendered-frame
+  // reports (the worklet's transport-position messages are the block boundary; no timer), up to 8 times. Exhaustion is a
+  // defect: the edit stays in the project and the next adoption publishes it.
+  const settleAdoption = (result: PortableAdoptionResult, resubmits: number) => {
+    adoptionRetry = undefined
+    if (result !== "failed") return
+    if (resubmits >= maxAdoptionResubmits) {
+      console.error(`[portable-playback] defect: instrument adoption failed after ${maxAdoptionResubmits} resubmits; the edit applies on the next successful publication`)
+      return
+    }
+    console.warn(`[portable-playback] instrument adoption failed; resubmit ${resubmits + 1} of ${maxAdoptionResubmits} at a later block boundary`)
+    adoptionRetry = { resubmits, wait: Math.min(2 ** resubmits, 16 * (resubmits + 1)) }
+  }
+
+  const adoptSchedule = async (): Promise<PortableAdoptionResult> => {
+    const result = await adoptQueued()
+    settleAdoption(result, 0)
+    return result
+  }
+
+  const resubmitAdoption = async (resubmits: number) => {
+    const result = await adoptQueued()
+    settleAdoption(result, resubmits + 1)
+    if (result !== "failed") input.onAdoptionResubmitted?.(result)
   }
 
   const start = (transport: LivePlaybackTransport, compileContext?: LivePlaybackCompileContext): Promise<PortableStartResult> => {

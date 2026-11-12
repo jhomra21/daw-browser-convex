@@ -2356,12 +2356,13 @@ struct AudioHost::Impl {
     for (std::size_t index = 0; index + kMaximumParkedNativeVsts < parked.size(); ++index) RetireNativeVst(*parked[index]);
   }
   // Takes back a parked instance of the same loaded plug-in. A plan still holding the
-  // object's address needs an identical binding, because the callback reads its metadata.
+  // object's address needs an identical binding, because the callback reads its metadata;
+  // a retired plan not yet reclaimed still holds the address of an instance the newer plan dropped.
   [[nodiscard]] bool RejoinParkedNativeVst(NativeVstWorkerAttachment& parked, const NativeVstAttachment& attachment) {
     if (parked.ownership != NativeVstWorkerAttachment::Ownership::kParked
       || parked.worker.health() != daw::plugin_host::WorkerHealth::kReady
       || !SameLoadedPlugin(parked.metadata, attachment)) return false;
-    const bool held_by_plan = parked.bound_active || parked.bound_prepared;
+    const bool held_by_plan = parked.bound_active || parked.bound_prepared || HasRetiredPlan();
     if (held_by_plan && !SameBinding(parked.metadata, attachment)) return false;
     if (!held_by_plan) parked.metadata = attachment;
     parked.ownership = parked.bound_active || !graph_prepared

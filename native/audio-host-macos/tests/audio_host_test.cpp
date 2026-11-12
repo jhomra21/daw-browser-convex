@@ -5735,6 +5735,28 @@ void TestParkedInstanceThatChangedIsLoadedAgain() {
   host.Stop();
 }
 
+// The revision that dropped a parked instance is published, but the plan before it is not retired yet: the callback may
+// still read that instance's metadata, so a rejoin with another binding loads again and never rewrites it.
+void TestRejoinInsideTheRetireWindowKeepsWhatTheCallbackReads() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  StartRunningHostWithGraph(host);
+  AttachReadyInstances(host, {kFirstVstInstance});
+  PublishRunningRevision(host, 3, 36);
+  const auto generation = AudioHostTestAccess::WorkerGeneration(host, kFirstVstInstance);
+  assert(host.DetachVstReference(kFirstVstInstance));
+  assert(host.PrepareGraphRevision(4, GraphSnapshot(4, 1.0F, 0)).code == GraphRevisionStatusCode::kPrepared);
+  assert(host.PublishGraphRevision(4).code == GraphRevisionStatusCode::kPublishPending);
+  RenderBlock(host);
+  assert(host.InspectGraphRevision(4).code == GraphRevisionStatusCode::kPublished);
+  auto moved = PlaybackVstAttachment(kFirstVstInstance, 2);
+  moved.stage_index = 1;
+  assert(host.AttachNativeVst(moved));
+  assert(AudioHostTestAccess::WorkerGeneration(host, kFirstVstInstance) != generation);
+  while (host.RetireGraphRevision(3).code != GraphRevisionStatusCode::kRetired) RenderBlock(host);
+  host.Stop();
+}
+
 void TestParkingIsBoundedByCountAndAge() {
   const NoPluginWorkers no_plugin;
   daw::audio_host_macos::AudioHost host;
@@ -6181,6 +6203,7 @@ int main() {
     TestParkedInstanceRejoinsWithoutAReload();
     TestUndoBeforeTheDeletePublishesKeepsTheLiveBinding();
     TestParkedInstanceThatChangedIsLoadedAgain();
+    TestRejoinInsideTheRetireWindowKeepsWhatTheCallbackReads();
     TestParkingIsBoundedByCountAndAge();
     return 0;
   }
@@ -6396,6 +6419,7 @@ int main() {
   TestParkedInstanceRejoinsWithoutAReload();
   TestUndoBeforeTheDeletePublishesKeepsTheLiveBinding();
   TestParkedInstanceThatChangedIsLoadedAgain();
+  TestRejoinInsideTheRetireWindowKeepsWhatTheCallbackReads();
   TestParkingIsBoundedByCountAndAge();
   TestRetireDuringPublicationKeepsTheWorkerTheCallbackReads();
   return 0;

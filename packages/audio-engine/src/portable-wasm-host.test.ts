@@ -902,19 +902,20 @@ type HostScheduleEvent = HostSchedule['events'][number]
 type AdoptionMessage =
   | { version: number; type: 'prepare-graph'; requestId: number; snapshot: { revision: number } }
   | { version: number; type: 'install-schedule'; requestId: number; schedule: HostSchedule }
-  | { version: number; type: 'publish-graph'; requestId: number; revision: number; requireContinuity: true }
+  | { version: number; type: 'publish-graph'; requestId: number; revision: number; requireContinuity: true; publicationFrame?: number }
 const adoptRevision = <Snapshot extends { revision: number }>(
   host: { handleMessage: (message: AdoptionMessage) => void },
   messages: readonly PortableWasmStatusMessage[],
   snapshot: Snapshot,
   events: readonly HostScheduleEvent[],
+  publicationFrame?: number,
 ) => {
   const revision = snapshot.revision
   host.handleMessage({ version: 2, type: 'prepare-graph', requestId: revision * 10, snapshot })
   expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-prepared', requestId: revision * 10, result: 'prepared' }))
   const schedule: HostSchedule = { revision, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events }
   host.handleMessage({ version: 2, type: 'install-schedule', requestId: revision * 10 + 1, schedule })
-  host.handleMessage({ version: 2, type: 'publish-graph', requestId: revision * 10 + 2, revision, requireContinuity: true })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: revision * 10 + 2, revision, requireContinuity: true, publicationFrame })
   return {
     installed: messages.flatMap((message) => message.type === 'schedule-installed' && message.requestId === revision * 10 + 1 ? [message.result] : [])[0],
     published: messages.flatMap((message) => message.type === 'graph-published' && message.requestId === revision * 10 + 2 ? [message.result] : [])[0],
@@ -1516,4 +1517,94 @@ test('B6f5 R1 an adoption at the core maximum graph stays inside the audio-threa
   expect([largest.nodes.length, largest.nodes.reduce((count, node) => count + node.processorOrder.length, 0), largest.edges.length]).toEqual([64, 483, 243])
   expect(quantile(timings.prepare, 0.95)).toBeLessThan(1.5)
   expect(quantile(timings.adoption, 0.95)).toBeLessThan(2)
+})
+
+// AE-08 phase 8 step 1: failure-first witnesses for the frame-exact publication (M1) and the release of held notes at a
+// locate (D4). Each is `test.failing` until its implementing step flips it to `test`.
+const publishedResults = (messages: readonly PortableWasmStatusMessage[], revision: number) =>
+  messages.flatMap((message) => message.type === 'graph-published' && message.requestId === revision * 10 + 2 ? [message.result] : [])
+const renderBlocks = (host: Parameters<typeof renderLeft>[0], blocks: number) => Array.from({ length: blocks }, () => renderLeft(host)).flat()
+const m1Playing = async () => {
+  const { host, messages } = await startPortableTracks(['track'])
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  // A holds 1 until 200, then 0.5; its later events must still play up to the seam.
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [gainSet(200, 1, 0.5), gainSet(400, 2, 0.75)],
+  } })
+  playConstantSources(host, messages, 2, 1, [{ nodeId: 'track', value: 1 }])
+  return { host, messages }
+}
+// B takes over at frame 256: A plays every event before it and none from it on.
+const m1Next = [gainSet(256, 1, 0.25), gainSet(600, 2, 0.125)]
+const m1Expected = (frame: number) => frame < 200 ? 1 : frame < 256 ? 0.5 : frame < 600 ? 0.25 : 0.125
+
+test.failing('W-M1a a publication frame swaps the schedule exactly there: old events before it play, new events from it play', async () => {
+  const { host, messages } = await m1Playing()
+  const rendered = renderBlocks(host, 1)
+  // The publish is handled while the transport stands at frame 128, ahead of the swap frame 256.
+  const adoption = adoptRevision(host, messages, { ...portableTrackGraph(['track']), revision: 2 }, m1Next, 256)
+  rendered.push(...renderBlocks(host, 6))
+  expect({ adoption, applied: messages.some((message) => message.type === 'graph-published' && message.requestId === 22 && 'appliedFrame' in message && message.appliedFrame === 256),
+    seamless: rendered.slice(0, 700).every((sample, frame) => Math.abs(sample - m1Expected(frame)) < 1e-6) })
+    .toEqual({ adoption: { installed: 'installed', published: 'published' }, applied: true, seamless: true })
+})
+
+test.failing('W-M1b a publication frame already behind the transport is answered late and leaves the old revision playing', async () => {
+  const { host, messages } = await m1Playing()
+  renderBlocks(host, 2)
+  const adoption = adoptRevision(host, messages, { ...portableTrackGraph(['track']), revision: 2 }, m1Next, 128)
+  const after = renderBlocks(host, 4)
+  expect({ adoption: String(adoption.published), revision: host.revision, laterEventsPlay: after.slice(0, 144).every((sample) => Math.abs(sample - 0.5) < 1e-6) })
+    .toEqual({ adoption: 'late', revision: 1, laterEventsPlay: true })
+})
+
+test.failing('W-M1c a transport message while a publication is pending rejects it and keeps the old revision playing', async () => {
+  const { host, messages } = await m1Playing()
+  renderBlocks(host, 1)
+  adoptRevision(host, messages, { ...portableTrackGraph(['track']), revision: 2 }, m1Next, 4_096)
+  host.handleMessage({ version: 2, type: 'transport', requestId: 30, epoch: 1, running: true, frame: 128 })
+  expect({ results: publishedResults(messages, 2), revision: host.revision }).toEqual({ results: ['rejected'], revision: 1 })
+})
+
+test.failing('W-M1d a note-off between an early publish and its swap frame still plays, so the note does not stick', async () => {
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const messages: PortableWasmStatusMessage[] = []
+  const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
+  expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+  const base = portableTrackGraph(['track'])
+  const graph = (revision: number) => ({ ...base, revision, nodes: base.nodes.map((node) => node.id === 'track' ? { ...node, kind: 'instrument', instrument: heldSynth } : node) })
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph(1) })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [
+      { frame: 0, sequence: 1, type: 'note-on', target: { kind: 'instrument', trackId: 'track' }, noteId: 1, pitch: 72, velocity: 0.8 },
+      { frame: 200, sequence: 2, type: 'note-off', target: { kind: 'instrument', trackId: 'track' }, noteId: 1, pitch: 72 }] } })
+  renderBlocks(host, 1)
+  // The next revision starts at frame 256 and carries nothing of the note: the old schedule must end it at 200.
+  expect(adoptRevision(host, messages, graph(2), [], 256)).toEqual({ installed: 'installed', published: 'published' })
+  renderBlocks(host, 6)
+  expect(peakOf(renderBlocks(host, 4))).toBeLessThan(1e-4)
+})
+
+// D4: a locate while playing releases held notes with their tails, as native does. The WASM core hard-clears voices on an
+// epoch change today.
+test.failing('W-E3-3 a note held across a transport epoch change decays through its release tail instead of cutting', async () => {
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const messages: PortableWasmStatusMessage[] = []
+  const host = new DawPortableAudioCoreHost({ sampleRateHz: 48_000, sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
+  expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+  const synth = { ...heldSynth, ampReleaseMs: 500 }
+  const base = portableTrackGraph(['track'])
+  const graph = { ...base, nodes: base.nodes.map((node) => node.id === 'track' ? { ...node, kind: 'instrument', instrument: synth } : node) }
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 },
+    events: [{ frame: 0, sequence: 1, type: 'note-on', target: { kind: 'instrument', trackId: 'track' }, noteId: 1, pitch: 72, velocity: 0.8 }] } })
+  const level = peakOf(renderBlocks(host, 20))
+  host.handleMessage({ version: 2, type: 'transport', requestId: 5, epoch: 2, running: true, frame: 96_000 })
+  const tail = [peakOf(renderLeft(host)), peakOf(renderLeft(host)), peakOf(renderLeft(host))]
+  expect({ audible: level > 0.1, tailStartsNearLevel: tail[0] > level * 0.5, decaying: tail[2] < tail[0] && tail[2] > 0 }).toEqual({ audible: true, tailStartsNearLevel: true, decaying: true })
 })

@@ -1751,7 +1751,7 @@ test('preserves caller-owned recording streams when portable writer startup fail
 const p1Initial: TrackInstrumentParams = { kind: 'synth', instanceId: 'synth:1', params: createDefaultSynthParams() }
 const p1Synth = (from: TrackInstrumentParams, update: SynthParamsUpdate): TrackInstrumentParams =>
   from.kind === 'synth' ? { ...from, params: mergeSynthParams(from.params, update) } : from
-const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number; initial?: TrackInstrumentParams; assetKeys?: readonly string[] } = {}) => {
+const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number; failCompile?: number; initial?: TrackInstrumentParams; assetKeys?: readonly string[] } = {}) => {
   const source = await readFile(new URL("../components/Timeline.tsx", import.meta.url), "utf8")
   const { portable, structural } = extractTimelineBindings(source)
   const transpile = (code: string) => new Bun.Transpiler({ loader: "ts" }).transformSync(code)
@@ -1774,11 +1774,14 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
     return { ...base.snapshot, revision, assets, mixer: { ...base.snapshot.mixer, fx,
       graph: resolveLiveMixerGraph([track], fx.trackFx, { masterFxInstances: [] }) } }
   }
-  let refused = 0, settled = 0
+  let refused = 0, settled = 0, compileFailures = 0, playing = false
   let registered: readonly string[] = []
   let emitPosition = (_frame: number, _sequence: number) => {}
   const controller = createPortableBrowserPlaybackController({
-    compileSnapshot: async () => ({ supported: true, snapshot: snapshot() }),
+    compileSnapshot: async () => {
+      if (playing && compileFailures < (options.failCompile ?? 0)) { compileFailures++; throw new Error('P1 compile threw') }
+      return { supported: true, snapshot: snapshot() }
+    },
     fingerprintSnapshot: next => JSON.stringify({ ...next, revision: 0, mixer: { ...next.mixer, graph: undefined } }),
     getAudioContext: () => context, select: async () => selected,
     onAdoptionResubmitted: () => { settled++ },
@@ -1805,6 +1808,7 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
     for (let index = 0; index < count; index++) { emitPosition(1_000 + ++reports, reports); await Bun.sleep(0) }
   }
   expect(await controller.start(snapshot().transport)).toBe('started')
+  playing = true
   const rebuild = async () => {
     rebuilds++
     revision++
@@ -1933,8 +1937,8 @@ test('P1 a Sampler zone edit and a sample swap with real buffers are adopted on 
     kind: 'sampler', instanceId: 'sampler:1',
     params: { ...createDefaultSamplerParams(), zones: [{
       id: 'zone', keyLow: 0, keyHigh: 127, velocityLow: 1, velocityHigh: 127, rootNote: 60, tuneCents: 0, gain: 1, pan: 0,
-      // A looped zone: the portable contract refuses a one-shot zone whose start is after frame 0 (loopStartFrame stays 0).
-      roundRobinGroup: 0, roundRobinIndex: 0, playbackMode: 'forward-loop', startSec: 0, crossfadeSec: 0, chokeGroup: 0,
+      // A one-shot zone with a start offset is supported (9a532e9f).
+      roundRobinGroup: 0, roundRobinIndex: 0, playbackMode: 'one-shot', startSec: 0, crossfadeSec: 0, chokeGroup: 0,
       sample: { assetKey, url: `local-asset:${assetKey}`, sourceKind: 'upload', source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 } },
       ...zone,
     }] },
@@ -1967,6 +1971,20 @@ test('P1 a failed adoption of an instrument edit keeps the playing graph, never 
     expect(await f.controller.adoptSchedule()).toBe('adopted')
     expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length }).toEqual({ rebuilds: 0, graphs: 2 })
     expect(f.sessionStructure()).toBe(f.structureOf(next))
+  } finally { f.controller.dispose() }
+})
+
+test('M4 an instrument compile that throws keeps the playing graph, never rebuilds, and the next adoption stages it', async () => {
+  const f = await p1Fixture({ failCompile: 1 })
+  try {
+    const next = p1Synth(p1Initial, { polyphony: 4 })
+    expect(await f.apply(f.edit(next))).toBe('applied')
+    await f.announce('synth', next)
+    expect(await f.controller.adoptSchedule()).toBe('failed')
+    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes }).toEqual({ rebuilds: 0, graphs: 1, notes: [] })
+    expect(f.controller.isActive()).toBeTrue()
+    expect(await f.controller.adoptSchedule()).toBe('adopted')
+    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length }).toEqual({ rebuilds: 0, graphs: 2 })
   } finally { f.controller.dispose() }
 })
 

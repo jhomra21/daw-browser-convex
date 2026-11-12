@@ -1833,10 +1833,11 @@ export const createPortableBrowserPlaybackController = (input: {
     const generation = lifecycleGeneration
     const intent = transportIntent
     const current = () => active === session && playing && generation === lifecycleGeneration && intent === transportIntent
-    // An instrument edit that cannot be installed leaves the old graph playing for the next adoption to retry; a
-    // rebuild would end the take and gap the audio for an edit the user expects to hear without either.
-    let instrumentEdit = false
-    const failed = (): PortableAdoptionResult => !current() ? "unavailable" : instrumentEdit ? "failed" : "rebuild"
+    // A compile that throws has changed nothing, and an instrument edit that cannot be installed leaves the old graph
+    // playing for the next adoption to retry; a rebuild would end the take and gap the audio for an edit the user
+    // expects to hear without either.
+    let retainsGraph = true
+    const failed = (): PortableAdoptionResult => !current() ? "unavailable" : retainsGraph ? "failed" : "rebuild"
     adopting = true
     try {
       const compilation = await compileSnapshot({ ...transport, state: "playing", playheadSec: schedule.timeOrigin.timelineSec },
@@ -1845,7 +1846,7 @@ export const createPortableBrowserPlaybackController = (input: {
       if (!compilation.supported) return "rebuild"
       const next = compilation.snapshot
       if (fingerprint(next) === fingerprint(previous)) return "unchanged"
-      instrumentEdit = instrumentsOf(next) !== instrumentsOf(previous)
+      retainsGraph = instrumentsOf(next) !== instrumentsOf(previous)
       const candidate = preparedSession({ ...next, revision: revision + 1 }, audioContext.sampleRate, epoch,
         safeProjectGeneration(activeProjectGeneration ?? 0), (range.endFrame - range.startFrame) / audioContext.sampleRate,
         1, activePreparedStretchAssets, undefined, activeOrdinaryDescriptors)

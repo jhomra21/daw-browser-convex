@@ -6868,15 +6868,12 @@ test('B6f2 a paused locate whose re-prepare settles after a Play committed keeps
   })
 })
 
-test('B6f2 two paused locates while the first compile is pending end at the second', async () => {
+test('B6f2 two paused locates in a row end at the second', async () => {
   await runB6f2Live(async (live) => {
     await live.pausedAt(1)
     const mark = live.mark()
-    live.holds.compile.armed = true
     live.playback.setPlayhead(3, live.tracks())
-    await live.holds.compile.reached.promise
     live.playback.setPlayhead(5, live.tracks())
-    releaseB6fLive(live.holds.compile)
     await live.expectLive(false, 5, mark, 'none')
   })
 })
@@ -7187,6 +7184,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     rebuildBackend: true, resumePlayback: true, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
   return { playback, edit, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, mark: () => world.seq,
+    locate: (sec: number) => playback.setPlayhead(sec, tracks()),
     liveSession: () => world.sessions.filter((session) => !session.closed).at(-1),
     holds: { resume: resumeHold, compile: compileHold, transport: world.transportHold, pause: world.pauseHold } }
 }
@@ -7280,7 +7278,7 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
 
 type B6f5State = 'paused' | 'stopped' | 'playing' | 'pending-warm-play' | 'pending-cold-play-precompile' | 'pending-cold-play-postcompile'
   | 'pending-pause' | 'pending-stop' | 'rebuild-precompile' | 'rebuild-before-commit' | 'rebuild-after-commit'
-  | 'paused-reprepare-precompile' | 'paused-reprepare-postcompile'
+  | 'paused-locate'
 
 // One cell of the newest-edit matrix: drive the transport into `state`, make one edit of `kind`, and expect the end state.
 const b6f5Cell = (state: B6f5State, kind: B6f5Kind, nativeEnabled: boolean) => runB6f5(async (live, world) => {
@@ -7349,22 +7347,11 @@ const b6f5Cell = (state: B6f5State, kind: B6f5Kind, nativeEnabled: boolean) => r
     await rebuild.catch(() => undefined)
     return live.expectEnd(true, undefined, mark, kind, false)
   }
+  // A paused locate moves the kept session in place; an edit that lands with it reaches that session.
   await live.pausedAt(1)
   const mark = live.mark()
-  if (state === 'paused-reprepare-precompile') {
-    live.holds.compile.armed = true
-    playback.setPlayhead(3, [])
-    await live.holds.compile.reached.promise
-    live.edit(kind)
-    releaseB6fLive(live.holds.compile)
-  } else {
-    // The compile has run and the session is still being prepared.
-    let armed = true
-    world.onNode = () => { if (armed) { armed = false; queueMicrotask(() => live.edit(kind)) } }
-    playback.setPlayhead(3, [])
-    await live.until(() => !armed)
-    expect(armed).toBeFalse()
-  }
+  live.locate(3)
+  live.edit(kind)
   return live.expectEnd(false, 3, mark, kind, false)
 }, nativeEnabled)
 
@@ -7445,6 +7432,22 @@ test('F20 W-F20f toggling the loop on and off while playing is adopted without a
   }, false)
 })
 
+// E3: a locate while playing seeks the live session in place; an edit that landed meanwhile is adopted by the follow after it.
+test('E3 W-E3-6 a locate while playing seeks the same session without a dispose or a Play, and the follow adopts the edit after it', async () => {
+  await runB6f5(async (live, world) => {
+    await live.playFrom(1)
+    const session = live.liveSession()
+    const mark = live.mark()
+    live.locate(3)
+    live.edit('mixer')
+    await live.expectEnd(true, undefined, mark, 'mixer', true)
+    expect({ same: live.liveSession() === session, closed: session?.closed, adoptions: session?.adoptions,
+      sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length,
+      located: session?.positions.some((entry) => entry.sec === 3 && !entry.running) && session?.positions.some((entry) => entry.sec === 3 && entry.running) })
+      .toEqual({ same: true, closed: false, adoptions: 1, sessionsAfterMark: 0, located: true })
+  }, false)
+})
+
 test('B6f5 A an edit the playing portable session cannot carry live rebuilds it once', async () => {
   await runB6f5(async (live, world) => {
     await live.playFrom(1)
@@ -7479,9 +7482,9 @@ test('B6f5 E with native playback on, an edit during a pending browser Play keep
   for (const [state, kind] of cells) await b6f5Cell(state, kind, true)
 })
 
-test('B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits', async () => {
-  const cells: [B6f5State, B6f5Kind][] = [['pending-cold-play-postcompile', 'proc-live'], ['paused-reprepare-postcompile', 'proc-live'],
-    ['paused-reprepare-postcompile', 'synth-live']]
+test('B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits', async () => {
+  const cells: [B6f5State, B6f5Kind][] = [['pending-cold-play-postcompile', 'proc-live'], ['paused-locate', 'proc-live'],
+    ['paused-locate', 'synth-live']]
   for (const [state, kind] of cells) await b6f5Cell(state, kind, false)
 })
 

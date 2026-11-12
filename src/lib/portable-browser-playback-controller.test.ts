@@ -2521,7 +2521,7 @@ test('B6f5 step5b R6 without a content fingerprint a Timeline revision bump stil
 type W8Note = NonNullable<RuntimeTrack['clips'][number]['midi']>['notes'][number]
 type W8Loop = typeof noLoop
 const w8Note = (id: string, beat: number, length = 1): W8Note => ({ id, beat, length, pitch: 60, velocity: 0.8 })
-const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loop?: W8Loop; audioStartSec?: number; clipSec?: number } = {}, options: { refuse?: () => boolean } = {}) => {
+const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loop?: W8Loop; audioStartSec?: number; clipSec?: number } = {}, options: { refuse?: () => boolean; failInstall?: () => boolean } = {}) => {
   const state = { bpm: initial.bpm ?? 120, notes: initial.notes ?? [w8Note('note', 0)], audioStartSec: initial.audioStartSec, warped: false }
   const calls: string[] = []
   const graphs: AudioCoreGraphSnapshot[] = []
@@ -2551,7 +2551,10 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
       const base = b6f5Session(calls, graphs, publishes, async (publishOptions) => {
         if (publishOptions && options.refuse?.()) throw new Error('Portable playback graph-published was rejected.')
       })
-      const withInstall = { ...base, ...createSession(calls, async (schedule) => { installs.push(schedule) }) }
+      const withInstall = { ...base, ...createSession(calls, async (schedule) => {
+        if (options.failInstall?.()) throw new Error('Portable playback install-schedule was rejected.')
+        installs.push(schedule)
+      }) }
       return { ...withInstall, prepareGraph: base.prepareGraph, publishGraph: base.publishGraph,
         setTransport: async (epoch: number, running: boolean, frame: number) => { epochs.push(epoch); await withInstall.setTransport(epoch, running, frame) },
         onTransportPosition: (listener: (message: Extract<PortableWasmStatusMessage, { type: 'transport-position' }>) => void) => {
@@ -2566,11 +2569,6 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
     (schedule?.events ?? []).flatMap((event) => event.type === type ? [{ noteId: event.noteId, frame: event.frame }] : [])
   const position = (frame: number, epoch = 1, sequence = 1) => positionListener?.({ version: 2, type: 'transport-position', sessionId: 1, epoch, sequence, running: true, frame })
   return { state, controller, transport, noLoop, calls, graphs, publishes, installs, epochs, faults, sessions: () => sessions, adopt, noteEvents, position }
-}
-// The phase adds `seek(sec, loop)` to the controller. Until it exists the E3 witnesses fail here; the implementing step
-// replaces this stub with `f.controller.seek`.
-const w8Seek = (_controller: ReturnType<typeof createPortableBrowserPlaybackController>): ((sec: number, loop: W8Loop) => Promise<string>) => {
-  throw new Error('controller.seek does not exist yet')
 }
 const w8SourceCalls = (calls: readonly string[]) => calls.filter((call) => call.includes('sources'))
 
@@ -2840,29 +2838,231 @@ test.failing('W-UD7p-1 a note edit on a paused prepared session is adopted in pl
   } finally { f.controller.dispose() }
 })
 
-// W-E3-1 and W-E3-4 call the `seek(sec, loop)` method the phase adds; today the controller has none.
-test.failing('W-E3-1 a seek while playing moves the transport in place at a new epoch', async () => {
+test('W-E3-1 a seek while playing moves the transport in place at a new epoch', async () => {
   const f = await w8Fixture()
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    const seek = w8Seek(f.controller)
     const before = f.calls.length
     const startEpoch = f.epochs.at(-1) ?? 0
-    const result = await seek(1.5, f.noLoop)
+    const result = await f.controller.seek(1.5, f.noLoop)
     expect({ result, sessions: f.sessions(), rebuilt: f.calls.slice(before).filter((call) => ['dispose', 'prepare-graph', 'publish-graph'].includes(call)),
       epochs: [...new Set(f.epochs.slice(-2))], transports: f.calls.slice(before).filter((call) => call.endsWith('-transport')) })
       .toEqual({ result: 'started', sessions: 1, rebuilt: [], epochs: [startEpoch + 1], transports: ['stop-transport', 'start-transport'] })
   } finally { f.controller.dispose() }
 })
 
-test.failing('W-E3-4 positions are reported again after a backward seek at the new epoch', async () => {
+test('W-E3-4 positions are reported again after a backward seek at the new epoch', async () => {
   const f = await w8Fixture()
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     f.position(96_000)
-    const seek = w8Seek(f.controller)
-    await seek(0.5, f.noLoop)
+    await f.controller.seek(0.5, f.noLoop)
     f.position(25_000, (f.epochs.at(-1) ?? 0), 1)
     expect(f.controller.currentPositionSec()).toBeCloseTo(25_000 / 48_000, 6)
   } finally { f.controller.dispose() }
+})
+
+// W-E3-2: past the installed range the seek compiles its own window at the target: one session, a schedule at the new
+// origin, sources replaced at the new epoch, and a loop around the target repeats from it.
+test('W-E3-2 a seek outside the installed range compiles at the target on the same session, loop off and on', async () => {
+  const far = [w8Note('far', 200, 1)]
+  for (const loop of [{ loopEnabled: false, loopStartSec: 0, loopEndSec: 0 }, { loopEnabled: true, loopStartSec: 90, loopEndSec: 110 }]) {
+    const f = await w8Fixture({ clipSec: 200, notes: far })
+    try {
+      expect(await f.controller.start(f.transport)).toBe('started')
+      const before = f.calls.length
+      const result = await f.controller.seek(100, loop)
+      expect({ loop: loop.loopEnabled, result, sessions: f.sessions(), origin: f.installs.at(-1)?.timeOrigin,
+        noteOns: f.noteEvents(f.installs.at(-1), 'note-on').map((event) => event.frame),
+        calls: f.calls.slice(before).filter((call) => !call.startsWith('install-schedule')) })
+        .toEqual({ loop: loop.loopEnabled, result: 'started', sessions: 1, origin: { timelineSec: 100, frame: 4_800_000 },
+          noteOns: loop.loopEnabled ? [4_800_000, 5_760_000] : [4_800_000],
+          calls: ['stop-transport', 'schedule-sources', 'start-transport', 'mark-active'] })
+    } finally { f.controller.dispose() }
+  }
+})
+
+// W-E3-3, compile half (the core half is in the host test): a note that ended before the target is not started, and a
+// note spanning it starts once at the target.
+test('W-E3-3 a seek starts a note that spans the target once and none that ended before it', async () => {
+  const f = await w8Fixture({ clipSec: 4, notes: [w8Note('spans', 0, 4), w8Note('ended', 0, 0.5)] })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.controller.seek(1, f.noLoop)
+    const installed = f.installs.at(-1)
+    expect({ noteOns: f.noteEvents(installed, 'note-on').map((event) => event.frame), noteOffs: f.noteEvents(installed, 'note-off').map((event) => event.frame) })
+      .toEqual({ noteOns: [48_000], noteOffs: [96_000] })
+  } finally { f.controller.dispose() }
+})
+
+// W-E3-5: a seek waits for what is in flight and the newest one wins.
+test('W-E3-5 a seek supersedes an adoption in flight, the older of two seeks, and waits for a refresh', async () => {
+  const adoption = await w8Fixture({ clipSec: 4 })
+  try {
+    expect(await adoption.controller.start(adoption.transport)).toBe('started')
+    adoption.state.notes = [w8Note('note', 0), w8Note('later', 4)]
+    const adopting = adoption.adopt(adoption.noLoop)
+    const seeking = adoption.controller.seek(1.5, adoption.noLoop)
+    const answers = { adopting: await adopting, seeking: await seeking }
+    const afterwards = await adoption.adopt(adoption.noLoop)
+    expect({ ...answers, afterwards, sessions: adoption.sessions(), published: adoption.publishes.length,
+      seam: adoption.installs.at(-1)?.timeOrigin.frame })
+      .toEqual({ adopting: 'unavailable', seeking: 'started', afterwards: 'adopted', sessions: 1, published: 2, seam: 72_000 + 12_000 })
+  } finally { adoption.controller.dispose() }
+  const twice = await w8Fixture()
+  try {
+    expect(await twice.controller.start(twice.transport)).toBe('started')
+    const before = twice.calls.length
+    const first = twice.controller.seek(1, twice.noLoop)
+    const second = twice.controller.seek(2, twice.noLoop)
+    expect({ first: await first, second: await second, origin: twice.installs.at(-1)?.timeOrigin.frame, position: twice.controller.currentPositionSec(),
+      transports: twice.calls.slice(before).filter((call) => call.endsWith('-transport')) })
+      .toEqual({ first: 'started', second: 'started', origin: 96_000, position: 2, transports: ['stop-transport', 'start-transport'] })
+  } finally { twice.controller.dispose() }
+  const refreshing = await w8Fixture({ clipSec: 40 })
+  try {
+    expect(await refreshing.controller.start(refreshing.transport)).toBe('started')
+    refreshing.position(1_250_000, 1, 1)
+    const refresh = refreshing.controller.refreshSchedule()
+    const seek = refreshing.controller.seek(3, refreshing.noLoop)
+    expect({ refresh: await refresh, seek: await seek, sessions: refreshing.sessions(), position: refreshing.controller.currentPositionSec(),
+      origin: refreshing.installs.at(-1)?.timeOrigin.frame })
+      .toEqual({ refresh: 'unavailable', seek: 'started', sessions: 2, position: 3, origin: 144_000 })
+  } finally { refreshing.controller.dispose() }
+})
+
+test('W-E3-5 a seek during a take throws and leaves the transport alone', async () => {
+  const calls: string[] = []
+  const { stream, recordingContext } = createRecordingFixture(calls)
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async () => compilation(), getAudioContext: () => recordingContext, select: async () => selected,
+    backend: { createPlaybackSession: async () => createSession(calls, async () => undefined) },
+    createRecordingWriter: () => ({ ready: Promise.resolve(), write: () => undefined, finalize: async () => ({ capturedFrames: 0 }),
+      abort: async () => undefined, terminate: () => undefined }),
+  })
+  try {
+    expect(await controller.start(compilation().snapshot.transport)).toBe('started')
+    await controller.startRecording(b6f5RecordingInput(stream))
+    const before = calls.length
+    await expect(controller.seek(1, noLoop)).rejects.toThrow('Portable recording must stop before playback can seek.')
+    expect({ calls: calls.slice(before), playing: controller.isActive() }).toEqual({ calls: [], playing: true })
+  } finally { controller.dispose() }
+})
+
+// W-E3-7: the seek plays the snapshot the session holds; the edit that landed is adopted after it.
+test('W-E3-7 a seek with an edit pending plays the active snapshot and the next adoption carries the edit', async () => {
+  const f = await w8Fixture({ clipSec: 4 })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    f.state.notes = [w8Note('note', 0), w8Note('later', 4)]
+    expect(await f.controller.seek(1.5, f.noLoop)).toBe('started')
+    const seeked = f.noteEvents(f.installs.at(-1), 'note-on').map((event) => event.frame)
+    const adopted = await f.adopt(f.noLoop)
+    expect({ seeked, adopted, adoptedNoteOns: f.noteEvents(f.installs.at(-1), 'note-on').map((event) => event.frame) })
+      .toEqual({ seeked: [], adopted: 'adopted', adoptedNoteOns: [96_000] })
+  } finally { f.controller.dispose() }
+})
+
+// W-E3-8: a seek after a loop edit that moved the position map starts a fresh map at the target.
+test('W-E3-8 a seek with the loop on after a wrap and a loop adoption resets the position map to the target', async () => {
+  const notes = [0, 1, 2, 3].map((beat) => w8Note(`n${beat}`, beat, 0.25))
+  const loop: W8Loop = { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 }
+  const f = await w8Fixture({ clipSec: 40, notes, loop })
+  const sec = (frame: number) => frame / 48_000
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    f.position(60_000, 1, 1)
+    expect(await f.adopt({ loopEnabled: true, loopStartSec: 0.5, loopEndSec: 1.5 })).toBe('adopted')
+    f.position(72_000, 1, 2)
+    expect(await f.controller.seek(0.25, loop)).toBe('started')
+    const atTarget = f.controller.currentPositionSec()
+    f.position(80_000, f.epochs.at(-1) ?? 0, 1)
+    expect({ atTarget, wrapped: f.controller.currentPositionSec() }).toEqual({ atTarget: 0.25, wrapped: sec(32_000) })
+  } finally { f.controller.dispose() }
+})
+
+// D5 and R-E3-4: a locate stops at the new epoch first (the core clears its sources), then releases the old preparations
+// and prepares the target's pages, then submits the schedule and the sources, then runs. The pages keep the generation
+// the session registered them under, whatever the transport epoch.
+test('W-E3-D5 a seek stops, prepares the target pages, installs, schedules sources and runs; pages keep the session generation', async () => {
+  const calls: string[] = []
+  const epochs: number[] = []
+  const generations: number[] = []
+  const faults: string[] = []
+  let registered = 0
+  let sessions = 0
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async (transport) => pagedCompilation(transport),
+    getAudioContext: () => context, scheduleHorizonSec: 4, select: async () => selected, reportFault: (message) => faults.push(message),
+    resolveSource: async (clip) => pagedDescriptor(clip.sourceAssetKey ?? 'missing', []),
+    backend: { createPlaybackSession: async () => {
+      sessions += 1
+      const base = createSession(calls, async () => undefined, undefined, true)
+      return { ...base,
+        setTransport: async (epoch: number, running: boolean, frame: number) => { epochs.push(epoch); await base.setTransport(epoch, running, frame) },
+        registerPagedAsset: async (_asset: Parameters<PortableWasmPlaybackSession['registerPagedAsset']>[0], generation: number) => {
+          registered = generation; generations.push(generation); return base.registerPagedAsset()
+        },
+        prepareAssetRange: async (assetId: string, generation: number, offset: number, count: number) => {
+          calls.push('prepare-range'); generations.push(generation)
+          return generation === registered ? base.prepareAssetRange(assetId, generation, offset, count) : { status: 'stale-generation' as const }
+        },
+        writeAssetPage: async (assetId: string, generation: number, pageIndex: number) => {
+          calls.push('write-page'); return base.writeAssetPage(assetId, generation, pageIndex)
+        },
+        releaseAssetPreparation: async (preparationId: number, generation: number) => {
+          calls.push('release-preparation'); generations.push(generation)
+          return generation === registered ? base.releaseAssetPreparation(preparationId) : 'stale-preparation' as const
+        } }
+    } },
+  })
+  try {
+    expect(await controller.start(pagedCompilation().snapshot.transport)).toBe('started')
+    const before = calls.length
+    const result = await controller.seek(20, noLoop)
+    const order = calls.slice(before).filter((call) => call !== 'write-page').filter((call, index, all) => call !== all[index - 1])
+    expect({ result, faults, sessions, order, generations: [...new Set(generations)], epochs: [...new Set(epochs)] })
+      .toEqual({ result: 'started', faults: [], sessions: 1,
+        order: ['stop-transport', 'release-preparation', 'prepare-range', 'install-schedule:0', 'schedule-prepared-sources', 'start-transport', 'mark-active'],
+        generations: [1], epochs: [1, 2] })
+  } finally { controller.dispose() }
+})
+
+// D6: a seek that fails inside its burst keeps the transport running and is resubmitted after rendered-frame reports, up
+// to the adoption retry limit; exhaustion is a logged defect and the transport-fault notice.
+test('W-E3-D6 a seek failing inside the burst resubmits after a position report from where the transport stands', async () => {
+  let failures = 0
+  const f = await w8Fixture({}, { failInstall: () => failures-- > 0 })
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    failures = 1
+    expect(await f.controller.seek(1.5, f.noLoop)).toBe('unavailable')
+    const epoch = f.epochs.at(-1) ?? 0
+    f.position(75_000, epoch, 1)
+    for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
+    expect({ sessions: f.sessions(), faults: f.faults, origin: f.installs.at(-1)?.timeOrigin.frame, epoch: f.epochs.at(-1), active: f.controller.isActive(),
+      warned: warn.mock.calls.length })
+      .toEqual({ sessions: 1, faults: [], origin: 75_000, epoch: epoch + 1, active: true, warned: 1 })
+  } finally { warn.mockRestore(); f.controller.dispose() }
+})
+
+test('W-E3-D6 a seek that keeps failing is a logged defect and the transport-fault notice after eight resubmits', async () => {
+  let attempts = 0
+  let armed = false
+  const f = await w8Fixture({}, { failInstall: () => { if (armed) attempts += 1; return armed } })
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  const error = spyOn(console, 'error').mockImplementation(() => undefined)
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    armed = true
+    expect(await f.controller.seek(1.5, f.noLoop)).toBe('unavailable')
+    for (let report = 1; report <= 400 && f.controller.isPrepared(); report += 1) {
+      f.position(50_000 + report * 1_000, f.epochs.at(-1) ?? 0, report)
+      for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
+    }
+    expect({ attempts, prepared: f.controller.isPrepared(), faults: f.faults, disposed: f.calls.includes('dispose'),
+      warned: warn.mock.calls.length, defects: error.mock.calls.length })
+      .toEqual({ attempts: 9, prepared: false, faults: ['Portable playback install-schedule was rejected.'], disposed: true, warned: 8, defects: 1 })
+  } finally { warn.mockRestore(); error.mockRestore(); f.controller.dispose() }
 })

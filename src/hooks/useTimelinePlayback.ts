@@ -1376,21 +1376,14 @@ export function useTimelinePlayback(
       }
       return
     }
-    if (isPlaying() && (nativePlayback.isActive() || portableBrowserPlayback.isActive())) {
-      const owner = portableBrowserPlayback.isActive() ? 'portable-browser' : 'native'
-      void restartTimelineSchedule(tracks, {
-        rebuildBackend: true,
-        resumePlayback: true,
-        playheadSec: sec,
-        owner,
-        projectId: nativeOptions?.projectId?.(),
-        projectGeneration: nativeOptions?.projectGeneration?.()
-          ?? portableBrowserOptions?.projectGeneration?.(),
-      }).catch((cause: unknown) => {
-        portableBrowserOptions?.reportFault?.(
-          cause instanceof Error ? cause.message : 'Playback could not seek while active.',
-        )
-      })
+    if (isPlaying() && portableBrowserPlayback.isActive()) {
+      // The live session moves in place; an edit that landed meanwhile is adopted by the follow after the locate.
+      const { isActive, start, end } = getLoopParams()
+      void portableBrowserPlayback.seek(sec, { loopEnabled: isActive, loopStartSec: start, loopEndSec: end })
+        .catch((cause: unknown) => {
+          portableBrowserOptions?.reportFault?.(cause instanceof Error ? cause.message : 'Playback could not seek while active.')
+        })
+        .finally(followPortableEdits)
       return
     }
     if (!isPlaying()) {

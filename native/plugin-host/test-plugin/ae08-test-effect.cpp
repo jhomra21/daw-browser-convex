@@ -84,6 +84,9 @@ class Ae08TestEffect final : public SingleComponentEffect {
     return kResultOk;
   }
 
+  // The controller half is this same object, so the component state it is offered is already applied.
+  tresult PLUGIN_API setComponentState(IBStream*) override { return kResultOk; }
+
   tresult PLUGIN_API getState(IBStream* stream) override {
     const int values[5]{kStateVersion, latency_.load(), fault_.load(), startupDelay_.load(), 0};
     int32 written = 0;

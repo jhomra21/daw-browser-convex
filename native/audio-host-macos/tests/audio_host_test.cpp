@@ -7,9 +7,13 @@
 #include "../src/revision-publication-wait.h"
 #include "../src/offline-failure-message.h"
 #include "worker-supervisor.h"
+#include "vst3-worker.h"
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cassert>
+#include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <chrono>
 #include <cstring>
@@ -5453,19 +5457,30 @@ void StartRunningHostWithGraph(daw::audio_host_macos::AudioHost& host) {
   RenderBlock(host);
 }
 
-void PublishRunningRevision(daw::audio_host_macos::AudioHost& host, const std::uint32_t revision, const std::uint32_t latency) {
-  assert(host.PrepareGraphRevision(revision, GraphSnapshot(revision, 1.0F, latency)).code == GraphRevisionStatusCode::kPrepared);
+// `render` runs one callback block; it is how the caller keeps its own audio flowing.
+template <typename Render>
+void PublishRunningGraph(
+  daw::audio_host_macos::AudioHost& host,
+  const std::uint32_t revision,
+  const std::vector<std::uint8_t>& graph,
+  Render render
+) {
+  assert(host.PrepareGraphRevision(revision, graph).code == GraphRevisionStatusCode::kPrepared);
   assert(host.PublishGraphRevision(revision).code == GraphRevisionStatusCode::kPublishPending);
-  RenderBlock(host);
+  render();
   assert(host.InspectGraphRevision(revision).code == GraphRevisionStatusCode::kPublished);
   // The previous plan retires once the callback has moved past any latency transition.
   for (unsigned block = 0; block < 20000; ++block) {
-    RenderBlock(host);
+    render();
     const auto retired = host.RetireGraphRevision(revision - 1);
     if (retired.code == GraphRevisionStatusCode::kRetired) return;
     assert(retired.code == GraphRevisionStatusCode::kRetirementNotSafe);
   }
   assert(false);
+}
+
+void PublishRunningRevision(daw::audio_host_macos::AudioHost& host, const std::uint32_t revision, const std::uint32_t latency) {
+  PublishRunningGraph(host, revision, GraphSnapshot(revision, 1.0F, latency), [&host] { RenderBlock(host); });
 }
 }
 
@@ -5678,8 +5693,406 @@ void TestRetiringASlowWorkerDoesNotBlockTheCommandLoop() {
   host.Stop();
 }
 
+// A plan that was published but not yet inspected already renders the instance, so retiring
+// it must leave its worker running until no plan can read it.
+void TestRetireDuringPublicationKeepsTheWorkerTheCallbackReads() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  StartRunningHostWithGraph(host);
+  AttachReadyInstances(host, {kFirstVstInstance});
+  assert(host.PrepareGraphRevision(3, GraphSnapshot(3, 1.0F, 36)).code == GraphRevisionStatusCode::kPrepared);
+  assert(host.PublishGraphRevision(3).code == GraphRevisionStatusCode::kPublishPending);
+  RenderBlock(host);
+  assert(host.DetachVstReference(kFirstVstInstance));
+  AudioHostTestAccess::SetParkedAge(host, std::chrono::milliseconds(0));
+  host.ProcessNativeVstControl();
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kRetired);
+  for (unsigned block = 0; block < 50; ++block) {
+    RenderBlock(host);
+    assert(host.NativeVstHealth(kFirstVstInstance) == NativeVstWorkerHealth::kReady);
+  }
+  assert(host.InspectGraphRevision(3).code == GraphRevisionStatusCode::kPublished);
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kRetired);
+  assert(host.NativeVstHealth(kFirstVstInstance) == NativeVstWorkerHealth::kReady);
+  while (host.RetireGraphRevision(2).code != GraphRevisionStatusCode::kRetired) RenderBlock(host);
+  // Dropped from the next revision, it can go: the reaper stops its worker.
+  PublishRunningRevision(host, 4, 0);
+  host.ProcessNativeVstControl();
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kAbsent);
+  host.Stop();
+}
+
+// Host tests against the AE-08 test plug-in. They run only when a driver names a built and
+// signed bundle with its fingerprints (DAW_AE08_TEST_PLUGIN_BUNDLE, _BUNDLE_FINGERPRINT,
+// _BINARY_FINGERPRINT); the plug-in is never built or installed by default.
+namespace plugin {
+constexpr std::string_view kFirst = "b0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f1";
+constexpr std::string_view kSecond = "c0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f2";
+constexpr std::uint32_t kBlock = 128;
+constexpr std::uint32_t kRate = 48000;
+// Parameter ids of the plug-in (ae08-test-effect.cpp) and the normalized value of step 1 of 3.
+constexpr std::uint32_t kLatency = 1, kFault = 2, kRequestRestart = 4;
+constexpr double kStepOne = 1.0 / 3.0, kStepThree = 1.0;
+
+std::string Env(const char* name) {
+  const auto* value = std::getenv(name);
+  assert(value != nullptr);
+  return value;
+}
+
+// `startup_delay_step` 1 makes the plug-in take 2 s to load its state.
+daw::audio_host_macos::NativeVstAttachment Attachment(
+  const std::string_view instance_id, const std::uint64_t node_id, const int startup_delay_step = 0
+) {
+  const auto bundle = std::filesystem::canonical(Env("DAW_AE08_TEST_PLUGIN_BUNDLE")).string();
+  daw::audio_host_macos::NativeVstAttachment attachment{
+    .graph_node_id = node_id,
+    .instance_id = std::string(instance_id),
+    .class_id = "AE08C0DE7E57EFFEC700000000000001",
+    .vendor_id = "DAW tests",
+    .canonical_bundle_path = bundle,
+    .canonical_executable_path = bundle + "/Contents/MacOS/ae08-test-effect",
+    .architecture = 1,
+    .scanner_catalog_version = 2,
+    .role = daw::audio_host_macos::NativeVstRole::kEffect,
+    .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+    .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+    .transport_latency_frames = kBlock,
+    .playback_enabled = true,
+    .transport = {.slot_count = 2, .maximum_frames = kBlock, .input_channels = 2, .output_channels = 2,
+      .maximum_events_per_block = 8},
+  };
+  attachment.bundle_fingerprint = Fingerprint(Env("DAW_AE08_TEST_PLUGIN_BUNDLE_FINGERPRINT"));
+  attachment.binary_fingerprint = Fingerprint(Env("DAW_AE08_TEST_PLUGIN_BINARY_FINGERPRINT"));
+  if (startup_delay_step > 0) {
+    // Plug-in state: version, latency, fault, startup delay step, reserved.
+    for (const int value : {1, 0, 0, startup_delay_step, 0}) {
+      const auto bytes = std::bit_cast<std::array<std::uint8_t, 4>>(value);
+      attachment.initial_state.insert(attachment.initial_state.end(), bytes.begin(), bytes.end());
+    }
+    attachment.initial_state_sha256 = daw::plugin_host::Sha256(attachment.initial_state);
+  }
+  return attachment;
+}
+
+// Sources 1 and 2 read input bus 0 and meet at master 1000. `external` is the latency a
+// source declares for its VST (0: none).
+std::vector<std::uint8_t> Graph(const std::uint32_t revision, const std::array<std::uint32_t, 2> external) {
+  std::vector<std::uint8_t> payload;
+  AppendLeU32(payload, DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY);
+  AppendLeU32(payload, revision);
+  AppendLeU32(payload, 3);
+  AppendLeU32(payload, 2);
+  AppendLeU32(payload, 0);
+  AppendLeU32(payload, 0);
+  const auto append_node = [&payload](const std::uint64_t id, const std::uint32_t kind, const std::uint32_t latency) {
+    AppendLeU64(payload, id);
+    AppendLeU32(payload, kind);
+    AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+    AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+    AppendLeU32(payload, 0);
+    AppendLeU32(payload, 0);
+    AppendLeU32(payload, latency);
+    for (std::size_t field = 0; field < 20; ++field) AppendLeU32(payload, 0);
+    AppendLeU64(payload, 0);
+    AppendLeFloat(payload, 0.0F);
+    AppendLeFloat(payload, 0.0F);
+    AppendLeU32(payload, 0);
+    AppendLeU32(payload, 0);
+  };
+  append_node(1000, 6, 0);
+  append_node(1, 1, external[0]);
+  append_node(2, 1, external[1]);
+  const auto longest = std::max(external[0], external[1]);
+  for (const std::uint64_t source : {1, 2}) {
+    AppendLeU64(payload, source);
+    AppendLeU64(payload, source);
+    AppendLeU64(payload, 1000);
+    AppendLeU64(payload, 0);
+    AppendLeFloat(payload, 1.0F);
+    AppendLeU32(payload, DAW_AUDIO_GRAPH_EDGE_POST_FADER);
+    AppendLeU32(payload, 0);
+    // The shorter path waits for the longer one.
+    AppendLeU32(payload, longest - external[source - 1]);
+  }
+  std::vector<std::uint8_t> frame;
+  AppendBeU64(frame, revision);
+  AppendBeU32(frame, static_cast<std::uint32_t>(payload.size()));
+  frame.insert(frame.end(), payload.begin(), payload.end());
+  return frame;
+}
+
+float Input(const std::size_t frame) {
+  return 0.25F * static_cast<float>(std::sin(2.0 * 3.141592653589793 * 440.0 * static_cast<double>(frame) / kRate));
+}
+
+// A host running a 440 Hz input through the graph; `output` keeps every rendered frame.
+struct Rig {
+  daw::audio_host_macos::AudioHost host;
+  std::vector<float> output;
+
+  void Configure() {
+    assert(host.Configure({
+      .device_uid = "diagnostic", .sample_rate_hz = kRate, .max_frames_per_block = kBlock,
+      .channel_count = 2, .revision = 1,
+    }));
+  }
+  // Attach before this: the first graph binds what is attached, and the workers start with the host.
+  void Start(const std::array<std::uint32_t, 2> external) {
+    assert(host.PrepareGraphRevision(2, Graph(2, external)).code == GraphRevisionStatusCode::kPrepared);
+    assert(host.PublishGraphRevision(2).code == GraphRevisionStatusCode::kPublished);
+    assert(host.SetTransport(1, false, 0));
+    assert(host.StartDiagnosticMode());
+    assert(host.SetTransport(1, true, 0));
+  }
+  void Render(const unsigned blocks = 1) {
+    for (unsigned block = 0; block < blocks; ++block) {
+      std::array<float, kBlock> in{}, left{}, right{};
+      for (std::size_t frame = 0; frame < kBlock; ++frame) in[frame] = Input(output.size() + frame);
+      const std::array<const float*, 2> planes_in{in.data(), in.data()};
+      const std::array<float*, 2> planes_out{left.data(), right.data()};
+      assert(host.ProcessPlanar(planes_in, planes_out, kBlock));
+      output.insert(output.end(), left.begin(), left.end());
+      // About one block of wall time, so the worker answers as it would behind a device.
+      std::this_thread::sleep_for(std::chrono::milliseconds(3));
+    }
+  }
+  void Publish(const std::uint32_t revision, const std::array<std::uint32_t, 2> external) {
+    PublishRunningGraph(host, revision, Graph(revision, external), [this] { Render(); });
+  }
+  bool Wait(const std::string_view instance_id, const NativeVstWorkerHealth health) {
+    for (int attempt = 0; attempt < 3000; ++attempt) {
+      if (host.NativeVstHealth(instance_id) == health) return true;
+      Render();
+    }
+    return false;
+  }
+  void Set(const std::string_view instance_id, const std::uint32_t parameter, const double value) {
+    std::vector<std::uint8_t> payload;
+    AppendLeU32(payload, static_cast<std::uint32_t>(instance_id.size()));
+    payload.insert(payload.end(), instance_id.begin(), instance_id.end());
+    AppendLeU32(payload, 1);
+    AppendLeU32(payload, parameter);
+    AppendLeU32(payload, 0);
+    AppendLeU64(payload, std::bit_cast<std::uint64_t>(value));
+    assert(host.QueueNativeVstParameterEvents(payload));
+  }
+  // The next notification of `kind`. The worker reports from its block loop, so blocks keep rendering while waiting.
+  std::optional<daw::audio_host_macos::WorkerNotification> Notification(const WorkerNotificationKind kind) {
+    std::atomic<bool> running{true};
+    auto pending = std::async(std::launch::async, [&] {
+      for (;;) {
+        const auto notification = host.WaitForWorkerNotification(&running);
+        if (!notification || notification->kind == kind) return notification;
+      }
+    });
+    for (unsigned block = 0; block < 3000 && pending.wait_for(std::chrono::seconds(0)) != std::future_status::ready; ++block) Render();
+    running.store(false, std::memory_order_release);
+    host.WakeWorkerNotificationWait();
+    return pending.get();
+  }
+  // RMS of the last `blocks` blocks.
+  double Level(const unsigned blocks) const {
+    double sum = 0;
+    const auto count = static_cast<std::size_t>(blocks) * kBlock;
+    for (std::size_t index = output.size() - count; index < output.size(); ++index) sum += output[index] * output[index];
+    return std::sqrt(sum / static_cast<double>(count));
+  }
+  bool Running() { return host.lifecycleState() == daw::audio_host_macos::LifecycleState::kRunning; }
+};
+
+// Largest |output(n) - scale * input(n - delay)| over the last `blocks` blocks.
+double Mismatch(const Rig& rig, const unsigned blocks, const std::size_t delay, const double scale) {
+  double worst = 0;
+  for (std::size_t index = rig.output.size() - static_cast<std::size_t>(blocks) * kBlock; index < rig.output.size(); ++index) {
+    worst = std::max(worst, std::abs(static_cast<double>(rig.output[index]) - scale * Input(index - delay)));
+  }
+  return worst;
+}
+
+// The delay at which the last `blocks` blocks equal `scale` times the input.
+std::optional<std::size_t> DelayOf(const Rig& rig, const unsigned blocks, const double scale) {
+  for (std::size_t delay = 0; delay <= 4 * kBlock; ++delay) {
+    if (Mismatch(rig, blocks, delay, scale) < 1.0e-3) return delay;
+  }
+  return std::nullopt;
+}
+
+// A component restart is the plug-in re-setting itself up: the worker reactivates the
+// component and reads the latency again, and a re-setup the plug-in refuses faults only it.
+void TestComponentRestartResetsUpTheWorker() {
+  Rig rig;
+  rig.Configure();
+  assert(rig.host.AttachNativeVst(Attachment(kFirst, 1)));
+  rig.Start({kBlock, 0});
+  assert(rig.Wait(kFirst, NativeVstWorkerHealth::kReady));
+  rig.Render(30);
+  const auto generation = AudioHostTestAccess::WorkerGeneration(rig.host, kFirst);
+  rig.Set(kFirst, kRequestRestart, kStepThree);
+  assert(rig.Notification(WorkerNotificationKind::kRestart));
+  const auto latency = rig.Notification(WorkerNotificationKind::kLatency);
+  assert(latency && latency->instance_id == kFirst && latency->value == 0);
+  rig.Render(30);
+  assert(rig.Running() && rig.host.NativeVstHealth(kFirst) == NativeVstWorkerHealth::kReady);
+  assert(AudioHostTestAccess::WorkerGeneration(rig.host, kFirst) == generation);
+  assert(rig.Level(10) > 0.1);
+  // The plug-in now refuses to become active again, so the re-setup fails.
+  rig.Set(kFirst, kFault, kStepThree);
+  rig.Set(kFirst, kRequestRestart, 0.0);
+  rig.Render(5);
+  rig.Set(kFirst, kRequestRestart, kStepThree);
+  const auto fault = rig.Notification(WorkerNotificationKind::kFault);
+  assert(fault && fault->instance_id == kFirst);
+  rig.Render(5);
+  assert(rig.host.NativeVstHealth(kFirst) == NativeVstWorkerHealth::kFaulted);
+  assert(rig.Running());
+  rig.host.Stop();
+}
+
+// A new latency from the plug-in is published as a revision while the host keeps running.
+void TestLatencySwitchPublishesWithoutStop() {
+  Rig rig;
+  rig.Configure();
+  assert(rig.host.AttachNativeVst(Attachment(kFirst, 1)));
+  rig.Start({kBlock, 0});
+  assert(rig.Wait(kFirst, NativeVstWorkerHealth::kReady));
+  rig.Render(30);
+  const auto generation = AudioHostTestAccess::WorkerGeneration(rig.host, kFirst);
+  const auto before = DelayOf(rig, 10, 2.0);
+  assert(before);
+  rig.Set(kFirst, kLatency, kStepOne);
+  // The worker's report from loading (0 frames) may still be queued ahead of the new one.
+  auto reported = rig.Notification(WorkerNotificationKind::kLatency);
+  if (reported && reported->value == 0) reported = rig.Notification(WorkerNotificationKind::kLatency);
+  assert(reported && reported->instance_id == kFirst && reported->value == 64);
+  rig.host.ProcessNativeVstControl();
+  assert(rig.Running());
+  // The node now declares the plug-in's 64 frames on top of the transport's block.
+  rig.Publish(3, {kBlock + 64, 0});
+  rig.Render(30);
+  assert(rig.Running() && rig.host.NativeVstHealth(kFirst) == NativeVstWorkerHealth::kReady);
+  assert(AudioHostTestAccess::WorkerGeneration(rig.host, kFirst) == generation);
+  // Both sources are compensated to the new latency and play on without a gap.
+  const auto after = DelayOf(rig, 10, 2.0);
+  assert(after && *after == *before + 64);
+  rig.host.Stop();
+}
+
+// One crashing plug-in silences only its own node; the other node renders sample for sample.
+void TestCrashMutesOnlyThatInstance() {
+  Rig rig;
+  rig.Configure();
+  assert(rig.host.AttachNativeVst(Attachment(kFirst, 1)));
+  assert(rig.host.AttachNativeVst(Attachment(kSecond, 2)));
+  rig.Start({kBlock, kBlock});
+  assert(rig.Wait(kFirst, NativeVstWorkerHealth::kReady) && rig.Wait(kSecond, NativeVstWorkerHealth::kReady));
+  rig.Render(30);
+  const auto delay = DelayOf(rig, 10, 2.0);
+  assert(delay);
+  rig.Set(kFirst, kFault, kStepOne);
+  for (unsigned guard = 0; guard < 500 && rig.host.NativeVstHealth(kFirst) == NativeVstWorkerHealth::kReady; ++guard) rig.Render();
+  assert(rig.host.NativeVstHealth(kFirst) == NativeVstWorkerHealth::kFaulted);
+  const auto fault = rig.Notification(WorkerNotificationKind::kFault);
+  assert(fault && fault->instance_id == kFirst);
+  rig.Render(30);
+  assert(rig.Running());
+  assert(rig.host.NativeVstHealth(kSecond) == NativeVstWorkerHealth::kReady);
+  // What remains is the second node alone: the same delay, one source's worth of signal.
+  assert(Mismatch(rig, 10, *delay, 1.0) < 1.0e-4);
+  rig.host.Stop();
+}
+
+// A plug-in that is still loading at a publication is left out of it and never stalls it; one
+// that is ready joins the next revision.
+void TestDelayedReadyAcrossAPublication() {
+  Rig rig;
+  rig.Configure();
+  rig.Start({0, 0});
+  rig.Render(30);
+  const auto steady = rig.Level(10);
+  assert(steady > 0.1);
+  assert(rig.host.AttachNativeVst(Attachment(kFirst, 1, 1)));
+  assert(AudioHostTestAccess::AttachmentOwnership(rig.host, kFirst) == Ownership::kStaged);
+  assert(rig.host.NativeVstHealth(kFirst) == NativeVstWorkerHealth::kStarting);
+  const auto started = std::chrono::steady_clock::now();
+  rig.Publish(3, {0, 0});
+  assert(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
+  assert(rig.host.NativeVstHealth(kFirst) == NativeVstWorkerHealth::kStarting);
+  assert(AudioHostTestAccess::AttachmentOwnership(rig.host, kFirst) != Ownership::kActive);
+  // It finishes loading after the publication, and the graph never took it.
+  std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+  rig.Render(30);
+  rig.host.ProcessNativeVstControl();
+  assert(AudioHostTestAccess::AttachmentOwnership(rig.host, kFirst) == Ownership::kAbsent);
+  assert(Mismatch(rig, 10, 0, 2.0) < 1.0e-4);
+  // Attached again and given time to load, it joins the next revision.
+  assert(rig.host.AttachNativeVst(Attachment(kSecond, 1, 1)));
+  assert(rig.Wait(kSecond, NativeVstWorkerHealth::kReady));
+  rig.Publish(4, {kBlock, 0});
+  rig.Render(30);
+  assert(AudioHostTestAccess::AttachmentOwnership(rig.host, kSecond) == Ownership::kActive);
+  assert(rig.Running() && rig.host.NativeVstHealth(kSecond) == NativeVstWorkerHealth::kReady);
+  assert(DelayOf(rig, 10, 2.0) == kBlock);
+  rig.host.Stop();
+}
+
+// Wall time of ten inserts into a running graph: attach to ready, then ready to bound
+// (prepare, publish and the callback taking the new revision).
+void MeasureInserts() {
+  Rig rig;
+  rig.Configure();
+  rig.Start({0, 0});
+  rig.Render(30);
+  using Clock = std::chrono::steady_clock;
+  const auto milliseconds = [](const Clock::duration span) {
+    return std::chrono::duration<double, std::milli>(span).count();
+  };
+  std::vector<double> loading, binding;
+  for (std::uint32_t insert = 0; insert < 10; ++insert) {
+    const std::string id = "b0c4db1e-bd48-46d4-a4bc-" + std::to_string(100000000000ULL + insert);
+    const auto attached = Clock::now();
+    assert(rig.host.AttachNativeVst(Attachment(id, 1)));
+    while (rig.host.NativeVstHealth(id) != NativeVstWorkerHealth::kReady) std::this_thread::sleep_for(std::chrono::microseconds(500));
+    const auto ready = Clock::now();
+    const std::uint32_t revision = 3 + 2 * insert;
+    assert(rig.host.PrepareGraphRevision(revision, Graph(revision, {kBlock, 0})).code == GraphRevisionStatusCode::kPrepared);
+    assert(rig.host.PublishGraphRevision(revision).code == GraphRevisionStatusCode::kPublishPending);
+    rig.Render();
+    assert(rig.host.InspectGraphRevision(revision).code == GraphRevisionStatusCode::kPublished);
+    const auto bound = Clock::now();
+    assert(AudioHostTestAccess::AttachmentOwnership(rig.host, id) == Ownership::kActive);
+    loading.push_back(milliseconds(ready - attached));
+    binding.push_back(milliseconds(bound - ready));
+    while (rig.host.RetireGraphRevision(revision - 1).code != GraphRevisionStatusCode::kRetired) rig.Render();
+    assert(rig.host.DetachVstReference(id));
+    rig.Publish(revision + 1, {0, 0});
+  }
+  const auto summary = [](std::vector<double> samples) {
+    std::sort(samples.begin(), samples.end());
+    return std::pair{(samples[4] + samples[5]) / 2, samples.back()};
+  };
+  const auto [loading_median, loading_max] = summary(loading);
+  const auto [binding_median, binding_max] = summary(binding);
+  std::printf("AE08_INSERT_MS attach_to_ready median=%.1f max=%.1f ready_to_bound median=%.1f max=%.1f total_median=%.1f\n",
+    loading_median, loading_max, binding_median, binding_max, loading_median + binding_median);
+  rig.host.Stop();
+}
+}  // namespace plugin
+
 int main() {
+  if (std::getenv("DAW_AE08_MEASURE_INSERTS")) {
+    plugin::MeasureInserts();
+    return 0;
+  }
+  if (std::getenv("DAW_AE08_TEST_PLUGIN_BUNDLE")) {
+    plugin::TestComponentRestartResetsUpTheWorker();
+    plugin::TestLatencySwitchPublishesWithoutStop();
+    plugin::TestCrashMutesOnlyThatInstance();
+    plugin::TestDelayedReadyAcrossAPublication();
+    return 0;
+  }
   if (std::getenv("DAW_AE08_RETIRE_ONLY")) {
+    TestRetireDuringPublicationKeepsTheWorkerTheCallbackReads();
     TestRetiringASlowWorkerDoesNotBlockTheCommandLoop();
     TestUndoBeforePublicationBindsNothing();
     TestRapidInsertUndoBurstKeepsEveryInstanceOwned();
@@ -5901,5 +6314,6 @@ int main() {
   TestUndoBeforeTheDeletePublishesKeepsTheLiveBinding();
   TestParkedInstanceThatChangedIsLoadedAgain();
   TestParkingIsBoundedByCountAndAge();
+  TestRetireDuringPublicationKeepsTheWorkerTheCallbackReads();
   return 0;
 }

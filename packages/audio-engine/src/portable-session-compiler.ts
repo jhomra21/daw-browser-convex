@@ -181,13 +181,14 @@ const samplerZone = (
     asset.decoded.frameCount,
     frameAt(zone.endSec ?? zone.sample.source.durationSec, asset.decoded.sampleRateHz),
   )
+  // One-shot zones never loop; the loop collapses to the zone start so the graph contract's loop bounds hold.
   const loopStartFrame = zone.playbackMode !== 'one-shot'
     ? frameAt(zone.loopStartSec ?? zone.startSec, asset.decoded.sampleRateHz)
-    : 0
+    : startFrame
   const loopEndFrame = zone.playbackMode !== 'one-shot'
     ? Math.min(asset.decoded.frameCount, frameAt(zone.loopEndSec ?? zone.endSec ?? zone.sample.source.durationSec, asset.decoded.sampleRateHz))
-    : 0
-  if (endFrame <= startFrame || loopEndFrame > 0 && loopEndFrame <= loopStartFrame) {
+    : startFrame
+  if (endFrame <= startFrame || (zone.playbackMode !== 'one-shot' && loopEndFrame > 0 && loopEndFrame <= loopStartFrame)) {
     throw new Error(`${zone.id}: browser sample bounds resolve to an empty portable range.`)
   }
   return {
@@ -297,8 +298,8 @@ export const compilePortableDrumRackConfiguration = (
       playbackMode: 'one-shot',
       startFrame,
       endFrame,
-      loopStartFrame: 0,
-      loopEndFrame: 0,
+      loopStartFrame: startFrame,
+      loopEndFrame: startFrame,
       crossfadeFrameCount: 0,
       chokeGroup: pad.chokeGroup,
     }]

@@ -2825,8 +2825,8 @@ test.failing('W-M3 an audio clip move answers adopted with its sources replaced,
 })
 
 // W-UD7p-1: an edit while paused is adopted in place; Play then resumes on the edited schedule with no re-prepare.
-test.failing('W-UD7p-1 a note edit on a paused prepared session is adopted in place', async () => {
-  const f = await w8Fixture()
+test('W-UD7p-1 a note edit on a paused prepared session is adopted in place', async () => {
+  const f = await w8Fixture({ clipSec: 4 })
   try {
     expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
     f.state.notes = [w8Note('note', 0), w8Note('later', 4)]
@@ -2835,6 +2835,88 @@ test.failing('W-UD7p-1 a note edit on a paused prepared session is adopted in pl
     expect({ result, started, sessions: f.sessions(), disposed: f.calls.includes('dispose'), seam: f.installs.at(-1)?.timeOrigin.frame,
       laterNoteOn: f.noteEvents(f.installs.at(-1), 'note-on').some((event) => event.frame === 96_000) })
       .toEqual({ result: 'adopted', started: 'started', sessions: 1, disposed: false, seam: 0, laterNoteOn: true })
+  } finally { f.controller.dispose() }
+})
+
+// W-UD7p-3: a pause leaves its voices sounding, so the edit that deletes the note releases it once, at the paused frame.
+test('W-UD7p-3 deleting a note that a pause left sounding releases it once at the paused frame', async () => {
+  const f = await w8Fixture({ clipSec: 4, notes: [w8Note('held', 0, 4)] })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    const heldId = f.noteEvents(f.installs[0], 'note-on')[0]?.noteId
+    await f.controller.pause(0.5)
+    f.state.notes = []
+    const result = await f.adopt(f.noLoop)
+    const installed = f.installs.at(-1)
+    expect({ result, sessions: f.sessions(), noteOns: f.noteEvents(installed, 'note-on'),
+      noteOffs: f.noteEvents(installed, 'note-off').map((event) => `${event.noteId === heldId}@${event.frame}`) })
+      .toEqual({ result: 'adopted', sessions: 1, noteOns: [], noteOffs: ['true@24000'] })
+  } finally { f.controller.dispose() }
+})
+
+// W-UD7p-4: a tempo edit and a loop edit while paused are adopted at the paused frame; a locate after the tempo edit
+// seeks the same session and compiles the edited tempo.
+test('W-UD7p-4 a paused tempo edit and a paused loop edit are adopted in place and a locate seeks the edited schedule', async () => {
+  const f = await w8Fixture()
+  try {
+    expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
+    f.state.bpm = 100
+    const tempo = await f.adopt(f.noLoop)
+    const tempoBpm = f.installs.at(-1)?.bpm
+    const before = f.calls.length
+    const located = await f.controller.ensurePrepared({ ...f.transport, state: 'paused', playheadSec: 0.25 })
+    const seeked = { bpm: f.installs.at(-1)?.bpm, origin: f.installs.at(-1)?.timeOrigin.frame, calls: f.calls.slice(before).filter((call) => call.endsWith('-transport') || call === 'dispose') }
+    const loop = await f.adopt({ loopEnabled: true, loopStartSec: 0.25, loopEndSec: 1.25 })
+    expect({ tempo, tempoBpm, located, seeked, loop, loopNoteOns: f.noteEvents(f.installs.at(-1), 'note-on').slice(0, 2).map((event) => event.frame),
+      sessions: f.sessions(), disposed: f.calls.includes('dispose') })
+      .toEqual({ tempo: 'adopted', tempoBpm: 100, located: 'started', seeked: { bpm: 100, origin: 12_000, calls: ['stop-transport'] },
+        loop: 'adopted', loopNoteOns: [12_000, 60_000], sessions: 1, disposed: false })
+  } finally { f.controller.dispose() }
+})
+
+// W-UD7p-5: Play after a paused edit finds the session compatible and only starts the transport.
+test('W-UD7p-5 Play after a paused structural edit resumes the same session with no prepare or install', async () => {
+  const f = await w8Fixture({ clipSec: 4 })
+  try {
+    expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
+    f.state.notes = [w8Note('note', 0), w8Note('later', 4)]
+    expect(await f.adopt(f.noLoop)).toBe('adopted')
+    const before = f.calls.length
+    const started = await f.controller.start({ ...f.transport, state: 'playing' })
+    expect({ started, sessions: f.sessions(), calls: f.calls.slice(before) }).toEqual({ started: 'started', sessions: 1, calls: ['start-transport', 'mark-active'] })
+  } finally { f.controller.dispose() }
+})
+
+// W-UD7p-6: a locate right after a paused edit seeks the session that adopted it.
+test('W-UD7p-6 a seek after a paused edit compiles the edited notes on the same session', async () => {
+  const f = await w8Fixture({ clipSec: 4 })
+  try {
+    expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
+    f.state.notes = [w8Note('note', 0), w8Note('later', 4)]
+    expect(await f.adopt(f.noLoop)).toBe('adopted')
+    const seeked = await f.controller.seek(1, f.noLoop)
+    expect({ seeked, sessions: f.sessions(), disposed: f.calls.includes('dispose'), origin: f.installs.at(-1)?.timeOrigin.frame,
+      laterNoteOn: f.noteEvents(f.installs.at(-1), 'note-on').some((event) => event.frame === 96_000) })
+      .toEqual({ seeked: 'started', sessions: 1, disposed: false, origin: 48_000, laterNoteOn: true })
+  } finally { f.controller.dispose() }
+})
+
+// W-UD7p-7: a paused edit whose publish is refused leaves the session as it was. A paused session reports no rendered
+// frames, so the UD 8 resubmit runs once Play makes them flow, and Play itself resumes the same session.
+test('W-UD7p-7 a refused paused edit answers failed, keeps the session and is resubmitted once Play reports frames', async () => {
+  let refuse = true
+  const f = await w8Fixture({ clipSec: 4 }, { refuse: () => refuse })
+  try {
+    expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
+    f.state.notes = [w8Note('note', 0), w8Note('later', 4)]
+    const failed = await f.adopt(f.noLoop)
+    const started = await f.controller.start({ ...f.transport, state: 'playing' })
+    refuse = false
+    f.position(1_000)
+    for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
+    expect({ failed, started, sessions: f.sessions(), disposed: f.calls.includes('dispose'), revisions: f.publishes.slice(1).map((entry) => entry.revision),
+      laterNoteOn: f.noteEvents(f.installs.at(-1), 'note-on').some((event) => event.frame === 96_000) })
+      .toEqual({ failed: 'failed', started: 'started', sessions: 1, disposed: false, revisions: [2, 2], laterNoteOn: true })
   } finally { f.controller.dispose() }
 })
 

@@ -1987,7 +1987,8 @@ export const createPortableBrowserPlaybackController = (input: {
   // Native adoption on the portable session: compile the newest desired state from a seam a quarter second ahead of the
   // rendered position, reconcile the notes sounding at the seam against the schedule they started in, then prepare,
   // install and publish at exactly that frame on the same core. A publication that is refused or late is a failed
-  // adoption that a resubmit retries; what the session cannot carry yet is a rebuild.
+  // adoption that a resubmit retries; what the session cannot carry yet is a rebuild. A paused session adopts the same
+  // way at the frame it stands on, with no lead and an immediate publish.
   const adoptLive = async (loop: AdoptionLoop): Promise<PortableAdoptionResult> => {
     // A locate rebuilds the schedule the adoption would reconcile against; the follow adopts again after it.
     if (pendingSeeks > 0) return "unavailable"
@@ -2000,11 +2001,12 @@ export const createPortableBrowserPlaybackController = (input: {
     const transport = activeTransport
     const revision = activeRevision
     const fingerprint = input.fingerprintSnapshot
-    if (!session || !playing || !audioContext || !previous || !schedule || !range || !transport || revision === undefined) return "unavailable"
+    if (!session || !audioContext || !previous || !schedule || !range || !transport || revision === undefined) return "unavailable"
     if (!fingerprint) return "rebuild"
     const generation = lifecycleGeneration
     const intent = transportIntent
-    const current = () => active === session && playing && generation === lifecycleGeneration && intent === transportIntent
+    const wasPlaying = playing
+    const current = () => active === session && playing === wasPlaying && generation === lifecycleGeneration && intent === transportIntent
     // A compile that throws has changed nothing, and an edit that cannot be installed leaves the old graph playing for
     // the next adoption to retry; a rebuild would end the take and gap the audio for an edit the user expects to hear
     // without either.
@@ -2017,7 +2019,7 @@ export const createPortableBrowserPlaybackController = (input: {
       // A run keeps its loop off while the playhead is at or past the loop's end, as a start would.
       const arrangementNow = arrangementFrame()
       const compilation = await compileSnapshot({
-        ...transport, ...effectiveLoopForStart(loop, arrangementNow, sampleRate), state: "playing", playheadSec: arrangementNow / sampleRate,
+        ...transport, ...effectiveLoopForStart(loop, arrangementNow, sampleRate), state: wasPlaying ? "playing" : "paused", playheadSec: arrangementNow / sampleRate,
       }, { liveAdoption: true })
       if (!current()) return "unavailable"
       // Audio clips, tracks, instrument kinds, assets, effect structure and warped audio under a tempo edit are not
@@ -2041,7 +2043,8 @@ export const createPortableBrowserPlaybackController = (input: {
       await session.prepareGraph(provisional.graph)
       if (!current()) return "unavailable"
       const leadFrames = Math.round(scheduleLeadSec(input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC) * sampleRate)
-      const seamFrame = positionFrame + Math.round(adoptionSeamLeadSec * sampleRate)
+      // A stopped transport has no publish race: the seam is where it stands and the publish below is immediate.
+      const seamFrame = wasPlaying ? positionFrame + Math.round(adoptionSeamLeadSec * sampleRate) : positionFrame
       const keepsVoices = (trackId: string) => previous.mixer.fx.trackFx?.[trackId]?.instrument?.instanceId
         === folded.mixer.fx.trackFx?.[trackId]?.instrument?.instanceId
       // Raw frames run on through a loop, so the seam's arrangement position is rarely its raw frame. The schedule is
@@ -2076,7 +2079,7 @@ export const createPortableBrowserPlaybackController = (input: {
       const graph = activeGraph
       activeRevision = candidate.graph.revision
       activeGraph = candidate.graph
-      const published = session.publishGraph(candidate.graph.revision, { requireContinuity: true, publicationFrame: seamFrame }).then((): PortableAdoptionResult => {
+      const published = session.publishGraph(candidate.graph.revision, wasPlaying ? { requireContinuity: true, publicationFrame: seamFrame } : { requireContinuity: true }).then((): PortableAdoptionResult => {
         if (active !== session) return "unavailable"
         // The compiled schedule, not the installed one: it still holds the note-on of a voice that continues from before
         // the seam, which the next reconcile needs to know that voice sounds.

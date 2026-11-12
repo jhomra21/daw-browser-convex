@@ -24494,9 +24494,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 203,
+      "pass": 204,
       "skip": 1,
-      "fail": 15
+      "fail": 14
      },
      "fails": [
       "B6d2 a paused structural change requested while the pause is pending is not dropped",
@@ -24509,7 +24509,6 @@
       "B6d5 a locate during an uncommitted paused preview reaches native once it commits",
       "B6d5 a locate during an uncommitted paused preview reaches native once it commits while Stop waits on it",
       "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
-      "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
       "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does",
       "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
       "failed lifecycle transition cancels delayed native startup",
@@ -35775,9 +35774,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 201,
+      "pass": 202,
       "skip": 1,
-      "fail": 17
+      "fail": 16
      },
      "fails": [
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
@@ -35793,7 +35792,6 @@
       "B6f2 two paused locates while the first seek is pending end at the second",
       "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
       "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
-      "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
       "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
@@ -40200,14 +40198,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
-      "fail": 5
+      "fail": 3
      },
      "fails": [
       "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
-      "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
-      "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -41483,7 +41479,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        // ensurePrepared keeps a paused session that stands at the playhead, so an edit replaces the one compiled before it.\n        void disposeNativePreview(undefined, \"paused-preview-structural-change\")\n",
+       "from": "          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).\n          adoptPortableEdits()\n",
        "to": ""
       }
      ]
@@ -41547,7 +41543,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        // ensurePrepared keeps a paused session that stands at the playhead, so an edit replaces the one compiled before it.\n        void disposeNativePreview(undefined, \"paused-preview-structural-change\")\n",
+       "from": "          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).\n          adoptPortableEdits()\n",
        "to": ""
       }
      ]
@@ -41608,7 +41604,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        // ensurePrepared keeps a paused session that stands at the playhead, so an edit replaces the one compiled before it.\n        void disposeNativePreview(undefined, \"paused-preview-structural-change\")\n",
+       "from": "          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).\n          adoptPortableEdits()\n",
        "to": ""
       }
      ]
@@ -41671,7 +41667,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        // ensurePrepared keeps a paused session that stands at the playhead, so an edit replaces the one compiled before it.\n        void disposeNativePreview(undefined, \"paused-preview-structural-change\")\n",
+       "from": "          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).\n          adoptPortableEdits()\n",
        "to": ""
       }
      ]
@@ -41730,7 +41726,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        // ensurePrepared keeps a paused session that stands at the playhead, so an edit replaces the one compiled before it.\n        void disposeNativePreview(undefined, \"paused-preview-structural-change\")\n",
+       "from": "          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).\n          adoptPortableEdits()\n",
        "to": ""
       }
      ]
@@ -42698,8 +42694,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        // The paused session now carries this fingerprint, so a re-run without an edit keeps it.\n        if (token === nativeLifecycleToken && portableBrowserPlayback.isPrepared() && !portableBrowserPlayback.isActive())\n          previewProjectionBaseline = trackFingerprint\n",
-       "to": ""
+       "from": "        if (outcome === \"adopted\" || outcome === \"unchanged\") previewProjectionBaseline = key\n",
+       "to": "        if (outcome === \"adopted\" || outcome === \"unchanged\") void key\n"
       }
      ]
     },
@@ -42944,8 +42940,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        // The paused session now carries this fingerprint, so a re-run without an edit keeps it.\n        if (token === nativeLifecycleToken && portableBrowserPlayback.isPrepared() && !portableBrowserPlayback.isActive())\n          previewProjectionBaseline = trackFingerprint\n",
-       "to": ""
+       "from": "        if (outcome === \"adopted\" || outcome === \"unchanged\") previewProjectionBaseline = key\n",
+       "to": "        if (outcome === \"adopted\" || outcome === \"unchanged\") void key\n"
       }
      ]
     },
@@ -43544,14 +43540,13 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
-      "fail": 5
+      "fail": 4
      },
      "fails": [
       "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
       "failed lifecycle transition cancels delayed native startup",
-      "keeps a paused portable session compatible when enabling a loop",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
      "fuzz": null,

@@ -6493,10 +6493,9 @@ const mountB6fLive = (world: B6fLiveWorld, nativeEnabled: boolean) => {
   const [projectId, setProjectId] = createSignal('project-a')
   const [generation, setGeneration] = createSignal(1)
   const faults: string[] = []
-  const compiles: { seq: number; volumes: number[] }[] = []
   const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => {
     if (compileHold.armed) await new Promise<void>((resolve) => holdB6fLive(compileHold, resolve))
-    compiles.push({ seq: ++world.seq, volumes: tracks().map((entry) => entry.volume) })
+    world.seq += 1
     return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
       renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
   }
@@ -6517,8 +6516,9 @@ const mountB6fLive = (world: B6fLiveWorld, nativeEnabled: boolean) => {
   const summary = (mark: number) => {
     const open = world.sessions.filter((session) => !session.closed)
     const session = open.at(-1)
-    const newest = compiles.at(-1)
     const position = session?.positions.at(-1)
+    // The graph the session holds: prepared with the edit, or republished with it by a paused adoption.
+    const gain = session ? JSON.parse(session.graph || '{}').nodes?.find((node: { id: string }) => node.id === track.id)?.mixer?.gain : undefined
     return {
       faults: [...faults],
       playing: playback.isPlaying(),
@@ -6527,8 +6527,7 @@ const mountB6fLive = (world: B6fLiveWorld, nativeEnabled: boolean) => {
       playhead: playback.playheadSec(),
       openSessions: open.length,
       position: position && { sec: position.sec, running: position.running },
-      edit: session?.graph.includes('"track-b6f"') ? 'structure'
-        : newest?.volumes.includes(0.5) && session && session.createdSeq > newest.seq ? 'volume' : 'none',
+      edit: session?.graph.includes('"track-b6f"') ? 'structure' : gain === 0.5 ? 'volume' : 'none',
       runningAfterMark: world.sessions.flatMap((entry) => entry.positions).filter((entry) => entry.seq > mark && entry.running).length,
     }
   }
@@ -6944,9 +6943,13 @@ test('B6f4 a paused-preview re-run with native playback off and no edit keeps th
     const session = live.liveSession()
     const prepared = nodes.length
     // Equal tracks in a new array re-run the effect, which reads them for its fingerprint, without changing that fingerprint.
+    // The hook records what the adoption carries once its publish answers, after the session shows the edit.
+    for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
+    const quiet = live.mark()
     live.setTracks([{ ...track, volume: 0.5 }])
     await live.until(() => session?.closed === true || nodes.length !== prepared)
-    expect({ disposed: session?.closed, prepares: nodes.length - prepared }).toEqual({ disposed: false, prepares: 0 })
+    // Nothing compiled or posted: the re-run neither re-prepared the session nor asked it to adopt an unchanged edit.
+    expect({ disposed: session?.closed, prepares: nodes.length - prepared, quiet: live.mark() === quiet }).toEqual({ disposed: false, prepares: 0, quiet: true })
     await live.expectLive(false, 1, mark, 'volume')
   }, false)
 })
@@ -7433,6 +7436,32 @@ test('F20 W-F20f toggling the loop on and off while playing is adopted without a
     expect({ looping, linear: session?.installedNoteOns.slice(0, 2), adoptions: session?.adoptions, closed: session?.closed,
       playing: live.playback.isPlaying(), sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
       .toEqual({ looping: [96_000, 240_000], linear: [96_000], adoptions: 2, closed: false, playing: true, sessionsAfterMark: 0 })
+  }, false)
+})
+
+// UD 7 paused, portable: a note edit while paused is adopted by the kept session, neither disposed nor re-prepared nor
+// played, and Play then resumes that session.
+test('B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session', async () => {
+  await runB6f5(async (live, world) => {
+    const emptyClip = { id: 'clip-ud7p', name: 'MIDI', color: '#fff', startSec: 0, duration: 4, midiOffsetBeats: 0, midi: { wave: 'sine' as const, notes: [] } }
+    live.setTracks((current) => current.map((entry) => entry.id === track.id ? { ...entry, kind: 'instrument', clips: [emptyClip] } : entry))
+    await live.pausedAt(1)
+    const session = live.liveSession()
+    const mark = live.mark()
+    const note = { id: 'note-ud7p', pitch: 60, beat: 4, length: 1, velocity: 0.8 }
+    live.setTracks((current) => current.map((entry) => entry.id === track.id
+      ? { ...entry, clips: [{ ...emptyClip, midi: { ...emptyClip.midi, notes: [note] } }] } : entry))
+    await live.until(() => session?.adoptions === 1)
+    await live.settle()
+    const paused = { adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session, playing: live.playback.isPlaying(),
+      sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length, runningAfterMark: session?.positions.filter((entry) => entry.seq > mark && entry.running).length,
+      noteOns: session?.installedNoteOns }
+    await live.playback.handlePlay([])
+    await live.until(() => live.playback.isPortableBrowserPlayback() && !live.playback.isPreparingPlayback())
+    expect({ paused, resumed: live.playback.isPortableBrowserPlayback(), same: live.liveSession() === session, closed: session?.closed,
+      sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
+      .toEqual({ paused: { adoptions: 1, closed: false, same: true, playing: false, sessionsAfterMark: 0, runningAfterMark: 0, noteOns: [96_000] },
+        resumed: true, same: true, closed: false, sessionsAfterMark: 0 })
   }, false)
 })
 

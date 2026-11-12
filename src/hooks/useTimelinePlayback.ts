@@ -1542,9 +1542,11 @@ export function useTimelinePlayback(
       && (options?.resumePlayback === undefined || options.resumePlayback)
       && (options?.projectId === undefined || options.projectId === nativeOptions?.projectId?.())
       && (options?.projectGeneration === undefined || options.projectGeneration === nativeOptions?.projectGeneration?.()))) {
-      // A playing portable session adopts what it carries live, as native does. Only followPortableEdits asks with no
-      // transport intent of its own while one plays; a seek or structural rebuild names its intent and rebuilds.
-      if (options || !portableBrowserPlayback.isActive() || !untrack(isPlaying)) return applyTimelineSchedule(tracks, options)
+      // A prepared portable session, playing or paused, adopts what it carries, as native does. Only the follow and the
+      // paused-preview effect ask with no transport intent of their own; a seek or structural rebuild names its intent
+      // and rebuilds.
+      if (options || !portableBrowserPlayback.isPrepared()) return applyTimelineSchedule(tracks, options)
+      const paused = !untrack(isPlaying)
       // The key and the loop are read together, so both describe the state this adoption answers for.
       const key = readDesiredScheduleFingerprint(tracks)
       const { isActive, start, end } = getLoopParams()
@@ -1552,6 +1554,18 @@ export function useTimelinePlayback(
       const lifecycle = nativeLifecycleToken
       const outcome = await portableBrowserPlayback.adoptSchedule({ loopEnabled: isActive, loopStartSec: start, loopEndSec: end })
       if (!mounted || transportIntent !== transportIntentToken || lifecycle !== nativeLifecycleToken) return
+      if (paused) {
+        if (outcome === "adopted" || outcome === "unchanged") previewProjectionBaseline = key
+        // What a paused session cannot carry yet is replaced where it stands, as before adoption; a failed staging keeps
+        // the session and the controller resubmits it once Play reports frames.
+        else if (outcome !== "failed") {
+          await disposeNativePreview(undefined, "paused-preview-structural-change")
+          const token = nativeLifecycleToken
+          await ensureLivePortableSession()
+          if (token === nativeLifecycleToken && portableBrowserPlayback.isPrepared() && !portableBrowserPlayback.isActive()) previewProjectionBaseline = key
+        }
+        return
+      }
       // A rebuild would end the take: while recording, the session keeps what it plays, as before adoption.
       if (outcome === "rebuild" && !portableBrowserPlayback.isRecording()) {
         await applyTimelineSchedule(tracks, { rebuildBackend: true })
@@ -2129,13 +2143,16 @@ export function useTimelinePlayback(
   // The playing portable session follows the newest desired state, as native adoption does: what it carries live is
   // adopted on the same core, anything else, or an edit that landed while its start was in flight, rebuilds it where
   // the transport stands.
+  const adoptPortableEdits = () => {
+    void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? [])).catch((cause: unknown) => {
+      portableBrowserOptions?.reportFault?.(cause instanceof Error ? cause.message : 'Playback could not follow the edit.')
+    })
+  }
   const followPortableEdits = () => {
     if (rebuildInProgress || playAttempt || !untrack(isPlaying) || !portableBrowserPlayback.isActive()
       || hasPendingAudioClipHydration()
       || untrack(() => readDesiredScheduleFingerprint()) === previewProjectionBaseline) return
-    void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? [])).catch((cause: unknown) => {
-      portableBrowserOptions?.reportFault?.(cause instanceof Error ? cause.message : 'Playback could not follow the edit.')
-    })
+    adoptPortableEdits()
   }
   createEffect(() => {
     if (!isPlaying() || activeBackend() !== "native") nativePlayback.dropAdoptionIntents()
@@ -2208,7 +2225,12 @@ export function useTimelinePlayback(
         void disposeNativePreview(undefined, "native-playback-disabled")
       } else if (projectionChanged && playAttempt === undefined
         && (portableBrowserPlayback.isPrepared() || portableBrowserPlayback.isPreparing())) {
-        // ensurePrepared keeps a paused session that stands at the playhead, so an edit replaces the one compiled before it.
+        if (portableBrowserPlayback.isPrepared()) {
+          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).
+          adoptPortableEdits()
+          return
+        }
+        // A session still preparing has nothing to adopt into; the one compiled before the edit is replaced.
         void disposeNativePreview(undefined, "paused-preview-structural-change")
       }
       const token = nativeLifecycleToken

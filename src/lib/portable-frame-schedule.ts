@@ -32,7 +32,8 @@ export type PortableFrameScheduleAdapterInput = {
   noteScheduleStartSec?: number
   clipSpanningNoteOn?: boolean
   loop?: LoopTransport
-  loopIteration?: number
+  // The raw frame the loop pass began at: the same in every compile of a run, whatever its origin or its shifted loop.
+  loopPassFrame?: number
 }
 
 type PendingEventPayload =
@@ -78,7 +79,7 @@ const stableNoteId = (trackId: string, clipId: string, identity: string) => {
 }
 
 const noteIdentity = (input: PortableFrameScheduleAdapterInput, identity: string) => (
-  input.loopIteration === undefined ? identity : `${identity}:loop:${input.loopIteration}`
+  input.loopPassFrame === undefined ? identity : `${identity}:loop:${input.loopPassFrame}`
 )
 
 const parameterTarget = (envelope: AutomationEnvelope): PortableParameterTarget => (
@@ -289,7 +290,7 @@ export const compilePortableFrameSchedule = (
     loopStartSec: 0,
     loopEndSec: 0,
   }, input.sampleRateHz)
-  if (!loop || input.loopIteration === -1) return compileSinglePortableFrameSchedule(input)
+  if (!loop) return compileSinglePortableFrameSchedule(input)
   const startFrame = input.timeOrigin.frame
   const endFrame = portableFrameAtTimelineTime(
     { sampleRateHz: input.sampleRateHz, timeOrigin: input.timeOrigin },
@@ -300,7 +301,7 @@ export const compilePortableFrameSchedule = (
     const schedule = compileSinglePortableFrameSchedule({
     ...input,
     loop: undefined,
-    loopIteration: slice.iteration,
+    loopPassFrame: slice.iteration === 0 ? 0 : slice.nativeStartFrame - (slice.arrangementStartFrame - loop.startFrame),
     timeOrigin: {
       timelineSec: input.timeOrigin.timelineSec
         + (slice.arrangementStartFrame - startFrame) / input.sampleRateHz,

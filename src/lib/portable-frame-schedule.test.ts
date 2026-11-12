@@ -308,3 +308,25 @@ test('releases active voices at a loop boundary before retriggering the next ite
   ])
   expect(events[1]?.noteId).not.toBe(events[2]?.noteId)
 })
+
+// R5: a note's id names its loop pass by the raw frame the pass began at, so a compile from a later seam (its loop shifted
+// by the passes already played) gives the same note in the same pass the same id.
+test('W-R5 a loop pass keeps its note ids in a compile from a later seam with the loop shifted', () => {
+  const shortTrack: RuntimeTrack = {
+    ...track,
+    clips: [{ ...track.clips[0]!, midi: { ...track.clips[0]!.midi!, notes: [{ id: 'pass-note', beat: 0, length: 0.75, pitch: 60, velocity: 0.7 }] } }],
+  }
+  const base = { ...input, tracks: [shortTrack], automationEnvelopes: [], stableNoteIds: true, clipSpanningNoteOn: true }
+  const noteOns = (schedule: ReturnType<typeof compilePortableFrameSchedule>) => schedule.events
+    .flatMap((event) => event.type === 'note-on' ? [[event.frame, event.noteId] as const] : [])
+  const first = noteOns(compilePortableFrameSchedule({ ...base, rangeEndSec: 5, loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } }))
+  // The seam is raw frame 110_000, 14_000 frames into the third pass: its loop starts two seconds (two passes) later.
+  const arrangement = 14_000 / 48_000
+  const later = noteOns(compilePortableFrameSchedule({ ...base, timeOrigin: { timelineSec: arrangement, frame: 110_000 }, rangeEndSec: arrangement + 3,
+    loop: { loopEnabled: true, loopStartSec: 2, loopEndSec: 3 } }))
+  const idAt = (notes: typeof first, frame: number) => notes.find(([at]) => at === frame)?.[1]
+  expect({ spanning: idAt(later, 110_000) === idAt(first, 96_000), fourth: idAt(later, 144_000) === idAt(first, 144_000),
+    distinct: new Set(first.map(([, id]) => id)).size === first.length })
+    .toEqual({ spanning: true, fourth: true, distinct: true })
+})
+

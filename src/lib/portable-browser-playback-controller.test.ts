@@ -3246,3 +3246,37 @@ test('W-R9 a seek on a session of another project generation answers rebuild and
     expect({ result, calls: f.calls.slice(before), prepared: f.controller.isPrepared() }).toEqual({ result: 'rebuild', calls: [], prepared: true })
   } finally { f.controller.dispose() }
 })
+
+// R5: with the loop on, a note held across the seam of a later pass keeps its voice, and a note that restarts at a wrap
+// seam is attacked again.
+test('W-R5 a note held across an adoption seam in a later loop pass is neither released nor re-attacked', async () => {
+  const loop: W8Loop = { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 }
+  const f = await w8Fixture({ clipSec: 40, notes: [w8Note('held', 0, 1)], loop })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    const heldId = f.noteEvents(f.installs[0], 'note-on').find((event) => event.frame === 96_000)?.noteId
+    f.position(98_000, 1, 1)
+    f.state.notes = [w8Note('held', 0, 1), w8Note('later', 1.5, 0.25)]
+    const result = await f.adopt(loop)
+    const installed = f.installs.at(-1)
+    const seam = installed?.timeOrigin.frame
+    expect({ result, seam, heldNoteOns: f.noteEvents(installed, 'note-on').filter((event) => event.noteId === heldId),
+      heldNoteOffs: f.noteEvents(installed, 'note-off').filter((event) => event.noteId === heldId).map((event) => event.frame) })
+      .toEqual({ result: 'adopted', seam: 110_000, heldNoteOns: [], heldNoteOffs: [120_000] })
+  } finally { f.controller.dispose() }
+})
+
+test('W-R5 a note that restarts at the seam on a loop wrap keeps its attack', async () => {
+  const loop: W8Loop = { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 }
+  const f = await w8Fixture({ clipSec: 40, notes: [w8Note('whole', 0, 2)], loop })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    f.position(36_000, 1, 1)
+    f.state.notes = [w8Note('whole', 0, 2), w8Note('later', 1.5, 0.25)]
+    const result = await f.adopt(loop)
+    const installed = f.installs.at(-1)
+    expect({ result, seam: installed?.timeOrigin.frame, noteOnsAtSeam: f.noteEvents(installed, 'note-on').filter((event) => event.frame === 48_000).length })
+      .toEqual({ result: 'adopted', seam: 48_000, noteOnsAtSeam: 1 })
+  } finally { f.controller.dispose() }
+})
+

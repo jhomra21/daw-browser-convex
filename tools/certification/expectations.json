@@ -1336,7 +1336,7 @@
     "alarmSeconds": 1500,
     "env": {},
     "evidence": false,
-    "rc7Seconds": 0
+    "rc7Seconds": 7
    },
    "judge": {
     "kind": "exit",
@@ -9420,8 +9420,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "        await disposePublication()\n        if (outcome.status === \"failed\" && record.kind === \"schedule\") reportStopped(outcome.reason, { retainPlayback: true })",
-       "to": "        if (record.kind === \"latency\" && outcome.status === \"adopted\") {\n          const held = processorState.retirement()\n          if (held) {\n            const cleanup = await revisions.retire(held.binding)\n            if (!cleanup.ok) throw new Error(cleanup.error)\n          }\n        }\n        await disposePublication()\n        if (outcome.status === \"failed\" && record.kind === \"schedule\") reportStopped(outcome.reason, { retainPlayback: true })"
+       "from": "        await disposePublication()\n        if (outcome.status === \"failed\" && record.kind === \"schedule\") logFailedAdoption(outcome.reason)",
+       "to": "        if (record.kind === \"latency\" && outcome.status === \"adopted\") {\n          const held = processorState.retirement()\n          if (held) {\n            const cleanup = await revisions.retire(held.binding)\n            if (!cleanup.ok) throw new Error(cleanup.error)\n          }\n        }\n        await disposePublication()\n        if (outcome.status === \"failed\" && record.kind === \"schedule\") logFailedAdoption(outcome.reason)"
       }
      ],
      "bounded": false,
@@ -15024,7 +15024,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          failure = { outcome: { status: \"failed\", reason }, reason: \"native-refused\" }\n          throw new Error(reason)",
+       "from": "          failure = { outcome: { status: takeLocked ? \"blocked\" : \"failed\", reason }, reason: \"native-refused\" }\n          throw new Error(reason)",
        "to": "          throw new Error(reason)"
       }
      ],
@@ -33721,7 +33721,7 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "        if (edited) rememberInstrumentParameters(node.id, edited)\n",
+       "from": "        if (edited && prepared && isLiveEventOnlyInstrumentChange(prepared, edited)) rememberInstrumentParameters(node.id, edited)\n",
        "to": ""
       }
      ]
@@ -33739,7 +33739,7 @@
      "fails": [
       "P1 a live Synth drag is heard once per frame and its release does not rebuild",
       "P1 a live Synth edit is accepted and the prepared portable snapshot follows it",
-      "P1 live then non-live Synth edits in one gesture keep the last live state and release rebuilds once"
+      "P1 live then non-live Synth edits in one gesture keep the last live state and release adopts once"
      ],
      "fuzz": null,
      "rejection": null,
@@ -33786,7 +33786,7 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "        if (edited) rememberInstrumentParameters(node.id, edited)\n",
+       "from": "        if (edited && prepared && isLiveEventOnlyInstrumentChange(prepared, edited)) rememberInstrumentParameters(node.id, edited)\n",
        "to": ""
       }
      ]
@@ -43718,7 +43718,7 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "        return current() ? \"rebuild\" : \"unavailable\"\n      })",
+       "from": "        return failed()\n      })",
        "to": "        return \"unchanged\"\n      })"
       }
      ]
@@ -43782,7 +43782,7 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "        return current() ? \"rebuild\" : \"unavailable\"\n      })",
+       "from": "        return failed()\n      })",
        "to": "        return \"unchanged\"\n      })"
       }
      ]
@@ -43964,7 +43964,7 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "        activeSnapshot = withAcceptedInstruments({ ...next, revision: candidate.graph.revision }, activeSnapshot ?? previous)\n",
+       "from": "        activeSnapshot = { ...folded, revision: candidate.graph.revision }\n",
        "to": ""
       }
      ]
@@ -44027,7 +44027,7 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "        activeSnapshot = withAcceptedInstruments({ ...next, revision: candidate.graph.revision }, activeSnapshot ?? previous)\n",
+       "from": "        activeSnapshot = { ...folded, revision: candidate.graph.revision }\n",
        "to": ""
       }
      ]

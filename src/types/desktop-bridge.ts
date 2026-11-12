@@ -21,6 +21,7 @@ import type {
   ControlErrorV1,
   HostErrorV1,
   DesktopVstParameterEditPayload,
+  DesktopVstInstanceEvent,
 } from "@daw-browser/desktop-protocol"
 import type {
   DesktopApplicationMenuMessage,
@@ -247,6 +248,7 @@ type NativeSessionBridge = {
   onSpectrumFrame(listener: (frame: NativeHostSpectrumFrame) => void): () => void
   onScheduleProgress(listener: (progress: NativeScheduleProgress) => void): () => void
   onVstParameterEdit(listener: (payload: DesktopVstParameterEditPayload) => void): () => void
+  onVstInstanceEvent(listener: (event: DesktopVstInstanceEvent) => void): () => void
 }
 
 type NativeOutputDeviceReply = { ok: true; device: NativeOutputDevice | null } | { ok: false; error: string }

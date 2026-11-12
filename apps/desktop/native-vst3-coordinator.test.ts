@@ -22,6 +22,7 @@ import {
   nativeVst3PlaybackDefaultStatus,
   resolveNativeVst3AttachmentPlan,
   nativeVst3CoordinatorFailureOrigin,
+  nativeVst3InstanceEvent,
   type NativeVst3Defect,
   type NativeVst3RevisionHost,
   type NativeVst3WorkerRevisionNotification,
@@ -1106,4 +1107,19 @@ test("only a crashed plug-in preflight is a plug-in failure; timeouts and stagin
     instanceId: undefined,
     detail: "The native VST3 attachment transaction failed.",
   })
+})
+
+test("host notifications reach the renderer as typed instance events and never end the session", () => {
+  const defects: NativeVst3Defect[] = []
+  const notify = (kind: "latency" | "fault" | "miss" | "restart" | "buses", value: number) => nativeVst3InstanceEvent({
+    kind, value, graphRevision: 10, graphNodeId: 1n, instanceId: first.instanceId,
+  }, (defect) => { defects.push(defect) })
+  expect(notify("latency", 4096)).toEqual({ kind: "latency", instanceId: first.instanceId, latencyFrames: 4096 })
+  expect(notify("fault", faultOrigin.childSignal | (11 << 8))).toEqual({ kind: "failed", instanceId: first.instanceId })
+  expect(notify("restart", 1)).toBeUndefined()
+  expect(notify("buses", 0)).toBeUndefined()
+  expect(defects).toEqual([])
+  expect(notify("fault", faultOrigin.transportFault)).toBeUndefined()
+  expect(notify("miss", 0)).toBeUndefined()
+  expect(defects.map((defect) => defect.source)).toEqual(["worker-fault", "worker-miss"])
 })

@@ -61,6 +61,7 @@ export const vstEditorCapturedStateChannel = "daw:audio-host:vst-editor-captured
 export const vstEditorCapturedStateAckChannel = "daw:audio-host:vst-editor-captured-state-ack"
 export const vstEditorStateChannel = "daw:audio-host:vst-editor-state"
 export const vstParameterEditChannel = "daw:audio-host:vst-parameter-edit"
+export const vstInstanceEventChannel = "daw:audio-host:vst-instance-event"
 export const benchmarkHeartbeatChannel = "daw:benchmark:heartbeat"
 export const benchmarkRendererPingChannel = "daw:benchmark:renderer-ping"
 export const benchmarkRendererPongChannel = "daw:benchmark:renderer-pong"

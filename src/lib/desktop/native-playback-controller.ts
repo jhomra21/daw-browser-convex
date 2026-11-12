@@ -60,7 +60,9 @@ import type {
 } from "~/lib/live-playback-snapshot"
 import { importNativeRecordingSpool } from "~/lib/recording/native-spool-importer"
 import type { RecordingTerminationCause } from "~/lib/recording/recording-diagnostics"
+import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
 import type { DesktopBridge, NativeDeliveryReply, NativeProcessorPatchReply } from "~/types/desktop-bridge"
+import { clearVstInstanceFailures, markVstInstanceFailed } from "./vst-instance-failures"
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import {
   SYNTH_KIND_ID,
@@ -269,6 +271,7 @@ type NativePlaybackBridge = Pick<
     reenableVstScheduleAutomation?: NonNullable<DesktopBridge["audioHost"]>["session"]["reenableVstScheduleAutomation"]
     setSpectrumNode?: NonNullable<DesktopBridge["audioHost"]>["session"]["setSpectrumNode"]
     onSpectrumFrame?: NonNullable<DesktopBridge["audioHost"]>["session"]["onSpectrumFrame"]
+    onVstInstanceEvent?: NonNullable<DesktopBridge["audioHost"]>["session"]["onVstInstanceEvent"]
   }
 }
 
@@ -805,6 +808,7 @@ export const createNativePlaybackController = (input: {
   }
   let stagedTransportIntent = 0
   let unsubscribeMeters: (() => void) | undefined
+  let unsubscribeVstInstanceEvents: (() => void) | undefined
   let recording: NativeRecordingSession | undefined
   let sampleRate = 0
   let maximumFramesPerBlock = 0
@@ -1035,6 +1039,11 @@ export const createNativePlaybackController = (input: {
     nativeMeterNodeIds = new Map()
     nativeMeterRevision = 0
     latestMeterSequence = 0n
+  }
+
+  const clearVstInstanceEvents = () => {
+    unsubscribeVstInstanceEvents?.()
+    unsubscribeVstInstanceEvents = undefined
   }
 
   const clearNativeSpectrum = () => {
@@ -1432,6 +1441,7 @@ export const createNativePlaybackController = (input: {
     scheduleCoordinator = undefined
     clearNativeMeters()
     clearNativeSpectrum()
+    clearVstInstanceEvents()
     preparedProjectGeneration = undefined
     preparedProjectId = undefined
     preparedSnapshot = undefined
@@ -1759,6 +1769,7 @@ export const createNativePlaybackController = (input: {
       scheduleCoordinator = undefined
       clearNativeMeters()
       clearNativeSpectrum()
+      clearVstInstanceEvents()
       active = false
       prepared = false
       nativeSessionStarted = false
@@ -2191,6 +2202,9 @@ export const createNativePlaybackController = (input: {
       unsubscribeMeters = bridge.session.onMeterBatch?.(handleNativeMeterBatch)
       unsubscribeSpectrum?.()
       unsubscribeSpectrum = bridge.session.onSpectrumFrame?.(handleNativeSpectrumFrame)
+      clearVstInstanceEvents()
+      clearVstInstanceFailures()
+      unsubscribeVstInstanceEvents = bridge.session.onVstInstanceEvent?.(handleVstInstanceEvent)
       nativeSpectrumSelectedNodeId = undefined
       startStage = "start-session"
       assertReply(await bridge.session.start())
@@ -4375,6 +4389,19 @@ export const createNativePlaybackController = (input: {
     attachmentLatencies.set(change.instanceId, { generation: change.generation, latencyFrames: change.latencyFrames })
     latencyInputVersion++
     return requestLatencyPublication()
+  }
+  // A plug-in's own report reaches the live graph with no stop and no rebuild: latency is a publication, a fault
+  // is that instance's failed state. An instance this session does not hold is ignored.
+  const handleVstInstanceEvent = (event: DesktopVstInstanceEvent) => {
+    const generation = attachmentGeneration(event.instanceId)
+    if (generation === undefined) return
+    if (event.kind === "failed") return markVstInstanceFailed(event.instanceId)
+    publishAttachmentLatency({ instanceId: event.instanceId, generation, latencyFrames: event.latencyFrames })
+      .then((result) => {
+        if (!result.handled) console.warn("[native-vst3] latency publication not applied", { reason: result.reason })
+      }, (error: unknown) => {
+        console.error("[native-vst3] latency publication failed", { error: error instanceof Error ? error.message : "unknown" })
+      })
   }
   // The typed reply of one patch send. The answer decides nothing here: the ledger's fence and policy do.
   const patchReplyOf = (reply: NativeProcessorPatchReply): PatchReply => {

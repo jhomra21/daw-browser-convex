@@ -100,6 +100,7 @@ import {
   spectrumFrameChannel,
   vstEditorCapturedStateChannel,
   vstEditorStateChannel,
+  vstInstanceEventChannel,
   vstParameterEditChannel,
 } from "@daw-browser/desktop-protocol/ipc-channels"
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
@@ -122,6 +123,7 @@ import { preflightVst3Insertion } from "./vst3-insertion-preflight"
 import { packagedVst3WorkerPath } from "./vst3-preflight"
 import {
   coordinateNativeVst3Attachments,
+  nativeVst3InstanceEvent,
   resolveNativeVst3AttachmentPlan,
 } from "./native-vst3-coordinator"
 import {
@@ -137,7 +139,6 @@ import {
   packagedAudioHostPath,
   type NativeVstEditorAnchor,
   type NativeVstEditorCommand,
-  type NativeWorkerNotification,
 } from "./audio-host"
 import { createNativeVst3EditorSessionManager } from "./native-vst3-editor-session"
 import {
@@ -2451,34 +2452,11 @@ else {
     if (recordingSpoolRegistry) recordingOrderEvidence?.ready()
     if (recordingRegistryFailure) console.error("[recording-spool] recording storage unavailable; DAW startup continues", recordingRegistryFailure)
     audioHostSupervisor = audioHostPath ? createNativeAudioHostSupervisor(audioHostPath) : undefined
-    let nativeWorkerReady = false
-    let nativeSessionIncidentGeneration = 0
-    let publishedNativeSessionLossGeneration = -1
-    let workerIncidentOpen = false
-    const publishNativeSessionLoss = (
-      error: string,
-      source: "host" | "worker",
-    ) => {
-      if (source === "host") {
-        nativeWorkerReady = false
-        if (workerIncidentOpen) {
-          workerIncidentOpen = false
-          return
-        }
-        nativeSessionIncidentGeneration += 1
-      }
-      if (publishedNativeSessionLossGeneration === nativeSessionIncidentGeneration) return
-      publishedNativeSessionLossGeneration = nativeSessionIncidentGeneration
+    // Only a lost host ends the native session. One plug-in's fault, miss or restart is that instance's business.
+    const publishNativeSessionLoss = (error: string) => {
       activeEditorProjectBindings.clear()
       sendRendererMessage(lossChannel, error)
     }
-    const workerLossMessage = (notification: NativeWorkerNotification) => (
-      notification.kind === "miss"
-        ? "Native VST3 worker missed its deadline."
-        : notification.kind === "restart"
-          ? "Native VST3 worker requested an unsupported restart."
-          : "Native VST3 worker faulted."
-    )
     const sendVstParameterEdit = (input: {
       projectId: string
       source: "active-playback" | "editor-session"
@@ -2489,54 +2467,19 @@ else {
       sendRendererMessage(vstParameterEditChannel, input)
     }
     removeAudioHostWorkerNotificationListener = audioHostSupervisor?.onWorkerNotification((notification) => {
-      if (notification.kind === "buses") {
-        if (!nativeWorkerReady) {
-          nativeWorkerReady = true
-          nativeSessionIncidentGeneration += 1
-        }
-        workerIncidentOpen = false
-        return
-      }
-      // The worker reports plugin-requested restart without performing a
-      // replacement itself; playback must rebuild the worker transaction.
-      if (
-        notification.kind === "fault"
-        || notification.kind === "miss"
-        || notification.kind === "restart"
-      ) {
-        // Fault-only value bytes match WorkerFaultOrigin; miss/restart values
-        // retain their original contracts. Log later evidence before UI dedup.
-        const originCode = notification.kind === "fault" ? notification.value & 0xff : 0
-        const faultOrigins = [
-          "unknown", "child-exit", "child-signal", "transport-fault",
-          "dispatch-failure", "callback-miss-termination", "startup-failure",
-          "startup-exception", "configure-failure", "configure-exception",
-          "process-failure", "process-exception", "worker-notification",
-          "unknown-worker-notification", "offline-completion-failure", "control-io-failure",
-        ]
-        const origin = notification.kind === "miss" ? "callback-miss"
-          : notification.kind === "restart" ? "plugin-restart-request"
-          : (notification.value >>> 24) !== 0 ? "unknown"
-          : faultOrigins[originCode] ?? "unknown"
+      if (notification.kind === "fault" || notification.kind === "miss" || notification.kind === "restart") {
+        // Fault-only value bytes match WorkerFaultOrigin; miss/restart values retain their original contracts.
         console.error("[native-vst3-worker-incident]", JSON.stringify({
           kind: notification.kind,
-          origin,
-          originCode,
+          originCode: notification.kind === "fault" ? notification.value & 0xff : 0,
           childCode: notification.kind === "fault" ? (notification.value >>> 8) & 0xff : 0,
           childStatus: notification.kind === "fault" ? (notification.value >>> 16) & 0xff : 0,
           value: notification.value,
           graphRevision: notification.graphRevision,
-          // This is the desktop incident generation, not a transport token.
-          generation: nativeSessionIncidentGeneration + (workerIncidentOpen ? 0 : 1),
-          firstIncident: !workerIncidentOpen,
         }))
-        if (workerIncidentOpen) return
-        workerIncidentOpen = true
-        nativeWorkerReady = false
-        nativeSessionIncidentGeneration += 1
-        publishNativeSessionLoss(workerLossMessage(notification), "worker")
-        return
       }
+      const instanceEvent = nativeVst3InstanceEvent(notification)
+      if (instanceEvent) sendRendererMessage(vstInstanceEventChannel, instanceEvent)
       if (notification.kind !== "parameter-edit") return
       const projectId = activeEditorProjectBindings.projectFor(notification.instanceId)
       if (!projectId) return
@@ -2614,7 +2557,7 @@ else {
     powerMonitor.on("suspend", handleSuspend)
     powerMonitor.on("resume", handleResume)
     removeAudioHostLossListener = audioHostSupervisor?.onLoss((error) => {
-      publishNativeSessionLoss(sanitizeNativeVst3DiagnosticError(error), "host")
+      publishNativeSessionLoss(sanitizeNativeVst3DiagnosticError(error))
     })
     const recordingBenchmark = createBenchmarkRecordingTelemetry()
     removeAudioHostRecordingStatusListener = audioHostSupervisor?.onRecordingStatus((status) => {

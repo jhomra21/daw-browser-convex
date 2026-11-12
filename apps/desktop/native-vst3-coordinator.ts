@@ -6,10 +6,12 @@ import {
   type NativeVst3PreflightResult,
 } from "@daw-browser/plugin-host-protocol"
 import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
+import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
 import { serializeNativeGraph } from "@daw-browser/audio-engine/native-host-wire"
 import {
   NativeAudioHostCommandError,
   type NativeAudioHostSupervisor,
+  type NativeWorkerNotification,
   type ResolvedVst3Attachment,
 } from "./audio-host"
 import type { PluginCatalogData } from "./plugin-catalog"
@@ -440,6 +442,29 @@ export const nativeVst3CoordinatorFailureOrigin = (
 
 const reportDefectToConsole = (defect: NativeVst3Defect) => {
   console.error("[native-vst3] defect", JSON.stringify(defect))
+}
+
+// The one place a host notification becomes something the renderer sees. A latency report is a live
+// publication; only the plug-in's own fault is a failed instance. A miss, any other fault origin and a
+// component restart never end the session: ours are logged as defects, a restart is the worker's own business.
+export const nativeVst3InstanceEvent = (
+  notification: NativeWorkerNotification,
+  reportDefect: (defect: NativeVst3Defect) => void = reportDefectToConsole,
+): DesktopVstInstanceEvent | undefined => {
+  const { instanceId } = notification
+  switch (notification.kind) {
+    case "latency":
+      return { kind: "latency", instanceId, latencyFrames: notification.value }
+    case "fault":
+      if (pluginFaultOrigins.has(notification.value & 0xff)) return { kind: "failed", instanceId }
+      reportDefect({ source: "worker-fault", instanceId, detail: `origin ${notification.value & 0xff}` })
+      return undefined
+    case "miss":
+      reportDefect({ source: "worker-miss", instanceId, detail: "deadline miss" })
+      return undefined
+    default:
+      return undefined
+  }
 }
 
 export const nativeVst3PlaybackDefaultStatus = (

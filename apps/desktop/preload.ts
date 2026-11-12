@@ -6,9 +6,11 @@ import {
   desktopImportTerminalSchemaV1,
   desktopReplySchemaV1,
   desktopTrustedRendererRequestSchemaV1,
+  desktopVstInstanceEventSchema,
   desktopVstParameterEditPayloadSchema,
   hostError,
   type DesktopRendererRequestV1,
+  type DesktopVstInstanceEvent,
   type DesktopVstParameterEditPayload,
 } from "@daw-browser/desktop-protocol"
 import {
@@ -97,6 +99,7 @@ import {
   vstEditorCapturedStateAckChannel,
   vstEditorCapturedStateChannel,
   vstEditorStateChannel,
+  vstInstanceEventChannel,
   vstParameterEditChannel,
 } from "@daw-browser/desktop-protocol/ipc-channels"
 import {
@@ -460,6 +463,14 @@ const desktopBridge = {
           })
           ipcRenderer.on(vstParameterEditChannel, notify)
           return () => ipcRenderer.removeListener(vstParameterEditChannel, notify)
+        },
+        onVstInstanceEvent: (listener: (event: DesktopVstInstanceEvent) => void) => {
+          const notify = ipcRendererListener((_event, value) => {
+            const event = desktopVstInstanceEventSchema.safeParse(value)
+            if (event.success) listener(event.data)
+          })
+          ipcRenderer.on(vstInstanceEventChannel, notify)
+          return () => ipcRenderer.removeListener(vstInstanceEventChannel, notify)
         },
       },
       offlineRender: {

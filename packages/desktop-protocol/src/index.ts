@@ -60,6 +60,17 @@ export const desktopVstParameterEditPayloadSchema = z.object({
 }).strict()
 export type DesktopVstParameterEditPayload = z.infer<typeof desktopVstParameterEditPayloadSchema>
 
+// What a loaded plug-in instance tells the renderer. "failed" is only ever the plug-in's own fault.
+export const desktopVstInstanceEventSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("latency"),
+    instanceId: z.string().uuid(),
+    latencyFrames: z.number().int().min(0).max(65_536),
+  }).strict(),
+  z.object({ kind: z.literal("failed"), instanceId: z.string().uuid() }).strict(),
+])
+export type DesktopVstInstanceEvent = z.infer<typeof desktopVstInstanceEventSchema>
+
 const correlationId = z.string().min(1).max(maxCorrelationIdLength).regex(/^[A-Za-z0-9._-]+$/)
 const version = z.literal(desktopProtocolVersion)
 const versionV2 = z.literal(desktopProtocolVersionV2)

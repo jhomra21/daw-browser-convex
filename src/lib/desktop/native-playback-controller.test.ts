@@ -7,6 +7,8 @@ import { createRenderEffect, createRoot, createSignal, untrack } from "solid-js"
 
 import { createNativePlaybackController, nativePlaybackFaultText, type NativePlaybackFault } from "./native-playback-controller"
 import { createNativeProcessorStateOwner } from "./native-processor-state-owner"
+import { vstInstanceFailed } from "./vst-instance-failures"
+import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
 import { compileDesiredNativeProcessorState, compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
 import { audioCoreContractVersion, encodeUtilityProcessorState, type AudioAssetRef } from "@daw-browser/audio-core-contract"
 import { createProcessorEditRegistry } from "~/components/timeline/create-processor-edit-registry"
@@ -1125,6 +1127,44 @@ describe("DV01 STEP7 frozen inputs and cleanup witnesses", () => {
       expect(second.value).toEqual({ handled: true })
       expect(graphs.map(graph => graph.pdc)).toEqual([[0, 512 + 1024 + 512], [0, 512 + 2048 + 512]])
     } finally { gate.resolve(); await f.close() }
+  })
+
+  test("M1 a plug-in latency report reaches the live graph as a publication, with no stop and no rebuild", async () => {
+    const f = await step7LatencyFixture(true)
+    const attachment = nativeAttachmentPlan.attachments[0]
+    if (!attachment) throw new Error("Missing attachment")
+    try {
+      const before = f.fixture.graphPayloads.length
+      const calls = f.fixture.calls.length
+      f.fixture.emitVstInstanceEvent({ kind: "latency", instanceId: attachment.instanceId, latencyFrames: 2048 })
+      await step7Turns()
+      const graphs = f.fixture.graphPayloads.slice(before).map(bytes => fields(decodeGraph(bytes)))
+      expect(graphs.map(graph => graph.pdc)).toEqual([[0, 512 + 2048 + 512]])
+      const added = f.fixture.calls.slice(calls)
+      expect(added).toContain("revision-publish")
+      for (const call of ["stop", "teardown", "prepare", "start"]) expect(added).not.toContain(call)
+      f.fixture.emitVstInstanceEvent({ kind: "latency", instanceId: crypto.randomUUID(), latencyFrames: 4096 })
+      await step7Turns()
+      expect(f.fixture.graphPayloads.length).toBe(before + 1)
+    } finally { await f.close() }
+  })
+
+  test("a plug-in fault marks only that instance failed and publishes nothing", async () => {
+    const f = await step7LatencyFixture(true)
+    const attachment = nativeAttachmentPlan.attachments[0]
+    if (!attachment) throw new Error("Missing attachment")
+    try {
+      const before = f.fixture.graphPayloads.length
+      f.fixture.emitVstInstanceEvent({ kind: "failed", instanceId: crypto.randomUUID() })
+      expect(vstInstanceFailed(attachment.instanceId)).toBe(false)
+      f.fixture.emitVstInstanceEvent({ kind: "failed", instanceId: attachment.instanceId })
+      expect(vstInstanceFailed(attachment.instanceId)).toBe(true)
+      await step7Turns()
+      expect(f.fixture.graphPayloads.length).toBe(before)
+      expect(f.fixture.calls).not.toContain("stop")
+      expect(f.controller.isPrepared()).toBe(true)
+    } finally { await f.close() }
+    expect(f.fixture.vstInstanceListenerCount()).toBe(0)
   })
 
   test("W57 queued patch recovery materializes newest projected desired, not submitted bytes", () => {
@@ -4974,6 +5014,7 @@ const createBridge = (
   const scheduleProgress = (progress: NativeScheduleProgress) => {
     for (const listener of scheduleProgressListeners) listener(progress)
   }
+  const vstInstanceListeners = new Set<(event: DesktopVstInstanceEvent) => void>()
   let progressSequence = 0n
   // Native carries the last reported claim resolution on every frame after it.
   let resolvedPatch: { token: string; result: number } | undefined
@@ -5049,6 +5090,8 @@ const createBridge = (
     emitMeterBatch: (batch: NativeHostMeterBatch) => meterBatch(batch),
     emitSpectrumFrame: (frame: NativeHostSpectrumFrame) => spectrumFrame(frame),
     emitScheduleProgress: (progress: NativeScheduleProgress) => scheduleProgress(progress),
+    emitVstInstanceEvent: (event: DesktopVstInstanceEvent) => { for (const listener of vstInstanceListeners) listener(event) },
+    vstInstanceListenerCount: () => vstInstanceListeners.size,
     emitPatchResolution: (token: string, result = 0) => {
       resolvedPatch = { token, result }
       emitProgress(0)
@@ -5357,6 +5400,10 @@ const createBridge = (
         onScheduleProgress: (listener: typeof scheduleProgress) => {
           scheduleProgressListeners.add(listener)
           return () => { scheduleProgressListeners.delete(listener) }
+        },
+        onVstInstanceEvent: (listener: (event: DesktopVstInstanceEvent) => void) => {
+          vstInstanceListeners.add(listener)
+          return () => { vstInstanceListeners.delete(listener) }
         },
       },
     },

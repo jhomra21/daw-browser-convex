@@ -48499,7 +48499,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "if (outcome === \"rebuild\" && !portableBrowserPlayback.isRecording()) {",
+       "from": "if (outcome === \"rebuild\") {",
        "to": "if (!portableBrowserPlayback.isRecording()) {"
       }
      ]
@@ -48570,7 +48570,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "if (outcome === \"rebuild\" && !portableBrowserPlayback.isRecording()) {",
+       "from": "if (outcome === \"rebuild\") {",
        "to": "if (!portableBrowserPlayback.isRecording()) {"
       }
      ]
@@ -48706,7 +48706,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "if (outcome === \"rebuild\" && !portableBrowserPlayback.isRecording()) {",
+       "from": "if (outcome === \"rebuild\") {",
        "to": "if (!portableBrowserPlayback.isRecording()) {"
       }
      ]

@@ -1,0 +1,52 @@
+{
+ "name": "ae08-phase8-review-anchors",
+ "sequence": 18,
+ "createdAt": "2026-11-12T18:25:08.922Z",
+ "revert": [],
+ "watched": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 review item 8: the hook returns while a take records before it tests the adoption outcome, so the ledger 486 mutant (rebuild on every adoption outcome) is anchored on the outcome test alone. Same behaviour moved; all three mutants and controls re-run PASS (/tmp/rf/cert-486), and every arm anchored in the touched files re-run PASS (469 jobs, /tmp/rf/cert-all)."
+ },
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:486:mutant:b6f5",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "if (outcome === \"rebuild\" && !portableBrowserPlayback.isRecording()) {",
+   "new": "if (outcome === \"rebuild\") {"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:486:mutant:matrix",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "if (outcome === \"rebuild\" && !portableBrowserPlayback.isRecording()) {",
+   "new": "if (outcome === \"rebuild\") {"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:486:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "if (outcome === \"rebuild\" && !portableBrowserPlayback.isRecording()) {",
+   "new": "if (outcome === \"rebuild\") {"
+  }
+ ]
+}

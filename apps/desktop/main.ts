@@ -123,7 +123,9 @@ import { preflightVst3Insertion } from "./vst3-insertion-preflight"
 import { packagedVst3WorkerPath } from "./vst3-preflight"
 import {
   coordinateNativeVst3Attachments,
+  createNativeVst3AttachmentLedger,
   nativeVst3InstanceEvent,
+  type NativeVst3AttachmentLedger,
   resolveNativeVst3AttachmentPlan,
 } from "./native-vst3-coordinator"
 import {
@@ -1698,6 +1700,9 @@ const registerIpc = () => {
       }
     }
   })
+  // What this native session has attached, so a live plan reaches the host as a delta. Every session begins in a
+  // transaction, which starts a ledger; a live coordination (no transaction) continues it.
+  let attachmentLedger: NativeVst3AttachmentLedger | undefined
   ipcMain.handle(sessionCoordinateVstAttachmentsChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeAttachmentEnvelopeSchema.safeParse(value)
@@ -1710,6 +1715,8 @@ const registerIpc = () => {
     ) return nativeSessionFailure()
     const sessionValue = envelope.data.value
     let result: Awaited<ReturnType<typeof coordinateNativeVst3Attachments>>
+    attachmentLedger ??= createNativeVst3AttachmentLedger(supervisor)
+    const ledger = attachmentLedger
     try {
       result = await coordinateNativeVst3Attachments({
         serializedPlan: sessionValue.serializedPlan,
@@ -1717,6 +1724,7 @@ const registerIpc = () => {
         workerPath,
         catalogStore: pluginCatalogStore,
         audioHost: supervisor,
+        ledger,
         transactionToken: envelope.data.transactionToken,
         capturedVstStates: new Map(
           (sessionValue.capturedVstStates ?? []).map((state) => [state.instanceId, state]),
@@ -1739,6 +1747,8 @@ const registerIpc = () => {
         projectId,
         envelope.data.transactionToken,
       )
+      // A live plan has no transaction to commit it: the project owns these instances from now.
+      if (envelope.data.transactionToken === undefined) activeEditorProjectBindings.commit()
       return { ok: true as const }
     } catch {
       activeEditorProjectBindings.rollback(envelope.data.transactionToken)
@@ -1811,6 +1821,9 @@ const registerIpc = () => {
             : operation === "rollback" ? await supervisor.rollbackGraphRevision(revision)
             : await supervisor.retireGraphRevision(revision)
         }
+        // The host detaches and parks what the live graph dropped, and retires what a rollback left staged.
+        if (result.status === "published") await attachmentLedger?.published()
+        if (operation === "rollback") attachmentLedger?.rolledBack()
         const current = supervisor.status()
         if (generation !== rendererGeneration || current.generation !== owner.generation
           || current.pid !== owner.pid || !ownsRevisionProject(event, parsed.data.projectId)) {
@@ -2042,6 +2055,7 @@ const registerIpc = () => {
     const senderId = event.sender.id
     try {
       const transactionToken = await supervisor.beginTransaction()
+      attachmentLedger = undefined
       if (
         generation !== requestGeneration
         || !window_
@@ -2073,6 +2087,7 @@ const registerIpc = () => {
       await supervisor.commitTransaction(envelope.data.transactionToken)
       activeRendererTransactions.delete(envelope.data.transactionToken)
       activeEditorProjectBindings.commit(envelope.data.transactionToken)
+      await attachmentLedger?.published()
       return { ok: true as const }
     } catch (error) {
       activeRendererTransactions.delete(envelope.data.transactionToken)
@@ -2093,6 +2108,7 @@ const registerIpc = () => {
     ) return nativeSessionFailure()
     try {
       await supervisor.rollbackTransaction(envelope.data.transactionToken)
+      attachmentLedger?.rolledBack()
       return { ok: true as const }
     } catch (error) {
       return nativeSessionFailure(error)

@@ -316,7 +316,6 @@ export type AdoptionRefusal =
 export type AdoptionOutcome =
   | { status: "adopted" | "unchanged" }
   | { status: "superseded"; evidence?: "lost" }
-  | { status: "rebuild"; reason: string }
   | AdoptionRefusal
 // The facts that make a refused attempt stale: a changed host, transport domain, structural graph, native admission
 // capacity (reclaims) or `settled`, a publication or latency transition that ended. An arena refusal (the clip asset

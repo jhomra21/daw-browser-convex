@@ -109,7 +109,6 @@ import {
   vst3TrustDisclosure,
 } from "~/lib/external-plugin-ui";
 import {
-  deleteLocalExternalProcessor,
   getLocalExternalProcessor,
   listLocalExternalProcessors,
   persistLocalExternalProcessorState,
@@ -2123,36 +2122,11 @@ const Timeline: Component<TimelineProps> = (props) => {
           nativePlaybackEnabled,
         });
       } catch (error) {
-        const message = error instanceof Error
-          ? error.message
-          : "The active native playback graph could not be rebuilt.";
-        console.error("[native-vst3] active rebuild failed", { error: message });
-        let rollbackMessage = "The VST3 insertion was rolled back.";
-        try {
-          await deleteLocalExternalProcessor(insertedProjectId, processor.instanceId);
-          await rebuildPlaybackBackend(renderTracks(), {
-            ...insertionIntent,
-            resumePlayback: insertionIntent.resumePlayback,
-            projectId: insertedProjectId,
-            projectGeneration: intent.projectGeneration,
-            externalProcessor: undefined,
-          });
-        } catch (rollbackError) {
-          const detail = rollbackError instanceof Error
-            ? rollbackError.message
-            : "The previous native playback graph could not be restored.";
-          rollbackMessage = `VST3 insertion rollback failed: ${detail}`;
-          console.error("[native-vst3] insertion rollback failed", {
-            error: detail,
-            insertionError: message,
-          });
-        }
-        notify(
-          rollbackMessage === "The VST3 insertion was rolled back."
-            ? "Native playback rebuild failed"
-            : "Native VST3 rollback failed",
-          `${message} ${rollbackMessage}`,
-        );
+        // The insertion stays in the project and the playing graph is unchanged; the next adoption retries it.
+        console.error("[native-vst3] live insertion did not reach playback", {
+          instanceId: processor.instanceId,
+          error: error instanceof Error ? error.message : String(error),
+        });
         if (pendingExternalProcessorEditorRequest()?.requestToken === request.requestToken) {
           setPendingExternalProcessorEditorRequest();
         }

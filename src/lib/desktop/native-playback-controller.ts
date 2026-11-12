@@ -460,21 +460,26 @@ const validateInstrumentAssetBudget = (
   }
 }
 
-// Only these changes need startup-owned resources. Never infer rebuild permission
-// from projection, capacity or bridge failures.
-const nativeScheduleRebuildReason = (
-  previous: LivePlaybackSnapshot,
-  snapshot: LivePlaybackSnapshot,
-): "external-attachment-ownership" | undefined => {
-  // A declared latency reaches native through `publishAttachmentLatency`; it binds no worker, slot or state.
-  const withoutDeclaredLatency = (plan: LivePlaybackSnapshot["nativeExternalAttachmentPlan"]) => JSON.stringify({
-    ...plan, attachments: plan?.attachments.map(({ declaredLatencyFrames: _latency, ...attachment }) => attachment),
+type AttachmentPlan = NonNullable<LivePlaybackSnapshot["nativeExternalAttachmentPlan"]>
+
+// A compile carries the plan's default worker block size; the session runs every worker at the device's.
+const planWithWorkerFrames = (plan: AttachmentPlan, maximumFrames: number): AttachmentPlan => plan.version === 1
+  ? { ...plan, attachments: plan.attachments.map((attachment) => ({
+    ...attachment, workerTransport: { ...attachment.workerTransport, maximumFrames } })) }
+  : { ...plan, attachments: plan.attachments.map((attachment) => ({
+    ...attachment, workerTransport: { ...attachment.workerTransport, maximumFrames } })) }
+
+// What the host must be told about for a graph. A declared latency is not one: it reaches native through
+// `publishAttachmentLatency`.
+const attachmentsChanged = (previous: LivePlaybackSnapshot, snapshot: LivePlaybackSnapshot, maximumFrames: number) => {
+  const bindings = (candidate: LivePlaybackSnapshot) => JSON.stringify({
+    attachments: candidate.nativeExternalAttachmentPlan
+      && planWithWorkerFrames(candidate.nativeExternalAttachmentPlan, maximumFrames).attachments
+        .map(({ declaredLatencyFrames: _latency, ...attachment }) => attachment),
+    states: candidate.nativeExternalAttachmentStates,
+    requirements: candidate.nativeExternalAttachmentStateRequirements,
   })
-  if (withoutDeclaredLatency(snapshot.nativeExternalAttachmentPlan) !== withoutDeclaredLatency(previous.nativeExternalAttachmentPlan)
-    || JSON.stringify(snapshot.nativeExternalAttachmentStates) !== JSON.stringify(previous.nativeExternalAttachmentStates)
-    || JSON.stringify(snapshot.nativeExternalAttachmentStateRequirements) !== JSON.stringify(previous.nativeExternalAttachmentStateRequirements))
-    // VST workers, transport slots and state are bound before the session starts.
-    return "external-attachment-ownership"
+  return bindings(snapshot) !== bindings(previous)
 }
 
 type ScheduleRevisionCandidate = {
@@ -493,7 +498,6 @@ type ScheduleRevisionPreparation =
   | ScheduleRevisionCandidate
   | { status: "retry"; reason: string; transport?: LivePlaybackTransport }
   | { status: "failed"; reason: string }
-  | { status: "rebuild"; reason: NonNullable<ReturnType<typeof nativeScheduleRebuildReason>> }
 
 /**
  * Owns a single native host session and coordinates trusted external effects
@@ -1216,6 +1220,9 @@ export const createNativePlaybackController = (input: {
   }
   const reportStopped = (message: string, options?: { retainPlayback: true }) =>
     reportFault({ kind: "session-stopped", message }, options)
+  // A live edit that fails to adopt is never shown: the old graph keeps playing, the edit stays in the project,
+  // and the next submission retries it. The log is the only record.
+  const logFailedAdoption = (reason: string) => console.warn("[native-live-edit] adoption failed; the playing graph is unchanged", { reason })
 
   const handleNativeScheduleProgress = (progress: NativeScheduleProgress) => {
     const retirementChanged = progress.epoch === transportEpoch
@@ -1848,31 +1855,8 @@ export const createNativePlaybackController = (input: {
       const runtimeMaximumFrames = Math.min(deviceReply.device.maximumFramesPerBlock, maxVst3WorkerFrames)
       sampleRate = deviceReply.device.nominalSampleRateHz
       maximumFramesPerBlock = runtimeMaximumFrames
-      const attachmentPlan = (() => {
-        const plan = snapshot.nativeExternalAttachmentPlan
-        if (!plan) return undefined
-        return plan.version === 1
-          ? {
-            ...plan,
-            attachments: plan.attachments.map((attachment) => ({
-              ...attachment,
-              workerTransport: {
-                ...attachment.workerTransport,
-                maximumFrames: runtimeMaximumFrames,
-              },
-            })),
-          }
-          : {
-            ...plan,
-            attachments: plan.attachments.map((attachment) => ({
-              ...attachment,
-              workerTransport: {
-                ...attachment.workerTransport,
-                maximumFrames: runtimeMaximumFrames,
-              },
-            })),
-          }
-      })()
+      const attachmentPlan = snapshot.nativeExternalAttachmentPlan
+        && planWithWorkerFrames(snapshot.nativeExternalAttachmentPlan, runtimeMaximumFrames)
       const configuredSnapshot = attachmentPlan
         ? { ...snapshot, nativeExternalAttachmentPlan: attachmentPlan }
         : snapshot
@@ -3270,14 +3254,14 @@ export const createNativePlaybackController = (input: {
       if (!compilation.supported) throw new Error(compilation.reasons.join(" "))
       if (previous !== preparedSnapshot || coordinator !== scheduleCoordinator)
         throw new NativePlaybackAbortError("ownership-invalidated")
-      const snapshot = compilation.snapshot
+      const plan = compilation.snapshot.nativeExternalAttachmentPlan
+      const snapshot = plan ? { ...compilation.snapshot, nativeExternalAttachmentPlan: planWithWorkerFrames(plan, maximumFramesPerBlock) }
+        : compilation.snapshot
       // The compile never moves the transport: a loop it disagrees on is applied by the adoption, outside any attempt.
       if (!hasEquivalentTransportScheduling(previous.transport, snapshot.transport))
         return { status: "retry", reason: "transport-mismatch", transport: snapshot.transport }
       const supportError = nativeSnapshotSupportError(snapshot)
       if (supportError) throw new Error(supportError)
-      const rebuild = nativeScheduleRebuildReason(previous, snapshot)
-      if (rebuild) return { status: "rebuild", reason: rebuild }
       let stretchAssets: readonly NativePreparedStretchAsset[] = []
       if (snapshot.tracks.some((track) => track.clips.some((clip) =>
         !clip.midi && clip.audioWarp?.enabled && clip.audioWarp.mode === "stretch"))) {
@@ -3332,7 +3316,7 @@ export const createNativePlaybackController = (input: {
       await disposeStretch()
       if (error instanceof NativePlaybackAbortError || owner.signal.aborted) return { status: "retry", reason: "ownership-invalidated" }
       const reason = error instanceof Error ? error.message : String(error)
-      reportStopped(reason, { retainPlayback: true })
+      logFailedAdoption(reason)
       return { status: "failed", reason }
     } finally {
       processorState.closeCompile(owner, transferred)
@@ -3526,7 +3510,7 @@ export const createNativePlaybackController = (input: {
       const finish = async (outcome: AdoptionOutcome, evidence: Parameters<typeof processorState.finishPublication>[2],
         reason?: Parameters<typeof processorState.finishPublication>[3]) => {
         await disposePublication()
-        if (outcome.status === "failed" && record.kind === "schedule") reportStopped(outcome.reason, { retainPlayback: true })
+        if (outcome.status === "failed" && record.kind === "schedule") logFailedAdoption(outcome.reason)
         processorState.finishPublication(record,
           record.kind === "latency" && outcome.status === "failed" && !outcome.failureKind
             ? { ...outcome, failureKind: { kind: evidence === "failed" ? "refused" : "unconfirmed" } } : outcome,
@@ -3838,6 +3822,19 @@ export const createNativePlaybackController = (input: {
         // Native refuses a prepare while a patch claim is unreported (design 2.4.6): none is sent until the fence opens.
         await quietPublicationLane()
         if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
+        // The host attaches a plug-in this graph adds and starts its worker before the graph that binds it is prepared.
+        // A removed one goes in the same plan, with no instance left in it, and is detached once the graph is live.
+        if (attachmentsChanged(previous, snapshot, maximumFramesPerBlock)) {
+          const emptied = previous.nativeExternalAttachmentPlan && { ...previous.nativeExternalAttachmentPlan, attachments: [] }
+          const plan = snapshot.nativeExternalAttachmentPlan ?? emptied
+          const coordinateVstAttachments = session.coordinateVstAttachments
+          if (!plan || !coordinateVstAttachments) throw new Error("The native VST3 attachment coordinator is unavailable.")
+          checked(await awaitPreparation(coordinateVstAttachments({
+            projectId, serializedPlan: encodeNativeExternalAttachmentPlan(plan), sampleRateHz: sampleRate,
+            capturedVstStates: snapshot.nativeExternalAttachmentStates,
+            requiredVstStateInstanceIds: snapshot.nativeExternalAttachmentStateRequirements,
+          })))
+        }
         // Provisional: long enough for the prepare and hydration below. The seam binds late, after them.
         let seam = chooseFrame(BigInt(coordinator.currentFrame()), 16)
         let observed = sequence
@@ -4237,7 +4234,6 @@ export const createNativePlaybackController = (input: {
         if (preparation.status === "staged") await preparation.dispose()
         return superseded
       }
-      if (preparation.status === "rebuild") return { outcome: { status: "rebuild", reason: preparation.reason } }
       const content = input.fingerprintSnapshot?.(preparation.snapshot)
       if (content !== undefined) {
         if (content === input.fingerprintSnapshot?.(preparation.previous)) {
@@ -4264,7 +4260,7 @@ export const createNativePlaybackController = (input: {
       return { outcome, content }
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
-      reportStopped(reason, { retainPlayback: true })
+      logFailedAdoption(reason)
       return { outcome: { status: "failed", reason } }
     }
   }
@@ -4396,12 +4392,14 @@ export const createNativePlaybackController = (input: {
     const generation = attachmentGeneration(event.instanceId)
     if (generation === undefined) return
     if (event.kind === "failed") return markVstInstanceFailed(event.instanceId)
-    publishAttachmentLatency({ instanceId: event.instanceId, generation, latencyFrames: event.latencyFrames })
-      .then((result) => {
+    void (async () => {
+      try {
+        const result = await publishAttachmentLatency({ instanceId: event.instanceId, generation, latencyFrames: event.latencyFrames })
         if (!result.handled) console.warn("[native-vst3] latency publication not applied", { reason: result.reason })
-      }, (error: unknown) => {
+      } catch (error) {
         console.error("[native-vst3] latency publication failed", { error: error instanceof Error ? error.message : "unknown" })
-      })
+      }
+    })()
   }
   // The typed reply of one patch send. The answer decides nothing here: the ledger's fence and policy do.
   const patchReplyOf = (reply: NativeProcessorPatchReply): PatchReply => {

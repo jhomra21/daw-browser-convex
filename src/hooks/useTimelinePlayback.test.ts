@@ -805,7 +805,7 @@ test.skipIf(!isServer)('adopted snapshots exercise real Solid reactive effects',
 })
 
 for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejection", "failure", "publish-error", "compile-error", "automation-only", "mixer-only",
-  "progress-retry", "capacity-release", "pending-exhaustion", "rebase-exhaustion", "loop-ui", "loop-adopted", "loop-clip", "loop-inflight", "unsupported", "time-signature", "duplicate", "stale-compile", "burst-during-compile", "inputs-during-compile", "explicit", "effect-only", "stop", "seek", "project"]) {
+  "progress-retry", "capacity-release", "pending-exhaustion", "rebase-exhaustion", "loop-ui", "loop-adopted", "loop-clip", "loop-inflight", "time-signature", "duplicate", "stale-compile", "burst-during-compile", "inputs-during-compile", "explicit", "effect-only", "stop", "seek", "project"]) {
   test.skipIf(isServer)(`adopted snapshot ${scenario} preserves the latest live intent`, async () => {
     const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
     const previousBuffer = Object.getOwnPropertyDescriptor(globalThis, "AudioBuffer")
@@ -929,8 +929,6 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
                       points: [{ id: "point", timeSec: 0, value: 0.5, interpolation: "linear" }],
                     }] : [],
                   }, sidechainRoutes: [] })
-                if (result.supported && changed && scenario === "unsupported")
-                  return { ...result, snapshot: { ...result.snapshot, nativeExternalAttachmentPlan: { version: 1, attachments: [] } } }
                 if (result.supported && changed && scenario === "time-signature")
                   return { ...result, snapshot: { ...result.snapshot, timeSignature: { numerator: 3, denominator: 4 } } }
                 return result
@@ -1072,27 +1070,22 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
             fixture.emitScheduleProgress()
             await settle()
           }
-          if (scenario === "unsupported") {
-            expect(fixture.calls.slice(before).filter((call) => call === "graph")).toHaveLength(1)
-            expect(published).toHaveLength(0)
-          } else {
+          expect(published).toHaveLength(1)
+          if (scenario === "inputs-during-compile") expect(compilationsAtPublication[0]).toBe(compilationsBeforeEdit + 1)
+          expect(stagedWindows.length).toBeGreaterThan(0)
+          expect(stagedWindows.every((bytes) => new DataView(bytes.buffer, bytes.byteOffset).getUint32(4, true) === epoch)).toBe(true)
+          expect(preparedTracks.at(-1)).toEqual(untrack(tracks))
+          if (scenario === "duplicate" || scenario === "explicit") {
+            setTracks(untrack(tracks).map((entry) => ({ ...entry })))
+            await playback.restartTimelineSchedule(untrack(tracks))
+            await settle()
             expect(published).toHaveLength(1)
-            if (scenario === "inputs-during-compile") expect(compilationsAtPublication[0]).toBe(compilationsBeforeEdit + 1)
-            expect(stagedWindows.length).toBeGreaterThan(0)
-            expect(stagedWindows.every((bytes) => new DataView(bytes.buffer, bytes.byteOffset).getUint32(4, true) === epoch)).toBe(true)
-            expect(preparedTracks.at(-1)).toEqual(untrack(tracks))
-            if (scenario === "duplicate" || scenario === "explicit") {
-              setTracks(untrack(tracks).map((entry) => ({ ...entry })))
-              await playback.restartTimelineSchedule(untrack(tracks))
-              await settle()
-              expect(published).toHaveLength(1)
-            }
-            expect(fixture.epoch()).toBe(epoch)
-            expect(fixture.calls.slice(before).filter((call) =>
-              ["stop", "teardown", "configure", "begin", "graph"].includes(call))).toEqual([])
-            expect(fixture.calls.slice(before).filter((call) => call === "transport"))
-              .toHaveLength(["tempo", "time-signature"].includes(scenario) ? 1 : 0)
           }
+          expect(fixture.epoch()).toBe(epoch)
+          expect(fixture.calls.slice(before).filter((call) =>
+            ["stop", "teardown", "configure", "begin", "graph"].includes(call))).toEqual([])
+          expect(fixture.calls.slice(before).filter((call) => call === "transport"))
+            .toHaveLength(["tempo", "time-signature"].includes(scenario) ? 1 : 0)
           expect(playback.isPlaying()).toBe(true)
         } finally { gate.resolve(); releaseAck.resolve(); dispose(); await settle() }
       })
@@ -3147,7 +3140,7 @@ test('live schedule compile failure retains the active graph for a later retry',
       expect(playback.isPlaying()).toBe(true)
       expect(playback.isNativePlayback()).toBe(true)
       expect(fixture.calls.slice(before)).not.toContain("graph")
-      expect(faults).toEqual(["edit remains desired"])
+      expect(faults).toEqual([])
       dispose()
     }))
   } finally {
@@ -3328,22 +3321,17 @@ for (const edit of ["audio-add", "audio-move", "audio-resize", "audio-delete", "
             expect(staged).toBe(0)
             expect(graphs).toBe(1)
             expect(desiredInstalled).toBe(false)
-            expect(faults.length).toBeGreaterThan(0)
+            expect(faults).toEqual([])
             expect(playback.isPlaying()).toBe(true)
             return
           }
           await restart
-          if (edit.startsWith("vst") && !edit.endsWith("-move")) {
-            console.log("STEP5 B28 explicit VST carrier", JSON.stringify({ edit, compiles: compiles - beforeCompiles, staged, graphs }));
-            // Admission probe, cold-rebuild preflight, then fresh start capture.
-            // D5 preserves this explicit external restart route, not one publication.
-            expect(compiles - beforeCompiles).toBe(3);
-            expect(staged).toBe(0);
-            expect(graphs).toBe(2);
-          }
+          // A plug-in edit joins the playing graph as one staged publication: no cold rebuild, no second graph.
+          if (edit.startsWith("vst") && !edit.endsWith("-move")) expect(compiles - beforeCompiles).toBe(1);
           if (edit !== "publication-failure") expect(faults).toEqual([])
           const stagedEdit = ["supported", "audio-add", "audio-move", "audio-resize", "audio-delete", "audio-track-remove",
             "audio-tempo", "asset-replace", "asset-add", "sampled-add", "instrument-replace", "time-signature-move"].includes(edit)
+            || edit.startsWith("vst")
           expect(desiredInstalled).toBe(!stagedEdit && edit !== "publication-failure")
           expect(graphs).toBe(stagedEdit || edit === "publication-failure" ? 1 : 2)
           expect(installedRevision).toBe(stagedEdit || edit === "publication-failure" ? 1n : 2n)

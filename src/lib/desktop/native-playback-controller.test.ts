@@ -2405,7 +2405,7 @@ describe("DV01 STEP6 public publication witnesses", () => {
     })
   }
 
-  for (const status of ["adopted", "superseded", "failed", "blocked", "unchanged", "rebuild"]) {
+  for (const status of ["adopted", "superseded", "failed", "blocked", "unchanged"]) {
     test(`W25 publication ${status} notifies once despite repeated settlement and clear`, () => {
       let notices = 0
       const options = { onTerminal: () => { notices++ } }
@@ -2414,11 +2414,11 @@ describe("DV01 STEP6 public publication witnesses", () => {
         loop: { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 } },
       false, { host: "host", epoch: 1, structural: 1, capacity: 0, settled: 0 })
       if (!submitted.start) throw new Error("W25 requires an admitted attempt")
-      const outcome = status === "failed" || status === "blocked" || status === "rebuild"
+      const outcome = status === "failed" || status === "blocked"
         ? { status, reason: "native-refused" } : { status }
       const parsed = z.union([
         z.object({ status: z.enum(["adopted", "superseded", "unchanged"]) }),
-        z.object({ status: z.enum(["failed", "blocked", "rebuild"]), reason: z.string() }),
+        z.object({ status: z.enum(["failed", "blocked"]), reason: z.string() }),
       ]).parse(outcome)
       owner.settleAdoption(submitted.start.attempt, parsed)
       expect(notices).toBe(1)
@@ -4955,6 +4955,7 @@ const createBridge = (
   maximumFrames = 512,
 ) => {
   const calls: string[] = []
+  const coordinations: string[] = []
   const parameterPayloads: Uint8Array[] = []
   const builtInParameterPayloads: Uint8Array[] = []
   const statePatchPayloads: Uint8Array[] = []
@@ -5059,6 +5060,7 @@ const createBridge = (
   }
   return {
     calls,
+    coordinations,
     parameterPayloads,
     builtInParameterPayloads,
     statePatchPayloads,
@@ -5256,8 +5258,9 @@ const createBridge = (
           parameterPayloads.push(bytes)
           return failure === "parameter" ? { ok: false as const, error: "failed" } : { ok: true as const }
         },
-        coordinateVstAttachments: async () => {
+        coordinateVstAttachments: async (request: { serializedPlan: string }) => {
           calls.push("coordinate")
+          coordinations.push(request.serializedPlan)
           return failure === "coordinate" ? { ok: false as const, error: "failed" } : { ok: true as const }
         },
         setTransport: async (transport: NativeHostTransport) => {
@@ -8631,7 +8634,7 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
     if (scenario === "invalid-prepare" || scenario === "prepared-conflict") {
       expect((await update).status).not.toBe("adopted")
       expect(prepares).toBe(1)
-      expect(faults).toHaveLength(1)
+      expect(faults).toHaveLength(0)
       expect(fixture.calls).not.toContain("stage-rollback")
     } else if (scenario === "hydration-cancel" || scenario === "asset-add-hydration-cancel") {
       await hydrationEntered.promise
@@ -8661,7 +8664,7 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
         for (let turn = 0; turn < 150; turn++) await Promise.resolve()
       }
       expect((await update).status).not.toBe("adopted")
-      expect(faults).toHaveLength(1)
+      expect(faults).toHaveLength(0)
       expect(controller.isActive()).toBe(true)
     } else if (scenario.startsWith("seek") || scenario === "audio-seek" || String(scenario) === "sampled-remove-zone-seek-racing"
       || String(scenario) === "sampled-remove-zone-cancel") {
@@ -8755,7 +8758,7 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
           revision: { ...stale.revision, transportEpoch: epoch + 1 } })
         progress()
         expect((await update).status).not.toBe("adopted")
-        expect(faults).toHaveLength(1)
+        expect(faults).toHaveLength(0)
         await controller.dispose()
         return
       }
@@ -9052,7 +9055,7 @@ for (const unsupported of ["sidechain", "midi-mappings", "missing-attachment-pla
 }
 
 for (const edit of ["vst-state", "vst-state-requirements", "time-signature"]) {
-  test(`native staged admission routes startup-only ${edit} changes to rebuild`, async () => {
+  test(`native staged admission adopts a ${edit} change live and hands plug-in state to the host, never rebuilding`, async () => {
     const fixture = createBridge("runtime-revision-progress")
     let changed = false
     const snapshotInput = input()
@@ -9073,17 +9076,78 @@ for (const edit of ["vst-state", "vst-state-requirements", "time-signature"]) {
     })
     try {
       expect(await controller.start(snapshotInput.transport)).toBe("started")
+      const startupCoordinations = fixture.coordinations.length
       acknowledgeStagedPublication(fixture)
       expect(await controller.adoptSchedule(migrationIntent(`startup-${edit}`), true)).toEqual({ status: "adopted" })
       changed = true
       acknowledgeStagedPublication(fixture)
-      expect(await controller.adoptSchedule(migrationIntent(`changed-${edit}`), true)).toMatchObject({
-        status: edit === "time-signature" ? "adopted" : "rebuild",
-      })
+      expect(await controller.adoptSchedule(migrationIntent(`changed-${edit}`), true)).toEqual({ status: "adopted" })
+      expect(fixture.coordinations.length - startupCoordinations).toBe(edit === "time-signature" ? 0 : 1)
       expect(controller.isActive()).toBe(true)
     } finally { await controller.dispose() }
   })
 }
+
+const vstJoinFixture = () => {
+  const fixture = createBridge("runtime-revision-progress")
+  let inserted = false
+  const snapshotInput = input()
+  const faults: string[] = []
+  const controller = createObservedController({
+    bridge: fixture.bridge, getProjectId: () => "local_project",
+    reportFault: (fault) => { faults.push(fault.kind) },
+    compileSnapshot: async (transport) => {
+      const compiled = compileLivePlaybackSnapshot({ ...snapshotInput, transport })
+      return compiled.supported && inserted
+        ? { ...compiled, snapshot: { ...compiled.snapshot, nativeExternalAttachmentPlan: nativeAttachmentPlan } } : compiled
+    },
+  })
+  const edit = (next: boolean, key: string) => {
+    inserted = next
+    acknowledgeStagedPublication(fixture)
+    return controller.adoptSchedule(migrationIntent(key), true)
+  }
+  return { fixture, controller, edit, faults, transport: snapshotInput.transport }
+}
+
+test("insert, remove and undo of a trusted VST while playing stage live, never stopping or rebuilding", async () => {
+  const { fixture, controller, edit, transport } = vstJoinFixture()
+  try {
+    expect(await controller.start(transport)).toBe("started")
+    const startCalls = fixture.calls.length
+    const attachmentCounts = () => fixture.coordinations.map((plan) => z.object({ attachments: z.array(z.unknown()) }).parse(JSON.parse(plan)).attachments.length)
+    const steps: [boolean, string, number[]][] = [[true, "insert", [1]], [false, "remove", [1, 0]], [true, "undo", [1, 0, 1]]]
+    for (const [inserted, key, counts] of steps) {
+      expect(await edit(inserted, key)).toEqual({ status: "adopted" })
+      expect(attachmentCounts()).toEqual(counts)
+    }
+    const live = fixture.calls.slice(startCalls)
+    expect(live.filter((call) => call === "coordinate")).toHaveLength(3)
+    for (const call of ["stop", "teardown", "start", "prepare", "begin-transaction"]) expect(live).not.toContain(call)
+    // Every attachment goes to the host before the graph that binds it is prepared.
+    expect(live.indexOf("stage-prepare")).toBeGreaterThan(live.indexOf("coordinate"))
+    expect(controller.isActive()).toBe(true)
+  } finally { await controller.dispose() }
+})
+
+test("a failed VST staging keeps the old graph playing with no fault shown, and the next submission retries it", async () => {
+  const { fixture, controller, edit, faults, transport } = vstJoinFixture()
+  const coordinate = fixture.bridge.session.coordinateVstAttachments
+  let refusals = 1
+  fixture.bridge.session.coordinateVstAttachments = async (request) =>
+    refusals-- > 0 ? { ok: false as const, error: "staging failed" } : coordinate(request)
+  try {
+    expect(await controller.start(transport)).toBe("started")
+    const before = fixture.calls.length
+    expect(await edit(true, "insert")).toMatchObject({ status: "failed" })
+    expect(controller.isActive()).toBe(true)
+    expect(faults).toEqual([])
+    expect(fixture.calls.slice(before)).not.toContain("stage-prepare")
+    expect(await edit(true, "insert-retry")).toEqual({ status: "adopted" })
+    expect(fixture.coordinations).toHaveLength(1)
+    for (const call of ["stop", "teardown"]) expect(fixture.calls.slice(before)).not.toContain(call)
+  } finally { await controller.dispose() }
+})
 
 for (const transport of ["seek", "pause"]) {
   test(`active coverage hydration cannot block publication cancellation by ${transport}`, async () => {

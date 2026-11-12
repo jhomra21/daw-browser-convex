@@ -1581,10 +1581,7 @@ export function useTimelinePlayback(
       && lifecycle === nativeLifecycleToken && projectId === nativeOptions?.projectId?.()
       && projectGeneration === nativeOptions?.projectGeneration?.()
     if (!current()) return
-    if (outcome.status === "rebuild") {
-      await applyTimelineSchedule(tracks, { ...options, rebuildBackend: true })
-      if (current()) previewProjectionBaseline = key
-    } else if (outcome.status === "adopted" || outcome.status === "unchanged") previewProjectionBaseline = key
+    if (outcome.status === "adopted" || outcome.status === "unchanged") previewProjectionBaseline = key
   }
   const applyTimelineSchedule = async (
     tracks: Track[],

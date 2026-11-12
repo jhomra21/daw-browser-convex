@@ -56,6 +56,7 @@ type RecordingCaptureConfigureFields = {
 export type PortableWasmControlMessage =
   | { version: typeof portableWasmProtocolVersion; type: 'initialize'; abiVersion: number; contractHash: string; maxFramesPerBlock: number }
   | { version: typeof portableWasmProtocolVersion; type: 'publish-graph'; requestId: number; revision: number; requireContinuity?: true; publicationFrame?: number }
+  | { version: typeof portableWasmProtocolVersion; type: 'cancel-publication'; revision: number }
   | { version: typeof portableWasmProtocolVersion; type: 'prepare-graph'; requestId: number; snapshot: AudioCoreGraphSnapshot; envelope?: Uint8Array }
   | { version: typeof portableWasmProtocolVersion; type: 'processor-state'; revision: number; envelope: AudioCoreProcessorStateEnvelope }
   | { version: typeof portableWasmProtocolVersion; type: 'parameter-blocks'; revision: number; blocks: readonly PortableWasmParameterBlock[] }
@@ -109,7 +110,7 @@ export type PortableWasmStatusMessage =
   | { version: typeof portableWasmProtocolVersion; type: 'asset-pages-trimmed'; requestId: number; generation: number; assetId: string; firstPage: number; pageCount: number; result: 'trimmed' | 'asset-in-use' | 'stale-generation' }
   | { version: typeof portableWasmProtocolVersion; type: 'asset-released'; requestId: number; generation: number; assetId: string; result: 'released' | 'stale-generation' | 'asset-in-use' }
   | { version: typeof portableWasmProtocolVersion; type: 'graph-prepared'; requestId: number; revision: number; result: 'prepared' | 'rejected' }
-  | { version: typeof portableWasmProtocolVersion; type: 'graph-published'; requestId: number; revision: number; result: 'published'; appliedFrame?: number }
+  | { version: typeof portableWasmProtocolVersion; type: 'graph-published'; requestId: number; revision: number; result: 'published' }
   | { version: typeof portableWasmProtocolVersion; type: 'graph-published'; requestId: number; revision: number; result: 'rejected' | 'late' }
   | { version: typeof portableWasmProtocolVersion; type: 'graph-continuity'; revision: number; result: 'accepted' | 'fallback' | 'rejected' | 'capacity' }
   | { version: typeof portableWasmProtocolVersion; type: 'transport-applied'; requestId: number; epoch: number; result: 'applied' | 'rejected' }
@@ -495,6 +496,9 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
     return { version: portableWasmProtocolVersion, type: 'publish-graph', requestId: value.requestId, revision: value.revision,
       ...(value.requireContinuity === true && { requireContinuity: true }),
       ...(value.publicationFrame !== undefined && { publicationFrame: value.publicationFrame }) }
+  }
+  if (value.type === 'cancel-publication' && isPositiveInteger(value.revision)) {
+    return { version: portableWasmProtocolVersion, type: 'cancel-publication', revision: value.revision }
   }
   if (value.type === 'prepare-graph' && isPositiveInteger(value.requestId) && isPortableGraphSnapshot(value.snapshot)
     && (value.envelope === undefined || value.envelope instanceof Uint8Array)) {

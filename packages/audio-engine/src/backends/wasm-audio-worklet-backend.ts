@@ -139,17 +139,7 @@ const readPortableRequestStatus = (value: PortableWireValue): PortableRequestSta
     }
   }
   if (value.type === 'graph-published' && isPositiveInteger(value.revision)) {
-    if (value.result === 'published' && (value.appliedFrame === undefined || isNonNegativeInteger(value.appliedFrame))) {
-      return {
-        version: portableWasmProtocolVersion,
-        type: value.type,
-        requestId: value.requestId,
-        revision: value.revision,
-        result: value.result,
-        ...(value.appliedFrame !== undefined && { appliedFrame: value.appliedFrame }),
-      }
-    }
-    if (value.result === 'rejected' || value.result === 'late') {
+    if (value.result === 'published' || value.result === 'rejected' || value.result === 'late') {
       return {
         version: portableWasmProtocolVersion,
         type: value.type,
@@ -450,7 +440,9 @@ export class PortableWasmPlaybackSession {
     request.resolve(response)
   }
 
-  private request(message: PortableRequestMessage, transfer: Transferable[] = []): Promise<PortableRequestStatus> {
+  // A request that times out is a fault of the session, unless `expire` turns it into the error of a request that can
+  // be abandoned.
+  private request(message: PortableRequestMessage, transfer: Transferable[] = [], expire?: () => Error): Promise<PortableRequestStatus> {
     return new Promise((resolve, reject) => {
       if (this.disposed) {
         reject(new Error('Portable playback session was disposed.'))
@@ -462,6 +454,10 @@ export class PortableWasmPlaybackSession {
         const request = this.pending.get(requestId)
         if (!request) return
         this.pending.delete(requestId)
+        if (expire) {
+          request.reject(expire())
+          return
+        }
         request.reject(new Error('Portable playback control request timed out.'))
         this.fail(new Error('Portable playback control request timed out.'))
       }, this.controlTimeoutMs)
@@ -480,9 +476,14 @@ export class PortableWasmPlaybackSession {
   }
 
   // An adoption republishes onto the playing graph and requires the core to continue it; the worklet refuses otherwise.
-  // With a publicationFrame the worklet swaps exactly there, or answers late when the transport has already passed it.
+  // With a publicationFrame the worklet swaps exactly there, or answers late when the transport has already passed it. It
+  // answers from the render thread, so a stalled context leaves the publication late: it is cancelled, never applied
+  // after the caller gave up, and the session lives on.
   async publishGraph(revision: number, options?: { requireContinuity: true; publicationFrame?: number }) {
-    const response = await this.request({ type: 'publish-graph', revision, ...options })
+    const response = await this.request({ type: 'publish-graph', revision, ...options }, [], options?.publicationFrame === undefined ? undefined : () => {
+      this.node.port.postMessage({ version: portableWasmProtocolVersion, type: 'cancel-publication', revision })
+      return new Error('Portable playback graph-published was late.')
+    })
     if (response.type !== 'graph-published' || response.result !== 'published') {
       throw new Error(`Portable playback graph-published was ${response.type === 'graph-published' ? response.result : 'rejected'}.`)
     }

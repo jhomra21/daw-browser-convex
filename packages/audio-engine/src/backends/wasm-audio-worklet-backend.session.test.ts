@@ -185,6 +185,21 @@ test("bounds an unacknowledged portable preparation request", async () => {
   expect(fixture.calls).toEqual(["prepare-graph", "dispose"])
 })
 
+// A framed publish waits for the render thread to reach its seam, so a stalled context is a late publication to cancel,
+// not a fault of the session; every other request that times out still is.
+test("a framed publish that times out is late and cancelled by revision, not a session fault", async () => {
+  const fixture = createSession(false, responseFor, 5)
+  const faults: string[] = []
+  fixture.session.onFault((error) => faults.push(error.message))
+  await expect(fixture.session.publishGraph(2, { requireContinuity: true, publicationFrame: 100 })).rejects.toThrow("graph-published was late")
+  await expect(fixture.session.publishGraph(3, { requireContinuity: true })).rejects.toThrow("timed out")
+  expect({ calls: fixture.calls, faults, active: fixture.session.isActive }).toEqual({
+    calls: ["publish-graph", "cancel-publication", "publish-graph", "dispose"],
+    faults: ["Portable playback control request timed out."],
+    active: false,
+  })
+})
+
 test("dispose rejects unresolved portable requests and closes the dispatcher", async () => {
   const fixture = createSession(false, responseFor, 1_000)
   const pending = fixture.session.prepareGraph({
@@ -226,7 +241,7 @@ test("B6f5 posts the graph envelope encoded on the main thread and the adoption 
           : message.type === "publish-graph" && message.revision === 4
             ? { version: portableWasmProtocolVersion, type: "graph-published", requestId: message.requestId, revision: 4, result: "late" }
             : message.type === "publish-graph" && message.publicationFrame !== undefined
-              ? { version: portableWasmProtocolVersion, type: "graph-published", requestId: message.requestId, revision: message.revision, result: "published", appliedFrame: message.publicationFrame }
+              ? { version: portableWasmProtocolVersion, type: "graph-published", requestId: message.requestId, revision: message.revision, result: "published" }
               : responseFor(message) }))
       },
       close() {},

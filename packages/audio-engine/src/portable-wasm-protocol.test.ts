@@ -844,6 +844,11 @@ test('B6f5 publish-graph carries an adoption continuity requirement and prepare-
   // A publication frame is a safe integer from 0, and only an adoption (requireContinuity) carries one.
   for (const publicationFrame of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '256']) expect(framed(publicationFrame)).toBeNull()
   expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, publicationFrame: 256 })).toBeNull()
+  expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'cancel-publication', revision: 2 }))
+    .toEqual({ version: portableWasmProtocolVersion, type: 'cancel-publication', revision: 2 })
+  for (const revision of [0, 1.5, '2']) {
+    expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'cancel-publication', revision })).toBeNull()
+  }
   const snapshot = {
     version: audioCoreContractVersion, revision: 1, contractHash: 'test', masterNodeId: 'master', edges: [], assets: [],
     nodes: [{ id: 'master', kind: 'master', inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: 0, processorOrder: [] }],

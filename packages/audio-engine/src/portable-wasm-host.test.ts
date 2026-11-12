@@ -1547,9 +1547,9 @@ test('W-M1a a publication frame swaps the schedule exactly there: old events bef
   // by the block that applies it.
   const adoption = adoptRevision(host, messages, { ...portableTrackGraph(['track']), revision: 2 }, m1Next, 256)
   rendered.push(...renderBlocks(host, 6))
-  expect({ installed: adoption.installed, published: publishedResults(messages, 2), applied: messages.some((message) => message.type === 'graph-published' && message.requestId === 22 && 'appliedFrame' in message && message.appliedFrame === 256),
+  expect({ installed: adoption.installed, published: publishedResults(messages, 2), answersCarryNoFrame: messages.every((message) => !('appliedFrame' in message)),
     seamless: rendered.slice(0, 700).every((sample, frame) => frame >= 256 && frame < 496 ? sample >= 0.25 - 1e-6 && sample <= 0.5 + 1e-6 : Math.abs(sample - m1Expected(frame)) < 1e-6) })
-    .toEqual({ installed: 'installed', published: ['published'], applied: true, seamless: true })
+    .toEqual({ installed: 'installed', published: ['published'], answersCarryNoFrame: true, seamless: true })
 })
 
 test('W-M1e a publication frame inside a block caps the old schedule there and applies at the next block start', async () => {
@@ -1558,9 +1558,40 @@ test('W-M1e a publication frame inside a block caps the old schedule there and a
   // Frame 200 lies inside the block 128..256. The old gain-set at 200 must not play, and the new one lands at frame 256.
   adoptRevision(host, messages, { ...portableTrackGraph(['track']), revision: 2 }, [gainSet(200, 1, 0.25), gainSet(600, 2, 0.125)], 200)
   rendered.push(...renderBlocks(host, 6))
-  expect({ applied: messages.flatMap((message) => message.type === 'graph-published' && message.requestId === 22 ? [message] : []).map((message) => 'appliedFrame' in message ? message.appliedFrame : undefined),
-    levels: [rendered[199], rendered[200], rendered[255], rendered[256], rendered[599], rendered[600]] })
-    .toEqual({ applied: [256], levels: [1, 1, 1, 0.25, 0.25, 0.125] })
+  expect({ published: publishedResults(messages, 2), levels: [rendered[199], rendered[200], rendered[255], rendered[256], rendered[599], rendered[600]] })
+    .toEqual({ published: ['published'], levels: [1, 1, 1, 0.25, 0.25, 0.125] })
+})
+
+// A publication the controller abandoned (its request timed out) is cancelled by revision, so the worklet never applies
+// it when the context resumes; a cancel for another revision leaves the pending one alone.
+test('W-R3 a cancelled pending publication is never applied and the old revision keeps playing', async () => {
+  const { host, messages } = await m1Playing()
+  renderBlocks(host, 1)
+  adoptRevision(host, messages, { ...portableTrackGraph(['track']), revision: 2 }, m1Next, 4_096)
+  host.handleMessage({ version: 2, type: 'cancel-publication', revision: 3 })
+  const otherRevision = host.pendingPublication?.revision
+  host.handleMessage({ version: 2, type: 'cancel-publication', revision: 2 })
+  const after = renderBlocks(host, 40)
+  expect({ otherRevision, pending: host.pendingPublication, revision: host.revision, published: publishedResults(messages, 2),
+    oldScheduleKeepsPlaying: after.slice(-64).every((sample) => Math.abs(sample - 0.75) < 1e-6) })
+    .toEqual({ otherRevision: 2, pending: null, revision: 1, published: ['rejected'], oldScheduleKeepsPlaying: true })
+})
+
+// R4: an apply that fails (here the prepared graph was replaced while the publish waited) keeps the old schedule, whose
+// parameter events in [seam, block start) must still land at the block start instead of expiring behind it.
+test('W-R4 a failed framed apply keeps the old schedule parameter events that fell between the seam and the block', async () => {
+  const { host, messages } = await startPortableTracks(['track'])
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [gainSet(250, 1, 0.5)],
+  } })
+  playConstantSources(host, messages, 2, 1, [{ nodeId: 'track', value: 1 }])
+  const rendered = renderBlocks(host, 1)
+  adoptRevision(host, messages, { ...portableTrackGraph(['track']), revision: 2 }, [gainSet(300, 1, 0.25)], 250)
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 30, snapshot: { ...portableTrackGraph(['track']), revision: 3 } })
+  rendered.push(...renderBlocks(host, 3))
+  expect({ published: publishedResults(messages, 2), revision: host.revision, levels: [rendered[255], rendered[256], rendered[383]] })
+    .toEqual({ published: ['rejected'], revision: 1, levels: [1, 0.5, 0.5] })
 })
 
 test('W-M1f a pending publication is rejected when the session is disposed', async () => {

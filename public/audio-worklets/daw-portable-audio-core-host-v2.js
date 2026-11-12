@@ -304,6 +304,7 @@ export class DawPortableAudioCoreHost {
       return
     }
     if (message.type === 'recording-capture-drain') return this.drainRecordingCapture()
+    if (message.type === 'cancel-publication') return this.rejectPendingPublication(message.revision)
     if (message.type === 'publish-graph' && Number.isInteger(message.requestId) && Number.isInteger(message.revision) && message.revision > this.revision) {
       if (this.pendingPublication) {
         this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'rejected' })
@@ -1161,25 +1162,25 @@ export class DawPortableAudioCoreHost {
   }
 
   // The publish steps of a prepared revision. A framed publish (`seam` set) runs them at the first block starting at or
-  // after the seam, and reports that block's start as `appliedFrame`.
-  publishPrepared({ requestId, revision, continuous, staged, continuityResult, seam, appliedFrame }) {
+  // after the seam. Returns whether the revision was published.
+  publishPrepared({ requestId, revision, continuous, staged, continuityResult, seam }) {
     // A prepare-graph for another revision while the publish waited replaced the prepared graph.
     if (this.preparedSnapshot === null || this.preparedSnapshot.revision !== revision) {
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'rejected' })
-      return
+      return false
     }
     if (!this.configureInstruments(this.preparedSnapshot)) {
       if (this.graphCancel) this.graphCancel(revision)
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'rejected' })
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision, result: 'rejected' })
-      return
+      return false
     }
     const publishResult = this.graphPublish ? this.graphPublish(revision) : -1
     if (publishResult !== 0) {
       if (this.graphCancel) this.graphCancel(revision)
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'rejected' })
       this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision, result: continuityResultForCoreResult(publishResult) })
-      return
+      return false
     }
     // An adoption keeps every target of the playing graph, so live edits in flight render on the next block and are
     // acknowledged then. Any other publish starts a graph that owns no live state.
@@ -1195,13 +1196,15 @@ export class DawPortableAudioCoreHost {
     this.publishedSnapshot = this.preparedSnapshot
     if (staged && staged.schedule.revision === revision) this.commitSchedule(staged, true, seam)
     this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-continuity', revision, result: continuityResult })
-    this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'published', ...(appliedFrame !== undefined && { appliedFrame }) })
+    this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId, revision, result: 'published' })
+    return true
   }
 
-  // Rejects a framed publish that has not reached its seam: the prepared graph is cancelled as a refusal does.
-  rejectPendingPublication() {
+  // Rejects a framed publish that has not reached its seam: the prepared graph is cancelled as a refusal does. A
+  // revision narrows it to that publication, which the controller abandoned.
+  rejectPendingPublication(revision) {
     const pending = this.pendingPublication
-    if (!pending) return
+    if (!pending || (revision !== undefined && pending.revision !== revision)) return
     this.pendingPublication = null
     if (this.graphCancel) this.graphCancel(pending.revision)
     this.postMessage({ version: PROTOCOL_VERSION, type: 'graph-published', requestId: pending.requestId, revision: pending.revision, result: 'rejected' })
@@ -1377,6 +1380,14 @@ export class DawPortableAudioCoreHost {
     const frame = this.currentTransportFrame()
     this.resetScheduleCursors(frame, instrumentFrame)
     if (seed) this.seedScheduleValues(frame)
+  }
+
+  // A failed apply leaves the old schedule playing. Its parameter events between the seam and this block start would
+  // expire unseen, so they are seeded here as a successful publish seeds the new schedule's.
+  keepScheduleAt(frame, instrumentFrame) {
+    if (!this.scheduleParameterStreams) return
+    this.resetScheduleCursors(frame, instrumentFrame)
+    this.seedScheduleValues(frame)
   }
 
   // A publish drops the core's held mixer values for every retained node. Each automated target that is not ramping
@@ -2362,7 +2373,7 @@ export class DawPortableAudioCoreHost {
     if (this.pendingPublication && startFrame >= this.pendingPublication.seam) {
       const pending = this.pendingPublication
       this.pendingPublication = null
-      this.publishPrepared({ ...pending, appliedFrame: startFrame })
+      if (!this.publishPrepared(pending)) this.keepScheduleAt(startFrame, pending.seam)
     }
     if (!this.prepareLiveProcessorEvents()) {
       this.flushInstrumentAcks('rejected')

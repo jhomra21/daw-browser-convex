@@ -15,6 +15,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <span>
 #include <type_traits>
 #include <tuple>
 
@@ -28,11 +29,8 @@ constexpr uint32_t kMaximumFramesPerBlock = 8192;
 constexpr uint32_t kMaximumChannels = 64;
 constexpr uint32_t kMaximumAssets = 64;
 constexpr uint32_t kMaximumSampleSources = 256;
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+// The upper half holds the sources a seam fades out beside the live ones.
 constexpr uint32_t kSampleSourceSlots = kMaximumSampleSources * 2;
-#else
-constexpr uint32_t kSampleSourceSlots = kMaximumSampleSources;
-#endif
 // Live limits are what a request may carry. Entries a plan deletes keep fading
 // out in transition capacity of their own, so a full live plan can always
 // replace any of its entries; only a genuine overflow of the transition capacity
@@ -3833,6 +3831,160 @@ bool sample_source_node_alive(const Core &core, const SampleSource &source) {
     && slot.generation.load(std::memory_order_relaxed) == source.node_runtime_generation;
 }
 // DAW_REALTIME_CALLBACK_HELPER_END sample-source-node-ownership
+
+SampleSource make_sample_source(const daw_audio_sample_source_event &event) {
+  return {
+    .source_node_id = event.source_node_id,
+    .asset = event.asset,
+    .start_frame = event.start_frame,
+    .stop_frame = event.stop_frame,
+    .source_offset_frame = event.source_offset_frame,
+    .source_offset_fraction = event.source_offset_fraction,
+    .source_frame_count = event.source_frame_count,
+    .gain = event.gain,
+    .fade_in_start_frame = event.fade_in_start_frame,
+    .fade_in_end_frame = event.fade_in_end_frame,
+    .fade_out_start_frame = event.fade_out_start_frame,
+    .fade_out_end_frame = event.fade_out_end_frame,
+    .fade_in_curve = event.fade_in_curve,
+    .fade_in_curve_position = event.fade_in_curve_position,
+    .fade_out_curve = event.fade_out_curve,
+    .fade_out_curve_position = event.fade_out_curve_position,
+    .active = true,
+  };
+}
+
+std::array<SampleSource, kSampleSourceSlots> &inactive_sample_source_table(Core &core) {
+  return core.active_sample_sources == &core.sample_source_tables[0] ? core.sample_source_tables[1]
+    : core.sample_source_tables[0];
+}
+
+// DAW_REALTIME_CALLBACK_HELPER_BEGIN native-source-seam
+// Swaps the active table for `next` at `frame`. A source that matches one already sounding keeps its cursor. Every other
+// sounding source fades out over kSampleTerminationFadeMilliseconds in the upper half of the table, and the sources
+// that take its place on the same node fade in over that span. `next` is bound to the published graph and ordered by
+// the caller. False leaves the table intact, so `apply = false` probes capacity.
+bool reconcile_sample_sources(Core &core, std::span<const SampleSource> next, int64_t frame, bool apply) {
+  const int64_t duration = std::max<int64_t>(1,
+    static_cast<int64_t>(core.config.sample_rate_hz * kSampleTerminationFadeMilliseconds / 1000.F));
+  if (frame < 0 || frame > INT64_MAX - duration || next.size() > kMaximumSampleSources) return false;
+  std::array<int32_t, kMaximumSampleSources> matches{};
+  std::array<bool, kMaximumSampleSources> retained{};
+  const auto signature = [](const SampleSource &source) {
+    // The running cursor retains its accepted wire origin. Projected f32
+    // positions can collide for distinct origins, so never use them as identity.
+    return std::make_tuple(source.source_node_id, source.node_runtime_slot, source.node_runtime_generation,
+      source.asset, source.paged, source.start_frame, source.source_offset_frame,
+      std::bit_cast<uint32_t>(source.source_offset_fraction), source.gain,
+      source.fade_in_start_frame, source.fade_in_end_frame,
+      source.fade_out_start_frame, source.fade_out_end_frame,
+      source.fade_in_curve, source.fade_in_curve_position,
+      source.fade_out_curve, source.fade_out_curve_position);
+  };
+  using Signature = decltype(signature(next[0]));
+  using IndexedSignature = std::pair<Signature, uint32_t>;
+  std::array<IndexedSignature, kMaximumSampleSources> old_sources{}, next_sources{};
+  uint32_t old_count = 0, next_count = 0;
+  // Fixed storage, O(n log n) multiset matching. Equal wire origins match
+  // once each, including genuinely overlapping identical clips.
+  for (uint32_t slot = 0; slot < kMaximumSampleSources; ++slot) {
+    const auto &source = (*core.active_sample_sources)[slot];
+    if (!source.active || !sample_source_node_alive(core, source)
+      || source.start_frame > frame || source.stop_frame <= frame) continue;
+    if (find_asset(&core, source.asset) == nullptr) continue;
+    old_sources[old_count++] = {signature(source), slot};
+  }
+  for (uint32_t index = 0; index < next.size(); ++index) {
+    matches[index] = -1;
+    if (next[index].start_frame <= frame && next[index].stop_frame > frame) {
+      next_sources[next_count++] = {signature(next[index]), index};
+    }
+  }
+  std::sort(old_sources.begin(), old_sources.begin() + old_count);
+  std::sort(next_sources.begin(), next_sources.begin() + next_count);
+  uint32_t previous = 0, following = 0;
+  while (previous < old_count && following < next_count) {
+    if (old_sources[previous].first < next_sources[following].first) { ++previous; continue; }
+    if (next_sources[following].first < old_sources[previous].first) { ++following; continue; }
+    const auto slot = old_sources[previous++].second;
+    matches[next_sources[following++].second] = static_cast<int32_t>(slot);
+    retained[slot] = true;
+  }
+  uint32_t tails = 0, available = 0, fading_count = 0;
+  using NodeOwner = std::pair<uint32_t, uint32_t>;
+  std::array<NodeOwner, kSampleSourceSlots> fading_nodes{};
+  for (uint32_t slot = 0; slot < kSampleSourceSlots; ++slot) {
+    const auto &source = (*core.active_sample_sources)[slot];
+    const bool audible = source.active && sample_source_node_alive(core, source) && source.start_frame <= frame
+      && (source.termination_end == 0 ? source.stop_frame > frame : source.termination_end > frame);
+    if (slot < kMaximumSampleSources) {
+      if (audible && !retained[slot]) {
+        ++tails;
+        fading_nodes[fading_count++] = {source.node_runtime_slot, source.node_runtime_generation};
+      }
+    } else if (audible) fading_nodes[fading_count++] = {source.node_runtime_slot, source.node_runtime_generation};
+    else ++available;
+  }
+  if (tails > available) return false;
+  if (!apply) return true;
+  std::sort(fading_nodes.begin(), fading_nodes.begin() + fading_count);
+  uint32_t tail_slot = kMaximumSampleSources;
+  for (uint32_t slot = 0; slot < kMaximumSampleSources; ++slot) {
+    auto &source = (*core.active_sample_sources)[slot];
+    if (retained[slot]) continue;
+    if (source.active && sample_source_node_alive(core, source)
+      && source.start_frame <= frame && source.stop_frame > frame) {
+      while (tail_slot < kSampleSourceSlots) {
+        const auto &tail = (*core.active_sample_sources)[tail_slot];
+        if (!tail.active || !sample_source_node_alive(core, tail) || tail.termination_end <= frame) break;
+        ++tail_slot;
+      }
+      auto &tail = (*core.active_sample_sources)[tail_slot++];
+      tail = source;
+      tail.termination_start = frame;
+      tail.termination_end = frame + duration;
+      tail.termination_read_frame = source.stop_frame - 1;
+      const auto *asset = find_asset(&core, source.asset);
+      if (asset != nullptr) {
+        // Hold the last readable sample if the old region ends during the
+        // declick. Compute once at the seam, never ceil/divide per tail sample.
+        const double rate = static_cast<double>(asset->sample_rate_hz) / core.config.sample_rate_hz;
+        const double read_count = source.reconciled_read_end == 0.0
+          ? static_cast<double>(source.source_frame_count)
+          : source.reconciled_read_end - (static_cast<double>(source.source_offset_frame)
+            + static_cast<double>(source.source_offset_fraction));
+        const double last = std::max(0.0, std::ceil(std::min(read_count,
+          static_cast<double>(asset->frame_count - source.source_offset_frame)
+            - source.source_offset_fraction) / rate) - 1.0);
+        tail.termination_read_frame = source.start_frame + static_cast<int64_t>(std::min(last,
+          static_cast<double>(source.stop_frame - source.start_frame - 1)));
+      }
+    }
+    source.active = false;
+  }
+  uint32_t free_slot = 0;
+  for (uint32_t index = 0; index < next.size(); ++index) {
+    const auto &declared = next[index];
+    if (declared.stop_frame <= frame) continue;
+    if (matches[index] >= 0) {
+      auto &source = (*core.active_sample_sources)[static_cast<uint32_t>(matches[index])];
+      source.stop_frame = declared.stop_frame;
+      source.paged_preparation = declared.paged_preparation;
+      source.reconciled_read_end = (static_cast<double>(declared.source_offset_frame)
+        + static_cast<double>(declared.source_offset_fraction)) + static_cast<double>(declared.source_frame_count);
+      continue;
+    }
+    while ((*core.active_sample_sources)[free_slot].active) ++free_slot;
+    auto &source = (*core.active_sample_sources)[free_slot];
+    source = declared;
+    if (declared.start_frame > frame) continue;
+    source.entry_start = frame;
+    source.entry_end = std::binary_search(fading_nodes.begin(), fading_nodes.begin() + fading_count,
+      NodeOwner{source.node_runtime_slot, source.node_runtime_generation}) ? frame + duration : 0;
+  }
+  return true;
+}
+// DAW_REALTIME_CALLBACK_HELPER_END native-source-seam
 
 void prepare_active_source_ranges(Core &core, const GraphRevision *graph) {
   // A deleted node's sources expire when its existing fade retires the slot.
@@ -9270,25 +9422,7 @@ extern "C" daw_audio_core_result daw_audio_core_schedule_sample_source(
     }
   }
   if (target == nullptr) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-  *target = {
-    .source_node_id = event->source_node_id,
-    .asset = event->asset,
-    .start_frame = event->start_frame,
-    .stop_frame = event->stop_frame,
-    .source_offset_frame = event->source_offset_frame,
-    .source_offset_fraction = event->source_offset_fraction,
-    .source_frame_count = event->source_frame_count,
-    .gain = event->gain,
-    .fade_in_start_frame = event->fade_in_start_frame,
-    .fade_in_end_frame = event->fade_in_end_frame,
-    .fade_out_start_frame = event->fade_out_start_frame,
-    .fade_out_end_frame = event->fade_out_end_frame,
-    .fade_in_curve = event->fade_in_curve,
-    .fade_in_curve_position = event->fade_in_curve_position,
-    .fade_out_curve = event->fade_out_curve,
-    .fade_out_curve_position = event->fade_out_curve_position,
-    .active = true,
-  };
+  *target = make_sample_source(*event);
   bind_sample_source_node(*target, *core->published_graph);
   core->last_event_sequence = event->sequence;
   return DAW_AUDIO_CORE_OK;
@@ -9306,9 +9440,7 @@ extern "C" daw_audio_core_result daw_audio_core_replace_sample_sources(
     || event_count > kMaximumSampleSources || (event_count != 0 && events == nullptr)) {
     return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }
-  auto *staged = core->active_sample_sources == &core->sample_source_tables[0]
-    ? &core->sample_source_tables[1]
-    : &core->sample_source_tables[0];
+  auto *staged = &inactive_sample_source_table(*core);
   for (SampleSource &source : *staged) source.active = false;
   uint64_t previous_sequence = 0;
   for (uint32_t index = 0; index < event_count; ++index) {
@@ -9403,7 +9535,15 @@ extern "C" daw_audio_core_result daw_audio_core_replace_sample_sources(
     bind_sample_source_node((*staged)[index], *core->published_graph);
     previous_sequence = event.sequence;
   }
-  core->active_sample_sources = staged;
+  if (core->transport.running != 0) {
+    // A running transport swaps at its own frame: sources that match keep their cursor and the rest fade over 6 ms
+    // instead of cutting. A stopped one has nothing sounding, so the table is simply replaced.
+    if (!reconcile_sample_sources(*core, {staged->data(), event_count}, core->transport.frame, true)) {
+      return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    }
+  } else {
+    core->active_sample_sources = staged;
+  }
   core->last_event_sequence = event_count == 0 ? 0 : previous_sequence;
   return DAW_AUDIO_CORE_OK;
 }
@@ -10451,43 +10591,15 @@ extern "C" daw_audio_core_result daw_audio_core_release_asset(
 }
 
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-// DAW_REALTIME_CALLBACK_HELPER_BEGIN native-source-seam
+// DAW_REALTIME_CALLBACK_HELPER_BEGIN native-source-seam-declarations
 bool daw::audio_core::ReconcileSampleSources(daw_audio_core_handle handle,
   std::span<const daw_audio_sample_source_event> events, int64_t frame, bool apply) noexcept {
   Core *core = to_core(handle);
   if (core == nullptr || events.size() > kMaximumSampleSources) return false;
-  const int64_t duration = std::max<int64_t>(1,
-    static_cast<int64_t>(core->config.sample_rate_hz * kSampleTerminationFadeMilliseconds / 1000.F));
-  if (frame < 0 || frame > INT64_MAX - duration) return false;
-  std::array<int32_t, kMaximumSampleSources> matches{};
-  std::array<bool, kMaximumSampleSources> retained{};
   uint64_t floor = core->last_event_sequence;
-  const auto signature = [](const auto &source, uint32_t slot, uint32_t generation) {
-    // The running cursor retains its accepted wire origin. Projected f32
-    // positions can collide for distinct origins, so never use them as identity.
-    return std::make_tuple(source.source_node_id, slot, generation, source.asset,
-      source.start_frame, source.source_offset_frame,
-      std::bit_cast<uint32_t>(source.source_offset_fraction), source.gain,
-      source.fade_in_start_frame, source.fade_in_end_frame,
-      source.fade_out_start_frame, source.fade_out_end_frame,
-      source.fade_in_curve, source.fade_in_curve_position,
-      source.fade_out_curve, source.fade_out_curve_position);
-  };
-  using Signature = decltype(signature(events[0], 0, 0));
-  using IndexedSignature = std::pair<Signature, uint32_t>;
-  std::array<IndexedSignature, kMaximumSampleSources> old_sources{}, next_sources{};
-  uint32_t old_count = 0;
-  // Fixed storage, O(n log n) multiset matching. Equal wire origins match
-  // once each, including genuinely overlapping identical clips.
-  for (uint32_t slot = 0; slot < kMaximumSampleSources; ++slot) {
-    const auto &source = (*core->active_sample_sources)[slot];
-    if (!source.active || !sample_source_node_alive(*core, source)
-      || source.paged || source.start_frame > frame || source.stop_frame <= frame) continue;
-    const auto *asset = find_asset(core, source.asset);
-    if (asset == nullptr) continue;
-    old_sources[old_count++] = {signature(source,
-      source.node_runtime_slot, source.node_runtime_generation), slot};
-  }
+  const auto &graph = configuration_graph(*core);
+  // Only a hard replace stages in the inactive table, and the host never calls it, so the callback may borrow it.
+  auto &declared = inactive_sample_source_table(*core);
   for (uint32_t index = 0; index < events.size(); ++index) {
     const auto &event = events[index];
     if (!valid_sample_source_event(event) || event.start_frame > frame || event.stop_frame <= frame
@@ -10496,108 +10608,16 @@ bool daw::audio_core::ReconcileSampleSources(daw_audio_core_handle handle,
     const auto *asset = find_asset(core, event.asset);
     if (asset == nullptr || event.source_offset_frame >= asset->frame_count
       || event.source_frame_count > asset->frame_count - event.source_offset_frame) return false;
-    const auto &graph = configuration_graph(*core);
     const auto node = graph_node_index(graph, event.source_node_id);
     if (node < 0 || graph.nodes[static_cast<uint32_t>(node)].kind != DAW_AUDIO_GRAPH_NODE_SOURCE) return false;
-    matches[index] = -1;
-    next_sources[index] = {signature(event,
-      graph.node_slots[static_cast<uint32_t>(node)], graph.node_generations[static_cast<uint32_t>(node)]), index};
+    declared[index] = make_sample_source(event);
+    bind_sample_source_node(declared[index], graph);
   }
-  std::sort(old_sources.begin(), old_sources.begin() + old_count);
-  std::sort(next_sources.begin(), next_sources.begin() + events.size());
-  uint32_t previous = 0, next = 0;
-  while (previous < old_count && next < events.size()) {
-    if (old_sources[previous].first < next_sources[next].first) { ++previous; continue; }
-    if (next_sources[next].first < old_sources[previous].first) { ++next; continue; }
-    const auto slot = old_sources[previous++].second;
-    matches[next_sources[next++].second] = static_cast<int32_t>(slot);
-    retained[slot] = true;
-  }
-  uint32_t tails = 0, available = 0, fading_count = 0;
-  using NodeOwner = std::pair<uint32_t, uint32_t>;
-  std::array<NodeOwner, kSampleSourceSlots> fading_nodes{};
-  for (uint32_t slot = 0; slot < kSampleSourceSlots; ++slot) {
-    const auto &source = (*core->active_sample_sources)[slot];
-    const bool audible = source.active && sample_source_node_alive(*core, source) && source.start_frame <= frame
-      && (source.termination_end == 0 ? source.stop_frame > frame : source.termination_end > frame);
-    if (slot < kMaximumSampleSources) {
-      if (audible && !retained[slot]) {
-        ++tails;
-        fading_nodes[fading_count++] = {source.node_runtime_slot, source.node_runtime_generation};
-      }
-    } else if (audible) fading_nodes[fading_count++] = {source.node_runtime_slot, source.node_runtime_generation};
-    else ++available;
-  }
-  if (tails > available) return false;
-  if (!apply) return true;
-  std::sort(fading_nodes.begin(), fading_nodes.begin() + fading_count);
-  uint32_t tail_slot = kMaximumSampleSources;
-  for (uint32_t slot = 0; slot < kMaximumSampleSources; ++slot) {
-    auto &source = (*core->active_sample_sources)[slot];
-    if (retained[slot]) continue;
-    if (source.active && sample_source_node_alive(*core, source)
-      && source.start_frame <= frame && source.stop_frame > frame) {
-      while (tail_slot < kSampleSourceSlots) {
-        const auto &tail = (*core->active_sample_sources)[tail_slot];
-        if (!tail.active || !sample_source_node_alive(*core, tail) || tail.termination_end <= frame) break;
-        ++tail_slot;
-      }
-      auto &tail = (*core->active_sample_sources)[tail_slot++];
-      tail = source;
-      tail.termination_start = frame;
-      tail.termination_end = frame + duration;
-      tail.termination_read_frame = source.stop_frame - 1;
-      const auto *asset = find_asset(core, source.asset);
-      if (asset != nullptr) {
-        // Hold the last readable sample if the old region ends during the
-        // declick. Compute once at the seam, never ceil/divide per tail sample.
-        const double rate = static_cast<double>(asset->sample_rate_hz) / core->config.sample_rate_hz;
-        const double read_count = source.reconciled_read_end == 0.0
-          ? static_cast<double>(source.source_frame_count)
-          : source.reconciled_read_end - (static_cast<double>(source.source_offset_frame)
-            + static_cast<double>(source.source_offset_fraction));
-        const double last = std::max(0.0, std::ceil(std::min(read_count,
-          static_cast<double>(asset->frame_count - source.source_offset_frame)
-            - source.source_offset_fraction) / rate) - 1.0);
-        tail.termination_read_frame = source.start_frame + static_cast<int64_t>(std::min(last,
-          static_cast<double>(source.stop_frame - source.start_frame - 1)));
-      }
-    }
-    source.active = false;
-  }
-  uint32_t free_slot = 0;
-  for (uint32_t index = 0; index < events.size(); ++index) {
-    const auto &event = events[index];
-    if (matches[index] >= 0) {
-      auto &source = (*core->active_sample_sources)[static_cast<uint32_t>(matches[index])];
-      source.stop_frame = event.stop_frame;
-      source.reconciled_read_end = (static_cast<double>(event.source_offset_frame)
-        + static_cast<double>(event.source_offset_fraction)) + static_cast<double>(event.source_frame_count);
-      continue;
-    }
-    while ((*core->active_sample_sources)[free_slot].active) ++free_slot;
-    auto &source = (*core->active_sample_sources)[free_slot];
-    source = {
-      .source_node_id = event.source_node_id, .asset = event.asset,
-      .start_frame = event.start_frame, .stop_frame = event.stop_frame,
-      .source_offset_frame = event.source_offset_frame,
-      .source_offset_fraction = event.source_offset_fraction,
-      .source_frame_count = event.source_frame_count, .gain = event.gain,
-      .fade_in_start_frame = event.fade_in_start_frame, .fade_in_end_frame = event.fade_in_end_frame,
-      .fade_out_start_frame = event.fade_out_start_frame, .fade_out_end_frame = event.fade_out_end_frame,
-      .fade_in_curve = event.fade_in_curve, .fade_in_curve_position = event.fade_in_curve_position,
-      .fade_out_curve = event.fade_out_curve, .fade_out_curve_position = event.fade_out_curve_position,
-      .active = true,
-      .entry_start = frame,
-    };
-    bind_sample_source_node(source, *core->published_graph);
-    source.entry_end = std::binary_search(fading_nodes.begin(), fading_nodes.begin() + fading_count,
-      NodeOwner{source.node_runtime_slot, source.node_runtime_generation}) ? frame + duration : 0;
-  }
-  core->last_event_sequence = floor;
+  if (!reconcile_sample_sources(*core, {declared.data(), events.size()}, frame, apply)) return false;
+  if (apply) core->last_event_sequence = floor;
   return true;
 }
-// DAW_REALTIME_CALLBACK_HELPER_END native-source-seam
+// DAW_REALTIME_CALLBACK_HELPER_END native-source-seam-declarations
 
 void daw::audio_core::RequestAssetRetirement(daw_audio_core_handle handle, daw_audio_asset_handle asset) noexcept {
   Core *core = to_core(handle);

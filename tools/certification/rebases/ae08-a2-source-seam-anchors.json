@@ -1,0 +1,110 @@
+{
+ "name": "ae08-a2-source-seam-anchors",
+ "sequence": 20,
+ "createdAt": "2026-11-12T23:20:00.000Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:489:control:step5b",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 9,
+   "new": 8
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:489:mutant:step5b",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 6
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:491:control:step5b",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 9,
+   "new": 8
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:491:mutant:step5b",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 7
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:498:control:step5b",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 9,
+   "new": 8
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:498:mutant:step5b",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 6
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:499:control:step5b",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 9,
+   "new": 8
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:499:mutant:step5b",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 8,
+   "new": 7
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 9a2 (D-2): the shared core now reconciles the sample-source table at a running replace (retained sources keep their cursor, unmatched old sources fade over 6 ms, the slot table is native's 512) and the portable core artefact was rebuilt. No arm anchors in native/audio-core/src/audio_core.cpp or in the artefact, so no anchor text moved. Run alone with --only: gate:x-host-ctest, x-wasm-artifact, x-portable-wasm, x-wasm-validation, x-validate-wasm, f-engine and x-backends pass, and arm ledger:475 (the only arm witnessed by portable-wasm-host.test.ts) passes as control and is still killed as mutant. Folded in: the count move of the eight step5b arms ledger:489, 491, 498 and 499 (control and mutant). They predate this step: the test \"B6f5 a resume after an adoption and a paused locate plays the newest state on the same session\" no longer matches those arms' filters since 096bac0c, so each recorded one test too many. Each control passes with 8 tests and each mutant is still killed by the same failing tests (489: 6 pass 2 fail, 491: 7 pass 1 fail, 498: 6 pass 2 fail, 499: 7 pass 1 fail), proven with --only on every step5b arm (489 to 501): the other nine arms already match their recorded counts. See PHASE8-STEP9A2.md. The watched hashes of the core, the wasm, its manifest and the host witness file, and the recorded pass counts of portable-wasm-host.test.ts, x-portable-wasm (86), x-backends (13) and f-engine, move only on --full."
+ }
+}

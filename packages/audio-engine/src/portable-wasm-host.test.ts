@@ -1737,12 +1737,12 @@ const rampSource = (sequence: number, startFrame: number, stopFrame: number, gai
   sourceFrameCount: stopFrame - startFrame, gain, fadeInStartFrame: startFrame, fadeInEndFrame: startFrame,
   fadeOutStartFrame: stopFrame, fadeOutEndFrame: stopFrame,
 })
-const playRamp = async (trackIds: readonly string[] = ['track'], running = true) => {
+const playRamp = async (trackIds: readonly string[] = ['track'], running = true, oldTable: readonly ReturnType<typeof rampSource>[] = [rampSource(1, 0, 512)]) => {
   const { host, messages } = await startPortableTracks(trackIds)
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running, frame: 0 })
   host.handleMessage({ version: 2, type: 'register-asset', requestId: 5, generation: 0,
     asset: { version: 1, assetId: 'ramp', frameCount: rampFrames, sampleRateHz: 48_000, channelCount: 2 }, planes: [rampAsset, rampAsset] })
-  host.handleMessage({ version: 2, type: 'schedule-sources', requestId: 6, revision: 1, epoch: 1, events: [rampSource(1, 0, 512)] })
+  host.handleMessage({ version: 2, type: 'schedule-sources', requestId: 6, revision: 1, epoch: 1, events: oldTable })
   expect(messages).toContainEqual(expect.objectContaining({ type: 'sources-scheduled', requestId: 6, result: 'scheduled' }))
   return { host, messages }
 }
@@ -1765,23 +1765,49 @@ const rampLevel = (frame: number, gain = 1) => Math.fround(rampAsset[frame] * ga
 const matchesRamp = (rendered: readonly number[], expected: (frame: number) => number) =>
   rendered.every((sample, frame) => Math.abs(sample - expected(frame)) < 1e-6)
 
-test('W-C9-clip-3a a framed swap of an unchanged spanning clip is sample-exact where the old table ends', async () => {
-  const { host, messages } = await playRamp()
+// The swap is not a cut: a source the new table does not retain fades out over 6 ms (288 frames at 48 kHz) from the
+// block that publishes, and the sources that replace it fade in over the same span, so the sum is a linear crossfade.
+const blendFrames = 288
+const crossfade = (seamFrame: number, oldGain: number, newGain: number) => (frame: number) => {
+  const entered = Math.min(1, Math.max(0, (frame - seamFrame) / blendFrames))
+  return rampLevel(frame, oldGain * (1 - entered) + newGain * entered)
+}
+
+test('W-C9-clip-3a a framed swap of an unchanged spanning clip is sample-exact across the swap', async () => {
+  const { host, messages } = await playRamp(['track'], true, [rampSource(1, 0, 1_024)])
   const rendered = renderBlocks(host, 1)
   publishWithSources(host, ['track'], [rampSource(1, 384, 1_024)], 384)
   rendered.push(...renderBlocks(host, 7))
-  expect({ published: sourcePublication(messages), continuous: matchesRamp(rendered, (frame) => frame < 1_024 ? rampLevel(frame) : 0), revision: host.revision })
+  expect({ published: sourcePublication(messages), continuous: matchesRamp(rendered, rampLevel), revision: host.revision })
     .toEqual({ published: ['published'], continuous: true, revision: 2 })
 })
 
-test('W-C9-clip-3b a framed swap changes the table exactly at its frame', async () => {
-  const { host, messages } = await playRamp()
+test('W-C9-clip-3b a framed swap of a changed clip crossfades to the new table over 6 ms from its frame', async () => {
+  const { host, messages } = await playRamp(['track'], true, [rampSource(1, 0, 1_024)])
   const rendered = renderBlocks(host, 1)
   publishWithSources(host, ['track'], [rampSource(1, 384, 1_024, 0.5)], 384)
   rendered.push(...renderBlocks(host, 7))
-  const published = sourcePublication(messages)
-  expect({ published, exact: matchesRamp(rendered, (frame) => frame < 384 ? rampLevel(frame) : frame < 1_024 ? rampLevel(frame, 0.5) : 0) })
-    .toEqual({ published: ['published'], exact: true })
+  expect({ published: sourcePublication(messages), crossfaded: matchesRamp(rendered, crossfade(384, 1, 0.5)), noStep: Math.abs(rendered[384] - rendered[383]) < 2e-4 })
+    .toEqual({ published: ['published'], crossfaded: true, noStep: true })
+})
+
+test('W-C9-clip-3h an old source the new table lacks fades out over 6 ms and is silent after', async () => {
+  const { host, messages } = await playRamp(['track'], true, [rampSource(1, 0, 1_024)])
+  const rendered = renderBlocks(host, 1)
+  publishWithSources(host, ['track'], [], 384)
+  rendered.push(...renderBlocks(host, 7))
+  expect({ published: sourcePublication(messages), faded: matchesRamp(rendered, crossfade(384, 1, 0)), noStep: Math.abs(rendered[384] - rendered[383]) < 2e-4, silent: rendered.slice(384 + blendFrames).every((sample) => sample === 0) })
+    .toEqual({ published: ['published'], faded: true, noStep: true, silent: true })
+})
+
+test('W-C9-clip-3i the slot table holds every old tail beside a full table of new sources', async () => {
+  const table = (gain: number, startFrame: number) => Array.from({ length: 256 }, (_, index) => rampSource(index + 1, startFrame, 1_024, gain))
+  const { host, messages } = await playRamp(['track'], true, table(0.001, 0))
+  const rendered = renderBlocks(host, 1)
+  publishWithSources(host, ['track'], table(0.002, 384), 384)
+  rendered.push(...renderBlocks(host, 7))
+  expect({ published: sourcePublication(messages), faulted: messages.some((message) => message.type === 'fault'), crossfaded: rendered.every((sample, frame) => Math.abs(sample - crossfade(384, 0.256, 0.512)(frame)) < 1e-5) })
+    .toEqual({ published: ['published'], faulted: false, crossfaded: true })
 })
 
 test('W-C9-clip-3c a source of a node the new graph adds plays from the seam, so the apply follows the publish', async () => {

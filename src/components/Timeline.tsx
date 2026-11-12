@@ -1684,14 +1684,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       return;
     }
     setLoopEnabled((prev) => !prev);
-    if (isPortableBrowserPlaybackPrepared()) {
-      void rebuildPlaybackBackend(renderTracks()).catch((cause: unknown) => {
-        console.error("[Timeline] failed to reconcile loop playback", cause);
-        audioEngine.onTransportPause();
-        audioEngine.stopAllSources();
-        setLoopEnabled(false);
-      });
-    } else if (isPlaying() && !isNativePlaybackPrepared()) {
+    // A prepared browser or native session adopts the toggle through the loop in its desired schedule.
+    if (!isPortableBrowserPlaybackPrepared() && isPlaying() && !isNativePlaybackPrepared()) {
       void restartTimelineSchedule(renderTracks()).catch((cause: unknown) => {
         console.error("[Timeline] failed to reschedule loop playback", cause);
       });

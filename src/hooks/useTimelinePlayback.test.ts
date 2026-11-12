@@ -6955,7 +6955,8 @@ test('B6f4 a paused-preview re-run with native playback off and no edit keeps th
 // rebuild or re-prepare ends carrying the newest edit (AE-08). The fixture is the browser build's, as B6f's, with the
 // Timeline's processor and instrument bindings (Timeline.tsx:447-468) and a worklet that records what each session holds.
 type B6f5Session = { createdSeq: number; closed: boolean; graph: AudioCoreGraphSnapshot | undefined; publishedRevision: number | undefined
-  parameters: string; adoptions: number; installedBpm: number[]; positions: { seq: number; sec: number; running: boolean }[]
+  parameters: string; adoptions: number; installedBpm: number[]; installedNoteOns: number[]
+  positions: { seq: number; sec: number; running: boolean }[]
   proc: { seq: number; values: number[] }[]; inst: { seq: number; values: number[] }[] }
 type B6f5World = { seq: number; sessions: B6f5Session[]; transportHold: B6fLiveHold
   pauseHold: B6fLiveHold; onNode?: () => void }
@@ -7000,6 +7001,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const [projectId] = createSignal('project-a')
   const [generation] = createSignal(1)
   const [bpm, setBpm] = createSignal(120)
+  const [loop, setLoop] = createSignal({ enabled: false, start: 0, end: 0 })
   const [utility, setUtility] = createSignal(b6f5Utility0)
   const [synth, setSynth] = createSignal(b6f5Synth0)
   const [sampler, setSampler] = createSignal(b6f5Sampler0)
@@ -7033,7 +7035,8 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     getAudioContext: () => audioCreated ? audioContext : null,
     resume: async () => { if (resumeHold.armed) await new Promise<void>((resolve) => holdB6fLive(resumeHold, resolve)) },
   }
-  const playback = useTimelinePlayback(engine, { getTracks: () => tracks(), bpm }, {
+  const playback = useTimelinePlayback(engine, { getTracks: () => tracks(), bpm, loopEnabled: () => loop().enabled,
+    loopStartSec: () => loop().start, loopEndSec: () => loop().end }, {
     enabled: () => nativeEnabled, projectId, projectGeneration: generation, compileSnapshot, playbackInputs,
     reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
   }, { projectGeneration: generation, compileSnapshot, reportFault: (message) => faults.push(message) })
@@ -7183,7 +7186,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const resumingRebuild = () => playback.restartTimelineSchedule(tracks(), {
     rebuildBackend: true, resumePlayback: true, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
-  return { playback, edit, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, mark: () => world.seq,
+  return { playback, edit, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, mark: () => world.seq,
     liveSession: () => world.sessions.filter((session) => !session.closed).at(-1),
     holds: { resume: resumeHold, compile: compileHold, transport: world.transportHold, pause: world.pauseHold } }
 }
@@ -7206,7 +7209,7 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
     readonly port: { onmessage: ((event: { data: PortableWasmStatusMessage }) => void) | null; postMessage: (message: PortableWasmControlMessage) => void; close: () => void }
     constructor() {
       const session: B6f5Session = { createdSeq: ++world.seq, closed: false, graph: undefined, publishedRevision: undefined, parameters: '',
-        adoptions: 0, installedBpm: [], positions: [], proc: [], inst: [] }
+        adoptions: 0, installedBpm: [], installedNoteOns: [], positions: [], proc: [], inst: [] }
       world.sessions.push(session)
       world.onNode?.()
       this.port = {
@@ -7220,6 +7223,7 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
           }
           if (message.type === 'install-schedule') {
             session.installedBpm.push(message.schedule.bpm)
+            session.installedNoteOns = message.schedule.events.flatMap((event) => event.type === 'note-on' ? [event.frame] : [])
             session.parameters = JSON.stringify(message.schedule.events.filter((event) => event.type.startsWith('parameter')))
             // A schedule staged for the next revision moves no transport: the publish swaps it in at the playing frame.
             const staged = session.publishedRevision !== undefined && message.schedule.revision > session.publishedRevision
@@ -7394,6 +7398,50 @@ test('B6f5 E5 a note and a tempo edit while playing are adopted at a seam withou
     expect({ adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session, playing: live.playback.isPortableBrowserPlayback(),
       sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length, installedBpm: session?.installedBpm.slice(-2) })
       .toEqual({ adoptions: 2, closed: false, same: true, playing: true, sessionsAfterMark: 0, installedBpm: [120, 90] })
+  }, false)
+})
+
+// F20: a loop edit while playing is a seam adoption too. The note recurs once per loop iteration, so the second
+// iteration's frame says where the installed schedule loops.
+const f20Clip = { id: 'clip-f20', name: 'MIDI', color: '#fff', startSec: 0, duration: 30, midiOffsetBeats: 0,
+  midi: { wave: 'sine' as const, notes: [{ id: 'note-f20', pitch: 60, beat: 4, length: 1, velocity: 0.8 }] } }
+const playF20 = async (live: ReturnType<typeof mountB6f5>, loop: { enabled: boolean; start: number; end: number }) => {
+  live.setTracks((current) => current.map((entry) => entry.id === track.id ? { ...entry, kind: 'instrument', clips: [f20Clip] } : entry))
+  live.setLoop(loop)
+  await live.playFrom(1)
+  return live.liveSession()
+}
+
+test('F20 W-F20b changing the loop end while playing is adopted at a seam and the schedule loops at the new end', async () => {
+  await runB6f5(async (live, world) => {
+    const session = await playF20(live, { enabled: true, start: 0, end: 3 })
+    const mark = live.mark()
+    const before = session?.installedNoteOns.slice(0, 2)
+    live.setLoop({ enabled: true, start: 0, end: 4 })
+    await live.until(() => session?.adoptions === 1)
+    await live.settle()
+    expect({ before, after: session?.installedNoteOns.slice(0, 2), adoptions: session?.adoptions, closed: session?.closed,
+      same: live.liveSession() === session, sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
+      .toEqual({ before: [96_000, 240_000], after: [96_000, 288_000], adoptions: 1, closed: false, same: true, sessionsAfterMark: 0 })
+  }, false)
+})
+
+// What Timeline's loop toggle does since the rebuild was removed: it sets the loop and the follow adopts it.
+test('F20 W-F20f toggling the loop on and off while playing is adopted without a dispose or a restart', async () => {
+  await runB6f5(async (live, world) => {
+    const session = await playF20(live, { enabled: false, start: 0, end: 3 })
+    const mark = live.mark()
+    live.setLoop({ enabled: true, start: 0, end: 3 })
+    await live.until(() => session?.adoptions === 1)
+    const looping = session?.installedNoteOns.slice(0, 2)
+    // The hook records what the adoption carries once its answer arrives, after the publish this waits for.
+    for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
+    live.setLoop({ enabled: false, start: 0, end: 3 })
+    await live.until(() => session?.adoptions === 2)
+    await live.settle()
+    expect({ looping, linear: session?.installedNoteOns.slice(0, 2), adoptions: session?.adoptions, closed: session?.closed,
+      playing: live.playback.isPlaying(), sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
+      .toEqual({ looping: [96_000, 240_000], linear: [96_000], adoptions: 2, closed: false, playing: true, sessionsAfterMark: 0 })
   }, false)
 })
 

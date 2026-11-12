@@ -43963,7 +43963,7 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "        activeSnapshot = { ...folded, revision: candidate.graph.revision }\n",
+       "from": "        activeSnapshot = {\n          ...folded,\n          revision: candidate.graph.revision,\n          transport: { ...folded.transport, loopEnabled: runLoop.loopEnabled },\n        }\n",
        "to": ""
       }
      ]
@@ -44027,7 +44027,7 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "        activeSnapshot = { ...folded, revision: candidate.graph.revision }\n",
+       "from": "        activeSnapshot = {\n          ...folded,\n          revision: candidate.graph.revision,\n          transport: { ...folded.transport, loopEnabled: runLoop.loopEnabled },\n        }\n",
        "to": ""
       }
      ]
@@ -53064,7 +53064,7 @@
      },
      "fails": [
       "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
-      "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds"
+      "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam"
      ],
      "fuzz": null,
      "rejection": null,
@@ -53126,7 +53126,7 @@
      },
      "fails": [
       "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
-      "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+      "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
       "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
@@ -55197,7 +55197,7 @@
       "fail": 1
      },
      "fails": [
-      "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds"
+      "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam"
      ],
      "fuzz": null,
      "rejection": null,
@@ -55258,7 +55258,7 @@
       "fail": 4
      },
      "fails": [
-      "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+      "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
       "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"

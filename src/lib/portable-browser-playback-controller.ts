@@ -24,7 +24,7 @@ import {
 } from "@daw-browser/audio-engine/portable-wasm-protocol"
 import { RECORDER_BLOCK_FRAMES, RECORDER_MAX_QUEUED_BLOCKS } from "@daw-browser/audio-engine/recording-protocol"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
-import { arrangementFrameForLoop, effectiveLoopForStart, loopFramesForTransport } from "@daw-browser/audio-engine/loop-frame-schedule"
+import { arrangementFrameForLoop, effectiveLoopForStart, loopFramesForTransport, type LoopFrames } from "@daw-browser/audio-engine/loop-frame-schedule"
 import { compilePreparedPortableLiveSession } from "~/lib/portable-live-session"
 import type { LivePlaybackCompileContext, LivePlaybackSnapshot, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from "~/lib/live-playback-snapshot"
 import { createPortableRecordingWriter } from "~/lib/recording/portable-recording-writer"
@@ -170,14 +170,23 @@ const isInstalledSnapshotAsset = (
   return !usedByStretch || usedByInstalledSource || instrumentKeys.has(assetId)
 }
 
-const reportedPositionFrame = (
-  frame: number,
-  transport: LivePlaybackTransport | undefined,
-  sampleRateHz: number,
-) => arrangementFrameForLoop(
-  frame,
-  transport ? loopFramesForTransport(transport, sampleRateHz) : undefined,
-)
+// The transport counts raw frames straight on through a loop. A segment says how to read raw frames from `fromFrame` on
+// as arrangement frames: the loop in raw frames, and how far raw runs ahead of the arrangement (an adopted loop edit
+// moves the seam to an arrangement position that is not its raw frame).
+type PositionSegment = { fromFrame: number; loop: LoopFrames | undefined; deltaFrames: number }
+
+const positionSegmentIndex = (segments: readonly PositionSegment[], frame: number) =>
+  Math.max(0, segments.findLastIndex((segment) => segment.fromFrame <= frame))
+
+const arrangementFrameAt = (segments: readonly PositionSegment[], frame: number) => {
+  const segment = segments[positionSegmentIndex(segments, frame)]
+  return segment ? arrangementFrameForLoop(frame, segment.loop) - segment.deltaFrames : frame
+}
+
+const initialPositionSegments = (transport: LivePlaybackTransport, sampleRateHz: number): PositionSegment[] =>
+  [{ fromFrame: 0, loop: loopFramesForTransport(transport, sampleRateHz), deltaFrames: 0 }]
+
+type AdoptionLoop = Pick<LivePlaybackTransport, "loopEnabled" | "loopStartSec" | "loopEndSec">
 
 const assetRegistry = (
   snapshot: LivePlaybackSnapshot,
@@ -289,6 +298,8 @@ const preparedSession = (
   preparedStretchAssets: readonly PortablePreparedStretch[] = [],
   sourceRangeStartSec?: number,
   ordinaryDescriptors: ReadonlyMap<string, PortableOrdinaryDescriptor> = new Map(),
+  // The raw frame that plays the playhead, when it is not the playhead's own frame (see PositionSegment).
+  originFrame = Math.round(snapshot.transport.playheadSec * sampleRateHz),
 ): PreparedPortableSession => compilePreparedPortableLiveSession(snapshot, {
   assetRegistry: assetRegistry(snapshot, projectGeneration, preparedStretchAssets, ordinaryDescriptors),
   preparedStretchAssets: new Map(preparedStretchAssets.map((asset) => [asset.clipId, asset])),
@@ -296,7 +307,7 @@ const preparedSession = (
   transportEpoch: epoch,
   timeOrigin: {
     timelineSec: snapshot.transport.playheadSec,
-    frame: Math.round(snapshot.transport.playheadSec * sampleRateHz),
+    frame: originFrame,
   },
   rangeEndSec: Math.min(
     snapshot.transport.playheadSec + horizonSec,
@@ -395,16 +406,20 @@ const withLiveContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSna
 const hasWarpedAudio = (snapshot: LivePlaybackSnapshot) =>
   snapshot.tracks.some((track) => track.clips.some((clip) => clip.audioWarp?.enabled === true))
 
+const hasAudioClips = (snapshot: LivePlaybackSnapshot) =>
+  snapshot.tracks.some((track) => track.clips.some((clip) => !clip.midi))
+
 // What a playing session adopts at a seam, beyond what it takes live: the tempo, the loop fields and the MIDI clips of
 // tracks it already plays. `next` with that taken from `previous` fingerprints as `previous` when nothing else changed.
-// A tempo moves warped audio, which needs new sources (a class the seam does not carry), so with warped audio the tempo
-// stays in `next` and the gate refuses it.
+// A tempo moves warped audio, and a loop repeats audio clips; both need new sources (a class the seam does not carry),
+// so with that audio the tempo or loop stays in `next` and the gate refuses it.
 const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const previousTracks = new Map(previous.tracks.map((track) => [track.id, track]))
+  const loopsAudio = hasAudioClips(next) || hasAudioClips(previous)
   return {
     ...next,
     bpm: hasWarpedAudio(next) || hasWarpedAudio(previous) ? next.bpm : previous.bpm,
-    transport: {
+    transport: loopsAudio ? next.transport : {
       ...next.transport,
       loopEnabled: previous.transport.loopEnabled,
       loopStartSec: previous.transport.loopStartSec,
@@ -1019,6 +1034,9 @@ export const createPortableBrowserPlaybackController = (input: {
   let recording: PortableRecordingSession | undefined
   let epoch = 0
   let positionFrame = 0
+  // Oldest first; the segment in effect is the last one that starts at or before the reported raw frame.
+  let positionSegments: readonly PositionSegment[] = []
+  const arrangementFrame = () => arrangementFrameAt(positionSegments, positionFrame)
   let positionSequence = 0
   let activeSourceSequence = 0
   let refreshPromise: Promise<PortableStartResult> | undefined
@@ -1036,6 +1054,8 @@ export const createPortableBrowserPlaybackController = (input: {
   let nextLiveProcessorSequence = 0
   let adopting = false
   let adoptionQueued: Promise<PortableAdoptionResult> | undefined
+  // The newest loop an adoption was asked for: the waiting adoption compiles with it, and so does a resubmit.
+  let latestLoop: AdoptionLoop = { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 }
   let adoptionTail: Promise<unknown> = Promise.resolve()
   let adoptionPublish: Promise<PortableAdoptionResult> | undefined
   // Synth sends past the adoption barrier and not yet answered; an adoption folds the values they carry once they settle.
@@ -1058,6 +1078,7 @@ export const createPortableBrowserPlaybackController = (input: {
     active = undefined
     activeProjectGeneration = undefined
     activeTransport = undefined
+    positionSegments = []
     activeScheduleRange = undefined
     activeRevision = undefined
     activeGraph = undefined
@@ -1450,6 +1471,7 @@ export const createPortableBrowserPlaybackController = (input: {
     active = runtime.session
     activeProjectGeneration = runtime.projectGeneration
     activeTransport = runtime.transport
+    positionSegments = initialPositionSegments(runtime.transport, runtime.prepared.schedule.sampleRateHz)
     activeScheduleRange = runtime.prepared.scheduleRange
     activeFrameSchedule = runtime.prepared.schedule
     activeRevision = runtime.prepared.graph.revision
@@ -1565,16 +1587,16 @@ export const createPortableBrowserPlaybackController = (input: {
     const generation = lifecycleGeneration
     const projectGeneration = input.getProjectGeneration?.() ?? 0
     const intent = transportIntent
+    // The refresh builds a new session whose raw frames are arrangement frames, so it starts from the arrangement position.
     const transport: LivePlaybackTransport = {
       ...(activeTransport ?? {
         state: "playing",
-        playheadSec: currentFrame / context.sampleRate,
         loopEnabled: false,
         loopStartSec: 0,
         loopEndSec: 0,
       }),
       state: "playing",
-      playheadSec: currentFrame / context.sampleRate,
+      playheadSec: arrangementFrame() / context.sampleRate,
     }
     const refreshAbortController = new AbortController()
     startupAbortController = refreshAbortController
@@ -1769,7 +1791,7 @@ export const createPortableBrowserPlaybackController = (input: {
         undefined,
         activeSnapshot,
       )
-      let latestFrame = positionFrame
+      let latestFrame = arrangementFrame()
       let valid = runtime !== undefined
         && preservesActiveGraph(runtime)
         && runtime.sessionFault.error === undefined
@@ -1779,7 +1801,7 @@ export const createPortableBrowserPlaybackController = (input: {
       if (valid && runtime && !hasContinuationCoverage(runtime, latestFrame)) {
         await releaseRuntime(runtime)
         runtime = await prepareRuntime(
-          replacementTransport(positionFrame),
+          replacementTransport(arrangementFrame()),
           generation,
           projectGeneration,
           false,
@@ -1788,7 +1810,7 @@ export const createPortableBrowserPlaybackController = (input: {
           undefined,
           activeSnapshot,
         )
-        latestFrame = positionFrame
+        latestFrame = arrangementFrame()
         valid = runtime !== undefined
           && preservesActiveGraph(runtime)
           && runtime.sessionFault.error === undefined
@@ -1857,7 +1879,7 @@ export const createPortableBrowserPlaybackController = (input: {
         input.reportFault?.(error instanceof Error ? error.message : "Portable parameter reconciliation failed.")
         return "unavailable"
       }
-      latestFrame = positionFrame
+      latestFrame = arrangementFrame()
       if (!hasContinuationCoverage(runtime, latestFrame, true) || runtime.sessionFault.error !== undefined || !stillCurrent()
         || active !== previousSession || !playing) {
         parameterReplacement = undefined
@@ -1931,7 +1953,7 @@ export const createPortableBrowserPlaybackController = (input: {
   // rendered position, reconcile the notes sounding at the seam against the schedule they started in, then prepare,
   // install and publish at exactly that frame on the same core. A publication that is refused or late is a failed
   // adoption that a resubmit retries; what the session cannot carry yet is a rebuild.
-  const adoptLive = async (): Promise<PortableAdoptionResult> => {
+  const adoptLive = async (loop: AdoptionLoop): Promise<PortableAdoptionResult> => {
     while (refreshPromise) await refreshPromise
     const session = active
     const audioContext = input.getAudioContext()
@@ -1955,8 +1977,11 @@ export const createPortableBrowserPlaybackController = (input: {
     const publishing = Promise.withResolvers<PortableAdoptionResult>()
     adopting = true
     try {
-      const compilation = await compileSnapshot({ ...transport, state: "playing", playheadSec: positionFrame / sampleRate },
-        { liveAdoption: true })
+      // A run keeps its loop off while the playhead is at or past the loop's end, as a start would.
+      const arrangementNow = arrangementFrame()
+      const compilation = await compileSnapshot({
+        ...transport, ...effectiveLoopForStart(loop, arrangementNow, sampleRate), state: "playing", playheadSec: arrangementNow / sampleRate,
+      }, { liveAdoption: true })
       if (!current()) return "unavailable"
       // Audio clips, tracks, instrument kinds, assets, effect structure and warped audio under a tempo edit are not
       // carried at a seam yet; those still rebuild.
@@ -1969,11 +1994,12 @@ export const createPortableBrowserPlaybackController = (input: {
       await Promise.all(liveInstrumentSends)
       if (!current()) return "unavailable"
       const folded = withAcceptedLiveSynthValues(next, previous, activeSnapshot ?? previous)
-      const compileFrom = (frame: number, horizonFrames: number) => preparedSession(
-        { ...folded, revision: revision + 1, transport: { ...folded.transport, playheadSec: frame / sampleRate } },
-        sampleRate, epoch, projectGeneration, horizonFrames / sampleRate, 1, activePreparedStretchAssets, undefined, activeOrdinaryDescriptors)
+      // The schedule plays the arrangement from `arrangementAt` at raw frame `rawFrame`, with the loop as given.
+      const compileFrom = (rawFrame: number, arrangementAt: number, scheduleLoop: AdoptionLoop, horizonFrames: number) => preparedSession(
+        { ...folded, revision: revision + 1, transport: { ...folded.transport, ...scheduleLoop, playheadSec: arrangementAt / sampleRate } },
+        sampleRate, epoch, projectGeneration, horizonFrames / sampleRate, 1, activePreparedStretchAssets, undefined, activeOrdinaryDescriptors, rawFrame)
       // The graph does not depend on the origin, so it is prepared first and the seam is chosen after that round trip.
-      const provisional = compileFrom(positionFrame, range.endFrame - positionFrame)
+      const provisional = compileFrom(positionFrame, arrangementNow, folded.transport, range.endFrame - positionFrame)
       if (!provisional.supported) return "rebuild"
       await session.prepareGraph(provisional.graph)
       if (!current()) return "unavailable"
@@ -1981,11 +2007,24 @@ export const createPortableBrowserPlaybackController = (input: {
       const seamFrame = positionFrame + Math.round(adoptionSeamLeadSec * sampleRate)
       const keepsVoices = (trackId: string) => previous.mixer.fx.trackFx?.[trackId]?.instrument?.instanceId
         === folded.mixer.fx.trackFx?.[trackId]?.instrument?.instanceId
+      // Raw frames run on through a loop, so the seam's arrangement position is rarely its raw frame. The schedule is
+      // compiled in raw frames: its loop is shifted by the difference, and the loop is off for the run when the
+      // arrangement position at the seam is at or past the loop's end.
+      const seamArrangement = arrangementFrameAt(positionSegments, seamFrame)
+      const deltaFrames = seamFrame - seamArrangement
+      const runLoop = effectiveLoopForStart(folded.transport, seamArrangement, sampleRate)
+      const scheduleLoop: AdoptionLoop = {
+        loopEnabled: runLoop.loopEnabled,
+        loopStartSec: runLoop.loopStartSec + deltaFrames / sampleRate,
+        loopEndSec: runLoop.loopEndSec + deltaFrames / sampleRate,
+      }
+      // The recording refresh reads raw frames as arrangement frames.
+      if (recording && deltaFrames !== 0) return failed()
       // The window shrinks until the schedule fits what the worklet installs; the next refresh extends it. A seam too
       // close to the end of the schedule, or a graph that depends on the origin, leaves nothing to publish.
       const fitted = (() => {
         for (let horizonFrames = range.endFrame - seamFrame; horizonFrames > leadFrames; horizonFrames = Math.floor(horizonFrames / 2)) {
-          const compiled = compileFrom(seamFrame, horizonFrames)
+          const compiled = compileFrom(seamFrame, seamArrangement, scheduleLoop, horizonFrames)
           if (!compiled.supported || JSON.stringify(compiled.graph) !== JSON.stringify(provisional.graph)) return undefined
           const reconciled = reconcileAtSeam({ previous: schedule, next: compiled.schedule, seamFrame, keepsVoices })
           if (reconciled.events.length <= maxScheduleEvents) return { candidate: compiled, adopted: reconciled }
@@ -2006,7 +2045,16 @@ export const createPortableBrowserPlaybackController = (input: {
         // the seam, which the next reconcile needs to know that voice sounds.
         activeFrameSchedule = candidate.schedule
         activeScheduleRange = candidate.scheduleRange
-        activeSnapshot = { ...folded, revision: candidate.graph.revision }
+        activeSnapshot = {
+          ...folded,
+          revision: candidate.graph.revision,
+          transport: { ...folded.transport, loopEnabled: runLoop.loopEnabled },
+        }
+        activeTransport = { ...transport, loopEnabled: runLoop.loopEnabled, loopStartSec: runLoop.loopStartSec, loopEndSec: runLoop.loopEndSec }
+        positionSegments = [
+          ...positionSegments.slice(positionSegmentIndex(positionSegments, positionFrame)),
+          { fromFrame: seamFrame, loop: loopFramesForTransport(scheduleLoop, sampleRate), deltaFrames },
+        ]
         return "adopted"
       }, (): PortableAdoptionResult => {
         // A refusal, or a publication that came too late, leaves the worklet on the revision it plays; so does the session.
@@ -2028,11 +2076,12 @@ export const createPortableBrowserPlaybackController = (input: {
   }
 
   // At most one adoption runs and one waits; the waiting one compiles when it starts, so it carries the newest edit.
-  const adoptQueued = (): Promise<PortableAdoptionResult> => {
+  const adoptQueued = (loop: AdoptionLoop): Promise<PortableAdoptionResult> => {
+    latestLoop = loop
     if (adoptionQueued) return adoptionQueued
     const run = adoptionTail.then(() => {
       adoptionQueued = undefined
-      return adoptLive()
+      return adoptLive(latestLoop)
     })
     adoptionQueued = run
     adoptionTail = run.catch(() => undefined)
@@ -2053,14 +2102,14 @@ export const createPortableBrowserPlaybackController = (input: {
     adoptionRetry = { resubmits, wait: Math.min(2 ** resubmits, 16 * (resubmits + 1)) }
   }
 
-  const adoptSchedule = async (): Promise<PortableAdoptionResult> => {
-    const result = await adoptQueued()
+  const adoptSchedule = async (loop: AdoptionLoop): Promise<PortableAdoptionResult> => {
+    const result = await adoptQueued(loop)
     settleAdoption(result, 0)
     return result
   }
 
   const resubmitAdoption = async (resubmits: number) => {
-    const result = await adoptQueued()
+    const result = await adoptQueued(latestLoop)
     settleAdoption(result, resubmits + 1)
     if (result !== "failed") input.onAdoptionResubmitted?.(result)
   }
@@ -2146,6 +2195,8 @@ export const createPortableBrowserPlaybackController = (input: {
     try {
       await session.setTransport(epoch, false, Math.round(playheadSec * context.sampleRate))
       positionFrame = Math.round(playheadSec * context.sampleRate)
+      // The transport now stands at the arrangement frame itself.
+      positionSegments = []
       if (active === session) playing = false
     } catch (error) {
       if (active === session) {
@@ -2589,7 +2640,7 @@ export const createPortableBrowserPlaybackController = (input: {
     currentPositionSec: () => {
       const context = input.getAudioContext()
       return context
-        ? reportedPositionFrame(positionFrame, activeTransport, context.sampleRate) / context.sampleRate
+        ? arrangementFrame() / context.sampleRate
         : undefined
     },
   }

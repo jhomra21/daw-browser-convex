@@ -1875,7 +1875,7 @@ test.each<[string, SynthParamsUpdate]>([
     const next = p1Synth(p1Initial, update)
     expect(await f.apply(f.edit(next))).toBe('applied')
     await f.announce('synth', next)
-    expect(await f.controller.adoptSchedule()).toBe('adopted')
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
     expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes }).toEqual({ rebuilds: 0, graphs: 2, notes: [] })
     expect(f.sessionStructure()).toBe(f.structureOf(next))
   } finally { f.controller.dispose() }
@@ -1914,7 +1914,7 @@ test('P1 live then non-live Synth edits in one gesture keep the last live state 
       .toEqual({ results: ['applied', 'applied', 'applied', 'applied'], batches: 4, rebuilds: 0, prepared: live })
     expect(await f.apply(f.edit(after))).toBe('applied')
     await f.announce('synth', after)
-    expect(await f.controller.adoptSchedule()).toBe('adopted')
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
     expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes }).toEqual({ rebuilds: 0, graphs: 2, notes: [] })
     expect(f.sessionStructure()).toBe(f.structureOf(after))
     expect(f.controller.preparedInstrument('synth')).toEqual(after)
@@ -1933,7 +1933,7 @@ test.each<[string, TrackInstrumentParams, TrackInstrumentParams]>([
   try {
     await f.announce('synth', next)
     f.setProjected(next)
-    expect(await f.controller.adoptSchedule()).toBe('adopted')
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
     expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes }).toEqual({ rebuilds: 0, graphs: 2, notes: [] })
     expect(f.controller.preparedInstrument('synth')).toEqual(next)
   } finally { f.controller.dispose() }
@@ -1958,7 +1958,7 @@ test('P1 a Sampler zone edit and a sample swap with real buffers are adopted on 
     for (const next of steps) {
       await f.announce('synth', next)
       f.setProjected(next)
-      results.push(await f.controller.adoptSchedule())
+      results.push(await f.controller.adoptSchedule(noLoop))
     }
     expect({ results, rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes, registered: f.registered() })
       .toEqual({ results: ['adopted', 'adopted', 'adopted'], rebuilds: 0, graphs: 4, notes: [], registered: ['asset-a', 'asset-b'] })
@@ -1972,10 +1972,10 @@ test('P1 a failed adoption of an instrument edit keeps the playing graph, never 
     const next = p1Synth(p1Initial, { polyphony: 4 })
     expect(await f.apply(f.edit(next))).toBe('applied')
     await f.announce('synth', next)
-    expect(await f.controller.adoptSchedule()).toBe('failed')
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('failed')
     expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes }).toEqual({ rebuilds: 0, graphs: 1, notes: [] })
     expect(f.controller.isActive()).toBeTrue()
-    expect(await f.controller.adoptSchedule()).toBe('adopted')
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
     expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length }).toEqual({ rebuilds: 0, graphs: 2 })
     expect(f.sessionStructure()).toBe(f.structureOf(next))
   } finally { f.controller.dispose() }
@@ -1987,10 +1987,10 @@ test('M4 an instrument compile that throws keeps the playing graph, never rebuil
     const next = p1Synth(p1Initial, { polyphony: 4 })
     expect(await f.apply(f.edit(next))).toBe('applied')
     await f.announce('synth', next)
-    expect(await f.controller.adoptSchedule()).toBe('failed')
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('failed')
     expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes }).toEqual({ rebuilds: 0, graphs: 1, notes: [] })
     expect(f.controller.isActive()).toBeTrue()
-    expect(await f.controller.adoptSchedule()).toBe('adopted')
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
     expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length }).toEqual({ rebuilds: 0, graphs: 2 })
   } finally { f.controller.dispose() }
 })
@@ -2001,7 +2001,7 @@ test('UD 8 a transient staging failure is retried at the next block boundary and
     const next = p1Synth(p1Initial, { polyphony: 4 })
     expect(await f.apply(f.edit(next))).toBe('applied')
     await f.announce('synth', next)
-    expect(await f.controller.adoptSchedule()).toBe('failed')
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('failed')
     expect(f.graphs.length).toBe(1)
     await f.report()
     await Bun.sleep(0)
@@ -2019,7 +2019,7 @@ test('UD 8 a persistent staging failure stops after 8 resubmits with a defect lo
     const next = p1Synth(p1Initial, { polyphony: 4 })
     expect(await f.apply(f.edit(next))).toBe('applied')
     await f.announce('synth', next)
-    expect(await f.controller.adoptSchedule()).toBe('failed')
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('failed')
     // Waits grow as min(2^r, 16(r+1)) reports: 1, 2, 4, ... 128 over eight resubmits.
     await f.report(300)
     await Bun.sleep(0)
@@ -2029,7 +2029,7 @@ test('UD 8 a persistent staging failure stops after 8 resubmits with a defect lo
     expect(logged.filter(line => line.startsWith('error')).length).toBe(1)
     await f.report(300)
     expect(f.refused()).toBe(9)
-    expect(await f.controller.adoptSchedule()).toBe('adopted')
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
     expect({ graphs: f.graphs.length, rebuilds: f.rebuilds() }).toEqual({ graphs: 2, rebuilds: 0 })
     expect(f.sessionStructure()).toBe(f.structureOf(next))
   } finally { warn.mockRestore(); error.mockRestore(); f.controller.dispose() }
@@ -2104,6 +2104,7 @@ test('B6f ensurePrepared moves a live paused session to a newer playhead instead
 })
 
 // B6f5: a playing portable session adopts mixer and automation edits on the same core, as native does.
+const noLoop: Pick<LivePlaybackTransport, 'loopEnabled' | 'loopStartSec' | 'loopEndSec'> = { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 }
 const b6f5Fingerprint = (snapshot: { revision: number; transport: LivePlaybackTransport }) =>
   JSON.stringify({ ...snapshot, revision: undefined, transport: { ...snapshot.transport, playheadSec: undefined, state: undefined } })
 const b6f5Compilation = (transport: LivePlaybackTransport, volume: number, clipDuration = 1, masterUtility?: UtilityParamsEnvelope) => {
@@ -2143,9 +2144,9 @@ test('B6f5 a playing portable session adopts a mixer edit on the same session an
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     const before = calls.length
     volume = 0.5
-    const adopted = await controller.adoptSchedule()
+    const adopted = await controller.adoptSchedule(noLoop)
     // The accepted revision is what the session plays now: the same desired state again is unchanged, not a second publish.
-    const again = await controller.adoptSchedule()
+    const again = await controller.adoptSchedule(noLoop)
     expect({ adopted, again, sessions, calls: calls.slice(before), publishes: publishes.slice(1), gain: b6f5Gain(graphs.at(-1)), revision: graphs.at(-1)?.revision })
       .toEqual({ adopted: 'adopted', again: 'unchanged', sessions: 1, calls: ['prepare-graph', 'install-schedule:1', 'publish-graph'],
         publishes: [{ revision: 2, options: { requireContinuity: true, publicationFrame: 12_000 } }], gain: 0.5, revision: 2 })
@@ -2170,12 +2171,12 @@ test('B6f5 a refused adoption answers failed and keeps the session revision; a M
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     volume = 0.5
-    const refused = await controller.adoptSchedule()
+    const refused = await controller.adoptSchedule(noLoop)
     refuse = false
-    const retried = await controller.adoptSchedule()
+    const retried = await controller.adoptSchedule(noLoop)
     const before = calls.length
     clipDuration = 2
-    const structural = await controller.adoptSchedule()
+    const structural = await controller.adoptSchedule(noLoop)
     expect({ refused, retried, structural, revisions: publishes.slice(1).map((entry) => entry.revision), afterStructural: calls.slice(before),
       active: controller.isActive() })
       .toEqual({ refused: 'failed', retried: 'adopted', structural: 'adopted', revisions: [2, 2, 3],
@@ -2224,7 +2225,7 @@ test('B6f5 R2 a live send crossing an adoption publish never faults the session'
     try {
       expect(await controller.start(compilation().snapshot.transport)).toBe('started')
       volume = 0.5
-      const adoption = controller.adoptSchedule()
+      const adoption = controller.adoptSchedule(noLoop)
       for (let turn = 0; turn < 50 && publishes.length < 2; turn += 1) await Promise.resolve()
       const live = controller.liveProcessorControl.flush({ instanceId: 'utility-b6f5', values: [{ parameterId: 'utility.gainDb', value: 1 }] })
       for (let turn = 0; turn < 50; turn += 1) await Promise.resolve()
@@ -2250,7 +2251,7 @@ test('B6f5 m1 a live synth value accepted during an adoption compile is in the c
   const f = await p1Fixture({ holdAdoptionCompile: hold.promise })
   try {
     f.setProjected(p1Synth(p1Initial, { oscillators: [{ level: 0.3 }] }))
-    const adoption = f.controller.adoptSchedule()
+    const adoption = f.controller.adoptSchedule(noLoop)
     for (let turn = 0; turn < 50; turn++) await Promise.resolve()
     const live = await f.flush(f.allocate(p1Synth(p1Initial, { gain: 0.125 })))
     hold.resolve()
@@ -2265,7 +2266,7 @@ test('B6f5 m1 a live synth send while the adoption prepares waits for the publis
   const f = await p1Fixture({ holdPrepare: hold.promise })
   try {
     f.setProjected(p1Synth(p1Initial, { oscillators: [{ level: 0.3 }] }))
-    const adoption = f.controller.adoptSchedule()
+    const adoption = f.controller.adoptSchedule(noLoop)
     for (let turn = 0; turn < 50; turn++) await Promise.resolve()
     const live = f.flush(f.allocate(p1Synth(p1Initial, { gain: 0.125 })))
     for (let turn = 0; turn < 50; turn++) await Promise.resolve()
@@ -2296,9 +2297,9 @@ test('B6f5 adoptions coalesce to one in flight and one queued that carries the n
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     volume = 0.1
-    const first = controller.adoptSchedule()
+    const first = controller.adoptSchedule(noLoop)
     for (let turn = 0; turn < 20 && adoptionCompiles === 0; turn += 1) await Promise.resolve()
-    const queued = [0.2, 0.3, 0.4, 0.5].map((next) => { volume = next; return controller.adoptSchedule() })
+    const queued = [0.2, 0.3, 0.4, 0.5].map((next) => { volume = next; return controller.adoptSchedule(noLoop) })
     hold.resolve()
     const outcomes = await Promise.all([first, ...queued])
     expect({ outcomes, adoptionCompiles, gains: graphs.slice(1).map(b6f5Gain), publishes: publishes.length - 1 })
@@ -2330,7 +2331,7 @@ test('B6f5 R6 a schedule refresh after an adoption continues the adopted revisio
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     volume = 0.5
-    expect(await controller.adoptSchedule()).toBe('adopted')
+    expect(await controller.adoptSchedule(noLoop)).toBe('adopted')
     sessions[0]?.emitPosition(80_000)
     expect({ refresh: await controller.refreshSchedule(), faults, sessions: sessionIndex, refreshedRevision: graphs.at(-1)?.revision, gain: b6f5Gain(graphs.at(-1)) })
       .toEqual({ refresh: 'started', faults: [], sessions: 2, refreshedRevision: 2, gain: 0.5 })
@@ -2395,7 +2396,7 @@ test('B6f5 step5b R6 a recording refresh after a structural edit skips without a
     added = b6f5AddedSynth
     sessions[0]?.emitPosition(80_000)
     const refresh = await controller.refreshSchedule()
-    const follow = await controller.adoptSchedule()
+    const follow = await controller.adoptSchedule(noLoop)
     expect({ refresh, follow, faults, recording: controller.isRecording(), playing: controller.isActive(), sessions: sessions.length,
       ended: calls.filter((call) => call === 'dispose' || call === 'recording-capture-cancel') })
       .toEqual({ refresh: 'unavailable', follow: 'rebuild', faults: [], recording: true, playing: true, sessions: 1, ended: [] })
@@ -2426,7 +2427,7 @@ test('B6f5 step5b R6 a normal refresh after a structural edit skips without a fa
     added = b6f5AddedAudio
     sessions[0]?.emitPosition(80_000)
     const refresh = await controller.refreshSchedule()
-    const follow = await controller.adoptSchedule()
+    const follow = await controller.adoptSchedule(noLoop)
     expect({ refresh, follow, faults, playing: controller.isActive(), sessions: sessions.length })
       .toEqual({ refresh: 'unavailable', follow: 'rebuild', faults: [], playing: true, sessions: 1 })
     controller.dispose()
@@ -2471,7 +2472,7 @@ test('B6f5 D6 an adoption during portable recording keeps the take and its captu
     block(1)
     block(2)
     volume = 0.5
-    const adoption = controller.adoptSchedule()
+    const adoption = controller.adoptSchedule(noLoop)
     for (let turn = 0; turn < 50 && publishes.length < 2; turn += 1) await Promise.resolve()
     // A block the worklet captures while the publish is in flight, then one after it answered.
     block(3)
@@ -2518,12 +2519,10 @@ test('B6f5 step5b R6 without a content fingerprint a Timeline revision bump stil
 // AE-08 phase 8 step 1: failure-first witnesses. Each asserts the behaviour required once the phase lands and is
 // `test.failing` until its implementing step flips it to `test`. The note and sequence ids are the design note's.
 type W8Note = NonNullable<RuntimeTrack['clips'][number]['midi']>['notes'][number]
-type W8Loop = Pick<LivePlaybackTransport, 'loopEnabled' | 'loopStartSec' | 'loopEndSec'>
-type W8Adopt = (loop: W8Loop) => Promise<PortableAdoptionResult>
+type W8Loop = typeof noLoop
 const w8Note = (id: string, beat: number, length = 1): W8Note => ({ id, beat, length, pitch: 60, velocity: 0.8 })
 const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loop?: W8Loop; audioStartSec?: number; clipSec?: number } = {}, options: { refuse?: () => boolean } = {}) => {
   const state = { bpm: initial.bpm ?? 120, notes: initial.notes ?? [w8Note('note', 0)], audioStartSec: initial.audioStartSec, warped: false }
-  const noLoop: W8Loop = { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 }
   const calls: string[] = []
   const graphs: AudioCoreGraphSnapshot[] = []
   const publishes: B6f5Publish[] = []
@@ -2562,7 +2561,7 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
     } },
   })
   const transport: LivePlaybackTransport = { ...compilation().snapshot.transport, ...(initial.loop ?? noLoop) }
-  const adopt: W8Adopt = controller.adoptSchedule
+  const adopt = controller.adoptSchedule
   const noteEvents = (schedule: PortableFrameSchedule | undefined, type: 'note-on' | 'note-off') =>
     (schedule?.events ?? []).flatMap((event) => event.type === type ? [{ noteId: event.noteId, frame: event.frame }] : [])
   const position = (frame: number, epoch = 1, sequence = 1) => positionListener?.({ version: 2, type: 'transport-position', sessionId: 1, epoch, sequence, running: true, frame })
@@ -2577,7 +2576,7 @@ const w8SourceCalls = (calls: readonly string[]) => calls.filter((call) => call.
 
 // W-F20a: a loop-bound edit while playing is adopted. Today the compile receives the old loop, both snapshots match,
 // and the follow marks the edit applied without installing anything.
-test.failing('W-F20a a loop edit while playing installs and publishes a schedule for the new loop', async () => {
+test('W-F20a a loop edit while playing installs and publishes a schedule for the new loop', async () => {
   const f = await w8Fixture({ loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
@@ -2588,6 +2587,83 @@ test.failing('W-F20a a loop edit while playing installs and publishes a schedule
       publicationFrame: JSON.stringify(f.publishes.at(-1)?.options).includes('publicationFrame'),
       oldPeriodNoteOn: f.noteEvents(installed.at(-1), 'note-on').some((event) => event.frame === 48_000) })
       .toEqual({ result: 'adopted', sessions: 1, calls: ['prepare-graph', 'install-schedule', 'publish-graph'], publicationFrame: true, oldPeriodNoteOn: false })
+  } finally { f.controller.dispose() }
+})
+
+// W-F20c: after the transport wrapped, raw frames are ahead of the arrangement. A loop edit installs its loop shifted by
+// that difference: the schedule is the one a start at the seam's arrangement position would compile, moved by the
+// difference; positions before the seam read the old loop and positions from it on the new one, with no jump; a refresh
+// then starts from the arrangement position.
+test('W-F20c a loop edit after a wrap maps positions across the seam, compiles the loop shifted and refreshes from the arrangement position', async () => {
+  const notes = [0, 1, 2, 3].map((beat) => w8Note(`n${beat}`, beat, 0.25))
+  const edited: W8Loop = { loopEnabled: true, loopStartSec: 0.5, loopEndSec: 1.5 }
+  const f = await w8Fixture({ clipSec: 40, notes, loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } })
+  const reference = await w8Fixture({ clipSec: 40, notes, loop: edited })
+  const sec = (frame: number) => frame / 48_000
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    expect(await reference.controller.start({ ...reference.transport, playheadSec: 0.5 })).toBe('started')
+    f.position(60_000, 1, 1)
+    expect(await f.adopt(edited)).toBe('adopted')
+    const installed = f.installs.at(-1)
+    const delta = 48_000
+    const before = (frame: number) => frame < 1_300_000
+    f.position(66_000, 1, 2)
+    const old = f.controller.currentPositionSec()
+    f.position(72_000, 1, 3)
+    const atSeam = f.controller.currentPositionSec()
+    f.position(125_000, 1, 4)
+    const wrapped = f.controller.currentPositionSec()
+    expect({ origin: installed?.timeOrigin, old, atSeam, wrapped,
+      noteOns: f.noteEvents(installed, 'note-on').map((event) => event.frame).filter(before),
+      referenceNoteOns: f.noteEvents(reference.installs[0], 'note-on').map((event) => event.frame + delta).filter(before) })
+      .toEqual({ origin: { timelineSec: 0.5, frame: 72_000 }, old: sec(18_000), atSeam: sec(24_000), wrapped: sec(29_000),
+        noteOns: f.noteEvents(reference.installs[0], 'note-on').map((event) => event.frame + delta).filter(before),
+        referenceNoteOns: f.noteEvents(installed, 'note-on').map((event) => event.frame).filter(before) })
+    f.position(1_250_000, 1, 5)
+    expect(await f.controller.refreshSchedule()).toBe('started')
+    expect({ sessions: f.sessions(), origin: f.installs.at(-1)?.timeOrigin, position: f.controller.currentPositionSec() })
+      .toEqual({ sessions: 2, origin: { timelineSec: sec(50_000), frame: 50_000 }, position: sec(50_000) })
+  } finally { f.controller.dispose(); reference.controller.dispose() }
+})
+
+// W-F20d: a loop repeats audio clips, whose sources a seam does not replace, so the edit is refused (a rebuild), never
+// adopted over the old sources.
+test('W-F20d a loop edit with an audio clip present is refused and installs nothing', async () => {
+  const f = await w8Fixture({ audioStartSec: 0, loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    const before = f.calls.length
+    const result: string = await f.adopt({ loopEnabled: true, loopStartSec: 0, loopEndSec: 2 })
+    expect({ result, calls: f.calls.slice(before).filter((call) => call !== 'mark-active') }).toEqual({ result: 'rebuild', calls: [] })
+  } finally { f.controller.dispose() }
+})
+
+// W-F20e: loop off and on while playing stay on one session. Off after a wrap continues linearly from the arrangement
+// position; a loop whose end the playhead has passed stays off for the run, as a start would (its adoption installs a
+// linear schedule); a wider loop turns on.
+test('W-F20e toggling the loop while playing keeps the session, continues linearly and keeps a passed loop off', async () => {
+  const f = await w8Fixture({ clipSec: 40, loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } })
+  const sec = (frame: number) => frame / 48_000
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    f.position(60_000, 1, 1)
+    const off = await f.adopt(f.noLoop)
+    f.position(72_000, 1, 2)
+    const atSeam = f.controller.currentPositionSec()
+    f.position(100_000, 1, 3)
+    const linear = f.controller.currentPositionSec()
+    const passed = await f.adopt({ loopEnabled: true, loopStartSec: 0, loopEndSec: 1 })
+    f.position(130_000, 1, 4)
+    const stillLinear = f.controller.currentPositionSec()
+    const wide = await f.adopt({ loopEnabled: true, loopStartSec: 0, loopEndSec: 2 })
+    f.position(142_000, 1, 5)
+    const atWideSeam = f.controller.currentPositionSec()
+    f.position(150_000, 1, 6)
+    const wrapped = f.controller.currentPositionSec()
+    expect({ off, atSeam, linear, passed, stillLinear, wide, atWideSeam, wrapped, sessions: f.sessions(), disposed: f.calls.includes('dispose') })
+      .toEqual({ off: 'adopted', atSeam: sec(24_000), linear: sec(52_000), passed: 'adopted', stillLinear: sec(82_000), wide: 'adopted',
+        atWideSeam: sec(94_000), wrapped: sec(6_000), sessions: 1, disposed: false })
   } finally { f.controller.dispose() }
 })
 
@@ -2714,11 +2790,11 @@ test('W-FB-1 a refused or structural adoption is failed or adopted and never ask
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     volume = 0.5
-    const refused = await controller.adoptSchedule()
+    const refused = await controller.adoptSchedule(noLoop)
     refuse = false
-    const retried = await controller.adoptSchedule()
+    const retried = await controller.adoptSchedule(noLoop)
     clipDuration = 2
-    const structural: string = await controller.adoptSchedule()
+    const structural: string = await controller.adoptSchedule(noLoop)
     expect({ refused, retried, structuralRebuild: structural === 'rebuild', sessions, disposed: calls.includes('dispose') })
       .toEqual({ refused: 'failed', retried: 'adopted', structuralRebuild: false, sessions: 1, disposed: false })
   } finally { controller.dispose() }

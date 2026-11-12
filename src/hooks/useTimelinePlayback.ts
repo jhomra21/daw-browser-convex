@@ -1552,10 +1552,12 @@ export function useTimelinePlayback(
       // A playing portable session adopts what it carries live, as native does. Only followPortableEdits asks with no
       // transport intent of its own while one plays; a seek or structural rebuild names its intent and rebuilds.
       if (options || !portableBrowserPlayback.isActive() || !untrack(isPlaying)) return applyTimelineSchedule(tracks, options)
+      // The key and the loop are read together, so both describe the state this adoption answers for.
       const key = readDesiredScheduleFingerprint(tracks)
+      const { isActive, start, end } = getLoopParams()
       const transportIntent = transportIntentToken
       const lifecycle = nativeLifecycleToken
-      const outcome = await portableBrowserPlayback.adoptSchedule()
+      const outcome = await portableBrowserPlayback.adoptSchedule({ loopEnabled: isActive, loopStartSec: start, loopEndSec: end })
       if (!mounted || transportIntent !== transportIntentToken || lifecycle !== nativeLifecycleToken) return
       // A rebuild would end the take: while recording, the session keeps what it plays, as before adoption.
       if (outcome === "rebuild" && !portableBrowserPlayback.isRecording()) {

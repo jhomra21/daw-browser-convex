@@ -12,7 +12,7 @@ export const vst3TrustAcknowledgementStorageKey = "daw:vst3-trust-acknowledged";
 
 export type NativeVst3PlaybackFaultKind = "launch-authorization-required";
 
-const nativeVst3LaunchAuthorizationRequiredMessage =
+export const nativeVst3LaunchAuthorizationRequiredMessage =
   "A native VST3 attachment is stale or no longer trusted.";
 
 export const classifyNativeVst3PlaybackFault = (

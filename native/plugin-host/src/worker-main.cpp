@@ -286,10 +286,10 @@ int main(const int argc, char* argv[]) {
       static_cast<void>(transport->PublishDiagnostic({
         .kind = kind,
         .value = kind == daw::plugin_host::WorkerDiagnosticKind::kFault
-          ? daw::plugin_host::EncodeWorkerFault(
-            notification.kind == daw::plugin_host::WorkerNotificationKind::kFault
-              ? WorkerFaultOrigin::kWorkerNotification : WorkerFaultOrigin::kUnknownWorkerNotification
-          ) : notification.value,
+          ? (notification.kind == daw::plugin_host::WorkerNotificationKind::kFault
+              ? daw::plugin_host::EncodeFaultNotification(notification.value)
+              : daw::plugin_host::EncodeWorkerFault(WorkerFaultOrigin::kUnknownWorkerNotification))
+          : notification.value,
         .parameter_id = notification.parameter_id,
         .normalized_value = notification.normalized_value,
       }));

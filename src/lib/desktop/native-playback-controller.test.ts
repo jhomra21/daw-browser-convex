@@ -6,6 +6,7 @@ import schema from "../../../convex/schema"
 import { createRenderEffect, createRoot, createSignal, untrack } from "solid-js"
 
 import { createNativePlaybackController, nativePlaybackFaultText, type NativePlaybackFault } from "./native-playback-controller"
+import { classifyNativeVst3PlaybackFault, nativeVst3LaunchAuthorizationRequiredMessage } from "~/lib/external-plugin-ui"
 import { createNativeProcessorStateOwner } from "./native-processor-state-owner"
 import { vstInstanceFailed } from "./vst-instance-failures"
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
@@ -1147,6 +1148,31 @@ describe("DV01 STEP7 frozen inputs and cleanup witnesses", () => {
       await step7Turns()
       expect(f.fixture.graphPayloads.length).toBe(before + 1)
     } finally { await f.close() }
+  })
+
+  // The worker's trust gate refusing its launch record is not a crash: it opens the existing authorization flow.
+  test("a refused worker launch record goes to the trust flow and never marks the device failed", async () => {
+    const fixture = createBridge("runtime-revision-progress")
+    const faults: NativePlaybackFault[] = []
+    const snapshotInput = input()
+    const controller = createObservedController({
+      bridge: fixture.bridge, getProjectId: () => "local_project",
+      reportFault: fault => { faults.push(fault) },
+      compileSnapshot: async transport => {
+        const compiled = compileLivePlaybackSnapshot({ ...snapshotInput, transport })
+        return compiled.supported ? { ...compiled, snapshot: { ...compiled.snapshot, nativeExternalAttachmentPlan: nativeAttachmentPlan } } : compiled
+      },
+    })
+    const instanceId = nativeAttachmentPlan.attachments[0]!.instanceId
+    try {
+      expect(await controller.start(snapshotInput.transport)).toBe("started")
+      const before = fixture.graphPayloads.length
+      fixture.emitVstInstanceEvent({ kind: "launch-not-trusted", instanceId })
+      await step7Turns()
+      expect({ faults, failed: vstInstanceFailed(instanceId), published: fixture.graphPayloads.length - before, active: controller.isActive() })
+        .toEqual({ faults: [{ kind: "session-stopped", message: nativeVst3LaunchAuthorizationRequiredMessage }], failed: false, published: 0, active: true })
+      expect(classifyNativeVst3PlaybackFault(nativeVst3LaunchAuthorizationRequiredMessage)).toBe("launch-authorization-required")
+    } finally { await controller.dispose() }
   })
 
   test("a plug-in fault marks only that instance failed and publishes nothing", async () => {

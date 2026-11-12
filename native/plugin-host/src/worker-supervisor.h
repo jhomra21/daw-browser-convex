@@ -342,6 +342,8 @@ enum class WorkerFaultOrigin : std::uint32_t {
   kUnknownWorkerNotification = 13,
   kOfflineCompletionFailure = 14,
   kControlIoFailure = 15,
+  // The worker refused the launch record: our trust gate said no, whatever the plug-in is.
+  kLaunchNotTrusted = 16,
 };
 
 constexpr std::uint32_t EncodeWorkerFault(
@@ -351,6 +353,12 @@ constexpr std::uint32_t EncodeWorkerFault(
 ) noexcept {
   return (static_cast<std::uint32_t>(origin) & 0xffU)
     | ((childCode & 0xffU) << 8U) | ((childStatus & 0xffU) << 16U);
+}
+
+// A fault notification raised inside the worker names its own origin in `value`; one that names none came from the
+// plug-in's component callbacks.
+constexpr std::uint32_t EncodeFaultNotification(const std::uint32_t value) noexcept {
+  return value != 0 ? value : EncodeWorkerFault(WorkerFaultOrigin::kWorkerNotification);
 }
 
 // Only the plug-in's own process or API is the plug-in's fault: the child exiting or being killed,

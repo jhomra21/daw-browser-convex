@@ -433,8 +433,10 @@ const reviseGraphExternalLatency = (
 // Bits 0..7 of a fault value are the native WorkerFaultOrigin (native/plugin-host/src/worker-supervisor.h).
 // Only the plug-in's own process or API is the plug-in's fault: the child exiting or being killed (1, 2),
 // setup failing (8, 9), processing failing (10, 11) and a failed component restart (12). Transport,
-// dispatch, callback-miss, startup, control IO and unknown-notification origins are ours.
+// dispatch, callback-miss, startup, control IO and unknown-notification origins are ours, and a refused launch
+// record (16) is the trust gate's: it goes to the trust flow, never to the device as a crash.
 const pluginFaultOrigins: ReadonlySet<number> = new Set([1, 2, 8, 9, 10, 11, 12])
+const launchNotTrustedOrigin = 16
 
 export const nativeVst3CoordinatorFailureOrigin = (
   code: NativeVst3CoordinatorFailureCode,
@@ -471,6 +473,7 @@ export const nativeVst3InstanceEvent = (
       return { kind: "latency", instanceId, latencyFrames: notification.value }
     case "fault":
       if (pluginFaultOrigins.has(notification.value & 0xff)) return { kind: "failed", instanceId }
+      if ((notification.value & 0xff) === launchNotTrustedOrigin) return { kind: "launch-not-trusted", instanceId }
       reportDefect({ source: "worker-fault", instanceId, detail: `origin ${notification.value & 0xff}` })
       return undefined
     case "miss":

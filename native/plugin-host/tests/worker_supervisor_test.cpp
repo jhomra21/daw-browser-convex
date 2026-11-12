@@ -492,9 +492,16 @@ int main(int argc, char* argv[]) {
       WorkerFaultOrigin::kCallbackMissTermination, WorkerFaultOrigin::kStartupFailure,
       WorkerFaultOrigin::kStartupException, WorkerFaultOrigin::kUnknownWorkerNotification,
       WorkerFaultOrigin::kOfflineCompletionFailure, WorkerFaultOrigin::kControlIoFailure,
+      WorkerFaultOrigin::kLaunchNotTrusted,
     }) {
       if (!Check(!IsPluginFaultOrigin(EncodeWorkerFault(origin, 2, 9)), "our own origin was attributed to the plug-in")) return EXIT_FAILURE;
     }
+    // A fault notification that names no origin is the plug-in's; the worker's own trust refusal names its origin.
+    using daw::plugin_host::EncodeFaultNotification;
+    if (!Check(IsPluginFaultOrigin(EncodeFaultNotification(0)), "an unnamed fault notification was not the plug-in's")) return EXIT_FAILURE;
+    const auto untrusted = EncodeFaultNotification(EncodeWorkerFault(WorkerFaultOrigin::kLaunchNotTrusted));
+    if (!Check(!IsPluginFaultOrigin(untrusted) && (untrusted & 0xffU) == static_cast<std::uint32_t>(WorkerFaultOrigin::kLaunchNotTrusted),
+      "a refused launch record was attributed to the plug-in")) return EXIT_FAILURE;
   }
   auto invalidStartup = NoPluginStartup();
   invalidStartup.classId = "not-allowed";

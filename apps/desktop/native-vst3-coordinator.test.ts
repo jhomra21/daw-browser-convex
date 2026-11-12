@@ -1146,6 +1146,16 @@ test("host notifications reach the renderer as typed instance events and never e
   expect(defects.map((defect) => defect.source)).toEqual(["worker-fault", "worker-miss"])
 })
 
+// The worker's refusal of its launch record is our trust gate, not a crash: it reaches the renderer's trust flow.
+test("a refused worker launch record is its own event, not a plug-in failure and not a defect", () => {
+  const defects: NativeVst3Defect[] = []
+  const event = nativeVst3InstanceEvent({
+    kind: "fault", value: 16, graphRevision: 10, graphNodeId: 1n, instanceId: first.instanceId,
+  }, (defect) => { defects.push(defect) })
+  expect(event).toEqual({ kind: "launch-not-trusted", instanceId: first.instanceId })
+  expect(defects).toEqual([])
+})
+
 const hostEventFixture = () => {
   const sent: DesktopVstInstanceEvent[] = []
   const edits: unknown[] = []

@@ -60,8 +60,10 @@ export const desktopVstParameterEditPayloadSchema = z.object({
 }).strict()
 export type DesktopVstParameterEditPayload = z.infer<typeof desktopVstParameterEditPayloadSchema>
 
-// What a loaded plug-in instance tells the renderer. "failed" is only ever the plug-in's own fault.
+// What a loaded plug-in instance tells the renderer. "failed" is only ever the plug-in's own fault;
+// "launch-not-trusted" is the worker's trust gate refusing the launch record, which the trust flow resolves.
 export const desktopVstInstanceEventSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("launch-not-trusted"), instanceId: z.string().uuid() }).strict(),
   z.object({
     kind: z.literal("latency"),
     instanceId: z.string().uuid(),

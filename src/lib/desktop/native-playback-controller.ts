@@ -63,6 +63,7 @@ import type { RecordingTerminationCause } from "~/lib/recording/recording-diagno
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
 import type { DesktopBridge, NativeDeliveryReply, NativeProcessorPatchReply } from "~/types/desktop-bridge"
 import { clearVstInstanceFailures, markVstInstanceFailed } from "./vst-instance-failures"
+import { nativeVst3LaunchAuthorizationRequiredMessage } from "~/lib/external-plugin-ui"
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import {
   SYNTH_KIND_ID,
@@ -4419,6 +4420,9 @@ export const createNativePlaybackController = (input: {
     const generation = attachmentGeneration(event.instanceId)
     if (generation === undefined) return
     if (event.kind === "failed") return markVstInstanceFailed(event.instanceId)
+    // The worker's trust gate refused the launch record: not the plug-in's fault, so the existing trust flow (a rescan
+    // after the acknowledgement) resolves it and the device does not show a crash. The mixer keeps playing.
+    if (event.kind === "launch-not-trusted") return reportStopped(nativeVst3LaunchAuthorizationRequiredMessage, { retainPlayback: true })
     void (async () => {
       try {
         const result = await publishAttachmentLatency({ instanceId: event.instanceId, generation, latencyFrames: event.latencyFrames })

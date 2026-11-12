@@ -555,7 +555,8 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
   implementation_->midiMapping = nullptr;
   implementation_->hasMidiParameters = {};
   if (!IsTrustedLaunch(request.eligibility) || request.classId.size() != 32 || !ValidSetup(request.setup)) {
-    implementation_->notifications.push_back({.kind = WorkerNotificationKind::kFault, .message = "Worker launch record is not trusted.", .value = 0});
+    implementation_->notifications.push_back({.kind = WorkerNotificationKind::kFault, .message = "Worker launch record is not trusted.",
+      .value = EncodeWorkerFault(WorkerFaultOrigin::kLaunchNotTrusted)});
     return false;
   }
   const auto classId = VST3::UID::fromString(request.classId);

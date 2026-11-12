@@ -2210,6 +2210,40 @@ test('B6f5 R2 a live send crossing an adoption publish never faults the session'
   }
 })
 
+// Review m1: a live send made after the adoption compiled but before it publishes goes to the revision then playing. The
+// published configuration was compiled without it, so the controller records which revision each live value reached;
+// whether the core keeps live values across a revision is not observable from this layer.
+test('B6f5 m1 a live send during an adoption compile reaches the playing revision and is not repeated on the published one', async () => {
+  const calls: string[] = []
+  const graphs: AudioCoreGraphSnapshot[] = []
+  const publishes: B6f5Publish[] = []
+  const sent: number[] = []
+  const hold = Promise.withResolvers<void>()
+  let volume = 0.8
+  let adoptionCompiles = 0
+  const utility: UtilityParamsEnvelope = { version: 1, state: createDefaultUtilityParams() }
+  const base = b6f5Session(calls, graphs, publishes)
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async (transport, compileContext) => {
+      const value = volume
+      if (compileContext?.liveAdoption && ++adoptionCompiles === 1) await hold.promise
+      return b6f5Compilation(transport, value, 1, utility)
+    },
+    fingerprintSnapshot: b6f5Fingerprint,
+    getAudioContext: () => context, select: async () => selected,
+    backend: { createPlaybackSession: async () => ({ ...base, queueProcessorEvents: async (revision: number) => { sent.push(revision) } }) },
+  })
+  try {
+    expect(await controller.start(compilation().snapshot.transport)).toBe('started')
+    volume = 0.5
+    const adoption = controller.adoptSchedule()
+    for (let turn = 0; turn < 50 && adoptionCompiles === 0; turn += 1) await Promise.resolve()
+    const live = await controller.liveProcessorControl.flush({ instanceId: 'utility-b6f5', values: [{ parameterId: 'utility.gainDb', value: 1 }] })
+    hold.resolve()
+    expect({ adoption: await adoption, live: live.accepted, sent }).toEqual({ adoption: 'adopted', live: true, sent: [1] })
+  } finally { controller.dispose() }
+})
+
 test('B6f5 adoptions coalesce to one in flight and one queued that carries the newest edit', async () => {
   const calls: string[] = []
   const graphs: AudioCoreGraphSnapshot[] = []

@@ -7714,6 +7714,32 @@ test('B6f5c a take ended by a device fault follows the edit it held', async () =
   }, false)
 })
 
+// A failed take follows once from onFailure and again from the stop/cancel the caller then issues. The second follow finds
+// the baseline already at the desired fingerprint, so the playing session is adopted or rebuilt once per edit, not twice.
+test('B6f5c a failed take followed by the caller stop or cancel adopts or rebuilds each edit once', async () => {
+  for (const end of ['stop', 'cancel'] as const) await runB6f5(async (live, world) => {
+    const recording = b6f5cRecording()
+    try {
+      await live.playFrom(1)
+      const session = live.liveSession()
+      await live.playback.portableRecording.start({ ...recording.input, onFailure: () => undefined })
+      live.edit('mixer')
+      await live.until(() => (session?.adoptions ?? 0) > 0)
+      await live.settle()
+      const mark = live.mark()
+      live.setTracks((current) => [...current, b6f5TrackB])
+      for (let turn = 0; turn < 3_000; turn += 1) await Promise.resolve()
+      await live.settle()
+      recording.endDevice()
+      await live.expectEnd(true, undefined, mark, 'structural', false)
+      await (end === 'stop' ? live.playback.portableRecording.stop() : live.playback.portableRecording.cancel()).catch(() => undefined)
+      await live.settle()
+      expect({ end, adoptions: session?.adoptions, rebuilds: world.sessions.filter((entry) => entry.createdSeq > mark).length })
+        .toEqual({ end, adoptions: 1, rebuilds: 1 })
+    } finally { recording.restore() }
+  }, false)
+})
+
 // B6f5c: the routing fields the track fingerprint keeps (createMixerChannel, normalizeTrackRouting) each change the graph
 // a session plays. An edit to one while playing reaches the playing session, adopted or rebuilt as continuity decides,
 // and it then plays the graph a fresh Play of the edited project prepares.

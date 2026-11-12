@@ -1764,7 +1764,7 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
     let instrumentPlaybackChangeTail = Promise.resolve();
     return ({ ${structural} }).onStructuralPlaybackChange;`))
   let projected: TrackInstrumentParams = options.initial ?? p1Initial, revision = 1, rebuilds = 0
-  const calls: string[] = [], batches: Array<readonly unknown[]> = [], notes: string[] = []
+  const calls: string[] = [], batches: Array<readonly unknown[]> = [], notes: string[] = [], faults: string[] = []
   const graphs: Parameters<PortableWasmPlaybackSession["prepareGraph"]>[0][] = []
   const snapshot = () => {
     const base = compilation()
@@ -1788,6 +1788,7 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
     fingerprintSnapshot: next => JSON.stringify({ ...next, revision: 0, mixer: { ...next.mixer, graph: undefined } }),
     getAudioContext: () => context, select: async () => selected,
     onAdoptionResubmitted: () => { settled++ },
+    reportFault: (message) => faults.push(message),
     backend: { createPlaybackSession: async () => {
       const session = createSession(calls, async () => {})
       emitPosition = (frame, sequence) => session.emitPosition(frame, sequence)
@@ -1851,7 +1852,7 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
   }
   const structureOf = (instrument: TrackInstrumentParams) =>
     instrument.kind === 'synth' ? nativeSynthStructureKey(compilePortableSynthState(instrument.params)) : undefined
-  return { controller, apply, announce, edit, allocate, flush, setProjected: (instrument: TrackInstrumentParams) => { projected = instrument }, batches, graphs, notes, rebuilds: () => rebuilds, sessionStructure, structureOf,
+  return { controller, apply, announce, edit, allocate, flush, setProjected: (instrument: TrackInstrumentParams) => { projected = instrument }, batches, graphs, notes, faults, rebuilds: () => rebuilds, sessionStructure, structureOf,
     report, refused: () => refused, settled: () => settled, registered: () => registered }
 }
 
@@ -2027,6 +2028,8 @@ test('UD 8 a persistent staging failure stops after 8 resubmits with a defect lo
       .toEqual({ refused: 9, graphs: 1, rebuilds: 0, notes: [], active: true })
     expect(logged.filter(line => line.startsWith('warn')).length).toBe(8)
     expect(logged.filter(line => line.startsWith('error')).length).toBe(1)
+    // The exhausted retry is also the user's notice: the edit is not playing.
+    expect(f.faults).toHaveLength(1)
     await f.report(300)
     expect(f.refused()).toBe(9)
     expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
@@ -2521,7 +2524,7 @@ test('B6f5 step5b R6 without a content fingerprint a Timeline revision bump stil
 type W8Note = NonNullable<RuntimeTrack['clips'][number]['midi']>['notes'][number]
 type W8Loop = typeof noLoop
 const w8Note = (id: string, beat: number, length = 1): W8Note => ({ id, beat, length, pitch: 60, velocity: 0.8 })
-const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loop?: W8Loop; audioStartSec?: number; clipSec?: number } = {}, options: { refuse?: () => boolean; failInstall?: () => boolean; failTransport?: (epoch: number, running: boolean) => boolean } = {}) => {
+const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loop?: W8Loop; audioStartSec?: number; clipSec?: number } = {}, options: { refuse?: () => boolean; failInstall?: () => boolean; failTransport?: (epoch: number, running: boolean) => boolean; audioContext?: AudioContext } = {}) => {
   const state = { bpm: initial.bpm ?? 120, notes: initial.notes ?? [w8Note('note', 0)], audioStartSec: initial.audioStartSec, warped: false, projectGeneration: 0 }
   const calls: string[] = []
   const graphs: AudioCoreGraphSnapshot[] = []
@@ -2529,6 +2532,7 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
   const installs: PortableFrameSchedule[] = []
   const epochs: number[] = []
   const faults: string[] = []
+  const scheduledSources: { sequence: number; startFrame: number }[][] = []
   let sessions = 0
   let positionListener: ((message: Extract<PortableWasmStatusMessage, { type: 'transport-position' }>) => void) | undefined
   const compile = (transport: LivePlaybackTransport) => {
@@ -2545,7 +2549,10 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => compile(transport),
     fingerprintSnapshot: b6f5Fingerprint, getProjectGeneration: () => state.projectGeneration,
-    getAudioContext: () => context, select: async () => selected, reportFault: (message) => faults.push(message),
+    getAudioContext: () => options.audioContext ?? context, select: async () => selected,
+    reportFault: (message) => faults.push(message),
+    createRecordingWriter: () => ({ ready: Promise.resolve(), write: () => undefined, finalize: async () => ({ capturedFrames: 0 }),
+      abort: async () => undefined, terminate: () => undefined }),
     backend: { createPlaybackSession: async () => {
       sessions += 1
       const base = b6f5Session(calls, graphs, publishes, async (publishOptions) => {
@@ -2556,6 +2563,10 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
         installs.push(schedule)
       }) }
       return { ...withInstall, prepareGraph: base.prepareGraph, publishGraph: base.publishGraph,
+        scheduleSources: async (_revision: number, _epoch: number, events: readonly { sequence: number; startFrame: number }[]) => {
+          calls.push('schedule-sources')
+          scheduledSources.push(events.map((event) => ({ sequence: event.sequence, startFrame: event.startFrame })))
+        },
         setTransport: async (epoch: number, running: boolean, frame: number) => {
           epochs.push(epoch)
           if (options.failTransport?.(epoch, running)) throw new Error('Portable playback transport was rejected.')
@@ -2572,7 +2583,7 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
   const noteEvents = (schedule: PortableFrameSchedule | undefined, type: 'note-on' | 'note-off') =>
     (schedule?.events ?? []).flatMap((event) => event.type === type ? [{ noteId: event.noteId, frame: event.frame }] : [])
   const position = (frame: number, epoch = 1, sequence = 1) => positionListener?.({ version: 2, type: 'transport-position', sessionId: 1, epoch, sequence, running: true, frame })
-  return { state, controller, transport, noLoop, calls, graphs, publishes, installs, epochs, faults, sessions: () => sessions, adopt, noteEvents, position }
+  return { state, controller, transport, noLoop, calls, graphs, publishes, installs, epochs, faults, scheduledSources, sessions: () => sessions, adopt, noteEvents, position }
 }
 const w8SourceCalls = (calls: readonly string[]) => calls.filter((call) => call.includes('sources'))
 
@@ -3277,6 +3288,47 @@ test('W-R5 a note that restarts at the seam on a loop wrap keeps its attack', as
     const installed = f.installs.at(-1)
     expect({ result, seam: installed?.timeOrigin.frame, noteOnsAtSeam: f.noteEvents(installed, 'note-on').filter((event) => event.frame === 48_000).length })
       .toEqual({ result: 'adopted', seam: 48_000, noteOnsAtSeam: 1 })
+  } finally { f.controller.dispose() }
+})
+
+// W-R7: dense MIDI shrinks an adoption's window below the one the start scheduled sources for; the recording refresh
+// then extends from the shortened end, and an audio clip in the gap must not be scheduled a second time.
+test('W-R7 an adoption that shortens the window while recording does not make the refresh schedule a source twice', async () => {
+  const calls: string[] = []
+  const { stream, recordingContext } = createRecordingFixture(calls)
+  const dense = Array.from({ length: 200 }, (_, index) => w8Note(`dense-${index}`, 20 + index * 0.05, 0.01))
+  const f = await w8Fixture({ clipSec: 30, notes: dense, audioStartSec: 20 }, { audioContext: recordingContext })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.controller.startRecording(b6f5RecordingInput(stream))
+    f.position(20_000, 1, 1)
+    f.state.notes = [...dense.slice(1), w8Note('extra', 3, 0.5)]
+    const adopted = await f.adopt(f.noLoop)
+    f.position(300_000, 1, 2)
+    const refresh = await f.controller.refreshSchedule()
+    expect({ adopted, refresh, faults: f.faults,
+      audioSources: f.scheduledSources.at(-1)?.filter((source) => source.startFrame === 960_000).length })
+      .toEqual({ adopted: 'adopted', refresh: 'started', faults: [], audioSources: 1 })
+  } finally { f.controller.dispose() }
+})
+
+// W-R8a: a loop edit made during a take is not adopted, the take's refresh reads raw frames as arrangement frames and
+// stops at a loop. The follow adopts it once the take has ended.
+test('W-R8a a loop edit during a take is held, and adopted once the take has ended', async () => {
+  const { stream, recordingContext } = createRecordingFixture([])
+  const f = await w8Fixture({ clipSec: 4 }, { audioContext: recordingContext })
+  const loop: W8Loop = { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 }
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.controller.startRecording(b6f5RecordingInput(stream))
+    const held = await f.adopt(loop)
+    const installsHeld = f.installs.length
+    f.position(40_000, 1, 1)
+    const refresh = await f.controller.refreshSchedule()
+    expect({ held, installsHeld, refresh, faults: f.faults }).toEqual({ held: 'unchanged', installsHeld: 1, refresh: 'started', faults: [] })
+    await f.controller.stopRecording()
+    const installsBefore = f.installs.length
+    expect({ followed: await f.adopt(loop), installs: f.installs.length - installsBefore }).toEqual({ followed: 'adopted', installs: 1 })
   } finally { f.controller.dispose() }
 })
 

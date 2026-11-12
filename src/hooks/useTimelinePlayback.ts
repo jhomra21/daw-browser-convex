@@ -1580,8 +1580,10 @@ export function useTimelinePlayback(
         }
         return
       }
-      // A rebuild would end the take: while recording, the session keeps what it plays, as before adoption.
-      if (outcome === "rebuild" && !portableBrowserPlayback.isRecording()) {
+      // A rebuild would end the take: while recording, the session keeps what it plays, as before adoption. It also
+      // keeps its loop, so the desired state is not marked applied: the follow after the take adopts it.
+      if (portableBrowserPlayback.isRecording()) return
+      if (outcome === "rebuild") {
         await applyTimelineSchedule(tracks, { rebuildBackend: true })
       } else if (outcome === "adopted" || outcome === "unchanged") previewProjectionBaseline = key
       // A failed staging leaves the baseline behind: the controller resubmits it at block boundaries and logs each one.

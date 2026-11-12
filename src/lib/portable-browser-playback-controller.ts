@@ -933,19 +933,19 @@ const fitPagedWindow = async (input: {
   horizonSec: number
   pageSec: number
   compile: (horizonSec: number) => Extract<PreparedPortableSession, { supported: true }> | undefined
-  // A refresh keeps the sources it holds and prepares the ones from this frame on.
-  fromFrame?: number
+  // A refresh keeps the sources it holds and prepares the rest.
+  isNew?: (source: Extract<PreparedPortableSession, { supported: true }>["sources"][number]) => boolean
   prepare: (sources: Extract<PreparedPortableSession, { supported: true }>["sources"]) => ReturnType<typeof preparePagedSources>
 }): Promise<{
   candidate: Extract<PreparedPortableSession, { supported: true }>
   sources: Extract<PreparedPortableSession, { supported: true }>["sources"]
   paged: Awaited<ReturnType<typeof preparePagedSources>>
 } | "refused" | "no-fit"> => {
-  const { fromFrame } = input
+  const { isNew } = input
   for (let horizonSec = input.horizonSec; horizonSec >= input.pageSec; horizonSec -= input.pageSec) {
     const candidate = input.compile(horizonSec)
     if (!candidate) return "refused"
-    const sources = fromFrame === undefined ? candidate.sources : candidate.sources.filter((source) => source.startFrame >= fromFrame)
+    const sources = isNew ? candidate.sources.filter(isNew) : candidate.sources
     try {
       return { candidate, sources, paged: await input.prepare(sources) }
     } catch (error) {
@@ -1676,6 +1676,9 @@ export const createPortableBrowserPlaybackController = (input: {
         const extensionStartFrame = baselineEndFrame
         const pageSec = portableWasmPagedPageFrames / context.sampleRate
         const requestedExtensionSec = horizonSec + (extensionStartFrame - currentFrame) / context.sampleRate
+        // An adoption shortens the window its schedule covers, not the sources the session holds: those reach past
+        // `extensionStartFrame`, and the compile from there lists them again.
+        const held = new Set([...baselineOrdinarySources, ...baselinePreparedSources].map((source) => `${source.sourceNodeId}:${source.startFrame}`))
         const restoreBaseline = async () => {
           if (!baselineSchedule) throw new Error("Portable scheduler cannot roll back a failed refresh.")
           await replaceSourcesAtomically({
@@ -1694,7 +1697,7 @@ export const createPortableBrowserPlaybackController = (input: {
           const fit = await fitPagedWindow({
             horizonSec: requestedExtensionSec,
             pageSec,
-            fromFrame: extensionStartFrame,
+            isNew: (source) => source.startFrame >= extensionStartFrame && !held.has(`${source.sourceNodeId}:${source.startFrame}`),
             compile: (candidateHorizonSec) => {
               const candidate = preparedSession(
                 compilation.snapshot,
@@ -2018,10 +2021,12 @@ export const createPortableBrowserPlaybackController = (input: {
     const publishing = Promise.withResolvers<PortableAdoptionResult>()
     adopting = true
     try {
-      // A run keeps its loop off while the playhead is at or past the loop's end, as a start would.
+      // A run keeps its loop off while the playhead is at or past the loop's end, as a start would. A take keeps the loop
+      // it runs with: its refresh reads raw frames as arrangement frames and stops at a loop, so the follow adopts the
+      // loop edit once the take has ended.
       const arrangementNow = arrangementFrame()
       const compilation = await compileSnapshot({
-        ...transport, ...effectiveLoopForStart(loop, arrangementNow, sampleRate), state: wasPlaying ? "playing" : "paused", playheadSec: arrangementNow / sampleRate,
+        ...transport, ...effectiveLoopForStart(recording ? previous.transport : loop, arrangementNow, sampleRate), state: wasPlaying ? "playing" : "paused", playheadSec: arrangementNow / sampleRate,
       }, { liveAdoption: true })
       if (!current()) return "unavailable"
       // Audio clips, tracks, instrument kinds, assets, effect structure and warped audio under a tempo edit are not
@@ -2139,7 +2144,9 @@ export const createPortableBrowserPlaybackController = (input: {
     retries.delete("adoption")
     if (result !== "failed") return
     if (resubmits >= maxAdoptionResubmits) {
-      console.error(`[portable-playback] defect: instrument adoption failed after ${maxAdoptionResubmits} resubmits; the edit applies on the next successful publication`)
+      const message = `instrument adoption failed after ${maxAdoptionResubmits} resubmits; the edit applies on the next successful publication`
+      console.error(`[portable-playback] defect: ${message}`)
+      input.reportFault?.(`Playback could not apply an edit: ${message}`)
       return
     }
     console.warn(`[portable-playback] instrument adoption failed; resubmit ${resubmits + 1} of ${maxAdoptionResubmits} at a later block boundary`)

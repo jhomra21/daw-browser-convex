@@ -2513,3 +2513,235 @@ test('B6f5 step5b R6 without a content fingerprint a Timeline revision bump stil
       .toEqual({ refresh: 'unavailable', faults: [], recording: true, playing: true, sessions: 1 })
   } finally { controller.dispose() }
 })
+
+// AE-08 phase 8 step 1: failure-first witnesses. Each asserts the behaviour required once the phase lands and is
+// `test.failing` until its implementing step flips it to `test`. The note and sequence ids are the design note's.
+type W8Note = NonNullable<RuntimeTrack['clips'][number]['midi']>['notes'][number]
+type W8Loop = Pick<LivePlaybackTransport, 'loopEnabled' | 'loopStartSec' | 'loopEndSec'>
+type W8Adopt = (loop: W8Loop) => Promise<PortableAdoptionResult>
+const w8Note = (id: string, beat: number, length = 1): W8Note => ({ id, beat, length, pitch: 60, velocity: 0.8 })
+const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loop?: W8Loop; audioStartSec?: number } = {}, options: { refuse?: () => boolean } = {}) => {
+  const state = { bpm: initial.bpm ?? 120, notes: initial.notes ?? [w8Note('note', 0)], audioStartSec: initial.audioStartSec }
+  const noLoop: W8Loop = { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 }
+  const calls: string[] = []
+  const graphs: AudioCoreGraphSnapshot[] = []
+  const publishes: B6f5Publish[] = []
+  const installs: PortableFrameSchedule[] = []
+  const epochs: number[] = []
+  const faults: string[] = []
+  let sessions = 0
+  let positionListener: ((message: Extract<PortableWasmStatusMessage, { type: 'transport-position' }>) => void) | undefined
+  const compile = (transport: LivePlaybackTransport) => {
+    const base = compilation()
+    const midi: RuntimeTrack = { ...track, clips: track.clips.map((clip) => ({ ...clip, midi: clip.midi && { ...clip.midi, notes: [...state.notes] } })) }
+    const audio: RuntimeTrack[] = state.audioStartSec === undefined ? [] : [{ id: 'audio-w8', kind: 'audio', name: 'Audio', volume: 1, clips: [{
+      id: 'clip-audio-w8', name: 'Audio', color: '#fff', startSec: state.audioStartSec, duration: 1, sourceAssetKey: 'asset-w8', buffer: new TestAudioBuffer() }] }]
+    const tracks = [midi, ...audio]
+    const assets = audio.length ? [{ assetId: 'asset-w8', buffer: new TestAudioBuffer() }] : []
+    return { ...base, snapshot: { ...base.snapshot, bpm: state.bpm, transport, tracks, assets,
+      mixer: { ...base.snapshot.mixer, graph: resolveLiveMixerGraph(tracks, base.snapshot.mixer.fx.trackFx) } } }
+  }
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async (transport) => compile(transport),
+    fingerprintSnapshot: b6f5Fingerprint,
+    getAudioContext: () => context, select: async () => selected, reportFault: (message) => faults.push(message),
+    backend: { createPlaybackSession: async () => {
+      sessions += 1
+      const base = b6f5Session(calls, graphs, publishes, async (publishOptions) => {
+        if (publishOptions && options.refuse?.()) throw new Error('Portable playback graph-published was rejected.')
+      })
+      const withInstall = { ...base, ...createSession(calls, async (schedule) => { installs.push(schedule) }) }
+      return { ...withInstall, prepareGraph: base.prepareGraph, publishGraph: base.publishGraph,
+        setTransport: async (epoch: number, running: boolean, frame: number) => { epochs.push(epoch); await withInstall.setTransport(epoch, running, frame) },
+        onTransportPosition: (listener: (message: Extract<PortableWasmStatusMessage, { type: 'transport-position' }>) => void) => {
+          positionListener = listener
+          return withInstall.onTransportPosition(listener)
+        } }
+    } },
+  })
+  const transport: LivePlaybackTransport = { ...compilation().snapshot.transport, ...(initial.loop ?? noLoop) }
+  const adopt: W8Adopt = controller.adoptSchedule
+  const noteEvents = (schedule: PortableFrameSchedule | undefined, type: 'note-on' | 'note-off') =>
+    (schedule?.events ?? []).flatMap((event) => event.type === type ? [{ noteId: event.noteId, frame: event.frame }] : [])
+  const position = (frame: number, epoch = 1, sequence = 1) => positionListener?.({ version: 2, type: 'transport-position', sessionId: 1, epoch, sequence, running: true, frame })
+  return { state, controller, transport, noLoop, calls, graphs, publishes, installs, epochs, faults, sessions: () => sessions, adopt, noteEvents, position }
+}
+// The phase adds `seek(sec, loop)` to the controller. Until it exists the E3 witnesses fail here; the implementing step
+// replaces this stub with `f.controller.seek`.
+const w8Seek = (_controller: ReturnType<typeof createPortableBrowserPlaybackController>): ((sec: number, loop: W8Loop) => Promise<string>) => {
+  throw new Error('controller.seek does not exist yet')
+}
+const w8SourceCalls = (calls: readonly string[]) => calls.filter((call) => call.includes('sources'))
+
+// W-F20a: a loop-bound edit while playing is adopted. Today the compile receives the old loop, both snapshots match,
+// and the follow marks the edit applied without installing anything.
+test.failing('W-F20a a loop edit while playing installs and publishes a schedule for the new loop', async () => {
+  const f = await w8Fixture({ loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    const before = f.calls.length
+    const result = await f.adopt({ loopEnabled: true, loopStartSec: 0, loopEndSec: 2 })
+    const installed = f.installs.slice(1)
+    expect({ result, sessions: f.sessions(), calls: f.calls.slice(before).filter((call) => call !== 'mark-active').map((call) => call.split(':')[0]),
+      publicationFrame: JSON.stringify(f.publishes.at(-1)?.options).includes('publicationFrame'),
+      oldPeriodNoteOn: f.noteEvents(installed.at(-1), 'note-on').some((event) => event.frame === 48_000) })
+      .toEqual({ result: 'adopted', sessions: 1, calls: ['prepare-graph', 'install-schedule', 'publish-graph'], publicationFrame: true, oldPeriodNoteOn: false })
+  } finally { f.controller.dispose() }
+})
+
+// W-E5-1: a tempo edit while playing is adopted on the same session at a seam; the playhead keeps its time (UD 18).
+test.failing('W-E5-1 a tempo edit while playing is adopted on the same session with the playhead time kept', async () => {
+  const f = await w8Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    f.state.bpm = 90
+    const result = await f.adopt(f.noLoop)
+    const installed = f.installs.at(-1)
+    expect({ result, sessions: f.sessions(), disposed: f.calls.includes('dispose'), installs: f.installs.length, published: f.publishes.length,
+      seam: installed?.timeOrigin.frame, noteOffs: f.noteEvents(installed, 'note-off').map((event) => event.frame), bpm: installed?.bpm })
+      .toEqual({ result: 'adopted', sessions: 1, disposed: false, installs: 2, published: 2,
+        seam: 12_000, noteOffs: [32_000], bpm: 90 })
+  } finally { f.controller.dispose() }
+})
+
+// W-E5-3: a note deleted while it sounds is released once, at the seam, and never started again.
+test.failing('W-E5-3 a note removed while held gets one note-off at the seam and no note-on', async () => {
+  const f = await w8Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    const heldId = f.noteEvents(f.installs[0], 'note-on')[0]?.noteId
+    f.state.notes = []
+    const result = await f.adopt(f.noLoop)
+    const installed = f.installs.at(-1)
+    expect({ result, noteOffs: f.noteEvents(installed, 'note-off'), noteOns: f.noteEvents(installed, 'note-on') })
+      .toEqual({ result: 'adopted', noteOffs: [{ noteId: heldId, frame: installed?.timeOrigin.frame ?? -1 }], noteOns: [] })
+  } finally { f.controller.dispose() }
+})
+
+// W-E5-4: a note that spans the seam and survives the edit keeps its voice: its note-on is not repeated, because a
+// repeated Synth note-on needs two note-offs and a Sampler layers a second voice.
+test.failing('W-E5-4 a note kept while held is not re-triggered at the seam', async () => {
+  const f = await w8Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    const heldId = f.noteEvents(f.installs[0], 'note-on')[0]?.noteId
+    f.state.notes = [w8Note('note', 0), w8Note('later', 8)]
+    const result = await f.adopt(f.noLoop)
+    const installed = f.installs.at(-1)
+    expect({ result, heldNoteOns: f.noteEvents(installed, 'note-on').filter((event) => event.noteId === heldId),
+      heldNoteOffs: f.noteEvents(installed, 'note-off').filter((event) => event.noteId === heldId).map((event) => event.frame),
+      laterNoteOns: f.noteEvents(installed, 'note-on').filter((event) => event.noteId !== heldId).map((event) => event.frame) })
+      .toEqual({ result: 'adopted', heldNoteOns: [], heldNoteOffs: [24_000], laterNoteOns: [192_000] })
+  } finally { f.controller.dispose() }
+})
+
+// W-E5-8 and W-FB-1: a refused publish is a failed adoption that a resubmit completes, never a rebuild.
+test.failing('W-E5-8 a refused tempo publish answers failed, restores the revision and adopts on resubmit', async () => {
+  let refuse = true
+  const f = await w8Fixture({}, { refuse: () => refuse })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    f.state.bpm = 90
+    const refused = await f.adopt(f.noLoop)
+    refuse = false
+    const retried = await f.adopt(f.noLoop)
+    expect({ refused, retried, sessions: f.sessions(), disposed: f.calls.includes('dispose'), revisions: f.publishes.slice(1).map((entry) => entry.revision) })
+      .toEqual({ refused: 'failed', retried: 'adopted', sessions: 1, disposed: false, revisions: [2, 2] })
+  } finally { f.controller.dispose() }
+})
+
+test.failing('W-FB-1 a refused or structural adoption is failed or adopted and never asks for a rebuild', async () => {
+  const calls: string[] = []
+  const graphs: AudioCoreGraphSnapshot[] = []
+  const publishes: B6f5Publish[] = []
+  let volume = 0.8
+  let clipDuration = 1
+  let refuse = true
+  let sessions = 0
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async (transport) => b6f5Compilation(transport, volume, clipDuration),
+    fingerprintSnapshot: b6f5Fingerprint,
+    getAudioContext: () => context, select: async () => selected,
+    backend: { createPlaybackSession: async () => { sessions += 1; return b6f5Session(calls, graphs, publishes, async (options) => {
+      if (refuse && options) throw new Error('Portable playback graph-published was rejected.')
+    }) } },
+  })
+  try {
+    expect(await controller.start(compilation().snapshot.transport)).toBe('started')
+    volume = 0.5
+    const refused = await controller.adoptSchedule()
+    refuse = false
+    const retried = await controller.adoptSchedule()
+    clipDuration = 2
+    const structural: string = await controller.adoptSchedule()
+    expect({ refused, retried, structuralRebuild: structural === 'rebuild', sessions, disposed: calls.includes('dispose') })
+      .toEqual({ refused: 'failed', retried: 'adopted', structuralRebuild: false, sessions: 1, disposed: false })
+  } finally { controller.dispose() }
+})
+
+// W-M3 guard: an audio clip edit that reaches the follow must never be adopted over the old sources. Green today
+// (the gate refuses it); it stays green when the audio class is carried, because a carry replaces the sources.
+test('W-M3 an audio clip move is never adopted or reported unchanged without touching the sources', async () => {
+  const f = await w8Fixture({ audioStartSec: 0 })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    const before = f.calls.length
+    f.state.audioStartSec = 0.5
+    const result = await f.adopt(f.noLoop)
+    const touched = w8SourceCalls(f.calls.slice(before)).length > 0
+    expect({ result, staleAdoption: (result === 'adopted' || result === 'unchanged') && !touched }).toMatchObject({ staleAdoption: false })
+  } finally { f.controller.dispose() }
+})
+
+// W-M3 end state: PortableAdoptionResult loses "rebuild"; the audio class is carried (adopted with new sources).
+test.failing('W-M3 an audio clip move answers adopted with its sources replaced, not a rebuild', async () => {
+  const f = await w8Fixture({ audioStartSec: 0 })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    const before = f.calls.length
+    f.state.audioStartSec = 0.5
+    const result: string = await f.adopt(f.noLoop)
+    expect({ result, sourcesTouched: w8SourceCalls(f.calls.slice(before)).length > 0 }).toEqual({ result: 'adopted', sourcesTouched: true })
+  } finally { f.controller.dispose() }
+})
+
+// W-UD7p-1: an edit while paused is adopted in place; Play then resumes on the edited schedule with no re-prepare.
+test.failing('W-UD7p-1 a note edit on a paused prepared session is adopted in place', async () => {
+  const f = await w8Fixture()
+  try {
+    expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
+    f.state.notes = [w8Note('note', 0), w8Note('later', 4)]
+    const result = await f.adopt(f.noLoop)
+    const started = await f.controller.start({ ...f.transport, state: 'playing' })
+    expect({ result, started, sessions: f.sessions(), disposed: f.calls.includes('dispose'), seam: f.installs.at(-1)?.timeOrigin.frame,
+      laterNoteOn: f.noteEvents(f.installs.at(-1), 'note-on').some((event) => event.frame === 96_000) })
+      .toEqual({ result: 'adopted', started: 'started', sessions: 1, disposed: false, seam: 0, laterNoteOn: true })
+  } finally { f.controller.dispose() }
+})
+
+// W-E3-1 and W-E3-4 call the `seek(sec, loop)` method the phase adds; today the controller has none.
+test.failing('W-E3-1 a seek while playing moves the transport in place at a new epoch', async () => {
+  const f = await w8Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    const seek = w8Seek(f.controller)
+    const before = f.calls.length
+    const startEpoch = f.epochs.at(-1) ?? 0
+    const result = await seek(1.5, f.noLoop)
+    expect({ result, sessions: f.sessions(), rebuilt: f.calls.slice(before).filter((call) => ['dispose', 'prepare-graph', 'publish-graph'].includes(call)),
+      epochs: [...new Set(f.epochs.slice(-2))], transports: f.calls.slice(before).filter((call) => call.endsWith('-transport')) })
+      .toEqual({ result: 'started', sessions: 1, rebuilt: [], epochs: [startEpoch + 1], transports: ['stop-transport', 'start-transport'] })
+  } finally { f.controller.dispose() }
+})
+
+test.failing('W-E3-4 positions are reported again after a backward seek at the new epoch', async () => {
+  const f = await w8Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    f.position(96_000)
+    const seek = w8Seek(f.controller)
+    await seek(0.5, f.noLoop)
+    f.position(25_000, (f.epochs.at(-1) ?? 0), 1)
+    expect(f.controller.currentPositionSec()).toBeCloseTo(25_000 / 48_000, 6)
+  } finally { f.controller.dispose() }
+})

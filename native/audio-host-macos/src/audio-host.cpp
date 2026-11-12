@@ -88,6 +88,8 @@ std::atomic<void (*)(std::uint64_t, std::uint32_t)> test_patch_ack_hook{nullptr}
 // Makes the next applied patch fail in the core (no staged patch left), so a claim can
 // resolve with a failure result.
 std::atomic<bool> test_patch_claim_discard{false};
+// Starts attached workers without a plug-in, so the host's worker handling runs in CTest.
+std::atomic<bool> test_no_plugin_workers{false};
 #endif
 #endif
 
@@ -980,7 +982,6 @@ struct WorkerNotificationSink {
   std::condition_variable ready;
   WorkerNotificationQueue notifications;
   std::atomic<std::uint32_t>* active_revision = nullptr;
-  std::atomic<bool> mute_requested = false;
 };
 
 void ForwardWorkerDiagnostic(
@@ -1006,9 +1007,6 @@ void ForwardWorkerDiagnostic(
   else if (diagnostic.kind == daw::plugin_host::WorkerDiagnosticKind::kEditorState) kind = WorkerNotificationKind::kEditorState;
   if (!kind) return;
   WorkerNotificationSink& sink = *attachment->notification_sink;
-  if (*kind == WorkerNotificationKind::kRestart || *kind == WorkerNotificationKind::kFault) {
-    sink.mute_requested.store(true, std::memory_order_release);
-  }
   if (*kind == WorkerNotificationKind::kParameterEdit) {
     static_cast<void>(attachment->SetAutomationOverride(diagnostic.parameter_id));
   }
@@ -1833,7 +1831,6 @@ struct AudioHost::Impl {
       [](const auto& entry) { return entry.second.release_requested; }), std::memory_order_release);
   }
   std::unordered_map<std::string, std::unique_ptr<NativeVstWorkerAttachment>> native_vst_attachments;
-  bool native_graph_revision_required = false;
   WorkerNotificationSink worker_notifications{};
   std::atomic<daw_audio_core_handle> recording_capture = 0;
   std::atomic<bool> recording_started = false;
@@ -2102,7 +2099,7 @@ struct AudioHost::Impl {
             .bytes = metadata.initial_state,
             .sha256 = metadata.initial_state_sha256,
           });
-      const daw::plugin_host::WorkerStartupRequest startup{
+      daw::plugin_host::WorkerStartupRequest startup{
         .eligibility = {
           .canonicalBundlePath = metadata.canonical_bundle_path,
           .canonicalExecutablePath = metadata.canonical_executable_path,
@@ -2123,6 +2120,14 @@ struct AudioHost::Impl {
         },
         .state = initial_state,
       };
+#if defined(DAW_AUDIO_HOST_TEST_PATCH_CLAIM) && DAW_AUDIO_HOST_TEST_PATCH_CLAIM == 1
+      if (test_no_plugin_workers.load(std::memory_order_acquire)) {
+        startup.eligibility = {};
+        startup.classId.clear();
+        startup.state.reset();
+        startup.noPluginTestMode = true;
+      }
+#endif
       const daw::plugin_host::WorkerTransportRequest transport{
         .slotCount = metadata.transport.slot_count,
         .maximumFrames = metadata.transport.maximum_frames,
@@ -2581,7 +2586,6 @@ bool AudioHost::Configure(const HostConfig& config) {
   impl_->processor_queue.read.store(0, std::memory_order_release);
   impl_->processor_queue.write.store(0, std::memory_order_release);
   impl_->processor_ramp_count = 0;
-  impl_->worker_notifications.mute_requested.store(false, std::memory_order_release);
   return true;
 }
 
@@ -3042,7 +3046,6 @@ GraphRevisionStatus AudioHost::PublishGraphRevision(const std::uint32_t revision
       impl_->prepared_revision.store(0, std::memory_order_release);
       impl_->last_graph_revision.store(revision, std::memory_order_release);
       impl_->graph_prepared = true;
-      impl_->native_graph_revision_required = false;
       return true;
     }
     if (daw_audio_core_publish(impl_->prepared_core, revision) != DAW_AUDIO_CORE_OK) return false;
@@ -3056,7 +3059,6 @@ GraphRevisionStatus AudioHost::PublishGraphRevision(const std::uint32_t revision
     impl_->retired_after_epoch.store(impl_->completed_render_epoch.load(std::memory_order_acquire), std::memory_order_release);
     impl_->last_graph_revision.store(revision, std::memory_order_release);
     impl_->graph_prepared = true;
-    impl_->native_graph_revision_required = false;
     return true;
   };
   const auto publish_asset_handles = [this] {
@@ -3112,7 +3114,6 @@ GraphRevisionStatus AudioHost::InspectGraphRevision(const std::uint32_t revision
       impl_->prepared_asset_handles.clear();
       impl_->published_instrument_assets = std::move(impl_->prepared_instrument_assets);
       impl_->graph_prepared = true;
-      impl_->native_graph_revision_required = false;
     } else {
       impl_->publication_in_flight = 0;
       impl_->schedule_owner.store(0, std::memory_order_release);
@@ -3280,6 +3281,30 @@ void SetTestPatchClaimHold(const bool hold) {
 
 void SetTestPatchClaimDiscard(const bool discard) {
   test_patch_claim_discard.store(discard, std::memory_order_release);
+}
+
+void AudioHostTestAccess::UseNoPluginWorkers(const bool use) {
+  test_no_plugin_workers.store(use, std::memory_order_release);
+}
+
+bool AudioHostTestAccess::PublishWorkerDiagnostic(
+  AudioHost& host,
+  const std::string_view instance_id,
+  const daw::plugin_host::WorkerDiagnostic& diagnostic
+) {
+  const auto attachment = host.impl_->native_vst_attachments.find(std::string(instance_id));
+  return attachment != host.impl_->native_vst_attachments.end()
+    && attachment->second->worker.callbackPort().PublishDiagnostic(diagnostic);
+}
+
+std::uint64_t AudioHostTestAccess::WorkerGeneration(AudioHost& host, const std::string_view instance_id) {
+  const auto attachment = host.impl_->native_vst_attachments.find(std::string(instance_id));
+  return attachment == host.impl_->native_vst_attachments.end() ? 0 : attachment->second->worker.workerGeneration();
+}
+
+int AudioHostTestAccess::WorkerProcessGroup(AudioHost& host, const std::string_view instance_id) {
+  const auto attachment = host.impl_->native_vst_attachments.find(std::string(instance_id));
+  return attachment == host.impl_->native_vst_attachments.end() ? -1 : attachment->second->worker.workerProcessGroupId();
 }
 #endif
 
@@ -4155,8 +4180,6 @@ std::optional<std::vector<std::uint8_t>> AudioHost::GetNativeVstState(const std:
 
 void AudioHost::ProcessNativeVstControl() {
   impl_->ReclaimAssets();
-  bool restart = false;
-  bool faulted = false;
   for (auto& [instance_id, attachment] : impl_->native_vst_attachments) {
     while (const auto diagnostic = attachment->worker.ReadDiagnostic()) {
       if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kScheduledAutomationInput) {
@@ -4174,9 +4197,10 @@ void AudioHost::ProcessNativeVstControl() {
           char detail[128];
           std::snprintf(detail, sizeof(detail), ",\"oldLatencyFrames\":%u,\"newLatencyFrames\":%u",
             attachment->metadata.declared_latency_frames, diagnostic->value);
-          impl_->Evidence("host-stop-request", "latency-notification", 0, detail);
+          // The notification sink already carries the value to the typed latency
+          // publish path; the host keeps running while it recomputes compensation.
+          impl_->Evidence("attachment-latency-report", "worker-notification", 0, detail);
           attachment->metadata.declared_latency_frames = diagnostic->value;
-          impl_->native_graph_revision_required = true;
         }
       } else if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kTail) {
         if (!daw::plugin_host::IsValidWorkerTailFrames(diagnostic->value)) {
@@ -4198,24 +4222,17 @@ void AudioHost::ProcessNativeVstControl() {
         char detail[64];
         std::snprintf(detail, sizeof(detail), ",\"restartFlags\":%u", diagnostic->value);
         impl_->Evidence("host-restart-request", "plugin-restartComponent", 0, detail);
+        // The worker re-sets its own component up; nothing else restarts.
         attachment->worker_automation.reset();
         impl_->vst_worker_restarts.fetch_add(1, std::memory_order_relaxed);
-        restart = true;
       } else if (diagnostic->kind == daw::plugin_host::WorkerDiagnosticKind::kFault) {
-        impl_->Evidence("host-stop-request", "plugin-crash");
+        // A faulted worker is no longer ready, so its callback writes silence for
+        // this instance only. Every other attachment and the graph keep rendering.
+        impl_->Evidence("attachment-fault-isolated", "plugin-fault");
         attachment->worker_automation.reset();
         impl_->vst_worker_faults.fetch_add(1, std::memory_order_relaxed);
-        faulted = true;
       }
     }
-  }
-  if ((faulted || impl_->native_graph_revision_required)
-    && impl_->state.load(std::memory_order_acquire) == LifecycleState::kRunning) {
-    Stop();
-  }
-  if (restart && impl_->state.load(std::memory_order_acquire) == LifecycleState::kRunning) {
-    Stop();
-    static_cast<void>(Start());
   }
 }
 
@@ -5306,17 +5323,6 @@ bool AudioHost::ProcessPlanar(
   impl_->test_patch_claim_hold_frames.fetch_sub(frame_count, std::memory_order_relaxed);
 #endif
   impl_->ApplyRequestedProcessorPatch();
-  if (impl_->worker_notifications.mute_requested.load(std::memory_order_acquire)) {
-    for (std::uint32_t channel = 0; channel < impl_->config.channel_count; ++channel) {
-      std::fill_n(output[channel], frame_count, 0.0F);
-    }
-    if (impl_->acceptance_tap) {
-      impl_->acceptance_tap->Push(output.data(), frame_count);
-      impl_->SignalRealtimeBridge(1U << 7U);
-    }
-    impl_->callbacks.fetch_add(1, std::memory_order_relaxed);
-    return true;
-  }
   const float* const* inputs = input.data();
   float* const* outputs = output.data();
   std::uint32_t offset = 0;

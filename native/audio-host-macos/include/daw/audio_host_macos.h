@@ -561,6 +561,19 @@ struct ProcessorPatchStatus {
 std::vector<std::uint8_t> EncodeScheduleProgress(const ScheduleProgress& progress);
 
 class AudioHost;
+#if defined(DAW_AUDIO_HOST_TEST_PATCH_CLAIM) && DAW_AUDIO_HOST_TEST_PATCH_CLAIM == 1
+}  // namespace daw::audio_host_macos
+namespace daw::plugin_host { struct WorkerDiagnostic; }
+namespace daw::audio_host_macos {
+// Private test copy only: drives attached workers that run without a plug-in.
+struct AudioHostTestAccess {
+  static void UseNoPluginWorkers(bool use);
+  static bool PublishWorkerDiagnostic(AudioHost& host, std::string_view instance_id,
+    const daw::plugin_host::WorkerDiagnostic& diagnostic);
+  static std::uint64_t WorkerGeneration(AudioHost& host, std::string_view instance_id);
+  static int WorkerProcessGroup(AudioHost& host, std::string_view instance_id);
+};
+#endif
 class RecordingInputDevice {
  public:
   virtual ~RecordingInputDevice() = default;
@@ -694,6 +707,9 @@ class AudioHost {
   DeviceReadinessReason readinessReason() const;
 
  private:
+#if defined(DAW_AUDIO_HOST_TEST_PATCH_CLAIM) && DAW_AUDIO_HOST_TEST_PATCH_CLAIM == 1
+  friend struct AudioHostTestAccess;
+#endif
   void AdvanceRecording();
   struct Impl;
   Impl* impl_;

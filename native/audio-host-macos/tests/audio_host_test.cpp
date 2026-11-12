@@ -6,6 +6,7 @@
 #include "../src/acceptance-output-tap.h"
 #include "../src/revision-publication-wait.h"
 #include "../src/offline-failure-message.h"
+#include "worker-supervisor.h"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -17,6 +18,7 @@
 #include <limits>
 #include <optional>
 #include <poll.h>
+#include <signal.h>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -5287,6 +5289,144 @@ void TestPatchStatusBranchesAreValid() {
 }
 }  // namespace
 
+namespace {
+using daw::audio_host_macos::AudioHostTestAccess;
+using daw::audio_host_macos::NativeVstWorkerHealth;
+using daw::audio_host_macos::WorkerNotificationKind;
+
+constexpr std::string_view kFirstVstInstance = "b0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f1";
+constexpr std::string_view kSecondVstInstance = "c0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f2";
+
+// Attached workers run without a plug-in for the lifetime of this object.
+struct NoPluginWorkers {
+  NoPluginWorkers() { AudioHostTestAccess::UseNoPluginWorkers(true); }
+  ~NoPluginWorkers() { AudioHostTestAccess::UseNoPluginWorkers(false); }
+};
+
+daw::audio_host_macos::NativeVstAttachment PlaybackVstAttachment(
+  const std::string_view instance_id,
+  const std::uint64_t node_id
+) {
+  daw::audio_host_macos::NativeVstAttachment attachment{
+    .graph_node_id = node_id,
+    .instance_id = std::string(instance_id),
+    .class_id = "class-id",
+    .vendor_id = "vendor-id",
+    .canonical_bundle_path = "/private/catalog/Example.vst3",
+    .canonical_executable_path = "/private/catalog/Example.vst3/Contents/MacOS/Example",
+    .architecture = 1,
+    .scanner_catalog_version = 2,
+    .role = daw::audio_host_macos::NativeVstRole::kEffect,
+    .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+    .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+    .declared_latency_frames = 32,
+    .transport_latency_frames = 4,
+    .playback_enabled = true,
+    .transport = {.slot_count = 2, .maximum_frames = 4, .input_channels = 2, .output_channels = 2, .maximum_events_per_block = 2},
+  };
+  attachment.bundle_fingerprint.fill(1);
+  attachment.binary_fingerprint.fill(2);
+  return attachment;
+}
+
+bool WaitForVstHealth(
+  daw::audio_host_macos::AudioHost& host,
+  const std::string_view instance_id,
+  const NativeVstWorkerHealth health
+) {
+  for (int attempt = 0; attempt < 1000; ++attempt) {
+    if (host.NativeVstHealth(instance_id) == health) return true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  return false;
+}
+
+std::optional<daw::audio_host_macos::WorkerNotification> NextWorkerNotification(
+  daw::audio_host_macos::AudioHost& host,
+  const WorkerNotificationKind kind
+) {
+  std::atomic<bool> running{true};
+  auto pending = std::async(std::launch::async, [&] {
+    for (;;) {
+      const auto notification = host.WaitForWorkerNotification(&running);
+      if (!notification || notification->kind == kind) return notification;
+    }
+  });
+  const auto arrived = pending.wait_for(std::chrono::seconds(10)) == std::future_status::ready;
+  if (!arrived) {
+    running.store(false, std::memory_order_release);
+    host.WakeWorkerNotificationWait();
+  }
+  return pending.get();
+}
+
+void ConfigureDiagnosticHost(daw::audio_host_macos::AudioHost& host) {
+  assert(host.Configure({
+    .device_uid = "diagnostic",
+    .sample_rate_hz = 48000,
+    .max_frames_per_block = 4,
+    .channel_count = 2,
+    .revision = 1,
+  }));
+}
+}
+
+void TestLatencyReportPublishesWithoutStop() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  ConfigureDiagnosticHost(host);
+  assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 17)));
+  assert(host.StartDiagnosticMode());
+  assert(WaitForVstHealth(host, kFirstVstInstance, NativeVstWorkerHealth::kReady));
+  const auto generation = AudioHostTestAccess::WorkerGeneration(host, kFirstVstInstance);
+  assert(AudioHostTestAccess::PublishWorkerDiagnostic(host, kFirstVstInstance,
+    {.kind = daw::plugin_host::WorkerDiagnosticKind::kLatency, .value = 99}));
+  const auto reported = NextWorkerNotification(host, WorkerNotificationKind::kLatency);
+  assert(reported && reported->instance_id == kFirstVstInstance && reported->value == 99);
+  host.ProcessNativeVstControl();
+  assert(host.lifecycleState() == daw::audio_host_macos::LifecycleState::kRunning);
+  assert(AudioHostTestAccess::WorkerGeneration(host, kFirstVstInstance) == generation);
+  assert(host.NativeVstHealth(kFirstVstInstance) == NativeVstWorkerHealth::kReady);
+  host.Stop();
+}
+
+void TestComponentRestartIsWorkerLocal() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  ConfigureDiagnosticHost(host);
+  assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 17)));
+  assert(host.StartDiagnosticMode());
+  assert(WaitForVstHealth(host, kFirstVstInstance, NativeVstWorkerHealth::kReady));
+  const auto generation = AudioHostTestAccess::WorkerGeneration(host, kFirstVstInstance);
+  assert(AudioHostTestAccess::PublishWorkerDiagnostic(host, kFirstVstInstance,
+    {.kind = daw::plugin_host::WorkerDiagnosticKind::kRestart, .value = 1}));
+  assert(NextWorkerNotification(host, WorkerNotificationKind::kRestart));
+  host.ProcessNativeVstControl();
+  assert(host.lifecycleState() == daw::audio_host_macos::LifecycleState::kRunning);
+  assert(AudioHostTestAccess::WorkerGeneration(host, kFirstVstInstance) == generation);
+  assert(host.NativeVstHealth(kFirstVstInstance) == NativeVstWorkerHealth::kReady);
+  host.Stop();
+}
+
+void TestWorkerFaultIsolatesOnlyThatAttachment() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  ConfigureDiagnosticHost(host);
+  assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 17)));
+  assert(host.AttachNativeVst(PlaybackVstAttachment(kSecondVstInstance, 18)));
+  assert(host.StartDiagnosticMode());
+  assert(WaitForVstHealth(host, kFirstVstInstance, NativeVstWorkerHealth::kReady));
+  assert(WaitForVstHealth(host, kSecondVstInstance, NativeVstWorkerHealth::kReady));
+  assert(kill(AudioHostTestAccess::WorkerProcessGroup(host, kFirstVstInstance), SIGKILL) == 0);
+  const auto fault = NextWorkerNotification(host, WorkerNotificationKind::kFault);
+  assert(fault && fault->instance_id == kFirstVstInstance);
+  host.ProcessNativeVstControl();
+  assert(host.lifecycleState() == daw::audio_host_macos::LifecycleState::kRunning);
+  assert(host.NativeVstHealth(kFirstVstInstance) == NativeVstWorkerHealth::kFaulted);
+  assert(host.NativeVstHealth(kSecondVstInstance) == NativeVstWorkerHealth::kReady);
+  host.Stop();
+}
+
 int main() {
   if (const auto* mode = std::getenv("DAW_AE08_OBSERVATION_ONLY")) {
     TestCheckpoint4ObservationHandoff(*mode); return 0;
@@ -5487,5 +5627,8 @@ int main() {
   TestFallbackPublishesConfiguredInstrumentState();
   TestWorkerNotificationCarriesRevisionIdentity();
   TestWorkerNotificationQueuePolicy();
+  TestLatencyReportPublishesWithoutStop();
+  TestComponentRestartIsWorkerLocal();
+  TestWorkerFaultIsolatesOnlyThatAttachment();
   return 0;
 }

@@ -249,6 +249,7 @@ struct SnapshotEdge {
   std::uint64_t id;
   std::uint64_t from;
   std::uint64_t to;
+  float gain = 0.25F;
 };
 
 struct SnapshotNode {
@@ -287,7 +288,7 @@ std::vector<std::uint8_t> RoutedGraphSnapshot(
     AppendLeU64(payload, edge.from);
     AppendLeU64(payload, edge.to);
     AppendLeU64(payload, 0);
-    AppendLeFloat(payload, 0.25F);
+    AppendLeFloat(payload, edge.gain);
     AppendLeU32(payload, DAW_AUDIO_GRAPH_EDGE_POST_FADER);
     AppendLeU32(payload, 0);
     AppendLeU32(payload, 0);
@@ -5516,9 +5517,8 @@ void TestStagedAttachmentJoinsAPublishedGraph() {
   host.Stop();
 }
 
-// While a capture is bound to node X, a revision may not remove X or change where X's output goes
-// (its output, group or send chain). Everything else publishes, and the capture is untouched.
-void TestCaptureBoundRoutingIsLocked() {
+// A host running `graph` with a spool and a fixture input device, for the tests that bind a capture to a node.
+struct CaptureBoundHost {
   struct Device : daw::audio_host_macos::RecordingInputDevice {
     bool Start(std::string_view, std::uint32_t, std::uint32_t, daw::audio_host_macos::AudioHost*, void** session) override {
       *session = this;
@@ -5527,56 +5527,93 @@ void TestCaptureBoundRoutingIsLocked() {
     void Stop(void*) override {}
     std::uint32_t Rate(std::string_view) override { return 48000; }
   };
-  constexpr std::uint64_t kTarget = 10, kGroup = 20, kOther = 30, kMaster = 1000;
-  const std::vector<SnapshotNode> base{{kMaster, 6, 0}, {kGroup, 3, 0}, {kTarget, 1, 0}};
-  const std::vector<SnapshotEdge> routed{{1, kTarget, kGroup}, {2, kGroup, kMaster}};
-  char root[] = "/private/tmp/daw-host-capture-lock-XXXXXX";
-  assert(mkdtemp(root) != nullptr);
-  struct stat identity{};
-  assert(stat(root, &identity) == 0);
+  char root[44] = "/private/tmp/daw-host-capture-lock-XXXXXX";
   daw::audio_host_macos::SpoolRequest request;
-  request.root_path = root;
-  request.root_device = identity.st_dev;
-  request.root_inode = identity.st_ino;
-  request.token = std::string(64, 'e');
   daw::audio_host_macos::RecordingSpoolService service;
   Device device;
-  daw::audio_host_macos::AudioHost host(&service, &device);
-  StartRunningHostWithGraph(host, RoutedGraphSnapshot(2, base, routed));
-  daw::audio_host_macos::RecordingConfig config{
-    .device_uid = "fixture", .generation = 1, .session_id = 1,
-    .channel_count = 2, .input_channels = {0, 1}, .gain = 1, .polarity = 1,
-    .punch_start_frame = 0, .punch_end_frame = -1, .monitoring = false, .target_node_id = 999,
-  };
+  daw::audio_host_macos::AudioHost host{&service, &device};
+  explicit CaptureBoundHost(const std::vector<std::uint8_t>& graph) {
+    assert(mkdtemp(root) != nullptr);
+    struct stat identity{};
+    assert(stat(root, &identity) == 0);
+    request.root_path = root;
+    request.root_device = identity.st_dev;
+    request.root_inode = identity.st_ino;
+    request.token = std::string(64, 'e');
+    StartRunningHostWithGraph(host, graph);
+  }
+  ~CaptureBoundHost() {
+    host.Stop();
+    std::filesystem::remove_all(root);
+  }
+  [[nodiscard]] bool Capture(const std::uint64_t target) {
+    return host.ConfigureRecording({
+      .device_uid = "fixture", .generation = 1, .session_id = 1,
+      .channel_count = 2, .input_channels = {0, 1}, .gain = 1, .polarity = 1,
+      .punch_start_frame = 0, .punch_end_frame = -1, .monitoring = false, .target_node_id = target,
+    }, request);
+  }
+};
+
+// While a capture is bound to node X, a revision may not remove X or change where X's output goes
+// (its output, group or send chain). Everything else publishes, and the capture is untouched.
+void TestCaptureBoundRoutingIsLocked() {
+  constexpr std::uint64_t kTarget = 10, kGroup = 20, kOuter = 25, kOther = 30, kMaster = 1000;
+  const std::vector<SnapshotNode> base{{kMaster, 6, 0}, {kOuter, 3, 0}, {kGroup, 3, 0}, {kTarget, 1, 0}};
+  // The target feeds a group that feeds an outer group that feeds the master: the route is three hops long.
+  const std::vector<SnapshotEdge> routed{{1, kTarget, kGroup}, {2, kGroup, kOuter}, {3, kOuter, kMaster}};
+  CaptureBoundHost rig(RoutedGraphSnapshot(2, base, routed));
+  auto& host = rig.host;
   // A capture can only bind a node the published plan has.
-  assert(!host.ConfigureRecording(config, request));
-  config.target_node_id = kTarget;
-  assert(host.ConfigureRecording(config, request));
+  assert(!rig.Capture(999));
+  assert(rig.Capture(kTarget));
   const auto before = host.RecordingSnapshot();
   const auto refused = [&](const std::vector<SnapshotNode>& nodes, const std::vector<SnapshotEdge>& edges) {
     return host.PrepareGraphRevision(3, RoutedGraphSnapshot(3, nodes, edges)).code
       == GraphRevisionStatusCode::kCaptureTargetLocked;
   };
   // Removing the target, rerouting its output, and removing the group it feeds are all refused.
-  assert(refused({{kMaster, 6, 0}, {kGroup, 3, 0}}, {{2, kGroup, kMaster}}));
-  assert(refused(base, {{1, kTarget, kMaster}, {2, kGroup, kMaster}}));
-  assert(refused({{kMaster, 6, 0}, {kTarget, 1, 0}}, {{1, kTarget, kMaster}}));
+  assert(refused({{kMaster, 6, 0}, {kOuter, 3, 0}, {kGroup, 3, 0}}, {{2, kGroup, kOuter}, {3, kOuter, kMaster}}));
+  assert(refused(base, {{1, kTarget, kMaster}, {2, kGroup, kOuter}, {3, kOuter, kMaster}}));
+  assert(refused({{kMaster, 6, 0}, {kOuter, 3, 0}, {kTarget, 1, 0}}, {{1, kTarget, kOuter}, {3, kOuter, kMaster}}));
+  // Moving a group further along the route, not the target's own edge, is a reroute too.
+  assert(refused(base, {{1, kTarget, kGroup}, {2, kGroup, kMaster}, {3, kOuter, kMaster}}));
+  assert(refused(base, {{1, kTarget, kGroup}, {2, kGroup, kOuter}, {3, kOuter, kGroup}}));
+  // Another send from the target adds a path.
+  assert(refused(base, {{1, kTarget, kGroup}, {2, kGroup, kOuter}, {3, kOuter, kMaster}, {4, kTarget, kMaster}}));
+  // A level change on any edge of the route is not a reroute, and publishes.
+  PublishRunningGraph(host, 3, RoutedGraphSnapshot(3, base,
+    {{1, kTarget, kGroup, 0.5F}, {2, kGroup, kOuter, 0.75F}, {3, kOuter, kMaster, 0.125F}}), [&host] { RenderBlock(host); });
   // A refusal leaves nothing prepared: an unrelated revision (a new source) prepares and publishes.
   auto other = base;
   other.push_back({kOther, 1, 1});
   auto other_edges = routed;
-  other_edges.push_back({3, kOther, kMaster});
-  PublishRunningGraph(host, 3, RoutedGraphSnapshot(3, other, other_edges), [&host] { RenderBlock(host); });
+  other_edges.push_back({4, kOther, kMaster});
+  PublishRunningGraph(host, 4, RoutedGraphSnapshot(4, other, other_edges), [&host] { RenderBlock(host); });
+  // `configured` is left out: the spool reports ready from its own thread, so it can flip between the two reads.
   const auto after = host.RecordingSnapshot();
   assert(after.generation == before.generation && after.session_id == before.session_id
     && after.captured_frames == before.captured_frames && after.dropped_frames == before.dropped_frames
-    && after.configured == before.configured && after.fatal == before.fatal);
+    && after.fatal == before.fatal);
   // The lock ends with the capture.
   assert(host.CancelRecording());
-  assert(host.PrepareGraphRevision(4, RoutedGraphSnapshot(4, {{kMaster, 6, 0}, {kGroup, 3, 0}}, {{2, kGroup, kMaster}})).code
+  assert(host.PrepareGraphRevision(5, RoutedGraphSnapshot(5, {{kMaster, 6, 0}, {kGroup, 3, 0}}, {{2, kGroup, kMaster}})).code
     == GraphRevisionStatusCode::kPrepared);
-  host.Stop();
-  std::filesystem::remove_all(root);
+}
+
+// A revision prepared but not yet published already decides what the plan in force will be: a take may not bind
+// a node it drops or reroutes, or the publication would remove the node the capture reads.
+void TestCaptureDoesNotBindANodeAPreparedRevisionDrops() {
+  constexpr std::uint64_t kTarget = 10, kGroup = 20, kMaster = 1000;
+  const std::vector<SnapshotNode> base{{kMaster, 6, 0}, {kGroup, 3, 0}, {kTarget, 1, 0}};
+  CaptureBoundHost rig(RoutedGraphSnapshot(2, base, {{1, kTarget, kGroup}, {2, kGroup, kMaster}}));
+  auto& host = rig.host;
+  assert(host.PrepareGraphRevision(3, RoutedGraphSnapshot(3, {{kMaster, 6, 0}, {kGroup, 3, 0}}, {{2, kGroup, kMaster}})).code
+    == GraphRevisionStatusCode::kPrepared);
+  assert(!rig.Capture(kTarget));
+  assert(host.PublishGraphRevision(3).code == GraphRevisionStatusCode::kPublishPending);
+  RenderBlock(host);
+  assert(!rig.Capture(kTarget));
 }
 
 void TestStagedAttachmentThatIsNotReadyIsRetiredAtPublication() {
@@ -6411,6 +6448,7 @@ int main() {
   TestWorkerFaultIsolatesOnlyThatAttachment();
   TestStagedAttachmentJoinsAPublishedGraph();
   TestCaptureBoundRoutingIsLocked();
+  TestCaptureDoesNotBindANodeAPreparedRevisionDrops();
   TestStagedAttachmentThatIsNotReadyIsRetiredAtPublication();
   TestRollbackRetiresEveryStagedAttachment();
   TestUndoBeforePublicationBindsNothing();

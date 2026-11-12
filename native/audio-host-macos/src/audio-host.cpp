@@ -220,11 +220,15 @@ struct PlanRouting {
   std::vector<RouteEdge> edges;
 };
 
+// Bytes one node takes in a graph envelope of this version.
+std::size_t GraphNodeBytes(const std::uint32_t version) {
+  return version == DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY ? 140U
+    : version >= DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY ? 136U : 132U;
+}
+
 std::optional<PlanRouting> ParsePlanRouting(const std::span<const std::uint8_t> payload) {
   if (payload.size() < 24) return std::nullopt;
-  const auto version = ReadLeU32(payload.data());
-  const std::size_t node_bytes = version == DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY ? 140U
-    : version >= DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY ? 136U : 132U;
+  const std::size_t node_bytes = GraphNodeBytes(ReadLeU32(payload.data()));
   const std::size_t node_count = ReadLeU32(payload.data() + 8);
   const std::size_t edge_count = ReadLeU32(payload.data() + 12);
   const std::size_t edges_at = 24 + node_count * node_bytes;
@@ -2944,9 +2948,7 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
   // Drop removed nodes from the next bank without releasing their resident data.
   if (payload.size() >= 24) {
     std::unordered_set<std::uint64_t> nodes;
-    const auto version = ReadLeU32(payload.data());
-    const auto node_bytes = version == DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY ? 140U
-      : version >= DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY ? 136U : 132U;
+    const auto node_bytes = GraphNodeBytes(ReadLeU32(payload.data()));
     const auto node_count = ReadLeU32(payload.data() + 8);
     if (node_count <= 64 && payload.size() >= 24 + static_cast<std::size_t>(node_count) * node_bytes) {
       for (unsigned index = 0; index < node_count; ++index) {
@@ -2996,8 +2998,7 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
   if (payload.size() >= 24) {
     const auto envelope_version = ReadLeU32(payload.data());
     const auto node_count = ReadLeU32(payload.data() + 8);
-    const auto node_bytes = envelope_version == DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY ? 140U
-      : envelope_version >= DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY ? 136U : 132U;
+    const auto node_bytes = GraphNodeBytes(envelope_version);
     if ((envelope_version == DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION
       || envelope_version == DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY
       || envelope_version == DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY)
@@ -4920,9 +4921,11 @@ bool AudioHost::ConfigureRecording(const RecordingConfig& config, SpoolRequest r
     || !std::isfinite(config.gain) || config.gain < 0 || (config.polarity != 1 && config.polarity != -1)
     || config.device_uid.empty() || config.punch_start_frame < 0
     || (config.punch_end_frame != -1 && config.punch_end_frame < config.punch_start_frame)) return false;
-  // A take binds only a node the plan in force has.
+  // A take binds only a node the plan in force has, and one a prepared revision does not drop or reroute.
   if (config.target_node_id != 0
-    && (!impl_->published_routing || !PlanContainsNode(*impl_->published_routing, config.target_node_id))) return false;
+    && (!impl_->published_routing || !PlanContainsNode(*impl_->published_routing, config.target_node_id)
+      || (impl_->prepared_routing
+        && !CaptureTargetKept(*impl_->published_routing, *impl_->prepared_routing, config.target_node_id)))) return false;
   if (impl_->recording_session) {
     const auto state = impl_->recording_session->Snapshot().state;
     if (state == SpoolState::kPreparing || state == SpoolState::kReady) return false;

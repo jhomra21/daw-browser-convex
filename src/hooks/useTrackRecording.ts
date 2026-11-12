@@ -113,6 +113,7 @@ type UseTrackRecordingOptions = {
     controller: {
       start: (input: {
         appSessionId: string
+        targetTrackId: string
         layout: "mono" | "stereo"
         inputChannel: number
         gain: number
@@ -771,6 +772,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       previewContextStartFrame = Math.floor(startSec * nativeSampleRate)
       const native = await nativeRecording.controller.start({
         appSessionId: engineCaptureSessionId,
+        targetTrackId: trackId,
         projectId: rid,
         projectGeneration: startGeneration,
         isCurrent: isStartCurrent,

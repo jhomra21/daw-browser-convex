@@ -426,20 +426,21 @@ bool ConfigureOffline(daw::audio_host_macos::AudioHost& host, const std::vector<
 }
 
 bool ConfigureRecording(daw::audio_host_macos::AudioHost& host, const std::vector<std::uint8_t>& payload) {
-  if (payload.size() < 144) return false;
+  constexpr std::size_t kHeaderBytes = 152;
+  if (payload.size() < kHeaderBytes) return false;
   const std::uint32_t flags = ReadU32(payload.data() + 48);
   const std::uint32_t uid_length = ReadU32(payload.data() + 56);
   if (flags > 1 || ReadU32(payload.data() + 52) != 0
     || uid_length == 0 || uid_length > 4096 || ReadU32(payload.data() + 140) == 0
-    || ReadU32(payload.data() + 140) > 4096 || payload.size() != 144 + uid_length + ReadU32(payload.data() + 140)) return false;
+    || ReadU32(payload.data() + 140) > 4096 || payload.size() != kHeaderBytes + uid_length + ReadU32(payload.data() + 140)) return false;
   const auto device_uid = daw::audio_host_macos::CoreAudioDeviceUid(
-    std::string_view(reinterpret_cast<const char*>(payload.data() + 144), uid_length));
+    std::string_view(reinterpret_cast<const char*>(payload.data() + kHeaderBytes), uid_length));
   if (!device_uid) return false;
   daw::audio_host_macos::SpoolRequest spool;
   spool.root_device = ReadU64(payload.data() + 60);
   spool.root_inode = ReadU64(payload.data() + 68);
   spool.token.assign(reinterpret_cast<const char*>(payload.data() + 76), 64);
-  spool.root_path.assign(reinterpret_cast<const char*>(payload.data() + 144 + uid_length), ReadU32(payload.data() + 140));
+  spool.root_path.assign(reinterpret_cast<const char*>(payload.data() + kHeaderBytes + uid_length), ReadU32(payload.data() + 140));
   return host.ConfigureRecording({
     .device_uid = *device_uid,
     .generation = ReadU32(payload.data()),
@@ -451,6 +452,7 @@ bool ConfigureRecording(daw::audio_host_macos::AudioHost& host, const std::vecto
     .punch_start_frame = ReadI64(payload.data() + 32),
     .punch_end_frame = ReadI64(payload.data() + 40),
     .monitoring = flags == 1,
+    .target_node_id = ReadU64(payload.data() + 144),
   }, std::move(spool));
 }
 

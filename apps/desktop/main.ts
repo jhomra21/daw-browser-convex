@@ -286,6 +286,7 @@ const nativeSessionRecordingConfigurationSchema = z.object({
   punchStartFrame: z.number().int().safe().min(0),
   punchEndFrame: z.number().int().safe().min(0).nullable(),
   monitoring: z.boolean(),
+  targetNodeId: z.bigint().positive().max(0xffff_ffff_ffff_ffffn),
 }).strict().refine((value) => (
   value.inputChannels.length === value.channelCount
   && (value.punchEndFrame === null || value.punchEndFrame >= value.punchStartFrame)
@@ -1434,6 +1435,7 @@ const registerIpc = () => {
       punchStartFrame: value.punchStartFrame,
       punchEndFrame: value.punchEndFrame,
       monitoring: value.monitoring,
+      targetNodeId: value.targetNodeId,
     }
   }
   const nativeSessionAsset = (

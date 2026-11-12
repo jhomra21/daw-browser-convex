@@ -350,6 +350,8 @@ enum class GraphRevisionStatusCode : std::uint32_t {
   // while the active latency transition still owns a graph bank.
   kPublishPending = 11,
   kRebaseRequired = 12,
+  // A capture is bound to a node this revision would remove or reroute. Nothing was prepared.
+  kCaptureTargetLocked = 13,
 };
 
 enum class GraphRevisionContinuity : std::uint32_t {
@@ -443,6 +445,8 @@ struct RecordingConfig {
   std::int64_t punch_start_frame = 0;
   std::int64_t punch_end_frame = -1;
   bool monitoring = false;
+  // The graph node the take records onto. 0 binds none.
+  std::uint64_t target_node_id = 0;
 };
 
 struct RecordingBlock {

@@ -1,7 +1,7 @@
 export type NativeGraphRevisionStatus = {
   status: "prepared" | "published" | "publish-pending" | "retired" | "rolled-back" | "stale-revision"
     | "invalid-revision" | "prepare-failed" | "publish-failed" | "retirement-not-safe"
-    | "retirement-capacity-exceeded" | "rebase-required"
+    | "retirement-capacity-exceeded" | "rebase-required" | "capture-target-locked"
   continuity: "not-evaluated" | "accepted" | "fallback" | "rejected"
   requestedRevision: number
   activeRevision: number

@@ -17,6 +17,7 @@
 #include <sys/sysctl.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -201,6 +202,68 @@ double ReadLeDouble(const std::uint8_t* bytes) {
   double value = 0.0;
   std::memcpy(&value, &bits, sizeof(value));
   return value;
+}
+
+// An edge as routing sees it. Gain and delay compensation are not routing: a level change or a latency
+// recompute must never read as a reroute.
+struct RouteEdge {
+  std::uint64_t from = 0;
+  std::uint64_t to = 0;
+  std::uint64_t processor = 0;
+  std::uint32_t tap = 0;
+  std::uint32_t sidechain = 0;
+  auto operator<=>(const RouteEdge&) const = default;
+};
+
+struct PlanRouting {
+  std::vector<std::uint64_t> nodes;
+  std::vector<RouteEdge> edges;
+};
+
+std::optional<PlanRouting> ParsePlanRouting(const std::span<const std::uint8_t> payload) {
+  if (payload.size() < 24) return std::nullopt;
+  const auto version = ReadLeU32(payload.data());
+  const std::size_t node_bytes = version == DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY ? 140U
+    : version >= DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY ? 136U : 132U;
+  const std::size_t node_count = ReadLeU32(payload.data() + 8);
+  const std::size_t edge_count = ReadLeU32(payload.data() + 12);
+  const std::size_t edges_at = 24 + node_count * node_bytes;
+  if (node_count > 64 || payload.size() < edges_at || (payload.size() - edges_at) / 48 < edge_count) return std::nullopt;
+  PlanRouting plan;
+  for (std::size_t index = 0; index < node_count; ++index)
+    plan.nodes.push_back(ReadLeU64(payload.data() + 24 + index * node_bytes));
+  for (std::size_t index = 0; index < edge_count; ++index) {
+    const auto* edge = payload.data() + edges_at + index * 48;
+    plan.edges.push_back({ReadLeU64(edge + 8), ReadLeU64(edge + 16), ReadLeU64(edge + 24),
+      ReadLeU32(edge + 36), ReadLeU32(edge + 40)});
+  }
+  return plan;
+}
+
+// Every edge on a path leaving `target`, sorted: its output, through any group or send, to the master.
+std::vector<RouteEdge> DownstreamRoute(const PlanRouting& plan, const std::uint64_t target) {
+  std::vector<RouteEdge> route;
+  std::vector<std::uint64_t> frontier{target};
+  std::unordered_set<std::uint64_t> seen{target};
+  while (!frontier.empty()) {
+    const auto node = frontier.back();
+    frontier.pop_back();
+    for (const auto& edge : plan.edges) {
+      if (edge.from != node) continue;
+      route.push_back(edge);
+      if (seen.insert(edge.to).second) frontier.push_back(edge.to);
+    }
+  }
+  std::sort(route.begin(), route.end());
+  return route;
+}
+
+bool PlanContainsNode(const PlanRouting& plan, const std::uint64_t node) {
+  return std::find(plan.nodes.begin(), plan.nodes.end(), node) != plan.nodes.end();
+}
+
+bool CaptureTargetKept(const PlanRouting& published, const PlanRouting& proposed, const std::uint64_t target) {
+  return PlanContainsNode(proposed, target) && DownstreamRoute(published, target) == DownstreamRoute(proposed, target);
 }
 
 bool ReadNativeInstanceId(const std::span<const std::uint8_t> payload, std::size_t& offset, std::string& instance_id) {
@@ -1828,6 +1891,9 @@ struct AudioHost::Impl {
   using InstrumentAssets = std::unordered_map<std::uint64_t, std::unordered_set<InstalledAsset*>>;
   InstrumentAssets published_instrument_assets;
   InstrumentAssets prepared_instrument_assets;
+  // Control thread only. What a bound capture checks the next revision against.
+  std::optional<PlanRouting> published_routing;
+  std::optional<PlanRouting> prepared_routing;
   std::unordered_map<std::uint32_t, daw_audio_asset_handle> prepared_asset_handles;
   bool AssetVisible(const InstalledAsset& asset, const std::uint32_t revision) const {
     return asset.staged_revision == 0 || asset.staged_revision == revision;
@@ -2341,6 +2407,17 @@ struct AudioHost::Impl {
       }
     }
   }
+  void AdoptPublishedRouting() {
+    published_routing = std::move(prepared_routing);
+    prepared_routing.reset();
+  }
+  // The node an unfinished capture is bound to. The advance thread retires captures, so this takes the owner mutex.
+  std::optional<std::uint64_t> CaptureTarget() const {
+    std::lock_guard lock(recording_owner_mutex);
+    if (!recording_session || recording_capture_retired || recording_finish_accepted
+      || recording_config.target_node_id == 0) return std::nullopt;
+    return recording_config.target_node_id;
+  }
   // The prepared revision was dropped: everything it staged is retired.
   void RollbackStagedNativeVsts() {
     for (auto& [instance_id, attachment] : native_vst_attachments) {
@@ -2701,6 +2778,8 @@ bool AudioHost::Configure(const HostConfig& config) {
   impl_->asset_retirement_pending.store(false, std::memory_order_release);
   impl_->published_instrument_assets.clear();
   impl_->prepared_instrument_assets.clear();
+  impl_->published_routing.reset();
+  impl_->prepared_routing.reset();
   impl_->prepared_asset_handles.clear();
   for (auto& [instance_id, attachment] : impl_->native_vst_attachments) {
     attachment->realtime_started = false;
@@ -2845,6 +2924,13 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
     return status(GraphRevisionStatusCode::kInvalidRevision);
   }
   const auto payload = snapshot.subspan(kNativeGraphFrameHeaderBytes);
+  // The last invariant of capture-bound routing, checked before anything is prepared or reclaimed: a take bound to
+  // node X records X's signal through its output, group and send chain, so no revision may remove or reroute it.
+  auto routing = ParsePlanRouting(payload);
+  if (const auto target = impl_->CaptureTarget();
+    target && (!impl_->published_routing || !routing || !CaptureTargetKept(*impl_->published_routing, *routing, *target))) {
+    return status(GraphRevisionStatusCode::kCaptureTargetLocked);
+  }
   // Control-thread reclamation only. A completed predecessor must not make a
   // newer edit stale; an unfinished reader/transition keeps admission retryable.
   if (impl_->HasRetiredPlan()
@@ -2940,6 +3026,7 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
   impl_->prepared_core = prepared_core;
   impl_->prepared_core_is_same_core = true;
   impl_->prepared_revision.store(revision, std::memory_order_release);
+  impl_->prepared_routing = std::move(routing);
   return status(GraphRevisionStatusCode::kPrepared);
 }
 
@@ -3238,6 +3325,7 @@ GraphRevisionStatus AudioHost::PublishGraphRevision(const std::uint32_t revision
       impl_->last_graph_revision.store(revision, std::memory_order_release);
       impl_->graph_prepared = true;
       impl_->AdoptPublishedNativeVsts();
+      impl_->AdoptPublishedRouting();
       return true;
     }
     if (daw_audio_core_publish(impl_->prepared_core, revision) != DAW_AUDIO_CORE_OK) return false;
@@ -3252,6 +3340,7 @@ GraphRevisionStatus AudioHost::PublishGraphRevision(const std::uint32_t revision
     impl_->last_graph_revision.store(revision, std::memory_order_release);
     impl_->graph_prepared = true;
     impl_->AdoptPublishedNativeVsts();
+    impl_->AdoptPublishedRouting();
     return true;
   };
   const auto publish_asset_handles = [this] {
@@ -3308,6 +3397,7 @@ GraphRevisionStatus AudioHost::InspectGraphRevision(const std::uint32_t revision
       impl_->published_instrument_assets = std::move(impl_->prepared_instrument_assets);
       impl_->graph_prepared = true;
       impl_->AdoptPublishedNativeVsts();
+      impl_->AdoptPublishedRouting();
     } else {
       impl_->publication_in_flight = 0;
       impl_->schedule_owner.store(0, std::memory_order_release);
@@ -3354,6 +3444,7 @@ GraphRevisionStatus AudioHost::RollbackGraphRevision(const std::uint32_t revisio
     impl_->prepared_revision.store(0, std::memory_order_release);
     impl_->prepared_asset_handles.clear();
     impl_->prepared_instrument_assets.clear();
+    impl_->prepared_routing.reset();
     impl_->RollbackStagedNativeVsts();
     for (auto& [id, asset] : impl_->assets) {
       static_cast<void>(id);
@@ -4828,6 +4919,9 @@ bool AudioHost::ConfigureRecording(const RecordingConfig& config, SpoolRequest r
     || !std::isfinite(config.gain) || config.gain < 0 || (config.polarity != 1 && config.polarity != -1)
     || config.device_uid.empty() || config.punch_start_frame < 0
     || (config.punch_end_frame != -1 && config.punch_end_frame < config.punch_start_frame)) return false;
+  // A take binds only a node the plan in force has.
+  if (config.target_node_id != 0
+    && (!impl_->published_routing || !PlanContainsNode(*impl_->published_routing, config.target_node_id))) return false;
   if (impl_->recording_session) {
     const auto state = impl_->recording_session->Snapshot().state;
     if (state == SpoolState::kPreparing || state == SpoolState::kReady) return false;
@@ -5508,6 +5602,8 @@ void AudioHost::Teardown() {
   impl_->assets.clear();
   impl_->published_instrument_assets.clear();
   impl_->prepared_instrument_assets.clear();
+  impl_->published_routing.reset();
+  impl_->prepared_routing.reset();
   impl_->prepared_asset_handles.clear();
   impl_->native_vst_attachments.clear();
   impl_->active_revision.store(0, std::memory_order_release);

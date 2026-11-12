@@ -6,6 +6,7 @@
 #include "../src/acceptance-output-tap.h"
 #include "../src/revision-publication-wait.h"
 #include "../src/offline-failure-message.h"
+#include "../src/recording-spool.h"
 #include "worker-supervisor.h"
 #include "vst3-worker.h"
 #include <algorithm>
@@ -30,6 +31,7 @@
 #include <vector>
 #include <malloc/malloc.h>
 #include <mach/mach.h>
+#include <sys/stat.h>
 
 // Linked only by this test executable's private core translation unit.
 // Tests arm this before processing, on the same thread as the callback.
@@ -249,20 +251,25 @@ struct SnapshotEdge {
   std::uint64_t to;
 };
 
-// Master 1000 plus one source per entry of `sources` (id, input bus), joined by `edges`.
-std::vector<std::uint8_t> EdgeGraphSnapshot(
+struct SnapshotNode {
+  std::uint64_t id;
+  std::uint32_t kind;
+  std::uint32_t bus;
+};
+
+std::vector<std::uint8_t> RoutedGraphSnapshot(
   const std::uint32_t revision,
-  const std::vector<std::pair<std::uint64_t, std::uint32_t>>& sources,
+  const std::vector<SnapshotNode>& nodes,
   const std::vector<SnapshotEdge>& edges
 ) {
   std::vector<std::uint8_t> payload;
   AppendLeU32(payload, DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION);
   AppendLeU32(payload, revision);
-  AppendLeU32(payload, static_cast<std::uint32_t>(sources.size() + 1));
+  AppendLeU32(payload, static_cast<std::uint32_t>(nodes.size()));
   AppendLeU32(payload, static_cast<std::uint32_t>(edges.size()));
   AppendLeU32(payload, 0);
   AppendLeU32(payload, 0);
-  const auto append_node = [&payload](const std::uint64_t id, const std::uint32_t kind, const std::uint32_t bus) {
+  for (const auto& [id, kind, bus] : nodes) {
     AppendLeU64(payload, id);
     AppendLeU32(payload, kind);
     AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
@@ -274,9 +281,7 @@ std::vector<std::uint8_t> EdgeGraphSnapshot(
     AppendLeFloat(payload, 0.0F);
     AppendLeU32(payload, 0);
     AppendLeU32(payload, 0);
-  };
-  append_node(1000, 6, 0);
-  for (const auto& [id, bus] : sources) append_node(id, 1, bus);
+  }
   for (const auto& edge : edges) {
     AppendLeU64(payload, edge.id);
     AppendLeU64(payload, edge.from);
@@ -292,6 +297,17 @@ std::vector<std::uint8_t> EdgeGraphSnapshot(
   AppendBeU32(frame, static_cast<std::uint32_t>(payload.size()));
   frame.insert(frame.end(), payload.begin(), payload.end());
   return frame;
+}
+
+// Master 1000 plus one source per entry of `sources` (id, input bus), joined by `edges`.
+std::vector<std::uint8_t> EdgeGraphSnapshot(
+  const std::uint32_t revision,
+  const std::vector<std::pair<std::uint64_t, std::uint32_t>>& sources,
+  const std::vector<SnapshotEdge>& edges
+) {
+  std::vector<SnapshotNode> nodes{{1000, 6, 0}};
+  for (const auto& [id, bus] : sources) nodes.push_back({id, 1, bus});
+  return RoutedGraphSnapshot(revision, nodes, edges);
 }
 
 // Master 1000 fed by one source per entry of `sources` (id, input bus).
@@ -5448,9 +5464,12 @@ void RenderBlock(daw::audio_host_macos::AudioHost& host) {
 }
 
 // Runs a published graph with the transport rolling, ready for live revisions.
-void StartRunningHostWithGraph(daw::audio_host_macos::AudioHost& host) {
+void StartRunningHostWithGraph(
+  daw::audio_host_macos::AudioHost& host,
+  const std::vector<std::uint8_t>& graph = GraphSnapshot(2, 1.0F)
+) {
   ConfigureDiagnosticHost(host);
-  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.0F)));
+  assert(host.PrepareAndPublishGraph(2, graph));
   assert(host.SetTransport(1, false, 0));
   assert(host.StartDiagnosticMode());
   assert(host.SetTransport(1, true, 0));
@@ -5495,6 +5514,69 @@ void TestStagedAttachmentJoinsAPublishedGraph() {
   assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kActive);
   assert(host.NativeVstHealth(kFirstVstInstance) == NativeVstWorkerHealth::kReady);
   host.Stop();
+}
+
+// While a capture is bound to node X, a revision may not remove X or change where X's output goes
+// (its output, group or send chain). Everything else publishes, and the capture is untouched.
+void TestCaptureBoundRoutingIsLocked() {
+  struct Device : daw::audio_host_macos::RecordingInputDevice {
+    bool Start(std::string_view, std::uint32_t, std::uint32_t, daw::audio_host_macos::AudioHost*, void** session) override {
+      *session = this;
+      return true;
+    }
+    void Stop(void*) override {}
+    std::uint32_t Rate(std::string_view) override { return 48000; }
+  };
+  constexpr std::uint64_t kTarget = 10, kGroup = 20, kOther = 30, kMaster = 1000;
+  const std::vector<SnapshotNode> base{{kMaster, 6, 0}, {kGroup, 3, 0}, {kTarget, 1, 0}};
+  const std::vector<SnapshotEdge> routed{{1, kTarget, kGroup}, {2, kGroup, kMaster}};
+  char root[] = "/private/tmp/daw-host-capture-lock-XXXXXX";
+  assert(mkdtemp(root) != nullptr);
+  struct stat identity{};
+  assert(stat(root, &identity) == 0);
+  daw::audio_host_macos::SpoolRequest request;
+  request.root_path = root;
+  request.root_device = identity.st_dev;
+  request.root_inode = identity.st_ino;
+  request.token = std::string(64, 'e');
+  daw::audio_host_macos::RecordingSpoolService service;
+  Device device;
+  daw::audio_host_macos::AudioHost host(&service, &device);
+  StartRunningHostWithGraph(host, RoutedGraphSnapshot(2, base, routed));
+  daw::audio_host_macos::RecordingConfig config{
+    .device_uid = "fixture", .generation = 1, .session_id = 1,
+    .channel_count = 2, .input_channels = {0, 1}, .gain = 1, .polarity = 1,
+    .punch_start_frame = 0, .punch_end_frame = -1, .monitoring = false, .target_node_id = 999,
+  };
+  // A capture can only bind a node the published plan has.
+  assert(!host.ConfigureRecording(config, request));
+  config.target_node_id = kTarget;
+  assert(host.ConfigureRecording(config, request));
+  const auto before = host.RecordingSnapshot();
+  const auto refused = [&](const std::vector<SnapshotNode>& nodes, const std::vector<SnapshotEdge>& edges) {
+    return host.PrepareGraphRevision(3, RoutedGraphSnapshot(3, nodes, edges)).code
+      == GraphRevisionStatusCode::kCaptureTargetLocked;
+  };
+  // Removing the target, rerouting its output, and removing the group it feeds are all refused.
+  assert(refused({{kMaster, 6, 0}, {kGroup, 3, 0}}, {{2, kGroup, kMaster}}));
+  assert(refused(base, {{1, kTarget, kMaster}, {2, kGroup, kMaster}}));
+  assert(refused({{kMaster, 6, 0}, {kTarget, 1, 0}}, {{1, kTarget, kMaster}}));
+  // A refusal leaves nothing prepared: an unrelated revision (a new source) prepares and publishes.
+  auto other = base;
+  other.push_back({kOther, 1, 1});
+  auto other_edges = routed;
+  other_edges.push_back({3, kOther, kMaster});
+  PublishRunningGraph(host, 3, RoutedGraphSnapshot(3, other, other_edges), [&host] { RenderBlock(host); });
+  const auto after = host.RecordingSnapshot();
+  assert(after.generation == before.generation && after.session_id == before.session_id
+    && after.captured_frames == before.captured_frames && after.dropped_frames == before.dropped_frames
+    && after.configured == before.configured && after.fatal == before.fatal);
+  // The lock ends with the capture.
+  assert(host.CancelRecording());
+  assert(host.PrepareGraphRevision(4, RoutedGraphSnapshot(4, {{kMaster, 6, 0}, {kGroup, 3, 0}}, {{2, kGroup, kMaster}})).code
+    == GraphRevisionStatusCode::kPrepared);
+  host.Stop();
+  std::filesystem::remove_all(root);
 }
 
 void TestStagedAttachmentThatIsNotReadyIsRetiredAtPublication() {
@@ -6305,6 +6387,7 @@ int main() {
   TestComponentRestartIsWorkerLocal();
   TestWorkerFaultIsolatesOnlyThatAttachment();
   TestStagedAttachmentJoinsAPublishedGraph();
+  TestCaptureBoundRoutingIsLocked();
   TestStagedAttachmentThatIsNotReadyIsRetiredAtPublication();
   TestRollbackRetiresEveryStagedAttachment();
   TestUndoBeforePublicationBindsNothing();

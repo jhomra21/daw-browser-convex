@@ -5012,6 +5012,7 @@ const createBridge = (
   let meterBatch = (_batch: NativeHostMeterBatch) => {}
   let spectrumFrame = (_frame: NativeHostSpectrumFrame) => {}
   const scheduleProgressListeners = new Set<(progress: NativeScheduleProgress) => void>()
+  const recordingTargets: bigint[] = []
   const scheduleProgress = (progress: NativeScheduleProgress) => {
     for (const listener of scheduleProgressListeners) listener(progress)
   }
@@ -5071,6 +5072,7 @@ const createBridge = (
     revisionReply,
     setRuntimeRevision: (revision: number) => { runtimeRevision = revision },
     emitProgress,
+    recordingTargets,
     listenerCounts: () => ({ progress: scheduleProgressListeners.size, loss: lossListeners.size }),
     installedAssets,
     releasedAssetIds,
@@ -5316,7 +5318,10 @@ const createBridge = (
           })
           return failure === "transport" ? { ok: false as const, error: "failed" } : { ok: true as const }
         },
-        configureRecording: async (): Promise<{ ok: true; takeId: string; sampleRateHz: number; channelCount: number }> => ({ ok: true, takeId: "retained-take", sampleRateHz: 48000, channelCount: 1 }),
+        configureRecording: async (configuration: { targetNodeId: bigint }): Promise<{ ok: true; takeId: string; sampleRateHz: number; channelCount: number }> => {
+          recordingTargets.push(configuration.targetNodeId)
+          return { ok: true, takeId: "retained-take", sampleRateHz: 48000, channelCount: 1 }
+        },
         startRecording: async () => {
           calls.push("recording-start")
           queueMicrotask(() => recordingStatus({
@@ -12650,11 +12655,12 @@ test("native Complete imports the retained take instead of subscribing to PCM de
     },
   })
   await controller.start(input().transport)
-  await expect(controller.startRecording({ appSessionId: "take-1", projectId: "local:test", projectGeneration: 0,
+  await expect(controller.startRecording({ appSessionId: "take-1", projectId: "local:test", projectGeneration: 0, targetTrackId: "track-1",
     layout: "mono", inputChannel: 0, gain: 1, polarity: 1, monitoring: true, punchStartFrame: 120,
   })).resolves.toEqual({ sampleRate: 48000, channelCount: 1, startFrame: 120 })
   await expect(controller.stopRecording()).resolves.toMatchObject({ capturedFrames: 128, finalizedAtMs: 2 })
   expect(imports).toEqual(["retained-take"])
+  expect(fixture.recordingTargets).toEqual([nativeGraphNodeId("track-1")])
   expect(controller.isRecording()).toBeFalse()
 })
 
@@ -12689,7 +12695,7 @@ test("recording Finish and delayed import success or failure do not retire the p
     })
     try {
       await controller.start(input().transport)
-      await controller.startRecording({ appSessionId: "delayed-import", projectId: "local:test", projectGeneration: 0,
+      await controller.startRecording({ appSessionId: "delayed-import", projectId: "local:test", projectGeneration: 0, targetTrackId: "track-1",
         layout: "mono", inputChannel: 0, gain: 1, polarity: 1, monitoring: true, punchStartFrame: 120 })
       const first = controller.stopRecording()
       void first.catch(() => undefined)
@@ -12756,7 +12762,7 @@ test("delayed Finish beyond two seconds cannot be cancelled by cleanup or inacti
     },
   })
   await controller.start(input().transport)
-  await controller.startRecording({ appSessionId: "delayed", projectId: "local:test", projectGeneration: 0,
+  await controller.startRecording({ appSessionId: "delayed", projectId: "local:test", projectGeneration: 0, targetTrackId: "track-1",
     layout: "mono", inputChannel: 0, gain: 1, polarity: 1, monitoring: true, punchStartFrame: 120 })
   const result = controller.stopRecording()
   await stopping.promise
@@ -12783,7 +12789,7 @@ test("project switch during native Finish refuses import and never cancels the a
     importRecordingSpool: async () => { imported = true; throw new Error("must not import") },
   })
   await controller.start(input().transport)
-  await controller.startRecording({ appSessionId: "switch", projectId: project, projectGeneration: 0,
+  await controller.startRecording({ appSessionId: "switch", projectId: project, projectGeneration: 0, targetTrackId: "track-1",
     layout: "mono", inputChannel: 0, gain: 1, polarity: 1, monitoring: true, punchStartFrame: 120 })
   const result = controller.stopRecording()
   await stopping.promise
@@ -12799,12 +12805,12 @@ test("cleanup during verified readiness cannot resurrect a cancelled recording",
   const configured = Promise.withResolvers<void>()
   const ready = Promise.withResolvers<void>()
   const configure = fixture.bridge.session.configureRecording
-  fixture.bridge.session.configureRecording = async () => { configured.resolve(); await ready.promise; return configure() }
+  fixture.bridge.session.configureRecording = async (configuration) => { configured.resolve(); await ready.promise; return configure(configuration) }
   const controller = createObservedController({ bridge: fixture.bridge,
     compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
   })
   await controller.start(input().transport)
-  const start = controller.startRecording({ appSessionId: "cancelled-start", projectId: "local:test", projectGeneration: 0,
+  const start = controller.startRecording({ appSessionId: "cancelled-start", projectId: "local:test", projectGeneration: 0, targetTrackId: "track-1",
     layout: "mono", inputChannel: 0, gain: 1, polarity: 1, monitoring: true, punchStartFrame: 120 })
   await configured.promise
   await controller.cancelRecording()
@@ -12820,7 +12826,7 @@ test("M auto-punch proof failure reports recording failure without cancelling pu
   const controller = createObservedController({ bridge: fixture.bridge,
     compileSnapshot: async () => compileLivePlaybackSnapshot(input()) })
   await controller.start(input().transport)
-  await controller.startRecording({ appSessionId: "proof-fail", projectId: "local:test", projectGeneration: 0,
+  await controller.startRecording({ appSessionId: "proof-fail", projectId: "local:test", projectGeneration: 0, targetTrackId: "track-1",
     layout: "mono", inputChannel: 0, gain: 1, polarity: 1, monitoring: false, punchStartFrame: 120, punchEndFrame: 248,
     onFailure: (error) => { failures.push(error.message); void controller.cancelRecording() } })
   fixture.emitRecordingFailure({ generation: 1, sessionId: 1n, message: "Complete proof failed; native source retained." })

@@ -230,6 +230,10 @@ process.stdin.on("data", (chunk) => {
       process.stdout.write(device())
     } else if (type === 34) {
       process.stdout.write(inputDevice())
+    } else if (type === 28 && process.env.MODE?.startsWith("spool")
+      && (payload.length !== 152 + payload.readUInt32BE(56) + payload.readUInt32BE(140) || payload.readBigUInt64BE(144) !== 1n)) {
+      // The wire carries the capture target node at 144, ahead of the device UID and root path.
+      process.stdout.write(ack(type, 0, "fixture: capture target missing from the configuration"))
     } else if (type === 28 && process.env.MODE?.startsWith("spool")) {
       recordingGeneration = payload.readUInt32BE(0)
       recordingSessionId = payload.readBigUInt64BE(4)
@@ -1199,7 +1203,7 @@ test("normal teardown and planned suspend retain parser and child until native F
     try {
       await fixture.supervisor.configureRecording({
         deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
-        inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false,
+        inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n,
       }, { rootPath: "/private/fixture", rootDevice: 1n, rootInode: 2n, token: "a".repeat(64) })
       await fixture.supervisor.startRecording()
       await fixture.supervisor.stopRecording()
@@ -1228,7 +1232,7 @@ test("the control timeout cannot kill persistence behind a blocked Stop ACK", as
   try {
     await fixture.supervisor.configureRecording({
       deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
-      inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false,
+      inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n,
     }, { rootPath: "/private/fixture", rootDevice: 1n, rootInode: 2n, token: "a".repeat(64) })
     await fixture.supervisor.startRecording()
     const stop = fixture.supervisor.stopRecording()
@@ -1252,7 +1256,7 @@ test("resume waits for pending Finish suspend and starts a fresh host afterwards
   try {
     await fixture.supervisor.configureRecording({
       deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
-      inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false,
+      inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n,
     }, { rootPath: "/private/fixture", rootDevice: 1n, rootInode: 2n, token: "a".repeat(64) })
     await fixture.supervisor.startRecording()
     await fixture.supervisor.stopRecording()
@@ -1278,7 +1282,7 @@ test("rejects malformed native final status and reserved PCM frames instead of f
     try {
       await fixture.supervisor.configureRecording({
         deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
-        inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false,
+        inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n,
       }, { rootPath: "/private/fixture", rootDevice: 1n, rootInode: 2n, token: "a".repeat(64) })
       await fixture.supervisor.startRecording()
       await fixture.supervisor.stopRecording()
@@ -1298,7 +1302,7 @@ test("actual native loss interrupts finalization rather than fabricating success
   try {
     await fixture.supervisor.configureRecording({
       deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
-      inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false,
+      inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n,
     }, { rootPath: "/private/fixture", rootDevice: 1n, rootInode: 2n, token: "a".repeat(64) })
     await fixture.supervisor.startRecording()
     await fixture.supervisor.stopRecording()
@@ -2397,7 +2401,7 @@ test("resolves the host default recording input and sends bounded recording cont
       polarity: 1,
       punchStartFrame: 0,
       punchEndFrame: null,
-      monitoring: false,
+      monitoring: false, targetNodeId: 1n,
     }, { rootPath: "/private/fixture", rootDevice: 1n, rootInode: 2n, token: "a".repeat(64) })
     let blocks = 0
     const remove = fixture.supervisor.onRecordingBlock(() => { blocks += 1 })
@@ -2409,7 +2413,7 @@ test("resolves the host default recording input and sends bounded recording cont
     remove()
     await expect(fixture.supervisor.configureRecording({
       deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
-      inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false,
+      inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n,
     }, { rootPath: "/private/fixture", rootDevice: 1n, rootInode: 2n, token: "b".repeat(64) }))
       .rejects.toThrow("already admitted")
     await fixture.supervisor.stopRecording(1024)
@@ -2426,7 +2430,7 @@ test("resolves the host default recording input and sends bounded recording cont
       polarity: 1,
       punchStartFrame: 0,
       punchEndFrame: null,
-      monitoring: false,
+      monitoring: false, targetNodeId: 1n,
     }, { rootPath: "/private/fixture", rootDevice: 1n, rootInode: 2n, token: "a".repeat(64) })).rejects.toThrow("native recording configuration is invalid")
   } finally {
     await fixture.supervisor.teardown()
@@ -2516,7 +2520,7 @@ test("M2 failed Finish outcome does not permanently veto playback stop or teardo
   try {
     await fixture.supervisor.configureRecording({ deviceUid: "coreaudio:fixture-input", generation: 1,
       sessionId: 1n, channelCount: 2, inputChannels: [0, 1], gain: 1, polarity: 1,
-      punchStartFrame: 0, punchEndFrame: null, monitoring: false },
+      punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n, },
       { rootPath: "/private/fixture", rootDevice: 1n, rootInode: 2n, token: "a".repeat(64) })
     await fixture.supervisor.startRecording()
     await fixture.supervisor.stopRecording()
@@ -2527,7 +2531,7 @@ test("M2 failed Finish outcome does not permanently veto playback stop or teardo
     expect(fixture.supervisor.recordingFinalizationPending()).toBeFalse()
     await expect(fixture.supervisor.configureRecording({ deviceUid: "coreaudio:fixture-input", generation: 2,
       sessionId: 2n, channelCount: 2, inputChannels: [0, 1], gain: 1, polarity: 1,
-      punchStartFrame: 0, punchEndFrame: null, monitoring: false },
+      punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n, },
       { rootPath: "/private/fixture", rootDevice: 1n, rootInode: 2n, token: "b".repeat(64) }))
       .resolves.toMatchObject({ generation: 2, sessionId: 2n, configured: true })
     await expect(fixture.supervisor.startRecording()).resolves.toBeUndefined()
@@ -2590,7 +2594,7 @@ const recordingFinishFixture = async (blocked?: "patch" | "graph", refused = fal
   })
   await supervisor.configureRecording({
     deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
-    inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false,
+    inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n,
   }, { rootPath: directory, rootDevice: 1n, rootInode: 2n, token: "a".repeat(64) })
   await supervisor.startRecording()
   const timers = spyOn(globalThis, "setTimeout")

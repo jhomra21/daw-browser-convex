@@ -249,6 +249,8 @@ export type NativeRecordingSpoolConfiguration = {
   token: string
 }
 export type NativeMainRecordingStatus = NativeHostRecordingStatus & { fileDevice: bigint; fileInode: bigint }
+// Mirrors kHeaderBytes in native/audio-host-macos/src/main.cpp: the fixed fields, then the device UID and the root path.
+const recordingConfigurationHeaderBytes = 152
 const serializeRecordingConfiguration = (input: NativeHostRecordingConfiguration, spool: NativeRecordingSpoolConfiguration) => {
   if (!spool || !/^[a-f0-9]{64}$/.test(spool.token) || !path.isAbsolute(spool.rootPath)
     || spool.rootPath.includes("\0") || spool.rootDevice < 0n || spool.rootInode <= 0n
@@ -270,8 +272,9 @@ const serializeRecordingConfiguration = (input: NativeHostRecordingConfiguration
     ))
     || !coreAudioDeviceId(input.deviceUid)
     || deviceUid.byteLength === 0 || deviceUid.byteLength > 4096
+    || input.targetNodeId <= 0n || input.targetNodeId > 0xffff_ffff_ffff_ffffn
   ) return undefined
-  const output = Buffer.alloc(144 + deviceUid.byteLength + root.byteLength)
+  const output = Buffer.alloc(recordingConfigurationHeaderBytes + deviceUid.byteLength + root.byteLength)
   output.writeUInt32BE(input.generation, 0)
   output.writeBigUInt64BE(input.sessionId, 4)
   output.writeUInt32BE(input.channelCount, 12)
@@ -287,8 +290,9 @@ const serializeRecordingConfiguration = (input: NativeHostRecordingConfiguration
   output.writeBigUInt64BE(spool.rootInode, 68)
   output.set(Buffer.from(spool.token, "ascii"), 76)
   output.writeUInt32BE(root.byteLength, 140)
-  output.set(deviceUid, 144)
-  output.set(root, 144 + deviceUid.byteLength)
+  output.writeBigUInt64BE(input.targetNodeId, 144)
+  output.set(deviceUid, recordingConfigurationHeaderBytes)
+  output.set(root, recordingConfigurationHeaderBytes + deviceUid.byteLength)
   return output
 }
 
@@ -1761,6 +1765,7 @@ export const createNativeAudioHostSupervisor = (
       : code === 10 ? "retirement-capacity-exceeded"
       : code === 11 ? "publish-pending"
       : code === 12 ? "rebase-required"
+      : code === 13 ? "capture-target-locked"
       : undefined
     if (!status) return undefined
     return {

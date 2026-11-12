@@ -2750,6 +2750,8 @@ export const createNativePlaybackController = (input: {
     projectId?: string
     projectGeneration?: number
     isCurrent?: () => boolean
+    // The track the take records onto: native keeps its node and routing fixed while the take runs.
+    targetTrackId: string
     layout: "mono" | "stereo"
     inputChannel: number
     gain: number
@@ -2824,7 +2826,8 @@ export const createNativePlaybackController = (input: {
       const ready = await bridge.session.configureRecording({ ...scope, spoolImportVersion: 1,
         deviceUid: inputDevice.deviceId, generation, sessionId: numericSessionId, channelCount, inputChannels,
         gain: recordingInput.gain, polarity: recordingInput.polarity, punchStartFrame: recordingInput.punchStartFrame,
-        punchEndFrame: recordingInput.punchEndFrame ?? null, monitoring: recordingInput.monitoring })
+        punchEndFrame: recordingInput.punchEndFrame ?? null, monitoring: recordingInput.monitoring,
+        targetNodeId: nativeGraphNodeId(recordingInput.targetTrackId) })
       assertReply(ready)
       if (!ready.takeId || ready.sampleRateHz !== sampleRate || ready.channelCount !== channelCount)
         throw new Error("Native recording verified readiness or sample rate mismatch.")

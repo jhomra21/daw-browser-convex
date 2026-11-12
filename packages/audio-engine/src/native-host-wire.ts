@@ -65,6 +65,8 @@ export type NativeHostRecordingConfiguration = {
   punchStartFrame: number
   punchEndFrame: number | null
   monitoring: boolean
+  // The graph node of the track the take records onto: native refuses a revision that removes or reroutes it.
+  targetNodeId: bigint
 }
 
 export type NativeHostRecordingBlock = {

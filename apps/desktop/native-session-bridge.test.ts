@@ -109,7 +109,7 @@ test("routes recording configure and stop through native session envelopes", asy
   const { session } = await darwinAudioHost()
   const input: NativeHostRecordingConfiguration & { spoolImportVersion: 1 } = {
     projectId: "project", deviceUid: "device", generation: 1, sessionId: 1n, channelCount: 2, inputChannels: [0, 1],
-    gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, spoolImportVersion: 1,
+    gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n, spoolImportVersion: 1,
   }
   invocations.length = 0
   await session.configureRecording(input)

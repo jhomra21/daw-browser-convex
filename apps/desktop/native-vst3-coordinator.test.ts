@@ -1046,7 +1046,9 @@ test("a cached verdict is not reused when the sample rate, the state revision or
   expect(calls).toEqual([`preflight:${later.instanceId}`, `attach:${later.instanceId}`])
   const refingerprinted = { ...extraInstance(3), bundleFingerprint: "c".repeat(64) }
   const moved = catalog()
-  moved.entries[0]!.launchEligibility!.bundleFingerprint = "c".repeat(64)
+  const { launchEligibility } = moved.entries[0]
+  if (!launchEligibility) throw new Error("Missing launch eligibility")
+  launchEligibility.bundleFingerprint = "c".repeat(64)
   calls.length = 0
   await run([refingerprinted], { sampleRateHz: 44_100, catalog: moved })
   expect(calls).toContain(`preflight:${refingerprinted.instanceId}`)

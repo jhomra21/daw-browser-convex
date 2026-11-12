@@ -1163,7 +1163,7 @@ describe("DV01 STEP7 frozen inputs and cleanup witnesses", () => {
         return compiled.supported ? { ...compiled, snapshot: { ...compiled.snapshot, nativeExternalAttachmentPlan: nativeAttachmentPlan } } : compiled
       },
     })
-    const instanceId = nativeAttachmentPlan.attachments[0]!.instanceId
+    const instanceId = nativeAttachmentPlan.attachments[0].instanceId
     try {
       expect(await controller.start(snapshotInput.transport)).toBe("started")
       const before = fixture.graphPayloads.length
@@ -9267,11 +9267,11 @@ test("a persistent VST staging refusal stops after 8 resubmits with a defect log
 // and never retried or logged as our defect.
 test("a plug-in that crashes during live staging is marked failed on its device, never retried and not logged as a defect", async () => {
   const { fixture, controller, edit, faults, transport } = vstJoinFixture()
-  const instanceId = nativeAttachmentPlan.attachments[0]!.instanceId
+  const instanceId = nativeAttachmentPlan.attachments[0].instanceId
   let attempts = 0
   fixture.bridge.session.coordinateVstAttachments = async () => {
     attempts++
-    return { ok: false as const, error: "The native VST3 worker preflight failed.", failure: { code: "worker-crashed", origin: "plugin" as const, instanceId } }
+    return { ok: false, error: "The native VST3 worker preflight failed.", failure: { code: "worker-crashed", origin: "plugin", instanceId } }
   }
   const warn = console.warn
   const error = console.error
@@ -9291,11 +9291,11 @@ test("a plug-in that crashes during live staging is marked failed on its device,
 // Our own refusals keep the retry; a host failure that names an instance must not mark it failed.
 test("a host-side staging refusal that names an instance retries and does not mark the instance failed", async () => {
   const { fixture, controller, edit, transport } = vstJoinFixture()
-  const instanceId = nativeAttachmentPlan.attachments[0]!.instanceId
+  const instanceId = nativeAttachmentPlan.attachments[0].instanceId
   let attempts = 0
   fixture.bridge.session.coordinateVstAttachments = async () => {
     attempts++
-    return { ok: false as const, error: "The native VST3 attachment transaction failed.", failure: { code: "native-transaction-failed", origin: "host" as const, instanceId } }
+    return { ok: false, error: "The native VST3 attachment transaction failed.", failure: { code: "native-transaction-failed", origin: "host", instanceId } }
   }
   const warn = console.warn
   const error = console.error

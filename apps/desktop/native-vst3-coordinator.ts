@@ -447,13 +447,17 @@ export const nativeVst3CoordinatorFailureOrigin = (
 export const nativeVst3CoordinationFailureReply = (
   result: Extract<NativeVst3CoordinatorResult, { ok: false }>,
 ) => ({
-  ok: false as const,
+  ok: false,
   error: result.message,
   failure: {
     code: result.code,
     origin: nativeVst3CoordinatorFailureOrigin(result.code),
     ...(result.instanceId !== undefined && { instanceId: result.instanceId }),
   },
+} satisfies {
+  ok: false
+  error: string
+  failure: { code: NativeVst3CoordinatorFailureCode; origin: "plugin" | "host"; instanceId?: string }
 })
 
 const reportDefectToConsole = (defect: NativeVst3Defect) => {

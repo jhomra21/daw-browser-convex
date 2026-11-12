@@ -75,9 +75,9 @@ if(DAW_HAS_WNO_UNNECESSARY_VIRTUAL_SPECIFIER)
     PROPERTIES COMPILE_FLAGS "-Wno-unnecessary-virtual-specifier"
   )
 endif()
-find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
-find_library(SECURITY_FRAMEWORK Security REQUIRED)
-target_link_libraries(daw-vst3-sdk-hosting PUBLIC "${COCOA_FRAMEWORK}" "${SECURITY_FRAMEWORK}")
+# -framework, not a find_library path: a cached path adds -F for that SDK, which makes its headers non-system and
+# -Werror then fails on the SDK's own deprecations (a build directory outlives the Xcode it was configured with).
+target_link_libraries(daw-vst3-sdk-hosting PUBLIC "-framework Cocoa" "-framework Security")
 
 add_executable(daw-vst3-worker src/worker-main.cpp)
 target_link_libraries(daw-vst3-worker PRIVATE daw-vst3-worker-runtime daw-vst3-sdk-hosting)

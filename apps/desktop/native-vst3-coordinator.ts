@@ -759,14 +759,17 @@ export const createNativeVst3AttachmentLedger = (
       }
       removed = [...active.keys()].filter((instanceId) => !entries.has(instanceId))
       const dropped = [...staged.keys()].filter((instanceId) => !entries.has(instanceId))
-      for (const instanceId of dropped) staged.delete(instanceId)
       return { attach, replace, dropped: dropped.filter((instanceId) => !active.has(instanceId)) }
     },
     parkedMatches: (instanceId: string, load: string) => parkedLoad(instanceId) === load,
     verdict: (key: string) => verdicts.get(key),
     rememberVerdict: (key: string, result: AvailablePreflight) => { verdicts.set(key, result) },
     stage: (instanceId: string, entry: LedgerEntry) => { staged.set(instanceId, entry) },
-    detach: (instanceId: string, transactionToken?: string) => host.detachVst(instanceId, transactionToken),
+    // A staged instance is forgotten only once the host let go of it: a plan refused before that still finds it staged.
+    detach: async (instanceId: string, transactionToken?: string) => {
+      await host.detachVst(instanceId, transactionToken)
+      staged.delete(instanceId)
+    },
     // The revision is live: staged instances are active, removed ones are detached and the host parks them.
     async published() {
       for (const [instanceId, entry] of staged) active.set(instanceId, entry)

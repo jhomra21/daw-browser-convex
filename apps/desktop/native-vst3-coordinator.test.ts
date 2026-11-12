@@ -888,18 +888,21 @@ test("stops on retirement failure after retaining the newly published revision",
 })
 
 // A stateful plug-in carries captured state, so its verdict is never taken from the cache.
-const ledgerHarness = (stateful: boolean, clock = { now: 0 }) => {
+const ledgerHarness = (stateful: boolean, clock = { now: 0 }, refused: ReadonlySet<string> = new Set()) => {
   const calls: string[] = []
   const ledger = createNativeVst3AttachmentLedger({
     detachVst: async (instanceId) => { calls.push(`detach:${instanceId}`) },
   }, () => clock.now)
   const stateBytes = new Uint8Array([1, 2, 3])
   const state = { bytes: stateBytes, sha256: createHash("sha256").update(stateBytes).digest("hex") }
-  const run = (attachments: NativeExternalAttachmentPlan["attachments"]) => coordinateNativeVst3Attachments({
+  const run = (
+    attachments: NativeExternalAttachmentPlan["attachments"],
+    options: { sampleRateHz?: number; catalog?: PluginCatalogData } = {},
+  ) => coordinateNativeVst3Attachments({
     serializedPlan: plan(attachments),
-    sampleRateHz: 48_000,
+    sampleRateHz: options.sampleRateHz ?? 48_000,
     workerPath: "/Resources/daw-vst3-worker",
-    catalogStore: { load: async () => catalog() },
+    catalogStore: { load: async () => options.catalog ?? catalog() },
     audioHost: host(calls),
     ledger,
     capturedVstStates: new Map(stateful ? attachments.map((entry) => [entry.instanceId, state]) : []),
@@ -908,6 +911,17 @@ const ledgerHarness = (stateful: boolean, clock = { now: 0 }) => {
       calls.push(`preflight:${input.instanceId}`)
       const source = attachments.find((candidate) => candidate.instanceId === input.instanceId)
       if (!source) throw new Error("missing fixture attachment")
+      if (refused.has(input.instanceId)) {
+        return {
+          version: 1,
+          type: "preflight-result",
+          requestId: "refused-preflight",
+          status: "unavailable",
+          code: "worker-crashed",
+          message: "Worker preflight failed.",
+          requirements,
+        }
+      }
       return available(source, { supportsState: stateful })
     },
   })
@@ -995,6 +1009,57 @@ test("a second default insert of a plug-in reuses the verdict of the first", asy
   calls.length = 0
   await run([first, extraInstance(1)])
   expect(calls).toEqual([`attach:${extraInstance(1).instanceId}`])
+})
+
+test("a refused plan keeps the staged instance it would have dropped, so the next plan does not attach it twice", async () => {
+  const refused = new Set<string>()
+  const { calls, run } = ledgerHarness(true, { now: 0 }, refused)
+  await run([first, second])
+  refused.add(extraInstance(1).instanceId)
+  expect(await run([second, extraInstance(1)])).toMatchObject({ ok: false, code: "worker-crashed" })
+  calls.length = 0
+  expect(await run([first, second])).toEqual({ ok: true, attached: 0 })
+  expect(calls).toEqual([])
+})
+
+test("a dropped staged instance is detached once the plan that drops it is accepted", async () => {
+  const { calls, run } = ledgerHarness(true)
+  await run([first, second])
+  calls.length = 0
+  expect(await run([second])).toEqual({ ok: true, attached: 0 })
+  expect(calls).toEqual([`detach:${first.instanceId}`])
+  calls.length = 0
+  expect(await run([first, second])).toEqual({ ok: true, attached: 1 })
+  expect(calls).toEqual([`preflight:${first.instanceId}`, `attach:${first.instanceId}`])
+})
+
+test("a cached verdict is not reused when the sample rate, the state revision or the fingerprints differ", async () => {
+  const { calls, run } = ledgerHarness(false)
+  await run([first])
+  const sibling = extraInstance(1)
+  calls.length = 0
+  await run([first, sibling], { sampleRateHz: 44_100 })
+  expect(calls).toEqual([`preflight:${sibling.instanceId}`, `attach:${sibling.instanceId}`])
+  const later = extraInstance(2)
+  calls.length = 0
+  await run([first, sibling, { ...later, stateRevision: 8 }], { sampleRateHz: 44_100 })
+  expect(calls).toEqual([`preflight:${later.instanceId}`, `attach:${later.instanceId}`])
+  const refingerprinted = { ...extraInstance(3), bundleFingerprint: "c".repeat(64) }
+  const moved = catalog()
+  moved.entries[0]!.launchEligibility!.bundleFingerprint = "c".repeat(64)
+  calls.length = 0
+  await run([refingerprinted], { sampleRateHz: 44_100, catalog: moved })
+  expect(calls).toContain(`preflight:${refingerprinted.instanceId}`)
+})
+
+test("a plug-in whose trust was revoked is unresolved even when its verdict was cached", async () => {
+  const { calls, run } = ledgerHarness(false)
+  await run([first])
+  const revoked = { ...catalog(), entries: [] }
+  calls.length = 0
+  expect(await run([first, extraInstance(1)], { catalog: revoked }))
+    .toMatchObject({ ok: false, code: "attachment-unresolved" })
+  expect(calls).toEqual([])
 })
 
 // native/plugin-host/src/worker-supervisor.h WorkerFaultOrigin, in bits 0..7 of a fault value.

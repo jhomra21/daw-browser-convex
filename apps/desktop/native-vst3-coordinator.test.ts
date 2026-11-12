@@ -24,6 +24,7 @@ import {
   createNativeVst3SessionLedger,
   nativeVst3PlaybackDefaultStatus,
   resolveNativeVst3AttachmentPlan,
+  nativeVst3CoordinationFailureReply,
   nativeVst3CoordinatorFailureOrigin,
   nativeVst3InstanceEvent,
   type NativeVst3Defect,
@@ -1110,6 +1111,24 @@ test("only a crashed plug-in preflight is a plug-in failure; timeouts and stagin
     instanceId: undefined,
     detail: "The native VST3 attachment transaction failed.",
   })
+})
+
+// UD 11: the reply to the renderer carries the failing code, its origin and the instance, so a staging crash is not
+// indistinguishable from a transient refusal there.
+test("a refused coordination reaches the renderer with its code, origin and instance", async () => {
+  const crashed = await coordinateNativeVst3Attachments({
+    serializedPlan: plan([first]), sampleRateHz: 48_000, workerPath: "/Resources/daw-vst3-worker",
+    catalogStore: { load: async () => catalog() }, audioHost: host([]), reportDefect: () => undefined,
+    preflight: async () => ({ version: 1, type: "preflight-result", requestId: "crashed", status: "unavailable",
+      code: "worker-crashed", message: "The native VST3 worker preflight failed.", requirements }),
+  })
+  if (crashed.ok) throw new Error("A crashed preflight must be refused")
+  expect(nativeVst3CoordinationFailureReply(crashed)).toEqual({
+    ok: false, error: "The native VST3 worker preflight failed.",
+    failure: { code: "worker-crashed", origin: "plugin", instanceId: first.instanceId },
+  })
+  expect(nativeVst3CoordinationFailureReply({ ok: false, code: "native-transaction-failed", message: "The native VST3 attachment transaction failed." }))
+    .toEqual({ ok: false, error: "The native VST3 attachment transaction failed.", failure: { code: "native-transaction-failed", origin: "host" } })
 })
 
 test("host notifications reach the renderer as typed instance events and never end the session", () => {

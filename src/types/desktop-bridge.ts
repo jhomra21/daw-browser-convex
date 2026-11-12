@@ -36,6 +36,12 @@ import type { ExportAudioFormat } from "@daw-browser/shared"
 import type { NativeRevisionSession } from "@daw-browser/desktop-protocol/native-revision"
 import type { NativeInstrumentBudgetPolicy } from "../lib/desktop/native-instrument-budget-policy"
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
+/** `plugin`: the plug-in's own crash or API error. `host`: ours. */
+type NativeVstCoordinationReply = { ok: true } | {
+  ok: false
+  error: string
+  failure?: { code: string; origin: "plugin" | "host"; instanceId?: string }
+}
 /** `refused`: native answered no. `unavailable`: nothing was delivered. `unconfirmed`: it may have been delivered. */
 export type NativeDeliveryFailureKind = "refused" | "unconfirmed" | "unavailable"
 export type NativeDeliveryReply = { ok: true } | { ok: false; error: string; kind: NativeDeliveryFailureKind }
@@ -229,7 +235,7 @@ type NativeSessionBridge = {
   queueScheduleWindow(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   reenableVstScheduleAutomation(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   queueSourceEvents(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
-  coordinateVstAttachments(input: NativeVstAttachmentCoordinationInput, transactionToken?: string): Promise<NativeSessionReply>
+  coordinateVstAttachments(input: NativeVstAttachmentCoordinationInput, transactionToken?: string): Promise<NativeVstCoordinationReply>
   setTransport(input: NativeHostTransport, transactionToken?: string): Promise<NativeSessionReply>
   configureRecording(input: NativeHostRecordingConfiguration & { spoolImportVersion: 1 }): Promise<
     { ok: true; takeId: string; sampleRateHz: number; channelCount: number } | { ok: false; error: string }

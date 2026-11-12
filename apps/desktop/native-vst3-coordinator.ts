@@ -440,6 +440,20 @@ export const nativeVst3CoordinatorFailureOrigin = (
   code: NativeVst3CoordinatorFailureCode,
 ): "plugin" | "host" => code === "worker-crashed" ? "plugin" : "host"
 
+// A refused coordination as the renderer receives it: the origin tells it whether to retry (ours) or to mark the
+// instance failed (the plug-in's).
+export const nativeVst3CoordinationFailureReply = (
+  result: Extract<NativeVst3CoordinatorResult, { ok: false }>,
+) => ({
+  ok: false as const,
+  error: result.message,
+  failure: {
+    code: result.code,
+    origin: nativeVst3CoordinatorFailureOrigin(result.code),
+    ...(result.instanceId !== undefined && { instanceId: result.instanceId }),
+  },
+})
+
 const reportDefectToConsole = (defect: NativeVst3Defect) => {
   console.error("[native-vst3] defect", JSON.stringify(defect))
 }

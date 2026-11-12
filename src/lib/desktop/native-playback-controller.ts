@@ -3838,17 +3838,24 @@ export const createNativePlaybackController = (input: {
             requiredVstStateInstanceIds: snapshot.nativeExternalAttachmentStateRequirements,
           }))
           let staging = await stage()
+          let stagingResubmits = 0
           // A refused staging keeps the playing graph and resubmits itself, with no further user edit. The wait is
           // counted in native progress reports (one per rendered window, the same event that wakes a publication), so
           // it needs no timer: min(2^r, 16(r+1)) reports, up to 8 resubmits, then the edit waits for the next opportunity.
+          // The count is this staging's own: publication rebases keep their budget.
           while (!staging.ok) {
-            if (record.resubmits >= 8) {
+            // The plug-in's own crash or API error is deterministic and its fault: the device shows it, nothing retries.
+            if (staging.failure?.origin === "plugin") {
+              if (staging.failure.instanceId) markVstInstanceFailed(staging.failure.instanceId)
+              break
+            }
+            if (stagingResubmits >= 8) {
               console.error("[native-live-edit] defect: VST staging was refused after 8 resubmits; the insertion stays in the project and applies on the next successful publication", { reason: staging.error })
               break
             }
-            console.warn(`[native-live-edit] VST staging refused; resubmit ${record.resubmits + 1} of 8 at a later block boundary`, { reason: staging.error })
-            const resumeAt = progressVersion + Math.min(2 ** record.resubmits, 16 * (record.resubmits + 1))
-            retry()
+            console.warn(`[native-live-edit] VST staging refused; resubmit ${stagingResubmits + 1} of 8 at a later block boundary`, { reason: staging.error })
+            const resumeAt = progressVersion + Math.min(2 ** stagingResubmits, 16 * (stagingResubmits + 1))
+            stagingResubmits++
             while (progressVersion < resumeAt) await waitForOpportunity(sequence)
             await quietPublicationLane()
             staging = await stage()

@@ -3210,6 +3210,29 @@ describe("DV01 instrument truth", () => {
     expect(unanswered.value).toBeUndefined()
     await f.controller.dispose()
   })
+  // Review m1: the compile reads the project, which a drag reaches on release; a live value delivered while it runs is
+  // part of the instrument state the adoption configures, or the publication would slew every live target back.
+  test("m1 a live Synth value delivered while an adoption compiles is in the instrument state it configures", async () => {
+    const f = setup(synth(), true)
+    await f.controller.start(f.base.transport)
+    const compiled = synth({ ...createDefaultSynthParams(), polyphony: 4 })
+    f.set(compiled)
+    const compile = holdCompile(f.controller)
+    const adoption = f.controller.adoptSchedule(migrationIntent("m1"), true)
+    await compile.entered
+    const live = synth({ ...compiled.params, gain: 0.125 })
+    f.set(live)
+    const answer = watch(f.controller.deliverProcessor(f.edit(live, 30, liveValues(compilePortableSynthState(live.params)))).settled)
+    const states: Uint8Array[] = []
+    const configure = f.fixture.bridge.session.configureInstrumentStates
+    f.fixture.bridge.session.configureInstrumentStates = async bytes => { states.push(bytes.slice()); return configure(bytes) }
+    acknowledgeStagedPublication(f.fixture)
+    expect(await (compile.release(), adoption)).toEqual({ status: "adopted" })
+    await turns()
+    expect(states).toEqual([serializeNativeInstrumentStates([{ nodeId: "instrument", state: compilePortableSynthState(live.params) }], [])])
+    expect(answer.value).toEqual({ state: "applied" })
+    await f.controller.dispose()
+  })
   test("R2-B6c-configured-content-not-held", async () => {
     const f = setup()
     await f.controller.start(f.base.transport)
@@ -9192,6 +9215,53 @@ test("a persistent VST staging refusal stops after 8 resubmits with a defect log
     expect(faults).toEqual([])
     expect(fixture.calls.slice(before)).not.toContain("stage-prepare")
     for (const call of ["stop", "teardown"]) expect(fixture.calls.slice(before)).not.toContain(call)
+  } finally { console.warn = warn; console.error = error; await controller.dispose() }
+})
+
+// UD 11: a plug-in that crashes or errors while it is staged fails the same way every time, so it is shown on its device
+// and never retried or logged as our defect.
+test("a plug-in that crashes during live staging is marked failed on its device, never retried and not logged as a defect", async () => {
+  const { fixture, controller, edit, faults, transport } = vstJoinFixture()
+  const instanceId = nativeAttachmentPlan.attachments[0]!.instanceId
+  let attempts = 0
+  fixture.bridge.session.coordinateVstAttachments = async () => {
+    attempts++
+    return { ok: false as const, error: "The native VST3 worker preflight failed.", failure: { code: "worker-crashed", origin: "plugin" as const, instanceId } }
+  }
+  const warn = console.warn
+  const error = console.error
+  const logs: unknown[][] = []
+  console.warn = (...args: unknown[]) => { logs.push(args) }
+  console.error = (...args: unknown[]) => { logs.push(args) }
+  try {
+    expect(await controller.start(transport)).toBe("started")
+    expect(vstInstanceFailed(instanceId)).toBe(false)
+    expect(await edit(true, "insert")).toMatchObject({ status: "failed" })
+    expect({ attempts, failed: vstInstanceFailed(instanceId), defects: logs.filter(([message]) => String(message).includes("defect")), faults, active: controller.isActive() })
+      .toEqual({ attempts: 1, failed: true, defects: [], faults: [], active: true })
+    expect(logs.filter(([message]) => String(message).includes("staging refused"))).toEqual([])
+  } finally { console.warn = warn; console.error = error; await controller.dispose() }
+})
+
+// Our own refusals keep the retry; a host failure that names an instance must not mark it failed.
+test("a host-side staging refusal that names an instance retries and does not mark the instance failed", async () => {
+  const { fixture, controller, edit, transport } = vstJoinFixture()
+  const instanceId = nativeAttachmentPlan.attachments[0]!.instanceId
+  let attempts = 0
+  fixture.bridge.session.coordinateVstAttachments = async () => {
+    attempts++
+    return { ok: false as const, error: "The native VST3 attachment transaction failed.", failure: { code: "native-transaction-failed", origin: "host" as const, instanceId } }
+  }
+  const warn = console.warn
+  const error = console.error
+  console.warn = () => undefined
+  console.error = () => undefined
+  try {
+    expect(await controller.start(transport)).toBe("started")
+    const failed = edit(true, "insert")
+    await feedProgress(fixture, () => attempts >= 9)
+    expect(await failed).toMatchObject({ status: "failed" })
+    expect({ attempts, failed: vstInstanceFailed(instanceId) }).toEqual({ attempts: 9, failed: false })
   } finally { console.warn = warn; console.error = error; await controller.dispose() }
 })
 

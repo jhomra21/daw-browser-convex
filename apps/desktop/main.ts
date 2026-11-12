@@ -125,6 +125,7 @@ import {
   coordinateNativeVst3Attachments,
   createNativeVst3HostEventHandlers,
   createNativeVst3SessionLedger,
+  nativeVst3CoordinationFailureReply,
   resolveNativeVst3AttachmentPlan,
 } from "./native-vst3-coordinator"
 import {
@@ -1737,7 +1738,7 @@ const registerIpc = () => {
     }
     if (!result.ok) {
       activeEditorProjectBindings.rollback(envelope.data.transactionToken)
-      return { ok: false as const, error: result.message }
+      return nativeVst3CoordinationFailureReply(result)
     }
     try {
       const plan = decodeNativeExternalAttachmentPlan(sessionValue.serializedPlan)

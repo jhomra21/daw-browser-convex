@@ -675,15 +675,17 @@ for (const spec of step5StructuralSpecs) {
         const counts = f.counts(before);
         console.log("STEP5 structural guard", JSON.stringify({ id: spec.id, transport, counts, faults: f.faults }));
         expect(f.faults).toEqual([]);
-        expect(counts.scheduleCompiles).toBe(transport === "playing" ? 1 : 0);
-        expect(counts.publishes).toBe(transport === "playing" ? 1 : 0);
-        // A paused structural edit replaces the paused preview: one dispose and teardown, then one compile.
-        expect(counts.previewCompiles).toBe(transport === "paused" ? 1 : 0);
-        expect(counts.previewDisposals).toBe(transport === "paused" ? 1 : 0);
-        expect(counts.teardowns).toBe(transport === "paused" ? 1 : 0);
-        // The replacement installs the synth's initial instrument state once, inside its own start transaction.
-        expect(counts.liveSends).toBe(transport === "paused" && spec.id.startsWith("B26") ? 1 : 0);
-        if (transport === "playing") expect(f.compilations.at(-1)?.renderState.fx).toEqual(untrack(() => fx(inputs())));
+        // A paused structural edit is adopted in place exactly like a playing one (D7): one schedule compile and one
+        // publication on the kept session, no preview compile, dispose, teardown, or host restart.
+        expect(counts.scheduleCompiles).toBe(1);
+        expect(counts.publishes).toBe(1);
+        expect(counts.previewCompiles).toBe(0);
+        expect(counts.previewDisposals).toBe(0);
+        expect(counts.teardowns).toBe(0);
+        expect(counts.liveSends).toBe(0);
+        expect(f.host.calls.slice(before.calls).filter(call => ["begin", "configure", "start", "stop", "teardown"].includes(call))).toEqual([]);
+        expect(f.playback.isNativePlaybackPrepared()).toBe(true);
+        expect(f.compilations.at(-1)?.renderState.fx).toEqual(untrack(() => fx(inputs())));
       } finally { await f.close(); }
     });
   }
@@ -868,20 +870,19 @@ for (const field of ["meter", "masterVolume", "automation", "sidechain"]) {
         await f.playback.awaitPlaybackPreparation();
         const counts = f.counts(before);
         console.log("STEP5 compiler field guard", JSON.stringify({ field, transport, counts, faults: f.faults }));
-        // A paused replacement preview hits the sidechain support gate and faults. A playing edit is an accepted native
-        // limitation (E6): the graph keeps playing, nothing is a fault, and nothing is prepared.
-        expect(f.faults).toEqual(field === "sidechain" && transport === "paused"
-          ? ["The native VST3 graph cannot activate with the current sidechain routing."] : []);
-        expect(counts.scheduleCompiles).toBe(transport === "playing" ? 1 : 0);
-        expect(counts.publishes).toBe(transport === "playing" && field !== "sidechain" ? 1 : 0);
-        if (field === "sidechain" && transport === "playing") {
-          expect(f.typedFaults).toEqual([]);
-          expect(f.host.calls.slice(before.calls)).not.toContain("revision.prepare");
-        }
-        expect(counts.previewCompiles).toBe(transport === "paused" ? 1 : 0);
-        expect(counts.previewDisposals).toBe(transport === "paused" ? 1 : 0);
-        expect(counts.teardowns).toBe(transport === "paused" ? 1 : 0);
+        // Playing and paused edits are adopted on the kept session alike (D7). A sidechain edit is an accepted native
+        // limitation (E6/D8): no fault, nothing prepared or retried, the graph and host stay as they were.
+        expect(f.faults).toEqual([]);
+        expect(f.typedFaults).toEqual([]);
+        expect(counts.scheduleCompiles).toBe(1);
+        expect(counts.publishes).toBe(field === "sidechain" ? 0 : 1);
+        if (field === "sidechain") expect(f.host.calls.slice(before.calls)).not.toContain("revision.prepare");
+        expect(counts.previewCompiles).toBe(0);
+        expect(counts.previewDisposals).toBe(0);
+        expect(counts.teardowns).toBe(0);
         expect(counts.liveSends).toBe(0);
+        expect(f.host.calls.slice(before.calls).filter(call => ["begin", "configure", "start", "stop", "teardown"].includes(call))).toEqual([]);
+        expect(f.playback.isNativePlaybackPrepared()).toBe(true);
       } finally { await f.close(); }
     });
   }

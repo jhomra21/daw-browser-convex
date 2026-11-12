@@ -628,6 +628,9 @@ export const createNativePlaybackController = (input: {
   }
   let preparedInstrumentTrackIds: readonly string[] = []
   let preparedSnapshot: LivePlaybackSnapshot | undefined
+  // The priming of a paused edit's published schedule. A loop change and a Play follow its publication and this priming:
+  // a Play resumes the schedule that settles with them, not the one they replace.
+  let pausedPriming: Promise<void> | undefined
   let preparedGraph: AudioCoreGraphSnapshot | undefined
   let structuralGraphGeneration = 0
   // Renderer edit order, never bridge completion order. Every stamp comes from
@@ -1638,6 +1641,8 @@ export const createNativePlaybackController = (input: {
     if (prepared && preparedProjectGeneration === projectGeneration && preparedProjectId === preparedProjectIdForAttempt) {
       let previousCoordinator: NativeScheduleCoordinator | undefined
       try {
+        await processorState.publication()?.terminal
+        await pausedPriming
         previousCoordinator = scheduleCoordinator
         attemptedCoordinator = previousCoordinator
         attemptedPageManager = nativeTimelinePageManager
@@ -2717,6 +2722,7 @@ export const createNativePlaybackController = (input: {
     try {
       // A loop change follows the captured bank instead of moving its epoch
       // while Publish is still unresolved. This wait owns no execution lane.
+      await pausedPriming
       const publication = processorState.publication()
       if (publication) await publication.terminal
       await queuePreparedTransportTransition(async () => {
@@ -3247,7 +3253,7 @@ export const createNativePlaybackController = (input: {
     const owner = processorState.openCompile()
     const previous = preparedSnapshot
     const coordinator = scheduleCoordinator
-    if (!active || !previous || !preparedGraph || !coordinator) {
+    if (!prepared || !previous || !preparedGraph || !coordinator) {
       processorState.closeCompile(owner)
       return { status: "retry", reason: "ownership-invalidated" }
     }
@@ -3392,7 +3398,8 @@ export const createNativePlaybackController = (input: {
         await candidate?.dispose()
         return { outcome: { status: "superseded" } } satisfies { outcome: AdoptionOutcome }
       }
-      if (intent !== stagedTransportIntent) return abandonCandidate()
+      // A candidate compiled against a session that has since moved takes no receipts: the adoption compiles again.
+      if (intent !== stagedTransportIntent || (candidate && !isScheduleCandidateValid(candidate))) return abandonCandidate()
       if (!candidate && latencyInputsApplied()) return { outcome: { status: "unchanged" } } satisfies { outcome: AdoptionOutcome }
       const session = input.bridge?.session
       const revisions = session?.revisions
@@ -3400,9 +3407,11 @@ export const createNativePlaybackController = (input: {
       const previous = preparedSnapshot
       const previousGraph = preparedGraph
       const projectId = preparedProjectId
-      if ((candidate && !active) || !prepared || !coordinator || !previous || !previousGraph || !projectId)
-        return abandonCandidate()
+      if (!prepared || !coordinator || !previous || !previousGraph || !projectId) return abandonCandidate()
       if (!session || !revisions || !session.configureInstrumentStates) return abandonCandidate()
+      // A stopped transport never reaches a seam frame, so a paused edit publishes with seam 0, which native applies at
+      // its next callback block. No window can be staged for an unpublished bank, so the schedule is primed afterwards.
+      const paused = candidate !== undefined && !active
       const generation = lifecycleGeneration
       const projectGeneration = resolveProjectGeneration()
       const publicationEpoch = transportEpoch
@@ -3510,12 +3519,15 @@ export const createNativePlaybackController = (input: {
       // 25 ms of blocks (at least two): what staging and one Publish round trip need after the seam is bound.
       const boundLeadBlocks = () => Math.max(2, Math.ceil(0.025 * sampleRate / maximumFramesPerBlock))
       const chooseFrame = (progress: bigint, blocks: number) => {
+        if (paused) return 0
         const frame = Number(progress) + maximumFramesPerBlock * blocks
         if (!Number.isSafeInteger(frame)) throw new Error("Native publication frame exceeds renderer precision.")
         return frame
       }
       let disposition: Promise<void> | undefined
       const disposePublication = () => disposition ??= (async () => {
+        // A published paused edit has already disposed the coordinator, so this only revives one native never replaced.
+        if (paused) coordinator.resumeGraphPublication(previousGraph.revision)
         staged?.dispose()
         if (!resourcesPromoted) {
           await discardAddedSources?.()
@@ -3876,6 +3888,8 @@ export const createNativePlaybackController = (input: {
           }
           checked(staging)
         }
+        // A published bank refuses the active window a refill would send; a stopped transport needs no refill.
+        if (paused) await coordinator.suspendGraphPublication()
         // Provisional: long enough for the prepare and hydration below. The seam binds late, after them.
         let seam = chooseFrame(BigInt(coordinator.currentFrame()), 16)
         let observed = sequence
@@ -3964,8 +3978,9 @@ export const createNativePlaybackController = (input: {
         processorState.prepared(binding.revision,
           scheduledRetention(previousGraph, graph, { before: previous, after: snapshot },
             new Set(addedInstruments.map(({ nodeId }) => nodeId))))
-        if (snapshot.bpm !== previous.bpm
-          || JSON.stringify(snapshot.timeSignature) !== JSON.stringify(previous.timeSignature)) {
+        // A paused edit takes its tempo from the transport command that re-primes the schedule.
+        if (!paused && (snapshot.bpm !== previous.bpm
+          || JSON.stringify(snapshot.timeSignature) !== JSON.stringify(previous.timeSignature))) {
           // The existing transport command stages context against the prepared
           // bank when it reuses the running transition. Native applies it only
           // after successful publication on that exact callback seam.
@@ -4040,7 +4055,7 @@ export const createNativePlaybackController = (input: {
         checked(await awaitPreparation(session.configureInstrumentStates(serializeNativeInstrumentStates(addedInstruments, assets))))
         // New timeline sources hydrate while a window is staged, which would spend the short bound lead. Page the
         // candidate first on a discarded coordinator, submitting nothing.
-        if (addedTimelineSources) {
+        if (addedTimelineSources && !paused) {
           const candidateRevision = ready.revision.requestedRevision
           await awaitPreparation(coordinator.prepareCandidatePages({ ...snapshot, revision: candidateRevision },
             { ...graph, revision: candidateRevision }, coordinator.currentFrame(), seam, { assets, assetSourceKeys: sourceKeys,
@@ -4065,19 +4080,20 @@ export const createNativePlaybackController = (input: {
           if (rebound.revision.status === "prepared") { seam = bound; binding = rebind; break }
         }
         let status: NativeRevisionReply = ready
-        let fill = true
+        let fill = !paused
         let submittedProgress = -1
         adoptPublication = (proof, acknowledgedEpoch) => {
           const afterTransport = acknowledgedEpoch !== undefined
           if (!proof.ok || !binding || !sessionAlive() || proof.hostGeneration !== ready.hostGeneration
             || proof.hostPid !== ready.hostPid
             || proof.revision.transportEpoch !== (acknowledgedEpoch ?? publicationEpoch)
-            || !staged?.activateRevision(proof.revision)) return false
-          if (afterTransport) staged.dispose()
+            || (!paused && !staged?.activateRevision(proof.revision))) return false
+          if (paused) coordinator.dispose()
+          else if (afterTransport) staged?.dispose()
           else {
             coordinator.dispose()
             scheduleCoordinator = staged
-            staged.install()
+            staged?.install()
           }
           staged = undefined
           preparedGraph = { ...graph, revision: binding.revision }
@@ -4259,6 +4275,22 @@ export const createNativePlaybackController = (input: {
 
   type AdoptionRun = { outcome: AdoptionOutcome; content?: string; transport?: LivePlaybackTransport }
   const superseded: AdoptionRun = { outcome: { status: "superseded" } }
+  // A paused edit was published with seam 0 and no window. A new epoch at the same frame primes the schedule of the
+  // published bank, and its transport command carries the tempo and loop the edit changed.
+  const reprimePausedAdoption = async () => {
+    try {
+      // Like a loop change, the transition follows a publication still in flight instead of moving the epoch under it.
+      const publication = processorState.publication()
+      if (publication) await publication.terminal
+      await queuePreparedTransportTransition(async () => {
+        if (!prepared || active) return
+        await transitionPreparedTransport(currentPositionSec() ?? transportFrame / sampleRate, false)
+      })
+    } catch (error) {
+      reportStopped(error instanceof Error ? error.message : "Native playback could not apply a paused edit.")
+      await disposeNativeSession(undefined, "native-paused-adoption-failure")
+    }
+  }
   // One attempt: compile (or reuse what native's last refusal kept), decide whether anything changed, publish. It
   // never throws; the owner retains its publication until native proof ends it.
   const executeAdoption = async (attempt: AdoptionAttempt): Promise<AdoptionRun> => {
@@ -4326,6 +4358,12 @@ export const createNativePlaybackController = (input: {
       }
       // Cancelled, or overtaken by an intent that changes the schedule, while the loop was applied.
       if (!processorState.isNewest(attempt)) return superseded
+      // A Play resuming the prepared session settles first: the edit then lands on the playing session it left. From here
+      // to the registration below nothing awaits, so a Play either is seen here or sees the registration.
+      if (prepared && !active && pendingStart) {
+        await pendingStart.then(() => undefined, () => undefined)
+        continue
+      }
       attempt.fields = adoptionFields()
       const run = await executeAdoption(attempt)
       if (run.transport && !mismatched) {
@@ -4341,6 +4379,12 @@ export const createNativePlaybackController = (input: {
       const { outcome, content } = await runAdoption(start.attempt)
       processorState.settleAdoption(start.attempt, outcome, content)
       void drainStatePatches()
+      // An edit adopted while no transport runs has no window for its bank. The owner holds the bank when the new epoch
+      // ends its domain, so the transition follows the settlement. A pause that moved the epoch primed the bank itself.
+      if (outcome.status === "adopted" && !active && start.attempt.fields.epoch === transportEpoch) {
+        pausedPriming = reprimePausedAdoption()
+        await pausedPriming
+      }
       start = processorState.nextAdoption(adoptionFields(), outcome.status === "blocked" || outcome.status === "failed")
     }
   }

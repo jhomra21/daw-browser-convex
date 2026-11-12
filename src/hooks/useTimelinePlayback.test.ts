@@ -1014,9 +1014,10 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
             return
           }
           if (scenario === "stop" || scenario === "project" || scenario === "seek") {
-            expect(published).toHaveLength(scenario === "seek" ? 1 : 0)
+            // UD 7 (D7): after a Stop the kept paused preview adopts the edit the stopped session never published.
+            expect(published).toHaveLength(scenario === "seek" || scenario === "stop" ? 1 : 0)
             expect(playback.isPlaying()).toBe(scenario === "seek")
-            if (scenario === "seek") expect(fixture.calls.slice(before).filter((call) =>
+            if (scenario === "seek" || scenario === "stop") expect(fixture.calls.slice(before).filter((call) =>
               ["configure", "begin", "graph"].includes(call))).toEqual([])
             return
           }
@@ -1438,7 +1439,9 @@ test("STEP7B3 real host paused edit during claimed latency", async () => {
   }
 }, 30000)
 
-for (const resume of [false, true]) test(`STEP7B3 real paused structural edit during held publication${resume ? " then queued start" : ""}`, async () => {
+// A host that offers no revision session once the pause is held cannot adopt the edit in place: the edit disposes the
+// paused preview, and the dispose still waits for the pause that owns the held publication.
+for (const [resume, replaces] of [[false, false], [true, false], [false, true], [true, true]]) test(`STEP7B3 real paused structural edit during held publication${resume ? " then queued start" : ""}${replaces ? " that replaces the preview" : ""}`, async () => {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
   const previousBuffer = Object.getOwnPropertyDescriptor(globalThis, "AudioBuffer")
   Object.defineProperty(globalThis, "AudioBuffer", { configurable: true, value: TestAudioBuffer })
@@ -1475,7 +1478,7 @@ for (const resume of [false, true]) test(`STEP7B3 real paused structural edit du
     return setTransport(transport)
   }
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: {
-    ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions,
+    ...fixture.audioHost, session: { ...fixture.audioHost.session, get revisions() { return replaces && holdTransport ? undefined : revisions },
       configureInstrumentStates: async () => ({ ok: true }) },
   } } } })
   let dispose = () => {}
@@ -1505,6 +1508,7 @@ for (const resume of [false, true]) test(`STEP7B3 real paused structural edit du
       const pause = playback.handlePause()
       await settle()
       const before = captures.length
+      const beginsBefore = fixture.calls.filter(call => call === "begin").length
       const stopBefore = fixture.calls.filter(call => call === "stop").length
       const editB = { ...initial, clips: initial.clips.map(clip => ({ ...clip, startSec: 0.75 })) }
       setTracks([editB])
@@ -1528,7 +1532,10 @@ for (const resume of [false, true]) test(`STEP7B3 real paused structural edit du
         expect(latestCaptured || !playback.isNativePlaybackPrepared()).toBe(true)
         if (resume) {
           expect(playback.isPlaying()).toBe(true)
-          expect(captures.slice(before).filter(capture => capture.state === "playing" && capture.starts.includes(0.75))).toHaveLength(1)
+          // UD 7 (D7): the paused edit and the Play both run on the session the pause kept. The edit is compiled for its
+          // adoption and again for the resume, so a compile count says nothing; a second session would.
+          expect(captures.slice(before).some(capture => capture.state === "playing" && capture.starts.includes(0.75))).toBe(true)
+          if (!replaces) expect(fixture.calls.filter(call => call === "begin")).toHaveLength(beginsBefore)
         }
       } finally {
         dispose()
@@ -1607,14 +1614,14 @@ test("B6d2 a paused structural change requested while the pause is pending is no
       await settle()
       const paused = { begins: begins(), calls: [...fixture.calls], prepared: playback.isNativePlaybackPrepared() }
       try {
-        // The paused preview is replaced while paused (a live graph compiled from the edited project), and the next play
-        // resumes that replacement instead of preparing again.
-        expect(paused).toMatchObject({ prepared: true, begins: before + 1 })
+        // UD 7 (D7): the paused preview adopts the edit in place (a compile of the edited project, no new session), and
+        // the next play resumes it instead of preparing again.
+        expect(paused).toMatchObject({ prepared: true, begins: before })
         expect(captures.at(-1)).toEqual([0.25])
         await playback.handlePlay(untrack(tracks))
         await settle()
         console.log("B6D2-PAUSED-STRUCTURE", JSON.stringify({ before, paused, begins: begins(), captures, playing: playback.isPlaying() }))
-        expect(begins()).toBe(before + 1)
+        expect(begins()).toBe(before)
         expect(captures.at(-1)).toEqual([0.25])
         expect(playback.isPlaying()).toBe(true)
       } finally {
@@ -8115,4 +8122,47 @@ test('C0G a clip waveform key or key order change while playing is neither adopt
       ? { ...entry, clips: entry.clips.map(patch) } : entry)))
     expect({ nativeEnabled, field, ...outcome }).toEqual({ nativeEnabled, field, rebuilds: 0, adoptions: 0, open: true, playing: true })
   }, nativeEnabled)
+})
+
+// AE-08 phase 8 step 8 (UD 7, D7): a paused native preview adopts an edit through its own session. The hook neither
+// disposes the preview nor restarts the host, and the controller publishes with seam 0.
+test('UD7n W-UD7n-5 a paused native edit is adopted in place: no dispose, no host restart', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  const [tracks, setTracks] = createSignal([track])
+  const faults: string[] = []
+  const seams: bigint[] = []
+  let status: 'prepared' | 'published' = 'prepared'
+  const reply = async (): Promise<NativeRevisionReply> => ({ ok: true, hostPid: 123, hostGeneration: 7,
+    revision: { status, continuity: 'accepted', requestedRevision: 2, activeRevision: status === 'published' ? 2 : 1,
+      preparedRevision: status === 'prepared' ? 2 : 0, retiredRevision: 0, renderEpoch: 1n, transportEpoch: fixture.epoch(),
+      publicationFrame: 0n, progressFrame: 0n } })
+  const revisions: NativeRevisionSession = {
+    prepare: async (request) => { seams.push(request.requestedPublicationFrame ?? 0n); status = 'prepared'; return reply() },
+    publish: async () => { status = 'published'; return reply() }, inspect: reply, rollback: reply, retire: reply,
+  }
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: {
+    ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions, configureInstrumentStates: async () => ({ ok: true }) },
+  } } } })
+  try {
+    await withFakeRaf(async () => createRoot(async (dispose) => {
+      const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
+        { getTracks: () => tracks() }, { requiresNativeAudio: true, enabled: () => true, projectId: () => 'project',
+          reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
+          compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
+            renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }) })
+      await playback.handlePlay(tracks())
+      await playback.handlePause()
+      expect(playback.isNativePlaybackPrepared()).toBeTrue()
+      const lifecycle = () => fixture.calls.filter((call) => ['begin', 'stop', 'teardown'].includes(call)).length
+      const before = lifecycle()
+      setTracks((current) => current.map((entry) => ({ ...entry, volume: 0.25 })))
+      await flushMicrotasks()
+      expect({ seams, lifecycle: lifecycle() - before, prepared: playback.isNativePlaybackPrepared(),
+        playing: playback.isPlaying(), faults }).toEqual({ seams: [0n], lifecycle: 0, prepared: true, playing: false, faults: [] })
+      dispose()
+    }))
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
 })

@@ -6086,6 +6086,138 @@ test('resume after a live publication removes a sampler does not report the remo
   } finally { await controller.dispose() }
 })
 
+// AE-08 phase 8 step 8 (UD 7, D7): a paused prepared native session adopts an edit through its own host session. The
+// graph is prepared and published with seam 0 (native applies it at the next block, a stopped transport included), then
+// the schedule is re-primed by an epoch bump at the same frame.
+const pausedNativeSession = async () => {
+  const fixture = createBridge("runtime-revision-progress")
+  let desired = nativeInstrumentInput()
+  const controller = createObservedController({
+    bridge: fixture.bridge, getProjectId: () => "local_project",
+    compileSnapshot: async (transport) => {
+      const compiled = compileLivePlaybackSnapshot({ ...desired, transport })
+      return compiled.supported
+        ? { ...compiled, snapshot: { ...compiled.snapshot, nativeExternalAttachmentPlan: nativeAttachmentPlan } } : compiled
+    },
+  })
+  expect(await controller.ensureLivePreview(0)).toBe("started")
+  expect(controller.isPrepared()).toBe(true)
+  expect(controller.isActive()).toBe(false)
+  acknowledgeStagedPublication(fixture)
+  const requestedFrames: bigint[] = []
+  const prepare = fixture.bridge.session.revisions.prepare
+  fixture.bridge.session.revisions.prepare = async (request) => {
+    requestedFrames.push(request.requestedPublicationFrame ?? 0n)
+    return prepare(request)
+  }
+  return {
+    fixture, controller, requestedFrames,
+    edit: (next: LivePlaybackSnapshotInput) => { desired = next },
+    base: nativeInstrumentInput(),
+    mark: () => ({ calls: fixture.calls.length, transports: fixture.transports.length, coordinations: fixture.coordinations.length }),
+  }
+}
+const hostLifecycleCalls = ["configure", "start", "stop", "teardown", "begin", "graph"]
+// The adoption answers when native holds the bank; the priming epoch follows on later turns.
+const primed = async () => { for (let turn = 0; turn < 100; turn++) await Promise.resolve() }
+const scheduledNotes = (fixture: ReturnType<typeof createBridge>, epoch: number) => fixture.schedulePayloads.flatMap((payload) => {
+  const view = new DataView(payload.buffer)
+  if (view.getUint32(4, true) !== epoch) return []
+  return Array.from({ length: view.getUint32(44, true) }, (_, index) => ({
+    type: view.getUint32(72 + index * 48 + 32, true), note: view.getUint32(72 + index * 48 + 40, true),
+  })).filter(({ type }) => type === 1).map(({ note }) => note)
+})
+const editedMidi = (base: LivePlaybackSnapshotInput, notes: readonly { pitch: number; beat: number }[]): LivePlaybackSnapshotInput => ({
+  ...base, revision: 2,
+  tracks: base.tracks.map((track) => ({ ...track, clips: track.clips.map((clip) => ({ ...clip,
+    midi: clip.midi && { ...clip.midi, notes: notes.map(({ pitch, beat }) => ({ pitch, beat, length: 0.5, velocity: 0.8 })) } })) })),
+})
+
+describe("AE-08 phase 8 UD 7 paused native adoption", () => {
+  test("W-UD7n-1 a paused note edit is adopted on the same host with seam 0, and Play resumes it with the new content", async () => {
+    const s = await pausedNativeSession()
+    try {
+      const before = s.mark()
+      const epoch = s.fixture.transports.at(-1)?.epoch ?? 0
+      s.edit(editedMidi(s.base, [{ pitch: 60, beat: 0 }, { pitch: 64, beat: 1 }]))
+      expect(await s.controller.adoptSchedule(migrationIntent("ud7n-note"), true)).toEqual({ status: "adopted" })
+      await primed()
+      const calls = s.fixture.calls.slice(before.calls)
+      expect(calls.filter((call) => hostLifecycleCalls.includes(call))).toEqual([])
+      expect(s.requestedFrames).toEqual([0n])
+      expect(s.fixture.coordinations.length).toBe(before.coordinations)
+      expect(s.fixture.calls.filter((call) => call === "start")).toHaveLength(1)
+      expect(s.fixture.calls.filter((call) => call === "configure")).toHaveLength(1)
+      expect(s.controller.isPrepared()).toBe(true)
+      expect(s.controller.isActive()).toBe(false)
+      const transports = s.fixture.transports.slice(before.transports)
+      expect(transports.every((transport) => !transport.running && transport.frame === 0)).toBe(true)
+      expect(transports.at(-1)?.epoch).toBe(epoch + 1)
+      expect(scheduledNotes(s.fixture, epoch + 1)).toContain(64)
+      expect(await s.controller.start({ ...s.base.transport, playheadSec: 0 })).toBe("started")
+      expect(s.fixture.calls.filter((call) => call === "start")).toHaveLength(1)
+      expect(s.fixture.calls.filter((call) => call === "configure")).toHaveLength(1)
+      expect(s.fixture.transports.at(-1)).toMatchObject({ running: true, epoch: epoch + 1 })
+      expect(s.controller.isActive()).toBe(true)
+    } finally { await s.controller.dispose() }
+  })
+
+  test("W-UD7n-2 a paused tempo edit is adopted with the new bpm on the re-primed epoch, never a running transport", async () => {
+    const s = await pausedNativeSession()
+    try {
+      const before = s.mark()
+      s.edit({ ...s.base, revision: 2, bpm: 90 })
+      expect(await s.controller.adoptSchedule(migrationIntent("ud7n-tempo"), true)).toEqual({ status: "adopted" })
+      await primed()
+      expect(s.fixture.calls.slice(before.calls).filter((call) => hostLifecycleCalls.includes(call))).toEqual([])
+      expect(s.requestedFrames).toEqual([0n])
+      const transports = s.fixture.transportContexts.slice(before.transports)
+      expect(transports.length).toBeGreaterThan(0)
+      expect(transports.every((transport) => !transport.running)).toBe(true)
+      expect(transports.at(-1)?.bpm).toBe(90)
+      expect(s.controller.isActive()).toBe(false)
+    } finally { await s.controller.dispose() }
+  })
+
+  // UD 8 / M5: a refused publication keeps the session and the old graph; the next submission of the intent adopts.
+  test("W-UD7n-3 a refused paused publication keeps the session, and the resubmitted intent adopts", async () => {
+    const s = await pausedNativeSession()
+    try {
+      const prepare = s.fixture.bridge.session.revisions.prepare
+      let refuse = true
+      s.fixture.bridge.session.revisions.prepare = async (request) => refuse
+        ? { ok: false, kind: "refused", error: "prepare refused" } : prepare(request)
+      const before = s.mark()
+      s.edit(editedMidi(s.base, [{ pitch: 60, beat: 0 }, { pitch: 64, beat: 1 }]))
+      expect(await s.controller.adoptSchedule(migrationIntent("ud7n-refused"), true)).toMatchObject({ status: "failed" })
+      expect(s.controller.isPrepared()).toBe(true)
+      expect(s.controller.isActive()).toBe(false)
+      expect(s.fixture.calls.slice(before.calls).filter((call) => hostLifecycleCalls.includes(call))).toEqual([])
+      refuse = false
+      expect(await s.controller.adoptSchedule(migrationIntent("ud7n-refused"), true)).toEqual({ status: "adopted" })
+      expect(s.fixture.calls.filter((call) => call === "start")).toHaveLength(1)
+    } finally { await s.controller.dispose() }
+  })
+
+  // E6 (f30dda48): a limitation is no fault. While paused it settles the same way: nothing is prepared, the session stays.
+  test("W-UD7n-4 a paused edit that hits an E6 limitation settles as unsupported, with no fault and the device notice", async () => {
+    const s = await pausedNativeSession()
+    try {
+      const before = s.mark()
+      const base = s.base
+      s.edit({ ...base, revision: 2, tracks: base.tracks.map((track) => ({ ...track, clips: track.clips.map((clip) => ({ ...clip,
+        midi: clip.midi && { ...clip.midi, mappings: [{ id: "mapping", source: { kind: "cc", controller: 1, channel: 1 },
+          target: { parameterId: "gain" }, outputMin: 0, outputMax: 1 }] } })) })) })
+      expect(await s.controller.adoptSchedule(migrationIntent("ud7n-e6"), true)).toMatchObject({ status: "unsupported" })
+      expect(s.requestedFrames).toEqual([])
+      expect(s.controller.isPrepared()).toBe(true)
+      expect(s.fixture.calls.slice(before.calls).filter((call) => hostLifecycleCalls.includes(call))).toEqual([])
+      expect(vstInstanceLimit(nativeAttachmentPlan.attachments[0].instanceId))
+        .toBe("Native VST3 playback does not support MIDI expression automation yet.")
+    } finally { await s.controller.dispose() }
+  })
+})
+
 const decodeNativeSourceEvents = (payloads: readonly Uint8Array[]) => payloads.flatMap((payload) => {
   const view = new DataView(payload.buffer)
   const instrumentCount = view.getUint32(44, true)
@@ -6888,8 +7020,12 @@ for (const intent of ["drop", "seek", "pause", "project"]) {
         acknowledgeStagedPublication(fixture)
       }
       if (intent === "seek") await controller.seekPrepared(0.25)
-      else if (intent === "pause") await controller.pause(0.25)
-      else if (intent === "project") await controller.dispose()
+      else if (intent === "pause") {
+        await controller.pause(0.25)
+        // A paused session adopts the intent the pause interrupted, as it adopts any paused edit. The hook drops the
+        // playing intents when playback stops; the retry in the paused domain is not the subject here.
+        controller.dropAdoptionIntents()
+      } else if (intent === "project") await controller.dispose()
       else controller.dropAdoptionIntents()
       expect(renderSignal?.aborted).toBe(true)
       expect(await pending).toMatchObject({ status: intent === "seek" ? "adopted" : "superseded" })
@@ -7304,6 +7440,17 @@ test("B6d a batch sent before a latency publication is re-offered on the publish
   expect([stranded.receipt.answered, restated.receipt.answered]).toEqual([{ state: "applied" }, { state: "applied" }])
 })
 
+test("B6d an adoption answers a request of an ended incarnation unavailable, never applied", () => {
+  const owner = createNativeProcessorStateOwner()
+  owner.configured(1, new Map([["fx", b6dInstalled(3)]]))
+  // Submitted for incarnation 1; the published bank carries the target at incarnation 2, whose desired edit the owner has not seen.
+  const ended = owner.deliver({ key: "fx", editId: "fx-6", order: 6, kindId: 1, incarnation: 1, epoch: 1, values: { gainDb: 0 } })
+  expect(ended.receipt.answered).toBeUndefined()
+  owner.adopted(new Map([["fx", 1]]), new Set(), new Set(), 5, () => true,
+    new Map([["fx", { kindId: 1, state: new Uint8Array([0]), values: { gainDb: 0 }, incarnation: 2 }]]))
+  expect(ended.receipt.answered).toEqual({ state: "unavailable" })
+})
+
 test("B6d a same-value release joining a parked unsent batch reaches native after the epoch applies", () => {
   const owner = createNativeProcessorStateOwner()
   owner.configured(1, new Map([["fx", b6dInstalled(-11)]]))
@@ -7440,17 +7587,6 @@ test("keeps released live-note ownership separate across focused instrument targ
   await Bun.sleep(0)
   await expect(controller.seekPrepared(0.5)).resolves.toBe("started")
   const second = controller.startLiveMidiNote({ trackId: "instrument-b", pitch: 60, velocity: 0.8 })
-test("B6d an adoption answers a request of an ended incarnation unavailable, never applied", () => {
-  const owner = createNativeProcessorStateOwner()
-  owner.configured(1, new Map([["fx", b6dInstalled(3)]]))
-  // Submitted for incarnation 1; the published bank carries the target at incarnation 2, whose desired edit the owner has not seen.
-  const ended = owner.deliver({ key: "fx", editId: "fx-6", order: 6, kindId: 1, incarnation: 1, epoch: 1, values: { gainDb: 0 } })
-  expect(ended.receipt.answered).toBeUndefined()
-  owner.adopted(new Map([["fx", 1]]), new Set(), new Set(), 5, () => true,
-    new Map([["fx", { kindId: 1, state: new Uint8Array([0]), values: { gainDb: 0 }, incarnation: 2 }]]))
-  expect(ended.receipt.answered).toEqual({ state: "unavailable" })
-})
-
   if (!second) throw new Error("Second native live note did not start.")
   await Bun.sleep(0)
 

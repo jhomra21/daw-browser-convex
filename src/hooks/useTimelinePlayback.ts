@@ -1551,7 +1551,10 @@ export function useTimelinePlayback(
     options?: TimelineScheduleOptions,
     explicit = false,
   ): Promise<void> => {
-    if (!(nativePlayback.isActive() && audioHostBridge?.session.revisions && audioHostBridge.session.configureInstrumentStates
+    // A kept paused native preview adopts what it carries, as a playing one does. As for a portable session, only a call
+    // with no transport intent of its own asks for it.
+    if (!((nativePlayback.isActive() || (!options && nativePlayback.isPrepared()))
+      && audioHostBridge?.session.revisions && audioHostBridge.session.configureInstrumentStates
       && (!options?.owner || options.owner === "native")
       && (options?.resumePlayback === undefined || options.resumePlayback)
       && (options?.projectId === undefined || options.projectId === nativeOptions?.projectId?.())
@@ -2229,6 +2232,12 @@ export function useTimelinePlayback(
       || (previewProjectionBaseline !== undefined && trackFingerprint !== previewProjectionBaseline)
     // A pending browser Play keeps the portable session it starts from; followPortableEdits replaces it once committed.
     if (projectionChanged && nativePreviewRequested && (playAttempt === undefined || !portableBrowserOptions)) {
+      // The kept native preview adopts the edit in place, tails included. Only one still preparing is replaced.
+      if (nativePlayback.isPrepared() && !pendingAudioHydration
+        && audioHostBridge?.session.revisions && audioHostBridge.session.configureInstrumentStates) {
+        adoptPortableEdits()
+        return
+      }
       if (!nativePlayback.hasLiveMidiTails()) {
         nativePreviewRequested = false
         void disposeNativePreview(undefined, "paused-preview-structural-change",

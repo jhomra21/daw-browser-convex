@@ -45,7 +45,7 @@ import {
 } from "@daw-browser/audio-engine/prepared-stretch-store"
 import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver"
 import { isLiveEventOnlyInstrumentChange, isLiveParameterChange, mapNativeBuiltInParameterCommit, nativeBuiltInLiveStateCovered } from "~/lib/desktop/native-built-in-parameter-mapper"
-import { normalizeTrackInstrumentParams, parseJsonValue } from "@daw-browser/shared"
+import { mergeSynthParams, normalizeTrackInstrumentParams, parseJsonValue, type SynthParamsUpdate } from "@daw-browser/shared"
 import type { AudioEffectRuntimeInstance } from "@daw-browser/audio-engine/audio-engine"
 import { createAudioEffectParameterPayload } from "~/components/timeline/audio-effect-parameter-payload"
 
@@ -318,6 +318,40 @@ const withAcceptedInstruments = (snapshot: LivePlaybackSnapshot, accepted: LiveP
     // A compile that differs elsewhere read newer content, which carries the live values itself.
     return [id, instrument && entry.instrument && isLiveEventOnlyInstrumentChange(instrument, entry.instrument)
       ? { ...entry, instrument } : entry]
+  }))
+  return { ...snapshot, mixer: { ...snapshot.mixer, fx: { ...fx, trackFx } } }
+}
+
+// The eight synth fields the live events carry. A compile reads the project, which a knob drag only reaches on release,
+// so the values the session accepted since `since` are laid over it; a field the accepted instrument did not move
+// keeps what the compile read.
+const withAcceptedLiveSynthValues = (
+  snapshot: LivePlaybackSnapshot, since: LivePlaybackSnapshot, accepted: LivePlaybackSnapshot,
+): LivePlaybackSnapshot => {
+  const fx = snapshot.mixer.fx
+  const trackFx = Object.fromEntries(Object.entries(fx.trackFx ?? {}).map(([id, entry]) => {
+    const now = accepted.mixer.fx.trackFx?.[id]?.instrument
+    const before = since.mixer.fx.trackFx?.[id]?.instrument
+    const compiled = entry.instrument
+    if (now?.kind !== "synth" || before?.kind !== "synth" || compiled?.kind !== "synth"
+      || now.instanceId !== before.instanceId || now.instanceId !== compiled.instanceId) return [id, entry]
+    const moved = (from: number, to: number) => !Object.is(from, to)
+    const a = now.params, b = before.params
+    const update: SynthParamsUpdate = {
+      ...(moved(a.gain, b.gain) && { gain: a.gain }),
+      ...(moved(a.pan, b.pan) && { pan: a.pan }),
+      filter: {
+        ...(moved(a.filter.frequencyHz, b.filter.frequencyHz) && { frequencyHz: a.filter.frequencyHz }),
+        ...(moved(a.filter.q, b.filter.q) && { q: a.filter.q }),
+      },
+      ampEnvelope: {
+        ...(moved(a.ampEnvelope.attackSec, b.ampEnvelope.attackSec) && { attackSec: a.ampEnvelope.attackSec }),
+        ...(moved(a.ampEnvelope.decaySec, b.ampEnvelope.decaySec) && { decaySec: a.ampEnvelope.decaySec }),
+        ...(moved(a.ampEnvelope.sustain, b.ampEnvelope.sustain) && { sustain: a.ampEnvelope.sustain }),
+        ...(moved(a.ampEnvelope.releaseSec, b.ampEnvelope.releaseSec) && { releaseSec: a.ampEnvelope.releaseSec }),
+      },
+    }
+    return [id, { ...entry, instrument: { ...compiled, params: mergeSynthParams(compiled.params, update) } }]
   }))
   return { ...snapshot, mixer: { ...snapshot.mixer, fx: { ...fx, trackFx } } }
 }
@@ -930,6 +964,8 @@ export const createPortableBrowserPlaybackController = (input: {
   let adoptionQueued: Promise<PortableAdoptionResult> | undefined
   let adoptionTail: Promise<unknown> = Promise.resolve()
   let adoptionPublish: Promise<PortableAdoptionResult> | undefined
+  // Synth sends past the adoption barrier and not yet answered; an adoption folds the values they carry once they settle.
+  const liveInstrumentSends = new Set<Promise<unknown>>()
   let adoptionRetry: { resubmits: number; wait: number } | undefined
   let nextRecordingSessionId = 1
   let unsubscribeFault: (() => void) | undefined
@@ -1838,6 +1874,7 @@ export const createPortableBrowserPlaybackController = (input: {
     // expects to hear without either.
     let retainsGraph = true
     const failed = (): PortableAdoptionResult => !current() ? "unavailable" : retainsGraph ? "failed" : "rebuild"
+    const publishing = Promise.withResolvers<PortableAdoptionResult>()
     adopting = true
     try {
       const compilation = await compileSnapshot({ ...transport, state: "playing", playheadSec: schedule.timeOrigin.timelineSec },
@@ -1847,7 +1884,13 @@ export const createPortableBrowserPlaybackController = (input: {
       const next = compilation.snapshot
       if (fingerprint(next) === fingerprint(previous)) return "unchanged"
       retainsGraph = instrumentsOf(next) !== instrumentsOf(previous)
-      const candidate = preparedSession({ ...next, revision: revision + 1 }, audioContext.sampleRate, epoch,
+      // From here live sends wait for the publish (R2) and so reach the revision that carries them; sends already in
+      // flight settle first, so the candidate holds every live value the session accepted while the compile ran.
+      adoptionPublish = publishing.promise
+      await Promise.all([...liveInstrumentSends])
+      if (!current()) return "unavailable"
+      const folded = withAcceptedLiveSynthValues(next, previous, activeSnapshot ?? previous)
+      const candidate = preparedSession({ ...folded, revision: revision + 1 }, audioContext.sampleRate, epoch,
         safeProjectGeneration(activeProjectGeneration ?? 0), (range.endFrame - range.startFrame) / audioContext.sampleRate,
         1, activePreparedStretchAssets, undefined, activeOrdinaryDescriptors)
       if (!candidate.supported || scheduledNotes(candidate.schedule) !== scheduledNotes(schedule)) return "rebuild"
@@ -1855,15 +1898,14 @@ export const createPortableBrowserPlaybackController = (input: {
       if (!current()) return "unavailable"
       await session.installSchedule(candidate.schedule)
       if (!current()) return "unavailable"
-      // Once posted, the publish decides which revision the worklet plays, whatever the transport did meanwhile; live
-      // sends wait for its answer (R2) so none carries a revision the worklet does not play.
+      // Once posted, the publish decides which revision the worklet plays, whatever the transport did meanwhile.
       const graph = activeGraph
       activeRevision = candidate.graph.revision
       activeGraph = candidate.graph
       const published = session.publishGraph(candidate.graph.revision, { requireContinuity: true }).then((): PortableAdoptionResult => {
         if (active !== session) return "unavailable"
         activeFrameSchedule = candidate.schedule
-        activeSnapshot = withAcceptedInstruments({ ...next, revision: candidate.graph.revision }, activeSnapshot ?? previous)
+        activeSnapshot = { ...folded, revision: candidate.graph.revision }
         return "adopted"
       }, (): PortableAdoptionResult => {
         // A refusal leaves the worklet on the revision it plays; so does the session.
@@ -1873,12 +1915,13 @@ export const createPortableBrowserPlaybackController = (input: {
         }
         return failed()
       })
-      adoptionPublish = published
+      publishing.resolve(published)
       return await published
     } catch {
       return failed()
     } finally {
       adopting = false
+      publishing.resolve("unavailable")
       adoptionPublish = undefined
     }
   }
@@ -2318,6 +2361,8 @@ export const createPortableBrowserPlaybackController = (input: {
       const revision = activeRevision
       const deliveryEpoch = epoch
       const sequence = nextLiveProcessorSequence
+      const settled = Promise.withResolvers<void>()
+      liveInstrumentSends.add(settled.promise)
       try {
         const acceptedEvents = events.flatMap(event => event === undefined ? [] : [event])
         await session.queueInstrumentEvents(deliveryEpoch, acceptedEvents, { revision, sequence })
@@ -2336,6 +2381,9 @@ export const createPortableBrowserPlaybackController = (input: {
         return { accepted: true, sequence, appliedSequence: sequence }
       } catch (error) {
         return { accepted: false, reason: "bridge-error", error: String(error) }
+      } finally {
+        liveInstrumentSends.delete(settled.promise)
+        settled.resolve()
       }
     }
     if (!active.queueProcessorEvents) return { accepted: false, reason: "unsupported" }

@@ -1751,7 +1751,7 @@ test('preserves caller-owned recording streams when portable writer startup fail
 const p1Initial: TrackInstrumentParams = { kind: 'synth', instanceId: 'synth:1', params: createDefaultSynthParams() }
 const p1Synth = (from: TrackInstrumentParams, update: SynthParamsUpdate): TrackInstrumentParams =>
   from.kind === 'synth' ? { ...from, params: mergeSynthParams(from.params, update) } : from
-const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number; failCompile?: number; initial?: TrackInstrumentParams; assetKeys?: readonly string[] } = {}) => {
+const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number; failCompile?: number; initial?: TrackInstrumentParams; assetKeys?: readonly string[]; holdAdoptionCompile?: Promise<void>; holdPrepare?: Promise<void> } = {}) => {
   const source = await readFile(new URL("../components/Timeline.tsx", import.meta.url), "utf8")
   const { portable, structural } = extractTimelineBindings(source)
   const transpile = (code: string) => new Bun.Transpiler({ loader: "ts" }).transformSync(code)
@@ -1778,9 +1778,12 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
   let registered: readonly string[] = []
   let emitPosition = (_frame: number, _sequence: number) => {}
   const controller = createPortableBrowserPlaybackController({
-    compileSnapshot: async () => {
+    compileSnapshot: async (_transport, compileContext) => {
       if (playing && compileFailures < (options.failCompile ?? 0)) { compileFailures++; throw new Error('P1 compile threw') }
-      return { supported: true, snapshot: snapshot() }
+      // The project is read when the compile starts, as a real compile does; the hold is the time it takes.
+      const compiled = snapshot()
+      if (compileContext?.liveAdoption) await options.holdAdoptionCompile
+      return { supported: true, snapshot: compiled }
     },
     fingerprintSnapshot: next => JSON.stringify({ ...next, revision: 0, mixer: { ...next.mixer, graph: undefined } }),
     getAudioContext: () => context, select: async () => selected,
@@ -1793,6 +1796,7 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
         ...session,
         prepareGraph: async graph => {
           if (graphs.length > 0 && refused < (options.failPrepare ?? 0)) { refused++; throw new Error('P1 prepare refused') }
+          if (graphs.length > 0) await options.holdPrepare
           graphs.push(graph)
         },
         queueInstrumentEvents: async (_epoch: number, events: readonly unknown[]) => {
@@ -1827,11 +1831,14 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
   })
   const registry = createProcessorEditRegistry(() => 120)
   // The persisted adapter projects each written value before its edit reaches playback.
-  const edit = (instrument: TrackInstrumentParams) => {
-    projected = instrument
+  const allocate = (instrument: TrackInstrumentParams) => {
     const allocated = registry.allocate({ targetId: 'synth', effect: 'instrument', from: instrument, to: instrument })
     if (!allocated) throw new Error('Missing Synth edit')
     return allocated
+  }
+  const edit = (instrument: TrackInstrumentParams) => {
+    projected = instrument
+    return allocate(instrument)
   }
   const flush = (allocated: LiveProcessorEditIdentity) => controller.liveProcessorControl.flush({
     instanceId: allocated.target.instanceId,
@@ -1844,7 +1851,7 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
   }
   const structureOf = (instrument: TrackInstrumentParams) =>
     instrument.kind === 'synth' ? nativeSynthStructureKey(compilePortableSynthState(instrument.params)) : undefined
-  return { controller, apply, announce, edit, flush, setProjected: (instrument: TrackInstrumentParams) => { projected = instrument }, batches, graphs, notes, rebuilds: () => rebuilds, sessionStructure, structureOf,
+  return { controller, apply, announce, edit, allocate, flush, setProjected: (instrument: TrackInstrumentParams) => { projected = instrument }, batches, graphs, notes, rebuilds: () => rebuilds, sessionStructure, structureOf,
     report, refused: () => refused, settled: () => settled, registered: () => registered }
 }
 
@@ -2210,38 +2217,43 @@ test('B6f5 R2 a live send crossing an adoption publish never faults the session'
   }
 })
 
-// Review m1: a live send made after the adoption compiled but before it publishes goes to the revision then playing. The
-// published configuration was compiled without it, so the controller records which revision each live value reached;
-// whether the core keeps live values across a revision is not observable from this layer.
-test('B6f5 m1 a live send during an adoption compile reaches the playing revision and is not repeated on the published one', async () => {
-  const calls: string[] = []
-  const graphs: AudioCoreGraphSnapshot[] = []
-  const publishes: B6f5Publish[] = []
-  const sent: number[] = []
+// Review m1: the published configuration is compiled from the project, which a knob drag reaches only on release. A live
+// synth value the session accepted while the adoption compiled or prepared must be in that configuration, or the core
+// slews every live target back to the stale one when it publishes (/tmp/m1-proof, case B: about six times louder).
+const m1Gain = (graphs: readonly AudioCoreGraphSnapshot[]) => {
+  const instrument = graphs.at(-1)?.nodes.find(node => node.id === 'synth')?.instrument
+  return instrument?.kind === 'synth' ? { gain: instrument.outputGain, level: instrument.oscillators?.[0]?.level } : undefined
+}
+
+test('B6f5 m1 a live synth value accepted during an adoption compile is in the configuration the adoption publishes', async () => {
   const hold = Promise.withResolvers<void>()
-  let volume = 0.8
-  let adoptionCompiles = 0
-  const utility: UtilityParamsEnvelope = { version: 1, state: createDefaultUtilityParams() }
-  const base = b6f5Session(calls, graphs, publishes)
-  const controller = createPortableBrowserPlaybackController({
-    compileSnapshot: async (transport, compileContext) => {
-      const value = volume
-      if (compileContext?.liveAdoption && ++adoptionCompiles === 1) await hold.promise
-      return b6f5Compilation(transport, value, 1, utility)
-    },
-    fingerprintSnapshot: b6f5Fingerprint,
-    getAudioContext: () => context, select: async () => selected,
-    backend: { createPlaybackSession: async () => ({ ...base, queueProcessorEvents: async (revision: number) => { sent.push(revision) } }) },
-  })
+  const f = await p1Fixture({ holdAdoptionCompile: hold.promise })
   try {
-    expect(await controller.start(compilation().snapshot.transport)).toBe('started')
-    volume = 0.5
-    const adoption = controller.adoptSchedule()
-    for (let turn = 0; turn < 50 && adoptionCompiles === 0; turn += 1) await Promise.resolve()
-    const live = await controller.liveProcessorControl.flush({ instanceId: 'utility-b6f5', values: [{ parameterId: 'utility.gainDb', value: 1 }] })
+    f.setProjected(p1Synth(p1Initial, { oscillators: [{ level: 0.3 }] }))
+    const adoption = f.controller.adoptSchedule()
+    for (let turn = 0; turn < 50; turn++) await Promise.resolve()
+    const live = await f.flush(f.allocate(p1Synth(p1Initial, { gain: 0.125 })))
     hold.resolve()
-    expect({ adoption: await adoption, live: live.accepted, sent }).toEqual({ adoption: 'adopted', live: true, sent: [1] })
-  } finally { controller.dispose() }
+    expect({ live: live.accepted, adoption: await adoption, published: m1Gain(f.graphs), prepared: f.controller.preparedInstrument('synth') })
+      .toEqual({ live: true, adoption: 'adopted', published: { gain: 0.125, level: 0.3 },
+        prepared: p1Synth(p1Synth(p1Initial, { oscillators: [{ level: 0.3 }] }), { gain: 0.125 }) })
+  } finally { f.controller.dispose() }
+})
+
+test('B6f5 m1 a live synth send while the adoption prepares waits for the publish and reaches the revision that carries it', async () => {
+  const hold = Promise.withResolvers<void>()
+  const f = await p1Fixture({ holdPrepare: hold.promise })
+  try {
+    f.setProjected(p1Synth(p1Initial, { oscillators: [{ level: 0.3 }] }))
+    const adoption = f.controller.adoptSchedule()
+    for (let turn = 0; turn < 50; turn++) await Promise.resolve()
+    const live = f.flush(f.allocate(p1Synth(p1Initial, { gain: 0.125 })))
+    for (let turn = 0; turn < 50; turn++) await Promise.resolve()
+    const sentWhilePreparing = f.batches.length
+    hold.resolve()
+    expect({ sentWhilePreparing, adoption: await adoption, live: (await live).accepted, batches: f.batches.length })
+      .toEqual({ sentWhilePreparing: 0, adoption: 'adopted', live: true, batches: 1 })
+  } finally { f.controller.dispose() }
 })
 
 test('B6f5 adoptions coalesce to one in flight and one queued that carries the newest edit', async () => {

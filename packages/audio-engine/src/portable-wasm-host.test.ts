@@ -1147,6 +1147,43 @@ test('B6f5 a sounding Synth note survives an adoption publish and ends at its no
     .toEqual([{ installed: 'installed', published: 'published' }, true, true, 0])
 })
 
+// Review m1. A live gain value reaches a held note through the worklet's instrument-parameters message. The next
+// published configuration decides what the note plays when it differs from the playing one in another field, so the
+// renderer must put the live value in it: the configuration compiled from the project, which has not seen the drag
+// yet, plays the stale gain.
+test('B6f5 m1 a held Synth note keeps a live gain through a publication that differs elsewhere only when it carries the value on the built core', async () => {
+  const liveGain = 0.1
+  const synth = { ...heldSynth, parameterTargets: [{ id: 'synth.outputGain', target: 1 }] }
+  const play = async (publishedGain: number) => {
+    const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+    const messages: PortableWasmStatusMessage[] = []
+    const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
+    expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+    const base = portableTrackGraph(['track'])
+    const graph = (revision: number, instrument: typeof heldSynth) => ({ ...base, revision, nodes: base.nodes.map((node) => node.id === 'track'
+      ? { ...node, kind: 'instrument', instrument } : node) })
+    const notes: HostScheduleEvent[] = [{ frame: 0, sequence: 1, type: 'note-on', target: { kind: 'instrument', trackId: 'track' }, noteId: 1, pitch: 72, velocity: 0.8 }]
+    host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph(1, synth) })
+    host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
+    host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+    host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+      revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: notes } })
+    for (let block = 0; block < 20; block += 1) renderLeft(host)
+    // Target 1 is synth.outputGain.
+    host.handleMessage({ version: 2, type: 'instrument-parameters', requestId: 100, revision: 1, sequence: 1, epoch: 1,
+      events: [{ nodeId: 'track', type: 'parameter', noteId: 1, sequence: 1, frameOffset: 0, channel: 0, note: 1, value: liveGain }] })
+    const live = Array.from({ length: 40 }, () => peakOf(renderLeft(host))).at(-1) ?? 0
+    expect(adoptRevision(host, messages, graph(2, { ...synth, filterCutoffHz: 3000, outputGain: publishedGain }), notes))
+      .toEqual({ installed: 'installed', published: 'published' })
+    const after = Array.from({ length: 40 }, () => peakOf(renderLeft(host))).at(-1) ?? 0
+    return { live, after }
+  }
+  const carried = await play(liveGain)
+  const stale = await play(0.8)
+  expect([carried.live > 0.01, Math.abs(carried.after - carried.live) < carried.live * 0.05, stale.after > stale.live * 3])
+    .toEqual([true, true, true])
+})
+
 // Phase 6i. An instrument edit that is not live replaces the instrument at an adoption publish. Each case runs the edit
 // against a reference that played the edited configuration from the start, with the same notes held from frame 0, and the
 // output must equal it once the 5 ms replacement crossfade (two 128-frame blocks) is over. 1e-4 is the tolerance the core

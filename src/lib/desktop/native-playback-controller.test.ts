@@ -5070,6 +5070,7 @@ const createBridge = (
     graphPayloads,
     revisionReply,
     setRuntimeRevision: (revision: number) => { runtimeRevision = revision },
+    emitProgress,
     listenerCounts: () => ({ progress: scheduleProgressListeners.size, loss: lossListeners.size }),
     installedAssets,
     releasedAssetIds,
@@ -9130,23 +9131,63 @@ test("insert, remove and undo of a trusted VST while playing stage live, never s
   } finally { await controller.dispose() }
 })
 
-test("a failed VST staging keeps the old graph playing with no fault shown, and the next submission retries it", async () => {
+// Each refused staging waits for native progress reports, never a timer: this feeds one per macrotask until `done`.
+const feedProgress = async (fixture: ReturnType<typeof createBridge>, done: () => boolean) => {
+  for (let frame = 0; !done() && frame < 2000; frame++) {
+    fixture.emitProgress(frame)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  }
+}
+
+test("a transient VST staging refusal retries on native progress with no further edit, and binds", async () => {
   const { fixture, controller, edit, faults, transport } = vstJoinFixture()
   const coordinate = fixture.bridge.session.coordinateVstAttachments
-  let refusals = 1
-  fixture.bridge.session.coordinateVstAttachments = async (request) =>
-    refusals-- > 0 ? { ok: false as const, error: "staging failed" } : coordinate(request)
+  let refusals = 2
+  let attempts = 0
+  fixture.bridge.session.coordinateVstAttachments = async (request) => {
+    attempts++
+    return refusals-- > 0 ? { ok: false as const, error: "staging failed" } : coordinate(request)
+  }
+  const warn = console.warn
+  const warnings: unknown[][] = []
+  console.warn = (...args: unknown[]) => { warnings.push(args) }
   try {
     expect(await controller.start(transport)).toBe("started")
     const before = fixture.calls.length
-    expect(await edit(true, "insert")).toMatchObject({ status: "failed" })
+    const adopted = edit(true, "insert")
+    await feedProgress(fixture, () => attempts >= 3)
+    expect(await adopted).toEqual({ status: "adopted" })
+    expect(attempts).toBe(3)
+    expect(fixture.coordinations).toHaveLength(1)
+    expect(warnings.filter(([message]) => String(message).includes("VST staging refused"))).toHaveLength(2)
+    expect(faults).toEqual([])
+    for (const call of ["stop", "teardown"]) expect(fixture.calls.slice(before)).not.toContain(call)
+  } finally { console.warn = warn; await controller.dispose() }
+})
+
+test("a persistent VST staging refusal stops after 8 resubmits with a defect log, and the old graph keeps playing", async () => {
+  const { fixture, controller, edit, faults, transport } = vstJoinFixture()
+  let attempts = 0
+  fixture.bridge.session.coordinateVstAttachments = async () => { attempts++; return { ok: false as const, error: "staging failed" } }
+  const warn = console.warn
+  const error = console.error
+  const defects: unknown[][] = []
+  console.warn = () => undefined
+  console.error = (...args: unknown[]) => { defects.push(args) }
+  try {
+    expect(await controller.start(transport)).toBe("started")
+    const before = fixture.calls.length
+    const failed = edit(true, "insert")
+    await feedProgress(fixture, () => defects.length > 0)
+    expect(await failed).toMatchObject({ status: "failed" })
+    expect(attempts).toBe(9)
+    expect(defects).toHaveLength(1)
+    expect(String(defects[0]?.[0])).toContain("defect")
     expect(controller.isActive()).toBe(true)
     expect(faults).toEqual([])
     expect(fixture.calls.slice(before)).not.toContain("stage-prepare")
-    expect(await edit(true, "insert-retry")).toEqual({ status: "adopted" })
-    expect(fixture.coordinations).toHaveLength(1)
     for (const call of ["stop", "teardown"]) expect(fixture.calls.slice(before)).not.toContain(call)
-  } finally { await controller.dispose() }
+  } finally { console.warn = warn; console.error = error; await controller.dispose() }
 })
 
 for (const transport of ["seek", "pause"]) {

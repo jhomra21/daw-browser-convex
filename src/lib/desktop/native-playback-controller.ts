@@ -3829,11 +3829,28 @@ export const createNativePlaybackController = (input: {
           const plan = snapshot.nativeExternalAttachmentPlan ?? emptied
           const coordinateVstAttachments = session.coordinateVstAttachments
           if (!plan || !coordinateVstAttachments) throw new Error("The native VST3 attachment coordinator is unavailable.")
-          checked(await awaitPreparation(coordinateVstAttachments({
+          const stage = () => awaitPreparation(coordinateVstAttachments({
             projectId, serializedPlan: encodeNativeExternalAttachmentPlan(plan), sampleRateHz: sampleRate,
             capturedVstStates: snapshot.nativeExternalAttachmentStates,
             requiredVstStateInstanceIds: snapshot.nativeExternalAttachmentStateRequirements,
-          })))
+          }))
+          let staging = await stage()
+          // A refused staging keeps the playing graph and resubmits itself, with no further user edit. The wait is
+          // counted in native progress reports (one per rendered window, the same event that wakes a publication), so
+          // it needs no timer: min(2^r, 16(r+1)) reports, up to 8 resubmits, then the edit waits for the next opportunity.
+          while (!staging.ok) {
+            if (record.resubmits >= 8) {
+              console.error("[native-live-edit] defect: VST staging was refused after 8 resubmits; the insertion stays in the project and applies on the next successful publication", { reason: staging.error })
+              break
+            }
+            console.warn(`[native-live-edit] VST staging refused; resubmit ${record.resubmits + 1} of 8 at a later block boundary`, { reason: staging.error })
+            const resumeAt = progressVersion + Math.min(2 ** record.resubmits, 16 * (record.resubmits + 1))
+            retry()
+            while (progressVersion < resumeAt) await waitForOpportunity(sequence)
+            await quietPublicationLane()
+            staging = await stage()
+          }
+          checked(staging)
         }
         // Provisional: long enough for the prepare and hydration below. The seam binds late, after them.
         let seam = chooseFrame(BigInt(coordinator.currentFrame()), 16)

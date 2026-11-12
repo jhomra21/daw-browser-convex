@@ -7649,8 +7649,11 @@ const b6f5cRecording = () => {
   Object.defineProperty(globalThis, 'Worker', { configurable: true, value: WriterWorker })
   Object.defineProperty(globalThis.AudioContext.prototype, 'createMediaStreamSource', { configurable: true,
     value: () => ({ connect: () => undefined, disconnect: () => undefined }) })
+  let onEnded: EventListener | undefined
   const mediaTrack: MediaStreamTrack = Object.assign(Object.create(null), {
-    readyState: 'live', getSettings: () => ({ channelCount: 1 }), addEventListener: () => undefined, removeEventListener: () => undefined })
+    readyState: 'live', getSettings: () => ({ channelCount: 1 }),
+    addEventListener: (type: string, listener: EventListener) => { if (type === 'ended') onEnded = listener },
+    removeEventListener: () => undefined })
   const stream: MediaStream = Object.assign(Object.create(null), { getTracks: () => [mediaTrack], getAudioTracks: () => [mediaTrack] })
   const input: Parameters<ReturnType<typeof mountB6f5>['playback']['portableRecording']['start']>[0] = {
     appSessionId: 'take-b6f5c', stream, layout: 'mono', inputChannel: 0, gain: 1, polarity: 1, monitoring: false, punchStartFrame: 0 }
@@ -7660,7 +7663,7 @@ const b6f5cRecording = () => {
       else Reflect.deleteProperty(globalThis, key)
     }
   }
-  return { controls, input, restore }
+  return { controls, input, restore, endDevice: () => onEnded?.(new Event('ended')) }
 }
 
 test('B6f5c a structural edit held by a portable take reaches the playing session once the take stops or is cancelled', async () => {
@@ -7683,6 +7686,42 @@ test('B6f5c a structural edit held by a portable take reaches the playing sessio
       expect({ end, sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length, adoptions: session?.adoptions,
         controls: recording.controls }).toEqual({ end, sessionsAfterMark: 1, adoptions: 0,
         controls: ['recording-capture-configure', end === 'stop' ? 'recording-capture-finalize' : 'recording-capture-cancel'] })
+    } finally { recording.restore() }
+  }, false)
+})
+
+test('B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take', async () => {
+  for (const kind of ['synth-nonlive', 'sampled', 'mixer'] as const) await runB6f5(async (live, world) => {
+    const recording = b6f5cRecording()
+    try {
+      await live.playFrom(1)
+      const session = live.liveSession()
+      await live.playback.portableRecording.start(recording.input)
+      const sessions = world.sessions.length
+      live.edit(kind)
+      await live.until(() => (session?.adoptions ?? 0) > 0)
+      await live.settle()
+      expect({ kind, adoptions: session?.adoptions, open: session?.closed === false, sessions: world.sessions.length - sessions,
+        controls: recording.controls }).toEqual({ kind, adoptions: 1, open: true, sessions: 0, controls: ['recording-capture-configure'] })
+      await live.playback.portableRecording.stop()
+    } finally { recording.restore() }
+  }, false)
+})
+
+test('B6f5c a take ended by a device fault follows the edit it held', async () => {
+  await runB6f5(async (live, world) => {
+    const recording = b6f5cRecording()
+    try {
+      await live.playFrom(1)
+      await live.playback.portableRecording.start({ ...recording.input, onFailure: () => undefined })
+      const mark = live.mark()
+      live.setTracks((current) => [...current, b6f5TrackB])
+      for (let turn = 0; turn < 3_000; turn += 1) await Promise.resolve()
+      await live.settle()
+      expect(world.sessions.filter((entry) => entry.createdSeq > mark).length).toBe(0)
+      recording.endDevice()
+      await live.expectEnd(true, undefined, mark, 'structural', false)
+      expect(world.sessions.filter((entry) => entry.createdSeq > mark).length).toBe(1)
     } finally { recording.restore() }
   }, false)
 })

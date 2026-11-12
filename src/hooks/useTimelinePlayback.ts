@@ -2346,7 +2346,11 @@ export function useTimelinePlayback(
       portableBrowserConfigured: portableBrowserOptions !== undefined,
     }),
     portableRecording: {
-      start: portableBrowserPlayback.startRecording,
+      // A take ended by a fault, a device `ended` or a writer failure reaches neither stop nor cancel below.
+      start: (recording: Parameters<typeof portableBrowserPlayback.startRecording>[0]) => portableBrowserPlayback.startRecording({
+        ...recording,
+        onFailure: (error) => { recording.onFailure?.(error); followPortableEdits() },
+      }),
       // An edit the take held (requestTimelineSchedule) is followed once the take ends with the transport playing.
       stop: () => portableBrowserPlayback.stopRecording().finally(followPortableEdits),
       cancel: () => portableBrowserPlayback.cancelRecording().finally(followPortableEdits),

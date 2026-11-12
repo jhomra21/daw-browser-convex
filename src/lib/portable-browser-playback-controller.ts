@@ -1559,33 +1559,11 @@ export const createPortableBrowserPlaybackController = (input: {
     )
     const cancelled = () => generation !== lifecycleGeneration
       || projectGeneration !== (input.getProjectGeneration?.() ?? 0)
-    const requestedFrame = Math.round(transport.playheadSec * context.sampleRate)
-    const horizonSec = input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC
-    const requestedScheduleEndFrame = requestedFrame
-      + Math.round(horizonSec * context.sampleRate)
-    const compatibleWithActiveSchedule = activeTransport !== undefined
-      && activeScheduleRange !== undefined
-      && !activeTransport.loopEnabled
-      && !transport.loopEnabled
-      && Number.isSafeInteger(requestedFrame)
-      && requestedFrame >= activeScheduleRange.startFrame
-      && Number.isSafeInteger(requestedScheduleEndFrame)
-      && requestedScheduleEndFrame <= activeScheduleRange.endFrame
-    if (active && activeProjectGeneration === projectGeneration && compatibleWithActiveSchedule) {
-      try {
-        await active.setTransport(epoch, runTransport, requestedFrame)
-        positionFrame = requestedFrame
-        if (cancelled()) {
-          void teardownSession()
-          return "unavailable"
-        }
-        if (runTransport) active.markActive()
-        playing = runTransport
-        return "started"
-      } catch (error) {
-        if (!cancelled()) {
-          input.reportFault?.(error instanceof Error ? error.message : "Portable browser playback could not resume.")
-        }
+    // A kept session resumes where it stands, with the loop a start would run: a locate to the playhead, then the run.
+    if (active && activeProjectGeneration === projectGeneration) {
+      const resumed = await seek(configuredTransport.playheadSec, configuredTransport, runTransport)
+      if (resumed !== "rebuild") {
+        if (!cancelled()) return resumed
         void teardownSession()
         return "unavailable"
       }
@@ -2168,7 +2146,8 @@ export const createPortableBrowserPlaybackController = (input: {
   // A locate in place, in native's order: stop at the new position and epoch (the core clears its sources there), free the
   // old pages and prepare the target's, install the schedule and its sources, then run. It compiles the snapshot the
   // session holds, not the project: an edit that landed meanwhile is adopted by the follow after the locate.
-  const seekAttempt = async (sec: number, loop: AdoptionLoop, intent: number, resubmits: number): Promise<PortableSeekResult> => {
+  // `resume` is a start on the paused session: it locates, then runs the transport at the target.
+  const seekAttempt = async (sec: number, loop: AdoptionLoop, intent: number, resubmits: number, resume: boolean): Promise<PortableSeekResult> => {
     while (refreshPromise) await refreshPromise
     await adoptionTail
     const session = active
@@ -2233,13 +2212,14 @@ export const createPortableBrowserPlaybackController = (input: {
       activePreparations = [...held, ...fit.paged.preparations]
       activePreparedSources = withPreparations(fit.paged.events, fit.paged.preparations)
       activeSourceSequence = fit.sources.at(-1)?.sequence ?? 0
-      activeTransport = { ...target, state: running ? "playing" : "paused" }
+      activeTransport = { ...target, state: running || resume ? "playing" : "paused" }
       activeSnapshot = { ...snapshot, transport: { ...snapshot.transport, loopEnabled: target.loopEnabled, loopStartSec: target.loopStartSec, loopEndSec: target.loopEndSec } }
       failedRefreshEndFrame = undefined
       // A newer locate or a pause leaves the session stopped at the schedule this one installed.
-      if (running && intent === transportIntent) {
+      if ((running || resume) && intent === transportIntent) {
         await session.setTransport(nextEpoch, true, frame)
         session.markActive()
+        playing = true
       }
       return "started"
     } catch (cause) {
@@ -2268,7 +2248,7 @@ export const createPortableBrowserPlaybackController = (input: {
           resubmits,
           wait: retryWaitReports(resubmits),
           run: (done) => intent === transportIntent && generation === lifecycleGeneration
-            ? queueSeek(stopped ? arrangementFrame() / sampleRate : sec, loop, intent, done + 1).then((result) => {
+            ? queueSeek(stopped ? arrangementFrame() / sampleRate : sec, loop, intent, done + 1, false).then((result) => {
               if (result === "started") input.onAdoptionResubmitted?.(result)
             })
             : Promise.resolve(),
@@ -2282,20 +2262,20 @@ export const createPortableBrowserPlaybackController = (input: {
     }
   }
 
-  const queueSeek = (sec: number, loop: AdoptionLoop, intent: number, resubmits: number): Promise<PortableSeekResult> => {
+  const queueSeek = (sec: number, loop: AdoptionLoop, intent: number, resubmits: number, resume: boolean): Promise<PortableSeekResult> => {
     pendingSeeks += 1
     const run = seekTail
       .then((): Promise<PortableSeekResult> | PortableSeekResult =>
-        intent === transportIntent ? seekAttempt(sec, loop, intent, resubmits) : active ? "started" : "unavailable")
+        intent === transportIntent ? seekAttempt(sec, loop, intent, resubmits, resume) : active ? "started" : "unavailable")
       .finally(() => { pendingSeeks -= 1 })
     seekTail = run.catch(() => undefined)
     return run
   }
 
-  const seek = async (sec: number, loop: AdoptionLoop): Promise<PortableSeekResult> => {
+  const seek = async (sec: number, loop: AdoptionLoop, resume = false): Promise<PortableSeekResult> => {
     if (recording) throw new Error("Portable recording must stop before playback can seek.")
     retries.delete("seek")
-    return queueSeek(sec, loop, ++transportIntent, 0)
+    return queueSeek(sec, loop, ++transportIntent, 0, resume)
   }
 
   const start = (transport: LivePlaybackTransport, compileContext?: LivePlaybackCompileContext): Promise<PortableStartResult> => {

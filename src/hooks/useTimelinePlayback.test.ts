@@ -7618,10 +7618,8 @@ test('B6f5 renaming a track while paused on native does not recompile the paused
   }
 })
 
-// B6f5 step 5b: a resume takes the state the last compile read, an adoption's included. An adoption's schedule starts at
-// its seam, ahead of where the session stood, and ends where the schedule it replaces ended, so a paused session no
-// longer resumes in place at a playhead inside the seam's range plus a horizon: the Play prepares once, and it plays the
-// newest state.
+// B6f5 step 5b: a resume takes the state the last compile read, an adoption's included. The kept paused session locates
+// to the playhead and runs, so the Play neither prepares nor rebuilds, and it plays the newest state.
 test('B6f5 a resume after an adoption plays the newest state', async () => {
   for (const nativeEnabled of [false, true]) await runB6f5(async (live, world) => {
     await live.playFrom(1)
@@ -7636,7 +7634,7 @@ test('B6f5 a resume after an adoption plays the newest state', async () => {
     await live.until(() => live.playback.isPortableBrowserPlayback() && !live.playback.isPreparingPlayback())
     expect({ nativeEnabled, sessions: world.sessions.length, playing: live.playback.isPlaying(),
       gain: live.liveSession()?.graph?.nodes.find((node) => node.id === track.id)?.mixer?.gain })
-      .toEqual({ nativeEnabled, sessions: 2, playing: true, gain: 0.5 })
+      .toEqual({ nativeEnabled, sessions: 1, playing: true, gain: 0.5 })
   }, nativeEnabled)
 })
 

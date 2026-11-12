@@ -1013,7 +1013,9 @@ test('promotes a pending portable preview without recompiling at the requested t
   await expect(started).resolves.toBe('started')
   expect(compileCalls).toBe(1)
   expect(createdSessions).toBe(1)
+  // The resume locates first (a stop at the new epoch), then runs.
   expect(session.transports).toEqual([
+    { running: false, frame: 0 },
     { running: false, frame: 0 },
     { running: true, frame: 0 },
   ])
@@ -1021,7 +1023,7 @@ test('promotes a pending portable preview without recompiling at the requested t
   controller.dispose()
 })
 
-test('rebuilds a portable preview when the requested playhead is outside its schedule', async () => {
+test('resumes a portable preview in place at a playhead outside its schedule', async () => {
   const calls: string[] = []
   const compileCalls: LivePlaybackTransport[] = []
   let createdSessions = 0
@@ -1049,14 +1051,14 @@ test('rebuilds a portable preview when the requested playhead is outside its sch
   await expect(controller.ensurePrepared(previewTransport)).resolves.toBe('started')
   await expect(controller.start(requestedTransport)).resolves.toBe('started')
 
-  expect(compileCalls).toEqual([previewTransport, requestedTransport])
-  expect(createdSessions).toBe(2)
-  expect(calls.filter((call) => call === 'dispose')).toHaveLength(1)
+  expect(compileCalls).toEqual([previewTransport])
+  expect(createdSessions).toBe(1)
+  expect(calls.filter((call) => call === 'dispose')).toHaveLength(0)
   expect(calls.filter((call) => call === 'mark-active')).toHaveLength(1)
   controller.dispose()
 })
 
-test('requires the full live schedule horizon before promoting a portable preview', async () => {
+test('resumes a portable preview in place near the end of its schedule', async () => {
   const calls: string[] = []
   const compileCalls: LivePlaybackTransport[] = []
   let createdSessions = 0
@@ -1087,13 +1089,13 @@ test('requires the full live schedule horizon before promoting a portable previe
   await controller.pause(0)
   await expect(controller.start(nearEndTransport)).resolves.toBe('started')
 
-  expect(compileCalls).toEqual([previewTransport, nearEndTransport])
-  expect(createdSessions).toBe(2)
-  expect(calls.filter((call) => call === 'dispose')).toHaveLength(1)
+  expect(compileCalls).toEqual([previewTransport])
+  expect(createdSessions).toBe(1)
+  expect(calls.filter((call) => call === 'dispose')).toHaveLength(0)
   controller.dispose()
 })
 
-test('rebuilds instead of promoting a portable preview when loop semantics change', async () => {
+test('resumes a portable preview in place when loop semantics change', async () => {
   const calls: string[] = []
   const compileCalls: LivePlaybackTransport[] = []
   const controller = createPortableBrowserPlaybackController({
@@ -1120,27 +1122,24 @@ test('rebuilds instead of promoting a portable preview when loop semantics chang
   await expect(controller.ensurePrepared(previewTransport)).resolves.toBe('started')
   await expect(controller.start(loopTransport)).resolves.toBe('started')
 
-  expect(compileCalls).toEqual([previewTransport, loopTransport])
-  expect(calls.filter((call) => call === 'dispose')).toHaveLength(1)
-  expect(controller.isPrepared()).toBeTrue()
+  expect(compileCalls).toEqual([previewTransport])
+  expect(calls.filter((call) => call === 'dispose')).toHaveLength(0)
+  expect(controller.isActive()).toBeTrue()
+  controller.dispose()
 })
 
-test('shares one rebuild for concurrent incompatible portable starts', async () => {
+test('shares one resume for concurrent starts of a paused portable session', async () => {
   const calls: string[] = []
-  const rebuild = Promise.withResolvers<ReturnType<typeof compilation>>()
   let compileCalls = 0
   let createdSessions = 0
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: (transport) => {
       compileCalls += 1
-      if (compileCalls === 1) {
-        const base = compilation()
-        return Promise.resolve({
-          ...base,
-          snapshot: { ...base.snapshot, transport },
-        })
-      }
-      return rebuild.promise
+      const base = compilation()
+      return Promise.resolve({
+        ...base,
+        snapshot: { ...base.snapshot, transport },
+      })
     },
     getAudioContext: () => context,
     backend: {
@@ -1160,24 +1159,17 @@ test('shares one rebuild for concurrent incompatible portable starts', async () 
   const second = controller.start(secondTransport)
   expect(second).toBe(first)
 
-  const base = compilation()
-  rebuild.resolve({ ...base, snapshot: { ...base.snapshot, transport: firstTransport } })
   await expect(Promise.all([first, second])).resolves.toEqual(['started', 'started'])
-  expect(compileCalls).toBe(2)
-  expect(createdSessions).toBe(2)
+  expect(compileCalls).toBe(1)
+  expect(createdSessions).toBe(1)
   controller.dispose()
 })
 
-test('disposal during an incompatible portable rebuild prevents activation', async () => {
+test('disposal during a portable resume prevents activation', async () => {
   const calls: string[] = []
-  const rebuild = Promise.withResolvers<ReturnType<typeof compilation>>()
-  let compileCalls = 0
   let createdSessions = 0
   const controller = createPortableBrowserPlaybackController({
-    compileSnapshot: () => {
-      compileCalls += 1
-      return compileCalls === 1 ? Promise.resolve(compilation()) : rebuild.promise
-    },
+    compileSnapshot: async () => compilation(),
     getAudioContext: () => context,
     backend: {
       createPlaybackSession: async () => {
@@ -1193,7 +1185,6 @@ test('disposal during an incompatible portable rebuild prevents activation', asy
   await expect(controller.ensurePrepared(previewTransport)).resolves.toBe('started')
   const started = controller.start(requestedTransport)
   controller.dispose()
-  rebuild.resolve(compilation())
 
   await expect(started).resolves.toBe('unavailable')
   expect(createdSessions).toBe(1)
@@ -1224,15 +1215,11 @@ test('shares concurrent portable starts during preview promotion', async () => {
   const first = controller.start(transport)
   const second = controller.start({ ...transport, playheadSec: 1.5 })
   expect(second).toBe(first)
-  expect(session.transports).toEqual([
-    { running: false, frame: 0 },
-    { running: true, frame: 0 },
-  ])
 
   promotion.resolve()
   await expect(Promise.all([first, second])).resolves.toEqual(['started', 'started'])
   expect(compileCalls).toBe(1)
-  expect(session.transports).toHaveLength(2)
+  expect(session.transports).toHaveLength(3)
   controller.dispose()
 })
 
@@ -2889,8 +2876,8 @@ test('W-UD7p-4 a paused tempo edit and a paused loop edit are adopted in place a
   } finally { f.controller.dispose() }
 })
 
-// W-UD7p-5: Play after a paused edit finds the session compatible and only starts the transport.
-test('W-UD7p-5 Play after a paused structural edit resumes the same session with no prepare or install', async () => {
+// W-UD7p-5: Play after a paused edit locates the session that adopted it and runs it: no prepare, no publish, no dispose.
+test('W-UD7p-5 Play after a paused structural edit resumes the same session with no prepare or publish', async () => {
   const f = await w8Fixture({ clipSec: 4 })
   try {
     expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
@@ -2898,7 +2885,26 @@ test('W-UD7p-5 Play after a paused structural edit resumes the same session with
     expect(await f.adopt(f.noLoop)).toBe('adopted')
     const before = f.calls.length
     const started = await f.controller.start({ ...f.transport, state: 'playing' })
-    expect({ started, sessions: f.sessions(), calls: f.calls.slice(before) }).toEqual({ started: 'started', sessions: 1, calls: ['start-transport', 'mark-active'] })
+    expect({ started, sessions: f.sessions(), rebuilt: f.calls.slice(before).filter((call) => ['dispose', 'prepare-graph', 'publish-graph'].includes(call)),
+      laterNoteOn: f.noteEvents(f.installs.at(-1), 'note-on').some((event) => event.frame === 96_000) })
+      .toEqual({ started: 'started', sessions: 1, rebuilt: [], laterNoteOn: true })
+  } finally { f.controller.dispose() }
+})
+
+// W-R11: a kept paused session resumes in place whether its loop is on or off, from where it stands, and plays the edit.
+test('W-R11 Play on a paused session with its loop on resumes the same session and plays the paused edit', async () => {
+  const loop: W8Loop = { loopEnabled: true, loopStartSec: 0, loopEndSec: 2 }
+  const f = await w8Fixture({ clipSec: 4, loop })
+  const paused: LivePlaybackTransport = { ...f.transport, state: 'paused', playheadSec: 0.5 }
+  try {
+    expect(await f.controller.ensurePrepared(paused)).toBe('started')
+    f.state.notes = [w8Note('note', 0), w8Note('later', 1)]
+    expect(await f.adopt(loop)).toBe('adopted')
+    const started = await f.controller.start({ ...paused, state: 'playing' })
+    const installed = f.installs.at(-1)
+    expect({ started, sessions: f.sessions(), disposed: f.calls.includes('dispose'), origin: installed?.timeOrigin.frame,
+      laterNoteOn: f.noteEvents(installed, 'note-on').some((event) => event.frame === 24_000), playing: f.controller.isActive() })
+      .toEqual({ started: 'started', sessions: 1, disposed: false, origin: 24_000, laterNoteOn: true, playing: true })
   } finally { f.controller.dispose() }
 })
 
@@ -2927,7 +2933,7 @@ test('W-UD7p-7 a refused paused edit answers failed, keeps the session and is re
     const failed = await f.adopt(f.noLoop)
     const started = await f.controller.start({ ...f.transport, state: 'playing' })
     refuse = false
-    f.position(1_000)
+    f.position(1_000, f.epochs.at(-1))
     for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
     expect({ failed, started, sessions: f.sessions(), disposed: f.calls.includes('dispose'), revisions: f.publishes.slice(1).map((entry) => entry.revision),
       laterNoteOn: f.noteEvents(f.installs.at(-1), 'note-on').some((event) => event.frame === 96_000) })

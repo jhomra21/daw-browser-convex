@@ -281,10 +281,11 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
       titleActions={(
         <Show when={failed()}>
           <span
+            role="status"
             class="shrink-0 text-[10px] text-amber-300"
             title="This plug-in stopped working and is muted. Other audio keeps playing. Replace or remove it."
           >
-            Unavailable
+            Plug-in failed
           </span>
         </Show>
       )}

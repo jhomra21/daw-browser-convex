@@ -1,4 +1,3 @@
-import type { AudioPcmSourceDescriptor, DecodedAudioPage, TrackInstrumentParams } from "@daw-browser/shared"
 import {
   selectPortableWasmAudioWorkletBackend,
   portableWasmPagedPreparationCount,
@@ -45,7 +44,10 @@ import {
 } from "@daw-browser/audio-engine/prepared-stretch-store"
 import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver"
 import { isLiveEventOnlyInstrumentChange, isLiveParameterChange, mapNativeBuiltInParameterCommit, nativeBuiltInLiveStateCovered } from "~/lib/desktop/native-built-in-parameter-mapper"
-import { mergeSynthParams, normalizeTrackInstrumentParams, parseJsonValue, type SynthParamsUpdate } from "@daw-browser/shared"
+import {
+  mergeSynthParams, normalizeTrackInstrumentParams, parseJsonValue,
+  type AudioPcmSourceDescriptor, type DecodedAudioPage, type SynthParamsUpdate, type TrackInstrumentParams,
+} from "@daw-browser/shared"
 import type { AudioEffectRuntimeInstance } from "@daw-browser/audio-engine/audio-engine"
 import { createAudioEffectParameterPayload } from "~/components/timeline/audio-effect-parameter-payload"
 
@@ -1887,7 +1889,7 @@ export const createPortableBrowserPlaybackController = (input: {
       // From here live sends wait for the publish (R2) and so reach the revision that carries them; sends already in
       // flight settle first, so the candidate holds every live value the session accepted while the compile ran.
       adoptionPublish = publishing.promise
-      await Promise.all([...liveInstrumentSends])
+      await Promise.all(liveInstrumentSends)
       if (!current()) return "unavailable"
       const folded = withAcceptedLiveSynthValues(next, previous, activeSnapshot ?? previous)
       const candidate = preparedSession({ ...folded, revision: revision + 1 }, audioContext.sampleRate, epoch,

@@ -16,15 +16,15 @@
   "path": "tools/certification/manifest-7a.json",
   "sha256": "efc72e432e6bf4716ac10f6971096347ca62ffbd219721544b5d03a6ab300376",
   "entries": {
-   "src/lib/desktop/native-playback-controller.ts": "7dd967226cf1a52cd5738c7dda494abe55dc164b6cb9124a5d48b24c2cb7cfbd",
-   "src/lib/desktop/native-processor-state-owner.ts": "0e0c7a05c34033c20db38bfabb240aa3e0d07a89391e8101e02e7509c9ce871b",
-   "src/hooks/useTimelinePlayback.ts": "f3d6a4888d252fe4afffc89d91fd49eda36a8a1e38037dc3b23848eaf07f8971",
-   "src/lib/desktop/native-playback-controller.test.ts": "69b88d47ac699261df86daef3b5d48e3b94c779f51777ead837a3bc78ce9fe48",
-   "src/hooks/useTimelinePlayback.test.ts": "e969395aea597a8da74cf719779c6468fe4d09a5e3b4ca1e9630f88000dcd48d",
+   "src/lib/desktop/native-playback-controller.ts": "0815986765d16ae1fa2a6db61142cc6a77300be07bbec054b509f51251983200",
+   "src/lib/desktop/native-processor-state-owner.ts": "7b8c79f9d2c0124591130cbab613bdd2a23474136962393f777d3bdf69af527c",
+   "src/hooks/useTimelinePlayback.ts": "8200950d45494b357a21390e3052d66025c3212d8a04e29e2352e74a6b7c7475",
+   "src/lib/desktop/native-playback-controller.test.ts": "4524564692e6ff28ff82755fb10d7927441dffcd54026ac79f749158f1c0f2b0",
+   "src/hooks/useTimelinePlayback.test.ts": "8fba09cd28ae3fda96ea58b0b4d81584bf8d3cf104b51b29c9f1fbebef42ceef",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "dcffbbda8434de38d9375da914c5b7c4b5cbc8c3255705b3f812242bfbea2669",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "29ebc5ffcad8b71c06c2e62f06168d0f8a2224140fd24576e6307b8d0df53c60",
    "src/components/timeline/create-timeline-effect-commit.ts": "c62ae6f5ec087a8abe5a0d1038d71b1172ae060a0c294bcef848c553b278a9c2",
-   "src/components/Timeline.tsx": "92968eb93d655efdeb295a87d0566c1308d67d136e5a73a3290ce2dab02ab225",
+   "src/components/Timeline.tsx": "e8226572ba3c3c1386cfa645dcbd3cae17af52cad1cc1a1cb39832b9ce09f3d3",
    "src/components/Timeline.test.ts": "b82519275ba6919910a0a3f6ed341c3f101ad2a8308eb229a5955921a5774317",
    "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "2488292cd8bf35fcf1e3e992f00d4be6300abf975972ddfe4d1ca48e3232f994",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "7f45e3103c2bdf98467bcb6de030a6971cbd6182729f77bf974907c9a1024ef0",
@@ -34,20 +34,20 @@
    "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "fd954305f90c00f465226a3b7fd5626c4ba93f6d2a5b5e951ff10d3ba91a7472",
    "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "fef86ee9f1fb64b7aa3b1f594d9f2aaa0e7c3fcb9ee4fb147b46401daae9ec34",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-commit.ts": null,
-   "tools/acceptance/device-control-cost.browser.test.ts": "b51c0c72e4627f0cc890e7db72f2db599e540961b03a6a9ea08885e750e8180c",
+   "tools/acceptance/device-control-cost.browser.test.ts": "4303fc2130643c0126fd82af21c92bf87c8c745fb10180eecc8a432860c2c300",
    "src/lib/instrument-buffer-sync.test.ts": "b40b77d90c1cbdc58f9456650a3e9528b5b0dd81a9b391bde79d1c749d88ac71",
    "src/components/timeline/parameter-gesture-owner.ts": "72733156f94affd25ba19e11dbe6ebe074c758a52e392f55d25af260422fc9d9",
    "src/components/timeline/create-persisted-effect-state.ts": "bc910f28f18592cdfed542608750b1e71f4325eeedcd05fd2aa0d415b6ff1d89",
    "src/components/timeline/create-effects-panel-state.ts": "576833cf6e59c0f7657948b4846e8e6fdef6f814008daffda0d43d8247b322e4",
    "src/components/timeline/create-effects-panel-controller.ts": "0950cb6702bd2acbb29493902881d0e83d7444493e7214b0acc45477dbacaf0f",
-   "src/lib/portable-browser-playback-controller.ts": "fb1d2004ff7bed3715bba70aaebab66ee1a9f8c2d58ff67b6d0849176844affa",
+   "src/lib/portable-browser-playback-controller.ts": "aba72757095178971f83e58146381a7f3ea1f7ac06bd5f07d60c5d50eef77430",
    "src/components/effects/Sampler.tsx": "65164a653cf2fdad60d96fd33ae7b29d6b7239801b102b37e208e8ac9e58b19b",
    "src/components/effects/Granular.tsx": "bd70f972b350d2888527f7ba28e107c2b4af681b3f6aca8022a406c8e873dd91",
    "src/lib/when-number.ts": "b52ff4e7bb3ea935af21ef607c0458d658c79cd892c4a27339a8c3e195e517d9",
    "tools/acceptance/device-control-cost.browser-runtime.tsx": "d083d15afca9269323ebdba5c886b2707e3f9e7bec53f5305c2b38e89edb7f07",
    "tools/acceptance/device-control-cost.ts": "cbfc01c361f83eba5061512fc866b6de1686b06a81f5a6ad4bf6adc1fc4ef3fe",
    "src/hooks/useEffectsPanelAudioSync.test.ts": "12f028b72e38b8badf8233a60363ae1f03a57119d7c01e2e3ecde0cfd38d8beb",
-   "src/lib/portable-browser-playback-controller.test.ts": "50cd176f226206f0ba7d02dbdb1ffee6db181a99cfb5f16b68386954c2ade79a",
+   "src/lib/portable-browser-playback-controller.test.ts": "b557b7e0c629e3956869254b0ef64bdfb195d8d852323093af8f039ceee1231d",
    "src/components/timeline/create-persisted-effect-state.test.ts": "5d3ae312c861ac660a4a81b47d18d223397a7b473dca0ac73168f1cce0086fa7",
    "src/components/timeline/create-effects-panel-audio-effects-state.test.ts": "267562137157e2c20b0e807286ed3cea5f8b9c61130933f9b32c2bb416470a6e",
    "src/components/timeline/create-effects-panel-audio-effects-state.ts": "3cf85e14cbf254b3cd1abb193bf660bf1a42ca978ae51a19f6b076ed0f73a6c9",
@@ -55,7 +55,7 @@
    "native/audio-core/src/audio_core.cpp": "a35f6ff238c101401254b068009a4f6969ed180232b4922625740fb2667baab4",
    "native/audio-core/include/daw/audio_core.h": "5e7b0754b8d8265ffc4d9140b4fcd2669e0f2483aa02a3dd4bd6c07a14d787dd",
    "native/audio-core/tests/audio_core_test.cpp": "cfd750268a7ed5835814a8d7d47bd431c26097896b0de95b4cda02ad85039d95",
-   "native/audio-host-macos/tests/audio_host_test.cpp": "223df98b272e50e33ddf89d7ba15eae89dc53556fb68ddf5ebdaa6a26db6290e",
+   "native/audio-host-macos/tests/audio_host_test.cpp": "8a50431f5b853857cb6dd3e4f429cfc27e3c1bc2b2c92c004ab1ab09cd0450bf",
    "native/audio-host-macos/tests/realtime_callback_guard.test.ts": "282cfbb7b83817d7ce88df862382a375a4c1249638f31fcbc80da7082b64a7b9",
    "public/audio-core/daw-audio-core.wasm": "b60bb1dc9a188038306776464457305daa4306f686d485a357cb713ad82e4ac0",
    "public/audio-core/daw-audio-core.manifest.json": "660e366b3accf9bc4b0d7a1864eaacf3c4961e68062bec100f10dd3def49cc94",
@@ -64,9 +64,9 @@
    "public/audio-worklets/daw-portable-audio-core-processor-v2.js": "d9fcd6ba60a590b54670e02d4124fc9a823759efbdbb463f2c9027ea505f6635",
    "packages/audio-engine/src/portable-wasm-protocol.ts": "09e0688e17fa38e51a8c26c4ef17e4f29ec2de7f21e174ade327a35255ab6f4d",
    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.ts": "8d1a2ac9064d2b08fac89eb19a387a92384a905cd186e3b62cc364dfeb15e26c",
-   "packages/audio-engine/src/native-host-wire.ts": "f84ac7b93f5bd73fcfda1d43eced8ea99d64c20cf274aaaa219ddb025da3f1a5",
+   "packages/audio-engine/src/native-host-wire.ts": "291817815c008c8ee4c9e2558b9b80077c8ba9597c8a3e4b1ded04c8acb845f3",
    "packages/audio-engine/src/native-host-wire.test.ts": "586d06916c7caa630003d88940403d5b356aa57f39965f624693fe34078917d1",
-   "packages/audio-engine/src/portable-wasm-host.test.ts": "fa56bff6802eed1c9f507e5610d2504b04399197a6dbfb18fa2b487cae08f073",
+   "packages/audio-engine/src/portable-wasm-host.test.ts": "a87a699a97bccaeed60f4d9bcac50795cbdeaaa25bbfa3627115a61d0d503638",
    "packages/audio-engine/src/portable-wasm-protocol.test.ts": "7c99cb630f255b0b6050e1275650d95c0f902777556890e3b1b21ea67355c730",
    "packages/audio-engine/src/portable-wasm-worklet.test.ts": "dd2dff481ec8ba5ac68e48f48dbc4547b3a504a426e304fea3ab41c9c20e024f",
    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": "6bc3f8535fcbcb3619cf4cb8a98255ec099566695dc1d44b72e98c3db8fced6c",
@@ -126,16 +126,16 @@
  },
  "fuzzSources": {
   "controller": {
-   "src/lib/desktop/native-playback-controller.ts": "7dd967226cf1a52cd5738c7dda494abe55dc164b6cb9124a5d48b24c2cb7cfbd",
+   "src/lib/desktop/native-playback-controller.ts": "0815986765d16ae1fa2a6db61142cc6a77300be07bbec054b509f51251983200",
    "src/lib/desktop/native-schedule-coordinator.ts": "6e841788b5b320bfa8019406466392c07c7717666c565f4ec10e5f98dd835f4d",
-   "src/lib/desktop/native-processor-state-owner.ts": "0e0c7a05c34033c20db38bfabb240aa3e0d07a89391e8101e02e7509c9ce871b",
-   "src/lib/desktop/native-built-in-parameter-mapper.ts": "178817f3f6e496828567c8ab4ff6b1d56e1fa95dd4c1a54852b9a6d6c7c97a15",
+   "src/lib/desktop/native-processor-state-owner.ts": "7b8c79f9d2c0124591130cbab613bdd2a23474136962393f777d3bdf69af527c",
+   "src/lib/desktop/native-built-in-parameter-mapper.ts": "21aadde284da527746d3c1463caaa0f92cec9674d70289e0b5e352e0dc850e43",
    "src/lib/live-processor-control.ts": "841375ec42695eaf9f5fe1669fb1011e109f95b3ea5bf857bc2192dd0978dc0d",
-   "src/components/timeline/create-processor-edit-registry.ts": "6d593d4bb93c1762dc9eedc539609c62dffd4b2f4a206335925c15a8e9ee47c6",
+   "src/components/timeline/create-processor-edit-registry.ts": "9df2fbd896a2e99d1fafac0bce8cb4a1c936af04126c7afe086fdfa30bf3733b",
    "src/lib/live-playback-snapshot.ts": "6e984692a06b262d2afe8b5b3239930f5c26b19cb1f83fe8f095d3e110a3399e",
-   "packages/audio-engine/src/native-host-wire.ts": "f84ac7b93f5bd73fcfda1d43eced8ea99d64c20cf274aaaa219ddb025da3f1a5",
-   "apps/desktop/audio-host.ts": "2f86cd7eef6f02e2eb29bf7acc8a2ba72cc221a6c1bdf68b44260eddc07c6faa",
-   "native/audio-host-macos/src/audio-host.cpp": "f36e9b302351d77ed6899e05a43d0c058efd6d6785136a4f56d9812b23e92869",
+   "packages/audio-engine/src/native-host-wire.ts": "291817815c008c8ee4c9e2558b9b80077c8ba9597c8a3e4b1ded04c8acb845f3",
+   "apps/desktop/audio-host.ts": "5d389b86d5541dd81fd18cabd4fed3d54a89761fde3cbc003ff48a22a21c575f",
+   "native/audio-host-macos/src/audio-host.cpp": "e0f4682c6897ef7e7274cec923fc64911b89e9978bba446bb1efd5bc2385bd15",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "29ebc5ffcad8b71c06c2e62f06168d0f8a2224140fd24576e6307b8d0df53c60",
    "tools/acceptance/ae-08-processor-state-fuzz-oracle.ts": "619a93ec58beb16bfc347eed3b34f0fe292acc844053ca540675d690fccb88ce",
    "tools/acceptance/ae-08-processor-state-fuzz.ts": "3b04ce85f13db50f9fef849318a3326ada87225e45cf13736d74c621a6dd8ee0",
@@ -145,14 +145,14 @@
    "tools/acceptance/ae-08-processor-state-fuzz-edit.ts": "781b5bff0fc34645b34144be0b7fe1d5287c50d323e3741ef9f57583c4f04452"
   },
   "hook": {
-   "src/hooks/useTimelinePlayback.ts": "f3d6a4888d252fe4afffc89d91fd49eda36a8a1e38037dc3b23848eaf07f8971",
+   "src/hooks/useTimelinePlayback.ts": "8200950d45494b357a21390e3052d66025c3212d8a04e29e2352e74a6b7c7475",
    "src/components/timeline/create-effects-panel-audio-effects-state.ts": "3cf85e14cbf254b3cd1abb193bf660bf1a42ca978ae51a19f6b076ed0f73a6c9",
-   "src/lib/desktop/native-playback-controller.ts": "7dd967226cf1a52cd5738c7dda494abe55dc164b6cb9124a5d48b24c2cb7cfbd",
+   "src/lib/desktop/native-playback-controller.ts": "0815986765d16ae1fa2a6db61142cc6a77300be07bbec054b509f51251983200",
    "src/lib/local-effects.ts": "4bf53a70c2d602cf459013e453b2e0ce44c1605006480421bc3637529c2add81",
-   "src/lib/desktop/native-processor-state-owner.ts": "0e0c7a05c34033c20db38bfabb240aa3e0d07a89391e8101e02e7509c9ce871b",
-   "src/lib/desktop/native-built-in-parameter-mapper.ts": "178817f3f6e496828567c8ab4ff6b1d56e1fa95dd4c1a54852b9a6d6c7c97a15",
+   "src/lib/desktop/native-processor-state-owner.ts": "7b8c79f9d2c0124591130cbab613bdd2a23474136962393f777d3bdf69af527c",
+   "src/lib/desktop/native-built-in-parameter-mapper.ts": "21aadde284da527746d3c1463caaa0f92cec9674d70289e0b5e352e0dc850e43",
    "src/lib/live-processor-control.ts": "841375ec42695eaf9f5fe1669fb1011e109f95b3ea5bf857bc2192dd0978dc0d",
-   "src/components/timeline/create-processor-edit-registry.ts": "6d593d4bb93c1762dc9eedc539609c62dffd4b2f4a206335925c15a8e9ee47c6",
+   "src/components/timeline/create-processor-edit-registry.ts": "9df2fbd896a2e99d1fafac0bce8cb4a1c936af04126c7afe086fdfa30bf3733b",
    "src/components/timeline/create-timeline-effect-commit.ts": "c62ae6f5ec087a8abe5a0d1038d71b1172ae060a0c294bcef848c553b278a9c2",
    "tools/acceptance/ae-08-processor-state-fuzz.ts": "3b04ce85f13db50f9fef849318a3326ada87225e45cf13736d74c621a6dd8ee0",
    "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "fd954305f90c00f465226a3b7fd5626c4ba93f6d2a5b5e951ff10d3ba91a7472",
@@ -1430,7 +1430,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 63,
+     "pass": 64,
      "skip": 0,
      "fail": 0
     },
@@ -1685,7 +1685,7 @@
     "kind": "tests",
     "exit": 1,
     "counts": {
-     "pass": 214,
+     "pass": 216,
      "skip": 1,
      "fail": 2
     },
@@ -1719,7 +1719,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 641,
+     "pass": 657,
      "skip": 1,
      "fail": 0
     },
@@ -2052,7 +2052,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 52,
+     "pass": 57,
      "skip": 0,
      "fail": 0
     },
@@ -2145,7 +2145,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 53,
+     "pass": 66,
      "skip": 0,
      "fail": 0
     },
@@ -2444,7 +2444,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/portable-session-compiler.test.ts": {
-      "pass": 17,
+      "pass": 18,
       "skip": 0,
       "fail": 0
      },
@@ -2484,7 +2484,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/portable-wasm-host.test.ts": {
-      "pass": 39,
+      "pass": 40,
       "skip": 0,
       "fail": 0
      },
@@ -2801,7 +2801,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 656,
+     "pass": 673,
      "skip": 1,
      "fail": 0
     },
@@ -2866,7 +2866,7 @@
     "kind": "tests",
     "exit": 1,
     "counts": {
-     "pass": 214,
+     "pass": 216,
      "skip": 1,
      "fail": 2
     },
@@ -3005,7 +3005,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 291,
+     "pass": 304,
      "skip": 3,
      "fail": 0
     },
@@ -3074,7 +3074,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 400,
+     "pass": 424,
      "skip": 1,
      "fail": 0
     },
@@ -3372,7 +3372,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/portable-session-compiler.test.ts": {
-      "pass": 17,
+      "pass": 18,
       "skip": 0,
       "fail": 0
      },
@@ -3412,7 +3412,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/portable-wasm-host.test.ts": {
-      "pass": 39,
+      "pass": 40,
       "skip": 0,
       "fail": 0
      },
@@ -4157,7 +4157,7 @@
    "judge": {
     "kind": "campaign",
     "exit": 0,
-    "logSha256": "ed65daf7101db97b1d75980df1e4197a151e1d0f2adad456ace4cc2ad4fc4e48",
+    "logSha256": "eff779776f2997facfc7f4baa1fde2f510b59e9a69e22167618cd99907d3bd8c",
     "gateSha256": "527966d859183afaca3420a2f70566eb84950f0fbca1b980addb3eef6f058c87",
     "summarySha256": "1a8bb302fb199750340c1e6ee058554f82c861c95ab4abb7ad7fb63402077a0b"
    }
@@ -4197,7 +4197,7 @@
    "judge": {
     "kind": "campaign",
     "exit": 0,
-    "logSha256": "ed65daf7101db97b1d75980df1e4197a151e1d0f2adad456ace4cc2ad4fc4e48",
+    "logSha256": "eff779776f2997facfc7f4baa1fde2f510b59e9a69e22167618cd99907d3bd8c",
     "gateSha256": "527966d859183afaca3420a2f70566eb84950f0fbca1b980addb3eef6f058c87",
     "summarySha256": "1a8bb302fb199750340c1e6ee058554f82c861c95ab4abb7ad7fb63402077a0b"
    }
@@ -4285,13 +4285,13 @@
  ],
  "traces": {
   "controller": {
-   "treeSha256": "b21e249832ebfe60a44769f6c9badfa282efeba7fdc961433fbd86e26ec9eef0",
+   "treeSha256": "6c37c65b2a3c4dced422ba215c3029891be98a8d4a46e0a0798cc08ca5e8d5ae",
    "files": 700,
    "a": "trace-controller-a",
    "b": "trace-controller-b"
   },
   "hook": {
-   "treeSha256": "9e9297a1f09b8408dde6f0085fcbb68fa0ebcee6e258a3385c2b835f73f142c9",
+   "treeSha256": "36968b6f2b0834244ad5beaf9b411501b6c62631bc2faa4d1c48f05cef5c55a3",
    "files": 4459,
    "a": "trace-hook-a",
    "b": "trace-hook-b"
@@ -18455,7 +18455,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 641,
+      "pass": 657,
       "skip": 1,
       "fail": 0
      },
@@ -18516,7 +18516,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 640,
+      "pass": 656,
       "skip": 1,
       "fail": 1
      },
@@ -19224,7 +19224,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -19288,7 +19288,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -19769,7 +19769,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 723,
+      "pass": 740,
       "skip": 1,
       "fail": 0
      },
@@ -19836,7 +19836,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 721,
+      "pass": 738,
       "skip": 1,
       "fail": 2
      },
@@ -20175,7 +20175,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 723,
+      "pass": 740,
       "skip": 1,
       "fail": 0
      },
@@ -20242,7 +20242,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 722,
+      "pass": 739,
       "skip": 1,
       "fail": 1
      },
@@ -20580,7 +20580,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 723,
+      "pass": 740,
       "skip": 1,
       "fail": 0
      },
@@ -20647,7 +20647,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 722,
+      "pass": 739,
       "skip": 1,
       "fail": 1
      },
@@ -20970,7 +20970,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 723,
+      "pass": 740,
       "skip": 1,
       "fail": 0
      },
@@ -21037,7 +21037,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 722,
+      "pass": 739,
       "skip": 1,
       "fail": 1
      },
@@ -24430,7 +24430,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -24494,7 +24494,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 201,
+      "pass": 203,
       "skip": 1,
       "fail": 15
      },
@@ -24693,7 +24693,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 723,
+      "pass": 740,
       "skip": 1,
       "fail": 0
      },
@@ -24760,7 +24760,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 722,
+      "pass": 739,
       "skip": 1,
       "fail": 1
      },
@@ -24940,7 +24940,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -25004,7 +25004,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -25194,7 +25194,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -25264,7 +25264,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -25444,7 +25444,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -25508,7 +25508,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -26055,7 +26055,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -26119,7 +26119,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 209,
+      "pass": 211,
       "skip": 1,
       "fail": 7
      },
@@ -26310,7 +26310,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 723,
+      "pass": 740,
       "skip": 1,
       "fail": 0
      },
@@ -26377,7 +26377,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 722,
+      "pass": 739,
       "skip": 1,
       "fail": 1
      },
@@ -26562,7 +26562,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 723,
+      "pass": 740,
       "skip": 1,
       "fail": 0
      },
@@ -26629,7 +26629,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 722,
+      "pass": 739,
       "skip": 1,
       "fail": 1
      },
@@ -26809,7 +26809,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -26873,7 +26873,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 213,
       "skip": 1,
       "fail": 5
      },
@@ -27056,7 +27056,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -27120,7 +27120,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -27305,7 +27305,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -27369,7 +27369,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 209,
+      "pass": 211,
       "skip": 1,
       "fail": 7
      },
@@ -27704,7 +27704,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -27780,7 +27780,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -27976,7 +27976,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -28052,7 +28052,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 208,
+      "pass": 210,
       "skip": 1,
       "fail": 8
      },
@@ -28238,7 +28238,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -28302,7 +28302,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -29337,7 +29337,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 723,
+      "pass": 740,
       "skip": 1,
       "fail": 0
      },
@@ -29404,7 +29404,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 722,
+      "pass": 739,
       "skip": 1,
       "fail": 1
      },
@@ -29584,7 +29584,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -29648,7 +29648,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -29956,7 +29956,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -30020,7 +30020,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 193,
+      "pass": 195,
       "skip": 1,
       "fail": 23
      },
@@ -30219,7 +30219,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -30283,7 +30283,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 210,
+      "pass": 212,
       "skip": 1,
       "fail": 6
      },
@@ -30465,7 +30465,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -30529,7 +30529,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -31069,7 +31069,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -31133,7 +31133,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -31313,7 +31313,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -31377,7 +31377,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -31682,7 +31682,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -31746,7 +31746,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -32050,7 +32050,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -32114,7 +32114,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -32539,7 +32539,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -32603,7 +32603,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -32771,7 +32771,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -32960,7 +32960,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 209,
+      "pass": 211,
       "skip": 1,
       "fail": 7
      },
@@ -33131,7 +33131,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -33318,7 +33318,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -33613,7 +33613,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 7,
+      "pass": 15,
       "skip": 0,
       "fail": 0
      },
@@ -33729,7 +33729,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 4,
+      "pass": 12,
       "skip": 0,
       "fail": 3
      },
@@ -34868,7 +34868,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -35056,7 +35056,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -35225,7 +35225,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -35413,7 +35413,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -35582,7 +35582,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -35775,7 +35775,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 199,
+      "pass": 201,
       "skip": 1,
       "fail": 17
      },
@@ -35958,7 +35958,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -36147,7 +36147,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -36317,7 +36317,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -36505,7 +36505,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -36675,7 +36675,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -36863,7 +36863,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 213,
       "skip": 1,
       "fail": 5
      },
@@ -37034,7 +37034,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -37222,7 +37222,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -37337,7 +37337,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 53,
+      "pass": 66,
       "skip": 0,
       "fail": 0
      },
@@ -37390,7 +37390,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -37518,7 +37518,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 52,
+      "pass": 65,
       "skip": 0,
       "fail": 1
      },
@@ -37579,7 +37579,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 210,
+      "pass": 212,
       "skip": 1,
       "fail": 6
      },
@@ -37751,7 +37751,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -37941,7 +37941,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -38111,7 +38111,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -38299,7 +38299,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -38468,7 +38468,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -38656,7 +38656,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -38825,7 +38825,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -39013,7 +39013,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -39182,7 +39182,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -39370,7 +39370,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -39539,7 +39539,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -39727,7 +39727,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -39951,7 +39951,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -40200,7 +40200,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 213,
       "skip": 1,
       "fail": 5
      },
@@ -40426,7 +40426,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -40677,7 +40677,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -40902,7 +40902,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -41151,7 +41151,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -41430,7 +41430,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -41741,7 +41741,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -42645,7 +42645,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -42955,7 +42955,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -43234,7 +43234,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -43544,7 +43544,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 213,
       "skip": 1,
       "fail": 5
      },
@@ -43609,7 +43609,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -43664,7 +43664,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 53,
+      "pass": 66,
       "skip": 0,
       "fail": 0
      },
@@ -43729,7 +43729,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 20,
+      "pass": 22,
       "skip": 0,
       "fail": 2
      },
@@ -43793,7 +43793,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 51,
+      "pass": 64,
       "skip": 0,
       "fail": 2
      },
@@ -43855,7 +43855,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -43910,7 +43910,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 53,
+      "pass": 66,
       "skip": 0,
       "fail": 0
      },
@@ -43975,12 +43975,13 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 22,
       "skip": 0,
-      "fail": 1
+      "fail": 2
      },
      "fails": [
-      "B6f5 a playing portable session adopts a mixer edit on the same session and follows it"
+      "B6f5 a playing portable session adopts a mixer edit on the same session and follows it",
+      "B6f5 m1 a live synth value accepted during an adoption compile is in the configuration the adoption publishes"
      ],
      "fuzz": null,
      "rejection": null,
@@ -44038,12 +44039,18 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 52,
+      "pass": 59,
       "skip": 0,
-      "fail": 1
+      "fail": 7
      },
      "fails": [
-      "B6f5 a playing portable session adopts a mixer edit on the same session and follows it"
+      "B6f5 a playing portable session adopts a mixer edit on the same session and follows it",
+      "B6f5 m1 a live synth value accepted during an adoption compile is in the configuration the adoption publishes",
+      "P1 a Drum Rack edit while playing is adopted as a published configuration, never rebuilt",
+      "P1 a Granular edit while playing is adopted as a published configuration, never rebuilt",
+      "P1 a Sampler edit while playing is adopted as a published configuration, never rebuilt",
+      "P1 a Sampler zone edit and a sample swap with real buffers are adopted on the same session, never rebuilt",
+      "P1 live then non-live Synth edits in one gesture keep the last live state and release adopts once"
      ],
      "fuzz": null,
      "rejection": null,
@@ -44099,7 +44106,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -44154,7 +44161,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 53,
+      "pass": 66,
       "skip": 0,
       "fail": 0
      },
@@ -44219,12 +44226,13 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 22,
       "skip": 0,
-      "fail": 1
+      "fail": 2
      },
      "fails": [
-      "B6f5 R2 a live send crossing an adoption publish never faults the session"
+      "B6f5 R2 a live send crossing an adoption publish never faults the session",
+      "B6f5 m1 a live synth send while the adoption prepares waits for the publish and reaches the revision that carries it"
      ],
      "fuzz": null,
      "rejection": null,
@@ -44282,12 +44290,13 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 52,
+      "pass": 64,
       "skip": 0,
-      "fail": 1
+      "fail": 2
      },
      "fails": [
-      "B6f5 R2 a live send crossing an adoption publish never faults the session"
+      "B6f5 R2 a live send crossing an adoption publish never faults the session",
+      "B6f5 m1 a live synth send while the adoption prepares waits for the publish and reaches the revision that carries it"
      ],
      "fuzz": null,
      "rejection": null,
@@ -44341,7 +44350,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
       "fail": 0
      },
@@ -44404,7 +44413,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 16,
+      "pass": 17,
       "skip": 0,
       "fail": 4
      },
@@ -44468,7 +44477,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -44523,7 +44532,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 53,
+      "pass": 66,
       "skip": 0,
       "fail": 0
      },
@@ -44588,7 +44597,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 17,
+      "pass": 19,
       "skip": 0,
       "fail": 5
      },
@@ -44655,7 +44664,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 49,
+      "pass": 62,
       "skip": 0,
       "fail": 4
      },
@@ -44719,7 +44728,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -44832,7 +44841,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -44900,13 +44909,14 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 20,
+      "pass": 21,
       "skip": 0,
-      "fail": 2
+      "fail": 3
      },
      "fails": [
       "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
-      "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits"
+      "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
+      "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from"
      ],
      "fuzz": null,
      "rejection": null,
@@ -44967,33 +44977,45 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 202,
       "skip": 0,
-      "fail": 22
+      "fail": 34
      },
      "fails": [
       "B6F5PROBE native-off pending-cold-play-postcompile automation",
       "B6F5PROBE native-off pending-cold-play-postcompile master",
       "B6F5PROBE native-off pending-cold-play-postcompile mixer",
+      "B6F5PROBE native-off pending-cold-play-postcompile sampled",
       "B6F5PROBE native-off pending-cold-play-postcompile structural",
+      "B6F5PROBE native-off pending-cold-play-postcompile synth-nonlive",
       "B6F5PROBE native-off pending-warm-play automation",
       "B6F5PROBE native-off pending-warm-play master",
       "B6F5PROBE native-off pending-warm-play mixer",
+      "B6F5PROBE native-off pending-warm-play sampled",
+      "B6F5PROBE native-off pending-warm-play synth-nonlive",
       "B6F5PROBE native-off rebuild-before-commit automation",
       "B6F5PROBE native-off rebuild-before-commit master",
       "B6F5PROBE native-off rebuild-before-commit mixer",
+      "B6F5PROBE native-off rebuild-before-commit sampled",
       "B6F5PROBE native-off rebuild-before-commit structural",
+      "B6F5PROBE native-off rebuild-before-commit synth-nonlive",
       "B6F5PROBE native-on pending-cold-play-postcompile automation",
       "B6F5PROBE native-on pending-cold-play-postcompile master",
       "B6F5PROBE native-on pending-cold-play-postcompile mixer",
+      "B6F5PROBE native-on pending-cold-play-postcompile sampled",
       "B6F5PROBE native-on pending-cold-play-postcompile structural",
+      "B6F5PROBE native-on pending-cold-play-postcompile synth-nonlive",
       "B6F5PROBE native-on pending-warm-play automation",
       "B6F5PROBE native-on pending-warm-play master",
       "B6F5PROBE native-on pending-warm-play mixer",
+      "B6F5PROBE native-on pending-warm-play sampled",
+      "B6F5PROBE native-on pending-warm-play synth-nonlive",
       "B6F5PROBE native-on rebuild-before-commit automation",
       "B6F5PROBE native-on rebuild-before-commit master",
       "B6F5PROBE native-on rebuild-before-commit mixer",
-      "B6F5PROBE native-on rebuild-before-commit structural"
+      "B6F5PROBE native-on rebuild-before-commit sampled",
+      "B6F5PROBE native-on rebuild-before-commit structural",
+      "B6F5PROBE native-on rebuild-before-commit synth-nonlive"
      ],
      "fuzz": null,
      "rejection": null,
@@ -45051,13 +45073,14 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
-      "fail": 4
+      "fail": 5
      },
      "fails": [
       "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
       "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
+      "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -45115,7 +45138,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -45228,7 +45251,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -45296,12 +45319,13 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 22,
       "skip": 0,
-      "fail": 1
+      "fail": 2
      },
      "fails": [
-      "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits"
+      "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
+      "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from"
      ],
      "fuzz": null,
      "rejection": null,
@@ -45362,25 +45386,33 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 222,
+      "pass": 214,
       "skip": 0,
-      "fail": 14
+      "fail": 22
      },
      "fails": [
       "B6F5PROBE native-off pending-cold-play-postcompile automation",
       "B6F5PROBE native-off pending-cold-play-postcompile master",
       "B6F5PROBE native-off pending-cold-play-postcompile mixer",
+      "B6F5PROBE native-off pending-cold-play-postcompile sampled",
       "B6F5PROBE native-off pending-cold-play-postcompile structural",
+      "B6F5PROBE native-off pending-cold-play-postcompile synth-nonlive",
       "B6F5PROBE native-off pending-warm-play automation",
       "B6F5PROBE native-off pending-warm-play master",
       "B6F5PROBE native-off pending-warm-play mixer",
+      "B6F5PROBE native-off pending-warm-play sampled",
+      "B6F5PROBE native-off pending-warm-play synth-nonlive",
       "B6F5PROBE native-on pending-cold-play-postcompile automation",
       "B6F5PROBE native-on pending-cold-play-postcompile master",
       "B6F5PROBE native-on pending-cold-play-postcompile mixer",
+      "B6F5PROBE native-on pending-cold-play-postcompile sampled",
       "B6F5PROBE native-on pending-cold-play-postcompile structural",
+      "B6F5PROBE native-on pending-cold-play-postcompile synth-nonlive",
       "B6F5PROBE native-on pending-warm-play automation",
       "B6F5PROBE native-on pending-warm-play master",
-      "B6F5PROBE native-on pending-warm-play mixer"
+      "B6F5PROBE native-on pending-warm-play mixer",
+      "B6F5PROBE native-on pending-warm-play sampled",
+      "B6F5PROBE native-on pending-warm-play synth-nonlive"
      ],
      "fuzz": null,
      "rejection": null,
@@ -45438,12 +45470,13 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
-      "fail": 3
+      "fail": 4
      },
      "fails": [
       "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
+      "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -45501,7 +45534,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -45614,7 +45647,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -45682,7 +45715,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 23,
       "skip": 0,
       "fail": 1
      },
@@ -45812,7 +45845,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -45875,7 +45908,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -45988,7 +46021,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -46056,7 +46089,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 23,
       "skip": 0,
       "fail": 1
      },
@@ -46122,25 +46155,33 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 222,
+      "pass": 214,
       "skip": 0,
-      "fail": 14
+      "fail": 22
      },
      "fails": [
       "B6F5PROBE native-off rebuild-after-commit automation",
       "B6F5PROBE native-off rebuild-after-commit master",
       "B6F5PROBE native-off rebuild-after-commit mixer",
+      "B6F5PROBE native-off rebuild-after-commit sampled",
+      "B6F5PROBE native-off rebuild-after-commit synth-nonlive",
       "B6F5PROBE native-off rebuild-before-commit automation",
       "B6F5PROBE native-off rebuild-before-commit master",
       "B6F5PROBE native-off rebuild-before-commit mixer",
+      "B6F5PROBE native-off rebuild-before-commit sampled",
       "B6F5PROBE native-off rebuild-before-commit structural",
+      "B6F5PROBE native-off rebuild-before-commit synth-nonlive",
       "B6F5PROBE native-on rebuild-after-commit automation",
       "B6F5PROBE native-on rebuild-after-commit master",
       "B6F5PROBE native-on rebuild-after-commit mixer",
+      "B6F5PROBE native-on rebuild-after-commit sampled",
+      "B6F5PROBE native-on rebuild-after-commit synth-nonlive",
       "B6F5PROBE native-on rebuild-before-commit automation",
       "B6F5PROBE native-on rebuild-before-commit master",
       "B6F5PROBE native-on rebuild-before-commit mixer",
-      "B6F5PROBE native-on rebuild-before-commit structural"
+      "B6F5PROBE native-on rebuild-before-commit sampled",
+      "B6F5PROBE native-on rebuild-before-commit structural",
+      "B6F5PROBE native-on rebuild-before-commit synth-nonlive"
      ],
      "fuzz": null,
      "rejection": null,
@@ -46198,7 +46239,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -46261,7 +46302,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -46374,7 +46415,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -46442,7 +46483,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 23,
       "skip": 0,
       "fail": 1
      },
@@ -46574,7 +46615,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -46889,9 +46930,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 228,
+      "pass": 224,
       "skip": 0,
-      "fail": 8
+      "fail": 12
      },
      "fails": [
       "B6F5PROBE cost native-off fader drag while playing",
@@ -46899,9 +46940,13 @@
       "B6F5PROBE native-off playing automation",
       "B6F5PROBE native-off playing master",
       "B6F5PROBE native-off playing mixer",
+      "B6F5PROBE native-off playing sampled",
+      "B6F5PROBE native-off playing synth-nonlive",
       "B6F5PROBE native-on playing automation",
       "B6F5PROBE native-on playing master",
-      "B6F5PROBE native-on playing mixer"
+      "B6F5PROBE native-on playing mixer",
+      "B6F5PROBE native-on playing sampled",
+      "B6F5PROBE native-on playing synth-nonlive"
      ],
      "fuzz": null,
      "rejection": null,
@@ -47031,7 +47076,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -47144,7 +47189,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -47212,7 +47257,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 23,
       "skip": 0,
       "fail": 1
      },
@@ -47355,7 +47400,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -47418,7 +47463,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -47531,7 +47576,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -47654,7 +47699,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 23,
       "skip": 0,
       "fail": 1
      },
@@ -47720,19 +47765,23 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 228,
+      "pass": 224,
       "skip": 0,
-      "fail": 8
+      "fail": 12
      },
      "fails": [
       "B6F5PROBE native-off paused-reprepare-postcompile proc-live",
       "B6F5PROBE native-off paused-reprepare-postcompile synth-live",
       "B6F5PROBE native-off pending-cold-play-postcompile proc-live",
+      "B6F5PROBE native-off pending-cold-play-postcompile synth-live",
       "B6F5PROBE native-off rebuild-before-commit proc-live",
+      "B6F5PROBE native-off rebuild-before-commit synth-live",
       "B6F5PROBE native-on paused-reprepare-postcompile proc-live",
       "B6F5PROBE native-on paused-reprepare-postcompile synth-live",
       "B6F5PROBE native-on pending-cold-play-postcompile proc-live",
-      "B6F5PROBE native-on rebuild-before-commit proc-live"
+      "B6F5PROBE native-on pending-cold-play-postcompile synth-live",
+      "B6F5PROBE native-on rebuild-before-commit proc-live",
+      "B6F5PROBE native-on rebuild-before-commit synth-live"
      ],
      "fuzz": null,
      "rejection": null,
@@ -47790,7 +47839,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -47914,7 +47963,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -48027,7 +48076,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -48095,7 +48144,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 23,
       "skip": 0,
       "fail": 1
      },
@@ -48161,19 +48210,23 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 228,
+      "pass": 224,
       "skip": 0,
-      "fail": 8
+      "fail": 12
      },
      "fails": [
       "B6F5PROBE native-off paused-reprepare-postcompile proc-live",
       "B6F5PROBE native-off paused-reprepare-postcompile synth-live",
       "B6F5PROBE native-off pending-cold-play-postcompile proc-live",
+      "B6F5PROBE native-off pending-cold-play-postcompile synth-live",
       "B6F5PROBE native-off rebuild-before-commit proc-live",
+      "B6F5PROBE native-off rebuild-before-commit synth-live",
       "B6F5PROBE native-on paused-reprepare-postcompile proc-live",
       "B6F5PROBE native-on paused-reprepare-postcompile synth-live",
       "B6F5PROBE native-on pending-cold-play-postcompile proc-live",
-      "B6F5PROBE native-on rebuild-before-commit proc-live"
+      "B6F5PROBE native-on pending-cold-play-postcompile synth-live",
+      "B6F5PROBE native-on rebuild-before-commit proc-live",
+      "B6F5PROBE native-on rebuild-before-commit synth-live"
      ],
      "fuzz": null,
      "rejection": null,
@@ -48231,7 +48284,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -48547,9 +48600,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 188,
+      "pass": 162,
       "skip": 0,
-      "fail": 48
+      "fail": 74
      },
      "fails": [
       "B6F5PROBE cost native-off fader drag while playing",
@@ -48557,48 +48610,74 @@
       "B6F5PROBE native-off pending-cold-play-postcompile automation",
       "B6F5PROBE native-off pending-cold-play-postcompile master",
       "B6F5PROBE native-off pending-cold-play-postcompile mixer",
+      "B6F5PROBE native-off pending-cold-play-postcompile sampled",
+      "B6F5PROBE native-off pending-cold-play-postcompile synth-nonlive",
       "B6F5PROBE native-off pending-cold-play-precompile automation",
       "B6F5PROBE native-off pending-cold-play-precompile master",
       "B6F5PROBE native-off pending-cold-play-precompile mixer",
+      "B6F5PROBE native-off pending-cold-play-precompile proc-nonlive",
+      "B6F5PROBE native-off pending-cold-play-precompile sampled",
       "B6F5PROBE native-off pending-cold-play-precompile structural",
       "B6F5PROBE native-off pending-warm-play automation",
       "B6F5PROBE native-off pending-warm-play master",
       "B6F5PROBE native-off pending-warm-play mixer",
+      "B6F5PROBE native-off pending-warm-play sampled",
+      "B6F5PROBE native-off pending-warm-play synth-nonlive",
       "B6F5PROBE native-off playing automation",
       "B6F5PROBE native-off playing master",
       "B6F5PROBE native-off playing mixer",
+      "B6F5PROBE native-off playing sampled",
+      "B6F5PROBE native-off playing synth-nonlive",
       "B6F5PROBE native-off rebuild-after-commit automation",
       "B6F5PROBE native-off rebuild-after-commit master",
       "B6F5PROBE native-off rebuild-after-commit mixer",
+      "B6F5PROBE native-off rebuild-after-commit sampled",
+      "B6F5PROBE native-off rebuild-after-commit synth-nonlive",
       "B6F5PROBE native-off rebuild-before-commit automation",
       "B6F5PROBE native-off rebuild-before-commit master",
       "B6F5PROBE native-off rebuild-before-commit mixer",
+      "B6F5PROBE native-off rebuild-before-commit sampled",
+      "B6F5PROBE native-off rebuild-before-commit synth-nonlive",
       "B6F5PROBE native-off rebuild-precompile automation",
       "B6F5PROBE native-off rebuild-precompile master",
       "B6F5PROBE native-off rebuild-precompile mixer",
+      "B6F5PROBE native-off rebuild-precompile proc-nonlive",
       "B6F5PROBE native-off rebuild-precompile structural",
       "B6F5PROBE native-on pending-cold-play-postcompile automation",
       "B6F5PROBE native-on pending-cold-play-postcompile master",
       "B6F5PROBE native-on pending-cold-play-postcompile mixer",
+      "B6F5PROBE native-on pending-cold-play-postcompile sampled",
+      "B6F5PROBE native-on pending-cold-play-postcompile synth-nonlive",
       "B6F5PROBE native-on pending-cold-play-precompile automation",
       "B6F5PROBE native-on pending-cold-play-precompile master",
       "B6F5PROBE native-on pending-cold-play-precompile mixer",
+      "B6F5PROBE native-on pending-cold-play-precompile proc-nonlive",
+      "B6F5PROBE native-on pending-cold-play-precompile sampled",
       "B6F5PROBE native-on pending-cold-play-precompile structural",
       "B6F5PROBE native-on pending-warm-play automation",
       "B6F5PROBE native-on pending-warm-play master",
       "B6F5PROBE native-on pending-warm-play mixer",
+      "B6F5PROBE native-on pending-warm-play sampled",
+      "B6F5PROBE native-on pending-warm-play synth-nonlive",
       "B6F5PROBE native-on playing automation",
       "B6F5PROBE native-on playing master",
       "B6F5PROBE native-on playing mixer",
+      "B6F5PROBE native-on playing sampled",
+      "B6F5PROBE native-on playing synth-nonlive",
       "B6F5PROBE native-on rebuild-after-commit automation",
       "B6F5PROBE native-on rebuild-after-commit master",
       "B6F5PROBE native-on rebuild-after-commit mixer",
+      "B6F5PROBE native-on rebuild-after-commit sampled",
+      "B6F5PROBE native-on rebuild-after-commit synth-nonlive",
       "B6F5PROBE native-on rebuild-before-commit automation",
       "B6F5PROBE native-on rebuild-before-commit master",
       "B6F5PROBE native-on rebuild-before-commit mixer",
+      "B6F5PROBE native-on rebuild-before-commit sampled",
+      "B6F5PROBE native-on rebuild-before-commit synth-nonlive",
       "B6F5PROBE native-on rebuild-precompile automation",
       "B6F5PROBE native-on rebuild-precompile master",
       "B6F5PROBE native-on rebuild-precompile mixer",
+      "B6F5PROBE native-on rebuild-precompile proc-nonlive",
       "B6F5PROBE native-on rebuild-precompile structural"
      ],
      "fuzz": null,
@@ -48726,7 +48805,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -48781,7 +48860,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 53,
+      "pass": 66,
       "skip": 0,
       "fail": 0
      },
@@ -48836,7 +48915,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -48904,7 +48983,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 23,
       "skip": 0,
       "fail": 1
      },
@@ -48967,7 +49046,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 52,
+      "pass": 65,
       "skip": 0,
       "fail": 1
      },
@@ -49030,7 +49109,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -49143,7 +49222,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 53,
+      "pass": 66,
       "skip": 0,
       "fail": 0
      },
@@ -49268,7 +49347,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 50,
+      "pass": 63,
       "skip": 0,
       "fail": 3
      },
@@ -49382,7 +49461,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 53,
+      "pass": 66,
       "skip": 0,
       "fail": 0
      },
@@ -49573,9 +49652,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 47,
+      "pass": 45,
       "skip": 0,
-      "fail": 6
+      "fail": 21
      },
      "fails": [
       "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
@@ -49583,7 +49662,22 @@
       "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
       "B6f5 a playing portable session adopts a mixer edit on the same session and follows it",
       "B6f5 a refused or structural adoption asks for a rebuild and keeps the session revision",
-      "B6f5 adoptions coalesce to one in flight and one queued that carries the newest edit"
+      "B6f5 adoptions coalesce to one in flight and one queued that carries the newest edit",
+      "B6f5 m1 a live synth send while the adoption prepares waits for the publish and reaches the revision that carries it",
+      "B6f5 m1 a live synth value accepted during an adoption compile is in the configuration the adoption publishes",
+      "M4 an instrument compile that throws keeps the playing graph, never rebuilds, and the next adoption stages it",
+      "P1 a Drum Rack edit while playing is adopted as a published configuration, never rebuilt",
+      "P1 a Granular edit while playing is adopted as a published configuration, never rebuilt",
+      "P1 a Sampler edit while playing is adopted as a published configuration, never rebuilt",
+      "P1 a Sampler zone edit and a sample swap with real buffers are adopted on the same session, never rebuilt",
+      "P1 a failed adoption of an instrument edit keeps the playing graph, never rebuilds, and the next adoption stages it",
+      "P1 a non-live Synth oscillator level edit is adopted as a published configuration, never rebuilt",
+      "P1 a non-live Synth oscillator waveform edit is adopted as a published configuration, never rebuilt",
+      "P1 a non-live Synth polyphony edit is adopted as a published configuration, never rebuilt",
+      "P1 a non-live Synth retrigger edit is adopted as a published configuration, never rebuilt",
+      "P1 live then non-live Synth edits in one gesture keep the last live state and release adopts once",
+      "UD 8 a persistent staging failure stops after 8 resubmits with a defect log, keeps the old graph, and the next publication applies it",
+      "UD 8 a transient staging failure is retried at the next block boundary and applies"
      ],
      "fuzz": null,
      "rejection": null,
@@ -49642,9 +49736,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 230,
+      "pass": 226,
       "skip": 0,
-      "fail": 8
+      "fail": 12
      },
      "fails": [
       "B6F5PROBE cost native-off fader drag while playing",
@@ -49652,9 +49746,13 @@
       "B6F5PROBE native-off playing automation",
       "B6F5PROBE native-off playing master",
       "B6F5PROBE native-off playing mixer",
+      "B6F5PROBE native-off playing sampled",
+      "B6F5PROBE native-off playing synth-nonlive",
       "B6F5PROBE native-on playing automation",
       "B6F5PROBE native-on playing master",
-      "B6F5PROBE native-on playing mixer"
+      "B6F5PROBE native-on playing mixer",
+      "B6F5PROBE native-on playing sampled",
+      "B6F5PROBE native-on playing synth-nonlive"
      ],
      "fuzz": null,
      "rejection": null,
@@ -49761,7 +49859,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 53,
+      "pass": 66,
       "skip": 0,
       "fail": 0
      },
@@ -49885,7 +49983,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 52,
+      "pass": 65,
       "skip": 0,
       "fail": 1
      },
@@ -50053,7 +50151,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -50247,7 +50345,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 213,
       "skip": 1,
       "fail": 5
      },
@@ -50821,7 +50919,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -50930,7 +51028,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -50996,7 +51094,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 23,
       "skip": 0,
       "fail": 1
      },
@@ -51119,7 +51217,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -51529,7 +51627,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -51718,7 +51816,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -51832,7 +51930,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 53,
+      "pass": 66,
       "skip": 0,
       "fail": 0
      },
@@ -51957,7 +52055,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 51,
+      "pass": 64,
       "skip": 0,
       "fail": 2
      },
@@ -52070,7 +52168,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 53,
+      "pass": 66,
       "skip": 0,
       "fail": 0
      },
@@ -52194,7 +52292,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 52,
+      "pass": 65,
       "skip": 0,
       "fail": 1
      },
@@ -52310,7 +52408,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 22,
+      "pass": 24,
       "skip": 0,
       "fail": 0
      },
@@ -52494,7 +52592,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 21,
+      "pass": 23,
       "skip": 0,
       "fail": 1
      },
@@ -52853,7 +52951,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 4,
+      "pass": 7,
       "skip": 0,
       "fail": 0
      },
@@ -52906,7 +53004,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -52970,7 +53068,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 2,
+      "pass": 5,
       "skip": 0,
       "fail": 2
      },
@@ -53032,7 +53130,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 213,
       "skip": 1,
       "fail": 5
      },
@@ -53093,7 +53191,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 4,
+      "pass": 7,
       "skip": 0,
       "fail": 0
      },
@@ -53146,7 +53244,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -53210,7 +53308,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 3,
+      "pass": 6,
       "skip": 0,
       "fail": 1
      },
@@ -53271,7 +53369,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -53330,7 +53428,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 4,
+      "pass": 7,
       "skip": 0,
       "fail": 0
      },
@@ -53383,7 +53481,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -53447,7 +53545,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 3,
+      "pass": 6,
       "skip": 0,
       "fail": 1
      },
@@ -53508,7 +53606,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -53567,7 +53665,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 4,
+      "pass": 7,
       "skip": 0,
       "fail": 0
      },
@@ -53620,7 +53718,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -53740,7 +53838,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 3,
+      "pass": 6,
       "skip": 0,
       "fail": 1
      },
@@ -53801,7 +53899,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -53922,7 +54020,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 4,
+      "pass": 7,
       "skip": 0,
       "fail": 0
      },
@@ -53975,7 +54073,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -54095,7 +54193,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 3,
+      "pass": 6,
       "skip": 0,
       "fail": 1
      },
@@ -54156,7 +54254,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -54277,7 +54375,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 4,
+      "pass": 7,
       "skip": 0,
       "fail": 0
      },
@@ -54330,7 +54428,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -54450,7 +54548,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 3,
+      "pass": 6,
       "skip": 0,
       "fail": 1
      },
@@ -54511,7 +54609,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -54632,7 +54730,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 4,
+      "pass": 7,
       "skip": 0,
       "fail": 0
      },
@@ -54685,7 +54783,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -54805,7 +54903,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 3,
+      "pass": 6,
       "skip": 0,
       "fail": 1
      },
@@ -54866,7 +54964,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -54987,7 +55085,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 4,
+      "pass": 7,
       "skip": 0,
       "fail": 0
      },
@@ -55040,7 +55138,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -55104,7 +55202,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 3,
+      "pass": 6,
       "skip": 0,
       "fail": 1
      },
@@ -55165,7 +55263,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -65770,7 +65868,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -65840,7 +65938,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 191,
+      "pass": 193,
       "skip": 1,
       "fail": 25
      },
@@ -65927,7 +66025,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 193,
+      "pass": 195,
       "skip": 1,
       "fail": 23
      },
@@ -66012,7 +66110,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -66082,7 +66180,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -66154,7 +66252,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -66224,7 +66322,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -66296,7 +66394,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -66367,7 +66465,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 193,
+      "pass": 195,
       "skip": 1,
       "fail": 23
      },
@@ -66452,7 +66550,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 193,
+      "pass": 195,
       "skip": 1,
       "fail": 23
      },
@@ -66543,7 +66641,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 210,
+      "pass": 212,
       "skip": 1,
       "fail": 6
      },
@@ -66617,7 +66715,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -66687,7 +66785,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -66758,7 +66856,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -66828,7 +66926,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -66899,7 +66997,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -66971,7 +67069,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -67042,7 +67140,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 211,
+      "pass": 213,
       "skip": 1,
       "fail": 5
      },
@@ -67109,7 +67207,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -67167,7 +67265,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 2
      },
@@ -67231,7 +67329,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 210,
+      "pass": 212,
       "skip": 1,
       "fail": 6
      },
@@ -67767,7 +67865,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -67838,7 +67936,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 211,
+      "pass": 213,
       "skip": 1,
       "fail": 5
      },
@@ -67905,7 +68003,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -67977,7 +68075,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },
@@ -68043,7 +68141,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 215,
       "skip": 1,
       "fail": 3
      },
@@ -68114,7 +68212,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 209,
+      "pass": 211,
       "skip": 1,
       "fail": 7
      },
@@ -68183,7 +68281,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 214,
       "skip": 1,
       "fail": 4
      },

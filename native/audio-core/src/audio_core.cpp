@@ -4063,7 +4063,6 @@ float graph_edge_sample(
 void clear_instrument_state(InstrumentNodeState &instrument);
 void release_instrument_state(InstrumentNodeState &instrument);
 
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
 void release_instrument_voices(Core &core) {
   for (uint32_t slot = 0; slot < kNodeRuntimeSlots; ++slot) {
     if (core.node_slots[slot].state.load(std::memory_order_acquire) == kSlotActive) {
@@ -4071,15 +4070,6 @@ void release_instrument_voices(Core &core) {
     }
   }
 }
-#else
-void clear_instrument_voices(Core &core) {
-  for (uint32_t slot = 0; slot < kNodeRuntimeSlots; ++slot) {
-    if (core.node_slots[slot].state.load(std::memory_order_acquire) == kSlotActive) {
-      clear_instrument_state(core.instrument_runtime[slot]);
-    }
-  }
-}
-#endif
 
 void release_instrument_state(InstrumentNodeState &instrument) {
   for (InstrumentVoice &voice : instrument.voices) {
@@ -9156,11 +9146,7 @@ extern "C" daw_audio_core_result daw_audio_core_set_transport(
     }
 #endif
     clear_sample_sources(*core);
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
     release_instrument_voices(*core);
-#else
-    clear_instrument_voices(*core);
-#endif
     core->last_event_sequence = 0;
     for (Core::MixerLatch &latch : core->mixer_latches) latch.mask = 0;
   }

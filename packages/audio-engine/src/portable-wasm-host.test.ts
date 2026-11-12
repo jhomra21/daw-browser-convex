@@ -1674,9 +1674,8 @@ test('W-E5-3 a removed held note is released by the note-off at the seam and han
   }
 })
 
-// D4: a locate while playing releases held notes with their tails, as native does. The WASM core hard-clears voices on an
-// epoch change today.
-test.failing('W-E3-3 a note held across a transport epoch change decays through its release tail instead of cutting', async () => {
+// D4: a locate while playing releases held notes with their tails, as native does.
+test('W-E3-3 a note held across a transport epoch change decays through its release tail instead of cutting', async () => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({ sampleRateHz: 48_000, sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })

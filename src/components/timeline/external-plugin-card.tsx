@@ -6,7 +6,7 @@ import { automationTargetKey, externalAutomationParameterId } from "@daw-browser
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { NativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
 import { externalProcessorStatusLabel } from "~/lib/external-plugin-ui";
-import { vstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
+import { vstInstanceFailed, vstInstanceLimit } from "~/lib/desktop/vst-instance-failures";
 import {
   nativeEditorAnchorFromElement,
   nativeEditorAvailabilityMessage,
@@ -279,7 +279,22 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
       title={props.processor.manifest.identity.name}
       typeLabel={`${props.processor.manifest.identity.vendor} · VST3`}
       titleActions={(
-        <Show when={failed()}>
+        <Show
+          when={failed()}
+          fallback={(
+            <Show when={vstInstanceLimit(props.processor.instanceId)}>
+              {(reason) => (
+                <span
+                  role="status"
+                  class="shrink-0 text-[10px] text-muted-foreground"
+                  title={`${reason()} Playback continues unchanged.`}
+                >
+                  Not supported yet
+                </span>
+              )}
+            </Show>
+          )}
+        >
           <span
             role="status"
             class="shrink-0 text-[10px] text-amber-300"

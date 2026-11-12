@@ -62,7 +62,7 @@ import { importNativeRecordingSpool } from "~/lib/recording/native-spool-importe
 import type { RecordingTerminationCause } from "~/lib/recording/recording-diagnostics"
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
 import type { DesktopBridge, NativeDeliveryReply, NativeProcessorPatchReply } from "~/types/desktop-bridge"
-import { clearVstInstanceFailures, markVstInstanceFailed } from "./vst-instance-failures"
+import { clearVstInstanceFailures, clearVstInstanceLimits, limitVstInstances, markVstInstanceFailed } from "./vst-instance-failures"
 import { nativeVst3LaunchAuthorizationRequiredMessage } from "~/lib/external-plugin-ui"
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import {
@@ -432,12 +432,18 @@ const nativeVstParameterEventsForSnapshot = (
   })
 }
 
-const nativeSnapshotSupportError = (snapshot: LivePlaybackSnapshot): string | undefined => {
+// What the native graph does not support yet, by design (E6). A live edit that hits one is a limitation, not a defect.
+const nativeSnapshotLimitation = (snapshot: LivePlaybackSnapshot): string | undefined => {
   if (snapshot.tracks.some((track) => track.clips.some((clip) => (
     clip.midi?.mappings !== undefined && clip.midi.mappings.length > 0
   )))) return "Native VST3 playback does not support MIDI expression automation yet."
   if (snapshot.mixer.sidechainRoutes.length > 0)
     return "The native VST3 graph cannot activate with the current sidechain routing."
+}
+
+const nativeSnapshotSupportError = (snapshot: LivePlaybackSnapshot): string | undefined => {
+  const limitation = nativeSnapshotLimitation(snapshot)
+  if (limitation) return limitation
   if (snapshot.requiresNativePlayback && !snapshot.nativeExternalAttachmentPlan)
     return "The active VST3 attachment plan is unavailable."
 }
@@ -499,6 +505,7 @@ type ScheduleRevisionPreparation =
   | ScheduleRevisionCandidate
   | { status: "retry"; reason: string; transport?: LivePlaybackTransport }
   | { status: "failed"; reason: string }
+  | { status: "unsupported"; reason: string }
 
 /**
  * Owns a single native host session and coordinates trusted external effects
@@ -3264,6 +3271,12 @@ export const createNativePlaybackController = (input: {
       // The compile never moves the transport: a loop it disagrees on is applied by the adoption, outside any attempt.
       if (!hasEquivalentTransportScheduling(previous.transport, snapshot.transport))
         return { status: "retry", reason: "transport-mismatch", transport: snapshot.transport }
+      const limitation = nativeSnapshotLimitation(snapshot)
+      if (!limitation) clearVstInstanceLimits()
+      else {
+        limitVstInstances(snapshot.nativeExternalAttachmentPlan?.attachments.map((attachment) => attachment.instanceId) ?? [], limitation)
+        return { status: "unsupported", reason: limitation }
+      }
       const supportError = nativeSnapshotSupportError(snapshot)
       if (supportError) throw new Error(supportError)
       let stretchAssets: readonly NativePreparedStretchAsset[] = []
@@ -4260,6 +4273,8 @@ export const createNativePlaybackController = (input: {
       const preparation = reusable ?? await prepareScheduleRevision(intent.context)
       if (preparation.status === "retry") return preparation.transport ? { ...superseded, transport: preparation.transport } : superseded
       if (preparation.status === "failed") return { outcome: { status: "failed", reason: preparation.reason } }
+      // A limitation settles the intent without the refusal the UD 8 retry reopens.
+      if (preparation.status === "unsupported") return { outcome: { status: "unsupported", reason: preparation.reason } }
       if (!processorState.isNewest(attempt) || !inDomain()) {
         if (preparation.status === "staged") await preparation.dispose()
         return superseded

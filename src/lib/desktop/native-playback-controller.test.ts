@@ -8,7 +8,7 @@ import { createRenderEffect, createRoot, createSignal, untrack } from "solid-js"
 import { createNativePlaybackController, nativePlaybackFaultText, type NativePlaybackFault } from "./native-playback-controller"
 import { classifyNativeVst3PlaybackFault, nativeVst3LaunchAuthorizationRequiredMessage } from "~/lib/external-plugin-ui"
 import { createNativeProcessorStateOwner } from "./native-processor-state-owner"
-import { vstInstanceFailed } from "./vst-instance-failures"
+import { vstInstanceFailed, vstInstanceLimit } from "./vst-instance-failures"
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
 import { compileDesiredNativeProcessorState, compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
 import { audioCoreContractVersion, encodeUtilityProcessorState, type AudioAssetRef } from "@daw-browser/audio-core-contract"
@@ -2451,6 +2451,20 @@ describe("DV01 STEP6 public publication witnesses", () => {
       owner.settleAdoption(submitted.start.attempt, parsed)
       owner.clear(); owner.clear()
       expect(notices).toBe(1)
+    })
+  }
+
+  // The UD 8 retry reopens a refusal when a field it answers to moves. A limitation (E6) is no refusal and is never reopened.
+  for (const status of ["failed", "unsupported"] as const) {
+    test(`UD 8 a ${status} adoption ${status === "failed" ? "reopens" : "never reopens"} when the transport epoch moves`, () => {
+      const owner = createNativeProcessorStateOwner()
+      const intent = { key: status, schedule: status, context: {}, loop: { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 } }
+      const submitted = owner.submitAdoption(intent, false, { host: "host", epoch: 1, structural: 1, capacity: 0, settled: 0 })
+      if (!submitted.start) throw new Error("UD 8 requires an admitted attempt")
+      owner.settleAdoption(submitted.start.attempt, { status, reason: "refused" })
+      const moved = { host: "host", epoch: 2, structural: 1, capacity: 0, settled: 0 }
+      expect(owner.reopenedIntent(moved)?.key).toBe(status === "failed" ? status : undefined)
+      expect(owner.nextAdoption(moved, true)?.attempt.intent.key).toBe(status === "failed" ? status : undefined)
     })
   }
 
@@ -9095,6 +9109,8 @@ for (const unsupported of ["sidechain", "midi-mappings", "missing-attachment-pla
   test(`shared native admission rejects live ${unsupported} before staging and at startup`, async () => {
     const fixture = createBridge("runtime-revision-progress")
     let changed = false
+    // E6: MIDI expression automation and a sidechain are limitations of the native graph, never defects.
+    const limitation = unsupported !== "missing-attachment-plan"
     const snapshotInput = nativeInstrumentInput()
     const controller = createObservedController({
       bridge: fixture.bridge, getProjectId: () => "local_project",
@@ -9103,6 +9119,7 @@ for (const unsupported of ["sidechain", "midi-mappings", "missing-attachment-pla
         if (!changed || !compiled.supported) return compiled
         const snapshot = compiled.snapshot
         return { ...compiled, snapshot: { ...snapshot, revision: 2,
+          nativeExternalAttachmentPlan: limitation ? nativeAttachmentPlan : undefined,
           requiresNativePlayback: unsupported === "missing-attachment-plan",
           mixer: { ...snapshot.mixer, sidechainRoutes: unsupported === "sidechain"
             ? [{ sourceTrackId: "instrument", targetTrackId: "master", effectInstanceId: "external" }] : [] },
@@ -9117,9 +9134,13 @@ for (const unsupported of ["sidechain", "midi-mappings", "missing-attachment-pla
     try {
       expect(await controller.start(snapshotInput.transport)).toBe("started")
       changed = true
-      expect(await controller.adoptSchedule(migrationIntent(`unsupported-${unsupported}`), true)).toMatchObject({ status: "failed" })
+      expect(await controller.adoptSchedule(migrationIntent(`unsupported-${unsupported}`), true))
+        .toMatchObject({ status: limitation ? "unsupported" : "failed" })
       expect(fixture.calls).not.toContain("revision-prepare")
       expect(controller.isActive()).toBe(true)
+      expect(vstInstanceLimit(nativeAttachmentPlan.attachments[0].instanceId)).toBe(!limitation ? undefined : unsupported === "sidechain"
+        ? "The native VST3 graph cannot activate with the current sidechain routing."
+        : "Native VST3 playback does not support MIDI expression automation yet.")
       await controller.dispose()
       expect(await controller.start(snapshotInput.transport)).toBe(
         unsupported === "missing-attachment-plan" ? "blocked" : "unavailable")

@@ -868,14 +868,14 @@ for (const field of ["meter", "masterVolume", "automation", "sidechain"]) {
         await f.playback.awaitPlaybackPreparation();
         const counts = f.counts(before);
         console.log("STEP5 compiler field guard", JSON.stringify({ field, transport, counts, faults: f.faults }));
-        // The paused replacement preview hits the same sidechain support gate as the playing schedule.
-        expect(f.faults).toEqual(field === "sidechain"
+        // A paused replacement preview hits the sidechain support gate and faults. A playing edit is an accepted native
+        // limitation (E6): the graph keeps playing, nothing is a fault, and nothing is prepared.
+        expect(f.faults).toEqual(field === "sidechain" && transport === "paused"
           ? ["The native VST3 graph cannot activate with the current sidechain routing."] : []);
         expect(counts.scheduleCompiles).toBe(transport === "playing" ? 1 : 0);
         expect(counts.publishes).toBe(transport === "playing" && field !== "sidechain" ? 1 : 0);
         if (field === "sidechain" && transport === "playing") {
-          expect(f.typedFaults).toEqual([{ kind: "session-stopped",
-            message: "The native VST3 graph cannot activate with the current sidechain routing." }]);
+          expect(f.typedFaults).toEqual([]);
           expect(f.host.calls.slice(before.calls)).not.toContain("revision.prepare");
         }
         expect(counts.previewCompiles).toBe(transport === "paused" ? 1 : 0);

@@ -316,6 +316,8 @@ export type AdoptionRefusal =
 export type AdoptionOutcome =
   | { status: "adopted" | "unchanged" }
   | { status: "superseded"; evidence?: "lost" }
+  // The native graph cannot carry this edit by design (E6). It is no refusal: nothing is retried and nothing faults.
+  | { status: "unsupported"; reason: string }
   | AdoptionRefusal
 // The facts that make a refused attempt stale: a changed host, transport domain, structural graph, native admission
 // capacity (reclaims) or `settled`, a publication or latency transition that ended. An arena refusal (the clip asset

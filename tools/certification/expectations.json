@@ -1324,6 +1324,26 @@
    }
   },
   {
+   "name": "x-host-plugin-tests",
+   "group": "x",
+   "isolated": true,
+   "trigger": "native",
+   "command": {
+    "argv": [
+     "bun",
+     "/Users/juan/Documents/daw-browser-convex/tools/acceptance/run-ae08-test-plugin.ts"
+    ],
+    "alarmSeconds": 1500,
+    "env": {},
+    "evidence": false,
+    "rc7Seconds": 0
+   },
+   "judge": {
+    "kind": "exit",
+    "exit": 0
+   }
+  },
+  {
    "name": "x-rtguard",
    "group": "x",
    "isolated": false,

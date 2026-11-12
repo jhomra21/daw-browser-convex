@@ -44,8 +44,6 @@ export type NativeVst3PlaybackGateReason =
   | "graph-revision-unacknowledged"
   | "graph-revision-invalid"
   | "dynamic-bus-layout-unsupported"
-  | "worker-missed-deadline"
-  | "worker-faulted"
   | "revision-prepare-failed"
   | "revision-publish-failed"
   | "revision-retire-failed"
@@ -65,10 +63,12 @@ export type NativeVst3WorkerRevisionNotification =
   }
   | { kind: "restart"; instanceId: string; revision: number }
   | { kind: "miss"; instanceId: string; revision: number }
-  | { kind: "fault"; instanceId: string; revision: number }
+  | { kind: "fault"; instanceId: string; revision: number; value: number }
 
 export type NativeVst3RevisionResult =
   | { ok: true; status: "stale" | "unchanged" | "published"; revision: number }
+  // Audio keeps running either way. "plugin-failed" is the only state shown to the user.
+  | { ok: true; status: "plugin-failed" | "host-defect"; revision: number; instanceId: string }
   | { ok: false; reason: NativeVst3PlaybackGateReason; revision: number; instanceId?: string }
 
 export type NativeVst3RevisionHost = {
@@ -83,8 +83,12 @@ export type NativeVst3RevisionHost = {
   stopAudio(reason: NativeVst3PlaybackGateReason): Promise<void>
 }
 
+export type NativeVst3Defect = { source: string; instanceId?: string; detail: string }
+
 export type NativeVst3RevisionCoordinator = {
   status(): NativeVst3PlaybackStatus
+  // Instances whose own plug-in crashed or returned an API error; the renderer shows these as failed.
+  failedInstances(): ReadonlySet<string>
   snapshot(): AudioCoreGraphSnapshot
   handleNotification(notification: NativeVst3WorkerRevisionNotification): Promise<NativeVst3RevisionResult>
 }
@@ -96,6 +100,7 @@ export type NativeVst3RevisionCoordinatorInput = {
   graphRevisionAcknowledged: boolean
   browserPlaybackActive: boolean
   host: NativeVst3RevisionHost
+  reportDefect?: (defect: NativeVst3Defect) => void
 }
 
 export type NativeVst3RevisionCoordinatorCreation =
@@ -423,6 +428,20 @@ const reviseGraphExternalLatency = (
   }
 }
 
+// Bits 0..7 of a fault value are the native WorkerFaultOrigin (native/plugin-host/src/worker-supervisor.h).
+// Only the plug-in's own process or API is the plug-in's fault: the child exiting or being killed (1, 2),
+// setup failing (8, 9), processing failing (10, 11) and a failed component restart (12). Transport,
+// dispatch, callback-miss, startup, control IO and unknown-notification origins are ours.
+const pluginFaultOrigins: ReadonlySet<number> = new Set([1, 2, 8, 9, 10, 11, 12])
+
+export const nativeVst3CoordinatorFailureOrigin = (
+  code: NativeVst3CoordinatorFailureCode,
+): "plugin" | "host" => code === "worker-crashed" ? "plugin" : "host"
+
+const reportDefectToConsole = (defect: NativeVst3Defect) => {
+  console.error("[native-vst3] defect", JSON.stringify(defect))
+}
+
 export const nativeVst3PlaybackDefaultStatus = (
   revision: number,
 ): Extract<NativeVst3PlaybackStatus, { active: false }> => ({
@@ -452,6 +471,13 @@ const createNativeVst3RevisionCoordinatorImplementation = (
   let attachments = canonicalAttachments(input.attachments)
   let playbackStatus: NativeVst3PlaybackStatus = { active: true, revision: snapshot.revision }
   let pending = Promise.resolve()
+  const failedInstances = new Set<string>()
+  const reportDefect = input.reportDefect ?? reportDefectToConsole
+
+  const hostDefect = (source: string, instanceId: string, detail: string): NativeVst3RevisionResult => {
+    reportDefect({ source, instanceId, detail })
+    return { ok: true, status: "host-defect", revision: snapshot.revision, instanceId }
+  }
 
   const stopSafely = async (
     reason: NativeVst3PlaybackGateReason,
@@ -495,9 +521,17 @@ const createNativeVst3RevisionCoordinatorImplementation = (
     const attachment = attachments[attachmentIndex]
     if (attachment === undefined) return stopSafely("attachment-subset-unproven", notification.instanceId)
     if (notification.kind === "buses") return stopSafely("dynamic-bus-layout-unsupported", notification.instanceId)
-    if (notification.kind === "restart") return stopSafely("worker-faulted", notification.instanceId)
-    if (notification.kind === "miss") return stopSafely("worker-missed-deadline", notification.instanceId)
-    if (notification.kind === "fault") return stopSafely("worker-faulted", notification.instanceId)
+    // The host mutes a faulted instance by itself, so none of these stop audio. A component
+    // restart is the worker's own business.
+    if (notification.kind === "restart") return { ok: true, status: "unchanged", revision: snapshot.revision }
+    if (notification.kind === "miss") return hostDefect("worker-miss", notification.instanceId, "deadline miss")
+    if (notification.kind === "fault") {
+      if (!pluginFaultOrigins.has(notification.value & 0xff)) {
+        return hostDefect("worker-fault", notification.instanceId, `origin ${notification.value & 0xff}`)
+      }
+      failedInstances.add(notification.instanceId)
+      return { ok: true, status: "plugin-failed", revision: snapshot.revision, instanceId: notification.instanceId }
+    }
     if (notification.kind === "tail") {
       const declaredTailFrames = notification.frames === 0xffff_ffff ? null : notification.frames
       if (!Number.isSafeInteger(notification.frames)
@@ -571,6 +605,7 @@ const createNativeVst3RevisionCoordinatorImplementation = (
 
   const coordinator: NativeVst3RevisionCoordinator = {
     status: () => playbackStatus,
+    failedInstances: () => failedInstances,
     snapshot: () => snapshot,
     handleNotification(notification) {
       const result = pending.then(() => handle(notification))
@@ -585,17 +620,129 @@ export const createNativeVst3RevisionCoordinator = (
   input: NativeVst3RevisionCoordinatorInput,
 ): NativeVst3RevisionCoordinatorCreation => createNativeVst3RevisionCoordinatorImplementation(input)
 
-export const coordinateNativeVst3Attachments = async (input: {
+const maximumParkedInstances = 4
+const parkedAgeMs = 60_000
+
+type AvailablePreflight = Extract<NativeVst3PreflightResult, { status: "available" }>
+type LedgerEntry = { plugin: string; binding: string; load: string }
+
+// What the host compares to take a parked instance back, so a match here means the host reuses it.
+const loadKey = (native: PreflightAttachment, stateSha256: string | undefined) => JSON.stringify([
+  native.classId, native.vendorId, native.canonicalBundlePath, native.canonicalExecutablePath,
+  native.bundleFingerprint, native.binaryFingerprint, native.role, native.inputLayout, native.outputLayout,
+  native.workerTransport, native.parameterIds, native.initialParameterValues, stateSha256 ?? "",
+])
+
+const verdictKey = (native: PreflightAttachment, sampleRateHz: number) => JSON.stringify([
+  native.classId, native.vendorId, native.bundleFingerprint, native.binaryFingerprint, native.role,
+  native.workerTransport, native.stateRevision, sampleRateHz,
+])
+
+const ledgerEntry = (attachment: Attachment, native: PreflightAttachment, stateSha256: string | undefined): LedgerEntry => ({
+  plugin: JSON.stringify([
+    attachment.catalogIdentity, attachment.bundleFingerprint, attachment.binaryFingerprint, attachment.role,
+    attachment.inputBuses, attachment.outputBuses, attachment.workerTransport,
+  ]),
+  binding: JSON.stringify([attachment.nativeGraphNodeId, attachment.stageIndex, attachment.sourceIndex ?? 0, attachment.bypassed]),
+  load: loadKey(native, stateSha256),
+})
+
+// The attachments one native session holds, so a plan reaches the host as a delta. Latency, tail
+// and parameter changes are not binding changes: the host and project control carry those.
+export const createNativeVst3AttachmentLedger = (
+  host: Pick<NativeAudioHostSupervisor, "detachVst">,
+  now: () => number = Date.now,
+) => {
+  const active = new Map<string, LedgerEntry>()
+  const staged = new Map<string, LedgerEntry>()
+  const parked = new Map<string, { load: string; at: number }>()
+  const verdicts = new Map<string, AvailablePreflight>()
+  let removed: string[] = []
+  const parkedLoad = (instanceId: string) => {
+    const entry = parked.get(instanceId)
+    return entry !== undefined && now() - entry.at < parkedAgeMs ? entry.load : undefined
+  }
+  return {
+    // Splits a plan into new instances, changed instances (detached first) and staged ones it dropped.
+    // It also records which active instances the plan removed, for the next publication.
+    reconcile(entries: ReadonlyMap<string, LedgerEntry>) {
+      const attach: string[] = []
+      const replace: string[] = []
+      for (const [instanceId, entry] of entries) {
+        const current = staged.get(instanceId) ?? active.get(instanceId)
+        if (current === undefined) attach.push(instanceId)
+        else if (current.plugin !== entry.plugin || current.binding !== entry.binding) replace.push(instanceId)
+      }
+      removed = [...active.keys()].filter((instanceId) => !entries.has(instanceId))
+      const dropped = [...staged.keys()].filter((instanceId) => !entries.has(instanceId))
+      for (const instanceId of dropped) staged.delete(instanceId)
+      return { attach, replace, dropped: dropped.filter((instanceId) => !active.has(instanceId)) }
+    },
+    parkedMatches: (instanceId: string, load: string) => parkedLoad(instanceId) === load,
+    verdict: (key: string) => verdicts.get(key),
+    rememberVerdict: (key: string, result: AvailablePreflight) => { verdicts.set(key, result) },
+    stage: (instanceId: string, entry: LedgerEntry) => { staged.set(instanceId, entry) },
+    detach: (instanceId: string, transactionToken?: string) => host.detachVst(instanceId, transactionToken),
+    // The revision is live: staged instances are active, removed ones are detached and the host parks them.
+    async published() {
+      for (const [instanceId, entry] of staged) active.set(instanceId, entry)
+      staged.clear()
+      for (const instanceId of removed) {
+        const entry = active.get(instanceId)
+        active.delete(instanceId)
+        if (entry === undefined) continue
+        await host.detachVst(instanceId)
+        parked.delete(instanceId)
+        parked.set(instanceId, { load: entry.load, at: now() })
+      }
+      removed = []
+      for (const instanceId of [...parked.keys()].slice(0, Math.max(0, parked.size - maximumParkedInstances))) {
+        parked.delete(instanceId)
+      }
+    },
+    // A rollback retires every staged instance in the host, so the next plan attaches them again.
+    rolledBack() {
+      staged.clear()
+      removed = []
+    },
+  }
+}
+
+export type NativeVst3AttachmentLedger = ReturnType<typeof createNativeVst3AttachmentLedger>
+
+type CoordinationInput = {
   serializedPlan: string
   sampleRateHz: number
   workerPath: string
   catalogStore: { load(): Promise<PluginCatalogData> }
   audioHost: Pick<NativeAudioHostSupervisor, "attachVst">
+  ledger?: NativeVst3AttachmentLedger
   transactionToken?: string
   capturedVstStates?: ReadonlyMap<string, CapturedVst3State>
   requiredVstStateInstanceIds?: ReadonlySet<string>
   preflight?: typeof preflightNativeVst3Worker
-}): Promise<NativeVst3CoordinatorResult> => {
+  reportDefect?: (defect: NativeVst3Defect) => void
+}
+
+// Every failure that is not the plug-in's own crash is ours: it is logged as a defect.
+export const coordinateNativeVst3Attachments = async (
+  input: CoordinationInput,
+): Promise<NativeVst3CoordinatorResult> => {
+  const reportDefect = input.reportDefect ?? reportDefectToConsole
+  let result: NativeVst3CoordinatorResult
+  try {
+    result = await coordinateDelta(input)
+  } catch (error) {
+    reportDefect({ source: "attachment-command", detail: error instanceof Error ? error.message : "unknown" })
+    throw error
+  }
+  if (!result.ok && nativeVst3CoordinatorFailureOrigin(result.code) === "host") {
+    reportDefect({ source: `attachment-${result.code}`, instanceId: result.instanceId, detail: result.message })
+  }
+  return result
+}
+
+const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3CoordinatorResult> => {
   let plan: NativeExternalAttachmentPlan
   try {
     plan = decodeNativeExternalAttachmentPlan(input.serializedPlan)
@@ -622,19 +769,35 @@ export const coordinateNativeVst3Attachments = async (input: {
     }
     resolved.push({ attachment, native })
   }
+  const ledger = input.ledger
+  const entries = ledger && new Map(resolved.map(({ attachment, native }) => [
+    attachment.instanceId,
+    ledgerEntry(attachment, native, input.capturedVstStates?.get(attachment.instanceId)?.sha256),
+  ]))
+  const delta = ledger && entries ? ledger.reconcile(entries) : undefined
+  const changed = delta && new Set([...delta.attach, ...delta.replace])
+  const pending = changed ? resolved.filter((candidate) => changed.has(candidate.attachment.instanceId)) : resolved
   const runPreflight = input.preflight ?? preflightNativeVst3Worker
-  for (const candidate of resolved) {
-    const result = await runPreflight({
-      workerPath: input.workerPath,
-      attachment: candidate.native,
-      sampleRateHz: input.sampleRateHz,
-    })
+  for (const candidate of pending) {
+    const instanceId = candidate.attachment.instanceId
+    const entry = entries?.get(instanceId)
+    // The host takes a parked instance back as it was preflighted, so there is nothing to load.
+    if (ledger && entry && ledger.parkedMatches(instanceId, entry.load)) continue
+    const key = verdictKey(candidate.native, input.sampleRateHz)
+    const cached = input.capturedVstStates?.has(instanceId) ? undefined : ledger?.verdict(key)
+    const result = cached
+      ? { ...cached, hello: { ...cached.hello, instanceId } }
+      : await runPreflight({
+        workerPath: input.workerPath,
+        attachment: candidate.native,
+        sampleRateHz: input.sampleRateHz,
+      })
     if (result.status === "unavailable") {
       return {
         ok: false,
         code: result.code,
         message: result.message,
-        instanceId: candidate.attachment.instanceId,
+        instanceId,
       }
     }
     if (!matchesManifest(candidate.attachment, result)) {
@@ -642,20 +805,21 @@ export const coordinateNativeVst3Attachments = async (input: {
         ok: false,
         code: "manifest-mismatch",
         message: "The native VST3 worker manifest does not match the attachment plan.",
-        instanceId: candidate.attachment.instanceId,
+        instanceId,
       }
     }
+    if (ledger && !cached && !input.capturedVstStates?.has(instanceId)) ledger.rememberVerdict(key, result)
     if (
       !candidate.attachment.bypassed
       && result.hello.manifest.supportsState === true
       && (input.requiredVstStateInstanceIds === undefined
-        || input.requiredVstStateInstanceIds.has(candidate.attachment.instanceId))
+        || input.requiredVstStateInstanceIds.has(instanceId))
     ) {
-      stateRequired.add(candidate.attachment.instanceId)
+      stateRequired.add(instanceId)
     }
   }
   const validatedStates = new Map<string, CapturedVst3State>()
-  for (const candidate of resolved) {
+  for (const candidate of pending) {
     const captured = input.capturedVstStates?.get(candidate.attachment.instanceId)
     if (!captured) {
       if (stateRequired.has(candidate.attachment.instanceId)) {
@@ -682,15 +846,20 @@ export const coordinateNativeVst3Attachments = async (input: {
     // The playback controller owns the encompassing graph transaction. Attach
     // only after preflight so graph publication and VST attachment commit
     // atomically as one native session.
-    for (const candidate of resolved) {
+    for (const instanceId of delta?.dropped ?? []) await ledger?.detach(instanceId, input.transactionToken)
+    for (const candidate of pending) {
+      const instanceId = candidate.attachment.instanceId
       const { stateRevision: _stateRevision, ...attachment } = candidate.native
-      const state = validatedStates.get(candidate.attachment.instanceId)
+      const state = validatedStates.get(instanceId)
+      if (delta?.replace.includes(instanceId)) await ledger?.detach(instanceId, input.transactionToken)
       await input.audioHost.attachVst(
         state ? { ...attachment, initialState: state } : attachment,
         input.transactionToken,
       )
+      const entry = entries?.get(instanceId)
+      if (entry) ledger?.stage(instanceId, entry)
     }
-    return { ok: true, attached: resolved.length }
+    return { ok: true, attached: pending.length }
   } catch (error) {
     if (error instanceof NativeAudioHostCommandError) throw error
     return { ok: false, code: "native-transaction-failed", message: "The native VST3 attachment transaction failed." }

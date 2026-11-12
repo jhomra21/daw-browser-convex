@@ -103,6 +103,16 @@ test("labels a preflighted native effect without claiming live processing", () =
   })).toBe("Enabled · Preflight passed");
 });
 
+test("a faulted plug-in instance reads as unavailable on its device, whatever its project health says", () => {
+  const ready: Parameters<typeof externalProcessorStatusLabel>[0] = {
+    bypassed: false,
+    health: { state: "ready", reason: "Native VST3 preflight passed.", updatedAt: 1 },
+  }
+  expect(externalProcessorStatusLabel(ready, true)).toBe("Plug-in failed · Muted");
+  expect(externalProcessorStatusLabel({ ...ready, bypassed: true }, true)).toBe("Plug-in failed · Muted");
+  expect(externalProcessorStatusLabel(ready, false)).toBe("Enabled · Preflight passed");
+});
+
 test("selects effects and instruments for the selected target in chain order", () => {
   const instrument = processor({
     instanceId: "00000000-0000-4000-8000-000000000002",

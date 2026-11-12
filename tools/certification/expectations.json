@@ -16,22 +16,22 @@
   "path": "tools/certification/manifest-7a.json",
   "sha256": "efc72e432e6bf4716ac10f6971096347ca62ffbd219721544b5d03a6ab300376",
   "entries": {
-   "src/lib/desktop/native-playback-controller.ts": "f4d7cdf9e0850356f1cf96e8c6281308e9b32c02d966c707ab02153f0f3d3ea9",
+   "src/lib/desktop/native-playback-controller.ts": "7dd967226cf1a52cd5738c7dda494abe55dc164b6cb9124a5d48b24c2cb7cfbd",
    "src/lib/desktop/native-processor-state-owner.ts": "0e0c7a05c34033c20db38bfabb240aa3e0d07a89391e8101e02e7509c9ce871b",
-   "src/hooks/useTimelinePlayback.ts": "19019a87eb53c8fcb84b46e114fc9e0c4aee97e986b10750572212fdbaa0a725",
-   "src/lib/desktop/native-playback-controller.test.ts": "b54024913c4f41bffa6f1f22dc29df27fff4ec2ff7c5012336b35b8eea149dcf",
-   "src/hooks/useTimelinePlayback.test.ts": "6d5e509c40923a7159ac64a43c7830a507c54c6d40077356c645b9fe303310f5",
+   "src/hooks/useTimelinePlayback.ts": "f3d6a4888d252fe4afffc89d91fd49eda36a8a1e38037dc3b23848eaf07f8971",
+   "src/lib/desktop/native-playback-controller.test.ts": "69b88d47ac699261df86daef3b5d48e3b94c779f51777ead837a3bc78ce9fe48",
+   "src/hooks/useTimelinePlayback.test.ts": "e969395aea597a8da74cf719779c6468fe4d09a5e3b4ca1e9630f88000dcd48d",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "dcffbbda8434de38d9375da914c5b7c4b5cbc8c3255705b3f812242bfbea2669",
-   "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "3aaea3d0441e32671ecacddca317166dc192f89c9d00df0dba524eef30c73ce5",
+   "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "29ebc5ffcad8b71c06c2e62f06168d0f8a2224140fd24576e6307b8d0df53c60",
    "src/components/timeline/create-timeline-effect-commit.ts": "c62ae6f5ec087a8abe5a0d1038d71b1172ae060a0c294bcef848c553b278a9c2",
-   "src/components/Timeline.tsx": "57de21f1c777bd85eba770582a4fbcb94d96a9c56918529d173d9fc359c93548",
+   "src/components/Timeline.tsx": "92968eb93d655efdeb295a87d0566c1308d67d136e5a73a3290ce2dab02ab225",
    "src/components/Timeline.test.ts": "b82519275ba6919910a0a3f6ed341c3f101ad2a8308eb229a5955921a5774317",
    "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "2488292cd8bf35fcf1e3e992f00d4be6300abf975972ddfe4d1ca48e3232f994",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "7f45e3103c2bdf98467bcb6de030a6971cbd6182729f77bf974907c9a1024ef0",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-classes.ts": "3d46c8e6cd6ec9e7dee21ab8e47261a8e1a5b2eebe6e887a44878b2140604c48",
    "tools/acceptance/ae-08-processor-state-fuzz-classes.ts": "e37400f689a0deab00dda57f0be8a5a6345f6a262fe92fb93b46e99ff8eb401f",
-   "tools/acceptance/ae-08-processor-state-fuzz.ts": "7d632f55a9743699f1f77688769d5d861747ddfc59e721371b4fd7111ce1362b",
-   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "fb940308581c60a92d5b3790d992d2a5630e2bf8c91d525e7f3a750485a467a2",
+   "tools/acceptance/ae-08-processor-state-fuzz.ts": "3b04ce85f13db50f9fef849318a3326ada87225e45cf13736d74c621a6dd8ee0",
+   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "fd954305f90c00f465226a3b7fd5626c4ba93f6d2a5b5e951ff10d3ba91a7472",
    "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "fef86ee9f1fb64b7aa3b1f594d9f2aaa0e7c3fcb9ee4fb147b46401daae9ec34",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-commit.ts": null,
    "tools/acceptance/device-control-cost.browser.test.ts": "b51c0c72e4627f0cc890e7db72f2db599e540961b03a6a9ea08885e750e8180c",
@@ -52,27 +52,27 @@
    "src/components/timeline/create-effects-panel-audio-effects-state.test.ts": "267562137157e2c20b0e807286ed3cea5f8b9c61130933f9b32c2bb416470a6e",
    "src/components/timeline/create-effects-panel-audio-effects-state.ts": "3cf85e14cbf254b3cd1abb193bf660bf1a42ca978ae51a19f6b076ed0f73a6c9",
    "src/hooks/pointer-gesture-ownership.browser.test.ts": "3366804e569ebe038988bf2c57ca39b1e9fd6fabb52d7e79cd337d3a6d50422b",
-   "native/audio-core/src/audio_core.cpp": "676c94feac37e26124cdbfd41e26c580d1fe48db60cbc90253683ff3441498ed",
+   "native/audio-core/src/audio_core.cpp": "a35f6ff238c101401254b068009a4f6969ed180232b4922625740fb2667baab4",
    "native/audio-core/include/daw/audio_core.h": "5e7b0754b8d8265ffc4d9140b4fcd2669e0f2483aa02a3dd4bd6c07a14d787dd",
-   "native/audio-core/tests/audio_core_test.cpp": "2fa823efc72b712a6decdaae7f7983ddc7a7f2d4c207be8194f318cdb8d83410",
-   "native/audio-host-macos/tests/audio_host_test.cpp": "4bbe97889b62c9071a638a1024378eb4f3a2d8c52f34bc838d5ae4b8e55e5c18",
+   "native/audio-core/tests/audio_core_test.cpp": "cfd750268a7ed5835814a8d7d47bd431c26097896b0de95b4cda02ad85039d95",
+   "native/audio-host-macos/tests/audio_host_test.cpp": "223df98b272e50e33ddf89d7ba15eae89dc53556fb68ddf5ebdaa6a26db6290e",
    "native/audio-host-macos/tests/realtime_callback_guard.test.ts": "282cfbb7b83817d7ce88df862382a375a4c1249638f31fcbc80da7082b64a7b9",
-   "public/audio-core/daw-audio-core.wasm": "0595e7d1adfa1988faac34fa57d2b6d9e8861bd2c13326bd8036d9c61d1ef195",
-   "public/audio-core/daw-audio-core.manifest.json": "2d929038ad18743b9001a6a108b8c70e81dce7728d53caebe1c899fe5d491e7b",
+   "public/audio-core/daw-audio-core.wasm": "b60bb1dc9a188038306776464457305daa4306f686d485a357cb713ad82e4ac0",
+   "public/audio-core/daw-audio-core.manifest.json": "660e366b3accf9bc4b0d7a1864eaacf3c4961e68062bec100f10dd3def49cc94",
    "public/audio-worklets/daw-portable-graph-envelope-v3.js": "21f7a750448152905143ac481a8c6cff75fdbc43b0508c1e1cd671173927c6ef",
-   "public/audio-worklets/daw-portable-audio-core-host-v2.js": "dad1982076876a444038365e2087940171ae49885a1fc7c6e96843e950abb06f",
+   "public/audio-worklets/daw-portable-audio-core-host-v2.js": "bae84bd0f91e047becc8eab323ec957e919eff070acdff8e97b02f10bf733b86",
    "public/audio-worklets/daw-portable-audio-core-processor-v2.js": "d9fcd6ba60a590b54670e02d4124fc9a823759efbdbb463f2c9027ea505f6635",
-   "packages/audio-engine/src/portable-wasm-protocol.ts": "7ca3f56ce89b446486cee7b82c86038dd121e27bc2c89c76558118b9dc794efe",
+   "packages/audio-engine/src/portable-wasm-protocol.ts": "09e0688e17fa38e51a8c26c4ef17e4f29ec2de7f21e174ade327a35255ab6f4d",
    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.ts": "8d1a2ac9064d2b08fac89eb19a387a92384a905cd186e3b62cc364dfeb15e26c",
    "packages/audio-engine/src/native-host-wire.ts": "f84ac7b93f5bd73fcfda1d43eced8ea99d64c20cf274aaaa219ddb025da3f1a5",
    "packages/audio-engine/src/native-host-wire.test.ts": "586d06916c7caa630003d88940403d5b356aa57f39965f624693fe34078917d1",
-   "packages/audio-engine/src/portable-wasm-host.test.ts": "8c3698d972bed783df85f9a95b041c75f255967178b7ace177200b4a59ffc96f",
+   "packages/audio-engine/src/portable-wasm-host.test.ts": "fa56bff6802eed1c9f507e5610d2504b04399197a6dbfb18fa2b487cae08f073",
    "packages/audio-engine/src/portable-wasm-protocol.test.ts": "7c99cb630f255b0b6050e1275650d95c0f902777556890e3b1b21ea67355c730",
    "packages/audio-engine/src/portable-wasm-worklet.test.ts": "dd2dff481ec8ba5ac68e48f48dbc4547b3a504a426e304fea3ab41c9c20e024f",
    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": "6bc3f8535fcbcb3619cf4cb8a98255ec099566695dc1d44b72e98c3db8fced6c",
    "tools/acceptance/analyze-ae-08-continuity.ts": "c31a69951a01f22414a6b852ba3c92f6b0257fc4956dba4a022526c316af36eb",
    "tools/acceptance/ae-08-phase-5-fixture.ts": "16d0acf1f5681bef2bdbc687dfa9be095f441f766f990905ebada1ab4196b50a",
-   "tools/acceptance/ae-08-live-graph.ts": "d9a2817075014b632c8b7dbb3eefd46d4011c8daa3e33fe6d59bb6c7fa811bab",
+   "tools/acceptance/ae-08-live-graph.ts": "ea5f2cbe4cc5e2baef5aa65508b2be692de3f8a6f54ed47ebd51b8a908b64b34",
    "tools/performance/30-track/native-spool-wav.test.ts": "57807adefa6ee3c644ec0a66706fb0f52a15f741164f36a2bcdfa494df0cbfca",
    "src/lib/timeline-audio-import.ts": "7f9fb7978bffee79814e7eaf99d27abb521c64e0beadfce39e078cee0136950b",
    "src/lib/timeline-audio-import-metadata-only.test.ts": "90ed907b59b969d0328295eef29d0b29920a1de8bef4687fbf9a3adbff4e417c",
@@ -126,8 +126,8 @@
  },
  "fuzzSources": {
   "controller": {
-   "src/lib/desktop/native-playback-controller.ts": "f4d7cdf9e0850356f1cf96e8c6281308e9b32c02d966c707ab02153f0f3d3ea9",
-   "src/lib/desktop/native-schedule-coordinator.ts": "d5b43368161d86af2a60d18f89a36cd01ab95ce3cddbdcbc76e3c613aa0b231f",
+   "src/lib/desktop/native-playback-controller.ts": "7dd967226cf1a52cd5738c7dda494abe55dc164b6cb9124a5d48b24c2cb7cfbd",
+   "src/lib/desktop/native-schedule-coordinator.ts": "6e841788b5b320bfa8019406466392c07c7717666c565f4ec10e5f98dd835f4d",
    "src/lib/desktop/native-processor-state-owner.ts": "0e0c7a05c34033c20db38bfabb240aa3e0d07a89391e8101e02e7509c9ce871b",
    "src/lib/desktop/native-built-in-parameter-mapper.ts": "178817f3f6e496828567c8ab4ff6b1d56e1fa95dd4c1a54852b9a6d6c7c97a15",
    "src/lib/live-processor-control.ts": "841375ec42695eaf9f5fe1669fb1011e109f95b3ea5bf857bc2192dd0978dc0d",
@@ -135,28 +135,28 @@
    "src/lib/live-playback-snapshot.ts": "6e984692a06b262d2afe8b5b3239930f5c26b19cb1f83fe8f095d3e110a3399e",
    "packages/audio-engine/src/native-host-wire.ts": "f84ac7b93f5bd73fcfda1d43eced8ea99d64c20cf274aaaa219ddb025da3f1a5",
    "apps/desktop/audio-host.ts": "2f86cd7eef6f02e2eb29bf7acc8a2ba72cc221a6c1bdf68b44260eddc07c6faa",
-   "native/audio-host-macos/src/audio-host.cpp": "cdf59df1786094a799e39125fc0a0e2b311a2a6a8a699c07b2a818a1ea1b2c56",
-   "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "3aaea3d0441e32671ecacddca317166dc192f89c9d00df0dba524eef30c73ce5",
+   "native/audio-host-macos/src/audio-host.cpp": "f36e9b302351d77ed6899e05a43d0c058efd6d6785136a4f56d9812b23e92869",
+   "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "29ebc5ffcad8b71c06c2e62f06168d0f8a2224140fd24576e6307b8d0df53c60",
    "tools/acceptance/ae-08-processor-state-fuzz-oracle.ts": "619a93ec58beb16bfc347eed3b34f0fe292acc844053ca540675d690fccb88ce",
-   "tools/acceptance/ae-08-processor-state-fuzz.ts": "7d632f55a9743699f1f77688769d5d861747ddfc59e721371b4fd7111ce1362b",
-   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "fb940308581c60a92d5b3790d992d2a5630e2bf8c91d525e7f3a750485a467a2",
+   "tools/acceptance/ae-08-processor-state-fuzz.ts": "3b04ce85f13db50f9fef849318a3326ada87225e45cf13736d74c621a6dd8ee0",
+   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "fd954305f90c00f465226a3b7fd5626c4ba93f6d2a5b5e951ff10d3ba91a7472",
    "tools/acceptance/ae-08-processor-state-fuzz-trace.ts": "3746a8cfcc27bfb2c092dcc5ff01a8e31e771c09776150490a05c9a44794916a",
    "tools/acceptance/ae-08-processor-state-fuzz-classes.ts": "e37400f689a0deab00dda57f0be8a5a6345f6a262fe92fb93b46e99ff8eb401f",
    "tools/acceptance/ae-08-processor-state-fuzz-edit.ts": "781b5bff0fc34645b34144be0b7fe1d5287c50d323e3741ef9f57583c4f04452"
   },
   "hook": {
-   "src/hooks/useTimelinePlayback.ts": "19019a87eb53c8fcb84b46e114fc9e0c4aee97e986b10750572212fdbaa0a725",
+   "src/hooks/useTimelinePlayback.ts": "f3d6a4888d252fe4afffc89d91fd49eda36a8a1e38037dc3b23848eaf07f8971",
    "src/components/timeline/create-effects-panel-audio-effects-state.ts": "3cf85e14cbf254b3cd1abb193bf660bf1a42ca978ae51a19f6b076ed0f73a6c9",
-   "src/lib/desktop/native-playback-controller.ts": "f4d7cdf9e0850356f1cf96e8c6281308e9b32c02d966c707ab02153f0f3d3ea9",
+   "src/lib/desktop/native-playback-controller.ts": "7dd967226cf1a52cd5738c7dda494abe55dc164b6cb9124a5d48b24c2cb7cfbd",
    "src/lib/local-effects.ts": "4bf53a70c2d602cf459013e453b2e0ce44c1605006480421bc3637529c2add81",
    "src/lib/desktop/native-processor-state-owner.ts": "0e0c7a05c34033c20db38bfabb240aa3e0d07a89391e8101e02e7509c9ce871b",
    "src/lib/desktop/native-built-in-parameter-mapper.ts": "178817f3f6e496828567c8ab4ff6b1d56e1fa95dd4c1a54852b9a6d6c7c97a15",
    "src/lib/live-processor-control.ts": "841375ec42695eaf9f5fe1669fb1011e109f95b3ea5bf857bc2192dd0978dc0d",
    "src/components/timeline/create-processor-edit-registry.ts": "6d593d4bb93c1762dc9eedc539609c62dffd4b2f4a206335925c15a8e9ee47c6",
    "src/components/timeline/create-timeline-effect-commit.ts": "c62ae6f5ec087a8abe5a0d1038d71b1172ae060a0c294bcef848c553b278a9c2",
-   "tools/acceptance/ae-08-processor-state-fuzz.ts": "7d632f55a9743699f1f77688769d5d861747ddfc59e721371b4fd7111ce1362b",
-   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "fb940308581c60a92d5b3790d992d2a5630e2bf8c91d525e7f3a750485a467a2",
-   "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "3aaea3d0441e32671ecacddca317166dc192f89c9d00df0dba524eef30c73ce5",
+   "tools/acceptance/ae-08-processor-state-fuzz.ts": "3b04ce85f13db50f9fef849318a3326ada87225e45cf13736d74c621a6dd8ee0",
+   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "fd954305f90c00f465226a3b7fd5626c4ba93f6d2a5b5e951ff10d3ba91a7472",
+   "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "29ebc5ffcad8b71c06c2e62f06168d0f8a2224140fd24576e6307b8d0df53c60",
    "tools/acceptance/ae-08-processor-state-fuzz-oracle.ts": "619a93ec58beb16bfc347eed3b34f0fe292acc844053ca540675d690fccb88ce",
    "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "fef86ee9f1fb64b7aa3b1f594d9f2aaa0e7c3fcb9ee4fb147b46401daae9ec34",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "7f45e3103c2bdf98467bcb6de030a6971cbd6182729f77bf974907c9a1024ef0",
@@ -1298,7 +1298,7 @@
    "judge": {
     "kind": "ctest",
     "exit": 0,
-    "total": 16
+    "total": 17
    }
   },
   {
@@ -1377,7 +1377,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 15,
+     "pass": 16,
      "skip": 0,
      "fail": 0
     },
@@ -1410,7 +1410,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 49,
+     "pass": 63,
      "skip": 0,
      "fail": 0
     },
@@ -1665,7 +1665,7 @@
     "kind": "tests",
     "exit": 1,
     "counts": {
-     "pass": 213,
+     "pass": 214,
      "skip": 1,
      "fail": 2
     },
@@ -1699,7 +1699,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 640,
+     "pass": 641,
      "skip": 1,
      "fail": 0
     },
@@ -1770,7 +1770,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 9,
+     "pass": 10,
      "skip": 0,
      "fail": 0
     },
@@ -2464,7 +2464,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/portable-wasm-host.test.ts": {
-      "pass": 25,
+      "pass": 39,
       "skip": 0,
       "fail": 0
      },
@@ -2781,7 +2781,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 655,
+     "pass": 656,
      "skip": 1,
      "fail": 0
     },
@@ -2815,7 +2815,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 109,
+     "pass": 111,
      "skip": 1,
      "fail": 0
     },
@@ -2846,7 +2846,7 @@
     "kind": "tests",
     "exit": 1,
     "counts": {
-     "pass": 213,
+     "pass": 214,
      "skip": 1,
      "fail": 2
     },
@@ -2985,7 +2985,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 290,
+     "pass": 291,
      "skip": 3,
      "fail": 0
     },
@@ -3392,7 +3392,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/portable-wasm-host.test.ts": {
-      "pass": 25,
+      "pass": 39,
       "skip": 0,
       "fail": 0
      },
@@ -3789,11 +3789,11 @@
    "judge": {
     "kind": "stdout",
     "exit": 0,
-    "value": "544b2d2b18cce006d4843f3efa6214d383209b7a369a4f84fcc82fa03532c4be",
+    "value": "2b2a0156f6d4d0a298e22d2172d7a2a2ad89b52d799e12dbb68e63bf13834dc8",
     "files": {
-     "public/audio-core/daw-audio-core.wasm": "0595e7d1adfa1988faac34fa57d2b6d9e8861bd2c13326bd8036d9c61d1ef195",
-     "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm": "0595e7d1adfa1988faac34fa57d2b6d9e8861bd2c13326bd8036d9c61d1ef195",
-     "public/audio-core/daw-audio-core.manifest.json": "2d929038ad18743b9001a6a108b8c70e81dce7728d53caebe1c899fe5d491e7b"
+     "public/audio-core/daw-audio-core.wasm": "b60bb1dc9a188038306776464457305daa4306f686d485a357cb713ad82e4ac0",
+     "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm": "b60bb1dc9a188038306776464457305daa4306f686d485a357cb713ad82e4ac0",
+     "public/audio-core/daw-audio-core.manifest.json": "660e366b3accf9bc4b0d7a1864eaacf3c4961e68062bec100f10dd3def49cc94"
     }
    }
   },
@@ -4265,13 +4265,13 @@
  ],
  "traces": {
   "controller": {
-   "treeSha256": "37a6c612f6da1a46b1d0e78c26ea5d648268d64ee777838a2304e8ba86f576bd",
+   "treeSha256": "b21e249832ebfe60a44769f6c9badfa282efeba7fdc961433fbd86e26ec9eef0",
    "files": 700,
    "a": "trace-controller-a",
    "b": "trace-controller-b"
   },
   "hook": {
-   "treeSha256": "32d2a95947fd2f1d1dca8e72a9e5ddca6681821b905a62f427d00d0c8820723c",
+   "treeSha256": "9e9297a1f09b8408dde6f0085fcbb68fa0ebcee6e258a3385c2b835f73f142c9",
    "files": 4459,
    "a": "trace-hook-a",
    "b": "trace-hook-b"
@@ -18435,7 +18435,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 640,
+      "pass": 641,
       "skip": 1,
       "fail": 0
      },
@@ -18496,7 +18496,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 639,
+      "pass": 640,
       "skip": 1,
       "fail": 1
      },
@@ -19204,7 +19204,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -19268,7 +19268,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -19749,7 +19749,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 720,
+      "pass": 723,
       "skip": 1,
       "fail": 0
      },
@@ -19816,7 +19816,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 718,
+      "pass": 721,
       "skip": 1,
       "fail": 2
      },
@@ -20155,7 +20155,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 720,
+      "pass": 723,
       "skip": 1,
       "fail": 0
      },
@@ -20222,7 +20222,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 719,
+      "pass": 722,
       "skip": 1,
       "fail": 1
      },
@@ -20560,7 +20560,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 720,
+      "pass": 723,
       "skip": 1,
       "fail": 0
      },
@@ -20627,7 +20627,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 719,
+      "pass": 722,
       "skip": 1,
       "fail": 1
      },
@@ -20950,7 +20950,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 720,
+      "pass": 723,
       "skip": 1,
       "fail": 0
      },
@@ -21017,7 +21017,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 719,
+      "pass": 722,
       "skip": 1,
       "fail": 1
      },
@@ -24410,7 +24410,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -24474,7 +24474,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 200,
+      "pass": 201,
       "skip": 1,
       "fail": 15
      },
@@ -24673,7 +24673,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 720,
+      "pass": 723,
       "skip": 1,
       "fail": 0
      },
@@ -24740,7 +24740,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 719,
+      "pass": 722,
       "skip": 1,
       "fail": 1
      },
@@ -24920,7 +24920,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -24984,7 +24984,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -25174,7 +25174,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -25244,7 +25244,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -25424,7 +25424,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -25488,7 +25488,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -26035,7 +26035,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -26099,7 +26099,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 208,
+      "pass": 209,
       "skip": 1,
       "fail": 7
      },
@@ -26290,7 +26290,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 720,
+      "pass": 723,
       "skip": 1,
       "fail": 0
      },
@@ -26357,7 +26357,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 719,
+      "pass": 722,
       "skip": 1,
       "fail": 1
      },
@@ -26542,7 +26542,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 720,
+      "pass": 723,
       "skip": 1,
       "fail": 0
      },
@@ -26609,7 +26609,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 719,
+      "pass": 722,
       "skip": 1,
       "fail": 1
      },
@@ -26789,7 +26789,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -26853,7 +26853,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 210,
+      "pass": 211,
       "skip": 1,
       "fail": 5
      },
@@ -27036,7 +27036,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -27100,7 +27100,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -27285,7 +27285,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -27349,7 +27349,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 208,
+      "pass": 209,
       "skip": 1,
       "fail": 7
      },
@@ -27684,7 +27684,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -27760,7 +27760,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -27956,7 +27956,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -28032,7 +28032,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 207,
+      "pass": 208,
       "skip": 1,
       "fail": 8
      },
@@ -28218,7 +28218,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -28282,7 +28282,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -29317,7 +29317,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 720,
+      "pass": 723,
       "skip": 1,
       "fail": 0
      },
@@ -29384,7 +29384,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 719,
+      "pass": 722,
       "skip": 1,
       "fail": 1
      },
@@ -29564,7 +29564,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -29628,7 +29628,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -29936,7 +29936,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -30000,7 +30000,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 192,
+      "pass": 193,
       "skip": 1,
       "fail": 23
      },
@@ -30199,7 +30199,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -30263,7 +30263,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 209,
+      "pass": 210,
       "skip": 1,
       "fail": 6
      },
@@ -30445,7 +30445,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -30509,7 +30509,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -31049,7 +31049,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -31113,7 +31113,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -31293,7 +31293,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -31357,7 +31357,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -31662,7 +31662,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -31726,7 +31726,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -32030,7 +32030,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -32094,7 +32094,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -32519,7 +32519,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -32583,7 +32583,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -32751,7 +32751,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -32940,7 +32940,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 208,
+      "pass": 209,
       "skip": 1,
       "fail": 7
      },
@@ -33111,7 +33111,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -33298,7 +33298,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -34851,7 +34851,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -35039,7 +35039,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -35208,7 +35208,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -35396,7 +35396,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -35565,7 +35565,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -35758,7 +35758,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 198,
+      "pass": 199,
       "skip": 1,
       "fail": 17
      },
@@ -35941,7 +35941,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -36130,7 +36130,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -36300,7 +36300,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -36488,7 +36488,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -36658,7 +36658,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -36846,7 +36846,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 210,
+      "pass": 211,
       "skip": 1,
       "fail": 5
      },
@@ -37017,7 +37017,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -37205,7 +37205,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -37373,7 +37373,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -37562,7 +37562,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 209,
+      "pass": 210,
       "skip": 1,
       "fail": 6
      },
@@ -37734,7 +37734,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -37924,7 +37924,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -38094,7 +38094,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -38282,7 +38282,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -38451,7 +38451,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -38639,7 +38639,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -38808,7 +38808,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -38996,7 +38996,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -39165,7 +39165,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -39353,7 +39353,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -39522,7 +39522,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -39710,7 +39710,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -39934,7 +39934,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -40183,7 +40183,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 210,
+      "pass": 211,
       "skip": 1,
       "fail": 5
      },
@@ -40409,7 +40409,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -40660,7 +40660,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -40885,7 +40885,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -41134,7 +41134,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -41413,7 +41413,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -41724,7 +41724,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -42004,7 +42004,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -42321,7 +42321,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 187,
+      "pass": 188,
       "skip": 1,
       "fail": 28
      },
@@ -42625,7 +42625,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -42935,7 +42935,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -43214,7 +43214,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -43524,7 +43524,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 210,
+      "pass": 211,
       "skip": 1,
       "fail": 5
      },
@@ -44321,7 +44321,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 6,
+      "pass": 20,
       "skip": 0,
       "fail": 0
      },
@@ -44384,7 +44384,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 2,
+      "pass": 16,
       "skip": 0,
       "fail": 4
      },
@@ -44812,7 +44812,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -45031,7 +45031,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -45208,7 +45208,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -45418,7 +45418,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -45594,7 +45594,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -45792,7 +45792,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -45968,7 +45968,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -46178,7 +46178,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -46354,7 +46354,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -46554,7 +46554,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -46730,7 +46730,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -46939,7 +46939,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 205,
+      "pass": 206,
       "skip": 1,
       "fail": 10
      },
@@ -47122,7 +47122,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -47333,7 +47333,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -47509,7 +47509,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -47768,7 +47768,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -48005,7 +48005,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -48209,7 +48209,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -48385,7 +48385,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -48635,7 +48635,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 206,
+      "pass": 207,
       "skip": 1,
       "fail": 9
      },
@@ -48814,7 +48814,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -49008,7 +49008,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -50029,7 +50029,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -50223,7 +50223,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 210,
+      "pass": 211,
       "skip": 1,
       "fail": 5
      },
@@ -50906,7 +50906,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -51095,7 +51095,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -51505,7 +51505,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -51694,7 +51694,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -52882,7 +52882,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -53008,7 +53008,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 210,
+      "pass": 211,
       "skip": 1,
       "fail": 5
      },
@@ -53122,7 +53122,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -53247,7 +53247,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -53359,7 +53359,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -53484,7 +53484,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -53596,7 +53596,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -53777,7 +53777,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -53951,7 +53951,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -54132,7 +54132,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -54306,7 +54306,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -54487,7 +54487,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -54661,7 +54661,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -54842,7 +54842,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -55016,7 +55016,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -55141,7 +55141,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -55771,7 +55771,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 3,
+      "pass": 4,
       "skip": 0,
       "fail": 0
      },
@@ -55834,9 +55834,10 @@
      "counts": {
       "pass": 2,
       "skip": 0,
-      "fail": 1
+      "fail": 2
      },
      "fails": [
+      "C0G Pause then Play after a latency proof that lands behind an unchanged adoption at a newer revision resumes warm",
       "C0G Pause then Play after an unchanged adoption at a newer compile revision resumes the paused graph warm"
      ],
      "fuzz": null,
@@ -65745,7 +65746,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -65815,7 +65816,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 190,
+      "pass": 191,
       "skip": 1,
       "fail": 25
      },
@@ -65902,7 +65903,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 192,
+      "pass": 193,
       "skip": 1,
       "fail": 23
      },
@@ -65987,7 +65988,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -66057,7 +66058,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -66129,7 +66130,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -66199,7 +66200,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -66271,7 +66272,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -66342,7 +66343,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 192,
+      "pass": 193,
       "skip": 1,
       "fail": 23
      },
@@ -66427,7 +66428,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 192,
+      "pass": 193,
       "skip": 1,
       "fail": 23
      },
@@ -66518,7 +66519,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 209,
+      "pass": 210,
       "skip": 1,
       "fail": 6
      },
@@ -66592,7 +66593,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -66662,7 +66663,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -66733,7 +66734,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -66803,7 +66804,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -66874,7 +66875,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -66946,7 +66947,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -67017,7 +67018,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 210,
+      "pass": 211,
       "skip": 1,
       "fail": 5
      },
@@ -67084,7 +67085,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -67142,7 +67143,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 213,
+      "pass": 214,
       "skip": 1,
       "fail": 2
      },
@@ -67206,7 +67207,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 209,
+      "pass": 210,
       "skip": 1,
       "fail": 6
      },
@@ -67742,7 +67743,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -67813,7 +67814,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 210,
+      "pass": 211,
       "skip": 1,
       "fail": 5
      },
@@ -67880,7 +67881,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -67952,7 +67953,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },
@@ -68018,7 +68019,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 212,
+      "pass": 213,
       "skip": 1,
       "fail": 3
      },
@@ -68089,7 +68090,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 208,
+      "pass": 209,
       "skip": 1,
       "fail": 7
      },
@@ -68158,7 +68159,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 211,
+      "pass": 212,
       "skip": 1,
       "fail": 4
      },

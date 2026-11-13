@@ -50,7 +50,7 @@ type Gate = "inputs" | "lead" | "rebase" | "prepare-to-publish" | "prep-time" | 
 type Failure = { row: string; gate: Gate; detail: string }
 type Status = "PASS" | "INCOMPLETE" | "FAIL"
 type Publication = {
-  row: string; revision: number; class: Class; raise: boolean; leadBlocks: number; prepareToPublishMs: number; prepMs: number
+  row: string; revision: number; publicationFrame: number; asset: boolean; class: Class; raise: boolean; leadBlocks: number; prepareToPublishMs: number; prepMs: number
   editToPublishMs: number | undefined; completeFrames: number | undefined; blocksBeforeBind: number
 }
 type Analysis = { publications: Publication[]; failures: Failure[]; rows: { row: string; status: Status }[]; status: Status }
@@ -66,6 +66,7 @@ const hostEventSchema = z.object({
 const editsSchema = z.object({ edits: z.array(z.object({
   wallMs: z.number(), fromLatencyFrames: z.number(), toLatencyFrames: z.number() })).default([]) })
 const classSchema = z.object({ class: z.enum(["plain", "raise", "asset", "vst-insert"]) })
+const continuitySchema = z.object({ assetPublicationFrame: z.number().optional() }).passthrough()
 type HostEvent = z.infer<typeof hostEventSchema>
 
 const readText = (file: string) => readFile(file, "utf8").catch(() => undefined)
@@ -92,7 +93,7 @@ const classOf = (declared: Class | undefined, asset: boolean, raise: boolean, bl
 }
 
 const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<typeof editsSchema>["edits"], declared: Class | undefined) => {
-  const drafts: (Omit<Publication, "class" | "raise" | "editToPublishMs"> & { asset: boolean; wallMs: number })[] = []
+  const drafts: (Omit<Publication, "class" | "raise" | "editToPublishMs"> & { wallMs: number })[] = []
   const failures: Failure[] = []
   events.forEach((publish, index) => {
     if (publish.event !== "graph-publish" || publish.cause !== "block-boundary" || publish.publicationFrame === 0) return
@@ -112,7 +113,7 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<ty
       && event.wallMs >= prepare.event.wallMs && event.wallMs <= publish.wallMs)
     const blocksBeforeBind = Math.max(1, Math.round((bind.frame - prepare.event.frame) / BLOCK))
     drafts.push({
-      row, revision, asset, blocksBeforeBind, wallMs: publish.wallMs,
+      row, revision, publicationFrame: publish.publicationFrame, asset, blocksBeforeBind, wallMs: publish.wallMs,
       leadBlocks: (publish.publicationFrame - bind.frame) / BLOCK, prepareToPublishMs: publish.wallMs - prepare.event.wallMs,
       prepMs: armed.wallMs - prepare.event.wallMs, completeFrames: complete ? complete.frame - publish.publicationFrame : undefined,
     })
@@ -125,13 +126,25 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<ty
     netMove[owner] = (netMove[owner] ?? 0) + edit.toLatencyFrames - edit.fromLatencyFrames
     firstEditMs[owner] = Math.min(firstEditMs[owner] ?? edit.wallMs, edit.wallMs)
   }
-  const publications = drafts.map(({ asset, wallMs, ...draft }, index): Publication => {
+  const publications = drafts.map(({ wallMs, ...draft }, index): Publication => {
     const raise = (netMove[index] ?? 0) > 0
     const editMs = firstEditMs[index]
-    return { ...draft, raise, editToPublishMs: editMs === undefined ? undefined : wallMs - editMs, class: classOf(declared, asset, raise, draft.blocksBeforeBind) }
+    return { ...draft, raise, editToPublishMs: editMs === undefined ? undefined : wallMs - editMs, class: classOf(declared, draft.asset, raise, draft.blocksBeforeBind) }
   })
   return { failures, publications }
 }
+
+// The continuity analysis names the one publication that delivers an asset (analysis.json assetPublicationFrame). Exactly
+// that publication must carry an asset-install and no other may: a spurious install would lift a publication from the
+// plain 70 ms limit to the asset class's 100 ms. A row without an analysis.json is not cross-checked here.
+const assetEvidenceFailures = (row: string, assetFrame: number | undefined, publications: readonly Publication[]): Failure[] => [
+  ...(assetFrame !== undefined && !publications.some((publication) => publication.publicationFrame === assetFrame)
+    ? [inputFailure(row, `the continuity analysis places an asset at frame ${assetFrame}, but no publication has that frame`)] : []),
+  ...publications.filter((publication) => (publication.publicationFrame === assetFrame) !== publication.asset)
+    .map((publication) => inputFailure(row, publication.asset
+      ? `revision ${publication.revision} carries asset-install, but the continuity analysis places no asset there`
+      : `revision ${publication.revision} delivers the asset, but carries no asset-install`)),
+]
 
 const judgePublication = (publication: Publication): Failure[] => {
   const { row, revision, leadBlocks } = publication
@@ -176,7 +189,11 @@ const analyzeRun = async (run: string, phase: number): Promise<Analysis> => {
     const declared = classText === undefined ? undefined : classSchema.safeParse(JSON.parse(classText))
     if (declared && !declared.success) return { row, publications: [], failures: [inputFailure(row, "latency-class.json names an unknown class")] }
     const edits = editsText === undefined ? [] : editsSchema.parse(JSON.parse(editsText)).edits
-    return { row, ...analyzeRow(row, parseHost(hostText), edits, declared?.data.class) }
+    const continuityText = await readText(join(run, row, "analysis.json"))
+    const analysis = analyzeRow(row, parseHost(hostText), edits, declared?.data.class)
+    if (continuityText !== undefined)
+      analysis.failures.push(...assetEvidenceFailures(row, continuitySchema.parse(JSON.parse(continuityText)).assetPublicationFrame, analysis.publications))
+    return { row, ...analysis }
   }))
   const rows = analyses.flatMap((analysis) => analysis ?? [])
   const publications = rows.flatMap((analysis) => analysis.publications)
@@ -204,15 +221,19 @@ type Spec = {
   leadBlocks?: number; prepMs?: number; totalMs?: number; editMs?: number; blocksBeforeBind?: number; raise?: boolean
   install?: boolean; resend?: boolean; completeFrames?: number | "none"
 }
-const syntheticRow = (specs: readonly Spec[], options: { sampleRate?: number; declare?: string } = {}) => {
+// `delivers` writes the continuity analysis.json naming the publication at that index as the asset's; `noAsset` writes one naming none.
+type RowOptions = { sampleRate?: number; declare?: string; delivers?: number; noAsset?: true }
+const syntheticRow = (specs: readonly Spec[], options: RowOptions = {}) => {
   const base = { cause: "", pid: 1, transportEpoch: 5 }
   const lines: object[] = [{ event: "device-session", pid: 1, wallMs: 0, sampleRate: options.sampleRate ?? SAMPLE_RATE, blockSize: BLOCK }]
   const edits: object[] = []
+  const frames: number[] = []
   specs.forEach((spec, index) => {
     const revision = index + 2, wall = 1_000_000 + index * 10_000, prepareFrame = BLOCK * 200 * (index + 1)
     const blocksBeforeBind = spec.blocksBeforeBind ?? 1
     const bindFrame = prepareFrame + BLOCK * blocksBeforeBind
     const publicationFrame = bindFrame + BLOCK * (spec.leadBlocks ?? 3)
+    frames.push(publicationFrame)
     const request = (frame: number, wallMs: number) => ({ ...base, event: "graph-publish-request", wallMs, frame, revision: revision - 1, requestedRevision: revision })
     lines.push({ ...base, event: "graph-prepare", wallMs: wall, frame: prepareFrame, revision: revision - 1, requestedRevision: revision }, request(bindFrame, wall + 1))
     if (spec.install) lines.push({ ...base, event: "asset-install", wallMs: wall + 5 })
@@ -223,17 +244,31 @@ const syntheticRow = (specs: readonly Spec[], options: { sampleRate?: number; de
       lines.push({ ...base, event: "latency-move-complete", wallMs: wall + 100, frame: publicationFrame + (spec.completeFrames ?? COMPLETE_BASE_FRAMES + BLOCK * blocksBeforeBind), revision, requestedRevision: 0 })
     edits.push({ wallMs: wall + (spec.totalMs ?? 30) - (spec.editMs ?? 75), fromLatencyFrames: 512, toLatencyFrames: spec.raise ? 4096 : 512 })
   })
-  return { host: lines.map((line) => JSON.stringify(line)).join("\n"), edits: JSON.stringify({ edits }), declare: options.declare }
+  // An index past the last publication names frame 1, which no publication has.
+  const delivered = options.delivers === undefined ? undefined : frames[options.delivers] ?? 1
+  return { host: lines.map((line) => JSON.stringify(line)).join("\n"), edits: JSON.stringify({ edits }), declare: options.declare,
+    continuity: delivered === undefined && !options.noAsset ? undefined : JSON.stringify(delivered === undefined ? {} : { assetPublicationFrame: delivered }) }
 }
 
 const selfTest = async (c1Runs: readonly string[]) => {
   const raise: Spec = { raise: true, totalMs: 42, completeFrames: 2560 }
   const clean: readonly Spec[] = [{}, { totalMs: 36 }, raise, { raise: true, totalMs: 62, blocksBeforeBind: 3, completeFrames: 3584 }]
   const withClean = (...extra: Spec[]): readonly Spec[] => [...clean, ...extra]
-  const cases: { name: string; rows: [string, readonly Spec[], { sampleRate?: number; declare?: string }?][]; status: Status; fails: Gate[] }[] = [
+  const cases: { name: string; rows: [string, readonly Spec[], RowOptions?][]; status: Status; fails: Gate[] }[] = [
     { name: "conforming: plain, single raise, merged k=3 raise, asset add", status: "PASS", fails: [],
       rows: [["two-tone", clean], ["add-paged-asset", [{ totalMs: 90, install: true }]]] },
     { name: "re-sent Publish at the same seam is not a rebase", status: "PASS", fails: [], rows: [["two-tone", withClean({ resend: true })]] },
+    { name: "asset install at the publication the continuity analysis names", status: "PASS", fails: [],
+      rows: [["two-tone", clean, { noAsset: true }], ["add-paged-asset", [{ totalMs: 90, install: true }], { delivers: 0 }]] },
+    // Without the cross-check the install lifts this plain publication from 70 ms to the asset class's 100 ms limit.
+    { name: "spurious asset-install with no matching assetPublicationFrame", status: "FAIL", fails: ["inputs"],
+      rows: [["two-tone", withClean({ totalMs: 90, install: true }), { noAsset: true }]] },
+    { name: "asset-install on a publication other than the one the analysis names", status: "FAIL", fails: ["inputs"],
+      rows: [["add-paged-asset", [{ totalMs: 90, install: true }, { totalMs: 90, install: true }], { delivers: 1 }]] },
+    { name: "asset delivered without an asset-install", status: "FAIL", fails: ["inputs"],
+      rows: [["add-paged-asset", [{ totalMs: 30 }], { delivers: 0 }]] },
+    { name: "analysis names an asset frame no publication has", status: "FAIL", fails: ["inputs"],
+      rows: [["add-paged-asset", [{ totalMs: 30 }], { delivers: 5 }]] },
     { name: "bound lead of 16 blocks", status: "FAIL", fails: ["lead", "rebase"], rows: [["two-tone", withClean({ leadBlocks: 16 })]] },
     { name: "bound lead of 1 block", status: "FAIL", fails: ["lead"], rows: [["two-tone", withClean({ leadBlocks: 1 })]] },
     { name: "moved publication frame (seam missed, 8 blocks late)", status: "FAIL", fails: ["lead", "rebase"], rows: [["two-tone", withClean({ leadBlocks: 11 })]] },
@@ -266,6 +301,7 @@ const selfTest = async (c1Runs: readonly string[]) => {
         await writeFile(join(run, row, "host.jsonl"), synthetic.host)
         await writeFile(join(run, row, "phase9-edits.json"), synthetic.edits)
         if (synthetic.declare) await writeFile(join(run, row, "latency-class.json"), synthetic.declare)
+        if (synthetic.continuity) await writeFile(join(run, row, "analysis.json"), synthetic.continuity)
       }
       const analysis = await analyzeRun(run, 9)
       const actual = [...new Set(analysis.failures.map((failure) => failure.gate))]

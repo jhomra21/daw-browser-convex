@@ -55,6 +55,8 @@ type Publication = {
 }
 type Analysis = { publications: Publication[]; failures: Failure[]; rows: { row: string; status: Status }[]; status: Status }
 
+const inputFailure = (row: string, detail: string): Failure => ({ row, gate: "inputs", detail })
+
 const hostEventSchema = z.object({
   event: z.string(), cause: z.string().default(""), pid: z.number().default(0), wallMs: z.number().default(0),
   frame: z.number().default(0), revision: z.number().default(0), requestedRevision: z.number().default(0),
@@ -100,10 +102,10 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<ty
       event.event === "graph-publish-request" && event.pid === publish.pid && event.requestedRevision === revision) : []
     const bind = requests[0]
     const armed = requests[requests.length - 1]
-    if (!prepare || !bind || !armed) return void failures.push({ row, gate: "inputs", detail: `revision ${revision} has no prepare or publish request before its publication` })
+    if (!prepare || !bind || !armed) return void failures.push(inputFailure(row, `revision ${revision} has no prepare or publish request before its publication`))
     const session = findLast(events, index, (event) => event.event === "device-session")?.event
     if (session?.sampleRate !== SAMPLE_RATE || session.blockSize !== BLOCK)
-      return void failures.push({ row, gate: "inputs", detail: `revision ${revision} runs at ${session?.sampleRate}/${session?.blockSize}, not ${SAMPLE_RATE}/${BLOCK}` })
+      return void failures.push(inputFailure(row, `revision ${revision} runs at ${session?.sampleRate}/${session?.blockSize}, not ${SAMPLE_RATE}/${BLOCK}`))
     const complete = events.slice(index + 1).find((event) => event.event === "latency-move-complete" && event.pid === publish.pid
       && event.revision === revision && event.transportEpoch === publish.transportEpoch && event.frame >= publish.publicationFrame)
     const asset = events.some((event) => event.event === "asset-install" && event.pid === publish.pid
@@ -172,14 +174,14 @@ const analyzeRun = async (run: string, phase: number): Promise<Analysis> => {
     const editsText = await readText(join(run, row, `phase${phase}-edits.json`))
     const classText = await readText(join(run, row, "latency-class.json"))
     const declared = classText === undefined ? undefined : classSchema.safeParse(JSON.parse(classText))
-    if (declared && !declared.success) return { row, publications: [], failures: [{ row, gate: "inputs" as const, detail: "latency-class.json names an unknown class" }] }
+    if (declared && !declared.success) return { row, publications: [], failures: [inputFailure(row, "latency-class.json names an unknown class")] }
     const edits = editsText === undefined ? [] : editsSchema.parse(JSON.parse(editsText)).edits
     return { row, ...analyzeRow(row, parseHost(hostText), edits, declared?.data.class) }
   }))
   const rows = analyses.flatMap((analysis) => analysis ?? [])
   const publications = rows.flatMap((analysis) => analysis.publications)
   const failures = [
-    ...(publications.length ? [] : [{ row: "(run)", gate: "inputs" as const, detail: "no seam publications found" }]),
+    ...(publications.length ? [] : [inputFailure("(run)", "no seam publications found")]),
     ...rows.flatMap((analysis) => [...analysis.failures, ...analysis.publications.flatMap(judgePublication)]),
     ...judgePooled(publications),
   ]

@@ -7600,6 +7600,22 @@ struct ProcessorContinuityMap {
 
 // Preparation only: immutable instance IDs, no reads of callback-owned
 // parameters or DSP histories. Fixed storage also bounds preparation memory.
+// A portable core cannot bridge a live FFT-size change: the retained stage-input
+// history that does it is native-sized (kSpectralInputFrames). The stage is replaced
+// instead, as a removal plus an insertion: the old one fades out as a ghost and the
+// new one starts fresh. Native keeps the spectral history across sizes.
+bool replaced_by_spectral_size_change(
+  const GraphRevision::Processor &current, const GraphRevision::Processor &next) {
+#if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  return current.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL && next.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL
+    && current.spectral.fft_size != next.spectral.fft_size;
+#else
+  (void)current;
+  (void)next;
+  return false;
+#endif
+}
+
 ProcessorContinuityMap build_processor_continuity_map(
   const GraphRevision &current, const GraphRevision &next) {
   ProcessorContinuityMap map{};
@@ -7629,35 +7645,16 @@ ProcessorContinuityMap build_processor_continuity_map(
     if (old_id < new_id) ++old_position;
     else if (new_id < old_id) ++new_position;
     else {
-      map.previous[new_index] = old_index;
-      map.next[old_index] = new_index;
+      if (!replaced_by_spectral_size_change(current.processors[old_index], next.processors[new_index])) {
+        map.previous[new_index] = old_index;
+        map.next[old_index] = new_index;
+      }
       ++old_position;
       ++new_position;
     }
   }
   return map;
 }
-
-// Everything a retained node, edge or processor must keep for its runtime to stay
-// valid: only differences the stable-ID slot tables cannot absorb are listed.
-#if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-// Preparation only. Nodes, edges and processors are matched by stable ID, so adding,
-// removing, reordering and reconfiguring them does not disturb what remains: each
-// object keeps or replaces its own runtime (see prepare_runtime_ownership), and a
-// latency change moves the read heads as it does on native. A live FFT-size change
-// is the one a portable core cannot carry: the retained stage-input history that
-// bridges it is native-sized (kSpectralInputFrames).
-bool spectral_size_continuity_compatible(
-  const GraphRevision &current, const GraphRevision &next, const ProcessorContinuityMap &processors) {
-  for (uint32_t index = 0; index < next.processor_count; ++index) {
-    const int32_t previous = processors.previous[index];
-    if (previous >= 0 && current.processors[static_cast<uint32_t>(previous)].kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL
-      && next.processors[index].kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL
-      && current.processors[static_cast<uint32_t>(previous)].spectral.fft_size != next.processors[index].spectral.fft_size) return false;
-  }
-  return true;
-}
-#endif
 
 void initialize_processor_slot(Core &core, uint32_t slot) {
   core.utility_histories[slot] = {};
@@ -8617,16 +8614,8 @@ daw_audio_core_result prepare_runtime_ownership(Core &core) {
   next.node_replaces.fill(0);
   next.edge_previous.fill(0);
   if (has_current) {
-#if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-    if (!spectral_size_continuity_compatible(current, next, processors)) {
-      core.prepared_continuity = ContinuityPreparationResult::kIncompatible;
-    } else {
-#endif
-      const daw_audio_core_result ghosts = append_deletion_ghosts(core, current, next, processors);
-      if (ghosts != DAW_AUDIO_CORE_OK) return ghosts;
-#if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-    }
-#endif
+    const daw_audio_core_result ghosts = append_deletion_ghosts(core, current, next, processors);
+    if (ghosts != DAW_AUDIO_CORE_OK) return ghosts;
   }
   build_graph_ranges(next);
   for (uint32_t index = 0; index < next.processor_count; ++index) {

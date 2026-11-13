@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { PortableWasmControlMessage, PortableWasmStatusMessage } from './portable-wasm-protocol'
-import { createDefaultUtilityParams } from '@daw-browser/shared'
-import { encodeEqProcessorState, encodeLimiterProcessorState, encodeUtilityProcessorState, mixerParameterRegistry, type AudioCoreGraphSnapshot, type AudioCoreInstrumentState } from '@daw-browser/audio-core-contract'
+import { createDefaultSpectralParams, createDefaultUtilityParams } from '@daw-browser/shared'
+import { encodeEqProcessorState, encodeLimiterProcessorState, encodeSpectralProcessorState, encodeUtilityProcessorState, mixerParameterRegistry, type AudioCoreGraphSnapshot, type AudioCoreInstrumentState } from '@daw-browser/audio-core-contract'
 
 const hostUrl = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v1.js', import.meta.url)
 const hostV2Url = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v2.js', import.meta.url)
@@ -2082,7 +2082,10 @@ const fxEq = (id: string, instanceId: number, type: 'peaking' | 'highshelf' = 'p
 type FxProcessor = ReturnType<typeof fxUtility>
 const fxGraph = (revision: number, chains: Record<string, readonly FxProcessor[]>) => {
   const base = portableTrackGraph(Object.keys(chains))
-  return { ...base, revision, nodes: base.nodes.map((node) => ({ ...node, processorOrder: chains[node.id] ?? [] })) }
+  return { ...base, revision, nodes: base.nodes.map((node) => {
+    const processorOrder = chains[node.id] ?? []
+    return { ...node, processorOrder, latencyFrames: processorOrder.reduce((sum, processor) => sum + processor.latencyFrames, 0) }
+  }) }
 }
 const fxSine = new Float32Array(48_000).map((_, frame) => Math.fround(Math.sin(2 * Math.PI * 1_000 * frame / 48_000)))
 const playSineThrough = async (chains: Record<string, readonly FxProcessor[]>) => {
@@ -2097,15 +2100,15 @@ const playSineThrough = async (chains: Record<string, readonly FxProcessor[]>) =
 }
 const fxSeam = 1_664
 // `before` plays 12 blocks, then the adoption of `after` publishes at frame 1664 and 8 more blocks render.
-const adoptEffects = async (before: readonly FxProcessor[], after: readonly FxProcessor[]) => {
+const adoptEffects = async (before: readonly FxProcessor[], after: readonly FxProcessor[], blocksAfter = 8) => {
   const { host, messages } = await playSineThrough({ track: before })
   const rendered = renderBlocks(host, 12)
   const { installed } = adoptRevision(host, messages, fxGraph(2, { track: after }), [], fxSeam)
-  rendered.push(...renderBlocks(host, 8))
+  rendered.push(...renderBlocks(host, blocksAfter))
   // A framed publish is answered by the block that applies it.
   return { rendered, adoption: { installed, published: publishedResults(messages, 2) } }
 }
-const referenceThrough = async (chain: readonly FxProcessor[]) => renderBlocks((await playSineThrough({ track: chain })).host, 20)
+const referenceThrough = async (chain: readonly FxProcessor[], blocks = 20) => renderBlocks((await playSineThrough({ track: chain })).host, blocks)
 // How much of `signal`'s departure from `base` the `rendered` signal has over `[from, from + length)`: 1 is `signal`, 0 is `base`.
 const weightOf = (rendered: readonly number[], base: readonly number[], signal: readonly number[], from: number, length = 48) => {
   let along = 0
@@ -2157,6 +2160,23 @@ test('W-C9-fx-4 a reorder dips the node to nothing and back over 5 ms around the
     dipsToNothing: Math.min(...gains) < 0.1, backNearFull: gains[9] > 0.8,
     steadyAfter: largestDifference(rendered, reference, fxSeam + 600, 20 * 128) < 5e-3 })
     .toEqual({ adoption: adoptedAtSeam, untouchedBefore: true, startsNearFull: true, dipsToNothing: true, backNearFull: true, steadyAfter: true })
+})
+
+// AE-08 phase 8 step 10, item 0: the portable core cannot bridge a Spectral FFT size change (its retained stage-input
+// history is 16,384 frames against native's 131,072), so the old stage fades out as a ghost over 5 ms and a fresh stage of
+// the new size starts. Native keeps the spectral history across sizes through its predecessor path; WASM restarts it.
+const fxSpectral = (fftSize: 512 | 1024) => fxProcessor('spectral-a', 61, 'spectral', 15,
+  encodeSpectralProcessorState({ ...createDefaultSpectralParams(), mode: 'gate', gateThresholdDb: -120, fftSize }), fftSize)
+
+test('W-C9-spectral-1 a Spectral FFT size change at the seam is adopted: the old stage fades out with no step and the new size resumes after its window fills', async () => {
+  const blocks = 60
+  const { rendered, adoption } = await adoptEffects([fxSpectral(512)], [fxSpectral(1024)], blocks)
+  const oldSize = await referenceThrough([fxSpectral(512)], 12 + blocks)
+  const newSize = await referenceThrough([fxSpectral(1024)], 12 + blocks)
+  expect({ adoption, untouchedBefore: largestDifference(rendered, oldSize, 0, fxSeam) < 1e-6,
+    noStep: largestStep(rendered.slice(fxSeam - 8, fxSeam + 2_048)) < 2 * largestStep(newSize.slice(4_096, 6_144)),
+    resumes: largestDifference(rendered, newSize, fxSeam + 6_000, rendered.length) < 5e-3 })
+    .toEqual({ adoption: adoptedAtSeam, untouchedBefore: true, noStep: true, resumes: true })
 })
 
 // AE-08 phase 8 step 9h: a delaying effect inserted or removed at a seam. The node's latency is its processors' sum, as

@@ -435,15 +435,16 @@ const withSeamClips = (next: readonly SnapshotClip[], installed: readonly Snapsh
   })
 }
 
-// The instances of `next` as `installed` has them where an edit leaves the same effect (the id and kind) with the same delay,
-// whatever else of its parameters moved: the core reconfigures it under continuity, keeping its history when its structure
-// allows and starting it again otherwise, as native does through the same call (CORE:7542-7609, 8689-8717). A parameter that
-// moves the delay (a Spectral fftSize) stays in the comparison.
+// The instances of `next` as `installed` has them where an edit leaves the same effect (the id and kind), whatever else of
+// its parameters moved: the core reconfigures it under continuity, keeping its history when its structure allows and
+// starting it again otherwise, and moves the read heads where its delay changed, as native does through the same calls
+// (CORE:7542-7609, 8689-8717). A Spectral fftSize stays in the comparison: the portable core cannot carry that change
+// (CORE:7658-7671).
 const withInstalledEffectParams = (next: readonly AudioEffectRuntimeInstance[], installed: readonly AudioEffectRuntimeInstance[] = []): AudioEffectRuntimeInstance[] => {
   const installedByKey = new Map(installed.map((instance) => [effectKey(instance), instance]))
   return next.map((instance) => {
     const counterpart = installedByKey.get(effectKey(instance))
-    return counterpart && latencyFrames(counterpart) === latencyFrames(instance) ? counterpart : instance
+    return counterpart && (instance.kind !== "spectral" || spectralDelay(counterpart) === spectralDelay(instance)) ? counterpart : instance
   })
 }
 
@@ -453,9 +454,8 @@ const withInstalledEffectParams = (next: readonly AudioEffectRuntimeInstance[], 
 // replaced one out, CORE:8162-8194, and the held notes follow `keepsInstrumentVoices`), and the parameters of the effects
 // it plays that the live path does not take (`withInstalledEffectParams`). `next` with that taken from `previous`
 // fingerprints as `previous` when nothing else changed. The tracks added or deleted are no part of the comparison
-// (`onSharedTracks`), nor are the effects of those tracks that do not delay the signal (`onKeptEffects`). Still refused: an
-// effect that delays the signal inserted, removed, replaced or moved, a parameter that changes an effect's delay, a sample
-// that becomes or ceases to be available, and a track whose add or delete moves a routing delay (`continuesDelays`).
+// (`onSharedTracks`), nor are the effects those tracks have inserted, removed or moved (`onKeptEffects`). Still refused: a
+// Spectral fftSize change and a sample that becomes or ceases to be available.
 const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const previousTracks = new Map(previous.tracks.map((track) => [track.id, track]))
   const trackFx = next.mixer.fx.trackFx && Object.fromEntries(Object.entries(next.mixer.fx.trackFx).map(([id, entry]) => {
@@ -487,45 +487,30 @@ const onSharedTracks = (snapshot: LivePlaybackSnapshot, other: LivePlaybackSnaps
   return { ...snapshot, tracks: snapshot.tracks.filter((track) => shared.has(track.id)), mixer: { ...snapshot.mixer, fx: { ...snapshot.mixer.fx, trackFx } } }
 }
 
-// A delay is only compared with zero or with another delay of the same kind, so the sample rate that turns its time into
-// frames cannot change an answer, and a constant stands in for the session's.
-const latencyFrames = (instance: AudioEffectRuntimeInstance) => getEffectTiming(instance, 48_000).latencyFrames
-const hasLatency = (instance: AudioEffectRuntimeInstance) => latencyFrames(instance) !== 0
+// A Spectral effect's delay is its FFT size, so comparing it with another's needs no sample rate: a constant stands in
+// for the session's.
+const spectralDelay = (instance: AudioEffectRuntimeInstance) => getEffectTiming(instance, 48_000).latencyFrames
 const effectKey = (instance: AudioEffectRuntimeInstance) => `${instance.id}\0${instance.kind}`
 
-// The effects of a track an adoption carries: every one inserted, removed, replaced (another kind under the same id) or
-// moved, when none of them delays the signal and the ones that do keep their order. The core keeps a survivor's history
-// by instance id, fades a removed one over its 5 ms ghost and dips a node whose stages were reordered; the node's latency
-// and the routes' delays are what they were, so the continuity it needs holds (`continuesDelays` checks the graph).
-const carriesEffects = (before: readonly AudioEffectRuntimeInstance[], after: readonly AudioEffectRuntimeInstance[]) => {
-  const inBefore = new Set(before.map(effectKey))
-  const inAfter = new Set(after.map(effectKey))
-  const delayingInOrder = (list: readonly AudioEffectRuntimeInstance[], other: ReadonlySet<string>) =>
-    list.filter((instance) => hasLatency(instance) && other.has(effectKey(instance))).map(effectKey)
-  return [...before.filter((instance) => !inAfter.has(effectKey(instance))), ...after.filter((instance) => !inBefore.has(effectKey(instance)))].every((instance) => !hasLatency(instance))
-    && JSON.stringify(delayingInOrder(before, inAfter)) === JSON.stringify(delayingInOrder(after, inBefore))
-}
-
-// `snapshot` with the effects `carriesEffects` carries taken out of the comparison: what both sides keep, by id. A
-// surviving effect's own edit stays in it (`withLiveContentOf` decides which are live). Both snapshots hold the tracks
-// both sides play (`onSharedTracks`), so each track has an entry on both, empty when it has no effects.
+// `snapshot` with the effects an adoption carries taken out of the comparison: every one inserted, removed, replaced
+// (another kind under the same id) or moved leaves only what both sides keep, by id. The core keeps a survivor's history
+// by instance id, fades a removed one over its 5 ms ghost, dips a node whose stages were reordered and moves the read
+// heads where the node's delay changed. A surviving effect's own edit stays in the comparison (`withLiveContentOf` decides
+// which are live). Both snapshots hold the tracks both sides play (`onSharedTracks`), so each track has an entry on both,
+// empty when it has no effects.
 const onKeptEffects = (snapshot: LivePlaybackSnapshot, other: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const own = snapshot.mixer.fx.trackFx ?? {}
   const theirs = other.mixer.fx.trackFx ?? {}
-  const trackFx = Object.fromEntries(snapshot.tracks.flatMap(({ id }) => {
+  const trackFx = Object.fromEntries(snapshot.tracks.map(({ id }) => {
     const entry = own[id]
-    const instances = entry?.instances ?? []
-    const counterpart = theirs[id]?.instances ?? []
-    if (!carriesEffects(instances, counterpart)) return entry ? [[id, entry]] : []
-    const kept = new Set(counterpart.map(effectKey))
-    return [[id, { ...entry, instances: instances.filter((instance) => kept.has(effectKey(instance))).sort((left, right) => left.id.localeCompare(right.id)) }]]
+    const kept = new Set((theirs[id]?.instances ?? []).map(effectKey))
+    return [id, { ...entry, instances: (entry?.instances ?? []).filter((instance) => kept.has(effectKey(instance))).sort((left, right) => left.id.localeCompare(right.id)) }]
   }))
   return { ...snapshot, mixer: { ...snapshot.mixer, fx: { ...snapshot.mixer.fx, trackFx } } }
 }
 
 // `next` in the order the session built its graph in, with the tracks it adds after the rest. A track's place among the
-// others sounds like nothing, so a reorder is the session's own graph again, and the node and edge lists, which the core
-// compares by position for delayed routes (CORE:7673-7692), keep their places.
+// others sounds like nothing, so a reorder is the session's own graph again, and the node and edge lists keep their places.
 const inSessionOrder = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const ranked = <T>(items: readonly T[], id: (item: T) => string, before: readonly string[]) => {
     const rank = new Map(before.map((entry, index) => [entry, index]))
@@ -544,22 +529,6 @@ const inSessionOrder = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapsh
       fx: { ...next.mixer.fx, trackFx },
     },
   }
-}
-
-// The WASM core continues a graph only when no delay moves: every node keeps its latency, and a delayed route keeps its
-// place and identity in the edge list (CORE:7673-7692). A track added or deleted on a path a latency-bearing effect
-// delays moves one; the core carries that in step 9h, until then the session is rebuilt.
-const continuesDelays = (before: AudioCoreGraphSnapshot, after: AudioCoreGraphSnapshot) => {
-  const nodes = new Map(after.nodes.map((node) => [node.id, node]))
-  const sameLatency = before.nodes.every((node) => {
-    const kept = nodes.get(node.id)
-    return !kept || (kept.latencyFrames === node.latencyFrames && (kept.externalLatencyFrames ?? 0) === (node.externalLatencyFrames ?? 0))
-  })
-  const delayed = (edge: AudioCoreGraphSnapshot["edges"][number] | undefined) => (edge?.pdcDelayFrames ?? 0) !== 0
-  return sameLatency && Array.from({ length: Math.max(before.edges.length, after.edges.length) }, (_, index) => [before.edges.at(index), after.edges.at(index)] as const)
-    .every(([left, right]) => !(delayed(left) || delayed(right)) || (left !== undefined && right !== undefined && left.id === right.id
-      && left.fromNodeId === right.fromNodeId && left.toNodeId === right.toNodeId && left.tap === right.tap && left.sidechain === right.sidechain
-      && left.targetProcessorId === right.targetProcessorId && left.pdcDelayFrames === right.pdcDelayFrames))
 }
 
 // The worklet rejects a schedule with more events than this.
@@ -2245,8 +2214,7 @@ export const createPortableBrowserPlaybackController = (input: {
         ...transport, ...effectiveLoopForStart(recording ? previous.transport : loop, arrangementNow, sampleRate), state: wasPlaying ? "playing" : "paused", playheadSec: arrangementNow / sampleRate,
       }, { liveAdoption: true })
       if (!current()) return "unavailable"
-      // Latency-bearing effect structure and parameters, and the tracks that move a routing delay, are not carried at a seam
-      // yet (step 9h); those still rebuild.
+      // What the session cannot carry at a seam (`compileSnapshot`) rebuilds.
       if (!compilation.supported) return "rebuild"
       const next = compilation.snapshot
       const desired = fingerprint(next)
@@ -2278,7 +2246,7 @@ export const createPortableBrowserPlaybackController = (input: {
         sampleRate, epoch, projectGeneration, horizonFrames / sampleRate, 1, resources.preparedStretchAssets, undefined, resources.ordinaryDescriptors, rawFrame)
       // The graph does not depend on the origin, so it is prepared first and the seam is chosen after that round trip.
       const provisional = compileFrom(positionFrame, arrangementNow, folded.transport, range.endFrame - positionFrame)
-      if (!provisional.supported || (activeGraph && !continuesDelays(activeGraph, provisional.graph))) return "rebuild"
+      if (!provisional.supported) return "rebuild"
       await session.prepareGraph(provisional.graph)
       if (!current()) return "unavailable"
       // The worklet resolves instrument zones and sources by asset id when it publishes, so what the edit added is

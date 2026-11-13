@@ -747,7 +747,6 @@ struct Core {
   std::unique_ptr<float[]> graph_tap_storage{};
   std::array<TapHistory, kTapHistorySlots> graph_tap_histories{};
   uint64_t graph_write_frame = 0;
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
   // Callback writes; control observes only these release/acquire snapshots.
   std::atomic<uint64_t> completed_graph_frame{0};
   std::atomic<uint32_t> latency_budget{0};
@@ -758,7 +757,6 @@ struct Core {
   // publication command reaches a later boundary than the prepare snapshot.
   uint64_t latency_publication_shift = 0;
   std::atomic<uint32_t> latency_shrunk_revision{0};
-#endif
   std::unique_ptr<GraphRevision[]> graph_prepare_scratch{};
   std::array<ProcessorHistorySlot, kMaximumGraphProcessors> processor_history_slots{};
   std::array<UtilityHistory, kMaximumGraphProcessors> utility_histories{};
@@ -1672,20 +1670,6 @@ daw_audio_core_result prepare_graph_revision(
   *out_graph = graph;
   return DAW_AUDIO_CORE_OK;
 }
-
-#if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-bool has_pdc_change(const GraphRevision &current, const GraphRevision &next) {
-  if (current.revision == 0) return false;
-  for (uint32_t next_index = 0; next_index < next.edge_count; ++next_index) {
-    const daw_audio_graph_edge_descriptor &next_edge = next.edges[next_index];
-    for (uint32_t current_index = 0; current_index < current.edge_count; ++current_index) {
-      const daw_audio_graph_edge_descriptor &current_edge = current.edges[current_index];
-      if (current_edge.id == next_edge.id && current_edge.pdc_delay_frames != next_edge.pdc_delay_frames) return true;
-    }
-  }
-  return false;
-}
-#endif
 
 bool valid_utility_state(const daw_audio_utility_state &state) {
   return (state.enabled == 0 || state.enabled == 1)
@@ -4187,7 +4171,6 @@ float graph_edge_sample(
   const auto &edge = graph.edges[edge_index];
   const uint32_t source_index = graph.edge_source_indices[edge_index];
   float source = 0.0F;
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
   const auto &head = graph.read_heads[edge_index];
   const uint64_t absolute = core.graph_write_frame + frame;
   const uint64_t seam = head.seam + core.latency_publication_shift;
@@ -4203,9 +4186,6 @@ float graph_edge_sample(
   } else {
     source = graph_tap_sample(core, graph, edge_index, channel, frame, head.delay);
   }
-#else
-  source = graph_tap_sample(core, graph, edge_index, channel, frame, edge.pdc_delay_frames);
-#endif
   const Core::EdgeRamp &ramp = core.edge_ramps[core.edge_ramp_bank][edge_index];
   source *= edge_ramp_gain(ramp, edge.gain, ramp.elapsed + frame + 1u);
   if (source_index >= graph.node_count) source *= ghost_edge_fade_gain(core, graph, edge_index, frame);
@@ -5880,21 +5860,17 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
     const uint32_t graph_channel = channel == 0 ? 0 : 1;
     for (uint32_t frame = 0; frame < block.frame_count; ++frame) {
       float gain = 1.0F;
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
       if (graph.latency_raise != 0 && core.transport.running != 0 && core.latency_shrunk_revision != graph.revision) {
         const uint64_t absolute = core.graph_write_frame + frame;
         const uint64_t seam = graph.latency_origin + core.latency_publication_shift + graph.fade_frames;
         if (absolute < seam) gain = static_cast<float>(seam - absolute) / graph.fade_frames;
         else if (absolute < seam + graph.fade_frames) gain = static_cast<float>(absolute - seam) / graph.fade_frames;
       }
-#endif
       block.outputs[channel][frame] = *graph_stage_sample(core, kGraphOutputStage, graph.master_index, graph_channel, frame) * gain;
     }
   }
   core.graph_write_frame += block.frame_count;
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
   core.completed_graph_frame.store(core.graph_write_frame, std::memory_order_release);
-#endif
 }
 
 bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
@@ -6917,50 +6893,65 @@ bool prepare_tap_histories(Core &core, GraphRevision &next) {
 }
 
 #if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-// Portable latency changes remain deferred. The first stopped graph configure
-// provisions only the rings its compensated readers actually need. Chains may
-// accumulate to the product ceiling; no smaller global latency bound is assumed.
+// Native reserves kMaximumGraphLatencyFrames for every tap; that does not fit the
+// fixed 256 MiB Wasm memory, so the rings here follow the readers. Every tap a node
+// owns keeps this floor, so a delay raised later still has its history to read.
+constexpr uint32_t kPortableTapHistoryFloorFrames = 4096;
+
+// Control and render share one thread here, so a prepare may move the rings. They
+// only grow: the published plan keeps reading them, and a grown ring carries its
+// history over. A ring covers the longest delay any head of the plan reads.
 bool configure_portable_tap_histories(Core &core, const GraphRevision &graph) {
-  if (core.published_revision != 0) {
-    for (uint32_t edge = 0; edge < graph.edge_count; ++edge) {
-      const auto &reader = graph.edges[edge];
-      const uint32_t stage = reader.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX ? kGraphPreFxStage
-        : reader.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FADER ? kGraphPreFaderStage : kGraphOutputStage;
-      if (reader.pdc_delay_frames > core.graph_tap_histories[
-        graph.tap_history_slots[graph.edge_source_indices[edge]][stage]].capacity) return false;
-    }
-    return true;
-  }
   std::array<uint32_t, Core::kTapHistorySlots> capacities{};
-  for (uint32_t edge = 0; edge < graph.edge_count; ++edge) {
+  for (uint32_t slot = 0; slot < capacities.size(); ++slot) capacities[slot] = core.graph_tap_histories[slot].capacity;
+  const auto grow = [&](uint32_t slot, uint32_t frames) {
+    uint32_t capacity = 1;
+    while (capacity < frames) capacity *= 2;
+    capacities[slot] = std::max(capacities[slot], capacity);
+  };
+  for (uint32_t node = 0; node < graph.node_count; ++node) {
+    for (uint32_t tap = 0; tap < kGraphStageCount; ++tap) grow(graph.tap_history_slots[node][tap], kPortableTapHistoryFloorFrames);
+  }
+  for (uint32_t edge = 0; edge < graph.total_edge_count(); ++edge) {
     const auto &reader = graph.edges[edge];
+    const auto &head = graph.read_heads[edge];
     const uint32_t stage = reader.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX ? kGraphPreFxStage
       : reader.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FADER ? kGraphPreFaderStage : kGraphOutputStage;
-    const uint32_t slot = graph.tap_history_slots[graph.edge_source_indices[edge]][stage];
-    uint32_t capacity = reader.pdc_delay_frames == 0 ? 0 : 1;
-    while (capacity < reader.pdc_delay_frames) capacity *= 2;
-    capacities[slot] = std::max(capacities[slot], capacity);
+    grow(graph.tap_history_slots[graph.edge_source_indices[edge]][stage],
+      std::max({head.delay, head.previous_delay, head.stopped_delay}));
   }
+  std::array<std::size_t, Core::kTapHistorySlots> offsets{};
   std::size_t samples = 0;
-  for (const uint32_t capacity : capacities) samples += capacity * 2u;
-  std::unique_ptr<float[]> storage;
-  if (samples != 0) {
-    storage.reset(new (std::nothrow) float[samples]());
-    if (!storage) return false;
-    volatile float *pages = storage.get();
-    for (std::size_t sample = 0; sample < samples; sample += 1024u) pages[sample] = 0.0F;
-  }
-  std::size_t offset = 0;
+  bool grown = false;
   for (uint32_t slot = 0; slot < capacities.size(); ++slot) {
-    core.graph_tap_histories[slot] = {.offset = offset, .capacity = capacities[slot]};
-    offset += capacities[slot] * 2u;
+    offsets[slot] = samples;
+    samples += static_cast<std::size_t>(capacities[slot]) * 2u;
+    grown = grown || capacities[slot] != core.graph_tap_histories[slot].capacity;
+  }
+  if (!grown) return true;
+  std::unique_ptr<float[]> storage(new (std::nothrow) float[samples]());
+  if (!storage) return false;
+  volatile float *pages = storage.get();
+  for (std::size_t sample = 0; sample < samples; sample += 1024u) pages[sample] = 0.0F;
+  for (uint32_t slot = 0; slot < capacities.size(); ++slot) {
+    const auto &old = core.graph_tap_histories[slot];
+    const uint64_t first = std::max<uint64_t>(old.first_frame, old.end_frame - std::min(old.end_frame, uint64_t{old.capacity}));
+    for (uint32_t channel = 0; channel < 2; ++channel) {
+      for (uint64_t frame = first; frame < old.end_frame; ++frame) {
+        storage[offsets[slot] + channel * capacities[slot] + (frame & (capacities[slot] - 1u))]
+          = core.graph_tap_storage[old.offset + channel * old.capacity + (frame & (old.capacity - 1u))];
+      }
+    }
+  }
+  for (uint32_t slot = 0; slot < capacities.size(); ++slot) {
+    core.graph_tap_histories[slot].offset = offsets[slot];
+    core.graph_tap_histories[slot].capacity = capacities[slot];
   }
   core.graph_tap_storage = std::move(storage);
   return true;
 }
 #endif
 
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
 // Control-side read-head preparation. Keep the compiler's validated minimum
 // table for stopped playback; a running graph pins its master budget on lowers.
 // Heads share the retained pre-gain tap, never another copy of the signal.
@@ -7119,7 +7110,6 @@ daw_audio_core_result prepare_latency_heads(Core &core, GraphRevision &next, boo
   }
   return DAW_AUDIO_CORE_OK;
 }
-#endif
 
 extern "C" daw_audio_core_result daw_audio_core_prepare(
   daw_audio_core_handle core_handle,
@@ -7147,9 +7137,6 @@ extern "C" daw_audio_core_result daw_audio_core_prepare_graph(
   GraphRevision *prepared = &core->graph_prepare_scratch[0];
   const daw_audio_core_result result = prepare_graph_revision(*core, *request, prepared);
   if (result != DAW_AUDIO_CORE_OK) return result;
-#if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-  if (has_pdc_change((*core->published_graph), *prepared)) return DAW_AUDIO_CORE_LATENCY_CHANGE_DEFERRED;
-#endif
   // A new prepare replaces any unpublished plan: its fresh slots go back first.
   release_prepared_runtime(*core);
   core->prepared_revision = 0;
@@ -7160,13 +7147,11 @@ extern "C" daw_audio_core_result daw_audio_core_prepare_graph(
     release_prepared_runtime(*core);
     return ownership;
   }
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
   const auto latency = prepare_latency_heads(*core, *core->prepared_graph);
   if (latency != DAW_AUDIO_CORE_OK) {
     release_prepared_runtime(*core);
     return latency;
   }
-#endif
   if (!prepare_tap_histories(*core, *core->prepared_graph)) {
     release_prepared_runtime(*core);
     return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
@@ -7656,37 +7641,19 @@ ProcessorContinuityMap build_processor_continuity_map(
 // Everything a retained node, edge or processor must keep for its runtime to stay
 // valid: only differences the stable-ID slot tables cannot absorb are listed.
 #if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-bool same_edge_identity(
-  const daw_audio_graph_edge_descriptor &left, const daw_audio_graph_edge_descriptor &right) {
-  return left.id == right.id && left.from_node_id == right.from_node_id
-    && left.to_node_id == right.to_node_id && left.tap == right.tap
-    && left.sidechain == right.sidechain && left.target_processor_id == right.target_processor_id
-    && left.pdc_delay_frames == right.pdc_delay_frames;
-}
-
 // Preparation only. Nodes, edges and processors are matched by stable ID, so adding,
 // removing, reordering and reconfiguring them does not disturb what remains: each
-// object keeps or replaces its own runtime (see prepare_runtime_ownership). Only a
-// latency change cannot yet be carried: persistent tap storage is available,
-// but seam-scheduled read-head transitions are not. Keep the legacy delayed-edge
-// compatibility restriction until those transitions are implemented together.
-bool latency_continuity_compatible(const GraphRevision &current, const GraphRevision &next) {
-  if (current.revision == 0) return true;
-  for (uint32_t index = 0; index < current.node_count; ++index) {
-    const auto &left = current.nodes[index];
-    const int32_t next_index = graph_node_index(next, left.id);
-    if (next_index < 0) continue;
-    const auto &right = next.nodes[static_cast<uint32_t>(next_index)];
-    if (left.latency_frames != right.latency_frames
-      || left.external_latency_frames != right.external_latency_frames) return false;
-  }
-  for (uint32_t index = 0; index < current.edge_count; ++index) {
-    if (current.edges[index].pdc_delay_frames != 0
-      && (index >= next.edge_count || !same_edge_identity(current.edges[index], next.edges[index]))) return false;
-  }
-  for (uint32_t index = 0; index < next.edge_count; ++index) {
-    if (next.edges[index].pdc_delay_frames != 0
-      && (index >= current.edge_count || !same_edge_identity(current.edges[index], next.edges[index]))) return false;
+// object keeps or replaces its own runtime (see prepare_runtime_ownership), and a
+// latency change moves the read heads as it does on native. A live FFT-size change
+// is the one a portable core cannot carry: the retained stage-input history that
+// bridges it is native-sized (kSpectralInputFrames).
+bool spectral_size_continuity_compatible(
+  const GraphRevision &current, const GraphRevision &next, const ProcessorContinuityMap &processors) {
+  for (uint32_t index = 0; index < next.processor_count; ++index) {
+    const int32_t previous = processors.previous[index];
+    if (previous >= 0 && current.processors[static_cast<uint32_t>(previous)].kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL
+      && next.processors[index].kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL
+      && current.processors[static_cast<uint32_t>(previous)].spectral.fft_size != next.processors[index].spectral.fft_size) return false;
   }
   return true;
 }
@@ -7814,9 +7781,8 @@ uint32_t deletion_fade_frames(uint32_t sample_rate_hz) {
 // the ghost shares. Running out of transition capacity, a deletion that has no dry
 // path to fade to, and fading entries that would form a cycle are failed prepares
 // (CAPACITY_EXCEEDED, GRAPH_COMPATIBILITY_REJECTED): none of them ever produces a
-// plan that cuts a deletion or resets what the edit did not touch. Only a deletion
-// that changes latency is deferred (LATENCY_CHANGE_DEFERRED), because moving PDC
-// delay lines belongs to a later phase.
+// plan that cuts a deletion or resets what the edit did not touch. A deletion that
+// changes latency moves the read heads (prepare_latency_heads), as on every host.
 daw_audio_core_result append_deletion_ghosts(
   Core &core, const GraphRevision &current, GraphRevision &next,
   const ProcessorContinuityMap &processors) {
@@ -7889,15 +7855,10 @@ daw_audio_core_result append_deletion_ghosts(
   };
   uint32_t ghost_edges = 0;
   const auto inherit_reader = [&](uint32_t edge, uint32_t old) {
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
     const uint32_t delay = core.latency_budget.load(std::memory_order_acquire) == current.latency_budget
       ? current.read_heads[old].delay : current.read_heads[old].stopped_delay;
     next.edges[edge].pdc_delay_frames = delay;
     next.read_heads[edge] = {.previous_delay = delay, .delay = delay, .stopped_delay = delay};
-#else
-    static_cast<void>(edge);
-    static_cast<void>(old);
-#endif
   };
   for (uint32_t order = 0; order < old_edges; ++order) {
     const uint32_t index = by_source[order];
@@ -7907,9 +7868,6 @@ daw_audio_core_result append_deletion_ghosts(
     const bool from_ghost = from >= static_cast<int32_t>(next.node_count);
     const bool to_ghost = to >= static_cast<int32_t>(next.node_count);
     if (from < 0 || to < 0 || !(from_ghost || to_ghost)) continue;
-#if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-    if (current.edges[index].pdc_delay_frames != 0) continue;
-#endif
     if (ghost_edges >= kMaximumGhostEdges) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
     const uint32_t ghost_index = next.edge_count + ghost_edges++;
     next.edges[ghost_index] = current.edges[index];
@@ -7947,9 +7905,6 @@ daw_audio_core_result append_deletion_ghosts(
       // A survivor's crossfade back to the dry signal needs a stage that neither
       // delays nor changes layout; otherwise the deletion cannot be faded.
       if (node < static_cast<int32_t>(next.node_count)) {
-#if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-        if (old.latency_frames != 0) return DAW_AUDIO_CORE_LATENCY_CHANGE_DEFERRED;
-#endif
         if (old.input_layout != old.output_layout
           || old.input_layout != next.nodes[static_cast<uint32_t>(node)].output_layout) {
           return DAW_AUDIO_CORE_GRAPH_COMPATIBILITY_REJECTED;
@@ -7987,9 +7942,6 @@ daw_audio_core_result append_deletion_ghosts(
     const int32_t target = processor_to_next[current.edge_target_processors[index]];
     if (from < 0 || to < 0 || target < 0) continue;
     if (from < static_cast<int32_t>(next.node_count) && target < static_cast<int32_t>(next.processor_count)) continue;
-#if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-    if (current.edges[index].pdc_delay_frames != 0) return DAW_AUDIO_CORE_LATENCY_CHANGE_DEFERRED;
-#endif
     if (ghost_edges >= kMaximumGhostEdges) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
     const uint32_t ghost_index = next.edge_count + ghost_edges++;
     next.edges[ghost_index] = current.edges[index];
@@ -8027,9 +7979,6 @@ daw_audio_core_result append_deletion_ghosts(
     const int32_t to = node_to_next[current.edge_target_indices[index]];
     if (from < 0 || to < 0 || from >= static_cast<int32_t>(next.node_count)
       || to >= static_cast<int32_t>(next.node_count)) continue;
-#if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-    if (old.pdc_delay_frames != 0) continue;
-#endif
     const int32_t target = old.sidechain != 0 ? processor_to_next[current.edge_target_processors[index]] : -1;
     if (old.sidechain != 0 && (target < 0 || target >= static_cast<int32_t>(next.processor_count))) continue;
     bool kept = false;
@@ -8669,13 +8618,12 @@ daw_audio_core_result prepare_runtime_ownership(Core &core) {
   next.edge_previous.fill(0);
   if (has_current) {
 #if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-    if (!latency_continuity_compatible(current, next)) {
+    if (!spectral_size_continuity_compatible(current, next, processors)) {
       core.prepared_continuity = ContinuityPreparationResult::kIncompatible;
     } else {
 #endif
       const daw_audio_core_result ghosts = append_deletion_ghosts(core, current, next, processors);
-      if (ghosts == DAW_AUDIO_CORE_LATENCY_CHANGE_DEFERRED) core.prepared_continuity = ContinuityPreparationResult::kIncompatible;
-      else if (ghosts != DAW_AUDIO_CORE_OK) return ghosts;
+      if (ghosts != DAW_AUDIO_CORE_OK) return ghosts;
 #if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
     }
 #endif
@@ -8865,11 +8813,9 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
   if (core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   if (expected_revision == 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   if (core->prepared_revision != expected_revision) return DAW_AUDIO_CORE_STALE_REVISION;
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
   if (core->latency_move_revision.load(std::memory_order_acquire)
     > core->latency_completed_revision.load(std::memory_order_acquire))
     return DAW_AUDIO_CORE_LATENCY_MOVE_PENDING;
-#endif
   if ((*core->prepared_graph).revision == expected_revision) {
     if (!prepared_runtime_current(*core, *core->prepared_graph)) {
       core->stale_references.fetch_add(1, std::memory_order_relaxed);
@@ -8902,7 +8848,6 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
       }
     }
     core->prepared_runtime_held = false;
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
     core->latency_publication_shift = core->graph_write_frame - core->prepared_graph->latency_origin;
     const bool running = core->transport_running.load(std::memory_order_acquire);
     core->latency_shrunk_revision = running ? 0u : expected_revision;
@@ -8912,7 +8857,6 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
     if (!running || (core->prepared_graph->latency_end == core->prepared_graph->latency_origin
       && core->prepared_graph->spectral_predecessor_count == 0))
       core->latency_completed_revision.store(expected_revision, std::memory_order_release);
-#endif
     std::swap(core->published_graph, core->prepared_graph);
     std::swap(core->published_instrument_configs, core->prepared_instrument_configs);
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
@@ -9196,7 +9140,6 @@ static daw_audio_core_result process_block(
     Core &core;
     ~EpochGuard() {
       core.render_epoch.fetch_add(1, std::memory_order_release);
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
       // Publish completion after the reader epoch, not from inside graph render.
       // Control may reclaim a descriptor as soon as it acquires this snapshot.
       const auto &graph = *core.published_graph;
@@ -9209,7 +9152,6 @@ static daw_audio_core_result process_block(
       }
       if (stages_complete && core.graph_write_frame >= graph.latency_end + core.latency_publication_shift)
         core.latency_completed_revision.store(graph.revision, std::memory_order_release);
-#endif
     }
   } epoch{*core};
   if (!valid_abi(block->abi_version)) return DAW_AUDIO_CORE_UNSUPPORTED_VERSION;
@@ -9303,14 +9245,12 @@ extern "C" daw_audio_core_result daw_audio_core_set_transport(
     for (Core::MixerLatch &latch : core->mixer_latches) latch.mask = 0;
   }
   core->transport = *state;
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
   core->transport_running.store(state->running != 0, std::memory_order_release);
   if (state->running == 0) {
     core->latency_shrunk_revision = core->published_revision;
     core->latency_budget.store(core->published_graph->minimum_latency, std::memory_order_release);
     core->latency_completed_revision.store(core->published_revision, std::memory_order_release);
   }
-#endif
   return DAW_AUDIO_CORE_OK;
 }
 

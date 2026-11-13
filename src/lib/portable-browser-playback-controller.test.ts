@@ -2329,13 +2329,13 @@ test('B6f5 R6 a schedule refresh after an adoption continues the adopted revisio
 
 // B6f5 step 5b, R6: a compile the session cannot continue (a structural edit since its start) is never installed on it.
 // The refresh skips it without a fault, as it did before adoption; the follow asks for the rebuild that carries it.
-// A limiter delays the signal, which no seam carries until step 9h; an effect that does not is carried (9f).
-const b6f5AddedEffect: AudioEffectRuntimeInstance = { id: 'limiter-b6f5-structure', kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } }
+// The structural edit is a Spectral fftSize change, which the portable core cannot carry at a seam (CORE:7658-7671).
+const b6f5Spectral = (fftSize: 512 | 1024): AudioEffectRuntimeInstance => ({ id: 'spectral-b6f5-structure', kind: 'spectral', params: { version: 1, state: { ...createDefaultSpectralParams(), fftSize } } })
+const b6f5AddedEffect = b6f5Spectral(1024)
 const b6f5StructuralCompilation = (transport: LivePlaybackTransport, added: AudioEffectRuntimeInstance | undefined) => {
   const base = compilation()
-  if (!added) return { ...base, snapshot: { ...base.snapshot, transport } }
   const trackFx = Object.fromEntries(Object.entries(base.snapshot.mixer.fx.trackFx ?? {})
-    .map(([id, entry]) => [id, id === track.id ? { ...entry, instances: [...entry.instances, added] } : entry]))
+    .map(([id, entry]) => [id, id === track.id ? { ...entry, instances: [...entry.instances, added ?? b6f5Spectral(512)] } : entry]))
   const fx = { ...base.snapshot.mixer.fx, trackFx }
   return { ...base, snapshot: { ...base.snapshot, transport, mixer: { ...base.snapshot.mixer, fx, graph: resolveLiveMixerGraph(base.snapshot.tracks, fx.trackFx) } } }
 }
@@ -3937,8 +3937,8 @@ test('W-C9-warp-6 the Stretch artifact a failed attempt kept is released when th
 
 // AE-08 phase 8 step 9e: a track added or deleted is carried at a seam (class 3). A track's place among the others sounds
 // like nothing, so a reorder is the session's own graph again. A deleted track's held notes and sources end with the
-// core's 5 ms ghost fade (D-3): a note-off for its node would reject the whole staged schedule. A track whose delay
-// the WASM core cannot yet move (step 9h) stays a rebuild.
+// core's 5 ms ghost fade (D-3): a note-off for its node would reject the whole staged schedule. A track that moves
+// another route's delay is carried too (9h): the core moves the read heads.
 const e9Source = { durationSec: pagedAssetFrameCount / 48_000, sampleRate: 48_000, channelCount: 1 }
 const e9Midi = (id: string): RuntimeTrack => ({ ...track, id, name: id, clips: track.clips.map((clip) => ({ ...clip, id: `${id}-clip`, duration: 8,
   midi: clip.midi && { ...clip.midi, notes: [{ id: `${id}-held`, beat: 0, length: 8, pitch: 60, velocity: 0.8 }] } })) })
@@ -4108,9 +4108,8 @@ test('W-C9-track-6 a track added and then deleted on a paused session is adopted
   } finally { f.controller.dispose() }
 })
 
-// The WASM core continues a graph only when no delay moves (CORE:7673-7692). Until step 9h a track whose add or delete
-// moves one is a rebuild: nothing is published, so the retry loop never meets a refusal it cannot converge on.
-test('W-C9-track-7 a track added or deleted where a latency-bearing effect gives routes a delay answers rebuild and publishes nothing', async () => {
+// A track whose add or delete moves another route's delay is adopted like any other: the core moves the read heads (9h, D-1).
+test('W-C9-track-7 a track added or deleted where a latency-bearing effect gives routes a delay is adopted with one publish', async () => {
   const added = await e9Fixture({ compressed: true })
   const deletedPlain = await e9Fixture({ compressed: true, tracks: [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a'), e9Audio('audio-b', 'asset-b')] })
   const deletedLatent = await e9Fixture({ compressed: true, tracks: [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a'), e9Audio('audio-b', 'asset-b')] })
@@ -4123,14 +4122,13 @@ test('W-C9-track-7 a track added or deleted where a latency-bearing effect gives
     deletedLatent.state.tracks = deletedLatent.state.tracks.filter((entry) => entry.id !== 'audio-a')
     expect({ added: await added.controller.adoptSchedule(noLoop), deletedPlain: await deletedPlain.controller.adoptSchedule(noLoop),
       deletedLatent: await deletedLatent.controller.adoptSchedule(noLoop), published: [added, deletedPlain, deletedLatent].map((f) => f.published()) })
-      .toEqual({ added: 'rebuild', deletedPlain: 'rebuild', deletedLatent: 'rebuild', published: [0, 0, 0] })
+      .toEqual({ added: 'adopted', deletedPlain: 'adopted', deletedLatent: 'adopted', published: [1, 1, 1] })
   } finally { added.controller.dispose(); deletedPlain.controller.dispose(); deletedLatent.controller.dispose() }
 })
 
 // AE-08 phase 8 step 9f: effects inserted, removed, replaced and reordered on a track the session plays are carried at a
-// seam when none of them delays the signal (class 4a). The core keeps a survivor's history by instance id, fades a
-// removed effect over its 5 ms ghost (D-3) and dips a node whose stages were reordered. An effect that delays the signal
-// stays a rebuild until step 9h.
+// seam (class 4a). The core keeps a survivor's history by instance id, fades a removed effect over its 5 ms ghost (D-3),
+// dips a node whose stages were reordered and, as 9h adds, moves the read heads where an effect changes the node's delay.
 const f9Utility = (id: string): AudioEffectRuntimeInstance => ({ id, kind: 'utility', params: { version: 1, state: createDefaultUtilityParams() } })
 const f9Delay = (id: string): AudioEffectRuntimeInstance => ({ id, kind: 'delay', params: createDefaultDelayParams() })
 const f9Limiter = (id: string): AudioEffectRuntimeInstance => ({ id, kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } })
@@ -4167,10 +4165,8 @@ test.each(f9Edits)('W-C9-fx-1p an effect %s on a paused session is adopted in pl
   } finally { f.controller.dispose() }
 })
 
-// Until step 9h inverts it (D-1): the WASM core cannot continue a changed latency, so nothing is published for it. With
-// the one audio track alone no route's delay changes; a limiter swapped for another keeps the node's latency, so only the
-// effect gate (carriesEffects) refuses that, and a reorder of delaying effects likewise.
-test('W-C9-fx-4 an effect that delays the signal inserted, removed, replaced or moved answers rebuild and publishes nothing', async () => {
+// An effect that delays the signal is carried like any other (9h, D-1): the core moves the node's read heads.
+test('W-C9-fx-4 an effect that delays the signal inserted, removed, replaced or moved is adopted with one publish', async () => {
   const cases: ReadonlyArray<readonly [readonly AudioEffectRuntimeInstance[], readonly AudioEffectRuntimeInstance[]]> = [
     [[], [f9Limiter('limiter-a')]],
     [[f9Limiter('limiter-a')], []],
@@ -4188,7 +4184,7 @@ test('W-C9-fx-4 an effect that delays the signal inserted, removed, replaced or 
       results.push({ result: await f.controller.adoptSchedule(noLoop), published: f.published() })
     } finally { f.controller.dispose() }
   }
-  expect(results).toEqual(Array.from({ length: 2 * cases.length }, () => ({ result: 'rebuild', published: 0 })))
+  expect(results).toEqual(Array.from({ length: 2 * cases.length }, () => ({ result: 'adopted', published: 1 })))
 })
 
 // A removal the core cannot ghost because earlier ghosts are still fading is refused at its prepare (CORE:7958-7960).
@@ -4285,7 +4281,7 @@ test('W-C9-proc-1 a processor parameter the live path does not take is adopted i
   }
 })
 
-test('W-C9-proc-2 a parameter that changes the effect\'s latency (spectral fftSize) answers rebuild and publishes nothing', async () => {
+test('W-C9-proc-2 a Spectral fftSize change, which the portable core cannot carry, answers rebuild and publishes nothing', async () => {
   const f = await e9Fixture({ effects: [g9Spectral(512)] })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')

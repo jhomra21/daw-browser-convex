@@ -18,7 +18,7 @@ import { SYNTH_KIND_ID, type LiveProcessorEditIdentity } from '~/lib/live-proces
 import { nativePlaybackFaultText, type NativePlaybackFault } from '~/lib/desktop/native-playback-controller'
 import type { AudioEffectRuntimeInstance, DeferredStretchWindow, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
-import { createDefaultDelayParams, createDefaultDrumRackParams, createDefaultLimiterParams, createDefaultSynthParams, createDefaultSamplerParams, createDefaultUtilityParams, mergeSynthParams } from '@daw-browser/shared'
+import { createDefaultDelayParams, createDefaultDrumRackParams, createDefaultLimiterParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultSamplerParams, createDefaultUtilityParams, mergeSynthParams } from '@daw-browser/shared'
 import type { AutomationEnvelope, TrackInstrumentParams, UtilityParamsEnvelope } from '@daw-browser/shared'
 import type { AudioCoreGraphSnapshot } from '@daw-browser/audio-core-contract'
 import { externalProcessorSchema, type ExternalProcessor } from '@daw-browser/external-plugins'
@@ -7055,14 +7055,17 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const [loop, setLoop] = createSignal({ enabled: false, start: 0, end: 0 })
   const [utility, setUtility] = createSignal(b6f5Utility0)
   const [addedEffects, setAddedEffects] = createSignal<AudioEffectRuntimeInstance[]>([])
+  const [spectralFftSize, setSpectralFftSize] = createSignal<512 | 1024>(512)
   const [synth, setSynth] = createSignal<TrackInstrumentParams>(b6f5Synth0)
   const [sampler, setSampler] = createSignal(b6f5Sampler0)
   const [masterVolume, setMasterVolume] = createSignal(1)
   const [automation, setAutomation] = createSignal<AutomationEnvelope[]>([])
+  const spectralInstance = (): AudioEffectRuntimeInstance =>
+    ({ id: 'spectral-1', kind: 'spectral', params: { version: 1, state: { ...createDefaultSpectralParams(), fftSize: spectralFftSize() } } })
   const fxOf = (instrumentOverride?: { targetId: string; instrument: TrackInstrumentParams }) => ({
     masterVolume: masterVolume(), masterFxInstances: [],
     trackFx: {
-      'track-1': { instances: [b6f5UtilityInstance(utility()), ...addedEffects()],
+      'track-1': { instances: [b6f5UtilityInstance(utility()), spectralInstance(), ...addedEffects()],
         instrument: instrumentOverride?.targetId === 'track-1' ? instrumentOverride.instrument : synth() },
       'track-s': { instances: [], instrument: instrumentOverride?.targetId === 'track-s' ? instrumentOverride.instrument : sampler() },
     },
@@ -7126,10 +7129,12 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     isNativePlaybackPrepared: playback.isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared: playback.isPortableBrowserPlaybackPrepared,
     captureStructuralPlaybackIntent, rebuildPlaybackBackend, renderTracks: tracks, notify: (title: string, message: string) => { faults.push(`${title}: ${message}`) } })
   const work: Promise<unknown>[] = []
-  // A structural edit no seam carries until step 9h: a limiter delays the signal, which the WASM core cannot continue.
-  const addEffect = () => setAddedEffects([{ id: 'limiter-2', kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } }])
+  // A structural edit no seam carries: a Spectral fftSize change, which the portable core cannot continue (CORE:7658-7671).
+  const addEffect = () => setSpectralFftSize(1024)
   // An effect that does not delay the signal is carried at a seam (9f), here with the Timeline's effect-order caller.
   const insertEffect = () => { setAddedEffects([{ id: 'utility-2', kind: 'utility', params: b6f5Utility0 }]); onMixedReorderCommitted(undefined) }
+  // The same with an effect that delays the signal, which the core carries by moving the read heads (9h).
+  const insertLimiter = () => { setAddedEffects([{ id: 'limiter-2', kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } }]); onMixedReorderCommitted(undefined) }
   let lastEdit: LiveProcessorEditIdentity | undefined
   const setVolume = (volume: number) => setTracks((current) => current.map((entry) => entry.id === track.id ? { ...entry, volume } : entry))
   // One user edit of each kind, delivered the way the product delivers it.
@@ -7255,7 +7260,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     rebuildBackend: true, resumePlayback: true, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
   const rebuild = (next: Track[]) => rebuildPlaybackBackend(next)
-  return { playback, tracks, observeTracksRead: (observer: () => void) => { onTracksRead = observer }, edit, replaceInstrument, addEffect, insertEffect, rebuild, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, mark: () => world.seq,
+  return { playback, tracks, observeTracksRead: (observer: () => void) => { onTracksRead = observer }, edit, replaceInstrument, addEffect, insertEffect, insertLimiter, rebuild, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, mark: () => world.seq,
     locate: (sec: number) => playback.setPlayhead(sec, tracks()),
     liveSession: () => world.sessions.filter((session) => !session.closed).at(-1),
     holds: { resume: resumeHold, compile: compileHold, transport: world.transportHold, pause: world.pauseHold } }
@@ -7556,6 +7561,24 @@ test('C9f W-C9-fx-5 an effect inserted while playing or paused is adopted by the
     await live.settle()
     expect({ paused, adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session, playing: live.playback.isPlaying(),
       carries: session?.graph?.nodes.some((node) => node.id === track.id && node.processorOrder.some((processor) => processor.id === 'utility-2')),
+      sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
+      .toEqual({ paused, adoptions: 1, closed: false, same: true, playing: !paused, carries: true, sessionsAfterMark: 0 })
+  }, false)
+})
+
+// C9h: a limiter inserted on a track the session plays is a seam adoption too, playing or paused: the same session takes it
+// with no dispose and no rebuild.
+test('C9h W-C9-fx-8 a limiter inserted while playing or paused is adopted by the same session with no dispose and no rebuild', async () => {
+  for (const paused of [false, true]) await runB6f5(async (live, world) => {
+    if (paused) await live.pausedAt(1)
+    else await live.playFrom(1)
+    const session = live.liveSession()
+    const mark = live.mark()
+    live.insertLimiter()
+    await live.until(() => session?.adoptions === 1 || world.sessions.length > 1)
+    await live.settle()
+    expect({ paused, adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session, playing: live.playback.isPlaying(),
+      carries: session?.graph?.nodes.some((node) => node.id === track.id && node.processorOrder.some((processor) => processor.id === 'limiter-2')),
       sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
       .toEqual({ paused, adoptions: 1, closed: false, same: true, playing: !paused, carries: true, sessionsAfterMark: 0 })
   }, false)
@@ -8041,12 +8064,14 @@ test('B6f5c a structural edit held by a portable take reaches the playing sessio
       const session = live.liveSession()
       await live.playback.portableRecording.start(recording.input)
       const mark = live.mark()
+      const spectral = () => JSON.stringify(Array.from(session?.graph?.nodes.find((node) => node.id === track.id)?.processorOrder.find((processor) => processor.id === 'spectral-1')?.state ?? []))
+      const installed = spectral()
       live.addEffect()
       // The follow answers rebuild and the take holds it.
       for (let turn = 0; turn < 3_000; turn += 1) await Promise.resolve()
       await live.settle()
       expect({ end, held: { sessions: world.sessions.length, open: session?.closed === false,
-        carries: session?.graph?.nodes.some((node) => node.id === track.id && node.processorOrder.length > 1), controls: [...recording.controls] } })
+        carries: spectral() !== installed, controls: [...recording.controls] } })
         .toEqual({ end, held: { sessions: 1, open: true, carries: false, controls: ['recording-capture-configure'] } })
       await (end === 'stop' ? live.playback.portableRecording.stop() : live.playback.portableRecording.cancel())
       await live.expectEnd(true, undefined, mark, 'structural', false)

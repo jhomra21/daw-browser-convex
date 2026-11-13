@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { PortableWasmControlMessage, PortableWasmStatusMessage } from './portable-wasm-protocol'
 import { createDefaultUtilityParams } from '@daw-browser/shared'
-import { encodeEqProcessorState, encodeUtilityProcessorState, mixerParameterRegistry, type AudioCoreGraphSnapshot, type AudioCoreInstrumentState } from '@daw-browser/audio-core-contract'
+import { encodeEqProcessorState, encodeLimiterProcessorState, encodeUtilityProcessorState, mixerParameterRegistry, type AudioCoreGraphSnapshot, type AudioCoreInstrumentState } from '@daw-browser/audio-core-contract'
 
 const hostUrl = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v1.js', import.meta.url)
 const hostV2Url = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v2.js', import.meta.url)
@@ -1047,7 +1047,7 @@ test('B6f5 the v2 host counts the processor events the core cannot take in a blo
   expect([droppedProcessorEvents(host, messages), Math.min(...block.map(Math.abs)) > 0]).toEqual([1, true])
 })
 
-test('B6f5 the v2 host refuses an adoption publish the core cannot continue and keeps rendering on the built core', async () => {
+test('B6f5 the v2 host adopts a latency change at a seam and keeps rendering on the built core', async () => {
   const { host, messages } = await startPortableTracks(['track'])
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
   host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
@@ -1056,7 +1056,7 @@ test('B6f5 the v2 host refuses an adoption publish the core cannot continue and 
   playConstantSources(host, messages, 2, 1, [{ nodeId: 'track', value: 0.5 }])
   renderLeft(host)
   const graph = portableTrackGraph(['track'])
-  // A latency change is a revision the core reports as `fallback`: it cannot continue the playing graph.
+  // A latency change continues the playing graph: the core moves the read heads instead of refusing the revision.
   const adoption = adoptRevision(host, messages, { ...graph, revision: 2, nodes: graph.nodes.map((node) => node.id === 'track' ? { ...node, latencyFrames: 64 } : node) }, [])
   const results: number[] = []
   const coreProcess = host.coreProcess
@@ -1067,7 +1067,7 @@ test('B6f5 the v2 host refuses an adoption publish the core cannot continue and 
   }
   const blocks = [renderLeft(host), renderLeft(host)]
   expect([adoption.published, messages.findLast((message) => message.type === 'graph-continuity')?.result, host.revision, results,
-    blocks.map((block) => block.every((sample) => sample === 0.5))]).toEqual(['rejected', 'fallback', 1, [0, 0], [true, true]])
+    blocks.map((block) => block.every(Number.isFinite))]).toEqual(['published', 'accepted', 2, [0, 0], [true, true]])
 })
 
 test('B6f5 the v2 host keeps a pending live acknowledgement across an adoption publish on the built core', async () => {
@@ -2035,10 +2035,9 @@ test('W-C9-track-9 a note held on a deleted track ends with its ghost and withou
     .toEqual({ held: true, published: ['published'], fading: true, after: true, rejected: 'rejected' })
 })
 
-// The shapes the WASM core cannot continue yet (CORE:7673-7692): a node that keeps its identity changes latency, or a
-// delayed route changes place or identity. Each is not continued (the continuity answer is not accepted), so the controller answers rebuild
-// before it publishes (PBT W-C9-track-7). Step 9h inverts these to publish.
-test('W-C9-track-10 a track added or deleted where a latency-bearing node delays routes is refused as a graph the core cannot continue', async () => {
+// A track added or deleted where a latency-bearing node delays routes moves the other tracks' delays; the core
+// continues each by moving their read heads (step 9h).
+test('W-C9-track-10 a track added or deleted where a latency-bearing node delays routes is continued by the core', async () => {
   const withLatency = (trackIds: readonly string[], revision: number) => {
     const base = portableTrackGraph(trackIds)
     const nodes = base.nodes.map((node) => node.id === 'a' ? { ...node, latencyFrames: 64 } : node)
@@ -2064,7 +2063,7 @@ test('W-C9-track-10 a track added or deleted where a latency-bearing node delays
     addLatencyFree: await attempt(['a'], ['a', 'b']),
     addLatencyFreeWithoutLatencyElsewhere: await attempt(['b'], ['b', 'c']),
   }
-  expect(results).toEqual({ deleteLatencyFree: false, deleteLatencyBearing: false, addLatencyFree: false, addLatencyFreeWithoutLatencyElsewhere: true })
+  expect(results).toEqual({ deleteLatencyFree: true, deleteLatencyBearing: true, addLatencyFree: true, addLatencyFreeWithoutLatencyElsewhere: true })
 })
 
 // AE-08 phase 8 step 9f: effects inserted, removed and reordered at a seam on the built core (class 4a). Survivors keep
@@ -2158,6 +2157,47 @@ test('W-C9-fx-4 a reorder dips the node to nothing and back over 5 ms around the
     dipsToNothing: Math.min(...gains) < 0.1, backNearFull: gains[9] > 0.8,
     steadyAfter: largestDifference(rendered, reference, fxSeam + 600, 20 * 128) < 5e-3 })
     .toEqual({ adoption: adoptedAtSeam, untouchedBefore: true, startsNearFull: true, dipsToNothing: true, backNearFull: true, steadyAfter: true })
+})
+
+// AE-08 phase 8 step 9h: a delaying effect inserted or removed at a seam. The node's latency is its processors' sum, as
+// graph-contract gives it, and a route that meets the delayed one waits for it. Track `a` carries the effect, track
+// `b` plays the sine: the core moves b's read head, so b's output is its own signal delayed by the effect's latency.
+const fxLimiter = (id: string, instanceId: number) => fxProcessor(id, instanceId, 'limiter', 12, encodeLimiterProcessorState(
+  { enabled: true, ceilingDbtp: -1, releaseMs: 100, lookaheadMs: 5, link: 1, detectorOversampling: 4 }), 240)
+const adoptDelaying = async (before: readonly FxProcessor[], after: readonly FxProcessor[]) => {
+  const withLatency = (revision: number, chain: readonly FxProcessor[]) => {
+    const graph = fxGraph(revision, { a: chain, b: [] })
+    const latencyFrames = chain.reduce((sum, processor) => sum + processor.latencyFrames, 0)
+    return { ...graph, nodes: graph.nodes.map((node) => node.id === 'a' ? { ...node, latencyFrames } : node),
+      edges: graph.edges.map((edge) => ({ ...edge, pdcDelayFrames: edge.fromNodeId === 'b' ? latencyFrames : 0 })) }
+  }
+  const { host, messages } = await startPortableTracks(['a', 'b'], withLatency(1, before))
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'register-asset', requestId: 5, generation: 0,
+    asset: { version: 1, assetId: 'sine', frameCount: 48_000, sampleRateHz: 48_000, channelCount: 2 }, planes: [fxSine, fxSine] })
+  host.handleMessage({ version: 2, type: 'schedule-sources', requestId: 6, revision: 1, epoch: 1,
+    events: [{ ...rampSource(1, 0, 48_000, 1, 'b'), assetId: 'sine' }] })
+  const rendered = renderBlocks(host, 12)
+  const { installed } = adoptRevision(host, messages, withLatency(2, after), [], fxSeam)
+  rendered.push(...renderBlocks(host, 20))
+  return { rendered, adoption: { installed, published: publishedResults(messages, 2) },
+    continuity: messages.findLast((message) => message.type === 'graph-continuity')?.result }
+}
+// How closely `rendered` is the sine delayed by `delay` frames over `[from, to)`.
+const delayedSineError = (rendered: readonly number[], delay: number, from: number, to: number) =>
+  Math.max(...rendered.slice(from, to).map((sample, index) => Math.abs(sample - fxSine[from + index - delay])))
+
+test('W-C9-fx-8 a limiter inserted at the seam is adopted and the other track is delayed to stay aligned with it', async () => {
+  const { rendered, adoption, continuity } = await adoptDelaying([], [fxLimiter('lim-a', 51)])
+  expect({ adoption, continuity, undelayedBefore: delayedSineError(rendered, 0, 240, fxSeam) < 1e-6,
+    delayedAfter: delayedSineError(rendered, 240, fxSeam + 1_200, rendered.length) < 1e-4 })
+    .toEqual({ adoption: adoptedAtSeam, continuity: 'accepted', undelayedBefore: true, delayedAfter: true })
+})
+
+test('W-C9-fx-9 a limiter removed at the seam is adopted and the other track keeps its delay, with no step', async () => {
+  const { rendered, adoption, continuity } = await adoptDelaying([fxLimiter('lim-a', 51)], [])
+  expect({ adoption, continuity, delayedThroughout: delayedSineError(rendered, 240, 480, rendered.length) < 1e-4 })
+    .toEqual({ adoption: adoptedAtSeam, continuity: 'accepted', delayedThroughout: true })
 })
 
 // The 6 removed effects of three nodes fade as ghosts (96 of the 128 the core holds); a second removal of 64 inside the same

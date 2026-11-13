@@ -180,12 +180,8 @@ void test_portable_graph_topology_pdc_and_revision_safety() {
     .node_count = static_cast<uint32_t>(changed_nodes.size()), .edge_count = static_cast<uint32_t>(changed_edges.size()),
     .nodes = changed_nodes.data(), .edges = changed_edges.data(),
   };
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
   expect(daw_audio_core_prepare_graph(core, &latency_change), DAW_AUDIO_CORE_OK);
   expect(daw_audio_core_cancel_prepared_graph(core, 6), DAW_AUDIO_CORE_OK);
-#else
-  expect(daw_audio_core_prepare_graph(core, &latency_change), DAW_AUDIO_CORE_LATENCY_CHANGE_DEFERRED);
-#endif
   expect(daw_audio_core_retire(core, 4), DAW_AUDIO_CORE_STALE_REVISION);
   expect(daw_audio_core_retire(core, 5), DAW_AUDIO_CORE_OK);
   expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_NOT_PREPARED);
@@ -2807,11 +2803,7 @@ void test_incompatible_continuity_prepare_does_not_consume_reset_state() {
     .nodes = incompatible_nodes.data(), .edges = incompatible_edges.data(),
   };
   expect(daw_audio_core_prepare_graph(core, &request), DAW_AUDIO_CORE_OK);
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
   assert(daw_audio_core_prepared_graph_continuity(core) == 1);
-#else
-  assert(daw_audio_core_prepared_graph_continuity(core) == 0);
-#endif
   expect(daw_audio_core_publish(core, 2), DAW_AUDIO_CORE_OK);
   const std::array<float, 1> left_one{1.0F};
   const std::array<float, 1> right_one{0.5F};
@@ -5492,8 +5484,8 @@ struct Phase3Rig {
   }
   // A stage exactly as the compiler emits it, its latency added to its node's. Only
   // the matrix's key compressor passes keep_latency = false: every matrix edit is
-  // latency-neutral by construction, and removing a stage that delays the signal is
-  // a latency change (LATENCY_CHANGE_DEFERRED), not a live edit.
+  // latency-neutral by construction: removing a stage that delays the signal moves
+  // read heads, which this matrix does not cover.
   void add_compiled(uint64_t node, const std::string &name, bool keep_latency = true) {
     const CompiledProcessor &record = compiled_processor(name);
     const uint32_t latency = keep_latency ? record.latency_frames : 0;
@@ -9952,7 +9944,7 @@ void matrix_build(Phase3Rig &rig, const MatrixSpec &spec) {
   }
   // Every stage is the compiler's record. The key compressor's 480 frames of latency
   // are left out: every matrix edit is latency-neutral, and deleting a stage that
-  // delays the signal is a latency change (LATENCY_CHANGE_DEFERRED), not a live edit.
+  // delays the signal moves read heads, which this matrix does not cover.
   const auto stage_one = [&] {
     if (!spec.stage_one) return;
     rig.add_compiled(1, std::string("stage-one") + (spec.restructured ? "-swap" : "") + (spec.bypassed ? "-off" : ""));

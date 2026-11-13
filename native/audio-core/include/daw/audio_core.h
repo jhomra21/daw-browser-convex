@@ -72,8 +72,8 @@ typedef enum daw_audio_core_result {
   /* A staged processor patch has not been applied or cancelled yet. The callback
    * may still write the published plan, so preparing from it is refused. */
   DAW_AUDIO_CORE_PROCESSOR_PATCH_PENDING = 15,
-  /* Native publication remains queued until the callback's move-complete event.
-   * This is not portable LATENCY_CHANGE_DEFERRED or a failed graph prepare. */
+  /* Publication remains refused until the callback's move-complete event for the
+   * previous latency move. This is not a failed graph prepare. */
   DAW_AUDIO_CORE_LATENCY_MOVE_PENDING = 16
 } daw_audio_core_result;
 

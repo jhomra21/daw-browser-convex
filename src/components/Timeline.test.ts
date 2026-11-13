@@ -144,14 +144,21 @@ test("opens an inserted VST editor only after the matching playback rebuild", as
   expect(handler).toContain("requestToken: ++externalProcessorEditorRequestToken");
   expect(handler).toContain("ready: false");
   expect(handler.indexOf("setPendingExternalProcessorEditorRequest(request)"))
-    .toBeLessThan(handler.indexOf("await rebuildPlaybackBackend(renderTracks(), insertionIntent)"));
+    .toBeLessThan(handler.indexOf("await syncPlaybackBackend(renderTracks(), insertionIntent)"));
+  // A prepared native session, playing or paused, joins the plug-in in place: the insertion never names a rebuild.
+  expect(handler).not.toContain("rebuildPlaybackBackend");
+  // A plug-in that failed while staged never opens its editor as ready.
+  expect(handler.indexOf("vstInstanceFailed(processor.instanceId)"))
+    .toBeGreaterThan(handler.indexOf("await syncPlaybackBackend(renderTracks(), insertionIntent)"));
+  expect(handler.indexOf("vstInstanceFailed(processor.instanceId)"))
+    .toBeLessThan(handler.indexOf("setPendingExternalProcessorEditorRequest({ ...currentRequest, ready: true })"));
   expect(handler).toContain("pendingExternalProcessorEditorRequest()?.requestToken === request.requestToken");
   expect(handler).toContain("currentRequest?.requestToken === request.requestToken");
   expect(handler).toContain("setPendingExternalProcessorEditorRequest();");
   expect(handler).toContain("currentRequest.projectId === projectId()");
   expect(handler).toContain("currentRequest.projectGeneration === mountedProjectGeneration()");
   expect(handler).toContain("{ ...currentRequest, ready: true }");
-  expect(handler.indexOf("await rebuildPlaybackBackend(renderTracks(), insertionIntent)"))
+  expect(handler.indexOf("await syncPlaybackBackend(renderTracks(), insertionIntent)"))
     .toBeLessThan(handler.indexOf("setPendingExternalProcessorEditorRequest({ ...currentRequest, ready: true })"));
 
   const exposureStart = source.indexOf("autoOpenExternalProcessorId:");

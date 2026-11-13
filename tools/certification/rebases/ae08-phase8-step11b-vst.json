@@ -1,0 +1,14 @@
+{
+ "name": "ae08-phase8-step11b-vst",
+ "sequence": 32,
+ "createdAt": "2026-11-13T21:20:00.000Z",
+ "revert": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 11b. A VST3 insert on a prepared native session joins in place: Timeline.tsx onExternalPluginInserted calls syncPlaybackBackend instead of rebuildPlaybackBackend. No arm's code is deleted and no recorded expectation moves, so no arm is retired or re-pointed: rebuildPlaybackBackend keeps its caller in syncPlaybackBackend (a session that is not prepared) and the hook rebuild path with its externalProcessor intent still serves that. The arms anchored in the touched files were run one at a time with --only and all passed unchanged: the 397 live arms whose command runs useTimelinePlayback.test.ts or Timeline.test.ts (4 chunks of 100, fail 0; HT counts 246/1/2 against RC7 227/1/2 are the 6 new step 11b witnesses and the 2 known HT reds) and rc2:276:0, ledger:444:p1-controller and p1-audiosync (Timeline.tsx anchors). The gates x-host-ctest, x-host-plugin-tests, f-controller (667/1/0, recorded 662/1/0), rc1-g-controller (683/1/0, recorded 678/1/0), rc1-i6-desktop and f-hookwit passed one at a time with --only; the controller and hook fuzz passed seeds 1-1000 in chunks of 100. No watched hash moves here: that and the seeds:hook shard failures that already fail at HEAD stay for --full.",
+  "expectationsSha256": "64a3dc1a71c1531a36689a4ced6ab7f671bda35d465c550607db24275ecc0c4e"
+ },
+ "watched": [],
+ "changes": [],
+ "seedRecordChanges": []
+}

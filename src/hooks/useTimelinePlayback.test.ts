@@ -16,6 +16,7 @@ import { extractTimelineBindings } from '~/lib/timeline-source-test-support'
 import { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { SYNTH_KIND_ID, type LiveProcessorEditIdentity } from '~/lib/live-processor-control'
 import { nativePlaybackFaultText, type NativePlaybackFault } from '~/lib/desktop/native-playback-controller'
+import { clearVstInstanceFailures, vstInstanceFailed } from '~/lib/desktop/vst-instance-failures'
 import type { AudioEffectRuntimeInstance, DeferredStretchWindow, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { createDefaultDelayParams, createDefaultDrumRackParams, createDefaultLimiterParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultSamplerParams, createDefaultUtilityParams, mergeSynthParams } from '@daw-browser/shared'
@@ -8542,3 +8543,96 @@ test('W-FB-5 a paused native instrument replacement requested by the Timeline is
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 })
+
+// AE-08 phase 8 step 11b: a VST3 insert, its removal (undo) and a plug-in that fails to load reach a prepared native
+// session through the call the Timeline makes, playing or paused: the host, its device and its session stay, and the
+// staged instance is the one in the plan the host coordinated.
+type VstLiveEditOutcome = { coordinated: string[][]; seams: bigint[]; lifecycle: number; prepared: boolean; playing: boolean; faults: string[]; failed: boolean }
+const vstLiveEdit = async (paused: boolean, edit: 'insert' | 'undo' | 'load-failure') => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  const inserted = { ...insertedExternalProcessor(), targetId: track.id }
+  const coordinated: string[][] = []
+  const seams: bigint[] = []
+  const faults: string[] = []
+  let withPlugin = edit === 'undo'
+  let revisionCounter = 1
+  let status: 'prepared' | 'published' = 'prepared'
+  let requested = 2
+  let seam = 0n
+  const reply = async (): Promise<NativeRevisionReply> => ({ ok: true, hostPid: 123, hostGeneration: 7,
+    revision: { status, continuity: 'accepted', requestedRevision: requested, activeRevision: status === 'published' ? requested : requested - 1,
+      preparedRevision: status === 'prepared' ? requested : 0, retiredRevision: 0, renderEpoch: 1n, transportEpoch: fixture.epoch(),
+      publicationFrame: status === 'published' ? seam : 0n, progressFrame: seam } })
+  const revisions: NativeRevisionSession = {
+    prepare: async (request) => {
+      seam = request.requestedPublicationFrame ?? 0n
+      seams.push(seam)
+      requested = Number(request.projectRevision)
+      status = 'prepared'
+      return reply()
+    },
+    publish: async () => { status = 'published'; return reply() }, inspect: reply, rollback: reply, retire: reply,
+  }
+  const session = { ...fixture.audioHost.session, revisions, configureInstrumentStates: async () => ({ ok: true as const }),
+    coordinateVstAttachments: async () => {
+      coordinated.push(withPlugin ? [inserted.instanceId] : [])
+      return edit === 'load-failure' && withPlugin
+        ? { ok: false as const, error: 'The native VST3 worker preflight failed.',
+          failure: { code: 'worker-crashed' as const, origin: 'plugin' as const, instanceId: inserted.instanceId } }
+        : { ok: true as const }
+    } }
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: { ...fixture.audioHost, session } } } })
+  try {
+    let outcome: VstLiveEditOutcome | undefined
+    await withFakeRaf(async () => createRoot(async (dispose) => {
+      const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
+        { getTracks: () => [track] }, { requiresNativeAudio: true, enabled: () => true, projectId: () => 'project',
+          reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
+          compileSnapshot: async (transport, context) => {
+            const compiled = compileLivePlaybackSnapshot({ revision: revisionCounter++, bpm: 120, transport, tracks: [track],
+              renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
+            if (!compiled.supported) return compiled
+            const processors = await resolveNativeLivePlaybackProcessors({ projectId: 'project',
+              persisted: edit === 'undo' && withPlugin ? [inserted] : [], seed: context?.externalProcessor, readPersisted: async () => undefined })
+            const plan = compileNativeExternalAttachmentPlan({ target: 'native', graph: compiled.snapshot.mixer.graph, processors,
+              workerTransport: { slotCount: 2, maximumFrames: 8192, maximumEventsPerBlock: 128 } })
+            if (!plan.supported) throw new Error(plan.reasons.join(' '))
+            return { ...compiled, snapshot: { ...compiled.snapshot, nativeExternalAttachmentPlan: plan.plan, requiresNativePlayback: true } }
+          } })
+      fixture.setScheduleComplete(false)
+      await playback.handlePlay([track])
+      if (paused) await playback.handlePause()
+      coordinated.length = 0
+      seams.length = 0
+      const lifecycle = () => fixture.calls.filter((call) => ['begin', 'stop', 'teardown', 'configure'].includes(call)).length
+      const before = lifecycle()
+      withPlugin = edit !== 'undo'
+      await playback.restartTimelineSchedule([track], {
+        resumePlayback: !paused, playheadSec: playback.playheadSec(), owner: 'native', projectId: 'project',
+        externalProcessor: withPlugin ? { projectId: 'project', processor: inserted } : undefined })
+      outcome = { coordinated, seams, lifecycle: lifecycle() - before, prepared: playback.isNativePlaybackPrepared(),
+        playing: playback.isPlaying(), faults, failed: vstInstanceFailed(inserted.instanceId) }
+      dispose()
+    }))
+    return outcome
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+    clearVstInstanceFailures()
+  }
+}
+
+for (const paused of [false, true]) {
+  const state = paused ? 'while paused' : 'while playing'
+  test(`UD7n W-S11b-1 a VST3 insert ${state} joins the prepared session in place`, async () => {
+    expect(await vstLiveEdit(paused, 'insert')).toEqual({ coordinated: [['33333333-3333-4333-8333-333333333333']],
+      seams: [paused ? 0n : expect.any(BigInt)], lifecycle: 0, prepared: true, playing: !paused, faults: [], failed: false })
+  })
+  test(`UD7n W-S11b-2 the undo of a VST3 insert ${state} leaves the prepared session in place`, async () => {
+    expect(await vstLiveEdit(paused, 'undo')).toEqual({ coordinated: [[]],
+      seams: [paused ? 0n : expect.any(BigInt)], lifecycle: 0, prepared: true, playing: !paused, faults: [], failed: false })
+  })
+  test(`UD11 W-S11b-3 a plug-in that fails to load ${state} is marked failed and stops nothing`, async () => {
+    expect(await vstLiveEdit(paused, 'load-failure')).toMatchObject({ lifecycle: 0, prepared: true, playing: !paused, faults: [], failed: true })
+  })
+}

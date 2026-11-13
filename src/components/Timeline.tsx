@@ -60,6 +60,7 @@ import createTimelineEffectCommit from "~/components/timeline/create-timeline-ef
 import { SYNTH_KIND_ID, type LiveProcessorEditIdentity } from "~/lib/live-processor-control";
 import { createProcessorEditRegistry } from "~/components/timeline/create-processor-edit-registry";
 import { pickNativePlaybackInputs } from "~/components/timeline/native-playback-inputs";
+import { vstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
 import { useTimelineMidiOverlay } from "~/hooks/useTimelineMidiOverlay";
@@ -2073,8 +2074,12 @@ const Timeline: Component<TimelineProps> = (props) => {
       openEffectsForTarget(processor.targetId);
       const intent = playbackIntent ?? captureStructuralPlaybackIntent();
       const insertedProjectId = intent.projectId ?? projectId();
+      // The drop's project guards the insertion; the transport is read now, because a trust prompt or a plug-in scan
+      // can outlast a Play or a Pause, and a session adopts only the transport state it is in.
       const insertionIntent: TimelinePlaybackRebuildIntent = {
-        ...intent,
+        ...captureStructuralPlaybackIntent(),
+        projectId: intent.projectId,
+        projectGeneration: intent.projectGeneration,
         externalProcessor: {
           projectId: insertedProjectId,
           processor,
@@ -2093,11 +2098,13 @@ const Timeline: Component<TimelineProps> = (props) => {
       console.info("[native-vst3] external plugin inserted", {
         instanceId: processor.instanceId,
         targetId: processor.targetId,
-        isPlaying: intent.resumePlayback,
+        isPlaying: insertionIntent.resumePlayback,
         nativePlaybackEnabled,
       });
       try {
-        await rebuildPlaybackBackend(renderTracks(), insertionIntent);
+        await syncPlaybackBackend(renderTracks(), insertionIntent);
+        // A plug-in that crashed while staged is shown failed on its device; there is no instance to read or edit.
+        if (vstInstanceFailed(processor.instanceId)) throw new Error("The plug-in failed while it was staged.");
         if (processor.manifest.supportsState) {
           const capture = await window.dawDesktop?.audioHost?.session.captureVstState(processor.instanceId);
           if (!capture?.ok) {
@@ -2110,10 +2117,10 @@ const Timeline: Component<TimelineProps> = (props) => {
             localVstStateOwnerId(insertedProjectId, userId()),
           );
         }
-        console.info("[native-vst3] rebuild succeeded", {
+        console.info("[native-vst3] insertion reached playback", {
           instanceId: processor.instanceId,
           targetId: processor.targetId,
-          isPlaying: intent.resumePlayback,
+          isPlaying: insertionIntent.resumePlayback,
           nativePlaybackEnabled,
         });
       } catch (error) {

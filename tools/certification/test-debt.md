@@ -80,6 +80,9 @@ The MISMATCH rows 382 and 434 keep their killing arms and have no survivor to re
 | `rc2:418:0:mutant` | rc2 418 | `src/hooks/useTimelinePlayback.ts`: `pendingStart.promise` → `undefined` | its test command exits 0, no test fails. Row 418 retired as "no witness" by the MISMATCH ruling |
 | `rc2:418:1:mutant` | rc2 418 | `src/hooks/useTimelinePlayback.ts`: `pendingStart.promise` → `undefined` | fails exactly the two tests its control fails; no arm discriminates. Retired as "no witness" |
 | `rc2:419:0:mutant` | rc2 419 | `src/hooks/useTimelinePlayback.ts`: drops `&& !rebuildInProgress` | fails exactly the two tests its control fails; no arm discriminates. Retired as "no witness" |
+| `ledger:486:mutant:{b6f5,matrix,playback}` | ledger 486 | `src/hooks/useTimelinePlayback.ts`: `if (outcome === "rebuild") {` → `if (!portableBrowserPlayback.isRecording()) {` | the mutated branch was deleted by cd259c14 with the `rebuild` adopt result; recorded as survivors in rebase 29 (AE-08 phase 8 step 10) |
+| `ledger:481:mutant:{b6f5,matrix,playback}` | ledger 481 | `src/hooks/useTimelinePlayback.ts`: `rebuildStartingPlay \|\| pendingPlay?.token === playAttemptToken` → `rebuildStartingPlay` | the only killers were structural edits during a pending warm Play, which a prepared session now adopts instead of rebuilding; a rebuild that lands on a pending Play is reached only by lifecycle callers, and a witness for it did not kill the mutant (AE-08 phase 8 step 10, rebase 29) |
+| `ledger:492:mutant:matrix`, `ledger:493:mutant:matrix` | ledger 492, 493 | `src/hooks/useTimelinePlayback.ts`: `tracks.map(({ id, kind, ...` → adds `name` to the fingerprint | the probe matrix counts rebuilds and a name in the fingerprint no longer causes one; the playback and step5b arms of both rows still kill it (AE-08 phase 8 step 10, rebase 29) |
 
 ## Retired controls
 

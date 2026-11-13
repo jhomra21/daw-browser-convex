@@ -6208,7 +6208,16 @@ describe("AE-08 phase 8 UD 7 paused native adoption", () => {
       s.edit({ ...base, revision: 2, tracks: base.tracks.map((track) => ({ ...track, clips: track.clips.map((clip) => ({ ...clip,
         midi: clip.midi && { ...clip.midi, mappings: [{ id: "mapping", source: { kind: "cc", controller: 1, channel: 1 },
           target: { parameterId: "gain" }, outputMin: 0, outputMax: 1 }] } })) })) })
-      expect(await s.controller.adoptSchedule(migrationIntent("ud7n-e6"), true)).toMatchObject({ status: "unsupported" })
+      const warned: unknown[][] = []
+      const warn = console.warn
+      console.warn = (...args: unknown[]) => { warned.push(args) }
+      try {
+        expect(await s.controller.adoptSchedule(migrationIntent("ud7n-e6"), true)).toMatchObject({ status: "unsupported" })
+      } finally { console.warn = warn }
+      // A deterministic limitation is logged once for the edit and is never retried.
+      expect(warned.map(([message, detail]) => [message, detail])).toEqual([[
+        "[native-live-edit] adoption not carried by the native graph yet; the playing graph is unchanged",
+        { reason: "Native VST3 playback does not support MIDI expression automation yet." }]])
       expect(s.requestedFrames).toEqual([])
       expect(s.controller.isPrepared()).toBe(true)
       expect(s.fixture.calls.slice(before.calls).filter((call) => hostLifecycleCalls.includes(call))).toEqual([])

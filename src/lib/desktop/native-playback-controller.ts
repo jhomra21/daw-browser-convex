@@ -4308,7 +4308,10 @@ export const createNativePlaybackController = (input: {
       if (preparation.status === "retry") return preparation.transport ? { ...superseded, transport: preparation.transport } : superseded
       if (preparation.status === "failed") return { outcome: { status: "failed", reason: preparation.reason } }
       // A limitation settles the intent without the refusal the UD 8 retry reopens.
-      if (preparation.status === "unsupported") return { outcome: { status: "unsupported", reason: preparation.reason } }
+      if (preparation.status === "unsupported") {
+        console.warn("[native-live-edit] adoption not carried by the native graph yet; the playing graph is unchanged", { reason: preparation.reason })
+        return { outcome: { status: "unsupported", reason: preparation.reason } }
+      }
       if (!processorState.isNewest(attempt) || !inDomain()) {
         if (preparation.status === "staged") await preparation.dispose()
         return superseded

@@ -8143,8 +8143,8 @@ test('B6f5c an instrument or unrelated edit during a portable take is adopted an
 })
 
 // A take keeps the loop it runs with (its refresh stops at a loop); the follow adopts the loop edit once the take ends.
-test('B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped', async () => {
-  await runB6f5(async (live, world) => {
+test('B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped or been cancelled', async () => {
+  for (const end of ['stop', 'cancel'] as const) await runB6f5(async (live, world) => {
     const recording = b6f5cRecording()
     try {
       const session = await playF20(live, { enabled: false, start: 0, end: 3 })
@@ -8154,12 +8154,12 @@ test('B6f5c W-R8a a loop edit during a portable take is adopted once the take ha
       for (let turn = 0; turn < 3_000; turn += 1) await Promise.resolve()
       await live.settle()
       const during = { adoptions: session?.adoptions, noteOns: session?.installedNoteOns.slice(0, 2) }
-      await live.playback.portableRecording.stop()
+      await (end === 'stop' ? live.playback.portableRecording.stop() : live.playback.portableRecording.cancel())
       await live.until(() => session?.adoptions === 1)
       await live.settle()
-      expect({ during, after: session?.installedNoteOns.slice(0, 2), adoptions: session?.adoptions, closed: session?.closed,
+      expect({ end, during, after: session?.installedNoteOns.slice(0, 2), adoptions: session?.adoptions, closed: session?.closed,
         sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
-        .toEqual({ during: { adoptions: 0, noteOns: [96_000] }, after: [96_000, 240_000], adoptions: 1, closed: false, sessionsAfterMark: 0 })
+        .toEqual({ end, during: { adoptions: 0, noteOns: [96_000] }, after: [96_000, 240_000], adoptions: 1, closed: false, sessionsAfterMark: 0 })
     } finally { recording.restore() }
   }, false)
 })

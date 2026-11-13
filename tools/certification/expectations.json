@@ -96,25 +96,25 @@
     "log": "acceptance-reports/ae-08-phase-5-2026-10-18/c1a/logs/self-test-1.log",
     "logSha256": "d8fa3a44f7fa6b4cf1971cdb22ec5f36cebc89d66eb3093dea8c07206ee9a287",
     "exit": 0,
-    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md §6, self-test"
+    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md \u00a76, self-test"
    },
    "g-tools-typecheck": {
     "log": "acceptance-reports/ae-08-phase-5-2026-10-18/c1a/logs/tools-typecheck-1.log",
     "logSha256": "5dab8f62ad782c154b0d2caeadeaa2418dc655681dc9606dc19fcb1f8e8d0dce",
     "exit": 2,
-    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md §6, tools typecheck (byte-identical to RC7's)"
+    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md \u00a76, tools typecheck (byte-identical to RC7's)"
    },
    "g-c0-oxlint": {
     "log": "acceptance-reports/ae-08-phase-5-2026-10-18/c1a/logs/oxlint-1.log",
     "logSha256": "a730d7c85ca96673804d873f0d014497e030c59e575ef0cb72ba9607dedbb8b7",
     "exit": 0,
-    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md §6, scoped oxlint on the analyzer"
+    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md \u00a76, scoped oxlint on the analyzer"
    },
    "g-c0fg-oxlint": {
     "log": "acceptance-reports/ae-08-phase-5-2026-10-18/c1a/logs/oxlint-1.log",
     "logSha256": "a730d7c85ca96673804d873f0d014497e030c59e575ef0cb72ba9607dedbb8b7",
     "exit": 0,
-    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md §6, scoped oxlint on the analyzer"
+    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md \u00a76, scoped oxlint on the analyzer"
    }
   },
   "rulings": [
@@ -946,7 +946,7 @@
  "environmentalFaults": [
   {
    "signature": "[CONVEX FATAL ERROR] Couldn't parse deployment name fixture",
-   "evidence": "acceptance-reports/device-control-cost-2026-10-31/dv01-parent/boundary/PARENT-GATES-3B1.md notes 1 and 4, acceptance-reports/device-control-cost-2026-10-31/dv01-parent/boundary/STEP4-0c-COVERAGE-REPORT.md §4: the fixture Convex client's websocket reply, charged to whichever test is running when it arrives; those tests pass alone"
+   "evidence": "acceptance-reports/device-control-cost-2026-10-31/dv01-parent/boundary/PARENT-GATES-3B1.md notes 1 and 4, acceptance-reports/device-control-cost-2026-10-31/dv01-parent/boundary/STEP4-0c-COVERAGE-REPORT.md \u00a74: the fixture Convex client's websocket reply, charged to whichever test is running when it arrives; those tests pass alone"
   }
  ],
  "references": {
@@ -34233,12 +34233,12 @@
       "source": "src/components/Timeline.tsx",
       "edits": [
        {
-        "from": "        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam\n        // and rebuilds what it cannot carry; a Synth edit is carried by the release announce. A preview must never rebuild.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
+        "from": "        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n        // a Synth edit is carried by the release announce.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
         "to": ""
        },
        {
         "from": "        if (result.accepted) return \"applied\";\n",
-        "to": "        if (result.accepted) return \"applied\";\n        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam\n        // and rebuilds what it cannot carry; a Synth edit is carried by the release announce. A preview must never rebuild.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n"
+        "to": "        if (result.accepted) return \"applied\";\n        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n        // a Synth edit is carried by the release announce.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n"
        }
       ]
      }
@@ -42016,7 +42016,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 227,
+      "pass": 239,
       "skip": 1,
       "fail": 2
      },
@@ -42333,9 +42333,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 190,
+      "pass": 192,
       "skip": 1,
-      "fail": 39
+      "fail": 49
      },
      "fails": [
       "B6f a project switch leaves a live paused portable session of the new project at the start",
@@ -42343,8 +42343,9 @@
       "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
       "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
       "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+      "B6f5 479 a rebuild requested after the running rebuild passed its last request check runs next with the newest tracks",
       "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
-      "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+      "B6f5 A an edit the playing portable session cannot take live is adopted once at a seam, with no rebuild",
       "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
       "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
       "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session",
@@ -42357,19 +42358,28 @@
       "B6f5 a resume after an adoption plays the newest state",
       "B6f5 renaming and recolouring a track while playing is neither adopted nor rebuilt",
       "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
-      "B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped",
-      "B6f5c a failed take followed by the caller stop or cancel adopts or rebuilds each edit once",
+      "B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped or been cancelled",
+      "B6f5c a failed take followed by the caller stop or cancel adopts each edit once",
       "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
       "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
-      "B6f5c a structural edit held by a portable take reaches the playing session once the take stops or is cancelled",
+      "B6f5c a structural edit during a portable take is adopted in place and the take stops or is cancelled afterwards",
       "B6f5c a take ended by a device fault follows the edit it held",
       "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
       "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
       "C0G a clip waveform key or key order change while playing is neither adopted nor rebuilt",
+      "C9b W-C9-clip-6 an audio clip move while playing or paused is adopted by the same session with no dispose and no rebuild",
+      "C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopted by the same session with no dispose and no rebuild",
+      "C9d W-C9-warp-8 a tempo or warp marker edit under a Stretch clip while playing or paused is adopted by the same session with no dispose and no rebuild",
+      "C9e W-C9-track-11 a track added, reordered and deleted while playing or paused is adopted by the same session with no dispose and no rebuild",
+      "C9f W-C9-fx-5 an effect inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+      "C9g W-C9-inst-7 an instrument replaced or a processor parameter edited while playing or paused is adopted by the same session with no dispose and no rebuild",
+      "C9h W-C9-fx-8 a limiter inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
       "E3 W-E3-6 a locate while playing seeks the same session without a dispose or a Play, and the follow adopts the edit after it",
       "E3 W-E3-R9 a locate the live session refuses without a failure rebuilds at the target and keeps playing",
       "F20 W-F20b changing the loop end while playing is adopted at a seam and the schedule loops at the new end",
       "F20 W-F20f toggling the loop on and off while playing is adopted without a dispose or a restart",
+      "W-FB-2 a refused adopting publish while playing keeps the session and a later adoption carries the edit",
+      "W-FB-3 a structural edit while a session is kept paused reaches its adoption and rebuilds nothing",
       "failed lifecycle transition cancels delayed native startup",
       "keeps a paused portable session compatible when enabling a loop",
       "native-required play retries failed recovery and stays stopped while recovery runs",
@@ -44483,7 +44493,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 24,
+      "pass": 28,
       "skip": 0,
       "fail": 0
      },
@@ -44538,7 +44548,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 66,
+      "pass": 160,
       "skip": 0,
       "fail": 0
      },
@@ -44603,14 +44613,14 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 25,
       "skip": 0,
-      "fail": 5
+      "fail": 3
      },
      "fails": [
       "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
-      "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the rebuild carries it",
-      "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take"
+      "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the follow adopts it",
+      "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and the follow adopts it during the take"
      ],
      "fuzz": null,
      "rejection": null,
@@ -44668,14 +44678,18 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 62,
+      "pass": 153,
       "skip": 0,
-      "fail": 4
+      "fail": 7
      },
      "fails": [
       "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
-      "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the rebuild carries it",
-      "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take"
+      "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the follow adopts it",
+      "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and the follow adopts it during the take",
+      "W-C9-clip-R an audio clip move during a take is adopted and the take refresh schedules the moved clip once",
+      "W-C9-track-5 a reorder is the session's own graph again: unchanged, nothing published, and the next edit keeps the node order",
+      "W-F20c a loop edit after a wrap maps positions across the seam, compiles the loop shifted and refreshes from the arrangement position",
+      "W-R7 an adoption that shortens the window while recording does not make the refresh schedule a source twice"
      ],
      "fuzz": null,
      "rejection": null,
@@ -46304,7 +46318,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 27,
+      "pass": 28,
       "skip": 0,
       "fail": 0
      },
@@ -46417,7 +46431,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 227,
+      "pass": 239,
       "skip": 1,
       "fail": 2
      },
@@ -46482,16 +46496,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 26,
+      "pass": 28,
       "skip": 0,
-      "fail": 1
+      "fail": 0
      },
-     "fails": [
-      "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -46548,17 +46560,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 234,
+      "pass": 236,
       "skip": 0,
-      "fail": 2
+      "fail": 0
      },
-     "fails": [
-      "B6F5PROBE native-off pending-warm-play structural",
-      "B6F5PROBE native-on pending-warm-play structural"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -46612,18 +46621,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 226,
+      "pass": 239,
       "skip": 1,
-      "fail": 3
+      "fail": 2
      },
-     "fails": [
-      "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session",
-      "failed lifecycle transition cancels delayed native startup",
-      "preserves an explicitly captured native owner across queued generation rebuilds"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -46678,7 +46683,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 27,
+      "pass": 28,
       "skip": 0,
       "fail": 0
      },
@@ -46791,7 +46796,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 227,
+      "pass": 239,
       "skip": 1,
       "fail": 2
      },
@@ -46859,13 +46864,13 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 20,
       "skip": 0,
       "fail": 8
      },
      "fails": [
       "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
-      "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+      "B6f5 A an edit the playing portable session cannot take live is adopted once at a seam, with no rebuild",
       "B6f5 E5 a note and a tempo edit while playing are adopted at a seam without a dispose or a restart",
       "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
       "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
@@ -47006,25 +47011,34 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 213,
+      "pass": 216,
       "skip": 1,
-      "fail": 16
+      "fail": 25
      },
      "fails": [
       "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
-      "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+      "B6f5 A an edit the playing portable session cannot take live is adopted once at a seam, with no rebuild",
       "B6f5 E5 a note and a tempo edit while playing are adopted at a seam without a dispose or a restart",
       "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
       "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
       "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
       "B6f5 a resume after an adoption plays the newest state",
       "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
-      "B6f5c a failed take followed by the caller stop or cancel adopts or rebuilds each edit once",
+      "B6f5c a failed take followed by the caller stop or cancel adopts each edit once",
       "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
+      "B6f5c a structural edit during a portable take is adopted in place and the take stops or is cancelled afterwards",
       "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
       "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
+      "C9b W-C9-clip-6 an audio clip move while playing or paused is adopted by the same session with no dispose and no rebuild",
+      "C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopted by the same session with no dispose and no rebuild",
+      "C9d W-C9-warp-8 a tempo or warp marker edit under a Stretch clip while playing or paused is adopted by the same session with no dispose and no rebuild",
+      "C9e W-C9-track-11 a track added, reordered and deleted while playing or paused is adopted by the same session with no dispose and no rebuild",
+      "C9f W-C9-fx-5 an effect inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
+      "C9g W-C9-inst-7 an instrument replaced or a processor parameter edited while playing or paused is adopted by the same session with no dispose and no rebuild",
+      "C9h W-C9-fx-8 a limiter inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
       "F20 W-F20b changing the loop end while playing is adopted at a seam and the schedule loops at the new end",
       "F20 W-F20f toggling the loop on and off while playing is adopted without a dispose or a restart",
+      "W-FB-2 a refused adopting publish while playing keeps the session and a later adoption carries the edit",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -48523,24 +48537,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 18,
+      "pass": 27,
       "skip": 0,
-      "fail": 9
+      "fail": 0
      },
-     "fails": [
-      "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
-      "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
-      "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
-      "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from",
-      "B6f5 E5 a note and a tempo edit while playing are adopted at a seam without a dispose or a restart",
-      "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
-      "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
-      "B6f5 a resume after an adoption plays the newest state",
-      "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -48597,89 +48601,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 162,
+      "pass": 236,
       "skip": 0,
-      "fail": 74
+      "fail": 0
      },
-     "fails": [
-      "B6F5PROBE cost native-off fader drag while playing",
-      "B6F5PROBE cost native-on fader drag while playing",
-      "B6F5PROBE native-off pending-cold-play-postcompile automation",
-      "B6F5PROBE native-off pending-cold-play-postcompile master",
-      "B6F5PROBE native-off pending-cold-play-postcompile mixer",
-      "B6F5PROBE native-off pending-cold-play-postcompile sampled",
-      "B6F5PROBE native-off pending-cold-play-postcompile synth-nonlive",
-      "B6F5PROBE native-off pending-cold-play-precompile automation",
-      "B6F5PROBE native-off pending-cold-play-precompile master",
-      "B6F5PROBE native-off pending-cold-play-precompile mixer",
-      "B6F5PROBE native-off pending-cold-play-precompile proc-nonlive",
-      "B6F5PROBE native-off pending-cold-play-precompile sampled",
-      "B6F5PROBE native-off pending-cold-play-precompile structural",
-      "B6F5PROBE native-off pending-warm-play automation",
-      "B6F5PROBE native-off pending-warm-play master",
-      "B6F5PROBE native-off pending-warm-play mixer",
-      "B6F5PROBE native-off pending-warm-play sampled",
-      "B6F5PROBE native-off pending-warm-play synth-nonlive",
-      "B6F5PROBE native-off playing automation",
-      "B6F5PROBE native-off playing master",
-      "B6F5PROBE native-off playing mixer",
-      "B6F5PROBE native-off playing sampled",
-      "B6F5PROBE native-off playing synth-nonlive",
-      "B6F5PROBE native-off rebuild-after-commit automation",
-      "B6F5PROBE native-off rebuild-after-commit master",
-      "B6F5PROBE native-off rebuild-after-commit mixer",
-      "B6F5PROBE native-off rebuild-after-commit sampled",
-      "B6F5PROBE native-off rebuild-after-commit synth-nonlive",
-      "B6F5PROBE native-off rebuild-before-commit automation",
-      "B6F5PROBE native-off rebuild-before-commit master",
-      "B6F5PROBE native-off rebuild-before-commit mixer",
-      "B6F5PROBE native-off rebuild-before-commit sampled",
-      "B6F5PROBE native-off rebuild-before-commit synth-nonlive",
-      "B6F5PROBE native-off rebuild-precompile automation",
-      "B6F5PROBE native-off rebuild-precompile master",
-      "B6F5PROBE native-off rebuild-precompile mixer",
-      "B6F5PROBE native-off rebuild-precompile proc-nonlive",
-      "B6F5PROBE native-off rebuild-precompile structural",
-      "B6F5PROBE native-on pending-cold-play-postcompile automation",
-      "B6F5PROBE native-on pending-cold-play-postcompile master",
-      "B6F5PROBE native-on pending-cold-play-postcompile mixer",
-      "B6F5PROBE native-on pending-cold-play-postcompile sampled",
-      "B6F5PROBE native-on pending-cold-play-postcompile synth-nonlive",
-      "B6F5PROBE native-on pending-cold-play-precompile automation",
-      "B6F5PROBE native-on pending-cold-play-precompile master",
-      "B6F5PROBE native-on pending-cold-play-precompile mixer",
-      "B6F5PROBE native-on pending-cold-play-precompile proc-nonlive",
-      "B6F5PROBE native-on pending-cold-play-precompile sampled",
-      "B6F5PROBE native-on pending-cold-play-precompile structural",
-      "B6F5PROBE native-on pending-warm-play automation",
-      "B6F5PROBE native-on pending-warm-play master",
-      "B6F5PROBE native-on pending-warm-play mixer",
-      "B6F5PROBE native-on pending-warm-play sampled",
-      "B6F5PROBE native-on pending-warm-play synth-nonlive",
-      "B6F5PROBE native-on playing automation",
-      "B6F5PROBE native-on playing master",
-      "B6F5PROBE native-on playing mixer",
-      "B6F5PROBE native-on playing sampled",
-      "B6F5PROBE native-on playing synth-nonlive",
-      "B6F5PROBE native-on rebuild-after-commit automation",
-      "B6F5PROBE native-on rebuild-after-commit master",
-      "B6F5PROBE native-on rebuild-after-commit mixer",
-      "B6F5PROBE native-on rebuild-after-commit sampled",
-      "B6F5PROBE native-on rebuild-after-commit synth-nonlive",
-      "B6F5PROBE native-on rebuild-before-commit automation",
-      "B6F5PROBE native-on rebuild-before-commit master",
-      "B6F5PROBE native-on rebuild-before-commit mixer",
-      "B6F5PROBE native-on rebuild-before-commit sampled",
-      "B6F5PROBE native-on rebuild-before-commit synth-nonlive",
-      "B6F5PROBE native-on rebuild-precompile automation",
-      "B6F5PROBE native-on rebuild-precompile master",
-      "B6F5PROBE native-on rebuild-precompile mixer",
-      "B6F5PROBE native-on rebuild-precompile proc-nonlive",
-      "B6F5PROBE native-on rebuild-precompile structural"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -48733,28 +48662,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 216,
+      "pass": 227,
       "skip": 1,
-      "fail": 13
+      "fail": 2
      },
-     "fails": [
-      "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
-      "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
-      "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
-      "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from",
-      "B6f5 E5 a note and a tempo edit while playing are adopted at a seam without a dispose or a restart",
-      "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
-      "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
-      "B6f5 a resume after an adoption plays the newest state",
-      "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
-      "E3 W-E3-6 a locate while playing seeks the same session without a dispose or a Play, and the follow adopts the edit after it",
-      "F20 W-F20f toggling the loop on and off while playing is adopted without a dispose or a restart",
-      "failed lifecycle transition cancels delayed native startup",
-      "preserves an explicitly captured native owner across queued generation rebuilds"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -49226,7 +49141,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 66,
+      "pass": 160,
       "skip": 0,
       "fail": 0
      },
@@ -49294,8 +49209,8 @@
       "fail": 2
      },
      "fails": [
-      "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the rebuild carries it",
-      "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take"
+      "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the follow adopts it",
+      "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and the follow adopts it during the take"
      ],
      "fuzz": null,
      "rejection": null,
@@ -49351,13 +49266,13 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 63,
+      "pass": 158,
       "skip": 0,
-      "fail": 3
+      "fail": 2
      },
      "fails": [
-      "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the rebuild carries it",
-      "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take"
+      "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the follow adopts it",
+      "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and the follow adopts it during the take"
      ],
      "fuzz": null,
      "rejection": null,
@@ -49654,9 +49569,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 120,
+      "pass": 117,
       "skip": 0,
-      "fail": 40
+      "fail": 43
      },
      "fails": [
       "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
@@ -49682,6 +49597,7 @@
       "W-C9-fx-1p an effect moved on a paused session is adopted in place with the seam at the position",
       "W-C9-fx-1p an effect removed on a paused session is adopted in place with the seam at the position",
       "W-C9-fx-1p an effect replaced on a paused session is adopted in place with the seam at the position",
+      "W-C9-fx-4 an effect that delays the signal inserted, removed, replaced or moved is adopted with one publish",
       "W-C9-fx-6 a removal refused by ghost capacity is retried after one position report and adopted",
       "W-C9-inst-1 a instance replacement of the instrument while a note is held is adopted: released on the old voice at the seam, started on the new instrument",
       "W-C9-inst-1 a kind replacement of the instrument while a note is held is adopted: released on the old voice at the seam, started on the new instrument",
@@ -49691,14 +49607,16 @@
       "W-C9-keeps-1 a held note of an instrument whose sample changed is released at the seam and started again there",
       "W-C9-keeps-2 a held note of an instrument that did not change keeps its voice through an edit elsewhere",
       "W-C9-proc-1 a processor parameter the live path does not take is adopted in place, playing and paused, with the new state in the published graph",
+      "W-C9-proc-2 a Spectral fftSize change is adopted in place with one publish and the new size in the published graph",
       "W-C9-track-1 an audio track added while playing is adopted: its node is published, its asset registered first, its clip starts at the seam",
       "W-C9-track-2 a MIDI track added while playing is adopted: its note that spans the seam starts there and the held note elsewhere keeps its voice",
       "W-C9-track-3 an audio track deleted while playing leaves no source or node, and its asset is released once the position reaches the seam",
       "W-C9-track-4 the held note of a deleted MIDI track gets no note-off: its node is not in the candidate and the core ghost ends the voice",
       "W-C9-track-5 a reorder is the session's own graph again: unchanged, nothing published, and the next edit keeps the node order",
       "W-C9-track-6 a track added and then deleted on a paused session is adopted in place with the seam at the position",
+      "W-C9-track-7 a track added or deleted where a latency-bearing effect gives routes a delay is adopted with one publish",
       "W-C9-track-R a track added and deleted during a take is adopted and the take goes on",
-      "W-FB-1 a refused or structural adoption is failed or adopted and never asks for a rebuild"
+      "W-FB-1 a refused publish and uncarried content answer failed, a missing fingerprint answers unavailable, never a rebuild"
      ],
      "fuzz": null,
      "rejection": null,
@@ -50168,7 +50086,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 227,
+      "pass": 239,
       "skip": 1,
       "fail": 2
      },
@@ -50234,14 +50152,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 5,
+      "pass": 7,
       "skip": 0,
-      "fail": 3
+      "fail": 1
      },
      "fails": [
-      "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
-      "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does",
-      "B6f5 renaming and recolouring a track while playing is neither adopted nor rebuilt"
+      "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does"
      ],
      "fuzz": null,
      "rejection": null,
@@ -50297,17 +50213,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 236,
+      "pass": 238,
       "skip": 0,
-      "fail": 2
+      "fail": 0
      },
-     "fails": [
-      "B6F5PROBE native-off playing cosmetic",
-      "B6F5PROBE native-on playing cosmetic"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -50362,14 +50275,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 224,
+      "pass": 238,
       "skip": 1,
-      "fail": 5
+      "fail": 3
      },
      "fails": [
-      "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
       "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does",
-      "B6f5 renaming and recolouring a track while playing is neither adopted nor rebuilt",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -50544,13 +50455,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 6,
+      "pass": 7,
       "skip": 0,
-      "fail": 2
+      "fail": 1
      },
      "fails": [
-      "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does",
-      "B6f5 renaming and recolouring a track while playing is neither adopted nor rebuilt"
+      "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does"
      ],
      "fuzz": null,
      "rejection": null,
@@ -50606,17 +50516,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 236,
+      "pass": 238,
       "skip": 0,
-      "fail": 2
+      "fail": 0
      },
-     "fails": [
-      "B6F5PROBE native-off playing cosmetic",
-      "B6F5PROBE native-on playing cosmetic"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -51950,7 +51857,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 66,
+      "pass": 160,
       "skip": 0,
       "fail": 0
      },
@@ -52019,7 +51926,7 @@
      },
      "fails": [
       "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
-      "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take"
+      "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and the follow adopts it during the take"
      ],
      "fuzz": null,
      "rejection": null,
@@ -52075,13 +51982,17 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 64,
+      "pass": 154,
       "skip": 0,
-      "fail": 2
+      "fail": 6
      },
      "fails": [
       "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
-      "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take"
+      "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and the follow adopts it during the take",
+      "W-C9-clip-R an audio clip move during a take is adopted and the take refresh schedules the moved clip once",
+      "W-C9-track-R a track added and deleted during a take is adopted and the take goes on",
+      "W-R7 an adoption that shortens the window while recording does not make the refresh schedule a source twice",
+      "W-R8a a loop edit during a take is held, and adopted once the take has ended"
      ],
      "fuzz": null,
      "rejection": null,
@@ -53264,7 +53175,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 227,
+      "pass": 239,
       "skip": 1,
       "fail": 2
      },
@@ -53328,13 +53239,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 6,
+      "pass": 7,
       "skip": 0,
-      "fail": 2
+      "fail": 1
      },
      "fails": [
-      "B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped",
-      "B6f5c a structural edit held by a portable take reaches the playing session once the take stops or is cancelled"
+      "B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped or been cancelled"
      ],
      "fuzz": null,
      "rejection": null,
@@ -53390,13 +53300,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 225,
+      "pass": 238,
       "skip": 1,
-      "fail": 4
+      "fail": 3
      },
      "fails": [
-      "B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped",
-      "B6f5c a structural edit held by a portable take reaches the playing session once the take stops or is cancelled",
+      "B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped or been cancelled",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -53503,7 +53412,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 227,
+      "pass": 239,
       "skip": 1,
       "fail": 2
      },
@@ -53564,16 +53473,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
-      "fail": 1
+      "fail": 0
      },
-     "fails": [
-      "B6f5c a structural edit held by a portable take reaches the playing session once the take stops or is cancelled"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -53628,12 +53535,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 226,
+      "pass": 238,
       "skip": 1,
       "fail": 3
      },
      "fails": [
-      "B6f5c a structural edit held by a portable take reaches the playing session once the take stops or is cancelled",
+      "B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped or been cancelled",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -71426,7 +71333,7 @@
     "row": "449",
     "family": "ledger",
     "disposition": "retired, not run",
-    "ruling": "acceptance-reports/device-control-cost-2026-10-31/dv01-parent/boundary/B6F-REPORT.md §6 (invalid, TS2304; replaced by 459; retired)",
+    "ruling": "acceptance-reports/device-control-cost-2026-10-31/dv01-parent/boundary/B6F-REPORT.md \u00a76 (invalid, TS2304; replaced by 459; retired)",
     "armIds": []
    },
    {
@@ -71802,7 +71709,7 @@
     "row": "525",
     "family": "analyzer",
     "disposition": "semantic kill (C1a analyzer: phase 4 publication attribution groups by renderer turn whenever there are no more publications than turns, so a turn may go unpublished): Phase 4 publication attribution oracle failed, unrejected lostEdit",
-    "ruling": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md §5 (PARENT-RULING-C1-PHASE4.md item 3)",
+    "ruling": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md \u00a75 (PARENT-RULING-C1-PHASE4.md item 3)",
     "armIds": [
      "analyzer:525:control",
      "analyzer:525:mutant"

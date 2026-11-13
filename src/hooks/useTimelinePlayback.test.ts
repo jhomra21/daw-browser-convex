@@ -16,7 +16,7 @@ import { extractTimelineBindings } from '~/lib/timeline-source-test-support'
 import { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { SYNTH_KIND_ID, type LiveProcessorEditIdentity } from '~/lib/live-processor-control'
 import { nativePlaybackFaultText, type NativePlaybackFault } from '~/lib/desktop/native-playback-controller'
-import { clearVstInstanceFailures, vstInstanceFailed } from '~/lib/desktop/vst-instance-failures'
+import { addInstanceLimit, clearInstanceLimits, clearVstInstanceFailures, instanceLimit, vstInstanceFailed } from '~/lib/desktop/vst-instance-failures'
 import type { AudioEffectRuntimeInstance, DeferredStretchWindow, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { createDefaultDelayParams, createDefaultDrumRackParams, createDefaultLimiterParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultSamplerParams, createDefaultUtilityParams, mergeSynthParams } from '@daw-browser/shared'
@@ -7026,7 +7026,7 @@ const b6f5UtilityInstance = (params: UtilityParamsEnvelope): AudioEffectRuntimeI
 
 const b6f5Bindings = async () => {
   const source = await readFile(new URL('../components/Timeline.tsx', import.meta.url), 'utf8')
-  const { portable, structural, mixedReorder } = extractTimelineBindings(source)
+  const { portable, structural, mixedReorder, syncPlaybackBackend } = extractTimelineBindings(source)
   const transpile = (code: string) => new Bun.Transpiler({ loader: 'ts' }).transformSync(code)
   const makePortable = new Function('deps', transpile(`
     const { liveProcessorControl, isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared, syncPlaybackBackend, renderTracks, SYNTH_KIND_ID } = deps;
@@ -7041,7 +7041,11 @@ const b6f5Bindings = async () => {
       syncPlaybackBackend, renderTracks, captureStructuralPlaybackIntent, notify } = deps;
     let instrumentPlaybackChangeTail = Promise.resolve();
     return ({ ${structural} }).onStructuralPlaybackChange;`))
-  return { makePortable, makeStructural, makeMixedReorder }
+  const makeSync = new Function('deps', transpile(`
+    const { isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared, restartTimelineSchedule, rebuildPlaybackBackend,
+      captureStructuralPlaybackIntent, addInstanceLimit } = deps;
+    return (${syncPlaybackBackend});`))
+  return { makePortable, makeStructural, makeMixedReorder, makeSync }
 }
 
 const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<ReturnType<typeof b6f5Bindings>>) => {
@@ -8780,3 +8784,42 @@ test('UD7n W-S11d-C1 an unhydrated clip inserted into a prepared preview keeps t
       .toEqual({ unhydrated: { lifecycle: 0, prepared: true, compiles: 0 }, lifecycle: 0, prepared: true, adoptions: 1, lastClips: 1, faults: [] })
   }, { enabled: true })
 })
+
+// AE-08 phase 8 step 11d (E): a browser session cannot host a VST3, so inserting one while only the browser session is
+// prepared is an edit the session adopts in place, never a rebuild. The device shows the E6 limitation.
+for (const playing of [true, false]) {
+  test(`UD7n W-S11d-E1 a VST3 insert ${playing ? 'while playing' : 'while paused'} with only a browser session prepared rebuilds nothing and shows the limitation`, async () => {
+    const bindings = await b6f5Bindings()
+    const info = spyOn(console, 'info').mockImplementation(() => undefined)
+    const inserted = { ...insertedExternalProcessor(), targetId: track.id }
+    try {
+      await runB6f5(async (live, world) => {
+        if (playing) await live.playFrom(1)
+        else await live.pausedAt(1)
+        const mark = live.mark()
+        const session = live.liveSession()
+        let rebuilds = 0
+        const sync = bindings.makeSync({
+          isNativePlaybackPrepared: live.playback.isNativePlaybackPrepared,
+          isPortableBrowserPlaybackPrepared: live.playback.isPortableBrowserPlaybackPrepared,
+          restartTimelineSchedule: live.playback.restartTimelineSchedule,
+          rebuildPlaybackBackend: () => { rebuilds += 1; return Promise.resolve() },
+          captureStructuralPlaybackIntent: () => ({ resumePlayback: live.playback.isPlaying(), playheadSec: live.playback.playheadSec(),
+            owner: 'portable-browser', projectId: 'project-a', projectGeneration: 1 }),
+          addInstanceLimit,
+        })
+        await sync(live.tracks(), { resumePlayback: live.playback.isPlaying(), playheadSec: live.playback.playheadSec(),
+          owner: 'portable-browser', projectId: 'project-a', projectGeneration: 1,
+          externalProcessor: { projectId: 'project-a', processor: inserted } })
+        await live.settle()
+        expect({ rebuilds, sameSession: live.liveSession() === session, closed: session?.closed, sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length,
+          playing: live.playback.isPlaying(), prepared: live.playback.isPortableBrowserPlaybackPrepared(), limited: instanceLimit(inserted.instanceId) !== undefined,
+          logged: info.mock.calls.filter((call) => String(call[0]).includes('not hosted by the browser engine')).length })
+          .toEqual({ rebuilds: 0, sameSession: true, closed: false, sessionsAfterMark: 0, playing, prepared: true, limited: true, logged: 1 })
+      }, false)
+    } finally {
+      info.mockRestore()
+      clearInstanceLimits()
+    }
+  })
+}

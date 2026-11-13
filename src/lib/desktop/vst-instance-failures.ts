@@ -15,6 +15,7 @@ const [limits, setLimits] = createSignal<ReadonlyMap<string, string>>(new Map<st
 
 export const instanceLimit = (id: string) => limits().get(id)
 export const setInstanceLimits = (next: ReadonlyMap<string, string>) => setLimits(next)
+export const addInstanceLimit = (id: string, reason: string) => setLimits((current) => new Map(current).set(id, reason))
 export const clearInstanceLimits = () => setLimits(new Map<string, string>())
 
 export const clearVstInstanceFailures = () => {

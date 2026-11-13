@@ -60,7 +60,7 @@ import createTimelineEffectCommit from "~/components/timeline/create-timeline-ef
 import { SYNTH_KIND_ID, type LiveProcessorEditIdentity } from "~/lib/live-processor-control";
 import { createProcessorEditRegistry } from "~/components/timeline/create-processor-edit-registry";
 import { pickNativePlaybackInputs } from "~/components/timeline/native-playback-inputs";
-import { vstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
+import { addInstanceLimit, instanceLimit, vstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
 import { useTimelineMidiOverlay } from "~/hooks/useTimelineMidiOverlay";
@@ -892,14 +892,24 @@ const Timeline: Component<TimelineProps> = (props) => {
     return rebuild;
   };
 
-  // A prepared native session, playing or paused, adopts a structural edit in place; only a session still starting is rebuilt.
+  // A prepared session, native or browser, playing or paused, adopts a structural edit in place; only a session still
+  // starting is rebuilt.
   const syncPlaybackBackend = (
     tracks: Track[],
     intent?: TimelinePlaybackRebuildIntent,
     instrumentOverride?: { targetId: Track["id"]; instrument: TrackInstrumentParams },
-  ) => isNativePlaybackPrepared()
-    ? restartTimelineSchedule(tracks, { ...(intent ?? captureStructuralPlaybackIntent()), instrumentOverride })
-    : rebuildPlaybackBackend(tracks, intent, instrumentOverride);
+  ) => {
+    if (!isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()) return rebuildPlaybackBackend(tracks, intent, instrumentOverride);
+    const inserted = intent?.externalProcessor?.processor;
+    // A browser session cannot host a VST3: it adopts the edit without it, and the device shows the limitation (E6).
+    if (inserted && !isNativePlaybackPrepared()) {
+      addInstanceLimit(inserted.instanceId, "The browser engine does not host VST3 plug-ins yet.");
+      console.info("[native-vst3] insertion not hosted by the browser engine; the session adopts the edit without it", {
+        instanceId: inserted.instanceId,
+      });
+    }
+    return restartTimelineSchedule(tracks, { ...(intent ?? captureStructuralPlaybackIntent()), instrumentOverride });
+  };
 
   function rescheduleChangedClips(clipIds: string[]) {
     if (clipIds.length === 0) return;
@@ -2105,6 +2115,13 @@ const Timeline: Component<TimelineProps> = (props) => {
         await syncPlaybackBackend(renderTracks(), insertionIntent);
         // A plug-in that crashed while staged is shown failed on its device; there is no instance to read or edit.
         if (vstInstanceFailed(processor.instanceId)) throw new Error("The plug-in failed while it was staged.");
+        // A browser session holds no instance of the plug-in, so there is no state to read and no editor to open.
+        if (instanceLimit(processor.instanceId)) {
+          if (pendingExternalProcessorEditorRequest()?.requestToken === request.requestToken) {
+            setPendingExternalProcessorEditorRequest();
+          }
+          return;
+        }
         if (processor.manifest.supportsState) {
           const capture = await window.dawDesktop?.audioHost?.session.captureVstState(processor.instanceId);
           if (!capture?.ok) {

@@ -796,10 +796,12 @@ export function useTimelinePlayback(
         loopEndSec: end,
       }
       const seekSequence = nativeSeekSequence
+      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.
+      const desiredAtStart = readDesiredScheduleFingerprint()
       const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {
         backendOwnerToken += 1
         setActiveBackend(backend)
-        previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : readDesiredScheduleFingerprint()
+        previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : desiredAtStart
         setIsPlaying(true)
         setLastTracks(tracks)
         lastPublishedPlayheadSec = playheadSec()
@@ -1551,12 +1553,12 @@ export function useTimelinePlayback(
     options?: TimelineScheduleOptions,
     explicit = false,
   ): Promise<void> => {
-    // A kept paused native preview adopts what it carries, as a playing one does. Only a lifecycle rebuild, which names
-    // rebuildBackend, or a Play intent for a session that is not playing, replaces it.
+    // A kept paused native preview adopts what it carries, as a playing one does. An edit takes the transport state the
+    // session has when it commits, never the one its intent captured. Only a lifecycle rebuild, which names rebuildBackend,
+    // replaces the session.
     if (!((nativePlayback.isActive() || (nativePlayback.isPrepared() && !options?.rebuildBackend))
       && audioHostBridge?.session.revisions && audioHostBridge.session.configureInstrumentStates
       && (!options?.owner || options.owner === "native")
-      && (options?.resumePlayback === undefined || options.resumePlayback === nativePlayback.isActive())
       && (options?.projectId === undefined || options.projectId === nativeOptions?.projectId?.())
       && (options?.projectGeneration === undefined || options.projectGeneration === nativeOptions?.projectGeneration?.()))) {
       // A prepared portable session, playing or paused, adopts every edit on its own core, as native does. Only a
@@ -1691,16 +1693,8 @@ export function useTimelinePlayback(
       }).catch(() => undefined)
       return rebuild
     }
-    if (!isPlaying()) return
-    if (nativePlayback.isActive() || portableBrowserPlayback.isActive()) {
-      setIsPlaying(false)
-      cancelRaf()
-      void disposePreparedBackends(undefined, "timeline-schedule-replaced").catch(reportNativeStateCaptureFailure)
-      if (!requiresNativeAudio) disposePortableBrowserPlayback()
-      setActiveBackend('idle')
-      return
-    }
-    if (requiresNativeAudio) return
+    // A playing native or portable session is never replaced by an edit; a stale-project edit it cannot carry is dropped.
+    if (!isPlaying() || requiresNativeAudio || nativePlayback.isActive() || portableBrowserPlayback.isActive()) return
     setLastTracks(tracks)
     const sec = audioEngine.currentTimelineSec
     audioEngine.stopAllSources()
@@ -2163,7 +2157,7 @@ export function useTimelinePlayback(
     })
   }
   const followPortableEdits = () => {
-    if (rebuildInProgress || playAttempt || !untrack(isPlaying) || !portableBrowserPlayback.isActive()
+    if (rebuildInProgress || playAttempt || !untrack(isPlaying) || !(portableBrowserPlayback.isActive() || nativePlayback.isActive())
       || hasPendingAudioClipHydration()
       || untrack(() => readDesiredScheduleFingerprint()) === previewProjectionBaseline) return
     adoptPortableEdits()
@@ -2217,9 +2211,6 @@ export function useTimelinePlayback(
     // Recording saves insert unhydrated clips before source release completes.
     if (rebuildInProgress) return
     if (isPlaying()) {
-      if (enabled && tracksChanged && !pendingAudioHydration && nativePlayback.isActive()
-        && audioHostBridge?.session.revisions && audioHostBridge.session.configureInstrumentStates)
-        void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? []))
       followPortableEdits()
       return
     }

@@ -1,0 +1,48 @@
+{
+ "name": "ae08-phase8-step11a-394",
+ "sequence": 31,
+ "createdAt": "2026-11-13T20:08:50.827Z",
+ "revert": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 11a. rc2:394:0:mutant (hook-waiters.ts: drops the flush/preview ending-incarnation clause) is still killed: its control passes and the mutant ends in the same flush|cancelled|ending-incarnation rejections of hook seed 206, whose command ids moved from [240, 244] to [205, 209, 214]. The arm gave the same ids on a tree with the HEAD eda7ab3e controller and fuzz-tool sources, so the step 11a edits did not move it; earlier step 9-10 changes re-timed that seed and no record followed. Every other arm anchored in the controller or fuzz sources step 11a edits (154 live), the 90 arms whose command runs the controller test file or the fuzz tool, and the 319 live arms witnessed by useTimelinePlayback.test.ts passed unchanged, one at a time with --only; the rest are retired arms that select no job. No watched hash moves here: that and the seeds:hook shard failures that already fail at HEAD (seed 204 compileCount 25 recorded 22 at HEAD, 34 with step 11a) stay for --full.",
+  "expectationsSha256": "b5af7186b7e1408905bcd206d55d3f32bc82e7e078e9a34bdf29d49960dc62d6"
+ },
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:394:0:mutant",
+    "expect",
+    "rejection"
+   ],
+   "old": [
+    [
+     206,
+     240
+    ],
+    [
+     206,
+     244
+    ]
+   ],
+   "new": [
+    [
+     206,
+     205
+    ],
+    [
+     206,
+     209
+    ],
+    [
+     206,
+     214
+    ]
+   ]
+  }
+ ],
+ "seedRecordChanges": []
+}

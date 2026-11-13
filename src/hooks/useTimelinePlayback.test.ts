@@ -8385,10 +8385,11 @@ test('C0G the clip fingerprint names every clip field a playback compile reads, 
           reportFault: () => undefined,
         })
       })
-      await flushMicrotasks()
+      // An edit landing on a preview still preparing is adopted after it, so the edit comes once the preview is prepared.
+      for (let turn = 0; turn < 40; turn += 1) await flushMicrotasks()
       const prepared = compiles
       setTracks((current) => current.map((entry) => ({ ...entry, clips: entry.clips.map(edit) })))
-      await flushMicrotasks()
+      for (let turn = 0; turn < 40; turn += 1) await flushMicrotasks()
       return compiles > prepared
     } finally {
       dispose()
@@ -8645,10 +8646,10 @@ type TransportEditWorld = { fixture: ReturnType<typeof createNativeHookBridge>; 
   lifecycle: () => number }
 const withNativeTransportEdit = async (
   run: (world: TransportEditWorld, playback: ReturnType<typeof useTimelinePlayback>, setVolume: (volume: number) => void) => Promise<void>,
-  coldPlayGate?: Promise<NativeTransactionReply>,
+  options: { enabled: boolean; beginGate?: Promise<NativeTransactionReply> },
 ) => {
   const previousWindow = globalThis.window
-  const fixture = createNativeHookBridge(undefined, undefined, coldPlayGate)
+  const fixture = createNativeHookBridge(undefined, undefined, options.beginGate)
   const [tracks, setTracks] = createSignal([track])
   const seams: bigint[] = []
   const compiled: number[] = []
@@ -8678,7 +8679,7 @@ const withNativeTransportEdit = async (
     await withFakeRaf(async () => createRoot(async (dispose) => {
       fixture.setScheduleComplete(false)
       const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
-        { getTracks: () => tracks() }, { requiresNativeAudio: true, enabled: () => !coldPlayGate, projectId: () => 'project',
+        { getTracks: () => tracks() }, { requiresNativeAudio: true, enabled: () => options.enabled, projectId: () => 'project',
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           compileSnapshot: async (transport) => {
             compiled.push(tracks()[0]?.volume ?? Number.NaN)
@@ -8709,7 +8710,7 @@ test('UD7n W-S11d-A1 an intent captured while paused and committed after Play ad
     expect({ lifecycle: world.lifecycle() - before, stops: world.fixture.transportStates.filter((running) => !running).length - stops,
       playing: playback.isPlaying(), prepared: playback.isNativePlaybackPrepared(), adoptions: world.seams.length, faults: world.faults })
       .toEqual({ lifecycle: 0, stops: 0, playing: true, prepared: true, adoptions: 1, faults: [] })
-  })
+  }, { enabled: true })
 })
 
 test('UD7n W-S11d-A2 an edit that lands while a native Play is starting is adopted once the start commits', async () => {
@@ -8725,5 +8726,35 @@ test('UD7n W-S11d-A2 an edit that lands while a native Play is starting is adopt
     await flushMicrotasks()
     expect({ playing: playback.isPlaying(), adoptions: world.seams.length, lastCompiled: world.compiled.at(-1), faults: world.faults })
       .toEqual({ playing: true, adoptions: 1, lastCompiled: 0.25, faults: [] })
-  }, gate.promise)
+  }, { enabled: false, beginGate: gate.promise })
+})
+
+// AE-08 phase 8 step 11d (B): an edit that lands while a paused preview is still preparing is an edit, not an initial
+// prepare. The prepare finishes on the one host start, and the edit is adopted into it afterwards.
+test('UD7n W-S11d-B1 an edit that lands while a paused native preview is preparing is adopted after the one prepare', async () => {
+  const gate = Promise.withResolvers<NativeTransactionReply>()
+  await withNativeTransportEdit(async (world, playback, setVolume) => {
+    await flushMicrotasks()
+    setVolume(0.25)
+    await flushMicrotasks()
+    gate.resolve({ ok: true, transactionToken: nativeTransactionToken })
+    for (let index = 0; index < 20; index += 1) await flushMicrotasks()
+    const count = (name: string) => world.fixture.calls.filter((call) => call === name).length
+    expect({ begins: count('begin'), configures: count('configure'), stops: count('stop'), teardowns: count('teardown'),
+      adoptions: world.seams.length, seams: world.seams, lastCompiled: world.compiled.at(-1), prepared: playback.isNativePlaybackPrepared(), faults: world.faults })
+      .toEqual({ begins: 1, configures: 1, stops: 0, teardowns: 0, adoptions: 1, seams: [0n], lastCompiled: 0.25, prepared: true, faults: [] })
+  }, { enabled: true, beginGate: gate.promise })
+})
+
+test('UD7n W-S11d-B2 an edit that lands while a paused portable session is preparing is adopted after the one prepare', async () => {
+  await runB6f5(async (live, world) => {
+    await live.pausedAt(1)
+    const mark = live.mark()
+    // The session's node is created once its compile has read the desired state, so the edit lands mid-prepare.
+    world.onNode = () => { world.onNode = undefined; live.edit('structural') }
+    await live.playback.handleStop()
+    await live.until(() => world.sessions.some((session) => session.createdSeq > mark && session.adoptions > 0))
+    await live.expectEnd(false, 0, mark, 'structural', false)
+    expect(world.sessions.filter((session) => session.createdSeq > mark).map((session) => session.adoptions)).toEqual([1])
+  }, false)
 })

@@ -1543,6 +1543,8 @@ export function useTimelinePlayback(
     ? untrack(() => createDesktopAudioLifecycleReconciler(audioHostBridge, handleAudioLifecycle))
     : undefined
   let previewProjectionBaseline: string | undefined
+  // What the paused native preview in flight compiled, kept across the edits that land before it commits.
+  let nativePreviewCompiledFingerprint: string | undefined
   let portableCompiledFingerprint: string | undefined
   const restartTimelineSchedule = (
     tracks: Track[],
@@ -2156,6 +2158,10 @@ export function useTimelinePlayback(
       portableBrowserOptions?.reportFault?.(cause instanceof Error ? cause.message : 'Playback could not follow the edit.')
     })
   }
+  // A paused session that finished preparing carries what it compiled; an edit that landed meanwhile is adopted into it.
+  const adoptEditsPastBaseline = () => {
+    if (untrack(() => readDesiredScheduleFingerprint()) !== previewProjectionBaseline) adoptPortableEdits()
+  }
   const followPortableEdits = () => {
     if (rebuildInProgress || playAttempt || !untrack(isPlaying) || !(portableBrowserPlayback.isActive() || nativePlayback.isActive())
       || hasPendingAudioClipHydration()
@@ -2218,13 +2224,14 @@ export function useTimelinePlayback(
       || (previewProjectionBaseline !== undefined && trackFingerprint !== previewProjectionBaseline)
     // A pending browser Play keeps the portable session it starts from; followPortableEdits replaces it once committed.
     if (projectionChanged && nativePreviewRequested && (playAttempt === undefined || !portableBrowserOptions)) {
-      // The kept native preview adopts the edit in place, tails included. Only one still preparing is replaced.
+      // The kept native preview adopts the edit in place, tails included. One still preparing finishes first and adopts it
+      // after (the effect's tail).
       if (nativePlayback.isPrepared() && !pendingAudioHydration
         && audioHostBridge?.session.revisions && audioHostBridge.session.configureInstrumentStates) {
         adoptPortableEdits()
         return
       }
-      if (!nativePlayback.hasLiveMidiTails()) {
+      if (nativePlayback.getPendingStart()?.mode !== "preview" && !nativePlayback.hasLiveMidiTails()) {
         nativePreviewRequested = false
         void disposeNativePreview(undefined, "paused-preview-structural-change",
           tracksChanged ? pendingBackendPause?.promise : undefined)
@@ -2241,15 +2248,16 @@ export function useTimelinePlayback(
           adoptPortableEdits()
           return
         }
-        // A session still preparing has nothing to adopt into; the one compiled before the edit is replaced.
-        void disposeNativePreview(undefined, "paused-preview-structural-change")
+        // A session still preparing finishes first; the edit is adopted once it has.
       }
       const token = nativeLifecycleToken
       // Without a native preview, the portable session is the paused graph this hook keeps live.
       void pendingNativeDispose.then(ensureLivePortableSession).then(() => {
-        // The paused session now carries this fingerprint, so a re-run without an edit keeps it.
-        if (token === nativeLifecycleToken && portableBrowserPlayback.isPrepared() && !portableBrowserPlayback.isActive())
-          previewProjectionBaseline = trackFingerprint
+        // The paused session carries what its last compile read, so a re-run without an edit keeps it.
+        if (token === nativeLifecycleToken && portableBrowserPlayback.isPrepared() && !portableBrowserPlayback.isActive()) {
+          previewProjectionBaseline = portableCompiledFingerprint
+          adoptEditsPastBaseline()
+        }
       }).catch(() => undefined)
       return
     }
@@ -2272,9 +2280,12 @@ export function useTimelinePlayback(
           || projectGeneration !== (nativeOptions?.projectGeneration?.() ?? 0)
         ) return
         // A Stop or locate can land while the dispose this waits for runs: prepare at the playhead as it is now.
+        if (nativePlayback.getPendingStart() === undefined) nativePreviewCompiledFingerprint = trackFingerprint
         return nativePlayback.ensureLivePreview(untrack(playheadSec)).then((result) => {
           if (result !== "started") return ensureLivePortableSession()
-          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint
+          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return
+          previewProjectionBaseline = nativePreviewCompiledFingerprint
+          adoptEditsPastBaseline()
         })
       })
       .catch(() => undefined)

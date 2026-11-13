@@ -1551,12 +1551,12 @@ export function useTimelinePlayback(
     options?: TimelineScheduleOptions,
     explicit = false,
   ): Promise<void> => {
-    // A kept paused native preview adopts what it carries, as a playing one does. As for a portable session, only a call
-    // with no transport intent of its own asks for it.
-    if (!((nativePlayback.isActive() || (!options && nativePlayback.isPrepared()))
+    // A kept paused native preview adopts what it carries, as a playing one does. Only a lifecycle rebuild, which names
+    // rebuildBackend, or a Play intent for a session that is not playing, replaces it.
+    if (!((nativePlayback.isActive() || (nativePlayback.isPrepared() && !options?.rebuildBackend))
       && audioHostBridge?.session.revisions && audioHostBridge.session.configureInstrumentStates
       && (!options?.owner || options.owner === "native")
-      && (options?.resumePlayback === undefined || options.resumePlayback)
+      && (options?.resumePlayback === undefined || options.resumePlayback === nativePlayback.isActive())
       && (options?.projectId === undefined || options.projectId === nativeOptions?.projectId?.())
       && (options?.projectGeneration === undefined || options.projectGeneration === nativeOptions?.projectGeneration?.()))) {
       // A prepared portable session, playing or paused, adopts every edit on its own core, as native does. Only a

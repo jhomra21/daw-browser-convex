@@ -891,17 +891,20 @@ const Timeline: Component<TimelineProps> = (props) => {
     return rebuild;
   };
 
+  // A prepared native session, playing or paused, adopts a structural edit in place; only a session still starting is rebuilt.
+  const syncPlaybackBackend = (
+    tracks: Track[],
+    intent?: TimelinePlaybackRebuildIntent,
+    instrumentOverride?: { targetId: Track["id"]; instrument: TrackInstrumentParams },
+  ) => isNativePlaybackPrepared()
+    ? restartTimelineSchedule(tracks, { ...(intent ?? captureStructuralPlaybackIntent()), instrumentOverride })
+    : rebuildPlaybackBackend(tracks, intent, instrumentOverride);
+
   function rescheduleChangedClips(clipIds: string[]) {
     if (clipIds.length === 0) return;
     setFollowPaused(true);
-    if (isNativePlaybackPrepared()) {
-      void rebuildPlaybackBackend(renderTracks()).catch((cause: unknown) => {
-        console.error("[Timeline] failed to rebuild prepared playback after clip edit", cause);
-      });
-      return;
-    }
-    // A prepared browser session adopts a clip edit through the hook's follow, which rebuilds what it cannot carry.
-    if (isPortableBrowserPlaybackPrepared()) return;
+    // A prepared session, native or browser, adopts a clip edit through the hook's follow.
+    if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) return;
     if (!isPlaying()) return;
     const enabled = loopEnabled();
     const end = loopEndSec();
@@ -921,12 +924,8 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   function rescheduleTimeline() {
     setFollowPaused(true);
-    if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
-      void rebuildPlaybackBackend(renderTracks()).catch((cause: unknown) => {
-        console.error("[Timeline] failed to rebuild prepared playback after structural edit", cause);
-      });
-      return;
-    }
+    // A prepared session, native or browser, adopts a structural edit through the hook's follow.
+    if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) return;
     if (isPlaying()) restartTimelineSchedule(renderTracks()).catch((cause: unknown) => {
       console.error("[Timeline] failed to reschedule legacy playback", cause);
     });
@@ -2471,22 +2470,16 @@ const Timeline: Component<TimelineProps> = (props) => {
           if (!isPlaying() && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()
             && !isStructuralRebuildInProgress()
             && !isPreparingPlayback()) return;
-          // A prepared browser session, playing or paused, adopts an instrument edit or replacement through the hook's
-          // follow, which rebuilds what it cannot carry.
+          // A prepared browser session, playing or paused, adopts an instrument edit or replacement through the hook's follow.
           if (isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) return;
           // A playing native session carries an edit to the same instrument as a published configuration: the schedule
           // follow adopts it, so there is no graph to rebuild.
           if (isPlaying() && previous && instrument && previous.kind === instrument.kind
             && previous.instanceId === instrument.instanceId) return;
-          await rebuildPlaybackBackend(renderTracks(), captureStructuralPlaybackIntent(),
+          await syncPlaybackBackend(renderTracks(), captureStructuralPlaybackIntent(),
             instrument ? { targetId, instrument } : undefined);
         }).catch((cause: unknown) => {
-          notify(
-            "Native playback rebuild failed",
-            cause instanceof Error
-              ? cause.message
-              : "The active playback graph could not be updated for the instrument change.",
-          );
+          console.error("[Timeline] failed to apply an instrument change to native playback", cause);
         });
       },
       usesLegacyAudioEngine,
@@ -2506,10 +2499,10 @@ const Timeline: Component<TimelineProps> = (props) => {
         if (result.reason === "cancelled" || result.reason === "stale") return "superseded";
         if (result.reason === "unavailable" || result.reason === "unprepared") return "dropped";
         if (result.reason !== "unsupported") throw new Error(result.error ?? "The portable processor update failed.");
-        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam
-        // and rebuilds what it cannot carry; a Synth edit is carried by the release announce. A preview must never rebuild.
+        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;
+        // a Synth edit is carried by the release announce.
         if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;
-        await rebuildPlaybackBackend(renderTracks());
+        await syncPlaybackBackend(renderTracks());
         return "applied";
       },
       onPreviewNote: auditionNote,
@@ -2542,25 +2535,21 @@ const Timeline: Component<TimelineProps> = (props) => {
         playbackIntent: TimelinePlaybackRebuildIntent | undefined,
       ) => {
         if (processor.bypassed === previous.bypassed) return;
-        const intent = playbackIntent ?? captureStructuralPlaybackIntent();
-        if (!intent.resumePlayback && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()) return;
-        void rebuildPlaybackBackend(renderTracks(), intent).catch((cause: unknown) => {
-          notify(
-            "Native playback rebuild failed",
-            cause instanceof Error ? cause.message : "The active native playback graph could not be rebuilt.",
-          );
-        });
-      },
-      onMixedReorderCommitted: (playbackIntent: TimelinePlaybackRebuildIntent | undefined) => {
-        // A prepared browser session adopts the new effect order through the hook's follow, which rebuilds what it cannot carry.
+        // A prepared browser session adopts the bypass through the hook's follow.
         if (isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) return;
         const intent = playbackIntent ?? captureStructuralPlaybackIntent();
         if (!intent.resumePlayback && !isNativePlaybackPrepared()) return;
-        void rebuildPlaybackBackend(renderTracks(), intent).catch((cause: unknown) => {
-          notify(
-            "Native playback rebuild failed",
-            cause instanceof Error ? cause.message : "The active native playback graph could not be rebuilt.",
-          );
+        void syncPlaybackBackend(renderTracks(), intent).catch((cause: unknown) => {
+          console.error("[Timeline] failed to apply an external processor update to native playback", cause);
+        });
+      },
+      onMixedReorderCommitted: (playbackIntent: TimelinePlaybackRebuildIntent | undefined) => {
+        // A prepared browser session adopts the new effect order through the hook's follow.
+        if (isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) return;
+        const intent = playbackIntent ?? captureStructuralPlaybackIntent();
+        if (!intent.resumePlayback && !isNativePlaybackPrepared()) return;
+        void syncPlaybackBackend(renderTracks(), intent).catch((cause: unknown) => {
+          console.error("[Timeline] failed to apply an effect reorder to native playback", cause);
         });
       },
       automationEnvelopes: automation.envelopes(),

@@ -60,7 +60,7 @@ test.each(["synth", "master", "master-structural"])("3B1 r3 portable %s live gai
   const targetId = schedule === "synth" ? "synth" : "master"
   const source = await readFile(new URL("../components/Timeline.tsx", import.meta.url), "utf8")
   const { portable: handler } = extractTimelineBindings(source)
-  const makeCallback = new Function("liveProcessorControl", "isPortableBrowserPlaybackPrepared", "isNativePlaybackPrepared", "rebuildPlaybackBackend", "SYNTH_KIND_ID",
+  const makeCallback = new Function("liveProcessorControl", "isPortableBrowserPlaybackPrepared", "isNativePlaybackPrepared", "syncPlaybackBackend", "SYNTH_KIND_ID",
     new Bun.Transpiler({ loader: "ts" }).transformSync(`return ({ ${handler} }).applyPortableProcessor;`))
   const calls: string[] = [], batches: unknown[] = []
   const graphs: Parameters<PortableWasmPlaybackSession["prepareGraph"]>[0][] = []
@@ -1740,12 +1740,12 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
   const source = await readFile(new URL("../components/Timeline.tsx", import.meta.url), "utf8")
   const { portable, structural } = extractTimelineBindings(source)
   const transpile = (code: string) => new Bun.Transpiler({ loader: "ts" }).transformSync(code)
-  const makePortable = new Function("liveProcessorControl", "isPortableBrowserPlaybackPrepared", "isNativePlaybackPrepared", "rebuildPlaybackBackend", "renderTracks", "SYNTH_KIND_ID",
+  const makePortable = new Function("liveProcessorControl", "isPortableBrowserPlaybackPrepared", "isNativePlaybackPrepared", "syncPlaybackBackend", "renderTracks", "SYNTH_KIND_ID",
     transpile(`return ({ ${portable} }).applyPortableProcessor;`))
   const makeStructural = new Function("deps", transpile(`
     const { mountedProjectGeneration, awaitPlaybackPreparation, preparedInstrument, isStructuralRebuildInProgress,
       isPreparingPlayback, isPlaying, isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared,
-      rebuildPlaybackBackend, renderTracks, captureStructuralPlaybackIntent, notify } = deps;
+      syncPlaybackBackend, renderTracks, captureStructuralPlaybackIntent, notify } = deps;
     let instrumentPlaybackChangeTail = Promise.resolve();
     return ({ ${structural} }).onStructuralPlaybackChange;`))
   let projected: TrackInstrumentParams = options.initial ?? p1Initial, revision = 1, rebuilds = 0
@@ -1812,7 +1812,7 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
     isStructuralRebuildInProgress: () => false, isPreparingPlayback: () => controller.isPreparing(),
     isPlaying: () => true, isNativePlaybackPrepared: () => false,
     isPortableBrowserPlaybackPrepared: () => controller.isPrepared(),
-    rebuildPlaybackBackend: rebuild, renderTracks: () => [track],
+    syncPlaybackBackend: rebuild, renderTracks: () => [track],
     captureStructuralPlaybackIntent: () => ({}), notify: (title: string, message: string) => { notes.push(`${title}: ${message}`) },
   })
   const registry = createProcessorEditRegistry(() => 120)

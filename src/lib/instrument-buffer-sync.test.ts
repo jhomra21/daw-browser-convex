@@ -1804,7 +1804,7 @@ test.each(["sampler", "granular", "sampler-change"])("3B1 r3 queued %s successor
   const makeCallback = new Function("deps", new Bun.Transpiler({ loader: "ts" }).transformSync(`
     const { mountedProjectGeneration, awaitPlaybackPreparation, preparedInstrument, isStructuralRebuildInProgress,
       isPreparingPlayback, isPlaying, isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared,
-      rebuildPlaybackBackend, renderTracks, captureStructuralPlaybackIntent, notify } = deps;
+      syncPlaybackBackend, renderTracks, captureStructuralPlaybackIntent, notify } = deps;
     let instrumentPlaybackChangeTail = Promise.resolve();
     return ({ ${handler} }).onStructuralPlaybackChange;
   `));
@@ -1841,7 +1841,7 @@ test.each(["sampler", "granular", "sampler-change"])("3B1 r3 queued %s successor
     preparedInstrument: () => undefined, isStructuralRebuildInProgress: () => false,
     isPreparingPlayback: () => armed, isPlaying: () => false,
     isNativePlaybackPrepared: () => false, isPortableBrowserPlaybackPrepared: () => false,
-    rebuildPlaybackBackend: async () => {}, renderTracks: () => [track],
+    syncPlaybackBackend: async () => {}, renderTracks: () => [track],
     captureStructuralPlaybackIntent: () => ({}), notify: () => {},
   });
   let panel: EffectsPanelController | undefined;

@@ -54,19 +54,18 @@ test("phase 5 file analyzer rejects injected PCM and an actual rebuild event", a
     if (frame >= seam) cleanSamples[frame * 2 + 1] = Math.fround((samples[frame * 2 + 1] ?? 0)
       * Math.max(0, Math.fround(1 - Math.fround((frame - seam) / fade))))
   }
+  const captureBlocks = Array.from({ length: frames / 512 }, (_, index) => ({ event: "capture-block", pid: 1, captureId: 2,
+    offset: index * 512, frames: 512, transportFrame: index * 512, transportEpoch: 3, revision: index * 512 < seam ? 1 : 2,
+    wallMs: index * 512 / 48 + 1000 }))
   const native = [
-    ...Array.from({ length: frames / 512 }, (_, index) => ({ event: "capture-block", pid: 1, captureId: 2,
-      offset: index * 512, frames: 512, transportFrame: index * 512, transportEpoch: 3, revision: index * 512 < seam ? 1 : 2,
-      wallMs: index * 512 / 48 + 1000 })),
     { event: "graph-publish-request", wallMs: 2999, requestedRevision: 2, transportEpoch: 3 },
     { event: "graph-publish", wallMs: 3000, pid: 1, revision: 2, transportEpoch: 3,
       publicationFrame: seam, publicationEpoch: 190, cause: "block-boundary" },
     { event: "capture-complete", pid: 1, captureId: 2, frames, failed: false, overflowFrames: 0, wallMs: 5100 },
   ]
-  const writeNative = (rebuild: boolean, blocks = native.filter((entry) => entry.event === "capture-block"),
-    completedFrames = frames) =>
+  const writeNative = (rebuild: boolean, blocks = captureBlocks, completedFrames = frames) =>
     writeFile(path.join(directory, "host.jsonl"),
-    [...blocks, ...native.filter((entry) => entry.event !== "capture-block"),
+    [...blocks, ...native,
       ...(rebuild ? [{ event: "structural-rebuild", wallMs: 3100, transportEpoch: 3 }] : [])]
       .map((entry) => JSON.stringify(entry.event === "capture-complete"
         ? { ...entry, frames: completedFrames } : entry)).join("\n") + "\n")
@@ -80,7 +79,6 @@ test("phase 5 file analyzer rejects injected PCM and an actual rebuild event", a
     await writeNative(false)
     await writeWav(path.join(directory, "output-1-2.wav"), { ...pcm, samples: cleanSamples })
     expect((await analyzePhase5(directory)).passed).toBe(true)
-    const captureBlocks = native.filter((entry) => entry.event === "capture-block")
     const repeatedOffset = captureBlocks.map((entry) => ({ ...entry }))
     if (repeatedOffset[1]) repeatedOffset[1].offset = 0
     await writeNative(false, repeatedOffset)

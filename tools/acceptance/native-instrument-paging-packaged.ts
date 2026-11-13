@@ -43,11 +43,13 @@ const expectedFixtures = new Map([
 ])
 type Device = "granular" | "sampler" | "drum-rack"
 const devices: Device[] = ["granular", "sampler", "drum-rack"]
+const modes: ("native live" | "native export")[] = ["native live", "native export"]
 const sources: { file: string; seconds: number; frames: number; markerFrame: number }[] = [
   { file: "stereo-48k-8s.wav", seconds: 8, frames: 384_000, markerFrame: 345_600 },
   { file: "stereo-48k-180s.wav", seconds: 180, frames: 8_640_000, markerFrame: 7_776_000 },
 ]
 const eventSchema = z.record(z.string(), z.json())
+const exportStatusSchema = z.object({ status: z.json().optional(), job: z.object({ id: z.string() }).passthrough().optional() }).passthrough()
 type Json = string | number | boolean | null | Json[] | { [key: string]: Json }
 type RunContext = {
   cell: string
@@ -404,8 +406,12 @@ const launchCell = async (cell: Omit<Cell, "result" | "pass" | "metrics" | "evid
     if (!imported) throw new Error("Imported sample missing in canonical project snapshot")
     metrics.fixtureSha256 = expectedHash
     metrics.fixtureFrames = fixture.frames
-    metrics.fixtureSampleRate = imported.sampleRate
-    metrics.fixtureChannels = imported.channelCount
+    const { durationSec, sampleRate, channelCount } = imported
+    if (durationSec === undefined || sampleRate === undefined || channelCount === undefined) {
+      throw new Error("Imported sample is missing canonical audio metadata in the project snapshot")
+    }
+    metrics.fixtureSampleRate = sampleRate
+    metrics.fixtureChannels = channelCount
 
     const trackRef = `paging-${randomUUID()}`
     const notes = cell.device === "granular"
@@ -419,7 +425,7 @@ const launchCell = async (cell: Omit<Cell, "result" | "pass" | "metrics" | "evid
     const audioClipTrackIds = new Set(before.clips.filter((clip) => !clip.midi).map((clip) => clip.trackId))
     const audioTracks = before.tracks.filter((track) => track.kind === "audio" && audioClipTrackIds.has(track.id))
     if (audioTracks.length === 0) throw new Error("Imported audio clip track missing from canonical project snapshot")
-    const actions = [
+    const actions: Json[] = [
       ...audioTracks.map((track) => ({
         kind: "track.mix.set",
         track: { source: "persisted", id: track.id },
@@ -433,9 +439,9 @@ const launchCell = async (cell: Omit<Cell, "result" | "pass" | "metrics" | "evid
         params: instrumentParams(cell.device, {
           id: imported.id,
           name: imported.name,
-          durationSec: imported.durationSec,
-          sampleRate: imported.sampleRate,
-          channelCount: imported.channelCount,
+          durationSec,
+          sampleRate,
+          channelCount,
         }),
       },
       {
@@ -451,7 +457,7 @@ const launchCell = async (cell: Omit<Cell, "result" | "pass" | "metrics" | "evid
     ]
     const request = { version: "v1", projectId, expectedRevision: before.project.revision, actions }
     const preview = controlPreviewResultSchemaV1.parse(await command(profile, ["preview", "--request", "-", "--target", "host"], request))
-    const approval = preview.approval.required
+    const approval = preview.approval?.required
       ? controlApprovalResultSchemaV1.parse(await command(profile, ["approval", "--request", "-", "--target", "host"], request)).approvalToken
       : undefined
     const commitRequest = { ...request, idempotencyKey: `paging-${randomUUID()}` }
@@ -535,11 +541,12 @@ const launchCell = async (cell: Omit<Cell, "result" | "pass" | "metrics" | "evid
       await writeFile(path.join(cellDirectory, "export-request.json"), JSON.stringify(request, null, 2), { mode: 0o600 })
       const jobId = z.string().safeParse(job.jobId).success ? z.string().parse(job.jobId) : undefined
       if (jobId) {
+        const exportStatus = async () => exportStatusSchema.parse(await command(profile, ["host", "export-status"]))
         await waitFor(async () => {
-          const status = eventSchema.parse(await command(profile, ["host", "export-status"]))
+          const status = await exportStatus()
           return status.job?.id === jobId && ["completed", "failed", "canceled"].includes(String(status.status))
         }, 600_000, "native export terminal status")
-        const status = eventSchema.parse(await command(profile, ["host", "export-status"]))
+        const status = await exportStatus()
         if (status.status !== "completed" || status.job?.id !== jobId) throw new Error(`Native export did not complete: ${JSON.stringify(status)}`)
       }
       const fileStat = await stat(outputFile)
@@ -640,6 +647,7 @@ const launchCell = async (cell: Omit<Cell, "result" | "pass" | "metrics" | "evid
     if (tap && cell.mode === "native live") {
       const tapPath = path.join(cellDirectory, tap)
       evidence.push(path.relative(output, tapPath))
+      let lateMarker: { left: number; right: number } | undefined
       try {
         const pcm = await readWav(tapPath)
         const finiteSamples = pcm.samples.every(Number.isFinite)
@@ -667,8 +675,9 @@ const launchCell = async (cell: Omit<Cell, "result" | "pass" | "metrics" | "evid
           const outputStart = Number(targetBlock.offset) + Math.max(0, markerTarget - Number(targetBlock.transportFrame))
           const probeFrames = Math.min(lateWindow, pcm.samples.length / pcm.channels - outputStart)
           const probe = analyzeMarker(pcm.samples, pcm.channels, pcm.sampleRate, outputStart, probeFrames)
-          metrics.liveLateMarkerLeft = probe.leftMarkerAmplitude
-          metrics.liveLateMarkerRight = probe.rightMarkerAmplitude
+          lateMarker = { left: probe.leftMarkerAmplitude, right: probe.rightMarkerAmplitude }
+          metrics.liveLateMarkerLeft = lateMarker.left
+          metrics.liveLateMarkerRight = lateMarker.right
           metrics.liveLateMarkerDistinctStereo = Math.abs(probe.leftMarkerAmplitude - probe.rightMarkerAmplitude) > 0.0001
         } else {
           metrics.liveLateMarkerFoundInTransportTap = false
@@ -683,8 +692,7 @@ const launchCell = async (cell: Omit<Cell, "result" | "pass" | "metrics" | "evid
         if (!finiteSamples || !nonzeroSamples || rms <= 1e-7 || metrics.liveTapTerminalValid !== true) {
           if (!cellError) cellError = "Live post-master PCM failed finite/nonzero/clean-terminal assertions"
         }
-        if (metrics.liveLateMarkerLeft === undefined || metrics.liveLateMarkerRight === undefined
-          || metrics.liveLateMarkerLeft <= 0.005 || metrics.liveLateMarkerRight <= 0.005
+        if (lateMarker === undefined || lateMarker.left <= 0.005 || lateMarker.right <= 0.005
           || metrics.liveLateMarkerDistinctStereo !== true) {
           if (!cellError) cellError = "Live post-master PCM did not contain the expected distinct late marker"
         }
@@ -746,7 +754,7 @@ const cellLimit = process.env.DAW_ACCEPTANCE_MAX_CELLS === undefined
 let launchedCells = 0
 for (const device of devices) {
   for (const source of sources) {
-    for (const mode of ["native live", "native export"]) {
+    for (const mode of modes) {
       const label = `${device}-${source.seconds}s-${mode === "native live" ? "live" : "export"}`
       if (selectedCells && !selectedCells.includes(label)) continue
       if (launchedCells >= cellLimit || Date.now() >= globalDeadline) break

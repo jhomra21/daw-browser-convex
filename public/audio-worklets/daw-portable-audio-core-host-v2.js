@@ -1933,7 +1933,12 @@ export class DawPortableAudioCoreHost {
     const existing = this.assets.get(message.assetId)
     if (!existing) return this.assetReleaseResult(message, 'stale-generation')
     existing.retainCount -= 1
-    if (existing.retainCount === 0) this.releaseStoredAsset(message.assetId, existing)
+    // The core reads a registered asset until its last source, voice or instrument zone has let go (a source fades out
+    // over its termination ramp), so the storage stays while the core says it is in use.
+    if (existing.retainCount === 0 && !this.releaseStoredAsset(message.assetId, existing)) {
+      existing.retainCount = 1
+      return this.assetReleaseResult(message, 'asset-in-use')
+    }
     this.assetReleaseResult(message, 'released')
   }
 
@@ -1947,10 +1952,12 @@ export class DawPortableAudioCoreHost {
     for (const [assetId, asset] of this.assets) this.releaseStoredAsset(assetId, asset)
   }
 
+  // Whether the storage went: the core refuses to release an asset something still reads.
   releaseStoredAsset(assetId, asset) {
-    if (this.assetRelease) this.assetRelease(asset.handle.value)
+    if (this.assetRelease && this.assetRelease(asset.handle.value) === CORE_ASSET_IN_USE) return false
     if (this.free) this.free(asset.allocation)
     this.assets.delete(assetId)
+    return true
   }
 
   assetRegistrationResult(message, result, handle) {

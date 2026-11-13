@@ -1878,3 +1878,69 @@ test('W-C9-clip-3g a publish while paused applies its sources at once, in the or
   const rendered = renderBlocks(host, 8)
   expect({ published, table: matchesRamp(rendered, (frame) => frame < 1_024 ? rampLevel(frame, 0.5) : 0) }).toEqual({ published: ['published'], table: true })
 })
+
+// AE-08 phase 8 step 9c: an asset swap at a seam. The new asset is registered before the publish, the old one is
+// released once nothing plays from it, and `release-asset` says so while something still does.
+const releaseAnswer = (host: { handleMessage: (message: { version: number; type: 'release-asset'; requestId: number; generation: number; assetId: string }) => void }, messages: readonly PortableWasmStatusMessage[], requestId: number, assetId: string) => {
+  host.handleMessage({ version: 2, type: 'release-asset', requestId, generation: 0, assetId })
+  return messages.flatMap((message) => message.type === 'asset-released' && message.requestId === requestId ? [message.result] : [])[0]
+}
+
+test('W-C9-asset-5 a clip asset swapped at the seam crossfades to the new audio, and the old asset is in use until its tail has ended', async () => {
+  const { host, messages } = await playRamp(['track'], true, [rampSource(1, 0, 1_024)])
+  const doubled = rampAsset.map((value) => Math.fround(value * 2))
+  host.handleMessage({ version: 2, type: 'register-asset', requestId: 7, generation: 0,
+    asset: { version: 1, assetId: 'ramp-doubled', frameCount: rampFrames, sampleRateHz: 48_000, channelCount: 2 }, planes: [doubled, doubled] })
+  const rendered = renderBlocks(host, 1)
+  publishWithSources(host, ['track'], [{ ...rampSource(1, 384, 1_024), assetId: 'ramp-doubled' }], 384)
+  rendered.push(...renderBlocks(host, 3))
+  const duringTail = releaseAnswer(host, messages, 50, 'ramp')
+  rendered.push(...renderBlocks(host, 4))
+  const afterTail = releaseAnswer(host, messages, 51, 'ramp')
+  expect({ published: sourcePublication(messages),
+    crossfaded: matchesRamp(rendered, (frame) => {
+      const entered = Math.min(1, Math.max(0, (frame - 384) / blendFrames))
+      return rampLevel(frame, 1 - entered + 2 * entered)
+    }), duringTail, afterTail })
+    .toEqual({ published: ['published'], crossfaded: true, duringTail: 'asset-in-use', afterTail: 'released' })
+})
+
+// The Sampler's zones name the asset, so the publish reconfigures the instrument from the registry: the new sample is
+// registered first. The held note is released by the note-off at the seam and the spanning note-on starts the new sample.
+const zeroCrossings = (signal: readonly number[]) => signal.slice(1).filter((sample, index) => (signal[index] < 0) !== (sample < 0)).length
+test('W-C9-asset-6 a Sampler zone sample swapped at the seam releases the old voice and starts the new sample on the spanning note-on', async () => {
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const messages: PortableWasmStatusMessage[] = []
+  const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
+  expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+  const register = (requestId: number, assetId: string, step: number) => {
+    const plane = new Float32Array(sineFrames).map((_, frame) => Math.sin(step * frame))
+    host.handleMessage({ version: 2, type: 'register-asset', requestId, generation: 0,
+      asset: { version: 1, assetId, frameCount: sineFrames, sampleRateHz: 48_000, channelCount: 2 }, planes: [plane, plane] })
+  }
+  register(900, 'held-sine', 0.05)
+  const sampler = (assetId: string): AudioCoreInstrumentState => {
+    const state = heldSampler('sampler', 1, 8)
+    return state.kind === 'sampler' ? { ...state, zones: state.zones.map((zone) => ({ ...zone, assetId })) } : state
+  }
+  const base = portableTrackGraph(['track'])
+  const graph = (revision: number, assetId: string) => ({ ...base, revision,
+    nodes: base.nodes.map((node) => node.id === 'track' ? { ...node, kind: 'instrument', instrument: sampler(assetId) } : node) })
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph(1, 'held-sine') })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [seamNoteOn(0, 1)] } })
+  const before = renderBlocks(host, noteSeam / 128).slice(-1280)
+  register(901, 'held-sine-fast', 0.1)
+  const seamEvents = [{ ...seamNoteOff(noteSeam, 1) }, seamNoteOn(noteSeam, 2)]
+  expect(adoptRevision(host, messages, graph(2, 'held-sine-fast'), seamEvents, noteSeam).installed).toBe('installed')
+  const first = renderBlocks(host, 1)
+  const duringBlend = releaseAnswer(host, messages, 52, 'held-sine')
+  const after = renderBlocks(host, 12).slice(-1280)
+  const afterBlend = releaseAnswer(host, messages, 53, 'held-sine')
+  expect({ published: publishedResults(messages, 2), oldRate: zeroCrossings(before), newRate: zeroCrossings(after), sounding: peakOf(first) > 0.02, duringBlend, afterBlend })
+    .toEqual({ published: ['published'], oldRate: expect.any(Number), newRate: expect.any(Number), sounding: true, duringBlend: 'asset-in-use', afterBlend: 'released' })
+  expect(zeroCrossings(before)).toBeLessThan(26)
+  expect(zeroCrossings(after)).toBeGreaterThan(36)
+})

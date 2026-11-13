@@ -70,6 +70,7 @@ type PortableSession = Pick<
   PortableWasmPlaybackSession,
   | "connectInput" | "dispose" | "installSchedule" | "markActive" | "onFault" | "onRecordingStatus" | "postRecordingControl" | "prepareGraph" | "publishGraph" | "registerAsset" | "scheduleSources" | "setTransport"
 > & {
+  releaseAsset?: PortableWasmPlaybackSession["releaseAsset"]
   pagedCapabilities?: PortableWasmPlaybackSession["pagedCapabilities"]
   registerPagedAsset?: PortableWasmPlaybackSession["registerPagedAsset"]
   writeAssetPage?: PortableWasmPlaybackSession["writeAssetPage"]
@@ -249,6 +250,8 @@ const resolveOrdinaryDescriptors = async (
   snapshot: LivePlaybackSnapshot,
   resolveSource: AudioPcmSourceResolver | undefined,
   signal?: AbortSignal,
+  // The descriptors of the session already playing: its assets are not resolved again.
+  known: ReadonlyMap<string, PortableOrdinaryDescriptor> = new Map(),
 ) => {
   const clipsByAsset = new Map<string, LivePlaybackSnapshot["tracks"][number]["clips"][number]>()
   for (const track of snapshot.tracks) {
@@ -263,6 +266,11 @@ const resolveOrdinaryDescriptors = async (
   const descriptors = new Map<string, PortableOrdinaryDescriptor>()
   for (const asset of snapshot.assets) {
     if (asset.buffer || !clipsByAsset.has(asset.assetId)) continue
+    const resolved = known.get(asset.assetId)
+    if (resolved) {
+      descriptors.set(asset.assetId, resolved)
+      continue
+    }
     if (!resolveSource) throw new Error(`Audio asset "${asset.assetId}" has no source resolver.`)
     const clip = clipsByAsset.get(asset.assetId)
     if (!clip) continue
@@ -414,8 +422,8 @@ type SnapshotClip = LivePlaybackSnapshot["tracks"][number]["clips"][number]
 const carriesClipEdits = (clip: SnapshotClip) => !clip.midi && clip.audioWarp?.enabled !== true
 
 // The clips of a track the seam carries, as `installed` has them: every MIDI clip, and of the audio clips their start,
-// duration, trim offset, gain and fades, and their addition or deletion. Whatever else differs (the asset a clip plays,
-// its warp, a warped clip's placement) stays as `next` has it, so the gate refuses it.
+// duration, trim offset, gain, fades and the asset they play, and their addition or deletion. Whatever else differs (a
+// clip's warp, a warped clip's placement) stays as `next` has it, so the gate refuses it.
 const withSeamClips = (next: readonly SnapshotClip[], installed: readonly SnapshotClip[]): SnapshotClip[] => {
   const incoming = new Map(next.map((clip) => [clip.id, clip]))
   const known = new Set(installed.map((clip) => clip.id))
@@ -424,22 +432,31 @@ const withSeamClips = (next: readonly SnapshotClip[], installed: readonly Snapsh
       if (clip.midi) return [clip]
       const edited = incoming.get(clip.id)
       if (!edited) return carriesClipEdits(clip) ? [clip] : []
-      return carriesClipEdits(clip) && carriesClipEdits(edited)
-        ? [{ ...edited, startSec: clip.startSec, duration: clip.duration, bufferOffsetSec: clip.bufferOffsetSec, gain: clip.gain, fades: clip.fades }]
-        : [edited]
+      if (!carriesClipEdits(clip) || !carriesClipEdits(edited)) return [edited]
+      const { startSec, duration, bufferOffsetSec, gain, fades, sourceAssetKey, sourceKind, sourceDurationSec, sourceSampleRate,
+        sourceChannelCount, sampleUrl, buffer } = clip
+      return [{ ...edited, startSec, duration, bufferOffsetSec, gain, fades, sourceAssetKey, sourceKind, sourceDurationSec,
+        sourceSampleRate, sourceChannelCount, sampleUrl, buffer }]
     }),
     ...next.filter((clip) => !known.has(clip.id) && !clip.midi && !carriesClipEdits(clip)),
   ]
 }
 
+const granularAssetKeys = (snapshot: LivePlaybackSnapshot) => Object.entries(snapshot.mixer.fx.trackFx ?? {}).flatMap(
+  ([id, entry]) => entry.instrument?.kind === "granular" && entry.instrument.params.zone ? [[id, entry.instrument.params.zone.sample.assetKey]] : [],
+)
+
 // What a playing session adopts at a seam, beyond what it takes live: the tempo of a project without warped audio, the
-// loop fields, and the clips of tracks it already plays (`withSeamClips`). `next` with that taken from `previous`
-// fingerprints as `previous` when nothing else changed. Still refused: a tempo under warped audio (new Stretch), assets,
-// tracks added or deleted, effect structure and instrument replacement.
+// loop fields, the clips of tracks it already plays (`withSeamClips`, the asset a clip plays included), and the assets
+// the Sampler zones and Drum Rack pads it plays name (the instrument itself is taken live, `withLiveContentOf`). `next`
+// with that taken from `previous` fingerprints as `previous` when nothing else changed. Still refused: a tempo under
+// warped audio (new Stretch), the asset of a warped clip, tracks added or deleted, effect structure, instrument
+// replacement, the sample of a Granular cloud, and a sample that becomes or ceases to be available.
 const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const previousTracks = new Map(previous.tracks.map((track) => [track.id, track]))
   return {
     ...next,
+    assets: JSON.stringify(granularAssetKeys(next)) === JSON.stringify(granularAssetKeys(previous)) ? previous.assets : next.assets,
     bpm: hasWarpedAudio(next) || hasWarpedAudio(previous) ? next.bpm : previous.bpm,
     transport: {
       ...next.transport,
@@ -467,6 +484,13 @@ const adoptionSeamLeadSec = 0.25
 // An adopted schedule starts at `seamFrame` while the session keeps sounding what the old schedule started before it.
 // A note that sounds at the seam and is not the same note in `next` gets a note-off at the seam; one that survives keeps
 // its voice, because a repeated note-on would stick a Synth (it then needs two note-offs) and double a Sampler.
+// Whether an edit leaves an instrument its voices, as native's retained rule does (NS:1227-1231) and the core's
+// `same_instrument_configuration` does (CORE:7510): the same instance with the same configuration and the same samples.
+// A Synth moves the eight fields its live events carry without replacing its slot.
+const keepsInstrumentVoices = (before: TrackInstrumentParams | undefined, after: TrackInstrumentParams | undefined) =>
+  before !== undefined && after !== undefined && before.instanceId === after.instanceId && before.kind === after.kind
+  && (before.kind === "synth" && after.kind === "synth" ? isLiveEventOnlyInstrumentChange(before, after) : JSON.stringify(before) === JSON.stringify(after))
+
 const reconcileAtSeam = (input: {
   previous: PortableSchedule
   next: PortableSchedule
@@ -765,6 +789,35 @@ const readPortableWasmPages = async function* (input: {
       planes: accumulatedPlanes.map((plane) => plane.slice(0, accumulatedFrames)),
     }
   }
+}
+
+// Registers an asset of a prepared graph with the worklet, from pages when a descriptor or a Stretch artifact serves it
+// and from its decoded buffer otherwise.
+const registerGraphAsset = async (
+  session: PortableSession,
+  asset: AudioAssetRef,
+  snapshot: LivePlaybackSnapshot,
+  preparedStretchAssets: readonly PortablePreparedStretch[],
+  ordinaryDescriptors: ReadonlyMap<string, PortableOrdinaryDescriptor>,
+  generation: number,
+) => {
+  const source = snapshot.assets.find((candidate) => candidate.assetId === asset.assetId)
+  const preparedSource = preparedStretchAssets.find((candidate) => candidate.asset.assetId === asset.assetId)
+  if ((preparedSource && isPagedStretchAsset(preparedSource)) || ordinaryDescriptors.has(asset.assetId)) {
+    if (preparedSource && isPagedStretchAsset(preparedSource) && preparedSource.manifest.pageFrames !== portableWasmPagedPageFrames) {
+      throw new Error(`Portable Stretch artifact "${preparedSource.artifactId}" has an incompatible page size.`)
+    }
+    if (!session.registerPagedAsset) throw new Error("Portable playback backend does not expose paged asset support.")
+    const registration = await session.registerPagedAsset(asset, generation)
+    if (registration.status !== "registered") {
+      throw new Error(`Portable paged audio asset "${asset.assetId}" was rejected (${registration.status}).`)
+    }
+    return
+  }
+  const pcm = preparedSource?.pcm ?? (source?.buffer ? planarPcm(source.buffer) : undefined)
+  if (!pcm) throw new Error(`Portable playback asset "${asset.assetId}" is not hydrated.`)
+  const result = await session.registerAsset(asset, pcm, generation)
+  if (result.status !== "registered") throw new Error(`Portable audio asset "${asset.assetId}" was rejected.`)
 }
 
 const preparedRangeKey = (assetId: string, sourceOffsetFrame: number, coverageEnd: number) =>
@@ -1156,10 +1209,14 @@ export const createPortableBrowserPlaybackController = (input: {
   let activeOrdinaryDescriptors: ReadonlyMap<string, PortableOrdinaryDescriptor> = new Map()
   let activePreparedSources: readonly PortablePreparedSource[] = []
   let activePreparations: readonly PortablePagedPreparation[] = []
-  // The preparations a failed adoption attempt made stay for the resubmit of the same desired state (UD 8), so a slow
-  // preparation converges instead of starting over. They go when the desired state changes, when the resubmits run out,
-  // and with the session.
-  let adoptionCache: { fingerprint: string; preparations: readonly PortablePagedPreparation[] } | undefined
+  // The preparations and registered assets a failed adoption attempt made stay for the resubmit of the same desired state
+  // (UD 8), so a slow preparation converges instead of starting over. They go when the desired state changes, when the
+  // resubmits run out, and with the session.
+  type AdoptionCache = { fingerprint: string; preparations: readonly PortablePagedPreparation[]; assets: readonly string[] }
+  let adoptionCache: AdoptionCache | undefined
+  // Assets an adoption replaced: the old sources stop at the seam, so they go once the position has reached it and the
+  // core no longer reads them.
+  let retiredAssets: readonly { assetId: string; seamFrame: number }[] = []
   let nextLiveProcessorSequence = 0
   let adopting = false
   let adoptionQueued: Promise<PortableAdoptionResult> | undefined
@@ -1184,10 +1241,12 @@ export const createPortableBrowserPlaybackController = (input: {
     await Promise.all([...leases].map((lease) => lease.release().catch(() => undefined)))
   }
 
-  const disposeAdoptionCache = (session: PortableSession | undefined) => {
+  const disposeAdoptionCache = async (session: PortableSession | undefined) => {
     const cache = adoptionCache
     adoptionCache = undefined
-    return session && cache ? releasePreparations(session, cache.preparations, assetGeneration) : Promise.resolve()
+    if (!session || !cache) return
+    await releasePreparations(session, cache.preparations, assetGeneration)
+    await Promise.all(cache.assets.map((assetId) => session.releaseAsset?.(assetId, assetGeneration).catch(() => undefined)))
   }
 
   const clearActiveSessionState = () => {
@@ -1213,6 +1272,7 @@ export const createPortableBrowserPlaybackController = (input: {
       }
     }
     activePreparations = []
+    retiredAssets = []
     activeOrdinarySources = []
     activeOrdinaryDescriptors = new Map()
     activePreparedSources = []
@@ -1263,18 +1323,27 @@ export const createPortableBrowserPlaybackController = (input: {
 
   const releaseExpiredPreparations = async (session: PortableSession, frame: number) => {
     const expired = activePreparations.filter((preparation) => !preparation.released && preparation.stopFrame <= frame)
-    if (!session.releaseAssetPreparation || expired.length === 0) return
-    const results = await Promise.all(expired.map(async (preparation) => ({
-      preparation,
-      result: await session.releaseAssetPreparation?.(preparation.id, assetGeneration),
-    })))
-    const released = new Set(
-      results.filter((entry) => entry.result === "released").map((entry) => entry.preparation.id),
-    )
-    for (const preparation of expired) {
-      if (released.has(preparation.id)) preparation.released = true
+    if (session.releaseAssetPreparation && expired.length > 0) {
+      const results = await Promise.all(expired.map(async (preparation) => ({
+        preparation,
+        result: await session.releaseAssetPreparation?.(preparation.id, assetGeneration),
+      })))
+      const released = new Set(
+        results.filter((entry) => entry.result === "released").map((entry) => entry.preparation.id),
+      )
+      for (const preparation of expired) {
+        if (released.has(preparation.id)) preparation.released = true
+      }
+      activePreparations = activePreparations.filter((preparation) => !released.has(preparation.id))
     }
-    activePreparations = activePreparations.filter((preparation) => !released.has(preparation.id))
+    // After the preparations: a paged asset answers asset-in-use while one holds it. It is asked again at the next report.
+    const due = retiredAssets.filter((retired) => retired.seamFrame <= frame)
+    retiredAssets = retiredAssets.filter((retired) => !due.includes(retired))
+    const answers = await Promise.all(due.map(async (retired) => ({
+      retired,
+      status: (await session.releaseAsset?.(retired.assetId, assetGeneration).catch(() => undefined))?.status,
+    })))
+    retiredAssets = [...retiredAssets, ...answers.filter((answer) => answer.status === "asset-in-use").map((answer) => answer.retired)]
   }
 
   const teardownSession = () => {
@@ -1460,28 +1529,9 @@ export const createPortableBrowserPlaybackController = (input: {
       )) {
         throw new Error("Portable playback backend does not expose paged asset support.")
       }
-      const registerPagedAsset = playbackSession.registerPagedAsset
       for (const asset of startupPrepared.graph.assets) {
-        const source = compilation.snapshot.assets.find((candidate) => candidate.assetId === asset.assetId)
-        const preparedSource = preparedStretchAssets.find((candidate) => candidate.asset.assetId === asset.assetId)
-        const ordinaryDescriptor = ordinaryDescriptors.get(asset.assetId)
-        if ((preparedSource && isPagedStretchAsset(preparedSource)) || ordinaryDescriptor) {
-          if (preparedSource && isPagedStretchAsset(preparedSource)
-            && preparedSource.manifest.pageFrames !== portableWasmPagedPageFrames) {
-            throw new Error(`Portable Stretch artifact "${preparedSource.artifactId}" has an incompatible page size.`)
-          }
-          if (!registerPagedAsset) throw new Error("Portable playback backend does not expose paged asset support.")
-          const registration = await registerPagedAsset(asset, nextEpoch)
-          if (registration.status !== "registered") {
-            throw new Error(`Portable paged audio asset "${asset.assetId}" was rejected (${registration.status}).`)
-          }
-          continue
-        }
-        const pcm = preparedSource?.pcm ?? (source?.buffer ? planarPcm(source.buffer) : undefined)
-        if (!pcm) throw new Error(`Portable playback asset "${asset.assetId}" is not hydrated.`)
-        const result = await playbackSession.registerAsset(asset, pcm, nextEpoch)
+        await registerGraphAsset(playbackSession, asset, compilation.snapshot, preparedStretchAssets, ordinaryDescriptors, nextEpoch)
         if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
-        if (result.status !== "registered") throw new Error(`Portable audio asset "${asset.assetId}" was rejected.`)
       }
       await playbackSession.publishGraph(startupPrepared.graph.revision)
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
@@ -2062,10 +2112,7 @@ export const createPortableBrowserPlaybackController = (input: {
     const sampleRate = audioContext.sampleRate
     const projectGeneration = safeProjectGeneration(activeProjectGeneration ?? 0)
     const publishing = Promise.withResolvers<PortableAdoptionResult>()
-    // What the candidate is compiled and prepared with. Only content the session already carries is adopted so far, so it
-    // is the session's own.
-    const resources = { preparedStretchAssets: activePreparedStretchAssets, ordinaryDescriptors: activeOrdinaryDescriptors }
-    let attempt: typeof adoptionCache
+    let attempt: AdoptionCache | undefined
     let committed = false
     adopting = true
     try {
@@ -2077,13 +2124,23 @@ export const createPortableBrowserPlaybackController = (input: {
         ...transport, ...effectiveLoopForStart(recording ? previous.transport : loop, arrangementNow, sampleRate), state: wasPlaying ? "playing" : "paused", playheadSec: arrangementNow / sampleRate,
       }, { liveAdoption: true })
       if (!current()) return "unavailable"
-      // Tracks, instrument kinds, assets, effect structure, warped clips and warped audio under a tempo edit are not
-      // carried at a seam yet; those still rebuild.
+      // Tracks, instrument kinds, effect structure, warped clips and warped audio under a tempo edit are not carried at a
+      // seam yet; those still rebuild.
       if (!compilation.supported) return "rebuild"
       const next = compilation.snapshot
       const desired = fingerprint(next)
       if (adoptionCache && adoptionCache.fingerprint !== desired) await disposeAdoptionCache(session)
       if (desired === fingerprint(previous)) return "unchanged"
+      // The candidate's assets: the session's own, and what the edit added.
+      const resources = {
+        preparedStretchAssets: activePreparedStretchAssets,
+        ordinaryDescriptors: await resolveOrdinaryDescriptors(next, input.resolveSource, undefined, activeOrdinaryDescriptors),
+      }
+      if (!current()) return "unavailable"
+      // This attempt owns what the failed one kept; a failed attempt hands it on again.
+      const owned: AdoptionCache = { fingerprint: desired, preparations: adoptionCache?.preparations ?? [], assets: adoptionCache?.assets ?? [] }
+      adoptionCache = undefined
+      attempt = owned
       // From here live sends wait for the publish (R2) and so reach the revision that carries them; sends already in
       // flight settle first, so the candidate holds every live value the session accepted while the compile ran.
       adoptionPublish = publishing.promise
@@ -2099,11 +2156,21 @@ export const createPortableBrowserPlaybackController = (input: {
       if (!provisional.supported) return "rebuild"
       await session.prepareGraph(provisional.graph)
       if (!current()) return "unavailable"
+      // The worklet resolves instrument zones and sources by asset id when it publishes, so what the edit added is
+      // registered before the seam is chosen: registering takes time the seam's lead must not lose. The old assets stay
+      // registered while the old sources play, and are released after the seam (retiredAssets).
+      const registered = new Set([...(activeGraph?.assets ?? []).map((asset) => asset.assetId), ...owned.assets])
+      for (const asset of provisional.graph.assets) {
+        if (registered.has(asset.assetId)) continue
+        await registerGraphAsset(session, asset, next, resources.preparedStretchAssets, resources.ordinaryDescriptors, assetGeneration)
+        owned.assets = [...owned.assets, asset.assetId]
+        if (!current()) return "unavailable"
+      }
       const leadFrames = Math.round(scheduleLeadSec(input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC) * sampleRate)
       // A stopped transport has no publish race: the seam is where it stands and the publish below is immediate.
       const seamFrame = wasPlaying ? positionFrame + Math.round(adoptionSeamLeadSec * sampleRate) : positionFrame
-      const keepsVoices = (trackId: string) => previous.mixer.fx.trackFx?.[trackId]?.instrument?.instanceId
-        === folded.mixer.fx.trackFx?.[trackId]?.instrument?.instanceId
+      const keepsVoices = (trackId: string) =>
+        keepsInstrumentVoices(previous.mixer.fx.trackFx?.[trackId]?.instrument, folded.mixer.fx.trackFx?.[trackId]?.instrument)
       // Raw frames run on through a loop, so the seam's arrangement position is rarely its raw frame. The schedule is
       // compiled in raw frames: its loop is shifted by the difference, and the loop is off for the run when the
       // arrangement position at the seam is at or past the loop's end.
@@ -2120,7 +2187,7 @@ export const createPortableBrowserPlaybackController = (input: {
       // The window shrinks until the schedule fits what the worklet installs and its paged sources fit the pages and
       // preparations the session holds beside the active ones; the next refresh extends it. A seam too close to the end of
       // the schedule, or a graph that depends on the origin, leaves nothing to publish.
-      const reusable = adoptionCache?.preparations ?? []
+      const reusable = owned.preparations
       const fitted = await (async () => {
         for (let horizonFrames = range.endFrame - seamFrame; horizonFrames > leadFrames; horizonFrames = Math.floor(horizonFrames / 2)) {
           const compiled = compileFrom(seamFrame, seamArrangement, scheduleLoop, horizonFrames)
@@ -2148,9 +2215,8 @@ export const createPortableBrowserPlaybackController = (input: {
       })()
       if (!fitted) return failed()
       const { candidate, adopted, paged } = fitted
-      // From here the attempt owns its preparations: the commit keeps them, a failed attempt leaves them to the resubmit.
-      adoptionCache = undefined
-      attempt = { fingerprint: desired, preparations: paged.preparations }
+      // The commit keeps these preparations; a failed attempt leaves them to the resubmit.
+      owned.preparations = paged.preparations
       const reusedIds = new Set(paged.preparations.map((preparation) => preparation.id))
       await releasePreparations(session, reusable.filter((preparation) => !reusedIds.has(preparation.id)), assetGeneration)
       await session.installSchedule(adopted)
@@ -2183,6 +2249,11 @@ export const createPortableBrowserPlaybackController = (input: {
         activePreparations = [
           ...activePreparations.map((preparation) => ({ ...preparation, stopFrame: Math.min(preparation.stopFrame, seamFrame) })),
           ...paged.preparations,
+        ]
+        const candidateAssets = new Set(candidate.graph.assets.map((asset) => asset.assetId))
+        retiredAssets = [
+          ...retiredAssets,
+          ...(graph?.assets ?? []).filter((asset) => !candidateAssets.has(asset.assetId)).map((asset) => ({ assetId: asset.assetId, seamFrame })),
         ]
         activeOrdinarySources = ordinary
         activePreparedSources = withPreparations(paged.events, paged.preparations)

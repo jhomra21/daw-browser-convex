@@ -7468,6 +7468,25 @@ test('C9b W-C9-clip-6 an audio clip move while playing or paused is adopted by t
   }, false)
 })
 
+// C9c: swapping the asset a clip plays is a seam adoption as well: the same session registers the new asset and takes it,
+// playing or paused, with no dispose and no rebuild.
+test('C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopted by the same session with no dispose and no rebuild', async () => {
+  for (const paused of [false, true]) await runB6f5(async (live, world) => {
+    live.setTracks((current) => [...current, c9bTrack])
+    if (paused) await live.pausedAt(1)
+    else await live.playFrom(1)
+    const session = live.liveSession()
+    const mark = live.mark()
+    live.setTracks((current) => current.map((entry) => entry.id === c9bTrack.id
+      ? { ...entry, clips: [{ ...c9bClip, sourceAssetKey: 'asset-c9c', buffer: new TestAudioBuffer() }] } : entry))
+    await live.until(() => session?.adoptions === 1 || world.sessions.length > 1)
+    await live.settle()
+    expect({ paused, adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session, playing: live.playback.isPlaying(),
+      sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
+      .toEqual({ paused, adoptions: 1, closed: false, same: true, playing: !paused, sessionsAfterMark: 0 })
+  }, false)
+})
+
 // UD 7 paused, portable: a note edit while paused is adopted by the kept session, neither disposed nor re-prepared nor
 // played, and Play then resumes that session.
 test('B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session', async () => {

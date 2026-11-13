@@ -3346,14 +3346,14 @@ test('W-R8a a loop edit during a take is held, and adopted once the take has end
 // AE-08 phase 8 step 9a: an adoption carries the sources of its candidate with the publish and commits them with it.
 // Two paged clips: one spans every seam, the other starts after them.
 type C9Publish = { revision: number; options?: Parameters<PortableWasmPlaybackSession['publishGraph']>[1] }
-type C9State = { volume: number; refusals: number; clip0Offset: number; clip1Start: number; clip1Present: boolean }
+type C9State = { volume: number; refusals: number; clip0Offset: number; clip1Start: number; clip1Present: boolean; clip1Asset: string; inUse: Set<string> }
 const c9Tracks = (state: C9State): RuntimeTrack[] => [
   { id: 'audio-0', kind: 'audio', name: 'Audio 0', volume: state.volume, clips: [{ id: 'clip-0', name: 'Clip 0', color: '#fff', startSec: 0, duration: 30, bufferOffsetSec: state.clip0Offset, sourceAssetKey: 'asset-a' }] },
   { id: 'audio-1', kind: 'audio', name: 'Audio 1', volume: 1, clips: state.clip1Present
-    ? [{ id: 'clip-1', name: 'Clip 1', color: '#fff', startSec: state.clip1Start, duration: 10, sourceAssetKey: 'asset-b' }] : [] },
+    ? [{ id: 'clip-1', name: 'Clip 1', color: '#fff', startSec: state.clip1Start, duration: 10, sourceAssetKey: state.clip1Asset }] : [] },
 ]
 const c9Fixture = async (options: { refusals?: number } = {}) => {
-  const state: C9State = { volume: 1, refusals: options.refusals ?? 0, clip0Offset: 0, clip1Start: 5, clip1Present: true }
+  const state: C9State = { volume: 1, refusals: options.refusals ?? 0, clip0Offset: 0, clip1Start: 5, clip1Present: true, clip1Asset: 'asset-b', inUse: new Set() }
   const calls: string[] = []
   const publishes: C9Publish[] = []
   const scheduled: PortableWasmPreparedSourceEventsOf[] = []
@@ -3364,15 +3364,25 @@ const c9Fixture = async (options: { refusals?: number } = {}) => {
     prepareGraph: async () => { calls.push('prepare-graph') },
     publishGraph: async (revision: number, publishOptions?: C9Publish['options']) => {
       publishes.push({ revision, options: publishOptions })
+      if (publishOptions) calls.push('publish')
       if (publishOptions && state.refusals-- > 0) throw new Error('Portable playback graph-published was rejected.')
     },
     schedulePreparedSources: async (_revision: number, _epoch: number, events: PortableWasmPreparedSourceEventsOf) => { scheduled.push(events) },
+    registerPagedAsset: async (asset: { assetId: string }) => {
+      calls.push(`register:${asset.assetId}`)
+      return { status: 'registered' as const, handle: { slot: 0, generation: 1 } }
+    },
+    releaseAsset: async (assetId: string) => {
+      calls.push(`release:${assetId}`)
+      return { status: state.inUse.has(assetId) ? 'asset-in-use' as const : 'released' as const }
+    },
   }
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => {
       const compiled = pagedCompilation(transport)
       const tracks = c9Tracks(state)
-      return { ...compiled, snapshot: { ...compiled.snapshot, tracks, mixer: { ...compiled.snapshot.mixer, graph: resolveLiveMixerGraph(tracks, {}) } } }
+      const assets = ['asset-a', state.clip1Asset].map((assetId) => ({ assetId, source: { durationSec: pagedAssetFrameCount / 48_000, sampleRate: 48_000, channelCount: 1 } }))
+      return { ...compiled, snapshot: { ...compiled.snapshot, tracks, assets, mixer: { ...compiled.snapshot.mixer, graph: resolveLiveMixerGraph(tracks, {}) } } }
     },
     fingerprintSnapshot: b6f5Fingerprint, getAudioContext: () => context, scheduleHorizonSec: 8, select: async () => selected,
     reportFault: (message) => faults.push(message),
@@ -3565,5 +3575,204 @@ test('W-C9-clip-R an audio clip move during a take is adopted and the take refre
     expect({ adopted, refresh, extended: f.scheduledSources.length > tables, faults: f.faults, held: table.filter((source) => source.startFrame === 1_344_000).length,
       moved: table.filter((source) => source.startFrame === 1_392_000).length, recording: f.controller.isRecording() })
       .toEqual({ adopted: 'adopted', refresh: 'started', extended: true, faults: [], held: 0, moved: 1, recording: true })
+  } finally { f.controller.dispose() }
+})
+
+// AE-08 phase 8 step 9c: asset swaps are carried at a seam. The new asset is registered and paged before the publish; the
+// old one is released only once the position has reached the seam, and again later while the core still reads it.
+const c9Registered = (calls: readonly string[]) => calls.filter((call) => call.startsWith('register:'))
+const c9Released = (calls: readonly string[]) => calls.filter((call) => call.startsWith('release:'))
+
+test('W-C9-asset-1 a clip asset swapped while playing is registered and paged before the publish; the old one is released once the position reaches the seam', async () => {
+  const f = await c9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(96_000)
+    const mark = f.calls.length
+    f.state.clip1Asset = 'asset-c'
+    const result = await f.controller.adoptSchedule(noLoop)
+    const adoption = f.calls.slice(mark)
+    const shipped = f.sources(f.publishes.at(-1))?.prepared.find((event) => event.sourceNodeId === 'audio-1')
+    const released = [c9Released(adoption)]
+    await f.report(107_000)
+    released.push(c9Released(f.calls.slice(mark)))
+    await f.report(108_000)
+    released.push(c9Released(f.calls.slice(mark)))
+    const started = f.scheduled[0]?.find((event) => event.sourceNodeId === 'audio-1')
+    expect({ result, order: adoption.filter((call) => call === 'publish' || call.startsWith('register:')), newRange: shipped?.preparationId !== started?.preparationId,
+      paged: [...f.base.writtenPages].some((page) => page.startsWith('asset-c:')), released, disposed: f.calls.includes('dispose') })
+      .toEqual({ result: 'adopted', order: ['register:asset-c', 'publish'], newRange: true, paged: true, released: [[], [], ['release:asset-b']], disposed: false })
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-asset-2 a release answered asset-in-use is asked again at the next position report until the core lets go', async () => {
+  const f = await c9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(96_000)
+    const mark = f.calls.length
+    f.state.inUse.add('asset-b')
+    f.state.clip1Asset = 'asset-c'
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
+    await f.report(108_000)
+    await f.report(109_000)
+    f.state.inUse.clear()
+    await f.report(110_000)
+    await f.report(111_000)
+    expect(c9Released(f.calls.slice(mark))).toEqual(['release:asset-b', 'release:asset-b', 'release:asset-b'])
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-asset-3 a refused publish keeps the registered asset for the resubmit, which registers nothing again', async () => {
+  const f = await c9Fixture({ refusals: 1 })
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(96_000)
+    const mark = f.calls.length
+    f.state.clip1Asset = 'asset-c'
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('failed')
+    const afterRefusal = { registered: c9Registered(f.calls.slice(mark)), released: c9Released(f.calls.slice(mark)) }
+    await f.report(120_000)
+    await f.report(300_000)
+    expect({ afterRefusal, registered: c9Registered(f.calls.slice(mark)), released: c9Released(f.calls.slice(mark)), publishes: f.publishes.length })
+      .toEqual({ afterRefusal: { registered: ['register:asset-c'], released: [] }, registered: ['register:asset-c'], released: ['release:asset-b'], publishes: 3 })
+  } finally { warn.mockRestore(); f.controller.dispose() }
+})
+
+test('W-C9-asset-4 the asset a failed attempt registered is released when the desired state changes, when the resubmits run out, and at teardown', async () => {
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  const error = spyOn(console, 'error').mockImplementation(() => undefined)
+  try {
+    const changed = await c9Fixture({ refusals: 1 })
+    expect(await changed.controller.start(changed.transport)).toBe('started')
+    await changed.report(96_000)
+    const mark = changed.calls.length
+    changed.state.clip1Asset = 'asset-c'
+    expect(await changed.controller.adoptSchedule(noLoop)).toBe('failed')
+    changed.state.clip1Asset = 'asset-d'
+    expect(await changed.controller.adoptSchedule(noLoop)).toBe('adopted')
+    expect({ registered: c9Registered(changed.calls.slice(mark)), released: c9Released(changed.calls.slice(mark)) })
+      .toEqual({ registered: ['register:asset-c', 'register:asset-d'], released: ['release:asset-c'] })
+    changed.controller.dispose()
+
+    const exhausted = await c9Fixture({ refusals: 100 })
+    expect(await exhausted.controller.start(exhausted.transport)).toBe('started')
+    await exhausted.report(96_000)
+    exhausted.state.clip1Asset = 'asset-c'
+    expect(await exhausted.controller.adoptSchedule(noLoop)).toBe('failed')
+    expect(c9Released(exhausted.calls)).toEqual([])
+    await exhausted.report(120_000, 300)
+    expect({ faults: exhausted.faults.length, released: c9Released(exhausted.calls) }).toEqual({ faults: 1, released: ['release:asset-c'] })
+    exhausted.controller.dispose()
+
+    const torndown = await c9Fixture({ refusals: 100 })
+    expect(await torndown.controller.start(torndown.transport)).toBe('started')
+    await torndown.report(96_000)
+    torndown.state.clip1Asset = 'asset-c'
+    expect(await torndown.controller.adoptSchedule(noLoop)).toBe('failed')
+    torndown.controller.dispose()
+    await Bun.sleep(0)
+    expect(c9Released(torndown.calls)).toEqual(['release:asset-c'])
+  } finally { warn.mockRestore(); error.mockRestore() }
+})
+
+test('W-C9-asset-5 a clip asset swap on a paused session is adopted in place and releases the old asset at once', async () => {
+  const f = await c9Fixture()
+  try {
+    expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
+    const mark = f.calls.length
+    f.state.clip1Asset = 'asset-c'
+    const result = await f.controller.adoptSchedule(noLoop)
+    await Bun.sleep(0)
+    const adoption = f.calls.slice(mark)
+    expect({ result, order: adoption.filter((call) => call === 'publish' || call.startsWith('register:') || call.startsWith('release:')), disposed: adoption.includes('dispose') })
+      .toEqual({ result: 'adopted', order: ['register:asset-c', 'publish', 'release:asset-b'], disposed: false })
+  } finally { f.controller.dispose() }
+})
+
+// A Drum Rack whose first pad (note 36) plays `padAsset`, held by one long note.
+type D9State = { padAsset: string; volume: number }
+const d9Source = { durationSec: 1, sampleRate: 48_000, channelCount: 1 }
+const d9Track: RuntimeTrack = { ...track, clips: track.clips.map((clip) => ({ ...clip, duration: 8,
+  midi: clip.midi && { ...clip.midi, notes: [{ id: 'held', beat: 0, length: 8, pitch: 36, velocity: 0.8 }] } })) }
+const d9Fixture = async () => {
+  const state: D9State = { padAsset: 'drum-a', volume: 1 }
+  const calls: string[] = []
+  const installs: PortableFrameSchedule[] = []
+  const faults: string[] = []
+  const base = createSession(calls, async (schedule) => { installs.push(schedule) })
+  const session = {
+    ...base,
+    prepareGraph: async () => { calls.push('prepare-graph') },
+    publishGraph: async (_revision: number, options?: Parameters<PortableWasmPlaybackSession['publishGraph']>[1]) => { if (options) calls.push('publish') },
+    registerAsset: async (asset: { assetId: string }) => {
+      calls.push(`register:${asset.assetId}`)
+      return { status: 'registered' as const, handle: { slot: 0, generation: 1 } }
+    },
+    releaseAsset: async (assetId: string) => {
+      calls.push(`release:${assetId}`)
+      return { status: 'released' as const }
+    },
+  }
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async (transport) => {
+      const base = compilation()
+      const params = createDefaultDrumRackParams()
+      const instrument: TrackInstrumentParams = { kind: 'drum-rack', instanceId: 'drums:1', params: { ...params, pads: params.pads.map((pad, index) => index === 0
+        ? { ...pad, sample: { assetKey: state.padAsset, url: `local-asset:${state.padAsset}`, sourceKind: 'upload' as const, source: d9Source } } : pad) } }
+      const tracks = [{ ...d9Track, volume: state.volume }]
+      const fx = { ...base.snapshot.mixer.fx, trackFx: { synth: { instances: [], instrument } } }
+      return { ...base, snapshot: { ...base.snapshot, transport, tracks, assets: [{ assetId: state.padAsset, source: d9Source, buffer: new TestAudioBuffer() }],
+        mixer: { ...base.snapshot.mixer, fx, graph: resolveLiveMixerGraph(tracks, fx.trackFx) } } }
+    },
+    fingerprintSnapshot: b6f5Fingerprint, getAudioContext: () => context, select: async () => selected,
+    reportFault: (message) => faults.push(message),
+    backend: { createPlaybackSession: async () => session },
+  })
+  const transport = compilation().snapshot.transport
+  let reports = 0
+  const report = async (frame: number) => { reports += 1; base.emitPosition(frame, reports); await Bun.sleep(0) }
+  const events = (type: 'note-on' | 'note-off') => (installs.at(-1)?.events ?? []).flatMap((event) => event.type === type ? [event.frame] : [])
+  return { state, controller, transport, calls, installs, faults, report, events }
+}
+
+test('W-C9-asset-6 a Drum Rack pad sample swapped while a note is held registers the asset before the publish and is adopted without a rebuild', async () => {
+  const f = await d9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(48_000)
+    const mark = f.calls.length
+    f.state.padAsset = 'drum-b'
+    const result = await f.controller.adoptSchedule(noLoop)
+    const adoption = f.calls.slice(mark)
+    expect({ result, order: adoption.filter((call) => call === 'publish' || call.startsWith('register:')), disposed: adoption.includes('dispose') })
+      .toEqual({ result: 'adopted', order: ['register:drum-b', 'publish'], disposed: false })
+    await f.report(60_000)
+    expect(c9Released(f.calls)).toEqual(['release:drum-a'])
+  } finally { f.controller.dispose() }
+})
+
+// M-D and D-5: the core replaces an instrument whose samples changed, so a note held across the seam is released on the old
+// voice and its note-on starts the new one; an instrument that is the same keeps its voice, as native does.
+test('W-C9-keeps-1 a held note of an instrument whose sample changed is released at the seam and started again there', async () => {
+  const f = await d9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(48_000)
+    f.state.padAsset = 'drum-b'
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
+    expect({ noteOffs: f.events('note-off').slice(0, 1), noteOns: f.events('note-on') }).toEqual({ noteOffs: [60_000], noteOns: [60_000] })
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-keeps-2 a held note of an instrument that did not change keeps its voice through an edit elsewhere', async () => {
+  const f = await d9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(48_000)
+    f.state.volume = 0.5
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
+    expect({ noteOns: f.events('note-on'), noteOffs: f.events('note-off') }).toEqual({ noteOns: [], noteOffs: [192_000] })
   } finally { f.controller.dispose() }
 })

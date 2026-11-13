@@ -8642,17 +8642,19 @@ for (const paused of [false, true]) {
 
 // AE-08 phase 8 step 11d (A): an edit adopts the transport state the session has when it commits. An intent captured
 // while paused and committed after Play, or an edit that lands while a Play is starting, never stops or restarts it.
-type TransportEditWorld = { fixture: ReturnType<typeof createNativeHookBridge>; seams: bigint[]; compiled: number[]; faults: string[]
-  lifecycle: () => number }
+type TransportEditWorld = { fixture: ReturnType<typeof createNativeHookBridge>; seams: bigint[]; compiled: number[]; clipsCompiled: number[]
+  faults: string[]; lifecycle: () => number }
 const withNativeTransportEdit = async (
-  run: (world: TransportEditWorld, playback: ReturnType<typeof useTimelinePlayback>, setVolume: (volume: number) => void) => Promise<void>,
+  run: (world: TransportEditWorld, playback: ReturnType<typeof useTimelinePlayback>, setVolume: (volume: number) => void,
+    setTracks: (update: (current: Track<AudioBuffer>[]) => Track<AudioBuffer>[]) => void) => Promise<void>,
   options: { enabled: boolean; beginGate?: Promise<NativeTransactionReply> },
 ) => {
   const previousWindow = globalThis.window
-  const fixture = createNativeHookBridge(undefined, undefined, options.beginGate)
-  const [tracks, setTracks] = createSignal([track])
+  const fixture = createNativeHookBridge(undefined, undefined, options.beginGate, undefined, 'failed', true)
+  const [tracks, setTracks] = createSignal<Track<AudioBuffer>[]>([track])
   const seams: bigint[] = []
   const compiled: number[] = []
+  const clipsCompiled: number[] = []
   const faults: string[] = []
   let revision = 1
   let status: 'prepared' | 'published' = 'prepared'
@@ -8683,12 +8685,13 @@ const withNativeTransportEdit = async (
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           compileSnapshot: async (transport) => {
             compiled.push(tracks()[0]?.volume ?? Number.NaN)
+            clipsCompiled.push(tracks().reduce((count, entry) => count + entry.clips.length, 0))
             return compileLivePlaybackSnapshot({ revision: revision++, bpm: 120, transport, tracks: tracks(),
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
           } })
-      await run({ fixture, seams, compiled, faults,
+      await run({ fixture, seams, compiled, clipsCompiled, faults,
         lifecycle: () => fixture.calls.filter((call) => ['begin', 'stop', 'teardown', 'configure'].includes(call)).length },
-      playback, (volume) => setTracks((current) => current.map((entry) => ({ ...entry, volume }))))
+      playback, (volume) => setTracks((current) => current.map((entry) => ({ ...entry, volume }))), setTracks)
       dispose()
     }))
   } finally {
@@ -8757,4 +8760,23 @@ test('UD7n W-S11d-B2 an edit that lands while a paused portable session is prepa
     await live.expectEnd(false, 0, mark, 'structural', false)
     expect(world.sessions.filter((session) => session.createdSeq > mark).map((session) => session.adoptions)).toEqual([1])
   }, false)
+})
+
+// AE-08 phase 8 step 11d (C): a clip inserted before its audio is hydrated is an edit. The prepared preview stays, and
+// the edit is adopted once the asset is hydrated.
+test('UD7n W-S11d-C1 an unhydrated clip inserted into a prepared preview keeps the session and is adopted after hydration', async () => {
+  await withNativeTransportEdit(async (world, playback, _setVolume, setTracks) => {
+    for (let index = 0; index < 40; index += 1) await flushMicrotasks()
+    expect(playback.isNativePlaybackPrepared()).toBeTrue()
+    const before = world.lifecycle()
+    const compiles = world.compiled.length
+    setTracks((current) => [...current, audioTrack(null)])
+    for (let index = 0; index < 40; index += 1) await flushMicrotasks()
+    const unhydrated = { lifecycle: world.lifecycle() - before, prepared: playback.isNativePlaybackPrepared(), compiles: world.compiled.length - compiles }
+    setTracks((current) => [current[0] ?? track, audioTrack(new TestAudioBuffer())])
+    for (let index = 0; index < 40; index += 1) await flushMicrotasks()
+    expect({ unhydrated, lifecycle: world.lifecycle() - before, prepared: playback.isNativePlaybackPrepared(), adoptions: world.seams.length,
+      lastClips: world.clipsCompiled.at(-1), faults: world.faults })
+      .toEqual({ unhydrated: { lifecycle: 0, prepared: true, compiles: 0 }, lifecycle: 0, prepared: true, adoptions: 1, lastClips: 1, faults: [] })
+  }, { enabled: true })
 })

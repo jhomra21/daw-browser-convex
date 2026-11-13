@@ -2224,11 +2224,11 @@ export function useTimelinePlayback(
       || (previewProjectionBaseline !== undefined && trackFingerprint !== previewProjectionBaseline)
     // A pending browser Play keeps the portable session it starts from; followPortableEdits replaces it once committed.
     if (projectionChanged && nativePreviewRequested && (playAttempt === undefined || !portableBrowserOptions)) {
-      // The kept native preview adopts the edit in place, tails included. One still preparing finishes first and adopts it
-      // after (the effect's tail).
-      if (nativePlayback.isPrepared() && !pendingAudioHydration
+      // The kept native preview adopts the edit in place, tails included, once the clips it adds are hydrated: the
+      // effect runs again when they are. One still preparing finishes first and adopts it after (the effect's tail).
+      if (nativePlayback.isPrepared()
         && audioHostBridge?.session.revisions && audioHostBridge.session.configureInstrumentStates) {
-        adoptPortableEdits()
+        if (!pendingAudioHydration) adoptPortableEdits()
         return
       }
       if (nativePlayback.getPendingStart()?.mode !== "preview" && !nativePlayback.hasLiveMidiTails()) {
@@ -2261,13 +2261,7 @@ export function useTimelinePlayback(
       }).catch(() => undefined)
       return
     }
-    if (pendingAudioHydration) {
-      if (nativePreviewRequested && !nativePlayback.hasLiveMidiTails()) {
-        nativePreviewRequested = false
-        void disposeNativePreview(undefined, "audio-source-hydration-pending")
-      }
-      return
-    }
+    if (pendingAudioHydration) return
     nativePreviewRequested = true
     const token = nativeLifecycleToken
     void pendingNativeDispose

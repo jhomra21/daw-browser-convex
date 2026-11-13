@@ -24,7 +24,6 @@ import {
 } from "@daw-browser/audio-engine/portable-wasm-protocol"
 import { RECORDER_BLOCK_FRAMES, RECORDER_MAX_QUEUED_BLOCKS } from "@daw-browser/audio-engine/recording-protocol"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
-import { getEffectTiming } from "@daw-browser/audio-engine/effects/timing"
 import { arrangementFrameForLoop, effectiveLoopForStart, loopFramesForTransport, type LoopFrames } from "@daw-browser/audio-engine/loop-frame-schedule"
 import { compilePreparedPortableLiveSession } from "~/lib/portable-live-session"
 import type { LivePlaybackCompileContext, LivePlaybackSnapshot, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from "~/lib/live-playback-snapshot"
@@ -55,7 +54,7 @@ import { createAudioEffectParameterPayload } from "~/components/timeline/audio-e
 type PortableStartResult = "started" | "unavailable"
 // A locate the session cannot take without having failed (nothing was touched) is the caller's to rebuild.
 type PortableSeekResult = PortableStartResult | "rebuild"
-export type PortableAdoptionResult = "adopted" | "unchanged" | "rebuild" | "failed" | "unavailable"
+export type PortableAdoptionResult = "adopted" | "unchanged" | "failed" | "unavailable"
 type PortablePreparedStretch = PortablePreparedStretchAsset | PortablePagedStretchAsset
 type PortableOrdinaryDescriptor = {
   asset: AudioAssetRef
@@ -438,14 +437,11 @@ const withSeamClips = (next: readonly SnapshotClip[], installed: readonly Snapsh
 // The instances of `next` as `installed` has them where an edit leaves the same effect (the id and kind), whatever else of
 // its parameters moved: the core reconfigures it under continuity, keeping its history when its structure allows and
 // starting it again otherwise, and moves the read heads where its delay changed, as native does through the same calls
-// (CORE:7542-7609, 8689-8717). A Spectral fftSize stays in the comparison: the portable core cannot carry that change
-// (CORE:7658-7671).
+// (CORE:7542-7609, 8689-8717). A Spectral fftSize change is replaced instead: the old stage fades out as a ghost and a
+// fresh stage of the new size starts (`replaced_by_spectral_size_change`).
 const withInstalledEffectParams = (next: readonly AudioEffectRuntimeInstance[], installed: readonly AudioEffectRuntimeInstance[] = []): AudioEffectRuntimeInstance[] => {
   const installedByKey = new Map(installed.map((instance) => [effectKey(instance), instance]))
-  return next.map((instance) => {
-    const counterpart = installedByKey.get(effectKey(instance))
-    return counterpart && (instance.kind !== "spectral" || spectralDelay(counterpart) === spectralDelay(instance)) ? counterpart : instance
-  })
+  return next.map((instance) => installedByKey.get(effectKey(instance)) ?? instance)
 }
 
 // What a playing session adopts at a seam, beyond what it takes live: the tempo, the loop fields, the clips of tracks it
@@ -455,7 +451,7 @@ const withInstalledEffectParams = (next: readonly AudioEffectRuntimeInstance[], 
 // it plays that the live path does not take (`withInstalledEffectParams`). `next` with that taken from `previous`
 // fingerprints as `previous` when nothing else changed. The tracks added or deleted are no part of the comparison
 // (`onSharedTracks`), nor are the effects those tracks have inserted, removed or moved (`onKeptEffects`). Still refused: a
-// Spectral fftSize change and a sample that becomes or ceases to be available.
+// sample that becomes or ceases to be available.
 const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const previousTracks = new Map(previous.tracks.map((track) => [track.id, track]))
   const trackFx = next.mixer.fx.trackFx && Object.fromEntries(Object.entries(next.mixer.fx.trackFx).map(([id, entry]) => {
@@ -474,7 +470,7 @@ const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSna
     },
     tracks: next.tracks.map((track) => {
       const installed = previousTracks.get(track.id)
-      return installed ? { ...track, clips: withSeamClips(track.clips, installed.clips) } : track
+      return installed ? { ...track, channelRole: installed.channelRole, groupId: installed.groupId, clips: withSeamClips(track.clips, installed.clips) } : track
     }),
     mixer: { ...next.mixer, fx: { ...next.mixer.fx, masterFxInstances: withInstalledEffectParams(next.mixer.fx.masterFxInstances, previous.mixer.fx.masterFxInstances), trackFx } },
   }
@@ -487,9 +483,6 @@ const onSharedTracks = (snapshot: LivePlaybackSnapshot, other: LivePlaybackSnaps
   return { ...snapshot, tracks: snapshot.tracks.filter((track) => shared.has(track.id)), mixer: { ...snapshot.mixer, fx: { ...snapshot.mixer.fx, trackFx } } }
 }
 
-// A Spectral effect's delay is its FFT size, so comparing it with another's needs no sample rate: a constant stands in
-// for the session's.
-const spectralDelay = (instance: AudioEffectRuntimeInstance) => getEffectTiming(instance, 48_000).latencyFrames
 const effectKey = (instance: AudioEffectRuntimeInstance) => `${instance.id}\0${instance.kind}`
 
 // `snapshot` with the effects an adoption carries taken out of the comparison: every one inserted, removed, replaced
@@ -2175,8 +2168,8 @@ export const createPortableBrowserPlaybackController = (input: {
   // Native adoption on the portable session: compile the newest desired state from a seam a quarter second ahead of the
   // rendered position, reconcile the notes sounding at the seam against the schedule they started in, then prepare,
   // install and publish at exactly that frame on the same core. A publication that is refused or late is a failed
-  // adoption that a resubmit retries; what the session cannot carry yet is a rebuild. A paused session adopts the same
-  // way at the frame it stands on, with no lead and an immediate publish.
+  // adoption that a resubmit retries, as is what the session cannot carry. A paused session adopts the same way at the
+  // frame it stands on, with no lead and an immediate publish.
   const adoptLive = async (loop: AdoptionLoop): Promise<PortableAdoptionResult> => {
     // A locate rebuilds the schedule the adoption would reconcile against; the follow adopts again after it.
     if (pendingSeeks > 0) return "unavailable"
@@ -2190,7 +2183,10 @@ export const createPortableBrowserPlaybackController = (input: {
     const revision = activeRevision
     const fingerprint = input.fingerprintSnapshot
     if (!session || !audioContext || !previous || !schedule || !range || !transport || revision === undefined) return "unavailable"
-    if (!fingerprint) return "rebuild"
+    if (!fingerprint) {
+      console.error("[portable-playback] defect: the controller has no fingerprintSnapshot, so no edit can be adopted")
+      return "unavailable"
+    }
     const generation = lifecycleGeneration
     const intent = transportIntent
     const wasPlaying = playing
@@ -2214,8 +2210,8 @@ export const createPortableBrowserPlaybackController = (input: {
         ...transport, ...effectiveLoopForStart(recording ? previous.transport : loop, arrangementNow, sampleRate), state: wasPlaying ? "playing" : "paused", playheadSec: arrangementNow / sampleRate,
       }, { liveAdoption: true })
       if (!current()) return "unavailable"
-      // What the session cannot carry at a seam (`compileSnapshot`) rebuilds.
-      if (!compilation.supported) return "rebuild"
+      // Content the session cannot carry at a seam (`compileSnapshot`) is a failed adoption: it retries, and exhaustion is a defect.
+      if (!compilation.supported) return failed()
       const next = compilation.snapshot
       const desired = fingerprint(next)
       if (adoptionCache && adoptionCache.fingerprint !== desired) await disposeAdoptionCache(session)
@@ -2246,7 +2242,7 @@ export const createPortableBrowserPlaybackController = (input: {
         sampleRate, epoch, projectGeneration, horizonFrames / sampleRate, 1, resources.preparedStretchAssets, undefined, resources.ordinaryDescriptors, rawFrame)
       // The graph does not depend on the origin, so it is prepared first and the seam is chosen after that round trip.
       const provisional = compileFrom(positionFrame, arrangementNow, folded.transport, range.endFrame - positionFrame)
-      if (!provisional.supported) return "rebuild"
+      if (!provisional.supported) return failed()
       await session.prepareGraph(provisional.graph)
       if (!current()) return "unavailable"
       // The worklet resolves instrument zones and sources by asset id when it publishes, so what the edit added is
@@ -2280,11 +2276,15 @@ export const createPortableBrowserPlaybackController = (input: {
       // The recording refresh reads raw frames as arrangement frames.
       if (recording && deltaFrames !== 0) return failed()
       // The window shrinks until the schedule fits what the worklet installs and its paged sources fit the pages and
-      // preparations the session holds beside the active ones; the next refresh extends it. A seam too close to the end of
-      // the schedule, or a graph that depends on the origin, leaves nothing to publish.
+      // preparations the session holds beside the active ones; the next refresh extends it. It starts at the old end, or
+      // at a full horizon when the seam is within the lead of it: that is where an edit the refresh refused lands, and
+      // no refresh can extend the schedule until this adoption has carried the edit. A graph that depends on the origin
+      // leaves nothing to publish.
       const reusable = owned.preparations
+      const oldWindowFrames = range.endFrame - seamFrame
+      const startWindowFrames = oldWindowFrames > leadFrames ? oldWindowFrames : Math.round((input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC) * sampleRate)
       const fitted = await (async () => {
-        for (let horizonFrames = range.endFrame - seamFrame; horizonFrames > leadFrames; horizonFrames = Math.floor(horizonFrames / 2)) {
+        for (let horizonFrames = startWindowFrames; horizonFrames > leadFrames; horizonFrames = Math.floor(horizonFrames / 2)) {
           const compiled = compileFrom(seamFrame, seamArrangement, scheduleLoop, horizonFrames)
           if (!compiled.supported || JSON.stringify(compiled.graph) !== JSON.stringify(provisional.graph)) return undefined
           const reconciled = reconcileAtSeam({ previous: schedule, next: compiled.schedule, seamFrame, keepsVoices, hasTrack })

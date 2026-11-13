@@ -7004,7 +7004,8 @@ type B6f5Session = { createdSeq: number; closed: boolean; graph: AudioCoreGraphS
   parameters: string; adoptions: number; installedBpm: number[]; installedNoteOns: number[]
   positions: { seq: number; sec: number; running: boolean }[]
   proc: { seq: number; values: number[] }[]; inst: { seq: number; values: number[] }[] }
-type B6f5World = { seq: number; sessions: B6f5Session[]; transportHold: B6fLiveHold
+// `refusals`: the next adopting publishes the worklet rejects, a mechanism failure the controller retries.
+type B6f5World = { seq: number; refusals: number; sessions: B6f5Session[]; transportHold: B6fLiveHold
   pauseHold: B6fLiveHold; onNode?: () => void }
 type B6f5Kind = 'mixer' | 'master' | 'automation' | 'structural' | 'proc-live' | 'proc-nonlive' | 'synth-live' | 'synth-nonlive' | 'sampled'
 const b6f5LiveKinds = new Set<B6f5Kind>(['proc-live', 'synth-live'])
@@ -7108,10 +7109,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     instrumentOverride?: { targetId: string; instrument: TrackInstrumentParams }) => playback.restartTimelineSchedule(next, {
     rebuildBackend: true, ...(intent ?? captureStructuralPlaybackIntent()), instrumentOverride: instrumentOverride ? instrumentOverride : undefined })
   const rescheduleTimeline = () => {
-    if (playback.isNativePlaybackPrepared() || playback.isPortableBrowserPlaybackPrepared()) {
-      void rebuildPlaybackBackend(tracks()).catch((cause: unknown) => faults.push(`rebuild: ${String(cause)}`))
-      return
-    }
+    if (playback.isNativePlaybackPrepared() || playback.isPortableBrowserPlaybackPrepared()) return
     if (playback.isPlaying()) playback.restartTimelineSchedule(tracks()).catch((cause: unknown) => faults.push(`reschedule: ${String(cause)}`))
   }
   const applyPortableProcessor: (edit: LiveProcessorEditIdentity) => Promise<EngineDisposition | undefined> = bindings.makePortable({
@@ -7129,7 +7127,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     isNativePlaybackPrepared: playback.isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared: playback.isPortableBrowserPlaybackPrepared,
     captureStructuralPlaybackIntent, rebuildPlaybackBackend, renderTracks: tracks, notify: (title: string, message: string) => { faults.push(`${title}: ${message}`) } })
   const work: Promise<unknown>[] = []
-  // A structural edit no seam carries: a Spectral fftSize change, which the portable core cannot continue (CORE:7658-7671).
+  // A structural edit with no live path: a Spectral fftSize change, which the core replaces at a seam.
   const addEffect = () => setSpectralFftSize(1024)
   // An effect that does not delay the signal is carried at a seam (9f), here with the Timeline's effect-order caller.
   const insertEffect = () => { setAddedEffects([{ id: 'utility-2', kind: 'utility', params: b6f5Utility0 }]); onMixedReorderCommitted(undefined) }
@@ -7274,7 +7272,7 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
     AudioWorkletNode: Object.getOwnPropertyDescriptor(globalThis, 'AudioWorkletNode'),
     fetch: Object.getOwnPropertyDescriptor(globalThis, 'fetch'),
   }
-  const world: B6f5World = { seq: 0, sessions: [], transportHold: b6fLiveHold(), pauseHold: b6fLiveHold() }
+  const world: B6f5World = { seq: 0, refusals: 0, sessions: [], transportHold: b6fLiveHold(), pauseHold: b6fLiveHold() }
   class FakeAudioContext {
     readonly sampleRate = 48_000
     readonly destination = {}
@@ -7292,7 +7290,9 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
         postMessage: (message) => {
           world.seq += 1
           if (message.type === 'prepare-graph') session.graph = message.snapshot
-          if (message.type === 'publish-graph') {
+          const refused = message.type === 'publish-graph' && message.requireContinuity === true && world.refusals > 0
+          if (refused) world.refusals -= 1
+          else if (message.type === 'publish-graph') {
             session.publishedRevision = message.revision
             if (message.requireContinuity) session.adoptions += 1
           }
@@ -7306,6 +7306,9 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
           }
           if (message.type === 'transport') session.positions.push({ seq: world.seq, sec: message.frame / 48_000, running: message.running })
           let response = portableResponseFor(message)
+          if (message.type === 'publish-graph' && refused) {
+            response = { version: portableWasmProtocolVersion, type: 'graph-published', requestId: message.requestId, revision: message.revision, result: 'rejected' }
+          }
           if (message.type === 'processor-events') {
             session.proc.push({ seq: world.seq, values: message.events.map((event) => event.value) })
             response = { version: portableWasmProtocolVersion, type: 'processor-events-applied', requestId: message.requestId,
@@ -7722,16 +7725,55 @@ test('E3 W-E3-R9 a locate the live session refuses without a failure rebuilds at
   } finally { warn.mockRestore() }
 })
 
-test('B6f5 A an edit the playing portable session cannot carry live rebuilds it once', async () => {
+test('B6f5 A an edit the playing portable session cannot take live is adopted once at a seam, with no rebuild', async () => {
   await runB6f5(async (live, world) => {
     await live.playFrom(1)
     const session = live.liveSession()
     const mark = live.mark()
-    // An effect the resolved tracks gain without a Timeline rebuild: only the playing session's follow can carry it.
+    // A Spectral size change, which the core replaces at the seam: only the playing session's follow can carry it.
     live.addEffect()
-    await live.expectEnd(true, undefined, mark, 'structural', false)
+    await live.expectEnd(true, undefined, mark, 'structural', true)
     expect({ adoptions: session?.adoptions, closed: session?.closed, sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
-      .toEqual({ adoptions: 0, closed: true, sessionsAfterMark: 1 })
+      .toEqual({ adoptions: 1, closed: false, sessionsAfterMark: 0 })
+  }, false)
+})
+
+// W-FB-2 and W-FB-3: the Timeline's structural caller no longer names a rebuild. A prepared session adopts the edit, and a
+// publish the worklet refuses is a failed adoption the controller retries on the same session: no dispose, no new session.
+test('W-FB-2 a refused adopting publish while playing keeps the session and a later adoption carries the edit', async () => {
+  const error = spyOn(console, 'error').mockImplementation(() => undefined)
+  try {
+    await runB6f5(async (live, world) => {
+      await live.playFrom(1)
+      const session = live.liveSession()
+      const mark = live.mark()
+      world.refusals = 1
+      live.edit('structural')
+      await live.until(() => world.refusals === 0)
+      await live.settle()
+      const refused = { adoptions: session?.adoptions, closed: session?.closed, sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length }
+      // The next edit's follow submits the newest desired state, the refused edit included.
+      live.edit('mixer')
+      await live.until(() => (session?.adoptions ?? 0) > 0)
+      await live.expectEnd(true, undefined, mark, 'structural', true)
+      expect({ refused, adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session,
+        sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
+        .toEqual({ refused: { adoptions: 0, closed: false, sessionsAfterMark: 0 }, adoptions: 1, closed: false, same: true, sessionsAfterMark: 0 })
+    }, false)
+  } finally { error.mockRestore() }
+})
+
+test('W-FB-3 a structural edit while a session is kept paused reaches its adoption and rebuilds nothing', async () => {
+  await runB6f5(async (live, world) => {
+    await live.pausedAt(1)
+    const session = live.liveSession()
+    const mark = live.mark()
+    live.edit('structural')
+    await live.until(() => (session?.adoptions ?? 0) > 0)
+    await live.expectEnd(false, 1, mark, 'structural', true)
+    expect({ adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session,
+      sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
+      .toEqual({ adoptions: 1, closed: false, same: true, sessionsAfterMark: 0 })
   }, false)
 })
 
@@ -8056,7 +8098,7 @@ const b6f5cRecording = () => {
   return { controls, input, restore, endDevice: () => onEnded?.(new Event('ended')) }
 }
 
-test('B6f5c a structural edit held by a portable take reaches the playing session once the take stops or is cancelled', async () => {
+test('B6f5c a structural edit during a portable take is adopted in place and the take stops or is cancelled afterwards', async () => {
   for (const end of ['stop', 'cancel']) await runB6f5(async (live, world) => {
     const recording = b6f5cRecording()
     try {
@@ -8067,16 +8109,15 @@ test('B6f5c a structural edit held by a portable take reaches the playing sessio
       const spectral = () => JSON.stringify(Array.from(session?.graph?.nodes.find((node) => node.id === track.id)?.processorOrder.find((processor) => processor.id === 'spectral-1')?.state ?? []))
       const installed = spectral()
       live.addEffect()
-      // The follow answers rebuild and the take holds it.
       for (let turn = 0; turn < 3_000; turn += 1) await Promise.resolve()
       await live.settle()
-      expect({ end, held: { sessions: world.sessions.length, open: session?.closed === false,
+      expect({ end, during: { sessions: world.sessions.length, open: session?.closed === false,
         carries: spectral() !== installed, controls: [...recording.controls] } })
-        .toEqual({ end, held: { sessions: 1, open: true, carries: false, controls: ['recording-capture-configure'] } })
+        .toEqual({ end, during: { sessions: 1, open: true, carries: true, controls: ['recording-capture-configure'] } })
       await (end === 'stop' ? live.playback.portableRecording.stop() : live.playback.portableRecording.cancel())
-      await live.expectEnd(true, undefined, mark, 'structural', false)
+      await live.expectEnd(true, undefined, mark, 'structural', true)
       expect({ end, sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length, adoptions: session?.adoptions,
-        controls: recording.controls }).toEqual({ end, sessionsAfterMark: 1, adoptions: 0,
+        controls: recording.controls }).toEqual({ end, sessionsAfterMark: 0, adoptions: 1,
         controls: ['recording-capture-configure', end === 'stop' ? 'recording-capture-finalize' : 'recording-capture-cancel'] })
     } finally { recording.restore() }
   }, false)
@@ -8134,15 +8175,15 @@ test('B6f5c a take ended by a device fault follows the edit it held', async () =
       await live.settle()
       expect(world.sessions.filter((entry) => entry.createdSeq > mark).length).toBe(0)
       recording.endDevice()
-      await live.expectEnd(true, undefined, mark, 'structural', false)
-      expect(world.sessions.filter((entry) => entry.createdSeq > mark).length).toBe(1)
+      await live.expectEnd(true, undefined, mark, 'structural', true)
+      expect(world.sessions.filter((entry) => entry.createdSeq > mark).length).toBe(0)
     } finally { recording.restore() }
   }, false)
 })
 
 // A failed take follows once from onFailure and again from the stop/cancel the caller then issues. The second follow finds
-// the baseline already at the desired fingerprint, so the playing session is adopted or rebuilt once per edit, not twice.
-test('B6f5c a failed take followed by the caller stop or cancel adopts or rebuilds each edit once', async () => {
+// the baseline already at the desired fingerprint, so the playing session adopts each edit once, not twice.
+test('B6f5c a failed take followed by the caller stop or cancel adopts each edit once', async () => {
   for (const end of ['stop', 'cancel'] as const) await runB6f5(async (live, world) => {
     const recording = b6f5cRecording()
     try {
@@ -8157,18 +8198,18 @@ test('B6f5c a failed take followed by the caller stop or cancel adopts or rebuil
       for (let turn = 0; turn < 3_000; turn += 1) await Promise.resolve()
       await live.settle()
       recording.endDevice()
-      await live.expectEnd(true, undefined, mark, 'structural', false)
+      await live.expectEnd(true, undefined, mark, 'structural', true)
       await (end === 'stop' ? live.playback.portableRecording.stop() : live.playback.portableRecording.cancel()).catch(() => undefined)
       await live.settle()
       expect({ end, adoptions: session?.adoptions, rebuilds: world.sessions.filter((entry) => entry.createdSeq > mark).length })
-        .toEqual({ end, adoptions: 1, rebuilds: 1 })
+        .toEqual({ end, adoptions: 2, rebuilds: 0 })
     } finally { recording.restore() }
   }, false)
 })
 
 // B6f5c: the routing fields the track fingerprint keeps (createMixerChannel, normalizeTrackRouting) each change the graph
-// a session plays. An edit to one while playing reaches the playing session, adopted or rebuilt as continuity decides,
-// and it then plays the graph a fresh Play of the edited project prepares.
+// a session plays. An edit to one while playing is adopted by the playing session, which then plays the graph a fresh Play
+// of the edited project prepares.
 const b6f5cGraph = (session: B6f5Session | undefined) => JSON.stringify({ ...session?.graph, revision: undefined })
 const b6f5cReturn: Track = { ...track, id: 'track-r', name: 'B6f5c return', channelRole: 'return' }
 const b6f5cGroup2: Track = { ...track, id: 'track-g2', name: 'B6f5c group 2', channelRole: 'group', outputTargetId: b6f5cGroup.id }

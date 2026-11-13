@@ -1559,10 +1559,9 @@ export function useTimelinePlayback(
       && (options?.resumePlayback === undefined || options.resumePlayback)
       && (options?.projectId === undefined || options.projectId === nativeOptions?.projectId?.())
       && (options?.projectGeneration === undefined || options.projectGeneration === nativeOptions?.projectGeneration?.()))) {
-      // A prepared portable session, playing or paused, adopts what it carries, as native does. Only the follow and the
-      // paused-preview effect ask with no transport intent of their own; a seek or structural rebuild names its intent
-      // and rebuilds.
-      if (options || !portableBrowserPlayback.isPrepared()) return applyTimelineSchedule(tracks, options)
+      // A prepared portable session, playing or paused, adopts every edit on its own core, as native does. Only a
+      // lifecycle rebuild (a locate the session refused, a retried instrument preparation) names rebuildBackend.
+      if (options?.rebuildBackend || !portableBrowserPlayback.isPrepared()) return applyTimelineSchedule(tracks, options)
       const paused = !untrack(isPlaying)
       // The key and the loop are read together, so both describe the state this adoption answers for.
       const key = readDesiredScheduleFingerprint(tracks)
@@ -1573,9 +1572,9 @@ export function useTimelinePlayback(
       if (!mounted || transportIntent !== transportIntentToken || lifecycle !== nativeLifecycleToken) return
       if (paused) {
         if (outcome === "adopted" || outcome === "unchanged") previewProjectionBaseline = key
-        // What a paused session cannot carry yet is replaced where it stands, as before adoption; a failed staging keeps
-        // the session and the controller resubmits it once Play reports frames.
-        else if (outcome !== "failed") {
+        // A session that went away is replaced where it stood; a failed staging keeps the session and the controller
+        // resubmits it once Play reports frames.
+        else if (outcome === "unavailable") {
           await disposeNativePreview(undefined, "paused-preview-structural-change")
           const token = nativeLifecycleToken
           await ensureLivePortableSession()
@@ -1583,12 +1582,9 @@ export function useTimelinePlayback(
         }
         return
       }
-      // A rebuild would end the take: while recording, the session keeps what it plays, as before adoption. It also
-      // keeps its loop, so the desired state is not marked applied: the follow after the take adopts it.
+      // A take holds the session's loop, so the desired state is not marked applied: the follow after the take adopts it.
       if (portableBrowserPlayback.isRecording()) return
-      if (outcome === "rebuild") {
-        await applyTimelineSchedule(tracks, { rebuildBackend: true })
-      } else if (outcome === "adopted" || outcome === "unchanged") previewProjectionBaseline = key
+      if (outcome === "adopted" || outcome === "unchanged") previewProjectionBaseline = key
       // A failed staging leaves the baseline behind: the controller resubmits it at block boundaries and logs each one.
       return
     }
@@ -2160,8 +2156,7 @@ export function useTimelinePlayback(
     return request
   }
   // The playing portable session follows the newest desired state, as native adoption does: what it carries live is
-  // adopted on the same core, anything else, or an edit that landed while its start was in flight, rebuilds it where
-  // the transport stands.
+  // adopted on the same core, as is an edit that landed while its start was in flight.
   const adoptPortableEdits = () => {
     void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? [])).catch((cause: unknown) => {
       portableBrowserOptions?.reportFault?.(cause instanceof Error ? cause.message : 'Playback could not follow the edit.')

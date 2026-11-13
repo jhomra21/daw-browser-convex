@@ -43,7 +43,7 @@ import {
 import type { PortableWasmBackendSelection, PortableWasmPlaybackSession } from '@daw-browser/audio-engine/wasm-audio-worklet-backend'
 import { portableWasmPagedPreparationCount } from '@daw-browser/audio-engine/wasm-audio-worklet-backend'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
-import type { LivePlaybackTransport } from '~/lib/live-playback-snapshot'
+import type { LivePlaybackSnapshot, LivePlaybackTransport } from '~/lib/live-playback-snapshot'
 import { createPortableBrowserPlaybackController, type PortableAdoptionResult } from '~/lib/portable-browser-playback-controller'
 
 test("3B1 r3 extraction ignores stale commented callbacks and rejects missing or ambiguous bindings", async () => {
@@ -2095,6 +2095,9 @@ test('B6f ensurePrepared moves a live paused session to a newer playhead instead
 const noLoop: Pick<LivePlaybackTransport, 'loopEnabled' | 'loopStartSec' | 'loopEndSec'> = { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 }
 const b6f5Fingerprint = (snapshot: { revision: number; transport: LivePlaybackTransport }) =>
   JSON.stringify({ ...snapshot, revision: undefined, transport: { ...snapshot.transport, playheadSec: undefined, state: undefined } })
+// The Timeline's fingerprint leaves the resolved mixer graph out: it is compiled from the tracks and effects it also holds.
+const b6f5ContentFingerprint = (snapshot: LivePlaybackSnapshot) => JSON.stringify({ ...snapshot, revision: undefined,
+  transport: { ...snapshot.transport, playheadSec: undefined, state: undefined }, mixer: { ...snapshot.mixer, graph: undefined } })
 const b6f5Compilation = (transport: LivePlaybackTransport, volume: number, clipDuration = 1, masterUtility?: UtilityParamsEnvelope) => {
   const base = compilation()
   const edited: RuntimeTrack = { ...track, volume, clips: track.clips.map((clip) => ({ ...clip, duration: clipDuration })) }
@@ -2328,8 +2331,8 @@ test('B6f5 R6 a schedule refresh after an adoption continues the adopted revisio
 })
 
 // B6f5 step 5b, R6: a compile the session cannot continue (a structural edit since its start) is never installed on it.
-// The refresh skips it without a fault, as it did before adoption; the follow asks for the rebuild that carries it.
-// The structural edit is a Spectral fftSize change, which the portable core cannot carry at a seam (CORE:7658-7671).
+// The refresh skips it without a fault, as it did before adoption; the follow adopts it at a seam.
+// The structural edit is a Spectral fftSize change, which the core carries as a ghost of the old stage plus a fresh one.
 const b6f5Spectral = (fftSize: 512 | 1024): AudioEffectRuntimeInstance => ({ id: 'spectral-b6f5-structure', kind: 'spectral', params: { version: 1, state: { ...createDefaultSpectralParams(), fftSize } } })
 const b6f5AddedEffect = b6f5Spectral(1024)
 const b6f5StructuralCompilation = (transport: LivePlaybackTransport, added: AudioEffectRuntimeInstance | undefined) => {
@@ -2355,7 +2358,7 @@ type B6f5RecordingInput = Parameters<ReturnType<typeof createPortableBrowserPlay
 const b6f5RecordingInput = (stream: MediaStream): B6f5RecordingInput => ({ appSessionId: 'take-b6f5', stream, layout: 'mono', inputChannel: 0,
   gain: 1, polarity: 1, monitoring: false, punchStartFrame: 0 })
 
-test('B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take', async () => {
+test('B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and the follow adopts it during the take', async () => {
   const calls: string[] = []
   const graphs: AudioCoreGraphSnapshot[] = []
   const publishes: B6f5Publish[] = []
@@ -2365,7 +2368,7 @@ test('B6f5 step5b R6 a recording refresh after a structural edit skips without a
   const { stream, recordingContext } = createRecordingFixture(calls)
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => b6f5StructuralCompilation(transport, added),
-    fingerprintSnapshot: b6f5Fingerprint,
+    fingerprintSnapshot: b6f5ContentFingerprint,
     getAudioContext: () => recordingContext, scheduleHorizonSec: 2, select: async () => selected, reportFault: (message) => faults.push(message),
     backend: { createPlaybackSession: async () => { const session = b6f5StrictSession(calls, graphs, publishes); sessions.push(session); return session } },
     createRecordingWriter: () => ({ ready: Promise.resolve(), write: () => undefined, finalize: async () => ({ capturedFrames: 0 }),
@@ -2380,17 +2383,13 @@ test('B6f5 step5b R6 a recording refresh after a structural edit skips without a
     const follow = await controller.adoptSchedule(noLoop)
     expect({ refresh, follow, faults, recording: controller.isRecording(), playing: controller.isActive(), sessions: sessions.length,
       ended: calls.filter((call) => call === 'dispose' || call === 'recording-capture-cancel') })
-      .toEqual({ refresh: 'unavailable', follow: 'rebuild', faults: [], recording: true, playing: true, sessions: 1, ended: [] })
-    // The take ends; the rebuild the follow asked for (dispose, then start, as the hook's rebuild) carries the newest state.
+      .toEqual({ refresh: 'unavailable', follow: 'adopted', faults: [], recording: true, playing: true, sessions: 1, ended: [] })
+    expect(graphs.at(-1)?.nodes.some((node) => node.id === track.id && node.processorOrder.length > 0)).toBe(true)
     expect(await controller.stopRecording()).toEqual({ capturedFrames: 0 })
-    controller.dispose()
-    expect(await controller.start({ ...compilation().snapshot.transport, playheadSec: 80_000 / 48_000 })).toBe('started')
-    expect({ faults, sessions: sessions.length, carries: graphs.at(-1)?.nodes.some((node) => node.id === track.id && node.processorOrder.length > 0) })
-      .toEqual({ faults: [], sessions: 2, carries: true })
   } finally { controller.dispose() }
 })
 
-test('B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the rebuild carries it', async () => {
+test('B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the follow adopts it', async () => {
   const calls: string[] = []
   const graphs: AudioCoreGraphSnapshot[] = []
   const publishes: B6f5Publish[] = []
@@ -2399,7 +2398,7 @@ test('B6f5 step5b R6 a normal refresh after a structural edit skips without a fa
   let added: AudioEffectRuntimeInstance | undefined
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => b6f5StructuralCompilation(transport, added),
-    fingerprintSnapshot: b6f5Fingerprint,
+    fingerprintSnapshot: b6f5ContentFingerprint,
     getAudioContext: () => context, scheduleHorizonSec: 2, select: async () => selected, reportFault: (message) => faults.push(message),
     backend: { createPlaybackSession: async () => { const session = b6f5Session(calls, graphs, publishes); sessions.push(session); return session } },
   })
@@ -2410,11 +2409,8 @@ test('B6f5 step5b R6 a normal refresh after a structural edit skips without a fa
     const refresh = await controller.refreshSchedule()
     const follow = await controller.adoptSchedule(noLoop)
     expect({ refresh, follow, faults, playing: controller.isActive(), sessions: sessions.length })
-      .toEqual({ refresh: 'unavailable', follow: 'rebuild', faults: [], playing: true, sessions: 1 })
-    controller.dispose()
-    expect(await controller.start({ ...compilation().snapshot.transport, playheadSec: 80_000 / 48_000 })).toBe('started')
-    expect({ faults, sessions: sessions.length, carries: graphs.at(-1)?.nodes.some((node) => node.id === track.id && node.processorOrder.length > 0) })
-      .toEqual({ faults: [], sessions: 2, carries: true })
+      .toEqual({ refresh: 'unavailable', follow: 'adopted', faults: [], playing: true, sessions: 1 })
+    expect(graphs.at(-1)?.nodes.some((node) => node.id === track.id && node.processorOrder.length > 0)).toBe(true)
   } finally { controller.dispose() }
 })
 
@@ -2765,16 +2761,18 @@ test('W-E5-8 a refused tempo publish answers failed, restores the revision and a
   } finally { f.controller.dispose() }
 })
 
-test('W-FB-1 a refused or structural adoption is failed or adopted and never asks for a rebuild', async () => {
+// A refused publish and content the session cannot carry are failed adoptions, which the controller retries and logs; a
+// missing fingerprint is a construction defect answered unavailable. None is a rebuild: the result type has no such member.
+test('W-FB-1 a refused publish and uncarried content answer failed, a missing fingerprint answers unavailable, never a rebuild', async () => {
   const calls: string[] = []
   const graphs: AudioCoreGraphSnapshot[] = []
   const publishes: B6f5Publish[] = []
   let volume = 0.8
-  let clipDuration = 1
+  let carried = true
   let refuse = true
   let sessions = 0
   const controller = createPortableBrowserPlaybackController({
-    compileSnapshot: async (transport) => b6f5Compilation(transport, volume, clipDuration),
+    compileSnapshot: async (transport) => carried ? b6f5Compilation(transport, volume) : { supported: false, reasons: ['not carried'] },
     fingerprintSnapshot: b6f5Fingerprint,
     getAudioContext: () => context, select: async () => selected,
     backend: { createPlaybackSession: async () => { sessions += 1; return b6f5Session(calls, graphs, publishes, async (options) => {
@@ -2787,11 +2785,25 @@ test('W-FB-1 a refused or structural adoption is failed or adopted and never ask
     const refused = await controller.adoptSchedule(noLoop)
     refuse = false
     const retried = await controller.adoptSchedule(noLoop)
-    clipDuration = 2
-    const structural: string = await controller.adoptSchedule(noLoop)
-    expect({ refused, retried, structuralRebuild: structural === 'rebuild', sessions, disposed: calls.includes('dispose') })
-      .toEqual({ refused: 'failed', retried: 'adopted', structuralRebuild: false, sessions: 1, disposed: false })
+    carried = false
+    const uncarried = await controller.adoptSchedule(noLoop)
+    expect({ refused, retried, uncarried, sessions, disposed: calls.includes('dispose') })
+      .toEqual({ refused: 'failed', retried: 'adopted', uncarried: 'failed', sessions: 1, disposed: false })
   } finally { controller.dispose() }
+
+  const errors: unknown[][] = []
+  const original = console.error
+  console.error = (...args: unknown[]) => { errors.push(args) }
+  const bare = createPortableBrowserPlaybackController({
+    compileSnapshot: async (transport) => b6f5Compilation(transport, volume),
+    getAudioContext: () => context, select: async () => selected,
+    backend: { createPlaybackSession: async () => b6f5Session(calls, graphs, publishes) },
+  })
+  try {
+    expect(await bare.start(compilation().snapshot.transport)).toBe('started')
+    const result = await bare.adoptSchedule(noLoop)
+    expect({ result, errors: errors.length }).toEqual({ result: 'unavailable', errors: 1 })
+  } finally { console.error = original; bare.dispose() }
 })
 
 // W-M3 guard: an audio clip edit that reaches the follow must never be adopted over the old sources. An adoption or an
@@ -4209,7 +4221,7 @@ test('W-C9-fx-6 a removal refused by ghost capacity is retried after one positio
 // AE-08 phase 8 step 9g: an instrument replaced (another kind or another instance), a processor parameter the live path
 // does not take, and a Granular sample are carried at a seam (class 5). The core keeps the replaced node's slot rendering
 // while it crossfades out; the held note is released on it by the note-off at the seam and the spanning note-on starts the
-// new instrument (D-5, NS:1227-1235). A parameter that changes an effect's latency (a spectral fftSize) stays a rebuild.
+// new instrument (D-5, NS:1227-1235). A parameter that changes an effect's latency (a spectral fftSize) is carried the same way.
 const g9Replacements: ReadonlyArray<readonly [string, TrackInstrumentParams, string[]]> = [
   ['kind', e9Sampler('sampler:midi-a', 'smp-a'), ['register:smp-a', 'publish']],
   ['instance', { kind: 'synth', instanceId: 'synth:replacement', params: createDefaultSynthParams() }, ['publish']],
@@ -4281,13 +4293,15 @@ test('W-C9-proc-1 a processor parameter the live path does not take is adopted i
   }
 })
 
-test('W-C9-proc-2 a Spectral fftSize change, which the portable core cannot carry, answers rebuild and publishes nothing', async () => {
+// The core replaces the stage: the old one fades out as a ghost, a fresh one of the new size starts (WHT W-C9-spectral-1).
+test('W-C9-proc-2 a Spectral fftSize change is adopted in place with one publish and the new size in the published graph', async () => {
   const f = await e9Fixture({ effects: [g9Spectral(512)] })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     await f.report(48_000)
     f.state.effects = [g9Spectral(1024)]
-    expect({ result: await f.controller.adoptSchedule(noLoop), published: f.published() }).toEqual({ result: 'rebuild', published: 0 })
+    expect({ result: await f.controller.adoptSchedule(noLoop), published: f.published(), chain: f9Chain(f), disposed: f.calls.includes('dispose') })
+      .toEqual({ result: 'adopted', published: 1, chain: ['spectral-a'], disposed: false })
   } finally { f.controller.dispose() }
 })
 

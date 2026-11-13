@@ -2471,7 +2471,10 @@ const Timeline: Component<TimelineProps> = (props) => {
           if (!isPlaying() && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()
             && !isStructuralRebuildInProgress()
             && !isPreparingPlayback()) return;
-          // A playing session carries an edit to the same instrument as a published configuration: the schedule
+          // A prepared browser session, playing or paused, adopts an instrument edit or replacement through the hook's
+          // follow, which rebuilds what it cannot carry.
+          if (isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) return;
+          // A playing native session carries an edit to the same instrument as a published configuration: the schedule
           // follow adopts it, so there is no graph to rebuild.
           if (isPlaying() && previous && instrument && previous.kind === instrument.kind
             && previous.instanceId === instrument.instanceId) return;
@@ -2503,8 +2506,9 @@ const Timeline: Component<TimelineProps> = (props) => {
         if (result.reason === "cancelled" || result.reason === "stale") return "superseded";
         if (result.reason === "unavailable" || result.reason === "unprepared") return "dropped";
         if (result.reason !== "unsupported") throw new Error(result.error ?? "The portable processor update failed.");
-        // A synth edit the session cannot take live is carried by the release announce; a preview must never rebuild.
-        if (edit.target.kindId === SYNTH_KIND_ID) return undefined;
+        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam
+        // and rebuilds what it cannot carry; a Synth edit is carried by the release announce. A preview must never rebuild.
+        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;
         await rebuildPlaybackBackend(renderTracks());
         return "applied";
       },

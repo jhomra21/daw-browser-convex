@@ -1382,8 +1382,8 @@ const longestSilence = (signal: readonly number[]) => signal.reduce((state, samp
   return { run, longest: Math.max(state.longest, run) }
 }, { run: 0, longest: 0 }).longest
 
-const granularCloud = (grainWindow: 'hann' | 'tukey', position = 0.5, grainSizeMs = 20): AudioCoreInstrumentState => ({
-  version: 1, kind: 'granular', voiceCapacity: 2, outputLayout: 'stereo', assetId: 'held-sine', seed: 77, maxGrains: 16,
+const granularCloud = (grainWindow: 'hann' | 'tukey', position = 0.5, grainSizeMs = 20, assetId = 'held-sine'): AudioCoreInstrumentState => ({
+  version: 1, kind: 'granular', voiceCapacity: 2, outputLayout: 'stereo', assetId, seed: 77, maxGrains: 16,
   'windowShape': grainWindow, freeze: false, grainSizeMs, densityHz: 100, position, spray: 0.3, pitchSemitones: 0,
   reverseProbability: 0, stereoSpread: 0.3,
 })
@@ -2076,9 +2076,9 @@ const fxProcessor = (id: string, instanceId: number, kind: string, kindId: numbe
 })
 const fxUtility = (id: string, instanceId: number, gainDb: number, latencyFrames = 0) =>
   fxProcessor(id, instanceId, 'utility', 1, encodeUtilityProcessorState({ ...createDefaultUtilityParams(), gainDb }), latencyFrames)
-const fxEq = (id: string, instanceId: number) => fxProcessor(id, instanceId, 'eq', 3, encodeEqProcessorState({
+const fxEq = (id: string, instanceId: number, type: 'peaking' | 'highshelf' = 'peaking') => fxProcessor(id, instanceId, 'eq', 3, encodeEqProcessorState({
   enabled: true, channelMode: 'stereo',
-  bands: Array.from({ length: 8 }, (_, index) => ({ enabled: index === 0, type: 'peaking' as const, frequency: 1_000, gainDb: 12, q: 1 })),
+  bands: Array.from({ length: 8 }, (_, index) => ({ enabled: index === 0, type, frequency: 1_000, gainDb: 12, q: 1 })),
 }))
 type FxProcessor = ReturnType<typeof fxUtility>
 const fxGraph = (revision: number, chains: Record<string, readonly FxProcessor[]>) => {
@@ -2177,4 +2177,95 @@ test('W-C9-fx-7 a removal of more than 128 effects inside one ghost fade is refu
   const frames = messages.flatMap((message) => message.type === 'transport-position' ? [message.frame] : [])
   expect({ first, refused, retried, cadence: Math.min(...frames.slice(1).map((frame, index) => frame - frames[index])) >= 2_400 })
     .toEqual({ first: adopted, refused: ['rejected'], retried: adopted, cadence: true })
+})
+
+// AE-08 phase 8 step 9g: instrument replacement, a non-live effect edit and a Granular sample change at a seam on the built
+// core (class 5). The replaced node's old slot keeps rendering and crossfades out (CORE:8162-8194, 8297-8305, 5385-5417);
+// the held note is released by the note-off at the seam and the spanning note-on starts the new instrument (D-5).
+const startInstrumentHost = async (first: AudioCoreInstrumentState, noteOnFrame: number) => {
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const messages: PortableWasmStatusMessage[] = []
+  const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
+  expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+  for (const [requestId, assetId, step] of [[900, 'held-sine', 0.05], [901, 'held-sine-fast', 0.1]] as const) {
+    const plane = new Float32Array(sineFrames).map((_, frame) => Math.sin(step * frame))
+    host.handleMessage({ version: 2, type: 'register-asset', requestId, generation: 0,
+      asset: { version: 1, assetId, frameCount: sineFrames, sampleRateHz: 48_000, channelCount: 2 }, planes: [plane, plane] })
+  }
+  const base = portableTrackGraph(['track'])
+  const graph = (revision: number, instrument: AudioCoreInstrumentState) => ({ ...base, revision,
+    nodes: base.nodes.map((node) => node.id === 'track' ? { ...node, kind: 'instrument', instrument } : node) })
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph(1, first) })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [seamNoteOn(noteOnFrame, 1)] } })
+  return { host, messages, graph }
+}
+// The output of `first` playing the note from `noteOnFrame`, or of `first` replaced by `replacement` at the seam, from frame 0.
+const playInstrumentRun = async (first: AudioCoreInstrumentState, noteOnFrame: number, replacement?: AudioCoreInstrumentState) => {
+  const { host, messages, graph } = await startInstrumentHost(first, noteOnFrame)
+  const rendered = renderBlocks(host, noteSeam / 128)
+  const adoption = replacement ? adoptRevision(host, messages, graph(2, replacement), [seamNoteOff(noteSeam, 1), seamNoteOn(noteSeam, 2)], noteSeam) : undefined
+  rendered.push(...renderBlocks(host, 14))
+  // A framed publish is answered by the block that applies it.
+  return { rendered, adoption: adoption && { installed: adoption.installed, published: publishedResults(messages, 2) } }
+}
+const replacedInstrumentWeights = (replaced: readonly number[], old: readonly number[], fresh: readonly number[]) =>
+  Array.from({ length: 6 }, (_, window) => weightOf(replaced, old, fresh, noteSeam + 48 * window))
+
+test('W-C9-inst-3 a Synth replaced by a Sampler at the seam keeps rendering as it crossfades out and the Sampler sounds alone after the blend', async () => {
+  const sampler = heldSampler('sampler', 1, 8)
+  const { rendered, adoption } = await playInstrumentRun(heldSynth, 0, sampler)
+  const old = (await playInstrumentRun(heldSynth, 0)).rendered
+  const fresh = (await playInstrumentRun(sampler, noteSeam)).rendered
+  const weights = replacedInstrumentWeights(rendered, old, fresh)
+  expect({ adoption, untouchedBefore: largestDifference(rendered, old, 0, noteSeam) < 1e-6, startsOld: weights[0] < 0.2,
+    risesToNew: weights.every((weight, index) => index === 0 || weight > weights[index - 1]) && weights[5] > 0.8,
+    noStep: largestStep(rendered.slice(noteSeam - 8, noteSeam + blendFrames)) < 0.1,
+    newAloneAfter: largestDifference(rendered, fresh, noteSeam + blendFrames + 128, 20 * 128) < 1e-4 })
+    .toEqual({ adoption: adoptedAtSeam, untouchedBefore: true, startsOld: true, risesToNew: true, noStep: true, newAloneAfter: true })
+})
+
+test('W-C9-asset-7 a Granular cloud whose sample changes at the seam plays the new sample from the spanning note-on', async () => {
+  const { rendered, adoption } = await playInstrumentRun(granularCloud('hann'), 0, granularCloud('hann', 0.5, 20, 'held-sine-fast'))
+  const before = rendered.slice(noteSeam - 1280, noteSeam)
+  const after = rendered.slice(-1280)
+  expect({ adoption, audible: peakOf(rendered.slice(noteSeam + blendFrames, noteSeam + blendFrames + 1280)) > 0.02, faster: zeroCrossings(after) > 1.5 * zeroCrossings(before) })
+    .toEqual({ adoption: adoptedAtSeam, audible: true, faster: true })
+})
+
+// A parameter the live path does not take replaces the effect's slot (CORE:7542-7609, 8713-8717): the history starts again,
+// as it does on native through the same core call. The bypass position is handed over (CORE:8276-8289), so the output has
+// no step at the seam, and it settles on what the edited effect plays from the start.
+test('W-C9-proc-3 a non-live EQ band type edit at the seam is continuous and settles on the edited chain', async () => {
+  const before = fxEq('eq-a', 31)
+  const after = fxEq('eq-a', 31, 'highshelf')
+  const { rendered, adoption } = await adoptEffects([before], [after])
+  const reference = await referenceThrough([before])
+  const edited = await referenceThrough([after])
+  expect({ adoption, untouchedBefore: largestDifference(rendered, reference, 0, fxSeam) < 1e-6,
+    differentChains: largestDifference(reference, edited, 600, 20 * 128) > 0.5,
+    noStep: largestStep(rendered.slice(fxSeam - 8, fxSeam + 240)) < 2 * Math.max(largestStep(reference.slice(fxSeam - 8, fxSeam + 240)), largestStep(edited.slice(fxSeam - 8, fxSeam + 240))),
+    settledAfter: largestDifference(rendered, edited, fxSeam + 1_200, 20 * 128) < 5e-3 })
+    .toEqual({ adoption: adoptedAtSeam, untouchedBefore: true, differentChains: true, noStep: true, settledAfter: true })
+})
+
+// A node carries at most kMaximumNodeBlends = 8 unfinished replacements (CORE:64, 8297-8305). The instruments are configured
+// from the registry when the revision publishes (WK:1162-1182), which is where the ninth replacement is refused: the publish
+// is rejected and the playing graph stays. Native configures through the same core call and fails the same way.
+test('W-C9-inst-5 a ninth replacement inside one blend window has its publish rejected and publishes once the blends have run', async () => {
+  const { host, messages, graph } = await startInstrumentHost(heldSynth, noteSeam)
+  const replaced = (revision: number): AudioCoreInstrumentState => ({ ...heldSynth, oscillators: [{ enabled: true, waveform: revision % 2 === 0 ? 1 : 2, level: 0.8, octave: 0, semitone: 0, detuneCents: 0 }, ...heldSynth.oscillators?.slice(1) ?? []] })
+  // Replacements 16 frames apart: the first eight are all inside the 288 frame blend of the first.
+  const adoptAfter = (revision: number, frames: number) => {
+    adoptRevision(host, messages, graph(revision, replaced(revision)), [])
+    renderLeft(host, frames)
+    return publishedResults(messages, revision)
+  }
+  const first8 = Array.from({ length: 8 }, (_, index) => adoptAfter(index + 2, 16))
+  const ninth = adoptAfter(10, 16)
+  renderBlocks(host, 4)
+  expect({ first8, ninth, retried: adoptAfter(11, 128) })
+    .toEqual({ first8: Array.from({ length: 8 }, () => ['published']), ninth: ['rejected'], retried: ['published'] })
 })

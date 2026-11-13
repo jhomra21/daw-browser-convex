@@ -14,6 +14,7 @@ import {
   createDefaultGranularParams,
   createDefaultLimiterParams,
   createDefaultSamplerParams,
+  createDefaultSpectralParams,
   createDefaultSynthParams,
   createDefaultUtilityParams,
   mergeSynthParams,
@@ -55,17 +56,18 @@ test("3B1 r3 extraction ignores stale commented callbacks and rejects missing or
   expect(() => extractTimelineBindings(source + `\nconst duplicate = { ${portable} };`)).toThrow()
 })
 
-test.each(["synth", "master", "master-structural"])("3B1 r3 portable %s live gain stays live and Utility Swap rebuilds", async (schedule) => {
+test.each(["synth", "master", "master-structural"])("3B1 r3 portable %s live gain stays live and Utility Swap is left to the schedule follow", async (schedule) => {
   const targetId = schedule === "synth" ? "synth" : "master"
   const source = await readFile(new URL("../components/Timeline.tsx", import.meta.url), "utf8")
   const { portable: handler } = extractTimelineBindings(source)
-  const makeCallback = new Function("liveProcessorControl", "rebuildPlaybackBackend", "renderTracks", "SYNTH_KIND_ID",
+  const makeCallback = new Function("liveProcessorControl", "isPortableBrowserPlaybackPrepared", "isNativePlaybackPrepared", "rebuildPlaybackBackend", "SYNTH_KIND_ID",
     new Bun.Transpiler({ loader: "ts" }).transformSync(`return ({ ${handler} }).applyPortableProcessor;`))
   const calls: string[] = [], batches: unknown[] = []
   const graphs: Parameters<PortableWasmPlaybackSession["prepareGraph"]>[0][] = []
   const initial: UtilityParamsEnvelope = { version: 1, state: createDefaultUtilityParams() }
   const changed: UtilityParamsEnvelope = { version: 1, state: { ...initial.state, swap: true } }
-  let projected = initial, revision = 1, rebuilds = 0
+  let projected = initial, rebuilds = 0
+  const revision = 1
   const snapshot = () => {
     const base = compilation()
     const instances: AudioEffectRuntimeInstance[] = [{ id: "utility:r2", kind: "utility", params: projected }]
@@ -86,11 +88,7 @@ test.each(["synth", "master", "master-structural"])("3B1 r3 portable %s live gai
   try {
     expect(await controller.start(snapshot().transport)).toBe("started")
     const apply: (edit: LiveProcessorEditIdentity) => Promise<EngineDisposition | undefined> = makeCallback(
-      () => controller.liveProcessorControl, async () => {
-        rebuilds++
-        revision++
-        expect(await controller.rebuildPrepared(snapshot().transport)).toBe("started")
-      }, () => [track], SYNTH_KIND_ID)
+      () => controller.liveProcessorControl, () => true, () => false, async () => { rebuilds++ }, SYNTH_KIND_ID)
     const registry = createProcessorEditRegistry(() => 120)
     const allocate = (to: UtilityParamsEnvelope) => targetId === "master"
       ? registry.allocate({ targetId, instanceId: "utility:r2", effect: "master-utility", from: initial, to })
@@ -100,19 +98,14 @@ test.each(["synth", "master", "master-structural"])("3B1 r3 portable %s live gai
       const gain = allocate({ version: 1, state: { ...initial.state, gainDb: 1 } })
       if (!gain) throw new Error("Missing live edit")
       expect(await apply(gain)).toBe("applied")
-      expect({ rebuilds, liveBatches: batches.length }).toEqual({ rebuilds: 0, liveBatches })
+      expect(batches).toHaveLength(liveBatches)
     }
     const edit = allocate(changed)
     if (!edit) throw new Error("Missing structural edit")
     projected = changed
-    expect(await apply(edit)).toBe("applied")
-    expect({ rebuilds, liveBatches: batches.length }).toEqual({ rebuilds: 1, liveBatches })
-    const configured = graphs.at(-1)?.nodes.flatMap(node => node.processorOrder).find(processor => processor.id === "utility:r2")
-    expect(configured?.state).toEqual(edit.content.state)
-    expect(graphs).toHaveLength(2)
-    // Once the new structure really is installed, the same whole edit can go live.
-    expect(await apply(edit)).toBe("applied")
-    expect({ rebuilds, liveBatches: batches.length }).toEqual({ rebuilds: 1, liveBatches: liveBatches + 1 })
+    // The edit is neither applied live nor rebuilt for: the schedule follow adopts it at a seam (WHT W-C9-proc-3).
+    expect(await apply(edit)).toBeUndefined()
+    expect({ rebuilds, graphs: graphs.length, liveBatches: batches.length }).toEqual({ rebuilds: 0, graphs: 1, liveBatches })
   } finally { controller.dispose() }
 })
 
@@ -1747,7 +1740,7 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
   const source = await readFile(new URL("../components/Timeline.tsx", import.meta.url), "utf8")
   const { portable, structural } = extractTimelineBindings(source)
   const transpile = (code: string) => new Bun.Transpiler({ loader: "ts" }).transformSync(code)
-  const makePortable = new Function("liveProcessorControl", "rebuildPlaybackBackend", "renderTracks", "SYNTH_KIND_ID",
+  const makePortable = new Function("liveProcessorControl", "isPortableBrowserPlaybackPrepared", "isNativePlaybackPrepared", "rebuildPlaybackBackend", "renderTracks", "SYNTH_KIND_ID",
     transpile(`return ({ ${portable} }).applyPortableProcessor;`))
   const makeStructural = new Function("deps", transpile(`
     const { mountedProjectGeneration, awaitPlaybackPreparation, preparedInstrument, isStructuralRebuildInProgress,
@@ -1812,7 +1805,7 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
     expect(await controller.rebuildPrepared(snapshot().transport)).toBe('started')
   }
   const apply: (edit: LiveProcessorEditIdentity) => Promise<EngineDisposition | undefined> = makePortable(
-    () => controller.liveProcessorControl, rebuild, () => [track], SYNTH_KIND_ID)
+    () => controller.liveProcessorControl, () => controller.isPrepared(), () => false, rebuild, () => [track], SYNTH_KIND_ID)
   const announce: (targetId: string, instrument: TrackInstrumentParams | undefined) => Promise<void> = makeStructural({
     mountedProjectGeneration: () => 0, awaitPlaybackPreparation: async () => {},
     preparedInstrument: (targetId: string) => controller.preparedInstrument(targetId),
@@ -3951,9 +3944,21 @@ const e9Midi = (id: string): RuntimeTrack => ({ ...track, id, name: id, clips: t
   midi: clip.midi && { ...clip.midi, notes: [{ id: `${id}-held`, beat: 0, length: 8, pitch: 60, velocity: 0.8 }] } })) })
 const e9Audio = (id: string, assetId: string): RuntimeTrack => ({ id, kind: 'audio', name: id, volume: 1,
   clips: [{ id: `${id}-clip`, name: id, color: '#fff', startSec: 0, duration: 30, sourceAssetKey: assetId }] })
-type E9State = { tracks: readonly RuntimeTrack[]; effects: readonly AudioEffectRuntimeInstance[]; refusals: number }
-const e9Fixture = async (options: { tracks?: readonly RuntimeTrack[]; compressed?: boolean; effects?: readonly AudioEffectRuntimeInstance[] } = {}) => {
-  const state: E9State = { tracks: options.tracks ?? [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a')],
+// `instruments` replaces the Synth a MIDI track gets by default.
+type E9State = {
+  tracks: readonly RuntimeTrack[]; effects: readonly AudioEffectRuntimeInstance[]; refusals: number
+  instruments: Readonly<Record<string, TrackInstrumentParams>>
+}
+const e9Zone = (assetKey: string): SamplerZone => ({
+  id: 'zone', keyLow: 0, keyHigh: 127, velocityLow: 1, velocityHigh: 127, rootNote: 60, tuneCents: 0, gain: 1, pan: 0,
+  roundRobinGroup: 0, roundRobinIndex: 0, playbackMode: 'one-shot', startSec: 0, crossfadeSec: 0, chokeGroup: 0,
+  sample: { assetKey, url: `local-asset:${assetKey}`, sourceKind: 'upload', source: d9Source },
+})
+const e9Granular = (instanceId: string, assetKey: string): TrackInstrumentParams => ({ kind: 'granular', instanceId, params: { ...createDefaultGranularParams(), zone: e9Zone(assetKey) } })
+const e9Sampler = (instanceId: string, assetKey: string): TrackInstrumentParams => ({ kind: 'sampler', instanceId, params: { ...createDefaultSamplerParams(), zones: [e9Zone(assetKey)] } })
+const e9Fixture = async (options: { tracks?: readonly RuntimeTrack[]; compressed?: boolean; effects?: readonly AudioEffectRuntimeInstance[];
+  instruments?: E9State['instruments'] } = {}) => {
+  const state: E9State = { tracks: options.tracks ?? [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a')], instruments: options.instruments ?? {},
     effects: options.effects ?? (options.compressed ? [{ id: 'compressor-a', kind: 'compressor', params: createDefaultCompressorParams() }] : []), refusals: 0 }
   const calls: string[] = []
   const installs: PortableFrameSchedule[] = []
@@ -3969,6 +3974,10 @@ const e9Fixture = async (options: { tracks?: readonly RuntimeTrack[]; compressed
       if (publishOptions) calls.push('publish')
       if (publishOptions && state.refusals-- > 0) throw new Error('Portable playback graph-published was rejected.')
     },
+    registerAsset: async (asset: { assetId: string }) => {
+      calls.push(`register:${asset.assetId}`)
+      return { status: 'registered' as const, handle: { slot: 0, generation: 1 } }
+    },
     registerPagedAsset: async (asset: { assetId: string }) => {
       calls.push(`register:${asset.assetId}`)
       return { status: 'registered' as const, handle: { slot: 0, generation: 1 } }
@@ -3982,10 +3991,16 @@ const e9Fixture = async (options: { tracks?: readonly RuntimeTrack[]; compressed
     compileSnapshot: async (transport) => {
       const compiled = pagedCompilation(transport)
       const trackFx = Object.fromEntries(state.tracks.flatMap((entry) => entry.kind === 'instrument'
-        ? [[entry.id, { instances: [], instrument: { kind: 'synth' as const, instanceId: `synth:${entry.id}`, params: createDefaultSynthParams() } }]]
+        ? [[entry.id, { instances: [], instrument: state.instruments[entry.id] ?? { kind: 'synth' as const, instanceId: `synth:${entry.id}`, params: createDefaultSynthParams() } }]]
         : entry.id === 'audio-a' && state.effects.length > 0 ? [[entry.id, { instances: [...state.effects] }]] : []))
       const assetIds = new Set(state.tracks.flatMap((entry) => entry.clips.flatMap((clip) => clip.sourceAssetKey ?? [])))
-      const assets = [...assetIds].map((assetId) => ({ assetId, source: e9Source }))
+      const sampleKeys = state.tracks.flatMap((entry) => {
+        const instrument = state.instruments[entry.id]
+        return instrument?.kind === 'sampler' ? instrument.params.zones.map((zone) => zone.sample.assetKey)
+          : instrument?.kind === 'granular' && instrument.params.zone ? [instrument.params.zone.sample.assetKey] : []
+      })
+      const assets = [...[...assetIds].map((assetId) => ({ assetId, source: e9Source })),
+        ...sampleKeys.map((assetId) => ({ assetId, source: d9Source, buffer: new TestAudioBuffer() }))]
       return { ...compiled, snapshot: { ...compiled.snapshot, tracks: state.tracks, assets,
         mixer: { ...compiled.snapshot.mixer, fx: { ...compiled.snapshot.mixer.fx, trackFx }, graph: resolveLiveMixerGraph(state.tracks, trackFx) } } }
     },
@@ -4192,6 +4207,119 @@ test('W-C9-fx-6 a removal refused by ghost capacity is retried after one positio
     await c9Settled(() => f.published() === 2)
     expect({ published: f.published(), chain: f9Chain(f), faults: f.faults, disposed: f.calls.includes('dispose') })
       .toEqual({ published: 2, chain: [], faults: [], disposed: false })
+  } finally { f.controller.dispose() }
+})
+
+// AE-08 phase 8 step 9g: an instrument replaced (another kind or another instance), a processor parameter the live path
+// does not take, and a Granular sample are carried at a seam (class 5). The core keeps the replaced node's slot rendering
+// while it crossfades out; the held note is released on it by the note-off at the seam and the spanning note-on starts the
+// new instrument (D-5, NS:1227-1235). A parameter that changes an effect's latency (a spectral fftSize) stays a rebuild.
+const g9Replacements: ReadonlyArray<readonly [string, TrackInstrumentParams, string[]]> = [
+  ['kind', e9Sampler('sampler:midi-a', 'smp-a'), ['register:smp-a', 'publish']],
+  ['instance', { kind: 'synth', instanceId: 'synth:replacement', params: createDefaultSynthParams() }, ['publish']],
+]
+test.each(g9Replacements)('W-C9-inst-1 a %s replacement of the instrument while a note is held is adopted: released on the old voice at the seam, started on the new instrument', async (_name, replacement, order) => {
+  const f = await e9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(48_000)
+    const mark = f.calls.length
+    f.state.instruments = { 'midi-a': replacement }
+    const result = await f.controller.adoptSchedule(noLoop)
+    const adoption = f.calls.slice(mark)
+    expect({ result, order: adoption.filter((call) => call === 'publish' || call.startsWith('register:')), disposed: adoption.includes('dispose'),
+      noteOns: f.notes('note-on'), noteOffs: f.notes('note-off') })
+      .toEqual({ result: 'adopted', order, disposed: false, noteOns: [['midi-a', 60_000]], noteOffs: [['midi-a', 192_000], ['midi-a', 60_000]] })
+  } finally { f.controller.dispose() }
+})
+
+test.each(g9Replacements)('W-C9-inst-1p a %s replacement of the instrument on a paused session is adopted in place with the seam at the position', async (_name, replacement, order) => {
+  const f = await e9Fixture()
+  try {
+    expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
+    const mark = f.calls.length
+    f.state.instruments = { 'midi-a': replacement }
+    const result = await f.controller.adoptSchedule(noLoop)
+    const adoption = f.calls.slice(mark)
+    expect({ result, order: adoption.filter((call) => call === 'publish' || call.startsWith('register:')), published: f.published(),
+      publicationFrame: JSON.stringify(f.publishes.at(-1)?.options).includes('publicationFrame'), disposed: adoption.includes('dispose') })
+      .toEqual({ result: 'adopted', order, published: 1, publicationFrame: false, disposed: false })
+  } finally { f.controller.dispose() }
+})
+
+// The core rejects the publish of a replacement when the node already carries 8 unfinished ones (CORE:8297-8305, at the
+// instrument configuration the publish runs, WK:1177). Native configures through the same core call, so this is a limit at
+// parity; the retry waits one position report, which is longer than the 5 ms blend (WHT W-C9-inst-5).
+test('W-C9-inst-6 a replacement refused by blend capacity is retried after one position report and adopted', async () => {
+  const f = await e9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(48_000)
+    f.state.refusals = 1
+    f.state.instruments = { 'midi-a': e9Sampler('sampler:midi-a', 'smp-a') }
+    const first = await f.controller.adoptSchedule(noLoop)
+    expect({ first, published: f.published() }).toEqual({ first: 'failed', published: 1 })
+    await f.report(60_000)
+    await c9Settled(() => f.published() === 2)
+    expect({ published: f.published(), faults: f.faults, disposed: f.calls.includes('dispose'), registered: c9Registered(f.calls).filter((call) => call === 'register:smp-a') })
+      .toEqual({ published: 2, faults: [], disposed: false, registered: ['register:smp-a'] })
+  } finally { f.controller.dispose() }
+})
+
+const g9Utility = (swap: boolean): AudioEffectRuntimeInstance => ({ id: 'util-a', kind: 'utility', params: { version: 1, state: { ...createDefaultUtilityParams(), swap } } })
+const g9Spectral = (fftSize: 512 | 1024): AudioEffectRuntimeInstance => ({ id: 'spectral-a', kind: 'spectral', params: { version: 1, state: { ...createDefaultSpectralParams(), fftSize } } })
+const g9State = (f: Awaited<ReturnType<typeof e9Fixture>>) => Array.from(f.graphs.at(-1)?.nodes.find((node) => node.id === 'audio-a')?.processorOrder[0]?.state ?? [])
+
+test('W-C9-proc-1 a processor parameter the live path does not take is adopted in place, playing and paused, with the new state in the published graph', async () => {
+  for (const paused of [false, true]) {
+    const f = await e9Fixture({ effects: [g9Utility(false)] })
+    try {
+      if (paused) expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
+      else { expect(await f.controller.start(f.transport)).toBe('started'); await f.report(48_000) }
+      const before = g9State(f)
+      f.state.effects = [g9Utility(true)]
+      const result = await f.controller.adoptSchedule(noLoop)
+      expect({ paused, result, changed: JSON.stringify(g9State(f)) !== JSON.stringify(before), chain: f9Chain(f), published: f.published(), disposed: f.calls.includes('dispose') })
+        .toEqual({ paused, result: 'adopted', changed: true, chain: ['util-a'], published: 1, disposed: false })
+    } finally { f.controller.dispose() }
+  }
+})
+
+test('W-C9-proc-2 a parameter that changes the effect\'s latency (spectral fftSize) answers rebuild and publishes nothing', async () => {
+  const f = await e9Fixture({ effects: [g9Spectral(512)] })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(48_000)
+    f.state.effects = [g9Spectral(1024)]
+    expect({ result: await f.controller.adoptSchedule(noLoop), published: f.published() }).toEqual({ result: 'rebuild', published: 0 })
+  } finally { f.controller.dispose() }
+})
+
+// A Granular cloud is configured from the registry at the publish, like a Sampler zone: its sample registers first, a
+// track that carries one is added and deleted like any other, and the old sample is released after the seam.
+test('W-C9-asset-7 a Granular sample changed, and a Granular track added and deleted, while playing are adopted with the asset registered before the publish', async () => {
+  const f = await e9Fixture({ instruments: { 'midi-a': e9Granular('granular:a', 'grain-a') } })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(48_000)
+    const steps: Array<readonly [() => void, string[], string[]]> = [
+      [() => { f.state.instruments = { 'midi-a': e9Granular('granular:a', 'grain-b') } }, ['register:grain-b', 'publish'], ['release:grain-a']],
+      [() => { f.state.tracks = [...f.state.tracks, e9Midi('midi-g')]; f.state.instruments = { 'midi-a': e9Granular('granular:a', 'grain-b'), 'midi-g': e9Granular('granular:g', 'grain-g') } }, ['register:grain-g', 'publish'], []],
+      [() => { f.state.tracks = f.state.tracks.filter((entry) => entry.id !== 'midi-g') }, ['publish'], ['release:grain-g']],
+    ]
+    let frame = 60_000
+    for (const [edit, order, released] of steps) {
+      const mark = f.calls.length
+      const releasedBefore = c9Released(f.calls).length
+      edit()
+      const result = await f.controller.adoptSchedule(noLoop)
+      const adoption = f.calls.slice(mark)
+      await f.report(frame)
+      frame += 48_000
+      expect({ result, order: adoption.filter((call) => call === 'publish' || call.startsWith('register:')), released: c9Released(f.calls).slice(releasedBefore), disposed: f.calls.includes('dispose') })
+        .toEqual({ result: 'adopted', order, released, disposed: false })
+    }
+    expect(f.nodes()).toEqual(['midi-a', 'audio-a'])
   } finally { f.controller.dispose() }
 })
 

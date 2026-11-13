@@ -34233,12 +34233,12 @@
       "source": "src/components/Timeline.tsx",
       "edits": [
        {
-        "from": "        // A synth edit the session cannot take live is carried by the release announce; a preview must never rebuild.\n        if (edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
+        "from": "        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam\n        // and rebuilds what it cannot carry; a Synth edit is carried by the release announce. A preview must never rebuild.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
         "to": ""
        },
        {
         "from": "        if (result.accepted) return \"applied\";\n",
-        "to": "        if (result.accepted) return \"applied\";\n        // A synth edit the session cannot take live is carried by the release announce; a preview must never rebuild.\n        if (edit.target.kindId === SYNTH_KIND_ID) return undefined;\n"
+        "to": "        if (result.accepted) return \"applied\";\n        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam\n        // and rebuilds what it cannot carry; a Synth edit is carried by the release announce. A preview must never rebuild.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n"
        }
       ]
      }
@@ -34315,12 +34315,12 @@
       "source": "src/components/Timeline.tsx",
       "edits": [
        {
-        "from": "        // A synth edit the session cannot take live is carried by the release announce; a preview must never rebuild.\n        if (edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
+        "from": "        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam\n        // and rebuilds what it cannot carry; a Synth edit is carried by the release announce. A preview must never rebuild.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
         "to": ""
        },
        {
         "from": "        if (result.accepted) return \"applied\";\n",
-        "to": "        if (result.accepted) return \"applied\";\n        // A synth edit the session cannot take live is carried by the release announce; a preview must never rebuild.\n        if (edit.target.kindId === SYNTH_KIND_ID) return undefined;\n"
+        "to": "        if (result.accepted) return \"applied\";\n        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam\n        // and rebuilds what it cannot carry; a Synth edit is carried by the release announce. A preview must never rebuild.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n"
        }
       ]
      }
@@ -46552,14 +46552,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 232,
+      "pass": 234,
       "skip": 0,
-      "fail": 4
+      "fail": 2
      },
      "fails": [
-      "B6F5PROBE native-off pending-warm-play proc-nonlive",
       "B6F5PROBE native-off pending-warm-play structural",
-      "B6F5PROBE native-on pending-warm-play proc-nonlive",
       "B6F5PROBE native-on pending-warm-play structural"
      ],
      "fuzz": null,
@@ -49414,7 +49412,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 24,
+      "pass": 27,
       "skip": 0,
       "fail": 0
      },
@@ -49467,7 +49465,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 66,
+      "pass": 160,
       "skip": 0,
       "fail": 0
      },
@@ -49586,9 +49584,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 12,
+      "pass": 16,
       "skip": 0,
-      "fail": 12
+      "fail": 11
      },
      "fails": [
       "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
@@ -49598,9 +49596,9 @@
       "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
       "B6f5 a playing portable session adopts a mixer edit on the same session and follows it",
       "B6f5 a refused adoption answers failed and keeps the session revision; a MIDI clip edit is adopted at a seam",
+      "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
+      "B6f5 a resume after an adoption plays the newest state",
       "B6f5 adoptions coalesce to one in flight and one queued that carries the newest edit",
-      "B6f5 m1 a live synth send while the adoption prepares waits for the publish and reaches the revision that carries it",
-      "B6f5 m1 a live synth value accepted during an adoption compile is in the configuration the adoption publishes",
       "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces"
      ],
      "fuzz": null,
@@ -49657,9 +49655,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 45,
+      "pass": 120,
       "skip": 0,
-      "fail": 21
+      "fail": 40
      },
      "fails": [
       "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
@@ -49668,21 +49666,40 @@
       "B6f5 a playing portable session adopts a mixer edit on the same session and follows it",
       "B6f5 a refused adoption answers failed and keeps the session revision; a MIDI clip edit is adopted at a seam",
       "B6f5 adoptions coalesce to one in flight and one queued that carries the newest edit",
-      "B6f5 m1 a live synth send while the adoption prepares waits for the publish and reaches the revision that carries it",
-      "B6f5 m1 a live synth value accepted during an adoption compile is in the configuration the adoption publishes",
-      "M4 an instrument compile that throws keeps the playing graph, never rebuilds, and the next adoption stages it",
-      "P1 a Drum Rack edit while playing is adopted as a published configuration, never rebuilt",
-      "P1 a Granular edit while playing is adopted as a published configuration, never rebuilt",
-      "P1 a Sampler edit while playing is adopted as a published configuration, never rebuilt",
-      "P1 a Sampler zone edit and a sample swap with real buffers are adopted on the same session, never rebuilt",
-      "P1 a failed adoption of an instrument edit keeps the playing graph, never rebuilds, and the next adoption stages it",
-      "P1 a non-live Synth oscillator level edit is adopted as a published configuration, never rebuilt",
-      "P1 a non-live Synth oscillator waveform edit is adopted as a published configuration, never rebuilt",
-      "P1 a non-live Synth polyphony edit is adopted as a published configuration, never rebuilt",
-      "P1 a non-live Synth retrigger edit is adopted as a published configuration, never rebuilt",
-      "P1 live then non-live Synth edits in one gesture keep the last live state and release adopts once",
-      "UD 8 a persistent staging failure stops after 8 resubmits with a defect log, keeps the old graph, and the next publication applies it",
-      "UD 8 a transient staging failure is retried at the next block boundary and applies"
+      "C9a-1 an adoption ships the sources compiled at its seam with the publish; a clip after the seam is the source the start scheduled",
+      "C9a-2 the preparations of the old sources are released once the position reaches the seam, the candidate's stay, and teardown releases all",
+      "C9a-3 a refused publish keeps the old sources and their preparations, and a resubmit reuses the candidate preparations it still matches",
+      "C9a-4 the candidate preparations a failed attempt kept are released when the desired state changes",
+      "C9a-5 the candidate preparations are released when the resubmits run out, and when the session is torn down",
+      "W-C9-asset-6 a Drum Rack pad sample swapped while a note is held registers the asset before the publish and is adopted without a rebuild",
+      "W-C9-asset-7 a Granular sample changed, and a Granular track added and deleted, while playing are adopted with the asset registered before the publish",
+      "W-C9-fx-1 an effect inserted beside a delaying effect it keeps while playing is adopted in place: one publish, nothing disposed, the new chain",
+      "W-C9-fx-1 an effect inserted while playing is adopted in place: one publish, nothing disposed, the new chain",
+      "W-C9-fx-1 an effect moved while playing is adopted in place: one publish, nothing disposed, the new chain",
+      "W-C9-fx-1 an effect removed while playing is adopted in place: one publish, nothing disposed, the new chain",
+      "W-C9-fx-1 an effect replaced while playing is adopted in place: one publish, nothing disposed, the new chain",
+      "W-C9-fx-1p an effect inserted beside a delaying effect it keeps on a paused session is adopted in place with the seam at the position",
+      "W-C9-fx-1p an effect inserted on a paused session is adopted in place with the seam at the position",
+      "W-C9-fx-1p an effect moved on a paused session is adopted in place with the seam at the position",
+      "W-C9-fx-1p an effect removed on a paused session is adopted in place with the seam at the position",
+      "W-C9-fx-1p an effect replaced on a paused session is adopted in place with the seam at the position",
+      "W-C9-fx-6 a removal refused by ghost capacity is retried after one position report and adopted",
+      "W-C9-inst-1 a instance replacement of the instrument while a note is held is adopted: released on the old voice at the seam, started on the new instrument",
+      "W-C9-inst-1 a kind replacement of the instrument while a note is held is adopted: released on the old voice at the seam, started on the new instrument",
+      "W-C9-inst-1p a instance replacement of the instrument on a paused session is adopted in place with the seam at the position",
+      "W-C9-inst-1p a kind replacement of the instrument on a paused session is adopted in place with the seam at the position",
+      "W-C9-inst-6 a replacement refused by blend capacity is retried after one position report and adopted",
+      "W-C9-keeps-1 a held note of an instrument whose sample changed is released at the seam and started again there",
+      "W-C9-keeps-2 a held note of an instrument that did not change keeps its voice through an edit elsewhere",
+      "W-C9-proc-1 a processor parameter the live path does not take is adopted in place, playing and paused, with the new state in the published graph",
+      "W-C9-track-1 an audio track added while playing is adopted: its node is published, its asset registered first, its clip starts at the seam",
+      "W-C9-track-2 a MIDI track added while playing is adopted: its note that spans the seam starts there and the held note elsewhere keeps its voice",
+      "W-C9-track-3 an audio track deleted while playing leaves no source or node, and its asset is released once the position reaches the seam",
+      "W-C9-track-4 the held note of a deleted MIDI track gets no note-off: its node is not in the candidate and the core ghost ends the voice",
+      "W-C9-track-5 a reorder is the session's own graph again: unchanged, nothing published, and the next edit keeps the node order",
+      "W-C9-track-6 a track added and then deleted on a paused session is adopted in place with the seam at the position",
+      "W-C9-track-R a track added and deleted during a take is adopted and the take goes on",
+      "W-FB-1 a refused or structural adoption is failed or adopted and never asks for a rebuild"
      ],
      "fuzz": null,
      "rejection": null,
@@ -49741,9 +49758,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 226,
+      "pass": 230,
       "skip": 0,
-      "fail": 12
+      "fail": 8
      },
      "fails": [
       "B6F5PROBE cost native-off fader drag while playing",
@@ -49751,13 +49768,9 @@
       "B6F5PROBE native-off playing automation",
       "B6F5PROBE native-off playing master",
       "B6F5PROBE native-off playing mixer",
-      "B6F5PROBE native-off playing sampled",
-      "B6F5PROBE native-off playing synth-nonlive",
       "B6F5PROBE native-on playing automation",
       "B6F5PROBE native-on playing master",
-      "B6F5PROBE native-on playing mixer",
-      "B6F5PROBE native-on playing sampled",
-      "B6F5PROBE native-on playing synth-nonlive"
+      "B6F5PROBE native-on playing mixer"
      ],
      "fuzz": null,
      "rejection": null,

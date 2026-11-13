@@ -435,23 +435,36 @@ const withSeamClips = (next: readonly SnapshotClip[], installed: readonly Snapsh
   })
 }
 
-const granularAssetKeys = (snapshot: LivePlaybackSnapshot) => Object.entries(snapshot.mixer.fx.trackFx ?? {}).flatMap(
-  ([id, entry]) => entry.instrument?.kind === "granular" && entry.instrument.params.zone ? [[id, entry.instrument.params.zone.sample.assetKey]] : [],
-)
+// The instances of `next` as `installed` has them where an edit leaves the same effect (the id and kind) with the same delay,
+// whatever else of its parameters moved: the core reconfigures it under continuity, keeping its history when its structure
+// allows and starting it again otherwise, as native does through the same call (CORE:7542-7609, 8689-8717). A parameter that
+// moves the delay (a Spectral fftSize) stays in the comparison.
+const withInstalledEffectParams = (next: readonly AudioEffectRuntimeInstance[], installed: readonly AudioEffectRuntimeInstance[] = []): AudioEffectRuntimeInstance[] => {
+  const installedByKey = new Map(installed.map((instance) => [effectKey(instance), instance]))
+  return next.map((instance) => {
+    const counterpart = installedByKey.get(effectKey(instance))
+    return counterpart && latencyFrames(counterpart) === latencyFrames(instance) ? counterpart : instance
+  })
+}
 
 // What a playing session adopts at a seam, beyond what it takes live: the tempo, the loop fields, the clips of tracks it
-// already plays (`withSeamClips`, the warp and the asset a clip plays included), and the assets the Sampler zones and
-// Drum Rack pads it plays name (the instrument itself is taken live, `withLiveContentOf`). `next` with that taken from
-// `previous` fingerprints as `previous` when nothing else changed. The tracks added or deleted are no part of the
-// comparison (`onSharedTracks`), nor are the effects of those tracks that do not delay the signal (`onKeptEffects`). Still
-// refused: an effect that delays the signal inserted, removed, replaced or moved, instrument replacement, the sample of a
-// Granular cloud, a sample that becomes or ceases to be available, and a track whose add or delete moves a routing delay
-// (`continuesDelays`).
+// already plays (`withSeamClips`, the warp and the asset a clip plays included), the assets the instruments and clips it
+// plays name, the instrument of each track it plays (an edit, another kind or another instance: the core crossfades the
+// replaced one out, CORE:8162-8194, and the held notes follow `keepsInstrumentVoices`), and the parameters of the effects
+// it plays that the live path does not take (`withInstalledEffectParams`). `next` with that taken from `previous`
+// fingerprints as `previous` when nothing else changed. The tracks added or deleted are no part of the comparison
+// (`onSharedTracks`), nor are the effects of those tracks that do not delay the signal (`onKeptEffects`). Still refused: an
+// effect that delays the signal inserted, removed, replaced or moved, a parameter that changes an effect's delay, a sample
+// that becomes or ceases to be available, and a track whose add or delete moves a routing delay (`continuesDelays`).
 const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const previousTracks = new Map(previous.tracks.map((track) => [track.id, track]))
+  const trackFx = next.mixer.fx.trackFx && Object.fromEntries(Object.entries(next.mixer.fx.trackFx).map(([id, entry]) => {
+    const installed = previous.mixer.fx.trackFx?.[id]
+    return [id, installed ? { ...entry, instrument: installed.instrument, instances: withInstalledEffectParams(entry.instances, installed.instances) } : entry]
+  }))
   return {
     ...next,
-    assets: JSON.stringify(granularAssetKeys(next)) === JSON.stringify(granularAssetKeys(previous)) ? previous.assets : next.assets,
+    assets: previous.assets,
     bpm: previous.bpm,
     transport: {
       ...next.transport,
@@ -463,6 +476,7 @@ const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSna
       const installed = previousTracks.get(track.id)
       return installed ? { ...track, clips: withSeamClips(track.clips, installed.clips) } : track
     }),
+    mixer: { ...next.mixer, fx: { ...next.mixer.fx, masterFxInstances: withInstalledEffectParams(next.mixer.fx.masterFxInstances, previous.mixer.fx.masterFxInstances), trackFx } },
   }
 }
 
@@ -473,7 +487,10 @@ const onSharedTracks = (snapshot: LivePlaybackSnapshot, other: LivePlaybackSnaps
   return { ...snapshot, tracks: snapshot.tracks.filter((track) => shared.has(track.id)), mixer: { ...snapshot.mixer, fx: { ...snapshot.mixer.fx, trackFx } } }
 }
 
-const hasLatency = (instance: AudioEffectRuntimeInstance) => getEffectTiming(instance, 48_000).latencyFrames !== 0
+// A delay is only compared with zero or with another delay of the same kind, so the sample rate that turns its time into
+// frames cannot change an answer, and a constant stands in for the session's.
+const latencyFrames = (instance: AudioEffectRuntimeInstance) => getEffectTiming(instance, 48_000).latencyFrames
+const hasLatency = (instance: AudioEffectRuntimeInstance) => latencyFrames(instance) !== 0
 const effectKey = (instance: AudioEffectRuntimeInstance) => `${instance.id}\0${instance.kind}`
 
 // The effects of a track an adoption carries: every one inserted, removed, replaced (another kind under the same id) or
@@ -2228,7 +2245,8 @@ export const createPortableBrowserPlaybackController = (input: {
         ...transport, ...effectiveLoopForStart(recording ? previous.transport : loop, arrangementNow, sampleRate), state: wasPlaying ? "playing" : "paused", playheadSec: arrangementNow / sampleRate,
       }, { liveAdoption: true })
       if (!current()) return "unavailable"
-      // Instrument kinds and latency-bearing effect structure are not carried at a seam yet; those still rebuild.
+      // Latency-bearing effect structure and parameters, and the tracks that move a routing delay, are not carried at a seam
+      // yet (step 9h); those still rebuild.
       if (!compilation.supported) return "rebuild"
       const next = compilation.snapshot
       const desired = fingerprint(next)

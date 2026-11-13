@@ -7025,7 +7025,7 @@ const b6f5Bindings = async () => {
   const { portable, structural, mixedReorder } = extractTimelineBindings(source)
   const transpile = (code: string) => new Bun.Transpiler({ loader: 'ts' }).transformSync(code)
   const makePortable = new Function('deps', transpile(`
-    const { liveProcessorControl, rebuildPlaybackBackend, renderTracks, SYNTH_KIND_ID } = deps;
+    const { liveProcessorControl, isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared, rebuildPlaybackBackend, renderTracks, SYNTH_KIND_ID } = deps;
     return ({ ${portable} }).applyPortableProcessor;`))
   const makeMixedReorder = new Function('deps', transpile(`
     const { isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared, captureStructuralPlaybackIntent, rebuildPlaybackBackend,
@@ -7055,7 +7055,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const [loop, setLoop] = createSignal({ enabled: false, start: 0, end: 0 })
   const [utility, setUtility] = createSignal(b6f5Utility0)
   const [addedEffects, setAddedEffects] = createSignal<AudioEffectRuntimeInstance[]>([])
-  const [synth, setSynth] = createSignal(b6f5Synth0)
+  const [synth, setSynth] = createSignal<TrackInstrumentParams>(b6f5Synth0)
   const [sampler, setSampler] = createSignal(b6f5Sampler0)
   const [masterVolume, setMasterVolume] = createSignal(1)
   const [automation, setAutomation] = createSignal<AutomationEnvelope[]>([])
@@ -7110,7 +7110,8 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     if (playback.isPlaying()) playback.restartTimelineSchedule(tracks()).catch((cause: unknown) => faults.push(`reschedule: ${String(cause)}`))
   }
   const applyPortableProcessor: (edit: LiveProcessorEditIdentity) => Promise<EngineDisposition | undefined> = bindings.makePortable({
-    liveProcessorControl: playback.liveProcessorControl, rebuildPlaybackBackend, renderTracks: tracks, SYNTH_KIND_ID })
+    liveProcessorControl: playback.liveProcessorControl, isNativePlaybackPrepared: playback.isNativePlaybackPrepared,
+    isPortableBrowserPlaybackPrepared: playback.isPortableBrowserPlaybackPrepared, rebuildPlaybackBackend, renderTracks: tracks, SYNTH_KIND_ID })
   const announce: (targetId: string, instrument: TrackInstrumentParams | undefined) => Promise<void> = bindings.makeStructural({
     mountedProjectGeneration: generation, awaitPlaybackPreparation: playback.awaitPlaybackPreparation,
     preparedInstrument: playback.preparedInstrument, isStructuralRebuildInProgress: playback.isStructuralRebuildInProgress,
@@ -7161,6 +7162,12 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
       work.push(announce(b6f5TrackS.id, to).catch((cause: unknown) => faults.push(`sampled: ${String(cause)}`)))
     }
     if (b6f5LiveKinds.has(kind) && Object.keys(lastEdit?.content.values ?? {}).length === 0) throw new Error(`B6f5 live edit ${kind} has no values`)
+  }
+  // The Synth replaced by another kind or another instance, announced as the effects panel's release does.
+  const replaceInstrument = (by: 'kind' | 'instance') => {
+    const to: TrackInstrumentParams = by === 'kind' ? { kind: 'sampler', instanceId: 'sampler:2', params: createDefaultSamplerParams() } : { ...b6f5Synth0, instanceId: 'synth:2' }
+    setSynth(to)
+    work.push(announce(track.id, to).catch((cause: unknown) => faults.push(`replace: ${String(cause)}`)))
   }
   // The graph the newest desired state prepares, through the controller's own compilers (preparedSession).
   const desiredGraph = () => {
@@ -7245,7 +7252,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const resumingRebuild = () => playback.restartTimelineSchedule(tracks(), {
     rebuildBackend: true, resumePlayback: true, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
-  return { playback, edit, addEffect, insertEffect, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, mark: () => world.seq,
+  return { playback, edit, replaceInstrument, addEffect, insertEffect, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, mark: () => world.seq,
     locate: (sec: number) => playback.setPlayhead(sec, tracks()),
     liveSession: () => world.sessions.filter((session) => !session.closed).at(-1),
     holds: { resume: resumeHold, compile: compileHold, transport: world.transportHold, pause: world.pauseHold } }
@@ -7548,6 +7555,25 @@ test('C9f W-C9-fx-5 an effect inserted while playing or paused is adopted by the
       carries: session?.graph?.nodes.some((node) => node.id === track.id && node.processorOrder.some((processor) => processor.id === 'utility-2')),
       sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
       .toEqual({ paused, adoptions: 1, closed: false, same: true, playing: !paused, carries: true, sessionsAfterMark: 0 })
+  }, false)
+})
+
+// C9g: an instrument replaced (another kind or another instance) and a processor parameter the live path does not take are
+// seam adoptions too, with the Timeline's instrument and processor callers: the same session takes each, playing or
+// paused, with no dispose and no rebuild.
+test('C9g W-C9-inst-7 an instrument replaced or a processor parameter edited while playing or paused is adopted by the same session with no dispose and no rebuild', async () => {
+  for (const paused of [false, true]) for (const edit of ['kind', 'instance', 'processor'] as const) await runB6f5(async (live, world) => {
+    if (paused) await live.pausedAt(1)
+    else await live.playFrom(1)
+    const session = live.liveSession()
+    const mark = live.mark()
+    if (edit === 'processor') live.edit('proc-nonlive')
+    else live.replaceInstrument(edit)
+    await live.until(() => session?.adoptions === 1 || world.sessions.length > 1)
+    await live.settle()
+    expect({ paused, edit, adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session, playing: live.playback.isPlaying(),
+      sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
+      .toEqual({ paused, edit, adoptions: 1, closed: false, same: true, playing: !paused, sessionsAfterMark: 0 })
   }, false)
 })
 

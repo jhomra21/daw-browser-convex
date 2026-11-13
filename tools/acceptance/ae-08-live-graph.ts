@@ -17,6 +17,7 @@ import { buildPhase3Fixture } from "./ae-08-phase-3-fixture"
 import { phase5Rows, runPhase5Fixture } from "./ae-08-phase-5-fixture"
 import { phase8Rows, runPhase8Fixture } from "./ae-08-phase-8-fixture"
 import { analyzePhase8Campaign } from "./analyze-ae-08-phase-8"
+import { burstSchedule, judgeStored, mergeLaunches, phase9Matrix, phase9Rows, repetitionsFor } from "./ae-08-phase-9-matrix"
 import { readWav, writeWav, type Pcm } from "./ae08-wav"
 import { serializeNativeGraph } from "@daw-browser/audio-engine/native-host-wire"
 import { audioCoreContractVersion } from "@daw-browser/audio-core-contract"
@@ -630,15 +631,16 @@ const assemble = async (directory: string, prefix = ""): Promise<Pcm> => {
   return { sampleRate, channels, samples }
 }
 
-const usage = "Usage: ae-08-live-graph.ts --phase 1|2|3|4|5|6|6i|7|8 [--out /absolute/dir] [--rows a,b,…] [--matrix] [--repetitions N] [--vst-repetitions N]"
-const knownPhases = ["1", "2", "3", "4", "5", "6", "6i", "7", "8"]
+const usage = "Usage: ae-08-live-graph.ts --phase 1|2|3|4|5|6|6i|7|8|9 [--out /absolute/dir] [--rows a,b,…] [--matrix] [--repetitions N] [--vst-repetitions N] [--judge-only /absolute/dir]"
+const knownPhases = ["1", "2", "3", "4", "5", "6", "6i", "7", "8", "9"]
 const positiveInteger = (flag: string, value: string) => {
   const number = Number(value)
   if (!Number.isInteger(number) || number < 1) throw new Error(`${flag} needs a positive integer, got ${value}`)
   return number
 }
-// Only phases 5 and 8 have rows to filter, only phase 5 repeats them, and only phases 6, 6i and 7 will have VST rows. `--matrix` (optionally spelled
-// `--matrix full`) selects every row, so it contradicts `--rows`.
+// Only phases 5, 8 and 9 have rows to filter, only phases 5 and 9 repeat them, and only phases 6, 6i, 7 and 9 have VST rows. `--matrix` (optionally
+// spelled `--matrix full`) selects every row, so it contradicts `--rows`. Phase 9 names its rows with --matrix or --rows, or re-judges stored
+// evidence with --judge-only, which launches nothing.
 export const parseRunnerArgs = (args: string[]) => {
   const values = new Map<string, string>()
   let matrix = false
@@ -650,7 +652,7 @@ export const parseRunnerArgs = (args: string[]) => {
       continue
     }
     const value = args[index + 1]
-    if (key === undefined || value === undefined || !["--phase", "--out", "--rows", "--repetitions", "--vst-repetitions"].includes(key) || values.has(key))
+    if (key === undefined || value === undefined || !["--phase", "--out", "--rows", "--repetitions", "--vst-repetitions", "--judge-only"].includes(key) || values.has(key))
       throw new Error(usage)
     values.set(key, value)
     index++
@@ -663,20 +665,24 @@ export const parseRunnerArgs = (args: string[]) => {
   const rows = rowsValue?.split(",")
   if (rows && (rows.some((row) => row === "") || new Set(rows).size !== rows.length)) throw new Error(`--rows needs distinct, non-empty names, got ${rowsValue}`)
   if (rows && matrix) throw new Error("--rows and --matrix contradict each other")
-  const phaseRows = phase === "5" ? phase5Rows : phase === "8" ? phase8Rows : []
+  const phaseRows = phase === "5" ? phase5Rows : phase === "8" ? phase8Rows : phase === "9" ? phase9Rows : []
   if (rows && (!phaseRows.length || rows.some((row) => !phaseRows.includes(row))))
-    throw new Error(`--rows names phase 5 rows: ${phase5Rows.join(", ")}; or phase 8 rows: ${phase8Rows.join(", ")}`)
+    throw new Error(`--rows names phase 5 rows: ${phase5Rows.join(", ")}; phase 8 rows: ${phase8Rows.join(", ")}; or phase 9 rows: ${phase9Rows.join(", ")}`)
   const repetitionsValue = values.get("--repetitions")
   const repetitions = repetitionsValue === undefined ? 1 : positiveInteger("--repetitions", repetitionsValue)
-  if (repetitions > 1 && phase !== "5") throw new Error("--repetitions repeats phase 5 rows")
+  if (repetitions > 1 && !["5", "9"].includes(phase)) throw new Error("--repetitions repeats phase 5 and phase 9 rows")
   const vstValue = values.get("--vst-repetitions")
   const vstRepetitions = vstValue === undefined ? 1 : positiveInteger("--vst-repetitions", vstValue)
-  if (vstValue !== undefined && !["6", "6i", "7"].includes(phase)) throw new Error("--vst-repetitions repeats the VST rows of phases 6, 6i and 7")
-  return { phase, out, rows, matrix, repetitions, vstRepetitions }
+  if (vstValue !== undefined && !["6", "6i", "7", "9"].includes(phase)) throw new Error("--vst-repetitions repeats the VST rows of phases 6, 6i, 7 and 9")
+  const judgeOnly = values.get("--judge-only")
+  if (judgeOnly !== undefined && (phase !== "9" || !path.isAbsolute(judgeOnly))) throw new Error("--judge-only /absolute/dir re-judges stored evidence for phase 9")
+  if (phase === "9" && !matrix && !rows && judgeOnly === undefined) throw new Error("--phase 9 needs --matrix, --rows or --judge-only")
+  return { phase, out, rows, matrix, repetitions, vstRepetitions, judgeOnly }
 }
-// Only a complete, single pass over every row can certify: the campaign analysis needs all rows (analyze-ae-08-continuity.ts).
+// Only a complete pass over every row can certify: the campaign analysis needs all rows (analyze-ae-08-continuity.ts). Phase 5 certifies
+// a single pass; phase 9 repeats each row by design.
 export const nonCertifyingReason = (parsed: ReturnType<typeof parseRunnerArgs>) =>
-  parsed.rows ? "filtered" : parsed.repetitions > 1 ? "repeated" : undefined
+  parsed.rows ? "filtered" : parsed.repetitions > 1 && parsed.phase !== "9" ? "repeated" : undefined
 
 const selfTest = () => {
   const refused = (args: string[], message: RegExp) => {
@@ -696,10 +702,19 @@ const selfTest = () => {
   refused(["--phase", "5", "--out", "/tmp/x", "--rows", "held-note", "--matrix"], /contradict/)
   refused(["--phase", "5", "--out", "/tmp/x", "--rows", "held-note,held-note"], /distinct/)
   refused(["--phase", "5", "--out", "/tmp/x", "--repetitions", "0"], /positive integer/)
-  refused(["--phase", "4", "--out", "/tmp/x", "--repetitions", "2"], /repeats phase 5 rows/)
+  refused(["--phase", "4", "--out", "/tmp/x", "--repetitions", "2"], /repeats phase 5 and phase 9 rows/)
   refused(["--phase", "5", "--out", "/tmp/x", "--vst-repetitions", "2"], /VST rows/)
-  refused(["--phase", "9", "--out", "/tmp/x"], /Usage/)
-  refused(["--phase", "8", "--out", "/tmp/x", "--repetitions", "2"], /repeats phase 5 rows/)
+  refused(["--phase", "9", "--out", "/tmp/x"], /needs --matrix, --rows or --judge-only/)
+  refused(["--phase", "10", "--out", "/tmp/x"], /Usage/)
+  refused(["--phase", "8", "--out", "/tmp/x", "--repetitions", "2"], /repeats phase 5 and phase 9 rows/)
+  const campaign = parseRunnerArgs(["--phase", "9", "--out", "/tmp/x", "--matrix", "full", "--repetitions", "100", "--vst-repetitions", "20"])
+  if (campaign.repetitions !== 100 || campaign.vstRepetitions !== 20 || nonCertifyingReason(campaign)) throw new Error("Phase 9 matrix parse failed")
+  if (nonCertifyingReason(parseRunnerArgs(["--phase", "9", "--out", "/tmp/x", "--rows", "fft-transition"])) !== "filtered") throw new Error("Phase 9 rows must not certify")
+  refused(["--phase", "9", "--out", "/tmp/x", "--rows", "held-note"], /phase 9 rows/)
+  refused(["--phase", "9", "--out", "/tmp/x", "--matrix", "--rows", "fft-transition"], /contradict/)
+  refused(["--phase", "5", "--out", "/tmp/x", "--judge-only", "/tmp/y"], /re-judges stored evidence for phase 9/)
+  refused(["--phase", "9", "--judge-only", "relative"], /re-judges stored evidence for phase 9/)
+  if (parseRunnerArgs(["--phase", "9", "--judge-only", "/tmp/y"]).judgeOnly !== "/tmp/y") throw new Error("--judge-only parse failed")
   const phase8 = parseRunnerArgs(["--phase", "8", "--out", "/tmp/x", "--rows", "paused-structural"])
   if (phase8.rows?.join() !== "paused-structural" || nonCertifyingReason(phase8) !== "filtered") throw new Error("Phase 8 filtered parse failed")
   if (nonCertifyingReason(parseRunnerArgs(["--phase", "8", "--out", "/tmp/x"]))) throw new Error("A full phase 8 pass must certify")
@@ -712,6 +727,12 @@ const main = async () => {
   const parsed = parseRunnerArgs(Bun.argv.slice(2))
   const { out } = parsed
   const phase = Number.parseInt(parsed.phase)
+  if (parsed.judgeOnly !== undefined) {
+    const judged = await judgeStored(parsed.judgeOnly)
+    for (const entry of judged) console.log(`phase${entry.phase} ${entry.row}: ${entry.edits} edit(s) ${entry.verdict.outcome.toUpperCase()}${entry.verdict.editIndex === undefined ? "" : ` at edit ${entry.verdict.editIndex}: ${entry.verdict.detail}`}`)
+    if (!judged.length) throw new Error(`No phase 4, 5 or 8 rows under ${parsed.judgeOnly}`)
+    return
+  }
   if (["6", "6i", "7"].includes(parsed.phase)) throw new Error(`Phase ${parsed.phase} is not implemented yet`)
   const processes = await Bun.$`ps -axo command=`.text()
   if (processes.split("\n").some((line) => line.trim().startsWith(`${executable} `)))
@@ -731,6 +752,17 @@ const main = async () => {
   provenance.untrackedSourceManifestSha256 = hash(JSON.stringify(sourceHashes))
   await writeFile(path.join(out, "provenance.json"), JSON.stringify(provenance, null, 2))
   try {
+    if (phase === 9) {
+      const selected = parsed.matrix ? phase9Matrix : phase9Matrix.filter((row) => parsed.rows?.includes(row.name))
+      const missing = selected.filter((row) => row.fixture === null)
+      const launches = mergeLaunches(selected.filter((row) => row.fixture !== null))
+      provenance.fixture = "Phase 9 matrix: one launch per row class carrying alternating edits, settled on host.jsonl publication evidence"
+      await writeFile(path.join(out, "phase9-plan.json"), JSON.stringify({ launches: launches.map((launch) => launch.map((row) => ({
+        row: row.name, class: row.latencyClass, edits: burstSchedule(row, repetitionsFor(row, parsed.repetitions, parsed.vstRepetitions)).length })) ),
+        missing: missing.map((row) => ({ row: row.name, needs: row.needs })) }, null, 2))
+      // No fixture performs a burst's edits yet (the missing rows also lack a setup), so nothing launches: the plan above is the record.
+      throw new Error(`Phase 9 launches are not wired: ${missing.length ? `rows without a fixture: ${missing.map((row) => row.name).join(", ")}; ` : ""}burst performers are not built`)
+    }
     if (phase === 5) {
       provenance.fixture = "Eight public-control source/schedule seam rows plus the effect-state UI row (FFT, gain preview/flush, pause); 180s paged assets; native frame oracle plus offline references"
       provenance.ownedPids = []

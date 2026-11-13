@@ -1987,3 +1987,81 @@ test('W-C9-warp-7 a warped clip swapped to the new-tempo artifact at the seam cr
     }), duringTail, afterTail })
     .toEqual({ registered: ['registered', 'registered'], published: ['published'], crossfaded: true, duringTail: 'asset-in-use', afterTail: 'released' })
 })
+
+// AE-08 phase 8 step 9e: tracks added and deleted at a seam. A deleted track's node becomes a ghost the core fades over
+// 5 ms (D-3, shared with native); the sources it played fade with it and end with it, and a voice held on it ends with it.
+// The tracks that remain are untouched. A track added plays its clip from the seam: W-C9-clip-3c.
+const ghostFrames = 240
+test('W-C9-track-8 a deleted track fades out over its 5 ms ghost with no step while the remaining track plays on exactly', async () => {
+  const { host, messages } = await playRamp(['track', 'gone'], true, [rampSource(1, 0, 1_024), rampSource(2, 0, 1_024, 1, 'gone')])
+  const rendered = renderBlocks(host, 1)
+  publishWithSources(host, ['track'], [rampSource(1, 384, 1_024)], 384)
+  rendered.push(...renderBlocks(host, 7))
+  const share = (frame: number) => (rendered[frame] - rampLevel(frame)) / rampLevel(frame)
+  const fading = Array.from({ length: ghostFrames + 1 }, (_, index) => share(384 + index))
+  expect({ published: sourcePublication(messages), before: matchesRamp(rendered.slice(0, 384), (frame) => rampLevel(frame, 2)),
+    startsWhole: share(384) > 0.99, noStep: fading.every((value, index) => index === 0 || (value <= fading[index - 1] && fading[index - 1] - value < 0.01)),
+    ended: rendered.slice(384 + ghostFrames).every((sample, index) => sample === rampLevel(384 + ghostFrames + index)) })
+    .toEqual({ published: ['published'], before: true, startsWhole: true, noStep: true, ended: true })
+})
+
+const playHeldOnGone = async () => {
+  const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+  const messages: PortableWasmStatusMessage[] = []
+  const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
+  expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+  const base = portableTrackGraph(['keep', 'gone'])
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: { ...base, nodes: base.nodes.map((node) => node.id === 'gone' ? { ...node, kind: 'instrument', instrument: heldSynth } : node) } })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
+    revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 },
+    events: [{ frame: 0, sequence: 1, type: 'note-on', target: { kind: 'instrument', trackId: 'gone' }, noteId: 1, pitch: 72, velocity: 0.8 }] } })
+  return { host, messages, held: peakOf(renderBlocks(host, 10).slice(-1280)) }
+}
+
+// The controller sends no note-off for the deleted track: its node is not in the candidate graph, so the staged schedule
+// would be rejected, and the ghost ends the voice without one.
+test('W-C9-track-9 a note held on a deleted track ends with its ghost and without a note-off, which the candidate graph would reject', async () => {
+  const silent = await playHeldOnGone()
+  expect(adoptRevision(silent.host, silent.messages, { ...portableTrackGraph(['keep']), revision: 2 }, [], 1_280).installed).toBe('installed')
+  const fading = peakOf(renderBlocks(silent.host, 2))
+  const after = peakOf(renderBlocks(silent.host, 20))
+  const released = await playHeldOnGone()
+  const rejected = adoptRevision(released.host, released.messages, { ...portableTrackGraph(['keep']), revision: 2 }, [
+    { frame: 1_280, sequence: 1, type: 'note-off', target: { kind: 'instrument', trackId: 'gone' }, noteId: 1, pitch: 72 }], 1_280).installed
+  expect({ held: silent.held > 0.02, published: publishedResults(silent.messages, 2), fading: fading > 0.001, after: after < 1e-6, rejected })
+    .toEqual({ held: true, published: ['published'], fading: true, after: true, rejected: 'rejected' })
+})
+
+// The shapes the WASM core cannot continue yet (CORE:7673-7692): a node that keeps its identity changes latency, or a
+// delayed route changes place or identity. Each is not continued (the continuity answer is not accepted), so the controller answers rebuild
+// before it publishes (PBT W-C9-track-7). Step 9h inverts these to publish.
+test('W-C9-track-10 a track added or deleted where a latency-bearing node delays routes is refused as a graph the core cannot continue', async () => {
+  const withLatency = (trackIds: readonly string[], revision: number) => {
+    const base = portableTrackGraph(trackIds)
+    const nodes = base.nodes.map((node) => node.id === 'a' ? { ...node, latencyFrames: 64 } : node)
+    // Convergence at the master: each route waits for the slowest path, as resolveMixerTiming gives it.
+    const edges = base.edges.map((edge) => ({ ...edge, pdcDelayFrames: edge.fromNodeId === 'a' || !trackIds.includes('a') ? 0 : 64 }))
+    return { ...base, revision, nodes, edges }
+  }
+  const attempt = async (before: readonly string[], after: readonly string[]) => {
+    const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+    const messages: PortableWasmStatusMessage[] = []
+    const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
+    expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+    host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 40, snapshot: withLatency(before, 5) })
+    host.handleMessage({ version: 2, type: 'publish-graph', requestId: 41, revision: 5 })
+    expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-published', requestId: 41, result: 'published' }))
+    host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 60, snapshot: withLatency(after, 6) })
+    host.handleMessage({ version: 2, type: 'publish-graph', requestId: 61, revision: 6, requireContinuity: true })
+    return messages.flatMap((message) => message.type === 'graph-continuity' && message.revision === 6 ? [message.result] : [])[0] === 'accepted'
+  }
+  const results = {
+    deleteLatencyFree: await attempt(['a', 'b'], ['a']),
+    deleteLatencyBearing: await attempt(['a', 'b'], ['b']),
+    addLatencyFree: await attempt(['a'], ['a', 'b']),
+    addLatencyFreeWithoutLatencyElsewhere: await attempt(['b'], ['b', 'c']),
+  }
+  expect(results).toEqual({ deleteLatencyFree: false, deleteLatencyBearing: false, addLatencyFree: false, addLatencyFreeWithoutLatencyElsewhere: true })
+})

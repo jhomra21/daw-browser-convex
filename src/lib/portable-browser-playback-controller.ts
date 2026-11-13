@@ -441,8 +441,10 @@ const granularAssetKeys = (snapshot: LivePlaybackSnapshot) => Object.entries(sna
 // What a playing session adopts at a seam, beyond what it takes live: the tempo, the loop fields, the clips of tracks it
 // already plays (`withSeamClips`, the warp and the asset a clip plays included), and the assets the Sampler zones and
 // Drum Rack pads it plays name (the instrument itself is taken live, `withLiveContentOf`). `next` with that taken from
-// `previous` fingerprints as `previous` when nothing else changed. Still refused: tracks added or deleted, effect
-// structure, instrument replacement, the sample of a Granular cloud, and a sample that becomes or ceases to be available.
+// `previous` fingerprints as `previous` when nothing else changed. The tracks added or deleted are no part of the
+// comparison (`onSharedTracks`). Still refused: effect structure of the tracks both sides play, instrument replacement,
+// the sample of a Granular cloud, a sample that becomes or ceases to be
+// available, and a track whose add or delete moves a routing delay (`continuesDelays`).
 const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const previousTracks = new Map(previous.tracks.map((track) => [track.id, track]))
   return {
@@ -460,6 +462,52 @@ const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSna
       return installed ? { ...track, clips: withSeamClips(track.clips, installed.clips) } : track
     }),
   }
+}
+
+// `snapshot` as the tracks `other` also has play it: a track added or deleted is no edit of the tracks both sides play.
+const onSharedTracks = (snapshot: LivePlaybackSnapshot, other: LivePlaybackSnapshot): LivePlaybackSnapshot => {
+  const shared = new Set(other.tracks.map((track) => track.id))
+  const trackFx = snapshot.mixer.fx.trackFx && Object.fromEntries(Object.entries(snapshot.mixer.fx.trackFx).filter(([id]) => shared.has(id)))
+  return { ...snapshot, tracks: snapshot.tracks.filter((track) => shared.has(track.id)), mixer: { ...snapshot.mixer, fx: { ...snapshot.mixer.fx, trackFx } } }
+}
+
+// `next` in the order the session built its graph in, with the tracks it adds after the rest. A track's place among the
+// others sounds like nothing, so a reorder is the session's own graph again, and the node and edge lists, which the core
+// compares by position for delayed routes (CORE:7673-7692), keep their places.
+const inSessionOrder = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
+  const ranked = <T>(items: readonly T[], id: (item: T) => string, before: readonly string[]) => {
+    const rank = new Map(before.map((entry, index) => [entry, index]))
+    return [...items].sort((left, right) => (rank.get(id(left)) ?? rank.size) - (rank.get(id(right)) ?? rank.size))
+  }
+  const trackIds = previous.tracks.map((track) => track.id)
+  const trackFx = next.mixer.fx.trackFx
+    && Object.fromEntries(ranked(Object.entries(next.mixer.fx.trackFx), ([id]) => id, Object.keys(previous.mixer.fx.trackFx ?? {})))
+  return {
+    ...next,
+    tracks: ranked(next.tracks, (track) => track.id, trackIds),
+    assets: ranked(next.assets, (asset) => asset.assetId, previous.assets.map((asset) => asset.assetId)),
+    mixer: {
+      ...next.mixer,
+      graph: { ...next.mixer.graph, channels: ranked(next.mixer.graph.channels, (entry) => entry.channel.id, trackIds) },
+      fx: { ...next.mixer.fx, trackFx },
+    },
+  }
+}
+
+// The WASM core continues a graph only when no delay moves: every node keeps its latency, and a delayed route keeps its
+// place and identity in the edge list (CORE:7673-7692). A track added or deleted on a path a latency-bearing effect
+// delays moves one; the core carries that in step 9h, until then the session is rebuilt.
+const continuesDelays = (before: AudioCoreGraphSnapshot, after: AudioCoreGraphSnapshot) => {
+  const nodes = new Map(after.nodes.map((node) => [node.id, node]))
+  const sameLatency = before.nodes.every((node) => {
+    const kept = nodes.get(node.id)
+    return !kept || (kept.latencyFrames === node.latencyFrames && (kept.externalLatencyFrames ?? 0) === (node.externalLatencyFrames ?? 0))
+  })
+  const delayed = (edge: AudioCoreGraphSnapshot["edges"][number] | undefined) => (edge?.pdcDelayFrames ?? 0) !== 0
+  return sameLatency && Array.from({ length: Math.max(before.edges.length, after.edges.length) }, (_, index) => [before.edges.at(index), after.edges.at(index)] as const)
+    .every(([left, right]) => !(delayed(left) || delayed(right)) || (left !== undefined && right !== undefined && left.id === right.id
+      && left.fromNodeId === right.fromNodeId && left.toNodeId === right.toNodeId && left.tap === right.tap && left.sidechain === right.sidechain
+      && left.targetProcessorId === right.targetProcessorId && left.pdcDelayFrames === right.pdcDelayFrames))
 }
 
 // The worklet rejects a schedule with more events than this.
@@ -487,6 +535,9 @@ const reconcileAtSeam = (input: {
   next: PortableSchedule
   seamFrame: number
   keepsVoices: (trackId: string) => boolean
+  // A deleted track's node is not in the candidate, so a note-off for it would reject the staged schedule; the core's
+  // 5 ms deletion fade ends its voices.
+  hasTrack: (trackId: string) => boolean
 }): PortableSchedule => {
   const { previous, next, seamFrame } = input
   const noteKey = (event: { target: { trackId: string }; noteId: number }) => `${event.target.trackId}\0${event.noteId}`
@@ -505,7 +556,7 @@ const reconcileAtSeam = (input: {
       sounding.delete(noteKey(event))
     }
   }
-  const releases = [...sounding.values()].map((held): PortableSchedule["events"][number] => ({
+  const releases = [...sounding.values()].filter((held) => input.hasTrack(held.target.trackId)).map((held): PortableSchedule["events"][number] => ({
     type: "note-off", target: held.target, noteId: held.noteId, pitch: held.pitch, frame: seamFrame, sequence: 0,
   }))
   // `next` starts at the seam, so the releases go first: a release precedes a note-on at the same frame.
@@ -1311,12 +1362,16 @@ export const createPortableBrowserPlaybackController = (input: {
     const compilation = await input.compileSnapshot(transport, context)
     const fingerprint = input.fingerprintSnapshot
     if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation
-    // An adoption installs its schedule at a seam, so it also takes tempo, loop and MIDI edits; a refresh or a start does not.
-    const adoptable = context?.liveAdoption ? withSeamContentOf(compilation.snapshot, activeSnapshot) : compilation.snapshot
-    if (fingerprint(withLiveContentOf(adoptable, activeSnapshot)) !== fingerprint(activeSnapshot)) {
+    const next = inSessionOrder(compilation.snapshot, activeSnapshot)
+    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a
+    // refresh or a start does not: they extend the graph that plays.
+    const [compared, installed] = context?.liveAdoption
+      ? [onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), onSharedTracks(activeSnapshot, next)]
+      : [next, activeSnapshot]
+    if (fingerprint(withLiveContentOf(compared, activeSnapshot)) !== fingerprint(installed)) {
       return { supported: false, reasons: ["Portable playback requires a schedule rebuild."] }
     }
-    return { ...compilation, snapshot: { ...compilation.snapshot, revision: activeRevision } }
+    return { ...compilation, snapshot: { ...next, revision: activeRevision } }
   }
 
   const releaseRuntime = async (runtime: PreparedRuntime | undefined) => {
@@ -2137,7 +2192,7 @@ export const createPortableBrowserPlaybackController = (input: {
         ...transport, ...effectiveLoopForStart(recording ? previous.transport : loop, arrangementNow, sampleRate), state: wasPlaying ? "playing" : "paused", playheadSec: arrangementNow / sampleRate,
       }, { liveAdoption: true })
       if (!current()) return "unavailable"
-      // Tracks, instrument kinds and effect structure are not carried at a seam yet; those still rebuild.
+      // Instrument kinds and effect structure are not carried at a seam yet; those still rebuild.
       if (!compilation.supported) return "rebuild"
       const next = compilation.snapshot
       const desired = fingerprint(next)
@@ -2169,7 +2224,7 @@ export const createPortableBrowserPlaybackController = (input: {
         sampleRate, epoch, projectGeneration, horizonFrames / sampleRate, 1, resources.preparedStretchAssets, undefined, resources.ordinaryDescriptors, rawFrame)
       // The graph does not depend on the origin, so it is prepared first and the seam is chosen after that round trip.
       const provisional = compileFrom(positionFrame, arrangementNow, folded.transport, range.endFrame - positionFrame)
-      if (!provisional.supported) return "rebuild"
+      if (!provisional.supported || (activeGraph && !continuesDelays(activeGraph, provisional.graph))) return "rebuild"
       await session.prepareGraph(provisional.graph)
       if (!current()) return "unavailable"
       // The worklet resolves instrument zones and sources by asset id when it publishes, so what the edit added is
@@ -2187,6 +2242,8 @@ export const createPortableBrowserPlaybackController = (input: {
       const seamFrame = wasPlaying ? positionFrame + Math.round(adoptionSeamLeadSec * sampleRate) : positionFrame
       const keepsVoices = (trackId: string) =>
         keepsInstrumentVoices(previous.mixer.fx.trackFx?.[trackId]?.instrument, folded.mixer.fx.trackFx?.[trackId]?.instrument)
+      const candidateTrackIds = new Set(folded.tracks.map((track) => track.id))
+      const hasTrack = (trackId: string) => candidateTrackIds.has(trackId)
       // Raw frames run on through a loop, so the seam's arrangement position is rarely its raw frame. The schedule is
       // compiled in raw frames: its loop is shifted by the difference, and the loop is off for the run when the
       // arrangement position at the seam is at or past the loop's end.
@@ -2208,7 +2265,7 @@ export const createPortableBrowserPlaybackController = (input: {
         for (let horizonFrames = range.endFrame - seamFrame; horizonFrames > leadFrames; horizonFrames = Math.floor(horizonFrames / 2)) {
           const compiled = compileFrom(seamFrame, seamArrangement, scheduleLoop, horizonFrames)
           if (!compiled.supported || JSON.stringify(compiled.graph) !== JSON.stringify(provisional.graph)) return undefined
-          const reconciled = reconcileAtSeam({ previous: schedule, next: compiled.schedule, seamFrame, keepsVoices })
+          const reconciled = reconcileAtSeam({ previous: schedule, next: compiled.schedule, seamFrame, keepsVoices, hasTrack })
           if (reconciled.events.length > maxScheduleEvents) continue
           try {
             const paged = await preparePagedSources({

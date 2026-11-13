@@ -7011,7 +7011,6 @@ const b6f5LiveKinds = new Set<B6f5Kind>(['proc-live', 'synth-live'])
 // What a playing session adopts on its own core (D5); elsewhere these reach the session as any edit does.
 const b6f5AdoptedKinds = new Set<B6f5Kind>(['mixer', 'master', 'automation', 'synth-nonlive', 'sampled'])
 const b6f5TrackS: Track = { ...track, id: 'track-s', name: 'Sampled' }
-const b6f5TrackB: Track = { ...track, id: 'track-b6f', name: 'B6f5 edit' }
 const b6f5Utility0: UtilityParamsEnvelope = { version: 1, state: createDefaultUtilityParams() }
 const b6f5Synth0: TrackInstrumentParams = { kind: 'synth', instanceId: 'synth:1', params: createDefaultSynthParams() }
 const b6f5Sampler0: TrackInstrumentParams = { kind: 'sampler', instanceId: 'sampler:1', params: createDefaultSamplerParams() }
@@ -7051,6 +7050,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const [bpm, setBpm] = createSignal(120)
   const [loop, setLoop] = createSignal({ enabled: false, start: 0, end: 0 })
   const [utility, setUtility] = createSignal(b6f5Utility0)
+  const [addedEffects, setAddedEffects] = createSignal<AudioEffectRuntimeInstance[]>([])
   const [synth, setSynth] = createSignal(b6f5Synth0)
   const [sampler, setSampler] = createSignal(b6f5Sampler0)
   const [masterVolume, setMasterVolume] = createSignal(1)
@@ -7058,7 +7058,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const fxOf = (instrumentOverride?: { targetId: string; instrument: TrackInstrumentParams }) => ({
     masterVolume: masterVolume(), masterFxInstances: [],
     trackFx: {
-      'track-1': { instances: [b6f5UtilityInstance(utility())],
+      'track-1': { instances: [b6f5UtilityInstance(utility()), ...addedEffects()],
         instrument: instrumentOverride?.targetId === 'track-1' ? instrumentOverride.instrument : synth() },
       'track-s': { instances: [], instrument: instrumentOverride?.targetId === 'track-s' ? instrumentOverride.instrument : sampler() },
     },
@@ -7116,6 +7116,8 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     notify: (title: string, message: string) => { faults.push(`${title}: ${message}`) },
   })
   const work: Promise<unknown>[] = []
+  // Effect structure on a track the session plays: a structural edit no seam carries until step 9f.
+  const addEffect = () => setAddedEffects([{ id: 'utility-2', kind: 'utility', params: b6f5Utility0 }])
   let lastEdit: LiveProcessorEditIdentity | undefined
   const setVolume = (volume: number) => setTracks((current) => current.map((entry) => entry.id === track.id ? { ...entry, volume } : entry))
   // One user edit of each kind, delivered the way the product delivers it.
@@ -7123,7 +7125,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     if (kind === 'mixer') setVolume(0.5)
     if (kind === 'master') setMasterVolume(0.5)
     if (kind === 'automation') setAutomation([b6f5Automation])
-    if (kind === 'structural') { setTracks((current) => [...current, b6f5TrackB]); rescheduleTimeline() }
+    if (kind === 'structural') { addEffect(); rescheduleTimeline() }
     if (kind === 'proc-live' || kind === 'proc-nonlive') {
       const to: UtilityParamsEnvelope = { version: 1, state: kind === 'proc-live' ? { ...utility().state, gainDb: 3.25 } : { ...utility().state, swap: true } }
       const allocated = registry.allocate({ targetId: track.id, instanceId: 'utility-1', effect: 'utility', from: utility(), to })
@@ -7175,7 +7177,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     if (kind === 'mixer') return node(track.id)?.mixer?.gain === 0.5
     if (kind === 'master') return node(graph.masterNodeId)?.mixer?.gain === 0.5
     if (kind === 'automation') return session.parameters.includes('"value":0.25')
-    if (kind === 'structural') return node(b6f5TrackB.id) !== undefined
+    if (kind === 'structural') return !changed(track.id, 'processorOrder')
     if (kind === 'proc-live') return !changed(track.id, 'processorOrder') || liveTook(session.proc)
     if (kind === 'proc-nonlive') return !changed(track.id, 'processorOrder')
     if (kind === 'synth-live') return !changed(track.id, 'instrument') || liveTook(session.inst)
@@ -7234,7 +7236,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const resumingRebuild = () => playback.restartTimelineSchedule(tracks(), {
     rebuildBackend: true, resumePlayback: true, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
-  return { playback, edit, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, mark: () => world.seq,
+  return { playback, edit, addEffect, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, mark: () => world.seq,
     locate: (sec: number) => playback.setPlayhead(sec, tracks()),
     liveSession: () => world.sessions.filter((session) => !session.closed).at(-1),
     holds: { resume: resumeHold, compile: compileHold, transport: world.transportHold, pause: world.pauseHold } }
@@ -7555,6 +7557,28 @@ test('C9d W-C9-warp-8 a tempo or warp marker edit under a Stretch clip while pla
   }, false)
 })
 
+// C9e: a track added, deleted or moved is a seam adoption too, playing or paused: the same session takes each with no
+// dispose and no rebuild (a reorder is the session's own graph, so it publishes nothing and is not counted).
+test('C9e W-C9-track-11 a track added, reordered and deleted while playing or paused is adopted by the same session with no dispose and no rebuild', async () => {
+  for (const paused of [false, true]) await runB6f5(async (live, world) => {
+    if (paused) await live.pausedAt(1)
+    else await live.playFrom(1)
+    const session = live.liveSession()
+    const mark = live.mark()
+    live.setTracks((current) => [...current, c9bTrack])
+    await live.until(() => session?.adoptions === 1 || world.sessions.length > 1)
+    await live.settle()
+    live.setTracks((current) => [...current].reverse())
+    await live.settle()
+    live.setTracks((current) => current.filter((entry) => entry.id !== c9bTrack.id))
+    await live.until(() => session?.adoptions === 2 || world.sessions.length > 1)
+    await live.settle()
+    expect({ paused, adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session, playing: live.playback.isPlaying(),
+      sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
+      .toEqual({ paused, adoptions: 2, closed: false, same: true, playing: !paused, sessionsAfterMark: 0 })
+  }, false)
+})
+
 // UD 7 paused, portable: a note edit while paused is adopted by the kept session, neither disposed nor re-prepared nor
 // played, and Play then resumes that session.
 test('B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session', async () => {
@@ -7624,8 +7648,8 @@ test('B6f5 A an edit the playing portable session cannot carry live rebuilds it 
     await live.playFrom(1)
     const session = live.liveSession()
     const mark = live.mark()
-    // A track the resolved tracks gain without a Timeline rebuild: only the playing session's follow can carry it.
-    live.setTracks((current) => [...current, b6f5TrackB])
+    // An effect the resolved tracks gain without a Timeline rebuild: only the playing session's follow can carry it.
+    live.addEffect()
     await live.expectEnd(true, undefined, mark, 'structural', false)
     expect({ adoptions: session?.adoptions, closed: session?.closed, sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
       .toEqual({ adoptions: 0, closed: true, sessionsAfterMark: 1 })
@@ -7931,12 +7955,12 @@ test('B6f5c a structural edit held by a portable take reaches the playing sessio
       const session = live.liveSession()
       await live.playback.portableRecording.start(recording.input)
       const mark = live.mark()
-      live.setTracks((current) => [...current, b6f5TrackB])
+      live.addEffect()
       // The follow answers rebuild and the take holds it.
       for (let turn = 0; turn < 3_000; turn += 1) await Promise.resolve()
       await live.settle()
       expect({ end, held: { sessions: world.sessions.length, open: session?.closed === false,
-        carries: session?.graph?.nodes.some((node) => node.id === b6f5TrackB.id), controls: [...recording.controls] } })
+        carries: session?.graph?.nodes.some((node) => node.id === track.id && node.processorOrder.length > 1), controls: [...recording.controls] } })
         .toEqual({ end, held: { sessions: 1, open: true, carries: false, controls: ['recording-capture-configure'] } })
       await (end === 'stop' ? live.playback.portableRecording.stop() : live.playback.portableRecording.cancel())
       await live.expectEnd(true, undefined, mark, 'structural', false)
@@ -7994,7 +8018,7 @@ test('B6f5c a take ended by a device fault follows the edit it held', async () =
       await live.playFrom(1)
       await live.playback.portableRecording.start({ ...recording.input, onFailure: () => undefined })
       const mark = live.mark()
-      live.setTracks((current) => [...current, b6f5TrackB])
+      live.addEffect()
       for (let turn = 0; turn < 3_000; turn += 1) await Promise.resolve()
       await live.settle()
       expect(world.sessions.filter((entry) => entry.createdSeq > mark).length).toBe(0)
@@ -8018,7 +8042,7 @@ test('B6f5c a failed take followed by the caller stop or cancel adopts or rebuil
       await live.until(() => (session?.adoptions ?? 0) > 0)
       await live.settle()
       const mark = live.mark()
-      live.setTracks((current) => [...current, b6f5TrackB])
+      live.addEffect()
       for (let turn = 0; turn < 3_000; turn += 1) await Promise.resolve()
       await live.settle()
       recording.endDevice()

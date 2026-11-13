@@ -8,6 +8,7 @@ import type { AudioEffectRuntimeInstance, EngineDisposition } from '@daw-browser
 import type { AudioCoreGraphSnapshot } from '@daw-browser/audio-core-contract'
 import { SYNTH_KIND_ID, nativeSynthStructureKey, type LiveProcessorEditIdentity } from '~/lib/live-processor-control'
 import {
+  createDefaultCompressorParams,
   createDefaultDrumRackParams,
   createDefaultGranularParams,
   createDefaultSamplerParams,
@@ -2333,23 +2334,14 @@ test('B6f5 R6 a schedule refresh after an adoption continues the adopted revisio
 
 // B6f5 step 5b, R6: a compile the session cannot continue (a structural edit since its start) is never installed on it.
 // The refresh skips it without a fault, as it did before adoption; the follow asks for the rebuild that carries it.
-const b6f5AddedSynth: RuntimeTrack = { ...track, id: 'synth-b', name: 'Synth B', clips: [{ ...track.clips[0], id: 'clip-b', name: 'MIDI B',
-  color: '#fff', startSec: 0, duration: 10, midiOffsetBeats: 0, midi: { wave: 'sine', cc: [], mappings: [],
-    notes: Array.from({ length: 20 }, (_, index) => ({ id: `note-b-${index}`, beat: index, length: 0.5, pitch: 62, velocity: 0.8 })) } }] }
-const b6f5AddedAudio: RuntimeTrack = { id: 'audio-b', kind: 'audio', name: 'Audio B', volume: 1, clips: [{ id: 'clip-audio-b',
-  name: 'Audio B', color: '#fff', startSec: 2, duration: 1, sourceAssetKey: 'asset-b', buffer: new TestAudioBuffer() }] }
-const b6f5StructuralCompilation = (transport: LivePlaybackTransport, added: RuntimeTrack | undefined) => {
+const b6f5AddedEffect: AudioEffectRuntimeInstance = { id: 'utility-b6f5-structure', kind: 'utility', params: { version: 1, state: createDefaultUtilityParams() } }
+const b6f5StructuralCompilation = (transport: LivePlaybackTransport, added: AudioEffectRuntimeInstance | undefined) => {
   const base = compilation()
   if (!added) return { ...base, snapshot: { ...base.snapshot, transport } }
-  const tracks = [track, added]
-  const instrument: TrackInstrumentParams = { kind: 'synth', instanceId: 'synth:2', params: createDefaultSynthParams() }
-  const trackFx = added.kind === 'instrument'
-    ? { ...base.snapshot.mixer.fx.trackFx, [added.id]: { instances: [], instrument } }
-    : base.snapshot.mixer.fx.trackFx
+  const trackFx = Object.fromEntries(Object.entries(base.snapshot.mixer.fx.trackFx ?? {})
+    .map(([id, entry]) => [id, id === track.id ? { ...entry, instances: [...entry.instances, added] } : entry]))
   const fx = { ...base.snapshot.mixer.fx, trackFx }
-  const assets = added.kind === 'audio' ? [{ assetId: 'asset-b', buffer: new TestAudioBuffer() }] : []
-  return { ...base, snapshot: { ...base.snapshot, transport, tracks, assets, mixer: { ...base.snapshot.mixer, fx,
-    graph: resolveLiveMixerGraph(tracks, fx.trackFx) } } }
+  return { ...base, snapshot: { ...base.snapshot, transport, mixer: { ...base.snapshot.mixer, fx, graph: resolveLiveMixerGraph(base.snapshot.tracks, fx.trackFx) } } }
 }
 // WK installSchedule answers `rejected` for an event whose target the prepared graph lacks (`!targets.has(key)`).
 const b6f5StrictSession = (calls: string[], graphs: AudioCoreGraphSnapshot[], publishes: B6f5Publish[]) => {
@@ -2373,7 +2365,7 @@ test('B6f5 step5b R6 a recording refresh after a structural edit skips without a
   const publishes: B6f5Publish[] = []
   const faults: string[] = []
   const sessions: ReturnType<typeof b6f5StrictSession>[] = []
-  let added: RuntimeTrack | undefined
+  let added: AudioEffectRuntimeInstance | undefined
   const { stream, recordingContext } = createRecordingFixture(calls)
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => b6f5StructuralCompilation(transport, added),
@@ -2386,7 +2378,7 @@ test('B6f5 step5b R6 a recording refresh after a structural edit skips without a
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     await controller.startRecording(b6f5RecordingInput(stream))
-    added = b6f5AddedSynth
+    added = b6f5AddedEffect
     sessions[0]?.emitPosition(80_000)
     const refresh = await controller.refreshSchedule()
     const follow = await controller.adoptSchedule(noLoop)
@@ -2397,7 +2389,7 @@ test('B6f5 step5b R6 a recording refresh after a structural edit skips without a
     expect(await controller.stopRecording()).toEqual({ capturedFrames: 0 })
     controller.dispose()
     expect(await controller.start({ ...compilation().snapshot.transport, playheadSec: 80_000 / 48_000 })).toBe('started')
-    expect({ faults, sessions: sessions.length, carries: graphs.at(-1)?.nodes.some((node) => node.id === b6f5AddedSynth.id) })
+    expect({ faults, sessions: sessions.length, carries: graphs.at(-1)?.nodes.some((node) => node.id === track.id && node.processorOrder.length > 0) })
       .toEqual({ faults: [], sessions: 2, carries: true })
   } finally { controller.dispose() }
 })
@@ -2408,7 +2400,7 @@ test('B6f5 step5b R6 a normal refresh after a structural edit skips without a fa
   const publishes: B6f5Publish[] = []
   const faults: string[] = []
   const sessions: ReturnType<typeof b6f5Session>[] = []
-  let added: RuntimeTrack | undefined
+  let added: AudioEffectRuntimeInstance | undefined
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => b6f5StructuralCompilation(transport, added),
     fingerprintSnapshot: b6f5Fingerprint,
@@ -2417,7 +2409,7 @@ test('B6f5 step5b R6 a normal refresh after a structural edit skips without a fa
   })
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
-    added = b6f5AddedAudio
+    added = b6f5AddedEffect
     sessions[0]?.emitPosition(80_000)
     const refresh = await controller.refreshSchedule()
     const follow = await controller.adoptSchedule(noLoop)
@@ -2425,10 +2417,8 @@ test('B6f5 step5b R6 a normal refresh after a structural edit skips without a fa
       .toEqual({ refresh: 'unavailable', follow: 'rebuild', faults: [], playing: true, sessions: 1 })
     controller.dispose()
     expect(await controller.start({ ...compilation().snapshot.transport, playheadSec: 80_000 / 48_000 })).toBe('started')
-    const graph = graphs.at(-1)
-    expect({ faults, sessions: sessions.length, node: graph?.nodes.some((node) => node.id === b6f5AddedAudio.id),
-      asset: graph?.assets.length })
-      .toEqual({ faults: [], sessions: 2, node: true, asset: 1 })
+    expect({ faults, sessions: sessions.length, carries: graphs.at(-1)?.nodes.some((node) => node.id === track.id && node.processorOrder.length > 0) })
+      .toEqual({ faults: [], sessions: 2, carries: true })
   } finally { controller.dispose() }
 })
 
@@ -2487,7 +2477,7 @@ test('B6f5 step5b R6 without a content fingerprint a Timeline revision bump stil
   const publishes: B6f5Publish[] = []
   const faults: string[] = []
   const sessions: ReturnType<typeof b6f5StrictSession>[] = []
-  let added: RuntimeTrack | undefined
+  let added: AudioEffectRuntimeInstance | undefined
   const { stream, recordingContext } = createRecordingFixture(calls)
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => {
@@ -2502,7 +2492,7 @@ test('B6f5 step5b R6 without a content fingerprint a Timeline revision bump stil
   try {
     expect(await controller.start(compilation().snapshot.transport)).toBe('started')
     await controller.startRecording(b6f5RecordingInput(stream))
-    added = b6f5AddedSynth
+    added = b6f5AddedEffect
     sessions[0]?.emitPosition(80_000)
     expect({ refresh: await controller.refreshSchedule(), faults, recording: controller.isRecording(), playing: controller.isActive(), sessions: sessions.length })
       .toEqual({ refresh: 'unavailable', faults: [], recording: true, playing: true, sessions: 1 })
@@ -3947,4 +3937,194 @@ test('W-C9-warp-6 the Stretch artifact a failed attempt kept is released when th
     await c9Settled(() => torndown.stretch.released === 2)
     expect([torndown.stretch.leased, torndown.stretch.released]).toEqual([2, 2])
   } finally { warn.mockRestore(); error.mockRestore() }
+})
+
+// AE-08 phase 8 step 9e: a track added or deleted is carried at a seam (class 3). A track's place among the others sounds
+// like nothing, so a reorder is the session's own graph again. A deleted track's held notes and sources end with the
+// core's 5 ms ghost fade (D-3): a note-off for its node would reject the whole staged schedule. A track whose delay
+// the WASM core cannot yet move (step 9h) stays a rebuild.
+const e9Source = { durationSec: pagedAssetFrameCount / 48_000, sampleRate: 48_000, channelCount: 1 }
+const e9Midi = (id: string): RuntimeTrack => ({ ...track, id, name: id, clips: track.clips.map((clip) => ({ ...clip, id: `${id}-clip`, duration: 8,
+  midi: clip.midi && { ...clip.midi, notes: [{ id: `${id}-held`, beat: 0, length: 8, pitch: 60, velocity: 0.8 }] } })) })
+const e9Audio = (id: string, assetId: string): RuntimeTrack => ({ id, kind: 'audio', name: id, volume: 1,
+  clips: [{ id: `${id}-clip`, name: id, color: '#fff', startSec: 0, duration: 30, sourceAssetKey: assetId }] })
+const e9Fixture = async (options: { tracks?: readonly RuntimeTrack[]; compressed?: boolean } = {}) => {
+  const state = { tracks: options.tracks ?? [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a')] }
+  const calls: string[] = []
+  const installs: PortableFrameSchedule[] = []
+  const graphs: AudioCoreGraphSnapshot[] = []
+  const publishes: C9Publish[] = []
+  const faults: string[] = []
+  const base = createSession(calls, async (schedule) => { installs.push(schedule) }, undefined, true)
+  const session = {
+    ...base,
+    prepareGraph: async (graph: AudioCoreGraphSnapshot) => { calls.push('prepare-graph'); graphs.push(graph) },
+    publishGraph: async (revision: number, publishOptions?: C9Publish['options']) => {
+      publishes.push({ revision, options: publishOptions })
+      if (publishOptions) calls.push('publish')
+    },
+    registerPagedAsset: async (asset: { assetId: string }) => {
+      calls.push(`register:${asset.assetId}`)
+      return { status: 'registered' as const, handle: { slot: 0, generation: 1 } }
+    },
+    releaseAsset: async (assetId: string) => {
+      calls.push(`release:${assetId}`)
+      return { status: 'released' as const }
+    },
+  }
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async (transport) => {
+      const compiled = pagedCompilation(transport)
+      const trackFx = Object.fromEntries(state.tracks.flatMap((entry) => entry.kind === 'instrument'
+        ? [[entry.id, { instances: [], instrument: { kind: 'synth' as const, instanceId: `synth:${entry.id}`, params: createDefaultSynthParams() } }]]
+        : options.compressed && entry.id === 'audio-a'
+          ? [[entry.id, { instances: [{ id: 'compressor-a', kind: 'compressor' as const, params: createDefaultCompressorParams() }] }]] : []))
+      const assetIds = new Set(state.tracks.flatMap((entry) => entry.clips.flatMap((clip) => clip.sourceAssetKey ?? [])))
+      const assets = [...assetIds].map((assetId) => ({ assetId, source: e9Source }))
+      return { ...compiled, snapshot: { ...compiled.snapshot, tracks: state.tracks, assets,
+        mixer: { ...compiled.snapshot.mixer, fx: { ...compiled.snapshot.mixer.fx, trackFx }, graph: resolveLiveMixerGraph(state.tracks, trackFx) } } }
+    },
+    fingerprintSnapshot: b6f5Fingerprint, getAudioContext: () => context, scheduleHorizonSec: 8, select: async () => selected,
+    reportFault: (message) => faults.push(message),
+    resolveSource: async (clip) => pagedDescriptor(clip.sourceAssetKey ?? 'missing', []),
+    backend: { createPlaybackSession: async () => session },
+  })
+  const transport = pagedCompilation().snapshot.transport
+  let reports = 0
+  const report = async (frame: number) => { reports += 1; base.emitPosition(frame, reports); await Bun.sleep(0) }
+  const shipped = () => c9Starts(publishes.at(-1)?.options?.sources?.prepared)
+  const nodes = () => (graphs.at(-1)?.nodes ?? []).flatMap((node) => node.id === '$master' ? [] : [node.id])
+  const notes = (type: 'note-on' | 'note-off') => (installs.at(-1)?.events ?? []).flatMap((event) => event.type === type ? [[event.target.trackId, event.frame]] : [])
+    .toSorted((left, right) => String(left).localeCompare(String(right)))
+  const published = () => publishes.filter((publish) => publish.options).length
+  return { state, controller, transport, calls, graphs, publishes, installs, faults, report, shipped, nodes, notes, published }
+}
+
+test('W-C9-track-1 an audio track added while playing is adopted: its node is published, its asset registered first, its clip starts at the seam', async () => {
+  const f = await e9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(48_000)
+    const mark = f.calls.length
+    f.state.tracks = [...f.state.tracks, e9Audio('audio-b', 'asset-b')]
+    const result = await f.controller.adoptSchedule(noLoop)
+    const adoption = f.calls.slice(mark)
+    expect({ result, nodes: f.nodes(), order: adoption.filter((call) => call === 'publish' || call.startsWith('register:')), disposed: adoption.includes('dispose'),
+      shipped: f.shipped(), noteOns: f.notes('note-on'), noteOffs: f.notes('note-off') })
+      .toEqual({ result: 'adopted', nodes: ['midi-a', 'audio-a', 'audio-b'], order: ['register:asset-b', 'publish'], disposed: false,
+        shipped: [['audio-a', 60_000, 60_000], ['audio-b', 60_000, 60_000]], noteOns: [], noteOffs: [['midi-a', 192_000]] })
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-track-2 a MIDI track added while playing is adopted: its note that spans the seam starts there and the held note elsewhere keeps its voice', async () => {
+  const f = await e9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(48_000)
+    f.state.tracks = [...f.state.tracks, e9Midi('midi-b')]
+    const result = await f.controller.adoptSchedule(noLoop)
+    expect({ result, nodes: f.nodes(), disposed: f.calls.includes('dispose'), noteOns: f.notes('note-on'), noteOffs: f.notes('note-off') })
+      .toEqual({ result: 'adopted', nodes: ['midi-a', 'audio-a', 'midi-b'], disposed: false, noteOns: [['midi-b', 60_000]],
+        noteOffs: [['midi-a', 192_000], ['midi-b', 192_000]] })
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-track-3 an audio track deleted while playing leaves no source or node, and its asset is released once the position reaches the seam', async () => {
+  const f = await e9Fixture({ tracks: [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a'), e9Audio('audio-b', 'asset-b')] })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(48_000)
+    f.state.tracks = f.state.tracks.filter((entry) => entry.id !== 'audio-b')
+    const result = await f.controller.adoptSchedule(noLoop)
+    const before = c9Released(f.calls)
+    await f.report(59_999)
+    const early = c9Released(f.calls)
+    await f.report(60_000)
+    expect({ result, nodes: f.nodes(), shipped: f.shipped(), disposed: f.calls.includes('dispose'), released: [before, early, c9Released(f.calls)] })
+      .toEqual({ result: 'adopted', nodes: ['midi-a', 'audio-a'], shipped: [['audio-a', 60_000, 60_000]], disposed: false, released: [[], [], ['release:asset-b']] })
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-track-4 the held note of a deleted MIDI track gets no note-off: its node is not in the candidate and the core ghost ends the voice', async () => {
+  const f = await e9Fixture({ tracks: [e9Midi('midi-a'), e9Midi('midi-b'), e9Audio('audio-a', 'asset-a')] })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(48_000)
+    f.state.tracks = f.state.tracks.filter((entry) => entry.id !== 'midi-b')
+    const result = await f.controller.adoptSchedule(noLoop)
+    expect({ result, nodes: f.nodes(), disposed: f.calls.includes('dispose'), noteOns: f.notes('note-on'), noteOffs: f.notes('note-off') })
+      .toEqual({ result: 'adopted', nodes: ['midi-a', 'audio-a'], disposed: false, noteOns: [], noteOffs: [['midi-a', 192_000]] })
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-track-5 a reorder is the session\'s own graph again: unchanged, nothing published, and the next edit keeps the node order', async () => {
+  const f = await e9Fixture({ tracks: [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a'), e9Audio('audio-b', 'asset-b')] })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(48_000)
+    const [midiA, audioA, audioB] = f.state.tracks
+    f.state.tracks = [audioB, midiA, audioA]
+    const reordered = await f.controller.adoptSchedule(noLoop)
+    const published = f.published()
+    f.state.tracks = [audioB, midiA, { ...audioA, volume: 0.5 }]
+    const edited = await f.controller.adoptSchedule(noLoop)
+    expect({ reordered, published, edited, nodes: f.nodes(), disposed: f.calls.includes('dispose') })
+      .toEqual({ reordered: 'unchanged', published: 0, edited: 'adopted', nodes: ['midi-a', 'audio-a', 'audio-b'], disposed: false })
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-track-6 a track added and then deleted on a paused session is adopted in place with the seam at the position', async () => {
+  const f = await e9Fixture()
+  try {
+    expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
+    f.state.tracks = [...f.state.tracks, e9Audio('audio-b', 'asset-b')]
+    const added = await f.controller.adoptSchedule(noLoop)
+    const addedState = { nodes: f.nodes(), shipped: f.shipped(), publicationFrame: JSON.stringify(f.publishes.at(-1)?.options).includes('publicationFrame') }
+    f.state.tracks = f.state.tracks.filter((entry) => entry.id !== 'audio-b')
+    const deleted = await f.controller.adoptSchedule(noLoop)
+    expect({ added, addedState, deleted, nodes: f.nodes(), shipped: f.shipped(), released: c9Released(f.calls), disposed: f.calls.includes('dispose') })
+      .toEqual({ added: 'adopted', addedState: { nodes: ['midi-a', 'audio-a', 'audio-b'], shipped: [['audio-a', 0, 0], ['audio-b', 0, 0]], publicationFrame: false },
+        deleted: 'adopted', nodes: ['midi-a', 'audio-a'], shipped: [['audio-a', 0, 0]], released: ['release:asset-b'], disposed: false })
+  } finally { f.controller.dispose() }
+})
+
+// The WASM core continues a graph only when no delay moves (CORE:7673-7692). Until step 9h a track whose add or delete
+// moves one is a rebuild: nothing is published, so the retry loop never meets a refusal it cannot converge on.
+test('W-C9-track-7 a track added or deleted where a latency-bearing effect gives routes a delay answers rebuild and publishes nothing', async () => {
+  const added = await e9Fixture({ compressed: true })
+  const deletedPlain = await e9Fixture({ compressed: true, tracks: [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a'), e9Audio('audio-b', 'asset-b')] })
+  const deletedLatent = await e9Fixture({ compressed: true, tracks: [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a'), e9Audio('audio-b', 'asset-b')] })
+  try {
+    expect(await added.controller.start(added.transport)).toBe('started')
+    expect(await deletedPlain.controller.start(deletedPlain.transport)).toBe('started')
+    expect(await deletedLatent.controller.start(deletedLatent.transport)).toBe('started')
+    added.state.tracks = [...added.state.tracks, e9Audio('audio-b', 'asset-b')]
+    deletedPlain.state.tracks = deletedPlain.state.tracks.filter((entry) => entry.id !== 'audio-b')
+    deletedLatent.state.tracks = deletedLatent.state.tracks.filter((entry) => entry.id !== 'audio-a')
+    expect({ added: await added.controller.adoptSchedule(noLoop), deletedPlain: await deletedPlain.controller.adoptSchedule(noLoop),
+      deletedLatent: await deletedLatent.controller.adoptSchedule(noLoop), published: [added, deletedPlain, deletedLatent].map((f) => f.published()) })
+      .toEqual({ added: 'rebuild', deletedPlain: 'rebuild', deletedLatent: 'rebuild', published: [0, 0, 0] })
+  } finally { added.controller.dispose(); deletedPlain.controller.dispose(); deletedLatent.controller.dispose() }
+})
+
+// Recording decision: native has no controller-level rule (its adoption path only refuses a seek during a take,
+// native-playback-controller.ts:2698). A take's own track, its group and its routes cannot be deleted or rerouted at all:
+// the Timeline's recording target lock refuses it before the edit exists (track-recording-target.ts:57-72, 96). Any other
+// track add or delete is adopted like any edit, and the take goes on.
+test('W-C9-track-R a track added and deleted during a take is adopted and the take goes on', async () => {
+  const calls: string[] = []
+  const { stream, recordingContext } = createRecordingFixture(calls)
+  const f = await w8Fixture({ clipSec: 30 }, { audioContext: recordingContext })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.controller.startRecording(b6f5RecordingInput(stream))
+    f.position(20_000, 1, 1)
+    f.state.audioStartSec = 28
+    const added = await f.adopt(f.noLoop)
+    f.position(40_000, 1, 2)
+    f.state.audioStartSec = undefined
+    const deleted = await f.adopt(f.noLoop)
+    expect({ added, deleted, faults: f.faults, recording: f.controller.isRecording(), sessions: f.sessions() })
+      .toEqual({ added: 'adopted', deleted: 'adopted', faults: [], recording: true, sessions: 1 })
+  } finally { f.controller.dispose() }
 })

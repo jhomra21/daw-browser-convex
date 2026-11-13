@@ -48980,7 +48980,7 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "    return { ...compilation, snapshot: { ...compilation.snapshot, revision: activeRevision } }\n  }\n",
+       "from": "    return { ...compilation, snapshot: { ...next, revision: activeRevision } }\n  }\n",
        "to": "    return compilation\n  }\n"
       }
      ]
@@ -49043,7 +49043,7 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "    return { ...compilation, snapshot: { ...compilation.snapshot, revision: activeRevision } }\n  }\n",
+       "from": "    return { ...compilation, snapshot: { ...next, revision: activeRevision } }\n  }\n",
        "to": "    return compilation\n  }\n"
       }
      ]
@@ -49106,7 +49106,7 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "    return { ...compilation, snapshot: { ...compilation.snapshot, revision: activeRevision } }\n  }\n",
+       "from": "    return { ...compilation, snapshot: { ...next, revision: activeRevision } }\n  }\n",
        "to": "    return compilation\n  }\n"
       }
      ]
@@ -49282,7 +49282,7 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "    if (fingerprint(withLiveContentOf(adoptable, activeSnapshot)) !== fingerprint(activeSnapshot)) {\n      return { supported: false, reasons: [\"Portable playback requires a schedule rebuild.\"] }\n    }\n",
+       "from": "    if (fingerprint(withLiveContentOf(compared, activeSnapshot)) !== fingerprint(installed)) {\n      return { supported: false, reasons: [\"Portable playback requires a schedule rebuild.\"] }\n    }\n",
        "to": ""
       }
      ]
@@ -49344,7 +49344,7 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "    if (fingerprint(withLiveContentOf(adoptable, activeSnapshot)) !== fingerprint(activeSnapshot)) {\n      return { supported: false, reasons: [\"Portable playback requires a schedule rebuild.\"] }\n    }\n",
+       "from": "    if (fingerprint(withLiveContentOf(compared, activeSnapshot)) !== fingerprint(installed)) {\n      return { supported: false, reasons: [\"Portable playback requires a schedule rebuild.\"] }\n    }\n",
        "to": ""
       }
      ]
@@ -49576,8 +49576,8 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "fingerprint(withLiveContentOf(adoptable, activeSnapshot)) !== fingerprint(activeSnapshot)",
-       "to": "fingerprint(adoptable) !== fingerprint(activeSnapshot)"
+       "from": "fingerprint(withLiveContentOf(compared, activeSnapshot)) !== fingerprint(installed)",
+       "to": "fingerprint(compared) !== fingerprint(installed)"
       }
      ]
     },
@@ -49647,8 +49647,8 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "fingerprint(withLiveContentOf(adoptable, activeSnapshot)) !== fingerprint(activeSnapshot)",
-       "to": "fingerprint(adoptable) !== fingerprint(activeSnapshot)"
+       "from": "fingerprint(withLiveContentOf(compared, activeSnapshot)) !== fingerprint(installed)",
+       "to": "fingerprint(compared) !== fingerprint(installed)"
       }
      ]
     },
@@ -49731,8 +49731,8 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "fingerprint(withLiveContentOf(adoptable, activeSnapshot)) !== fingerprint(activeSnapshot)",
-       "to": "fingerprint(adoptable) !== fingerprint(activeSnapshot)"
+       "from": "fingerprint(withLiveContentOf(compared, activeSnapshot)) !== fingerprint(installed)",
+       "to": "fingerprint(compared) !== fingerprint(installed)"
       }
      ]
     },
@@ -49917,8 +49917,8 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    // An adoption installs its schedule at a seam, so it also takes tempo, loop and MIDI edits; a refresh or a start does not.\n    const adoptable = context?.liveAdoption ? withSeamContentOf(compilation.snapshot, activeSnapshot) : compilation.snapshot\n    if (fingerprint(",
-       "to": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    // An adoption installs its schedule at a seam, so it also takes tempo, loop and MIDI edits; a refresh or a start does not.\n    const adoptable = context?.liveAdoption ? withSeamContentOf(compilation.snapshot, activeSnapshot) : compilation.snapshot\n    if (fingerprint && fingerprint("
+       "from": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), onSharedTracks(activeSnapshot, next)]\n      : [next, activeSnapshot]\n    if (fingerprint(",
+       "to": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), onSharedTracks(activeSnapshot, next)]\n      : [next, activeSnapshot]\n    if (fingerprint && fingerprint("
       }
      ]
     },
@@ -49978,8 +49978,8 @@
      "changes": [
       {
        "file": "src/lib/portable-browser-playback-controller.ts",
-       "from": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    // An adoption installs its schedule at a seam, so it also takes tempo, loop and MIDI edits; a refresh or a start does not.\n    const adoptable = context?.liveAdoption ? withSeamContentOf(compilation.snapshot, activeSnapshot) : compilation.snapshot\n    if (fingerprint(",
-       "to": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    // An adoption installs its schedule at a seam, so it also takes tempo, loop and MIDI edits; a refresh or a start does not.\n    const adoptable = context?.liveAdoption ? withSeamContentOf(compilation.snapshot, activeSnapshot) : compilation.snapshot\n    if (fingerprint && fingerprint("
+       "from": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), onSharedTracks(activeSnapshot, next)]\n      : [next, activeSnapshot]\n    if (fingerprint(",
+       "to": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), onSharedTracks(activeSnapshot, next)]\n      : [next, activeSnapshot]\n    if (fingerprint && fingerprint("
       }
      ]
     },

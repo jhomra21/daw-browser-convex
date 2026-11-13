@@ -7255,8 +7255,8 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     await playback.handlePause()
     await until(() => playback.isPortableBrowserPlaybackPrepared() && !playback.isPreparingPlayback())
   }
-  const resumingRebuild = () => playback.restartTimelineSchedule(tracks(), {
-    rebuildBackend: true, resumePlayback: true, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
+  const resumingRebuild = (resumePlayback = true) => playback.restartTimelineSchedule(tracks(), {
+    rebuildBackend: true, resumePlayback, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
   const rebuild = (next: Track[]) => syncPlaybackBackend(next)
   return { playback, tracks, observeTracksRead: (observer: () => void) => { onTracksRead = observer }, edit, replaceInstrument, addEffect, insertEffect, insertLimiter, rebuild, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, mark: () => world.seq,
@@ -7822,6 +7822,24 @@ test('B6f5 479 a rebuild requested after the running rebuild passed its last req
 test('B6f5 D a structural edit during a warm Play keeps the Play and reaches its session', async () => {
   const kinds: B6f5Kind[] = ['structural', 'proc-nonlive']
   for (const kind of kinds) await b6f5Cell('pending-warm-play', kind, false)
+})
+
+// A lifecycle rebuild (a retried instrument preparation, a VST insert, a seek) names resumePlayback from isPlaying(), which is
+// false while a warm Play is still starting. The Play that is current when the rebuild starts is the newest transport intent,
+// so the rebuild resumes it; a Play that a Stop already ended is not.
+test('B6f5 481 a rebuild that lands on a pending warm Play resumes that Play; one that lands after its Stop does not', async () => {
+  for (const stopped of [false, true]) await runB6f5(async (live) => {
+    await live.pausedAt(1)
+    live.holds.transport.armed = true
+    const play = live.playback.handlePlay([])
+    await live.holds.transport.reached.promise
+    const stop = stopped ? live.playback.handleStop() : undefined
+    const rebuild = live.resumingRebuild(false)
+    releaseB6fLive(live.holds.transport)
+    await Promise.all([play, stop, rebuild].map((work) => work?.catch(() => undefined)))
+    await live.settle()
+    expect({ stopped, playing: live.playback.isPlaying() }).toEqual({ stopped, playing: !stopped })
+  }, false)
 })
 
 test('B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from', async () => {

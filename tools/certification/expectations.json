@@ -96,25 +96,25 @@
     "log": "acceptance-reports/ae-08-phase-5-2026-10-18/c1a/logs/self-test-1.log",
     "logSha256": "d8fa3a44f7fa6b4cf1971cdb22ec5f36cebc89d66eb3093dea8c07206ee9a287",
     "exit": 0,
-    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md \u00a76, self-test"
+    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md §6, self-test"
    },
    "g-tools-typecheck": {
     "log": "acceptance-reports/ae-08-phase-5-2026-10-18/c1a/logs/tools-typecheck-1.log",
     "logSha256": "5dab8f62ad782c154b0d2caeadeaa2418dc655681dc9606dc19fcb1f8e8d0dce",
     "exit": 2,
-    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md \u00a76, tools typecheck (byte-identical to RC7's)"
+    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md §6, tools typecheck (byte-identical to RC7's)"
    },
    "g-c0-oxlint": {
     "log": "acceptance-reports/ae-08-phase-5-2026-10-18/c1a/logs/oxlint-1.log",
     "logSha256": "a730d7c85ca96673804d873f0d014497e030c59e575ef0cb72ba9607dedbb8b7",
     "exit": 0,
-    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md \u00a76, scoped oxlint on the analyzer"
+    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md §6, scoped oxlint on the analyzer"
    },
    "g-c0fg-oxlint": {
     "log": "acceptance-reports/ae-08-phase-5-2026-10-18/c1a/logs/oxlint-1.log",
     "logSha256": "a730d7c85ca96673804d873f0d014497e030c59e575ef0cb72ba9607dedbb8b7",
     "exit": 0,
-    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md \u00a76, scoped oxlint on the analyzer"
+    "evidence": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md §6, scoped oxlint on the analyzer"
    }
   },
   "rulings": [
@@ -946,7 +946,7 @@
  "environmentalFaults": [
   {
    "signature": "[CONVEX FATAL ERROR] Couldn't parse deployment name fixture",
-   "evidence": "acceptance-reports/device-control-cost-2026-10-31/dv01-parent/boundary/PARENT-GATES-3B1.md notes 1 and 4, acceptance-reports/device-control-cost-2026-10-31/dv01-parent/boundary/STEP4-0c-COVERAGE-REPORT.md \u00a74: the fixture Convex client's websocket reply, charged to whichever test is running when it arrives; those tests pass alone"
+   "evidence": "acceptance-reports/device-control-cost-2026-10-31/dv01-parent/boundary/PARENT-GATES-3B1.md notes 1 and 4, acceptance-reports/device-control-cost-2026-10-31/dv01-parent/boundary/STEP4-0c-COVERAGE-REPORT.md §4: the fixture Convex client's websocket reply, charged to whichever test is running when it arrives; those tests pass alone"
   }
  ],
  "references": {
@@ -46318,7 +46318,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 28,
+      "pass": 29,
       "skip": 0,
       "fail": 0
      },
@@ -46431,7 +46431,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 239,
+      "pass": 240,
       "skip": 1,
       "fail": 2
      },
@@ -46496,14 +46496,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 1,
      "counts": {
       "pass": 28,
       "skip": 0,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "B6f5 481 a rebuild that lands on a pending warm Play resumes that Play; one that lands after its Stop does not"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -46621,14 +46623,18 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 1,
      "counts": {
       "pass": 239,
       "skip": 1,
-      "fail": 2
+      "fail": 3
      },
-     "fails": [],
+     "fails": [
+      "B6f5 481 a rebuild that lands on a pending warm Play resumes that Play; one that lands after its Stop does not",
+      "failed lifecycle transition cancels delayed native startup",
+      "preserves an explicitly captured native owner across queued generation rebuilds"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -71333,7 +71339,7 @@
     "row": "449",
     "family": "ledger",
     "disposition": "retired, not run",
-    "ruling": "acceptance-reports/device-control-cost-2026-10-31/dv01-parent/boundary/B6F-REPORT.md \u00a76 (invalid, TS2304; replaced by 459; retired)",
+    "ruling": "acceptance-reports/device-control-cost-2026-10-31/dv01-parent/boundary/B6F-REPORT.md §6 (invalid, TS2304; replaced by 459; retired)",
     "armIds": []
    },
    {
@@ -71709,7 +71715,7 @@
     "row": "525",
     "family": "analyzer",
     "disposition": "semantic kill (C1a analyzer: phase 4 publication attribution groups by renderer turn whenever there are no more publications than turns, so a turn may go unpublished): Phase 4 publication attribution oracle failed, unrejected lostEdit",
-    "ruling": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md \u00a75 (PARENT-RULING-C1-PHASE4.md item 3)",
+    "ruling": "acceptance-reports/ae-08-phase-5-2026-10-18/C1A-REPORT.md §5 (PARENT-RULING-C1-PHASE4.md item 3)",
     "armIds": [
      "analyzer:525:control",
      "analyzer:525:mutant"

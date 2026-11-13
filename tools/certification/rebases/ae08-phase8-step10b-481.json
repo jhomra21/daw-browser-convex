@@ -1,0 +1,112 @@
+{
+ "name": "ae08-phase8-step10b-481",
+ "sequence": 30,
+ "createdAt": "2026-11-13T15:55:43.639Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:481:control:b6f5",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 28,
+   "new": 29
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:481:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 239,
+   "new": 240
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:481:mutant:b6f5",
+    "expect",
+    "exit"
+   ],
+   "old": 0,
+   "new": 1
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:481:mutant:b6f5",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 0,
+   "new": 1
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:481:mutant:b6f5",
+    "expect",
+    "fails"
+   ],
+   "old": [],
+   "new": [
+    "B6f5 481 a rebuild that lands on a pending warm Play resumes that Play; one that lands after its Stop does not"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:481:mutant:playback",
+    "expect",
+    "exit"
+   ],
+   "old": 0,
+   "new": 1
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:481:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 2,
+   "new": 3
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:481:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [],
+   "new": [
+    "B6f5 481 a rebuild that lands on a pending warm Play resumes that Play; one that lands after its Stop does not",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  }
+ ],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 10b. ledger:481:mutant:{b6f5,playback} (`rebuildStartingPlay || pendingPlay?.token === playAttemptToken` -> `rebuildStartingPlay` in rebuildTimelineBackend) are killed again by the HT witness 'B6f5 481 a rebuild that lands on a pending warm Play resumes that Play; one that lands after its Stop does not': every rebuild caller (VST insert, retryNativeInstrumentPreparation, the seek rebuild) names resumePlayback from isPlaying(), which is false while a warm Play is still starting, so only the pending-Play clause resumes it, and only for the Play that is still current. The controls gain that test. The matrix arm drives the B6F5PROBE cells, which the witness is not part of: ledger:481:mutant:matrix stays a retired survivor (its playback and b6f5 arms kill the same mutation), like 492 and 493.",
+  "expectationsSha256": "703df88c48b8556290557d4701b86956929e6b6aab4dfa38a4082a38aa3f2c0a"
+ }
+}

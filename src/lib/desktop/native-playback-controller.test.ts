@@ -5550,12 +5550,12 @@ const sampledNativeInput = (kind: 'sampler' | 'granular' | 'drum-rack', seconds 
   }
 }
 
-const acknowledgeStagedPublication = (fixture: ReturnType<typeof createBridge>) => {
+const acknowledgeStagedPublication = (fixture: ReturnType<typeof createBridge>, revision = 2) => {
   let seam = 0n
   let published = false
   const reply = (): NativeRevisionReply => ({ ok: true, hostPid: 123, hostGeneration: 7,
     revision: { status: published ? "published" : "prepared", continuity: "accepted",
-      requestedRevision: 2, activeRevision: published ? 2 : 1, preparedRevision: published ? 0 : 2,
+      requestedRevision: revision, activeRevision: published ? revision : revision - 1, preparedRevision: published ? 0 : revision,
       retiredRevision: 0, renderEpoch: 1n, transportEpoch: fixture.transports.at(-1)?.epoch ?? 1, publicationFrame: published ? seam : 0n,
       progressFrame: published ? seam : 0n } })
   fixture.bridge.session.revisions.prepare = async (request) => {
@@ -5565,7 +5565,7 @@ const acknowledgeStagedPublication = (fixture: ReturnType<typeof createBridge>) 
   }
   fixture.bridge.session.revisions.publish = async () => {
     published = true
-    fixture.setRuntimeRevision(2)
+    fixture.setRuntimeRevision(revision)
     return reply()
   }
   fixture.bridge.session.revisions.inspect = async () => reply()
@@ -6159,6 +6159,40 @@ describe("AE-08 phase 8 UD 7 paused native adoption", () => {
       expect(s.fixture.calls.filter((call) => call === "configure")).toHaveLength(1)
       expect(s.fixture.transports.at(-1)).toMatchObject({ running: true, epoch: epoch + 1 })
       expect(s.controller.isActive()).toBe(true)
+    } finally { await s.controller.dispose() }
+  })
+
+  // An undo is the previous state submitted as its own adoption once the edit's has settled and its epoch re-primed.
+  test("W-UD7n-6 an undo applied after the edit settled is adopted in place on the same host, and its schedule is the original one", async () => {
+    const s = await pausedNativeSession()
+    try {
+      const before = s.mark()
+      const epoch = s.fixture.transports.at(-1)?.epoch ?? 0
+      const original = scheduledNotes(s.fixture, epoch)
+      s.edit(editedMidi(s.base, [{ pitch: 60, beat: 0 }, { pitch: 64, beat: 1 }]))
+      expect(await s.controller.adoptSchedule(migrationIntent("ud7n-edit"), true)).toEqual({ status: "adopted" })
+      await primed()
+      expect(scheduledNotes(s.fixture, epoch + 1)).toContain(64)
+      // The host accepts the next revision; the recorder is wrapped around its prepare again.
+      acknowledgeStagedPublication(s.fixture, 3)
+      const prepare = s.fixture.bridge.session.revisions.prepare
+      s.fixture.bridge.session.revisions.prepare = async (request) => {
+        s.requestedFrames.push(request.requestedPublicationFrame ?? 0n)
+        return prepare(request)
+      }
+      s.edit({ ...s.base, revision: 3 })
+      expect(await s.controller.adoptSchedule(migrationIntent("ud7n-undo"), true)).toEqual({ status: "adopted" })
+      await primed()
+      expect(s.fixture.calls.slice(before.calls).filter((call) => hostLifecycleCalls.includes(call))).toEqual([])
+      expect(s.requestedFrames).toEqual([0n, 0n])
+      expect(s.fixture.coordinations.length).toBe(before.coordinations)
+      expect(s.fixture.calls.filter((call) => call === "start")).toHaveLength(1)
+      expect(s.fixture.calls.filter((call) => call === "configure")).toHaveLength(1)
+      expect(s.controller.isPrepared()).toBe(true)
+      expect(s.controller.isActive()).toBe(false)
+      expect(s.fixture.transports.at(-1)?.epoch).toBe(epoch + 2)
+      expect(original.length).toBeGreaterThan(0)
+      expect(scheduledNotes(s.fixture, epoch + 2)).toEqual(original)
     } finally { await s.controller.dispose() }
   })
 

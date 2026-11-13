@@ -1054,3 +1054,14 @@ test('allows empty instrument tracks alongside prepared Stretch audio and mixer 
     }),
   ])
 })
+
+test('an instrument for a track the snapshot does not hold leaves the compile supported', () => {
+  const fx: ExportFx = {
+    masterVolume: 1, masterFxInstances: [], trackFx: {
+      absent: { instances: [], instrument: { kind: 'synth', instanceId: 'absent', params: createDefaultSynthParams() } },
+    },
+  }
+  const result = compileLiveNativeProjection({ tracks: [track()], fx, bpm: 120, sampleRateHz: 48_000, revision: 1, epoch: 1, firstSequence: 1 })
+  if (!result.supported) throw new Error(result.reasons.join('\n'))
+  expect(result.graph.nodes.map((node) => node.id)).not.toContain('absent')
+})

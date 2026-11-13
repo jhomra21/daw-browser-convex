@@ -257,8 +257,15 @@ export const compileLiveNativeInstrumentConfigurations = (
  * contract rather than browser/Wasm fixture coverage.
  */
 export const compileLiveNativeProjection = (input: LiveNativeProjectionInput): LiveNativeProjection => {
-  const fx = normalizeNativeFx(input.fx, input.tracks)
   const tracks = input.tracks
+  const normalizedFx = normalizeNativeFx(input.fx, tracks)
+  // The effects draft can run ahead of the tracks of the same snapshot: a track not in it has no node to instrument yet,
+  // and the session adopts it when it appears.
+  const heldTrackIds = new Set(tracks.map((track) => track.id))
+  const fx = normalizedFx && {
+    ...normalizedFx,
+    trackFx: Object.fromEntries(Object.entries(normalizedFx.trackFx ?? {}).filter(([trackId]) => heldTrackIds.has(trackId))),
+  }
   const reasons: string[] = []
   const sourceAssets = new Map<string, LiveNativePcmAsset>()
   const addAsset = (

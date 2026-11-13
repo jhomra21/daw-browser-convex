@@ -413,51 +413,42 @@ const withLiveContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSna
   }
 }
 
-const hasWarpedAudio = (snapshot: LivePlaybackSnapshot) =>
-  snapshot.tracks.some((track) => track.clips.some((clip) => clip.audioWarp?.enabled === true))
-
 type SnapshotClip = LivePlaybackSnapshot["tracks"][number]["clips"][number]
 
-// A warped clip needs Stretch prepared for its placement, which the seam does not carry yet.
-const carriesClipEdits = (clip: SnapshotClip) => !clip.midi && clip.audioWarp?.enabled !== true
+const hasStretchClips = (snapshot: LivePlaybackSnapshot) => snapshot.tracks.some((track) => track.clips.some((clip) => (
+  clip.audioWarp?.enabled === true && clip.audioWarp.mode === "stretch"
+)))
 
 // The clips of a track the seam carries, as `installed` has them: every MIDI clip, and of the audio clips their start,
-// duration, trim offset, gain, fades and the asset they play, and their addition or deletion. Whatever else differs (a
-// clip's warp, a warped clip's placement) stays as `next` has it, so the gate refuses it.
+// duration, trim offset, gain, fades, warp and the asset they play, and their addition or deletion. A warped clip's
+// Stretch artifact is prepared for the candidate before the seam, so its placement and warp are carried like any other.
 const withSeamClips = (next: readonly SnapshotClip[], installed: readonly SnapshotClip[]): SnapshotClip[] => {
   const incoming = new Map(next.map((clip) => [clip.id, clip]))
-  const known = new Set(installed.map((clip) => clip.id))
-  return [
-    ...installed.flatMap((clip) => {
-      if (clip.midi) return [clip]
-      const edited = incoming.get(clip.id)
-      if (!edited) return carriesClipEdits(clip) ? [clip] : []
-      if (!carriesClipEdits(clip) || !carriesClipEdits(edited)) return [edited]
-      const { startSec, duration, bufferOffsetSec, gain, fades, sourceAssetKey, sourceKind, sourceDurationSec, sourceSampleRate,
-        sourceChannelCount, sampleUrl, buffer } = clip
-      return [{ ...edited, startSec, duration, bufferOffsetSec, gain, fades, sourceAssetKey, sourceKind, sourceDurationSec,
-        sourceSampleRate, sourceChannelCount, sampleUrl, buffer }]
-    }),
-    ...next.filter((clip) => !known.has(clip.id) && !clip.midi && !carriesClipEdits(clip)),
-  ]
+  return installed.map((clip) => {
+    const edited = incoming.get(clip.id)
+    if (clip.midi || !edited) return clip
+    const { startSec, duration, bufferOffsetSec, gain, fades, audioWarp, sourceAssetKey, sourceKind, sourceDurationSec, sourceSampleRate,
+      sourceChannelCount, sampleUrl, buffer } = clip
+    return { ...edited, startSec, duration, bufferOffsetSec, gain, fades, audioWarp, sourceAssetKey, sourceKind, sourceDurationSec,
+      sourceSampleRate, sourceChannelCount, sampleUrl, buffer }
+  })
 }
 
 const granularAssetKeys = (snapshot: LivePlaybackSnapshot) => Object.entries(snapshot.mixer.fx.trackFx ?? {}).flatMap(
   ([id, entry]) => entry.instrument?.kind === "granular" && entry.instrument.params.zone ? [[id, entry.instrument.params.zone.sample.assetKey]] : [],
 )
 
-// What a playing session adopts at a seam, beyond what it takes live: the tempo of a project without warped audio, the
-// loop fields, the clips of tracks it already plays (`withSeamClips`, the asset a clip plays included), and the assets
-// the Sampler zones and Drum Rack pads it plays name (the instrument itself is taken live, `withLiveContentOf`). `next`
-// with that taken from `previous` fingerprints as `previous` when nothing else changed. Still refused: a tempo under
-// warped audio (new Stretch), the asset of a warped clip, tracks added or deleted, effect structure, instrument
-// replacement, the sample of a Granular cloud, and a sample that becomes or ceases to be available.
+// What a playing session adopts at a seam, beyond what it takes live: the tempo, the loop fields, the clips of tracks it
+// already plays (`withSeamClips`, the warp and the asset a clip plays included), and the assets the Sampler zones and
+// Drum Rack pads it plays name (the instrument itself is taken live, `withLiveContentOf`). `next` with that taken from
+// `previous` fingerprints as `previous` when nothing else changed. Still refused: tracks added or deleted, effect
+// structure, instrument replacement, the sample of a Granular cloud, and a sample that becomes or ceases to be available.
 const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const previousTracks = new Map(previous.tracks.map((track) => [track.id, track]))
   return {
     ...next,
     assets: JSON.stringify(granularAssetKeys(next)) === JSON.stringify(granularAssetKeys(previous)) ? previous.assets : next.assets,
-    bpm: hasWarpedAudio(next) || hasWarpedAudio(previous) ? next.bpm : previous.bpm,
+    bpm: previous.bpm,
     transport: {
       ...next.transport,
       loopEnabled: previous.transport.loopEnabled,
@@ -1209,14 +1200,20 @@ export const createPortableBrowserPlaybackController = (input: {
   let activeOrdinaryDescriptors: ReadonlyMap<string, PortableOrdinaryDescriptor> = new Map()
   let activePreparedSources: readonly PortablePreparedSource[] = []
   let activePreparations: readonly PortablePagedPreparation[] = []
-  // The preparations and registered assets a failed adoption attempt made stay for the resubmit of the same desired state
-  // (UD 8), so a slow preparation converges instead of starting over. They go when the desired state changes, when the
-  // resubmits run out, and with the session.
-  type AdoptionCache = { fingerprint: string; preparations: readonly PortablePagedPreparation[]; assets: readonly string[] }
+  // The preparations, registered assets and Stretch artifacts (with their leases) a failed adoption attempt made stay for
+  // the resubmit of the same desired state (UD 8), so a slow preparation converges instead of starting over. They go when
+  // the desired state changes, when the resubmits run out, and with the session.
+  type AdoptionCache = {
+    fingerprint: string
+    preparations: readonly PortablePagedPreparation[]
+    assets: readonly string[]
+    stretch: readonly PortablePreparedStretch[] | undefined
+  }
   let adoptionCache: AdoptionCache | undefined
-  // Assets an adoption replaced: the old sources stop at the seam, so they go once the position has reached it and the
-  // core no longer reads them.
+  // Assets and Stretch leases an adoption replaced: the old sources stop at the seam, so they go once the position has
+  // reached it and the core no longer reads them.
   let retiredAssets: readonly { assetId: string; seamFrame: number }[] = []
+  let retiredStretch: readonly { assets: readonly PortablePreparedStretch[]; seamFrame: number }[] = []
   let nextLiveProcessorSequence = 0
   let adopting = false
   let adoptionQueued: Promise<PortableAdoptionResult> | undefined
@@ -1241,12 +1238,31 @@ export const createPortableBrowserPlaybackController = (input: {
     await Promise.all([...leases].map((lease) => lease.release().catch(() => undefined)))
   }
 
+  const prepareStretch = (snapshot: LivePlaybackSnapshot, projectGeneration: number, signal?: AbortSignal) => preparePortablePagedStretchAssets({
+    tracks: snapshot.tracks,
+    projectBpm: snapshot.bpm,
+    projectGeneration: safeProjectGeneration(projectGeneration),
+    repository: stretchRepository,
+    resolveSource: input.resolveSource,
+    signal,
+  })
+
+  const prepareCandidateStretch = async (snapshot: LivePlaybackSnapshot, projectGeneration: number) => {
+    if (!hasStretchClips(snapshot)) return []
+    const preparation = await prepareStretch(snapshot, projectGeneration)
+    if (!preparation.supported) throw new Error(preparation.message)
+    return preparation.assets
+  }
+
   const disposeAdoptionCache = async (session: PortableSession | undefined) => {
     const cache = adoptionCache
     adoptionCache = undefined
-    if (!session || !cache) return
-    await releasePreparations(session, cache.preparations, assetGeneration)
-    await Promise.all(cache.assets.map((assetId) => session.releaseAsset?.(assetId, assetGeneration).catch(() => undefined)))
+    if (!cache) return
+    if (session) {
+      await releasePreparations(session, cache.preparations, assetGeneration)
+      await Promise.all(cache.assets.map((assetId) => session.releaseAsset?.(assetId, assetGeneration).catch(() => undefined)))
+    }
+    await releasePreparedStretchAssets(cache.stretch ?? [])
   }
 
   const clearActiveSessionState = () => {
@@ -1273,6 +1289,8 @@ export const createPortableBrowserPlaybackController = (input: {
     }
     activePreparations = []
     retiredAssets = []
+    cleanup.push(releasePreparedStretchAssets(retiredStretch.flatMap((retired) => retired.assets)))
+    retiredStretch = []
     activeOrdinarySources = []
     activeOrdinaryDescriptors = new Map()
     activePreparedSources = []
@@ -1344,6 +1362,10 @@ export const createPortableBrowserPlaybackController = (input: {
       status: (await session.releaseAsset?.(retired.assetId, assetGeneration).catch(() => undefined))?.status,
     })))
     retiredAssets = [...retiredAssets, ...answers.filter((answer) => answer.status === "asset-in-use").map((answer) => answer.retired)]
+    // The leases go with the assets: nothing reads the old artifacts once the position is past the seam.
+    const expiredStretch = retiredStretch.filter((retired) => retired.seamFrame <= frame)
+    retiredStretch = retiredStretch.filter((retired) => !expiredStretch.includes(retired))
+    await releasePreparedStretchAssets(expiredStretch.flatMap((retired) => retired.assets))
   }
 
   const teardownSession = () => {
@@ -1449,17 +1471,8 @@ export const createPortableBrowserPlaybackController = (input: {
       if (cancelled()) return undefined
       if (!compilation.supported) return undefined
       if (parameterSnapshot) compilation = { ...compilation, snapshot: withAcceptedInstruments(compilation.snapshot, parameterSnapshot) }
-      if (compilation.snapshot.tracks.some((track) => track.clips.some((clip) => (
-        clip.audioWarp?.enabled === true && clip.audioWarp.mode === "stretch"
-      )))) {
-        const preparation = await preparePortablePagedStretchAssets({
-          tracks: compilation.snapshot.tracks,
-          projectBpm: compilation.snapshot.bpm,
-          projectGeneration: safeProjectGeneration(projectGeneration),
-          repository: stretchRepository,
-          resolveSource: input.resolveSource,
-          signal: preparationAbortController.signal,
-        })
+      if (hasStretchClips(compilation.snapshot)) {
+        const preparation = await prepareStretch(compilation.snapshot, projectGeneration, preparationAbortController.signal)
         if (!preparation.supported) {
           input.reportFault?.(preparation.message)
           return undefined
@@ -2124,23 +2137,26 @@ export const createPortableBrowserPlaybackController = (input: {
         ...transport, ...effectiveLoopForStart(recording ? previous.transport : loop, arrangementNow, sampleRate), state: wasPlaying ? "playing" : "paused", playheadSec: arrangementNow / sampleRate,
       }, { liveAdoption: true })
       if (!current()) return "unavailable"
-      // Tracks, instrument kinds, effect structure, warped clips and warped audio under a tempo edit are not carried at a
-      // seam yet; those still rebuild.
+      // Tracks, instrument kinds and effect structure are not carried at a seam yet; those still rebuild.
       if (!compilation.supported) return "rebuild"
       const next = compilation.snapshot
       const desired = fingerprint(next)
       if (adoptionCache && adoptionCache.fingerprint !== desired) await disposeAdoptionCache(session)
       if (desired === fingerprint(previous)) return "unchanged"
-      // The candidate's assets: the session's own, and what the edit added.
+      // This attempt owns what the failed one kept; a failed attempt hands it on again.
+      const owned: AdoptionCache = { fingerprint: desired, preparations: adoptionCache?.preparations ?? [], assets: adoptionCache?.assets ?? [], stretch: adoptionCache?.stretch }
+      adoptionCache = undefined
+      attempt = owned
+      // The candidate's Stretch artifacts are prepared at its tempo and placement, as native prepares them (C:3289-3305). The
+      // seam is chosen after this, so a slow preparation spends none of its lead.
+      owned.stretch ??= await prepareCandidateStretch(next, projectGeneration)
+      if (!current()) return "unavailable"
+      // The candidate's assets: the Stretch artifacts it prepared, and the session's own with what the edit added.
       const resources = {
-        preparedStretchAssets: activePreparedStretchAssets,
+        preparedStretchAssets: owned.stretch,
         ordinaryDescriptors: await resolveOrdinaryDescriptors(next, input.resolveSource, undefined, activeOrdinaryDescriptors),
       }
       if (!current()) return "unavailable"
-      // This attempt owns what the failed one kept; a failed attempt hands it on again.
-      const owned: AdoptionCache = { fingerprint: desired, preparations: adoptionCache?.preparations ?? [], assets: adoptionCache?.assets ?? [] }
-      adoptionCache = undefined
-      attempt = owned
       // From here live sends wait for the publish (R2) and so reach the revision that carries them; sends already in
       // flight settle first, so the candidate holds every live value the session accepted while the compile ran.
       adoptionPublish = publishing.promise
@@ -2258,6 +2274,7 @@ export const createPortableBrowserPlaybackController = (input: {
         activeOrdinarySources = ordinary
         activePreparedSources = withPreparations(paged.events, paged.preparations)
         activeSourceSequence = candidate.sources.at(-1)?.sequence ?? 0
+        retiredStretch = [...retiredStretch, { assets: activePreparedStretchAssets, seamFrame }]
         activePreparedStretchAssets = resources.preparedStretchAssets
         activeOrdinaryDescriptors = resources.ordinaryDescriptors
         committed = true
@@ -2276,7 +2293,10 @@ export const createPortableBrowserPlaybackController = (input: {
     } catch {
       return failed()
     } finally {
-      if (attempt && !committed && active === session) adoptionCache = attempt
+      if (attempt && !committed) {
+        if (active === session) adoptionCache = attempt
+        else void releasePreparedStretchAssets(attempt.stretch ?? [])
+      }
       adopting = false
       publishing.resolve("unavailable")
       adoptionPublish = undefined

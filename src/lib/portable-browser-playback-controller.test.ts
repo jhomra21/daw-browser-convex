@@ -1,5 +1,7 @@
+import 'fake-indexeddb/auto'
 import { expect, spyOn, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
+import { createPreparedStretchArtifactRepository } from '@daw-browser/audio-engine/prepared-stretch-store'
 import { extractTimelineBindings } from '~/lib/timeline-source-test-support'
 import { createProcessorEditRegistry } from '~/components/timeline/create-processor-edit-registry'
 import type { AudioEffectRuntimeInstance, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
@@ -2528,7 +2530,7 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
     const midi: RuntimeTrack = { ...track, clips: track.clips.map((clip) => ({ ...clip, duration: initial.clipSec ?? clip.duration, midi: clip.midi && { ...clip.midi, notes: [...state.notes] } })) }
     const audio: RuntimeTrack[] = state.audioStartSec === undefined ? [] : [{ id: 'audio-w8', kind: 'audio', name: 'Audio', volume: 1, clips: [{
       id: 'clip-audio-w8', name: 'Audio', color: '#fff', startSec: state.audioStartSec, duration: 1, sourceAssetKey: 'asset-w8', buffer: new TestAudioBuffer(),
-      ...(state.warped && { audioWarp: { enabled: true, mode: 'repitch', sourceBpm: 120 } }) }] }]
+      ...(state.warped && { audioWarp: c9Stretch }) }] }]
     const tracks = [midi, ...audio]
     const assets = audio.length ? [{ assetId: 'asset-w8', buffer: new TestAudioBuffer() }] : []
     return { ...base, snapshot: { ...base.snapshot, bpm: state.bpm, transport, tracks, assets,
@@ -2538,6 +2540,7 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
     compileSnapshot: async (transport) => compile(transport),
     fingerprintSnapshot: b6f5Fingerprint, getProjectGeneration: () => state.projectGeneration,
     getAudioContext: () => options.audioContext ?? context, select: async () => selected,
+    createPreparedStretchRepository: c9StretchRepository,
     reportFault: (message) => faults.push(message),
     createRecordingWriter: () => ({ ready: Promise.resolve(), write: () => undefined, finalize: async () => ({ capturedFrames: 0 }),
       abort: async () => undefined, terminate: () => undefined }),
@@ -2745,9 +2748,9 @@ test('W-E5-11 a tempo edit that makes the window exceed the install limit shrink
   } finally { f.controller.dispose() }
 })
 
-// A tempo moves warped audio, whose sources a seam does not replace: the gate refuses it. A session that already plays
-// warped audio needs prepared Stretch assets, which this fixture cannot start, so the edit turns the warp on with the tempo.
-test('W-E5 a tempo edit that warps audio is refused and installs nothing', async () => {
+// A tempo moves warped audio and the MIDI notes together (UD 18): the edit that warps the audio with the tempo is adopted
+// on the same session, as native's adoption does, with the sources compiled for the new tempo.
+test('W-E5 a tempo edit that warps audio is adopted with the new sources and no rebuild', async () => {
   const f = await w8Fixture({ audioStartSec: 0 })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
@@ -2755,7 +2758,9 @@ test('W-E5 a tempo edit that warps audio is refused and installs nothing', async
     f.state.bpm = 90
     f.state.warped = true
     const result: string = await f.adopt(f.noLoop)
-    expect({ result, calls: f.calls.slice(before).filter((call) => call !== 'mark-active') }).toEqual({ result: 'rebuild', calls: [] })
+    expect({ result, calls: f.calls.slice(before).filter((call) => call !== 'mark-active').map((call) => call.split(':')[0]), disposed: f.calls.includes('dispose'),
+      shipped: f.publishes.at(-1)?.options?.sources !== undefined, noteOffs: f.noteEvents(f.installs.at(-1), 'note-off').map((event) => event.frame) })
+      .toEqual({ result: 'adopted', calls: ['prepare-graph', 'install-schedule', 'publish-graph'], disposed: false, shipped: true, noteOffs: [32_000] })
   } finally { f.controller.dispose() }
 })
 
@@ -3346,14 +3351,23 @@ test('W-R8a a loop edit during a take is held, and adopted once the take has end
 // AE-08 phase 8 step 9a: an adoption carries the sources of its candidate with the publish and commits them with it.
 // Two paged clips: one spans every seam, the other starts after them.
 type C9Publish = { revision: number; options?: Parameters<PortableWasmPlaybackSession['publishGraph']>[1] }
-type C9State = { volume: number; refusals: number; clip0Offset: number; clip1Start: number; clip1Present: boolean; clip1Asset: string; inUse: Set<string> }
+const c9StretchRepository = () => createPreparedStretchArtifactRepository({
+  sessionId: `c9-${crypto.randomUUID()}`,
+  lockManager: { request: async (name, _options, callback) => callback({ name }) },
+})
+type C9Warp = NonNullable<RuntimeTrack['clips'][number]['audioWarp']>
+type C9State = { volume: number; refusals: number; clip0Offset: number; clip1Start: number; clip1Present: boolean; clip1Asset: string; inUse: Set<string>; bpm: number; clip1Warp: C9Warp | undefined; clip1Duration: number }
+const c9Stretch: C9Warp = { enabled: true, mode: 'stretch', sourceBpm: 120 }
 const c9Tracks = (state: C9State): RuntimeTrack[] => [
   { id: 'audio-0', kind: 'audio', name: 'Audio 0', volume: state.volume, clips: [{ id: 'clip-0', name: 'Clip 0', color: '#fff', startSec: 0, duration: 30, bufferOffsetSec: state.clip0Offset, sourceAssetKey: 'asset-a' }] },
   { id: 'audio-1', kind: 'audio', name: 'Audio 1', volume: 1, clips: state.clip1Present
-    ? [{ id: 'clip-1', name: 'Clip 1', color: '#fff', startSec: state.clip1Start, duration: 10, sourceAssetKey: state.clip1Asset }] : [] },
+    ? [{ id: 'clip-1', name: 'Clip 1', color: '#fff', startSec: state.clip1Start, duration: state.clip1Duration, sourceAssetKey: state.clip1Asset, audioWarp: state.clip1Warp }] : [] },
 ]
-const c9Fixture = async (options: { refusals?: number } = {}) => {
-  const state: C9State = { volume: 1, refusals: options.refusals ?? 0, clip0Offset: 0, clip1Start: 5, clip1Present: true, clip1Asset: 'asset-b', inUse: new Set() }
+const c9Fixture = async (options: { refusals?: number; clip1Warp?: C9Warp; clip1Duration?: number } = {}) => {
+  const state: C9State = { volume: 1, refusals: options.refusals ?? 0, clip0Offset: 0, clip1Start: 5, clip1Present: true, clip1Asset: 'asset-b', inUse: new Set(), bpm: 120, clip1Warp: options.clip1Warp, clip1Duration: options.clip1Duration ?? 10 }
+  // Stretch artifacts the controller leased and released; a lease is made once per artifact a preparation produces.
+  const stretch = { leased: 0, released: 0 }
+  const stretchRepository = c9StretchRepository()
   const calls: string[] = []
   const publishes: C9Publish[] = []
   const scheduled: PortableWasmPreparedSourceEventsOf[] = []
@@ -3382,11 +3396,16 @@ const c9Fixture = async (options: { refusals?: number } = {}) => {
       const compiled = pagedCompilation(transport)
       const tracks = c9Tracks(state)
       const assets = ['asset-a', state.clip1Asset].map((assetId) => ({ assetId, source: { durationSec: pagedAssetFrameCount / 48_000, sampleRate: 48_000, channelCount: 1 } }))
-      return { ...compiled, snapshot: { ...compiled.snapshot, tracks, assets, mixer: { ...compiled.snapshot.mixer, graph: resolveLiveMixerGraph(tracks, {}) } } }
+      return { ...compiled, snapshot: { ...compiled.snapshot, bpm: state.bpm, tracks, assets, mixer: { ...compiled.snapshot.mixer, graph: resolveLiveMixerGraph(tracks, {}) } } }
     },
     fingerprintSnapshot: b6f5Fingerprint, getAudioContext: () => context, scheduleHorizonSec: 8, select: async () => selected,
     reportFault: (message) => faults.push(message),
     resolveSource: async (clip) => pagedDescriptor(clip.sourceAssetKey ?? 'missing', []),
+    createPreparedStretchRepository: () => ({ ...stretchRepository, acquireLease: async (manifest) => {
+      const lease = await stretchRepository.acquireLease(manifest)
+      stretch.leased += 1
+      return { ...lease, release: async () => { stretch.released += 1; await lease.release() } }
+    } }),
     backend: { createPlaybackSession: async () => session },
   })
   const transport = pagedCompilation().snapshot.transport
@@ -3399,7 +3418,7 @@ const c9Fixture = async (options: { refusals?: number } = {}) => {
     }
   }
   const sources = (publish?: C9Publish) => publish?.options?.sources
-  return { state, controller, transport, base, calls, publishes, scheduled, faults, report, sources }
+  return { state, controller, transport, base, calls, publishes, scheduled, faults, report, sources, stretch }
 }
 type PortableWasmPreparedSourceEventsOf = Parameters<PortableWasmPlaybackSession['schedulePreparedSources']>[2]
 const c9Starts = (events: readonly { sourceNodeId: string; startFrame: number; sourceOffsetFrame: number }[] | undefined) =>
@@ -3775,4 +3794,157 @@ test('W-C9-keeps-2 a held note of an instrument that did not change keeps its vo
     expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
     expect({ noteOns: f.events('note-on'), noteOffs: f.events('note-off') }).toEqual({ noteOns: [], noteOffs: [192_000] })
   } finally { f.controller.dispose() }
+})
+
+// AE-08 phase 8 step 9d: warped audio is carried at a seam (class 2). A Stretch clip's artifact depends on the tempo and on
+// the clip's placement and warp, so the candidate's artifacts are prepared, leased and registered before the publish, and
+// the session's own are released once the position has reached the seam.
+const c9Artifacts = (calls: readonly string[]) => c9Registered(calls).filter((call) => call !== 'register:asset-a' && call !== 'register:asset-b')
+// Stretch renders the clip for real, so the clip is short.
+const c9WarpFixture = (options: { refusals?: number; clip1Warp?: C9Warp } = {}) => c9Fixture({ clip1Duration: 1, ...options })
+const c9Settled = async (done: () => boolean) => { for (let turn = 0; turn < 500 && !done(); turn += 1) await Bun.sleep(0) }
+const c9Phases = (calls: readonly string[]) => calls.filter((call) => call === 'publish' || call.startsWith('register:')).map((call) => call.split(':')[0])
+
+test('W-C9-warp-1 a tempo edit with a Stretch clip prepares its artifact at the new tempo before the publish and releases the old leases after the seam', async () => {
+  const f = await c9WarpFixture({ clip1Warp: c9Stretch })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    const [oldArtifact] = c9Artifacts(f.calls)
+    await f.report(96_000)
+    const mark = f.calls.length
+    f.state.bpm = 100
+    const result = await f.controller.adoptSchedule(noLoop)
+    const adoption = f.calls.slice(mark)
+    const [newArtifact] = c9Artifacts(adoption)
+    const leases = [[f.stretch.leased, f.stretch.released]]
+    const released = [c9Released(adoption)]
+    await f.report(107_000)
+    leases.push([f.stretch.leased, f.stretch.released])
+    released.push(c9Released(f.calls.slice(mark)))
+    await f.report(108_000)
+    await c9Settled(() => f.stretch.released === 1)
+    leases.push([f.stretch.leased, f.stretch.released])
+    released.push(c9Released(f.calls.slice(mark)))
+    const shipped = f.sources(f.publishes.at(-1))?.prepared
+    expect({ result, order: c9Phases(adoption), fresh: newArtifact !== undefined && newArtifact !== oldArtifact,
+      paged: [...f.base.writtenPages].some((page) => page.startsWith(`${newArtifact?.slice('register:'.length)}:`)),
+      unwarped: c9Starts(shipped).find((start) => start[0] === 'audio-0'), leases, released, disposed: f.calls.includes('dispose') })
+      .toEqual({ result: 'adopted', order: ['register', 'publish'], fresh: true, paged: true, unwarped: ['audio-0', 108_000, 108_000],
+        leases: [[2, 0], [2, 0], [2, 1]], released: [[], [], [`release:${oldArtifact?.slice('register:'.length)}`]], disposed: false })
+  } finally { f.controller.dispose() }
+})
+
+// The seam is chosen after the preparation, so a slow Stretch does not spend the lead; what a late publish costs is the
+// attempt after it. Its candidate keeps the artifact, so the resubmit leases and registers nothing again (D-4).
+test('W-C9-warp-2 a publish that answers late is retried on the Stretch artifact the first attempt prepared, which nothing prepares again', async () => {
+  const f = await c9WarpFixture({ clip1Warp: c9Stretch, refusals: 1 })
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(96_000)
+    const mark = f.calls.length
+    f.state.bpm = 100
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('failed')
+    const afterRefusal = { leased: f.stretch.leased, registered: c9Artifacts(f.calls.slice(mark)).length, released: f.stretch.released }
+    await f.report(120_000)
+    await c9Settled(() => f.publishes.length === 3)
+    await f.report(300_000)
+    await c9Settled(() => f.stretch.released === 1)
+    expect({ afterRefusal, leased: f.stretch.leased, released: f.stretch.released, registered: c9Artifacts(f.calls.slice(mark)).length, publishes: f.publishes.length, faults: f.faults })
+      .toEqual({ afterRefusal: { leased: 2, registered: 1, released: 0 }, leased: 2, released: 1, registered: 1, publishes: 3, faults: [] })
+  } finally { warn.mockRestore(); f.controller.dispose() }
+})
+
+test('W-C9-warp-3 a warp marker edit is adopted on a new artifact registered before the publish', async () => {
+  const f = await c9WarpFixture({ clip1Warp: c9Stretch })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    const [oldArtifact] = c9Artifacts(f.calls)
+    await f.report(96_000)
+    const mark = f.calls.length
+    f.state.clip1Warp = { ...c9Stretch, markers: [{ id: 'start', sourceBeat: 0, timelineBeat: 0 }, { id: 'stretched', sourceBeat: 2, timelineBeat: 3 }] }
+    const result = await f.controller.adoptSchedule(noLoop)
+    const adoption = f.calls.slice(mark)
+    expect({ result, order: c9Phases(adoption), fresh: c9Artifacts(adoption)[0] !== oldArtifact, disposed: adoption.includes('dispose') })
+      .toEqual({ result: 'adopted', order: ['register', 'publish'], fresh: true, disposed: false })
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-warp-4 warp turned on or off while playing swaps the ordinary asset and the Stretch artifact at the seam', async () => {
+  const on = await c9WarpFixture()
+  try {
+    expect(await on.controller.start(on.transport)).toBe('started')
+    await on.report(96_000)
+    const mark = on.calls.length
+    on.state.clip1Warp = c9Stretch
+    const result = await on.controller.adoptSchedule(noLoop)
+    await on.report(108_000)
+    expect({ result, order: c9Phases(on.calls.slice(mark)), leased: on.stretch.leased, ordinaryReleased: c9Released(on.calls.slice(mark)) })
+      .toEqual({ result: 'adopted', order: ['register', 'publish'], leased: 1, ordinaryReleased: ['release:asset-b'] })
+  } finally { on.controller.dispose() }
+  const off = await c9WarpFixture({ clip1Warp: c9Stretch })
+  try {
+    expect(await off.controller.start(off.transport)).toBe('started')
+    const [artifact] = c9Artifacts(off.calls)
+    await off.report(96_000)
+    const mark = off.calls.length
+    off.state.clip1Warp = undefined
+    const result = await off.controller.adoptSchedule(noLoop)
+    await off.report(108_000)
+    await c9Settled(() => off.stretch.released === 1)
+    expect({ result, registered: c9Registered(off.calls.slice(mark)), released: [off.stretch.released, c9Released(off.calls.slice(mark))] })
+      .toEqual({ result: 'adopted', registered: ['register:asset-b'], released: [1, [`release:${artifact?.slice('register:'.length)}`]] })
+  } finally { off.controller.dispose() }
+})
+
+test('W-C9-warp-5 a tempo edit on a paused session with a Stretch clip is adopted in place and releases the old artifact at once', async () => {
+  const f = await c9WarpFixture({ clip1Warp: c9Stretch })
+  try {
+    expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
+    const mark = f.calls.length
+    f.state.bpm = 100
+    const result = await f.controller.adoptSchedule(noLoop)
+    await c9Settled(() => f.stretch.released === 1)
+    const adoption = f.calls.slice(mark)
+    expect({ result, order: c9Phases(adoption), leases: [f.stretch.leased, f.stretch.released], disposed: adoption.includes('dispose'),
+      publicationFrame: JSON.stringify(f.publishes.at(-1)?.options).includes('publicationFrame') })
+      .toEqual({ result: 'adopted', order: ['register', 'publish'], leases: [2, 1], disposed: false, publicationFrame: false })
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-warp-6 the Stretch artifact a failed attempt kept is released when the desired state changes, when the resubmits run out, and at teardown', async () => {
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  const error = spyOn(console, 'error').mockImplementation(() => undefined)
+  try {
+    const changed = await c9WarpFixture({ clip1Warp: c9Stretch, refusals: 1 })
+    expect(await changed.controller.start(changed.transport)).toBe('started')
+    await changed.report(96_000)
+    changed.state.bpm = 100
+    expect(await changed.controller.adoptSchedule(noLoop)).toBe('failed')
+    expect([changed.stretch.leased, changed.stretch.released]).toEqual([2, 0])
+    changed.state.bpm = 90
+    expect(await changed.controller.adoptSchedule(noLoop)).toBe('adopted')
+    await c9Settled(() => changed.stretch.released === 1)
+    expect([changed.stretch.leased, changed.stretch.released]).toEqual([3, 1])
+    changed.controller.dispose()
+
+    const exhausted = await c9WarpFixture({ clip1Warp: c9Stretch, refusals: 100 })
+    expect(await exhausted.controller.start(exhausted.transport)).toBe('started')
+    await exhausted.report(96_000)
+    exhausted.state.bpm = 100
+    expect(await exhausted.controller.adoptSchedule(noLoop)).toBe('failed')
+    await exhausted.report(120_000, 300)
+    await c9Settled(() => exhausted.stretch.released === 1)
+    expect({ faults: exhausted.faults.length, leased: exhausted.stretch.leased, released: exhausted.stretch.released }).toEqual({ faults: 1, leased: 2, released: 1 })
+    exhausted.controller.dispose()
+
+    const torndown = await c9WarpFixture({ clip1Warp: c9Stretch, refusals: 100 })
+    expect(await torndown.controller.start(torndown.transport)).toBe('started')
+    await torndown.report(96_000)
+    torndown.state.bpm = 100
+    expect(await torndown.controller.adoptSchedule(noLoop)).toBe('failed')
+    torndown.controller.dispose()
+    await c9Settled(() => torndown.stretch.released === 2)
+    expect([torndown.stretch.leased, torndown.stretch.released]).toEqual([2, 2])
+  } finally { warn.mockRestore(); error.mockRestore() }
 })

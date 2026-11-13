@@ -1751,13 +1751,20 @@ const publishWithSources = (
   trackIds: readonly string[],
   sources: readonly ReturnType<typeof rampSource>[],
   publicationFrame?: number,
+  prepared: readonly ReturnType<typeof pagedRampSource>[] = [],
 ) => {
   host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 20, snapshot: { ...portableTrackGraph(trackIds), revision: 2 } })
   host.handleMessage({ version: 2, type: 'install-schedule', requestId: 21, schedule: {
     revision: 2, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [] } })
   host.handleMessage({ version: 2, type: 'publish-graph', requestId: 22, revision: 2, requireContinuity: true, publicationFrame,
-    sources: { epoch: 1, ordinary: sources, prepared: [] } })
+    sources: { epoch: 1, ordinary: sources, prepared } })
 }
+// A prepared (paged) source plays a range of a paged asset, as the controller ships a Stretch artifact.
+const pagedRampSource = (sequence: number, preparationId: number, startFrame: number, stopFrame: number) => ({
+  version: 1, epoch: 1, sequence, preparationId, sourceNodeId: 'track', startFrame, stopFrame, sourceOffsetFrame: startFrame,
+  sourceFrameCount: stopFrame - startFrame, gain: 1, fadeInStartFrame: startFrame, fadeInEndFrame: startFrame,
+  fadeOutStartFrame: stopFrame, fadeOutEndFrame: stopFrame,
+})
 // A framed publish is answered by the block that applies it.
 const sourcePublication = (messages: readonly PortableWasmStatusMessage[]) =>
   messages.flatMap((message) => message.type === 'graph-published' && message.requestId === 22 ? [message.result] : [])
@@ -1943,4 +1950,40 @@ test('W-C9-asset-6 a Sampler zone sample swapped at the seam releases the old vo
     .toEqual({ published: ['published'], oldRate: expect.any(Number), newRate: expect.any(Number), sounding: true, duringBlend: 'asset-in-use', afterBlend: 'released' })
   expect(zeroCrossings(before)).toBeLessThan(26)
   expect(zeroCrossings(after)).toBeGreaterThan(36)
+})
+
+// AE-08 phase 8 step 9d: a Stretch artifact is a paged asset. A tempo edit swaps the clip to the artifact prepared at the
+// new tempo (here the same ramp at twice the level): it crossfades in over 6 ms from the seam and plays alone after it, and
+// the old artifact is released once its preparation is, as the controller releases them after the seam.
+test('W-C9-warp-7 a warped clip swapped to the new-tempo artifact at the seam crossfades to it and the old artifact is released after its tail', async () => {
+  const { host, messages } = await playRamp(['track'], true, [])
+  const pageFrames = 16_384
+  const answers = (type: 'paged-asset-registered' | 'asset-range-prepared', requestId: number) => messages.flatMap((message) => message.type === type && message.requestId === requestId ? [message] : [])[0]
+  const pagedArtifact = (assetId: string, scale: number, requestId: number) => {
+    const plane = new Float32Array(pageFrames).map((_, frame) => Math.fround(frame * 1e-4 * scale))
+    host.handleMessage({ version: 2, type: 'register-paged-asset', requestId, generation: 0,
+      asset: { version: 1, assetId, frameCount: pageFrames, sampleRateHz: 48_000, channelCount: 2 } })
+    host.handleMessage({ version: 2, type: 'write-asset-page', requestId: requestId + 1, generation: 0, assetId, pageIndex: 0, validFrames: pageFrames, planes: [plane, plane] })
+    host.handleMessage({ version: 2, type: 'prepare-asset-range', requestId: requestId + 2, generation: 0, assetId, sourceOffsetFrame: 0, sourceFrameCount: pageFrames, interpolationGuardFrames: 0 })
+    const prepared = answers('asset-range-prepared', requestId + 2)
+    return { registered: answers('paged-asset-registered', requestId)?.result, preparationId: prepared?.result === 'prepared' ? prepared.preparationId : undefined }
+  }
+  const old = pagedArtifact('stretch-old', 1, 100)
+  const fresh = pagedArtifact('stretch-new', 2, 110)
+  if (old.preparationId === undefined || fresh.preparationId === undefined) throw new Error('the paged artifacts were not prepared')
+  host.handleMessage({ version: 2, type: 'schedule-prepared-sources', requestId: 120, revision: 1, epoch: 1, events: [pagedRampSource(1, old.preparationId, 0, 1_024)] })
+  const rendered = renderBlocks(host, 1)
+  publishWithSources(host, ['track'], [], 384, [pagedRampSource(1, fresh.preparationId, 384, 1_024)])
+  rendered.push(...renderBlocks(host, 3))
+  host.handleMessage({ version: 2, type: 'release-asset-preparation', requestId: 130, generation: 0, preparationId: old.preparationId })
+  const duringTail = releaseAnswer(host, messages, 131, 'stretch-old')
+  rendered.push(...renderBlocks(host, 4))
+  host.handleMessage({ version: 2, type: 'release-asset-preparation', requestId: 132, generation: 0, preparationId: old.preparationId })
+  const afterTail = releaseAnswer(host, messages, 133, 'stretch-old')
+  expect({ registered: [old.registered, fresh.registered], published: sourcePublication(messages),
+    crossfaded: matchesRamp(rendered, (frame) => {
+      const entered = Math.min(1, Math.max(0, (frame - 384) / blendFrames))
+      return rampLevel(frame, 1 - entered + 2 * entered)
+    }), duringTail, afterTail })
+    .toEqual({ registered: ['registered', 'registered'], published: ['published'], crossfaded: true, duringTail: 'asset-in-use', afterTail: 'released' })
 })

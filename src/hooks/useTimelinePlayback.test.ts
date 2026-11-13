@@ -1,3 +1,4 @@
+import "fake-indexeddb/auto";
 import { createProcessorEditRegistry } from "~/components/timeline/create-processor-edit-registry";
 import { mountStep5Playback, settleStep5Playback } from "../../tools/acceptance/b5c-playback-witness-support";
 import { resolveDesiredPlaybackFx } from "~/lib/export/run-export-job";
@@ -30,7 +31,11 @@ import type { NativeHostTransport, NativeScheduleProgress } from '@daw-browser/a
 import type { NativeRevisionSession, NativeRevisionReply } from '@daw-browser/desktop-protocol/native-revision'
 import type { DesktopAudioLifecycle } from '~/lib/desktop-audio-lifecycle'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
+import { audioCoreWasmPagedAbiVersion } from '@daw-browser/audio-core-wasm'
 import {
+  portableWasmPagedMaxChannels,
+  portableWasmPagedPageFrames,
+  portableWasmPagedSlotCount,
   portableWasmProtocolVersion,
   type PortableWasmControlMessage,
   type PortableWasmStatusMessage,
@@ -356,6 +361,17 @@ test.each(["announce", "unsupported", "announce+sample"])("3B1 r2 actual playbac
   }
 })
 
+// The portable controller keeps its Stretch artifacts in IndexedDB under Web Locks.
+if (!globalThis.navigator?.locks) {
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: {
+      ...globalThis.navigator,
+      locks: { request: async <Value>(name: string, _options: { ifAvailable?: boolean; mode?: 'shared' | 'exclusive' }, callback: (lock: { name: string } | null) => Promise<Value>) => callback({ name }) },
+    },
+  })
+}
+
 const isFailureResolver = (
   failure: string | (() => string | undefined) | undefined,
 ): failure is () => string | undefined => typeof failure === 'function'
@@ -364,7 +380,26 @@ const portableResponseFor = (
   message: PortableWasmControlMessage,
 ): PortableWasmStatusMessage | undefined => {
   if (message.type === 'initialize') {
-    return { version: portableWasmProtocolVersion, type: 'ready', revision: 1 }
+    return { version: portableWasmProtocolVersion, type: 'ready', revision: 1, pagedAbi: audioCoreWasmPagedAbiVersion,
+      pagedPageFrames: portableWasmPagedPageFrames, pagedSlotCount: portableWasmPagedSlotCount, pagedMaxChannels: portableWasmPagedMaxChannels }
+  }
+  if (message.type === 'register-paged-asset') {
+    return { version: portableWasmProtocolVersion, type: 'paged-asset-registered', requestId: message.requestId, generation: message.generation, assetId: message.asset.assetId, result: 'registered', handle: { slot: 0, generation: message.generation } }
+  }
+  if (message.type === 'write-asset-page') {
+    return { version: portableWasmProtocolVersion, type: 'asset-page-written', requestId: message.requestId, generation: message.generation, assetId: message.assetId, pageIndex: message.pageIndex, result: 'written' }
+  }
+  if (message.type === 'prepare-asset-range') {
+    return { version: portableWasmProtocolVersion, type: 'asset-range-prepared', requestId: message.requestId, generation: message.generation, assetId: message.assetId, result: 'prepared', preparationId: message.requestId }
+  }
+  if (message.type === 'schedule-prepared-sources') {
+    return { version: portableWasmProtocolVersion, type: 'prepared-sources-scheduled', requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: 'scheduled' }
+  }
+  if (message.type === 'release-asset-preparation') {
+    return { version: portableWasmProtocolVersion, type: 'asset-preparation-released', requestId: message.requestId, generation: message.generation, preparationId: message.preparationId, result: 'released' }
+  }
+  if (message.type === 'release-asset') {
+    return { version: portableWasmProtocolVersion, type: 'asset-released', requestId: message.requestId, generation: message.generation, assetId: message.assetId, result: 'released' }
   }
   if (message.type === 'prepare-graph') {
     return { version: portableWasmProtocolVersion, type: 'graph-prepared', requestId: message.requestId, revision: message.snapshot.revision, result: 'prepared' }
@@ -7484,6 +7519,39 @@ test('C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopt
     expect({ paused, adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session, playing: live.playback.isPlaying(),
       sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
       .toEqual({ paused, adoptions: 1, closed: false, same: true, playing: !paused, sessionsAfterMark: 0 })
+  }, false)
+})
+
+// C9d: warped audio is a seam adoption too. A tempo edit or a warp marker edit under a Stretch clip is taken by the same
+// session, playing or paused, with no dispose and no rebuild.
+class C9dAudioBuffer implements AudioBuffer {
+  readonly duration = 1
+  readonly length = 48_000
+  readonly numberOfChannels = 1
+  readonly sampleRate = 48_000
+  copyFromChannel(destination: Float32Array) { destination.fill(0) }
+  copyToChannel() {}
+  getChannelData() { return new Float32Array(this.length) }
+}
+const c9dWarp: NonNullable<Track<AudioBuffer>['clips'][number]['audioWarp']> = { enabled: true, mode: 'stretch', sourceBpm: 120 }
+const c9dClip: Track<AudioBuffer>['clips'][number] = { id: 'clip-c9d', name: 'Audio', color: '#fff', startSec: 2, duration: 1, sourceAssetKey: 'asset-c9d', buffer: new C9dAudioBuffer(), audioWarp: c9dWarp }
+const c9dTrack: Track<AudioBuffer> = { id: 'track-c9d', name: 'Audio', kind: 'audio', volume: 1, clips: [c9dClip] }
+test('C9d W-C9-warp-8 a tempo or warp marker edit under a Stretch clip while playing or paused is adopted by the same session with no dispose and no rebuild', async () => {
+  for (const paused of [false, true]) for (const edit of ['tempo', 'markers'] as const) await runB6f5(async (live, world) => {
+    live.setTracks((current) => [...current, c9dTrack])
+    if (paused) await live.pausedAt(1)
+    else await live.playFrom(1)
+    const session = live.liveSession()
+    const mark = live.mark()
+    if (edit === 'tempo') live.setBpm(90)
+    else live.setTracks((current) => current.map((entry) => entry.id === c9dTrack.id
+      ? { ...entry, clips: [{ ...c9dClip, audioWarp: { ...c9dWarp, markers: [{ id: 'start', sourceBeat: 0, timelineBeat: 0 }, { id: 'stretched', sourceBeat: 2, timelineBeat: 3 }] } }] } : entry))
+    // The Stretch artifact is rendered through IndexedDB, which takes macrotasks.
+    for (let turn = 0; turn < 2_000 && session?.adoptions !== 1 && world.sessions.length === 1; turn += 1) await Bun.sleep(0)
+    await live.settle()
+    expect({ paused, edit, adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session, playing: live.playback.isPlaying(),
+      sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
+      .toEqual({ paused, edit, adoptions: 1, closed: false, same: true, playing: !paused, sessionsAfterMark: 0 })
   }, false)
 })
 

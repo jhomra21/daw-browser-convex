@@ -6,6 +6,7 @@ export const extractTimelineBindings = (source: string) => {
   const compile: ts.ArrowFunction[] = [];
   const structural: ts.PropertyAssignment[] = [];
   const portable: ts.PropertyAssignment[] = [];
+  const mixedReorder: ts.PropertyAssignment[] = [];
   const visit = (node: ts.Node) => {
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)
       && node.name.text === "compilePlaybackSnapshot" && node.initializer && ts.isArrowFunction(node.initializer)) {
@@ -14,6 +15,7 @@ export const extractTimelineBindings = (source: string) => {
     if (ts.isPropertyAssignment(node) && (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name))) {
       if (node.name.text === "onStructuralPlaybackChange") structural.push(node);
       if (node.name.text === "applyPortableProcessor") portable.push(node);
+      if (node.name.text === "onMixedReorderCommitted") mixedReorder.push(node);
     }
     ts.forEachChild(node, visit);
   };
@@ -40,5 +42,6 @@ export const extractTimelineBindings = (source: string) => {
     compilePrefix: statements.slice(0, statements.indexOf(boundary)).map(statement => statement.getText(file)).join("\n"),
     structural: property(structural, "onStructuralPlaybackChange"),
     portable: property(portable, "applyPortableProcessor"),
+    mixedReorder: property(mixedReorder, "onMixedReorderCommitted"),
   };
 };

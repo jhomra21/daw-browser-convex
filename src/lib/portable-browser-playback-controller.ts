@@ -24,6 +24,7 @@ import {
 } from "@daw-browser/audio-engine/portable-wasm-protocol"
 import { RECORDER_BLOCK_FRAMES, RECORDER_MAX_QUEUED_BLOCKS } from "@daw-browser/audio-engine/recording-protocol"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
+import { getEffectTiming } from "@daw-browser/audio-engine/effects/timing"
 import { arrangementFrameForLoop, effectiveLoopForStart, loopFramesForTransport, type LoopFrames } from "@daw-browser/audio-engine/loop-frame-schedule"
 import { compilePreparedPortableLiveSession } from "~/lib/portable-live-session"
 import type { LivePlaybackCompileContext, LivePlaybackSnapshot, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from "~/lib/live-playback-snapshot"
@@ -442,9 +443,10 @@ const granularAssetKeys = (snapshot: LivePlaybackSnapshot) => Object.entries(sna
 // already plays (`withSeamClips`, the warp and the asset a clip plays included), and the assets the Sampler zones and
 // Drum Rack pads it plays name (the instrument itself is taken live, `withLiveContentOf`). `next` with that taken from
 // `previous` fingerprints as `previous` when nothing else changed. The tracks added or deleted are no part of the
-// comparison (`onSharedTracks`). Still refused: effect structure of the tracks both sides play, instrument replacement,
-// the sample of a Granular cloud, a sample that becomes or ceases to be
-// available, and a track whose add or delete moves a routing delay (`continuesDelays`).
+// comparison (`onSharedTracks`), nor are the effects of those tracks that do not delay the signal (`onKeptEffects`). Still
+// refused: an effect that delays the signal inserted, removed, replaced or moved, instrument replacement, the sample of a
+// Granular cloud, a sample that becomes or ceases to be available, and a track whose add or delete moves a routing delay
+// (`continuesDelays`).
 const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const previousTracks = new Map(previous.tracks.map((track) => [track.id, track]))
   return {
@@ -469,6 +471,39 @@ const onSharedTracks = (snapshot: LivePlaybackSnapshot, other: LivePlaybackSnaps
   const shared = new Set(other.tracks.map((track) => track.id))
   const trackFx = snapshot.mixer.fx.trackFx && Object.fromEntries(Object.entries(snapshot.mixer.fx.trackFx).filter(([id]) => shared.has(id)))
   return { ...snapshot, tracks: snapshot.tracks.filter((track) => shared.has(track.id)), mixer: { ...snapshot.mixer, fx: { ...snapshot.mixer.fx, trackFx } } }
+}
+
+const hasLatency = (instance: AudioEffectRuntimeInstance) => getEffectTiming(instance, 48_000).latencyFrames !== 0
+const effectKey = (instance: AudioEffectRuntimeInstance) => `${instance.id}\0${instance.kind}`
+
+// The effects of a track an adoption carries: every one inserted, removed, replaced (another kind under the same id) or
+// moved, when none of them delays the signal and the ones that do keep their order. The core keeps a survivor's history
+// by instance id, fades a removed one over its 5 ms ghost and dips a node whose stages were reordered; the node's latency
+// and the routes' delays are what they were, so the continuity it needs holds (`continuesDelays` checks the graph).
+const carriesEffects = (before: readonly AudioEffectRuntimeInstance[], after: readonly AudioEffectRuntimeInstance[]) => {
+  const inBefore = new Set(before.map(effectKey))
+  const inAfter = new Set(after.map(effectKey))
+  const delayingInOrder = (list: readonly AudioEffectRuntimeInstance[], other: ReadonlySet<string>) =>
+    list.filter((instance) => hasLatency(instance) && other.has(effectKey(instance))).map(effectKey)
+  return [...before.filter((instance) => !inAfter.has(effectKey(instance))), ...after.filter((instance) => !inBefore.has(effectKey(instance)))].every((instance) => !hasLatency(instance))
+    && JSON.stringify(delayingInOrder(before, inAfter)) === JSON.stringify(delayingInOrder(after, inBefore))
+}
+
+// `snapshot` with the effects `carriesEffects` carries taken out of the comparison: what both sides keep, by id. A
+// surviving effect's own edit stays in it (`withLiveContentOf` decides which are live). Both snapshots hold the tracks
+// both sides play (`onSharedTracks`), so each track has an entry on both, empty when it has no effects.
+const onKeptEffects = (snapshot: LivePlaybackSnapshot, other: LivePlaybackSnapshot): LivePlaybackSnapshot => {
+  const own = snapshot.mixer.fx.trackFx ?? {}
+  const theirs = other.mixer.fx.trackFx ?? {}
+  const trackFx = Object.fromEntries(snapshot.tracks.flatMap(({ id }) => {
+    const entry = own[id]
+    const instances = entry?.instances ?? []
+    const counterpart = theirs[id]?.instances ?? []
+    if (!carriesEffects(instances, counterpart)) return entry ? [[id, entry]] : []
+    const kept = new Set(counterpart.map(effectKey))
+    return [[id, { ...entry, instances: instances.filter((instance) => kept.has(effectKey(instance))).sort((left, right) => left.id.localeCompare(right.id)) }]]
+  }))
+  return { ...snapshot, mixer: { ...snapshot.mixer, fx: { ...snapshot.mixer.fx, trackFx } } }
 }
 
 // `next` in the order the session built its graph in, with the tracks it adds after the rest. A track's place among the
@@ -1366,7 +1401,8 @@ export const createPortableBrowserPlaybackController = (input: {
     // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a
     // refresh or a start does not: they extend the graph that plays.
     const [compared, installed] = context?.liveAdoption
-      ? [onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), onSharedTracks(activeSnapshot, next)]
+      ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),
+        onKeptEffects(onSharedTracks(activeSnapshot, next), next)]
       : [next, activeSnapshot]
     if (fingerprint(withLiveContentOf(compared, activeSnapshot)) !== fingerprint(installed)) {
       return { supported: false, reasons: ["Portable playback requires a schedule rebuild."] }
@@ -2192,7 +2228,7 @@ export const createPortableBrowserPlaybackController = (input: {
         ...transport, ...effectiveLoopForStart(recording ? previous.transport : loop, arrangementNow, sampleRate), state: wasPlaying ? "playing" : "paused", playheadSec: arrangementNow / sampleRate,
       }, { liveAdoption: true })
       if (!current()) return "unavailable"
-      // Instrument kinds and effect structure are not carried at a seam yet; those still rebuild.
+      // Instrument kinds and latency-bearing effect structure are not carried at a seam yet; those still rebuild.
       if (!compilation.supported) return "rebuild"
       const next = compilation.snapshot
       const desired = fingerprint(next)

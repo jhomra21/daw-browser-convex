@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { PortableWasmControlMessage, PortableWasmStatusMessage } from './portable-wasm-protocol'
-import { mixerParameterRegistry, type AudioCoreGraphSnapshot, type AudioCoreInstrumentState } from '@daw-browser/audio-core-contract'
+import { createDefaultUtilityParams } from '@daw-browser/shared'
+import { encodeEqProcessorState, encodeUtilityProcessorState, mixerParameterRegistry, type AudioCoreGraphSnapshot, type AudioCoreInstrumentState } from '@daw-browser/audio-core-contract'
 
 const hostUrl = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v1.js', import.meta.url)
 const hostV2Url = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v2.js', import.meta.url)
@@ -509,7 +510,7 @@ const portableTrackGraph = (trackIds: readonly string[]) => ({
     version: 1, id: `${id}-master`, fromNodeId: id, toNodeId: 'master', gain: 1, tap: 'post-fader', sidechain: false, pdcDelayFrames: 0,
   })),
 })
-const startPortableTracks = async (trackIds: readonly string[]) => {
+const startPortableTracks = async (trackIds: readonly string[], graph: { revision: number } = portableTrackGraph(trackIds)) => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({
@@ -518,9 +519,9 @@ const startPortableTracks = async (trackIds: readonly string[]) => {
     close: () => undefined,
   })
   expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
-  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: portableTrackGraph(trackIds) })
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph })
   expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-prepared', requestId: 1, result: 'prepared' }))
-  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: graph.revision })
   expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-published', requestId: 2, result: 'published' }))
   return { host, messages }
 }
@@ -2064,4 +2065,116 @@ test('W-C9-track-10 a track added or deleted where a latency-bearing node delays
     addLatencyFreeWithoutLatencyElsewhere: await attempt(['b'], ['b', 'c']),
   }
   expect(results).toEqual({ deleteLatencyFree: false, deleteLatencyBearing: false, addLatencyFree: false, addLatencyFreeWithoutLatencyElsewhere: true })
+})
+
+// AE-08 phase 8 step 9f: effects inserted, removed and reordered at a seam on the built core (class 4a). Survivors keep
+// their history by instance id (CORE:7640-7654); a removed one is a ghost that fades over 5 ms (CORE:7806, 7929-7976;
+// D-3); a node whose stages were reordered dips for 5 ms (CORE:5452-5459, 8311-8335). The same shared core code renders on
+// native (nothing in these ranges is under DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS).
+const fxProcessor = (id: string, instanceId: number, kind: string, kindId: number, state: Uint8Array, latencyFrames = 0) => ({
+  id, instanceId, kind, kindId, stateVersion: 1, state, parameterTargets: [], bypassed: false, latencyFrames, tailFrames: 0,
+})
+const fxUtility = (id: string, instanceId: number, gainDb: number, latencyFrames = 0) =>
+  fxProcessor(id, instanceId, 'utility', 1, encodeUtilityProcessorState({ ...createDefaultUtilityParams(), gainDb }), latencyFrames)
+const fxEq = (id: string, instanceId: number) => fxProcessor(id, instanceId, 'eq', 3, encodeEqProcessorState({
+  enabled: true, channelMode: 'stereo',
+  bands: Array.from({ length: 8 }, (_, index) => ({ enabled: index === 0, type: 'peaking' as const, frequency: 1_000, gainDb: 12, q: 1 })),
+}))
+type FxProcessor = ReturnType<typeof fxUtility>
+const fxGraph = (revision: number, chains: Record<string, readonly FxProcessor[]>) => {
+  const base = portableTrackGraph(Object.keys(chains))
+  return { ...base, revision, nodes: base.nodes.map((node) => ({ ...node, processorOrder: chains[node.id] ?? [] })) }
+}
+const fxSine = new Float32Array(48_000).map((_, frame) => Math.fround(Math.sin(2 * Math.PI * 1_000 * frame / 48_000)))
+const playSineThrough = async (chains: Record<string, readonly FxProcessor[]>) => {
+  const { host, messages } = await startPortableTracks(Object.keys(chains), fxGraph(1, chains))
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  host.handleMessage({ version: 2, type: 'register-asset', requestId: 5, generation: 0,
+    asset: { version: 1, assetId: 'sine', frameCount: 48_000, sampleRateHz: 48_000, channelCount: 2 }, planes: [fxSine, fxSine] })
+  host.handleMessage({ version: 2, type: 'schedule-sources', requestId: 6, revision: 1, epoch: 1,
+    events: Object.keys(chains).map((nodeId, index) => ({ ...rampSource(index + 1, 0, 48_000, 1, nodeId), assetId: 'sine' })) })
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'sources-scheduled', requestId: 6, result: 'scheduled' }))
+  return { host, messages }
+}
+const fxSeam = 1_664
+// `before` plays 12 blocks, then the adoption of `after` publishes at frame 1664 and 8 more blocks render.
+const adoptEffects = async (before: readonly FxProcessor[], after: readonly FxProcessor[]) => {
+  const { host, messages } = await playSineThrough({ track: before })
+  const rendered = renderBlocks(host, 12)
+  const { installed } = adoptRevision(host, messages, fxGraph(2, { track: after }), [], fxSeam)
+  rendered.push(...renderBlocks(host, 8))
+  // A framed publish is answered by the block that applies it.
+  return { rendered, adoption: { installed, published: publishedResults(messages, 2) } }
+}
+const referenceThrough = async (chain: readonly FxProcessor[]) => renderBlocks((await playSineThrough({ track: chain })).host, 20)
+// How much of `signal`'s departure from `base` the `rendered` signal has over `[from, from + length)`: 1 is `signal`, 0 is `base`.
+const weightOf = (rendered: readonly number[], base: readonly number[], signal: readonly number[], from: number, length = 48) => {
+  let along = 0
+  let power = 0
+  for (let frame = from; frame < from + length; frame += 1) {
+    along += (rendered[frame] - base[frame]) * (signal[frame] - base[frame])
+    power += (signal[frame] - base[frame]) ** 2
+  }
+  return along / power
+}
+const largestDifference = (left: readonly number[], right: readonly number[], from: number, to: number) =>
+  Math.max(...left.slice(from, to).map((sample, index) => Math.abs(sample - right[from + index])))
+const adopted: ReturnType<typeof adoptRevision> = { installed: 'installed', published: 'published' }
+const adoptedAtSeam: Awaited<ReturnType<typeof adoptEffects>>['adoption'] = { installed: 'installed', published: ['published'] }
+
+test('W-C9-fx-2 a removed EQ fades out over its 5 ms ghost from the seam, with no step, and is gone after it', async () => {
+  const eq = fxEq('eq-a', 31)
+  const { rendered, adoption } = await adoptEffects([eq], [])
+  const withEq = await referenceThrough([eq])
+  const dry = await referenceThrough([])
+  const weights = Array.from({ length: 5 }, (_, window) => weightOf(rendered, dry, withEq, fxSeam + 48 * window))
+  expect({ adoption, untouchedBefore: largestDifference(rendered, withEq, 0, fxSeam) < 1e-6,
+    boosted: Math.max(...withEq.slice(fxSeam - 96, fxSeam).map(Math.abs)) > 3.5,
+    falling: weights.every((weight, index) => index === 0 || weight < weights[index - 1]), starts: weights[0] > 0.85, ends: weights[4] < 0.25,
+    noStep: Math.abs(rendered[fxSeam] - withEq[fxSeam]) < 0.05,
+    goneAfter: largestDifference(rendered, dry, fxSeam + 240, 20 * 128) < 1e-6 })
+    .toEqual({ adoption: adoptedAtSeam, untouchedBefore: true, boosted: true, falling: true, starts: true, ends: true, noStep: true, goneAfter: true })
+})
+
+test('W-C9-fx-3 an inserted effect fades in from the seam and settles on the reference chain after its entry', async () => {
+  const half = fxUtility('util-a', 41, -6)
+  const { rendered, adoption } = await adoptEffects([], [half])
+  const processed = await referenceThrough([half])
+  const dry = await referenceThrough([])
+  const weights = Array.from({ length: 10 }, (_, window) => weightOf(rendered, dry, processed, fxSeam + 48 * window))
+  expect({ adoption, untouchedBefore: largestDifference(rendered, dry, 0, fxSeam) < 1e-6, startsDry: weights[0] < 0.1,
+    risesToProcessed: weights.every((weight, index) => index === 0 || weight > weights[index - 1]) && weights[9] > 0.9,
+    settledAfter: largestDifference(rendered, processed, fxSeam + 600, 20 * 128) < 5e-3 })
+    .toEqual({ adoption: adoptedAtSeam, untouchedBefore: true, startsDry: true, risesToProcessed: true, settledAfter: true })
+})
+
+test('W-C9-fx-4 a reorder dips the node to nothing and back over 5 ms around the seam and keeps its history, so the steady output is the same', async () => {
+  const half = fxUtility('util-a', 41, -6)
+  const eq = fxEq('eq-a', 31)
+  const { rendered, adoption } = await adoptEffects([half, eq], [eq, half])
+  const reference = await referenceThrough([half, eq])
+  const gains = Array.from({ length: 10 }, (_, window) => weightOf(rendered, reference.map(() => 0), reference, fxSeam + 24 * window, 24))
+  expect({ adoption, untouchedBefore: largestDifference(rendered, reference, 0, fxSeam) < 1e-6, startsNearFull: gains[0] > 0.85,
+    dipsToNothing: Math.min(...gains) < 0.1, backNearFull: gains[9] > 0.8,
+    steadyAfter: largestDifference(rendered, reference, fxSeam + 600, 20 * 128) < 5e-3 })
+    .toEqual({ adoption: adoptedAtSeam, untouchedBefore: true, startsNearFull: true, dipsToNothing: true, backNearFull: true, steadyAfter: true })
+})
+
+// The 6 removed effects of three nodes fade as ghosts (96 of the 128 the core holds); a second removal of 64 inside the same
+// 5 ms needs 160 and its prepare is refused (CORE:7958-7960). Native refuses it the same way (HOST:2968-2981). The UD 8
+// retry waits one position report, which is at least 2400 frames (WK:2462), against the 240 frame fade: it prepares.
+test('W-C9-fx-7 a removal of more than 128 effects inside one ghost fade is refused at its prepare and the retry one position report later succeeds', async () => {
+  const chains = (kept: readonly string[]) => Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map((id, node) => [id,
+    kept.includes(id) ? Array.from({ length: 32 }, (_, index) => fxUtility(`${id}-${index}`, 1_000 + node * 32 + index, -1)) : []]))
+  const { host, messages } = await playSineThrough(chains(['a', 'b', 'c', 'd', 'e']))
+  renderBlocks(host, 12)
+  const first = adoptRevision(host, messages, fxGraph(2, chains(['d', 'e'])), [])
+  renderBlocks(host, 1)
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 30, snapshot: fxGraph(3, chains([])) })
+  const refused = messages.flatMap((message) => message.type === 'graph-prepared' && message.requestId === 30 ? [message.result] : [])
+  renderBlocks(host, 19)
+  const retried = adoptRevision(host, messages, fxGraph(4, chains([])), [])
+  const frames = messages.flatMap((message) => message.type === 'transport-position' ? [message.frame] : [])
+  expect({ first, refused, retried, cadence: Math.min(...frames.slice(1).map((frame, index) => frame - frames[index])) >= 2_400 })
+    .toEqual({ first: adopted, refused: ['rejected'], retried: adopted, cadence: true })
 })

@@ -2548,8 +2548,10 @@ const Timeline: Component<TimelineProps> = (props) => {
         });
       },
       onMixedReorderCommitted: (playbackIntent: TimelinePlaybackRebuildIntent | undefined) => {
+        // A prepared browser session adopts the new effect order through the hook's follow, which rebuilds what it cannot carry.
+        if (isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) return;
         const intent = playbackIntent ?? captureStructuralPlaybackIntent();
-        if (!intent.resumePlayback && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()) return;
+        if (!intent.resumePlayback && !isNativePlaybackPrepared()) return;
         void rebuildPlaybackBackend(renderTracks(), intent).catch((cause: unknown) => {
           notify(
             "Native playback rebuild failed",

@@ -9,8 +9,10 @@ import type { AudioCoreGraphSnapshot } from '@daw-browser/audio-core-contract'
 import { SYNTH_KIND_ID, nativeSynthStructureKey, type LiveProcessorEditIdentity } from '~/lib/live-processor-control'
 import {
   createDefaultCompressorParams,
+  createDefaultDelayParams,
   createDefaultDrumRackParams,
   createDefaultGranularParams,
+  createDefaultLimiterParams,
   createDefaultSamplerParams,
   createDefaultSynthParams,
   createDefaultUtilityParams,
@@ -2334,7 +2336,8 @@ test('B6f5 R6 a schedule refresh after an adoption continues the adopted revisio
 
 // B6f5 step 5b, R6: a compile the session cannot continue (a structural edit since its start) is never installed on it.
 // The refresh skips it without a fault, as it did before adoption; the follow asks for the rebuild that carries it.
-const b6f5AddedEffect: AudioEffectRuntimeInstance = { id: 'utility-b6f5-structure', kind: 'utility', params: { version: 1, state: createDefaultUtilityParams() } }
+// A limiter delays the signal, which no seam carries until step 9h; an effect that does not is carried (9f).
+const b6f5AddedEffect: AudioEffectRuntimeInstance = { id: 'limiter-b6f5-structure', kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } }
 const b6f5StructuralCompilation = (transport: LivePlaybackTransport, added: AudioEffectRuntimeInstance | undefined) => {
   const base = compilation()
   if (!added) return { ...base, snapshot: { ...base.snapshot, transport } }
@@ -3948,8 +3951,10 @@ const e9Midi = (id: string): RuntimeTrack => ({ ...track, id, name: id, clips: t
   midi: clip.midi && { ...clip.midi, notes: [{ id: `${id}-held`, beat: 0, length: 8, pitch: 60, velocity: 0.8 }] } })) })
 const e9Audio = (id: string, assetId: string): RuntimeTrack => ({ id, kind: 'audio', name: id, volume: 1,
   clips: [{ id: `${id}-clip`, name: id, color: '#fff', startSec: 0, duration: 30, sourceAssetKey: assetId }] })
-const e9Fixture = async (options: { tracks?: readonly RuntimeTrack[]; compressed?: boolean } = {}) => {
-  const state = { tracks: options.tracks ?? [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a')] }
+type E9State = { tracks: readonly RuntimeTrack[]; effects: readonly AudioEffectRuntimeInstance[]; refusals: number }
+const e9Fixture = async (options: { tracks?: readonly RuntimeTrack[]; compressed?: boolean; effects?: readonly AudioEffectRuntimeInstance[] } = {}) => {
+  const state: E9State = { tracks: options.tracks ?? [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a')],
+    effects: options.effects ?? (options.compressed ? [{ id: 'compressor-a', kind: 'compressor', params: createDefaultCompressorParams() }] : []), refusals: 0 }
   const calls: string[] = []
   const installs: PortableFrameSchedule[] = []
   const graphs: AudioCoreGraphSnapshot[] = []
@@ -3962,6 +3967,7 @@ const e9Fixture = async (options: { tracks?: readonly RuntimeTrack[]; compressed
     publishGraph: async (revision: number, publishOptions?: C9Publish['options']) => {
       publishes.push({ revision, options: publishOptions })
       if (publishOptions) calls.push('publish')
+      if (publishOptions && state.refusals-- > 0) throw new Error('Portable playback graph-published was rejected.')
     },
     registerPagedAsset: async (asset: { assetId: string }) => {
       calls.push(`register:${asset.assetId}`)
@@ -3977,8 +3983,7 @@ const e9Fixture = async (options: { tracks?: readonly RuntimeTrack[]; compressed
       const compiled = pagedCompilation(transport)
       const trackFx = Object.fromEntries(state.tracks.flatMap((entry) => entry.kind === 'instrument'
         ? [[entry.id, { instances: [], instrument: { kind: 'synth' as const, instanceId: `synth:${entry.id}`, params: createDefaultSynthParams() } }]]
-        : options.compressed && entry.id === 'audio-a'
-          ? [[entry.id, { instances: [{ id: 'compressor-a', kind: 'compressor' as const, params: createDefaultCompressorParams() }] }]] : []))
+        : entry.id === 'audio-a' && state.effects.length > 0 ? [[entry.id, { instances: [...state.effects] }]] : []))
       const assetIds = new Set(state.tracks.flatMap((entry) => entry.clips.flatMap((clip) => clip.sourceAssetKey ?? [])))
       const assets = [...assetIds].map((assetId) => ({ assetId, source: e9Source }))
       return { ...compiled, snapshot: { ...compiled.snapshot, tracks: state.tracks, assets,
@@ -4105,6 +4110,89 @@ test('W-C9-track-7 a track added or deleted where a latency-bearing effect gives
       deletedLatent: await deletedLatent.controller.adoptSchedule(noLoop), published: [added, deletedPlain, deletedLatent].map((f) => f.published()) })
       .toEqual({ added: 'rebuild', deletedPlain: 'rebuild', deletedLatent: 'rebuild', published: [0, 0, 0] })
   } finally { added.controller.dispose(); deletedPlain.controller.dispose(); deletedLatent.controller.dispose() }
+})
+
+// AE-08 phase 8 step 9f: effects inserted, removed, replaced and reordered on a track the session plays are carried at a
+// seam when none of them delays the signal (class 4a). The core keeps a survivor's history by instance id, fades a
+// removed effect over its 5 ms ghost (D-3) and dips a node whose stages were reordered. An effect that delays the signal
+// stays a rebuild until step 9h.
+const f9Utility = (id: string): AudioEffectRuntimeInstance => ({ id, kind: 'utility', params: { version: 1, state: createDefaultUtilityParams() } })
+const f9Delay = (id: string): AudioEffectRuntimeInstance => ({ id, kind: 'delay', params: createDefaultDelayParams() })
+const f9Limiter = (id: string): AudioEffectRuntimeInstance => ({ id, kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } })
+const f9Compressor = (id: string): AudioEffectRuntimeInstance => ({ id, kind: 'compressor', params: createDefaultCompressorParams() })
+const f9Chain = (f: Awaited<ReturnType<typeof e9Fixture>>) => f.graphs.at(-1)?.nodes.find((node) => node.id === 'audio-a')?.processorOrder.map((processor) => processor.id)
+const f9Edits: ReadonlyArray<readonly [string, readonly AudioEffectRuntimeInstance[], readonly AudioEffectRuntimeInstance[], string[]]> = [
+  ['inserted', [], [f9Utility('util-a')], ['util-a']],
+  ['inserted beside a delaying effect it keeps', [f9Limiter('limiter-a')], [f9Limiter('limiter-a'), f9Utility('util-a')], ['limiter-a', 'util-a']],
+  ['removed', [f9Utility('util-a'), f9Delay('delay-a')], [f9Delay('delay-a')], ['delay-a']],
+  ['moved', [f9Utility('util-a'), f9Delay('delay-a')], [f9Delay('delay-a'), f9Utility('util-a')], ['delay-a', 'util-a']],
+  ['replaced', [f9Utility('util-a')], [f9Delay('delay-b')], ['delay-b']],
+]
+
+test.each(f9Edits)('W-C9-fx-1 an effect %s while playing is adopted in place: one publish, nothing disposed, the new chain', async (_name, before, after, chain) => {
+  const f = await e9Fixture({ effects: before })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(48_000)
+    f.state.effects = after
+    const result = await f.controller.adoptSchedule(noLoop)
+    expect({ result, chain: f9Chain(f), published: f.published(), disposed: f.calls.includes('dispose') })
+      .toEqual({ result: 'adopted', chain, published: 1, disposed: false })
+  } finally { f.controller.dispose() }
+})
+
+test.each(f9Edits)('W-C9-fx-1p an effect %s on a paused session is adopted in place with the seam at the position', async (_name, before, after, chain) => {
+  const f = await e9Fixture({ effects: before })
+  try {
+    expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
+    f.state.effects = after
+    const result = await f.controller.adoptSchedule(noLoop)
+    expect({ result, chain: f9Chain(f), published: f.published(), publicationFrame: JSON.stringify(f.publishes.at(-1)?.options).includes('publicationFrame'), disposed: f.calls.includes('dispose') })
+      .toEqual({ result: 'adopted', chain, published: 1, publicationFrame: false, disposed: false })
+  } finally { f.controller.dispose() }
+})
+
+// Until step 9h inverts it (D-1): the WASM core cannot continue a changed latency, so nothing is published for it. With
+// the one audio track alone no route's delay changes; a limiter swapped for another keeps the node's latency, so only the
+// effect gate (carriesEffects) refuses that, and a reorder of delaying effects likewise.
+test('W-C9-fx-4 an effect that delays the signal inserted, removed, replaced or moved answers rebuild and publishes nothing', async () => {
+  const cases: ReadonlyArray<readonly [readonly AudioEffectRuntimeInstance[], readonly AudioEffectRuntimeInstance[]]> = [
+    [[], [f9Limiter('limiter-a')]],
+    [[f9Limiter('limiter-a')], []],
+    [[f9Utility('util-a')], [f9Limiter('limiter-b')]],
+    [[f9Limiter('limiter-a')], [f9Limiter('limiter-b')]],
+    [[f9Limiter('limiter-a'), f9Compressor('compressor-a')], [f9Compressor('compressor-a'), f9Limiter('limiter-a')]],
+  ]
+  const results: { result: PortableAdoptionResult; published: number }[] = []
+  for (const tracks of [undefined, [e9Audio('audio-a', 'asset-a')]]) for (const [before, after] of cases) {
+    const f = await e9Fixture({ tracks, effects: before })
+    try {
+      expect(await f.controller.start(f.transport)).toBe('started')
+      await f.report(48_000)
+      f.state.effects = after
+      results.push({ result: await f.controller.adoptSchedule(noLoop), published: f.published() })
+    } finally { f.controller.dispose() }
+  }
+  expect(results).toEqual(Array.from({ length: 2 * cases.length }, () => ({ result: 'rebuild', published: 0 })))
+})
+
+// A removal the core cannot ghost because earlier ghosts are still fading is refused at its prepare (CORE:7958-7960).
+// The retry waits one rendered-frame report, which is at least 2400 frames at 48 kHz against a 240 frame ghost
+// (WK:2462, CORE:7806), so it meets free ghosts and converges: WHT W-C9-fx-7 pins the core side.
+test('W-C9-fx-6 a removal refused by ghost capacity is retried after one position report and adopted', async () => {
+  const f = await e9Fixture({ effects: [f9Utility('util-a'), f9Delay('delay-a')] })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(48_000)
+    f.state.refusals = 1
+    f.state.effects = []
+    const first = await f.controller.adoptSchedule(noLoop)
+    expect({ first, published: f.published(), chain: f9Chain(f) }).toEqual({ first: 'failed', published: 1, chain: [] })
+    await f.report(60_000)
+    await c9Settled(() => f.published() === 2)
+    expect({ published: f.published(), chain: f9Chain(f), faults: f.faults, disposed: f.calls.includes('dispose') })
+      .toEqual({ published: 2, chain: [], faults: [], disposed: false })
+  } finally { f.controller.dispose() }
 })
 
 // Recording decision: native has no controller-level rule (its adoption path only refuses a seek during a take,

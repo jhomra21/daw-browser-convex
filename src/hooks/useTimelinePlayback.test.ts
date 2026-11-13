@@ -18,7 +18,7 @@ import { SYNTH_KIND_ID, type LiveProcessorEditIdentity } from '~/lib/live-proces
 import { nativePlaybackFaultText, type NativePlaybackFault } from '~/lib/desktop/native-playback-controller'
 import type { AudioEffectRuntimeInstance, DeferredStretchWindow, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
-import { createDefaultDelayParams, createDefaultDrumRackParams, createDefaultSynthParams, createDefaultSamplerParams, createDefaultUtilityParams, mergeSynthParams } from '@daw-browser/shared'
+import { createDefaultDelayParams, createDefaultDrumRackParams, createDefaultLimiterParams, createDefaultSynthParams, createDefaultSamplerParams, createDefaultUtilityParams, mergeSynthParams } from '@daw-browser/shared'
 import type { AutomationEnvelope, TrackInstrumentParams, UtilityParamsEnvelope } from '@daw-browser/shared'
 import type { AudioCoreGraphSnapshot } from '@daw-browser/audio-core-contract'
 import { externalProcessorSchema, type ExternalProcessor } from '@daw-browser/external-plugins'
@@ -7022,18 +7022,22 @@ const b6f5UtilityInstance = (params: UtilityParamsEnvelope): AudioEffectRuntimeI
 
 const b6f5Bindings = async () => {
   const source = await readFile(new URL('../components/Timeline.tsx', import.meta.url), 'utf8')
-  const { portable, structural } = extractTimelineBindings(source)
+  const { portable, structural, mixedReorder } = extractTimelineBindings(source)
   const transpile = (code: string) => new Bun.Transpiler({ loader: 'ts' }).transformSync(code)
   const makePortable = new Function('deps', transpile(`
     const { liveProcessorControl, rebuildPlaybackBackend, renderTracks, SYNTH_KIND_ID } = deps;
     return ({ ${portable} }).applyPortableProcessor;`))
+  const makeMixedReorder = new Function('deps', transpile(`
+    const { isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared, captureStructuralPlaybackIntent, rebuildPlaybackBackend,
+      renderTracks, notify } = deps;
+    return ({ ${mixedReorder} }).onMixedReorderCommitted;`))
   const makeStructural = new Function('deps', transpile(`
     const { mountedProjectGeneration, awaitPlaybackPreparation, preparedInstrument, isStructuralRebuildInProgress,
       isPreparingPlayback, isPlaying, isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared,
       rebuildPlaybackBackend, renderTracks, captureStructuralPlaybackIntent, notify } = deps;
     let instrumentPlaybackChangeTail = Promise.resolve();
     return ({ ${structural} }).onStructuralPlaybackChange;`))
-  return { makePortable, makeStructural }
+  return { makePortable, makeStructural, makeMixedReorder }
 }
 
 const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<ReturnType<typeof b6f5Bindings>>) => {
@@ -7115,9 +7119,14 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     rebuildPlaybackBackend, renderTracks: tracks, captureStructuralPlaybackIntent,
     notify: (title: string, message: string) => { faults.push(`${title}: ${message}`) },
   })
+  const onMixedReorderCommitted: (intent: B6f5Intent | undefined) => void = bindings.makeMixedReorder({
+    isNativePlaybackPrepared: playback.isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared: playback.isPortableBrowserPlaybackPrepared,
+    captureStructuralPlaybackIntent, rebuildPlaybackBackend, renderTracks: tracks, notify: (title: string, message: string) => { faults.push(`${title}: ${message}`) } })
   const work: Promise<unknown>[] = []
-  // Effect structure on a track the session plays: a structural edit no seam carries until step 9f.
-  const addEffect = () => setAddedEffects([{ id: 'utility-2', kind: 'utility', params: b6f5Utility0 }])
+  // A structural edit no seam carries until step 9h: a limiter delays the signal, which the WASM core cannot continue.
+  const addEffect = () => setAddedEffects([{ id: 'limiter-2', kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } }])
+  // An effect that does not delay the signal is carried at a seam (9f), here with the Timeline's effect-order caller.
+  const insertEffect = () => { setAddedEffects([{ id: 'utility-2', kind: 'utility', params: b6f5Utility0 }]); onMixedReorderCommitted(undefined) }
   let lastEdit: LiveProcessorEditIdentity | undefined
   const setVolume = (volume: number) => setTracks((current) => current.map((entry) => entry.id === track.id ? { ...entry, volume } : entry))
   // One user edit of each kind, delivered the way the product delivers it.
@@ -7236,7 +7245,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const resumingRebuild = () => playback.restartTimelineSchedule(tracks(), {
     rebuildBackend: true, resumePlayback: true, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
-  return { playback, edit, addEffect, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, mark: () => world.seq,
+  return { playback, edit, addEffect, insertEffect, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, mark: () => world.seq,
     locate: (sec: number) => playback.setPlayhead(sec, tracks()),
     liveSession: () => world.sessions.filter((session) => !session.closed).at(-1),
     holds: { resume: resumeHold, compile: compileHold, transport: world.transportHold, pause: world.pauseHold } }
@@ -7521,6 +7530,24 @@ test('C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopt
     expect({ paused, adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session, playing: live.playback.isPlaying(),
       sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
       .toEqual({ paused, adoptions: 1, closed: false, same: true, playing: !paused, sessionsAfterMark: 0 })
+  }, false)
+})
+
+// C9f: an effect that does not delay the signal inserted on a track the session plays is a seam adoption, with the
+// Timeline's effect-order caller too: the same session takes it, playing or paused, with no dispose and no rebuild.
+test('C9f W-C9-fx-5 an effect inserted while playing or paused is adopted by the same session with no dispose and no rebuild', async () => {
+  for (const paused of [false, true]) await runB6f5(async (live, world) => {
+    if (paused) await live.pausedAt(1)
+    else await live.playFrom(1)
+    const session = live.liveSession()
+    const mark = live.mark()
+    live.insertEffect()
+    await live.until(() => session?.adoptions === 1 || world.sessions.length > 1)
+    await live.settle()
+    expect({ paused, adoptions: session?.adoptions, closed: session?.closed, same: live.liveSession() === session, playing: live.playback.isPlaying(),
+      carries: session?.graph?.nodes.some((node) => node.id === track.id && node.processorOrder.some((processor) => processor.id === 'utility-2')),
+      sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
+      .toEqual({ paused, adoptions: 1, closed: false, same: true, playing: !paused, carries: true, sessionsAfterMark: 0 })
   }, false)
 })
 

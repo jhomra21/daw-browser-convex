@@ -7411,6 +7411,67 @@ test("B6 refused parameter record follows the paused domain into a differently p
   }
 })
 
+// AE-08 phase 8 step 11d (D, UD 8): a paused adoption whose re-prime fails keeps the session and its graph. The failure is
+// logged, the edit stays in the project, and the Play that follows primes it.
+test("P8 a re-prime that fails after a paused adoption keeps the session and the next Play carries the edit", async () => {
+  const h = createFuzzHost(() => {}, undefined, false, () => {}, () => {})
+  const base = utilityPlaybackInput()
+  let current = base
+  let failTransport = false
+  const bridge = { ...h.bridge, session: { ...h.bridge.session, setTransport: (value: Parameters<typeof h.bridge.session.setTransport>[0]) => {
+    if (!failTransport) return h.bridge.session.setTransport(value)
+    failTransport = false
+    return Promise.resolve({ ok: false as const, error: "transport lost" })
+  } } }
+  const controller = createNativePlaybackController({
+    bridge, getProjectId: () => "fixture-project", getProjectGeneration: () => 1,
+    compileSnapshot: async transport => compileLivePlaybackSnapshot({ ...current, transport }),
+  })
+  const warn = spyOn(console, "warn").mockImplementation(() => undefined)
+  const turns = async () => { for (let turn = 0; turn < 100; turn++) await Promise.resolve() }
+  const act = async (action: Parameters<typeof h.act>[0]) => {
+    h.act(action, [], h.lose, () => {})
+    await turns()
+  }
+  const drive = async () => {
+    for (let step = 0; step < 200; step++) {
+      const control = h.enabled([]).find(action => action.kind === "control-wake"
+        || action.kind === "deliver-reply" || action.kind === "publication-acknowledge")
+      if (control) await act(control)
+      else if (h.started) {
+        await act({ kind: "render-block" })
+        await act({ kind: "deliver-progress" })
+      } else return
+    }
+  }
+  const count = (name: string) => h.counts.get(name) ?? 0
+  try {
+    const play = controller.start(base.transport)
+    await turns(); await drive()
+    expect(await play).toBe("started")
+    const pause = controller.pause(0.25)
+    await turns(); await drive(); await pause
+    const before = { nodes: h.active?.nodes.size ?? 0, spawns: count("begin") + count("configure") + count("start"), teardowns: count("teardown") }
+    current = { ...base, tracks: [...base.tracks, { ...base.tracks[0]!, id: "routed", clips: [] }] }
+    failTransport = true
+    const adopted = controller.adoptSchedule({ ...migrationIntent("d-reprime-failure"), schedule: "d-reprime-failure" })
+    await turns(); await drive(); await adopted
+    await turns(); await drive()
+    expect({ prepared: controller.isPrepared(), teardowns: count("teardown") - before.teardowns, retried: failTransport,
+      logged: warn.mock.calls.some(call => String(call[0]).includes("paused adoption")) })
+      .toEqual({ prepared: true, teardowns: 0, retried: false, logged: true })
+    const resumed = controller.start({ ...base.transport, playheadSec: 0.25 })
+    await turns(); await drive()
+    expect(await resumed).toBe("started")
+    expect({ active: controller.isActive(), nodes: h.active?.nodes.size, spawns: count("begin") + count("configure") + count("start") })
+      .toEqual({ active: true, nodes: before.nodes + 1, spawns: before.spawns })
+  } finally {
+    warn.mockRestore()
+    h.lose()
+    await controller.dispose()
+  }
+})
+
 for (const submitted of [false, true]) {
   test(`P8 a routed track added while paused is adopted in place by the Play that resumes (edit ${submitted ? "submitted" : "not submitted"})`, async () => {
     const h = createFuzzHost(() => {}, undefined, false, () => {}, () => {})

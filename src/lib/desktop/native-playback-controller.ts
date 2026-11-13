@@ -4326,8 +4326,15 @@ export const createNativePlaybackController = (input: {
         await transitionPreparedTransport(currentPositionSec() ?? transportFrame / sampleRate, false)
       })
     } catch (error) {
-      reportStopped(error instanceof Error ? error.message : "Native playback could not apply a paused edit.")
-      await disposeNativeSession(undefined, "native-paused-adoption-failure")
+      const reason = error instanceof Error ? error.message : "Native playback could not apply a paused edit."
+      // Only a host that reports the session gone ends it. Otherwise the edit is already the session's published graph and
+      // every transport transition, a Play included, primes it again.
+      if (hasNativeHostConnectionLoss()) {
+        reportStopped(reason)
+        await disposeNativeSession(undefined, "native-paused-adoption-failure")
+        return
+      }
+      console.warn("[native-live-edit] paused adoption could not be primed; the session stays and the next transport change retries", { reason })
     }
   }
   // One attempt: compile (or reuse what native's last refusal kept), decide whether anything changed, publish. It

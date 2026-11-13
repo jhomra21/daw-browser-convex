@@ -17,7 +17,7 @@
     "check:packages": "bun --filter '@daw-browser/shared' --filter '@daw-browser/control' --filter '@daw-browser/control-core' --filter '@daw-browser/control-sdk' --filter '@daw-browser/control-mcp' --filter '@daw-browser/control-cli' --filter '@daw-browser/desktop-protocol' --filter '@daw-browser/plugin-host-protocol' --filter '@daw-browser/external-plugins' --filter '@daw-browser/desktop' --filter '@daw-browser/timeline-core' --filter '@daw-browser/audio-engine' --filter '@daw-browser/waveforms' check",
     "lint": "oxlint --deny-warnings --report-unused-disable-directives .",
     "lint:fix": "oxlint --fix .",
-    "typecheck": "bun run check:packages && bun x tsc --noEmit -p tsconfig.json && bun x tsc --noEmit -p api/tsconfig.json",
+    "typecheck": "bun run check:packages && bun x tsc --noEmit -p tsconfig.json && bun x tsc --noEmit -p api/tsconfig.json && bun tools/typecheck.ts",
     "test": "bun test",
     "test:anti-slop": "set -- tools/oxlint/anti-slop/rules/*.rule-test.ts; test \"$#\" -eq 12 || { echo \"Expected 12 anti-slop suites, found $#\" >&2; exit 1; }; for file do node --experimental-strip-types \"$file\" || exit; done",
     "test:control-compat": "bun test src/hooks/local-send-reload.integration.test.ts src/lib/desktop/attached-host-controller.test.ts src/lib/local-control/local-control-state.test.ts src/lib/local-control/local-control-service.test.ts",

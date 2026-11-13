@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM"],
+    "types": ["vite/client", "bun"],
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "~/*": ["../src/*"],
+      "@/*": ["../src/*"]
+    }
+  },
+  "include": ["./**/*.ts", "./**/*.tsx", "../src/types/**/*.ts"],
+  "exclude": ["oxlint/**"]
+}

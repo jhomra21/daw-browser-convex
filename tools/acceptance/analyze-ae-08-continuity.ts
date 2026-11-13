@@ -1609,9 +1609,11 @@ export const phase5EffectStateSyntheticProof = () => {
 
 // add-paged-asset admits one silent track-only publication before the asset's. Each defect below must still fail the
 // row on its publication count, and both clean shapes must pass.
-export const phase5AddPagedAssetDefects = ["audible-early-publication", "two-extra-publications",
-  "extra-after-asset-publication", "early-publication-installs-asset", "silent-asset-after-seam", "coincident-publications"] as const
-type AddPagedAssetCase = (typeof phase5AddPagedAssetDefects)[number] | "single-publication" | "track-only-publication"
+type AddPagedAssetDefect = "audible-early-publication" | "two-extra-publications" | "extra-after-asset-publication"
+  | "early-publication-installs-asset" | "silent-asset-after-seam" | "coincident-publications"
+export const phase5AddPagedAssetDefects: readonly AddPagedAssetDefect[] = ["audible-early-publication", "two-extra-publications",
+  "extra-after-asset-publication", "early-publication-installs-asset", "silent-asset-after-seam", "coincident-publications"]
+type AddPagedAssetCase = AddPagedAssetDefect | "single-publication" | "track-only-publication"
 
 // One small packaged-wellFormed capture: the retained source on the left, and the imported asset entering the right
 // channel at the asset publication, which is the last one.

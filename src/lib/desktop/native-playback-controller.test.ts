@@ -8,7 +8,7 @@ import { createRenderEffect, createRoot, createSignal, untrack } from "solid-js"
 import { createNativePlaybackController, nativePlaybackFaultText, type NativePlaybackFault } from "./native-playback-controller"
 import { classifyNativeVst3PlaybackFault, nativeVst3LaunchAuthorizationRequiredMessage } from "~/lib/external-plugin-ui"
 import { createNativeProcessorStateOwner } from "./native-processor-state-owner"
-import { vstInstanceFailed, vstInstanceLimit } from "./vst-instance-failures"
+import { clearInstanceLimits, instanceLimit, vstInstanceFailed } from "./vst-instance-failures"
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
 import { compileDesiredNativeProcessorState, compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
 import { audioCoreContractVersion, encodeUtilityProcessorState, type AudioAssetRef } from "@daw-browser/audio-core-contract"
@@ -6212,8 +6212,8 @@ describe("AE-08 phase 8 UD 7 paused native adoption", () => {
       expect(s.requestedFrames).toEqual([])
       expect(s.controller.isPrepared()).toBe(true)
       expect(s.fixture.calls.slice(before.calls).filter((call) => hostLifecycleCalls.includes(call))).toEqual([])
-      expect(vstInstanceLimit(nativeAttachmentPlan.attachments[0].instanceId))
-        .toBe("Native VST3 playback does not support MIDI expression automation yet.")
+      // The mapping targets no device, so the track it sits on carries the notice.
+      expect(instanceLimit(base.tracks[0]!.id)).toBe("Native VST3 playback does not support MIDI expression automation yet.")
     } finally { await s.controller.dispose() }
   })
 })
@@ -6863,6 +6863,37 @@ test("accepts an expanded session at the 64-asset native boundary", async () => 
   expect(controller.isActive()).toBe(true)
   expect(fixture.calls.slice(before).filter((call) => ["begin", "stop", "graph"].includes(call))).toEqual([])
   await controller.dispose()
+})
+
+// AE-08 phase 8 step 10: an edit the native graph cannot carry is a failed adoption, never a stop or a dialog: the playing
+// graph stays, nothing reaches the host and no fault is reported (UD 8).
+test("W-FB-4 a support error and a capacity overflow answer failed and keep the session with no fault", async () => {
+  const fixture = createBridge()
+  const faults: string[] = []
+  let mode: "carried" | "capacity" | "missing-plan" = "carried"
+  const controller = createObservedController({
+    bridge: fixture.bridge,
+    createBuffer: (channels, frames, sampleRate) => new TestAudioBuffer(Array.from({ length: channels }, () => new Float32Array(frames)), sampleRate),
+    reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
+    compileSnapshot: async (transport) => {
+      const compiled = compileLivePlaybackSnapshot({ ...inputWithRawAssetsAndStretch(mode === "capacity" ? 64 : 63), transport })
+      return compiled.supported && mode === "missing-plan"
+        ? { ...compiled, snapshot: { ...compiled.snapshot, requiresNativePlayback: true } } : compiled
+    },
+  })
+  try {
+    expect(await controller.start(inputWithRawAssetsAndStretch(63).transport)).toBe("started")
+    const before = fixture.calls.length
+    mode = "capacity"
+    const capacity = await controller.adoptSchedule(migrationIntent("fb4-capacity"), true)
+    mode = "missing-plan"
+    const missingPlan = await controller.adoptSchedule(migrationIntent("fb4-missing-plan"), true)
+    const outcomes = { capacity, "missing-plan": missingPlan }
+    expect({ outcomes, active: controller.isActive(), faults,
+      host: fixture.calls.slice(before).filter((call) => ["begin", "stop", "graph", "teardown", "revision-prepare"].includes(call)) })
+      .toMatchObject({ outcomes: { capacity: { status: "failed" }, "missing-plan": { status: "failed", reason: "The active VST3 attachment plan is unavailable." } },
+        active: true, faults: [], host: [] })
+  } finally { await controller.dispose() }
 })
 
 test("uses native prepared Stretch playback without an output buffer factory", async () => {
@@ -9252,13 +9283,14 @@ for (const accepted of [true, false]) test(`tempo and meter context is revision-
   } finally { await controller.destroy() }
 })
 
-for (const unsupported of ["sidechain", "midi-mappings", "missing-attachment-plan"]) {
+for (const unsupported of ["sidechain", "midi-mappings", "midi-device-mapping", "missing-attachment-plan"]) {
   test(`shared native admission rejects live ${unsupported} before staging and at startup`, async () => {
     const fixture = createBridge("runtime-revision-progress")
     let changed = false
     // E6: MIDI expression automation and a sidechain are limitations of the native graph, never defects.
     const limitation = unsupported !== "missing-attachment-plan"
     const snapshotInput = nativeInstrumentInput()
+    clearInstanceLimits()
     const controller = createObservedController({
       bridge: fixture.bridge, getProjectId: () => "local_project",
       compileSnapshot: async (transport) => {
@@ -9270,10 +9302,11 @@ for (const unsupported of ["sidechain", "midi-mappings", "missing-attachment-pla
           requiresNativePlayback: unsupported === "missing-attachment-plan",
           mixer: { ...snapshot.mixer, sidechainRoutes: unsupported === "sidechain"
             ? [{ sourceTrackId: "instrument", targetTrackId: "master", effectInstanceId: "external" }] : [] },
-          tracks: unsupported === "midi-mappings" ? snapshot.tracks.map((track) => ({ ...track,
+          tracks: unsupported.startsWith("midi") ? snapshot.tracks.map((track) => ({ ...track,
             clips: track.clips.map((clip) => ({ ...clip, midi: clip.midi && { ...clip.midi,
               mappings: [{ id: "mapping", source: { kind: "cc", controller: 1, channel: 1 },
-                target: { parameterId: "gain" }, outputMin: 0, outputMax: 1 }] } })),
+                target: unsupported === "midi-device-mapping" ? { parameterId: "gain", effectInstanceId: "external" } : { parameterId: "gain" },
+                outputMin: 0, outputMax: 1 }] } })),
           })) : snapshot.tracks,
         } }
       },
@@ -9285,9 +9318,14 @@ for (const unsupported of ["sidechain", "midi-mappings", "missing-attachment-pla
         .toMatchObject({ status: limitation ? "unsupported" : "failed" })
       expect(fixture.calls).not.toContain("revision-prepare")
       expect(controller.isActive()).toBe(true)
-      expect(vstInstanceLimit(nativeAttachmentPlan.attachments[0].instanceId)).toBe(!limitation ? undefined : unsupported === "sidechain"
-        ? "The native VST3 graph cannot activate with the current sidechain routing."
-        : "Native VST3 playback does not support MIDI expression automation yet.")
+      // The notice sits on the element the routing belongs to: the device whose sidechain input is set, or, for a mapping
+      // that targets no device, the track it sits on. The plug-in the graph merely holds carries none.
+      expect({ device: instanceLimit("external"), track: instanceLimit(snapshotInput.tracks[0]!.id), plugin: instanceLimit(nativeAttachmentPlan.attachments[0].instanceId) })
+        .toEqual({
+          device: unsupported === "sidechain" ? "The native VST3 graph cannot activate with the current sidechain routing."
+            : unsupported === "midi-device-mapping" ? "Native VST3 playback does not support MIDI expression automation yet." : undefined,
+          track: unsupported === "midi-mappings" ? "Native VST3 playback does not support MIDI expression automation yet." : undefined,
+          plugin: undefined })
       await controller.dispose()
       expect(await controller.start(snapshotInput.transport)).toBe(
         unsupported === "missing-attachment-plan" ? "blocked" : "unavailable")

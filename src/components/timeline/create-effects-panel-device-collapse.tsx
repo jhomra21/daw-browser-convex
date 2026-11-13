@@ -92,6 +92,8 @@ export type DeviceCollapseContextValue = {
   toggle: () => void;
   contentId: Accessor<string>;
   canWrite: Accessor<boolean>;
+  // Why the native engine cannot carry this device's routing yet (E6), shown on its title bar.
+  nativeLimit?: Accessor<string | undefined>;
 };
 
 const DeviceCollapseContext = createContext<DeviceCollapseContextValue>();

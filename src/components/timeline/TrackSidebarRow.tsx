@@ -30,6 +30,8 @@ import {
 import { cn } from "~/lib/utils";
 import { RECORDING_TARGET_FINISHING, RECORDING_TARGET_LOCKED_BADGE, RECORDING_TARGET_LOCKED_REASON } from "~/lib/track-recording-target";
 import { parseHexColor } from "~/lib/color";
+import { instanceLimit } from "~/lib/desktop/vst-instance-failures";
+import NativeLimitNotice from "./native-limit-notice";
 import { trackColorForClip } from "~/lib/clip-color";
 import type { TimelineContextMenuItem } from "./context-menu/timeline-context-menu";
 import TimelineContextMenu from "./context-menu/timeline-context-menu";
@@ -502,6 +504,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
           >
             <span class="truncate">{displayTrackName(track)}</span>
           </button>
+          <NativeLimitNotice reason={instanceLimit(track.id)} />
           <Show when={isRecordingTarget()}>
             <span role="status" class="sr-only">
               <Show when={sidebar().recordingTargetLock.state() === "finishing"}>{RECORDING_TARGET_FINISHING} </Show>

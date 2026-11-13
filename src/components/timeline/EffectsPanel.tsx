@@ -81,6 +81,7 @@ import { reorderLocalMixedEffects } from "~/lib/local-effects";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import { selectExternalProcessorsForTarget } from "~/lib/external-plugin-ui";
 import { ExternalPluginCard, nativeEditorAnchorFromElement } from "~/components/timeline/external-plugin-card";
+import { instanceLimit } from "~/lib/desktop/vst-instance-failures";
 import type { NativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
 import type { MixedEffectOrderItem } from "~/lib/mixed-effect-order";
 import {
@@ -194,6 +195,8 @@ type EffectsPanelInstrumentSectionProps = {
 
 const EffectsPanelDeviceBoundary: Component<{
   identity: DeviceCollapseIdentity;
+  // The effect or processor instance id the native limitation (E6) is keyed by, for a device that has one.
+  instanceId?: string;
   canWrite: boolean;
   collapse: ReturnType<typeof createEffectsPanelDeviceCollapse>;
   menuItems: () => TimelineContextMenuItem[];
@@ -207,6 +210,7 @@ const EffectsPanelDeviceBoundary: Component<{
       toggle={() => props.collapse.toggle(identity())}
       contentId={() => safeDeviceContentId(identity())}
       canWrite={() => props.canWrite}
+      nativeLimit={() => props.instanceId === undefined ? undefined : instanceLimit(props.instanceId)}
     >
       <TimelineContextMenu
         items={() => [
@@ -807,6 +811,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
           return (
             <EffectsPanelDeviceBoundary
               identity={deviceCollapseIdentity.external(processor().instanceId)}
+              instanceId={processor().instanceId}
               canWrite={props.canWrite}
               collapse={props.deviceCollapse}
               menuItems={() => externalProcessorContextMenuItems(processor())}
@@ -887,6 +892,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                           >
                             <EffectsPanelDeviceBoundary
                               identity={deviceCollapseIdentity.external(processor().instanceId)}
+                              instanceId={processor().instanceId}
                               canWrite={props.canWrite}
                               collapse={props.deviceCollapse}
                               menuItems={() => externalProcessorContextMenuItems(processor())}
@@ -934,6 +940,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                           >
                             <EffectsPanelDeviceBoundary
                               identity={deviceCollapseIdentity.audioEffect(effect().id)}
+                              instanceId={effect().id}
                               canWrite={props.canWrite}
                               collapse={props.deviceCollapse}
                               menuItems={() => contextMenuItems(effect())}

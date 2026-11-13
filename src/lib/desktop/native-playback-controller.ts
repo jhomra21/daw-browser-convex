@@ -62,7 +62,7 @@ import { importNativeRecordingSpool } from "~/lib/recording/native-spool-importe
 import type { RecordingTerminationCause } from "~/lib/recording/recording-diagnostics"
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
 import type { DesktopBridge, NativeDeliveryReply, NativeProcessorPatchReply } from "~/types/desktop-bridge"
-import { clearVstInstanceFailures, clearVstInstanceLimits, limitVstInstances, markVstInstanceFailed } from "./vst-instance-failures"
+import { clearInstanceLimits, clearVstInstanceFailures, markVstInstanceFailed, setInstanceLimits } from "./vst-instance-failures"
 import { nativeVst3LaunchAuthorizationRequiredMessage } from "~/lib/external-plugin-ui"
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import {
@@ -433,17 +433,19 @@ const nativeVstParameterEventsForSnapshot = (
 }
 
 // What the native graph does not support yet, by design (E6). A live edit that hits one is a limitation, not a defect.
-const nativeSnapshotLimitation = (snapshot: LivePlaybackSnapshot): string | undefined => {
-  if (snapshot.tracks.some((track) => track.clips.some((clip) => (
-    clip.midi?.mappings !== undefined && clip.midi.mappings.length > 0
-  )))) return "Native VST3 playback does not support MIDI expression automation yet."
-  if (snapshot.mixer.sidechainRoutes.length > 0)
-    return "The native VST3 graph cannot activate with the current sidechain routing."
-}
+// Each names the elements its routing belongs to, which carry the notice: the mapped device, or the track holding
+// a mapping that targets no device; the device whose sidechain input is set.
+const nativeSnapshotLimitations = (snapshot: LivePlaybackSnapshot) => [
+  { reason: "Native VST3 playback does not support MIDI expression automation yet.",
+    carriers: snapshot.tracks.flatMap((track) => track.clips.flatMap((clip) =>
+      (clip.midi?.mappings ?? []).map((mapping) => mapping.target.effectInstanceId ?? track.id))) },
+  { reason: "The native VST3 graph cannot activate with the current sidechain routing.",
+    carriers: snapshot.mixer.sidechainRoutes.map((route) => route.effectInstanceId) },
+].filter((limitation) => limitation.carriers.length > 0)
 
 const nativeSnapshotSupportError = (snapshot: LivePlaybackSnapshot): string | undefined => {
-  const limitation = nativeSnapshotLimitation(snapshot)
-  if (limitation) return limitation
+  const limitation = nativeSnapshotLimitations(snapshot)[0]
+  if (limitation) return limitation.reason
   if (snapshot.requiresNativePlayback && !snapshot.nativeExternalAttachmentPlan)
     return "The active VST3 attachment plan is unavailable."
 }
@@ -3277,11 +3279,11 @@ export const createNativePlaybackController = (input: {
       // The compile never moves the transport: a loop it disagrees on is applied by the adoption, outside any attempt.
       if (!hasEquivalentTransportScheduling(previous.transport, snapshot.transport))
         return { status: "retry", reason: "transport-mismatch", transport: snapshot.transport }
-      const limitation = nativeSnapshotLimitation(snapshot)
-      if (!limitation) clearVstInstanceLimits()
+      const limitations = nativeSnapshotLimitations(snapshot)
+      if (limitations.length === 0) clearInstanceLimits()
       else {
-        limitVstInstances(snapshot.nativeExternalAttachmentPlan?.attachments.map((attachment) => attachment.instanceId) ?? [], limitation)
-        return { status: "unsupported", reason: limitation }
+        setInstanceLimits(new Map(limitations.flatMap(({ reason, carriers }) => carriers.map((id): [string, string] => [id, reason]))))
+        return { status: "unsupported", reason: limitations[0].reason }
       }
       const supportError = nativeSnapshotSupportError(snapshot)
       if (supportError) throw new Error(supportError)

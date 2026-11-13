@@ -95,3 +95,21 @@ test("keeps the fold contract at the shell and panel boundaries", async () => {
     'data-reorder-key={key}',
   );
 });
+
+// AE-08 phase 8 step 10, item 4 (E6): the native limitation notice sits on the element the routing belongs to, as a neutral
+// title-bar marker and never a dialog: every device's shell, through its boundary's instance id, and the track header.
+test("shows the native limitation notice on the device or track the routing belongs to", async () => {
+  const shell = await readFile(new URL("../effects/EffectShell.tsx", import.meta.url), "utf8");
+  const panel = await readFile(new URL("./EffectsPanel.tsx", import.meta.url), "utf8");
+  const row = await readFile(new URL("./TrackSidebarRow.tsx", import.meta.url), "utf8");
+  const notice = await readFile(new URL("./native-limit-notice.tsx", import.meta.url), "utf8");
+
+  expect(shell).toContain("<NativeLimitNotice reason={collapse?.nativeLimit?.()} />");
+  expect(panel).toContain("nativeLimit={() => props.instanceId === undefined ? undefined : instanceLimit(props.instanceId)}");
+  expect(panel.match(/instanceId=\{processor\(\)\.instanceId\}/g)).toHaveLength(2);
+  expect(panel).toContain("instanceId={effect().id}");
+  expect(row).toContain("<NativeLimitNotice reason={instanceLimit(track.id)} />");
+  expect(notice).toContain('role="status"');
+  expect(notice).toContain("text-muted-foreground");
+  expect(notice).not.toContain("Dialog");
+});

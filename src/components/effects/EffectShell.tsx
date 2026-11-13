@@ -8,6 +8,7 @@ import {
   type DeviceCollapseGesture,
 } from '~/components/timeline/create-effects-panel-device-collapse'
 import { isDeviceHeaderTarget, isDeviceInteractiveTarget } from '~/components/timeline/device-interaction'
+import NativeLimitNotice from '~/components/timeline/native-limit-notice'
 
 type EffectShellProps = {
   title: string
@@ -146,7 +147,10 @@ export default function EffectShell(props: EffectShellProps) {
           <Show when={!collapsed() && props.typeLabel}>
             <span class="shrink-0 text-[10px] text-muted-foreground">{props.typeLabel}</span>
           </Show>
-          <Show when={!collapsed()}>{props.titleActions}</Show>
+          <Show when={!collapsed()}>
+            <NativeLimitNotice reason={collapse?.nativeLimit?.()} />
+            {props.titleActions}
+          </Show>
         </div>
         <Show when={!collapsed() && hasActions()}>
           <div

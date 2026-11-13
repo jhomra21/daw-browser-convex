@@ -172,6 +172,7 @@ export const controllerClassTable = {
     { scenario: "compile-domain-end", seed: 1, greenAfter: "B4a" },
     { scenario: "transport-mismatch", seed: 1, greenAfter: "B4a" },
     { scenario: "abort-no-block", seed: 1, greenAfter: "B4a" },
+    { scenario: "resume-structure", seed: 1, greenAfter: "P8" },
     { scenario: "adoption-cancel", seed: 1, greenAfter: "B4a" },
     { scenario: "adoption-aba", seed: 1, greenAfter: "B4a" },
     { scenario: "adoption-context", seed: 1, greenAfter: "B4a" },

@@ -42,7 +42,7 @@ const patchScenarios = ["patch-install", "patch-install-late-proof", "patch-firs
   "patch-prepared-override", "patch-prepared-pending", "patch-refused-settled", "rebound-credit", "rebound-applied-rejected", "joined-flush-credit", "patch-projected-timing"]
 // B3b witnesses: what an ended domain owes its waiters, and the timers a processor wait may not allocate.
 const endingScenarios = ["pause-refused-pending", "seek-refused-pending", "rapid-seek", "send-straddles-pause", "two-registry-frame", "browser-flush-pause", "urgent-pause", "processor-timer", "late-inspect",
-  "flush-no-bridge", "flush-unprepared", "flush-after-dispose", "flush-after-loss", "terminal-classifier", "compile-domain-end", "abort-no-block"]
+  "flush-no-bridge", "flush-unprepared", "flush-after-dispose", "flush-after-loss", "terminal-classifier", "compile-domain-end", "abort-no-block", "resume-structure"]
 // B4a witnesses: what an adoption owes a cancelled, joined, waiting or refused intent.
 const adoptionScenarios = ["adoption-cancel", "adoption-aba", "adoption-context", "adoption-refusal-context", "adoption-refusal-key",
   "adoption-explicit-upgrade", "content-rejection", "content-rejection-explicit",
@@ -1029,6 +1029,16 @@ async function runSeed(seed: number, plant: Defect | undefined, trace?: SeedTrac
         await act({ kind: "check", mode: "compile-aborted", value: index })
         await act({ kind: "compile-unsupported", value: 0 })
       }
+    } else if (options.scenario === "resume-structure") {
+      // A track added while the session is paused changes neither its assets nor its processors: the Play that resumes the
+      // session must still run it (phase 8 step 4).
+      await act({ kind: "pause" }); await drain()
+      await act({ kind: "mark-compiles" })
+      await act({ kind: "structure", value: 1 })
+      // On odd seeds the hook's follow has submitted the edit, and its adoption is still under way when Play comes.
+      if (seed % 2) await act({ kind: "submit-schedule" })
+      await act({ kind: "start" }); await drain()
+      await act({ kind: "check", mode: "resume-structure" })
     } else if (options.scenario === "abort-no-block") {
       // An adoption whose compile is cancelled by a seek ends without a refusal on record: nothing blocks the next ask.
       await act({ kind: "submit-schedule" })

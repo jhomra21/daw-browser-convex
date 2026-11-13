@@ -7411,6 +7411,54 @@ test("B6 refused parameter record follows the paused domain into a differently p
   }
 })
 
+for (const submitted of [false, true]) {
+  test(`P8 a routed track added while paused is adopted in place by the Play that resumes (edit ${submitted ? "submitted" : "not submitted"})`, async () => {
+    const h = createFuzzHost(() => {}, undefined, false, () => {}, () => {})
+    const base = utilityPlaybackInput()
+    let current = base
+    const controller = createNativePlaybackController({
+      bridge: h.bridge, getProjectId: () => "fixture-project", getProjectGeneration: () => 1,
+      compileSnapshot: async transport => compileLivePlaybackSnapshot({ ...current, transport }),
+    })
+    const turns = async () => { for (let turn = 0; turn < 100; turn++) await Promise.resolve() }
+    const act = async (action: Parameters<typeof h.act>[0]) => {
+      h.act(action, [], h.lose, () => {})
+      await turns()
+    }
+    const drive = async () => {
+      for (let step = 0; step < 200; step++) {
+        const control = h.enabled([]).find(action => action.kind === "control-wake"
+          || action.kind === "deliver-reply" || action.kind === "publication-acknowledge")
+        if (control) await act(control)
+        else if (h.started) {
+          await act({ kind: "render-block" })
+          await act({ kind: "deliver-progress" })
+        } else return
+      }
+    }
+    const spawns = () => ["begin", "configure", "start"].reduce((sum, name) => sum + (h.counts.get(name) ?? 0), 0)
+    try {
+      const play = controller.start(base.transport)
+      await turns(); await drive()
+      expect(await play).toBe("started")
+      const pause = controller.pause(0.25)
+      await turns(); await drive(); await pause
+      const before = { nodes: h.active?.nodes.size, spawns: spawns() }
+      current = { ...base, tracks: [...base.tracks, { ...base.tracks[0]!, id: "routed", clips: [] }] }
+      if (submitted) void controller.adoptSchedule({ ...migrationIntent("p8-routed-add"), schedule: "p8-routed-add" })
+      const resumed = controller.start({ ...base.transport, playheadSec: 0.25 })
+      await turns(); await drive()
+      expect(await resumed).toBe("started")
+      expect(controller.isActive()).toBe(true)
+      expect(h.active?.nodes.size).toBe((before.nodes ?? 0) + 1)
+      expect(spawns()).toBe(before.spawns)
+    } finally {
+      h.lose()
+      await controller.dispose()
+    }
+  })
+}
+
 type B6dOwner = ReturnType<typeof createNativeProcessorStateOwner>
 const b6dProgress = (revision: number, epoch: number, sequence: number, appliedProcessorSequence: number): NativeScheduleProgress => ({
   revision, epoch, progressSequence: BigInt(sequence), renderedThroughFrame: 512n, acceptedThroughFrame: 96_512n,

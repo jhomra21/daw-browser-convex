@@ -129,6 +129,7 @@ export default function createControllerFixture(
         ...(warped && { audioWarp: { enabled: true, mode: "stretch" as const, sourceBpm: 200 } }),
       }] : [] },
       { id: "parallel", name: "Parallel", volume: 1, clips: [] },
+      ...(content.routed ? [{ id: "extra", name: "Extra", volume: 1, clips: [] }] : []),
     ],
     renderState: { fx: { masterVolume, masterFxInstances: [], trackFx: { ...(instrument && !synthEffects && { parallel: {
       instances: [],
@@ -176,7 +177,7 @@ export default function createControllerFixture(
   // What a refusal left behind, to count the attempt a returning capacity buys from there.
   let afterRefusal = { compiles: 0, prepares: 0 }
   const nativeMaster = (context: string | undefined) => ({ native: masterGainOf(h.active), compiled: Math.fround(contextVolume(context)) })
-  let mark = { faults: 0, compiles: 0, epoch: 0, transports: 0, prepares: 0, publishes: 0, revision: 0, assets: new Set<number>(), attempts: 0, edits: 0 }
+  let mark = { faults: 0, compiles: 0, epoch: 0, transports: 0, prepares: 0, spawns: 0, publishes: 0, revision: 0, assets: new Set<number>(), attempts: 0, edits: 0 }
   // Adoption witnesses name their intents "key/schedule/context/loop": a context is an instrument override of that
   // name (one object per name), so another name is another reference, and any loop part asks for a loop.
   const overrides = new Map<string, { targetId: string; instrument: TrackInstrumentParams }>()
@@ -523,6 +524,8 @@ export default function createControllerFixture(
       updateDesired({ utilityPresent: present, gain: present ? 0 : desired.gain, sequence: desired.sequence + 1, incarnation })
       record({ event: "incarnation", present, incarnation, desired })
     }
+    // A track neither the assets nor the processor membership name: the one kind of structural edit a resume's gate cannot see.
+    else if (action.kind === "structure") updateDesired({ routed: action.value !== 0, sequence: desired.sequence + 1 })
     else if (action.kind === "sample") updateDesired({ sample: action.value !== 0, sequence: desired.sequence + 1 })
     else if (action.kind === "sample-source") sampleSource = action.mode ?? "source"
     else if (action.kind === "release-asset") {
@@ -585,7 +588,7 @@ export default function createControllerFixture(
     else if (action.kind === "compile-unsupported") compileUnsupported = action.value !== 0
     else if (action.kind === "mark-compiles")
       mark = { faults: productFaults, compiles: compileCount, epoch: h.epoch, transports: h.counts.get("transport") ?? 0, prepares: h.counts.get("prepare") ?? 0,
-        publishes: h.counts.get("publish") ?? 0, revision: h.active?.revision ?? 0, assets: heldAssets(), attempts: h.counts.get("asset") ?? 0, edits: fftOrder + attachmentEdits }
+        spawns: ["begin", "configure", "start"].reduce((sum, name) => sum + (h.counts.get(name) ?? 0), 0), publishes: h.counts.get("publish") ?? 0, revision: h.active?.revision ?? 0, assets: heldAssets(), attempts: h.counts.get("asset") ?? 0, edits: fftOrder + attachmentEdits }
     // The owner path the hook takes: an intent, retried only by an explicit request or a capacity fact. Each ask is
     // watched under the intent's name.
     else if (action.kind === "submit-schedule") {
@@ -847,6 +850,22 @@ export default function createControllerFixture(
       record({ witness: mode, outcome: outcome.success ? outcome.data.status : undefined, blocked })
       if (blocked || !outcome.success || !["adopted", "unchanged"].includes(outcome.data.status))
         fail("I7", `An adoption cancelled by a seek ended ${outcome.success ? outcome.data.status : "unsettled"}${blocked ? " with a refusal on record" : ""}`, "live", "compile-abort-block")
+      return
+    }
+    if (mode === "resume-structure") {
+      // A Play resuming the prepared session recompiled a track the prepared graph lacks: what it runs holds that track.
+      checked("I1")
+      const installed = h.active?.nodes.size
+      const wanted = expectedTopology(desired.fft).nodeLatencies.length + (desired.routed ? 1 : 0)
+      // A session prepare opens a transaction, configures the host and starts it: a resume sends none of them.
+      const spawns = ["begin", "configure", "start"].reduce((sum, name) => sum + (h.counts.get(name) ?? 0), 0) - mark.spawns
+      record({ witness: mode, installed, wanted, spawns, prepared: controller.isPrepared(), active: controller.isActive() })
+      if (!controller.isActive())
+        fail("I1", "A Play resuming a paused session left it not playing", "live", "resume-structure-not-started")
+      else if (installed !== wanted)
+        fail("I1", `A resumed session runs ${installed} graph nodes, its compile has ${wanted}`, "live", "resume-structure-uninstalled")
+      else if (spawns)
+        fail("I1", `A Play resuming a paused session spawned the host again (${spawns} begin/configure/start) for a track added while paused`, "live", "resume-structure-rebuilt")
       return
     }
     if (mode === "transport-lane") {

@@ -1,6 +1,6 @@
 export type Defect = "stale-overwrite" | "false-receipt" | "early-release" | "noop-churn" | "drop-batch" | "false-rejection" | "lost-edit" | "swallow-waiter" | "never-wake-latency" | "underfill" | "force-rebuild" | "false-urgent-receipt" | "cancel-retained" | "post-recovery-overwrite"
 export type Failure = { invariant: string; detail: string; domain: string; class?: string; reason?: string | null; error?: string | null; transition?: string | null }
-export type Content = { gain: number; fft: 512 | 1024 | 2048 | 4096; sequence: number; sample: boolean; utilityPresent?: boolean; incarnation: number }
+export type Content = { gain: number; fft: 512 | 1024 | 2048 | 4096; sequence: number; sample: boolean; utilityPresent?: boolean; routed?: boolean; incarnation: number }
 export const initialContent: Content = { gain: 0, fft: 512, sequence: 1, sample: false, incarnation: 1 }
 export const reduceDesired = (previous: Content, change: Partial<Content>): Content =>
   change.sequence !== undefined && change.sequence < previous.sequence ? previous : { ...previous, ...change }

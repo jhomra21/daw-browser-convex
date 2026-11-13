@@ -170,6 +170,13 @@ const processorMembership = (snapshot: LivePlaybackSnapshot | undefined) => [
   ].map((instance) => JSON.stringify([nodeId, instance.id, instance.kind]))),
 ].sort().join("\n")
 
+// The nodes and routes a snapshot gives a graph, without their gains or timing: what only a publication can install.
+const graphStructure = (snapshot: LivePlaybackSnapshot | undefined) => JSON.stringify([
+  snapshot?.mixer.graph.channels.map(({ channel, outputTargetId, inputLayout, outputLayout, sends }) =>
+    [channel.id, channel.kind, outputTargetId, inputLayout, outputLayout, sends.map(({ targetId, tap }) => [targetId, tap])]),
+  snapshot?.mixer.sidechainRoutes,
+])
+
 // The tracks whose sampled instrument regions a prepared graph holds native state for.
 const sampledInstrumentTrackIds = (snapshot: LivePlaybackSnapshot): readonly string[] =>
   Object.entries(snapshot.mixer.fx.trackFx ?? {}).flatMap(([trackId, entry]) =>
@@ -633,6 +640,10 @@ export const createNativePlaybackController = (input: {
   // The priming of a paused edit's published schedule. A loop change and a Play follow its publication and this priming:
   // a Play resumes the schedule that settles with them, not the one they replace.
   let pausedPriming: Promise<void> | undefined
+  // A Play resuming the prepared session is waiting for the adoption of the graph structure it compiled. Adoptions otherwise
+  // wait for a pending Play; this one is the Play's own, and an adoption already waiting wakes to run it.
+  let resumeAdoptionPending = false
+  let resumeAdoptionWake = Promise.withResolvers<void>()
   let preparedGraph: AudioCoreGraphSnapshot | undefined
   let structuralGraphGeneration = 0
   // Renderer edit order, never bridge completion order. Every stamp comes from
@@ -1650,15 +1661,39 @@ export const createNativePlaybackController = (input: {
         attemptedPageManager = nativeTimelinePageManager
         // Public project control can persist automation while a paused native
         // session remains prepared. Recompile before resuming its coordinator.
-        const compiled = await input.compileSnapshot(transport, compileContext)
+        let compiled = await input.compileSnapshot(transport, compileContext)
+        // A track, send or sidechain edit the paused session has not adopted: a resume never rebuilds for it. The session
+        // adopts it at seam 0 and primes it, then this Play compiles again and resumes what it holds.
+        if (compiled.supported && graphStructure(compiled.snapshot) !== graphStructure(preparedSnapshot)) {
+          const structure = graphStructure(compiled.snapshot)
+          resumeAdoptionPending = true
+          resumeAdoptionWake.resolve()
+          try {
+            await adoptSchedule({
+              key: `resume:${structure}`, schedule: structure,
+              context: { instrumentOverride: compileContext?.instrumentOverride, externalProcessor: compileContext?.externalProcessor },
+              loop: { loopEnabled: transport.loopEnabled, loopStartSec: transport.loopStartSec, loopEndSec: transport.loopEndSec },
+            })
+            await pausedPriming
+          } finally {
+            resumeAdoptionPending = false
+            resumeAdoptionWake = Promise.withResolvers<void>()
+          }
+          // The priming moved the session to a new epoch and coordinator.
+          previousCoordinator = attemptedCoordinator = scheduleCoordinator
+          attemptedPageManager = nativeTimelinePageManager
+          compiled = await input.compileSnapshot(transport, compileContext)
+        }
         const refreshed = compiled.supported
           ? { ...compiled, snapshot: { ...compiled.snapshot, transport } }
           : compiled
         // The prepared session schedules only the sources and processors it installed: a recompile that names another
-        // source, or places other processors, needs a prepare.
+        // source, places other processors or routes other nodes, needs a prepare.
         const installedSources = new Set(preparedSnapshot?.assets.map((asset) => asset.assetId))
         if (!refreshed.supported || refreshed.snapshot.revision !== preparedSnapshot?.revision
           || refreshed.snapshot.assets.some((asset) => !installedSources.has(asset.assetId))
+          // Only an adoption that failed leaves the structure behind: the one case a resume prepares for it.
+          || graphStructure(refreshed.snapshot) !== graphStructure(preparedSnapshot)
           || processorMembership(refreshed.snapshot) !== processorMembership(preparedSnapshot)) {
           preparedProjectGeneration = undefined
         } else {
@@ -2712,8 +2747,8 @@ export const createNativePlaybackController = (input: {
 
   const updateLoop = async (loop: Pick<LivePlaybackTransport, "loopEnabled" | "loopStartSec" | "loopEndSec">) => {
     // Startup owns its coordinator until priming and the running ACK finish.
-    // Hydrated loop settings must not replace it with a paused epoch mid-start.
-    await pendingStart
+    // Hydrated loop settings must not replace it with a paused epoch mid-start. The start's own adoption is its first step.
+    await Promise.race([pendingStart, resumeAdoptionWake.promise])
     if (!prepared || !preparedSnapshot) return
     const sequence = ++loopUpdateSequence
     const matches = () => preparedSnapshot?.transport.loopEnabled === loop.loopEnabled
@@ -4365,8 +4400,8 @@ export const createNativePlaybackController = (input: {
       if (!processorState.isNewest(attempt)) return superseded
       // A Play resuming the prepared session settles first: the edit then lands on the playing session it left. From here
       // to the registration below nothing awaits, so a Play either is seen here or sees the registration.
-      if (prepared && !active && pendingStart) {
-        await pendingStart.then(() => undefined, () => undefined)
+      if (prepared && !active && pendingStart && !resumeAdoptionPending) {
+        await Promise.race([pendingStart.then(() => undefined, () => undefined), resumeAdoptionWake.promise])
         continue
       }
       attempt.fields = adoptionFields()

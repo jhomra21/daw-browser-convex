@@ -4,6 +4,7 @@ import { build } from 'vite'
 import solidPlugin from 'vite-plugin-solid'
 import tailwindcss from '@tailwindcss/vite'
 import { z } from 'zod'
+import { createDefaultSpectralParams } from '@daw-browser/shared'
 
 const root = new URL('../../../', import.meta.url).pathname.replace(/\/$/u, '')
 const evidence = process.env.DAW_INSTRUMENT_EVIDENCE ?? `${root}/acceptance-reports/native-running-seek-${crypto.randomUUID()}`
@@ -1033,7 +1034,7 @@ const liveEditSchema = z.object({
 })
 const publishedBanks = (state: z.infer<typeof liveEditSchema>) => [...new Set(state.revisions.filter((entry) => entry.status === 'published').map((entry) => entry.revision))]
 const trackSchema = z.object({ id: z.string(), name: z.string(), kind: z.string() }).passthrough()
-const observedSchema = z.object({ tracks: z.array(trackSchema), processors: z.array(z.object({ id: z.string(), processor: z.object({ kind: z.string() }).passthrough() }).passthrough()) }).passthrough()
+const observedSchema = z.object({ tracks: z.array(trackSchema), processors: z.array(z.object({ id: z.string(), processor: z.object({ kind: z.string(), params: z.object({ state: z.record(z.string(), z.json()).optional() }).passthrough().optional() }).passthrough() }).passthrough()) }).passthrough()
 const persisted = (id: string) => ({ source: 'persisted', id })
 type LiveEditState = z.infer<typeof observedSchema>
 const trackNamed = (state: LiveEditState, name: string) => {
@@ -1060,6 +1061,17 @@ const liveEditClasses: ({ name: string; publishes?: false } & ({ actions: (state
     const effect = state.processors.find((entry) => entry.processor.kind === 'utility')
     if (!effect) throw new Error('Utility effect is absent')
     return [{ kind: 'effect.remove', target: { kind: 'track', track: persisted(trackNamed(state, 'Added').id) }, effectKind: 'utility', effect: persisted(effect.id) }]
+  } },
+  { name: 'spectral insert', actions: (state) => {
+    const target = { kind: 'track', track: persisted(trackNamed(state, 'Audio').id) }
+    return [{ kind: 'effect.upsert', target, effectKind: 'spectral', params: { version: 1, state: { ...createDefaultSpectralParams(), fftSize: 512, mix: 1 } } },
+      { kind: 'effect.upsert', target, effectKind: 'utility' }]
+  } },
+  { name: 'spectral fft size', actions: (state) => {
+    const spectral = state.processors.find((entry) => entry.processor.kind === 'spectral')
+    if (!spectral) throw new Error('Spectral effect is absent')
+    return [{ kind: 'effect.upsert', target: { kind: 'track', track: persisted(trackNamed(state, 'Audio').id) }, effect: persisted(spectral.id), effectKind: 'spectral',
+      params: { version: 1, state: { ...spectral.processor.params?.state, fftSize: 4096 } } }]
   } },
   { name: 'instrument replace', actions: (state) => [{ kind: 'instrument.set', target: { kind: 'track', track: persisted(trackNamed(state, 'Empty instrument fixture').id) }, instrumentKind: 'drum-rack' }] },
   { name: 'track reorder', actions: (state) => {

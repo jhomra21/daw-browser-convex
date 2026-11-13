@@ -9,7 +9,7 @@ import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { createNativePlaybackController, nativePlaybackFaultText } from './native-playback-controller'
 import { createEffectsPanelController } from '~/components/timeline/create-effects-panel-controller'
 import { nativeGraphNodeId } from '@daw-browser/audio-engine/native-host-wire'
-import { createDefaultSamplerParams, createDefaultGranularParams, createDefaultDrumRackParams, type TrackInstrumentParams, type SamplerZone } from '@daw-browser/shared'
+import { createDefaultSamplerParams, createDefaultGranularParams, createDefaultDrumRackParams, type JsonValue, type TrackInstrumentParams, type SamplerZone } from '@daw-browser/shared'
 import { sampledInstrumentRegionIdentity } from '@daw-browser/audio-engine/sampled-instrument-region'
 import { createSampledInstrumentRegionBudget } from '~/lib/sampled-instrument-region-budget'
 import { nativeInstrumentBudgetPolicy } from './native-instrument-budget-policy'
@@ -576,7 +576,7 @@ const compileSnapshot = async (next: LivePlaybackTransport) => {
 }
 // The desktop host's control requests reach the mounted Timeline through the handler it registers (attached-host-controller).
 let hostRequestHandler: Parameters<NonNullable<Window['dawDesktop']>['setRequestHandler']>[0]
-export const hostControl = async (operation: 'control.preview' | 'control.requestApproval' | 'control.commit' | 'control.snapshot', input: unknown) => {
+export const hostControl = async (operation: 'control.preview' | 'control.requestApproval' | 'control.commit' | 'control.snapshot', input: JsonValue) => {
   if (!hostRequestHandler) throw new Error('The Timeline registered no host request handler.')
   const response = await hostRequestHandler({ id: crypto.randomUUID(), operation, input,
     trustedActorSubject: 'local:00000000-0000-4000-8000-000000000000' })

@@ -3124,8 +3124,10 @@ export const createNativePlaybackController = (input: {
     if (execution && !epochApplied(epoch)) return execution.sequence
     const attempt = execution?.attempt
     const result = await queueBuiltInParameterEvents({ ...request, revision, epoch, sequence, ...(execution && { execution }) })
-    // A record dispatched again while this send was out is that dispatch's now.
-    if (execution && execution.attempt === attempt) {
+    // A record dispatched again while this send was out is that dispatch's now, except for a parameter its processor
+    // has no target for: no dispatch can carry it, and a frame redispatches an unsent record, which would otherwise
+    // take the verdict from every send in turn.
+    if (execution && (execution.attempt === attempt || !result.ok && result.kind === "not-sent" && result.reason === "unsupported")) {
       if (result.ok) processorState.admit(execution)
       else parameterFailed(execution, result, reconciling)
     }

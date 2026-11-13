@@ -19,7 +19,7 @@ import type { PortableWasmBackendSelection } from '@daw-browser/audio-engine/was
 import type { PortableWasmStatusMessage } from '@daw-browser/audio-engine/portable-wasm-protocol'
 import { audioCoreContractVersion } from '@daw-browser/audio-core-contract'
 import { audioCoreWasmAbiVersion, audioCoreWasmArtifactVersion, audioCoreWasmPagedAbiVersion } from '@daw-browser/audio-core-wasm'
-import { createDefaultSynthParams, type TrackInstrumentParams } from '@daw-browser/shared'
+import { createDefaultSynthParams, type JsonValue, type TrackInstrumentParams } from '@daw-browser/shared'
 import { setLocalEffect, deleteLocalEffect } from '~/lib/local-effects'
 import { mapNativeBuiltInParameterCommit } from '~/lib/desktop/native-built-in-parameter-mapper'
 
@@ -282,7 +282,7 @@ export const mountTimeline = async () => {
       loop: () => loadLocalProjectState(project.id, 'loop'),
       observe: async () => projectSnapshotSchemaV2.parse(await hostControl('control.snapshot', { projectId: project.id, readVersion: 'v2' })),
       // The desktop host's canonical path: snapshot, preview, approval when required, keyed commit. The mounted Timeline reconciles around the commit.
-      commit: async (actions: unknown[]) => {
+      commit: async (actions: JsonValue[]) => {
         const snapshot = projectSnapshotSchemaV2.parse(await hostControl('control.snapshot', { projectId: project.id, readVersion: 'v2' }))
         const request = { version: 'v1', projectId: project.id, expectedRevision: snapshot.project.revision, actions }
         const preview = controlPreviewResultSchemaV1.parse(await hostControl('control.preview', request))

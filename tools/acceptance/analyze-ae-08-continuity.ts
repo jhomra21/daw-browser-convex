@@ -51,6 +51,9 @@ const compare = (output: Pcm, reference: Pcm) => {
 // A measured capture is one that produced blocks inside the marked interval. It
 // must have completed, and none may have failed or dropped frames.
 type Entry = Awaited<ReturnType<typeof jsonl>>[number]
+// The VST3 worker supervisor coming up beside the running device is not a device start, so a warm resume or an edit
+// in a row with a worker must not read it as a cold sign.
+const coldEvent = (event: Entry["event"] | undefined, pattern: RegExp) => event !== "worker-supervisor-started" && pattern.test(String(event))
 export const rawCaptureOffsetsValid = (blocks: Entry[], wavFrames: number, complete?: Entry) => {
   if (!complete || !Number.isSafeInteger(wavFrames) || Number(complete.frames) !== wavFrames || !blocks.length) return false
   let accountedFrames = 0
@@ -446,7 +449,9 @@ type Phase4Edit = { name: string; fromLatencyFrames: number; toLatencyFrames: nu
 // Moves come from the published revisions, never from plan positions. Each publication carries a contiguous run of
 // plan edits in plan order: either every edit has its own publication, or every renderer turn (the edits the runner
 // recorded at one wallMs) has exactly one. Any other count loses or duplicates an edit, and no publication may
-// precede an edit it carries. A publication's move is the sum of its raises, so the total is the plan's.
+// precede an edit it carries. A publication's move is the net rise of its turn, max(0, last.to - first.from), which
+// is the sum of the raises for a run of contiguous raises. A turn that raises then lowers moves only by the net.
+// Turns are judged strictly: edits closer than one compile duration fail the row even when the audio is right.
 const attributePublications = <Publication extends { wallMs: number; publicationFrame: number }>(
   edits: readonly Phase4Edit[], publications: readonly Publication[]) => {
   const turns: Phase4Edit[][] = []
@@ -460,8 +465,7 @@ const attributePublications = <Publication extends { wallMs: number; publication
   if (!groups) return undefined
   const attributed = publications.map((publication, index) => {
     const group = groups[index] ?? []
-    return { publication, edits: group, raiseFrames: group.reduce((sum, edit) =>
-      sum + Math.max(0, edit.toLatencyFrames - edit.fromLatencyFrames), 0) }
+    return { publication, edits: group, raiseFrames: Math.max(0, (group.at(-1)?.toLatencyFrames ?? 0) - (group[0]?.fromLatencyFrames ?? 0)) }
   })
   return attributed.every(({ publication, edits: group }) => group.length > 0
     && group.every((edit) => edit.wallMs <= publication.wallMs)) ? attributed : undefined
@@ -481,7 +485,11 @@ const latencySample = (reference: Pcm, frame: number, channel: number, move: Lat
   return Math.fround((reference.samples[(frame - shift) * reference.channels + channel] ?? 0) * Math.fround(gain))
 }
 
-const compareLatency = (output: Pcm, reference: Pcm, move: LatencyMove | LatencyMove[], tolerance: number, endFrame: number) => {
+// publicationFrames lists every publication of the burst, lowers included. Each frame is judged against its own
+// window's expectation, and the first mismatch is reported with the publication whose window holds it (null before
+// the first publication).
+const compareLatency = (output: Pcm, reference: Pcm, move: LatencyMove | LatencyMove[], tolerance: number, endFrame: number,
+  publicationFrames: readonly number[] = []) => {
   const moves = Array.isArray(move) ? move : [move]
   let mismatches = 0, nonFinite = 0, clipped = 0, maxAbsDifference = 0, firstMismatch: number | null = null
   const regions = { before: 0, fade: 0, shifted: 0 }
@@ -512,8 +520,10 @@ const compareLatency = (output: Pcm, reference: Pcm, move: LatencyMove | Latency
       }
     }
   }
+  const window = firstMismatch === null ? -1 : publicationFrames.findLastIndex((frame) => frame <= firstMismatch)
   return { passed: mismatches === 0 && nonFinite === 0 && clipped === 0,
-    mismatches, nonFinite, clipped, maxAbsDifference, firstMismatch, regions, comparedFrames: endFrame }
+    mismatches, nonFinite, clipped, maxAbsDifference, firstMismatch, failedPublication: window < 0 ? null : window,
+    regions, comparedFrames: endFrame }
 }
 
 // Compare the monitored right output with its identical source on the retained
@@ -536,6 +546,30 @@ const monitoredContentDelay = (output: Pcm, source: Pcm, from: number, intrinsic
   }
   return { intrinsicFrames, measuredFrames, correlation: bestCorrelation,
     passed: count >= 2048 && bestCorrelation > 0.98 && Math.abs(measuredFrames - intrinsicFrames) <= 1 }
+}
+
+// Where the edited track plays the retained track's own source, its content delay against the retained reference is the
+// budget of the raises published so far. A lower never shifts the retained channel and the budget stays pinned, so the
+// right path must hold it through a lower, too. Without this the right path of a lower is only energy-checked, and a
+// lower that unpins it or a raise it never follows passes. Reported by publication index. A lower that is lost with
+// the budget unchanged has the same delay and cannot be seen here.
+const rightPathDelays = (output: Pcm, source: Pcm, publications: readonly { raiseFrames: number; publicationFrame: number }[],
+  rate: number) => {
+  let budget = 0
+  return publications.map((edit, index) => {
+    const before = monitoredContentDelay(output, source, edit.publicationFrame - rate / 4, budget)
+    budget += edit.raiseFrames
+    return { index, before, after: monitoredContentDelay(output, source, edit.publicationFrame + rate / 4, budget) }
+  })
+}
+// Wall times of the publications in publication order, of the latency-move-complete events, and of the request of the
+// overlapping move. The overlapping request lands before the first move completes, and no publication, merged or
+// split, falls between the first publication and that completion. The first completion must be the first
+// publication's own, so it comes after it.
+const overlappingMoveWaits = (publications: readonly number[], completions: readonly number[], overlapRequested: number) => {
+  const [first] = publications, [done] = completions
+  return first !== undefined && done !== undefined && completions.length >= 2 && overlapRequested < done && first < done
+    && publications.every((wall) => wall <= first || wall >= done)
 }
 
 export const phase4SyntheticProof = () => {
@@ -589,17 +623,29 @@ export const phase4SyntheticProof = () => {
   const moves = [move, { publicationFrame: 48000, raiseFrames: 512 }]
   const multipleMoves = compareLatency(renderMoves(moves), reference, moves, 0, frames).passed
     && !compareLatency(renderMoves(moves), reference, [move], 0, frames).passed
+  // A defect is reported with the publication whose window it falls in, and one before the first publication with none.
+  const dropout = (at: number) => {
+    const damaged = renderMoves(moves)
+    damaged.samples.fill(0, at * channels, (at + 64) * channels)
+    return compareLatency(damaged, reference, moves, 0, frames, moves.map((entry) => entry.publicationFrame)).failedPublication
+  }
+  const failedPublication = { first: dropout(30000) === 0, second: dropout(60000) === 1, beforeAny: dropout(10000) === null,
+    clean: compareLatency(renderMoves(moves), reference, moves, 0, frames, [24000, 48000]).failedPublication === null }
   // The overlapping-moves plan: two raises in one renderer turn, then two lowers in later turns.
   const plan: Phase4Edit[] = [
     { name: "latency-raise", fromLatencyFrames: 1024, toLatencyFrames: 2560, wallMs: 0 },
     { name: "latency-raise-overlap", fromLatencyFrames: 2560, toLatencyFrames: 6144, wallMs: 0 },
     { name: "latency-lower", fromLatencyFrames: 6144, toLatencyFrames: 2560, wallMs: 1000 },
     { name: "latency-lower", fromLatencyFrames: 2560, toLatencyFrames: 1024, wallMs: 2000 }]
+  const mixedPlan: Phase4Edit[] = [
+    { name: "latency-raise", fromLatencyFrames: 1024, toLatencyFrames: 6144, wallMs: 0 },
+    { name: "latency-lower", fromLatencyFrames: 6144, toLatencyFrames: 2560, wallMs: 0 },
+    { name: "latency-lower", fromLatencyFrames: 2560, toLatencyFrames: 1024, wallMs: 2000 }]
   const raised = { wallMs: 100, publicationFrame: 20000 }, overlap = { wallMs: 150, publicationFrame: 30000 }
   const lowered = { wallMs: 1100, publicationFrame: 50000 }, lowest = { wallMs: 2100, publicationFrame: 70000 }
   // Whether the audio that actually moved by `actual` passes against the moves taken from `published`.
-  const accepted = (published: { wallMs: number; publicationFrame: number }[], actual: LatencyMove[]) => {
-    const attributed = attributePublications(plan, published)
+  const accepted = (published: { wallMs: number; publicationFrame: number }[], actual: LatencyMove[], edits = plan) => {
+    const attributed = attributePublications(edits, published)
     return !!attributed && compareLatency(renderMoves(actual), reference, publishedMoves(attributed), 0, frames).passed
   }
   const attribution = {
@@ -614,9 +660,42 @@ export const phase4SyntheticProof = () => {
         { publicationFrame: 20000, raiseFrames: 1536 }, { publicationFrame: 30000, raiseFrames: 3584 },
         { publicationFrame: 40000, raiseFrames: 3584 }]),
     wrongMergedTotal: !accepted([raised, lowered, lowest], [{ publicationFrame: 20000, raiseFrames: 5632 }]),
+    // A turn that raises and then lowers moves the budget by the net rise (1024 to 2560), not by the sum of its raises.
+    mixedTurnNetRise: accepted([raised, lowest], [{ publicationFrame: 20000, raiseFrames: 1536 }], mixedPlan)
+      && !accepted([raised, lowest], [{ publicationFrame: 20000, raiseFrames: 5120 }], mixedPlan),
     swappedOrder: !accepted([raised, overlap, lowered, lowest],
       [{ publicationFrame: 20000, raiseFrames: 3584 }, { publicationFrame: 30000, raiseFrames: 1536 }])
       && !accepted([raised, { wallMs: 900, publicationFrame: 45000 }, lowest], [{ publicationFrame: 20000, raiseFrames: 5120 }]),
+  }
+  // The edited right channel carries the retained source 1024 frames late, then 6144 after a raise at frame 100000, then
+  // 2560 after the lower at 200000. A lost lower keeps 6144, whatever substitute publication stands in its place.
+  const delayFrames = 262_144, delaySource = (frame: number) => 0.12 * Math.sin(frame * 0.071 + frame * frame * 0.0000001)
+  const delayOutput = (rightDelay: (frame: number) => number): Pcm => {
+    const samples = new Float32Array(delayFrames * channels)
+    for (let frame = 0; frame < delayFrames; frame++) {
+      samples[frame * channels] = delaySource(frame)
+      samples[frame * channels + 1] = delaySource(frame - rightDelay(frame))
+    }
+    return { sampleRate, channels, samples }
+  }
+  const delaySourcePcm = { ...delayOutput(() => 0), samples: Float32Array.from({ length: delayFrames * channels }, (_, index) => delaySource(Math.floor(index / channels))) }
+  // A raise of 5120 at frame 100000 and a pinned lower at 200000. The retained left stays exact through a lower, so
+  // only the right path's own delay shows an unpinned or unapplied one.
+  const budgetPublications = [{ raiseFrames: 5120, publicationFrame: 100_000 }, { raiseFrames: 0, publicationFrame: 200_000 }]
+  const rightFollows = (rightDelay: (frame: number) => number) =>
+    rightPathDelays(delayOutput(rightDelay), delaySourcePcm, budgetPublications, sampleRate)
+      .find((entry) => !entry.before.passed || !entry.after.passed)?.index ?? null
+  const rightDelays = { pinned: rightFollows((frame) => frame < 100_000 ? 0 : 5120) === null,
+    lowerUnpinsRightPath: rightFollows((frame) => frame < 100_000 ? 0 : frame < 200_000 ? 5120 : 1536) === 1,
+    raiseNotAppliedToRightPath: rightFollows(() => 0) === 0 }
+  const overlapWaits = {
+    merged: overlappingMoveWaits([100, 3100, 4300], [1500, 3300, 4500], 0),
+    split: overlappingMoveWaits([100, 1600, 3100, 4300], [1500, 1700, 3300, 4500], 0),
+    earlyOverlapPublication: !overlappingMoveWaits([100, 150, 3100, 4300], [1500, 1700, 3300, 4500], 0),
+    requestedAfterCompletion: !overlappingMoveWaits([100, 3100, 4300], [1500, 3300, 4500], 2000),
+    // A completion that precedes the first publication is not the completion of the move it published.
+    staleCompletion: !overlappingMoveWaits([100, 3100, 4300], [50, 3300, 4500], 0),
+    noPublication: !overlappingMoveWaits([], [1500, 3300], 0),
   }
   const keepLatency = compareLatency(reference, reference, [], 0, frames).passed
     && !compareLatency(pristine, reference, [], 0, frames).passed
@@ -632,8 +711,11 @@ export const phase4SyntheticProof = () => {
   if (!monitoredIntrinsicOnly || !monitoredCompensationRejected) throw new Error("Monitored content-delay oracle failed")
   if (!multipleMoves || !keepLatency) throw new Error("Phase 4 multiple-move/Keep Latency oracle failed")
   if (!Object.values(attribution).every(Boolean)) throw new Error(`Phase 4 publication attribution oracle failed: ${JSON.stringify(attribution)}`)
+  if (!Object.values(failedPublication).every(Boolean)) throw new Error(`Phase 4 per-publication report failed: ${JSON.stringify(failedPublication)}`)
+  if (!Object.values(rightDelays).every(Boolean)) throw new Error(`Phase 4 right-path delay oracle failed: ${JSON.stringify(rightDelays)}`)
+  if (!Object.values(overlapWaits).every(Boolean)) throw new Error(`Phase 4 overlapping-move oracle failed: ${JSON.stringify(overlapWaits)}`)
   if (!Object.values(results).every(Boolean)) throw new Error(`Phase 4 synthetic oracle failed: ${JSON.stringify(results)}`)
-  return { ...results, multipleMoves, keepLatency, monitoredIntrinsicOnly, monitoredCompensationRejected, ...attribution }
+  return { ...results, multipleMoves, keepLatency, monitoredIntrinsicOnly, monitoredCompensationRejected, ...attribution, failedPublication, ...rightDelays, overlapWaits }
 }
 
 const phase4Plan = z.object({ phase: z.literal(4), fixtureKind: z.string(), edits: z.array(z.object({
@@ -697,7 +779,8 @@ export const analyzePhase4 = async (directory: string) => {
   const keepLatency = plan.fixtureKind === "keep-latency-direct" || plan.fixtureKind === "keep-latency-group"
   const moves = keepLatency || !attribution ? [] : publishedMoves(attribution)
   const R = moves.reduce((sum, move) => sum + move.raiseFrames, 0)
-  const pcm = compareLatency(protectedOutput, protectedReference, moves, tolerance, endFrame)
+  const pcm = compareLatency(protectedOutput, protectedReference, moves, tolerance, endFrame,
+    located.map((publication) => publication.publicationFrame))
   const sources = await Promise.all(["reference", "calibration", "baseline"].map(async (name) => {
     const sourceHost = await jsonl(path.join(directory, name, "host.jsonl"))
     const sourceActions = await jsonl(path.join(directory, name, "actions.jsonl"))
@@ -729,6 +812,9 @@ export const analyzePhase4 = async (directory: string) => {
     before: monitoredContentDelay(aligned, expected, edit.publicationFrame - rate / 4, edit.fromLatencyFrames ?? 0),
     after: monitoredContentDelay(aligned, expected, edit.publicationFrame + rate / 4, edit.toLatencyFrames ?? 0),
   })) : []
+  // The rows whose edited track plays the retained track's own source; the others carry content a delay search cannot match.
+  const sourceOnRight = ["stop-restart", "overlapping-moves", "product-maximum"].includes(plan.fixtureKind)
+  const rightDelays = sourceOnRight ? rightPathDelays(aligned, expected, edits, rate) : []
   let restart: { passed: boolean; actualOnset: number; referenceOnset: number } | undefined
   if (plan.fixtureKind === "stop-restart") {
     const restarted = protectedChannel(await readWav(path.join(directory, "restart.wav")))
@@ -779,10 +865,10 @@ export const analyzePhase4 = async (directory: string) => {
       [entry.before, entry.after].every((energy) => energy.meanSquare > 1e-10 && energy.nonFinite === 0 && energy.clipped === 0)),
     monitoredPathHasNoCompensation: !keepLatency || (attribution !== undefined
       && monitoredDelay.every((entry) => entry.before.passed && entry.after.passed)),
+    rightPathHoldsPinnedBudget: attribution !== undefined && rightDelays.every((entry) => entry.before.passed && entry.after.passed),
     stopRestartShrinks: plan.fixtureKind !== "stop-restart" || restart?.passed === true,
     overlappingMoveWaitsForCompletion: plan.fixtureKind !== "overlapping-moves"
-      || (completion.length >= 2 && overlapRequested < Number(completion[0]?.wallMs)
-        && Number(publications[1]?.wallMs) >= Number(completion[0]?.wallMs)),
+      || overlappingMoveWaits(publications.map((entry) => Number(entry.wallMs)), completion.map((entry) => Number(entry.wallMs)), overlapRequested),
     productMaximumReached: plan.fixtureKind !== "product-maximum" || raise?.toLatencyFrames === 65_536,
     captureIntegrity: sources.every((source) => source.measured === 1 && source.failures.length === 0),
   }
@@ -790,7 +876,7 @@ export const analyzePhase4 = async (directory: string) => {
   const verdict = passed ? `PHASE 4 PACKAGED PASS: ${plan.fixtureKind}; R=${R} frames; ${
     keepLatency ? "Keep Latency, no compensated move." : "5 ms out/in, lower pinned."}`
     : `PHASE 4 PACKAGED FAIL: ${Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name).join(", ")}`
-  const analysis = { phase: 4, passed, verdict, checks, synthetic, edits, publications: located, restart, audibleEditedPath, monitoredDelay,
+  const analysis = { phase: 4, passed, verdict, checks, synthetic, edits, publications: located, restart, audibleEditedPath, monitoredDelay, rightDelays,
     oracle: "Moves from the published revisions; exact retained left channel; monitored right content delay equals intrinsic FFT latency only; edited right energy/finite checks.",
     declaredMoveFrames: R,
     declaredMoveMs: R / rate * 1000, allowedMoveWindowFrames: R + Math.round(rate * 0.01),
@@ -886,6 +972,85 @@ const spanDifference = (output: Pcm, reference: Pcm, startFrame: number, endFram
   return { mismatches, maxAbsDifference }
 }
 
+// A burst of N edits publishes N times. Publication k owns [seams[k], seams[k + 1]) (the last runs to endFrame) and is
+// judged on its own: states[k + 1] is the state it enters, entered over fadeFrames from states[k] on every edited
+// channel, while channel 0 is the retained path and must equal the entered state exactly. A defect is reported with
+// the index of the edit whose window holds it and never spills into the next window, so one corrupted slot counts once.
+// A window shorter than the fade cannot be judged and fails, as does any seam list that is not strictly ascending.
+export const judgeBurst = (output: Pcm, states: readonly Pcm[], seams: readonly number[], options: { fadeFrames: number; endFrame: number }) => {
+  const { fadeFrames, endFrame } = options
+  const wellFormed = states.length === seams.length + 1 && seams.every((seam, edit) => edit === 0 || seam > (seams[edit - 1] ?? Infinity))
+    && [output, ...states].every((pcm) => pcm.sampleRate === output.sampleRate && pcm.channels === output.channels
+      && pcm.samples.length >= endFrame * output.channels)
+  const windows = wellFormed ? seams.map((from, edit) => {
+    const to = seams[edit + 1] ?? endFrame
+    const before = states[edit], after = states[edit + 1]
+    let mismatches = 0, firstMismatch: number | null = null, maxAbsDifference = 0
+    for (let frame = from; frame < to; frame++) {
+      const fade = Math.max(0, Math.fround(1 - Math.fround((frame - from) / fadeFrames)))
+      for (let channel = 0; channel < output.channels; channel++) {
+        const index = frame * output.channels + channel
+        const next = after?.samples[index] ?? NaN
+        const expected = channel === 0 ? next : Math.fround((before?.samples[index] ?? NaN) * fade + next * (1 - fade))
+        const error = Math.abs((output.samples[index] ?? NaN) - expected)
+        maxAbsDifference = Math.max(maxAbsDifference, error)
+        if (!(error <= (channel === 0 ? 0 : 2e-7))) { mismatches++; firstMismatch ??= frame }
+      }
+    }
+    return { edit, seamFrame: from, endFrame: to, covered: to - from >= fadeFrames, mismatches, firstMismatch, maxAbsDifference }
+  }) : []
+  const failedEdits = windows.filter((entry) => entry.mismatches > 0 || !entry.covered).map((entry) => entry.edit)
+  return { passed: wellFormed && failedEdits.length === 0, wellFormed, failedEdit: failedEdits[0] ?? null, failedEdits, windows }
+}
+
+type BurstDefect = "dropout-at-seam" | "lost-publication" | "retained-click" | "hard-cut"
+export const burstSyntheticProof = () => {
+  const sampleRate = 48000, channels = 2, edits = 100, window = 1000, fadeFrames = Math.round(sampleRate * 0.006)
+  const seams = Array.from({ length: edits }, (_, edit) => 4000 + edit * window), endFrame = 4000 + edits * window
+  const state = (index: number): Pcm => {
+    const samples = new Float32Array(endFrame * channels)
+    for (let frame = 0; frame < endFrame; frame++) {
+      samples[frame * channels] = 0.1 * Math.sin(frame * 0.027)
+      samples[frame * channels + 1] = 0.1 * Math.sin(frame * (index % 2 ? 0.061 : 0.043) + index)
+    }
+    return { sampleRate, channels, samples }
+  }
+  const states = Array.from({ length: edits + 1 }, (_, index) => state(index))
+  const render = (defect?: BurstDefect): Pcm => {
+    const samples = Float32Array.from(states[0]?.samples ?? [])
+    seams.forEach((from, edit) => {
+      const before = states[edit], after = states[edit + 1]
+      const holdsOld = defect === "lost-publication" && edit === 12
+      for (let frame = from; frame < (seams[edit + 1] ?? endFrame); frame++) {
+        const fade = defect === "hard-cut" && edit === 4 ? 0 : Math.max(0, Math.fround(1 - Math.fround((frame - from) / fadeFrames)))
+        const entered = holdsOld ? before : after
+        samples[frame * channels] = entered?.samples[frame * channels] ?? NaN
+        samples[frame * channels + 1] = Math.fround((before?.samples[frame * channels + 1] ?? NaN) * fade
+          + (entered?.samples[frame * channels + 1] ?? NaN) * (1 - fade))
+      }
+    })
+    if (defect === "dropout-at-seam") samples.fill(0, ((seams[6] ?? 0) + 100) * channels, ((seams[6] ?? 0) + 164) * channels)
+    const click = ((seams[3] ?? 0) + 500) * channels
+    if (defect === "retained-click") samples[click] = (samples[click] ?? 0) + 2 ** -20
+    return { sampleRate, channels, samples }
+  }
+  const judge = (defect?: BurstDefect) => judgeBurst(render(defect), states, seams, { fadeFrames, endFrame })
+  // A slot lost at edit 12 of 100 fails edit 12 alone: edits 13 to 99 enter their own states and still pass.
+  const cases: [BurstDefect, number][] = [["dropout-at-seam", 6], ["lost-publication", 12], ["retained-click", 3], ["hard-cut", 4]]
+  const defects = Object.fromEntries(cases.map(([defect, edit]) => {
+    const result = judge(defect)
+    return [defect, { edit, failedEdit: result.failedEdit, failedEdits: result.failedEdits, rejected: !result.passed
+      && result.failedEdit === edit && result.failedEdits.length === 1 }]
+  }))
+  const crowded = judgeBurst(render(), states, [...seams.slice(0, 3), (seams[2] ?? 0) + fadeFrames - 1, ...seams.slice(3)],
+    { fadeFrames, endFrame })
+  const clean = judge()
+  const proof = { clean: clean.passed && clean.windows.length === edits, defects, windowShorterThanFade: !crowded.passed }
+  if (!proof.clean || !proof.windowShorterThanFade || Object.values(defects).some((entry) => !entry.rejected))
+    throw new Error(`Burst segmentation oracle failed: ${JSON.stringify(proof)}`)
+  return proof
+}
+
 const phase5PlanSchema = z.object({ phase: z.literal(5), row: z.string(), editStart: z.number(),
   commits: z.array(z.object({ wallMs: z.number(), revision: z.number() })), endFrame: z.number().int().positive(),
   sameTrackId: z.boolean().optional() })
@@ -926,7 +1091,7 @@ export const checkPhase5 = async ({ plan, host, actions, wav }: Phase5Evidence) 
   }
   const seams = publications.map((entry) => Number(entry.publicationFrame))
   const epoch = owner.transportEpoch
-  const lifecycle = measured.filter((entry) => /stop|teardown|start|rebuild|host-exit|host-spawn|device-configure/i.test(String(entry.event)))
+  const lifecycle = measured.filter((entry) => coldEvent(entry.event, /stop|teardown|start|rebuild|host-exit|host-spawn|device-configure/i))
   const energy = (source: Pcm, start: number, stop: number, channel: number) => {
     let square = 0
     for (let frame = start; frame < stop; frame++) square += (source.samples[frame * source.channels + channel] ?? NaN) ** 2
@@ -1142,7 +1307,7 @@ export const checkPhase5EffectState = (evidence: EffectStateEvidence) => {
   const warmResume = !!owner && pauseBlocks.length > 0 && measured.every((entry) =>
     !(Number(entry.wallMs) >= pausedFromWall && Number(entry.wallMs) <= resumedWall)
     || (entry.pid === owner.pid && (entry.event !== "capture-block" || entry.captureId === owner.captureId)
-      && !/stop|start|configure|rebuild|teardown|host-exit|host-spawn/i.test(String(entry.event))))
+      && !coldEvent(entry.event, /stop|start|configure|rebuild|teardown|host-exit|host-spawn/i)))
   const resumeSteps = spanB ? {
     actual: peakStep((frame) => sample(spanB, frame, 0), spanB.transportFrame, spanB.transportFrame + resumeGuard),
     reference: peakStep((frame) => leftReference.samples[frame * leftReference.channels] ?? NaN,
@@ -1229,7 +1394,7 @@ export const checkPhase5EffectState = (evidence: EffectStateEvidence) => {
     captureIntegrity: !!owner && rawCaptureOffsetsValid(ownerBlocks, capture.samples.length / channels, complete)
       && complete?.failed === false && complete.overflowFrames === 0,
     sameHostNoColdRebuild: !!owner
-      && !measured.some((entry) => /stop|teardown|start|rebuild|host-exit|host-spawn|device-configure/i.test(String(entry.event)))
+      && !measured.some((entry) => coldEvent(entry.event, /stop|teardown|start|rebuild|host-exit|host-spawn|device-configure/i))
       && measured.every((entry) => entry.event !== "capture-block" || (entry.pid === owner.pid && entry.captureId === owner.captureId))
       && publications.every((entry) => entry.cause === "block-boundary" && entry.pid === owner.pid),
     playingSpansContinuous: playing.length === 2 && !!spanA && !!spanB && spanA.transportFrame <= rate
@@ -1302,12 +1467,12 @@ const effectStateIntendedCheck = {
   "early-restore": "resumedEarlyGain", "export-gain-lost": "exportDurable",
 } satisfies Record<EffectStateDefect, keyof ReturnType<typeof checkPhase5EffectState>["checks"]>
 
-// One deterministic packaged-shaped capture: pre-roll, a playing span with an
+// One deterministic packaged-wellFormed capture: pre-roll, a playing span with an
 // FFT publication and a gain preview, a pause holding one frame one block
 // behind, then the warm resume in the same epoch from that frame with a 6 ms
 // entry ramp. Spectral is a pure delay here, and each offline reference delays
 // the left source by the Spectral latency it rendered with.
-export const phase5EffectStateEvidence = (defect?: EffectStateDefect): EffectStateEvidence => {
+export const phase5EffectStateEvidence = (defect?: EffectStateDefect | "worker-supervisor-start"): EffectStateEvidence => {
   const sampleRate = 48000, block = 512, channels = 2, targetDb = defect === "drag-missed" ? 0 : -14
   const signature = (frame: number, right: boolean) => 0.08 + 0.025 * Math.sin(frame * (right ? 0.039 : 0.027))
     + 0.015 * Math.sin(frame * frame * (right ? 1.7e-8 : 1e-8))
@@ -1393,7 +1558,8 @@ export const phase5EffectStateEvidence = (defect?: EffectStateDefect): EffectSta
   const holdWall = wallAt(segments.slice(0, 2).reduce((sum, segment) => sum + segment.blocks, 0) + 8)
   const pauseEvents = defect === "cold-resume-new-epoch" ? ["device-stop", "device-start-request"]
     : defect === "warm-resume-across-stop" ? ["device-stop"] : defect === "warm-resume-across-configure" ? ["device-configure"]
-    : defect === "resume-across-capture-configure" ? ["capture-configure"] : []
+    : defect === "resume-across-capture-configure" ? ["capture-configure"]
+    : defect === "worker-supervisor-start" ? ["worker-supervisor-started"] : []
   host.push({ event: "graph-publish-request", requestedRevision: 2, wallMs: publishWall - 1 },
     ...(defect === "publish-missing" ? [] : [{ event: "graph-publish", pid: 1, revision: 2, transportEpoch: 3,
       publicationFrame: fftFrame, publicationEpoch: 190,
@@ -1428,32 +1594,35 @@ export const phase5EffectStateEvidence = (defect?: EffectStateDefect): EffectSta
 
 export const phase5EffectStateSyntheticProof = () => {
   const clean = checkPhase5EffectState(phase5EffectStateEvidence())
+  // A genuine warm resume in a row with a VST3 worker: the supervisor starts inside the pause.
+  const withWorker = checkPhase5EffectState(phase5EffectStateEvidence("worker-supervisor-start"))
   const defects = Object.fromEntries(phase5EffectStateDefects.map((defect) => {
     const { checks } = checkPhase5EffectState(phase5EffectStateEvidence(defect))
     const intended = effectStateIntendedCheck[defect]
     return [defect, { rejected: !checks[intended], intended,
       failed: Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name) }]
   }))
-  if (!clean.passed || Object.values(defects).some((entry) => !entry.rejected))
-    throw new Error(`Phase 5 effect-state synthetic oracle failed: ${JSON.stringify({ clean: clean.checks, defects })}`)
-  return { clean: clean.passed, checks: Object.keys(clean.checks).length, defects }
+  if (!clean.passed || !withWorker.passed || Object.values(defects).some((entry) => !entry.rejected))
+    throw new Error(`Phase 5 effect-state synthetic oracle failed: ${JSON.stringify({ clean: clean.checks, withWorker: withWorker.checks, defects })}`)
+  return { clean: clean.passed, withWorkerSupervisor: withWorker.passed, checks: Object.keys(clean.checks).length, defects }
 }
 
 // add-paged-asset admits one silent track-only publication before the asset's. Each defect below must still fail the
 // row on its publication count, and both clean shapes must pass.
 export const phase5AddPagedAssetDefects = ["audible-early-publication", "two-extra-publications",
-  "extra-after-asset-publication", "early-publication-installs-asset"] as const
+  "extra-after-asset-publication", "early-publication-installs-asset", "silent-asset-after-seam", "coincident-publications"] as const
 type AddPagedAssetCase = (typeof phase5AddPagedAssetDefects)[number] | "single-publication" | "track-only-publication"
 
-// One small packaged-shaped capture: the retained source on the left, and the imported asset entering the right
+// One small packaged-wellFormed capture: the retained source on the left, and the imported asset entering the right
 // channel at the asset publication, which is the last one.
 const phase5AddPagedAssetEvidence = (variant: AddPagedAssetCase): Phase5Evidence => {
   const sampleRate = 8000, block = 64, channels = 2, endFrame = 6 * sampleRate, pid = 1, captureId = 1, epoch = 3
   const wall = (frame: number) => 1_000_000 + frame / sampleRate * 1000
   const retained = (frame: number) => 0.08 + 0.025 * Math.sin(frame * 0.027)
-  const asset = (frame: number) => 0.07 * Math.sin(frame * 0.039)
+  // The asset the final reference promises is silent after its seam: a track-only publication must not pass for it.
+  const asset = (frame: number) => variant === "silent-asset-after-seam" ? 0 : 0.07 * Math.sin(frame * 0.039)
   const seams = variant === "single-publication" ? [28_032] : variant === "two-extra-publications"
-    ? [16_000, 20_032, 28_032] : [20_032, 28_032]
+    ? [16_000, 20_032, 28_032] : variant === "coincident-publications" ? [28_032, 28_032] : [20_032, 28_032]
   const first = seams[0] ?? 0, last = seams.at(-1) ?? 0
   const assetFrom = variant === "extra-after-asset-publication" ? first : last
   const pcm = (sample: (frame: number, channel: number) => number): Pcm => {
@@ -1557,7 +1726,7 @@ export const analyzePhase5Campaign = async (directory: string, selected: readonl
 
 if (import.meta.main && Bun.argv[2] === "--self-test") {
   console.log(JSON.stringify({ phase4: phase4SyntheticProof(), legacy: syntheticProof(),
-    phase5EffectState: phase5EffectStateSyntheticProof(), phase5AddPagedAsset: await phase5AddPagedAssetSyntheticProof() }, null, 2))
+    burst: burstSyntheticProof(), phase5EffectState: phase5EffectStateSyntheticProof(), phase5AddPagedAsset: await phase5AddPagedAssetSyntheticProof() }, null, 2))
 } else if (import.meta.main) {
   if (Bun.argv[2] === "--run" && Bun.argv[3] && await Bun.file(path.join(Bun.argv[3], "phase5-campaign.json")).exists()) {
     const result = await analyzePhase5Campaign(Bun.argv[3])

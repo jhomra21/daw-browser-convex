@@ -1810,6 +1810,19 @@ test('W-C9-clip-3i the slot table holds every old tail beside a full table of ne
     .toEqual({ published: ['published'], faulted: false, crossfaded: true })
 })
 
+// 9b: a clip moved from frame 0 to frame 800 plays where it was until the seam, fades out over 6 ms, is silent until its
+// new start, and from there plays its own start (the asset from frame 0), with no entry fade (it begins after the seam).
+test('W-C9-clip-3j a clip moved at the seam plays the new position once the 6 ms crossfade has run', async () => {
+  const { host, messages } = await playRamp(['track'], true, [rampSource(1, 0, 1_024)])
+  const rendered = renderBlocks(host, 1)
+  publishWithSources(host, ['track'], [{ ...rampSource(1, 800, 1_700), sourceOffsetFrame: 0 }], 384)
+  rendered.push(...renderBlocks(host, 7))
+  const expected = (frame: number) => frame < 384 + blendFrames ? crossfade(384, 1, 0)(frame) : frame < 800 ? 0 : rampLevel(frame - 800)
+  expect({ published: sourcePublication(messages), played: matchesRamp(rendered, expected), gap: rendered.slice(384 + blendFrames, 800).every((sample) => sample === 0),
+    arrived: rendered[1_000] === rampLevel(200) })
+    .toEqual({ published: ['published'], played: true, gap: true, arrived: true })
+})
+
 test('W-C9-clip-3c a source of a node the new graph adds plays from the seam, so the apply follows the publish', async () => {
   const { host, messages } = await playRamp()
   const rendered = renderBlocks(host, 1)

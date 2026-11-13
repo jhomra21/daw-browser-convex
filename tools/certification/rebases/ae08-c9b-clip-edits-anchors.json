@@ -1,0 +1,13 @@
+{
+ "name": "ae08-c9b-clip-edits-anchors",
+ "sequence": 21,
+ "createdAt": "2026-11-12T23:59:00.000Z",
+ "revert": [],
+ "watched": [],
+ "changes": [],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 9b: audio clip edits and loop edits with audio are adopted at a seam on the portable controller (withSeamContentOf takes carried audio clip fields and the loop from next; Timeline.rescheduleChangedClips no longer rebuilds a prepared browser session). No anchor text moved and no recorded count moved. Every arm anchored in the controller (31 PB/TL mutants with controls, 62 jobs; 4 retired ids are unknown to the plan) and in the hook (152 mutants with controls, 304 jobs) was run alone with --jobs 1 --only: 366 of 366 PASS, 0 fail, so each mutant is still killed. Tests added: W-C9-clip-1, 2, 4, 5, 7, R and the HT W-C9-clip-6 and WHT 3j; W-M3 end state flipped from test.failing to test, the W-M3 guard rewritten, W-F20d inverted to adopted. Watched hashes of the controller, hook, Timeline and the test files, and the pass counts of f-portable, f-playback and x-portable-wasm, move only on --full. See PHASE8-STEP9B.md."
+ }
+}

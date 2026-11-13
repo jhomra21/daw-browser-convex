@@ -2105,12 +2105,13 @@ const b6f5Compilation = (transport: LivePlaybackTransport, volume: number, clipD
   return { ...base, snapshot: { ...base.snapshot, transport, tracks: [edited], mixer: { ...base.snapshot.mixer, fx,
     graph: resolveLiveMixerGraph([edited], fx.trackFx, { masterFxInstances }) } } }
 }
-type B6f5Publish = { revision: number; options: unknown }
+type PublishOptions = Parameters<PortableWasmPlaybackSession['publishGraph']>[1]
+type B6f5Publish = { revision: number; options: PublishOptions }
 const b6f5Session = (calls: string[], graphs: AudioCoreGraphSnapshot[], publishes: B6f5Publish[],
-  publish: (options?: { requireContinuity: true }) => Promise<void> = async () => undefined) => ({
+  publish: (options?: PublishOptions) => Promise<void> = async () => undefined) => ({
   ...createSession(calls, async () => undefined),
   prepareGraph: async (graph: AudioCoreGraphSnapshot) => { calls.push('prepare-graph'); graphs.push(graph) },
-  publishGraph: async (revision: number, options?: { requireContinuity: true }) => {
+  publishGraph: async (revision: number, options?: PublishOptions) => {
     calls.push('publish-graph')
     publishes.push({ revision, options })
     await publish(options)
@@ -2189,7 +2190,7 @@ test('B6f5 R2 a live send crossing an adoption publish never faults the session'
     const base = b6f5Session(calls, graphs, publishes)
     const session = {
       ...base,
-      publishGraph: async (revision: number, options?: { requireContinuity: true }) => {
+      publishGraph: async (revision: number, options?: PublishOptions) => {
         publishes.push({ revision, options })
         if (!options) { playingRevision = revision; return }
         // The worklet handles the publish in port order; its answer arrives later.
@@ -2572,7 +2573,8 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
   const position = (frame: number, epoch = 1, sequence = 1) => positionListener?.({ version: 2, type: 'transport-position', sessionId: 1, epoch, sequence, running: true, frame })
   return { state, controller, transport, noLoop, calls, graphs, publishes, installs, epochs, faults, scheduledSources, sessions: () => sessions, adopt, noteEvents, position }
 }
-const w8SourceCalls = (calls: readonly string[]) => calls.filter((call) => call.includes('sources'))
+const w8ShippedStarts = (f: { publishes: readonly B6f5Publish[] }) =>
+  (f.publishes.at(-1)?.options?.sources?.ordinary ?? []).map((source) => source.startFrame)
 
 // W-F20a: a loop-bound edit while playing is adopted. Today the compile receives the old loop, both snapshots match,
 // and the follow marks the edit applied without installing anything.
@@ -2627,15 +2629,16 @@ test('W-F20c a loop edit after a wrap maps positions across the seam, compiles t
   } finally { f.controller.dispose(); reference.controller.dispose() }
 })
 
-// W-F20d: a loop repeats audio clips, whose sources a seam does not replace, so the edit is refused (a rebuild), never
-// adopted over the old sources.
-test('W-F20d a loop edit with an audio clip present is refused and installs nothing', async () => {
+// W-F20d: a loop repeats audio clips, so the sources an adoption ships are those compiled for the new loop at the seam:
+// the 1 s clip starts at the seam (12000) and again once per 2 s iteration (96000), where the old 1 s loop restarted it
+// every 48000 frames.
+test('W-F20d a loop edit with an audio clip present is adopted with the sources compiled for the new loop', async () => {
   const f = await w8Fixture({ audioStartSec: 0, loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    const before = f.calls.length
-    const result: string = await f.adopt({ loopEnabled: true, loopStartSec: 0, loopEndSec: 2 })
-    expect({ result, calls: f.calls.slice(before).filter((call) => call !== 'mark-active') }).toEqual({ result: 'rebuild', calls: [] })
+    const result = await f.adopt({ loopEnabled: true, loopStartSec: 0, loopEndSec: 2 })
+    expect({ result, starts: w8ShippedStarts(f).filter((start) => start < 200_000), sessions: f.sessions(), disposed: f.calls.includes('dispose') })
+      .toEqual({ result: 'adopted', starts: [12_000, 96_000, 192_000], sessions: 1, disposed: false })
   } finally { f.controller.dispose() }
 })
 
@@ -2800,29 +2803,30 @@ test('W-FB-1 a refused or structural adoption is failed or adopted and never ask
   } finally { controller.dispose() }
 })
 
-// W-M3 guard: an audio clip edit that reaches the follow must never be adopted over the old sources. Green today
-// (the gate refuses it); it stays green when the audio class is carried, because a carry replaces the sources.
-test('W-M3 an audio clip move is never adopted or reported unchanged without touching the sources', async () => {
+// W-M3 guard: an audio clip edit that reaches the follow must never be adopted over the old sources. An adoption or an
+// unchanged answer counts only when the sources it shipped place the clip where the edit put it.
+test('W-M3 an audio clip move is never adopted or reported unchanged without shipping its new sources', async () => {
   const f = await w8Fixture({ audioStartSec: 0 })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    const before = f.calls.length
     f.state.audioStartSec = 0.5
     const result = await f.adopt(f.noLoop)
-    const touched = w8SourceCalls(f.calls.slice(before)).length > 0
-    expect({ result, staleAdoption: (result === 'adopted' || result === 'unchanged') && !touched }).toMatchObject({ staleAdoption: false })
+    const shipped = f.publishes.at(-1)?.options?.sources
+    expect({ result, stale: (result === 'adopted' || result === 'unchanged') && !w8ShippedStarts(f).includes(24_000), shipped: shipped !== undefined })
+      .toEqual({ result: 'adopted', stale: false, shipped: true })
   } finally { f.controller.dispose() }
 })
 
-// W-M3 end state: PortableAdoptionResult loses "rebuild"; the audio class is carried (adopted with new sources).
-test.failing('W-M3 an audio clip move answers adopted with its sources replaced, not a rebuild', async () => {
+// W-M3 end state: the audio class is carried: the move is adopted on the same session with its sources replaced.
+test('W-M3 an audio clip move answers adopted with its sources replaced, not a rebuild', async () => {
   const f = await w8Fixture({ audioStartSec: 0 })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
     const before = f.calls.length
     f.state.audioStartSec = 0.5
     const result: string = await f.adopt(f.noLoop)
-    expect({ result, sourcesTouched: w8SourceCalls(f.calls.slice(before)).length > 0 }).toEqual({ result: 'adopted', sourcesTouched: true })
+    expect({ result, starts: w8ShippedStarts(f), calls: f.calls.slice(before).filter((call) => call !== 'mark-active').map((call) => call.split(':')[0]), disposed: f.calls.includes('dispose') })
+      .toEqual({ result: 'adopted', starts: [24_000], calls: ['prepare-graph', 'install-schedule', 'publish-graph'], disposed: false })
   } finally { f.controller.dispose() }
 })
 
@@ -3342,12 +3346,14 @@ test('W-R8a a loop edit during a take is held, and adopted once the take has end
 // AE-08 phase 8 step 9a: an adoption carries the sources of its candidate with the publish and commits them with it.
 // Two paged clips: one spans every seam, the other starts after them.
 type C9Publish = { revision: number; options?: Parameters<PortableWasmPlaybackSession['publishGraph']>[1] }
-const c9Tracks = (volume: number): RuntimeTrack[] => [
-  { id: 'audio-0', kind: 'audio', name: 'Audio 0', volume, clips: [{ id: 'clip-0', name: 'Clip 0', color: '#fff', startSec: 0, duration: 30, sourceAssetKey: 'asset-a' }] },
-  { id: 'audio-1', kind: 'audio', name: 'Audio 1', volume: 1, clips: [{ id: 'clip-1', name: 'Clip 1', color: '#fff', startSec: 5, duration: 10, sourceAssetKey: 'asset-b' }] },
+type C9State = { volume: number; refusals: number; clip0Offset: number; clip1Start: number; clip1Present: boolean }
+const c9Tracks = (state: C9State): RuntimeTrack[] => [
+  { id: 'audio-0', kind: 'audio', name: 'Audio 0', volume: state.volume, clips: [{ id: 'clip-0', name: 'Clip 0', color: '#fff', startSec: 0, duration: 30, bufferOffsetSec: state.clip0Offset, sourceAssetKey: 'asset-a' }] },
+  { id: 'audio-1', kind: 'audio', name: 'Audio 1', volume: 1, clips: state.clip1Present
+    ? [{ id: 'clip-1', name: 'Clip 1', color: '#fff', startSec: state.clip1Start, duration: 10, sourceAssetKey: 'asset-b' }] : [] },
 ]
 const c9Fixture = async (options: { refusals?: number } = {}) => {
-  const state = { volume: 1, refusals: options.refusals ?? 0 }
+  const state: C9State = { volume: 1, refusals: options.refusals ?? 0, clip0Offset: 0, clip1Start: 5, clip1Present: true }
   const calls: string[] = []
   const publishes: C9Publish[] = []
   const scheduled: PortableWasmPreparedSourceEventsOf[] = []
@@ -3365,7 +3371,7 @@ const c9Fixture = async (options: { refusals?: number } = {}) => {
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => {
       const compiled = pagedCompilation(transport)
-      const tracks = c9Tracks(state.volume)
+      const tracks = c9Tracks(state)
       return { ...compiled, snapshot: { ...compiled.snapshot, tracks, mixer: { ...compiled.snapshot.mixer, graph: resolveLiveMixerGraph(tracks, {}) } } }
     },
     fingerprintSnapshot: b6f5Fingerprint, getAudioContext: () => context, scheduleHorizonSec: 8, select: async () => selected,
@@ -3383,7 +3389,7 @@ const c9Fixture = async (options: { refusals?: number } = {}) => {
     }
   }
   const sources = (publish?: C9Publish) => publish?.options?.sources
-  return { state, controller, transport, base, publishes, scheduled, faults, report, sources }
+  return { state, controller, transport, base, calls, publishes, scheduled, faults, report, sources }
 }
 type PortableWasmPreparedSourceEventsOf = Parameters<PortableWasmPlaybackSession['schedulePreparedSources']>[2]
 const c9Starts = (events: readonly { sourceNodeId: string; startFrame: number; sourceOffsetFrame: number }[] | undefined) =>
@@ -3476,4 +3482,88 @@ test('C9a-5 the candidate preparations are released when the resubmits run out, 
     await Bun.sleep(0)
     expect(f.base.preparations.size).toBe(0)
   } finally { warn.mockRestore(); error.mockRestore(); f.controller.dispose() }
+})
+// AE-08 phase 8 step 9b: audio clip edits are carried at a seam. The sources shipped with the publish are those a start
+// at the seam would compile for the edited clips; the session is never disposed or rebuilt.
+test('W-C9-clip-1 a clip moved while playing is adopted: its source starts at the new frame and the old start is gone', async () => {
+  const f = await c9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(96_000)
+    f.state.clip1Start = 6
+    const result = await f.controller.adoptSchedule(noLoop)
+    expect({ result, prepared: c9Starts(f.sources(f.publishes.at(-1))?.prepared), disposed: f.calls.includes('dispose') })
+      .toEqual({ result: 'adopted', prepared: [['audio-0', 108_000, 108_000], ['audio-1', 288_000, 0]], disposed: false })
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-clip-2 a trim of a clip that spans the seam starts its new source at the seam with the in-clip offset and its fraction', async () => {
+  const f = await c9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(96_000)
+    f.state.clip0Offset = 2 + 0.5 / 48_000
+    const result = await f.controller.adoptSchedule(noLoop)
+    const spanning = f.sources(f.publishes.at(-1))?.prepared.find((event) => event.sourceNodeId === 'audio-0')
+    expect({ result, start: spanning?.startFrame, offset: spanning?.sourceOffsetFrame, fraction: spanning?.sourceOffsetFraction })
+      .toEqual({ result: 'adopted', start: 108_000, offset: 204_000, fraction: expect.closeTo(0.5, 6) })
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-clip-4 a clip move on a paused session is adopted in place with the seam at the position', async () => {
+  const f = await c9Fixture()
+  try {
+    expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
+    f.state.clip1Start = 6
+    const result = await f.controller.adoptSchedule(noLoop)
+    expect({ result, prepared: c9Starts(f.sources(f.publishes.at(-1))?.prepared), disposed: f.calls.includes('dispose'),
+      publicationFrame: JSON.stringify(f.publishes.at(-1)?.options).includes('publicationFrame') })
+      .toEqual({ result: 'adopted', prepared: [['audio-0', 0, 0], ['audio-1', 288_000, 0]], disposed: false, publicationFrame: false })
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-clip-5 a loop edit with audio clips is adopted with each iteration sliced from the shifted loop', async () => {
+  const f = await c9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(12_000)
+    const result = await f.controller.adoptSchedule({ loopEnabled: true, loopStartSec: 0, loopEndSec: 1 })
+    const prepared = f.sources(f.publishes.at(-1))?.prepared ?? []
+    expect({ result, audio0: c9Starts(prepared.filter((event) => event.sourceNodeId === 'audio-0')).slice(0, 3),
+      audio1: prepared.filter((event) => event.sourceNodeId === 'audio-1').length, disposed: f.calls.includes('dispose') })
+      .toEqual({ result: 'adopted', audio0: [['audio-0', 24_000, 24_000], ['audio-0', 48_000, 0], ['audio-0', 96_000, 0]], audio1: 0, disposed: false })
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-clip-7 a clip deleted while playing leaves no source behind', async () => {
+  const f = await c9Fixture()
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(96_000)
+    f.state.clip1Present = false
+    const result = await f.controller.adoptSchedule(noLoop)
+    expect({ result, prepared: c9Starts(f.sources(f.publishes.at(-1))?.prepared) }).toEqual({ result: 'adopted', prepared: [['audio-0', 108_000, 108_000]] })
+  } finally { f.controller.dispose() }
+})
+
+// Recording decision: an audio clip edit made during a take is adopted like any other edit; only a loop edit is held. The
+// refresh that extends the take's sources starts from the adopted state, so the moved clip is scheduled once, where it is.
+test('W-C9-clip-R an audio clip move during a take is adopted and the take refresh schedules the moved clip once', async () => {
+  const calls: string[] = []
+  const { stream, recordingContext } = createRecordingFixture(calls)
+  const f = await w8Fixture({ clipSec: 30, audioStartSec: 28 }, { audioContext: recordingContext })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.controller.startRecording(b6f5RecordingInput(stream))
+    f.position(20_000, 1, 1)
+    f.state.audioStartSec = 29
+    const adopted = await f.adopt(f.noLoop)
+    f.position(1_250_000, 1, 2)
+    const tables = f.scheduledSources.length
+    const refresh = await f.controller.refreshSchedule()
+    const table = f.scheduledSources.at(-1) ?? []
+    expect({ adopted, refresh, extended: f.scheduledSources.length > tables, faults: f.faults, held: table.filter((source) => source.startFrame === 1_344_000).length,
+      moved: table.filter((source) => source.startFrame === 1_392_000).length, recording: f.controller.isRecording() })
+      .toEqual({ adopted: 'adopted', refresh: 'started', extended: true, faults: [], held: 0, moved: 1, recording: true })
+  } finally { f.controller.dispose() }
 })

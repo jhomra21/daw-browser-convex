@@ -894,12 +894,14 @@ const Timeline: Component<TimelineProps> = (props) => {
   function rescheduleChangedClips(clipIds: string[]) {
     if (clipIds.length === 0) return;
     setFollowPaused(true);
-    if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) {
+    if (isNativePlaybackPrepared()) {
       void rebuildPlaybackBackend(renderTracks()).catch((cause: unknown) => {
         console.error("[Timeline] failed to rebuild prepared playback after clip edit", cause);
       });
       return;
     }
+    // A prepared browser session adopts a clip edit through the hook's follow, which rebuilds what it cannot carry.
+    if (isPortableBrowserPlaybackPrepared()) return;
     if (!isPlaying()) return;
     const enabled = loopEnabled();
     const end = loopEndSec();

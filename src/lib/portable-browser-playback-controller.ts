@@ -408,20 +408,40 @@ const withLiveContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSna
 const hasWarpedAudio = (snapshot: LivePlaybackSnapshot) =>
   snapshot.tracks.some((track) => track.clips.some((clip) => clip.audioWarp?.enabled === true))
 
-const hasAudioClips = (snapshot: LivePlaybackSnapshot) =>
-  snapshot.tracks.some((track) => track.clips.some((clip) => !clip.midi))
+type SnapshotClip = LivePlaybackSnapshot["tracks"][number]["clips"][number]
 
-// What a playing session adopts at a seam, beyond what it takes live: the tempo, the loop fields and the MIDI clips of
-// tracks it already plays. `next` with that taken from `previous` fingerprints as `previous` when nothing else changed.
-// A tempo moves warped audio, and a loop repeats audio clips; both need new sources (a class the seam does not carry),
-// so with that audio the tempo or loop stays in `next` and the gate refuses it.
+// A warped clip needs Stretch prepared for its placement, which the seam does not carry yet.
+const carriesClipEdits = (clip: SnapshotClip) => !clip.midi && clip.audioWarp?.enabled !== true
+
+// The clips of a track the seam carries, as `installed` has them: every MIDI clip, and of the audio clips their start,
+// duration, trim offset, gain and fades, and their addition or deletion. Whatever else differs (the asset a clip plays,
+// its warp, a warped clip's placement) stays as `next` has it, so the gate refuses it.
+const withSeamClips = (next: readonly SnapshotClip[], installed: readonly SnapshotClip[]): SnapshotClip[] => {
+  const incoming = new Map(next.map((clip) => [clip.id, clip]))
+  const known = new Set(installed.map((clip) => clip.id))
+  return [
+    ...installed.flatMap((clip) => {
+      if (clip.midi) return [clip]
+      const edited = incoming.get(clip.id)
+      if (!edited) return carriesClipEdits(clip) ? [clip] : []
+      return carriesClipEdits(clip) && carriesClipEdits(edited)
+        ? [{ ...edited, startSec: clip.startSec, duration: clip.duration, bufferOffsetSec: clip.bufferOffsetSec, gain: clip.gain, fades: clip.fades }]
+        : [edited]
+    }),
+    ...next.filter((clip) => !known.has(clip.id) && !clip.midi && !carriesClipEdits(clip)),
+  ]
+}
+
+// What a playing session adopts at a seam, beyond what it takes live: the tempo of a project without warped audio, the
+// loop fields, and the clips of tracks it already plays (`withSeamClips`). `next` with that taken from `previous`
+// fingerprints as `previous` when nothing else changed. Still refused: a tempo under warped audio (new Stretch), assets,
+// tracks added or deleted, effect structure and instrument replacement.
 const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const previousTracks = new Map(previous.tracks.map((track) => [track.id, track]))
-  const loopsAudio = hasAudioClips(next) || hasAudioClips(previous)
   return {
     ...next,
     bpm: hasWarpedAudio(next) || hasWarpedAudio(previous) ? next.bpm : previous.bpm,
-    transport: loopsAudio ? next.transport : {
+    transport: {
       ...next.transport,
       loopEnabled: previous.transport.loopEnabled,
       loopStartSec: previous.transport.loopStartSec,
@@ -429,11 +449,7 @@ const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSna
     },
     tracks: next.tracks.map((track) => {
       const installed = previousTracks.get(track.id)
-      if (!installed) return track
-      const other = track.clips.filter((clip) => !clip.midi)
-      let taken = 0
-      const clips = installed.clips.flatMap((clip) => clip.midi ? [clip] : taken < other.length ? [other[taken++]] : [])
-      return { ...track, clips: [...clips, ...other.slice(taken)] }
+      return installed ? { ...track, clips: withSeamClips(track.clips, installed.clips) } : track
     }),
   }
 }
@@ -2061,7 +2077,7 @@ export const createPortableBrowserPlaybackController = (input: {
         ...transport, ...effectiveLoopForStart(recording ? previous.transport : loop, arrangementNow, sampleRate), state: wasPlaying ? "playing" : "paused", playheadSec: arrangementNow / sampleRate,
       }, { liveAdoption: true })
       if (!current()) return "unavailable"
-      // Audio clips, tracks, instrument kinds, assets, effect structure and warped audio under a tempo edit are not
+      // Tracks, instrument kinds, assets, effect structure, warped clips and warped audio under a tempo edit are not
       // carried at a seam yet; those still rebuild.
       if (!compilation.supported) return "rebuild"
       const next = compilation.snapshot

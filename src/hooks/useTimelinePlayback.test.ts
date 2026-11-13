@@ -8647,7 +8647,7 @@ for (const paused of [false, true]) {
 // AE-08 phase 8 step 11d (A): an edit adopts the transport state the session has when it commits. An intent captured
 // while paused and committed after Play, or an edit that lands while a Play is starting, never stops or restarts it.
 type TransportEditWorld = { fixture: ReturnType<typeof createNativeHookBridge>; seams: bigint[]; compiled: number[]; clipsCompiled: number[]
-  faults: string[]; lifecycle: () => number }
+  contexts: (LivePlaybackCompileContext | undefined)[]; faults: string[]; lifecycle: () => number }
 const withNativeTransportEdit = async (
   run: (world: TransportEditWorld, playback: ReturnType<typeof useTimelinePlayback>, setVolume: (volume: number) => void,
     setTracks: (update: (current: Track<AudioBuffer>[]) => Track<AudioBuffer>[]) => void) => Promise<void>,
@@ -8659,6 +8659,7 @@ const withNativeTransportEdit = async (
   const seams: bigint[] = []
   const compiled: number[] = []
   const clipsCompiled: number[] = []
+  const contexts: (LivePlaybackCompileContext | undefined)[] = []
   const faults: string[] = []
   let revision = 1
   let status: 'prepared' | 'published' = 'prepared'
@@ -8687,13 +8688,14 @@ const withNativeTransportEdit = async (
       const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
         { getTracks: () => tracks() }, { requiresNativeAudio: true, enabled: () => options.enabled, projectId: () => 'project',
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
-          compileSnapshot: async (transport) => {
+          compileSnapshot: async (transport, context) => {
+            contexts.push(context)
             compiled.push(tracks()[0]?.volume ?? Number.NaN)
             clipsCompiled.push(tracks().reduce((count, entry) => count + entry.clips.length, 0))
             return compileLivePlaybackSnapshot({ revision: revision++, bpm: 120, transport, tracks: tracks(),
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
           } })
-      await run({ fixture, seams, compiled, clipsCompiled, faults,
+      await run({ fixture, seams, compiled, clipsCompiled, contexts, faults,
         lifecycle: () => fixture.calls.filter((call) => ['begin', 'stop', 'teardown', 'configure'].includes(call)).length },
       playback, (volume) => setTracks((current) => current.map((entry) => ({ ...entry, volume }))), setTracks)
       dispose()
@@ -8734,6 +8736,27 @@ test('UD7n W-S11d-A2 an edit that lands while a native Play is starting is adopt
     expect({ playing: playback.isPlaying(), adoptions: world.seams.length, lastCompiled: world.compiled.at(-1), faults: world.faults })
       .toEqual({ playing: true, adoptions: 1, lastCompiled: 0.25, faults: [] })
   }, { enabled: false, beginGate: gate.promise })
+})
+
+test('UD7n W-S11d-A3 an edit whose captured intent names the portable owner adopts into the playing native session with its instrument override', async () => {
+  await withNativeTransportEdit(async (world, playback, setVolume) => {
+    const replacement: TrackInstrumentParams = { kind: 'drum-rack', instanceId: 'instrument-replacement', params: createDefaultDrumRackParams() }
+    await playback.handlePlay([track])
+    expect(playback.isPlaying()).toBeTrue()
+    world.seams.length = 0
+    world.contexts.length = 0
+    const before = world.lifecycle()
+    const stops = world.fixture.transportStates.filter((running) => !running).length
+    setVolume(0.25)
+    await playback.restartTimelineSchedule([{ ...track, volume: 0.25 }], { resumePlayback: false, owner: 'portable-browser',
+      projectId: 'project', instrumentOverride: { targetId: track.id, instrument: replacement } })
+    await flushMicrotasks()
+    expect({ lifecycle: world.lifecycle() - before, stops: world.fixture.transportStates.filter((running) => !running).length - stops,
+      playing: playback.isPlaying(), prepared: playback.isNativePlaybackPrepared(), adoptions: world.seams.length,
+      overrides: world.contexts.flatMap((context) => context?.instrumentOverride ? [context.instrumentOverride] : []), faults: world.faults })
+      .toEqual({ lifecycle: 0, stops: 0, playing: true, prepared: true, adoptions: 1,
+        overrides: [{ targetId: track.id, instrument: replacement }], faults: [] })
+  }, { enabled: true })
 })
 
 // AE-08 phase 8 step 11d (B): an edit that lands while a paused preview is still preparing is an edit, not an initial

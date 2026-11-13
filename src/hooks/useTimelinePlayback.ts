@@ -1555,12 +1555,12 @@ export function useTimelinePlayback(
     options?: TimelineScheduleOptions,
     explicit = false,
   ): Promise<void> => {
-    // A kept paused native preview adopts what it carries, as a playing one does. An edit takes the transport state the
-    // session has when it commits, never the one its intent captured. Only a lifecycle rebuild, which names rebuildBackend,
-    // replaces the session.
+    // A kept paused native preview adopts what it carries, as a playing one does. An edit takes the owner and transport
+    // state the session has when it commits, never the ones its intent captured. Only a lifecycle rebuild, which names
+    // rebuildBackend, replaces the session.
     if (!((nativePlayback.isActive() || (nativePlayback.isPrepared() && !options?.rebuildBackend))
       && audioHostBridge?.session.revisions && audioHostBridge.session.configureInstrumentStates
-      && (!options?.owner || options.owner === "native")
+      && (!options?.rebuildBackend || !options.owner || options.owner === "native")
       && (options?.projectId === undefined || options.projectId === nativeOptions?.projectId?.())
       && (options?.projectGeneration === undefined || options.projectGeneration === nativeOptions?.projectGeneration?.()))) {
       // A prepared portable session, playing or paused, adopts every edit on its own core, as native does. Only a
@@ -1695,7 +1695,8 @@ export function useTimelinePlayback(
       }).catch(() => undefined)
       return rebuild
     }
-    // A playing native or portable session is never replaced by an edit; a stale-project edit it cannot carry is dropped.
+    // A playing native or portable session is never replaced by an edit. An edit the session cannot adopt, such as one for a
+    // stale project, is dropped.
     if (!isPlaying() || requiresNativeAudio || nativePlayback.isActive() || portableBrowserPlayback.isActive()) return
     setLastTracks(tracks)
     const sec = audioEngine.currentTimelineSec

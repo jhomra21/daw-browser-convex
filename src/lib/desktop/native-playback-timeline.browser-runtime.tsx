@@ -11,7 +11,8 @@ import { createLocalProject } from '~/lib/local-project-db'
 import { saveLocalProjectState, loadLocalProjectState } from '~/lib/local-project-state'
 import { createLocalControlService } from '~/lib/local-control/local-control-service'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
-import { timelineState, preparedInstrumentIdentity, instrumentPanel, instrumentEvidence, holdNextRebuild, isRebuildHeld, releaseRebuild, timelineSeek, closeTimeline, retireTimeline, loseTimelineHost } from './native-playback-lifecycle.browser-runtime'
+import { controlApprovalResultSchemaV1, controlPreviewResultSchemaV1, projectSnapshotSchemaV2 } from '@daw-browser/control'
+import { hostControl, timelineState, preparedInstrumentIdentity, instrumentPanel, instrumentEvidence, holdNextRebuild, isRebuildHeld, releaseRebuild, timelineSeek, closeTimeline, retireTimeline, loseTimelineHost } from './native-playback-lifecycle.browser-runtime'
 import { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
 import { compileLivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
 import type { PortableWasmBackendSelection } from '@daw-browser/audio-engine/wasm-audio-worklet-backend'
@@ -279,6 +280,17 @@ export const mountTimeline = async () => {
       retire: retireTimeline,
       loseHost: loseTimelineHost,
       loop: () => loadLocalProjectState(project.id, 'loop'),
+      observe: async () => projectSnapshotSchemaV2.parse(await hostControl('control.snapshot', { projectId: project.id, readVersion: 'v2' })),
+      // The desktop host's canonical path: snapshot, preview, approval when required, keyed commit. The mounted Timeline reconciles around the commit.
+      commit: async (actions: unknown[]) => {
+        const snapshot = projectSnapshotSchemaV2.parse(await hostControl('control.snapshot', { projectId: project.id, readVersion: 'v2' }))
+        const request = { version: 'v1', projectId: project.id, expectedRevision: snapshot.project.revision, actions }
+        const preview = controlPreviewResultSchemaV1.parse(await hostControl('control.preview', request))
+        if (!preview.applied) throw new Error('Expected local preview to apply.')
+        const approvalToken = preview.approval?.required
+          ? controlApprovalResultSchemaV1.parse(await hostControl('control.requestApproval', request)).approvalToken : undefined
+        await hostControl('control.commit', { ...request, ...(approvalToken && { approvalToken }), idempotencyKey: crypto.randomUUID() })
+      },
       commitLoop: async () => {
         service.capabilities()
         const snapshot = await service.snapshot({ projectId: project.id })

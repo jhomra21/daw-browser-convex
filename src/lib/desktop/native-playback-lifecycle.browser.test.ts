@@ -1021,3 +1021,110 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     await rm(directory, { recursive: true, force: true })
   }
 }, 120_000)
+
+// AE-08 phase 8 step 11c: one row per edit class. The full Timeline runs against a host that implements the revision
+// session, so an edit is followed in place or it is not. Playing or paused, an edit may publish revisions and nothing
+// else: no second host, no stop, teardown or transaction, and the revisions it publishes only rise.
+const liveEditSchema = z.object({
+  prepared: z.boolean(), preparing: z.boolean(), rebuilding: z.boolean(), running: z.boolean(), faults: z.array(z.string()),
+  starts: z.number(), stops: z.number(), teardowns: z.number(),
+  revisions: z.array(z.object({ operation: z.string(), revision: z.number(), status: z.string() })),
+  trace: z.array(z.object({ event: z.string() })),
+})
+const publishedBanks = (state: z.infer<typeof liveEditSchema>) => [...new Set(state.revisions.filter((entry) => entry.status === 'published').map((entry) => entry.revision))]
+const trackSchema = z.object({ id: z.string(), name: z.string(), kind: z.string() }).passthrough()
+const observedSchema = z.object({ tracks: z.array(trackSchema), processors: z.array(z.object({ id: z.string(), processor: z.object({ kind: z.string() }).passthrough() }).passthrough()) }).passthrough()
+const persisted = (id: string) => ({ source: 'persisted', id })
+type LiveEditState = z.infer<typeof observedSchema>
+const trackNamed = (state: LiveEditState, name: string) => {
+  const track = state.tracks.find((entry) => entry.name === name)
+  if (!track) throw new Error(`Track ${name} is absent`)
+  return track
+}
+type LiveEditKey = { key: string; code: string; shiftKey: boolean }
+// A canonical action list, or the key the Timeline's own shortcut handles; `publishes` is false for a change that is not a graph revision.
+const liveEditClasses: ({ name: string; publishes?: false } & ({ actions: (state: LiveEditState) => unknown[] } | { keyboard: LiveEditKey }))[] = [
+  { name: 'mixer volume', actions: (state) => [{ kind: 'track.mix.set', track: persisted(trackNamed(state, 'Audio').id), volume: 0.5 }] },
+  { name: 'tempo', actions: () => [{ kind: 'project.settings.set', tempoBpm: 100 }] },
+  { name: 'loop bounds', publishes: false, actions: () => [{ kind: 'project.settings.set', loopEnabled: true, loopStartSec: 0.3, loopEndSec: 0.7 }] },
+  { name: 'track add', actions: () => [{ kind: 'track.create', name: 'Added', trackKind: 'audio' }] },
+  { name: 'return track add', actions: () => [{ kind: 'track.create', name: 'Added return', trackKind: 'audio', channelRole: 'return' }] },
+  { name: 'send', actions: (state) => [{ kind: 'track.routing.set', track: persisted(trackNamed(state, 'Added').id),
+    sends: [{ target: persisted(trackNamed(state, 'Added return').id), amount: 0.5 }] }] },
+  { name: 'effect insert', actions: (state) => [{ kind: 'effect.upsert', target: { kind: 'track', track: persisted(trackNamed(state, 'Added').id) }, effectKind: 'utility' }] },
+  { name: 'second effect insert', actions: (state) => [{ kind: 'effect.upsert', target: { kind: 'track', track: persisted(trackNamed(state, 'Added').id) }, effectKind: 'eq' }] },
+  { name: 'effect reorder', actions: (state) => [{ kind: 'effect.reorder', target: { kind: 'track', track: persisted(trackNamed(state, 'Added').id) },
+    order: state.processors.filter((entry) => ['utility', 'eq'].includes(entry.processor.kind)).reverse()
+      .map((entry) => ({ effect: persisted(entry.id), kind: entry.processor.kind })) }] },
+  { name: 'effect remove', actions: (state) => {
+    const effect = state.processors.find((entry) => entry.processor.kind === 'utility')
+    if (!effect) throw new Error('Utility effect is absent')
+    return [{ kind: 'effect.remove', target: { kind: 'track', track: persisted(trackNamed(state, 'Added').id) }, effectKind: 'utility', effect: persisted(effect.id) }]
+  } },
+  { name: 'instrument replace', actions: (state) => [{ kind: 'instrument.set', target: { kind: 'track', track: persisted(trackNamed(state, 'Empty instrument fixture').id) }, instrumentKind: 'drum-rack' }] },
+  { name: 'track reorder', actions: (state) => {
+    const ordinary = state.tracks.filter((entry) => entry.name !== 'Added return')
+    const returns = state.tracks.filter((entry) => entry.name === 'Added return')
+    return [{ kind: 'track.reorder', tracks: [...ordinary.reverse(), ...returns].map((entry, index) => ({ track: persisted(entry.id), index, group: null })) }]
+  } },
+  { name: 'track delete', actions: (state) => [{ kind: 'track.delete', track: persisted(trackNamed(state, 'Added').id) }] },
+  { name: 'shortcut track add', keyboard: { key: 'T', code: 'KeyT', shiftKey: true } },
+  { name: 'undo of the added track', keyboard: { key: 'z', code: 'KeyZ', shiftKey: false } },
+  { name: 'redo of the added track', keyboard: { key: 'z', code: 'KeyZ', shiftKey: true } },
+]
+
+for (const paused of [false, true]) {
+  test(`every edit class is followed in place by a prepared native session ${paused ? 'while paused' : 'while playing'}`, async () => {
+    const directory = `/tmp/ae08-live-edits-${crypto.randomUUID()}`
+    await mkdir(directory)
+    await Bun.write(`${directory}/index.html`, await fixtureHtml())
+    const session = `ae08-live-edits-${crypto.randomUUID()}`
+    const { AGENT_BROWSER_CDP: _cdp, AGENT_BROWSER_SESSION: _session, ...env } = process.env
+    const browser = async (...args: string[]) => {
+      const child = Bun.spawn(['perl', '-e', 'alarm shift; exec @ARGV', '90', 'agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
+      const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited])
+      if (code !== 0) throw new Error(`${args.join(' ')}: ${err || out}`)
+      return out.trim()
+    }
+    const page = async (expression: string) => JSON.parse(JSON.parse(await browser('eval', `(async () => JSON.stringify(await ${expression}))()`)))
+    const snapshot = async () => liveEditSchema.parse(await page('timelineJourney.snapshot()'))
+    const rows: { edit: string; paused: boolean; banks: number }[] = []
+    try {
+      await browser('open', `file://${directory}/index.html?timeline&layout&live`)
+      await browser('wait', '--fn', '!!window.timelineJourney?.instrumentTrackId')
+      await browser('click', '[aria-label="Play"]')
+      await browser('wait', '--fn', 'timelineJourney.snapshot().running')
+      if (paused) {
+        await browser('click', '[aria-label="Pause"]')
+        await browser('wait', '--fn', '!timelineJourney.snapshot().running')
+      }
+      const baseline = await snapshot()
+      expect(baseline.prepared).toBeTrue()
+      for (const edit of liveEditClasses) {
+        const before = await snapshot()
+        if ('keyboard' in edit) {
+          await browser('eval', `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { ...${JSON.stringify(edit.keyboard)}, ctrlKey: true, metaKey: true, bubbles: true })); return true })()`)
+        } else await page(`timelineJourney.commit(${JSON.stringify(edit.actions(observedSchema.parse(await page('timelineJourney.observe()'))))})`)
+        // A bank reaches publication or the edit never did. A loop change is a transport command, so its wait is the compile that follows it.
+        await (edit.publishes !== false
+          ? browser('wait', '--fn', `new Set(timelineJourney.snapshot().revisions.filter(entry => entry.status === 'published').map(entry => entry.revision)).size > ${publishedBanks(before).length}`)
+          : browser('wait', '--fn', `timelineJourney.snapshot().trace.filter(entry => entry.event === 'compile.complete').length > ${before.trace.filter((entry) => entry.event === 'compile.complete').length}`))
+          .catch(async (cause) => { throw new Error(`${edit.name} was not followed in place: ${JSON.stringify((await snapshot()).trace.slice(before.trace.length).map((entry) => entry.event))}`, { cause }) })
+        const after = await snapshot()
+        const banks = publishedBanks(after)
+        const lifecycle = after.trace.slice(before.trace.length).filter((entry) => /transaction\.begin|session\.(start|stop|teardown)|commit\./.test(entry.event)).map((entry) => entry.event)
+        rows.push({ edit: edit.name, paused, banks: banks.length })
+        expect({ edit: edit.name, lifecycle, starts: after.starts - before.starts, stops: after.stops - before.stops, teardowns: after.teardowns - before.teardowns,
+          prepared: after.prepared, running: after.running, faults: after.faults,
+          monotonic: banks.every((revision, index) => index === 0 || revision > (banks[index - 1] ?? Infinity)),
+          published: banks.length > publishedBanks(before).length })
+          .toEqual({ edit: edit.name, lifecycle: [], starts: 0, stops: 0, teardowns: 0, prepared: true, running: !paused, faults: [], monotonic: true, published: edit.publishes !== false })
+      }
+      console.info(`AE-08 live-edit rows: ${JSON.stringify(rows)}`)
+    } finally {
+      await browser('eval', 'timelineJourney.close()').catch(() => undefined)
+      await browser('close').catch(() => undefined)
+      await rm(directory, { recursive: true, force: true })
+    }
+  }, 180_000)
+}

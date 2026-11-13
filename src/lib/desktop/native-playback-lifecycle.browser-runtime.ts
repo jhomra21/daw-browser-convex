@@ -4,6 +4,7 @@ import { useTimelinePlayback } from '~/hooks/useTimelinePlayback'
 import { createPreparedStretchArtifactRepository } from '@daw-browser/audio-engine/prepared-stretch-store'
 import type { NativeHostMeterBatch, NativeHostSpectrumFrame, NativeHostTransport, NativeScheduleProgress } from '@daw-browser/audio-engine/native-host-wire'
 import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-protocol'
+import type { NativeGraphRevisionStatus, NativeRevisionReply, NativeRevisionSession } from '@daw-browser/desktop-protocol/native-revision'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { createNativePlaybackController, nativePlaybackFaultText } from './native-playback-controller'
 import { createEffectsPanelController } from '~/components/timeline/create-effects-panel-controller'
@@ -26,6 +27,8 @@ let duplicateLeaseReleases = 0
 let controller: ReturnType<typeof createNativePlaybackController> | undefined
 const disposals: Promise<void>[] = []
 const timelineJourney = new URL(location.href).searchParams.has('timeline')
+// `live` mounts the Timeline as the desktop product does: native playback enabled, with the host's revision session.
+const liveEdits = new URL(location.href).searchParams.has('live')
 const sampledKind = new URL(location.href).searchParams.get('sampled')
 const instrumentBudget = createSampledInstrumentRegionBudget(nativeInstrumentBudgetPolicy(18 * 1024 ** 3).aggregateBytes)
 let sampleGeneration = 0
@@ -84,7 +87,7 @@ export const instrumentEvidence = (targetId: string) => ({
 })
 export const observePlayback = (...args: Parameters<typeof useTimelinePlayback>) => {
   const [engine, loop, native, portable] = args
-  timelinePlayback = useTimelinePlayback(engine, loop, native ? { ...native, enabled: () => false } : native, portable)
+  timelinePlayback = useTimelinePlayback(engine, loop, native && !liveEdits ? { ...native, enabled: () => false } : native, portable)
   return timelinePlayback
 }
 export const timelineState = () => ({
@@ -98,7 +101,7 @@ export const timelineState = () => ({
   cycleEnd: transport.cycleEndSec,
   position: controller?.currentPositionSec(),
   playheadSec: timelinePlayback?.playheadSec(),
-  starts, stops, teardowns,
+  starts, stops, teardowns, revisions: revisionLog, faults: [...faults], trace: trace.map(({ event }) => ({ event })),
   pauses: trace.filter((entry) => entry.event === 'transport.pause').length,
 })
 export const preparedInstrumentIdentity = (targetId: string) =>
@@ -208,6 +211,60 @@ let transport: NativeHostTransport = {
   epoch: 1, frame: 0, running: false, bpm: 120,
   timeSignatureNumerator: 4, timeSignatureDenominator: 4, cycleActive: false,
 }
+// Emulates the host's graph-revision session: a prepared bank is bound to a publication frame (a publish naming another
+// frame rebinds it), and a publish activates it and leaves the bank it replaced to retire.
+const revisionLog: { operation: string; revision: number; status: string }[] = []
+const revisionBanks = { active: 1, prepared: 0, retired: 0, seam: 0n, publishing: false, issued: 1 }
+// A running host activates a published bank when rendering reaches its seam, a paused one at once.
+const activateIfReached = (revision: number) => {
+  if (!revisionBanks.publishing || revision !== revisionBanks.prepared || (transport.running && BigInt(transport.frame) < revisionBanks.seam)) return
+  revisionBanks.retired = revisionBanks.active
+  revisionBanks.active = revision
+  revisionBanks.prepared = 0
+  revisionBanks.publishing = false
+  graphRevision = revision
+}
+const revisionReply = (operation: string, requested: number, status: NativeGraphRevisionStatus['status']): NativeRevisionReply => {
+  revisionLog.push({ operation, revision: requested, status })
+  return { ok: true, hostGeneration: 1, hostPid: 123, revision: { status, continuity: 'accepted', requestedRevision: requested,
+    activeRevision: revisionBanks.active, preparedRevision: revisionBanks.prepared, retiredRevision: revisionBanks.retired,
+    publicationFrame: status === 'published' ? revisionBanks.seam : 0n, renderEpoch: 1n, transportEpoch: transport.epoch,
+    requestedPublicationFrame: revisionBanks.seam, progressFrame: BigInt(transport.frame) } }
+}
+const revisions: NativeRevisionSession = {
+  // The host numbers banks itself, strictly above every revision it has issued.
+  prepare: async ({ requestedPublicationFrame }) => {
+    revisionBanks.issued = Math.max(revisionBanks.issued, revisionBanks.active) + 1
+    revisionBanks.prepared = revisionBanks.issued
+    revisionBanks.seam = requestedPublicationFrame ?? 0n
+    return revisionReply('prepare', revisionBanks.prepared, 'prepared')
+  },
+  publish: async ({ revision, requestedPublicationFrame }) => {
+    if (requestedPublicationFrame !== undefined && requestedPublicationFrame !== revisionBanks.seam) {
+      revisionBanks.seam = requestedPublicationFrame
+      return revisionReply('rebind', revision, 'prepared')
+    }
+    revisionBanks.publishing = true
+    activateIfReached(revision)
+    if (!revisionBanks.publishing) return revisionReply('publish', revision, 'published')
+    queueMicrotask(() => emitProgress(Number(revisionBanks.seam) - transport.frame))
+    return revisionReply('publish', revision, 'publish-pending')
+  },
+  inspect: async ({ revision }) => {
+    activateIfReached(revision)
+    return revisionReply('inspect', revision, revision === revisionBanks.active ? 'published'
+      : revision === revisionBanks.prepared ? (revisionBanks.publishing ? 'publish-pending' : 'prepared') : 'retired')
+  },
+  rollback: async ({ revision }) => {
+    revisionBanks.prepared = 0
+    revisionBanks.publishing = false
+    return revisionReply('rollback', revision, 'rolled-back')
+  },
+  retire: async ({ revision }) => {
+    revisionBanks.retired = 0
+    return revisionReply('retire', revision, 'retired')
+  },
+}
 const emitProgress = (advance = 0) => {
   transport = { ...transport, frame: transport.frame + advance }
   const progress: NativeScheduleProgress = {
@@ -247,6 +304,7 @@ const host = {
     release: async () => undefined,
   },
   session: {
+    ...(liveEdits && { revisions }),
     beginTransaction: async () => {
       owner += 1
       token = `fixture-transaction-${owner}`
@@ -320,6 +378,7 @@ const host = {
     },
     publishGraph: async (bytes: Uint8Array): Promise<Reply> => {
       graphRevision = Number(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigUint64(0, false))
+      revisionBanks.active = graphRevision
       return { ok: true }
     },
     configureInstrumentStates: async (bytes: Uint8Array): Promise<Reply> => {
@@ -515,7 +574,16 @@ const compileSnapshot = async (next: LivePlaybackTransport) => {
     ? { ...result, snapshot: { ...result.snapshot, nativeExternalAttachmentPlan: attachmentPlan, requiresNativePlayback: true } }
     : result
 }
-Object.defineProperty(window, 'dawDesktop', { value: { setRequestHandler: () => undefined, onPrepareToClose: () => undefined, audioHost: timelineJourney ? {
+// The desktop host's control requests reach the mounted Timeline through the handler it registers (attached-host-controller).
+let hostRequestHandler: Parameters<NonNullable<Window['dawDesktop']>['setRequestHandler']>[0]
+export const hostControl = async (operation: 'control.preview' | 'control.requestApproval' | 'control.commit' | 'control.snapshot', input: unknown) => {
+  if (!hostRequestHandler) throw new Error('The Timeline registered no host request handler.')
+  const response = await hostRequestHandler({ id: crypto.randomUUID(), operation, input,
+    trustedActorSubject: 'local:00000000-0000-4000-8000-000000000000' })
+  if (response.error) throw new Error(`${operation}: ${JSON.stringify(response.error)}`)
+  return response.result
+}
+Object.defineProperty(window, 'dawDesktop', { value: { setRequestHandler: (next: typeof hostRequestHandler) => { hostRequestHandler = next }, onPrepareToClose: () => undefined, audioHost: timelineJourney ? {
   ...host,
   getLifecycle: async () => ({ state: 'ready', powerGeneration: 0 }),
   onLifecycle: () => () => undefined,

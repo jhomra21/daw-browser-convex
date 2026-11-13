@@ -1535,11 +1535,11 @@ export const analyzePhase5EffectState = async (directory: string) => {
   await writeFile(path.join(directory, "analysis.json"), JSON.stringify(analysis, null, 2))
   return analysis
 }
-export const analyzePhase5Campaign = async (directory: string) => {
+export const analyzePhase5Campaign = async (directory: string, selected: readonly string[] = phase5Rows) => {
   const campaign = z.object({ phase: z.literal(5), rows: z.array(z.object({ row: z.string(), failure: z.string().optional() })) })
     .parse(JSON.parse(await readFile(path.join(directory, "phase5-campaign.json"), "utf8")))
   const rows = []
-  for (const row of phase5Rows) {
+  for (const row of selected) {
     const declared = campaign.rows.find((entry) => entry.row === row)
     try {
       if (!declared || declared.failure) throw new Error(declared?.failure ?? "Missing required row")
@@ -1549,7 +1549,7 @@ export const analyzePhase5Campaign = async (directory: string) => {
     }
   }
   const passed = rows.every((row) => row.passed)
-  const analysis = { phase: 5, passed, verdict: `PHASE 5 PACKAGED ${passed ? "PASS" : "FAIL"}: ${rows.filter((row) => row.passed).length}/${phase5Rows.length} rows`, rows }
+  const analysis = { phase: 5, passed, verdict: `PHASE 5 PACKAGED ${passed ? "PASS" : "FAIL"}: ${rows.filter((row) => row.passed).length}/${selected.length} rows`, rows }
   await writeFile(path.join(directory, "analysis.json"), JSON.stringify(analysis, null, 2))
   await writeFile(path.join(directory, "verdict.md"), `# AE-08 phase 5\n\n${analysis.verdict}\n`)
   return analysis

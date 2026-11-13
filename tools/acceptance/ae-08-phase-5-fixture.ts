@@ -11,7 +11,7 @@ import { writeWav } from "./ae08-wav"
 
 export const phase5Rows = ["delete-clip", "move-trim", "unchanged-span", "add-paged-asset",
   "remove-readd-track", "held-note", "raw-tempo", "rapid-burst", "effect-state"]
-type Phase5Context = {
+export type Phase5Context = {
   out: string
   profile: string
   row: string
@@ -27,7 +27,7 @@ const ref = (id: string) => ({ source: "persisted", id })
 const record = z.record(z.string(), z.json())
 // browserCommand aborts an eval after browserCommandTimeoutMs; every page-side
 // deadline fires first, so the page's named error, not the abort, reports a stall.
-const pageDeadlineMs = browserCommandTimeoutMs([]) - 5_000
+export const pageDeadlineMs = browserCommandTimeoutMs([]) - 5_000
 // Observe the UI commit, not an arbitrary delay. The deadline is failure-only.
 const waitForUi = (context: Phase5Context, failure: string, ready: string) => context.evaluate(`new Promise((resolve,reject)=>{
   const ready=()=>(${ready});
@@ -36,12 +36,12 @@ const waitForUi = (context: Phase5Context, failure: string, ready: string) => co
   observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true});
   if(ready()){observer.disconnect();clearTimeout(timer);resolve(true)}
 })`)
-const waitImportedClip = (context: Phase5Context, name: string) => waitForUi(context, `Import UI deadline: ${name}`,
+export const waitImportedClip = (context: Phase5Context, name: string) => waitForUi(context, `Import UI deadline: ${name}`,
   `[...document.querySelectorAll('[data-timeline-clip]')].some(e=>e.getAttribute('title')?.includes(${JSON.stringify(name)}))`)
 
 // Nonperiodic envelope plus DC prevents a single missing sample from landing
 // on a sine zero and makes a block shift observably wrong at every seam.
-const writePhase5Asset = async (file: string, seconds: number, right: boolean) => {
+export const writePhase5Asset = async (file: string, seconds: number, right: boolean) => {
   const sampleRate = 48000
   const samples = new Float32Array(seconds * sampleRate * 2)
   for (let frame = 0; frame < seconds * sampleRate; frame++) {
@@ -190,19 +190,21 @@ const exportReference = async (context: Phase5Context, name: string) => {
   } finally { watcher.close() }
 }
 
+// Deadline only. Audio progress, not wall time, advances the fixture.
+export const waitNativeFrame = (context: Phase5Context, frame: number) => context.evaluate(`new Promise((resolve,reject)=>{
+  const session=window.dawDesktop.audioHost.session;
+  const timer=setTimeout(()=>{unsubscribe();reject(new Error("Native progress deadline"))},${pageDeadlineMs});
+  const unsubscribe=session.onScheduleProgress(progress=>{
+    if(progress.running&&Number(progress.renderedThroughFrame)>=${frame}){
+      unsubscribe();clearTimeout(timer);resolve(true);
+    }
+  });
+})`)
+
 export const runPhase5Fixture = async (context: Phase5Context) => {
   const { out, profile, row, mutate, snapshot, mark } = context
   const runtime = (args: string[]) => command(profile, ["host", ...args])
-  const waitFrame = (frame: number) => context.evaluate(`new Promise((resolve,reject)=>{
-    const session=window.dawDesktop.audioHost.session;
-    // Deadline only. Audio progress, not wall time, advances the fixture.
-    const timer=setTimeout(()=>{unsubscribe();reject(new Error("Native progress deadline"))},${pageDeadlineMs});
-    const unsubscribe=session.onScheduleProgress(progress=>{
-      if(progress.running&&Number(progress.renderedThroughFrame)>=${frame}){
-        unsubscribe();clearTimeout(timer);resolve(true);
-      }
-    });
-  })`)
+  const waitFrame = (frame: number) => waitNativeFrame(context, frame)
   const retainedFile = path.join(out, "retained.wav")
   const changedFile = path.join(out, "changed.wav")
   await writePhase5Asset(retainedFile, 180, false)

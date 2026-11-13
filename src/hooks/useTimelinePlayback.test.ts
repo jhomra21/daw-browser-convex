@@ -7087,7 +7087,9 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     getAudioContext: () => audioCreated && !audioHidden ? audioContext : null,
     resume: async () => { if (resumeHold.armed) await new Promise<void>((resolve) => holdB6fLive(resumeHold, resolve)) },
   }
-  const playback = useTimelinePlayback(engine, { getTracks: () => tracks(), bpm, loopEnabled: () => loop().enabled,
+  // Called synchronously wherever the hook reads the desired tracks, the follow at the end of a rebuild included.
+  let onTracksRead: (() => void) | undefined
+  const playback = useTimelinePlayback(engine, { getTracks: () => { onTracksRead?.(); return tracks() }, bpm, loopEnabled: () => loop().enabled,
     loopStartSec: () => loop().start, loopEndSec: () => loop().end }, {
     enabled: () => nativeEnabled, projectId, projectGeneration: generation, compileSnapshot, playbackInputs,
     reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
@@ -7252,7 +7254,8 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
   const resumingRebuild = () => playback.restartTimelineSchedule(tracks(), {
     rebuildBackend: true, resumePlayback: true, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
-  return { playback, edit, replaceInstrument, addEffect, insertEffect, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, mark: () => world.seq,
+  const rebuild = (next: Track[]) => rebuildPlaybackBackend(next)
+  return { playback, tracks, observeTracksRead: (observer: () => void) => { onTracksRead = observer }, edit, replaceInstrument, addEffect, insertEffect, rebuild, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, mark: () => world.seq,
     locate: (sec: number) => playback.setPlayhead(sec, tracks()),
     liveSession: () => world.sessions.filter((session) => !session.closed).at(-1),
     holds: { resume: resumeHold, compile: compileHold, transport: world.transportHold, pause: world.pauseHold } }
@@ -7718,6 +7721,36 @@ test('B6f5 C an edit during a resuming rebuild reaches the session the rebuild c
   const states: B6f5State[] = ['rebuild-before-commit', 'rebuild-after-commit']
   const kinds: B6f5Kind[] = ['mixer', 'proc-nonlive']
   for (const state of states) for (const kind of kinds) await b6f5Cell(state, kind, false)
+})
+
+// A request that lands once the running rebuild has passed its last request check and cleared its flag, but before its
+// promise is released, must start the next rebuild. The hook reads the desired tracks once the rebuild has cleared its
+// flag (the follow); the microtask queued there runs ahead of the promise's release, as a request already in flight would.
+test('B6f5 479 a rebuild requested after the running rebuild passed its last request check runs next with the newest tracks', async () => {
+  for (const nativeEnabled of [false, true]) await runB6f5(async (live, world) => {
+    let armed = false
+    let late: Promise<void> | undefined
+    let landedAfterLastCheck = false
+    live.observeTracksRead(() => {
+      if (!armed || live.playback.isStructuralRebuildInProgress()) return
+      armed = false
+      queueMicrotask(() => {
+        landedAfterLastCheck = !live.playback.isStructuralRebuildInProgress()
+        live.setVolume(0.5)
+        late = live.rebuild(live.tracks())
+      })
+    })
+    await live.playFrom(1)
+    const mark = live.mark()
+    armed = true
+    const first = live.resumingRebuild()
+    await first
+    await live.until(() => late !== undefined)
+    await late
+    await live.expectEnd(true, undefined, mark, 'mixer', false)
+    expect({ landedAfterLastCheck, sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length })
+      .toEqual({ landedAfterLastCheck: true, sessionsAfterMark: 2 })
+  }, nativeEnabled)
 })
 
 test('B6f5 D a structural edit during a warm Play keeps the Play and reaches its session', async () => {

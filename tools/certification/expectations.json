@@ -45537,7 +45537,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 27,
+      "pass": 28,
       "skip": 0,
       "fail": 0
      },
@@ -45574,7 +45574,7 @@
       "/tmp/dv01-b6/rc5/tools/dv01-b6f5-step3-5/overlay-js.ts",
       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
       "-t",
-      "B6F5PROBE"
+      "B6F5PROBE|B6f5 479"
      ],
      "alarmSeconds": 400,
      "env": {
@@ -45595,7 +45595,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 236,
+      "pass": 237,
       "skip": 0,
       "fail": 0
      },
@@ -45650,7 +45650,7 @@
      "exit": 1,
      "applied": 0,
      "counts": {
-      "pass": 227,
+      "pass": 234,
       "skip": 1,
       "fail": 2
      },
@@ -45718,12 +45718,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 26,
+      "pass": 27,
       "skip": 0,
       "fail": 1
      },
      "fails": [
-      "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits"
+      "B6f5 479 a rebuild requested after the running rebuild passed its last request check runs next with the newest tracks"
      ],
      "fuzz": null,
      "rejection": null,
@@ -45757,7 +45757,7 @@
       "/tmp/dv01-b6/rc5/tools/dv01-b6f5-step3-5/overlay-js.ts",
       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts",
       "-t",
-      "B6F5PROBE"
+      "B6F5PROBE|B6f5 479"
      ],
      "alarmSeconds": 400,
      "env": {
@@ -45784,13 +45784,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 234,
+      "pass": 236,
       "skip": 0,
-      "fail": 2
+      "fail": 1
      },
      "fails": [
-      "B6F5PROBE native-off rebuild-after-commit proc-nonlive",
-      "B6F5PROBE native-on rebuild-after-commit proc-nonlive"
+      "B6f5 479 a rebuild requested after the running rebuild passed its last request check runs next with the newest tracks"
      ],
      "fuzz": null,
      "rejection": null,
@@ -45848,12 +45847,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 226,
+      "pass": 233,
       "skip": 1,
       "fail": 3
      },
      "fails": [
-      "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
+      "B6f5 479 a rebuild requested after the running rebuild passed its last request check runs next with the newest tracks",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],

@@ -302,9 +302,9 @@ ipcRenderer.on(hostRequestChannel, (_event, message) => {
 const desktopBridge = {
   benchmarkSabRecording: process.env.DAW_BENCHMARK_SAB_RECORDING === "1",
   acceptanceExternalNativeSession: process.env.DAW_AE08_EXTERNAL_NATIVE_SESSION === "1",
-  ...(process.env.DAW_AE08_EVIDENCE_DIR ? {
-    ae08Mark: (name: string, key: string) => ipcRenderer.send(ae08RendererMarkChannel, [name, key]),
-  } : {}),
+  ae08Mark: process.env.DAW_AE08_EVIDENCE_DIR
+    ? (name: string, key: string) => ipcRenderer.send(ae08RendererMarkChannel, [name, key])
+    : undefined,
   benchmarkHeartbeat: (): Promise<{ mainEpochMs: number } | null> =>
     process.env.DAW_BENCHMARK_HEARTBEAT === "1" ? ipcRenderer.invoke(benchmarkHeartbeatChannel) : Promise.resolve(null),
   traceDiagnosticsV2(id: string, stage: "controller-before-native" | "controller-after-native" | "controller-parsed") {

@@ -183,7 +183,7 @@ import {
 import { packagedRendererRoot, rendererAssetPath } from "./renderer-path"
 import { createNativeVstProjectBindings } from "./native-vst-project-bindings"
 import { createApplicationMenuController } from "./application-menu"
-import { ae08ControlCommitReceived, ae08Evidence, ae08RendererMark } from "./ae08-evidence"
+import { ae08ControlCommitReceived, ae08Evidence, ae08RendererMarkSchema } from "./ae08-evidence"
 import { deliverToRenderer } from "./renderer-delivery"
 import { createRendererLifecycleOwner } from "./renderer-lifecycle"
 import { createOfflinePcmAckTracker } from "./offline-pcm-ack"
@@ -1150,7 +1150,8 @@ const registerIpc = () => {
     && sameAppOrigin(event.senderFrame.url)
   )
   if (process.env.DAW_AE08_EVIDENCE_DIR) ipcMain.on(ae08RendererMarkChannel, (event, message) => {
-    if (audioHostAllowed(event)) ae08RendererMark(message)
+    const mark = ae08RendererMarkSchema.safeParse(message)
+    if (mark.success && audioHostAllowed(event)) ae08Evidence(mark.data[0], { key: mark.data[1] })
   })
   installBenchmarkHeartbeat({
     app,

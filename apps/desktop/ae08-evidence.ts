@@ -23,10 +23,5 @@ export const ae08ControlCommitReceived = (frame: Pick<DesktopRequestV2, "operati
   if (commit.success) ae08Evidence("control-commit-received", { idempotencyKey: commit.data.idempotencyKey })
 }
 
-const rendererMark = z.tuple([z.enum(ae08RendererMarks), z.string().max(64)])
-
-// A renderer mark of the edit-to-publish path. The key is the commit's idempotency key or an adoption's hash.
-export const ae08RendererMark = (message: unknown) => {
-  const mark = rendererMark.safeParse(message)
-  if (mark.success) ae08Evidence(mark.data[0], { key: mark.data[1] })
-}
+// A renderer mark of the edit-to-publish path: its name and the commit's idempotency key or an adoption's hash.
+export const ae08RendererMarkSchema = z.tuple([z.enum(ae08RendererMarks), z.string().max(64)])

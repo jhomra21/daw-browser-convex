@@ -66,16 +66,6 @@ export const observePanelController = (...args: Parameters<typeof createEffectsP
   return panel
 }
 export const instrumentPanel = () => panel?.devices.instrument
-let rebuildGate: ReturnType<typeof Promise.withResolvers<void>> | undefined
-let rebuildHeld = false
-export const holdNextRebuild = () => { rebuildGate = Promise.withResolvers<void>() }
-export const isRebuildHeld = () => rebuildHeld
-export const releaseRebuild = () => { rebuildGate?.resolve(); rebuildGate = undefined; rebuildHeld = false }
-Object.assign(window, { holdRebuildBeforeRetirement: async () => {
-  if (!rebuildGate) return
-  rebuildHeld = true
-  await rebuildGate.promise
-} })
 export const instrumentEvidence = (targetId: string) => ({
   instrumentNotifications,
   instrument: timelinePlayback?.preparedInstrument(targetId) ?? null,

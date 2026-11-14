@@ -12,7 +12,7 @@ import { saveLocalProjectState, loadLocalProjectState } from '~/lib/local-projec
 import { createLocalControlService } from '~/lib/local-control/local-control-service'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { controlApprovalResultSchemaV1, controlPreviewResultSchemaV1, projectSnapshotSchemaV2 } from '@daw-browser/control'
-import { hostControl, timelineState, preparedInstrumentIdentity, instrumentPanel, instrumentEvidence, holdNextRebuild, isRebuildHeld, releaseRebuild, timelineSeek, closeTimeline, retireTimeline, loseTimelineHost } from './native-playback-lifecycle.browser-runtime'
+import { hostControl, timelineState, preparedInstrumentIdentity, instrumentPanel, instrumentEvidence, timelineSeek, closeTimeline, retireTimeline, loseTimelineHost } from './native-playback-lifecycle.browser-runtime'
 import { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
 import { compileLivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
 import type { PortableWasmBackendSelection } from '@daw-browser/audio-engine/wasm-audio-worklet-backend'
@@ -235,9 +235,6 @@ export const mountTimeline = async () => {
       coalescedTrackId,
       preparedInstrumentIdentity,
       instrumentEvidence,
-      holdNextRebuild,
-      isRebuildHeld,
-      releaseRebuild,
       changeSynthCutoff: (frequencyHz: number) => instrumentPanel()?.synth.change({ filter: { frequencyHz } }),
       flushInstrument: () => instrumentPanel()?.flushPending(),
       roomRows: () => [instrumentTrackId, remoteTrackId, coalescedTrackId].flatMap(trackId => {

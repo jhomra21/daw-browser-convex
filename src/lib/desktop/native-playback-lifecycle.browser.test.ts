@@ -65,12 +65,6 @@ const fixtureHtml = async () => {
             'if (options.roomEffects() === undefined && isLocalId("project", projectId) && track.kind === "instrument")',
           )
         }
-        if (!process.env.DAW_LOOP_REGRESSION && id === `${root}/src/hooks/useTimelinePlayback.ts`) {
-          return (await Bun.file(id).text()).replace(
-            '    await awaitPendingPauseAndStop()\n    if (isSuperseded()) return',
-            '    await awaitPendingPauseAndStop()\n    await Reflect.get(globalThis, "holdRebuildBeforeRetirement")?.()\n    if (isSuperseded()) return',
-          )
-        }
         if (process.env.DAW_INSTRUMENT_R20_BASELINE === '1' || process.env.DAW_INSTRUMENT_NO_IDENTITY_GUARD === '1') {
           if (id === `${root}/src/lib/desktop/native-built-in-parameter-mapper.ts`) {
             return (await Bun.file(id).text()).replace(
@@ -813,7 +807,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     await browser('screenshot', `${evidence}/production-timeline.png`)
     await browser('eval', 'timelineJourney.close()')
     await browser('set', 'viewport', '1720', '1080')
-    await browser('open', `file://${directory}/index.html?timeline&layout`)
+    await browser('open', `file://${directory}/index.html?timeline&layout&live`)
     await browser('wait', '--fn', `!!window.timelineJourney && !!document.querySelector('[aria-label="Play"]')`)
     await browser('eval', `(() => {for(const [label,enabled] of [['Toggle Follow',true],['Toggle snap to grid',false]]){const b=document.querySelector('button[aria-label="'+label+'"]');if((b.getAttribute('aria-pressed')==='true')!==enabled)b.click()}})()`)
     await browser('eval', 'timelineJourney.seek(70)')
@@ -964,14 +958,14 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     const removed = JSON.parse(JSON.parse(await browser('eval', `JSON.stringify({state:timelineJourney.snapshot(),boundary:timelineJourney.instrumentEvidence("${remoteTrackId}")})`)))
     await Bun.write(`${evidence}/28-instrument-removal.json`, JSON.stringify(removed, null, 2))
     if (process.env.DAW_INSTRUMENT_R20_BASELINE !== '1') expect(removed.boundary.instrument).toBeNull()
-    // Hold B before graph A retires, then queue A through panel-local apply.
-    // The awaited handoff keeps A's registration behind B, while its draft is visible immediately.
-    await browser('eval', 'timelineJourney.holdNextRebuild()')
+    // Hold B's adoption at its compile, then queue A through panel-local apply.
+    // The adoption queue keeps A behind B, while its draft is visible immediately.
+    await browser('eval', 'dv01Timeline.holdCapture()')
     await browser('eval', `timelineJourney.setPanelInstrument("${coalescedTrackId}", "instrument:race-B", 650)`)
-    await browser('wait', '--fn', 'timelineJourney.isRebuildHeld()')
+    await browser('wait', '--fn', 'dv01Timeline.held()')
     await browser('eval', `timelineJourney.setPanelInstrument("${coalescedTrackId}", "${coalescedInstanceId}", 740)`)
     await browser('wait', '--fn', `timelineJourney.instrumentEvidence("${coalescedTrackId}").desiredInstrument?.instanceId === "${coalescedInstanceId}" && timelineJourney.instrumentEvidence("${coalescedTrackId}").desiredInstrument?.params.filter.frequencyHz === 740`)
-    await browser('eval', 'timelineJourney.releaseRebuild()')
+    await browser('eval', 'dv01Timeline.releaseCapture()')
     if (process.env.DAW_INSTRUMENT_R20_BASELINE !== '1') await browser('wait', '--fn', `timelineJourney.preparedInstrumentIdentity("${coalescedTrackId}")?.instanceId === "${coalescedInstanceId}"`)
     else await browser('wait', '500')
     await browser('eval', 'timelineJourney.flushInstrument()')

@@ -58,6 +58,7 @@ The MISMATCH rows 382 and 434 keep their killing arms and have no survivor to re
 | `ledger:468:mutant:b6f3` | ledger 468 | `src/hooks/useTimelinePlayback.ts`: ` // ensurePrepared keeps a paused session that stands at the playhead, so an edit replaces` → `` | its test command (1 pass) still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
 | `ledger:468:mutant:b6f2` | ledger 468 | `src/hooks/useTimelinePlayback.ts`: ` // ensurePrepared keeps a paused session that stands at the playhead, so an edit replaces` → `` | its test command (5 pass) still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
 | `ledger:468:mutant:b6f` | ledger 468 | `src/hooks/useTimelinePlayback.ts`: ` // ensurePrepared keeps a paused session that stands at the playhead, so an edit replaces` → `` | its test command (8 pass) still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
+| `ledger:469:mutant:b6f3` | ledger 469 | `src/hooks/useTimelinePlayback.ts`: `else if (projectionChanged && playAttempt === undefined && (isPrepared() \|\| isPreparing()))` → `else if (true)` | its test command (`-t "B6f3 "`) exits 0. B6f3's path (a fault while playing, no projection change, a prepared session) leaves the same session, the same compile count and the same posts under both branches since 11d, so no witness on that path can tell them apart. The mutation is live: `ledger:469:mutant:playback` fails 17 tests and `ledger:469:mutant:b6f4` fails the paused re-run witness. Only this narrow view retires (phase 8 closure item 2, record 36) |
 | `ledger:470:mutant:b6f3` | ledger 470 | `src/hooks/useTimelinePlayback.ts`: ` // The paused session now carries this fingerprint, so a re-run without an edit keeps it.` → `` | its test command (1 pass) still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
 | `ledger:470:mutant:b6f2` | ledger 470 | `src/hooks/useTimelinePlayback.ts`: ` // The paused session now carries this fingerprint, so a re-run without an edit keeps it.` → `` | its test command (5 pass) still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
 | `ledger:470:mutant:b6f` | ledger 470 | `src/hooks/useTimelinePlayback.ts`: ` // The paused session now carries this fingerprint, so a re-run without an edit keeps it.` → `` | its test command (8 pass) still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
@@ -143,6 +144,7 @@ The MISMATCH rows 382 and 434 keep their killing arms and have no survivor to re
 - `ledger:468:control:b6f3`
 - `ledger:468:control:b6f2`
 - `ledger:468:control:b6f`
+- `ledger:469:control:b6f3`
 - `ledger:470:control:b6f3`
 - `ledger:470:control:b6f2`
 - `ledger:470:control:b6f`

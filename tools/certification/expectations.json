@@ -4304,8 +4304,9 @@
   "hook206": {
    "seed": 206,
    "ids": [
-    240,
-    244
+    205,
+    209,
+    214
    ]
   },
   "controller": {
@@ -30032,8 +30033,7 @@
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
       "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
@@ -41481,7 +41481,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).\n          adoptPortableEdits()\n",
+       "from": "          // The kept paused session adopts the edit in place, once the clips it adds are hydrated: the effect runs again\n          // when they are. What it cannot carry replaces it (requestTimelineSchedule).\n          if (!pendingAudioHydration) adoptPortableEdits()\n",
        "to": ""
       }
      ]
@@ -41728,7 +41728,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).\n          adoptPortableEdits()\n",
+       "from": "          // The kept paused session adopts the edit in place, once the clips it adds are hydrated: the effect runs again\n          // when they are. What it cannot carry replaces it (requestTimelineSchedule).\n          if (!pendingAudioHydration) adoptPortableEdits()\n",
        "to": ""
       }
      ]
@@ -41746,7 +41746,8 @@
      "fails": [
       "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
       "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
-      "B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session",
+      "C9e W-C9-track-11 a track added, reordered and deleted while playing or paused is adopted by the same session with no dispose and no rebuild",
+      "UD7n W-S11d-C2 an unhydrated clip inserted into a paused portable session keeps the session, stages nothing, and is adopted after hydration",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -42089,7 +42090,6 @@
       "fail": 2
      },
      "fails": [
-      "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
       "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session"
      ],
      "fuzz": null,
@@ -42145,16 +42145,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 0,
+      "pass": 1,
       "skip": 0,
-      "fail": 1
+      "fail": 0
      },
-     "fails": [
-      "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -42344,33 +42342,10 @@
      "fails": [
       "B6f a project switch leaves a live paused portable session of the new project at the start",
       "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
-      "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
-      "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
       "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
-      "B6f5 479 a rebuild requested after the running rebuild passed its last request check runs next with the newest tracks",
-      "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
-      "B6f5 A an edit the playing portable session cannot take live is adopted once at a seam, with no rebuild",
-      "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
-      "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
-      "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session",
-      "B6f5 E5 a note and a tempo edit while playing are adopted at a seam without a dispose or a restart",
-      "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
       "B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session",
-      "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
-      "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
       "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
       "B6f5 a resume after an adoption plays the newest state",
-      "B6f5 renaming and recolouring a track while playing is neither adopted nor rebuilt",
-      "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
-      "B6f5c W-R8a a loop edit during a portable take is adopted once the take has stopped or been cancelled",
-      "B6f5c a failed take followed by the caller stop or cancel adopts each edit once",
-      "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
-      "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
-      "B6f5c a structural edit during a portable take is adopted in place and the take stops or is cancelled afterwards",
-      "B6f5c a take ended by a device fault follows the edit it held",
-      "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
-      "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
-      "C0G a clip waveform key or key order change while playing is neither adopted nor rebuilt",
       "C9b W-C9-clip-6 an audio clip move while playing or paused is adopted by the same session with no dispose and no rebuild",
       "C9c W-C9-asset-7 an audio clip asset swap while playing or paused is adopted by the same session with no dispose and no rebuild",
       "C9d W-C9-warp-8 a tempo or warp marker edit under a Stretch clip while playing or paused is adopted by the same session with no dispose and no rebuild",
@@ -42378,19 +42353,10 @@
       "C9f W-C9-fx-5 an effect inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
       "C9g W-C9-inst-7 an instrument replaced or a processor parameter edited while playing or paused is adopted by the same session with no dispose and no rebuild",
       "C9h W-C9-fx-8 a limiter inserted while playing or paused is adopted by the same session with no dispose and no rebuild",
-      "E3 W-E3-6 a locate while playing seeks the same session without a dispose or a Play, and the follow adopts the edit after it",
-      "E3 W-E3-R9 a locate the live session refuses without a failure rebuilds at the target and keeps playing",
-      "F20 W-F20b changing the loop end while playing is adopted at a seam and the schedule loops at the new end",
-      "F20 W-F20f toggling the loop on and off while playing is adopted without a dispose or a restart",
-      "W-FB-2 a refused adopting publish while playing keeps the session and a later adoption carries the edit",
+      "UD7n W-S11d-E1 a VST3 insert while paused with only a browser session prepared rebuilds nothing and shows the limitation",
       "W-FB-3 a structural edit while a session is kept paused reaches its adoption and rebuilds nothing",
       "failed lifecycle transition cancels delayed native startup",
-      "keeps a paused portable session compatible when enabling a loop",
-      "native-required play retries failed recovery and stays stopped while recovery runs",
-      "pauses Web Audio transport before disposing active portable playback on cleanup",
-      "pauses Web Audio transport before disposing portable playback on project generation change",
-      "preserves an explicitly captured native owner across queued generation rebuilds",
-      "rebuilds active portable playback into compatibility playback for a loop"
+      "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
      "fuzz": null,
      "rejection": null,
@@ -65897,8 +65863,7 @@
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
       "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
@@ -65982,8 +65947,7 @@
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
       "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
@@ -66422,8 +66386,7 @@
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
       "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
@@ -66507,8 +66470,7 @@
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
       "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",

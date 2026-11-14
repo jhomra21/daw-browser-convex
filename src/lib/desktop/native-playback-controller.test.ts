@@ -642,6 +642,35 @@ describe("DV01 STEP7 latency publication witnesses", () => {
     })
   }
 
+  for (const { path, playhead } of [{ path: "resume in the prepared epoch", playhead: 0 }, { path: "resume in a new epoch at another frame", playhead: 1 }]) {
+    test(`a Play (${path}) still runs while a burst of schedule adoptions keeps arriving`, async () => {
+      const f = await step7Host()
+      try {
+        await f.act({ kind: "pause" })
+        await f.advance()
+        await f.act({ kind: "start", value: playhead })
+        const playRunning = () => f.fixture.state().waiters.findLast(waiter => waiter.name === "start")?.settled === true
+        const heldCompile = () => f.fixture.enabled().find(action => action.kind === "resolve-compile")
+        await f.until(() => heldCompile() !== undefined)
+        for (let edit = 0; edit < 20; edit++) {
+          await f.act({ kind: "submit-schedule", mode: edit % 2 ? "A" : "B" })
+          const compile = heldCompile()
+          if (compile) await f.act(compile)
+          for (let step = 0; step < 300 && !playRunning() && !heldCompile(); step++) {
+            const action = f.next()
+            if (!action) break
+            await f.act(action)
+          }
+        }
+        // Each adoption compiles for itself; what must not happen is the Play waiting out the whole burst.
+        expect(playRunning()).toBe(true)
+        await f.advance()
+        expect(f.fixture.pending()).toEqual([])
+        expect(f.fixture.failures).toEqual([])
+      } finally { await f.close() }
+    })
+  }
+
   test("a schedule adoption whose publication a Play's transport move cancels runs again in the new epoch", async () => {
     const f = await step7Host()
     try {

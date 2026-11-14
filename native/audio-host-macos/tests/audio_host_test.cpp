@@ -3403,6 +3403,80 @@ void TestLatencyMoveCompletionQueuesTheNextRevision() {
   host.Stop();
 }
 
+// Acceptance evidence for one test: the host appends JSON lines to a private directory.
+struct EvidenceLog {
+  std::filesystem::path directory = std::filesystem::temp_directory_path()
+    / ("ae08-evidence-" + std::to_string(getpid()));
+  EvidenceLog() {
+    std::filesystem::create_directory(directory);
+    setenv("DAW_AE08_EVIDENCE_DIR", directory.c_str(), 1);
+  }
+  ~EvidenceLog() {
+    unsetenv("DAW_AE08_EVIDENCE_DIR");
+    std::filesystem::remove_all(directory);
+  }
+  // Lines of one event. The bridge thread writes after the callback returns, so wait for `count`.
+  std::vector<std::string> Lines(const std::string& event, const std::size_t count) const {
+    const auto marker = "\"event\":\"" + event + "\"";
+    std::vector<std::string> found;
+    for (const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);;) {
+      found.clear();
+      std::ifstream file(directory / ("native-" + std::to_string(getpid()) + ".jsonl"));
+      for (std::string line; std::getline(file, line);)
+        if (line.find(marker) != std::string::npos) found.push_back(line);
+      if (found.size() >= count || std::chrono::steady_clock::now() > deadline) return found;
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+  }
+  static std::optional<std::uint64_t> Field(const std::string& line, const std::string& key) {
+    const auto at = line.find("\"" + key + "\":");
+    if (at == std::string::npos) return std::nullopt;
+    return std::strtoull(line.c_str() + at + key.size() + 3, nullptr, 10);
+  }
+};
+
+// A raise publishes the larger latency. A lower while playing publishes the graph's own smaller latency but keeps
+// the pinned budget until the transport stops, so only the graph latency shows that the lower was applied.
+void TestPublishEvidenceCarriesTheAppliedLatency() {
+  using daw::audio_host_macos::GraphRevisionStatusCode;
+  EvidenceLog log;
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 22050,
+    .max_frames_per_block = 128, .channel_count = 2, .revision = 1}));
+  assert(host.PrepareAndPublishGraph(1, SpectralTransitionGraph(1, 512)));
+  assert(host.SetTransport(1, false, 0));
+  assert(host.StartDiagnosticMode());
+  assert(host.SetTransport(1, true, 0));
+  std::array<float, 128> silence{}, left{}, right{};
+  const std::array<const float*, 2> input{silence.data(), silence.data()};
+  const std::array<float*, 2> output{left.data(), right.data()};
+  assert(host.ProcessPlanar(input, output, 128));
+  assert(host.PrepareGraphRevision(2, SpectralTransitionGraph(2, 4096)).code == GraphRevisionStatusCode::kPrepared);
+  assert(host.PublishGraphRevision(2).code == GraphRevisionStatusCode::kPublishPending);
+  assert(host.ProcessPlanar(input, output, 128));
+  assert(host.InspectGraphRevision(2).code == GraphRevisionStatusCode::kPublished);
+  for (unsigned rendered = 0; host.InspectGraphRevision(3).code == GraphRevisionStatusCode::kPublishPending
+    && rendered < 1000; ++rendered) assert(host.ProcessPlanar(input, output, 128));
+  assert(host.PrepareGraphRevision(3, SpectralTransitionGraph(3, 512)).code == GraphRevisionStatusCode::kPrepared);
+  assert(host.PublishGraphRevision(3).code == GraphRevisionStatusCode::kPublishPending);
+  assert(host.ProcessPlanar(input, output, 128));
+  assert(host.InspectGraphRevision(3).code == GraphRevisionStatusCode::kPublished);
+  const auto published = log.Lines("graph-publish", 3);
+  host.Stop();
+  assert(published.size() == 3);
+  const auto latencies = [&](const char* key) {
+    std::array<std::uint64_t, 3> frames{};
+    for (std::size_t index = 0; index < frames.size(); ++index) {
+      const auto value = EvidenceLog::Field(published[index], key);
+      assert(value);
+      frames[index] = *value;
+    }
+    return frames;
+  };
+  assert((latencies("graphLatencyFrames") == std::array<std::uint64_t, 3>{512, 4096, 512}));
+  assert((latencies("pinnedLatencyFrames") == std::array<std::uint64_t, 3>{512, 4096, 4096}));
+}
+
 void TestPausedPublicationReconcilesScheduledTargets() {
   using daw::audio_host_macos::GraphRevisionStatusCode;
   for (const bool removed : {false, true}) {
@@ -6300,6 +6374,7 @@ int main() {
   TestDeviceLossTerminatesPendingTransition();
   TestKeepLatencyDiagnosticReply();
   TestLatencyMoveCompletionQueuesTheNextRevision();
+  TestPublishEvidenceCarriesTheAppliedLatency();
   TestPausedPublicationReconcilesScheduledTargets();
   if (std::getenv("DAW_AE08_LATENCY_ONLY") != nullptr) return 0;
   if (std::getenv("DAW_PHASE2_VALIDATION_BENCHMARK") != nullptr) {

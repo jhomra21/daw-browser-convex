@@ -7245,6 +7245,11 @@ daw::audio_core::NativeLatencyTransition daw::audio_core::InspectLatencyTransiti
   };
 }
 
+std::uint32_t daw::audio_core::PublishedGraphLatency(const daw_audio_core_handle handle) noexcept {
+  const Core *core = to_core(handle);
+  return core == nullptr ? 0u : core->published_graph->minimum_latency;
+}
+
 void daw::audio_core::StopLatencyTransition(const daw_audio_core_handle handle) noexcept {
   Core *core = to_core(handle);
   if (core == nullptr) return;

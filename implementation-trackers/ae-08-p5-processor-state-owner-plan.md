@@ -1046,7 +1046,7 @@ None block source design. Certification is blocked until the C0 fixture/runner e
   - **F2: `resumeBoundaryBounded` reads the reference unshifted** (A:1080–1084; parent note 2).
     - The compensated reference is 512 frames later. On C0i the bound is the same either way.
     - The fix is one line: read `leftReference.samples[(frame + state.fromLatencyFrames) * channels]`.
-  - **F3: residual cold signs** (A:1165–1168 and A:1076–1079).
+  - **F3: residual cold signs** (A:1165–1168 and A:1076–1079). **CLOSED** for `suspend` and for events without `wallMs`: the cold regexes carry `suspend`, and a window never excludes an untimed event (`inWindow`). Self-test defects `warm-resume-across-suspend` and `resume-across-untimed-stop` reject. The lone `capture-configure` sign below is not part of that fix.
     - A lone `capture-configure` just outside the warm window passes both checks. That cannot pass in the product, because `native/audio-host-macos/src/acceptance-output-tap.h:29–47` starts a new capture.
     - `host-suspend-request` (`apps/desktop/audio-host.ts:3268`) matches neither regex. Add `suspend` to both.
     - An event without `wallMs` is invisible to both checks. No real event lacks it.

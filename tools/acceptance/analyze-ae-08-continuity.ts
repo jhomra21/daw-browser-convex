@@ -54,6 +54,9 @@ type Entry = Awaited<ReturnType<typeof jsonl>>[number]
 // The VST3 worker supervisor coming up beside the running device is not a device start, so a warm resume or an edit
 // in a row with a worker must not read it as a cold sign.
 const coldEvent = (event: Entry["event"] | undefined, pattern: RegExp) => event !== "worker-supervisor-started" && pattern.test(String(event))
+// An event with no wall time cannot be placed outside a window, so a window never excludes it: it is read, not skipped.
+const inWindow = (entry: Entry, from: number, to: number) =>
+  !Number.isFinite(Number(entry.wallMs)) || (Number(entry.wallMs) >= from && Number(entry.wallMs) <= to)
 export const rawCaptureOffsetsValid = (blocks: Entry[], wavFrames: number, complete?: Entry) => {
   if (!complete || !Number.isSafeInteger(wavFrames) || Number(complete.frames) !== wavFrames || !blocks.length) return false
   let accountedFrames = 0
@@ -474,6 +477,19 @@ const publishedMoves = (attributed: NonNullable<ReturnType<typeof attributePubli
   attributed.filter((entry) => entry.raiseFrames > 0)
     .map((entry) => ({ publicationFrame: entry.publication.publicationFrame, raiseFrames: entry.raiseFrames }))
 
+// What the host reports at each publication, which PCM cannot show: a lost lower whose delay equals the pinned budget
+// sounds like a pinned one. The graph latency is what the publication's last edit asked for. The pinned budget only
+// rises while playing, so a lower leaves it at the highest graph latency so far.
+const appliedLatencyMatches = <Publication extends { graphLatencyFrames: number; pinnedLatencyFrames: number }>(
+  attributed: readonly { publication: Publication; edits: readonly Phase4Edit[] }[]) => {
+  let pinned = attributed[0]?.edits[0]?.fromLatencyFrames ?? 0
+  return attributed.every(({ publication, edits: group }) => {
+    const graph = group.at(-1)?.toLatencyFrames
+    pinned = Math.max(pinned, graph ?? 0)
+    return publication.graphLatencyFrames === graph && publication.pinnedLatencyFrames === pinned
+  })
+}
+
 // An exact oracle, not a seam exclusion. Both the fade and the declared R-frame
 // history move are checked sample by sample. A lower never removes that shift.
 const latencySample = (reference: Pcm, frame: number, channel: number, move: LatencyMove) => {
@@ -688,6 +704,21 @@ export const phase4SyntheticProof = () => {
   const rightDelays = { pinned: rightFollows((frame) => frame < 100_000 ? 0 : 5120) === null,
     lowerUnpinsRightPath: rightFollows((frame) => frame < 100_000 ? 0 : frame < 200_000 ? 5120 : 1536) === 1,
     raiseNotAppliedToRightPath: rightFollows(() => 0) === 0 }
+  // Latencies as reported by the host, per publication. A lost lower reports the pinned budget as its graph latency.
+  const reports = (graph: number[], pinned: number[], published = [raised, lowered, lowest], edits = plan) => {
+    const attributed = attributePublications(edits, published.map((entry, index) =>
+      ({ ...entry, graphLatencyFrames: graph[index] ?? NaN, pinnedLatencyFrames: pinned[index] ?? NaN })))
+    return !!attributed && appliedLatencyMatches(attributed)
+  }
+  const appliedLatency = {
+    merged: reports([6144, 2560, 1024], [6144, 6144, 6144]),
+    split: reports([2560, 6144, 2560, 1024], [2560, 6144, 6144, 6144], [raised, overlap, lowered, lowest]),
+    mixedTurn: reports([2560, 1024], [2560, 2560], [raised, lowest], mixedPlan),
+    lostLowerAtPinnedBudget: !reports([6144, 6144, 1024], [6144, 6144, 6144])
+      && !reports([2560, 6144, 6144, 1024], [2560, 6144, 6144, 6144], [raised, overlap, lowered, lowest]),
+    unpinnedLower: !reports([6144, 2560, 1024], [6144, 2560, 2560]),
+    missingFields: !reports([], []),
+  }
   const overlapWaits = {
     merged: overlappingMoveWaits([100, 3100, 4300], [1500, 3300, 4500], 0),
     split: overlappingMoveWaits([100, 1600, 3100, 4300], [1500, 1700, 3300, 4500], 0),
@@ -713,9 +744,10 @@ export const phase4SyntheticProof = () => {
   if (!Object.values(attribution).every(Boolean)) throw new Error(`Phase 4 publication attribution oracle failed: ${JSON.stringify(attribution)}`)
   if (!Object.values(failedPublication).every(Boolean)) throw new Error(`Phase 4 per-publication report failed: ${JSON.stringify(failedPublication)}`)
   if (!Object.values(rightDelays).every(Boolean)) throw new Error(`Phase 4 right-path delay oracle failed: ${JSON.stringify(rightDelays)}`)
+  if (!Object.values(appliedLatency).every(Boolean)) throw new Error(`Phase 4 applied-latency oracle failed: ${JSON.stringify(appliedLatency)}`)
   if (!Object.values(overlapWaits).every(Boolean)) throw new Error(`Phase 4 overlapping-move oracle failed: ${JSON.stringify(overlapWaits)}`)
   if (!Object.values(results).every(Boolean)) throw new Error(`Phase 4 synthetic oracle failed: ${JSON.stringify(results)}`)
-  return { ...results, multipleMoves, keepLatency, monitoredIntrinsicOnly, monitoredCompensationRejected, ...attribution, failedPublication, ...rightDelays, overlapWaits }
+  return { ...results, multipleMoves, keepLatency, monitoredIntrinsicOnly, monitoredCompensationRejected, ...attribution, failedPublication, ...rightDelays, appliedLatency, overlapWaits }
 }
 
 const phase4Plan = z.object({ phase: z.literal(4), fixtureKind: z.string(), edits: z.array(z.object({
@@ -759,6 +791,7 @@ export const analyzePhase4 = async (directory: string) => {
     if (!segment) throw new Error("Publication is outside the assembled capture")
     return { nativePublicationFrame: publicationFrame, revision: Number(entry.revision),
       pid: Number(entry.pid), transportEpoch: Number(entry.transportEpoch), wallMs: Number(entry.wallMs),
+      graphLatencyFrames: Number(entry.graphLatencyFrames), pinnedLatencyFrames: Number(entry.pinnedLatencyFrames),
       publicationFrame: segment.outputFrame + sourceFrame - segment.sourceFrame - origins.output }
   })
   const attribution = attributePublications(plan.edits, located)
@@ -848,6 +881,7 @@ export const analyzePhase4 = async (directory: string) => {
       && plan.edits[0]?.name === "latency-raise" && lower?.name === "latency-lower"
       && lower?.toLatencyFrames === raise?.fromLatencyFrames,
     everyEditPublished: attribution !== undefined,
+    publishedLatencyMatchesMoves: attribution !== undefined && appliedLatencyMatches(attribution),
     monotonicRevisions: located.every((edit, index) => index === 0 || edit.revision > (located[index - 1]?.revision ?? Infinity)),
     oneHostAndGeneration: owners.length === 1 && Number.isInteger(owners[0]?.lifecycleGeneration)
       && located.every((edit) => edit.pid === pid && edit.transportEpoch === located[0]?.transportEpoch)
@@ -1058,7 +1092,7 @@ type Phase5Evidence = { plan: z.infer<typeof phase5PlanSchema>; host: Entry[]; a
 
 export const checkPhase5 = async ({ plan, host, actions, wav }: Phase5Evidence) => {
   const end = Number(actions.find((entry) => entry.event === "capture-end")?.wallMs)
-  const measured = host.filter((entry) => Number(entry.wallMs) >= plan.editStart && Number(entry.wallMs) <= end)
+  const measured = host.filter((entry) => inWindow(entry, plan.editStart, end))
   const publications = measured.filter((entry) => entry.event === "graph-publish")
     .sort((a, b) => Number(a.publicationFrame) - Number(b.publicationFrame))
   const blocks = host.filter((entry) => entry.event === "capture-block"
@@ -1091,7 +1125,7 @@ export const checkPhase5 = async ({ plan, host, actions, wav }: Phase5Evidence) 
   }
   const seams = publications.map((entry) => Number(entry.publicationFrame))
   const epoch = owner.transportEpoch
-  const lifecycle = measured.filter((entry) => coldEvent(entry.event, /stop|teardown|start|rebuild|host-exit|host-spawn|device-configure/i))
+  const lifecycle = measured.filter((entry) => coldEvent(entry.event, /stop|suspend|teardown|start|rebuild|host-exit|host-spawn|device-configure/i))
   const energy = (source: Pcm, start: number, stop: number, channel: number) => {
     let square = 0
     for (let frame = start; frame < stop; frame++) square += (source.samples[frame * source.channels + channel] ?? NaN) ** 2
@@ -1252,7 +1286,7 @@ export const checkPhase5EffectState = (evidence: EffectStateEvidence) => {
   const start = markWall("capture-start"), end = markWall("capture-end"), resumeMark = markWall("effect-resume")
   const fftMark = markWall("effect-fft-edit"), dragMark = markWall("effect-gain-drag")
   const owner = effectStateOwner(host, plan.editStart)
-  const measured = host.filter((entry) => Number(entry.wallMs) >= start && Number(entry.wallMs) <= end)
+  const measured = host.filter((entry) => inWindow(entry, start, end))
   const ownerBlocks = host.filter((entry) => entry.event === "capture-block" && !!owner
     && entry.pid === owner.pid && entry.captureId === owner.captureId)
   const complete = host.find((entry) => entry.event === "capture-complete" && !!owner
@@ -1305,9 +1339,9 @@ export const checkPhase5EffectState = (evidence: EffectStateEvidence) => {
   const pausedFromWall = Number((spanA && blocks.findLast((block) => Number(block.offset) < spanA.offset + spanA.frames))?.wallMs)
   const resumedWall = Number((spanB && blocks.find((block) => Number(block.offset) === spanB.offset))?.wallMs)
   const warmResume = !!owner && pauseBlocks.length > 0 && measured.every((entry) =>
-    !(Number(entry.wallMs) >= pausedFromWall && Number(entry.wallMs) <= resumedWall)
+    !inWindow(entry, pausedFromWall, resumedWall)
     || (entry.pid === owner.pid && (entry.event !== "capture-block" || entry.captureId === owner.captureId)
-      && !coldEvent(entry.event, /stop|start|configure|rebuild|teardown|host-exit|host-spawn/i)))
+      && !coldEvent(entry.event, /stop|suspend|start|configure|rebuild|teardown|host-exit|host-spawn/i)))
   const resumeSteps = spanB ? {
     actual: peakStep((frame) => sample(spanB, frame, 0), spanB.transportFrame, spanB.transportFrame + resumeGuard),
     reference: peakStep((frame) => leftReference.samples[frame * leftReference.channels] ?? NaN,
@@ -1394,7 +1428,7 @@ export const checkPhase5EffectState = (evidence: EffectStateEvidence) => {
     captureIntegrity: !!owner && rawCaptureOffsetsValid(ownerBlocks, capture.samples.length / channels, complete)
       && complete?.failed === false && complete.overflowFrames === 0,
     sameHostNoColdRebuild: !!owner
-      && !measured.some((entry) => coldEvent(entry.event, /stop|teardown|start|rebuild|host-exit|host-spawn|device-configure/i))
+      && !measured.some((entry) => coldEvent(entry.event, /stop|suspend|teardown|start|rebuild|host-exit|host-spawn|device-configure/i))
       && measured.every((entry) => entry.event !== "capture-block" || (entry.pid === owner.pid && entry.captureId === owner.captureId))
       && publications.every((entry) => entry.cause === "block-boundary" && entry.pid === owner.pid),
     playingSpansContinuous: playing.length === 2 && !!spanA && !!spanB && spanA.transportFrame <= rate
@@ -1448,7 +1482,7 @@ export const phase5EffectStateDefects = ["playing-gap", "pcm-discontinuity", "tr
   "resume-other-frame", "resume-click", "publish-missing", "publish-configured-boundary", "stamps-misordered",
   "capture-overflow", "drag-missed", "cold-resume-new-epoch", "warm-resume-wrong-frame", "warm-resume-across-stop",
   "warm-resume-across-configure", "resume-across-capture-configure", "left-wrong-shift", "left-one-sample", "early-restore",
-  "export-gain-lost"] as const
+  "export-gain-lost", "warm-resume-across-suspend", "resume-across-untimed-stop"] as const
 type EffectStateDefect = (typeof phase5EffectStateDefects)[number]
 const effectStateIntendedCheck = {
   "playing-gap": "retainedLeftExact", "pcm-discontinuity": "retainedLeftExact",
@@ -1465,6 +1499,7 @@ const effectStateIntendedCheck = {
   "resume-across-capture-configure": "pauseBoundary",
   "left-wrong-shift": "retainedLeftExact", "left-one-sample": "retainedLeftExact",
   "early-restore": "resumedEarlyGain", "export-gain-lost": "exportDurable",
+  "warm-resume-across-suspend": "pauseBoundary", "resume-across-untimed-stop": "pauseBoundary",
 } satisfies Record<EffectStateDefect, keyof ReturnType<typeof checkPhase5EffectState>["checks"]>
 
 // One deterministic packaged-shaped capture: pre-roll, a playing span with an
@@ -1559,6 +1594,7 @@ export const phase5EffectStateEvidence = (defect?: EffectStateDefect | "worker-s
   const pauseEvents = defect === "cold-resume-new-epoch" ? ["device-stop", "device-start-request"]
     : defect === "warm-resume-across-stop" ? ["device-stop"] : defect === "warm-resume-across-configure" ? ["device-configure"]
     : defect === "resume-across-capture-configure" ? ["capture-configure"]
+    : defect === "warm-resume-across-suspend" ? ["host-suspend-request"]
     : defect === "worker-supervisor-start" ? ["worker-supervisor-started"] : []
   host.push({ event: "graph-publish-request", requestedRevision: 2, wallMs: publishWall - 1 },
     ...(defect === "publish-missing" ? [] : [{ event: "graph-publish", pid: 1, revision: 2, transportEpoch: 3,
@@ -1567,7 +1603,8 @@ export const phase5EffectStateEvidence = (defect?: EffectStateDefect | "worker-s
     { event: "capture-complete", pid: 1, captureId: 2, frames: offset, failed: false,
       overflowFrames: defect === "capture-overflow" ? block : 0, wallMs: endWall + 1 },
     ...(defect === "cold-rebuild" ? [{ event: "structural-rebuild", pid: 1, cause: "device-configure", wallMs: blockWall(3, 150_000) }] : []),
-    ...pauseEvents.map((event) => ({ event, pid: 1, wallMs: holdWall })))
+    ...pauseEvents.map((event) => ({ event, pid: 1, wallMs: holdWall })),
+    ...(defect === "resume-across-untimed-stop" ? [{ event: "device-stop", pid: 1 }] : []))
   const editStart = blockWall(3, 96_000) - 1
   const restored = defect === "restored-draft" ? 0 : targetDb
   const persistedGainDb = defect === "restored-persisted" ? 0 : targetDb

@@ -5789,6 +5789,25 @@ struct NeverReadyWorkers {
   ~NeverReadyWorkers() { AudioHostTestAccess::UseWorkerExecutable({}); }
 };
 
+// A staged instance whose worker is still loading has not joined: a graph prepared now would drop it silently, so the
+// preparation is refused as pending and the controller retries, keeping the instance staged.
+void TestRevisionIsHeldWhileAStagedAttachmentIsStarting() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  StartRunningHostWithGraph(host);
+  {
+    const NeverReadyWorkers starting;
+    assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 2)));
+  }
+  assert(host.NativeVstHealth(kFirstVstInstance) == NativeVstWorkerHealth::kStarting);
+  assert(host.PrepareGraphRevision(3, GraphSnapshot(3, 1.0F, 36)).code == GraphRevisionStatusCode::kPublishPending);
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kStaged);
+  // Once it is gone the same revision prepares: the refusal left nothing prepared.
+  assert(host.DetachVstReference(kFirstVstInstance));
+  assert(host.PrepareGraphRevision(3, GraphSnapshot(3, 1.0F, 0)).code == GraphRevisionStatusCode::kPrepared);
+  host.Stop();
+}
+
 void TestUndoBeforePublicationBindsNothing() {
   const NoPluginWorkers no_plugin;
   daw::audio_host_macos::AudioHost host;
@@ -6292,8 +6311,8 @@ void TestCrashMutesOnlyThatInstance() {
   rig.host.Stop();
 }
 
-// A plug-in that is still loading at a publication is left out of it and never stalls it; one
-// that is ready joins the next revision.
+// A plug-in that is still loading holds the revision that would bind it, without stalling the host: the playing graph
+// is untouched, and the same revision prepares and joins once the plug-in is ready.
 void TestDelayedReadyAcrossAPublication() {
   Rig rig;
   rig.Configure();
@@ -6305,23 +6324,16 @@ void TestDelayedReadyAcrossAPublication() {
   assert(AudioHostTestAccess::AttachmentOwnership(rig.host, kFirst) == Ownership::kStaged);
   assert(rig.host.NativeVstHealth(kFirst) == NativeVstWorkerHealth::kStarting);
   const auto started = std::chrono::steady_clock::now();
-  rig.Publish(3, {0, 0});
+  assert(rig.host.PrepareGraphRevision(3, Graph(3, {kBlock, 0})).code == GraphRevisionStatusCode::kPublishPending);
   assert(std::chrono::steady_clock::now() - started < std::chrono::seconds(1));
-  assert(rig.host.NativeVstHealth(kFirst) == NativeVstWorkerHealth::kStarting);
-  assert(AudioHostTestAccess::AttachmentOwnership(rig.host, kFirst) != Ownership::kActive);
-  // It finishes loading after the publication, and the graph never took it.
-  std::this_thread::sleep_for(std::chrono::milliseconds(2500));
+  assert(AudioHostTestAccess::AttachmentOwnership(rig.host, kFirst) == Ownership::kStaged);
   rig.Render(30);
-  rig.host.ProcessNativeVstControl();
-  assert(AudioHostTestAccess::AttachmentOwnership(rig.host, kFirst) == Ownership::kAbsent);
   assert(Mismatch(rig, 10, 0, 2.0) < 1.0e-4);
-  // Attached again and given time to load, it joins the next revision.
-  assert(rig.host.AttachNativeVst(Attachment(kSecond, 1, 1)));
-  assert(rig.Wait(kSecond, NativeVstWorkerHealth::kReady));
-  rig.Publish(4, {kBlock, 0});
+  assert(rig.Wait(kFirst, NativeVstWorkerHealth::kReady));
+  rig.Publish(3, {kBlock, 0});
   rig.Render(30);
-  assert(AudioHostTestAccess::AttachmentOwnership(rig.host, kSecond) == Ownership::kActive);
-  assert(rig.Running() && rig.host.NativeVstHealth(kSecond) == NativeVstWorkerHealth::kReady);
+  assert(AudioHostTestAccess::AttachmentOwnership(rig.host, kFirst) == Ownership::kActive);
+  assert(rig.Running() && rig.host.NativeVstHealth(kFirst) == NativeVstWorkerHealth::kReady);
   assert(DelayOf(rig, 10, 2.0) == kBlock);
   rig.host.Stop();
 }
@@ -6603,6 +6615,7 @@ int main() {
   TestCaptureDoesNotBindANodeAPreparedRevisionDrops();
   TestStagedAttachmentThatIsNotReadyIsRetiredAtPublication();
   TestRevisionPreparedRightAfterALatencyReportBindsTheNewLatency();
+  TestRevisionIsHeldWhileAStagedAttachmentIsStarting();
   TestRollbackRetiresEveryStagedAttachment();
   TestUndoBeforePublicationBindsNothing();
   TestRapidInsertUndoBurstKeepsEveryInstanceOwned();

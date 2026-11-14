@@ -9534,9 +9534,10 @@ const vstJoinFixture = () => {
         ? { ...compiled, snapshot: { ...compiled.snapshot, nativeExternalAttachmentPlan: nativeAttachmentPlan } } : compiled
     },
   })
-  const edit = (next: boolean, key: string) => {
+  const edit = (next: boolean, key: string, wrap?: () => void) => {
     inserted = next
     acknowledgeStagedPublication(fixture)
+    wrap?.()
     return controller.adoptSchedule(migrationIntent(key), true)
   }
   return { fixture, controller, edit, faults, transport: snapshotInput.transport }
@@ -9577,6 +9578,28 @@ for (const playing of [true, false]) test(`a latency report of a plug-in inserte
     await step7Turns()
     expect(fixture.graphPayloads.length).toBe(before + 1)
     expect(fixture.calls.slice(calls)).toContain("revision-publish")
+  } finally { await controller.dispose() }
+})
+
+// The host holds a revision that would bind a plug-in whose worker is still loading (publish-pending): the playing graph
+// stays, the preparation is offered again at the next native report, and the plug-in is staged once.
+test("a VST insertion whose worker is still starting prepares again and publishes once it is ready", async () => {
+  const { fixture, controller, edit, faults, transport } = vstJoinFixture()
+  let holds = 2
+  let prepares = 0
+  try {
+    expect(await controller.start(transport)).toBe("started")
+    const adopted = edit(true, "insert", () => {
+      const prepare = fixture.bridge.session.revisions.prepare
+      fixture.bridge.session.revisions.prepare = async (request) => {
+        prepares++
+        return holds-- > 0 ? fixture.revisionReply("publish-pending") : prepare(request)
+      }
+    })
+    await feedProgress(fixture, () => prepares >= 3)
+    expect(await adopted).toEqual({ status: "adopted" })
+    expect({ prepares, coordinations: fixture.coordinations.length, faults }).toEqual({ prepares: 3, coordinations: 1, faults: [] })
+    expect(fixture.calls.slice(-20)).not.toContain("stop")
   } finally { await controller.dispose() }
 })
 

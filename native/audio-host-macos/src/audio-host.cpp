@@ -2603,6 +2603,15 @@ struct AudioHost::Impl {
     }
   }
   // DAW_REALTIME_CALLBACK_HELPER_END reconcile-scheduled-targets
+  // A staged instance whose worker is still loading has not joined: a graph prepared now would leave it out and
+  // retire it at publication.
+  bool StagedVstStarting() const {
+    return std::any_of(native_vst_attachments.begin(), native_vst_attachments.end(), [](const auto& entry) {
+      return entry.second->metadata.playback_enabled
+        && entry.second->ownership == NativeVstWorkerAttachment::Ownership::kStaged
+        && entry.second->worker.health() == daw::plugin_host::WorkerHealth::kStarting;
+    });
+  }
   bool RegisterPreparedGraphHooks(
     const daw_audio_core_handle core,
     const std::uint32_t revision
@@ -2919,6 +2928,8 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
   // Existing pending code: admission is retryable, not a failed preparation.
   if (impl_->LatencyTransitionPending()) return status(GraphRevisionStatusCode::kPublishPending);
   if (impl_->publication_in_flight != 0) return status(GraphRevisionStatusCode::kPublishPending);
+  // The controller keeps the old graph and prepares again at its next opportunity.
+  if (impl_->StagedVstStarting()) return status(GraphRevisionStatusCode::kPublishPending);
   if (requested_frame != 0) {
     const auto progress = static_cast<std::uint64_t>(impl_->applied_transport_frame.load(std::memory_order_acquire));
     if (requested_frame > INT64_MAX - impl_->config.max_frames_per_block

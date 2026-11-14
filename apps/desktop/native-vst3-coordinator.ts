@@ -775,8 +775,9 @@ export const createNativeVst3AttachmentLedger = (
     // The host parks a removed instance before the revision that drops it is prepared, because it binds every instance it
     // still holds into a prepared graph. The live graph keeps rendering it until that revision publishes. A rolled back
     // removal leaves it parked, so a plan that restores it attaches it again from the host's parking. A host that refuses
-    // the detach no longer holds the instance (it retires a staged one whose worker was not ready when its revision
-    // published): nothing is parked and a restoring plan loads it anew.
+    // the detach no longer holds the instance (a worker that faulted or failed to spawn before it joined is retired when
+    // the next revision publishes, while the plug-in's fault is reported on its device): nothing is parked and a
+    // restoring plan loads it anew.
     release: async (instanceId: string, transactionToken?: string) => {
       const entry = active.get(instanceId)
       if (entry === undefined) return

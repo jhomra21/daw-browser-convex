@@ -485,7 +485,7 @@ export const readTimings = async (file: string): Promise<Timings> => {
 }
 
 const plan = async (args: string[]) => {
-  const number = (flag: string, fallback: number) => Number(args[args.indexOf(flag) + 1] ?? fallback)
+  const number = (flag: string, fallback: number) => args.includes(flag) ? Number(args[args.indexOf(flag) + 1]) : fallback
   const repetitions = number("--repetitions", 20), vstRepetitions = number("--vst-repetitions", 20)
   const timingsFile = args[args.indexOf("--timings") + 1]
   const timings = args.includes("--timings") && timingsFile ? await readTimings(timingsFile) : assumedTimings

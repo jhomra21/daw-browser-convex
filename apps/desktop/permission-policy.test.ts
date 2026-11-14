@@ -17,9 +17,21 @@ describe("desktop MIDI permission policy", () => {
     })).toBeTrue()
   })
 
-  test("denies sysex, untrusted renderers and origins, and iframes", () => {
+  // Electron 43 reports navigator.requestMIDIAccess({ sysex: false }) as "midiSysex" (packaged app, observed), so the app's own request is
+  // only granted when the sysex permission is, for the same trusted renderer, origin and main frame.
+  test("allows the sysex-named MIDI request of the trusted renderer main frame", () => {
     expect(allowsTrustedMidiPermission({
       permission: "midiSysex",
+      trustedRendererId: 1,
+      requestingRendererId: 1,
+      requestingUrl: "daw://app/",
+      isMainFrame: true,
+    })).toBeTrue()
+  })
+
+  test("denies other permissions, untrusted renderers and origins, and iframes", () => {
+    expect(allowsTrustedMidiPermission({
+      permission: "usb",
       trustedRendererId: 1,
       requestingRendererId: 1,
       requestingUrl: "daw://app/",

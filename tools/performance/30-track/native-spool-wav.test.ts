@@ -163,7 +163,8 @@ test("phase 5 effect-state analyzer rejects span gaps, unchanged gain/FFT, unann
         failed: Object.entries(analysis.checks).filter(([, ok]) => !ok).map(([name]) => name) }))
     }
   } finally { await rm(directory, { recursive: true, force: true }) }
-})
+// Measured: the synthetic proof is about 4 s and the five file-backed analyses bring the test to about 22 s; the default 5 s limit cut it off.
+}, 60_000)
 
 // C0b failure inventory, recorded before the fix, using the C0 reviewer's
 // probe mutations: a 2 ms right-channel dropout that a 10 ms energy floor

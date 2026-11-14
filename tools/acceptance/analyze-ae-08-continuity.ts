@@ -1467,7 +1467,7 @@ const effectStateIntendedCheck = {
   "early-restore": "resumedEarlyGain", "export-gain-lost": "exportDurable",
 } satisfies Record<EffectStateDefect, keyof ReturnType<typeof checkPhase5EffectState>["checks"]>
 
-// One deterministic packaged-wellFormed capture: pre-roll, a playing span with an
+// One deterministic packaged-shaped capture: pre-roll, a playing span with an
 // FFT publication and a gain preview, a pause holding one frame one block
 // behind, then the warm resume in the same epoch from that frame with a 6 ms
 // entry ramp. Spectral is a pure delay here, and each offline reference delays
@@ -1615,7 +1615,7 @@ export const phase5AddPagedAssetDefects: readonly AddPagedAssetDefect[] = ["audi
   "extra-after-asset-publication", "early-publication-installs-asset", "silent-asset-after-seam", "coincident-publications"]
 type AddPagedAssetCase = AddPagedAssetDefect | "single-publication" | "track-only-publication"
 
-// One small packaged-wellFormed capture: the retained source on the left, and the imported asset entering the right
+// One small packaged-shaped capture: the retained source on the left, and the imported asset entering the right
 // channel at the asset publication, which is the last one.
 const phase5AddPagedAssetEvidence = (variant: AddPagedAssetCase): Phase5Evidence => {
   const sampleRate = 8000, block = 64, channels = 2, endFrame = 6 * sampleRate, pid = 1, captureId = 1, epoch = 3

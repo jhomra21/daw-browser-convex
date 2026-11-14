@@ -1,0 +1,38 @@
+{
+ "name": "ae08-phase9-tooling-batch",
+ "sequence": 35,
+ "createdAt": "2026-11-14T01:01:01.000Z",
+ "revert": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 9 tooling batch (analyzer A `4a8e0ff2`+`f531e8c6`, gates cross-check `b5dce10d`, runner `882f93c5`+`c575bc59`+`d7c723be`, portable campaign `c4f784ea`), hand record. (1) Re-pointed: analyzer:521:mutant `from`. The analyzer's warm-resume check now reads `!coldEvent(entry.event, /stop|start|configure|rebuild|teardown|host-exit|host-spawn/i)` (a VST3 `worker-supervisor-started` is not a device start); the mutation still replaces that clause with `true` and was run alone with --only: it is killed with the recorded oracle failure and the same three unrejected defects. Its control and the other analyzer arms 522-525, c0:m514 and c0:m519 were run with --only --jobs 1 and pass unchanged. (2) g-analyzer-selftest: the self-test now prints 36 `\"rejected\": true` lines instead of 30 (burst segmentation 4, add-paged-asset `silent-asset-after-seam` and `coincident-publications` 2); none is `false`, `drag-missed` is still rejected for `gainChanged`. (3) Native-spool-wav.test.ts: the phase 5 effect-state test gets an explicit 60 s timeout (measured 22.5 s here; the synthetic proof alone is 3.8-4.0 s), because the default 5 s cut it off on the old bytes and the new. It was pinned at 57807ade before 11d and stays a watched pin for --full. (4) Pin moves for --full (not applied here, as in record 34): analyzer fc988158 (HEAD 4b35941f) -> a9685310 (A's 8b782236 plus the `f531e8c6` fix and the restored 'packaged-shaped' comment wording); native-spool-wav.test.ts -> 26540502; the ae-08-live-graph.ts and ae-08-phase-5-fixture.ts pins move with the runner picks to c0078720 and 61649c3d. The new tools files (ae-08-latency-gates.ts, ae-08-phase-9-matrix.ts, ae-08-phase-9-launch.ts, ae-08-portable-campaign.ts, ae-08-portable-campaign.browser-runtime.ts) are in no watched set; the gates file gets its own pin when it has a consumer in the expectations. (5) g-tools-typecheck: recorded 17 diagnostics, 15 live by `tsc -p c0-tools-tsconfig.json`: the one TS2339 `offset` entry of native-spool-wav.test.ts that 311548c3 fixed is gone (record 34 counted 15 as well; the record was not applied to the expectations), nothing is added. The new tool files add no diagnostic and tools/tsc-baseline.txt (101) is unchanged. The gate still fails until --full re-records it.",
+  "expectationsSha256": "45f7d06aa8197b57e9ce9c8ede89159f671527e25966df7569dc6bc9767c8b04"
+ },
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=analyzer:521:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "      && !/stop|start|configure|rebuild|teardown|host-exit|host-spawn/i.test(String(entry.event))))",
+   "new": "      && !coldEvent(entry.event, /stop|start|configure|rebuild|teardown|host-exit|host-spawn/i)))"
+  },
+  {
+   "path": [
+    "gates",
+    "name=g-analyzer-selftest",
+    "judge",
+    "rejected"
+   ],
+   "old": 30,
+   "new": 36
+  }
+ ],
+ "seedRecordChanges": []
+}

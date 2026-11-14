@@ -329,8 +329,8 @@ export const judgeStored = async (directory: string) => Promise.all((await store
 // commit to graph-prepare is split by the renderer marks (packages/desktop-protocol ae08RendererMarks), logged when the app runs with
 // DAW_AE08_EVIDENCE_DIR: the control handler's marks carry the commit's idempotency key, the compile and lane marks the key of the
 // adoption whose prepare-sent is the last before that graph-prepare. A mark the evidence lacks is skipped, so its span is merged.
-const commitMarkNames = ae08RendererMarks.filter((name) => name.startsWith("control-"))
-const adoptionMarkNames = ae08RendererMarks.filter((name) => !name.startsWith("control-"))
+const commitMarkNames = ae08RendererMarks.options.filter((name) => name.startsWith("control-"))
+const adoptionMarkNames = ae08RendererMarks.options.filter((name) => !name.startsWith("control-"))
 export type EditSpan = { from: string; to: string; ms: number }
 export type EditBreakdown = { index: number; name: string; fromCommit: boolean; toPrepareMs: number; toRequestMs: number; toPublishMs: number; spans: EditSpan[] }
 export const editBreakdowns = (events: readonly HostEvent[], edits: readonly { index: number; name: string; wallMs: number }[]): (EditBreakdown | { index: number; name: string; missing: string })[] =>

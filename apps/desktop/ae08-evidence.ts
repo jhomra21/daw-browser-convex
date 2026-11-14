@@ -24,4 +24,4 @@ export const ae08ControlCommitReceived = (frame: Pick<DesktopRequestV2, "operati
 }
 
 // A renderer mark of the edit-to-publish path: its name and the commit's idempotency key or an adoption's hash.
-export const ae08RendererMarkSchema = z.tuple([z.enum(ae08RendererMarks), z.string().max(64)])
+export const ae08RendererMarkSchema = z.tuple([ae08RendererMarks, z.string().max(64)])

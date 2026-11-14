@@ -1,6 +1,6 @@
 import type { ae08RendererMarks } from "@daw-browser/desktop-protocol/ipc-channels"
 
-export type Ae08RendererMark = (typeof ae08RendererMarks)[number]
+export type Ae08RendererMark = (typeof ae08RendererMarks.options)[number]
 
 // Opt-in acceptance evidence: the bridge offers `ae08Mark` only when the app runs with DAW_AE08_EVIDENCE_DIR, so with it off a
 // call is one property read and `key` never runs.

@@ -21,7 +21,7 @@ import {
   type DrumRackPadSample,
 } from "@daw-browser/shared"
 import { readWav } from "./ae08-wav"
-import { createPrivateRunDirectory } from "../performance/30-track/electron"
+import { cleanupOwnedRunDirectory, createPrivateRunDirectory } from "../performance/30-track/electron"
 import { ownedV3CdpEndpoint } from "../performance/30-track/v3-import-acceptance"
 
 const root = path.resolve(import.meta.dir, "../..")
@@ -541,8 +541,8 @@ export const tapMetrics = async (
   return metrics
 }
 const runInstrumentPersistence = async (kind: "sampler" | "drum-rack" | "granular", dir: string): Promise<Scenario> => {
-  const profileRoot = await createPrivateRunDirectory("/tmp")
-  const profile = path.join(profileRoot, "profile")
+  const runDirectory = await createPrivateRunDirectory("/tmp")
+  const profile = path.join(runDirectory, "profile")
   let session: Session | undefined
   const evidence: string[] = []
   const metrics: Record<string, Json> = {}
@@ -623,7 +623,7 @@ const runInstrumentPersistence = async (kind: "sampler" | "drum-rack" | "granula
       evidence: [...evidence, "canonical-before-edit.json", "canonical-after-edit.json", "canonical-after-app-restart.json", "after-renderer-reload.png", "after-renderer-reload-ui.txt", "after-renderer-reload-controls.json", "after-renderer-reload-edited-control.json", "ready-after-reload.png", "after-app-restart.png", "after-app-restart-ui.txt", "after-app-restart-controls.json", "after-app-restart-edited-control.json", "ready-after-restart.png", "capture-metrics.json", "native-events.jsonl", "failure.png", "failure-ui.txt", "host-diagnostics.json"],
       metrics,
     }
-  } finally { await quit(session) }
+  } finally { await quit(session); await cleanupOwnedRunDirectory(runDirectory, []) }
 }
 const commandTransport = async (s: Session, action: "play" | "stop" | "seek", value?: string) =>
   cli(s.profile, ["host", action, ...(value ? [value] : [])])
@@ -722,7 +722,8 @@ const attachExisting = async (profile: string, pid: number, child: ReturnType<ty
 }
 
 const runGranularPolyphony = async (dir: string): Promise<Scenario> => {
-  const profile = path.join(await createPrivateRunDirectory("/tmp"), "profile")
+  const runDirectory = await createPrivateRunDirectory("/tmp")
+  const profile = path.join(runDirectory, "profile")
   let s: Session | undefined
   const evidence: string[] = []
   const metrics: Record<string, Json> = {}
@@ -810,11 +811,12 @@ const runGranularPolyphony = async (dir: string): Promise<Scenario> => {
       await screenshot(s.cdp, path.join(dir, "failure.png")).catch(() => undefined)
     }
     return { id: "granular-polyphony", title: "Granular simultaneous-note polyphony", result: "FAIL", reason, evidence: ["canonical-before-edit.json", "canonical-after-edit.json", "capture-metrics.json", "native-events.jsonl", "host-diagnostics.json", "failure.png", "failure-ui.txt"], metrics }
-  } finally { await quit(s) }
+  } finally { await quit(s); await cleanupOwnedRunDirectory(runDirectory, []) }
 }
 
 const runImportFailureReason = async (dir: string): Promise<Scenario> => {
-  const profile = path.join(await createPrivateRunDirectory("/tmp"), "profile")
+  const runDirectory = await createPrivateRunDirectory("/tmp")
+  const profile = path.join(runDirectory, "profile")
   let s: Session | undefined
   const evidence: string[] = []
   const metrics: Record<string, Json> = {}
@@ -879,11 +881,12 @@ const runImportFailureReason = async (dir: string): Promise<Scenario> => {
       await screenshot(s.cdp, path.join(dir, "failure.png")).catch(() => undefined)
     }
     return { id: "import-failure-reason", title: "Import failure reason and path redaction", result: "FAIL", reason, evidence: ["unsupported-import-result.json", "corrupt-import-result.json", "host-import-status.json", "host-diagnostics.json", "snapshot-before-import.json", "snapshot-after-import.json", "failure.png", "failure-ui.txt"], metrics }
-  } finally { await quit(s) }
+  } finally { await quit(s); await cleanupOwnedRunDirectory(runDirectory, []) }
 }
 
 const runProjectSwitchNoAbortModal = async (dir: string): Promise<Scenario> => {
-  const profile = path.join(await createPrivateRunDirectory("/tmp"), "profile")
+  const runDirectory = await createPrivateRunDirectory("/tmp")
+  const profile = path.join(runDirectory, "profile")
   let s: Session | undefined
   const metrics: Record<string, Json> = {}
   try {
@@ -1135,11 +1138,12 @@ const runProjectSwitchNoAbortModal = async (dir: string): Promise<Scenario> => {
       await cli(profile, ["host", "diagnostics-v2"]).then((value) => writeFile(path.join(dir, "host-diagnostics.json"), JSON.stringify(value, null, 2), { mode: 0o600 })).catch(() => undefined)
     }
     return { id: "project-switch-no-abort-modal", title: "Project switch during audio effect playback", result: "FAIL", reason, evidence: ["project-a-snapshot.json", "project-a-playing.png", "projects-dashboard.png", "projects-dashboard-ui.txt", "project-b-snapshot.json", "mounted-project-after-switch.json", "project-switch-diagnostics.json", "project-b-loaded.png", "failure.png", "failure-ui.txt", "host-diagnostics.json"], metrics }
-  } finally { await quit(s) }
+  } finally { await quit(s); await cleanupOwnedRunDirectory(runDirectory, []) }
 }
 
 const runDrumRackRetry = async (dir: string): Promise<Scenario> => {
-  const profile = path.join(await createPrivateRunDirectory("/tmp"), "profile")
+  const runDirectory = await createPrivateRunDirectory("/tmp")
+  const profile = path.join(runDirectory, "profile")
   let s: Session | undefined
   const metrics: Record<string, Json> = {}
   try {
@@ -1213,7 +1217,7 @@ const runDrumRackRetry = async (dir: string): Promise<Scenario> => {
       await cli(profile, ["host", "diagnostics-v2"]).then((value) => writeFile(path.join(dir, "host-diagnostics.json"), JSON.stringify(value, null, 2), { mode: 0o600 })).catch(() => undefined)
     }
     return { id: "drum-rack-retry", title: "Drum Rack preparation retry", result: "FAIL", reason, evidence: ["drum-rack-preparation.png", "drum-rack-preparation-ui.txt", "drum-rack-after-retry.png", "drum-rack-after-retry-ui.txt", "host-diagnostics.json", "failure.png", "failure-ui.txt"], metrics: {} }
-  } finally { await quit(s) }
+  } finally { await quit(s); await cleanupOwnedRunDirectory(runDirectory, []) }
 }
 
 // The product host import operation is the same implicit WAV import entry point documented by r26.
@@ -1262,7 +1266,8 @@ const runSynth = async (dir: string): Promise<Scenario> => {
   return runSynthScenario(dir)
 }
 const runSynthScenario = async (dir: string): Promise<Scenario> => {
-  const profile = path.join(await createPrivateRunDirectory("/tmp"), "profile")
+  const runDirectory = await createPrivateRunDirectory("/tmp")
+  const profile = path.join(runDirectory, "profile")
   let s: Session | undefined
   const evidence: string[] = []
   const metrics: Record<string, Json> = {}
@@ -1328,11 +1333,12 @@ const runSynthScenario = async (dir: string): Promise<Scenario> => {
       await screenshot(s.cdp, path.join(dir, "failure.png")).catch(() => undefined)
     }
     return { id: "synth", title: "Synth cutoff and undo", result: "FAIL", reason, evidence: [...evidence, "failure.png", "failure-ui.txt", "host-diagnostics.json"], metrics }
-  } finally { await quit(s) }
+  } finally { await quit(s); await cleanupOwnedRunDirectory(runDirectory, []) }
 }
 const runExport = async (dir: string): Promise<Scenario> => runExportScenario(dir)
 const runExportScenario = async (dir: string): Promise<Scenario> => {
-  const profile = path.join(await createPrivateRunDirectory("/tmp"), "profile")
+  const runDirectory = await createPrivateRunDirectory("/tmp")
+  const profile = path.join(runDirectory, "profile")
   let s: Session | undefined
   const evidence: string[] = []
   const metrics: Record<string, Json> = {}
@@ -1378,11 +1384,13 @@ const runExportScenario = async (dir: string): Promise<Scenario> => {
   } finally {
     if (s) await cli(profile, ["host", "diagnostics-v2"]).then((value) => writeFile(path.join(dir, "host-diagnostics.json"), JSON.stringify(value, null, 2), { mode: 0o600 })).catch(() => undefined)
     await quit(s)
+    await cleanupOwnedRunDirectory(runDirectory, [])
   }
 }
 const runImport = async (dir: string): Promise<Scenario> => runImportScenario(dir)
 const runImportScenario = async (dir: string): Promise<Scenario> => {
-  const profile = path.join(await createPrivateRunDirectory("/tmp"), "profile")
+  const runDirectory = await createPrivateRunDirectory("/tmp")
+  const profile = path.join(runDirectory, "profile")
   let s: Session | undefined
   try {
     s = await launch(profile, dir)
@@ -1419,7 +1427,7 @@ const runImportScenario = async (dir: string): Promise<Scenario> => {
       await screenshot(s.cdp, path.join(dir, "failure.png")).catch(() => undefined)
     }
     return { id: "import-selected-instrument", title: "Import WAV with instrument selected", result: "FAIL", reason: error instanceof Error ? error.message : String(error), evidence: ["snapshot-before-import.json", "snapshot-after-import.json", "failure.png", "failure-ui.txt", "host-diagnostics.json"], metrics: {} }
-  } finally { await quit(s) }
+  } finally { await quit(s); await cleanupOwnedRunDirectory(runDirectory, []) }
 }
 const evidenceFiles = async (directory: string, prefix = ""): Promise<string[]> => {
   const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])

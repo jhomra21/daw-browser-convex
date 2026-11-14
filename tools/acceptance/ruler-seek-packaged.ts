@@ -6,7 +6,7 @@ import { z } from "zod"
 import { controlCapabilitiesSchemaV2, controlCommitResultSchemaV1, controlPreviewResultSchemaV1, projectSnapshotSchemaV2 } from "@daw-browser/control"
 import { desktopTransportStatusSchemaV1 } from "@daw-browser/desktop-protocol"
 import { browserCommand } from "../performance/browser-harness"
-import { createPrivateRunDirectory, electronRendererTarget, writePrivateArtifact } from "../performance/30-track/electron"
+import { cleanupOwnedRunDirectory, createPrivateRunDirectory, electronRendererTarget, writePrivateArtifact } from "../performance/30-track/electron"
 import { ownedV3CdpEndpoint } from "../performance/30-track/v3-import-acceptance"
 
 const root = path.resolve(import.meta.dir, "../..")
@@ -600,10 +600,12 @@ try {
   }, null, 2))
   if (app.exitCode === null && app.signalCode === null) {
     try { process.kill(pid, "SIGTERM") } catch {}
+    await Promise.race([new Promise<void>((resolve) => app.once("exit", () => resolve())), pause(5_000)])
   }
   await writePrivateArtifact(path.join(output, "run-summary.json"), JSON.stringify({
     profile, pid, endpointObserved: Boolean(endpoint), rendererObserved: Boolean(targetId), error: runError ?? null,
   }, null, 2))
   await writeFile(path.join(output, "r-checks.json"), JSON.stringify({ results: runResults }, null, 2))
+  await cleanupOwnedRunDirectory(runDir, [])
 }
 if (runError || Object.values(runResults).some(value => value !== "PASS")) process.exitCode = 1

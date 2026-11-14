@@ -19,7 +19,7 @@ import {
   type DrumRackPadSample,
 } from "@daw-browser/shared"
 import { readWav } from "./ae08-wav"
-import { createPrivateRunDirectory } from "../performance/30-track/electron"
+import { cleanupOwnedRunDirectory, createPrivateRunDirectory } from "../performance/30-track/electron"
 import { ownedV3CdpEndpoint } from "../performance/30-track/v3-import-acceptance"
 
 const root = path.resolve(import.meta.dir, "../..")
@@ -333,14 +333,15 @@ const launchCell = async (cell: Omit<Cell, "result" | "pass" | "metrics" | "evid
   let app: ReturnType<typeof spawn> | undefined
   let appClosed: Promise<void> | undefined
   let profilePath: string | undefined
+  let runDirectory: string | undefined
   let attached = false
   let cellError: string | undefined
   let devicePreparationError: string | undefined
   let captureFile: string | undefined
   let completedCell: Cell | undefined
   try {
-    const profileRoot = await createPrivateRunDirectory("/tmp")
-    const profile = path.join(profileRoot, "profile")
+    runDirectory = await createPrivateRunDirectory("/tmp")
+    const profile = path.join(runDirectory, "profile")
     profilePath = profile
     await mkdir(profile, { mode: 0o700 })
     app = spawn(executable, ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0", `--user-data-dir=${profile}`], {
@@ -711,6 +712,7 @@ const launchCell = async (cell: Omit<Cell, "result" | "pass" | "metrics" | "evid
         completedCell.error = cellError
       }
     }
+    if (runDirectory) await cleanupOwnedRunDirectory(runDirectory, [])
     await log(`${cellLabel}: cleanup complete${runContext.appExitInfo ? `; app ${runContext.appExitInfo}` : ""}`)
     runContext = undefined
   }

@@ -3,9 +3,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { z } from "zod"
 import type { ProjectSnapshotV2 } from "@daw-browser/control"
-import { createDefaultSpectralParams, getSpectralLatencyFrames } from "@daw-browser/shared"
+import { createDefaultLimiterParams, createDefaultSpectralParams, getSpectralLatencyFrames } from "@daw-browser/shared"
 import { command } from "../performance/30-track/v3-import-workload"
-import { deleteTrackThroughUi, exportReference, pressHistoryKey, selectFftSize, setupPhase5Fixture, waitForUi, waitImportedClip,
+import { deleteTrackThroughUi, dragUtilityGainKnob, exportReference, pressHistoryKey, selectFftSize, setupPhase5Fixture, waitForUi, waitImportedClip,
   waitNativeFrame, liveMidiTrack, type Phase5Context } from "./ae-08-phase-5-fixture"
 import { burstSchedule, judgeStored, MIN_WINDOW_MS, parseHostLines, repetitionsFor, runBurst, type Perform, type Timings } from "./ae-08-phase-9-matrix"
 import { phase9Matrix, type Row } from "./ae-08-phase-9-rows"
@@ -30,16 +30,17 @@ export type Phase9Launch =
   | { role: "reference" | "calibration"; rows: Row[]; frames: number; contentSeconds: number }
 
 // The ids a performer needs from the project; `observe` reads them from a fresh snapshot, so a performer never holds a stale one.
-export type Observed = { spectralEffectId: string | undefined; externalEffectId: string | undefined; trackId: (name: string) => string | undefined; clipId: (name: string) => string | undefined }
+export type Observed = { spectralEffectId: string | undefined; limiterEffectId: string | undefined; externalEffectId: string | undefined; trackId: (name: string) => string | undefined; clipId: (name: string) => string | undefined }
 export const observeSnapshot = (state: ProjectSnapshotV2, changedTrackId: string): Observed => ({
   spectralEffectId: state.processors.find((entry) => "trackId" in entry.target && entry.target.trackId === changedTrackId && entry.processor.kind === "spectral")?.id,
+  limiterEffectId: state.processors.find((entry) => "trackId" in entry.target && entry.target.trackId === changedTrackId && entry.processor.kind === "limiter")?.id,
   externalEffectId: state.processors.find((entry) => "trackId" in entry.target && entry.target.trackId === changedTrackId && entry.processor.kind === "external-vst3")?.id,
   trackId: (name) => state.tracks.find((track) => track.name === name)?.id,
   clipId: (name) => state.clips.find((clip) => clip.name.includes(name))?.id,
 })
 
 type Performers = {
-  context: Pick<Phase5Context, "mutate" | "evaluate" | "interact" | "reload">
+  context: Pick<Phase5Context, "mutate" | "evaluate" | "interact" | "read" | "reload">
   runtime: (args: string[]) => Promise<void>
   observe: () => Promise<Observed>
   setup: { changedTrackId: string; changedFile: string }
@@ -70,7 +71,18 @@ export const createPerformer = ({ context, runtime, observe, setup }: Performers
       processor: ref(required((await observe()).externalEffectId, "Test plug-in processor")), changes: [{ parameterId: 1, normalizedValue }] }])
     return { ...move(from, to), wallMs }
   }
+  const lookahead = (lookaheadMs: number) => async () => commit([{ kind: "effect.upsert", target, effectKind: "limiter",
+    effect: ref(required((await observe()).limiterEffectId, "Limiter device")), params: { version: 1, state: { ...createDefaultLimiterParams(), lookaheadMs } } }])
   const performers = new Map([
+    ["lookahead-1ms", lookahead(1)],
+    ["lookahead-5ms", lookahead(5)],
+    // The drag overrides the lane on the Utility Gain knob; the transport's red button re-enables it.
+    ["knob-drag", async () => { await dragUtilityGainKnob(context, 10); return unmoved }],
+    ["lane-rearm", async () => {
+      await context.evaluate(`(()=>{const b=document.querySelector('button[aria-label^="Re-enable automation"]');if(!b)throw new Error('Re-enable automation unavailable');b.click();return true})()`)
+      await waitForUi(context, "Automation not re-enabled", `!document.querySelector('button[aria-label^="Re-enable automation"]')`)
+      return unmoved
+    }],
     ["fft-4096", fft(512, 4096)],
     ["fft-512", fft(4096, 512)],
     ["spectral-remove", async () => {
@@ -173,10 +185,12 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
   // One offline export per state of each compared row, with the project in that state: the references of judgeBurst. Each row's burst
   // ended on its start state, and one pass over its cycle returns it there.
   if (launch.role === "burst") for (const row of launch.rows.filter((entry) => entry.judge === "states")) {
+    const exported = new Set([row.start])
     await exportReference(context, stateName(row.name, row.start), launch.contentSeconds)
     for (const step of row.cycle) {
       for (const edit of step.edits) await perform(edit)
-      if (step.state !== row.start) await exportReference(context, stateName(row.name, step.state), launch.contentSeconds)
+      if (!exported.has(step.state)) await exportReference(context, stateName(row.name, step.state), launch.contentSeconds)
+      exported.add(step.state)
     }
   }
 }
@@ -212,12 +226,13 @@ const check = (condition: boolean, message: string) => { if (!condition) throw n
 
 export const selfTest = async () => {
   const calls: string[] = []
-  const observed: Observed = { spectralEffectId: "spectral-1", externalEffectId: "external-1", trackId: (name) => name === silentTrack ? "silent-1" : undefined, clipId: (name) => name === "changed" ? "clip-1" : undefined }
+  const observed: Observed = { spectralEffectId: "spectral-1", limiterEffectId: "limiter-1", externalEffectId: "external-1", trackId: (name) => name === silentTrack ? "silent-1" : undefined, clipId: (name) => name === "changed" ? "clip-1" : undefined }
   const perform = createPerformer({
     context: {
       mutate: async (actions) => { calls.push(`mutate ${JSON.stringify(actions)}`); return 4242 },
       evaluate: async (script) => { calls.push(`evaluate ${script}`) },
       interact: async (args) => { calls.push(`interact ${args.join(" ")}`) },
+      read: async (script, schema) => { calls.push(`read ${script}`); return schema.parse(script.includes("getBoundingClientRect") ? { x: 300, y: 200 } : 0) },
       reload: async () => { calls.push("reload") },
     },
     runtime: async (args) => { calls.push(`runtime ${args.join(" ")}`) },
@@ -251,6 +266,16 @@ export const selfTest = async () => {
   check(attach.calls[0]?.includes('"kind":"effect.upsert"') === true && attach.calls[0]?.includes('"effectKind":"spectral"') === true && attach.calls[0]?.includes('"fftSize":512') === true,
     `spectral-attach upserts a 512 Spectral: ${attach.calls[0]}`)
   check(attach.moved.fromLatencyFrames === 0 && attach.moved.toLatencyFrames === spectral512, "spectral-attach declares a raise from zero")
+
+  // The lookahead rows patch the observed Limiter in place; the lane row drags the knob once and re-enables the lane from the transport.
+  const limiterAction = (lookaheadMs: number) => `mutate ${JSON.stringify([{ kind: "effect.upsert", target: { kind: "track", track: ref("track-1") }, effectKind: "limiter",
+    effect: ref("limiter-1"), params: { version: 1, state: { ...createDefaultLimiterParams(), lookaheadMs } } }])}`
+  check((await run("lookahead-1ms")).calls[0] === limiterAction(1) && (await run("lookahead-5ms")).calls[0] === limiterAction(5), "the lookahead edits upsert the observed Limiter at 1 and 5 ms")
+  const drag = await run("knob-drag")
+  check(drag.calls.filter((call) => call.startsWith("interact mouse")).join("|") === "interact mouse move 300 200|interact mouse down|interact mouse move 300 210|interact mouse up",
+    `knob-drag presses, moves once and releases: ${drag.calls.filter((call) => call.startsWith("interact"))}`)
+  const rearm = await run("lane-rearm")
+  check(rearm.calls[0]?.includes('button[aria-label^="Re-enable automation"]') === true && rearm.calls[0]?.includes(".click()") === true, "lane-rearm clicks the transport's Re-enable automation button")
 
   const create = await run("silent-track-create")
   check(create.calls[0] === `mutate ${JSON.stringify([{ kind: "track.create", name: silentTrack, trackKind: "audio" }])}`, "silent-track-create")

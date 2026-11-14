@@ -25,6 +25,8 @@ export type PackagedRun = {
   // A hardware device the row needs. A launch checks that it is present before the app starts.
   device?: "iac-midi" | "blackhole"
   judge?: Judge
+  // The host line a step settles on when its edits publish no graph: an applied processor patch or an applied parameter sequence.
+  settle?: "patch" | "sequence"
   // What a launch of this row needs that no current fixture provides.
   needs?: string
 }
@@ -37,8 +39,6 @@ export type PortableCampaignRow = PortableRun & { row: string; class: LatencyCla
 const raiseState = "phase5:raise-state"
 const testPlugin = ["vst-trust"]
 const insertedTestPlugin = ["vst-trust", "vst-insert"]
-const nativeEvidence = (what: string) => `no settle evidence: ${what} is a live parameter write or patch, and the host logs no graph-publish for it. `
-  + "Needs a host evidence line for an applied processor patch, which lands with the native batch after phase 8 sign-off"
 const absentDevice = (device: string) => `NOT CERTIFIABLE UNTIL ${device} IS PRESENT: the launch checks for it first and fails as a setup failure, never a pass`
 
 export const burstRows: BurstRow[] = [
@@ -50,24 +50,27 @@ export const burstRows: BurstRow[] = [
     portable: { from: "spec512", to: "spec1024", latency: true } },
   { name: "raise-lower-burst", latencyClass: "raise", packaged: { repeat: "burst", periodSec: null, fixture: raiseState, start: "spectral-512", judge: "latency",
     cycle: [{ edits: ["fft-4096", "fft-512"], state: "spectral-512" }] } },
-  { name: "lookahead-transition", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: null, start: "limiter-lookahead-5",
-    cycle: [{ edits: ["lookahead-1ms"], state: "limiter-lookahead-1" }, { edits: ["lookahead-5ms"], state: "limiter-lookahead-5" }],
-    needs: `${nativeEvidence("a Limiter lookahead change (1..5 ms, effects-params.ts:796)")}; the limiter's path delay stays fixed at 5 ms (audio_core.cpp:3196)` } },
-  { name: "undo-redo-burst", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:remove-readd-track", start: "restored",
+  // The limiter's path delay stays fixed at 5 ms (audio_core.cpp:3196), so a lookahead change is a processor patch and publishes no graph.
+  { name: "lookahead-transition", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:limiter-state", start: "limiter-lookahead-5",
+    judge: "states", settle: "patch",
+    cycle: [{ edits: ["lookahead-1ms"], state: "limiter-lookahead-1" }, { edits: ["lookahead-5ms"], state: "limiter-lookahead-5" }] } },
+  { name: "undo-redo-burst", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:remove-readd-track", start: "restored", judge: "states",
     cycle: [{ edits: ["track-delete"], state: "deleted" }, { edits: ["undo"], state: "restored" }, { edits: ["redo"], state: "deleted" }, { edits: ["undo"], state: "restored" }] } },
   // Ruling 3: one delete per launch, judged on host evidence and the capture itself, never against a reference.
   { name: "delete-while-starting", latencyClass: "plain", packaged: { repeat: "launch", periodSec: null, fixture: "phase5:delete-clip", start: "clip-present", judge: "delete",
     cycle: [{ edits: ["clip-delete"], state: "clip-deleted" }] } },
-  { name: "paged-playback", latencyClass: "asset", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:add-paged-asset", start: "paged-asset-absent",
+  { name: "paged-playback", latencyClass: "asset", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:add-paged-asset", start: "paged-asset-absent", judge: "states",
     cycle: [{ edits: ["asset-import"], state: "paged-asset-present" }, { edits: ["asset-clip-delete"], state: "paged-asset-absent" }] } },
   // The states of the next two rows sound alike, so the analyzer's fade model compares them exactly.
   { name: "held-note-unrelated-edit", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-note", start: "base", judge: "states",
     cycle: [{ edits: ["silent-track-create"], state: "extra-track" }, { edits: ["silent-track-delete"], state: "base" }] } },
   { name: "tempo-burst", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:raw-tempo", start: "tempo-120", judge: "states",
     cycle: [{ edits: ["tempo-137"], state: "tempo-137" }, { edits: ["tempo-120"], state: "tempo-120" }] } },
-  { name: "manual-automation-override", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: null, start: "lane-armed",
-    cycle: [{ edits: ["knob-drag"], state: "lane-overridden" }, { edits: ["lane-rearm"], state: "lane-armed" }],
-    needs: `${nativeEvidence("a manual override of an automated parameter")}; the lane (automation.set) and the knob drag (phase 5 effect-state) exist` } },
+  // No judge: an offline export applies a lane the override has turned off in the player, so no export stands for the overridden state.
+  // The row is settled on the applied parameter sequence and gated on host evidence.
+  { name: "manual-automation-override", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:lane-state", start: "lane-armed",
+    settle: "sequence",
+    cycle: [{ edits: ["knob-drag"], state: "lane-overridden" }, { edits: ["lane-rearm"], state: "lane-armed" }] } },
   { name: "sustained-live-midi", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:live-midi", start: "base", judge: "sustained",
     device: "iac-midi", prepare: ["midi-select-iac", "midi-hold"],
     cycle: [{ edits: ["silent-track-create"], state: "extra-track" }, { edits: ["silent-track-delete"], state: "base" }] } },

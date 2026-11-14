@@ -3,7 +3,7 @@ import { watch } from "node:fs"
 import { writeFile } from "node:fs/promises"
 import { z } from "zod"
 import type { ProjectSnapshotV2 } from "@daw-browser/control"
-import { createDefaultSpectralParams, createDefaultSynthParams, createDefaultUtilityParams, getSpectralLatencyFrames } from "@daw-browser/shared"
+import { createDefaultLimiterParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultUtilityParams, getSpectralLatencyFrames } from "@daw-browser/shared"
 import { command } from "../performance/30-track/v3-import-workload"
 import { waitForAcceptanceEvent } from "../performance/30-track/native-acceptance-ui"
 import { browserCommandTimeoutMs } from "../performance/browser-harness"
@@ -88,7 +88,7 @@ const utilityGainKnob = `(()=>{const knobs=[...document.querySelectorAll('.effec
   .filter(shell=>shell.querySelector('[data-effect-shell-header]')?.textContent?.includes('Utility'))
   .flatMap(shell=>[...shell.querySelectorAll('[role="slider"][aria-label="Gain"]')]);
   if(knobs.length!==1)throw new Error("Utility gain knob missing");return knobs[0]})()`
-const readKnobDb = async (context: Phase5Context) =>
+const readKnobDb = async (context: Pick<Phase5Context, "read">) =>
   context.read(`Number(${utilityGainKnob}.getAttribute('aria-valuenow'))`, z.number())
 // A knob gate's failure carries the pointer record: which press the knob took, and whether a capture or the window was lost.
 const waitForKnob = async (context: Phase5Context, failure: string, ready: string) => {
@@ -96,6 +96,20 @@ const waitForKnob = async (context: Phase5Context, failure: string, ready: strin
     const drag = await context.read("JSON.stringify((({listeners:_listeners,...drag})=>drag)(window.__ae08EffectState.drag))", z.json())
     throw new Error(`${failure}: ${JSON.stringify(drag)}`, { cause })
   }
+}
+// One manual drag of the Utility Gain knob: press, one move of `pixels` down, release. Each step waits for the knob's own state.
+export const dragUtilityGainKnob = async (context: Pick<Phase5Context, "evaluate" | "interact" | "read">, pixels: number) => {
+  const before = await readKnobDb(context)
+  const knob = await context.read(`JSON.stringify((()=>{
+    const box=${utilityGainKnob}.getBoundingClientRect();return {x:Math.round(box.x+box.width/2),y:Math.round(box.y+box.height/2)};
+  })())`, z.object({ x: z.number(), y: z.number() }))
+  await context.interact(["mouse", "move", String(knob.x), String(knob.y)])
+  await context.interact(["mouse", "down"])
+  await waitForUi(context, "Utility gain press did not start a drag", "document.body.classList.contains('select-none')")
+  await context.interact(["mouse", "move", String(knob.x), String(knob.y + pixels)])
+  await waitForUi(context, "Utility gain did not move", `Number(${utilityGainKnob}.getAttribute('aria-valuenow'))!==${before}`)
+  await context.interact(["mouse", "up"])
+  await waitForUi(context, "Utility gain drag did not end", "!document.body.classList.contains('select-none')")
 }
 const latestFrame = async (context: Phase5Context) =>
   context.read("Number(window.__ae08EffectState.progress.at(-1)?.renderedThroughFrame)", z.number().int())
@@ -309,13 +323,25 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
   // the offline reference independent of any stale mounted projection.
   await context.reload()
   await waitImportedClip(context, "retained")
-  if (spectralRow) {
+  // Phase 9 only: "limiter-state" is the Limiter at its default lookahead; "lane-state" is a Utility whose Gain follows an enabled
+  // automation lane (constant at the knob's own value), so a manual drag of the knob overrides it.
+  if (row === "limiter-state") await mutate([{ kind: "effect.upsert", target: { kind: "track", track: ref(changedTrack.id) }, effectKind: "limiter",
+    params: { version: 1, state: createDefaultLimiterParams() } }])
+  if (row === "lane-state") {
+    const target = { kind: "track", track: ref(changedTrack.id) }
+    await mutate([{ kind: "effect.upsert", target, effectKind: "utility", params: { version: 1, state: { ...createDefaultUtilityParams(), gainDb: 0, dcBlock: false } } }])
+    const utility = (await snapshot()).processors.find((entry) => "trackId" in entry.target && entry.target.trackId === changedTrack.id && entry.processor.kind === "utility")
+    if (!utility) throw new Error("Lane fixture's Utility missing")
+    await mutate([{ kind: "automation.set", target, effect: ref(utility.id), parameterId: "utility.gainDb", enabled: true,
+      points: [{ id: "lane-start", timeSec: 0, value: 0, interpolation: "linear" }, { id: "lane-end", timeSec: contentSeconds ?? 24, value: 0, interpolation: "linear" }] }])
+  }
+  if (spectralRow || row === "lane-state") {
     await context.evaluate(`(()=>{
       const button=[...document.querySelectorAll('button[aria-label]')].find(b=>b.getAttribute('aria-label')?.endsWith(': Changed right'));
       if(!button)throw new Error("Effect-state track selector missing");button.click();return true;
     })()`)
     await waitForUi(context, "Effect-state devices missing",
-      `document.querySelectorAll('.device-spectral').length===1&&(()=>{try{return !!${utilityGainKnob}}catch{return false}})()`)
+      `${spectralRow ? "document.querySelectorAll('.device-spectral').length===1&&" : ""}(()=>{try{return !!${utilityGainKnob}}catch{return false}})()`)
   }
   if (row === "effect-state") {
     const index = (await snapshot()).tracks.findIndex((track) => track.id === changedTrack.id) + 1

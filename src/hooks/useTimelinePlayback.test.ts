@@ -7919,6 +7919,7 @@ test('B6f5 renaming a track while paused on native does not recompile the paused
       })
     })
     await flushMicrotasks()
+    for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
     const prepared = { compiles, begins: fixture.calls.filter((call) => call === "begin").length, prepared: playback.isNativePlaybackPrepared() }
     setTracks((current) => current.map((entry) => ({ ...entry, name: "Renamed", color: "#123456" })))
     await flushMicrotasks()

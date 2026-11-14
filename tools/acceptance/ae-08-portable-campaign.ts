@@ -337,12 +337,31 @@ const campaign = async (out: string, rowNames: readonly string[], edits: number)
   }
 }
 
+// D3: the core's maximum graph plays a carrier while it adopts; the page returns how the render thread's blocks and the carrier's phase held up.
+const stallPhaseSchema = z.object({ phase: z.string(), driftMsPerSec: z.number(), blocks: z.number(), phaseStepMaxRad: z.number().optional(), phaseStepOver: z.number(), waitP99Ms: z.number(), waitMaxMs: z.number(), latenessResidualMinMs: z.number(), latenessResidualMaxMs: z.number(), latenessResidualRangeMs: z.number() })
+const renderStallSchema = z.object({ faults: z.array(z.string()), adoptMs: z.array(z.number()), gaps: z.array(z.object({ block: z.number(), phase: z.string(), frames: z.number() })), nonFinite: z.number(), silentRuns: z.number(), driftMsPerSec: z.number(), phases: z.array(stallPhaseSchema) })
+const renderStall = async (out: string, adoptions: number) => {
+  const server = await fixtureServer()
+  try {
+    await browser("open", `http://127.0.0.1:${server.port}/`)
+    const result = await evalJson(`portableCampaign.renderStall(${adoptions})`, renderStallSchema)
+    await mkdir(out, { recursive: true })
+    await writeFile(`${out}/render-stall.json`, `${JSON.stringify(result, null, 2)}\n`)
+    console.log(JSON.stringify({ ...result, adoptMs: summarize(result.adoptMs) }, null, 2))
+    return result.faults.length === 0
+  } finally {
+    await browser("close").catch(() => undefined)
+    await server.stop(true)
+  }
+}
+
 const args = process.argv.slice(2)
 const value = (flag: string) => args.includes(flag) ? args[args.indexOf(flag) + 1] : undefined
 if (import.meta.main) {
   if (args.includes("--self-test")) process.exit(selfTest() ? 0 : 1)
   const out = value("--out")
-  if (!out) throw new Error("usage: ae-08-portable-campaign.ts --out <dir> [--rows a,b] [--edits 20] | --self-test")
+  if (!out) throw new Error("usage: ae-08-portable-campaign.ts --out <dir> [--rows a,b] [--edits 20] | --render-stall --out <dir> [--edits 40] | --self-test")
   const rows = value("--rows")?.split(",") ?? portableCampaignRows.map((row) => row.row)
+  if (args.includes("--render-stall")) process.exit(await renderStall(resolve(out), Number(value("--edits") ?? 40)) ? 0 : 1)
   process.exit(await campaign(resolve(out), rows, Number(value("--edits") ?? 20)) ? 0 : 1)
 }

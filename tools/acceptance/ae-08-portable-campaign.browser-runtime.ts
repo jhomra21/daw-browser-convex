@@ -4,7 +4,7 @@
 // It judges nothing: the driver does.
 import { resolveLiveMixerGraph } from "@daw-browser/audio-engine/live-mixer-runtime"
 import { WasmAudioWorkletBackend, detectPortableWasmCapability } from "@daw-browser/audio-engine/wasm-audio-worklet-backend"
-import { encodeUtilityProcessorState, mixerParameterRegistry, type AudioCoreGraphEdgeDto, type AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
+import { encodeUtilityProcessorState, mixerParameterRegistry, type AudioCoreGraphEdgeDto, type AudioCoreGraphSnapshot, type AudioCoreSampleSourceEventDto } from "@daw-browser/audio-core-contract"
 import { processorContractHash } from "../../packages/audio-core-contract/src/generated/processor-contract-metadata"
 import type { PortableFrameSchedule } from "@daw-browser/audio-engine/portable-frame-scheduling"
 import { createDefaultSpectralParams, createDefaultSynthParams, createDefaultUtilityParams, getSpectralLatencyFrames, type SynthParams, type TrackInstrumentParams } from "@daw-browser/shared"
@@ -82,21 +82,21 @@ const fingerprint = (snapshot: { revision: number; transport: LivePlaybackTransp
 // A pass-through tap: the worklet copies each block's left and right input and its frame, and posts them in batches.
 const captureModule = `
 class Tap extends AudioWorkletProcessor {
-  constructor() { super(); this.n = 0; this.left = new Float32Array(${BLOCK * 64}); this.right = new Float32Array(${BLOCK * 64}); this.frames = []
+  constructor() { super(); this.n = 0; this.left = new Float32Array(${BLOCK * 64}); this.right = new Float32Array(${BLOCK * 64}); this.frames = []; this.times = []
     this.port.onmessage = () => { this.post(true) } }
-  post(done) { this.port.postMessage({ left: this.left.slice(0, this.n * ${BLOCK}), right: this.right.slice(0, this.n * ${BLOCK}), frames: this.frames, done }); this.n = 0; this.frames = [] }
+  post(done) { this.port.postMessage({ left: this.left.slice(0, this.n * ${BLOCK}), right: this.right.slice(0, this.n * ${BLOCK}), frames: this.frames, times: this.times, done }); this.n = 0; this.frames = []; this.times = [] }
   process(inputs, outputs) {
     const input = inputs[0], output = outputs[0]
     for (let channel = 0; channel < output.length; channel++) if (input[channel]) output[channel].set(input[channel])
     this.left.set(input[0] ?? new Float32Array(${BLOCK}), this.n * ${BLOCK}); this.right.set(input[1] ?? new Float32Array(${BLOCK}), this.n * ${BLOCK})
-    this.frames.push(currentFrame); this.n += 1
+    this.frames.push(currentFrame); this.times.push(Date.now()); this.n += 1
     if (this.n === 64) this.post(false)
     return true
   }
 }
 registerProcessor("ae08-tap", Tap)`
 
-type Chunk = { left: Float32Array; right: Float32Array; frames: number[]; done: boolean }
+type Chunk = { left: Float32Array; right: Float32Array; frames: number[]; times: number[]; done: boolean }
 const createTap = async (context: AudioContext) => {
   const url = URL.createObjectURL(new Blob([captureModule], { type: "text/javascript" }))
   try { await context.audioWorklet.addModule(url) } finally { URL.revokeObjectURL(url) }
@@ -119,7 +119,7 @@ const createTap = async (context: AudioContext) => {
       for (const chunk of chunks) { out.set(pick(chunk), offset); offset += pick(chunk).length }
       return out
     }
-    return { left: join((chunk) => chunk.left), right: join((chunk) => chunk.right), frames: chunks.flatMap((chunk) => chunk.frames) }
+    return { left: join((chunk) => chunk.left), right: join((chunk) => chunk.right), frames: chunks.flatMap((chunk) => chunk.frames), times: chunks.flatMap((chunk) => chunk.times) }
   }
   return { node, finish }
 }
@@ -439,6 +439,112 @@ const adoptionTiming = async (adoptions: number) => {
     blockMs: BLOCK / SAMPLE_RATE * 1000, series, faults }
 }
 
+// ---- D3: does the render thread stall while the core's maximum graph adopts? ----
+// The core renders the maximum graph with a 1 kHz carrier on one track. The worklet has only Date (1 ms), so a stall shows two ways:
+// the carrier's phase (a dropped or repeated block moves it) and the lateness of each block against the audio clock (a block the render
+// thread started late, past the device's buffer, is an underrun). Prepare, install and publish run on the render thread between quanta.
+const carrierHz = 1_000
+// A 1 s asset (a whole number of carrier periods) played back to back twenty times: one source per piece.
+const carrierFrames = SAMPLE_RATE
+const carrierPieces = 20
+// The carrier's phase in each block, in radians: a joint least-squares fit of its cosine and sine over the block.
+const carrierPhases = (samples: Float32Array) => {
+  const phases: number[] = []
+  const w = 2 * Math.PI * carrierHz / SAMPLE_RATE
+  for (let start = 0; start + BLOCK <= samples.length; start += BLOCK) {
+    let cc = 0, ss = 0, cs = 0, yc = 0, ys = 0
+    for (let n = start; n < start + BLOCK; n++) {
+      const c = Math.cos(w * n), s = Math.sin(w * n), y = samples[n] ?? 0
+      cc += c * c; ss += s * s; cs += c * s; yc += y * c; ys += y * s
+    }
+    const det = cc * ss - cs * cs
+    phases.push(Math.atan2(-(cc * ys - cs * yc) / det, (ss * yc - cs * ys) / det))
+  }
+  return phases
+}
+const wrap = (angle: number) => Math.atan2(Math.sin(angle), Math.cos(angle))
+const renderStall = async (adoptions: number) => {
+  await context.resume()
+  const capability = await detectPortableWasmCapability()
+  if (!capability.available) throw new Error(capability.reason)
+  const tap = await createTap(context)
+  const marks: { phase: string; from: number; to: number }[] = []
+  // The tap alone: how the context's audio clock runs against the wall clock with nothing of ours rendering.
+  const bare = Date.now()
+  await new Promise<void>((resolve) => { const source = new ConstantSourceNode(context); source.connect(tap.node); source.onended = () => resolve(); source.start(); source.stop(context.currentTime + 2) })
+  marks.push({ phase: "tap-only", from: bare, to: Date.now() })
+  const session = await new WasmAudioWorkletBackend().createPlaybackSession(context, capability, 8_192, tap.node)
+  const faults: string[] = []
+  session.onFault((error) => faults.push(error.message))
+  const reports: (() => void)[] = []
+  session.onTransportPosition(() => { for (const resolve of reports.splice(0)) resolve() })
+  const nextReport = () => new Promise<void>((resolve) => { reports.push(resolve) })
+  const carrier = Float32Array.from({ length: carrierFrames }, (_, n) => Math.sin(2 * Math.PI * carrierHz * n / SAMPLE_RATE))
+  const adopt = new Array<number>()
+  const windows: { from: number; to: number }[] = []
+  const sessionStart = Date.now()
+  try {
+    await session.registerAsset({ version: 1, assetId: "carrier", frameCount: carrierFrames, sampleRateHz: SAMPLE_RATE, channelCount: 2 }, { frameCount: carrierFrames, planes: [carrier, carrier.slice()] }, 1)
+    await session.prepareGraph(maximumGraph(1))
+    await session.publishGraph(1)
+    await session.setTransport(1, true, 0)
+    await session.scheduleSources(1, 1, Array.from({ length: carrierPieces }, (_, piece): AudioCoreSampleSourceEventDto => ({ version: 1, epoch: 1, sequence: piece + 1, sourceNodeId: "t0", assetId: "carrier",
+      startFrame: piece * carrierFrames, stopFrame: (piece + 1) * carrierFrames, sourceOffsetFrame: 0, sourceFrameCount: carrierFrames, gain: 1,
+      fadeInStartFrame: piece * carrierFrames, fadeInEndFrame: piece * carrierFrames, fadeOutStartFrame: (piece + 1) * carrierFrames, fadeOutEndFrame: (piece + 1) * carrierFrames })))
+    await session.installSchedule(adoptionSchedule(1, false))
+    // The carrier settles for a second, then the idle phase is what the render thread does with nothing to adopt.
+    for (let report = 0; report < 20; report++) await nextReport()
+    let from = Date.now()
+    for (let report = 0; report < 60; report++) await nextReport()
+    marks.push({ phase: "idle", from, to: Date.now() })
+    from = Date.now()
+    for (let revision = 2; revision < adoptions + 2; revision++) {
+      const started = performance.now(), wallFrom = Date.now()
+      await session.prepareGraph(maximumGraph(revision))
+      await session.installSchedule(adoptionSchedule(revision, false))
+      await session.publishGraph(revision, { requireContinuity: true })
+      adopt.push(performance.now() - started)
+      windows.push({ from: wallFrom, to: Date.now() })
+      for (let report = 0; report < 3; report++) await nextReport()
+    }
+    marks.push({ phase: "adopting", from, to: Date.now() })
+  } finally { session.dispose() }
+  const capture = await tap.finish()
+  const phases = carrierPhases(capture.left)
+  const lateness = capture.frames.map((frame, index) => (capture.times[index] ?? 0) - frame / SAMPLE_RATE * 1000)
+  const settled = (index: number) => index >= Math.round(SAMPLE_RATE / BLOCK)
+  const within = (index: number, from: number, to: number) => settled(index) && (capture.times[index] ?? 0) >= from && (capture.times[index] ?? 0) <= to
+  // The audio clock does not run at the wall clock's rate (a headless device paces itself), so lateness is read against its straight-line trend over the whole run.
+  const run = capture.times.flatMap((_, index) => marks.some((mark) => within(index, mark.from, mark.to)) ? [index] : [])
+  const meanFrame = run.reduce((total, index) => total + (capture.frames[index] ?? 0), 0) / run.length
+  const meanLate = run.reduce((total, index) => total + (lateness[index] ?? 0), 0) / run.length
+  const slope = run.reduce((total, index) => total + ((capture.frames[index] ?? 0) - meanFrame) * ((lateness[index] ?? 0) - meanLate), 0)
+    / run.reduce((total, index) => total + ((capture.frames[index] ?? 0) - meanFrame) ** 2, 0)
+  const residual = (index: number) => (lateness[index] ?? 0) - meanLate - slope * ((capture.frames[index] ?? 0) - meanFrame)
+  const gaps = capture.frames.flatMap((frame, index) => index > 0 && frame - (capture.frames[index - 1] ?? 0) !== BLOCK ? [index] : [])
+  return { faults, adoptMs: adopt, gaps: gaps.map((index) => ({ block: index, phase: marks.find((mark) => within(index, mark.from, mark.to))?.phase ?? "outside", frames: (capture.frames[index] ?? 0) - (capture.frames[index - 1] ?? 0) })),
+    nonFinite: scan(capture.left, capture.right).nonFinite, silentRuns: silentRuns(capture.left, (capture.times.findIndex((time) => time >= sessionStart)) * BLOCK).length, driftMsPerSec: slope * SAMPLE_RATE,
+    phases: [...marks, ...windows.map((window) => ({ phase: "in-adoption", ...window }))].map(({ phase, from, to }) => {
+      const blocks = capture.times.flatMap((_, index) => within(index, from, to) ? [index] : [])
+      return { phase, blocks }
+    }).reduce<{ phase: string; blocks: number[] }[]>((merged, entry) => {
+      const existing = merged.find((candidate) => candidate.phase === entry.phase)
+      if (existing) existing.blocks.push(...entry.blocks)
+      else merged.push(entry)
+      return merged
+    }, []).map(({ phase, blocks }) => {
+      const steps = phase === "tap-only" ? [] : blocks.flatMap((index) => settled(index - 1) && index > 0 ? [Math.abs(wrap((phases[index] ?? 0) - (phases[index - 1] ?? 0)))] : [])
+      const late = blocks.map(residual)
+      // Wall time between a block and the one before it: a render thread held for a message shows as a long one.
+      const waits = blocks.flatMap((index) => index > 0 ? [(capture.times[index] ?? 0) - (capture.times[index - 1] ?? 0)] : []).sort((a, b) => a - b)
+      const first = blocks[0] ?? 0, last = blocks[blocks.length - 1] ?? 0
+      return { phase, driftMsPerSec: ((lateness[last] ?? 0) - (lateness[first] ?? 0)) / (((capture.frames[last] ?? 0) - (capture.frames[first] ?? 0)) / SAMPLE_RATE), blocks: blocks.length,
+        phaseStepMaxRad: steps.length ? Math.max(...steps) : undefined, phaseStepOver: steps.filter((step) => step > 0.05).length,
+        waitP99Ms: waits[Math.min(waits.length - 1, Math.ceil(0.99 * waits.length) - 1)] ?? 0, waitMaxMs: waits[waits.length - 1] ?? 0,
+        latenessResidualMinMs: Math.min(...late), latenessResidualMaxMs: Math.max(...late), latenessResidualRangeMs: Math.max(...late) - Math.min(...late) }
+    }) }
+}
+
 // What clocks the worklet global scope has: it decides whether a step's cost can be read on the render thread.
 const workletClock = async () => {
   const url = URL.createObjectURL(new Blob([`registerProcessor("ae08-probe", class extends AudioWorkletProcessor { constructor() { super(); this.port.postMessage(JSON.stringify({ performance: typeof performance, date: typeof Date, atomics: typeof Atomics })) } process() { return false } })`], { type: "text/javascript" }))
@@ -457,4 +563,4 @@ const dispatch = (id: string, run: () => Promise<Json>): boolean => {
   return true
 }
 
-Object.assign(window, { portableCampaign: { reference, burst, adoptionTiming, workletClock, dispatch } })
+Object.assign(window, { portableCampaign: { reference, burst, adoptionTiming, renderStall, workletClock, dispatch } })

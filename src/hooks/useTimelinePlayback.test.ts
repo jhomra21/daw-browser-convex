@@ -6982,6 +6982,9 @@ test('B6f4 a paused-preview re-run with native playback off and no edit keeps th
       }
     } })
     await live.pausedAt(1)
+    // The Pause's own paused-preview run records what the session compiled once its prepare settles; the edit below
+    // must be the one that moves the baseline.
+    for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
     const mark = live.mark()
     live.setTracks([{ ...track, volume: 0.5 }])
     await live.expectLive(false, 1, mark, 'volume')

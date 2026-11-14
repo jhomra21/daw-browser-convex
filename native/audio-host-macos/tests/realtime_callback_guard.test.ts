@@ -353,6 +353,27 @@ test('CoreAudio callback paths contain no scheduler wake, wait, or lock operatio
   expect(publish).not.toContain('std::swap(*core->published_native_hooks')
 })
 
+// A prepared graph always lives in the active core and a publication always retires inside it. No revision core is
+// created, so nothing is destroyed on publish, rollback or the callback, and no flag says which kind a graph is.
+test('publish, rollback and the callback keep no revision-core branch', async () => {
+  const host = await Bun.file(new URL('../src/audio-host.cpp', import.meta.url)).text()
+  const slices = {
+    publish: host.slice(host.indexOf('GraphRevisionStatus AudioHost::PublishGraphRevision('),
+      host.indexOf('GraphRevisionStatus AudioHost::InspectGraphRevision(')),
+    rollback: host.slice(host.indexOf('GraphRevisionStatus AudioHost::RollbackGraphRevision('),
+      host.indexOf('GraphRevisionStatus AudioHost::RetireGraphRevision(')),
+    callback: host.slice(host.indexOf('bool AudioHost::ProcessPlanar('), host.indexOf('bool AudioHost::ProcessRecordingPlanar(')),
+  }
+  for (const [name, slice] of Object.entries(slices)) {
+    expect(slice.length, name).toBeGreaterThan(0)
+    for (const token of ['prepared_core_is_same_core', 'retired_core', 'retired_same_core', 'RetireSameCorePlan',
+      'daw_audio_core_destroy(impl_->prepared_core', 'previous_core']) expect(slice, `${name}: ${token}`).not.toContain(token)
+  }
+  for (const token of ['prepared_core_is_same_core', 'retired_core', 'retired_same_core', 'RetireSameCorePlan',
+    'daw_audio_core_destroy(impl_->prepared_core']) expect(host).not.toContain(token)
+  expect(slices.rollback).toContain('daw_audio_core_cancel_prepared_graph(impl_->prepared_core')
+})
+
 test('AudioHost publishes running state before opening CoreAudio', async () => {
   const source = await Bun.file(new URL('../src/audio-host.cpp', import.meta.url)).text()
   const start = source.slice(source.indexOf('bool AudioHost::Start()'))

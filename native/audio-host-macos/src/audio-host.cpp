@@ -1599,19 +1599,16 @@ struct AudioHost::Impl {
     std::optional<std::uint64_t> release_after_epoch;
   };
   std::atomic<daw_audio_core_handle> active_core = 0;
+  // A prepared graph lives in the active core; this is nonzero from prepare until publish or rollback.
   daw_audio_core_handle prepared_core = 0;
-  bool prepared_core_is_same_core = false;
   GraphRevisionContinuity prepared_continuity = GraphRevisionContinuity::kNotEvaluated;
   const std::uint64_t instrument_resident_budget = InstrumentResidentBudget();
   std::string_view instrument_preparation_error;
   std::string_view schedule_window_error;
-  daw_audio_core_handle retired_core = 0;
   // The previous revision was published over on the active core. Its slots are
   // retired inside the core and only reusable once a block has completed.
-  bool retired_same_core = false;
-  [[nodiscard]] bool HasRetiredPlan() const { return retired_core != 0 || retired_same_core; }
-  void RetireSameCorePlan(const std::uint32_t previous_revision) {
-    retired_same_core = previous_revision != 0;
+  [[nodiscard]] bool HasRetiredPlan() const { return retired_revision.load(std::memory_order_acquire) != 0; }
+  void RetirePreviousPlan(const std::uint32_t previous_revision) {
     retired_revision.store(previous_revision, std::memory_order_release);
     retired_after_epoch.store(completed_render_epoch.load(std::memory_order_acquire)
       + (state.load(std::memory_order_acquire) == LifecycleState::kRunning ? 1 : 0), std::memory_order_release);
@@ -2758,8 +2755,6 @@ AudioHost::~AudioHost() {
   impl_->recording_session.reset();
   const daw_audio_core_handle active_core = impl_->active_core.load(std::memory_order_acquire);
   if (active_core != 0) daw_audio_core_destroy(active_core);
-  if (impl_->prepared_core != 0 && !impl_->prepared_core_is_same_core) daw_audio_core_destroy(impl_->prepared_core);
-  if (impl_->retired_core != 0) daw_audio_core_destroy(impl_->retired_core);
   delete impl_;
 }
 
@@ -2788,13 +2783,8 @@ bool AudioHost::Configure(const HostConfig& config) {
   }
   const daw_audio_core_handle previous_core = impl_->active_core.exchange(next_core, std::memory_order_acq_rel);
   if (previous_core != 0) daw_audio_core_destroy(previous_core);
-  if (impl_->prepared_core != 0 && !impl_->prepared_core_is_same_core) daw_audio_core_destroy(impl_->prepared_core);
-  if (impl_->retired_core != 0) daw_audio_core_destroy(impl_->retired_core);
   impl_->prepared_core = 0;
-  impl_->prepared_core_is_same_core = false;
   impl_->prepared_continuity = GraphRevisionContinuity::kNotEvaluated;
-  impl_->retired_core = 0;
-  impl_->retired_same_core = false;
   impl_->config = config;
   if (impl_->acceptance_tap) impl_->acceptance_tap->Configure(config.sample_rate_hz, config.channel_count);
   impl_->Evidence("device-configure");
@@ -3055,7 +3045,6 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
     return status(GraphRevisionStatusCode::kPrepareFailed);
   }
   impl_->prepared_core = prepared_core;
-  impl_->prepared_core_is_same_core = true;
   impl_->prepared_revision.store(revision, std::memory_order_release);
   impl_->prepared_routing = std::move(routing);
   return status(GraphRevisionStatusCode::kPrepared);
@@ -3342,32 +3331,15 @@ GraphRevisionStatus AudioHost::PublishGraphRevision(const std::uint32_t revision
       return status(GraphRevisionStatusCode::kPublishPending);
   }
   const auto publish_at_boundary = [this, revision] {
-    if (impl_->prepared_core_is_same_core) {
-      if (daw_audio_core_publish(impl_->active_core.load(std::memory_order_acquire), revision) != DAW_AUDIO_CORE_OK) {
-        return false;
-      }
-      impl_->ReconcileScheduledTargets(impl_->active_core.load(std::memory_order_acquire),
-        impl_->active_revision.load(std::memory_order_acquire), revision);
-      impl_->PromoteObservationLookup();
-      impl_->RetireSameCorePlan(impl_->active_revision.exchange(revision, std::memory_order_acq_rel));
-      impl_->prepared_core = 0;
-      impl_->prepared_core_is_same_core = false;
-      impl_->prepared_revision.store(0, std::memory_order_release);
-      impl_->last_graph_revision.store(revision, std::memory_order_release);
-      impl_->graph_prepared = true;
-      impl_->AdoptPublishedNativeVsts();
-      impl_->AdoptPublishedRouting();
-      return true;
+    if (daw_audio_core_publish(impl_->active_core.load(std::memory_order_acquire), revision) != DAW_AUDIO_CORE_OK) {
+      return false;
     }
-    if (daw_audio_core_publish(impl_->prepared_core, revision) != DAW_AUDIO_CORE_OK) return false;
+    impl_->ReconcileScheduledTargets(impl_->active_core.load(std::memory_order_acquire),
+      impl_->active_revision.load(std::memory_order_acquire), revision);
     impl_->PromoteObservationLookup();
-    const daw_audio_core_handle previous_core = impl_->active_core.exchange(impl_->prepared_core, std::memory_order_acq_rel);
-    const std::uint32_t previous_revision = impl_->active_revision.exchange(revision, std::memory_order_acq_rel);
+    impl_->RetirePreviousPlan(impl_->active_revision.exchange(revision, std::memory_order_acq_rel));
     impl_->prepared_core = 0;
     impl_->prepared_revision.store(0, std::memory_order_release);
-    impl_->retired_core = previous_core;
-    impl_->retired_revision.store(previous_revision, std::memory_order_release);
-    impl_->retired_after_epoch.store(impl_->completed_render_epoch.load(std::memory_order_acquire), std::memory_order_release);
     impl_->last_graph_revision.store(revision, std::memory_order_release);
     impl_->graph_prepared = true;
     impl_->AdoptPublishedNativeVsts();
@@ -3387,12 +3359,7 @@ GraphRevisionStatus AudioHost::PublishGraphRevision(const std::uint32_t revision
     const bool replacing_graph = impl_->graph_prepared;
     if (!publish_at_boundary()) return status(GraphRevisionStatusCode::kPublishFailed);
     publish_asset_handles();
-    if (!replacing_graph) {
-      daw_audio_core_destroy(impl_->retired_core);
-      impl_->retired_core = 0;
-      impl_->retired_same_core = false;
-      impl_->retired_revision.store(0, std::memory_order_release);
-    }
+    if (!replacing_graph) impl_->retired_revision.store(0, std::memory_order_release);
     impl_->acceptance_publication_frame.store(impl_->applied_transport_frame.load());
     impl_->acceptance_publication_epoch.store(impl_->completed_render_epoch.load());
     impl_->RecordPublicationLatency();
@@ -3466,13 +3433,8 @@ GraphRevisionStatus AudioHost::RollbackGraphRevision(const std::uint32_t revisio
   if (code == GraphRevisionStatusCode::kRolledBack) {
     impl_->prepared_transport_context.reset();
     impl_->ResetPreparedSchedule(0, 0, 0);
-    if (impl_->prepared_core_is_same_core) {
-      static_cast<void>(daw_audio_core_cancel_prepared_graph(impl_->prepared_core, revision));
-    } else {
-      daw_audio_core_destroy(impl_->prepared_core);
-    }
+    static_cast<void>(daw_audio_core_cancel_prepared_graph(impl_->prepared_core, revision));
     impl_->prepared_core = 0;
-    impl_->prepared_core_is_same_core = false;
     impl_->prepared_revision.store(0, std::memory_order_release);
     impl_->prepared_asset_handles.clear();
     impl_->prepared_instrument_assets.clear();
@@ -3513,10 +3475,7 @@ GraphRevisionStatus AudioHost::RetireGraphRevision(const std::uint32_t revision)
       < impl_->retired_after_epoch.load(std::memory_order_acquire)) {
       code = GraphRevisionStatusCode::kRetirementNotSafe;
     } else {
-      if (impl_->retired_core != 0) daw_audio_core_destroy(impl_->retired_core);
-      else daw_audio_core_reclaim_retired_runtime(impl_->active_core.load(std::memory_order_acquire));
-      impl_->retired_core = 0;
-      impl_->retired_same_core = false;
+      daw_audio_core_reclaim_retired_runtime(impl_->active_core.load(std::memory_order_acquire));
       impl_->retired_revision.store(0, std::memory_order_release);
       code = GraphRevisionStatusCode::kRetired;
       impl_->Evidence("graph-retire");
@@ -5639,11 +5598,7 @@ void AudioHost::Teardown() {
   }
   const daw_audio_core_handle active_core = impl_->active_core.exchange(0, std::memory_order_acq_rel);
   if (active_core != 0) daw_audio_core_destroy(active_core);
-  if (impl_->prepared_core != 0 && !impl_->prepared_core_is_same_core) daw_audio_core_destroy(impl_->prepared_core);
-  if (impl_->retired_core != 0) daw_audio_core_destroy(impl_->retired_core);
   impl_->prepared_core = 0;
-  impl_->retired_core = 0;
-  impl_->retired_same_core = false;
   impl_->assets.clear();
   impl_->published_instrument_assets.clear();
   impl_->prepared_instrument_assets.clear();
@@ -5798,67 +5753,34 @@ bool AudioHost::ProcessPlanar(
     } else if (requested_revision != 0
       && impl_->prepared_core != 0
       && impl_->prepared_revision.load(std::memory_order_acquire) == requested_revision) {
-      if (impl_->prepared_core_is_same_core) {
-        const bool sources_ready = requested_frame == 0
-          || impl_->ReconcileSourceSeam(false, static_cast<std::int64_t>(requested_frame));
-        if (!sources_ready) impl_->publication_rebase_required.store(true, std::memory_order_release);
-        const auto result = sources_ready ? daw_audio_core_publish(
-          impl_->active_core.load(std::memory_order_acquire), requested_revision)
-          : DAW_AUDIO_CORE_LATENCY_MOVE_PENDING;
-        if (result == DAW_AUDIO_CORE_OK) {
-          impl_->ApplyPreparedTransportContext();
-          impl_->PromoteObservationLookup();
-          if (requested_frame != 0) static_cast<void>(
-            impl_->ReconcileSourceSeam(true, static_cast<std::int64_t>(requested_frame)));
-          impl_->ReconcileScheduledTargets(impl_->active_core.load(std::memory_order_acquire),
-            impl_->active_revision.load(std::memory_order_acquire), requested_revision, requested_frame == 0);
-          if (requested_frame != 0) impl_->active_schedule_bank.store(
-            1U - impl_->active_schedule_bank.load(std::memory_order_relaxed), std::memory_order_release);
-          impl_->acceptance_publication_frame.store(impl_->applied_transport_frame.load(std::memory_order_relaxed));
-          impl_->acceptance_publication_epoch.store(impl_->completed_render_epoch.load(std::memory_order_relaxed));
-          impl_->RecordPublicationLatency();
-          impl_->RetireSameCorePlan(impl_->active_revision.exchange(requested_revision, std::memory_order_acq_rel));
-          impl_->prepared_core = 0;
-          impl_->prepared_core_is_same_core = false;
-          impl_->prepared_revision.store(0, std::memory_order_release);
-          impl_->last_graph_revision.store(requested_revision, std::memory_order_release);
-        }
-        if (result == DAW_AUDIO_CORE_LATENCY_MOVE_PENDING) {
-          // Not admitted: preserve the prepared bank for explicit event retry.
-          impl_->publish_deferred_revision.store(requested_revision, std::memory_order_release);
-          impl_->SignalRealtimeBridge(Impl::kRealtimeScheduleProgress);
-        } else {
-          impl_->publish_acknowledged_revision.store(requested_revision, std::memory_order_release);
-          impl_->SignalRealtimeBridge(Impl::kRealtimePublishAcknowledged);
-        }
-      } else {
-        const auto result = daw_audio_core_publish(impl_->prepared_core, requested_revision);
-        if (result == DAW_AUDIO_CORE_LATENCY_MOVE_PENDING) {
-          impl_->publish_deferred_revision.store(requested_revision, std::memory_order_release);
-          impl_->SignalRealtimeBridge(Impl::kRealtimeScheduleProgress);
-          continue;
-        }
-        if (result != DAW_AUDIO_CORE_OK) {
-          impl_->publish_acknowledged_revision.store(requested_revision, std::memory_order_release);
-          impl_->SignalRealtimeBridge(Impl::kRealtimePublishAcknowledged);
-          continue;
-        }
-        const daw_audio_core_handle previous_core = impl_->active_core.exchange(impl_->prepared_core, std::memory_order_acq_rel);
+      const bool sources_ready = requested_frame == 0
+        || impl_->ReconcileSourceSeam(false, static_cast<std::int64_t>(requested_frame));
+      if (!sources_ready) impl_->publication_rebase_required.store(true, std::memory_order_release);
+      const auto result = sources_ready ? daw_audio_core_publish(
+        impl_->active_core.load(std::memory_order_acquire), requested_revision)
+        : DAW_AUDIO_CORE_LATENCY_MOVE_PENDING;
+      if (result == DAW_AUDIO_CORE_OK) {
         impl_->ApplyPreparedTransportContext();
         impl_->PromoteObservationLookup();
+        if (requested_frame != 0) static_cast<void>(
+          impl_->ReconcileSourceSeam(true, static_cast<std::int64_t>(requested_frame)));
+        impl_->ReconcileScheduledTargets(impl_->active_core.load(std::memory_order_acquire),
+          impl_->active_revision.load(std::memory_order_acquire), requested_revision, requested_frame == 0);
+        if (requested_frame != 0) impl_->active_schedule_bank.store(
+          1U - impl_->active_schedule_bank.load(std::memory_order_relaxed), std::memory_order_release);
         impl_->acceptance_publication_frame.store(impl_->applied_transport_frame.load(std::memory_order_relaxed));
         impl_->acceptance_publication_epoch.store(impl_->completed_render_epoch.load(std::memory_order_relaxed));
-        const std::uint32_t previous_revision = impl_->active_revision.exchange(requested_revision, std::memory_order_acq_rel);
+        impl_->RecordPublicationLatency();
+        impl_->RetirePreviousPlan(impl_->active_revision.exchange(requested_revision, std::memory_order_acq_rel));
         impl_->prepared_core = 0;
-        impl_->prepared_core_is_same_core = false;
         impl_->prepared_revision.store(0, std::memory_order_release);
-        impl_->retired_core = previous_core;
-        impl_->retired_revision.store(previous_revision, std::memory_order_release);
-        impl_->retired_after_epoch.store(
-          impl_->completed_render_epoch.load(std::memory_order_acquire) + 1,
-          std::memory_order_release
-        );
         impl_->last_graph_revision.store(requested_revision, std::memory_order_release);
+      }
+      if (result == DAW_AUDIO_CORE_LATENCY_MOVE_PENDING) {
+        // Not admitted: preserve the prepared bank for explicit event retry.
+        impl_->publish_deferred_revision.store(requested_revision, std::memory_order_release);
+        impl_->SignalRealtimeBridge(Impl::kRealtimeScheduleProgress);
+      } else {
         impl_->publish_acknowledged_revision.store(requested_revision, std::memory_order_release);
         impl_->SignalRealtimeBridge(Impl::kRealtimePublishAcknowledged);
       }

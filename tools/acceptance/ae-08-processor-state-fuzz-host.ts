@@ -929,6 +929,11 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
     get preparedBank() { return preparedBank },
     get retiredBank() { return retiredBank },
     get progress() { return progress },
+    // The last progress report already names the bank window and the transport transition native holds now.
+    get progressCurrent() {
+      return progress !== undefined && progress.lastAcceptedWindowId === activeBank.window && progress.acceptedThroughFrame === activeBank.through
+        && progress.appliedTransportTransitionId === transition && progress.running === running
+    },
     get transport() { return transport },
     get controls() { return controls },
     get patch() { return patch },

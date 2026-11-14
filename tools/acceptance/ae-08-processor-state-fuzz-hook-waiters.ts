@@ -34,7 +34,8 @@ export default function createWaiterLedger({ h, mutation, record, fail, checked,
     if (sequence >= confirmedOrder) { confirmedGain = gain; confirmedOrder = sequence }
   }
   // A latency edit was refused or cancelled outside the live domain and native has not reached the desired FFT since.
-  // A newer latency edit answers for itself; the user undoing the edit leaves native equal to desired.
+  // A teardown carries the debt to the next session, whose first quiescent live point judges it. A newer latency edit
+  // answers for itself; the user undoing the edit leaves native equal to desired.
   let latencyOwed = false
   const watch = <Value>(name: string, promise: Promise<Value>, content = desired()) => {
     if (name === "latency") latencyOwed = false
@@ -108,12 +109,12 @@ export default function createWaiterLedger({ h, mutation, record, fail, checked,
         fail(classification === "lost-edit" ? "I1" : "I3", `${classification}: ${waiter.name} ${waiter.id}`, domain, failureClass, reason, error)
     }
   }
-  // `nativeFft` is what native held when the check came due: just before a teardown, or when the run ended.
+  // `nativeFft` is what native holds at a quiescent live point, or when the run ended.
   const checkLatencyOwed = (nativeFft: number | null) => {
     if (!latencyOwed) return
     if (nativeFft === desired().fft) { latencyOwed = false; return }
     checked("I1")
-    fail("I1", `Refused latency edit never reached native: native fft ${nativeFft}, desired ${desired().fft}`, "ending-transport-domain",
+    fail("I1", `Refused latency edit never reached native: native fft ${nativeFft}, desired ${desired().fft}`, "live",
       "latency-before-publish-lost-edit")
     latencyOwed = false
   }

@@ -319,15 +319,19 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
       trace: trace.length, persistenceFailures, panelErrors, aborts: time.effectTransactions().filter((entry) => entry.state === "aborted").length, prepares: h.counts.get("prepare") ?? 0, publishes: h.counts.get("publish") ?? 0,
       assets: [...h.assets.keys()], sources: [...h.activeBank.sources.keys()],
       coldInstalls: ["stop", "configure", "initial-graph"].reduce((total, name) => total + (h.counts.get(name) ?? 0), 0) })
-    // What native held before the previous step: a teardown ends the session this step, before native's state is read.
-    let teardowns = 0
-    let nativeFft = h.nativeFields(h.active).fft
+    // The point where a refused latency edit is judged: a prepared session whose transport domain is live, every host reply
+    // delivered, no publication held and no transition pending. A controller request still unsettled, a compile not yet
+    // resolved, a progress report not yet delivered, a transport request no render block applied yet and a progress report
+    // that does not name native's current bank window and transport transition each belong to a transition in flight.
+    const quiescentLivePoint = () => !h.lost && h.started && playback.isNativePlaybackPrepared()
+      && !h.pendingControl && !h.queuedSends.length && !h.commands.length && !h.replies.length && !h.controls.length && !h.patch
+      && !h.publicationPending && h.latencyReadyEpoch === undefined && !playback.isPreparingPlayback()
+      && !compilations.length && h.progressSequence === h.deliveredProgressSequence && !waiters.some((waiter) => !waiter.settled)
+      && !h.transport && h.progressCurrent
     const observe = () => {
       bridge.synchronizeSupervisor()
       refreshDesired()
-      if ((h.counts.get("teardown") ?? 0) !== teardowns) ledger.checkLatencyOwed(nativeFft)
-      teardowns = h.counts.get("teardown") ?? 0
-      nativeFft = h.nativeFields(h.active).fft
+      if (quiescentLivePoint()) ledger.checkLatencyOwed(h.nativeFields(h.active).fft)
       const current = knob()
       if (current !== lastKnob) {
         checked("I10")

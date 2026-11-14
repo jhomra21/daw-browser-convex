@@ -1703,7 +1703,9 @@ export const createNativePlaybackController = (input: {
           // The recompile carries processor content the prepared graph may not hold: the ledger takes it and sends it,
           // as a prepare does for content edited after its compile.
           const adoptRecompiled = () => {
-            preparedSnapshot = refreshed.snapshot
+            const plan = refreshed.snapshot.nativeExternalAttachmentPlan
+            preparedSnapshot = plan ? { ...refreshed.snapshot, nativeExternalAttachmentPlan: planWithWorkerFrames(plan, maximumFramesPerBlock) }
+              : refreshed.snapshot
             ingestProjectedProcessors(refreshed.snapshot)
             if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))
           }
@@ -3892,11 +3894,13 @@ export const createNativePlaybackController = (input: {
         if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
         // The host attaches a plug-in this graph adds and starts its worker before the graph that binds it is prepared.
         // A removed one goes in the same plan, with no instance left in it, and is detached once the graph is live.
+        let stagedWorkers = false
         if (attachmentsChanged(previous, snapshot, maximumFramesPerBlock)) {
           const emptied = previous.nativeExternalAttachmentPlan && { ...previous.nativeExternalAttachmentPlan, attachments: [] }
           const plan = snapshot.nativeExternalAttachmentPlan ?? emptied
           const coordinateVstAttachments = session.coordinateVstAttachments
           if (!plan || !coordinateVstAttachments) throw new Error("The native VST3 attachment coordinator is unavailable.")
+          stagedWorkers = plan.attachments.length > 0
           const stage = () => awaitPreparation(coordinateVstAttachments({
             projectId, serializedPlan: encodeNativeExternalAttachmentPlan(plan), sampleRateHz: sampleRate,
             capturedVstStates: snapshot.nativeExternalAttachmentStates,
@@ -3947,7 +3951,10 @@ export const createNativePlaybackController = (input: {
               || fresh.revision.progressFrame === undefined || BigInt(seam) > fresh.revision.progressFrame) break
             progress = fresh.revision.progressFrame
           }
-          if (record.resubmits >= 8) {
+          // The host holds the prepare until a staged plug-in's worker is ready, which takes more than eight blocks: that
+          // wait ends with the worker (ready or faulted), so it spends no resubmit.
+          const workerWait = stagedWorkers && ready.revision.status === "publish-pending"
+          if (!workerWait && record.resubmits >= 8) {
             const error = "Native live preparation is waiting for publication ownership."
             throw new Error(error)
           }
@@ -3991,7 +3998,7 @@ export const createNativePlaybackController = (input: {
           await quietPublicationLane()
           if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
           observed = sequence
-          retry()
+          if (!workerWait) retry()
           seam = chooseFrame(progress, 16 * (record.resubmits + 1))
           ready = await withoutLane(revisions.prepare({
             projectId, projectRevision: snapshot.revision, bytes: serializeNativeGraph(graph, serializedKeepLatencyNodeIds),

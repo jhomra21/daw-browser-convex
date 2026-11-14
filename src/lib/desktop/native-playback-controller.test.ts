@@ -9603,6 +9603,26 @@ test("a VST insertion whose worker is still starting prepares again and publishe
   } finally { await controller.dispose() }
 })
 
+// A packaged worker takes tens of milliseconds to start, which is more block-length waits than the ownership resubmit budget (8).
+test("a VST insertion whose worker takes longer than the resubmit budget to start still publishes", async () => {
+  const { fixture, controller, edit, faults, transport } = vstJoinFixture()
+  let holds = 20
+  let prepares = 0
+  try {
+    expect(await controller.start(transport)).toBe("started")
+    const adopted = edit(true, "insert", () => {
+      const prepare = fixture.bridge.session.revisions.prepare
+      fixture.bridge.session.revisions.prepare = async (request) => {
+        prepares++
+        return holds-- > 0 ? fixture.revisionReply("publish-pending") : prepare(request)
+      }
+    })
+    await feedProgress(fixture, () => prepares >= 21)
+    expect(await adopted).toEqual({ status: "adopted" })
+    expect({ prepares, faults }).toEqual({ prepares: 21, faults: [] })
+  } finally { await controller.dispose() }
+})
+
 test("a Play that starts while a paused VST insertion is still being staged leaves the transport running", async () => {
   const { fixture, controller, edit, transport } = vstJoinFixture()
   const coordinate = fixture.bridge.session.coordinateVstAttachments
@@ -10317,6 +10337,32 @@ test("publishes attachment latency only for the current instance generation", as
   await controller.dispose()
   await expect(controller.publishAttachmentLatency({ instanceId, generation, latencyFrames: 0 }))
     .resolves.toEqual({ handled: false, reason: "stale" })
+})
+
+// A compile carries the plan's default worker block size (8192); the session runs workers at the device's, and a play that
+// resumes the prepared preview must not leave the compile's size in the prepared snapshot a later latency report reads.
+test("a latency report after a play that resumed the prepared preview counts the device's worker block size", async () => {
+  const fixture = createBridge()
+  const compiled = compileLivePlaybackSnapshot({ ...input(), tracks: [sourceTrack(), { ...sourceTrack(), id: "parallel", clips: [] }] })
+  if (!compiled.supported) throw new Error(compiled.reasons.join(" "))
+  const compileDefault = { ...nativeAttachmentPlan, attachments: nativeAttachmentPlan.attachments.map((attachment) => ({
+    ...attachment, workerTransport: { ...attachment.workerTransport, maximumFrames: 8_192 } })) }
+  const controller = createObservedController({
+    bridge: fixture.bridge, getProjectId: () => "local_project",
+    compileSnapshot: async () => ({ supported: true, snapshot: { ...compiled.snapshot, nativeExternalAttachmentPlan: compileDefault } }),
+  })
+  await expect(controller.ensureLivePreview(0)).resolves.toBe("started")
+  await expect(controller.start(input().transport)).resolves.toBe("started")
+  const instanceId = nativeAttachmentPlan.attachments[0]?.instanceId
+  if (!instanceId) throw new Error("Missing attachment")
+  const generation = controller.attachmentGeneration(instanceId)
+  if (generation === undefined) throw new Error("Missing generation")
+  await expect(controller.publishAttachmentLatency({ instanceId, generation, latencyFrames: 2048 })).resolves.toEqual({ handled: true })
+  const payload = fixture.graphPayloads.at(-1)
+  if (!payload) throw new Error("Missing attachment latency graph")
+  const view = new DataView(payload.buffer, payload.byteOffset)
+  expect(view.getUint32(36 + view.getUint32(20, true) * 136 + 48 + 44, true)).toBe(2048 + 512)
+  await controller.dispose()
 })
 
 const reverbCommit = (

@@ -641,8 +641,18 @@ int main(int argc, char* argv[]) {
     daw::audio_host_macos::ControlType::kTransactionBegin, true));
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kDeviceConfigure, Configure()),
     daw::audio_host_macos::ControlType::kDeviceConfigure, true));
+  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kVstAttach, attachment),
+    daw::audio_host_macos::ControlType::kVstAttach, true));
+  // A detach inside the open transaction reaches the staged host.
+  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kVstDetach, instance_id),
+    daw::audio_host_macos::ControlType::kVstDetach, true));
+  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kVstAttach, attachment),
+    daw::audio_host_macos::ControlType::kVstAttach, true));
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransactionCommit),
     daw::audio_host_macos::ControlType::kTransactionCommit, true));
+  // With no transaction open, a detach reaches the committed host that holds the instance.
+  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kVstDetach, instance_id),
+    daw::audio_host_macos::ControlType::kVstDetach, true));
   TestCheckpoint3AssetCapacityWire(to_host[1], from_host[0]);
   const std::vector<std::uint8_t> malformed_state_request{0};
   assert(IsAck(RoundTrip(

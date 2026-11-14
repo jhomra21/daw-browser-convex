@@ -510,7 +510,7 @@ const portableTrackGraph = (trackIds: readonly string[]) => ({
     version: 1, id: `${id}-master`, fromNodeId: id, toNodeId: 'master', gain: 1, tap: 'post-fader', sidechain: false, pdcDelayFrames: 0,
   })),
 })
-const startPortableTracks = async (trackIds: readonly string[], graph: { revision: number } = portableTrackGraph(trackIds)) => {
+const startPortableTracks = async (trackIds: readonly string[], graph: { revision: number } = portableTrackGraph(trackIds), maxFramesPerBlock = 128) => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({
@@ -518,13 +518,22 @@ const startPortableTracks = async (trackIds: readonly string[], graph: { revisio
     postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
     close: () => undefined,
   })
-  expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+  expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock })).toBe(true)
   host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph })
   expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-prepared', requestId: 1, result: 'prepared' }))
   host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: graph.revision })
   expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-published', requestId: 2, result: 'published' }))
   return { host, messages }
 }
+// The controller creates its session with the capacity of 8192 frames; the position cadence follows the quanta rendered.
+test('the position report cadence is 50 ms of rendered frames whatever the block capacity', async () => {
+  const { host, messages } = await startPortableTracks(['track'], undefined, 8_192)
+  host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+  for (let block = 0; block < 100; block += 1) host.process([], [[new Float32Array(128), new Float32Array(128)]])
+  const frames = messages.flatMap((message) => message.type === 'transport-position' ? [message.frame] : [])
+  const gaps = frames.slice(1).map((frame, index) => frame - frames[index])
+  expect({ reports: frames.length, shortest: Math.min(...gaps), longest: Math.max(...gaps) }).toEqual({ reports: 6, shortest: 2_432, longest: 2_432 })
+})
 // Plays a constant on each listed source through a registered PCM asset and a
 // scheduled sample source, as the product feeds clips: portable sources never
 // read the worklet's live input.

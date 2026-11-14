@@ -2459,7 +2459,7 @@ export class DawPortableAudioCoreHost {
     this.framesProcessed += frames
     if (this.transportRunning) {
       const frame = this.currentTransportFrame()
-      const cadenceFrames = Math.max(this.maxFramesPerBlock, Math.floor(this.sampleRate / 20))
+      const cadenceFrames = Math.max(frames, Math.floor(this.sampleRate / 20))
       const publishPosition = this.transportPositionSequence === 0
         || frame >= this.lastTransportPositionFrame + cadenceFrames
       if (publishPosition) {

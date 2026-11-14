@@ -43,7 +43,7 @@ import {
   type PreparedStretchArtifactRepository,
 } from "@daw-browser/audio-engine/prepared-stretch-store"
 import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver"
-import { isLiveEventOnlyInstrumentChange, isLiveParameterChange, mapNativeBuiltInParameterCommit, nativeBuiltInLiveStateCovered } from "~/lib/desktop/native-built-in-parameter-mapper"
+import { isLiveEventOnlyInstrumentChange, isLiveParameterChange, nativeBuiltInLiveStateCovered } from "~/lib/desktop/native-built-in-parameter-mapper"
 import {
   mergeSynthParams, normalizeTrackInstrumentParams, parseJsonValue,
   type AudioPcmSourceDescriptor, type DecodedAudioPage, type SynthParamsUpdate, type TrackInstrumentParams,
@@ -517,9 +517,22 @@ const maxScheduleEvents = 256
 // How far before the end of its schedule a session extends it.
 const scheduleLeadSec = (horizonSec: number) => Math.min(5, Math.max(0.05, horizonSec * 0.25))
 
-// Rendered frames between the last position report and the seam an adoption publishes at: covers the report lag (up to
-// max(block, sampleRate / 20) frames) and the prepare, install and publish round trips.
-const adoptionSeamLeadSec = 0.25
+// Rendered frames between the last position report and the seam an adoption publishes at. The playing position is up to a
+// report interval past the last report (the worklet reports every sampleRate / 20 rendered frames); on top of that the seam
+// covers the slowest recent round trip from choosing a seam to the publish reaching the worklet, and two render quanta for
+// the message itself. A seam that is still too near answers late, and the resubmit chooses a later one.
+const maxAdoptionSeamLeadSec = 0.25
+const renderQuantumFrames = 128
+const recentSeamRoundTripCount = 32
+// What a session's first adoption assumes, as the native bound lead does (25 ms).
+const coldSeamRoundTripMs = 25
+const adoptionSeamLeadFrames = (sampleRate: number, roundTripsMs: readonly number[]) => {
+  const slowest = [...roundTripsMs].sort((a, b) => a - b)[Math.ceil(0.99 * roundTripsMs.length) - 1] ?? coldSeamRoundTripMs
+  return Math.min(
+    Math.round(maxAdoptionSeamLeadSec * sampleRate),
+    Math.floor(sampleRate / 20) + Math.ceil(slowest * sampleRate / 1000) + 2 * renderQuantumFrames,
+  )
+}
 
 // An adopted schedule starts at `seamFrame` while the session keeps sounding what the old schedule started before it.
 // A note that sounds at the seam and is not the same note in `next` gets a note-off at the seam; one that survives keeps
@@ -1273,6 +1286,8 @@ export const createPortableBrowserPlaybackController = (input: {
   let latestLoop: AdoptionLoop = { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 }
   let adoptionTail: Promise<unknown> = Promise.resolve()
   let adoptionPublish: Promise<PortableAdoptionResult> | undefined
+  // Milliseconds from choosing a seam to the publish being posted or refused, for the adoptions this session made recently.
+  let seamRoundTripsMs: readonly number[] = []
   // Synth sends past the adoption barrier and not yet answered; an adoption folds the values they carry once they settle.
   const liveInstrumentSends = new Set<Promise<unknown>>()
   // Failed operations waiting for rendered-frame reports to run again (UD 8): `wait` more reports, `resubmits` made so far.
@@ -1324,6 +1339,7 @@ export const createPortableBrowserPlaybackController = (input: {
     activeProjectGeneration = undefined
     activeTransport = undefined
     positionSegments = []
+    seamRoundTripsMs = []
     activeScheduleRange = undefined
     activeRevision = undefined
     activeGraph = undefined
@@ -2060,7 +2076,13 @@ export const createPortableBrowserPlaybackController = (input: {
       }
       const leadFrames = Math.round(scheduleLeadSec(input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC) * sampleRate)
       // A stopped transport has no publish race: the seam is where it stands and the publish below is immediate.
-      const seamFrame = wasPlaying ? positionFrame + Math.round(adoptionSeamLeadSec * sampleRate) : positionFrame
+      const seamLeadFrames = adoptionSeamLeadFrames(sampleRate, seamRoundTripsMs)
+      const seamChosenAt = performance.now()
+      const seamFrame = wasPlaying ? positionFrame + seamLeadFrames : positionFrame
+      const recordSeamRoundTrip = () => {
+        seamRoundTripsMs = [...seamRoundTripsMs, performance.now() - seamChosenAt].slice(-recentSeamRoundTripCount)
+      }
+      if (wasPlaying) console.debug(`[portable-playback] adoption seam ${seamLeadFrames} frames ahead of the last report (clamp ${Math.round(maxAdoptionSeamLeadSec * sampleRate)})`)
       const keepsVoices = (trackId: string) =>
         keepsInstrumentVoices(previous.mixer.fx.trackFx?.[trackId]?.instrument, folded.mixer.fx.trackFx?.[trackId]?.instrument)
       const candidateTrackIds = new Set(folded.tracks.map((track) => track.id))
@@ -2126,6 +2148,7 @@ export const createPortableBrowserPlaybackController = (input: {
       const ordinary = ordinarySourcesOf(candidate.sources, resources.preparedStretchAssets, resources.ordinaryDescriptors)
       // The sources travel with the publish: the worklet swaps them in with the graph, so no block plays one without the other.
       const sources = { epoch, ordinary, prepared: paged.events }
+      recordSeamRoundTrip()
       const published = session.publishGraph(candidate.graph.revision, wasPlaying ? { requireContinuity: true, publicationFrame: seamFrame, sources } : { requireContinuity: true, sources }).then((): PortableAdoptionResult => {
         if (active !== session) return "unavailable"
         // The compiled schedule, not the installed one: it still holds the note-on of a voice that continues from before
@@ -2164,6 +2187,9 @@ export const createPortableBrowserPlaybackController = (input: {
         return "adopted"
       }, (): PortableAdoptionResult => {
         // A refusal, or a publication that came too late, leaves the worklet on the revision it plays; so does the session.
+        // A late answer arrives after the seam: the time it took is what the seam had to cover, so the resubmit's seam
+        // is chosen with it.
+        recordSeamRoundTrip()
         if (active === session) {
           activeRevision = revision
           activeGraph = graph

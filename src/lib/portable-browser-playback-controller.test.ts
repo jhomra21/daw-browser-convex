@@ -1977,8 +1977,52 @@ test('B6f5 a playing portable session adopts a mixer edit on the same session an
     const again = await controller.adoptSchedule(noLoop)
     expect({ adopted, again, sessions, calls: calls.slice(before), publishes: publishes.slice(1), gain: b6f5Gain(graphs.at(-1)), revision: graphs.at(-1)?.revision })
       .toEqual({ adopted: 'adopted', again: 'unchanged', sessions: 1, calls: ['prepare-graph', 'install-schedule:1', 'publish-graph'],
-        publishes: [{ revision: 2, options: { requireContinuity: true, publicationFrame: 12_000, sources: { epoch: 1, ordinary: [], prepared: [] } } }], gain: 0.5, revision: 2 })
+        publishes: [{ revision: 2, options: { requireContinuity: true, publicationFrame: 3_856, sources: { epoch: 1, ordinary: [], prepared: [] } } }], gain: 0.5, revision: 2 })
   } finally { controller.dispose() }
+})
+
+// The seam is a report interval (2400 frames at 48 kHz), the slowest recent round trip from choosing the seam to the publish,
+// and two render quanta ahead of the last report, up to a quarter second; a refused publish counts the time it took.
+test('B6f5 the adoption seam adapts to the round trips of recent adoptions, clamps, and a late publish moves the next seam later', async () => {
+  const calls: string[] = []
+  const graphs: AudioCoreGraphSnapshot[] = []
+  const publishes: B6f5Publish[] = []
+  let volume = 0.8
+  let clock = 0
+  let installMs = 0
+  let refuse = false
+  const now = spyOn(performance, 'now').mockImplementation(() => clock)
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async (transport) => b6f5Compilation(transport, volume),
+    fingerprintSnapshot: b6f5Fingerprint,
+    getAudioContext: () => context, select: async () => selected,
+    backend: { createPlaybackSession: async () => ({
+      ...b6f5Session(calls, graphs, publishes, async () => { if (refuse) throw new Error('Portable playback graph-published was rejected.') }),
+      installSchedule: async () => { clock += installMs },
+    }) },
+  })
+  const seams: number[] = []
+  const adoptAt = async (next: number, slowInstallMs: number) => {
+    volume = next
+    installMs = slowInstallMs
+    const result = await controller.adoptSchedule(noLoop)
+    seams.push(publishes.at(-1)?.options?.publicationFrame ?? -1)
+    return result
+  }
+  try {
+    expect(await controller.start(compilation().snapshot.transport)).toBe('started')
+    const first = await adoptAt(0.7, 80)
+    const second = await adoptAt(0.6, 0)
+    refuse = true
+    const late = await adoptAt(0.5, 100)
+    refuse = false
+    const rebound = await adoptAt(0.5, 0)
+    const slow = await adoptAt(0.4, 1_000)
+    const clamped = await adoptAt(0.3, 0)
+    expect({ first, second, late, rebound, slow, clamped, seams })
+      .toEqual({ first: 'adopted', second: 'adopted', late: 'failed', rebound: 'adopted', slow: 'adopted', clamped: 'adopted',
+        seams: [3_856, 2_400 + 3_840 + 256, 2_400 + 3_840 + 256, 2_400 + 4_800 + 256, 2_400 + 4_800 + 256, 12_000] })
+  } finally { controller.dispose(); now.mockRestore() }
 })
 
 test('B6f5 a refused adoption answers failed and keeps the session revision; a MIDI clip edit is adopted at a seam', async () => {
@@ -2425,22 +2469,22 @@ test('W-F20c a loop edit after a wrap maps positions across the seam, compiles t
   const sec = (frame: number) => frame / 48_000
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    expect(await reference.controller.start({ ...reference.transport, playheadSec: 0.5 })).toBe('started')
+    expect(await reference.controller.start({ ...reference.transport, playheadSec: sec(15_856) })).toBe('started')
     f.position(60_000, 1, 1)
     expect(await f.adopt(edited)).toBe('adopted')
     const installed = f.installs.at(-1)
     const delta = 48_000
     const before = (frame: number) => frame < 1_300_000
-    f.position(66_000, 1, 2)
+    f.position(61_000, 1, 2)
     const old = f.controller.currentPositionSec()
-    f.position(72_000, 1, 3)
+    f.position(63_856, 1, 3)
     const atSeam = f.controller.currentPositionSec()
     f.position(125_000, 1, 4)
     const wrapped = f.controller.currentPositionSec()
     expect({ origin: installed?.timeOrigin, old, atSeam, wrapped,
       noteOns: f.noteEvents(installed, 'note-on').map((event) => event.frame).filter(before),
       referenceNoteOns: f.noteEvents(reference.installs[0], 'note-on').map((event) => event.frame + delta).filter(before) })
-      .toEqual({ origin: { timelineSec: 0.5, frame: 72_000 }, old: sec(18_000), atSeam: sec(24_000), wrapped: sec(29_000),
+      .toEqual({ origin: { timelineSec: sec(15_856), frame: 63_856 }, old: sec(13_000), atSeam: sec(15_856), wrapped: sec(29_000),
         noteOns: f.noteEvents(reference.installs[0], 'note-on').map((event) => event.frame + delta).filter(before),
         referenceNoteOns: f.noteEvents(installed, 'note-on').map((event) => event.frame).filter(before) })
     f.position(1_250_000, 1, 5)
@@ -2459,7 +2503,7 @@ test('W-F20d a loop edit with an audio clip present is adopted with the sources 
     expect(await f.controller.start(f.transport)).toBe('started')
     const result = await f.adopt({ loopEnabled: true, loopStartSec: 0, loopEndSec: 2 })
     expect({ result, starts: w8ShippedStarts(f).filter((start) => start < 200_000), sessions: f.sessions(), disposed: f.calls.includes('dispose') })
-      .toEqual({ result: 'adopted', starts: [12_000, 96_000, 192_000], sessions: 1, disposed: false })
+      .toEqual({ result: 'adopted', starts: [3_856, 96_000, 192_000], sessions: 1, disposed: false })
   } finally { f.controller.dispose() }
 })
 
@@ -2502,7 +2546,7 @@ test('W-E5-1 a tempo edit while playing is adopted on the same session with the 
     expect({ result, sessions: f.sessions(), disposed: f.calls.includes('dispose'), installs: f.installs.length, published: f.publishes.length,
       seam: installed?.timeOrigin.frame, noteOffs: f.noteEvents(installed, 'note-off').map((event) => event.frame), bpm: installed?.bpm })
       .toEqual({ result: 'adopted', sessions: 1, disposed: false, installs: 2, published: 2,
-        seam: 12_000, noteOffs: [32_000], bpm: 90 })
+        seam: 3_856, noteOffs: [32_000], bpm: 90 })
   } finally { f.controller.dispose() }
 })
 
@@ -2853,7 +2897,7 @@ test('W-E3-5 a seek supersedes an adoption in flight, the older of two seeks, an
     const afterwards = await adoption.adopt(adoption.noLoop)
     expect({ ...answers, afterwards, sessions: adoption.sessions(), published: adoption.publishes.length,
       seam: adoption.installs.at(-1)?.timeOrigin.frame })
-      .toEqual({ adopting: 'unavailable', seeking: 'started', afterwards: 'adopted', sessions: 1, published: 2, seam: 72_000 + 12_000 })
+      .toEqual({ adopting: 'unavailable', seeking: 'started', afterwards: 'adopted', sessions: 1, published: 2, seam: 72_000 + 3_856 })
   } finally { adoption.controller.dispose() }
   const twice = await w8Fixture()
   try {
@@ -3122,7 +3166,7 @@ test('W-R5 a note held across an adoption seam in a later loop pass is neither r
     const seam = installed?.timeOrigin.frame
     expect({ result, seam, heldNoteOns: f.noteEvents(installed, 'note-on').filter((event) => event.noteId === heldId),
       heldNoteOffs: f.noteEvents(installed, 'note-off').filter((event) => event.noteId === heldId).map((event) => event.frame) })
-      .toEqual({ result: 'adopted', seam: 110_000, heldNoteOns: [], heldNoteOffs: [120_000] })
+      .toEqual({ result: 'adopted', seam: 101_856, heldNoteOns: [], heldNoteOffs: [120_000] })
   } finally { f.controller.dispose() }
 })
 
@@ -3131,7 +3175,7 @@ test('W-R5 a note that restarts at the seam on a loop wrap keeps its attack', as
   const f = await w8Fixture({ clipSec: 40, notes: [w8Note('whole', 0, 2)], loop })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    f.position(36_000, 1, 1)
+    f.position(44_144, 1, 1)
     f.state.notes = [w8Note('whole', 0, 2), w8Note('later', 1.5, 0.25)]
     const result = await f.adopt(loop)
     const installed = f.installs.at(-1)
@@ -3269,7 +3313,7 @@ test('C9a-1 an adoption ships the sources compiled at its seam with the publish;
     const startup = f.scheduled[0]?.find((event) => event.sourceNodeId === 'audio-1')
     const shipped = sources?.prepared.find((event) => event.sourceNodeId === 'audio-1')
     expect({ epoch: sources?.epoch, ordinary: sources?.ordinary, prepared: c9Starts(sources?.prepared), same: { ...shipped, preparationId: 0 } })
-      .toEqual({ epoch: 1, ordinary: [], prepared: [['audio-0', 108_000, 108_000], ['audio-1', 240_000, 0]], same: { ...startup, preparationId: 0 } })
+      .toEqual({ epoch: 1, ordinary: [], prepared: [['audio-0', 99_856, 99_856], ['audio-1', 240_000, 0]], same: { ...startup, preparationId: 0 } })
   } finally { f.controller.dispose() }
 })
 
@@ -3282,9 +3326,9 @@ test('C9a-2 the preparations of the old sources are released once the position r
     f.state.volume = 0.5
     expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
     held.push(f.base.preparations.size)
-    await f.report(107_000)
+    await f.report(98_855)
     held.push(f.base.preparations.size)
-    await f.report(108_000)
+    await f.report(99_856)
     held.push(f.base.preparations.size)
     f.controller.dispose()
     await Bun.sleep(0)
@@ -3356,7 +3400,7 @@ test('W-C9-clip-1 a clip moved while playing is adopted: its source starts at th
     f.state.clip1Start = 6
     const result = await f.controller.adoptSchedule(noLoop)
     expect({ result, prepared: c9Starts(f.sources(f.publishes.at(-1))?.prepared), disposed: f.calls.includes('dispose') })
-      .toEqual({ result: 'adopted', prepared: [['audio-0', 108_000, 108_000], ['audio-1', 288_000, 0]], disposed: false })
+      .toEqual({ result: 'adopted', prepared: [['audio-0', 99_856, 99_856], ['audio-1', 288_000, 0]], disposed: false })
   } finally { f.controller.dispose() }
 })
 
@@ -3369,7 +3413,7 @@ test('W-C9-clip-2 a trim of a clip that spans the seam starts its new source at 
     const result = await f.controller.adoptSchedule(noLoop)
     const spanning = f.sources(f.publishes.at(-1))?.prepared.find((event) => event.sourceNodeId === 'audio-0')
     expect({ result, start: spanning?.startFrame, offset: spanning?.sourceOffsetFrame, fraction: spanning?.sourceOffsetFraction })
-      .toEqual({ result: 'adopted', start: 108_000, offset: 204_000, fraction: expect.closeTo(0.5, 6) })
+      .toEqual({ result: 'adopted', start: 99_856, offset: 195_856, fraction: expect.closeTo(0.5, 6) })
   } finally { f.controller.dispose() }
 })
 
@@ -3394,7 +3438,7 @@ test('W-C9-clip-5 a loop edit with audio clips is adopted with each iteration sl
     const prepared = f.sources(f.publishes.at(-1))?.prepared ?? []
     expect({ result, audio0: c9Starts(prepared.filter((event) => event.sourceNodeId === 'audio-0')).slice(0, 3),
       audio1: prepared.filter((event) => event.sourceNodeId === 'audio-1').length, disposed: f.calls.includes('dispose') })
-      .toEqual({ result: 'adopted', audio0: [['audio-0', 24_000, 24_000], ['audio-0', 48_000, 0], ['audio-0', 96_000, 0]], audio1: 0, disposed: false })
+      .toEqual({ result: 'adopted', audio0: [['audio-0', 15_856, 15_855], ['audio-0', 48_000, 0], ['audio-0', 96_000, 0]], audio1: 0, disposed: false })
   } finally { f.controller.dispose() }
 })
 
@@ -3405,7 +3449,7 @@ test('W-C9-clip-7 a clip deleted while playing leaves no source behind', async (
     await f.report(96_000)
     f.state.clip1Present = false
     const result = await f.controller.adoptSchedule(noLoop)
-    expect({ result, prepared: c9Starts(f.sources(f.publishes.at(-1))?.prepared) }).toEqual({ result: 'adopted', prepared: [['audio-0', 108_000, 108_000]] })
+    expect({ result, prepared: c9Starts(f.sources(f.publishes.at(-1))?.prepared) }).toEqual({ result: 'adopted', prepared: [['audio-0', 99_856, 99_856]] })
   } finally { f.controller.dispose() }
 })
 
@@ -3447,9 +3491,9 @@ test('W-C9-asset-1 a clip asset swapped while playing is registered and paged be
     const adoption = f.calls.slice(mark)
     const shipped = f.sources(f.publishes.at(-1))?.prepared.find((event) => event.sourceNodeId === 'audio-1')
     const released = [c9Released(adoption)]
-    await f.report(107_000)
+    await f.report(98_855)
     released.push(c9Released(f.calls.slice(mark)))
-    await f.report(108_000)
+    await f.report(99_856)
     released.push(c9Released(f.calls.slice(mark)))
     const started = f.scheduled[0]?.find((event) => event.sourceNodeId === 'audio-1')
     expect({ result, order: adoption.filter((call) => call === 'publish' || call.startsWith('register:')), newRange: shipped?.preparationId !== started?.preparationId,
@@ -3467,7 +3511,7 @@ test('W-C9-asset-2 a release answered asset-in-use is asked again at the next po
     f.state.inUse.add('asset-b')
     f.state.clip1Asset = 'asset-c'
     expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
-    await f.report(108_000)
+    await f.report(99_856)
     await f.report(109_000)
     f.state.inUse.clear()
     await f.report(110_000)
@@ -3594,7 +3638,7 @@ test('W-C9-asset-6 a Drum Rack pad sample swapped while a note is held registers
   const f = await d9Fixture()
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    await f.report(48_000)
+    await f.report(56_144)
     const mark = f.calls.length
     f.state.padAsset = 'drum-b'
     const result = await f.controller.adoptSchedule(noLoop)
@@ -3612,7 +3656,7 @@ test('W-C9-keeps-1 a held note of an instrument whose sample changed is released
   const f = await d9Fixture()
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    await f.report(48_000)
+    await f.report(56_144)
     f.state.padAsset = 'drum-b'
     expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
     expect({ noteOffs: f.events('note-off').slice(0, 1), noteOns: f.events('note-on') }).toEqual({ noteOffs: [60_000], noteOns: [60_000] })
@@ -3623,7 +3667,7 @@ test('W-C9-keeps-2 a held note of an instrument that did not change keeps its vo
   const f = await d9Fixture()
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    await f.report(48_000)
+    await f.report(56_144)
     f.state.volume = 0.5
     expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
     expect({ noteOns: f.events('note-on'), noteOffs: f.events('note-off') }).toEqual({ noteOns: [], noteOffs: [192_000] })
@@ -3652,10 +3696,10 @@ test('W-C9-warp-1 a tempo edit with a Stretch clip prepares its artifact at the 
     const [newArtifact] = c9Artifacts(adoption)
     const leases = [[f.stretch.leased, f.stretch.released]]
     const released = [c9Released(adoption)]
-    await f.report(107_000)
+    await f.report(98_855)
     leases.push([f.stretch.leased, f.stretch.released])
     released.push(c9Released(f.calls.slice(mark)))
-    await f.report(108_000)
+    await f.report(99_856)
     await c9Settled(() => f.stretch.released === 1)
     leases.push([f.stretch.leased, f.stretch.released])
     released.push(c9Released(f.calls.slice(mark)))
@@ -3663,7 +3707,7 @@ test('W-C9-warp-1 a tempo edit with a Stretch clip prepares its artifact at the 
     expect({ result, order: c9Phases(adoption), fresh: newArtifact !== undefined && newArtifact !== oldArtifact,
       paged: [...f.base.writtenPages].some((page) => page.startsWith(`${newArtifact?.slice('register:'.length)}:`)),
       unwarped: c9Starts(shipped).find((start) => start[0] === 'audio-0'), leases, released, disposed: f.calls.includes('dispose') })
-      .toEqual({ result: 'adopted', order: ['register', 'publish'], fresh: true, paged: true, unwarped: ['audio-0', 108_000, 108_000],
+      .toEqual({ result: 'adopted', order: ['register', 'publish'], fresh: true, paged: true, unwarped: ['audio-0', 99_856, 99_856],
         leases: [[2, 0], [2, 0], [2, 1]], released: [[], [], [`release:${oldArtifact?.slice('register:'.length)}`]], disposed: false })
   } finally { f.controller.dispose() }
 })
@@ -3872,7 +3916,7 @@ test('W-C9-track-1 an audio track added while playing is adopted: its node is pu
   const f = await e9Fixture()
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    await f.report(48_000)
+    await f.report(56_144)
     const mark = f.calls.length
     f.state.tracks = [...f.state.tracks, e9Audio('audio-b', 'asset-b')]
     const result = await f.controller.adoptSchedule(noLoop)
@@ -3888,7 +3932,7 @@ test('W-C9-track-2 a MIDI track added while playing is adopted: its note that sp
   const f = await e9Fixture()
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    await f.report(48_000)
+    await f.report(56_144)
     f.state.tracks = [...f.state.tracks, e9Midi('midi-b')]
     const result = await f.controller.adoptSchedule(noLoop)
     expect({ result, nodes: f.nodes(), disposed: f.calls.includes('dispose'), noteOns: f.notes('note-on'), noteOffs: f.notes('note-off') })
@@ -3901,7 +3945,7 @@ test('W-C9-track-3 an audio track deleted while playing leaves no source or node
   const f = await e9Fixture({ tracks: [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a'), e9Audio('audio-b', 'asset-b')] })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    await f.report(48_000)
+    await f.report(56_144)
     f.state.tracks = f.state.tracks.filter((entry) => entry.id !== 'audio-b')
     const result = await f.controller.adoptSchedule(noLoop)
     const before = c9Released(f.calls)
@@ -3917,7 +3961,7 @@ test('W-C9-track-4 the held note of a deleted MIDI track gets no note-off: its n
   const f = await e9Fixture({ tracks: [e9Midi('midi-a'), e9Midi('midi-b'), e9Audio('audio-a', 'asset-a')] })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    await f.report(48_000)
+    await f.report(56_144)
     f.state.tracks = f.state.tracks.filter((entry) => entry.id !== 'midi-b')
     const result = await f.controller.adoptSchedule(noLoop)
     expect({ result, nodes: f.nodes(), disposed: f.calls.includes('dispose'), noteOns: f.notes('note-on'), noteOffs: f.notes('note-off') })
@@ -3929,7 +3973,7 @@ test('W-C9-track-5 a reorder is the session\'s own graph again: unchanged, nothi
   const f = await e9Fixture({ tracks: [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a'), e9Audio('audio-b', 'asset-b')] })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    await f.report(48_000)
+    await f.report(56_144)
     const [midiA, audioA, audioB] = f.state.tracks
     f.state.tracks = [audioB, midiA, audioA]
     const reordered = await f.controller.adoptSchedule(noLoop)
@@ -3994,7 +4038,7 @@ test.each(f9Edits)('W-C9-fx-1 an effect %s while playing is adopted in place: on
   const f = await e9Fixture({ effects: before })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    await f.report(48_000)
+    await f.report(56_144)
     f.state.effects = after
     const result = await f.controller.adoptSchedule(noLoop)
     expect({ result, chain: f9Chain(f), published: f.published(), disposed: f.calls.includes('dispose') })
@@ -4027,7 +4071,7 @@ test('W-C9-fx-4 an effect that delays the signal inserted, removed, replaced or 
     const f = await e9Fixture({ tracks, effects: before })
     try {
       expect(await f.controller.start(f.transport)).toBe('started')
-      await f.report(48_000)
+      await f.report(56_144)
       f.state.effects = after
       results.push({ result: await f.controller.adoptSchedule(noLoop), published: f.published() })
     } finally { f.controller.dispose() }
@@ -4042,7 +4086,7 @@ test('W-C9-fx-6 a removal refused by ghost capacity is retried after one positio
   const f = await e9Fixture({ effects: [f9Utility('util-a'), f9Delay('delay-a')] })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    await f.report(48_000)
+    await f.report(56_144)
     f.state.refusals = 1
     f.state.effects = []
     const first = await f.controller.adoptSchedule(noLoop)
@@ -4066,7 +4110,7 @@ test.each(g9Replacements)('W-C9-inst-1 a %s replacement of the instrument while 
   const f = await e9Fixture()
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    await f.report(48_000)
+    await f.report(56_144)
     const mark = f.calls.length
     f.state.instruments = { 'midi-a': replacement }
     const result = await f.controller.adoptSchedule(noLoop)
@@ -4098,7 +4142,7 @@ test('W-C9-inst-6 a replacement refused by blend capacity is retried after one p
   const f = await e9Fixture()
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    await f.report(48_000)
+    await f.report(56_144)
     f.state.refusals = 1
     f.state.instruments = { 'midi-a': e9Sampler('sampler:midi-a', 'smp-a') }
     const first = await f.controller.adoptSchedule(noLoop)
@@ -4119,7 +4163,7 @@ test('W-C9-proc-1 a processor parameter the live path does not take is adopted i
     const f = await e9Fixture({ effects: [g9Utility(false)] })
     try {
       if (paused) expect(await f.controller.ensurePrepared({ ...f.transport, state: 'paused' })).toBe('started')
-      else { expect(await f.controller.start(f.transport)).toBe('started'); await f.report(48_000) }
+      else { expect(await f.controller.start(f.transport)).toBe('started'); await f.report(56_144) }
       const before = g9State(f)
       f.state.effects = [g9Utility(true)]
       const result = await f.controller.adoptSchedule(noLoop)
@@ -4134,7 +4178,7 @@ test('W-C9-proc-2 a Spectral fftSize change is adopted in place with one publish
   const f = await e9Fixture({ effects: [g9Spectral(512)] })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    await f.report(48_000)
+    await f.report(56_144)
     f.state.effects = [g9Spectral(1024)]
     expect({ result: await f.controller.adoptSchedule(noLoop), published: f.published(), chain: f9Chain(f), disposed: f.calls.includes('dispose') })
       .toEqual({ result: 'adopted', published: 1, chain: ['spectral-a'], disposed: false })
@@ -4147,7 +4191,7 @@ test('W-C9-asset-7 a Granular sample changed, and a Granular track added and del
   const f = await e9Fixture({ instruments: { 'midi-a': e9Granular('granular:a', 'grain-a') } })
   try {
     expect(await f.controller.start(f.transport)).toBe('started')
-    await f.report(48_000)
+    await f.report(56_144)
     const steps: Array<readonly [() => void, string[], string[]]> = [
       [() => { f.state.instruments = { 'midi-a': e9Granular('granular:a', 'grain-b') } }, ['register:grain-b', 'publish'], ['release:grain-a']],
       [() => { f.state.tracks = [...f.state.tracks, e9Midi('midi-g')]; f.state.instruments = { 'midi-a': e9Granular('granular:a', 'grain-b'), 'midi-g': e9Granular('granular:g', 'grain-g') } }, ['register:grain-g', 'publish'], []],

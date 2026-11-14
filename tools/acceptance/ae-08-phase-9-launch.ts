@@ -51,7 +51,7 @@ const required = (id: string | undefined, what: string) => {
 
 // The edit names of the built rows (ae-08-phase-9-matrix.ts) and what each does. Each returns the latency move it declares.
 export const createPerformer = ({ context, runtime, observe, setup }: Performers): Perform => {
-  // An edit through the control protocol is stamped when its commit is issued.
+  // An edit through the control protocol is stamped when the app receives its commit.
   const commit = async (actions: Parameters<Performers["context"]["mutate"]>[0]) => ({ ...unmoved, wallMs: await context.mutate(actions) })
   const target = { kind: "track", track: ref(setup.changedTrackId) }
   const changedClip = (present: boolean) => waitForUi(context, `Changed clip ${present ? "not restored" : "not removed"} in the UI`,

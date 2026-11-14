@@ -16,7 +16,7 @@ export type Phase5Context = {
   profile: string
   row: string
   snapshot: () => Promise<ProjectSnapshotV2>
-  // Resolves to the wall time just before the commit was issued: the moment the host can first see the edit.
+  // Resolves to the wall time at which the app received the commit (its own control-commit-received line).
   mutate: (actions: z.infer<ReturnType<typeof z.json>>[]) => Promise<number>
   interact: (args: string[]) => Promise<void>
   evaluate: (script: string) => Promise<void>

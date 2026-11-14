@@ -4,6 +4,7 @@ import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "no
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { z } from "zod"
+import { ae08ControlCommitReceived } from "../../apps/desktop/ae08-evidence"
 import { phase9Matrix, phase9Rows, type LatencyClass, type Row } from "./ae-08-phase-9-rows"
 
 // AE-08 phase 9 matrix (plan §8 steps 1-2): one packaged launch per row class carries N alternating edits. This file owns
@@ -104,13 +105,24 @@ export const chooseVstRepetitions = (launches: readonly Row[][], repetitions: nu
 
 // ---- Settling on host evidence ----
 const hostEventSchema = z.object({ event: z.string(), cause: z.string().default(""), wallMs: z.number().default(0),
-  revision: z.number().default(0), frame: z.number().default(0), publicationFrame: z.number().default(0), transportEpoch: z.number().default(0) })
+  revision: z.number().default(0), frame: z.number().default(0), publicationFrame: z.number().default(0), transportEpoch: z.number().default(0),
+  idempotencyKey: z.string().default("") })
 export type HostEvent = z.infer<typeof hostEventSchema>
 export class SetupFailure extends Error {}
 
 // A torn trailing line is a record still being written.
 export const parseHostLines = (text: string) => text.slice(0, text.lastIndexOf("\n") + 1).split("\n").filter(Boolean)
   .map((line) => hostEventSchema.parse(JSON.parse(line)))
+
+// When the app received a commit: the main process logs control-commit-received with the commit's idempotency key
+// (apps/desktop/ae08-evidence.ts) before the renderer sees it, so edit-to-publish excludes the CLI that sent the commit. The line is
+// written before the commit's reply, so a returned commit has its line.
+export const commitReceivedWallMs = async (out: string, idempotencyKey: string) => {
+  const received = parseHostLines(await readFile(path.join(out, "host.jsonl"), "utf8"))
+    .find((event) => event.event === "control-commit-received" && event.idempotencyKey === idempotencyKey)
+  if (!received) throw new SetupFailure(`The app logged no control-commit-received line for commit ${idempotencyKey}`)
+  return received.wallMs
+}
 
 // Publication-complete: the first in-place publication at or after the edit; for a raise also its latency-move-complete. `wallMs` is
 // when it completed; `revision` and `publicationFrame` are the publication's own.
@@ -154,8 +166,8 @@ export const awaitPublicationComplete = (out: string, sinceWallMs: number, raise
 // ---- Per-launch capture ----
 export type LoggedEdit = { index: number; name: string; wallMs: number; settledWallMs: number | undefined;
   revision: number; publicationFrame: number; fromLatencyFrames: number; toLatencyFrames: number }
-// `wallMs` is when the host could first see the edit, for an edit that goes through the control protocol (its preview and commit round
-// trips are the runner's, not the product's). An edit made in the UI has none and counts from the start of its step.
+// `wallMs` is when the app received the edit's commit (its control-commit-received line), for an edit that goes through the control
+// protocol. An edit made in the UI has none and counts from the start of its step.
 export type Perform = (edit: string) => Promise<{ fromLatencyFrames: number; toLatencyFrames: number; wallMs?: number }>
 // A VST edit waits for a worker to start (the plan assumes 20 s per insert), so its deadline is longer.
 const settleDeadlineMs = (row: Row) => row.repeat === "vst-burst" ? 60_000 : 15_000
@@ -424,6 +436,25 @@ export const selfTest = async () => {
       perform: async () => ({ fromLatencyFrames: 0, toLatencyFrames: 0 }) }).then(() => "resolved", (error) => error instanceof SetupFailure ? "setup" : "other")
     check(failure === "setup" && JSON.parse(await readFile(path.join(failing, "phase9-edits.json"), "utf8")).edits.length === 0, `a missing line is a setup failure with evidence kept, got ${failure}`)
   } finally { await rm(burstDirectory, { recursive: true }) }
+  // The app's own commit stamp, written by the product helper and read back by the runner.
+  const evidence = await mkdtemp(path.join(tmpdir(), "ae08-phase9-stamp-"))
+  const previousEvidenceDir = process.env.DAW_AE08_EVIDENCE_DIR
+  try {
+    process.env.DAW_AE08_EVIDENCE_DIR = evidence
+    const before = Date.now()
+    ae08ControlCommitReceived("control.preview", { idempotencyKey: "preview-key" })
+    ae08ControlCommitReceived("control.commit", { version: "v1" })
+    ae08ControlCommitReceived("control.commit", { idempotencyKey: "commit-key" })
+    const received = await commitReceivedWallMs(evidence, "commit-key")
+    check(received >= before && received <= Date.now(), "the runner reads the wall time the app logged for its commit")
+    check(parseHostLines(await readFile(path.join(evidence, "host.jsonl"), "utf8")).length === 1, "only a commit that carries a key is stamped")
+    const absent = await commitReceivedWallMs(evidence, "other-key").then(() => "read", (error) => error instanceof SetupFailure ? "setup" : "other")
+    check(absent === "setup", `a commit the app never logged is a setup failure, got ${absent}`)
+  } finally {
+    if (previousEvidenceDir === undefined) delete process.env.DAW_AE08_EVIDENCE_DIR
+    else process.env.DAW_AE08_EVIDENCE_DIR = previousEvidenceDir
+    await rm(evidence, { recursive: true })
+  }
   // The live wait: a line appended later resolves it; no line is a SetupFailure when the deadline passes, never a pass.
   const directory = await mkdtemp(path.join(tmpdir(), "ae08-phase9-"))
   try {

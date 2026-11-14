@@ -18,7 +18,7 @@ import { phase5Rows, runPhase5Fixture } from "./ae-08-phase-5-fixture"
 import { phase8Rows, runPhase8Fixture } from "./ae-08-phase-8-fixture"
 import { analyzePhase8Campaign } from "./analyze-ae-08-phase-8"
 import { contentSecondsFor, exportRowEvidence, runPhase9Launch, stateName, type Phase9Launch } from "./ae-08-phase-9-launch"
-import { assumedTimings, burstSchedule, chooseVstRepetitions, judgeStored, launchesFor, launchPlan, measuredEditsSchema, measuredTimings, pooled,
+import { assumedTimings, burstSchedule, chooseVstRepetitions, commitReceivedWallMs, judgeStored, launchesFor, launchPlan, measuredEditsSchema, measuredTimings, pooled,
   readTimings, repetitionsFor, type Trial } from "./ae-08-phase-9-matrix"
 import { phase9Matrix, phase9Rows } from "./ae-08-phase-9-rows"
 import { judgeRowCapture } from "./ae-08-phase-9-compare"
@@ -279,11 +279,11 @@ const run = async (out: string, edited: boolean, fixtureKind: string, phase = 1,
         const preview = controlPreviewResultSchemaV1.parse(await command(profile, ["preview", "--request", "-", "--target", "host"], payload))
         const approvalToken = preview.approval?.required
           ? controlApprovalResultSchemaV1.parse(await command(profile, ["approval", "--request", "-", "--target", "host"], payload)).approvalToken : undefined
-        const committedAt = Date.now()
+        const idempotencyKey = `ae08-${crypto.randomUUID()}`
         controlCommitResultSchemaV1.parse(await command(profile, ["commit", "--request", "-", "--target", "host"],
-          JSON.stringify({ ...request, approvalToken, idempotencyKey: `ae08-${crypto.randomUUID()}` })))
+          JSON.stringify({ ...request, approvalToken, idempotencyKey })))
         await snapshot()
-        return committedAt
+        return commitReceivedWallMs(out, idempotencyKey)
       }
       if (phase === 5 || phase === 8 || phase === 9) {
         const fixtureContext = { out, profile, row: fixtureKind, snapshot, mark,

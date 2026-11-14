@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 #include <array>
+#include <chrono>
 #include <algorithm>
 #include <bit>
 #include <deque>
@@ -15,10 +16,11 @@
 #include <utility>
 
 #include "daw/audio_core.h"
+#include "../../src/recording-spool.h"
 
 namespace daw::audio_host_macos {
 
-constexpr std::uint32_t kControlProtocolVersion = 22;
+constexpr std::uint32_t kControlProtocolVersion = 29;
 constexpr std::size_t kMaximumControlPayloadBytes = 1'048'576;
 constexpr std::size_t kControlFrameHeaderBytes = 16;
 constexpr std::size_t kNativeGraphFrameHeaderBytes = 12;
@@ -74,6 +76,14 @@ constexpr bool NativeVstWatchdogShouldMiss(
 }
 
 }  // namespace detail
+
+// The status word of a ControlType::kAck. kUnavailable is a negative ACK that tells the caller nothing was
+// refused on its merits: there was no audio session (or core) to take the request. The ACK text is for people only.
+enum class ControlAckStatus : std::uint32_t {
+  kRefused = 0,
+  kAccepted = 1,
+  kUnavailable = 2,
+};
 
 enum class ControlType : std::uint32_t {
   kHostHello = 1,
@@ -136,6 +146,7 @@ enum class ControlType : std::uint32_t {
   kMappedAssetWritePage = 58,
   kMappedAssetPrepareRange = 59,
   kMappedAssetRelease = 60,
+  kProcessorStatePatchStatus = 61,
 };
 
 struct ControlFrame {
@@ -335,6 +346,12 @@ enum class GraphRevisionStatusCode : std::uint32_t {
   kPublishFailed = 8,
   kRetirementNotSafe = 9,
   kRetirementCapacityExceeded = 10,
+  // Retryable admission/publication work. Prepare/inspect also return this
+  // while the active latency transition still owns a graph bank.
+  kPublishPending = 11,
+  kRebaseRequired = 12,
+  // A capture is bound to a node this revision would remove or reroute. Nothing was prepared.
+  kCaptureTargetLocked = 13,
 };
 
 enum class GraphRevisionContinuity : std::uint32_t {
@@ -352,6 +369,11 @@ struct GraphRevisionStatus {
   std::uint32_t prepared_revision = 0;
   std::uint32_t retired_revision = 0;
   std::uint64_t render_epoch = 0;
+  std::int64_t publication_frame = 0;
+  std::uint32_t diagnostic_code = 0;
+  std::uint64_t requested_publication_frame = 0;
+  std::uint64_t progress_frame = 0;
+  std::uint32_t transport_epoch = 0;
 };
 
 enum class WorkerNotificationKind : std::uint32_t {
@@ -423,6 +445,8 @@ struct RecordingConfig {
   std::int64_t punch_start_frame = 0;
   std::int64_t punch_end_frame = -1;
   bool monitoring = false;
+  // The graph node the take records onto. 0 binds none.
+  std::uint64_t target_node_id = 0;
 };
 
 struct RecordingBlock {
@@ -450,11 +474,27 @@ struct RecordingStatus {
   bool fatal = false;
   bool active = false;
   bool configured = false;
+  SpoolSnapshot spool;
+  std::uint64_t file_device = 0;
+  std::uint64_t file_inode = 0;
+  std::uint32_t sample_rate_hz = 0;
+  std::uint32_t channel_count = 0;
 };
 
 struct RecordingMessage {
   std::optional<RecordingBlock> block;
   RecordingStatus status;
+};
+class RecordingStatusChannel {
+ public:
+  void Publish(RecordingStatus status);
+  std::optional<RecordingStatus> Wait(std::uint64_t& revision, const std::atomic<bool>& running);
+  void Wake();
+ private:
+  std::mutex mutex_;
+  std::condition_variable changed_;
+  std::uint64_t revision_ = 0;
+  std::optional<RecordingStatus> latest_;
 };
 
 struct MeterEntry {
@@ -483,6 +523,8 @@ struct SpectrumFrame {
 };
 
 struct ScheduleProgress {
+  std::uint64_t admission_capacity_generation = 0;
+  std::uint64_t latency_completion_generation = 0;
   std::uint32_t revision = 0;
   std::uint32_t epoch = 0;
   std::uint64_t progress_sequence = 0;
@@ -497,24 +539,83 @@ struct ScheduleProgress {
   std::uint32_t instrument_credits = 0;
   std::uint32_t source_credits = 0;
   std::uint32_t automation_credits = 0;
+  // The last claimed processor patch whose result was reported. Token 0 means none.
+  std::uint64_t processor_patch_resolved_token = 0;
+  std::uint32_t processor_patch_resolved_result = 0;
+};
+
+enum class ProcessorPatchOutcome : std::uint32_t { kApplied = 1, kRefused = 2, kClaimed = 3 };
+enum class ProcessorPatchRefusal : std::uint32_t {
+  kNone = 0,
+  kUnavailable = 1,
+  kPreparing = 2,
+  kClaimPending = 3,
+  kInvalid = 4,
+  kStaleRevision = 5,
+  kStageFailed = 6,
+  kNotClaimed = 7,
+  kApplyFailed = 8,
+};
+struct ProcessorPatchStatus {
+  ProcessorPatchOutcome outcome = ProcessorPatchOutcome::kRefused;
+  ProcessorPatchRefusal refusal = ProcessorPatchRefusal::kUnavailable;
+  std::uint32_t core_result = 0;  // kStageFailed / kApplyFailed only
+  std::uint64_t token = 0;        // kClaimed: the claim; kClaimPending: the blocking claim; otherwise 0
+};
+
+std::vector<std::uint8_t> EncodeScheduleProgress(const ScheduleProgress& progress);
+
+class AudioHost;
+#if defined(DAW_AUDIO_HOST_TEST_PATCH_CLAIM) && DAW_AUDIO_HOST_TEST_PATCH_CLAIM == 1
+}  // namespace daw::audio_host_macos
+namespace daw::plugin_host { struct WorkerDiagnostic; }
+namespace daw::audio_host_macos {
+// Private test copy only: drives attached workers that run without a plug-in.
+struct AudioHostTestAccess {
+  enum class Ownership { kAbsent, kStaged, kActive, kParked, kRetired };
+  static void SetParkedAge(AudioHost& host, std::chrono::milliseconds age);
+  static Ownership AttachmentOwnership(AudioHost& host, std::string_view instance_id);
+  static void UseNoPluginWorkers(bool use);
+  static void UseWorkerExecutable(std::string path);
+  static bool PublishWorkerDiagnostic(AudioHost& host, std::string_view instance_id,
+    const daw::plugin_host::WorkerDiagnostic& diagnostic);
+  static std::uint64_t WorkerGeneration(AudioHost& host, std::string_view instance_id);
+  static int WorkerProcessGroup(AudioHost& host, std::string_view instance_id);
+};
+#endif
+class RecordingInputDevice {
+ public:
+  virtual ~RecordingInputDevice() = default;
+  virtual bool Start(std::string_view uid, std::uint32_t rate, std::uint32_t channels, AudioHost* host, void** session);
+  virtual void Stop(void* session);
+  virtual std::uint32_t Rate(std::string_view uid);
 };
 
 class AudioHost {
  public:
-  AudioHost();
+  explicit AudioHost(RecordingSpoolService* spool = nullptr, RecordingInputDevice* recording_device = nullptr,
+    std::shared_ptr<RecordingStatusChannel> recording_status = {});
   ~AudioHost();
   AudioHost(const AudioHost&) = delete;
   AudioHost& operator=(const AudioHost&) = delete;
 
   bool Configure(const HostConfig& config);
   bool PrepareAndPublishGraph(std::uint32_t revision, std::span<const std::uint8_t> snapshot);
-  GraphRevisionStatus PrepareGraphRevision(std::uint32_t revision, std::span<const std::uint8_t> snapshot);
+  GraphRevisionStatus PrepareGraphRevision(std::uint32_t revision, std::span<const std::uint8_t> snapshot,
+    std::uint64_t requested_frame = 0);
   bool ConfigureInstrumentStates(std::span<const std::uint8_t> payload);
-  GraphRevisionStatus PublishGraphRevision(std::uint32_t revision);
+  // Control-thread diagnostics. Locks are retained until safe asset release.
+  std::uint64_t instrumentLockedBytes() const;
+  std::uint64_t instrumentResidentBudgetBytes() const;
+  std::string_view instrumentPreparationError() const;
+  // Control thread. False until Configure builds a core: requests that need one are unavailable, not refused.
+  bool HasAudioCore() const;
+  GraphRevisionStatus PublishGraphRevision(std::uint32_t revision, std::uint64_t requested_frame = 0);
+  GraphRevisionStatus InspectGraphRevision(std::uint32_t revision);
   GraphRevisionStatus RollbackGraphRevision(std::uint32_t revision);
   GraphRevisionStatus RetireGraphRevision(std::uint32_t revision);
   bool QueueParameterEvents(std::span<const std::uint8_t> payload);
-  bool QueueProcessorStatePatch(std::span<const std::uint8_t> payload);
+  ProcessorPatchStatus QueueProcessorStatePatch(std::span<const std::uint8_t> payload);
   bool QueueInstrumentEvents(std::span<const std::uint8_t> payload);
   bool QueueSourceEvents(std::span<const std::uint8_t> payload);
   bool QueueNativeVstParameterEvents(std::span<const std::uint8_t> payload);
@@ -522,6 +623,9 @@ class AudioHost {
   bool SetNativeVstState(std::span<const std::uint8_t> payload);
   std::optional<std::vector<std::uint8_t>> GetNativeVstState(std::span<const std::uint8_t> payload);
   void ProcessNativeVstControl();
+  // Event-driven control-thread resource collection, never called by audio.
+  int controlWakeDescriptor() const;
+  void DrainControlWake();
   bool InstallAsset(
     std::uint32_t asset_id,
     std::uint32_t frame_count,
@@ -545,6 +649,10 @@ class AudioHost {
     std::uint64_t start_frame,
     std::uint64_t frame_count);
   bool ReleaseAsset(std::uint32_t asset_id);
+  std::string_view assetOperationError() const;
+  // A positive-BPM command reusing the current running transition stages
+  // musical context into an unpublished graph bank. Publication applies it at
+  // the bank's seam; rollback discards it. It never locates the transport.
   bool SetTransport(
     std::uint32_t epoch,
     bool running,
@@ -558,8 +666,10 @@ class AudioHost {
     std::uint64_t transition_id = 0
   );
   bool QueueScheduleWindow(std::span<const std::uint8_t> payload);
+  std::string_view scheduleWindowError() const;
   bool ReenableVstScheduleAutomation(std::span<const std::uint8_t> payload);
-  bool ConfigureRecording(const RecordingConfig& config);
+  bool ConfigureRecording(const RecordingConfig& config, SpoolRequest request);
+  RecordingStatus RecordingSnapshot() const;
   bool StartRecording();
   bool StopRecording(std::optional<std::int64_t> stop_frame);
   bool CancelRecording();
@@ -595,16 +705,21 @@ class AudioHost {
   bool Start();
   bool StartOffline();
   bool StartDiagnosticMode();
-  void Stop();
+  void Stop(const std::string& reason = "unspecified");
   void Teardown();
   bool Retire(std::uint32_t revision);
   bool ProcessPlanar(std::span<const float* const> input, std::span<float* const> output, std::uint32_t frame_count);
   bool ProcessRecordingPlanar(std::span<const float* const> input, std::uint32_t frame_count);
   void RecordOutputCallback(std::uint32_t frame_count, std::uint64_t duration_nanoseconds) noexcept;
   Diagnostics diagnostics() const;
+  LifecycleState lifecycleState() const;
   DeviceReadinessReason readinessReason() const;
 
  private:
+#if defined(DAW_AUDIO_HOST_TEST_PATCH_CLAIM) && DAW_AUDIO_HOST_TEST_PATCH_CLAIM == 1
+  friend struct AudioHostTestAccess;
+#endif
+  void AdvanceRecording();
   struct Impl;
   Impl* impl_;
 };

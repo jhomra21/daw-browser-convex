@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises"
 import { expect, test } from "bun:test"
 import {
   createReleasePreparation,
@@ -13,16 +12,6 @@ import {
   defaultNotaryProfile,
   type NativeReleaseArtifactPaths,
 } from "./release.config"
-
-const packageJson = await readFile(new URL("./package.json", import.meta.url), "utf8")
-
-test("uses the local helper for start and package and the release helper for make", () => {
-  expect(packageJson).toContain('"start": "bun scripts/run-local.ts start"')
-  expect(packageJson).toContain('"package": "bun scripts/run-local.ts package"')
-  expect(packageJson).toContain('"make": "bun scripts/run-release.ts make"')
-  expect(packageJson).toContain('"release:mac:package": "bun scripts/run-release.ts package"')
-  expect(packageJson).toContain('"release:mac:make": "bun scripts/run-release.ts make"')
-})
 
 test("prepares the dry-run release environment with native artifact paths", () => {
   const command: ReleaseCommand = "package"

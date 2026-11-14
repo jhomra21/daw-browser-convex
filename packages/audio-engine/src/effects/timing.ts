@@ -16,7 +16,7 @@ type EffectTiming = {
   tail: { kind: 'finite'; frames: number } | { kind: 'unbounded' }
 }
 
-type EffectTimingInput =
+export type EffectTimingInput =
   | Extract<AudioEffectRuntimeInstance, { kind: 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' }>
   | Extract<AudioEffectRuntimeInstance, { kind: 'utility' | 'autofilter' | 'gate' | 'limiter' | 'lofi' | 'spectral' }>
   | { kind: 'eq'; params: EqParamsLite }

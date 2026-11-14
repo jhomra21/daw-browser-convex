@@ -1,0 +1,13 @@
+{
+ "name": "ae08-c9c-asset-swaps-anchors",
+ "sequence": 22,
+ "createdAt": "2026-11-13T00:50:00.000Z",
+ "revert": [],
+ "watched": [],
+ "changes": [],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 9c: asset swaps are adopted at a seam on the portable controller (audio clip asset id, Sampler zone samples, Drum Rack pad samples); keepsVoices follows native's rule; the worklet host answers asset-in-use for an ordinary asset a source or voice still reads. No anchor text moved and no recorded count moved. Every arm anchored in the controller and the worklet host (31 PB/TL mutants and ledger:475 host, with controls, 64 jobs) ran alone with --jobs 1 --only: 64 of 64 PASS, 0 fail. gate:x-portable-wasm 89/0/0, gate:f-portable 126/0/0 and gate:f-engine ran clean; their counts rose with the new tests and move only on --full. Tests added: W-C9-asset-1 to 6, W-C9-keeps-1 and 2 (PBT), W-C9-asset-5 and 6 (WHT), W-C9-asset-7 (HT). See PHASE8-STEP9C.md."
+ }
+}

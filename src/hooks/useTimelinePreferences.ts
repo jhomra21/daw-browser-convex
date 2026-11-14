@@ -12,12 +12,13 @@ import { TIMELINE_SIDEBAR_MIN_WIDTH } from '~/lib/timeline-layout'
 import { clampPixelsPerSecond, DEFAULT_PIXELS_PER_SECOND } from '~/lib/timeline-view'
 import { isLocalId } from '@daw-browser/shared'
 import { loadLocalProjectState, saveLocalProjectState } from '~/lib/local-project-state'
+import { subscribeToLocalProjectChanges } from '~/lib/local-project-changes'
 
 import { useProjectPersistedState } from './useProjectPersistedState'
 
 type UseTimelinePreferencesOptions = {
   projectId: Accessor<string>
-  onLocalSaveFailed?: (message: string) => void
+  onLocalSaveFailed?: (projectId: string, message: string) => void
   cloudTimelineSettings?: Accessor<{
     tempoBpm: number
     loopEnabled: boolean
@@ -67,8 +68,8 @@ export function useTimelinePreferences(
   const saveLocalState = async <TValue,>(projectId: string, key: string, value: TValue) => {
     if (isLocalId('project', projectId)) await saveLocalProjectState(projectId, key, value)
   }
-  const onLocalSaveError = (cause: unknown) => {
-    options.onLocalSaveFailed?.(cause instanceof Error ? cause.message : 'Local project settings could not be saved.')
+  const onLocalSaveError = (projectId: string, cause: unknown) => {
+    options.onLocalSaveFailed?.(projectId, cause instanceof Error ? cause.message : 'Local project settings could not be saved.')
   }
 
   const syncMixState = useProjectPersistedState<boolean>({
@@ -88,6 +89,7 @@ export function useTimelinePreferences(
     createInitial: () => 120,
     load: () => 120,
     loadAsync: (projectId) => loadLocalState<number>(projectId, 'bpm'),
+    subscribeToChanges: subscribeToLocalProjectChanges,
     save: () => undefined,
     saveAsync: (projectId, value) => saveLocalState(projectId, 'bpm', value),
     onSaveAsyncError: onLocalSaveError,
@@ -110,6 +112,7 @@ export function useTimelinePreferences(
     createInitial: () => ({ enabled: false, startSec: 0, endSec: 8 }),
     load: () => ({ enabled: false, startSec: 0, endSec: 8 }),
     loadAsync: (projectId) => loadLocalState<{ enabled: boolean; startSec: number; endSec: number }>(projectId, 'loop'),
+    subscribeToChanges: subscribeToLocalProjectChanges,
     save: () => undefined,
     saveAsync: (projectId, value) => saveLocalState(projectId, 'loop', value),
     onSaveAsyncError: onLocalSaveError,

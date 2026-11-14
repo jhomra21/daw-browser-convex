@@ -3,7 +3,7 @@ import "fake-indexeddb/auto"
 import { audioCoreContractVersion } from "@daw-browser/audio-core-contract"
 import { compileLivePlaybackSnapshot, type LivePlaybackSnapshot } from "~/lib/live-playback-snapshot"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
-import { createDefaultReverbParams, createDefaultSynthParams, externalAutomationParameterId } from "@daw-browser/shared"
+import { createDefaultGranularParams, createDefaultReverbParams, createDefaultSynthParams, externalAutomationParameterId, type AutomationEnvelope } from "@daw-browser/shared"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
 import type { NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import {
@@ -28,11 +28,12 @@ class LongStereoAudioBuffer implements AudioBuffer {
   readonly duration: number
   readonly length: number
   readonly numberOfChannels = 2
-  readonly sampleRate = 48_000
+  readonly sampleRate: number
   private readonly channels: readonly Float32Array<ArrayBuffer>[]
 
-  constructor(length: number) {
+  constructor(length: number, sampleRate = 48_000) {
     this.length = length
+    this.sampleRate = sampleRate
     this.duration = length / this.sampleRate
     this.channels = [
       new Float32Array(new ArrayBuffer(length * Float32Array.BYTES_PER_ELEMENT)),
@@ -264,6 +265,172 @@ const bridgeFor = (options: { failureCount?: number; onAccept?: (attempt: number
   }
 }
 
+test("staged bank preserves exact held-note seam ownership and requires publication proof", async () => {
+  const snapshot = snapshotFor(instrumentTrack)
+  const { fixture, coordinator } = coordinatorFor(snapshot, 0, bridgeFor(), undefined, true)
+  coordinator.install()
+  await coordinator.prime(0)
+  const seam = 48_128
+  await coordinator.coverThrough(seam + 512)
+  const next = { ...snapshot, revision: 2 }
+  const staged = coordinator.stageRevision(next, nativeGraphFor(next), seam)
+  await staged.prime(seam)
+  const events = (payloads: readonly Uint8Array[]) => payloads.flatMap((payload) => {
+    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
+    const start = Number(view.getBigUint64(16, true))
+    return Array.from({ length: view.getUint32(44, true) }, (_, index) => ({
+      frame: start + view.getUint32(72 + index * 48 + 28, true),
+      type: view.getUint32(72 + index * 48 + 32, true),
+      note: view.getBigUint64(72 + index * 48 + 8, true),
+    }))
+  })
+  const activePayloads = fixture.payloads.filter((bytes) => new DataView(bytes.buffer).getUint32(60, true) === 0)
+  const stagedPayloads = fixture.payloads.filter((bytes) => new DataView(bytes.buffer).getUint32(60, true) === 2)
+  expect(stagedPayloads.length).toBeGreaterThan(0)
+  const seamEvents = [
+    ...events(activePayloads).filter((event) => event.frame < seam),
+    ...events(stagedPayloads),
+  ]
+  expect(seamEvents.map(({ frame, type }) => ({ frame, type }))).toEqual([
+    { frame: 0, type: 1 }, { frame: 96_000, type: 2 },
+  ])
+  expect(seamEvents[0]?.note).toBe(seamEvents[1]?.note)
+  for (const bytes of stagedPayloads) {
+    const view = new DataView(bytes.buffer)
+    expect(view.getUint32(4, true)).toBe(1)
+    expect(view.getBigUint64(64, true)).toBe(BigInt(seam))
+  }
+  expect(staged.activateRevision({ status: "prepared", activeRevision: 1, publicationFrame: BigInt(seam) })).toBe(false)
+  expect(staged.activateRevision({ status: "publish-pending", activeRevision: 1, publicationFrame: BigInt(seam) })).toBe(false)
+  expect(staged.activateRevision({ status: "published", activeRevision: 2, publicationFrame: BigInt(seam + 1) })).toBe(false)
+  expect(staged.activateRevision({ status: "published", activeRevision: 2, publicationFrame: BigInt(seam) })).toBe(true)
+  coordinator.dispose()
+  staged.install()
+  fixture.emitProgress({ ...progressFor(2n), revision: 2, renderedThroughFrame: 120_000n })
+  await staged.coverThrough(180_000)
+  const last = fixture.payloads.at(-1)
+  expect(last && new DataView(last.buffer).getUint32(60, true)).toBe(0)
+  expect(last && new DataView(last.buffer).getUint32(4, true)).toBe(1)
+  staged.dispose()
+})
+
+for (const { pitch, velocity } of [{ pitch: 60, velocity: 0.8 }, { pitch: 62, velocity: 0.8 }, { pitch: 60, velocity: 0.4 }]) test(`staged held pitch ${pitch} velocity ${velocity} reconciles sounding voice`, async () => {
+  const snapshot = snapshotFor({ ...instrumentTrack, clips: instrumentTrack.clips.map((clip) => ({ ...clip,
+    midi: clip.midi && { ...clip.midi, notes: clip.midi.notes.map((note) => ({ ...note, id: "held" })) },
+  })) })
+  const { fixture, coordinator } = coordinatorFor(snapshot, 0, bridgeFor(), undefined, true)
+  await coordinator.prime(0)
+  const edited = { ...snapshot, revision: 2, tracks: snapshot.tracks.map((track) => ({ ...track,
+    clips: track.clips.map((clip) => ({ ...clip, midi: clip.midi && { ...clip.midi,
+      notes: clip.midi.notes.map((note) => ({ ...note, pitch, velocity })) } })),
+  })) }
+  const staged = coordinator.stageRevision(edited, nativeGraphFor(edited), 48_128)
+  await staged.prime(48_128)
+  const events = fixture.payloads.filter((bytes) => new DataView(bytes.buffer).getUint32(60, true) === 2)
+    .flatMap((bytes) => {
+      const view = new DataView(bytes.buffer)
+      return Array.from({ length: view.getUint32(44, true) }, (_, index) => ({
+        offset: view.getUint32(72 + index * 48 + 28, true),
+        type: view.getUint32(72 + index * 48 + 32, true),
+        pitch: view.getUint32(72 + index * 48 + 40, true),
+      }))
+    }).filter((event) => event.offset === 0)
+  expect(events).toEqual(pitch === 60 && velocity === 0.8 ? [] : [
+    { offset: 0, type: 2, pitch: 60 }, { offset: 0, type: 1, pitch },
+  ])
+  staged.dispose()
+  coordinator.dispose()
+})
+
+test("staged edit releases a deleted held MIDI note exactly at the seam", async () => {
+  const snapshot = snapshotFor(instrumentTrack)
+  const { fixture, coordinator } = coordinatorFor(snapshot, 0, bridgeFor(), undefined, true)
+  await coordinator.prime(0)
+  const edited = { ...snapshot, revision: 2, tracks: snapshot.tracks.map((track) => ({ ...track, clips: [] })) }
+  const staged = coordinator.stageRevision(edited, nativeGraphFor(edited), 48_128)
+  await staged.prime(48_128)
+  const bytes = fixture.payloads.find((bytes) => new DataView(bytes.buffer).getUint32(60, true) === 2)
+  if (!bytes) throw new Error("No staged payload")
+  const view = new DataView(bytes.buffer)
+  expect(view.getUint32(44, true)).toBe(1)
+  expect(view.getUint32(72 + 32, true)).toBe(2)
+  expect(view.getUint32(72 + 28, true)).toBe(0)
+  expect(view.getBigUint64(72 + 8, true)).toBe(new DataView(fixture.payloads[0]!.buffer).getBigUint64(72 + 8, true))
+  staged.dispose()
+  coordinator.dispose()
+})
+
+test("discarding a staged bank leaves active accepted windows and refills intact", async () => {
+  const snapshot = snapshotFor(instrumentTrack)
+  const { fixture, coordinator } = coordinatorFor(snapshot, 0, bridgeFor(), undefined, true)
+  coordinator.install()
+  await coordinator.prime(0)
+  const next = { ...snapshot, revision: 2 }
+  const first = coordinator.stageRevision(next, nativeGraphFor(next), 48_128)
+  await first.prime(48_128)
+  const original = fixture.payloads.slice()
+  first.dispose()
+  const rebased = coordinator.stageRevision(next, nativeGraphFor(next), 49_152)
+  await rebased.prime(49_152)
+  expect(fixture.payloads.slice(0, original.length)).toEqual(original)
+  const resent = fixture.payloads.slice(original.length)
+  expect(resent.length).toBeGreaterThan(0)
+  expect(Number(new DataView(resent[0]!.buffer).getBigUint64(16, true))).toBe(49_152)
+  expect(new DataView(resent[0]!.buffer).getBigUint64(8, true)).toBe(1n)
+  rebased.dispose()
+  await coordinator.coverThrough(200_000)
+  expect(new DataView(fixture.payloads.at(-1)!.buffer).getUint32(0, true)).toBe(1)
+  expect(coordinator.isDisposed()).toBe(false)
+  coordinator.dispose()
+})
+
+test("disposing staged work during a chunk ACK cannot submit its remaining chunks", async () => {
+  const track = { ...instrumentTrack, clips: instrumentTrack.clips.map((clip) => ({
+    ...clip, midi: { ...clip.midi!, notes: Array.from({ length: 300 }, (_, index) => ({
+      pitch: 40 + index % 50, beat: 0.5, length: 1, velocity: 0.8,
+    })) },
+  })) }
+  const snapshot = snapshotFor(track)
+  const { fixture, coordinator } = coordinatorFor(snapshot, 0, bridgeFor(), undefined, true)
+  await coordinator.prime(0)
+  const staged = coordinator.stageRevision({ ...snapshot, revision: 2 },
+    { ...nativeGraphFor(snapshot), revision: 2 }, 128)
+  const before = fixture.payloads.length
+  fixture.setOnAccept(() => staged.dispose())
+  await expect(staged.prime(128)).rejects.toThrow()
+  expect(fixture.payloads.length - before).toBe(1)
+  expect(coordinator.isDisposed()).toBe(false)
+  coordinator.dispose()
+})
+
+test("staged source hydration continues the retained cursor without a seam restart or hole", async () => {
+  const track = { ...sourceTrack, clips: sourceTrack.clips.map((clip) => ({
+    ...clip, duration: 4, buffer: new LongStereoAudioBuffer(192_000),
+  })) }
+  const snapshot = snapshotFor(track)
+  const hydrated: number[] = []
+  const { fixture, coordinator } = coordinatorFor(snapshot, 0, bridgeFor(), undefined, true, {
+    ensureRanges: async (ranges) => { hydrated.push(...ranges.map((range) => range.startFrame)) },
+    invalidateRanges: () => {},
+  })
+  await coordinator.prime(0)
+  const staged = coordinator.stageRevision({ ...snapshot, revision: 2 },
+    { ...nativeGraphFor(snapshot), revision: 2 }, 48_128)
+  await staged.prime(48_128)
+  const prepared = fixture.payloads.filter((bytes) => new DataView(bytes.buffer).getUint32(60, true) === 2)
+  const active = fixture.payloads.filter((bytes) => new DataView(bytes.buffer).getUint32(60, true) === 0)
+  expect(sourceEventsFrom(active).map(({ startFrame, stopFrame, sourceOffsetFrame }) => ({
+    startFrame, stopFrame, sourceOffsetFrame,
+  }))).toEqual([{ startFrame: 0, stopFrame: 96_000, sourceOffsetFrame: 0 }])
+  expect(sourceEventsFrom(prepared).map(({ startFrame, stopFrame, sourceOffsetFrame }) => ({
+    startFrame, stopFrame, sourceOffsetFrame,
+  }))).toEqual([{ startFrame: 0, stopFrame: 144_128, sourceOffsetFrame: 0 }])
+  expect(prepared.map((bytes) => Number(new DataView(bytes.buffer).getBigUint64(16, true)))).toEqual([48_128])
+  expect(hydrated).toContain(48_128)
+  staged.dispose()
+  coordinator.dispose()
+})
+
 test("opt-in refill diagnostics aggregate progress and synchronous compilation per coordinator", async () => {
   const fixture = bridgeFor()
   const reports: Array<{ progressCount: number; compileCount: number; compileTotalMs: number; compileMaxMs: number }> = []
@@ -307,14 +474,176 @@ test("opt-in refill diagnostics aggregate progress and synchronous compilation p
   other.dispose()
 })
 
+for (const edit of ["unchanged", "move", "trim", "delete", "tempo", "combined", "cancel", "remove-readd"]) {
+  test(`source seam wire ${edit} preserves accepted origins and complete candidate ownership`, async () => {
+    const track = { ...sourceTrack, clips: sourceTrack.clips.map((clip) => ({
+      ...clip, duration: 4, bufferOffsetSec: 0.3 / 48_000, buffer: new LongStereoAudioBuffer(240_000),
+    })) }
+    const snapshot = snapshotFor(track)
+    const { fixture, coordinator } = coordinatorFor(snapshot, 0, bridgeFor(), undefined, true)
+    await coordinator.prime(0)
+    const original = sourceEventsFrom(fixture.payloads)[0]!
+    let next = { ...snapshot, revision: 2 }
+    if (edit === "move" || edit === "trim" || edit === "combined") next = { ...next, tracks: [{
+      ...track, clips: track.clips.map((clip) => ({ ...clip,
+        startSec: edit === "trim" ? 0 : 0.25,
+        bufferOffsetSec: edit === "move" ? clip.bufferOffsetSec : 0.25,
+      })),
+    }] }
+    if (edit === "delete") next = { ...next, tracks: [{ ...track, clips: [] }] }
+    if (edit === "remove-readd") next = { ...next, tracks: [] }
+    if (edit === "tempo" || edit === "combined") next = { ...next, bpm: 130 }
+    const staged = coordinator.stageRevision(next, nativeGraphFor(next), 48_128)
+    await staged.prime(48_128)
+    const declarations = sourceEventsFrom(fixture.payloads.filter((bytes) => new DataView(bytes.buffer).getUint32(60, true) === 2))
+    if (edit === "delete" || edit === "remove-readd") expect(declarations).toEqual([])
+    else {
+      expect(declarations).toHaveLength(1)
+      expect(declarations[0]?.sequence).toBeGreaterThan(original.sequence)
+      expect(declarations[0]?.stopFrame).toBe(144_128)
+      if (edit === "move" || edit === "trim" || edit === "combined") {
+        expect(declarations[0]?.startFrame).toBe(48_128)
+        expect(declarations[0]?.sourceOffsetFrame).not.toBe(original.sourceOffsetFrame)
+      } else {
+        expect(declarations[0]?.startFrame).toBe(original.startFrame)
+        expect(declarations[0]?.sourceOffsetFrame).toBe(original.sourceOffsetFrame)
+        expect(Object.is(declarations[0]?.sourceOffsetFraction, original.sourceOffsetFraction)).toBe(true)
+      }
+    }
+    if (edit === "cancel") {
+      staged.dispose()
+      const rebased = coordinator.stageRevision({ ...snapshot, revision: 3 }, nativeGraphFor(snapshot), 49_152)
+      await rebased.prime(49_152)
+      expect(sourceEventsFrom(fixture.payloads.filter((bytes) => new DataView(bytes.buffer).getUint32(60, true) === 3))[0])
+        .toMatchObject({ startFrame: original.startFrame, sourceOffsetFrame: original.sourceOffsetFrame,
+          sourceOffsetFraction: original.sourceOffsetFraction })
+      rebased.dispose()
+    } else {
+      expect(staged.activateRevision({ status: "prepared", activeRevision: 2, publicationFrame: 48_128n })).toBe(false)
+      expect(staged.activateRevision({ status: "published", activeRevision: 2, publicationFrame: 48_128n })).toBe(true)
+      const thirdSnapshot = { ...(edit === "remove-readd" ? snapshot : next), revision: 3 }
+      const third = staged.stageRevision(thirdSnapshot, nativeGraphFor(thirdSnapshot), 60_000)
+      await third.prime(60_000)
+      const sources = sourceEventsFrom(fixture.payloads.filter((bytes) => new DataView(bytes.buffer).getUint32(60, true) === 3))
+      if (edit === "remove-readd") expect(sources[0]?.startFrame).toBe(60_000)
+      else if (edit !== "delete") {
+        expect(sources[0]).toMatchObject({ startFrame: declarations[0]!.startFrame,
+          sourceOffsetFrame: declarations[0]!.sourceOffsetFrame, sourceOffsetFraction: declarations[0]!.sourceOffsetFraction })
+        third.dispose()
+        const rebased = staged.stageRevision(thirdSnapshot, nativeGraphFor(thirdSnapshot), 61_440)
+        await rebased.prime(61_440)
+        const last = sourceEventsFrom(fixture.payloads.filter((bytes) =>
+          new DataView(bytes.buffer).getBigUint64(64, true) === 61_440n))[0]
+        expect(last).toMatchObject({ startFrame: declarations[0]!.startFrame,
+          sourceOffsetFrame: declarations[0]!.sourceOffsetFrame, sourceOffsetFraction: declarations[0]!.sourceOffsetFraction })
+        rebased.dispose()
+      }
+      third.dispose()
+    }
+    staged.dispose()
+    coordinator.dispose()
+  })
+}
+
+test("complete seam declarations sort by effective start, not accepted origin", async () => {
+  const track = { ...sourceTrack, clips: sourceTrack.clips.map((clip) => ({
+    ...clip, duration: 4, buffer: new LongStereoAudioBuffer(240_000),
+  })) }
+  const snapshot = snapshotForTracks([{ ...track, id: "later", clips: track.clips.map((clip) => ({ ...clip, id: "later-clip", startSec: 0.1 })) }, track])
+  const { fixture, coordinator } = coordinatorFor(snapshot)
+  await coordinator.prime(0)
+  const next = { ...snapshot, revision: 2 }
+  const staged = coordinator.stageRevision(next, nativeGraphFor(next), 48_128)
+  await staged.prime(48_128)
+  expect(sourceEventsFrom(fixture.payloads.filter((bytes) => new DataView(bytes.buffer).getUint32(60, true) === 2))
+    .map(({ startFrame }) => startFrame)).toEqual([4_800, 0])
+  staged.dispose()
+  coordinator.dispose()
+})
+
+for (const assetRate of [44_100, 48_000, 96_000]) test(`accepted f32 origin at ${assetRate} survives two publications and a rebase`, async () => {
+  const track = { ...sourceTrack, clips: sourceTrack.clips.map((clip) => ({
+    ...clip, duration: 4, bufferOffsetSec: 0.3 / assetRate, buffer: new LongStereoAudioBuffer(assetRate * 5, assetRate),
+  })) }
+  const snapshot = snapshotFor(track, 0.25)
+  const { fixture, coordinator } = coordinatorFor(snapshot)
+  await coordinator.prime(12_000)
+  const original = sourceEventsFrom(fixture.payloads)[0]!
+  const origin = { startFrame: original.startFrame, sourceOffsetFrame: original.sourceOffsetFrame,
+    sourceOffsetFraction: original.sourceOffsetFraction }
+  let active = coordinator
+  for (const revision of [2, 3, 4]) {
+    const next = { ...snapshot, revision }
+    const seam = 24_000 + revision * 512
+    const staged = active.stageRevision(next, nativeGraphFor(next), seam)
+    await staged.prime(seam)
+    const sources = sourceEventsFrom(fixture.payloads.filter((bytes) => new DataView(bytes.buffer).getUint32(60, true) === revision))
+    expect(sources).toHaveLength(1)
+    expect(sources[0]).toMatchObject(origin)
+    expect(Object.is(sources[0]?.sourceOffsetFraction, original.sourceOffsetFraction)).toBe(true)
+    if (revision === 4) staged.dispose()
+    else {
+      expect(staged.activateRevision({ status: "published", activeRevision: revision, publicationFrame: BigInt(seam) })).toBe(true)
+      active.dispose()
+      active = staged
+    }
+  }
+  const rebased = active.stageRevision({ ...snapshot, revision: 4 }, nativeGraphFor(snapshot), 30_720)
+  await rebased.prime(30_720)
+  expect(sourceEventsFrom(fixture.payloads.filter((bytes) => new DataView(bytes.buffer).getBigUint64(64, true) === 30_720n))[0])
+    .toMatchObject(origin)
+  rebased.dispose()
+  active.dispose()
+})
+
+test("new source origin carries a rounded f32 fraction into the integer offset", async () => {
+  const track = { ...sourceTrack, clips: sourceTrack.clips.map((clip) => ({
+    ...clip, duration: 4, bufferOffsetSec: 0.99999999 / 48_000, buffer: new LongStereoAudioBuffer(240_000),
+  })) }
+  const { fixture, coordinator } = coordinatorFor(snapshotFor(track))
+  await coordinator.prime(0)
+  expect(sourceEventsFrom(fixture.payloads)[0]).toMatchObject({ sourceOffsetFrame: 1, sourceOffsetFraction: 0 })
+  coordinator.dispose()
+})
+
+test("preserved origins hydrate only the audible candidate horizon, not the entire accepted past", async () => {
+  const track = { ...sourceTrack, clips: sourceTrack.clips.map((clip) => ({
+    ...clip, duration: 4, buffer: new LongStereoAudioBuffer(240_000),
+  })) }
+  const snapshot = snapshotFor(track)
+  const ranges: Array<{ sourceAssetKey: string; startFrame: number; endFrame: number }> = []
+  const { coordinator } = coordinatorFor(snapshot, 0, bridgeFor(), undefined, true, {
+    ensureRanges: async (entries) => { ranges.push(...entries) }, invalidateRanges: () => {},
+  })
+  await coordinator.prime(0)
+  ranges.length = 0
+  const staged = coordinator.stageRevision({ ...snapshot, revision: 2 }, nativeGraphFor(snapshot), 48_128)
+  await staged.prime(48_128)
+  expect(ranges).toEqual([{ sourceAssetKey: "source", startFrame: 48_128, endFrame: 144_129 }])
+  staged.dispose()
+  coordinator.dispose()
+})
+
+test("rounded fractional origins never declare samples beyond the immutable asset", async () => {
+  const track = { ...sourceTrack, clips: sourceTrack.clips.map((clip) => ({
+    ...clip, duration: 4, bufferOffsetSec: 0.99999999 / 48_000, buffer: new LongStereoAudioBuffer(192_000),
+  })) }
+  const { fixture, coordinator } = coordinatorFor(snapshotFor(track, 3))
+  await coordinator.prime(144_000)
+  const source = sourceEventsFrom(fixture.payloads)[0]!
+  expect(source.sourceOffsetFrame + source.sourceFrameCount).toBeLessThanOrEqual(192_000)
+  coordinator.dispose()
+})
+
 const instrumentEventsFrom = (payloads: readonly Uint8Array[]) => payloads.flatMap((payload) => {
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
   const count = view.getUint32(44, true)
+  const startFrame = Number(view.getBigUint64(16, true))
   return Array.from({ length: count }, (_, index) => {
-    const offset = 60 + index * 48
+    const offset = 72 + index * 48
     return {
       noteId: view.getBigUint64(offset + 8, true),
-      frame: view.getUint32(offset + 28, true),
+      frame: startFrame + view.getUint32(offset + 28, true),
       type: view.getUint32(offset + 32, true),
     }
   })
@@ -324,7 +653,7 @@ const sourceEventsFrom = (payloads: readonly Uint8Array[]) => payloads.flatMap((
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
   const count = view.getUint32(48, true)
   return Array.from({ length: count }, (_, index) => {
-    const offset = 60 + index * 112
+    const offset = 72 + view.getUint32(44, true) * 48 + index * 112
     return {
       assetId: view.getUint32(offset + 20, true),
       sequence: Number(view.getBigUint64(offset + 4, true)),
@@ -342,14 +671,17 @@ const processorEventsFrom = (payloads: readonly Uint8Array[]) => payloads.flatMa
   const instrumentCount = view.getUint32(44, true)
   const sourceCount = view.getUint32(48, true)
   const processorCount = view.getUint32(56, true)
-  const offset = 60 + instrumentCount * 48 + sourceCount * 112
+  const offset = 72 + instrumentCount * 48 + sourceCount * 112
   return Array.from({ length: processorCount }, (_, index) => {
     const eventOffset = offset + index * 40
     return {
       processorInstanceId: Number(view.getBigUint64(eventOffset, true)),
       parameterTarget: view.getUint32(eventOffset + 8, true),
+      linear: view.getUint32(eventOffset + 12, true) === 1,
       frame: Number(view.getBigUint64(eventOffset + 16, true)),
+      endFrame: Number(view.getBigUint64(eventOffset + 24, true)),
       value: view.getFloat32(eventOffset + 32, true),
+      endValue: view.getFloat32(eventOffset + 36, true),
     }
   })
 })
@@ -911,8 +1243,8 @@ test("moves a note-off at a window boundary into the following window", async ()
   if (!second) return
   const view = new DataView(second.buffer)
   expect(view.getUint32(44, true)).toBe(1)
-  expect(view.getUint32(60 + 28, true)).toBe(96_000)
-  expect(view.getUint32(60 + 32, true)).toBe(2)
+  expect(view.getUint32(72 + 28, true)).toBe(0)
+  expect(view.getUint32(72 + 32, true)).toBe(2)
   const events = instrumentEventsFrom(fixture.payloads)
   expect(events.filter((event) => event.type === 1)).toHaveLength(1)
   expect(events.filter((event) => event.type === 2)).toHaveLength(1)
@@ -961,8 +1293,8 @@ test("extends the final schedule window so the final note-off is accepted", asyn
   expect(view.getUint32(24, true)).toBe(96_001)
   expect(view.getUint32(40, true)).toBe(1)
   expect(view.getUint32(44, true)).toBe(1)
-  expect(view.getUint32(60 + 28, true)).toBe(96_000)
-  expect(view.getUint32(60 + 32, true)).toBe(2)
+  expect(view.getUint32(72 + 28, true)).toBe(0)
+  expect(view.getUint32(72 + 32, true)).toBe(2)
 })
 
 test("projects repeated loop iterations onto monotonic native frames", async () => {
@@ -1067,7 +1399,7 @@ test("accepts overlapping arranged notes up to synth voice capacity", () => {
   expect(() => coordinator.preflight(nativeGraphFor(snapshot))).not.toThrow()
 })
 
-test("rejects one more overlapping arranged note than synth voice capacity", () => {
+test("schedules a chord beyond explicit polyphony for native voice stealing", async () => {
   const track: RuntimeTrack = {
     ...instrumentTrack,
     clips: [{
@@ -1077,18 +1409,80 @@ test("rejects one more overlapping arranged note than synth voice capacity", () 
         wave: "sawtooth",
         notes: [
           { pitch: 60, beat: 0, length: 4, velocity: 0.8 },
-          { pitch: 64, beat: 0.5, length: 3.5, velocity: 0.8 },
-          { pitch: 67, beat: 1, length: 3, velocity: 0.8 },
+          { pitch: 64, beat: 0, length: 4, velocity: 0.8 },
+          { pitch: 67, beat: 0, length: 4, velocity: 0.8 },
         ],
       },
     }],
   }
   const snapshot = snapshotFor(track, 0, { ...createDefaultSynthParams(), polyphony: 2 })
-  const { coordinator } = coordinatorFor(snapshot)
-  expect(() => coordinator.preflight(nativeGraphFor(snapshot))).toThrow(/simultaneous voices/)
+  const graph = nativeGraphFor(snapshot)
+  expect(graph.nodes.find((node) => node.id === "instrument")?.instrument?.voiceCapacity).toBe(2)
+  const { fixture, coordinator } = coordinatorFor(snapshot)
+  expect(() => coordinator.preflight(graph)).not.toThrow()
+  await coordinator.prime(0)
+  expect(instrumentEventsFrom(fixture.payloads).filter((event) => event.type === 1)).toHaveLength(3)
 })
 
-test("preflights finite live-MIDI capacity beyond the initial lookahead", () => {
+test("schedules 33 held notes on a two-voice stealing synth", async () => {
+  const track: RuntimeTrack = {
+    ...instrumentTrack,
+    clips: [{
+      ...instrumentTrack.clips[0]!,
+      duration: 3,
+      midi: {
+        wave: "sawtooth",
+        notes: Array.from({ length: 33 }, (_, index) => ({
+          pitch: 36 + (index % 48),
+          beat: 0,
+          length: 4,
+          velocity: 0.8,
+        })),
+      },
+    }],
+  }
+  const snapshot = snapshotFor(track, 0, { ...createDefaultSynthParams(), polyphony: 2 })
+  const { fixture, coordinator } = coordinatorFor(snapshot)
+  expect(() => coordinator.preflight(nativeGraphFor(snapshot))).not.toThrow()
+  await coordinator.prime(0)
+  expect(instrumentEventsFrom(fixture.payloads).filter((event) => event.type === 1)).toHaveLength(33)
+})
+test("preflights more than 32 simultaneous granular notes", () => {
+  const notes = Array.from({ length: 33 }, (_, index) => ({
+    pitch: 36 + index,
+    beat: 0,
+    length: 4,
+    velocity: 0.8,
+  }))
+  const track: RuntimeTrack = {
+    ...instrumentTrack,
+    clips: [{ ...instrumentTrack.clips[0]!, duration: 3, midi: { wave: "sawtooth", notes } }],
+  }
+  const base = snapshotFor(track)
+  const snapshot: LivePlaybackSnapshot = {
+    ...base,
+    mixer: {
+      ...base.mixer,
+      fx: {
+        ...base.mixer.fx,
+        trackFx: {
+          ...base.mixer.fx.trackFx,
+          [track.id]: {
+            instances: [],
+            instrument: {
+              kind: "granular",
+              instanceId: "granular:instrument",
+              params: createDefaultGranularParams(),
+            },
+          },
+        },
+      },
+    },
+  }
+  expect(() => coordinatorFor(snapshot).coordinator.preflight(nativeGraphFor(snapshot))).not.toThrow()
+})
+
+test("allows stealing built-in notes beyond the initial lookahead", () => {
   const track: RuntimeTrack = {
     ...instrumentTrack,
     clips: [{
@@ -1105,11 +1499,78 @@ test("preflights finite live-MIDI capacity beyond the initial lookahead", () => 
       },
     }],
   }
-  const snapshot = snapshotFor(track, 0, { ...createDefaultSynthParams(), polyphony: 128 })
+  const snapshot = snapshotFor(track, 0, { ...createDefaultSynthParams(), polyphony: 2 })
   const { coordinator } = coordinatorFor(snapshot, 0, undefined, undefined, true)
-  expect(() => coordinator.preflight(nativeGraphFor(snapshot))).toThrow(
-    "instrument instrument needs 33 simultaneous voices",
-  )
+  expect(() => coordinator.preflight(nativeGraphFor(snapshot))).not.toThrow()
+})
+
+// Keep every gate: initial synth state, later callbacks, source slots, native
+// processor slots, VST combined MIDI/automation, and invalid device capacity.
+test("preflight rejects native instrument capacity including initialization", () => {
+  const tracks = Array.from({ length: 9 }, (_, index): RuntimeTrack => ({
+    ...instrumentTrack, id: `instrument-${index}`,
+    clips: [{
+      ...instrumentTrack.clips[0]!, id: `midi-${index}`,
+      midi: { wave: "sawtooth", notes: Array.from({ length: 22 }, (_, pitch) => ({ pitch, beat: 0, length: 1 })) },
+    }],
+  }))
+  const snapshot = snapshotForTracks(tracks)
+  expect(() => coordinatorFor(snapshot).coordinator.preflight(nativeGraphFor(snapshot))).toThrow(/270 instrument events/)
+})
+
+test("preflight rejects source capacity without queuing native data", () => {
+  const snapshot = snapshotForTracks(Array.from({ length: 257 }, (_, index) => ({
+    ...sourceTrack, id: `audio-${index}`,
+    clips: [{ ...sourceTrack.clips[0]!, id: `clip-${index}` }],
+  })))
+  const { fixture, coordinator } = coordinatorFor(snapshot)
+  expect(() => coordinator.preflight(nativeGraphFor(snapshot))).toThrow(/257 source events/)
+  expect(fixture.payloads).toHaveLength(0)
+})
+
+test("preflight rejects native processor capacity at later hold callbacks", () => {
+  const base = snapshotForTracks(Array.from({ length: 257 }, (_, index) => ({
+    ...sourceTrack, id: `audio-${index}`, clips: [],
+  })))
+  const snapshot = {
+    ...base,
+    mixer: {
+      ...base.mixer,
+      automationEnvelopes: base.tracks.map<AutomationEnvelope>((track, index) => ({
+        id: `volume-${index}`, projectId: "project", targetKey: track.id,
+        target: { kind: "track", trackId: track.id }, parameterId: "volume", enabled: true, updatedAt: 1,
+        points: [{ id: "hold", timeSec: 4, value: 0.5, interpolation: "hold" }],
+      })),
+    },
+  }
+  // Start after initialization so this specifically exercises processor slots.
+  const seek = { ...snapshot, transport: { ...snapshot.transport, playheadSec: 1 } }
+  expect(() => coordinatorFor(seek).coordinator.preflight(nativeGraphFor(seek))).toThrow(/257 processor events/)
+})
+
+test("preflight rejects combined VST MIDI and automation capacity", () => {
+  const base = automationSnapshot([{ id: "hold", timeSec: 0, value: 0.5, interpolation: "hold" }])
+  const snapshot = {
+    ...base,
+    nativeExternalAttachmentPlan: {
+      ...attachmentPlan,
+      attachments: attachmentPlan.attachments.map((attachment) => ({
+        ...attachment, workerTransport: { ...attachment.workerTransport, maximumEventsPerBlock: 1 },
+      })),
+    },
+  }
+  expect(() => coordinatorFor(snapshot).coordinator.preflight(nativeGraphFor(snapshot))).toThrow(/combines 1 MIDI and 1 automation/)
+})
+
+test("preflight rejects invalid callback sizes", () => {
+  const snapshot = snapshotFor(instrumentTrack)
+  for (const blockSize of [0, -1, 0.5, NaN]) {
+    const coordinator = createNativeScheduleCoordinator({
+      bridge: bridgeFor().bridge, snapshot, epoch: 1, sampleRateHz: 48_000,
+      assets: [], startFrame: 0, capacity: { maximumFramesPerBlock: blockSize },
+    })
+    expect(() => coordinator.preflight(nativeGraphFor(snapshot))).toThrow(/block size is invalid/)
+  }
 })
 
 test("publishes a spanning note-on and later note-off in one logical window", async () => {
@@ -1120,9 +1581,9 @@ test("publishes a spanning note-on and later note-off in one logical window", as
   if (!payload) return
   const view = new DataView(payload.buffer)
   expect(view.getUint32(44, true)).toBe(2)
-  expect(view.getUint32(60 + 28, true)).toBe(48_000)
-  expect(view.getUint32(60 + 48 + 28, true)).toBe(96_000)
-  expect(view.getUint32(60 + 32, true)).not.toBe(view.getUint32(60 + 48 + 32, true))
+  expect(view.getUint32(72 + 28, true)).toBe(0)
+  expect(view.getUint32(72 + 48 + 28, true)).toBe(48_000)
+  expect(view.getUint32(72 + 32, true)).not.toBe(view.getUint32(72 + 48 + 32, true))
 })
 
 test("projects non-empty VST automation segments across start, seek, and end boundaries", () => {
@@ -1246,10 +1707,91 @@ test("converts native volume ramps into callback-safe processor events", async (
   }
   const { fixture, coordinator } = coordinatorFor(snapshot)
   await coordinator.prime(0)
+  // A ramp travels as one segment and lands on its end value with a set.
   expect(processorEventsFrom(fixture.payloads)).toMatchObject([
-    { parameterTarget: 26, frame: 0, value: 0.5 },
-    { parameterTarget: 26, frame: 12, value: 1 },
+    { parameterTarget: 26, linear: true, frame: 0, endFrame: 12, value: 0.5, endValue: 1 },
+    { parameterTarget: 26, linear: false, frame: 12, value: 1 },
   ])
+})
+
+test("sends a 50 ms native volume ramp as one segment", async () => {
+  const rampFrames = 2_400
+  const longTrack: RuntimeTrack = {
+    ...sourceTrack,
+    clips: [{
+      ...sourceTrack.clips[0]!,
+      duration: 2 * rampFrames / 48_000,
+      buffer: new LongStereoAudioBuffer(2 * rampFrames),
+    }],
+  }
+  const base = snapshotFor(longTrack)
+  const snapshot = {
+    ...base,
+    mixer: {
+      ...base.mixer,
+      automationEnvelopes: [{
+        id: "track-volume-fade",
+        projectId: "project:1",
+        target: { kind: "track" as const, trackId: longTrack.id },
+        targetKey: "track-volume-fade",
+        parameterId: "volume",
+        enabled: true,
+        points: [
+          { id: "start", timeSec: 0, value: 0, interpolation: "linear" as const },
+          { id: "end", timeSec: rampFrames / 48_000, value: 1, interpolation: "hold" as const },
+        ],
+        updatedAt: 1,
+      }],
+    },
+  }
+  const { fixture, coordinator } = coordinatorFor(snapshot)
+  await coordinator.prime(0)
+  const events = processorEventsFrom(fixture.payloads)
+  expect(events).toMatchObject([
+    { linear: true, frame: 0, endFrame: rampFrames, value: 0, endValue: 1 },
+    { linear: false, frame: rampFrames, value: 1 },
+  ])
+})
+
+test("sends a 0.5 s ramp and a 2 s ramp as one segment each without splitting the lookahead window", async () => {
+  const longTrack: RuntimeTrack = {
+    ...sourceTrack,
+    clips: [{
+      ...sourceTrack.clips[0]!,
+      duration: 3,
+      buffer: new LongStereoAudioBuffer(3 * 48_000),
+    }],
+  }
+  const base = snapshotFor(longTrack)
+  const snapshot = {
+    ...base,
+    mixer: {
+      ...base.mixer,
+      automationEnvelopes: [{
+        id: "track-volume-fades",
+        projectId: "project:1",
+        target: { kind: "track" as const, trackId: longTrack.id },
+        targetKey: "track-volume-fades",
+        parameterId: "volume",
+        enabled: true,
+        points: [
+          { id: "start", timeSec: 0, value: 0, interpolation: "linear" as const },
+          { id: "peak", timeSec: 0.5, value: 1, interpolation: "linear" as const },
+          { id: "end", timeSec: 2.5, value: 0, interpolation: "hold" as const },
+        ],
+        updatedAt: 1,
+      }],
+    },
+  }
+  const { fixture, coordinator } = coordinatorFor(snapshot)
+  await coordinator.prime(0)
+  const first = new DataView(fixture.payloads[0]!.buffer)
+  expect(processorEventsFrom(fixture.payloads).filter((event) => event.linear)).toMatchObject([
+    { frame: 0, endFrame: 24_000 },
+    { frame: 24_000, endFrame: 96_000 },
+  ])
+  expect(processorEventsFrom(fixture.payloads).length).toBeLessThanOrEqual(4)
+  expect([Number(first.getBigUint64(24, true)), first.getUint32(36, true)]).toEqual([96_000, 1])
 })
 
 test("does not let persisted parameter initialization suppress scheduled automation", () => {

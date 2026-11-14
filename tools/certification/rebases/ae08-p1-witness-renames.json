@@ -1,0 +1,477 @@
+{
+ "name": "ae08-p1-witness-renames",
+ "sequence": 10,
+ "createdAt": "2026-11-12T05:38:09.417Z",
+ "revert": [],
+ "watched": [],
+ "seedRecordChanges": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:control:b6f5",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 22,
+   "new": 24
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:494:control:b6f5",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 22,
+   "new": 24
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 216
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 216
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:486:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 214,
+   "new": 216
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:b6f5",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 10,
+   "new": 12
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:b6f5",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session",
+    "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
+    "B6f5 R2 a live send crossing an adoption publish never faults the session",
+    "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a playing portable session adopts a mixer edit on the same session and follows it",
+    "B6f5 a refused or structural adoption asks for a rebuild and keeps the session revision",
+    "B6f5 a warm resume after an adoption plays the newest state without another compile",
+    "B6f5 adoptions coalesce to one in flight and one queued that carries the newest edit",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces"
+   ],
+   "new": [
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
+    "B6f5 R2 a live send crossing an adoption publish never faults the session",
+    "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a playing portable session adopts a mixer edit on the same session and follows it",
+    "B6f5 a refused or structural adoption asks for a rebuild and keeps the session revision",
+    "B6f5 a warm resume after an adoption plays the newest state without another compile",
+    "B6f5 adoptions coalesce to one in flight and one queued that carries the newest edit",
+    "B6f5 m1 a live synth send while the adoption prepares waits for the publish and reaches the revision that carries it",
+    "B6f5 m1 a live synth value accepted during an adoption compile is in the configuration the adoption publishes",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:control:b6f5",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 22,
+   "new": 24
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:486:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 207,
+   "new": 209
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:486:mutant:playback",
+    "expect",
+    "fails",
+    "#0"
+   ],
+   "old": "B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session",
+   "new": "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:486:control:b6f5",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 22,
+   "new": 24
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:486:mutant:b6f5",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:486:mutant:b6f5",
+    "expect",
+    "fails",
+    "#0"
+   ],
+   "old": "B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session",
+   "new": "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:control:p1-controller",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 15
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:441:control:p1-controller",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 15
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:441:mutant:p1-controller",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 2,
+   "new": 13
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:441:mutant:p1-controller",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 5,
+   "new": 2
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:441:mutant:p1-controller",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "P1 a Synth portable bridge error is still reported and an unsupported Synth preview does not rebuild",
+    "P1 a non-live Synth oscillator level edit is refused and the prepared portable snapshot is unchanged",
+    "P1 a non-live Synth polyphony edit is refused and the prepared portable snapshot is unchanged",
+    "P1 a non-live Synth retrigger edit is refused and the prepared portable snapshot is unchanged",
+    "P1 live then non-live Synth edits in one gesture keep the last live state and release rebuilds once"
+   ],
+   "new": [
+    "P1 an edit that replaces the Synth with another instance is refused and sends no live events",
+    "P1 an edit that replaces the Synth with another kind is refused and sends no live events"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:mutant:p1-controller",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 6,
+   "new": 14
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:mutant:p1-controller",
+    "expect",
+    "fails",
+    "#0"
+   ],
+   "old": "P1 a Synth portable bridge error is still reported and an unsupported Synth preview does not rebuild",
+   "new": "P1 a Synth portable bridge error is still reported and never rebuilds"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:494:mutant:b6f5",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:494:mutant:b6f5",
+    "expect",
+    "fails",
+    "#0"
+   ],
+   "old": "B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session",
+   "new": "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:b6f5",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:b6f5",
+    "expect",
+    "fails",
+    "#0"
+   ],
+   "old": "B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session",
+   "new": "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 188,
+   "new": 187
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 28,
+   "new": 31
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session",
+    "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+    "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
+    "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
+    "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session",
+    "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 a warm resume after an adoption plays the newest state without another compile",
+    "B6f5 renaming and recolouring a track while playing is neither adopted nor rebuilt",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+    "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
+    "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
+    "B6f5c a structural edit held by a portable take reaches the playing session once the take stops or is cancelled",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+    "C0G a clip waveform key or key order change while playing is neither adopted nor rebuilt",
+    "failed lifecycle transition cancels delayed native startup",
+    "keeps a paused portable session compatible when enabling a loop",
+    "native-required play retries failed recovery and stays stopped while recovery runs",
+    "pauses Web Audio transport before disposing active portable playback on cleanup",
+    "pauses Web Audio transport before disposing portable playback on project generation change",
+    "preserves an explicitly captured native owner across queued generation rebuilds",
+    "rebuilds active portable playback into compatibility playback for a loop"
+   ],
+   "new": [
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+    "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
+    "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
+    "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session",
+    "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 a warm resume after an adoption plays the newest state without another compile",
+    "B6f5 renaming and recolouring a track while playing is neither adopted nor rebuilt",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+    "B6f5c a failed take followed by the caller stop or cancel adopts or rebuilds each edit once",
+    "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
+    "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
+    "B6f5c a structural edit held by a portable take reaches the playing session once the take stops or is cancelled",
+    "B6f5c a take ended by a device fault follows the edit it held",
+    "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+    "C0G a clip waveform key or key order change while playing is neither adopted nor rebuilt",
+    "failed lifecycle transition cancels delayed native startup",
+    "keeps a paused portable session compatible when enabling a loop",
+    "native-required play retries failed recovery and stays stopped while recovery runs",
+    "pauses Web Audio transport before disposing active portable playback on cleanup",
+    "pauses Web Audio transport before disposing portable playback on project generation change",
+    "preserves an explicitly captured native owner across queued generation rebuilds",
+    "rebuilds active portable playback into compatibility playback for a loop"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 10,
+   "new": 12
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 A a mixer, master or automation edit while playing is adopted by the playing portable session",
+    "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 a warm resume after an adoption plays the newest state without another compile",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+    "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 a warm resume after an adoption plays the newest state without another compile",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+    "B6f5c a failed take followed by the caller stop or cancel adopts or rebuilds each edit once",
+    "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
+    "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a clip move still rebuilds",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  }
+ ],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "Witness renames and growth since bd1cf962, measured by running each arm alone (fast-cert --only, mutant killed, control passes). B6f5 A and P1 tests were renamed by b3a835d4/e2d5c117 (a name leaf was lost, not a kill): the recorded failing name moves to the renamed test, plus the tests that now also kill (stronger). ledger:441:mutant:p1-controller: b3a835d4 reversed the behaviour its four recorded witnesses pinned (a non-live Synth edit is adopted, not refused), so they were replaced; the surviving mutation (the live-eligibility gate of queueLiveProcessorControl) is killed by two new witnesses, an edit that replaces the Synth with another kind or another instance. See acceptance-reports/ae-08-phase-5-2026-10-18/BLESS-BLOCKERS-REPORT.md.",
+  "expectationsSha256": "b7a64d6f6cd274fa2d1037bdf75d3721ebb6454292534c4ea86836dd0691c375"
+ }
+}

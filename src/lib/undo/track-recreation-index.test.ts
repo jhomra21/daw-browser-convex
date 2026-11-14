@@ -1,7 +1,6 @@
 import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
 
-import { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { convexApi, convexClient } from '~/lib/convex'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -51,7 +50,6 @@ test('redo recreates a Return track at the current canonical index', async () =>
     projectId,
     userId: 'user',
     persistLocalMix: () => {},
-    audioEngine: new AudioEngine(),
     grantTrackWrite: () => {},
     grantClipWrite: () => {},
     actions: {
@@ -69,6 +67,7 @@ test('redo recreates a Return track at the current canonical index', async () =>
       commitClipTiming: () => {},
       commitClipAudioWarp: () => {},
       commitClipFades: () => {},
+      commitClipMidi: () => {},
       rescheduleChangedClips: () => {},
       cancelTrackVolumeWrite: () => {},
       cancelTrackRoutingWrite: () => {},

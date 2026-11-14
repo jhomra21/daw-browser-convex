@@ -5,7 +5,7 @@ import { eventsForPortableFrameBlock, isPortableFrameScheduleCurrent, portableFr
 import { resolveTrackMidiExpressionSchedule } from '@daw-browser/audio-engine/midi-expression-scheduling'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
-import { compilePortableFrameSchedule } from '~/lib/portable-frame-schedule'
+import { compilePortableFrameSchedule, compilePortableFrameScheduleWindow, createPortableFrameScheduleWindowCompiler } from '~/lib/portable-frame-schedule'
 
 const automation: AutomationEnvelope = {
   id: 'automation-a',
@@ -58,6 +58,55 @@ const input = {
   automationEnvelopes: [automation],
   arpeggiators: new Map(),
 }
+
+// Failure modes: callback-end note-offs, seek seeds, mapped-expression restore,
+// overlapping clips, MIDI trim, arp identity, non-integral frames, and loop shifts.
+test('prepared native windows exactly match independent portable compilation', () => {
+  for (const sampleRateHz of [44_100, 48_000, 96_000]) {
+    for (const bpm of [60, 123]) {
+      const tracks: RuntimeTrack[] = [{
+        ...track,
+        clips: [
+          ...track.clips,
+          { ...track.clips[0]!, id: 'overlap', startSec: 0.213, duration: 3.1, midiOffsetBeats: 0.35 },
+        ],
+      }]
+      const base = { ...input, sampleRateHz, bpm, tracks }
+      const compileWindow = createPortableFrameScheduleWindowCompiler(base)
+      for (const frame of [0, 1, 511, 512, 9_731, 44_100, 48_000, 96_000, 150_000]) {
+        for (const frameCount of [128, 512, 96_000]) {
+          for (const shift of [0, 24_001]) {
+            const window = {
+              timeOrigin: { timelineSec: frame / sampleRateHz, frame: frame + shift },
+              rangeStartFrame: frame + shift,
+              rangeEndFrame: frame + shift + frameCount,
+            }
+            expect(compileWindow(window)).toEqual(compilePortableFrameScheduleWindow({
+              ...base, ...window,
+              eventRangeStartSec: window.timeOrigin.timelineSec,
+              stableNoteIds: true,
+              noteScheduleStartSec: 0,
+              clipSpanningNoteOn: true,
+            }))
+          }
+        }
+      }
+    }
+  }
+})
+
+test('prepared compiler owns no cache across replacement snapshots', () => {
+  const window = { timeOrigin: input.timeOrigin, rangeStartFrame: 0, rangeEndFrame: 48_000 }
+  const before = createPortableFrameScheduleWindowCompiler(input)(window)
+  const changed = {
+    ...input, revision: input.revision + 1, bpm: 123,
+    tracks: [{ ...track, clips: [{ ...track.clips[0]!, midi: { wave: 'sine', notes: [{ beat: 0, length: 1, pitch: 72 }] } }] } satisfies RuntimeTrack],
+  }
+  const after = createPortableFrameScheduleWindowCompiler(changed)(window)
+  expect(after.revision).toBe(changed.revision)
+  expect(after.events.filter((event) => event.type === 'note-on').map((event) => event.pitch)).toEqual([72])
+  expect(after.events).not.toEqual(before.events)
+})
 
 test('projects timeline, expression, and automation authorities into stable frame events', () => {
   const schedule = compilePortableFrameSchedule(input)
@@ -259,3 +308,25 @@ test('releases active voices at a loop boundary before retriggering the next ite
   ])
   expect(events[1]?.noteId).not.toBe(events[2]?.noteId)
 })
+
+// R5: a note's id names its loop pass by the raw frame the pass began at, so a compile from a later seam (its loop shifted
+// by the passes already played) gives the same note in the same pass the same id.
+test('W-R5 a loop pass keeps its note ids in a compile from a later seam with the loop shifted', () => {
+  const shortTrack: RuntimeTrack = {
+    ...track,
+    clips: [{ ...track.clips[0]!, midi: { ...track.clips[0]!.midi!, notes: [{ id: 'pass-note', beat: 0, length: 0.75, pitch: 60, velocity: 0.7 }] } }],
+  }
+  const base = { ...input, tracks: [shortTrack], automationEnvelopes: [], stableNoteIds: true, clipSpanningNoteOn: true }
+  const noteOns = (schedule: ReturnType<typeof compilePortableFrameSchedule>) => schedule.events
+    .flatMap((event) => event.type === 'note-on' ? [[event.frame, event.noteId] as const] : [])
+  const first = noteOns(compilePortableFrameSchedule({ ...base, rangeEndSec: 5, loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } }))
+  // The seam is raw frame 110_000, 14_000 frames into the third pass: its loop starts two seconds (two passes) later.
+  const arrangement = 14_000 / 48_000
+  const later = noteOns(compilePortableFrameSchedule({ ...base, timeOrigin: { timelineSec: arrangement, frame: 110_000 }, rangeEndSec: arrangement + 3,
+    loop: { loopEnabled: true, loopStartSec: 2, loopEndSec: 3 } }))
+  const idAt = (notes: typeof first, frame: number) => notes.find(([at]) => at === frame)?.[1]
+  expect({ spanning: idAt(later, 110_000) === idAt(first, 96_000), fourth: idAt(later, 144_000) === idAt(first, 144_000),
+    distinct: new Set(first.map(([, id]) => id)).size === first.length })
+    .toEqual({ spanning: true, fourth: true, distinct: true })
+})
+

@@ -8,9 +8,10 @@ type UseRoomPersistedStateOptions<TValue> = {
   createInitial: () => TValue
   load: (projectId: string) => TValue
   loadAsync?: (projectId: string) => Promise<TValue | undefined>
+  subscribeToChanges?: (projectId: string, refresh: () => void) => () => void
   save: (projectId: string, value: TValue) => void
   saveAsync?: (projectId: string, value: TValue) => Promise<void>
-  onSaveAsyncError?: (error: Error) => void
+  onSaveAsyncError?: (projectId: string, error: Error) => void
 }
 
 type UseRoomPersistedStateReturn<TValue> = {
@@ -71,15 +72,21 @@ export function useProjectPersistedState<TValue>(
   createEffect(on(options.projectId, (projectId) => {
     syncHydratedValue()
     if (!projectId || !options.loadAsync) return
-    const loadRevision = valueRevision
+    const load = options.loadAsync
+    const refresh = () => {
+      const loadRevision = ++valueRevision
+      void load(projectId).then((loaded) => {
+        if (options.projectId() !== projectId || valueRevision !== loadRevision) return
+        if (loaded !== undefined) setCurrentValue(() => loaded)
+        setAsyncHydrated(true)
+      }).catch(() => {
+        if (options.projectId() === projectId && valueRevision === loadRevision) setAsyncHydrated(true)
+      })
+    }
     setAsyncHydrated(false)
-    void options.loadAsync(projectId).then((loaded) => {
-      if (options.projectId() !== projectId || valueRevision !== loadRevision) return
-      if (loaded !== undefined) setCurrentValue(() => loaded)
-      setAsyncHydrated(true)
-    }).catch(() => {
-      if (options.projectId() === projectId && valueRevision === loadRevision) setAsyncHydrated(true)
-    })
+    const unsubscribe = options.subscribeToChanges?.(projectId, refresh)
+    if (unsubscribe) onCleanup(unsubscribe)
+    refresh()
   }, { defer: false }))
 
   const applyValue: RoomPersistedSetter<TValue> = (next) => {
@@ -95,7 +102,7 @@ export function useProjectPersistedState<TValue>(
     ensureProjectFlusher(projectId)
     const save = options.saveAsync(projectId, value)
     void save.catch((error) => {
-      options.onSaveAsyncError?.(error instanceof Error ? error : new Error('Project state save failed.'))
+      options.onSaveAsyncError?.(projectId, error instanceof Error ? error : new Error('Project state save failed.'))
     })
     trackAsyncSave(projectId, save)
   }

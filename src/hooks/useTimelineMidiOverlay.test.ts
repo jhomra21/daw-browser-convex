@@ -119,9 +119,11 @@ test("only suspended lifecycle blocks MIDI and lifecycle readiness gates native 
   expect(source).toContain("if (midiSuspended) return")
 })
 
-test("keeps editor close separate from live-note safety cleanup", async () => {
+test("derives the live MIDI editor target from the docked clip without a close path", async () => {
   const source = await readFile(new URL("./useTimelineMidiOverlay.ts", import.meta.url), "utf8")
   expect(source).not.toContain("if (!midiEditorClipId())")
+  expect(source).not.toContain("setMidiEditorClipId")
+  expect(source).toContain("options.dockedMidiClipId()")
   expect(source).toContain("forceStopAllLiveNotes()")
 })
 
@@ -129,7 +131,7 @@ test("reconciles router-owned held notes when native preview ownership is rebuil
   const source = await readFile(new URL("./useTimelineMidiOverlay.ts", import.meta.url), "utf8")
   const reset = source.slice(
     source.indexOf("removeNativeLiveMidiReset ="),
-    source.indexOf("  const closeMidiEditor", source.indexOf("removeNativeLiveMidiReset =")),
+    source.indexOf("const targetKey = [", source.indexOf("removeNativeLiveMidiReset =")),
   )
   expect(reset).toContain("forceStopAllLiveNotes()")
 })

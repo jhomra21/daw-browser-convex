@@ -67,6 +67,7 @@ describe("device collapse double-tap classifier", () => {
 test("keeps the fold contract at the shell and panel boundaries", async () => {
   const shell = await readFile(new URL("../effects/EffectShell.tsx", import.meta.url), "utf8");
   const panel = await readFile(new URL("./EffectsPanel.tsx", import.meta.url), "utf8");
+  const drumRack = await readFile(new URL("../effects/DrumRack.tsx", import.meta.url), "utf8");
 
   expect(shell).toContain('hidden={collapsed()}');
   expect(shell).toContain('aria-expanded={!collapsed()}');
@@ -75,6 +76,13 @@ test("keeps the fold contract at the shell and panel boundaries", async () => {
   expect(panel).toContain('deviceCollapseIdentity.audioEffect(effect().id)');
   expect(panel).toContain('deviceCollapseIdentity.external(processor().instanceId)');
   expect(panel).toContain('contentId={() => safeDeviceContentId(identity())}');
+  expect(drumRack).toContain('classList={{ "text-destructive": status().state === \'error\' }}');
+  expect(drumRack).toContain('disabled={status().state !== \'error\'}');
+  expect(drumRack).toContain('{status().state}');
+  expect(drumRack).toContain('<p class="py-1 text-destructive" role="alert">{error()}</p>');
+  expect(drumRack).toContain('<Show when={props.nativeStatus?.error}>');
+  expect(drumRack).toContain('onClick={() => props.onRetry()}');
+  expect(panel).toContain('onRetry={props.instrument.state.drumRack.retry}');
 
   const externalEffectStart = panel.indexOf('data-external-effect-id={processor().instanceId}');
   const externalBoundaryStart = panel.indexOf(
@@ -86,4 +94,22 @@ test("keeps the fold contract at the shell and panel boundaries", async () => {
   expect(panel.slice(externalEffectStart, externalBoundaryStart)).toContain(
     'data-reorder-key={key}',
   );
+});
+
+// AE-08 phase 8 step 10, item 4 (E6): the native limitation notice sits on the element the routing belongs to, as a neutral
+// title-bar marker and never a dialog: every device's shell, through its boundary's instance id, and the track header.
+test("shows the native limitation notice on the device or track the routing belongs to", async () => {
+  const shell = await readFile(new URL("../effects/EffectShell.tsx", import.meta.url), "utf8");
+  const panel = await readFile(new URL("./EffectsPanel.tsx", import.meta.url), "utf8");
+  const row = await readFile(new URL("./TrackSidebarRow.tsx", import.meta.url), "utf8");
+  const notice = await readFile(new URL("./native-limit-notice.tsx", import.meta.url), "utf8");
+
+  expect(shell).toContain("<NativeLimitNotice reason={collapse?.nativeLimit?.()} />");
+  expect(panel).toContain("nativeLimit={() => props.instanceId === undefined ? undefined : instanceLimit(props.instanceId)}");
+  expect(panel.match(/instanceId=\{processor\(\)\.instanceId\}/g)).toHaveLength(2);
+  expect(panel).toContain("instanceId={effect().id}");
+  expect(row).toContain("<NativeLimitNotice reason={instanceLimit(track.id)} />");
+  expect(notice).toContain('role="status"');
+  expect(notice).toContain("text-muted-foreground");
+  expect(notice).not.toContain("Dialog");
 });

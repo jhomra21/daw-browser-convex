@@ -2,6 +2,7 @@ type PhysicalRecord = {
   readonly physical: AudioBuffer
   readonly owners: Set<BudgetEntry>
   chargeBytes: number
+  pins: number
 }
 
 type BudgetEntry = {
@@ -10,6 +11,7 @@ type BudgetEntry = {
   onEvict: () => void
   physical?: AudioBuffer
   record: PhysicalRecord | undefined
+  protectPhysical: boolean
 }
 
 export type SampledInstrumentRegionReservation = {
@@ -38,7 +40,7 @@ export type SampledInstrumentRegionBudgetScope = {
   touch: (key: string) => void
   pin: (key: string) => SampledInstrumentRegionPin | undefined
   unpin: (pin: SampledInstrumentRegionPin) => void
-  lease: (buffers: readonly SampledInstrumentBufferLeaseInput[]) => SampledInstrumentRegionLease
+  lease: (buffers: readonly SampledInstrumentBufferLeaseInput[], protectPhysicalEntries?: boolean) => SampledInstrumentRegionLease
   isLeased: (buffer: AudioBuffer) => boolean
   release: () => void
 }
@@ -46,6 +48,7 @@ export type SampledInstrumentRegionBudgetScope = {
 export type SampledInstrumentRegionBudget = ReturnType<typeof createSampledInstrumentRegionBudget>
 
 const RETIRED_KEY_MARKER = '\u0000retired\u0000'
+const canEvict = (entry: BudgetEntry) => entry.pins === 0 && (entry.record?.pins ?? 0) === 0
 
 const validateBudgetValue = (value: number, label: string) => {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${label} is invalid.`)
@@ -95,7 +98,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
   const getOrCreatePhysicalRecord = (physical: AudioBuffer) => {
     const existing = physicalRecords.get(physical)
     if (existing) return existing
-    const record: PhysicalRecord = { physical, owners: new Set(), chargeBytes: 0 }
+    const record: PhysicalRecord = { physical, owners: new Set(), chargeBytes: 0, pins: 0 }
     physicalRecords.set(physical, record)
     return record
   }
@@ -108,7 +111,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
     pins = 0,
   ) => {
     const record = physical ? getOrCreatePhysicalRecord(physical) : undefined
-    const entry: BudgetEntry = { bytes, pins, onEvict, physical, record }
+    const entry: BudgetEntry = { bytes, pins, onEvict, physical, record, protectPhysical: false }
     entries.set(key, entry)
     record?.owners.add(entry)
     if (record) refreshRecordCharge(record)
@@ -161,7 +164,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
 
   const evict = (protectedKeys: ReadonlySet<string>, additionalBytes = 0) => {
     while (totalBytes + reservedBytes() + additionalBytes > maxBytes) {
-      const candidate = [...entries].find(([key, entry]) => entry.pins === 0 && !protectedKeys.has(key))
+      const candidate = [...entries].find(([key, entry]) => canEvict(entry) && !protectedKeys.has(key))
       if (!candidate) return
       removeEntry(candidate[0], true)
     }
@@ -193,7 +196,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
     evict(protectedKeys, additionalBytes)
     while (totalBytes + reservedBytes() + additionalBytes > maxBytes) {
       const candidate = [...entries].find(([key, entry]) => (
-        entry.pins === 0
+        canEvict(entry)
         && !protectedKeys.has(key)
         && !requested.has(key)
       ))
@@ -239,7 +242,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
   ) => {
     while (projectedSetTotal(key, bytes, physical) + reservedBytes() > maxBytes) {
       const candidate = [...entries].find(([candidateKey, entry]) => (
-        candidateKey !== key && entry.pins === 0
+        candidateKey !== key && canEvict(entry)
       ))
       if (!candidate) throw new Error(`Sampled instrument regions exceed the ${maxBytes} byte aggregate limit.`)
       removeEntry(candidate[0], true)
@@ -257,11 +260,13 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
 
   const pinEntry = (entry: BudgetEntry) => {
     entry.pins += 1
+    if (entry.record && entry.protectPhysical) entry.record.pins += 1
   }
 
   const unpinEntry = (entry: BudgetEntry) => {
     if (entry.pins === 0) return
     entry.pins -= 1
+    if (entry.record && entry.protectPhysical) entry.record.pins -= 1
     if (entry.pins === 0) {
       const key = findEntryKey(entry)
       if (key?.includes(RETIRED_KEY_MARKER)) removeEntry(key, false)
@@ -280,7 +285,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
   const createPin = (entry: BudgetEntry): SampledInstrumentRegionPin => {
     const token: SampledInstrumentRegionPin = { release: () => releasePin(token) }
     pinEntries.set(token, entry)
-    entry.pins += 1
+    pinEntry(entry)
     return token
   }
 
@@ -435,7 +440,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
           break
         }
       },
-      lease: (buffers) => {
+      lease: (buffers, protectPhysicalEntries = false) => {
         const leased = new Set<BudgetEntry>()
         try {
           for (const input of buffers) {
@@ -443,6 +448,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
             const nextKey = scopedKey(`lease\u0000${input.key}\u0000${nextInternalId}`)
             nextInternalId += 1
             const entry = set(nextKey, input.bytes, () => undefined, input.buffer)
+            entry.protectPhysical = protectPhysicalEntries
             pinEntry(entry)
             ownedEntries.add(entry)
             leaseEntries.add(entry)

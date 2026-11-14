@@ -1,6 +1,10 @@
 import { resolveLiveMixerGraph } from "@daw-browser/audio-engine/live-mixer-runtime"
 import type { ExternalProcessor } from "@daw-browser/external-plugins"
-import type { ExportRenderStateSnapshot } from "~/lib/export/run-export-job"
+import { resolveDesiredPlaybackFx, type ExportCloudRenderRowsSnapshot, type ExportRenderStateSnapshot } from "~/lib/export/run-export-job"
+import type { ExportEffectsProjection } from "~/lib/export/export-effect-rows"
+import { nativeInstrumentContentKey, type DesiredInstrument } from "~/lib/live-processor-control"
+import { createPortableGraphSnapshot } from "@daw-browser/audio-engine/mixer/graph-contract"
+import { compileLiveNativeInstrumentConfigurations } from "@daw-browser/audio-engine/live-native-projection"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types"
 import type { AutomationEnvelope, TrackInstrumentParams } from "@daw-browser/shared"
@@ -23,6 +27,7 @@ export type LivePlaybackTransport = {
 }
 
 export type LivePlaybackCompileContext = {
+  liveAdoption?: true
   instrumentOverride?: {
     targetId: string
     instrument: TrackInstrumentParams
@@ -48,6 +53,7 @@ export type LivePlaybackAsset = {
 
 export type LivePlaybackSnapshot = {
   revision: number
+  processorStateSequence?: number
   bpm: number
   timeSignature?: LivePlaybackTimeSignature
   transport: LivePlaybackTransport
@@ -71,6 +77,7 @@ export type LivePlaybackSnapshot = {
 
 export type LivePlaybackSnapshotInput = {
   revision: number
+  processorStateSequence?: number
   bpm: number
   timeSignature?: LivePlaybackTimeSignature
   transport: LivePlaybackTransport
@@ -94,6 +101,7 @@ const addInstrumentAssets = (
   assetsById: Map<string, AudioBuffer>,
   fx: ExportFx["trackFx"],
 ) => {
+  const unavailableSampleAssetKeys = (entry: LiveTrackFxEntry) => new Set(entry.unavailableSampleAssetKeys ?? [])
   const add = (assetId: string, buffer: AudioBuffer) => {
     const previous = assetsById.get(assetId)
     if (previous && (
@@ -105,10 +113,14 @@ const addInstrumentAssets = (
   }
   for (const entry of Object.values(fx ?? {})) {
     const instrument = entry.instrument
+    const unavailable = unavailableSampleAssetKeys(entry)
     if (instrument?.kind === "sampler") {
       for (const zone of instrument.params.zones) {
         const buffer = entry.samplerBuffers?.get(zone.id)
-        if (!buffer) throw new Error(`Sampler zone "${zone.id}" is missing its authoritative audio buffer.`)
+        if (!buffer) {
+          if (unavailable.has(zone.sample.assetKey)) continue
+          throw new Error(`Sampler zone "${zone.id}" is missing its authoritative audio buffer.`)
+        }
         add(zone.sample.assetKey, buffer.buffer)
       }
     }
@@ -116,12 +128,16 @@ const addInstrumentAssets = (
       for (const pad of instrument.params.pads) {
         if (!pad.sample) continue
         const buffer = entry.drumRackBuffers?.get(pad.id)
-        if (!buffer) throw new Error(`Drum Rack pad "${pad.id}" is missing its authoritative audio buffer.`)
+        if (!buffer) {
+          if (unavailable.has(pad.sample.assetKey)) continue
+          throw new Error(`Drum Rack pad "${pad.id}" is missing its authoritative audio buffer.`)
+        }
         add(pad.sample.assetKey, buffer.buffer)
       }
     }
     if (instrument?.kind === "granular" && instrument.params.zone) {
       if (!entry.granularBuffer) {
+        if (unavailable.has(instrument.params.zone.sample.assetKey)) continue
         throw new Error(`Granular zone "${instrument.params.zone.id}" is missing its authoritative audio buffer.`)
       }
       if (entry.granularBuffer.assetKey !== instrument.params.zone.sample.assetKey) {
@@ -132,7 +148,7 @@ const addInstrumentAssets = (
   }
 }
 
-const validateInstrumentBuffers = (fx: ExportFx["trackFx"]) => {
+export const validateInstrumentBuffers = (fx: ExportFx["trackFx"]) => {
   for (const entry of Object.values(fx ?? {})) {
     const instrument = entry.instrument
     if (instrument?.kind === "sampler") {
@@ -175,6 +191,57 @@ const validateInstrumentBuffers = (fx: ExportFx["trackFx"]) => {
         sampledInstrumentRegionIdentity(zone.sample, region),
       )
     }
+  }
+}
+
+export const compileDesiredNativeProcessorState = (
+  snapshot: LivePlaybackSnapshot,
+  sampleRate: number,
+  sequence: number,
+  projection?: ExportEffectsProjection,
+  cloudRows?: ExportCloudRenderRowsSnapshot,
+) => {
+  const fx = resolveDesiredPlaybackFx(snapshot.mixer.fx, projection, cloudRows)
+  // Snapshot instruments are already localized. Only instrument rows overlaid by the panel/cloud are raw.
+  // Resolve those rows separately so unchanged snapshot regions are never localized twice.
+  const overrides = resolveDesiredPlaybackFx({ masterVolume: 1, masterFxInstances: [], trackFx: {} }, projection, cloudRows)
+  const instrumentReasons: string[] = []
+  const invalidInstrumentNodes = new Set<string>()
+  const trackFx = Object.fromEntries(Object.entries(fx.trackFx ?? {}).map(([nodeId, entry]) => {
+    if (!overrides.trackFx?.[nodeId]?.instrument) return [nodeId, entry]
+    try {
+      const overlaid = { [nodeId]: entry }
+      validateInstrumentBuffers(overlaid)
+      const localized = localizeInstrumentFx({ ...fx, trackFx: overlaid })?.trackFx?.[nodeId]
+      return [nodeId, localized ?? entry]
+    } catch (error) {
+      invalidInstrumentNodes.add(nodeId)
+      instrumentReasons.push(`${nodeId}: ${error instanceof Error ? error.message : "instrument localization failed."}`)
+      const { instrument: _instrument, synth: _synth, ...withoutInstrument } = entry
+      return [nodeId, withoutInstrument]
+    }
+  }))
+  // Exclude invalid targets from track fallback too, so omission cannot manufacture a default synth.
+  const compiled = compileLiveNativeInstrumentConfigurations(
+    snapshot.tracks.filter(track => !invalidInstrumentNodes.has(track.id)), { ...fx, trackFx },
+  )
+  instrumentReasons.push(...compiled.reasons)
+  const instruments = new Map<string, DesiredInstrument>(compiled.configurations.map(configuration => [
+    configuration.nodeId,
+    configuration.state.kind === "synth"
+      ? { kind: "synth", instanceId: configuration.instanceId, state: configuration.state }
+      : { kind: "sampled", instanceId: configuration.instanceId, contentKey: nativeInstrumentContentKey(configuration.state) },
+  ]))
+  return {
+    sequence,
+    graph: createPortableGraphSnapshot({
+      graph: resolveLiveMixerGraph(snapshot.tracks, fx.trackFx ?? {}, {
+        masterFxInstances: fx.masterFxInstances, masterVolume: fx.masterVolume,
+      }),
+      revision: snapshot.revision, sampleRate, bpm: snapshot.bpm,
+    }),
+    instruments,
+    instrumentReasons,
   }
 }
 
@@ -375,6 +442,7 @@ export const compileLivePlaybackSnapshot = (
     supported: true,
     snapshot: {
       revision: input.revision,
+      processorStateSequence: input.processorStateSequence,
       bpm: input.bpm,
       timeSignature: structuredClone(timeSignature),
       transport: structuredClone(input.transport),

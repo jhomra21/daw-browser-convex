@@ -1,8 +1,8 @@
 import {
-  createAudioPcmSourceDescriptor,
+  createAudioBufferPcmSourceDescriptor,
   getAudioBufferSessionIdentity,
   type AudioPcmSourceDescriptor,
-} from '@daw-browser/audio-engine/media-pages'
+} from '@daw-browser/shared'
 import { extractPeakAsset } from './extract-peaks'
 import {
   deletePeakGenerationChunks,
@@ -59,13 +59,14 @@ const cacheGet = <Key, Value>(cache: Map<Key, Value>, key: Key) => {
 }
 
 export const createWaveformSourceFromBuffer = (buffer: AudioBuffer): AudioPcmSourceDescriptor => (
-  createAudioPcmSourceDescriptor({
+  createAudioBufferPcmSourceDescriptor({
     identity: getAudioBufferSessionIdentity(buffer),
-    durationSec: buffer.duration,
-    frameCount: buffer.length,
+    length: buffer.length,
     sampleRate: buffer.sampleRate,
-    channelCount: buffer.numberOfChannels,
-    source: buffer,
+    numberOfChannels: buffer.numberOfChannels,
+    copyFromChannel: (destination, channelNumber, bufferOffset) => (
+      buffer.copyFromChannel(destination, channelNumber, bufferOffset)
+    ),
   })
 )
 

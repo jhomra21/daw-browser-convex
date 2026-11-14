@@ -74,7 +74,7 @@ export const parseBrowserProjectId = (output: string) => {
   const encoded = z.string().min(1).parse(JSON.parse(output))
   return z.string().regex(/^project:[A-Za-z0-9-]+$/).parse(JSON.parse(encoded))
 }
-const rows = async () => {
+export const rows = async () => {
   const child = Bun.spawn(["ps", "-axo", "pid=,ppid=,pgid=,time=,command="], { stdout: "pipe" })
   const text = await new Response(child.stdout).text()
   return text.split("\n").flatMap((line) => {

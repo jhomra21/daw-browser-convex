@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test"
+import { expect, spyOn, test } from "bun:test"
+import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
 import { createHash } from "node:crypto"
 import {
   encodeNativeExternalAttachmentPlan,
@@ -14,12 +15,20 @@ import {
 } from "@daw-browser/plugin-host-protocol"
 import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import { portableGraphContractHash } from "@daw-browser/audio-core-contract/generated"
+import { NativeAudioHostCommandError } from "./audio-host"
 import { parsePluginCatalogData, type PluginCatalogData } from "./plugin-catalog"
 import {
   coordinateNativeVst3Attachments,
+  createNativeVst3AttachmentLedger,
+  createNativeVst3HostEventHandlers,
   createNativeVst3RevisionCoordinator,
+  createNativeVst3SessionLedger,
   nativeVst3PlaybackDefaultStatus,
   resolveNativeVst3AttachmentPlan,
+  nativeVst3CoordinationFailureReply,
+  nativeVst3CoordinatorFailureOrigin,
+  nativeVst3InstanceEvent,
+  type NativeVst3Defect,
   type NativeVst3RevisionHost,
   type NativeVst3WorkerRevisionNotification,
 } from "./native-vst3-coordinator"
@@ -537,7 +546,9 @@ const revisionCoordinator = (input: {
   calls: string[]
   prepared: Array<Parameters<NativeVst3RevisionHost["prepareRevision"]>[0]>
   fail?: "prepare" | "publish" | "retire" | "stop"
+  defects?: NativeVst3Defect[]
 }) => createNativeVst3RevisionCoordinator({
+  reportDefect: (defect) => { input.defects?.push(defect) },
   snapshot: nativeGraph(),
   attachments: [first, second],
   attachmentHandshakeAcknowledged: true,
@@ -768,7 +779,7 @@ test("ignores stale worker notifications without touching the active graph", asy
   expect(creation.coordinator.status()).toEqual({ active: true, revision: 10 })
 })
 
-test("safely stops bus changes, worker misses, and faults", async () => {
+test("safely stops bus changes", async () => {
   const unchangedCalls: string[] = []
   const unchanged = revisionCoordinator({ calls: unchangedCalls, prepared: [] })
   if (!unchanged.ok) throw new Error(unchanged.status.reason)
@@ -789,8 +800,6 @@ test("safely stops bus changes, worker misses, and faults", async () => {
       instanceId: first.instanceId,
       revision: 10,
     },
-    { kind: "miss", instanceId: first.instanceId, revision: 10 },
-    { kind: "fault", instanceId: first.instanceId, revision: 10 },
   ]
   for (const notification of notifications) {
     const calls: string[] = []
@@ -799,9 +808,7 @@ test("safely stops bus changes, worker misses, and faults", async () => {
     const result = await creation.coordinator.handleNotification(notification)
     expect(result).toMatchObject({
       ok: false,
-      reason: notification.kind === "buses"
-        ? "dynamic-bus-layout-unsupported"
-        : notification.kind === "miss" ? "worker-missed-deadline" : "worker-faulted",
+      reason: "dynamic-bus-layout-unsupported",
       revision: 10,
       instanceId: first.instanceId,
     })
@@ -815,7 +822,7 @@ test("fails closed if the native stop operation fails", async () => {
   const creation = revisionCoordinator({ calls, prepared: [], fail: "stop" })
   if (!creation.ok) throw new Error(creation.status.reason)
   await expect(creation.coordinator.handleNotification({
-    kind: "fault",
+    kind: "buses",
     instanceId: first.instanceId,
     revision: 10,
   })).resolves.toEqual({
@@ -824,7 +831,7 @@ test("fails closed if the native stop operation fails", async () => {
     revision: 10,
     instanceId: first.instanceId,
   })
-  expect(calls).toEqual(["stop:worker-faulted"])
+  expect(calls).toEqual(["stop:dynamic-bus-layout-unsupported"])
   expect(creation.coordinator.status()).toEqual({
     active: false,
     revision: 10,
@@ -879,4 +886,450 @@ test("stops on retirement failure after retaining the newly published revision",
     "stop:revision-retire-failed",
   ])
   expect(creation.coordinator.snapshot().revision).toBe(11)
+})
+
+// A stateful plug-in carries captured state, so its verdict is never taken from the cache.
+const ledgerHarness = (
+  stateful: boolean,
+  clock = { now: 0 },
+  refused: ReadonlySet<string> = new Set(),
+  retired: ReadonlySet<string> = new Set(),
+) => {
+  const calls: string[] = []
+  const ledger = createNativeVst3AttachmentLedger({
+    detachVst: async (instanceId) => {
+      calls.push(`detach:${instanceId}`)
+      if (retired.has(instanceId)) throw new NativeAudioHostCommandError(11)
+    },
+  }, () => clock.now)
+  const stateBytes = new Uint8Array([1, 2, 3])
+  const state = { bytes: stateBytes, sha256: createHash("sha256").update(stateBytes).digest("hex") }
+  const run = (
+    attachments: NativeExternalAttachmentPlan["attachments"],
+    options: { sampleRateHz?: number; catalog?: PluginCatalogData } = {},
+  ) => coordinateNativeVst3Attachments({
+    serializedPlan: plan(attachments),
+    sampleRateHz: options.sampleRateHz ?? 48_000,
+    workerPath: "/Resources/daw-vst3-worker",
+    catalogStore: { load: async () => options.catalog ?? catalog() },
+    audioHost: host(calls),
+    ledger,
+    capturedVstStates: new Map(stateful ? attachments.map((entry) => [entry.instanceId, state]) : []),
+    requiredVstStateInstanceIds: new Set(),
+    preflight: async ({ attachment: input }) => {
+      calls.push(`preflight:${input.instanceId}`)
+      const source = attachments.find((candidate) => candidate.instanceId === input.instanceId)
+      if (!source) throw new Error("missing fixture attachment")
+      if (refused.has(input.instanceId)) {
+        return {
+          version: 1,
+          type: "preflight-result",
+          requestId: "refused-preflight",
+          status: "unavailable",
+          code: "worker-crashed",
+          message: "Worker preflight failed.",
+          requirements,
+        }
+      }
+      return available(source, { supportsState: stateful })
+    },
+  })
+  return { calls, ledger, run, clock }
+}
+
+test("a later plan attaches only the instances it adds", async () => {
+  const { calls, ledger, run } = ledgerHarness(true)
+  expect(await run([first])).toEqual({ ok: true, attached: 1 })
+  ledger.published()
+  calls.length = 0
+  expect(await run([first, second])).toEqual({ ok: true, attached: 1 })
+  expect(calls).toEqual([`preflight:${second.instanceId}`, `attach:${second.instanceId}`])
+})
+
+test("a rolled back revision attaches its staged instances again", async () => {
+  const { calls, ledger, run } = ledgerHarness(true)
+  await run([first])
+  ledger.rolledBack()
+  await run([first])
+  expect(calls.filter((call) => call.startsWith("attach:"))).toEqual([
+    `attach:${first.instanceId}`,
+    `attach:${first.instanceId}`,
+  ])
+})
+
+// The host binds every instance it still holds into the graph it prepares, and rejects one the graph no longer declares.
+test("a changed instance is detached before it is attached and a removed one before the plan that drops it is prepared", async () => {
+  const { calls, ledger, run } = ledgerHarness(true)
+  await run([first, second])
+  ledger.published()
+  calls.length = 0
+  const moved = { ...first, stageIndex: 1 }
+  await run([moved])
+  expect(calls).toEqual([
+    `preflight:${first.instanceId}`,
+    `detach:${second.instanceId}`,
+    `detach:${first.instanceId}`,
+    `attach:${first.instanceId}`,
+  ])
+  calls.length = 0
+  ledger.published()
+  expect(calls).toEqual([])
+})
+
+test("a removal whose revision was rolled back is neither detached twice nor lost when the plug-in comes back", async () => {
+  const { calls, ledger, run } = ledgerHarness(true)
+  await run([first, second])
+  ledger.published()
+  calls.length = 0
+  await run([first])
+  ledger.rolledBack()
+  await run([first])
+  expect(calls).toEqual([`detach:${second.instanceId}`])
+  calls.length = 0
+  await run([first, second])
+  expect(calls).toEqual([`attach:${second.instanceId}`])
+})
+
+test("a removal of an instance the host already retired is not refused, and the plug-in loads anew when it comes back", async () => {
+  const { calls, ledger, run } = ledgerHarness(true, { now: 0 }, new Set(), new Set([second.instanceId]))
+  await run([first, second])
+  ledger.published()
+  calls.length = 0
+  expect(await run([first])).toEqual({ ok: true, attached: 0 })
+  ledger.published()
+  expect(calls).toEqual([`detach:${second.instanceId}`])
+  calls.length = 0
+  await run([first, second])
+  expect(calls).toEqual([`preflight:${second.instanceId}`, `attach:${second.instanceId}`])
+})
+
+const extraInstance = (index: number) => attachment({
+  instanceId: `5555555${index}-5555-4555-8555-555555555555`,
+  graphNodeId: `track-${index}`,
+  nativeGraphNodeId: String(10 + index),
+  classId: first.catalogIdentity.classId,
+})
+
+test("a removed instance that comes back within the parking bounds skips its preflight", async () => {
+  const { calls, ledger, run, clock } = ledgerHarness(true)
+  await run([first, second])
+  ledger.published()
+  await run([second])
+  ledger.published()
+  calls.length = 0
+  clock.now = 59_999
+  await run([first, second])
+  expect(calls).toEqual([`attach:${first.instanceId}`])
+  ledger.published()
+  await run([second])
+  ledger.published()
+  calls.length = 0
+  clock.now += 60_000
+  await run([first, second])
+  expect(calls).toEqual([`preflight:${first.instanceId}`, `attach:${first.instanceId}`])
+})
+
+test("only the four newest removed instances stay parked", async () => {
+  const { calls, ledger, run } = ledgerHarness(true)
+  const extras = [1, 2, 3, 4, 5].map(extraInstance)
+  await run([second, ...extras])
+  ledger.published()
+  await run([second])
+  ledger.published()
+  calls.length = 0
+  await run([second, ...extras])
+  expect(calls.filter((call) => call.startsWith("preflight:"))).toEqual([`preflight:${extras[0]!.instanceId}`])
+})
+
+test("a second default insert of a plug-in reuses the verdict of the first", async () => {
+  const { calls, run } = ledgerHarness(false)
+  await run([first])
+  calls.length = 0
+  await run([first, extraInstance(1)])
+  expect(calls).toEqual([`attach:${extraInstance(1).instanceId}`])
+})
+
+test("a refused plan keeps the staged instance it would have dropped, so the next plan does not attach it twice", async () => {
+  const refused = new Set<string>()
+  const { calls, run } = ledgerHarness(true, { now: 0 }, refused)
+  await run([first, second])
+  refused.add(extraInstance(1).instanceId)
+  expect(await run([second, extraInstance(1)])).toMatchObject({ ok: false, code: "worker-crashed" })
+  calls.length = 0
+  expect(await run([first, second])).toEqual({ ok: true, attached: 0 })
+  expect(calls).toEqual([])
+})
+
+test("a dropped staged instance is detached once the plan that drops it is accepted", async () => {
+  const { calls, run } = ledgerHarness(true)
+  await run([first, second])
+  calls.length = 0
+  expect(await run([second])).toEqual({ ok: true, attached: 0 })
+  expect(calls).toEqual([`detach:${first.instanceId}`])
+  calls.length = 0
+  expect(await run([first, second])).toEqual({ ok: true, attached: 1 })
+  expect(calls).toEqual([`preflight:${first.instanceId}`, `attach:${first.instanceId}`])
+})
+
+test("a cached verdict is not reused when the sample rate, the state revision or the fingerprints differ", async () => {
+  const { calls, run } = ledgerHarness(false)
+  await run([first])
+  const sibling = extraInstance(1)
+  calls.length = 0
+  await run([first, sibling], { sampleRateHz: 44_100 })
+  expect(calls).toEqual([`preflight:${sibling.instanceId}`, `attach:${sibling.instanceId}`])
+  const later = extraInstance(2)
+  calls.length = 0
+  await run([first, sibling, { ...later, stateRevision: 8 }], { sampleRateHz: 44_100 })
+  expect(calls).toEqual([`preflight:${later.instanceId}`, `attach:${later.instanceId}`])
+  const refingerprinted = { ...extraInstance(3), bundleFingerprint: "c".repeat(64) }
+  const moved = catalog()
+  const { launchEligibility } = moved.entries[0]
+  if (!launchEligibility) throw new Error("Missing launch eligibility")
+  launchEligibility.bundleFingerprint = "c".repeat(64)
+  calls.length = 0
+  await run([refingerprinted], { sampleRateHz: 44_100, catalog: moved })
+  expect(calls).toContain(`preflight:${refingerprinted.instanceId}`)
+})
+
+test("a plug-in whose trust was revoked is unresolved even when its verdict was cached", async () => {
+  const { calls, run } = ledgerHarness(false)
+  await run([first])
+  const revoked = { ...catalog(), entries: [] }
+  calls.length = 0
+  expect(await run([first, extraInstance(1)], { catalog: revoked }))
+    .toMatchObject({ ok: false, code: "attachment-unresolved" })
+  expect(calls).toEqual([])
+})
+
+// native/plugin-host/src/worker-supervisor.h WorkerFaultOrigin, in bits 0..7 of a fault value.
+const faultOrigin = {
+  childExit: 1,
+  childSignal: 2,
+  transportFault: 3,
+  dispatchFailure: 4,
+  callbackMissTermination: 5,
+  startupFailure: 6,
+  configureFailure: 8,
+  processException: 11,
+  workerNotification: 12,
+  unknownWorkerNotification: 13,
+  controlIoFailure: 15,
+} as const
+
+const failureOf = async (notification: NativeVst3WorkerRevisionNotification) => {
+  const calls: string[] = []
+  const defects: NativeVst3Defect[] = []
+  const creation = revisionCoordinator({ calls, prepared: [], defects })
+  if (!creation.ok) throw new Error(creation.status.reason)
+  const result = await creation.coordinator.handleNotification(notification)
+  return { result, calls, defects, coordinator: creation.coordinator }
+}
+
+test("a plug-in's own crash or API error marks only that instance failed and never stops audio", async () => {
+  for (const origin of [
+    faultOrigin.childSignal,
+    faultOrigin.childExit,
+    faultOrigin.configureFailure,
+    faultOrigin.processException,
+    faultOrigin.workerNotification,
+  ]) {
+    const { result, calls, defects, coordinator } = await failureOf({
+      kind: "fault", instanceId: first.instanceId, revision: 10, value: origin | (9 << 8),
+    })
+    expect(result).toEqual({ ok: true, status: "plugin-failed", revision: 10, instanceId: first.instanceId })
+    expect(calls).toEqual([])
+    expect(defects).toEqual([])
+    expect(coordinator.failedInstances()).toEqual(new Set([first.instanceId]))
+    expect(coordinator.status()).toEqual({ active: true, revision: 10 })
+  }
+})
+
+test("our own IPC, timeout and lifecycle faults are logged as defects and never shown as a plug-in failure", async () => {
+  for (const origin of [
+    faultOrigin.transportFault,
+    faultOrigin.dispatchFailure,
+    faultOrigin.callbackMissTermination,
+    faultOrigin.startupFailure,
+    faultOrigin.unknownWorkerNotification,
+    faultOrigin.controlIoFailure,
+  ]) {
+    const { result, calls, defects, coordinator } = await failureOf({
+      kind: "fault", instanceId: first.instanceId, revision: 10, value: origin,
+    })
+    expect(result).toEqual({ ok: true, status: "host-defect", revision: 10, instanceId: first.instanceId })
+    expect(calls).toEqual([])
+    expect(defects).toHaveLength(1)
+    expect(defects[0]).toMatchObject({ source: "worker-fault", instanceId: first.instanceId })
+    expect(coordinator.failedInstances()).toEqual(new Set())
+    expect(coordinator.status()).toEqual({ active: true, revision: 10 })
+  }
+  const miss = await failureOf({ kind: "miss", instanceId: first.instanceId, revision: 10 })
+  expect(miss.result).toMatchObject({ ok: true, status: "host-defect" })
+  expect(miss.defects).toHaveLength(1)
+  expect(miss.coordinator.failedInstances()).toEqual(new Set())
+  expect(miss.calls).toEqual([])
+})
+
+test("a component restart never stops audio", async () => {
+  const { result, calls, defects } = await failureOf({ kind: "restart", instanceId: first.instanceId, revision: 10 })
+  expect(result).toEqual({ ok: true, status: "unchanged", revision: 10 })
+  expect(calls).toEqual([])
+  expect(defects).toEqual([])
+})
+
+test("only a crashed plug-in preflight is a plug-in failure; timeouts and staging errors are ours", async () => {
+  expect(nativeVst3CoordinatorFailureOrigin("worker-crashed")).toBe("plugin")
+  for (const code of [
+    "worker-timeout", "worker-unavailable", "worker-invalid-response", "manifest-mismatch",
+    "native-transaction-failed", "state-invalid", "attachment-unresolved", "invalid-plan", "catalog-unavailable",
+  ] as const) expect(nativeVst3CoordinatorFailureOrigin(code)).toBe("host")
+  const defects: NativeVst3Defect[] = []
+  for (const code of ["worker-crashed", "worker-timeout"] as const) {
+    const outcome = await coordinateNativeVst3Attachments({
+      serializedPlan: plan([first]),
+      sampleRateHz: 48_000,
+      workerPath: "/Resources/daw-vst3-worker",
+      catalogStore: { load: async () => catalog() },
+      audioHost: host([]),
+      reportDefect: (defect) => { defects.push(defect) },
+      preflight: async () => ({
+        version: 1, type: "preflight-result", requestId: "failed", status: "unavailable", code,
+        message: "Worker preflight failed.", requirements,
+      }),
+    })
+    expect(outcome).toMatchObject({ ok: false, code, instanceId: first.instanceId })
+  }
+  expect(defects).toEqual([{ source: "attachment-worker-timeout", instanceId: first.instanceId, detail: "Worker preflight failed." }])
+  const staging = await coordinateNativeVst3Attachments({
+    serializedPlan: plan([first]),
+    sampleRateHz: 48_000,
+    workerPath: "/Resources/daw-vst3-worker",
+    catalogStore: { load: async () => catalog() },
+    audioHost: { attachVst: async () => { throw new Error("staging failed") } },
+    reportDefect: (defect) => { defects.push(defect) },
+    preflight: async () => available(first),
+  })
+  expect(staging).toMatchObject({ ok: false, code: "native-transaction-failed" })
+  expect(defects.at(-1)).toEqual({
+    source: "attachment-native-transaction-failed",
+    instanceId: undefined,
+    detail: "The native VST3 attachment transaction failed.",
+  })
+})
+
+// UD 11: the reply to the renderer carries the failing code, its origin and the instance, so a staging crash is not
+// indistinguishable from a transient refusal there.
+test("a refused coordination reaches the renderer with its code, origin and instance", async () => {
+  const crashed = await coordinateNativeVst3Attachments({
+    serializedPlan: plan([first]), sampleRateHz: 48_000, workerPath: "/Resources/daw-vst3-worker",
+    catalogStore: { load: async () => catalog() }, audioHost: host([]), reportDefect: () => undefined,
+    preflight: async () => ({ version: 1, type: "preflight-result", requestId: "crashed", status: "unavailable",
+      code: "worker-crashed", message: "The native VST3 worker preflight failed.", requirements }),
+  })
+  if (crashed.ok) throw new Error("A crashed preflight must be refused")
+  expect(nativeVst3CoordinationFailureReply(crashed)).toEqual({
+    ok: false, error: "The native VST3 worker preflight failed.",
+    failure: { code: "worker-crashed", origin: "plugin", instanceId: first.instanceId },
+  })
+  expect(nativeVst3CoordinationFailureReply({ ok: false, code: "native-transaction-failed", message: "The native VST3 attachment transaction failed." }))
+    .toEqual({ ok: false, error: "The native VST3 attachment transaction failed.", failure: { code: "native-transaction-failed", origin: "host" } })
+})
+
+test("host notifications reach the renderer as typed instance events and never end the session", () => {
+  const defects: NativeVst3Defect[] = []
+  const notify = (kind: "latency" | "fault" | "miss" | "restart" | "buses", value: number) => nativeVst3InstanceEvent({
+    kind, value, graphRevision: 10, graphNodeId: 1n, instanceId: first.instanceId,
+  }, (defect) => { defects.push(defect) })
+  expect(notify("latency", 4096)).toEqual({ kind: "latency", instanceId: first.instanceId, latencyFrames: 4096 })
+  expect(notify("fault", faultOrigin.childSignal | (11 << 8))).toEqual({ kind: "failed", instanceId: first.instanceId })
+  expect(notify("restart", 1)).toBeUndefined()
+  expect(notify("buses", 0)).toBeUndefined()
+  expect(defects).toEqual([])
+  expect(notify("fault", faultOrigin.transportFault)).toBeUndefined()
+  expect(notify("miss", 0)).toBeUndefined()
+  expect(defects.map((defect) => defect.source)).toEqual(["worker-fault", "worker-miss"])
+})
+
+// The worker's refusal of its launch record is our trust gate, not a crash: it reaches the renderer's trust flow.
+test("a refused worker launch record is its own event, not a plug-in failure and not a defect", () => {
+  const defects: NativeVst3Defect[] = []
+  const event = nativeVst3InstanceEvent({
+    kind: "fault", value: 16, graphRevision: 10, graphNodeId: 1n, instanceId: first.instanceId,
+  }, (defect) => { defects.push(defect) })
+  expect(event).toEqual({ kind: "launch-not-trusted", instanceId: first.instanceId })
+  expect(defects).toEqual([])
+})
+
+const hostEventFixture = () => {
+  const sent: DesktopVstInstanceEvent[] = []
+  const edits: unknown[] = []
+  const ended: Error[] = []
+  const defects: NativeVst3Defect[] = []
+  const handlers = createNativeVst3HostEventHandlers({
+    sendInstanceEvent: (event) => { sent.push(event) },
+    sendParameterEdit: (input) => { edits.push(input) },
+    projectFor: (instanceId) => instanceId === first.instanceId ? "project-1" : undefined,
+    endSession: (error) => { ended.push(error) },
+    reportDefect: (defect) => { defects.push(defect) },
+  })
+  const notify = (kind: "latency" | "fault" | "miss" | "restart", value: number, instanceId = first.instanceId) =>
+    handlers.onNotification({ kind, value, graphRevision: 10, graphNodeId: 1n, instanceId })
+  return { sent, edits, ended, defects, handlers, notify }
+}
+
+test("main host events: a latency notification reaches the renderer channel with the instance and value", () => {
+  const { sent, ended, notify } = hostEventFixture()
+  notify("latency", 512)
+  expect(sent).toEqual([{ kind: "latency", instanceId: first.instanceId, latencyFrames: 512 }])
+  expect(ended).toEqual([])
+})
+
+test("main host events: a plug-in fault marks only that instance and does not end the session", () => {
+  const { sent, ended, notify } = hostEventFixture()
+  const logged = spyOn(console, "error").mockImplementation(() => undefined)
+  try { notify("fault", faultOrigin.childSignal | (11 << 8), "other-instance") } finally { logged.mockRestore() }
+  expect(sent).toEqual([{ kind: "failed", instanceId: "other-instance" }])
+  expect(ended).toEqual([])
+})
+
+test("main host events: our-side failures are logged as defects and never surfaced as a plug-in fault", () => {
+  const { sent, ended, defects, notify } = hostEventFixture()
+  const logged = spyOn(console, "error").mockImplementation(() => undefined)
+  try {
+    notify("fault", faultOrigin.transportFault)
+    notify("miss", 0)
+    notify("restart", 1)
+  } finally { logged.mockRestore() }
+  expect(sent).toEqual([])
+  expect(ended).toEqual([])
+  expect(defects.map((defect) => defect.source)).toEqual(["worker-fault", "worker-miss"])
+})
+
+test("main host events: a parameter edit goes out only for an instance a project owns", () => {
+  const { edits, handlers } = hostEventFixture()
+  const edit = (instanceId: string) => handlers.onNotification({
+    kind: "parameter-edit", graphRevision: 10, graphNodeId: 1n, instanceId, parameterId: 7, normalizedValue: 0.25,
+  })
+  edit("unowned")
+  edit(first.instanceId)
+  expect(edits).toEqual([{ projectId: "project-1", instanceId: first.instanceId, parameterId: 7, normalizedValue: 0.25 }])
+})
+
+test("main host events: a lost host ends the session", () => {
+  const { ended, handlers } = hostEventFixture()
+  const lost = new Error("host lost")
+  handlers.onLoss(lost)
+  expect(ended).toEqual([lost])
+})
+
+test("the session ledger starts per transaction, continues across live coordinations and tolerates a revision before any plan", async () => {
+  const session = createNativeVst3SessionLedger()
+  const host = { detachVst: async () => undefined }
+  session.published()
+  session.rolledBack()
+  const live = session.forHost(host)
+  expect(session.forHost(host)).toBe(live)
+  session.begin()
+  expect(session.forHost(host)).not.toBe(live)
 })

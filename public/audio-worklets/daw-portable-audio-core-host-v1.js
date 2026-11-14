@@ -79,7 +79,7 @@ const instrumentEventEnvelope = (events) => {
     view.setBigUint64(offset + 16, BigInt(event.sequence), true)
     view.setUint32(offset + 24, event.epoch, true)
     view.setUint32(offset + 28, event.frameOffset, true)
-    view.setUint32(offset + 32, event.type === 'note-on' ? 1 : event.type === 'note-off' ? 2 : event.type === 'sustain' ? 3 : 4, true)
+    view.setUint32(offset + 32, event.type === 'note-on' ? 1 : event.type === 'note-off' ? 2 : event.type === 'sustain' ? 3 : event.type === 'parameter' ? 5 : 4, true)
     view.setUint32(offset + 36, event.channel, true)
     view.setUint32(offset + 40, event.note, true)
     view.setFloat32(offset + 44, event.value, true)
@@ -132,6 +132,11 @@ export class DawPortableAudioCoreHost {
     this.eventByteCount = 0
     this.instrumentEventOffset = 0
     this.instrumentEventByteCount = 0
+    this.liveInstrumentEvents = []
+    this.instrumentParameterValues = new Map()
+    this.instrumentAcks = []
+    this.instrumentLiveDeferred = false
+    this.instrumentEventView = null
     this.graphPrepareDiagnostics = null
     this.graphContinuity = null
     this.graphCancel = null
@@ -173,6 +178,7 @@ export class DawPortableAudioCoreHost {
   handleMessage(message) {
     if (!isRecord(message) || message.version !== PROTOCOL_VERSION) return this.fault('malformed-message')
     if (message.type === 'dispose') {
+      this.flushInstrumentAcks('rejected')
       this.releaseAllAssets()
       this.disposed = true
       this.close()
@@ -243,6 +249,7 @@ export class DawPortableAudioCoreHost {
         })
         return
       }
+      this.resetInstrumentEvents(false)
       this.revision = message.revision
       this.publishedSnapshot = this.preparedSnapshot
       this.liveInputBusCount = this.preparedInputBusCount
@@ -342,7 +349,9 @@ export class DawPortableAudioCoreHost {
         this.postMessage({ version: PROTOCOL_VERSION, type: 'transport-applied', requestId: message.requestId, epoch: message.epoch, result: 'rejected' })
         return
       }
+      const epochChanged = this.transportEpoch !== message.epoch
       this.transportEpoch = message.epoch
+      if (epochChanged) this.resetInstrumentEvents(true)
       this.transportRunning = message.running
       this.transportFrame = message.frame
       this.transportProcessOrigin = this.framesProcessed
@@ -358,22 +367,25 @@ export class DawPortableAudioCoreHost {
       if (!this.configureInstrument(message.nodeId, state)) return this.fault('core-error')
       return
     }
-    if (message.type === 'instrument-events') {
-      if (!Number.isInteger(message.epoch) || message.epoch !== this.transportEpoch || !Array.isArray(message.events) || message.events.length > 256) return this.fault('event-overflow')
-      let previousOffset = -1
-      let previousSequence = 0
-      for (const event of message.events) {
-        if (!event || !isString(event.nodeId)
-          || !Number.isInteger(event.noteId) || event.noteId < 1 || !Number.isInteger(event.sequence) || event.sequence < 1
-          || event.sequence <= previousSequence || !Number.isInteger(event.frameOffset) || event.frameOffset < previousOffset || event.frameOffset >= this.maxFramesPerBlock
-          || !['note-on', 'note-off', 'sustain', 'expression'].includes(event.type)
-          || !Number.isInteger(event.channel) || event.channel < 0 || event.channel > 15
-          || !Number.isInteger(event.note) || event.note < 0 || event.note > 127
-          || !Number.isFinite(event.value) || event.value < 0 || event.value > 1) return this.fault('malformed-message')
-        previousSequence = event.sequence
-        previousOffset = event.frameOffset
+    if (message.type === 'instrument-parameters') {
+      const ack = { version: PROTOCOL_VERSION, type: 'instrument-events-applied', requestId: message.requestId,
+        revision: message.revision, epoch: message.epoch, sequence: message.sequence, result: 'rejected' }
+      if (!Number.isSafeInteger(message.requestId) || !Number.isSafeInteger(message.sequence)
+        || message.requestId < 1 || message.sequence < 1
+        || message.revision !== this.revision || message.epoch !== this.transportEpoch
+        || this.instrumentAcks.length >= 256 || !Array.isArray(message.events)
+        || message.events.some(event => event.type !== 'parameter' || event.frameOffset !== 0)
+        || !this.queueInstrumentEvents(message)) {
+        this.postMessage(ack)
+        return
       }
-      return this.replaceRenderEnvelope('instrumentEvent', instrumentEventEnvelope(message.events))
+      ack.result = 'applied'
+      this.instrumentAcks.push(ack)
+      return
+    }
+    if (message.type === 'instrument-events') {
+      if (!this.queueInstrumentEvents(message)) this.fault('event-overflow')
+      return
     }
     if (message.type === 'install-schedule') {
       return this.installSchedule(message)
@@ -407,6 +419,54 @@ export class DawPortableAudioCoreHost {
     if (message.abiVersion !== ABI_VERSION) return this.fault('abi-mismatch')
     if (!Number.isInteger(message.maxFramesPerBlock) || message.maxFramesPerBlock < 1 || message.maxFramesPerBlock > 8192 || !(message.wasmModule instanceof WebAssembly.Module)) return this.fault('capacity-exceeded')
     return this.initializeWasm(message)
+  }
+
+  queueInstrumentEvents(message) {
+    if (!this.ready || message.epoch !== this.transportEpoch || !Array.isArray(message.events) || message.events.length > 256) return false
+    let previousOffset = -1
+    let previousSequence = 0
+    for (const event of message.events) {
+      if (!event || !isString(event.nodeId) || !Number.isSafeInteger(event.sequence) || event.sequence < 1
+        || !Number.isSafeInteger(event.noteId) || event.noteId < 1
+        || !Number.isInteger(event.frameOffset) || event.frameOffset < 0 || event.frameOffset >= this.maxFramesPerBlock
+        || !['note-on', 'note-off', 'sustain', 'expression', 'parameter'].includes(event.type)
+        || !Number.isInteger(event.channel) || event.channel < 0 || event.channel > 15
+        || !Number.isInteger(event.note) || event.note < 0 || event.note > 127 || !Number.isFinite(event.value)
+        || event.type !== 'parameter' && (event.value < 0 || event.value > 1)
+        || event.frameOffset < previousOffset || event.sequence <= previousSequence) return false
+      previousOffset = event.frameOffset
+      previousSequence = event.sequence
+    }
+    if (this.liveInstrumentEvents.length + message.events.length > 256) return false
+    const values = new Map(this.instrumentParameterValues)
+    for (const event of message.events) if (event.type === 'parameter') values.set(`${event.nodeId}:${event.note}`, event)
+    if (values.size > 256) return false
+    this.instrumentParameterValues = values
+    this.liveInstrumentEvents.push(...message.events.map(event => ({ ...event, epoch: message.epoch })))
+    this.liveInstrumentEvents.sort((a, b) => a.frameOffset - b.frameOffset || a.sequence - b.sequence)
+    this.replaceRenderEnvelope('instrumentEvent', instrumentEventEnvelope(this.liveInstrumentEvents))
+    return true
+  }
+
+  flushInstrumentAcks(result) {
+    // Ack objects are allocated at the message boundary, never in process().
+    for (let index = 0; index < this.instrumentAcks.length; index += 1) {
+      const ack = this.instrumentAcks[index]
+      ack.result = result
+      this.postMessage(ack)
+    }
+    this.instrumentAcks.length = 0
+  }
+
+  resetInstrumentEvents(replay) {
+    this.flushInstrumentAcks('rejected')
+    this.liveInstrumentEvents = replay
+      ? Array.from(this.instrumentParameterValues.values(), event => ({ ...event, epoch: this.transportEpoch }))
+      : []
+    this.liveInstrumentEvents.sort((a, b) => a.frameOffset - b.frameOffset || a.sequence - b.sequence)
+    this.instrumentLiveDeferred = false
+    if (!replay) this.instrumentParameterValues.clear()
+    this.replaceRenderEnvelope('instrumentEvent', instrumentEventEnvelope(this.liveInstrumentEvents))
   }
 
   initialize({ wasmBytes, wasmModule, contractHash, maxFramesPerBlock }) {
@@ -585,6 +645,7 @@ export class DawPortableAudioCoreHost {
     if (this[offset]) this.free(this[offset])
     this[offset] = allocation
     this[byteCount] = envelope.byteLength
+    if (kind === 'instrumentEvent') this.instrumentEventView = new DataView(this.memory.buffer, allocation, envelope.byteLength)
   }
 
   configureInstruments(snapshot) {
@@ -1268,21 +1329,37 @@ export class DawPortableAudioCoreHost {
         }
       }
     }
-    while (this.scheduleInstrumentCursor < this.scheduleInstrumentEvents.length
-      && this.scheduleInstrumentEvents[this.scheduleInstrumentCursor].frame < startFrame) {
-      this.scheduleInstrumentCursor += 1
-      this.scheduleCursor += 1
-    }
-    while (this.scheduleInstrumentCursor < this.scheduleInstrumentEvents.length) {
+    const liveView = this.instrumentEventByteCount > 0 ? this.instrumentEventView : null
+    const liveCount = liveView ? liveView.getUint32(0, true) : 0
+    // Scheduled notes keep their quantum; a full block defers live controls.
+    let scheduledEnd = this.scheduleInstrumentCursor
+    while (scheduledEnd < this.scheduleInstrumentEvents.length
+      && scheduledEnd - this.scheduleInstrumentCursor <= 256
+      && this.scheduleInstrumentEvents[scheduledEnd].frame < endFrame) scheduledEnd += 1
+    const liveLimit = this.instrumentLiveDeferred || scheduledEnd - this.scheduleInstrumentCursor + liveCount <= 256 ? liveCount : 0
+    this.materializedLiveInstrumentCount = liveLimit
+    let liveCursor = 0
+    while (this.scheduleInstrumentCursor < this.scheduleInstrumentEvents.length || liveCursor < liveLimit) {
+      if (instrumentCount >= 256) break
       const event = this.scheduleInstrumentEvents[this.scheduleInstrumentCursor]
-      if (event.frame >= endFrame) break
-      if (instrumentCount >= 256) return null
+      const liveFrame = liveCursor < liveLimit ? liveView.getUint32(4 + liveCursor * 48 + 28, true) : Infinity
+      // Timeline schedule materialization must retain immediate controls.
+      if (liveCursor < liveLimit && (!event || event.frame >= endFrame || liveFrame < Math.max(0, event.frame - startFrame)
+        || 256 - instrumentCount <= liveLimit - liveCursor)) {
+        for (let word = 0; word < 48; word += 4) {
+          this.scheduleInstrumentEventView.setUint32(4 + instrumentCount * 48 + word, liveView.getUint32(4 + liveCursor * 48 + word, true), true)
+        }
+        liveCursor += 1
+        instrumentCount += 1
+        continue
+      }
+      if (!event || event.frame >= endFrame) break
       const offset = 4 + instrumentCount * 48
       this.scheduleInstrumentEventView.setBigUint64(offset, event.nodeId, true)
       this.scheduleInstrumentEventView.setBigUint64(offset + 8, event.noteId, true)
       this.scheduleInstrumentEventView.setBigUint64(offset + 16, event.sequence, true)
       this.scheduleInstrumentEventView.setUint32(offset + 24, this.transportEpoch, true)
-      this.scheduleInstrumentEventView.setUint32(offset + 28, event.frame - startFrame, true)
+      this.scheduleInstrumentEventView.setUint32(offset + 28, Math.max(0, event.frame - startFrame), true)
       this.scheduleInstrumentEventView.setUint32(offset + 32, event.type, true)
       this.scheduleInstrumentEventView.setUint32(offset + 36, 0, true)
       this.scheduleInstrumentEventView.setUint32(offset + 40, event.pitch, true)
@@ -1292,6 +1369,12 @@ export class DawPortableAudioCoreHost {
       instrumentCount += 1
     }
     this.scheduleEventView.setUint32(0, processorCount, true)
+    // Live and timeline events have independent sequence domains. The core
+    // requires one increasing sequence for the merged render block.
+    for (let index = 0; index < instrumentCount; index += 1) {
+      this.scheduleInstrumentEventView.setUint32(4 + index * 48 + 16, index + 1, true)
+      this.scheduleInstrumentEventView.setUint32(4 + index * 48 + 20, 0, true)
+    }
     this.scheduleInstrumentEventView.setUint32(0, instrumentCount, true)
     this.scheduleEventCount = processorCount
     this.scheduleInstrumentEventCount = instrumentCount
@@ -1304,6 +1387,7 @@ export class DawPortableAudioCoreHost {
     if (!output || output.length === 0 || !this.ready || !this.coreProcess) return true
     const frames = output[0] ? output[0].length : 0
     if (frames > this.maxFramesPerBlock) {
+      this.flushInstrumentAcks('rejected')
       for (let channel = 0; channel < output.length; channel += 1) output[channel].fill(0)
       return true
     }
@@ -1343,6 +1427,7 @@ export class DawPortableAudioCoreHost {
     }
     const materialized = this.materializeSchedule(startFrame, frames)
     if (materialized === null) {
+      this.flushInstrumentAcks('rejected')
       for (let channel = 0; channel < output.length; channel += 1) output[channel].fill(0)
       return true
     }
@@ -1352,11 +1437,21 @@ export class DawPortableAudioCoreHost {
     const instrumentEventByteCount = materialized ? 4 + this.scheduleInstrumentEventCount * 48 : this.instrumentEventByteCount
     const result = this.coreProcess(frames, stagedInputBusCount, CHANNEL_COUNT, this.inputPointerOffset, this.outputPointerOffset, this.revision, this.parameterOffset, this.parameterByteCount, eventOffset, eventByteCount, instrumentEventOffset, instrumentEventByteCount)
     if (result !== 0) {
+      this.flushInstrumentAcks('rejected')
+      this.instrumentEventByteCount = 0
+      this.liveInstrumentEvents.length = 0
       for (let channel = 0; channel < output.length; channel += 1) output[channel].fill(0)
       return true
     }
     this.eventByteCount = 0
-    this.instrumentEventByteCount = 0
+    // At most one full scheduled block may defer controls. On the next block,
+    // reserve their slots and retain excess scheduled notes at their cursor.
+    this.instrumentLiveDeferred = materialized && this.liveInstrumentEvents.length > 0 && this.materializedLiveInstrumentCount === 0
+    if (!materialized || this.materializedLiveInstrumentCount > 0 || this.liveInstrumentEvents.length === 0) {
+      this.instrumentEventByteCount = 0
+      this.liveInstrumentEvents.length = 0
+      this.flushInstrumentAcks('applied')
+    }
     for (let frame = 0; frame < frames; frame += 1) {
       output[0][frame] = this.leftOutput[frame] + (
         this.recordingCaptureActive && this.recordingMonitoring ? this.recordingMonitorPlanes[0][frame] : 0

@@ -248,6 +248,34 @@ export const compileTrackMidiExpressionSchedule = (input: {
     ))
 }
 
+const automationEnvelopeKey = (
+  trackId: string,
+  effectInstanceId: string | undefined,
+  parameterId: string,
+) => JSON.stringify([trackId, effectInstanceId ?? null, parameterId])
+
+// Keeps the first enabled track envelope per (track, effect instance, parameter). A lookup then returns
+// the same envelope that `Array.prototype.find` returns over the same list.
+export const indexTrackAutomationEnvelopes = (
+  envelopes: readonly AutomationEnvelope[],
+): ReadonlyMap<string, AutomationEnvelope> => {
+  const index = new Map<string, AutomationEnvelope>()
+  for (const envelope of envelopes) {
+    if (!envelope.enabled || envelope.target.kind !== 'track') continue
+    const key = automationEnvelopeKey(envelope.target.trackId, envelope.target.effectInstanceId, envelope.parameterId)
+    if (!index.has(key)) index.set(key, envelope)
+  }
+  return index
+}
+
+export const findTrackAutomationEnvelope = (
+  index: ReadonlyMap<string, AutomationEnvelope>,
+  trackId: string,
+  target: MidiMapping['target'],
+): AutomationEnvelope | undefined => index.get(
+  automationEnvelopeKey(trackId, target.effectInstanceId, target.parameterId),
+)
+
 export const resolveTrackMidiExpressionSchedule = (input: {
   clips: readonly Pick<Clip, 'id' | 'startSec' | 'duration' | 'midiOffsetBeats' | 'midi'>[]
   trackId: string

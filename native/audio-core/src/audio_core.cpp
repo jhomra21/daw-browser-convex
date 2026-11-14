@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -14,7 +15,13 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <span>
 #include <type_traits>
+#include <tuple>
+
+#if defined(DAW_AUDIO_CORE_TEST_INSTRUMENT_REJECTION)
+extern "C" bool daw_audio_core_test_reject_instrument_event(uint32_t index);
+#endif
 
 namespace {
 
@@ -22,16 +29,42 @@ constexpr uint32_t kMaximumFramesPerBlock = 8192;
 constexpr uint32_t kMaximumChannels = 64;
 constexpr uint32_t kMaximumAssets = 64;
 constexpr uint32_t kMaximumSampleSources = 256;
-constexpr uint32_t kMaximumGraphNodes = 64;
-constexpr uint32_t kMaximumGraphEdges = 256;
-constexpr uint32_t kMaximumGraphProcessors = 512;
+// The upper half holds the sources a seam fades out beside the live ones.
+constexpr uint32_t kSampleSourceSlots = kMaximumSampleSources * 2;
+// Live limits are what a request may carry. Entries a plan deletes keep fading
+// out in transition capacity of their own, so a full live plan can always
+// replace any of its entries; only a genuine overflow of the transition capacity
+// fails the prepare. A plan's arrays hold both.
+constexpr uint32_t kMaximumLiveNodes = 64;
+constexpr uint32_t kMaximumLiveEdges = 256;
+constexpr uint32_t kMaximumLiveProcessors = 512;
+constexpr uint32_t kMaximumGhostNodes = 64;
+constexpr uint32_t kMaximumGhostEdges = 256;
+constexpr uint32_t kMaximumGhostProcessors = 128;
+constexpr uint32_t kMaximumGraphNodes = kMaximumLiveNodes + kMaximumGhostNodes;
+constexpr uint32_t kMaximumGraphEdges = kMaximumLiveEdges + kMaximumGhostEdges;
+// Transition nodes the core adds to carry a fade have ids no caller can name.
+constexpr uint64_t kTransitionNodeId = 1ULL << 63;
+constexpr uint32_t kMaximumGraphProcessors = kMaximumLiveProcessors + kMaximumGhostProcessors;
 constexpr uint32_t kMaximumInstrumentVoices = DAW_AUDIO_CORE_MAX_INSTRUMENT_VOICES;
 constexpr uint32_t kMaximumModulationDelayFrames = 4132;
 constexpr uint32_t kMaximumDynamicsDelayFrames = 1024;
 constexpr uint32_t kMaximumDelayProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 constexpr uint32_t kMaximumReverbProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
-constexpr uint32_t kMaximumRetirementLanes = 8;
-constexpr uint32_t kMaximumRetirementSeconds = 30;
+// A published plan and the plan being prepared may each reference every node,
+// so node runtime (instrument voices, fade progress) has two plans' worth of
+// slots. Processor slots equal one plan's capacity, live and transition entries
+// together. Exhaustion is a failure that never touches an active slot.
+constexpr uint32_t kNodeRuntimeSlots = kMaximumLiveNodes * 2 + kMaximumGhostNodes;
+// Fader values by DAW_AUDIO_MIXER_PARAMETER_* target: gain, pan, mute, solo.
+constexpr uint32_t kMixerParameterCount = DAW_AUDIO_MIXER_PARAMETER_SOLO - DAW_AUDIO_MIXER_PARAMETER_GAIN + 1;
+// Replaced instruments that may still be fading out beside a node's current one.
+// Each replacement within one deletion fade of the last adds one; a prepare that
+// would exceed it fails rather than cutting the oldest.
+constexpr uint32_t kMaximumNodeBlends = 8;
+// Live processors and fading ghosts together on one node.
+constexpr uint32_t kMaximumNodeChain = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE * 2u;
+constexpr uint32_t kProcessorRuntimeSlots = kMaximumGraphProcessors;
 constexpr uint32_t kMaximumSpectralProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
 constexpr uint32_t kMaximumNativeGraphStagesPerNode = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE * 2u;
@@ -40,6 +73,15 @@ constexpr uint32_t kAutoFilterLatencyFrames = 6;
 constexpr uint32_t kMaximumSpectralFftSize = 4096;
 constexpr uint32_t kMaximumSpectralBins = kMaximumSpectralFftSize / 2 + 1;
 constexpr uint32_t kSpectralHpssFrames = 31;
+// HPSS at overlap two: N + 30*(N/2) fills the median, then N
+// replaces every overlap-add contribution. Round up and leave reader slack.
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+constexpr uint32_t kSpectralInputFrames = 131072;
+#else
+// Portable callers cannot publish a live FFT-size change. Preserve their
+// fixed 256 MiB memory contract instead of reserving native transition history.
+constexpr uint32_t kSpectralInputFrames = 16384;
+#endif
 constexpr float kSampleTerminationFadeMilliseconds = 6.0F;
 // Port of public/audio-worklets/daw-limiter-processor-v1.js createFir():
 // 48 taps, 0.125 cutoff, Blackman-Harris window, normalized for four phases.
@@ -67,7 +109,6 @@ static_assert(DAW_AUDIO_CORE_PROCESSOR_CONTRACT_VERSION == 1u);
 enum class ContinuityPreparationResult : uint8_t {
   kAccepted,
   kIncompatible,
-  kRetirementCapacityExceeded,
 };
 
 struct AssetSlot {
@@ -103,12 +144,15 @@ struct PagedPreparation {
 
 struct SampleSource {
   uint64_t source_node_id = 0;
+  uint32_t node_runtime_slot = 0;
+  uint32_t node_runtime_generation = 0;
   daw_audio_asset_handle asset = 0;
   int64_t start_frame = 0;
   int64_t stop_frame = 0;
   uint64_t source_offset_frame = 0;
   float source_offset_fraction = 0.0F;
   uint64_t source_frame_count = 0;
+  double reconciled_read_end = 0.0;
   float gain = 0.0F;
   int64_t fade_in_start_frame = 0;
   int64_t fade_in_end_frame = 0;
@@ -121,6 +165,33 @@ struct SampleSource {
   PagedPreparation *paged_preparation = nullptr;
   bool paged = false;
   bool active = false;
+  int64_t termination_start = 0;
+  int64_t termination_end = 0;
+  int64_t termination_read_frame = 0;
+  int64_t entry_start = 0;
+  int64_t entry_end = 0;
+};
+
+// Reusable runtime (processor histories, instrument voices, fade progress)
+// lives in slots that outlive any one plan. A slot only moves
+//   free/initialized -> prepared -> active -> retired(epoch) -> free
+// and its generation advances when it is released, so a plan that still holds an
+// old (index, generation) pair is detectably stale.
+enum RuntimeSlotState : uint32_t {
+  kSlotFree = 0,
+  kSlotInitialized,
+  kSlotPrepared,
+  kSlotActive,
+  kSlotRetired,
+};
+
+struct RuntimeSlot {
+  // Core storage starts value-initialized, which is the initialized state.
+  std::atomic<uint32_t> state{kSlotInitialized};
+  std::atomic<uint32_t> generation{1};
+  std::atomic<uint64_t> retired_epoch{0};
+  // Deletion-fade progress. Only the callback writes it.
+  std::atomic<uint32_t> fade_elapsed{0};
 };
 
 struct GraphRevision {
@@ -129,9 +200,50 @@ struct GraphRevision {
     uint16_t count = 0;
   };
   uint32_t revision = 0;
+  // Counts of live entries, which every id lookup and validation sees. Ghosts
+  // (deleted nodes, their edges and processors that are still fading out) are
+  // appended after the live entries, are only rendered, and are never reported
+  // as live graph members.
   uint32_t node_count = 0;
   uint32_t edge_count = 0;
+  uint32_t ghost_node_count = 0;
+  uint32_t ghost_edge_count = 0;
+  uint32_t ghost_processor_count = 0;
+  // Frames a ghost needs to fade to silence, fixed when the plan is prepared.
+  uint32_t fade_frames = 0;
+  uint32_t minimum_latency = 0;
+  uint32_t latency_budget = 0;
+  uint32_t latency_raise = 0;
+  uint64_t latency_origin = 0;
+  uint64_t latency_end = 0;
+  struct ReadHead {
+    uint32_t previous_delay = 0;
+    uint32_t delay = 0;
+    uint32_t stopped_delay = 0;
+    uint64_t seam = 0;
+    uint32_t crossfade_frames = 0;
+  };
+  std::array<ReadHead, kMaximumGraphEdges> read_heads{};
   uint32_t master_index = kMaximumGraphNodes;
+  uint32_t total_node_count() const { return node_count + ghost_node_count; }
+  uint32_t total_edge_count() const { return edge_count + ghost_edge_count; }
+  // Each node (live or ghost) owns a node runtime slot holding its instrument
+  // voices and deletion-fade progress. Plans refer to it by (slot, generation).
+  std::array<uint16_t, kMaximumGraphNodes> node_slots{};
+  std::array<uint32_t, kMaximumGraphNodes> node_generations{};
+  std::array<std::array<uint16_t, 3>, kMaximumGraphNodes> tap_history_slots{};
+  std::array<std::array<bool, 3>, kMaximumLiveNodes> reset_tap_histories{};
+  std::array<std::array<bool, 3>, kMaximumGraphNodes> ghost_history_writers{};
+  // Slots of the previous plan that this plan neither keeps nor fades out;
+  // publish retires them.
+  struct SlotRef {
+    uint16_t index = 0;
+    uint32_t generation = 0;
+  };
+  uint32_t released_node_count = 0;
+  std::array<SlotRef, kMaximumGraphNodes> released_nodes{};
+  uint32_t released_processor_count = 0;
+  std::array<SlotRef, kMaximumGraphProcessors + kMaximumSpectralProcessors> released_processors{};
   std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes> nodes{};
   std::array<uint32_t, kMaximumGraphNodes> node_lookup{};
   std::array<daw_audio_graph_edge_descriptor, kMaximumGraphEdges> edges{};
@@ -140,6 +252,29 @@ struct GraphRevision {
   std::array<uint16_t, kMaximumGraphEdges> incoming_edge_indices{};
   std::array<Range, kMaximumGraphNodes> incoming_edge_ranges{};
   std::array<uint16_t, kMaximumGraphEdges> sidechain_edge_indices{};
+  // Sidechain edges only: the plan processor whose detector the edge feeds. A
+  // fading edge can feed a surviving processor or a fading one.
+  std::array<uint16_t, kMaximumGraphEdges> edge_target_processors{};
+  // Edges that replace a route through a deleted node: one plus the ghost node
+  // whose fade-out the edge fades in against (0 for every other edge).
+  std::array<uint16_t, kMaximumGraphEdges> edge_join_nodes{};
+  // Edges that carry on one of the published plan: a route it already had, or the
+  // ghost of one it drops. One plus that edge's index there (0 for every other
+  // edge): publish moves the edge from the gain it applied to its own.
+  std::array<uint16_t, kMaximumGraphEdges> edge_previous{};
+  // Nodes whose chain runs its surviving stages in a different order than the one
+  // they render now. Such a node dips: it keeps the old order while its output fades
+  // to nothing, then runs this plan's order while the output returns. A stage cannot
+  // render both orders at once, and at nothing the switch cannot be heard.
+  std::array<bool, kMaximumGraphNodes> node_reordered{};
+  // Where each processor of the published plan stands in this one (its own entry, or
+  // the ghost that fades it out), -1 when it is gone. Publish carries the order a
+  // dip keeps into this plan through it.
+  std::array<int16_t, kMaximumGraphProcessors> processor_remap{};
+  // A node that got a fresh slot while the published plan had one (a replaced
+  // instrument) names that predecessor by its index in the published plan, plus one:
+  // publish keeps the predecessor rendering beside it for the deletion fade.
+  std::array<uint16_t, kMaximumGraphNodes> node_replaces{};
   std::array<uint32_t, kMaximumGraphNodes> process_order{};
   struct Processor {
     uint64_t node_id = 0;
@@ -154,8 +289,6 @@ struct GraphRevision {
     uint32_t tail_frames = 0;
     uint32_t parameter_count = 0;
     std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS> parameter_targets{};
-    std::array<float, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS> live_parameter_values{};
-    std::array<bool, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS> live_parameter_valid{};
     uint32_t state_size = 0;
     std::array<uint8_t, DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES> state{};
     daw_audio_utility_state utility{};
@@ -178,10 +311,37 @@ struct GraphRevision {
     uint32_t delay_slot = kMaximumDelayProcessors;
     uint32_t reverb_slot = kMaximumReverbProcessors;
     uint32_t spectral_slot = kMaximumSpectralProcessors;
+    uint32_t generation = 0;
+    // A ghost keeps rendering a deleted processor while it fades out. One on a
+    // deleted node fades with that node; a detached one sits on a surviving
+    // node and crossfades back to the unprocessed signal.
+    bool ghost = false;
+    bool detached = false;
+    // Ghosts only: the plan processor that precedes this one in the chain it was
+    // deleted from (-1 when it headed the chain), so it renders in its old place.
+    int32_t chain_anchor = -1;
+    // A processor that got a fresh slot while replacing one of the same identity:
+    // the index of that predecessor in the plan being replaced (-1 when none). Publish
+    // hands its bypass position over on the callback side.
+    int32_t bypass_source = -1;
+    // Replacement stages share input, never an upstream execution.
+    int32_t spectral_predecessor = -1;
+    // Compensation may live beside a replacement stage, before retained
+    // downstream DSP, rather than solely in an outgoing edge read head.
+    uint32_t spectral_compensation = 0;
   };
+  uint32_t spectral_predecessor_count = 0;
+  std::array<Processor, kMaximumSpectralProcessors> spectral_predecessors{};
   uint32_t processor_count = 0;
+  uint32_t total_processor_count() const { return processor_count + ghost_processor_count; }
   std::array<Processor, kMaximumGraphProcessors> processors{};
   std::array<uint16_t, kMaximumGraphProcessors> processor_indices{};
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  // Control-prepared live-target indexes keep publication reconciliation
+  // logarithmic per queued event, independently of the processor chain order.
+  std::array<uint16_t, kMaximumLiveProcessors> scheduled_processor_lookup{};
+  std::array<uint16_t, kMaximumLiveNodes> scheduled_mixer_lookup{};
+#endif
   std::array<Range, kMaximumGraphNodes> processor_ranges{};
   std::array<Range, kMaximumGraphProcessors> sidechain_edge_ranges{};
 };
@@ -222,10 +382,12 @@ struct SaturatorHistory {
   BiquadHistory color_right{};
   float previous_left = 0.0F;
   float previous_right = 0.0F;
+  float bypass = 0.0F;
 };
 
 struct EqHistory {
   std::array<std::array<BiquadHistory, 2>, 8> bands{};
+  float bypass = 0.0F;
 };
 
 struct DynamicsHistory {
@@ -247,6 +409,7 @@ struct DynamicsHistory {
   float compressor_rms = 0.0F;
   float compressor_sc_low = 0.0F;
   float compressor_sc_band = 0.0F;
+  float bypass = 0.0F;
 };
 
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
@@ -282,7 +445,7 @@ bool initialize_native_graph_stages(NativeGraphHooks &hooks, const GraphRevision
   hooks.revision = graph.revision;
   hooks.stage_counts.fill(0);
   hooks.has_instrument_sources.fill(false);
-  for (uint32_t node_index = 0; node_index < graph.node_count; ++node_index) {
+  for (uint32_t node_index = 0; node_index < graph.total_node_count(); ++node_index) {
     uint32_t stage_count = 0;
     const GraphRevision::Range processor_range = graph.processor_ranges[node_index];
     const uint32_t processor_end = static_cast<uint32_t>(processor_range.start) + processor_range.count;
@@ -323,20 +486,22 @@ struct InstrumentVoice {
   bool released = false;
 };
 
+// A voice names its zone (an index into its own instrument's zones) and reads the
+// zone's end, loop, gain, pan and choke each frame. What it derives from the zone
+// once (the asset, the tuning increment, the start the playhead is offset from) is
+// kept beside the values it was derived from, so `follow_sample_zone` re-derives it
+// when they change.
 struct SampleVoice {
   uint64_t note_id = 0;
   uint32_t note = 0;
+  uint32_t zone = 0;
+  float velocity = 0.0F;
   daw_audio_asset_handle asset = 0;
+  uint32_t start_frame = 0;
+  uint32_t root_note = 0;
+  float tune_cents = 0.0F;
   double position = 0.0;
   double increment = 1.0;
-  uint32_t end_frame = 0;
-  uint32_t loop_start_frame = 0;
-  uint32_t loop_end_frame = 0;
-  uint32_t crossfade_frame_count = 0;
-  uint32_t playback_mode = DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT;
-  uint32_t choke_group = 0;
-  float gain = 0.0F;
-  float pan = 0.0F;
   float amp_level = 0.0F;
   float filter_level = 0.0F;
   uint32_t filter_stage = 0;
@@ -358,7 +523,20 @@ struct GranularGrain {
   bool active = false;
 };
 
+// Control-owned snapshots contain configuration only. Live parameter overrides
+// and all voice/grain/cursor state belong exclusively to InstrumentNodeState.
+struct InstrumentConfiguration {
+  daw_audio_synth_state synth{};
+  daw_audio_sampler_state sampler{};
+  std::array<daw_audio_sample_zone, DAW_AUDIO_CORE_MAX_SAMPLE_ZONES> zones{};
+  daw_audio_granular_state granular{};
+};
+
+// `synth`, `sampler`, `zones` and `granular` are what the instrument is set to (its
+// targets: a live event or a publish writes them). Render reads `applied`, which
+// moves toward them a little every frame, so a drag has no steps.
 struct InstrumentNodeState {
+  InstrumentConfiguration applied{};
   std::array<InstrumentVoice, kMaximumInstrumentVoices> voices{};
   daw_audio_synth_state synth{};
   bool sustain = false;
@@ -371,7 +549,9 @@ struct InstrumentNodeState {
   daw_audio_granular_state granular{};
   std::array<GranularGrain, DAW_AUDIO_CORE_MAX_GRANULAR_GRAINS> grains{};
   std::array<uint64_t, kMaximumInstrumentVoices> granular_note_ids{};
+  std::array<uint64_t, kMaximumInstrumentVoices> granular_note_ages{};
   uint32_t granular_note_count = 0;
+  uint64_t granular_next_note_age = 1;
   uint32_t granular_random_state = 1;
   double granular_next_frame = 0.0;
   float granular_frozen_position = -1.0F;
@@ -413,7 +593,19 @@ struct TimeEffectHistory {
 using DelayHistory = TimeEffectHistory<kMaximumTimeEffectDelayFrames>;
 using ReverbHistory = TimeEffectHistory<kMaximumReverbDelayFrames>;
 
+struct SpectralTransferMap {
+  struct Band {
+    uint32_t first = 0, last = 0;
+    float first_weight = 0, last_weight = 0, inner_weight = 0;
+  };
+  std::array<Band, kMaximumSpectralBins> bands{};
+  uint32_t before = 0, after = 0;
+  float level = 1;
+};
+
 struct SpectralHistory {
+  SpectralTransferMap transfer_map{};
+  std::array<std::array<float, kMaximumSpectralFftSize * 2>, 2> rendered{};
   std::array<std::array<float, kMaximumSpectralFftSize>, 2> input{};
   std::array<std::array<float, kMaximumSpectralFftSize>, 2> sidechain{};
   std::array<std::array<float, kMaximumSpectralFftSize * 2>, 2> output{};
@@ -424,6 +616,7 @@ struct SpectralHistory {
   std::array<std::array<float, kMaximumSpectralFftSize>, 2> side_imaginary{};
   std::array<std::array<float, kMaximumSpectralBins>, 2> frozen_magnitude{};
   std::array<std::array<float, kMaximumSpectralBins>, 2> frozen_phase{};
+  std::array<float, 2> wet_sample{};
   std::array<std::array<float, kMaximumSpectralBins>, 2> gate_gain{};
   std::array<std::array<float, kMaximumSpectralBins>, 2> noise_profile{};
   std::array<std::array<float, kMaximumSpectralBins>, 2> scratch{};
@@ -437,7 +630,26 @@ struct SpectralHistory {
   uint32_t write_index = 0;
   uint32_t samples_until_frame = 0;
   float bypass = 0.0F;
+  uint64_t warm_cursor = 0;
+  uint64_t freeze_source_deadline = 0;
+  uint32_t transition_elapsed = 0;
+  bool transition_started = false;
+  bool analysis_from_predecessor = false;
+  bool freeze_source_latched = false;
+  bool freeze_changed_after_latch = false;
+  bool persistent_state_transferred = false;
+  uint64_t state_serial = 0;
+  uint32_t state_mode = UINT32_MAX;
+  uint64_t prepared_state_serial = UINT64_MAX;
+  uint32_t prepared_state_mode = UINT32_MAX;
+  uint32_t prepared_state_fft_size = 0;
+  uint32_t analysis_frames = 0;
 };
+
+uint32_t spectral_warm_frames(const daw_audio_spectral_state &state) {
+  return state.fft_size * 2u + (state.mode == DAW_AUDIO_SPECTRAL_MODE_HPSS
+    ? (kSpectralHpssFrames - 1u) * (state.fft_size / state.overlap) : 0u);
+}
 
 struct AutoFilterChannelHistory {
   float ic1 = 0.0F;
@@ -485,11 +697,19 @@ struct Core {
   daw_audio_core_graph_validation_diagnostic graph_validation_diagnostic{};
   uint32_t prepared_revision = 0;
   uint32_t published_revision = 0;
+  uint32_t rejected_instrument_event_index = UINT32_MAX;
   ContinuityPreparationResult prepared_continuity = ContinuityPreparationResult::kAccepted;
+  std::array<int32_t, kMaximumLiveNodes> prepared_instrument_previous_nodes{};
   daw_audio_utility_state utility{};
   UtilityHistory utility_history{};
   bool utility_configured = false;
   std::array<AssetSlot, kMaximumAssets> assets{};
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  // 0 open, 1 awaiting final callback readers, 2 quiescent. Fixed capacity,
+  // disjoint from asset metadata so acknowledgement never races slot reuse.
+  std::array<std::atomic<uint64_t>, kMaximumAssets> asset_retirements{};
+  std::array<std::atomic<uint64_t>, kMaximumAssets> asset_retirement_epochs{};
+#endif
   daw_audio_paged_asset_config paged_config{
     .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
     .page_frames = DAW_AUDIO_CORE_WASM_PAGED_PAGE_FRAMES,
@@ -502,20 +722,42 @@ struct Core {
   uint64_t paged_access_sequence = 0;
   daw_audio_transport_state transport{};
   uint64_t last_event_sequence = 0;
-  std::array<std::array<SampleSource, kMaximumSampleSources>, 2> sample_source_tables{};
-  std::array<SampleSource, kMaximumSampleSources> *active_sample_sources = &sample_source_tables[0];
+  std::array<std::array<SampleSource, kSampleSourceSlots>, 2> sample_source_tables{};
+  std::array<SampleSource, kSampleSourceSlots> *active_sample_sources = &sample_source_tables[0];
   std::array<GraphRevision, 2> graph_slots{};
   GraphRevision *prepared_graph = &graph_slots[0];
   GraphRevision *published_graph = &graph_slots[1];
   std::unique_ptr<StagedProcessorStatePatch[]> staged_processor_state_patches{};
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-  NativeGraphHooks prepared_native_hooks{};
-  NativeGraphHooks published_native_hooks{};
+  std::array<NativeGraphHooks, 2> native_hook_banks{};
+  NativeGraphHooks *prepared_native_hooks = &native_hook_banks[0];
+  NativeGraphHooks *published_native_hooks = &native_hook_banks[1];
 #endif
-  std::array<std::array<std::array<float, kMaximumFramesPerBlock>, 2>, kMaximumGraphNodes> graph_buffers{};
   std::unique_ptr<float[]> graph_stage_buffers{};
-  std::array<std::array<std::array<float, kMaximumFramesPerBlock>, 2>, kMaximumGraphEdges> graph_delay_lines{};
-  std::array<uint32_t, kMaximumGraphEdges> graph_delay_cursors{};
+  // A history is shared by every edge reading the same pre-gain source tap.
+  // Zero-delay ghosts consume current-block stages. Delayed ghosts reserve
+  // only their actual readers, until the deletion fade and reader epoch finish.
+  static constexpr uint32_t kTapHistorySlots = kMaximumLiveNodes * 3u;
+  struct TapHistory {
+    uint64_t first_frame = 0;
+    uint64_t end_frame = 0;
+    std::size_t offset = 0;
+    uint32_t capacity = 0;
+  };
+  std::unique_ptr<float[]> graph_tap_storage{};
+  std::array<TapHistory, kTapHistorySlots> graph_tap_histories{};
+  uint64_t graph_write_frame = 0;
+  // Callback writes; control observes only these release/acquire snapshots.
+  std::atomic<uint64_t> completed_graph_frame{0};
+  std::atomic<uint32_t> latency_budget{0};
+  std::atomic<bool> transport_running{false};
+  std::atomic<uint32_t> latency_move_revision{0};
+  std::atomic<uint32_t> latency_completed_revision{0};
+  // Callback-owned translation keeps absolute prepared seams intact when the
+  // publication command reaches a later boundary than the prepare snapshot.
+  uint64_t latency_publication_shift = 0;
+  std::atomic<uint32_t> latency_shrunk_revision{0};
+  std::unique_ptr<GraphRevision[]> graph_prepare_scratch{};
   std::array<ProcessorHistorySlot, kMaximumGraphProcessors> processor_history_slots{};
   std::array<UtilityHistory, kMaximumGraphProcessors> utility_histories{};
   std::array<SaturatorHistory, kMaximumGraphProcessors> saturator_histories{};
@@ -524,26 +766,105 @@ struct Core {
   std::array<ModulationHistory, kMaximumGraphProcessors> modulation_histories{};
   std::array<DelayHistory, kMaximumDelayProcessors> delay_histories{};
   std::array<ReverbHistory, kMaximumReverbProcessors> reverb_histories{};
-  std::array<std::atomic<uint64_t>, kMaximumDelayProcessors> delay_slot_owners{};
-  std::array<std::atomic<uint64_t>, kMaximumReverbProcessors> reverb_slot_owners{};
   std::array<SpectralHistory, kMaximumSpectralProcessors> spectral_histories{};
+  SpectralHistory spectral_state_snapshot{};
+  // Callback-owned stage-input histories, including detector input. Separate
+  // from algorithm storage, so preparing/resetting a spare never touches a
+  // running stage. The longest finite mode window is HPSS: 69,632 frames
+  // at N=4096/overlap=2. 131,072 frames retain this plus reader slack.
+  struct SpectralInputHistory {
+    // Reserve address space at creation, but initialize/prefault the sample
+    // pages only when a spectral slot is admitted on control. A user-provided
+    // constructor intentionally leaves this float array uninitialized.
+    // Every concurrent access uses lock-free atomic_ref, including wraparound.
+    std::array<std::array<float, kSpectralInputFrames>, 4> samples;
+    SpectralInputHistory() noexcept {}
+    void initialize_samples() {
+      for (auto &plane : samples) plane.fill(0.0F);
+    }
+    float sample(uint32_t plane, uint32_t frame) {
+      return std::atomic_ref<float>(samples[plane][frame]).load(std::memory_order_relaxed);
+    }
+    void store(uint32_t plane, uint32_t frame, float value) {
+      std::atomic_ref<float>(samples[plane][frame]).store(value, std::memory_order_relaxed);
+    }
+    std::atomic<uint64_t> end{0};
+    struct PublishedState {
+      std::array<std::array<float, kMaximumSpectralBins>, 2> magnitude{}, phase{};
+      std::array<bool, 2> captured{};
+      uint64_t serial = 0;
+      uint32_t mode = UINT32_MAX;
+      uint32_t fft_size = 0;
+    };
+    // Three fixed banks: callback owns writer, control owns reader, and an
+    // atomic exchange hands over the latest complete snapshot. Neither waits.
+    std::array<PublishedState, 3> states{};
+    std::atomic<uint32_t> middle{1};
+    uint32_t writer = 0;
+    uint32_t reader = 2;
+    void publish(const SpectralHistory &history, uint32_t mode) {
+      auto &state = states[writer];
+      if (mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE) {
+        state.magnitude = history.frozen_magnitude;
+        state.phase = history.frozen_phase;
+      } else if (mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE) state.magnitude = history.noise_profile;
+      else if (mode == DAW_AUDIO_SPECTRAL_MODE_GATE) state.magnitude = history.gate_gain;
+      state.captured = history.freeze_captured;
+      state.serial = history.state_serial;
+      state.mode = mode;
+      state.fft_size = history.fft_size;
+      writer = middle.exchange(writer | 4u, std::memory_order_acq_rel) & 3u;
+    }
+    bool read(SpectralHistory &history, const daw_audio_spectral_state &config) {
+      if ((middle.load(std::memory_order_acquire) & 4u) != 0)
+        reader = middle.exchange(reader, std::memory_order_acq_rel) & 3u;
+      const auto &state = states[reader];
+      history.state_serial = 0;
+      if (state.serial == 0 || state.mode != config.mode || state.fft_size != config.fft_size) return false;
+      const auto mode = config.mode;
+      if (mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE) {
+        history.frozen_magnitude = state.magnitude;
+        history.frozen_phase = state.phase;
+      } else if (mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE) history.noise_profile = state.magnitude;
+      else if (mode == DAW_AUDIO_SPECTRAL_MODE_GATE) history.gate_gain = state.magnitude;
+      history.freeze_captured = state.captured;
+      history.state_serial = state.serial;
+      history.state_mode = state.mode;
+      history.fft_size = state.fft_size;
+      return true;
+    }
+  };
+  static_assert(std::atomic_ref<float>::is_always_lock_free);
+  static_assert(alignof(float) >= std::atomic_ref<float>::required_alignment);
+  static_assert(std::atomic<uint64_t>::is_always_lock_free);
+  std::array<SpectralInputHistory, kMaximumSpectralProcessors> spectral_inputs{};
   std::array<AutoFilterHistory, kMaximumGraphProcessors> autofilter_histories{};
   std::array<LoFiHistory, kMaximumGraphProcessors> lofi_histories{};
-  struct RetirementLane {
-    GraphRevision::Processor processor{};
-    std::atomic<uint32_t> remaining_frames = 0;
-    uint64_t generation = 0;
-    uint32_t source_delay_slot = kMaximumDelayProcessors;
-    uint32_t source_reverb_slot = kMaximumReverbProcessors;
+  // Ownership ledgers. Processor slot i guards every history array at index i
+  // plus the delay/reverb/spectral history named by the owner tables below
+  // (index + 1 of the owning processor slot, 0 when free; control-owned).
+  std::array<RuntimeSlot, kProcessorRuntimeSlots> processor_slots{};
+  std::array<uint32_t, kMaximumDelayProcessors> delay_slot_owners{};
+  std::array<uint32_t, kMaximumReverbProcessors> reverb_slot_owners{};
+  std::array<uint32_t, kMaximumSpectralProcessors> spectral_slot_owners{};
+  std::array<RuntimeSlot, kNodeRuntimeSlots> node_slots{};
+  // Manual parameter values the callback latched from events and parameter
+  // blocks, one table per processor slot. A table belongs to the slot, not to a
+  // plan: it outlives republishes and follows the processor into a ghost, and
+  // only reclaiming the slot (control thread, after its epoch) clears it.
+  struct ProcessorOverrides {
+    uint32_t count = 0;
+    std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS> targets{};
+    std::array<float, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS> values{};
   };
-  std::unique_ptr<std::array<RetirementLane, kMaximumRetirementLanes>[]> retirement_lane_slots{};
-  std::array<RetirementLane, kMaximumRetirementLanes> *prepared_retirement_lanes = nullptr;
-  std::array<RetirementLane, kMaximumRetirementLanes> *published_retirement_lanes = nullptr;
-  uint64_t retirement_generation = 0;
-  std::array<bool, kMaximumGraphProcessors> prepared_reset_history{};
-  std::array<bool, kMaximumDelayProcessors> prepared_reset_delay{};
-  std::array<bool, kMaximumReverbProcessors> prepared_reset_reverb{};
-  std::array<bool, kMaximumSpectralProcessors> prepared_reset_spectral{};
+  std::array<ProcessorOverrides, kProcessorRuntimeSlots> processor_overrides{};
+  // Process calls that finished. A retired slot is reusable only after the
+  // epoch it retired in has completed.
+  std::atomic<uint64_t> render_epoch{0};
+  std::atomic<uint32_t> stale_references{0};
+  uint32_t reclaimed_slots = 0;
+  // The prepared plan holds slots in the prepared state that rollback must return.
+  bool prepared_runtime_held = false;
   std::array<const daw_audio_processor_parameter_block *, kMaximumGraphProcessors> active_parameter_blocks{};
   std::array<uint32_t, kMaximumGraphProcessors> event_starts{};
   std::array<uint32_t, kMaximumGraphProcessors> event_ends{};
@@ -559,38 +880,104 @@ struct Core {
   std::array<std::array<bool, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS>, kMaximumGraphProcessors>
     resolved_parameter_valid{};
   std::array<bool, kMaximumGraphProcessors> parameter_cache_prepared{};
+  // The processor's override table, laid out by parameter index for this block.
+  std::array<std::array<float, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS>, kMaximumGraphProcessors>
+    override_parameter_values{};
+  std::array<std::array<bool, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS>, kMaximumGraphProcessors>
+    override_parameter_valid{};
   const daw_audio_processor_event *active_events = nullptr;
   uint32_t active_event_count = 0;
   const daw_audio_instrument_event *active_instrument_events = nullptr;
   uint32_t active_instrument_event_count = 0;
-  std::array<std::array<uint16_t, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS>, kMaximumGraphNodes> instrument_event_indices{};
+  std::array<std::array<uint16_t, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS>, kMaximumLiveNodes> instrument_event_indices{};
   std::array<uint16_t, kMaximumGraphNodes> instrument_event_counts{};
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-  std::array<std::array<daw_audio_instrument_event, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS>, kMaximumGraphNodes>
+  std::array<std::array<daw_audio_instrument_event, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS>, kMaximumLiveNodes>
     native_instrument_events{};
 #endif
-  std::array<uint16_t, kMaximumSampleSources> active_source_indices{};
+  std::array<uint16_t, kSampleSourceSlots> active_source_indices{};
   std::array<GraphRevision::Range, kMaximumGraphNodes> active_source_ranges{};
   GraphRevision::Range root_source_range{};
-  std::array<std::array<InstrumentNodeState, kMaximumGraphNodes>, 2> instrument_slots{};
-  std::array<InstrumentNodeState, kMaximumGraphNodes> *prepared_instruments = &instrument_slots[0];
-  std::array<InstrumentNodeState, kMaximumGraphNodes> *published_instruments = &instrument_slots[1];
-  std::array<std::array<InstrumentNodeState, kMaximumGraphNodes>, 2> instrument_config_slots{};
-  std::array<InstrumentNodeState, kMaximumGraphNodes> *prepared_instrument_configs = &instrument_config_slots[0];
-  std::array<InstrumentNodeState, kMaximumGraphNodes> *published_instrument_configs = &instrument_config_slots[1];
+  // Per block, where each ghost node's deletion fade starts (fade_frames once done).
+  std::array<uint32_t, kMaximumGraphNodes> node_fade_start{};
+  // Indexed by node runtime slot like the instrument runtime: where a node stands in
+  // the dip that carries it across a reorder of its stages. The output is `level`
+  // of the dip's half length (half a deletion fade). Fading out, the node renders
+  // `order` (processors of the published plan, in the order they ran before the
+  // edit) and `level` counts down to nothing; fading in, it renders the plan's own
+  // order and `level` counts up to the whole.
+  enum DipPhase : uint32_t { kDipNone = 0, kDipFadingOut, kDipFadingIn };
+  struct NodeDip {
+    uint32_t phase = kDipNone;
+    uint32_t level = 0;
+    uint32_t count = 0;
+    std::array<uint16_t, kMaximumNodeChain> order{};
+  };
+  std::array<NodeDip, kNodeRuntimeSlots> node_dips{};
+  // Where each layout fold of a node stands: 0 leaves the channels alone, 1 folds
+  // them to mono, and a change of layout moves it linearly over the deletion fade.
+  // [0] is the fold before the node's chain, [1] the fold after its fader.
+  struct NodeFold {
+    std::array<float, 2> level{};
+    bool seen = false;
+  };
+  std::array<NodeFold, kNodeRuntimeSlots> node_folds{};
+  // A replaced instrument keeps rendering its own voices in its old slot while the
+  // node's new one fades in. `partner` is that slot plus one (0 for none); the
+  // partner's own record chains the instrument it replaced in turn. `depth` is the
+  // length of the chain, which the control thread reads to refuse one too long.
+  struct NodeBlend {
+    uint16_t partner = 0;
+    uint32_t partner_generation = 0;
+    uint32_t elapsed = 0;
+    daw_audio_instrument_state_descriptor descriptor{};
+    std::atomic<uint32_t> depth{0};
+  };
+  std::array<NodeBlend, kNodeRuntimeSlots> node_blends{};
+  // Per node slot, the fader values a mixer event set, held until a later event,
+  // a publish of the node or an epoch change drops them (`mask` bit per target).
+  struct MixerLatch {
+    std::array<float, kMixerParameterCount> values{};
+    uint8_t mask = 0;
+  };
+  std::array<MixerLatch, kNodeRuntimeSlots> mixer_latches{};
+  // Per node slot, the per-channel gains the fader applied last, and the move a
+  // publish starts from them toward the plan's values.
+  struct MixerRamp {
+    std::array<float, 2> applied{};
+    std::array<float, 2> from{};
+    uint32_t elapsed = 0;
+    uint32_t frames = 0;
+    bool seen = false;
+  };
+  std::array<MixerRamp, kNodeRuntimeSlots> mixer_ramps{};
+  // Per edge of the published plan, by its index there: the gain a publish moved
+  // the edge from and how far it has come toward the plan's gain. Publish writes
+  // the other bank for the plan it publishes and flips `edge_ramp_bank`.
+  struct EdgeRamp {
+    float from = 0.0F;
+    uint32_t elapsed = 0;
+    uint32_t frames = 0;
+    bool seen = false;
+  };
+  std::array<std::array<EdgeRamp, kMaximumGraphEdges>, 2> edge_ramps{};
+  uint32_t edge_ramp_bank = 0;
+  // Per block, whether any fader is soloed at each frame (resolve_mixer_solo).
+  std::array<uint8_t, kMaximumFramesPerBlock> mixer_solo_frames{};
+  // Instrument runtime is indexed by node runtime slot, never by node position.
+  std::array<InstrumentNodeState, kNodeRuntimeSlots> instrument_runtime{};
+  std::array<std::array<InstrumentConfiguration, kMaximumLiveNodes>, 2> instrument_config_slots{};
+  std::array<InstrumentConfiguration, kMaximumLiveNodes> *prepared_instrument_configs = &instrument_config_slots[0];
+  std::array<InstrumentConfiguration, kMaximumLiveNodes> *published_instrument_configs = &instrument_config_slots[1];
 #if defined(DAW_AUDIO_CORE_USE_PERSISTENT_VALIDATION_SCRATCH)
-  std::array<InstrumentNodeState, kMaximumGraphNodes> proposed_instruments{};
+  std::array<InstrumentNodeState, kMaximumLiveNodes> proposed_instruments{};
 #endif
 };
 
 bool initialize_core_storage(Core &core) {
   core.staged_processor_state_patches.reset(new (std::nothrow) Core::StagedProcessorStatePatch[2]);
-  core.retirement_lane_slots.reset(
-    new (std::nothrow) std::array<Core::RetirementLane, kMaximumRetirementLanes>[2]);
-  if (core.staged_processor_state_patches == nullptr || core.retirement_lane_slots == nullptr) return false;
-  core.prepared_retirement_lanes = &core.retirement_lane_slots[0];
-  core.published_retirement_lanes = &core.retirement_lane_slots[1];
-  return true;
+  core.graph_prepare_scratch.reset(new (std::nothrow) GraphRevision[2]);
+  return core.staged_processor_state_patches != nullptr && core.graph_prepare_scratch != nullptr;
 }
 
 bool initialize_paged_storage(Core &core, const daw_audio_paged_asset_config &config) {
@@ -617,20 +1004,6 @@ bool initialize_paged_storage(Core &core, const daw_audio_paged_asset_config &co
   core.paged_preparations = std::move(preparations);
   core.paged_access_sequence = 0;
   return true;
-}
-
-void release_retirement_lane_slot(Core &core, const Core::RetirementLane &lane) {
-  if (lane.processor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY
-    && lane.source_delay_slot < kMaximumDelayProcessors) {
-    uint64_t expected_generation = lane.generation;
-    core.delay_slot_owners[lane.source_delay_slot].compare_exchange_strong(
-      expected_generation, 0, std::memory_order_acq_rel);
-  } else if (lane.processor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB
-    && lane.source_reverb_slot < kMaximumReverbProcessors) {
-    uint64_t expected_generation = lane.generation;
-    core.reverb_slot_owners[lane.source_reverb_slot].compare_exchange_strong(
-      expected_generation, 0, std::memory_order_acq_rel);
-  }
 }
 
 Core *to_core(daw_audio_core_handle handle) {
@@ -752,18 +1125,19 @@ bool paged_asset_is_referenced(const Core &core, daw_audio_asset_handle asset) {
       if (preparation.occupied && preparation.asset == asset) return true;
     }
   }
-  for (const auto *instruments : {core.published_instruments, core.prepared_instruments}) {
-    for (const InstrumentNodeState &instrument : *instruments) {
-      for (uint32_t index = 0; index < instrument.sampler.zone_count; ++index) {
-        if (instrument.zones[index].asset == asset) return true;
-      }
-      for (const SampleVoice &voice : instrument.sample_voices) {
-        if (voice.active && voice.asset == asset) return true;
-      }
-      if (instrument.granular.asset == asset && (instrument.granular_note_count > 0
-        || std::any_of(instrument.grains.begin(), instrument.grains.end(),
-          [](const GranularGrain &grain) { return grain.active; }))) return true;
+  for (uint32_t slot = 0; slot < kNodeRuntimeSlots; ++slot) {
+    const uint32_t state = core.node_slots[slot].state.load(std::memory_order_acquire);
+    if (state != kSlotPrepared && state != kSlotActive) continue;
+    const InstrumentNodeState &instrument = core.instrument_runtime[slot];
+    for (uint32_t index = 0; index < instrument.sampler.zone_count; ++index) {
+      if (instrument.zones[index].asset == asset) return true;
     }
+    for (const SampleVoice &voice : instrument.sample_voices) {
+      if (voice.active && voice.asset == asset) return true;
+    }
+    if (instrument.granular.asset == asset && (instrument.granular_note_count > 0
+      || std::any_of(instrument.grains.begin(), instrument.grains.end(),
+        [](const GranularGrain &grain) { return grain.active; }))) return true;
   }
   return false;
 }
@@ -901,10 +1275,8 @@ GraphRevision &configuration_graph(Core &core) {
   return core.prepared_revision != 0 ? (*core.prepared_graph) : (*core.published_graph);
 }
 
-std::array<InstrumentNodeState, kMaximumGraphNodes> &configuration_instruments(Core &core) {
-  return core.prepared_revision != 0
-    ? (*core.prepared_instruments)
-    : (*core.published_instruments);
+InstrumentNodeState &published_instrument(Core &core, uint32_t node_index) {
+  return core.instrument_runtime[(*core.published_graph).node_slots[node_index]];
 }
 
 bool valid_mixer_state(const daw_audio_mixer_state &mixer) {
@@ -997,29 +1369,99 @@ int32_t graph_node_index(const GraphRevision &graph, uint64_t id) {
   return graph.nodes[node_index].id == id ? static_cast<int32_t>(node_index) : -1;
 }
 
-bool processor_is_retirable(const GraphRevision &graph, const GraphRevision::Processor &processor) {
-  if (processor.kind != DAW_AUDIO_PROCESSOR_KIND_DELAY
-    && processor.kind != DAW_AUDIO_PROCESSOR_KIND_REVERB) return false;
-  const uint32_t range_index = processor.node_index;
-  if (range_index >= graph.node_count) return false;
-  const GraphRevision::Range range = graph.processor_ranges[range_index];
-  uint32_t final_processor = kMaximumGraphProcessors;
-  for (uint32_t position = range.start;
-    position < static_cast<uint32_t>(range.start) + range.count;
-    ++position) {
-    final_processor = graph.processor_indices[position];
+bool allocate_graph_stage_buffers(Core &core);
+
+// Topological order over live and ghost nodes together, signal and sidechain
+// edges alike: a key is always processed before the node it controls. False on a
+// cycle.
+bool order_graph_nodes(GraphRevision &graph) {
+  std::array<uint32_t, kMaximumGraphNodes> remaining{};
+  std::array<bool, kMaximumGraphNodes> ordered{};
+  const uint32_t node_total = graph.total_node_count();
+  const uint32_t edge_total = graph.total_edge_count();
+  for (uint32_t edge_index = 0; edge_index < edge_total; ++edge_index) {
+    ++remaining[graph.edge_target_indices[edge_index]];
   }
-  if (final_processor == kMaximumGraphProcessors
-    || final_processor != static_cast<uint32_t>(&processor - graph.processors.data())) return false;
-  const uint64_t node_id = graph.nodes[range_index].id;
-  for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
-    const auto &edge = graph.edges[edge_index];
-    if (edge.from_node_id == node_id && edge.sidechain != 0) return false;
+  for (uint32_t order_count = 0; order_count < node_total; ++order_count) {
+    uint32_t next = kMaximumGraphNodes;
+    for (uint32_t index = 0; index < node_total; ++index) {
+      if (!ordered[index] && remaining[index] == 0) {
+        next = index;
+        break;
+      }
+    }
+    if (next == kMaximumGraphNodes) return false;
+    ordered[next] = true;
+    graph.process_order[order_count] = next;
+    for (uint32_t edge_index = 0; edge_index < edge_total; ++edge_index) {
+      if (graph.edge_source_indices[edge_index] == next) --remaining[graph.edge_target_indices[edge_index]];
+    }
   }
   return true;
 }
 
-bool allocate_graph_stage_buffers(Core &core);
+// Edge and processor ranges in request order for live and ghost entries.
+void build_graph_ranges(GraphRevision &graph) {
+  const uint32_t node_total = graph.total_node_count();
+  const uint32_t edge_total = graph.total_edge_count();
+  const uint32_t processor_total = graph.total_processor_count();
+  graph.incoming_edge_ranges = {};
+  graph.processor_ranges = {};
+  graph.sidechain_edge_ranges = {};
+  for (uint32_t edge_index = 0; edge_index < edge_total; ++edge_index) {
+    if (graph.edges[edge_index].sidechain == 0) ++graph.incoming_edge_ranges[graph.edge_target_indices[edge_index]].count;
+  }
+  for (uint32_t processor_index = 0; processor_index < processor_total; ++processor_index) {
+    ++graph.processor_ranges[graph.processors[processor_index].node_index].count;
+  }
+  uint16_t incoming_start = 0;
+  uint16_t processor_start = 0;
+  for (uint32_t node_index = 0; node_index < node_total; ++node_index) {
+    graph.incoming_edge_ranges[node_index].start = incoming_start;
+    graph.processor_ranges[node_index].start = processor_start;
+    incoming_start = static_cast<uint16_t>(incoming_start + graph.incoming_edge_ranges[node_index].count);
+    processor_start = static_cast<uint16_t>(processor_start + graph.processor_ranges[node_index].count);
+  }
+  std::array<uint16_t, kMaximumGraphNodes> incoming_fill{};
+  std::array<uint16_t, kMaximumGraphNodes> processor_fill{};
+  for (uint32_t edge_index = 0; edge_index < edge_total; ++edge_index) {
+    if (graph.edges[edge_index].sidechain != 0) continue;
+    const uint32_t target = graph.edge_target_indices[edge_index];
+    graph.incoming_edge_indices[graph.incoming_edge_ranges[target].start + incoming_fill[target]++] =
+      static_cast<uint16_t>(edge_index);
+  }
+  for (uint32_t processor_index = 0; processor_index < graph.processor_count; ++processor_index) {
+    const uint32_t node_index = graph.processors[processor_index].node_index;
+    graph.processor_indices[graph.processor_ranges[node_index].start + processor_fill[node_index]++] =
+      static_cast<uint16_t>(processor_index);
+  }
+  // A ghost goes back where it stood in its chain: straight after the processor
+  // it followed, so every retained processor still runs once and in order.
+  // Ghosts are stored in their old chain order, so a ghost's anchor is placed
+  // before the ghost itself.
+  for (uint32_t processor_index = graph.processor_count; processor_index < processor_total; ++processor_index) {
+    const GraphRevision::Processor &ghost = graph.processors[processor_index];
+    uint16_t *chain = &graph.processor_indices[graph.processor_ranges[ghost.node_index].start];
+    uint32_t position = 0;
+    if (ghost.chain_anchor >= 0) {
+      while (chain[position] != ghost.chain_anchor) ++position;
+      ++position;
+    }
+    for (uint32_t end = processor_fill[ghost.node_index]++; end > position; --end) chain[end] = chain[end - 1];
+    chain[position] = static_cast<uint16_t>(processor_index);
+  }
+  uint16_t sidechain_edge_count = 0;
+  for (uint32_t processor_index = 0; processor_index < processor_total; ++processor_index) {
+    GraphRevision::Range &sidechain_range = graph.sidechain_edge_ranges[processor_index];
+    sidechain_range.start = sidechain_edge_count;
+    for (uint32_t edge_index = 0; edge_index < edge_total; ++edge_index) {
+      if (graph.edges[edge_index].sidechain != 0 && graph.edge_target_processors[edge_index] == processor_index) {
+        graph.sidechain_edge_indices[sidechain_edge_count++] = static_cast<uint16_t>(edge_index);
+        ++sidechain_range.count;
+      }
+    }
+  }
+}
 
 daw_audio_core_result prepare_graph_revision(
   Core &core,
@@ -1027,14 +1469,17 @@ daw_audio_core_result prepare_graph_revision(
   GraphRevision *out_graph) {
   core.graph_validation_diagnostic = {};
   if (!valid_abi(request.abi_version)) return DAW_AUDIO_CORE_UNSUPPORTED_VERSION;
-  if (request.graph_revision == 0 || request.node_count == 0 || request.node_count > kMaximumGraphNodes
-    || request.edge_count > kMaximumGraphEdges || request.nodes == nullptr
+  if (request.graph_revision == 0 || request.node_count == 0 || request.node_count > kMaximumLiveNodes
+    || request.edge_count > kMaximumLiveEdges || request.nodes == nullptr
     || (request.edge_count > 0 && request.edges == nullptr)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-  if (request.processor_count > kMaximumGraphProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  if (request.processor_count > kMaximumLiveProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
   if (request.processor_count > 0 && request.processors == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-  const auto next_graph = std::unique_ptr<GraphRevision>(new (std::nothrow) GraphRevision{});
-  if (!next_graph) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-  GraphRevision &graph = *next_graph;
+  GraphRevision &graph = core.graph_prepare_scratch[1];
+  // Reset directly in preallocated storage. `graph = {}` materializes a full
+  // graph temporary in debug builds and overflows macOS control-thread stacks.
+  // This is control-only placement construction, with no storage allocation.
+  std::destroy_at(&graph);
+  std::construct_at(&graph);
   graph.revision = request.graph_revision;
   graph.node_count = request.node_count;
   graph.edge_count = request.edge_count;
@@ -1042,9 +1487,11 @@ daw_audio_core_result prepare_graph_revision(
     const daw_audio_graph_node_descriptor node = request.nodes[index];
     if (node.id == 0 || !valid_graph_node_kind(node.kind) || !valid_graph_layout(node.input_layout)
       || !valid_graph_layout(node.output_layout) || !valid_instrument_descriptor(node) || !valid_mixer_state(node.mixer)
+      || node.keep_latency > 1
+      // A source's bus indexes the block's input buses, which process caps at kMaximumChannels.
       || (node.kind == DAW_AUDIO_GRAPH_NODE_SOURCE
         && node.input_bus != DAW_AUDIO_GRAPH_INPUT_BUS_DISCONNECTED
-        && node.input_bus >= core.config.max_channels)) {
+        && node.input_bus >= kMaximumChannels)) {
       return DAW_AUDIO_CORE_INVALID_ARGUMENT;
     }
     if (graph_node_index_linear(graph, node.id) >= 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
@@ -1060,62 +1507,6 @@ daw_audio_core_result prepare_graph_revision(
     return graph.nodes[left].id < graph.nodes[right].id;
   });
   std::array<uint32_t, kMaximumGraphNodes> processor_counts{};
-  std::array<bool, kMaximumGraphProcessors> history_slots_available{};
-  history_slots_available.fill(true);
-  std::array<bool, kMaximumDelayProcessors> delay_slots_available{};
-  std::array<bool, kMaximumReverbProcessors> reverb_slots_available{};
-  std::array<bool, kMaximumSpectralProcessors> spectral_slots_available{};
-  delay_slots_available.fill(true);
-  reverb_slots_available.fill(true);
-  spectral_slots_available.fill(true);
-  for (uint32_t current_index = 0; current_index < (*core.published_graph).processor_count; ++current_index) {
-    const GraphRevision::Processor &current = (*core.published_graph).processors[current_index];
-    bool retained = false;
-    for (uint32_t next_index = 0; next_index < request.processor_count; ++next_index) {
-      const daw_audio_processor_descriptor &next = request.processors[next_index];
-      if (next.instance_id == current.instance_id && next.kind == current.kind) {
-        retained = true;
-        break;
-      }
-    }
-    if (!retained) {
-      if (current.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY && current.delay_slot < kMaximumDelayProcessors) {
-        delay_slots_available[current.delay_slot] = !processor_is_retirable(
-          *core.published_graph,
-          current);
-      }
-      if (current.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB && current.reverb_slot < kMaximumReverbProcessors) {
-        reverb_slots_available[current.reverb_slot] = !processor_is_retirable(
-          *core.published_graph,
-          current);
-      }
-      if (current.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL && current.spectral_slot < kMaximumSpectralProcessors) {
-        spectral_slots_available[current.spectral_slot] = true;
-      }
-    } else {
-      history_slots_available[current.history_slot] = false;
-      if (current.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY && current.delay_slot < kMaximumDelayProcessors) {
-        delay_slots_available[current.delay_slot] = false;
-      }
-      if (current.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB && current.reverb_slot < kMaximumReverbProcessors) {
-        reverb_slots_available[current.reverb_slot] = false;
-      }
-      if (current.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL && current.spectral_slot < kMaximumSpectralProcessors) {
-        spectral_slots_available[current.spectral_slot] = false;
-      }
-    }
-  }
-  for (const auto &lane : *core.published_retirement_lanes) {
-    if (lane.remaining_frames.load(std::memory_order_acquire) == 0) continue;
-    if (lane.processor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY
-      && lane.source_delay_slot < kMaximumDelayProcessors) {
-      delay_slots_available[lane.source_delay_slot] = false;
-    }
-    if (lane.processor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB
-      && lane.source_reverb_slot < kMaximumReverbProcessors) {
-      reverb_slots_available[lane.source_reverb_slot] = false;
-    }
-  }
   for (uint32_t index = 0; index < request.processor_count; ++index) {
     const daw_audio_processor_descriptor &descriptor = request.processors[index];
     const int32_t node_index = graph_node_index(graph, descriptor.node_id);
@@ -1138,81 +1529,6 @@ daw_audio_core_result prepare_graph_revision(
     GraphRevision::Processor &processor = graph.processors[index];
     processor.node_index = static_cast<uint16_t>(node_index);
     processor.control_slot = index;
-    bool history_slot_assigned = false;
-    bool delay_slot_assigned = false;
-    bool reverb_slot_assigned = false;
-    bool spectral_slot_assigned = false;
-    for (uint32_t current_index = 0; current_index < (*core.published_graph).processor_count; ++current_index) {
-      const GraphRevision::Processor &current = (*core.published_graph).processors[current_index];
-      if (current.instance_id != descriptor.instance_id || current.kind != descriptor.kind) continue;
-      processor.history_slot = current.history_slot;
-      history_slots_available[processor.history_slot] = false;
-      history_slot_assigned = true;
-      if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY) {
-        processor.delay_slot = current.delay_slot;
-        delay_slots_available[processor.delay_slot] = false;
-        delay_slot_assigned = true;
-      } else if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB) {
-        processor.reverb_slot = current.reverb_slot;
-        reverb_slots_available[processor.reverb_slot] = false;
-        reverb_slot_assigned = true;
-      } else if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) {
-        processor.spectral_slot = current.spectral_slot;
-        spectral_slots_available[processor.spectral_slot] = false;
-        spectral_slot_assigned = true;
-      }
-      break;
-    }
-    if (!history_slot_assigned) {
-      for (uint32_t slot = 0; slot < kMaximumGraphProcessors; ++slot) {
-        if (history_slots_available[slot]) {
-          processor.history_slot = slot;
-          history_slots_available[slot] = false;
-          history_slot_assigned = true;
-          break;
-        }
-      }
-    }
-    if (!history_slot_assigned) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-    if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY) {
-      if (!delay_slot_assigned) {
-        for (uint32_t slot = 0; slot < kMaximumDelayProcessors; ++slot) {
-          if (delay_slots_available[slot]) {
-            processor.delay_slot = slot;
-            delay_slots_available[slot] = false;
-            delay_slot_assigned = true;
-            break;
-          }
-        }
-      }
-      if (!delay_slot_assigned) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-    }
-    if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB) {
-      if (!reverb_slot_assigned) {
-        for (uint32_t slot = 0; slot < kMaximumReverbProcessors; ++slot) {
-          if (reverb_slots_available[slot]) {
-            processor.reverb_slot = slot;
-            reverb_slots_available[slot] = false;
-            reverb_slot_assigned = true;
-            break;
-          }
-        }
-      }
-      if (!reverb_slot_assigned) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-    }
-    if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) {
-      if (!spectral_slot_assigned) {
-        for (uint32_t slot = 0; slot < kMaximumSpectralProcessors; ++slot) {
-          if (spectral_slots_available[slot]) {
-            processor.spectral_slot = slot;
-            spectral_slots_available[slot] = false;
-            spectral_slot_assigned = true;
-            break;
-          }
-        }
-      }
-      if (!spectral_slot_assigned) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-    }
     processor.node_id = descriptor.node_id;
     processor.instance_id = descriptor.instance_id;
     processor.kind = descriptor.kind;
@@ -1235,6 +1551,14 @@ daw_audio_core_result prepare_graph_revision(
     ++processor_counts[static_cast<uint32_t>(node_index)];
     ++graph.processor_count;
   }
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  for (uint32_t index = 0; index < graph.processor_count; ++index) graph.scheduled_processor_lookup[index] = index;
+  std::sort(graph.scheduled_processor_lookup.begin(), graph.scheduled_processor_lookup.begin() + graph.processor_count,
+    [&graph](uint16_t left, uint16_t right) { return graph.processors[left].instance_id < graph.processors[right].instance_id; });
+  for (uint32_t index = 0; index < graph.node_count; ++index) graph.scheduled_mixer_lookup[index] = index;
+  std::sort(graph.scheduled_mixer_lookup.begin(), graph.scheduled_mixer_lookup.begin() + graph.node_count,
+    [&graph](uint16_t left, uint16_t right) { return graph.nodes[left].mixer.instance_id < graph.nodes[right].mixer.instance_id; });
+#endif
   for (uint32_t node_index = 0; node_index < graph.node_count; ++node_index) {
     uint64_t chain_latency = 0;
     bool has_chain = false;
@@ -1251,7 +1575,6 @@ daw_audio_core_result prepare_graph_revision(
     if (has_chain && (chain_latency != graph.nodes[node_index].latency_frames
       || previous_layout != graph.nodes[node_index].output_layout)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }
-  std::array<uint32_t, kMaximumGraphNodes> incoming{};
   for (uint32_t index = 0; index < graph.edge_count; ++index) {
     const daw_audio_graph_edge_descriptor edge = request.edges[index];
     const int32_t from_index = graph_node_index(graph, edge.from_node_id);
@@ -1269,6 +1592,7 @@ daw_audio_core_result prepare_graph_revision(
         const GraphRevision::Processor &processor = graph.processors[processor_index];
         if (processor.instance_id == edge.target_processor_id) {
           target = &processor;
+          graph.edge_target_processors[index] = static_cast<uint16_t>(processor_index);
           break;
         }
       }
@@ -1277,12 +1601,12 @@ daw_audio_core_result prepare_graph_revision(
         return DAW_AUDIO_CORE_INVALID_ARGUMENT;
       }
     }
-    if (edge.pdc_delay_frames > kMaximumFramesPerBlock) {
+    if (edge.pdc_delay_frames > kMaximumGraphLatencyFrames) {
       core.graph_validation_diagnostic = {
         .code = DAW_AUDIO_CORE_GRAPH_VALIDATION_PDC_DELAY_EXCEEDS_RING_CAPACITY,
         .index = index,
         .actual = edge.pdc_delay_frames,
-        .limit = kMaximumFramesPerBlock,
+        .limit = kMaximumGraphLatencyFrames,
       };
       return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
     }
@@ -1292,47 +1616,8 @@ daw_audio_core_result prepare_graph_revision(
     graph.edges[index] = edge;
     graph.edge_source_indices[index] = static_cast<uint16_t>(from_index);
     graph.edge_target_indices[index] = static_cast<uint16_t>(to_index);
-    if (edge.sidechain == 0) ++incoming[static_cast<uint32_t>(to_index)];
   }
-  std::array<uint32_t, kMaximumGraphNodes> remaining = incoming;
-  uint32_t order_count = 0;
-  while (order_count < graph.node_count) {
-    uint32_t next = kMaximumGraphNodes;
-    for (uint32_t index = 0; index < graph.node_count; ++index) {
-      bool already_ordered = false;
-      for (uint32_t ordered = 0; ordered < order_count; ++ordered) {
-        if (graph.process_order[ordered] == index) {
-          already_ordered = true;
-          break;
-        }
-      }
-      if (!already_ordered && remaining[index] == 0) {
-        next = index;
-        break;
-      }
-    }
-    if (next == kMaximumGraphNodes) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-    graph.process_order[order_count++] = next;
-    for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
-      const daw_audio_graph_edge_descriptor &edge = graph.edges[edge_index];
-      if (edge.sidechain == 0 && edge.from_node_id == graph.nodes[next].id) {
-        const uint32_t target = graph.edge_target_indices[edge_index];
-        if (remaining[target] == 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-        --remaining[target];
-      }
-    }
-  }
-  for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
-    const daw_audio_graph_edge_descriptor &edge = graph.edges[edge_index];
-    if (edge.sidechain == 0) continue;
-    uint32_t source_order = graph.node_count;
-    uint32_t target_order = graph.node_count;
-    for (uint32_t order = 0; order < graph.node_count; ++order) {
-      if (graph.nodes[graph.process_order[order]].id == edge.from_node_id) source_order = order;
-      if (graph.nodes[graph.process_order[order]].id == edge.to_node_id) target_order = order;
-    }
-    if (source_order >= target_order) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-  }
+  if (!order_graph_nodes(graph)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   std::array<uint32_t, kMaximumGraphNodes> path_latency{};
   const auto effective_node_latency = [&graph](const uint32_t node_index) -> uint32_t {
     const auto &node = graph.nodes[node_index];
@@ -1361,6 +1646,15 @@ daw_audio_core_result prepare_graph_revision(
       return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
     }
     path_latency[node_index] = upstream_latency + node_latency;
+    if (path_latency[node_index] > kMaximumGraphLatencyFrames) {
+      core.graph_validation_diagnostic = {
+        .code = DAW_AUDIO_CORE_GRAPH_VALIDATION_PATH_LATENCY_EXCEEDS_PRODUCT_MAXIMUM,
+        .index = node_index,
+        .actual = path_latency[node_index],
+        .limit = kMaximumGraphLatencyFrames,
+      };
+      return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    }
     for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
       const daw_audio_graph_edge_descriptor &edge = graph.edges[edge_index];
       if (edge.sidechain != 0 || edge.to_node_id != graph.nodes[node_index].id) continue;
@@ -1370,53 +1664,11 @@ daw_audio_core_result prepare_graph_revision(
       if (edge.pdc_delay_frames != upstream_latency - arrival) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
     }
   }
-  uint16_t incoming_edge_count = 0;
-  uint16_t processor_index_count = 0;
-  for (uint32_t node_index = 0; node_index < graph.node_count; ++node_index) {
-    GraphRevision::Range &edge_range = graph.incoming_edge_ranges[node_index];
-    edge_range.start = incoming_edge_count;
-    for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
-      if (graph.edges[edge_index].sidechain == 0 && graph.edge_target_indices[edge_index] == node_index) {
-        graph.incoming_edge_indices[incoming_edge_count++] = static_cast<uint16_t>(edge_index);
-        ++edge_range.count;
-      }
-    }
-    GraphRevision::Range &processor_range = graph.processor_ranges[node_index];
-    processor_range.start = processor_index_count;
-    for (uint32_t processor_index = 0; processor_index < graph.processor_count; ++processor_index) {
-      if (graph.processors[processor_index].node_index == node_index) {
-        graph.processor_indices[processor_index_count++] = static_cast<uint16_t>(processor_index);
-        ++processor_range.count;
-      }
-    }
-  }
-  uint16_t sidechain_edge_count = 0;
-  for (uint32_t processor_index = 0; processor_index < graph.processor_count; ++processor_index) {
-    GraphRevision::Range &sidechain_range = graph.sidechain_edge_ranges[processor_index];
-    sidechain_range.start = sidechain_edge_count;
-    for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
-      if (graph.edges[edge_index].sidechain != 0
-        && graph.edges[edge_index].target_processor_id == graph.processors[processor_index].instance_id) {
-        graph.sidechain_edge_indices[sidechain_edge_count++] = static_cast<uint16_t>(edge_index);
-        ++sidechain_range.count;
-      }
-    }
-  }
-  if (!allocate_graph_stage_buffers(core)) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  build_graph_ranges(graph);
+  graph.minimum_latency = path_latency[graph.master_index];
+  if (!core.graph_stage_buffers) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
   *out_graph = graph;
   return DAW_AUDIO_CORE_OK;
-}
-
-bool has_pdc_change(const GraphRevision &current, const GraphRevision &next) {
-  if (current.revision == 0) return false;
-  for (uint32_t next_index = 0; next_index < next.edge_count; ++next_index) {
-    const daw_audio_graph_edge_descriptor &next_edge = next.edges[next_index];
-    for (uint32_t current_index = 0; current_index < current.edge_count; ++current_index) {
-      const daw_audio_graph_edge_descriptor &current_edge = current.edges[current_index];
-      if (current_edge.id == next_edge.id && current_edge.pdc_delay_frames != next_edge.pdc_delay_frames) return true;
-    }
-  }
-  return false;
 }
 
 bool valid_utility_state(const daw_audio_utility_state &state) {
@@ -1891,8 +2143,8 @@ void resolve_processor_parameter_frame(
     core.event_parameter_valid[slot][index] = true;
   }
   for (uint32_t index = 0; index < processor.parameter_count; ++index) {
-    bool valid = processor.live_parameter_valid[index];
-    float value = processor.live_parameter_values[index];
+    bool valid = core.override_parameter_valid[slot][index];
+    float value = core.override_parameter_values[slot][index];
     const uint32_t block_parameter = core.parameter_block_indices[slot][index];
     if (parameters != nullptr && block_parameter < parameters->parameter_count) {
       value = parameters->values[block_parameter * parameters->frame_count
@@ -1915,6 +2167,17 @@ void prepare_processor_parameter_cache(
   core.parameter_event_cursors[slot] = core.event_starts[slot];
   core.event_parameter_valid[slot].fill(false);
   core.resolved_parameter_valid[slot].fill(false);
+  core.override_parameter_valid[slot].fill(false);
+  const Core::ProcessorOverrides &overrides = core.processor_overrides[processor.history_slot];
+  for (uint32_t entry = 0; entry < overrides.count; ++entry) {
+    const auto parameter_begin = processor.parameter_targets.begin();
+    const auto parameter_end = parameter_begin + processor.parameter_count;
+    const auto target = std::lower_bound(parameter_begin, parameter_end, overrides.targets[entry]);
+    if (target == parameter_end || *target != overrides.targets[entry]) continue;
+    const auto index = static_cast<size_t>(target - parameter_begin);
+    core.override_parameter_values[slot][index] = overrides.values[entry];
+    core.override_parameter_valid[slot][index] = true;
+  }
   core.parameter_block_indices[slot].fill(
     static_cast<uint8_t>(DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS));
   const daw_audio_processor_parameter_block *parameters = core.active_parameter_blocks[slot];
@@ -1932,126 +2195,161 @@ void prepare_processor_parameter_cache(
   core.parameter_cache_prepared[slot] = true;
 }
 
-void materialize_latched_time_effect_state(
-  GraphRevision::Processor &processor,
-  uint32_t sample_rate_hz) {
-  if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY) {
-    for (uint32_t index = 0; index < processor.parameter_count; ++index) {
-      if (!processor.live_parameter_valid[index]) continue;
-      const uint32_t target = processor.parameter_targets[index];
-      const float value = processor.live_parameter_values[index];
-      if (target == DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_MS) processor.delay.delay_ms = value;
-      else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_FEEDBACK) processor.delay.feedback = value;
-      else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_DRY_WET) processor.delay.dry_wet = value;
-      else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_LOW_CUT_HZ) processor.delay.low_cut_hz = value;
-      else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_HIGH_CUT_HZ) processor.delay.high_cut_hz = value;
-    }
-    processor.tail_frames = 0;
-    if (processor.delay.enabled != 0 && processor.delay.dry_wet != 0.0F) {
-      const double feedback = std::max(static_cast<double>(processor.delay.feedback), 1e-6);
-      const double repeats = std::max(1.0, std::ceil(std::log(1e-4) / std::log(feedback)));
-      const double frames = std::ceil(
-        static_cast<double>(processor.delay.delay_ms)
-        * static_cast<double>(sample_rate_hz) / 1000.0
-        * repeats);
-      const double maximum = static_cast<double>(sample_rate_hz) * kMaximumRetirementSeconds;
-      processor.tail_frames = static_cast<uint32_t>(std::min(frames, maximum));
-    }
-    return;
-  }
-  if (processor.kind != DAW_AUDIO_PROCESSOR_KIND_REVERB) return;
-  for (uint32_t index = 0; index < processor.parameter_count; ++index) {
-    if (!processor.live_parameter_valid[index]) continue;
-    const uint32_t target = processor.parameter_targets[index];
-    const float value = processor.live_parameter_values[index];
-    if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_WET) processor.reverb.wet = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_PRE_DELAY_MS) processor.reverb.pre_delay_ms = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_LOW_CUT_HZ) processor.reverb.low_cut_hz = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_HIGH_CUT_HZ) processor.reverb.high_cut_hz = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_STEREO_WIDTH) processor.reverb.stereo_width = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DECAY_SEC) processor.reverb.decay_sec = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_REFLECTIONS) processor.reverb.reflections = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_REFLECTION_MOD_AMOUNT_MS) processor.reverb.reflection_mod_amount_ms = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_REFLECTION_MOD_RATE_HZ) processor.reverb.reflection_mod_rate_hz = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_REFLECTION_SHAPE) processor.reverb.reflection_shape = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSE) processor.reverb.diffuse = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_SIZE) processor.reverb.size = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION) processor.reverb.diffusion = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DENSITY) processor.reverb.density = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION_LOW_CUT_HZ) processor.reverb.diffusion_low_cut_hz = value;
-    else if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION_HIGH_CUT_HZ) processor.reverb.diffusion_high_cut_hz = value;
-  }
-  processor.tail_frames = processor.reverb.enabled == 0 || processor.reverb.wet == 0.0F
-    ? 0
-    : static_cast<uint32_t>(std::min(
-      std::ceil((static_cast<double>(processor.reverb.pre_delay_ms) / 1000.0
-        + static_cast<double>(processor.reverb.decay_sec)) * static_cast<double>(sample_rate_hz)),
-      static_cast<double>(sample_rate_hz) * kMaximumRetirementSeconds));
-}
-
+// Callback. A plan's processor reaches its override table through the runtime
+// slot it owns, so a retained processor keeps its values across republishes.
 void latch_processor_parameter_values(Core &core) {
-  for (uint32_t processor_index = 0; processor_index < (*core.published_graph).processor_count; ++processor_index) {
-    GraphRevision::Processor &processor = (*core.published_graph).processors[processor_index];
+  const GraphRevision &graph = *core.published_graph;
+  for (uint32_t processor_index = 0; processor_index < graph.processor_count; ++processor_index) {
+    const GraphRevision::Processor &processor = graph.processors[processor_index];
     const uint32_t slot = processor.control_slot;
     if (!core.parameter_cache_prepared[slot]) continue;
+    Core::ProcessorOverrides &overrides = core.processor_overrides[processor.history_slot];
     for (uint32_t index = 0; index < processor.parameter_count; ++index) {
       if (!core.resolved_parameter_valid[slot][index]) continue;
-      processor.live_parameter_values[index] = core.resolved_parameter_values[slot][index];
-      processor.live_parameter_valid[index] = true;
+      const uint32_t target = processor.parameter_targets[index];
+      uint32_t entry = 0;
+      while (entry < overrides.count && overrides.targets[entry] != target) ++entry;
+      if (entry == overrides.count) {
+        if (entry < DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS) {
+          ++overrides.count;
+        } else {
+          // Full of targets earlier plans declared: this plan declares at most
+          // the table size and this target is missing from it, so one entry is stale.
+          const auto declared_begin = processor.parameter_targets.begin();
+          const auto declared_end = declared_begin + processor.parameter_count;
+          entry = 0;
+          while (std::binary_search(declared_begin, declared_end, overrides.targets[entry])) ++entry;
+        }
+        overrides.targets[entry] = target;
+      }
+      overrides.values[entry] = core.resolved_parameter_values[slot][index];
     }
   }
 }
 
-float mixer_parameter_value(
-  const Core &core,
-  uint64_t instance_id,
-  uint32_t target,
-  uint32_t frame,
-  float fallback) {
-  float value = fallback;
-  for (uint32_t index = 0; index < core.active_event_count; ++index) {
-    const daw_audio_processor_event &event = core.active_events[index];
-    if (event.processor_instance_id == instance_id && event.parameter_target == target && event.frame_offset <= frame) {
-      value = event.value;
+// One node's fader across one block. Events are sorted by instance, then offset
+// (bind_process_transport), so a fader's events are one run that the block walks
+// once, from what the slot latched (else the descriptor). Every event at or before
+// a frame applies to it, equal offsets last-wins.
+struct MixerBlock {
+  uint32_t slot = 0;
+  bool active = false;
+  uint8_t written = 0;
+  std::array<float, kMixerParameterCount> values{};
+  const daw_audio_processor_event *next = nullptr;
+  const daw_audio_processor_event *end = nullptr;
+};
+
+constexpr uint32_t mixer_value_index(uint32_t target) {
+  return target - DAW_AUDIO_MIXER_PARAMETER_GAIN;
+}
+
+MixerBlock begin_mixer_block(const Core &core, const daw_audio_mixer_state &mixer, uint32_t slot) {
+  MixerBlock block{.slot = slot, .active = mixer.instance_id != 0};
+  if (!block.active) return block;
+  block.values = {mixer.gain, mixer.pan, mixer.muted == 0 ? 0.0F : 1.0F, mixer.soloed == 0 ? 0.0F : 1.0F};
+  const Core::MixerLatch &latch = core.mixer_latches[slot];
+  for (uint32_t index = 0; index < kMixerParameterCount; ++index) {
+    if ((latch.mask & (1u << index)) != 0) block.values[index] = latch.values[index];
+  }
+  const daw_audio_processor_event *events_end = core.active_events + core.active_event_count;
+  block.next = std::lower_bound(core.active_events, events_end, mixer.instance_id,
+    [](const daw_audio_processor_event &event, uint64_t id) { return event.processor_instance_id < id; });
+  block.end = std::upper_bound(block.next, events_end, mixer.instance_id,
+    [](uint64_t id, const daw_audio_processor_event &event) { return id < event.processor_instance_id; });
+  return block;
+}
+
+void advance_mixer_block(MixerBlock &mixer, uint32_t frame) {
+  for (; mixer.next != mixer.end && mixer.next->frame_offset <= frame; ++mixer.next) {
+    const uint32_t index = mixer_value_index(mixer.next->parameter_target);
+    if (index >= kMixerParameterCount) continue;
+    mixer.values[index] = mixer.next->value;
+    mixer.written = static_cast<uint8_t>(mixer.written | (1u << index));
+  }
+}
+
+// Callback, after a node's block: what its events set holds for later blocks.
+void latch_mixer_block(Core &core, const MixerBlock &mixer) {
+  Core::MixerLatch &latch = core.mixer_latches[mixer.slot];
+  for (uint32_t index = 0; index < kMixerParameterCount; ++index) {
+    if ((mixer.written & (1u << index)) != 0) latch.values[index] = mixer.values[index];
+  }
+  latch.mask = static_cast<uint8_t>(latch.mask | mixer.written);
+}
+
+// Whether any live node's fader is soloed, per frame of the block, into
+// mixer_solo_frames. False, writing nothing, when none is soloed in the block.
+bool resolve_mixer_solo(Core &core, const GraphRevision &graph, uint32_t frame_count) {
+  bool soloed = false;
+  for (uint32_t node = 0; node < graph.node_count; ++node) {
+    MixerBlock mixer = begin_mixer_block(core, graph.nodes[node].mixer, graph.node_slots[node]);
+    for (uint32_t frame = 0; mixer.active && frame < frame_count;) {
+      advance_mixer_block(mixer, frame);
+      const uint32_t until = mixer.next == mixer.end ? frame_count : mixer.next->frame_offset;
+      if (mixer.values[mixer_value_index(DAW_AUDIO_MIXER_PARAMETER_SOLO)] == 1.0F) {
+        if (!soloed) std::fill_n(core.mixer_solo_frames.begin(), frame_count, uint8_t{0});
+        soloed = true;
+        std::fill(core.mixer_solo_frames.begin() + frame, core.mixer_solo_frames.begin() + until, uint8_t{1});
+      }
+      frame = until;
     }
   }
-  return value;
+  return soloed;
 }
 
-bool mixer_solo_active(const Core &core, uint32_t frame) {
-  for (uint32_t index = 0; index < (*core.published_graph).node_count; ++index) {
-    const daw_audio_mixer_state &mixer = (*core.published_graph).nodes[index].mixer;
-    if (mixer.instance_id != 0
-      && mixer_parameter_value(core, mixer.instance_id, DAW_AUDIO_MIXER_PARAMETER_SOLO, frame,
-        mixer.soloed == 0 ? 0.0F : 1.0F) == 1.0F) return true;
-  }
-  return false;
-}
-
-void apply_mixer_frame(const Core &core, const daw_audio_mixer_state &mixer, uint32_t frame,
+// One frame of a fader. A publish that changed what a retained node applies moves
+// its gains there over the plan's fade (begin_mixer_ramps); otherwise they follow
+// the values at once.
+void apply_mixer_frame(Core &core, MixerBlock &mixer, uint32_t frame, bool solo_active,
   float *left, float *right) {
-  if (mixer.instance_id == 0) return;
-  const float muted = mixer_parameter_value(core, mixer.instance_id, DAW_AUDIO_MIXER_PARAMETER_MUTE, frame,
-    mixer.muted == 0 ? 0.0F : 1.0F);
-  const float soloed = mixer_parameter_value(core, mixer.instance_id, DAW_AUDIO_MIXER_PARAMETER_SOLO, frame,
-    mixer.soloed == 0 ? 0.0F : 1.0F);
-  if (muted == 1.0F || (mixer_solo_active(core, frame) && soloed != 1.0F)) {
+  if (!mixer.active) return;
+  advance_mixer_block(mixer, frame);
+  const bool silent = mixer.values[mixer_value_index(DAW_AUDIO_MIXER_PARAMETER_MUTE)] == 1.0F
+    || (solo_active && mixer.values[mixer_value_index(DAW_AUDIO_MIXER_PARAMETER_SOLO)] != 1.0F);
+  std::array<float, 2> gains{};
+  if (!silent) {
+    const float gain = mixer.values[mixer_value_index(DAW_AUDIO_MIXER_PARAMETER_GAIN)];
+    const float pan = mixer.values[mixer_value_index(DAW_AUDIO_MIXER_PARAMETER_PAN)];
+    gains = {std::min(1.0F, 1.0F - pan) * gain, std::min(1.0F, 1.0F + pan) * gain};
+  }
+  Core::MixerRamp &ramp = core.mixer_ramps[mixer.slot];
+  ramp.seen = true;
+  if (ramp.elapsed < ramp.frames) {
+    const float progress = static_cast<float>(++ramp.elapsed) / static_cast<float>(ramp.frames);
+    for (uint32_t channel = 0; channel < 2; ++channel) {
+      gains[channel] = ramp.from[channel] + (gains[channel] - ramp.from[channel]) * progress;
+    }
+  } else if (silent) {
+    ramp.applied = gains;
     *left = 0.0F;
     *right = 0.0F;
     return;
   }
-  const float gain = mixer_parameter_value(core, mixer.instance_id, DAW_AUDIO_MIXER_PARAMETER_GAIN, frame, mixer.gain);
-  const float pan = mixer_parameter_value(core, mixer.instance_id, DAW_AUDIO_MIXER_PARAMETER_PAN, frame, mixer.pan);
-  const float left_gain = std::min(1.0F, 1.0F - pan) * gain;
-  const float right_gain = std::min(1.0F, 1.0F + pan) * gain;
-  *left *= left_gain;
-  *right *= right_gain;
+  ramp.applied = gains;
+  *left *= gains[0];
+  *right *= gains[1];
 }
 
 float clamp_bypass_step(float current, float target, float step) {
   if (target > current + step) return current + step;
   if (target < current - step) return current - step;
   return target;
+}
+
+// The one bypass transition every processor kind shares: a 10 ms linear move of
+// `level` between the processed signal (0) and the dry one (1). The processor keeps
+// running underneath, so un-bypassing continues its state rather than restarting it.
+float advance_bypass(const Core &core, float &level, bool bypassed) {
+  const uint32_t frames = (core.config.sample_rate_hz + 50u) / 100u;
+  level = clamp_bypass_step(level, bypassed ? 1.0F : 0.0F, 1.0F / static_cast<float>(frames == 0 ? 1u : frames));
+  return level;
+}
+
+float bypass_mix(float processed, float dry, float level) {
+  if (level <= 0.0F) return processed;
+  if (level >= 1.0F) return dry;
+  return processed + (dry - processed) * level;
 }
 
 void process_utility_frame(
@@ -2129,11 +2427,9 @@ void process_utility_frame(
     history.dc_x1_left = history.dc_x1_right = history.dc_y1_left = history.dc_y1_right = 0.0F;
   }
 
-  const uint32_t bypass_frames = (core.config.sample_rate_hz + 50u) / 100u;
-  const float bypass_step = 1.0F / static_cast<float>(bypass_frames == 0 ? 1u : bypass_frames);
-  history.bypass = clamp_bypass_step(history.bypass, state.enabled != 0 ? 0.0F : 1.0F, bypass_step);
-  *left_output = left + (sanitized_dry_left - left) * history.bypass;
-  *right_output = right + (sanitized_dry_right - right) * history.bypass;
+  advance_bypass(core, history.bypass, state.enabled == 0 || (processor != nullptr && processor->bypassed != 0));
+  *left_output = bypass_mix(left, sanitized_dry_left, history.bypass);
+  *right_output = bypass_mix(right, sanitized_dry_right, history.bypass);
 }
 
 void render_utility_processor(
@@ -2239,7 +2535,6 @@ float render_saturator_channel(
   state.output_db = processor_parameter_value(core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_OUTPUT_DB, frame, state.output_db);
   state.dry_wet = processor_parameter_value(core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET, frame, state.dry_wet);
   const float dry = std::isfinite(input) ? input : 0.0F;
-  if (processor.bypassed != 0 || state.enabled == 0) return dry;
   const float drive = std::pow(10.0F, state.drive_db / 20.0F);
   const BiquadCoefficients color = rbj_coefficients(DAW_AUDIO_EQ_BAND_PEAKING, state.color_frequency_hz, 0.8F,
     state.color != 0 ? state.color_amount * 12.0F : 0.0F, core.config.sample_rate_hz);
@@ -2257,8 +2552,11 @@ void render_saturator_processor(
   Core &core, GraphRevision::Processor &processor, uint32_t frame,
   float input_left, float input_right, float, float, float *output_left, float *output_right) {
   SaturatorHistory &history = core.saturator_histories[processor.history_slot];
-  *output_left = render_saturator_channel(core, processor, frame, input_left, &history.previous_left, history.color_left);
-  *output_right = render_saturator_channel(core, processor, frame, input_right, &history.previous_right, history.color_right);
+  const float wet_left = render_saturator_channel(core, processor, frame, input_left, &history.previous_left, history.color_left);
+  const float wet_right = render_saturator_channel(core, processor, frame, input_right, &history.previous_right, history.color_right);
+  advance_bypass(core, history.bypass, processor.bypassed != 0 || processor.saturator.enabled == 0);
+  *output_left = bypass_mix(wet_left, std::isfinite(input_left) ? input_left : 0.0F, history.bypass);
+  *output_right = bypass_mix(wet_right, std::isfinite(input_right) ? input_right : 0.0F, history.bypass);
 }
 
 void render_eq_processor(
@@ -2267,9 +2565,8 @@ void render_eq_processor(
   EqHistory &history = core.eq_histories[processor.history_slot];
   float left = std::isfinite(input_left) ? input_left : 0.0F;
   float right = std::isfinite(input_right) ? input_right : 0.0F;
-  if (processor.bypassed != 0 || processor.eq.enabled == 0) {
-    *output_left = left; *output_right = right; return;
-  }
+  const float dry_left = left;
+  const float dry_right = right;
   if (processor.eq.mono != 0) left = right = 0.5F * (left + right);
   for (uint32_t index = 0; index < 8; ++index) {
     const daw_audio_eq_band_state &band = processor.eq.bands[index];
@@ -2285,8 +2582,9 @@ void render_eq_processor(
     left = process_biquad(left, coefficients, history.bands[index][0]);
     right = process_biquad(right, coefficients, history.bands[index][1]);
   }
-  *output_left = std::isfinite(left) ? left : 0.0F;
-  *output_right = std::isfinite(right) ? right : 0.0F;
+  advance_bypass(core, history.bypass, processor.bypassed != 0 || processor.eq.enabled == 0);
+  *output_left = bypass_mix(std::isfinite(left) ? left : 0.0F, dry_left, history.bypass);
+  *output_right = bypass_mix(std::isfinite(right) ? right : 0.0F, dry_right, history.bypass);
 }
 
 float autofilter_lfo(uint32_t waveform, float phase) {
@@ -2384,9 +2682,7 @@ void render_autofilter_processor(
   AutoFilterHistory &history = core.autofilter_histories[processor.history_slot];
   const float left = std::isfinite(input_left) ? input_left : 0.0F;
   const float right = std::isfinite(input_right) ? input_right : 0.0F;
-  const float bypass_step = 1.0F / std::fmax(1.0F, std::round(0.01F * static_cast<float>(core.config.sample_rate_hz)));
-  const float target_bypass = processor.bypassed != 0 || processor.autofilter.enabled == 0 ? 1.0F : 0.0F;
-  history.bypass = clamp_bypass_step(history.bypass, target_bypass, bypass_step);
+  advance_bypass(core, history.bypass, processor.bypassed != 0 || processor.autofilter.enabled == 0);
   const float processed_left = render_autofilter_channel(core, processor, history.channels[0], 0, frame, left);
   const float processed_right = render_autofilter_channel(core, processor, history.channels[1], 1, frame, right);
   const float mixed_left = std::isfinite(processed_left) ? processed_left + (left - processed_left) * history.bypass : 0.0F;
@@ -2472,12 +2768,7 @@ void render_lofi_processor(
     if (channel_index == 0) *output_left = processed;
     else *output_right = processed;
   }
-  const uint32_t bypass_frames = (core.config.sample_rate_hz + 50u) / 100u;
-  const float bypass_step = 1.0F / static_cast<float>(bypass_frames == 0 ? 1u : bypass_frames);
-  history.bypass = clamp_bypass_step(
-    history.bypass,
-    processor.bypassed != 0 || state.enabled == 0 ? 1.0F : 0.0F,
-    bypass_step);
+  advance_bypass(core, history.bypass, processor.bypassed != 0 || state.enabled == 0);
   *output_left = std::isfinite(*output_left)
     ? *output_left + (dry_left - *output_left) * history.bypass : dry_left;
   *output_right = std::isfinite(*output_right)
@@ -2617,8 +2908,7 @@ void render_modulation_processor(
   if (!std::isfinite(left) || !std::isfinite(right)) {
     left = right = 0.0F; history.feedback_left = history.feedback_right = 0.0F;
   }
-  const float target_bypass = !enabled || processor.bypassed != 0 ? 1.0F : 0.0F;
-  history.bypass = clamp_bypass_step(history.bypass, target_bypass, 1.0F / std::fmax(1.0F, std::round(0.01F * static_cast<float>(core.config.sample_rate_hz))));
+  advance_bypass(core, history.bypass, !enabled || processor.bypassed != 0);
   *output_left = left + (dry_left - left) * history.bypass;
   *output_right = right + (dry_right - right) * history.bypass;
 }
@@ -2723,11 +3013,6 @@ void render_time_effect_processor_impl(
     const float delay_dry_wet = processor_parameter_value(core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_DRY_WET, frame, delay_state.dry_wet);
     const float delay_low_cut = processor_parameter_value(core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_LOW_CUT_HZ, frame, delay_state.low_cut_hz);
     const float delay_high_cut = processor_parameter_value(core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_HIGH_CUT_HZ, frame, delay_state.high_cut_hz);
-    if (delay_state.enabled == 0 || processor.bypassed != 0) {
-      const float bypass = history.bypass;
-      history = History{};
-      history.bypass = bypass;
-    }
     const float bounded_delay_ms = std::fmax(1.0F, std::fmin(delay_parameter_ms, 3000.0F));
     const float bounded_feedback = std::fmax(0.0F, std::fmin(delay_feedback, 0.95F));
     const float bounded_dry_wet = std::fmax(0.0F, std::fmin(delay_dry_wet, 1.0F));
@@ -2837,8 +3122,7 @@ void render_time_effect_processor_impl(
     left = right = 0.0F;
     history = History{};
   }
-  const float target_bypass = !enabled || processor.bypassed != 0 ? 1.0F : 0.0F;
-  history.bypass = clamp_bypass_step(history.bypass, target_bypass, 1.0F / std::fmax(1.0F, std::round(0.01F * rate)));
+  advance_bypass(core, history.bypass, !enabled || processor.bypassed != 0);
   *output_left = left + (dry_left - left) * history.bypass;
   *output_right = right + (dry_right - right) * history.bypass;
 }
@@ -2857,22 +3141,6 @@ void render_time_effect_processor(
       core, processor, frame, core.reverb_histories[processor.reverb_slot],
     input_left, input_right, sidechain_left, sidechain_right, output_left, output_right);
 }
-
-void render_retirement_processor(
-  Core &core, Core::RetirementLane &lane, uint32_t frame,
-  float input_left, float input_right, float sidechain_left, float sidechain_right,
-  float *output_left, float *output_right) {
-  if (lane.processor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY) {
-    render_time_effect_processor_impl(
-      core, lane.processor, frame, core.delay_histories[lane.source_delay_slot],
-      input_left, input_right, sidechain_left, sidechain_right, output_left, output_right);
-    return;
-  }
-  render_time_effect_processor_impl(
-      core, lane.processor, frame, core.reverb_histories[lane.source_reverb_slot],
-    input_left, input_right, sidechain_left, sidechain_right, output_left, output_right);
-}
-
 
 float dynamics_db_to_gain(float db) {
   return std::pow(10.0F, db / 20.0F);
@@ -2935,6 +3203,10 @@ void render_dynamics_processor(
   history.detector_right[write] = dry_right;
   float left = history.delay_left[read];
   float right = history.delay_right[read];
+  // Bypass crossfades to the input as delayed by the processor's fixed latency, so
+  // it never shifts the signal in time.
+  const float delayed_left = left;
+  const float delayed_right = right;
   if (gate) {
     daw_audio_gate_state state = processor.gate;
     state.threshold_db = processor_parameter_value(core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_GATE_THRESHOLD_DB, frame, state.threshold_db);
@@ -2983,7 +3255,7 @@ void render_dynamics_processor(
       }
       const float target_db = history.open[channel] != 0 ? 0.0F
         : state.mode != 0 ? std::fmax(state.range_db, (db - state.threshold_db) * (state.ratio - 1.0F)) : state.range_db;
-      const float target = state.enabled != 0 && processor.bypassed == 0 ? dynamics_db_to_gain(target_db) : 1.0F;
+      const float target = dynamics_db_to_gain(target_db);
       const float milliseconds = target > history.gain[channel] ? state.attack_ms : state.release_ms;
       const float coefficient = std::exp(-1.0F / (std::fmax(0.1F, milliseconds) * 0.001F * static_cast<float>(core.config.sample_rate_hz)));
       history.gain[channel] = target + coefficient * (history.gain[channel] - target);
@@ -3013,7 +3285,7 @@ void render_dynamics_processor(
     const float level = state.detector_mode != 0
       ? std::sqrt(history.compressor_rms = history.compressor_rms * 0.99F + detector * detector * 0.01F)
       : std::abs(detector);
-    const float target_db = state.enabled != 0 && processor.bypassed == 0 ? compressor_curve_db(dynamics_gain_to_db(level), state) - dynamics_gain_to_db(level) : 0.0F;
+    const float target_db = compressor_curve_db(dynamics_gain_to_db(level), state) - dynamics_gain_to_db(level);
     const float release_ms = state.auto_release != 0 ? std::fmax(state.release_ms, state.release_ms * (1.0F + std::fmin(1.0F, -history.compressor_envelope_db / 24.0F))) : state.release_ms;
     if (state.envelope_curve != 0) {
       const float milliseconds = target_db < history.compressor_envelope_db ? state.attack_ms : release_ms;
@@ -3047,7 +3319,6 @@ void render_dynamics_processor(
     const std::array<float, 2> targets{target_left + (linked - target_left) * state.link, target_right + (linked - target_right) * state.link};
     const float release = std::exp(-1.0F / (state.release_ms * 0.001F * static_cast<float>(core.config.sample_rate_hz)));
     for (uint32_t channel = 0; channel < 2; ++channel) history.gain[channel] = targets[channel] < history.gain[channel] ? targets[channel] : 1.0F + release * (history.gain[channel] - 1.0F);
-    if (state.enabled == 0 || processor.bypassed != 0) history.gain = {1.0F, 1.0F};
   }
   history.write = (write + 1) % kMaximumDynamicsDelayFrames;
   if (gate) {
@@ -3057,8 +3328,10 @@ void render_dynamics_processor(
     left *= history.gain[0];
     right *= history.gain[1];
   }
-  *output_left = std::isfinite(left) ? left : 0.0F;
-  *output_right = std::isfinite(right) ? right : 0.0F;
+  const bool enabled = gate ? processor.gate.enabled != 0 : compressor ? processor.compressor.enabled != 0 : processor.limiter.enabled != 0;
+  advance_bypass(core, history.bypass, processor.bypassed != 0 || !enabled);
+  *output_left = bypass_mix(std::isfinite(left) ? left : 0.0F, delayed_left, history.bypass);
+  *output_right = bypass_mix(std::isfinite(right) ? right : 0.0F, delayed_right, history.bypass);
 }
 
 float spectral_parameter(
@@ -3142,7 +3415,9 @@ void transform_spectrum(
   auto &side_real = history.side_real[channel];
   auto &side_imaginary = history.side_imaginary[channel];
   const uint32_t bins = state.fft_size / 2 + 1;
-  const float freeze = spectral_transform_parameter(core, processor, 15, frame, state.freeze);
+  const float freeze = history.freeze_source_latched
+    ? (history.analysis_from_predecessor ? 1.0F : 0.0F)
+    : spectral_transform_parameter(core, processor, 15, frame, state.freeze);
   const float threshold_db = spectral_transform_parameter(core, processor, 16, frame, state.gate_threshold_db);
   const float attack_ms = spectral_transform_parameter(core, processor, 17, frame, state.gate_attack_ms);
   const float release_ms = spectral_transform_parameter(core, processor, 18, frame, state.gate_release_ms);
@@ -3228,12 +3503,15 @@ void transform_spectrum(
       real[bin] *= gain; imaginary[bin] *= gain;
     }
   }
+  imaginary[0] = 0.0F;
+  imaginary[state.fft_size / 2u] = 0.0F;
   for (uint32_t bin = 1; bin < state.fft_size / 2; ++bin) {
     real[state.fft_size - bin] = real[bin]; imaginary[state.fft_size - bin] = -imaginary[bin];
   }
 }
 
 void process_spectral_frame(Core &core, GraphRevision::Processor &processor, SpectralHistory &history, uint32_t frame) {
+  if (history.analysis_frames < UINT32_MAX) ++history.analysis_frames;
   const uint32_t input_mask = kMaximumSpectralFftSize - 1;
   const uint32_t output_mask = kMaximumSpectralFftSize * 2 - 1;
   const uint32_t frame_start = (history.write_index - processor.spectral.fft_size + kMaximumSpectralFftSize) & input_mask;
@@ -3258,23 +3536,24 @@ void process_spectral_frame(Core &core, GraphRevision::Processor &processor, Spe
   }
 }
 
-void render_spectral_processor(
+void render_spectral_sample(
   Core &core, GraphRevision::Processor &processor, uint32_t frame,
-  float input_left, float input_right, float sidechain_left, float sidechain_right, float *output_left, float *output_right) {
+  float input_left, float input_right, float sidechain_left, float sidechain_right, float *output_left, float *output_right,
+  const std::array<float, 2> *analysis_input = nullptr) {
   SpectralHistory &history = core.spectral_histories[processor.spectral_slot];
   reset_spectral_history(history, processor.spectral);
   const uint32_t input_mask = kMaximumSpectralFftSize - 1;
   const uint32_t output_mask = kMaximumSpectralFftSize * 2 - 1;
   const std::array<float, 2> input{std::isfinite(input_left) ? input_left : 0.0F, std::isfinite(input_right) ? input_right : 0.0F};
   const std::array<float, 2> sidechain{std::isfinite(sidechain_left) ? sidechain_left : 0.0F, std::isfinite(sidechain_right) ? sidechain_right : 0.0F};
-  const float bypass_step = 1.0F / std::fmax(1.0F, std::round(0.01F * core.config.sample_rate_hz));
-  history.bypass = clamp_bypass_step(history.bypass, processor.bypassed != 0 || processor.spectral.enabled == 0 ? 1.0F : 0.0F, bypass_step);
+  advance_bypass(core, history.bypass, processor.bypassed != 0 || processor.spectral.enabled == 0);
   std::array<float, 2> output{};
   for (uint32_t channel = 0; channel < 2; ++channel) {
-    history.input[channel][history.write_index & input_mask] = input[channel];
+    history.input[channel][history.write_index & input_mask] = analysis_input ? (*analysis_input)[channel] : input[channel];
     history.sidechain[channel][history.write_index & input_mask] = sidechain[channel];
     history.dry[channel][(history.write_index + processor.spectral.fft_size) & output_mask] = input[channel];
     const float wet = history.output[channel][history.write_index];
+    history.wet_sample[channel] = wet;
     const float dry = history.dry[channel][history.write_index];
     history.output[channel][history.write_index] = 0.0F;
     history.dry[channel][history.write_index] = 0.0F;
@@ -3284,11 +3563,34 @@ void render_spectral_processor(
   }
   history.write_index = (history.write_index + 1) & output_mask;
   if (--history.samples_until_frame == 0) {
+    const auto captured = history.freeze_captured;
     process_spectral_frame(core, processor, history, frame);
     history.samples_until_frame = history.hop_size;
+    const auto mode = processor.spectral.mode;
+    if (history.state_serial == 0 || history.state_mode != mode || mode == DAW_AUDIO_SPECTRAL_MODE_GATE
+      || (mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE && captured != history.freeze_captured)
+      || (mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE
+        && spectral_transform_parameter(core, processor, 24, frame, processor.spectral.profile_learn) > 0.0F)) {
+      ++history.state_serial;
+      history.state_mode = mode;
+      core.spectral_inputs[processor.spectral_slot].publish(history, mode);
+    }
   }
   *output_left = output[0];
   *output_right = output[1];
+  for (uint32_t channel = 0; channel < 2; ++channel)
+    history.rendered[channel][(history.write_index - 1u) & output_mask] = output[channel];
+}
+
+void render_spectral_processor(
+  Core &core, GraphRevision::Processor &processor, uint32_t frame,
+  float input_left, float input_right, float sidechain_left, float sidechain_right, float *output_left, float *output_right) {
+  render_spectral_sample(core, processor, frame, input_left, input_right, sidechain_left, sidechain_right,
+    output_left, output_right);
+}
+
+float spectral_delayed_output(const SpectralHistory &history, uint32_t channel, uint32_t delay) {
+  return history.rendered[channel][(history.write_index - 1u - delay) & (kMaximumSpectralFftSize * 2u - 1u)];
 }
 
 struct ProcessorImplementation {
@@ -3443,14 +3745,21 @@ float curved_fade_gain(
   return static_cast<float>(std::min(1.0, std::max(0.0, gain)));
 }
 
-float source_envelope_gain(const SampleSource &source, int64_t transport_frame) {
+float source_envelope_gain(const SampleSource &source, int64_t transport_frame, int64_t envelope_frame) {
   const float fade_in = curved_fade_gain(
-    transport_frame, source.fade_in_start_frame, source.fade_in_end_frame, 0.0F, 1.0F,
+    envelope_frame, source.fade_in_start_frame, source.fade_in_end_frame, 0.0F, 1.0F,
     source.fade_in_curve, source.fade_in_curve_position);
   const float fade_out = curved_fade_gain(
-    transport_frame, source.fade_out_start_frame, source.fade_out_end_frame, 1.0F, 0.0F,
+    envelope_frame, source.fade_out_start_frame, source.fade_out_end_frame, 1.0F, 0.0F,
     source.fade_out_curve, source.fade_out_curve_position);
-  return source.gain * fade_in * fade_out;
+  const float termination = source.termination_end == 0 ? 1.F
+    : transport_frame >= source.termination_end ? 0.F
+    : 1.F - static_cast<float>(transport_frame - source.termination_start)
+      / static_cast<float>(source.termination_end - source.termination_start);
+  const float entry = source.entry_end == 0 ? 1.F
+    : std::min(1.F, static_cast<float>(transport_frame - source.entry_start)
+      / static_cast<float>(source.entry_end - source.entry_start));
+  return source.gain * fade_in * fade_out * termination * entry;
 }
 
 float paged_asset_frame_sample(
@@ -3491,18 +3800,195 @@ float asset_sample(
   return std::isfinite(value) ? value : 0.0F;
 }
 
+// DAW_REALTIME_CALLBACK_HELPER_BEGIN sample-source-node-ownership
+void bind_sample_source_node(SampleSource &source, const GraphRevision &graph) {
+  const auto node = graph_node_index(graph, source.source_node_id);
+  if (node < 0) return; // Legacy root sources have no graph runtime owner.
+  source.node_runtime_slot = graph.node_slots[static_cast<uint32_t>(node)];
+  source.node_runtime_generation = graph.node_generations[static_cast<uint32_t>(node)];
+}
+
+bool sample_source_node_alive(const Core &core, const SampleSource &source) {
+  if (source.node_runtime_generation == 0) return true;
+  const auto &slot = core.node_slots[source.node_runtime_slot];
+  return slot.state.load(std::memory_order_acquire) == kSlotActive
+    && slot.generation.load(std::memory_order_relaxed) == source.node_runtime_generation;
+}
+// DAW_REALTIME_CALLBACK_HELPER_END sample-source-node-ownership
+
+SampleSource make_sample_source(const daw_audio_sample_source_event &event) {
+  return {
+    .source_node_id = event.source_node_id,
+    .asset = event.asset,
+    .start_frame = event.start_frame,
+    .stop_frame = event.stop_frame,
+    .source_offset_frame = event.source_offset_frame,
+    .source_offset_fraction = event.source_offset_fraction,
+    .source_frame_count = event.source_frame_count,
+    .gain = event.gain,
+    .fade_in_start_frame = event.fade_in_start_frame,
+    .fade_in_end_frame = event.fade_in_end_frame,
+    .fade_out_start_frame = event.fade_out_start_frame,
+    .fade_out_end_frame = event.fade_out_end_frame,
+    .fade_in_curve = event.fade_in_curve,
+    .fade_in_curve_position = event.fade_in_curve_position,
+    .fade_out_curve = event.fade_out_curve,
+    .fade_out_curve_position = event.fade_out_curve_position,
+    .active = true,
+  };
+}
+
+std::array<SampleSource, kSampleSourceSlots> &inactive_sample_source_table(Core &core) {
+  return core.active_sample_sources == &core.sample_source_tables[0] ? core.sample_source_tables[1]
+    : core.sample_source_tables[0];
+}
+
+// DAW_REALTIME_CALLBACK_HELPER_BEGIN native-source-seam
+// Swaps the active table for `next` at `frame`. A source that matches one already sounding keeps its cursor. Every other
+// sounding source fades out over kSampleTerminationFadeMilliseconds in the upper half of the table, and the sources
+// that take its place on the same node fade in over that span. `next` is bound to the published graph and ordered by
+// the caller. False leaves the table intact, so `apply = false` probes capacity.
+bool reconcile_sample_sources(Core &core, std::span<const SampleSource> next, int64_t frame, bool apply) {
+  const int64_t duration = std::max<int64_t>(1,
+    static_cast<int64_t>(core.config.sample_rate_hz * kSampleTerminationFadeMilliseconds / 1000.F));
+  if (frame < 0 || frame > INT64_MAX - duration || next.size() > kMaximumSampleSources) return false;
+  std::array<int32_t, kMaximumSampleSources> matches{};
+  std::array<bool, kMaximumSampleSources> retained{};
+  const auto signature = [](const SampleSource &source) {
+    // The running cursor retains its accepted wire origin. Projected f32
+    // positions can collide for distinct origins, so never use them as identity.
+    return std::make_tuple(source.source_node_id, source.node_runtime_slot, source.node_runtime_generation,
+      source.asset, source.paged, source.start_frame, source.source_offset_frame,
+      std::bit_cast<uint32_t>(source.source_offset_fraction), source.gain,
+      source.fade_in_start_frame, source.fade_in_end_frame,
+      source.fade_out_start_frame, source.fade_out_end_frame,
+      source.fade_in_curve, source.fade_in_curve_position,
+      source.fade_out_curve, source.fade_out_curve_position);
+  };
+  using Signature = decltype(signature(next[0]));
+  using IndexedSignature = std::pair<Signature, uint32_t>;
+  std::array<IndexedSignature, kMaximumSampleSources> old_sources{}, next_sources{};
+  uint32_t old_count = 0, next_count = 0;
+  // Fixed storage, O(n log n) multiset matching. Equal wire origins match
+  // once each, including genuinely overlapping identical clips.
+  for (uint32_t slot = 0; slot < kMaximumSampleSources; ++slot) {
+    const auto &source = (*core.active_sample_sources)[slot];
+    if (!source.active || !sample_source_node_alive(core, source)
+      || source.start_frame > frame || source.stop_frame <= frame) continue;
+    if (find_asset(&core, source.asset) == nullptr) continue;
+    old_sources[old_count++] = {signature(source), slot};
+  }
+  for (uint32_t index = 0; index < next.size(); ++index) {
+    matches[index] = -1;
+    if (next[index].start_frame <= frame && next[index].stop_frame > frame) {
+      next_sources[next_count++] = {signature(next[index]), index};
+    }
+  }
+  std::sort(old_sources.begin(), old_sources.begin() + old_count);
+  std::sort(next_sources.begin(), next_sources.begin() + next_count);
+  uint32_t previous = 0, following = 0;
+  while (previous < old_count && following < next_count) {
+    if (old_sources[previous].first < next_sources[following].first) { ++previous; continue; }
+    if (next_sources[following].first < old_sources[previous].first) { ++following; continue; }
+    const auto slot = old_sources[previous++].second;
+    matches[next_sources[following++].second] = static_cast<int32_t>(slot);
+    retained[slot] = true;
+  }
+  uint32_t tails = 0, available = 0, fading_count = 0;
+  using NodeOwner = std::pair<uint32_t, uint32_t>;
+  std::array<NodeOwner, kSampleSourceSlots> fading_nodes{};
+  for (uint32_t slot = 0; slot < kSampleSourceSlots; ++slot) {
+    const auto &source = (*core.active_sample_sources)[slot];
+    const bool audible = source.active && sample_source_node_alive(core, source) && source.start_frame <= frame
+      && (source.termination_end == 0 ? source.stop_frame > frame : source.termination_end > frame);
+    if (slot < kMaximumSampleSources) {
+      if (audible && !retained[slot]) {
+        ++tails;
+        fading_nodes[fading_count++] = {source.node_runtime_slot, source.node_runtime_generation};
+      }
+    } else if (audible) fading_nodes[fading_count++] = {source.node_runtime_slot, source.node_runtime_generation};
+    else ++available;
+  }
+  if (tails > available) return false;
+  if (!apply) return true;
+  std::sort(fading_nodes.begin(), fading_nodes.begin() + fading_count);
+  uint32_t tail_slot = kMaximumSampleSources;
+  for (uint32_t slot = 0; slot < kMaximumSampleSources; ++slot) {
+    auto &source = (*core.active_sample_sources)[slot];
+    if (retained[slot]) continue;
+    if (source.active && sample_source_node_alive(core, source)
+      && source.start_frame <= frame && source.stop_frame > frame) {
+      while (tail_slot < kSampleSourceSlots) {
+        const auto &tail = (*core.active_sample_sources)[tail_slot];
+        if (!tail.active || !sample_source_node_alive(core, tail) || tail.termination_end <= frame) break;
+        ++tail_slot;
+      }
+      auto &tail = (*core.active_sample_sources)[tail_slot++];
+      tail = source;
+      tail.termination_start = frame;
+      tail.termination_end = frame + duration;
+      tail.termination_read_frame = source.stop_frame - 1;
+      const auto *asset = find_asset(&core, source.asset);
+      if (asset != nullptr) {
+        // Hold the last readable sample if the old region ends during the
+        // declick. Compute once at the seam, never ceil/divide per tail sample.
+        const double rate = static_cast<double>(asset->sample_rate_hz) / core.config.sample_rate_hz;
+        const double read_count = source.reconciled_read_end == 0.0
+          ? static_cast<double>(source.source_frame_count)
+          : source.reconciled_read_end - (static_cast<double>(source.source_offset_frame)
+            + static_cast<double>(source.source_offset_fraction));
+        const double last = std::max(0.0, std::ceil(std::min(read_count,
+          static_cast<double>(asset->frame_count - source.source_offset_frame)
+            - source.source_offset_fraction) / rate) - 1.0);
+        tail.termination_read_frame = source.start_frame + static_cast<int64_t>(std::min(last,
+          static_cast<double>(source.stop_frame - source.start_frame - 1)));
+      }
+    }
+    source.active = false;
+  }
+  uint32_t free_slot = 0;
+  for (uint32_t index = 0; index < next.size(); ++index) {
+    const auto &declared = next[index];
+    if (declared.stop_frame <= frame) continue;
+    if (matches[index] >= 0) {
+      auto &source = (*core.active_sample_sources)[static_cast<uint32_t>(matches[index])];
+      source.stop_frame = declared.stop_frame;
+      source.paged_preparation = declared.paged_preparation;
+      source.reconciled_read_end = (static_cast<double>(declared.source_offset_frame)
+        + static_cast<double>(declared.source_offset_fraction)) + static_cast<double>(declared.source_frame_count);
+      continue;
+    }
+    while ((*core.active_sample_sources)[free_slot].active) ++free_slot;
+    auto &source = (*core.active_sample_sources)[free_slot];
+    source = declared;
+    if (declared.start_frame > frame) continue;
+    source.entry_start = frame;
+    source.entry_end = std::binary_search(fading_nodes.begin(), fading_nodes.begin() + fading_count,
+      NodeOwner{source.node_runtime_slot, source.node_runtime_generation}) ? frame + duration : 0;
+  }
+  return true;
+}
+// DAW_REALTIME_CALLBACK_HELPER_END native-source-seam
+
 void prepare_active_source_ranges(Core &core, const GraphRevision *graph) {
+  // A deleted node's sources expire when its existing fade retires the slot.
+  // This also drops owners removed without a ghost, before resource collection.
+  for (auto &source : *core.active_sample_sources)
+    if (source.active && !sample_source_node_alive(core, source)) source.active = false;
   core.active_source_ranges = {};
   core.root_source_range = {};
   uint16_t count = 0;
   if (graph != nullptr) {
-    for (uint32_t node_index = 0; node_index < graph->node_count; ++node_index) {
+    // A fading source keeps playing its scheduled clips until it reaches silence.
+    for (uint32_t node_index = 0; node_index < graph->total_node_count(); ++node_index) {
       GraphRevision::Range &range = core.active_source_ranges[node_index];
       range.start = count;
       if (graph->nodes[node_index].kind != DAW_AUDIO_GRAPH_NODE_SOURCE) continue;
       for (uint32_t source_index = 0; source_index < core.active_sample_sources->size(); ++source_index) {
         const SampleSource &source = (*core.active_sample_sources)[source_index];
-        if (source.active && source.source_node_id == graph->nodes[node_index].id) {
+        if (source.active && source.source_node_id == graph->nodes[node_index].id
+          && source.node_runtime_slot == graph->node_slots[node_index]
+          && source.node_runtime_generation == graph->node_generations[node_index]) {
           core.active_source_indices[count++] = static_cast<uint16_t>(source_index);
           ++range.count;
         }
@@ -3530,7 +4016,8 @@ void render_sample_source_range(
   for (uint32_t position = range.start; position < end; ++position) {
     SampleSource &source = (*core.active_sample_sources)[core.active_source_indices[position]];
     if (!source.active) continue;
-    if (transport_frame >= source.stop_frame) {
+    if ((source.termination_end == 0 && transport_frame >= source.stop_frame)
+      || (source.termination_end != 0 && transport_frame >= source.termination_end)) {
       source.active = false;
       continue;
     }
@@ -3540,12 +4027,15 @@ void render_sample_source_range(
       source.active = false;
       continue;
     }
-    const uint64_t elapsed_output_frames = static_cast<uint64_t>(transport_frame - source.start_frame);
+    const int64_t read_frame = source.termination_end == 0 ? transport_frame
+      : std::min(transport_frame, source.termination_read_frame);
+    const uint64_t elapsed_output_frames = static_cast<uint64_t>(read_frame - source.start_frame);
     const double source_position = static_cast<double>(source.source_offset_frame)
       + static_cast<double>(source.source_offset_fraction)
       + static_cast<double>(elapsed_output_frames) * static_cast<double>(asset->sample_rate_hz)
         / static_cast<double>(core.config.sample_rate_hz);
-    const double source_end = static_cast<double>(source.source_offset_frame)
+    const double source_end = source.reconciled_read_end != 0.0 ? source.reconciled_read_end
+      : static_cast<double>(source.source_offset_frame)
       + static_cast<double>(source.source_offset_fraction)
       + static_cast<double>(source.source_frame_count);
     if (source_position >= source_end
@@ -3555,7 +4045,7 @@ void render_sample_source_range(
       source.active = false;
       continue;
     }
-    const float gain = source_envelope_gain(source, transport_frame);
+    const float gain = source_envelope_gain(source, transport_frame, read_frame);
     const uint32_t right_channel = asset->channel_count > 1 ? 1 : 0;
     const float left = asset_sample(core, *asset, source.paged ? source.paged_preparation : nullptr, source_position, 0);
     const float right = asset_sample(core, *asset, source.paged ? source.paged_preparation : nullptr, source_position, right_channel);
@@ -3566,12 +4056,33 @@ void render_sample_source_range(
 
 constexpr uint32_t kGraphPreFxStage = 0;
 constexpr uint32_t kGraphPreFaderStage = 1;
+constexpr uint32_t kGraphOutputStage = 2;
+constexpr uint32_t kGraphStageCount = 3;
 
+// Sized by the core config, so one allocation serves every revision and a
+// prepare never frees storage the callback may still be reading.
 bool allocate_graph_stage_buffers(Core &core) {
-  const std::size_t graph_stage_samples = static_cast<std::size_t>(2u) * kMaximumGraphNodes * 2u
+  if (core.graph_stage_buffers) return true;
+  const std::size_t graph_stage_samples = static_cast<std::size_t>(kGraphStageCount) * kMaximumGraphNodes * 2u
     * core.config.max_frames_per_block;
-  std::unique_ptr<float[]> buffers(new (std::nothrow) float[graph_stage_samples]);
+  std::unique_ptr<float[]> buffers(new (std::nothrow) float[graph_stage_samples]());
   if (!buffers) return false;
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  if (!core.graph_tap_storage) {
+    const std::size_t history_samples = static_cast<std::size_t>(Core::kTapHistorySlots) * 2u
+      * kMaximumGraphLatencyFrames;
+    core.graph_tap_storage.reset(new (std::nothrow) float[history_samples]());
+    if (!core.graph_tap_storage) return false;
+    // A zero-filled allocation may still be backed by shared zero pages.
+    // Touch every 4 KiB off-thread, covering native and Wasm page sizes.
+    volatile float *pages = core.graph_tap_storage.get();
+    for (std::size_t sample = 0; sample < history_samples; sample += 1024u) pages[sample] = 0.0F;
+    for (uint32_t slot = 0; slot < Core::kTapHistorySlots; ++slot) {
+      core.graph_tap_histories[slot].offset = static_cast<std::size_t>(slot) * 2u * kMaximumGraphLatencyFrames;
+      core.graph_tap_histories[slot].capacity = kMaximumGraphLatencyFrames;
+    }
+  }
+#endif
   core.graph_stage_buffers = std::move(buffers);
   return true;
 }
@@ -3587,42 +4098,110 @@ float *graph_stage_sample(
   return core.graph_stage_buffers.get() + offset;
 }
 
-float graph_edge_sample(
+float deletion_fade_gain(uint32_t elapsed, uint32_t fade_frames) {
+  return elapsed >= fade_frames ? 0.0F : 1.0F - static_cast<float>(elapsed) / static_cast<float>(fade_frames);
+}
+
+// Level at which a signal leaves a source node that was deleted. A fading node
+// feeding a node that was deleted no later than itself is faded once, where the
+// signal leaves that node, so deleting a source with its group does not apply the
+// ramp twice.
+float ghost_edge_fade_gain(const Core &core, const GraphRevision &graph, uint32_t edge_index, uint32_t frame) {
+  const uint32_t target_index = graph.edge_target_indices[edge_index];
+  const uint32_t elapsed = core.node_fade_start[graph.edge_source_indices[edge_index]];
+  if (target_index >= graph.node_count && core.node_fade_start[target_index] >= elapsed) return 1.0F;
+  return deletion_fade_gain(elapsed + frame, graph.fade_frames);
+}
+
+// Level at which a route that replaced one through a deleted node enters: the
+// complement of that node's fade-out.
+float edge_join_gain(const Core &core, const GraphRevision &graph, uint32_t edge_index, uint32_t frame) {
+  const uint32_t join = graph.edge_join_nodes[edge_index];
+  if (join == 0) return 1.0F;
+  return 1.0F - deletion_fade_gain(core.node_fade_start[join - 1] + frame, graph.fade_frames);
+}
+
+float graph_tap_sample(
   Core &core,
   const GraphRevision &graph,
   uint32_t edge_index,
   uint32_t channel,
-  uint32_t frame) {
+  uint32_t frame,
+  uint32_t delay) {
   const daw_audio_graph_edge_descriptor &edge = graph.edges[edge_index];
   const uint32_t source_index = graph.edge_source_indices[edge_index];
-  const uint32_t delay = edge.pdc_delay_frames;
-  const float source = edge.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX
-    ? *graph_stage_sample(core, kGraphPreFxStage, source_index, channel, frame) * edge.gain
-    : edge.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FADER
-      ? *graph_stage_sample(core, kGraphPreFaderStage, source_index, channel, frame) * edge.gain
-      : core.graph_buffers[source_index][channel][frame] * edge.gain;
-  if (delay == 0) return source;
-  const uint32_t cursor = (core.graph_delay_cursors[edge_index] + frame) % delay;
-  float &stored = core.graph_delay_lines[edge_index][channel][cursor];
-  const float delayed = stored;
-  stored = source;
-  return delayed;
+  const uint32_t stage = edge.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX ? kGraphPreFxStage
+    : edge.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FADER ? kGraphPreFaderStage : kGraphOutputStage;
+  float source = 0.0F;
+  if (delay <= frame) {
+    source = *graph_stage_sample(core, stage, source_index, channel, frame - delay);
+  } else if (core.graph_write_frame + frame >= delay) {
+    const uint64_t read_frame = core.graph_write_frame + frame - delay;
+    const uint32_t slot = graph.tap_history_slots[source_index][stage];
+    const auto &history = core.graph_tap_histories[slot];
+    if (read_frame >= history.first_frame && read_frame < history.end_frame
+      && history.end_frame - read_frame <= history.capacity) {
+      const std::size_t offset = history.offset + static_cast<std::size_t>(channel) * history.capacity
+        + (read_frame & (history.capacity - 1u));
+      source = core.graph_tap_storage[offset];
+    }
+  }
+  return source;
+}
+
+// The gain an edge applies `at` frames into the move a publish started
+// (begin_edge_ramps): from where it stood toward its own, then exactly its own.
+float edge_ramp_gain(const Core::EdgeRamp &ramp, float gain, uint32_t at) {
+  if (at >= ramp.frames) return gain;
+  const float progress = static_cast<float>(at) / static_cast<float>(ramp.frames);
+  return ramp.from + (gain - ramp.from) * progress;
+}
+
+void advance_edge_ramps(Core &core, const GraphRevision &graph, uint32_t frame_count) {
+  for (uint32_t edge = 0; edge < graph.total_edge_count(); ++edge) {
+    Core::EdgeRamp &ramp = core.edge_ramps[core.edge_ramp_bank][edge];
+    ramp.seen = true;
+    ramp.elapsed = std::min(ramp.frames, ramp.elapsed + frame_count);
+  }
+}
+
+float graph_edge_sample(
+  Core &core, const GraphRevision &graph, uint32_t edge_index,
+  uint32_t channel, uint32_t frame) {
+  const auto &edge = graph.edges[edge_index];
+  const uint32_t source_index = graph.edge_source_indices[edge_index];
+  float source = 0.0F;
+  const auto &head = graph.read_heads[edge_index];
+  const uint64_t absolute = core.graph_write_frame + frame;
+  const uint64_t seam = head.seam + core.latency_publication_shift;
+  if (core.transport.running == 0 || core.latency_shrunk_revision == graph.revision) {
+    source = graph_tap_sample(core, graph, edge_index, channel, frame, head.stopped_delay);
+  } else if (absolute < seam) {
+    source = graph_tap_sample(core, graph, edge_index, channel, frame, head.previous_delay);
+  } else if (head.crossfade_frames != 0 && absolute - seam < head.crossfade_frames) {
+    const float mix = static_cast<float>(absolute - seam) / head.crossfade_frames;
+    const float previous = graph_tap_sample(core, graph, edge_index, channel, frame, head.previous_delay);
+    const float next = graph_tap_sample(core, graph, edge_index, channel, frame, head.delay);
+    source = previous * (1.0F - mix) + next * mix;
+  } else {
+    source = graph_tap_sample(core, graph, edge_index, channel, frame, head.delay);
+  }
+  const Core::EdgeRamp &ramp = core.edge_ramps[core.edge_ramp_bank][edge_index];
+  source *= edge_ramp_gain(ramp, edge.gain, ramp.elapsed + frame + 1u);
+  if (source_index >= graph.node_count) source *= ghost_edge_fade_gain(core, graph, edge_index, frame);
+  return source * edge_join_gain(core, graph, edge_index, frame);
 }
 
 void clear_instrument_state(InstrumentNodeState &instrument);
 void release_instrument_state(InstrumentNodeState &instrument);
 
-void clear_instrument_voices(Core &core) {
-  for (InstrumentNodeState &instrument : (*core.published_instruments)) {
-    clear_instrument_state(instrument);
+void release_instrument_voices(Core &core) {
+  for (uint32_t slot = 0; slot < kNodeRuntimeSlots; ++slot) {
+    if (core.node_slots[slot].state.load(std::memory_order_acquire) == kSlotActive) {
+      release_instrument_state(core.instrument_runtime[slot]);
+    }
   }
 }
-
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-void release_instrument_voices(Core &core) {
-  for (InstrumentNodeState &instrument : (*core.published_instruments)) release_instrument_state(instrument);
-}
-#endif
 
 void release_instrument_state(InstrumentNodeState &instrument) {
   for (InstrumentVoice &voice : instrument.voices) {
@@ -3634,6 +4213,11 @@ void release_instrument_state(InstrumentNodeState &instrument) {
   for (SampleVoice &voice : instrument.sample_voices) {
     if (voice.active) voice.released = true;
   }
+  instrument.grains = {};
+  instrument.granular_note_ids = {};
+  instrument.granular_note_ages = {};
+  instrument.granular_note_count = 0;
+  instrument.granular_next_note_age = 1;
   instrument.sustain = false;
 }
 
@@ -3642,7 +4226,9 @@ void clear_instrument_state(InstrumentNodeState &instrument) {
   instrument.sample_voices = {};
   instrument.grains = {};
   instrument.granular_note_ids = {};
+  instrument.granular_note_ages = {};
   instrument.granular_note_count = 0;
+  instrument.granular_next_note_age = 1;
   instrument.granular_next_frame = 0.0;
   instrument.granular_frozen_position = -1.0F;
   instrument.granular_random_state = instrument.granular.seed == 0 ? 1 : instrument.granular.seed;
@@ -3771,16 +4357,119 @@ float envelope_step(float level, uint32_t *stage, bool released, float attack, f
   return level;
 }
 
-float synth_parameter_value(const InstrumentNodeState &instrument, uint32_t target, float fallback) {
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN) return instrument.synth.output_gain;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_PAN) return instrument.synth.output_pan;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_CUTOFF_HZ) return instrument.synth.filter_cutoff_hz;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_RESONANCE) return instrument.synth.filter_resonance;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_ATTACK_MS) return instrument.synth.amp_attack_ms;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_DECAY_MS) return instrument.synth.amp_decay_ms;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_SUSTAIN) return instrument.synth.amp_sustain;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_RELEASE_MS) return instrument.synth.amp_release_ms;
-  return fallback;
+// The continuous values of an instrument's configuration, the ones a knob drag
+// moves; every other field (waveforms, modes, enables, capacity, zone set, asset) is
+// discrete and replaces the instrument when it changes. `visit(to, from)` is called
+// for each continuous float of `to` and its counterpart in `from`. An oscillator's
+// octave and semitone fold into its detune (cents), so a transposition drags like
+// any other value; `from` is read through that fold and `to` receives the sum.
+float oscillator_cents(const daw_audio_synth_oscillator_state &oscillator) {
+  return static_cast<float>(oscillator.octave * 1200 + oscillator.semitone * 100) + oscillator.detune_cents;
+}
+
+template <typename State, size_t Count, typename Visit>
+void visit_fields(State &to, const State &from, const std::array<float State::*, Count> &fields, Visit &&visit) {
+  for (float State::*field : fields) visit(to.*field, from.*field);
+}
+
+template <typename Visit>
+void visit_synth(daw_audio_synth_state &to, const daw_audio_synth_state &from, Visit &&visit) {
+  visit_fields(to, from, std::array{
+    &daw_audio_synth_state::noise_level, &daw_audio_synth_state::filter_cutoff_hz, &daw_audio_synth_state::filter_resonance,
+    &daw_audio_synth_state::filter_key_tracking, &daw_audio_synth_state::filter_envelope_amount_octaves,
+    &daw_audio_synth_state::filter_attack_ms, &daw_audio_synth_state::filter_decay_ms, &daw_audio_synth_state::filter_sustain,
+    &daw_audio_synth_state::filter_release_ms, &daw_audio_synth_state::amp_attack_ms, &daw_audio_synth_state::amp_decay_ms,
+    &daw_audio_synth_state::amp_sustain, &daw_audio_synth_state::amp_release_ms, &daw_audio_synth_state::lfo_rate_hz,
+    &daw_audio_synth_state::lfo_pitch_cents, &daw_audio_synth_state::lfo_filter_octaves, &daw_audio_synth_state::lfo_amplitude,
+    &daw_audio_synth_state::lfo_pan, &daw_audio_synth_state::output_gain, &daw_audio_synth_state::output_pan}, visit);
+  for (uint32_t index = 0; index < 2; ++index) {
+    visit(to.oscillators[index].level, from.oscillators[index].level);
+    visit(to.oscillators[index].detune_cents, oscillator_cents(from.oscillators[index]));
+  }
+}
+
+template <typename Visit>
+void visit_sampler(daw_audio_sampler_state &to, const daw_audio_sampler_state &from, Visit &&visit) {
+  visit_fields(to, from, std::array{
+    &daw_audio_sampler_state::amp_attack_ms, &daw_audio_sampler_state::amp_decay_ms, &daw_audio_sampler_state::amp_sustain,
+    &daw_audio_sampler_state::amp_release_ms, &daw_audio_sampler_state::filter_cutoff_hz,
+    &daw_audio_sampler_state::filter_resonance, &daw_audio_sampler_state::filter_envelope_amount,
+    &daw_audio_sampler_state::filter_attack_ms, &daw_audio_sampler_state::filter_decay_ms,
+    &daw_audio_sampler_state::filter_sustain, &daw_audio_sampler_state::filter_release_ms,
+    &daw_audio_sampler_state::lfo_rate_hz, &daw_audio_sampler_state::lfo_pitch_cents, &daw_audio_sampler_state::lfo_filter_hz,
+    &daw_audio_sampler_state::lfo_amplitude, &daw_audio_sampler_state::lfo_pan}, visit);
+}
+
+template <typename Visit>
+void visit_zone(daw_audio_sample_zone &to, const daw_audio_sample_zone &from, Visit &&visit) {
+  visit_fields(to, from, std::array{
+    &daw_audio_sample_zone::tune_cents, &daw_audio_sample_zone::gain, &daw_audio_sample_zone::pan}, visit);
+}
+
+template <typename Visit>
+void visit_granular(daw_audio_granular_state &to, const daw_audio_granular_state &from, Visit &&visit) {
+  visit_fields(to, from, std::array{
+    &daw_audio_granular_state::grain_size_ms, &daw_audio_granular_state::density_hz, &daw_audio_granular_state::position,
+    &daw_audio_granular_state::spray, &daw_audio_granular_state::pitch_semitones,
+    &daw_audio_granular_state::reverse_probability, &daw_audio_granular_state::stereo_spread}, visit);
+}
+
+// A kept instrument's targets move at once; `applied` follows them. One pole per
+// value, so a value reverses without overshoot, a burst of events ends where the
+// last one says, and a value within 1e-4 of its target lands on it (nothing decays
+// into subnormals). The time constant is the shortest the drag witnesses accept: at
+// 2 ms a two-semitone step still changes a cycle's period by 3.5%, at 5 ms by less
+// than 2.5%.
+constexpr float kInstrumentSlewSeconds = 0.005F;
+
+void advance_applied(const Core &core, InstrumentNodeState &instrument, uint32_t kind) {
+  const float rate = 1.0F / std::fmax(1.0F, static_cast<float>(core.config.sample_rate_hz) * kInstrumentSlewSeconds);
+  const auto slew = [rate](float &applied, float target) {
+    const float delta = target - applied;
+    applied = std::fabs(delta) <= 1e-4F * std::fmax(1.0F, std::fabs(target)) ? target : applied + delta * rate;
+  };
+  if (kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
+    visit_synth(instrument.applied.synth, instrument.synth, slew);
+  } else if (kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
+    visit_granular(instrument.applied.granular, instrument.granular, slew);
+  } else {
+    visit_sampler(instrument.applied.sampler, instrument.sampler, slew);
+    for (uint32_t index = 0; index < instrument.sampler.zone_count; ++index) {
+      visit_zone(instrument.applied.zones[index], instrument.zones[index], slew);
+    }
+  }
+}
+
+// A configuration with its continuous values cleared: what two configurations must
+// share for one instrument to serve both.
+InstrumentConfiguration discrete_part(const InstrumentConfiguration &configuration) {
+  InstrumentConfiguration discrete = configuration;
+  const InstrumentConfiguration none{};
+  const auto clear = [](float &to, float) { to = 0.0F; };
+  visit_synth(discrete.synth, none.synth, clear);
+  visit_sampler(discrete.sampler, none.sampler, clear);
+  visit_granular(discrete.granular, none.granular, clear);
+  for (uint32_t index = 0; index < discrete.sampler.zone_count; ++index) visit_zone(discrete.zones[index], none.zones[index], clear);
+  for (daw_audio_synth_oscillator_state &oscillator : discrete.synth.oscillators) oscillator.octave = oscillator.semitone = 0;
+  return discrete;
+}
+
+void set_instrument_targets(InstrumentNodeState &runtime, const InstrumentConfiguration &configuration) {
+  runtime.synth = configuration.synth;
+  runtime.sampler = configuration.sampler;
+  runtime.zones = configuration.zones;
+  runtime.granular = configuration.granular;
+}
+
+// An instrument that is set up (not edited) applies what it is set to from its first
+// frame, so nothing slews in from zero.
+void set_up_instrument(InstrumentNodeState &runtime, const InstrumentConfiguration &configuration) {
+  set_instrument_targets(runtime, configuration);
+  runtime.applied = configuration;
+  for (daw_audio_synth_oscillator_state &oscillator : runtime.applied.synth.oscillators) {
+    oscillator.detune_cents = oscillator_cents(oscillator);
+    oscillator.octave = oscillator.semitone = 0;
+  }
 }
 
 bool instrument_declares_target(const daw_audio_instrument_state_descriptor &descriptor, uint32_t target) {
@@ -3790,16 +4479,16 @@ bool instrument_declares_target(const daw_audio_instrument_state_descriptor &des
   return false;
 }
 
-bool set_synth_parameter(InstrumentNodeState &instrument, uint32_t target, float value) {
+bool set_synth_parameter(daw_audio_synth_state &synth, uint32_t target, float value) {
   if (!std::isfinite(value)) return false;
-  if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN && value >= 0.0F && value <= 1.5F) instrument.synth.output_gain = value;
-  else if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_PAN && value >= -1.0F && value <= 1.0F) instrument.synth.output_pan = value;
-  else if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_CUTOFF_HZ && value >= 20.0F && value <= 20000.0F) instrument.synth.filter_cutoff_hz = value;
-  else if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_RESONANCE && value >= 0.0001F && value <= 30.0F) instrument.synth.filter_resonance = value;
-  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_ATTACK_MS && value >= 0.0F && value <= 60000.0F) instrument.synth.amp_attack_ms = value;
-  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_DECAY_MS && value >= 0.0F && value <= 60000.0F) instrument.synth.amp_decay_ms = value;
-  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_SUSTAIN && value >= 0.0F && value <= 1.0F) instrument.synth.amp_sustain = value;
-  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_RELEASE_MS && value >= 0.0F && value <= 60000.0F) instrument.synth.amp_release_ms = value;
+  if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN && value >= 0.0F && value <= 1.5F) synth.output_gain = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_PAN && value >= -1.0F && value <= 1.0F) synth.output_pan = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_CUTOFF_HZ && value >= 20.0F && value <= 20000.0F) synth.filter_cutoff_hz = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_FILTER_RESONANCE && value >= 0.0001F && value <= 30.0F) synth.filter_resonance = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_ATTACK_MS && value >= 0.0F && value <= 60000.0F) synth.amp_attack_ms = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_DECAY_MS && value >= 0.0F && value <= 60000.0F) synth.amp_decay_ms = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_SUSTAIN && value >= 0.0F && value <= 1.0F) synth.amp_sustain = value;
+  else if (target == DAW_AUDIO_SYNTH_PARAMETER_AMP_RELEASE_MS && value >= 0.0F && value <= 60000.0F) synth.amp_release_ms = value;
   else return false;
   return true;
 }
@@ -3812,11 +4501,11 @@ void render_instrument_frame(
   float *right_output) {
   float left = 0.0F;
   float right = 0.0F;
-  const daw_audio_synth_state &synth = instrument.synth;
-  const float amp_attack = 1.0F / std::fmax(1.0F, synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_AMP_ATTACK_MS, synth.amp_attack_ms) * sample_rate_hz / 1000.0F);
-  const float amp_decay = 1.0F / std::fmax(1.0F, synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_AMP_DECAY_MS, synth.amp_decay_ms) * sample_rate_hz / 1000.0F);
-  const float amp_release = 1.0F / std::fmax(1.0F, synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_AMP_RELEASE_MS, synth.amp_release_ms) * sample_rate_hz / 1000.0F);
-  const float amp_sustain = synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_AMP_SUSTAIN, synth.amp_sustain);
+  const daw_audio_synth_state &synth = instrument.applied.synth;
+  const float amp_attack = 1.0F / std::fmax(1.0F, synth.amp_attack_ms * sample_rate_hz / 1000.0F);
+  const float amp_decay = 1.0F / std::fmax(1.0F, synth.amp_decay_ms * sample_rate_hz / 1000.0F);
+  const float amp_release = 1.0F / std::fmax(1.0F, synth.amp_release_ms * sample_rate_hz / 1000.0F);
+  const float amp_sustain = synth.amp_sustain;
   for (uint32_t index = 0; index < descriptor.voice_capacity; ++index) {
     InstrumentVoice &voice = instrument.voices[index];
     if (!voice.active) continue;
@@ -3837,18 +4526,17 @@ void render_instrument_frame(
     for (uint32_t oscillator_index = 0; oscillator_index < 2; ++oscillator_index) {
       const daw_audio_synth_oscillator_state &oscillator = synth.oscillators[oscillator_index];
       if (oscillator.enabled == 0) continue;
-      const float semitones = static_cast<float>(oscillator.octave * 12 + oscillator.semitone)
-        + (oscillator.detune_cents + lfo * synth.lfo_pitch_cents) / 100.0F;
+      const float semitones = (oscillator.detune_cents + lfo * synth.lfo_pitch_cents) / 100.0F;
       const float increment = base_frequency * std::pow(2.0F, semitones / 12.0F) / static_cast<float>(sample_rate_hz);
       voice.oscillator_phase[oscillator_index] += increment;
       voice.oscillator_phase[oscillator_index] -= std::floor(voice.oscillator_phase[oscillator_index]);
       sample += waveform(oscillator.waveform, voice.oscillator_phase[oscillator_index]) * oscillator.level;
     }
-    float cutoff = synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_FILTER_CUTOFF_HZ, synth.filter_cutoff_hz);
+    float cutoff = synth.filter_cutoff_hz;
     cutoff *= std::pow(2.0F, (static_cast<float>(voice.note) - 60.0F) / 12.0F * synth.filter_key_tracking
       + voice.filter_level * synth.filter_envelope_amount_octaves + lfo * synth.lfo_filter_octaves);
     cutoff = std::fmax(20.0F, std::fmin(cutoff, static_cast<float>(sample_rate_hz) * 0.45F));
-    const float resonance = synth_parameter_value(instrument, DAW_AUDIO_SYNTH_PARAMETER_FILTER_RESONANCE, synth.filter_resonance);
+    const float resonance = synth.filter_resonance;
     const uint32_t filter_type = synth.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_HIGHPASS
       ? DAW_AUDIO_EQ_BAND_HIGHPASS
       : synth.filter_mode == DAW_AUDIO_SYNTH_FILTER_MODE_BANDPASS
@@ -3871,6 +4559,30 @@ void render_instrument_frame(
   *right_output = std::isfinite(right) ? right : 0.0F;
 }
 
+double sample_voice_increment(
+  const Core &core, const AssetSlot &asset, uint32_t note, const daw_audio_sample_zone &zone) {
+  const float cents = (static_cast<float>(note) - static_cast<float>(zone.root_note)) * 100.0F + zone.tune_cents;
+  return std::pow(2.0, cents / 1200.0) * static_cast<double>(asset.sample_rate_hz) / core.config.sample_rate_hz;
+}
+
+// Re-derives what a voice took from its zone when the zone no longer says the same:
+// a swapped asset or a tuning edit changes the step (the playhead stays where it
+// is), and a start edit moves the playhead by the same distance as the start, so the
+// note plays on from the same offset into the sample.
+void follow_sample_zone(
+  const Core &core, SampleVoice &voice, const daw_audio_sample_zone &zone, const AssetSlot &asset) {
+  if (voice.asset != zone.asset || voice.root_note != zone.root_note || voice.tune_cents != zone.tune_cents) {
+    voice.asset = zone.asset;
+    voice.root_note = zone.root_note;
+    voice.tune_cents = zone.tune_cents;
+    voice.increment = sample_voice_increment(core, asset, voice.note, zone);
+  }
+  if (voice.start_frame != zone.start_frame) {
+    voice.position += static_cast<double>(zone.start_frame) - static_cast<double>(voice.start_frame);
+    voice.start_frame = zone.start_frame;
+  }
+}
+
 void render_sample_instrument_frame(
   Core &core,
   InstrumentNodeState &instrument,
@@ -3879,7 +4591,7 @@ void render_sample_instrument_frame(
   float *right_output) {
   float left = 0.0F;
   float right = 0.0F;
-  const daw_audio_sampler_state &state = instrument.sampler;
+  const daw_audio_sampler_state &state = instrument.applied.sampler;
   const float attack = 1.0F / std::fmax(1.0F, state.amp_attack_ms * core.config.sample_rate_hz / 1000.0F);
   const float decay = 1.0F / std::fmax(1.0F, state.amp_decay_ms * core.config.sample_rate_hz / 1000.0F);
   const float filter_attack = 1.0F / std::fmax(1.0F, state.filter_attack_ms * core.config.sample_rate_hz / 1000.0F);
@@ -3892,19 +4604,21 @@ void render_sample_instrument_frame(
     voice.amp_level = envelope_step(voice.amp_level, &voice.amp_stage, voice.released, attack, decay, state.amp_sustain, release);
     const float filter_release = 1.0F / std::fmax(1.0F, state.filter_release_ms * core.config.sample_rate_hz / 1000.0F);
     voice.filter_level = envelope_step(voice.filter_level, &voice.filter_stage, voice.released, filter_attack, filter_decay, state.filter_sustain, filter_release);
-    AssetSlot *asset = find_asset(&core, voice.asset);
+    const daw_audio_sample_zone &zone = instrument.applied.zones[voice.zone];
+    AssetSlot *asset = find_asset(&core, zone.asset);
     if (asset == nullptr || (voice.amp_level <= 0.0F && voice.released)) {
       voice = {};
       continue;
     }
-    if (voice.position >= static_cast<double>(voice.end_frame)) {
-      if (voice.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT) {
+    follow_sample_zone(core, voice, zone, *asset);
+    if (voice.position >= static_cast<double>(zone.end_frame)) {
+      if (zone.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT) {
         voice = {};
         continue;
       }
-      const double loop_length = static_cast<double>(voice.loop_end_frame - voice.loop_start_frame);
-      voice.position = static_cast<double>(voice.loop_start_frame) + std::fmod(
-        voice.position - static_cast<double>(voice.loop_start_frame), loop_length);
+      const double loop_length = static_cast<double>(zone.loop_end_frame - zone.loop_start_frame);
+      voice.position = static_cast<double>(zone.loop_start_frame) + std::fmod(
+        voice.position - static_cast<double>(zone.loop_start_frame), loop_length);
     }
     const auto sample_at = [&core, asset](double position, uint32_t channel) {
       return asset_sample(core, *asset, nullptr, position, channel);
@@ -3912,13 +4626,13 @@ void render_sample_instrument_frame(
     const uint32_t right_channel = asset->channel_count > 1 ? 1 : 0;
     float sample_left = sample_at(voice.position, 0);
     float sample_right = sample_at(voice.position, right_channel);
-    if (voice.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_CROSSFADE_LOOP
-      && voice.crossfade_frame_count > 0
-      && voice.position >= static_cast<double>(voice.loop_end_frame - voice.crossfade_frame_count)) {
-      const double fade = (voice.position - static_cast<double>(voice.loop_end_frame - voice.crossfade_frame_count))
-        / static_cast<double>(voice.crossfade_frame_count);
-      const double loop_position = static_cast<double>(voice.loop_start_frame)
-        + (voice.position - static_cast<double>(voice.loop_end_frame - voice.crossfade_frame_count));
+    if (zone.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_CROSSFADE_LOOP
+      && zone.crossfade_frame_count > 0
+      && voice.position >= static_cast<double>(zone.loop_end_frame - zone.crossfade_frame_count)) {
+      const double fade = (voice.position - static_cast<double>(zone.loop_end_frame - zone.crossfade_frame_count))
+        / static_cast<double>(zone.crossfade_frame_count);
+      const double loop_position = static_cast<double>(zone.loop_start_frame)
+        + (voice.position - static_cast<double>(zone.loop_end_frame - zone.crossfade_frame_count));
       sample_left = sample_left * static_cast<float>(1.0 - fade) + sample_at(loop_position, 0) * static_cast<float>(fade);
       sample_right = sample_right * static_cast<float>(1.0 - fade) + sample_at(loop_position, right_channel) * static_cast<float>(fade);
     }
@@ -3942,8 +4656,8 @@ void render_sample_instrument_frame(
       filtered_left = process_biquad(sample_left, coefficients, voice.filter_history[0]);
       filtered_right = process_biquad(sample_right, coefficients, voice.filter_history[1]);
     }
-    const float gain = voice.gain * voice.amp_level * std::fmax(0.0F, 1.0F - lfo * state.lfo_amplitude);
-    const float pan_angle = (std::fmax(-1.0F, std::fmin(1.0F, voice.pan + lfo * state.lfo_pan)) + 1.0F) * 0.7853981633974483096F;
+    const float gain = zone.gain * voice.velocity * voice.amp_level * std::fmax(0.0F, 1.0F - lfo * state.lfo_amplitude);
+    const float pan_angle = (std::fmax(-1.0F, std::fmin(1.0F, zone.pan + lfo * state.lfo_pan)) + 1.0F) * 0.7853981633974483096F;
     left += filtered_left * gain * std::cos(pan_angle) * 1.4142135623730950488F;
     right += filtered_right * gain * std::sin(pan_angle) * 1.4142135623730950488F;
     voice.position += voice.increment * std::pow(2.0, static_cast<double>(lfo * state.lfo_pitch_cents) / 1200.0);
@@ -3957,7 +4671,7 @@ void render_granular_instrument_frame(
   InstrumentNodeState &instrument,
   float *left_output,
   float *right_output) {
-  const daw_audio_granular_state &state = instrument.granular;
+  const daw_audio_granular_state &state = instrument.applied.granular;
   AssetSlot *asset = find_asset(&core, state.asset);
   if (asset == nullptr || instrument.granular_note_count == 0) {
     *left_output = 0.0F;
@@ -4025,20 +4739,43 @@ bool apply_granular_instrument_event(
   const daw_audio_instrument_event &event) {
   const std::uint32_t type = portable_instrument_event_type(event.type);
   if (type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON) {
-    for (uint64_t &note_id : instrument.granular_note_ids) {
+    uint32_t oldest_index = 0;
+    uint32_t empty_index = static_cast<uint32_t>(instrument.granular_note_ids.size());
+    for (uint32_t index = 0; index < instrument.granular_note_ids.size(); ++index) {
+      const uint64_t note_id = instrument.granular_note_ids[index];
       if (note_id == event.note_id) return true;
       if (note_id == 0) {
-        note_id = event.note_id;
-        ++instrument.granular_note_count;
-        return true;
+        empty_index = index;
+        continue;
+      }
+      if (instrument.granular_note_ages[index] < instrument.granular_note_ages[oldest_index]) {
+        oldest_index = index;
       }
     }
-    return false;
+    if (instrument.granular_next_note_age == UINT64_MAX) {
+      const auto previous_ages = instrument.granular_note_ages;
+      for (uint32_t index = 0; index < instrument.granular_note_ids.size(); ++index) {
+        if (instrument.granular_note_ids[index] == 0) continue;
+        uint64_t rank = 1;
+        for (uint32_t other = 0; other < instrument.granular_note_ids.size(); ++other) {
+          if (instrument.granular_note_ids[other] != 0
+            && previous_ages[other] < previous_ages[index]) ++rank;
+        }
+        instrument.granular_note_ages[index] = rank;
+      }
+      instrument.granular_next_note_age = static_cast<uint64_t>(instrument.granular_note_count) + 1;
+    }
+    const uint32_t target_index = empty_index < instrument.granular_note_ids.size() ? empty_index : oldest_index;
+    instrument.granular_note_ids[target_index] = event.note_id;
+    instrument.granular_note_ages[target_index] = instrument.granular_next_note_age++;
+    if (empty_index < instrument.granular_note_ids.size()) ++instrument.granular_note_count;
+    return true;
   }
   if (type == DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF) {
-    for (uint64_t &note_id : instrument.granular_note_ids) {
-      if (note_id == event.note_id) {
-        note_id = 0;
+    for (uint32_t index = 0; index < instrument.granular_note_ids.size(); ++index) {
+      if (instrument.granular_note_ids[index] == event.note_id) {
+        instrument.granular_note_ids[index] = 0;
+        instrument.granular_note_ages[index] = 0;
         --instrument.granular_note_count;
         if (instrument.granular_note_count == 0) instrument.grains = {};
         return true;
@@ -4062,6 +4799,7 @@ bool apply_sample_instrument_event(
   if (type != DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON) return type != DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER;
   const daw_audio_sample_zone *selected = nullptr;
   uint32_t matching_group = 0;
+  uint32_t *round_robin_cursor = nullptr;
   for (uint32_t index = 0; index < instrument.sampler.zone_count; ++index) {
     const daw_audio_sample_zone &zone = instrument.zones[index];
     if (event.note >= zone.key_low && event.note <= zone.key_high
@@ -4071,7 +4809,8 @@ bool apply_sample_instrument_event(
         selected = &zone;
         break;
       }
-      const uint32_t cursor = instrument.round_robin_cursors[matching_group % DAW_AUDIO_CORE_MAX_SAMPLE_ZONES]++;
+      round_robin_cursor = &instrument.round_robin_cursors[matching_group % DAW_AUDIO_CORE_MAX_SAMPLE_ZONES];
+      const uint32_t cursor = *round_robin_cursor;
       uint32_t group_count = 0;
       for (uint32_t group_index = 0; group_index < instrument.sampler.zone_count; ++group_index) {
         const daw_audio_sample_zone &candidate = instrument.zones[group_index];
@@ -4108,6 +4847,9 @@ bool apply_sample_instrument_event(
     }
   }
   if (selected == nullptr) return true;
+  AssetSlot *asset = find_asset(&core, selected->asset);
+  if (asset == nullptr) return false;
+  if (round_robin_cursor != nullptr) ++*round_robin_cursor;
   if (instrument.sampler.retrigger != 0) {
     for (SampleVoice &voice : instrument.sample_voices) {
       if (voice.active && voice.note == event.note) {
@@ -4118,7 +4860,7 @@ bool apply_sample_instrument_event(
   }
   if (selected->choke_group != 0) {
     for (SampleVoice &voice : instrument.sample_voices) {
-      if (voice.active && voice.choke_group == selected->choke_group) {
+      if (voice.active && instrument.zones[voice.zone].choke_group == selected->choke_group) {
         voice.released = true;
         voice.forced_release_ms = kSampleTerminationFadeMilliseconds;
       }
@@ -4137,15 +4879,10 @@ bool apply_sample_instrument_event(
       if (instrument.sample_voices[index].age < voice->age) voice = &instrument.sample_voices[index];
     }
   }
-  AssetSlot *asset = find_asset(&core, selected->asset);
-  if (asset == nullptr) return false;
-  const float cents = (static_cast<float>(event.note) - static_cast<float>(selected->root_note)) * 100.0F + selected->tune_cents;
-  *voice = {.note_id = event.note_id, .note = event.note, .asset = selected->asset, .position = static_cast<double>(selected->start_frame),
-    .increment = std::pow(2.0, cents / 1200.0) * static_cast<double>(asset->sample_rate_hz) / core.config.sample_rate_hz,
-    .end_frame = selected->end_frame, .loop_start_frame = selected->loop_start_frame, .loop_end_frame = selected->loop_end_frame,
-    .crossfade_frame_count = selected->crossfade_frame_count,
-    .playback_mode = selected->playback_mode, .choke_group = selected->choke_group,
-    .gain = selected->gain * event.value, .pan = selected->pan, .age = instrument.next_age++, .active = true};
+  *voice = {.note_id = event.note_id, .note = event.note, .zone = static_cast<uint32_t>(selected - instrument.zones.data()),
+    .velocity = event.value, .asset = selected->asset, .start_frame = selected->start_frame, .root_note = selected->root_note,
+    .tune_cents = selected->tune_cents, .position = static_cast<double>(selected->start_frame),
+    .increment = sample_voice_increment(core, *asset, event.note, *selected), .age = instrument.next_age++, .active = true};
   return true;
 }
 
@@ -4157,7 +4894,7 @@ bool apply_instrument_event(
   const std::uint32_t type = portable_instrument_event_type(event.type);
   if (type == DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER) {
     return instrument_declares_target(descriptor, event.note)
-      && set_synth_parameter(instrument, event.note, event.value);
+      && set_synth_parameter(instrument.synth, event.note, event.value);
   }
   if (type == DAW_AUDIO_INSTRUMENT_EVENT_SUSTAIN) {
     instrument.sustain = event.value >= 0.5F;
@@ -4219,23 +4956,609 @@ bool apply_instrument_event(
   return true;
 }
 
+// A plan entry renders only while its slot is active at the generation the plan
+// recorded. A mismatch on an active slot means the slot was reused under a plan
+// that still names it; that entry must never render.
+bool runtime_slot_renderable(Core &core, const RuntimeSlot &slot, uint32_t generation) {
+  if (slot.state.load(std::memory_order_acquire) != kSlotActive) return false;
+  if (slot.generation.load(std::memory_order_relaxed) == generation) return true;
+  core.stale_references.fetch_add(1, std::memory_order_relaxed);
+  return false;
+}
+
+void retire_runtime_slot(Core &core, RuntimeSlot &slot) {
+  // The process call in progress completes epoch render_epoch + 1.
+  slot.retired_epoch.store(core.render_epoch.load(std::memory_order_relaxed) + 1, std::memory_order_relaxed);
+  slot.state.store(kSlotRetired, std::memory_order_release);
+}
+
+// Moves every ghost's fade forward by one block and retires what finished. The
+// slot then only awaits reclamation after this process call completes.
+void advance_deletion_fades(Core &core, const GraphRevision &graph, uint32_t frame_count) {
+  const auto advance = [&](RuntimeSlot &slot) {
+    const uint32_t elapsed = slot.fade_elapsed.load(std::memory_order_relaxed);
+    if (elapsed >= graph.fade_frames) return true;
+    slot.fade_elapsed.store(std::min(graph.fade_frames, elapsed + frame_count), std::memory_order_relaxed);
+    return elapsed + frame_count >= graph.fade_frames;
+  };
+  for (uint32_t node_index = graph.node_count; node_index < graph.total_node_count(); ++node_index) {
+    RuntimeSlot &slot = core.node_slots[graph.node_slots[node_index]];
+    if (slot.state.load(std::memory_order_relaxed) == kSlotActive && advance(slot)) retire_runtime_slot(core, slot);
+  }
+  for (uint32_t index = graph.processor_count; index < graph.total_processor_count(); ++index) {
+    const GraphRevision::Processor &processor = graph.processors[index];
+    RuntimeSlot &slot = core.processor_slots[processor.history_slot];
+    if (slot.state.load(std::memory_order_relaxed) != kSlotActive) continue;
+    const bool finished = processor.detached
+      ? advance(slot)
+      : core.node_slots[graph.node_slots[processor.node_index]].state.load(std::memory_order_relaxed) != kSlotActive;
+    if (finished) {
+      retire_runtime_slot(core, slot);
+      if (processor.spectral_predecessor >= 0) {
+        const auto &previous = graph.spectral_predecessors[processor.spectral_predecessor];
+        auto &old_slot = core.processor_slots[previous.history_slot];
+        if (old_slot.state.load(std::memory_order_relaxed) == kSlotActive
+          && old_slot.generation.load(std::memory_order_relaxed) == previous.generation) retire_runtime_slot(core, old_slot);
+      }
+    }
+  }
+}
+
+struct ChainItem {
+  uint16_t processor_index = 0;
+  ProcessorRenderer render = nullptr;
+};
+constexpr uint32_t kMaximumChainItems = kMaximumNodeChain;
+
+SpectralTransferMap prepare_spectral_transfer(uint32_t before, uint32_t after) {
+  SpectralTransferMap map{};
+  map.before = before; map.after = after;
+  map.level = static_cast<float>(after) / before;
+  const double ratio = static_cast<double>(after) / before;
+  const uint32_t last = before / 2u;
+  for (uint32_t bin = 0; bin <= after / 2u; ++bin) {
+    auto &band = map.bands[bin];
+    const double at = bin / ratio;
+    if (after >= before) {
+      band.first = static_cast<uint32_t>(at);
+      band.last = std::min(band.first + 1u, last);
+      band.first_weight = 1.0 - (at - band.first);
+      band.last_weight = at - band.first;
+      if (band.first == band.last) { band.first_weight = 1; band.last_weight = 0; }
+    } else {
+      const double left = std::max(0.0, (bin - 0.5) / ratio);
+      const double right = std::min(static_cast<double>(last), (bin + 0.5) / ratio);
+      band.first = static_cast<uint32_t>(left + 0.5);
+      band.last = std::min(last, static_cast<uint32_t>(right + 0.5));
+      band.inner_weight = 1.0 / (right - left);
+      band.first_weight = (std::min(right, band.first + 0.5) - left) / (right - left);
+      band.last_weight = (right - std::max(left, band.last - 0.5)) / (right - left);
+    }
+  }
+  return map;
+}
+
+void apply_spectral_transfer(const SpectralHistory &prior, const daw_audio_spectral_state &before,
+  SpectralHistory &history, const daw_audio_spectral_state &after, const SpectralTransferMap &map) {
+  if (before.mode != after.mode || map.before != before.fft_size || map.after != after.fft_size) return;
+  if (before.fft_size == after.fft_size) {
+    history.frozen_magnitude = prior.frozen_magnitude;
+    history.frozen_phase = prior.frozen_phase;
+    history.noise_profile = prior.noise_profile;
+    history.gate_gain = prior.gate_gain;
+    history.freeze_captured = prior.freeze_captured;
+    return;
+  }
+  const bool gate = after.mode == DAW_AUDIO_SPECTRAL_MODE_GATE;
+  if (!gate && after.mode != DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE) return;
+  for (uint32_t channel = 0; channel < 2; ++channel) {
+    const auto &source = gate ? prior.gate_gain[channel] : prior.noise_profile[channel];
+    auto &destination = gate ? history.gate_gain[channel] : history.noise_profile[channel];
+    const auto power = [&](uint32_t k) { return source[k] * source[k]; };
+    for (uint32_t bin = 0; bin <= after.fft_size / 2u; ++bin) {
+      const auto &band = map.bands[bin];
+      float sum = power(band.first) * band.first_weight + power(band.last) * band.last_weight;
+      // Disjoint, control-prepared bands touch each source bin at most twice.
+      // Validated sizes <=4096 bound total work by 2*2049/channel.
+      for (uint32_t k = band.first + 1u; k < band.last; ++k) sum += power(k) * band.inner_weight;
+      destination[bin] = std::sqrt(sum * (gate ? 1.0F : map.level));
+    }
+  }
+}
+
+// Control-side only. The callback applies the immutable map once if the tagged
+// state changed after prepare; it never constructs weights or calls trig/log.
+void transfer_spectral_persistent(const SpectralHistory &prior, const daw_audio_spectral_state &before,
+  SpectralHistory &history, const daw_audio_spectral_state &after) {
+  history.transfer_map = prepare_spectral_transfer(before.fft_size, after.fft_size);
+  apply_spectral_transfer(prior, before, history, after, history.transfer_map);
+}
+// One processor's sample. Its key is the signal routed to it, or its own input
+// when nothing is. A key from a deleted source fades with that source, and the
+// processor's own input takes over by the amount the keys have faded: once every
+// key is gone the detector reads exactly what it would with no key routed, with
+// no step on the way and no later publication needed.
+void render_chain_frame(
+  Core &core, GraphRevision &graph, const ChainItem &item, uint32_t frame, float &left, float &right) {
+  GraphRevision::Processor &processor = graph.processors[item.processor_index];
+  resolve_processor_parameter_frame(core, processor, frame);
+  const float own_left = processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL ? 0.0F : left;
+  const float own_right = processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL ? 0.0F : right;
+  float sidechain_left = own_left;
+  float sidechain_right = own_right;
+  const GraphRevision::Range sidechain_range = graph.sidechain_edge_ranges[item.processor_index];
+  if (sidechain_range.count > 0) {
+    sidechain_left = 0.0F;
+    sidechain_right = 0.0F;
+    float key_level = 0.0F;
+    const uint32_t sidechain_end = static_cast<uint32_t>(sidechain_range.start) + sidechain_range.count;
+    for (uint32_t sidechain_position = sidechain_range.start; sidechain_position < sidechain_end; ++sidechain_position) {
+      const uint32_t edge_index = graph.sidechain_edge_indices[sidechain_position];
+      sidechain_left += graph_edge_sample(core, graph, edge_index, 0, frame);
+      sidechain_right += graph_edge_sample(core, graph, edge_index, 1, frame);
+      key_level += edge_join_gain(core, graph, edge_index, frame)
+        * (graph.edge_source_indices[edge_index] < graph.node_count ? 1.0F : ghost_edge_fade_gain(core, graph, edge_index, frame));
+    }
+    key_level = std::min(1.0F, key_level);
+    if (key_level < 1.0F) {
+      sidechain_left += own_left * (1.0F - key_level);
+      sidechain_right += own_right * (1.0F - key_level);
+    }
+  }
+  float processed_left = 0.0F;
+  float processed_right = 0.0F;
+  const auto record_input = [&](uint32_t slot) {
+    auto &input = core.spectral_inputs[slot];
+    const uint64_t end = input.end.load(std::memory_order_relaxed);
+    const uint32_t at = end & (kSpectralInputFrames - 1u);
+    input.store(0, at, left);
+    input.store(1, at, right);
+    input.store(2, at, sidechain_left);
+    input.store(3, at, sidechain_right);
+    input.end.store(end + 1u, std::memory_order_release);
+  };
+  if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) record_input(processor.spectral_slot);
+  if (processor.spectral_predecessor >= 0) {
+    auto &old = graph.spectral_predecessors[processor.spectral_predecessor];
+    auto &slot = core.processor_slots[old.history_slot];
+    auto &history = core.spectral_histories[processor.spectral_slot];
+    if (runtime_slot_renderable(core, slot, old.generation)) {
+      auto &input = core.spectral_inputs[old.spectral_slot];
+      const uint64_t end = input.end.load(std::memory_order_relaxed);
+      // The predecessor has no parameter-cache entry of its own. Freeze must
+      // nevertheless follow the replacement's resolved live control so it is
+      // the audible released reference while fresh live analysis fills.
+      const float freeze = spectral_transform_parameter(core, processor, 15, frame, processor.spectral.freeze);
+      const bool freeze_resize = old.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE
+        && processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE
+        && old.spectral.fft_size != processor.spectral.fft_size;
+      const bool latch_now = freeze_resize && !history.freeze_source_latched
+        && core.graph_write_frame + frame >= history.freeze_source_deadline;
+      const bool recapture = freeze_resize
+        && (history.freeze_source_latched ? history.analysis_from_predecessor : freeze > 0.0F);
+      if (history.freeze_source_latched && (freeze > 0.0F) != history.analysis_from_predecessor)
+        history.freeze_changed_after_latch = true;
+      if (old.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE
+        && processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE) old.spectral.freeze = freeze;
+      if (!history.persistent_state_transferred) {
+        history.persistent_state_transferred = true;
+        const auto &prior = core.spectral_histories[old.spectral_slot];
+        if ((history.prepared_state_serial != prior.state_serial
+          || history.prepared_state_mode != old.spectral.mode
+          || history.prepared_state_fft_size != old.spectral.fft_size)
+          && prior.state_mode == old.spectral.mode && prior.fft_size == old.spectral.fft_size)
+          apply_spectral_transfer(prior, old.spectral, history, processor.spectral, history.transfer_map);
+        if (recapture) {
+          // Only fresh predecessor wet samples may reach the existing capture
+          // step. Old prepared live-input OLA drains while the predecessor stays
+          // audible; no bulk reset or spectrum conversion runs on the callback.
+          history.freeze_captured.fill(false);
+          history.samples_until_frame = processor.spectral.fft_size;
+          history.analysis_frames = 0;
+          history.warm_cursor = end;
+          history.analysis_from_predecessor = true;
+        }
+        const bool same_mode = old.spectral.mode == processor.spectral.mode;
+        ++history.state_serial;
+        history.state_mode = processor.spectral.mode;
+        core.spectral_inputs[processor.spectral_slot].publish(history, processor.spectral.mode);
+        if (same_mode && (processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_GATE
+          || processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE
+          || (processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE && freeze > 0.0F))) {
+          history.warm_cursor = end - std::min<uint64_t>(end, spectral_warm_frames(processor.spectral));
+          // Current envelopes/profiles are not historical state. Replaying
+          // past samples would apply release or profile learning twice.
+          if (recapture || processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_GATE
+            || processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE) history.warm_cursor = end;
+          history.analysis_frames = 0;
+        }
+      }
+      if (!history.transition_started) {
+        history.warm_cursor = end - std::min<uint64_t>(end, spectral_warm_frames(processor.spectral));
+        history.transition_started = true;
+      }
+      if (!history.freeze_source_latched && history.analysis_from_predecessor != recapture) {
+        // Use the same resolved event/automation value as synthesis. A source
+        // change needs N fresh samples and the ordinary N+C OLA fill before
+        // fading; keep the released predecessor audible during that bounded
+        // warm-up. Never replay pre-gesture input with post-gesture parameters.
+        history.analysis_from_predecessor = recapture;
+        history.freeze_captured.fill(false);
+        history.samples_until_frame = processor.spectral.fft_size;
+        history.analysis_frames = 0;
+        history.warm_cursor = end;
+      }
+      // The publication-relative deadline never restarts. Freeze this final
+      // analysis source and replacement Freeze until the ready fade
+      // ends; further controls remain in the parameter cache for steady state.
+      if (latch_now) history.freeze_source_latched = true;
+      // A command delayed longer than its warm window restarts bounded
+      // catch-up from the newest complete warm window. The old stage continues
+      // at unity, and at least two FFTs replace any stale algorithm history
+      // before this replacement can become audible.
+      const uint32_t warm_frames = spectral_warm_frames(processor.spectral) + processor.spectral_compensation;
+      if (end - history.warm_cursor > warm_frames) {
+        history.warm_cursor = end - std::min<uint64_t>(end, warm_frames);
+        history.analysis_frames = 0;
+        history.transition_elapsed = 0;
+      }
+      record_input(old.spectral_slot);
+      float old_left = 0.0F, old_right = 0.0F;
+      render_spectral_processor(core, old, frame, left, right, sidechain_left, sidechain_right, &old_left, &old_right);
+      if (recapture) {
+        render_spectral_sample(core, processor, frame, left, right, sidechain_left, sidechain_right,
+          &processed_left, &processed_right, &core.spectral_histories[old.spectral_slot].wet_sample);
+        history.warm_cursor = end + 1u;
+      }
+      // At most two replacement samples per input sample: bounded catch-up
+      // from retained stage input, without a publish-time FFT burst or upstream
+      // rerender. Only these two stages run until the 10 ms linear seam ends.
+      for (uint32_t work = 0; !recapture && work < 2 && history.warm_cursor < end + 1u; ++work) {
+        const uint32_t at = history.warm_cursor++ & (kSpectralInputFrames - 1u);
+        render_spectral_processor(core, processor, frame,
+          input.sample(0, at), input.sample(1, at),
+          input.sample(2, at), input.sample(3, at),
+          &processed_left, &processed_right);
+      }
+      const uint32_t ola_frames = processor.spectral.overlap;
+      bool ready = history.analysis_frames >= ola_frames + 1u;
+      if (processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_HPSS)
+        ready = history.analysis_frames >= kSpectralHpssFrames + ola_frames;
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+      const uint64_t absolute = core.graph_write_frame + frame;
+      const uint64_t raise_seam = graph.latency_origin + core.latency_publication_shift
+        + (graph.latency_raise != 0 ? graph.fade_frames : 0u);
+      const bool running = core.transport.running != 0 && core.latency_shrunk_revision != graph.revision
+        && graph.nodes[processor.node_index].keep_latency == 0;
+      const uint32_t common_latency = processor.spectral.fft_size + processor.spectral_compensation;
+      const uint32_t old_delay = !running ? 0u : absolute < raise_seam ? old.spectral_compensation
+        : common_latency - old.spectral.fft_size;
+      old_left = spectral_delayed_output(core.spectral_histories[old.spectral_slot], 0, old_delay);
+      old_right = spectral_delayed_output(core.spectral_histories[old.spectral_slot], 1, old_delay);
+      const uint32_t new_delay = running ? processor.spectral_compensation : 0u;
+      processed_left = spectral_delayed_output(history, 0, new_delay);
+      processed_right = spectral_delayed_output(history, 1, new_delay);
+      const uint32_t algorithm_frames = processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_HPSS
+        ? kSpectralHpssFrames + ola_frames : ola_frames + 1u;
+      ready = ready && absolute >= raise_seam
+        && history.analysis_frames >= algorithm_frames + (new_delay + history.hop_size - 1u) / history.hop_size;
+#endif
+      const bool advance_transition = ready && history.warm_cursor == end + 1u;
+      // A gesture can arrive after fading has begun. Hold the last coefficient
+      // during replacement-source fill instead of jumping back to predecessor-only.
+      const uint32_t fade_at = advance_transition ? history.transition_elapsed++
+        : history.transition_elapsed - std::min(history.transition_elapsed, 1u);
+      const float mix = std::min(1.0F, static_cast<float>(fade_at) / (graph.fade_frames * 2u));
+      processed_left = old_left * (1.0F - mix) + processed_left * mix;
+      processed_right = old_right * (1.0F - mix) + processed_right * mix;
+      if (mix == 1.0F) {
+        if (history.analysis_from_predecessor && history.freeze_changed_after_latch) {
+          // The existing dry delay retains exactly N live stage-input samples.
+          // Restore that analysis window at the seam so a deferred engage
+          // captures live input, not the predecessor's wet tail. This bounded
+          // 2N copy leaves the capture spectrum, OLA and aligned output intact.
+          const uint32_t size = processor.spectral.fft_size;
+          for (uint32_t channel = 0; channel < 2; ++channel)
+            for (uint32_t i = 0; i < size; ++i)
+              history.input[channel][(history.write_index - size + i) & (kMaximumSpectralFftSize - 1u)]
+                = history.dry[channel][(history.write_index + i) & (kMaximumSpectralFftSize * 2u - 1u)];
+        }
+        // Even release -> engage ending at the latched value needs a fresh
+        // normal capture. Clear only capture ownership, never the OLA tail.
+        if (history.freeze_changed_after_latch) {
+          history.freeze_captured.fill(false);
+          ++history.state_serial;
+          core.spectral_inputs[processor.spectral_slot].publish(history, processor.spectral.mode);
+        }
+        history.freeze_source_latched = false;
+        retire_runtime_slot(core, slot);
+      }
+    } else {
+      item.render(core, processor, frame, left, right, sidechain_left, sidechain_right, &processed_left, &processed_right);
+      if (processor.spectral_compensation != 0 && core.transport.running != 0
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+        && core.latency_shrunk_revision.load(std::memory_order_relaxed) != graph.revision
+#endif
+      ) {
+        processed_left = spectral_delayed_output(history, 0, processor.spectral_compensation);
+        processed_right = spectral_delayed_output(history, 1, processor.spectral_compensation);
+      }
+    }
+  } else {
+    item.render(core, processor, frame, left, right, sidechain_left, sidechain_right, &processed_left, &processed_right);
+    if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL && processor.spectral_compensation != 0
+      && core.transport.running != 0
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+      && core.latency_shrunk_revision.load(std::memory_order_relaxed) != graph.revision
+#endif
+    ) {
+      const auto &history = core.spectral_histories[processor.spectral_slot];
+      processed_left = spectral_delayed_output(history, 0, processor.spectral_compensation);
+      processed_right = spectral_delayed_output(history, 1, processor.spectral_compensation);
+    }
+  }
+  left = std::isfinite(processed_left) ? processed_left : 0.0F;
+  right = std::isfinite(processed_right) ? processed_right : 0.0F;
+}
+
+// Renders consecutive built-in processors of one node over the block, in chain
+// order. Removed processors that sit next to each other and started fading
+// together leave as one stage: they run in sequence at full level and a single
+// ramp crossfades from the signal that entered the first to the one that left the
+// last. Crossfading each on its own would multiply the ramps. Runs frames
+// [frame_begin, frame_end) of the block: a dipping node runs the two halves of a
+// block in different orders, and each processor still sees its frames once, in
+// sequence. Returns whether a live (not fading) processor ran.
+bool render_chain_segment(
+  Core &core, GraphRevision &graph, uint32_t node_index, uint32_t frame_begin, uint32_t frame_end,
+  const ChainItem *items, uint32_t count) {
+  bool live = false;
+  const auto fade_clock = [&core](const GraphRevision::Processor &processor, uint32_t &elapsed) {
+    const RuntimeSlot &slot = core.processor_slots[processor.history_slot];
+    if (!runtime_slot_renderable(core, slot, processor.generation)) return false;
+    elapsed = slot.fade_elapsed.load(std::memory_order_relaxed);
+    return true;
+  };
+  std::array<ChainItem, kMaximumChainItems> run;
+  for (uint32_t position = 0; position < count; ++position) {
+    GraphRevision::Processor &first = graph.processors[items[position].processor_index];
+    uint32_t fade_start = 0;
+    if (first.detached && !fade_clock(first, fade_start)) continue;
+    uint32_t run_count = 0;
+    run[run_count++] = items[position];
+    while (first.detached && position + 1 < count) {
+      const GraphRevision::Processor &candidate = graph.processors[items[position + 1].processor_index];
+      uint32_t elapsed = 0;
+      if (!candidate.detached) break;
+      if (!fade_clock(candidate, elapsed)) {
+        ++position;
+        continue;
+      }
+      if (elapsed != fade_start) break;
+      run[run_count++] = items[++position];
+    }
+    live = live || !first.ghost;
+    for (uint32_t index = 0; index < run_count; ++index) {
+      prepare_processor_parameter_cache(core, graph.processors[run[index].processor_index]);
+    }
+    for (uint32_t frame = frame_begin; frame < frame_end; ++frame) {
+      float &left = *graph_stage_sample(core, kGraphPreFaderStage, node_index, 0, frame);
+      float &right = *graph_stage_sample(core, kGraphPreFaderStage, node_index, 1, frame);
+      const float dry_left = left;
+      const float dry_right = right;
+      for (uint32_t index = 0; index < run_count; ++index) render_chain_frame(core, graph, run[index], frame, left, right);
+      if (!first.detached) continue;
+      const float wet = deletion_fade_gain(fade_start + frame, graph.fade_frames);
+      left = dry_left + (left - dry_left) * wet;
+      right = dry_right + (right - dry_right) * wet;
+      if (!std::isfinite(left)) left = 0.0F;
+      if (!std::isfinite(right)) right = 0.0F;
+    }
+  }
+  return live;
+}
+
+// Ends the replaced instruments fading out beside a node's own, and the ones
+// behind them: each retires its slot, which awaits reclamation after the process
+// call completes. Callback, once a blend is over; or control thread, for a slot
+// nothing renders any more.
+void end_node_blend(Core &core, Core::NodeBlend &first) {
+  Core::NodeBlend *blend = &first;
+  for (uint32_t link = 0; blend->partner != 0 && link <= kMaximumNodeBlends; ++link) {
+    const uint32_t partner = blend->partner - 1u;
+    RuntimeSlot &slot = core.node_slots[partner];
+    if (slot.state.load(std::memory_order_relaxed) == kSlotActive
+      && slot.generation.load(std::memory_order_relaxed) == blend->partner_generation) retire_runtime_slot(core, slot);
+    blend->partner = 0;
+    blend->elapsed = 0;
+    blend->depth.store(0, std::memory_order_release);
+    blend = &core.node_blends[partner];
+  }
+}
+
+// Moves every replaced instrument's fade forward by one block; one that finished
+// retires itself and everything behind it, whose weight is nil by then.
+void advance_node_blends(Core &core, const GraphRevision &graph, uint32_t frame_count) {
+  for (uint32_t node_index = 0; node_index < graph.total_node_count(); ++node_index) {
+    Core::NodeBlend &head = core.node_blends[graph.node_slots[node_index]];
+    uint32_t depth = 0;
+    Core::NodeBlend *blend = &head;
+    while (blend->partner != 0 && depth < kMaximumNodeBlends) {
+      blend->elapsed = std::min(graph.fade_frames, blend->elapsed + frame_count);
+      if (blend->elapsed >= graph.fade_frames) {
+        end_node_blend(core, *blend);
+        break;
+      }
+      ++depth;
+      blend = &core.node_blends[blend->partner - 1u];
+    }
+    head.depth.store(depth, std::memory_order_release);
+  }
+}
+
+// A layout fold moves a linear step per frame toward the layout's target and folds
+// by the position it stands at, so the first frame after a change is still the old
+// layout and the last of the fade is the target layout.
+float advance_fold(float &level, bool mono, float step) {
+  const float applied = level;
+  level = clamp_bypass_step(level, mono ? 1.0F : 0.0F, step);
+  return applied;
+}
+
+void fold_channels(float level, float &left, float &right) {
+  if (level <= 0.0F) return;
+  const float mean = 0.5F * (left + right);
+  if (level >= 1.0F) {
+    left = right = mean;
+    return;
+  }
+  left += (mean - left) * level;
+  right += (mean - right) * level;
+}
+
+void render_instrument_state(
+  Core &core, InstrumentNodeState &state, const daw_audio_instrument_state_descriptor &descriptor,
+  float *left, float *right) {
+  advance_applied(core, state, descriptor.kind);
+  if (descriptor.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
+    render_instrument_frame(state, descriptor, core.config.sample_rate_hz, left, right);
+  } else if (descriptor.kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
+    render_granular_instrument_frame(core, state, left, right);
+  } else {
+    render_sample_instrument_frame(core, state, descriptor, left, right);
+  }
+}
+
+// A reorder of a node's stages gets no splice: the stages are single instances that
+// cannot render both orders, and any blend of the two outputs leaves a residue for a
+// downstream resonant filter to ring on. The node dips instead. For half a deletion
+// fade its output goes to nothing through the old order, which keeps running with
+// its history; then, at nothing, the plan's order takes over and the output returns
+// over another half. Each stage runs once per frame throughout and the order
+// changes where the output is zero, so the dip is the only audible change.
+uint32_t dip_half_frames(const GraphRevision &graph) { return std::max(1u, (graph.fade_frames + 1u) / 2u); }
+
+// The leading frames of a block that still have output to fade, and so run the old
+// order; the frame whose output is nothing already belongs to the plan's order. A
+// node with an external stage cannot split a block (the stage renders all of it), so
+// it keeps the old order for the whole block in which its output reaches nothing, and
+// `dip_hold_frames` places the fade at the end of that block.
+uint32_t dip_old_frames(const Core::NodeDip &dip, uint32_t frame_count, bool splittable) {
+  if (dip.phase != Core::kDipFadingOut || dip.level == 0) return 0;
+  return splittable ? std::min(frame_count, dip.level) : frame_count;
+}
+
+// The leading frames of a block in which a node that cannot split it keeps the old
+// order at the level it stands at, so the fade ends on the block edge where the plan's
+// order takes over instead of reaching nothing early and holding silence. A fade that
+// does not fit in the block (shorter than it) runs from the first frame, and holds
+// the level it has reached in the block that can finish it.
+uint32_t dip_hold_frames(const Core::NodeDip &dip, uint32_t frame_count, bool splittable) {
+  if (splittable || dip.phase != Core::kDipFadingOut || dip.level == 0 || frame_count < dip.level) return 0;
+  return frame_count - dip.level;
+}
+
+// Multiplies a node's pre-fader output by its dip, one linear step per frame, and
+// moves the dip along. The frame whose output is nothing, past the old order's last,
+// starts the return. The first `hold_frames` frames keep the level they stand at.
+void apply_node_dip(
+  Core &core, const GraphRevision &graph, uint32_t node_index, uint32_t frame_count, uint32_t old_frames,
+  uint32_t hold_frames) {
+  Core::NodeDip &dip = core.node_dips[graph.node_slots[node_index]];
+  const uint32_t half = dip_half_frames(graph);
+  for (uint32_t frame = 0; frame < frame_count && dip.phase != Core::kDipNone; ++frame) {
+    if (dip.phase == Core::kDipFadingOut && dip.level == 0 && frame >= old_frames) dip.phase = Core::kDipFadingIn;
+    const float gain = static_cast<float>(dip.level) / static_cast<float>(half);
+    if (dip.phase == Core::kDipFadingOut) {
+      if (dip.level > 0 && frame >= hold_frames) --dip.level;
+    } else if (++dip.level >= half) {
+      dip = {};
+    }
+    *graph_stage_sample(core, kGraphPreFaderStage, node_index, 0, frame) *= gain;
+    *graph_stage_sample(core, kGraphPreFaderStage, node_index, 1, frame) *= gain;
+  }
+}
+
+// The chain a dipping node runs while its output fades out: the plan's chain with
+// the stages the dip names (survivors, and the ghosts of stages the edit deleted)
+// put back in the order they ran, in the places those stages hold. Stages the dip
+// does not name (added by the edit) stay where the plan puts them, and so do the
+// external stages around them.
+void order_chain_for_dip(
+  const GraphRevision &graph, const Core::NodeDip &dip, const ChainItem *items, uint32_t count, ChainItem *out) {
+  const auto order_end = dip.order.begin() + dip.count;
+  uint32_t taken = 0;
+  for (uint32_t position = 0; position < count; ++position) {
+    out[position] = items[position];
+    if (std::find(dip.order.begin(), order_end, items[position].processor_index) == order_end) continue;
+    const uint16_t index = dip.order[taken++];
+    out[position] = {index, find_processor_renderer(graph.processors[index].kind)};
+  }
+}
+
+// One block of a node's chain: the old order for the frames a dip still fades out,
+// then the plan's order.
+bool render_node_chain(
+  Core &core, GraphRevision &graph, uint32_t node_index, uint32_t frame_count, uint32_t old_frames,
+  const ChainItem *items, const ChainItem *old_items, uint32_t count) {
+  bool live = false;
+  if (old_frames > 0) live = render_chain_segment(core, graph, node_index, 0, old_frames, old_items, count);
+  if (old_frames < frame_count) {
+    live = render_chain_segment(core, graph, node_index, old_frames, frame_count, items, count) || live;
+  }
+  return live;
+}
+
 void process_graph(Core &core, const daw_audio_core_process_block &block) {
   GraphRevision &graph = (*core.published_graph);
-  for (uint32_t ordered = 0; ordered < graph.node_count; ++ordered) {
+  // Where each ghost's fade stands, known up front because a ghost consumer reads
+  // its sources' progress. A faded-out ghost contributes nothing: consumers
+  // multiply by the fade gain.
+  for (uint32_t node_index = graph.node_count; node_index < graph.total_node_count(); ++node_index) {
+    const RuntimeSlot &node_slot = core.node_slots[graph.node_slots[node_index]];
+    core.node_fade_start[node_index] = runtime_slot_renderable(core, node_slot, graph.node_generations[node_index])
+      ? node_slot.fade_elapsed.load(std::memory_order_relaxed) : graph.fade_frames;
+  }
+  const bool solo = resolve_mixer_solo(core, graph, block.frame_count);
+  for (uint32_t ordered = 0; ordered < graph.total_node_count(); ++ordered) {
     const uint32_t node_index = graph.process_order[ordered];
     const daw_audio_graph_node_descriptor &node = graph.nodes[node_index];
+    const bool ghost_node = node_index >= graph.node_count;
+    if (ghost_node && core.node_fade_start[node_index] >= graph.fade_frames) continue;
+    const uint32_t node_slot = graph.node_slots[node_index];
+    InstrumentNodeState &instrument_state = core.instrument_runtime[node_slot];
+    // The instrument and, while it fades out, the one it replaced and the ones
+    // that one replaced in turn. `elapsed` is the clock of the fade-in that link
+    // owns against the next one; the oldest link has none.
+    struct InstrumentLink {
+      InstrumentNodeState *state;
+      const daw_audio_instrument_state_descriptor *descriptor;
+      uint32_t elapsed;
+    };
+    std::array<InstrumentLink, kMaximumNodeBlends + 1> instrument_links;
+    uint32_t instrument_link_count = 0;
+    if (node.kind == DAW_AUDIO_GRAPH_NODE_INSTRUMENT) {
+      instrument_links[instrument_link_count++] = {&instrument_state, &node.instrument, 0};
+      const Core::NodeBlend *blend = &core.node_blends[node_slot];
+      while (blend->partner != 0 && instrument_link_count <= kMaximumNodeBlends) {
+        const uint32_t partner = blend->partner - 1u;
+        if (!runtime_slot_renderable(core, core.node_slots[partner], blend->partner_generation)) break;
+        instrument_links[instrument_link_count - 1].elapsed = blend->elapsed;
+        instrument_links[instrument_link_count++] = {&core.instrument_runtime[partner], &blend->descriptor, 0};
+        blend = &core.node_blends[partner];
+      }
+    }
+    Core::NodeFold &fold = core.node_folds[node_slot];
+    if (!fold.seen) {
+      fold.level = {node.input_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO ? 1.0F : 0.0F,
+        node.output_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO ? 1.0F : 0.0F};
+      fold.seen = true;
+    }
+    const float fold_step = 1.0F / static_cast<float>(graph.fade_frames);
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
     const uint32_t hook_layout = node.output_layout;
     const uint32_t hook_channel_count = hook_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO ? 1U : 2U;
 #endif
-    std::array<Core::RetirementLane *, kMaximumRetirementLanes> retirement_lanes{};
-    uint32_t retirement_lane_count = 0;
-    for (auto &lane : *core.published_retirement_lanes) {
-      if (lane.processor.node_id == node.id
-        && lane.remaining_frames.load(std::memory_order_relaxed) != 0) {
-        retirement_lanes[retirement_lane_count++] = &lane;
-      }
-    }
     uint16_t instrument_event_cursor = 0;
     const uint16_t instrument_event_count = core.instrument_event_counts[node_index];
     for (uint32_t frame = 0; frame < block.frame_count; ++frame) {
@@ -4248,23 +5571,34 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
           if (event.frame_offset != frame) break;
           ++instrument_event_cursor;
           if (is_native_transport_release(event.type)) {
-            release_instrument_state((*core.published_instruments)[node_index]);
+            for (uint32_t link = 0; link < instrument_link_count; ++link) release_instrument_state(*instrument_links[link].state);
           } else if (is_native_all_sound_off(event.type)) {
-            clear_instrument_state((*core.published_instruments)[node_index]);
+            for (uint32_t link = 0; link < instrument_link_count; ++link) clear_instrument_state(*instrument_links[link].state);
           } else if (node.instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
-            (void)apply_instrument_event((*core.published_instruments)[node_index], node.instrument, event);
+            (void)apply_instrument_event(instrument_state, node.instrument, event);
           } else if (node.instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
-            (void)apply_granular_instrument_event((*core.published_instruments)[node_index], event);
+            (void)apply_granular_instrument_event(instrument_state, event);
           } else {
-            (void)apply_sample_instrument_event(core, (*core.published_instruments)[node_index], node.instrument, event);
+            (void)apply_sample_instrument_event(core, instrument_state, node.instrument, event);
           }
         }
-        if (node.instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
-          render_instrument_frame((*core.published_instruments)[node_index], node.instrument, core.config.sample_rate_hz, &left, &right);
-        } else if (node.instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
-          render_granular_instrument_frame(core, (*core.published_instruments)[node_index], &left, &right);
+        if (instrument_link_count == 1) {
+          render_instrument_state(core, instrument_state, node.instrument, &left, &right);
         } else {
-          render_sample_instrument_frame(core, (*core.published_instruments)[node_index], node.instrument, &left, &right);
+          // Complementary weights: each link takes its share of what the newer
+          // links left, so the waveforms sum to one whole at every frame.
+          float remaining = 1.0F;
+          for (uint32_t link = 0; link < instrument_link_count; ++link) {
+            const InstrumentLink &voice = instrument_links[link];
+            float voice_left = 0.0F;
+            float voice_right = 0.0F;
+            render_instrument_state(core, *voice.state, *voice.descriptor, &voice_left, &voice_right);
+            const float entering = link + 1 == instrument_link_count ? 1.0F
+              : std::min(1.0F, static_cast<float>(voice.elapsed + frame) / static_cast<float>(graph.fade_frames));
+            left += remaining * entering * voice_left;
+            right += remaining * entering * voice_right;
+            remaining *= 1.0F - entering;
+          }
         }
       }
       if (node.kind == DAW_AUDIO_GRAPH_NODE_SOURCE
@@ -4289,7 +5623,7 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
           right += graph_edge_sample(core, graph, edge_index, 1, frame);
         }
       }
-      if (node.input_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO) left = right = 0.5F * (left + right);
+      fold_channels(advance_fold(fold.level[0], node.input_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO, fold_step), left, right);
       *graph_stage_sample(core, kGraphPreFxStage, node_index, 0, frame) = std::isfinite(left) ? left : 0.0F;
       *graph_stage_sample(core, kGraphPreFxStage, node_index, 1, frame) = std::isfinite(right) ? right : 0.0F;
       *graph_stage_sample(core, kGraphPreFaderStage, node_index, 0, frame) =
@@ -4298,8 +5632,22 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
         *graph_stage_sample(core, kGraphPreFxStage, node_index, 1, frame);
     }
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-    const NativeGraphHooks &native_stages = core.published_native_hooks;
+    const NativeGraphHooks &native_stages = *core.published_native_hooks;
 #endif
+    // A node that is dipping runs the old order of its stages for the frames its
+    // output still has to fade. An external stage renders a whole block where it
+    // stands, so a node with one keeps the old order for the whole block in which its
+    // output reaches nothing; it holds the old order at its level first, so the fade
+    // ends on that block's edge.
+    bool splittable = true;
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+    for (std::uint32_t stage_index = 0; stage_index < native_stages.stage_counts[node_index]; ++stage_index) {
+      if (native_stages.stages[node_index][stage_index].kind == NativeGraphStageKind::kExternal) splittable = false;
+    }
+#endif
+    const Core::NodeDip &node_dip = core.node_dips[node_slot];
+    const uint32_t old_frames = dip_old_frames(node_dip, block.frame_count, splittable);
+    const uint32_t hold_frames = dip_hold_frames(node_dip, block.frame_count, splittable);
     bool processed_chain = false;
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
     if (native_stages.has_instrument_sources[node_index] && native_stages.hook != nullptr) {
@@ -4343,9 +5691,29 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
         if (!std::isfinite(right)) right = 0.0F;
       }
     }
+    std::array<ChainItem, kMaximumChainItems> plan_order;
+    std::array<ChainItem, kMaximumChainItems> old_order;
+    uint32_t built_in_count = 0;
+    for (std::uint32_t stage_index = 0; stage_index < native_stages.stage_counts[node_index]; ++stage_index) {
+      const NativeGraphStage &stage = native_stages.stages[node_index][stage_index];
+      if (stage.kind != NativeGraphStageKind::kExternal) plan_order[built_in_count++] = {stage.processor_index, stage.renderer};
+    }
+    if (old_frames > 0) order_chain_for_dip(graph, node_dip, plan_order.data(), built_in_count, old_order.data());
+    // Built-in stages are gathered until an external stage interrupts the chain.
+    std::array<ChainItem, kMaximumChainItems> pending;
+    std::array<ChainItem, kMaximumChainItems> old_pending;
+    std::uint32_t pending_count = 0;
+    std::uint32_t built_in_index = 0;
+    const auto render_pending = [&] {
+      const bool live = render_node_chain(
+        core, graph, node_index, block.frame_count, old_frames, pending.data(), old_pending.data(), pending_count);
+      pending_count = 0;
+      return live;
+    };
     for (std::uint32_t stage_index = 0; stage_index < native_stages.stage_counts[node_index]; ++stage_index) {
       const NativeGraphStage &stage = native_stages.stages[node_index][stage_index];
       if (stage.kind == NativeGraphStageKind::kExternal) {
+        processed_chain = render_pending() || processed_chain;
         if (native_stages.hook == nullptr) continue;
         const auto project_frame = project_time_frame(core);
         const daw::audio_core::NativeGraphNodeRender render{
@@ -4385,68 +5753,25 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
         }
         continue;
       }
-      GraphRevision::Processor &processor = graph.processors[stage.processor_index];
-      const ProcessorRenderer render = stage.renderer;
-      processed_chain = true;
-      prepare_processor_parameter_cache(core, processor);
-      for (std::uint32_t frame = 0; frame < block.frame_count; ++frame) {
-        resolve_processor_parameter_frame(core, processor, frame);
-        float &left = *graph_stage_sample(core, kGraphPreFaderStage, node_index, 0, frame);
-        float &right = *graph_stage_sample(core, kGraphPreFaderStage, node_index, 1, frame);
-        float sidechain_left = processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL ? 0.0F : left;
-        float sidechain_right = processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL ? 0.0F : right;
-        const GraphRevision::Range sidechain_range = graph.sidechain_edge_ranges[stage.processor_index];
-        if (sidechain_range.count > 0) {
-          sidechain_left = 0.0F;
-          sidechain_right = 0.0F;
-        }
-        const uint32_t sidechain_end = static_cast<uint32_t>(sidechain_range.start) + sidechain_range.count;
-        for (uint32_t sidechain_position = sidechain_range.start; sidechain_position < sidechain_end; ++sidechain_position) {
-          const uint32_t edge_index = graph.sidechain_edge_indices[sidechain_position];
-          sidechain_left += graph_edge_sample(core, graph, edge_index, 0, frame);
-          sidechain_right += graph_edge_sample(core, graph, edge_index, 1, frame);
-        }
-        float processed_left = 0.0F;
-        float processed_right = 0.0F;
-        render(core, processor, frame, left, right, sidechain_left, sidechain_right, &processed_left, &processed_right);
-        left = std::isfinite(processed_left) ? processed_left : 0.0F;
-        right = std::isfinite(processed_right) ? processed_right : 0.0F;
-      }
+      old_pending[pending_count] = old_frames > 0 ? old_order[built_in_index] : plan_order[built_in_index];
+      pending[pending_count++] = plan_order[built_in_index++];
     }
+    processed_chain = render_pending() || processed_chain;
 #else
     const GraphRevision::Range processor_range = graph.processor_ranges[node_index];
     const uint32_t processor_end = static_cast<uint32_t>(processor_range.start) + processor_range.count;
+    std::array<ChainItem, kMaximumChainItems> chain;
+    uint32_t chain_count = 0;
     for (uint32_t position = processor_range.start; position < processor_end; ++position) {
       const uint32_t processor_index = graph.processor_indices[position];
-      GraphRevision::Processor &processor = graph.processors[processor_index];
-      const ProcessorRenderer render = find_processor_renderer(processor.kind);
-      if (render == nullptr) continue;
-      processed_chain = true;
-      prepare_processor_parameter_cache(core, processor);
-      for (uint32_t frame = 0; frame < block.frame_count; ++frame) {
-        resolve_processor_parameter_frame(core, processor, frame);
-        float &left = *graph_stage_sample(core, kGraphPreFaderStage, node_index, 0, frame);
-        float &right = *graph_stage_sample(core, kGraphPreFaderStage, node_index, 1, frame);
-        float sidechain_left = processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL ? 0.0F : left;
-        float sidechain_right = processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL ? 0.0F : right;
-        const GraphRevision::Range sidechain_range = graph.sidechain_edge_ranges[processor_index];
-        if (sidechain_range.count > 0) {
-          sidechain_left = 0.0F;
-          sidechain_right = 0.0F;
-        }
-        const uint32_t sidechain_end = static_cast<uint32_t>(sidechain_range.start) + sidechain_range.count;
-        for (uint32_t sidechain_position = sidechain_range.start; sidechain_position < sidechain_end; ++sidechain_position) {
-          const uint32_t edge_index = graph.sidechain_edge_indices[sidechain_position];
-          sidechain_left += graph_edge_sample(core, graph, edge_index, 0, frame);
-          sidechain_right += graph_edge_sample(core, graph, edge_index, 1, frame);
-        }
-        float processed_left = 0.0F;
-        float processed_right = 0.0F;
-        render(core, processor, frame, left, right, sidechain_left, sidechain_right, &processed_left, &processed_right);
-        left = std::isfinite(processed_left) ? processed_left : 0.0F;
-        right = std::isfinite(processed_right) ? processed_right : 0.0F;
-      }
+      const ProcessorRenderer render = find_processor_renderer(graph.processors[processor_index].kind);
+      if (render != nullptr) chain[chain_count++] = {static_cast<uint16_t>(processor_index), render};
     }
+    std::array<ChainItem, kMaximumChainItems> old_chain;
+    if (old_frames > 0) order_chain_for_dip(graph, node_dip, chain.data(), chain_count, old_chain.data());
+    processed_chain = render_node_chain(
+      core, graph, node_index, block.frame_count, old_frames, chain.data(), old_chain.data(), chain_count)
+      || processed_chain;
 #endif
     if (!processed_chain && node.kind == DAW_AUDIO_GRAPH_NODE_UTILITY && core.utility_configured) {
       for (uint32_t frame = 0; frame < block.frame_count; ++frame) {
@@ -4461,44 +5786,23 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
         *graph_stage_sample(core, kGraphPreFaderStage, node_index, 1, frame) = utility_right;
       }
     }
+    apply_node_dip(core, graph, node_index, block.frame_count, old_frames, hold_frames);
+    MixerBlock mixer = begin_mixer_block(core, node.mixer, node_slot);
     for (uint32_t frame = 0; frame < block.frame_count; ++frame) {
       float left = *graph_stage_sample(core, kGraphPreFaderStage, node_index, 0, frame);
       float right = *graph_stage_sample(core, kGraphPreFaderStage, node_index, 1, frame);
-      for (uint32_t retirement_index = 0; retirement_index < retirement_lane_count; ++retirement_index) {
-        Core::RetirementLane &lane = *retirement_lanes[retirement_index];
-        uint32_t remaining = lane.remaining_frames.load(std::memory_order_relaxed);
-        if (remaining == 0) continue;
-        float tail_left = 0.0F;
-        float tail_right = 0.0F;
-        const ProcessorRenderer render = find_processor_renderer(lane.processor.kind);
-        if (render == nullptr) {
-          lane.remaining_frames.store(0, std::memory_order_relaxed);
-          continue;
-        }
-        if (lane.processor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY
-          || lane.processor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB) {
-          render_retirement_processor(
-            core, lane, frame, 0.0F, 0.0F, 0.0F, 0.0F, &tail_left, &tail_right);
-        } else {
-          render(core, lane.processor, frame, 0.0F, 0.0F, 0.0F, 0.0F, &tail_left, &tail_right);
-        }
-        left += std::isfinite(tail_left) ? tail_left : 0.0F;
-        right += std::isfinite(tail_right) ? tail_right : 0.0F;
-        const uint32_t next_remaining = remaining - 1;
-        lane.remaining_frames.store(next_remaining, std::memory_order_relaxed);
-        if (next_remaining == 0) release_retirement_lane_slot(core, lane);
-      }
       *graph_stage_sample(core, kGraphPreFaderStage, node_index, 0, frame) = std::isfinite(left) ? left : 0.0F;
       *graph_stage_sample(core, kGraphPreFaderStage, node_index, 1, frame) = std::isfinite(right) ? right : 0.0F;
-      apply_mixer_frame(core, node.mixer, frame, &left, &right);
-      if (node.output_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO) left = right = 0.5F * (left + right);
-      core.graph_buffers[node_index][0][frame] = std::isfinite(left) ? left : 0.0F;
-      core.graph_buffers[node_index][1][frame] = std::isfinite(right) ? right : 0.0F;
+      apply_mixer_frame(core, mixer, frame, solo && core.mixer_solo_frames[frame] != 0, &left, &right);
+      fold_channels(advance_fold(fold.level[1], node.output_layout == DAW_AUDIO_GRAPH_LAYOUT_MONO, fold_step), left, right);
+      *graph_stage_sample(core, kGraphOutputStage, node_index, 0, frame) = std::isfinite(left) ? left : 0.0F;
+      *graph_stage_sample(core, kGraphOutputStage, node_index, 1, frame) = std::isfinite(right) ? right : 0.0F;
     }
+    latch_mixer_block(core, mixer);
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-    if (core.published_native_hooks.observer != nullptr) {
+    if (!ghost_node && core.published_native_hooks->observer != nullptr) {
       const auto project_frame = project_time_frame(core);
-      core.published_native_hooks.observer({
+      core.published_native_hooks->observer({
         .graph_revision = graph.revision,
         .node_index = node_index,
         .node_id = node.id,
@@ -4516,23 +5820,57 @@ void process_graph(Core &core, const daw_audio_core_process_block &block) {
         .cycle_active = core.transport.cycle_active != 0,
         .cycle_start_music = project_time_music(core, core.transport.cycle_start_frame),
         .cycle_end_music = project_time_music(core, core.transport.cycle_end_frame),
-        .planes = {core.graph_buffers[node_index][0].data(), core.graph_buffers[node_index][1].data()},
+        .planes = {
+          graph_stage_sample(core, kGraphOutputStage, node_index, 0, 0),
+          graph_stage_sample(core, kGraphOutputStage, node_index, 1, 0),
+        },
         .instrument_events = {},
-        .attachment = core.published_native_hooks.observer_attachment,
+        .attachment = core.published_native_hooks->observer_attachment,
       });
     }
 #endif
   }
-  for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
-    const uint32_t delay = graph.edges[edge_index].pdc_delay_frames;
-    if (delay > 0) core.graph_delay_cursors[edge_index] = (core.graph_delay_cursors[edge_index] + block.frame_count) % delay;
+  // Commit each pre-gain tap once, after every reader consumed the preceding
+  // block's history. This keeps a full-capacity delay valid even when a block
+  // spans the ring wrap; writing a source block before its readers would erase
+  // the oldest samples they still need.
+  for (uint32_t node = 0; node < graph.total_node_count(); ++node) {
+    for (uint32_t stage = 0; stage < kGraphStageCount; ++stage) {
+      if (node >= graph.node_count && !graph.ghost_history_writers[node][stage]) continue;
+      const uint32_t slot = graph.tap_history_slots[node][stage];
+      auto &history = core.graph_tap_histories[slot];
+      if (history.capacity == 0) continue;
+      if (history.end_frame != core.graph_write_frame) history.first_frame = core.graph_write_frame;
+      for (uint32_t channel = 0; channel < 2; ++channel) {
+        const std::size_t base = history.offset + static_cast<std::size_t>(channel) * history.capacity;
+        for (uint32_t frame = 0; frame < block.frame_count; ++frame) {
+          core.graph_tap_storage[base + ((core.graph_write_frame + frame) & (history.capacity - 1u))]
+            = *graph_stage_sample(core, stage, node, channel, frame);
+        }
+      }
+      history.end_frame = core.graph_write_frame + block.frame_count;
+      history.first_frame = std::max(history.first_frame,
+        history.end_frame > history.capacity ? history.end_frame - history.capacity : 0);
+    }
   }
+  advance_deletion_fades(core, graph, block.frame_count);
+  advance_node_blends(core, graph, block.frame_count);
+  advance_edge_ramps(core, graph, block.frame_count);
   for (uint32_t channel = 0; channel < block.channel_count; ++channel) {
     const uint32_t graph_channel = channel == 0 ? 0 : 1;
     for (uint32_t frame = 0; frame < block.frame_count; ++frame) {
-      block.outputs[channel][frame] = core.graph_buffers[graph.master_index][graph_channel][frame];
+      float gain = 1.0F;
+      if (graph.latency_raise != 0 && core.transport.running != 0 && core.latency_shrunk_revision != graph.revision) {
+        const uint64_t absolute = core.graph_write_frame + frame;
+        const uint64_t seam = graph.latency_origin + core.latency_publication_shift + graph.fade_frames;
+        if (absolute < seam) gain = static_cast<float>(seam - absolute) / graph.fade_frames;
+        else if (absolute < seam + graph.fade_frames) gain = static_cast<float>(absolute - seam) / graph.fade_frames;
+      }
+      block.outputs[channel][frame] = *graph_stage_sample(core, kGraphOutputStage, graph.master_index, graph_channel, frame) * gain;
     }
   }
+  core.graph_write_frame += block.frame_count;
+  core.completed_graph_frame.store(core.graph_write_frame, std::memory_order_release);
 }
 
 bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
@@ -4788,7 +6126,7 @@ bool valid_mixer_parameter_value(uint32_t target, float value) {
     && (value == 0.0F || value == 1.0F);
 }
 
-bool bind_process_transport(Core &core, const daw_audio_core_process_block &block) {
+bool bind_process_transport(Core &core, const daw_audio_core_process_block &block, uint8_t *rejected_events) {
   core.parameter_cache_prepared.fill(false);
   if (block.parameter_block_count > DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETER_BLOCKS
     || block.event_count > DAW_AUDIO_CORE_MAX_PROCESSOR_EVENTS
@@ -4862,11 +6200,11 @@ bool bind_process_transport(Core &core, const daw_audio_core_process_block &bloc
     find_processor((*core.published_graph), previous_processor, &previous_index);
     core.event_ends[previous_index] = block.event_count;
   }
+  // Validation applies events to a scratch copy of only the nodes they touch.
 #if defined(DAW_AUDIO_CORE_USE_PERSISTENT_VALIDATION_SCRATCH)
-  std::copy((*core.published_instruments).begin(), (*core.published_instruments).end(), core.proposed_instruments.begin());
   auto &proposed_instruments = core.proposed_instruments;
 #else
-  auto proposed_instruments = (*core.published_instruments);
+  std::array<InstrumentNodeState, kMaximumLiveNodes> proposed_instruments;
 #endif
   for (auto &indices : core.instrument_event_indices) indices.fill(0);
   core.instrument_event_counts.fill(0);
@@ -4874,7 +6212,16 @@ bool bind_process_transport(Core &core, const daw_audio_core_process_block &bloc
   uint64_t previous_instrument_sequence = 0;
   bool has_previous_instrument = false;
   for (uint32_t event_index = 0; event_index < block.instrument_event_count; ++event_index) {
+    core.rejected_instrument_event_index = event_index;
     const daw_audio_instrument_event &event = block.instrument_events[event_index];
+#if defined(DAW_AUDIO_CORE_TEST_INSTRUMENT_REJECTION)
+    // Only the host test's private core is built with this fault-injection hook.
+    if (daw_audio_core_test_reject_instrument_event(event_index)) {
+      if (rejected_events == nullptr) return false;
+      rejected_events[event_index] = 1;
+      continue;
+    }
+#endif
     const bool native_event = is_native_instrument_event(event.type);
     const std::uint32_t portable_type = portable_instrument_event_type(event.type);
     const int32_t node_index = graph_node_index((*core.published_graph), event.node_id);
@@ -4892,18 +6239,29 @@ bool bind_process_transport(Core &core, const daw_audio_core_process_block &bloc
       || (portable_type == DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER
         && !instrument_declares_target((*core.published_graph).nodes[static_cast<uint32_t>(node_index)].instrument, event.note))
       || (has_previous_instrument && (event.frame_offset < previous_instrument_offset
-        || event.sequence <= previous_instrument_sequence))) return false;
+        || event.sequence <= previous_instrument_sequence))) {
+      if (rejected_events == nullptr) return false;
+      rejected_events[event_index] = 1;
+      continue;
+    }
     const uint32_t index = static_cast<uint32_t>(node_index);
+    if (core.instrument_event_counts[index] == 0) proposed_instruments[index] = published_instrument(core, index);
+    bool accepted = true;
     if (is_native_transport_release(event.type)) {
       release_instrument_state(proposed_instruments[index]);
     } else if (is_native_all_sound_off(event.type)) {
       clear_instrument_state(proposed_instruments[index]);
     } else if ((*core.published_graph).nodes[index].instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
-      if (!apply_instrument_event(proposed_instruments[index], (*core.published_graph).nodes[index].instrument, event)) return false;
+      accepted = apply_instrument_event(proposed_instruments[index], (*core.published_graph).nodes[index].instrument, event);
     } else if ((*core.published_graph).nodes[index].instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
-      if (!apply_granular_instrument_event(proposed_instruments[index], event)) return false;
-    } else if (!apply_sample_instrument_event(core, proposed_instruments[index], (*core.published_graph).nodes[index].instrument, event)) {
-      return false;
+      accepted = apply_granular_instrument_event(proposed_instruments[index], event);
+    } else {
+      accepted = apply_sample_instrument_event(core, proposed_instruments[index], (*core.published_graph).nodes[index].instrument, event);
+    }
+    if (!accepted) {
+      if (rejected_events == nullptr) return false;
+      rejected_events[event_index] = 1;
+      continue;
     }
     const uint16_t count = core.instrument_event_counts[index];
     if (count >= DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS) return false;
@@ -4913,6 +6271,7 @@ bool bind_process_transport(Core &core, const daw_audio_core_process_block &bloc
     previous_instrument_sequence = event.sequence;
     has_previous_instrument = true;
   }
+  core.rejected_instrument_event_index = UINT32_MAX;
   core.active_instrument_events = block.instrument_events;
   core.active_instrument_event_count = block.instrument_event_count;
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
@@ -4979,11 +6338,11 @@ bool wasm_parse_graph(
   const uint8_t *bytes,
   uint32_t byte_count,
   daw_audio_graph_prepare_request *out_request,
-  std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes> *nodes,
-  std::array<daw_audio_graph_edge_descriptor, kMaximumGraphEdges> *edges,
-  std::array<daw_audio_processor_descriptor, kMaximumGraphProcessors> *processors,
-  std::array<std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS>, kMaximumGraphProcessors> *targets,
-  std::array<std::array<uint8_t, DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES>, kMaximumGraphProcessors> *states) {
+  std::array<daw_audio_graph_node_descriptor, kMaximumLiveNodes> *nodes,
+  std::array<daw_audio_graph_edge_descriptor, kMaximumLiveEdges> *edges,
+  std::array<daw_audio_processor_descriptor, kMaximumLiveProcessors> *processors,
+  std::array<std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS>, kMaximumLiveProcessors> *targets,
+  std::array<std::array<uint8_t, DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES>, kMaximumLiveProcessors> *states) {
   if (bytes == nullptr || byte_count < DAW_AUDIO_CORE_WASM_GRAPH_HEADER_BYTES) return false;
   uint32_t offset = 0;
   uint32_t version = 0;
@@ -4997,10 +6356,13 @@ bool wasm_parse_graph(
     || !wasm_read_u32(bytes, byte_count, &offset, &processor_count) || !wasm_read_u32(bytes, byte_count, &offset, &reserved)
     || (version != DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION
       && version != DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+      && version != DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY
+#endif
       && version != DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_LEGACY_2
       && version != DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_LEGACY) || reserved != 0
-    || revision == 0 || node_count == 0 || node_count > kMaximumGraphNodes || edge_count > kMaximumGraphEdges
-    || processor_count > kMaximumGraphProcessors) return false;
+    || revision == 0 || node_count == 0 || node_count > kMaximumLiveNodes || edge_count > kMaximumLiveEdges
+    || processor_count > kMaximumLiveProcessors) return false;
   for (uint32_t index = 0; index < node_count; ++index) {
     uint64_t id = 0;
     uint32_t kind = 0;
@@ -5009,11 +6371,14 @@ bool wasm_parse_graph(
     uint32_t input_bus = 0;
     uint32_t latency = 0;
     uint32_t external_latency = 0;
+    uint32_t keep_latency = 0;
     if (!wasm_read_u64(bytes, byte_count, &offset, &id) || !wasm_read_u32(bytes, byte_count, &offset, &kind)
       || !wasm_read_u32(bytes, byte_count, &offset, &input_layout) || !wasm_read_u32(bytes, byte_count, &offset, &output_layout)
       || !wasm_read_u32(bytes, byte_count, &offset, &input_bus) || !wasm_read_u32(bytes, byte_count, &offset, &latency)) return false;
-    if (version == DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY
+    if (version >= DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY
       && !wasm_read_u32(bytes, byte_count, &offset, &external_latency)) return false;
+    if (version == DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY
+      && (!wasm_read_u32(bytes, byte_count, &offset, &keep_latency) || keep_latency > 1)) return false;
     daw_audio_instrument_state_descriptor instrument{};
     if (version != DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_LEGACY) {
       if (!wasm_read_u32(bytes, byte_count, &offset, &instrument.kind)
@@ -5031,7 +6396,7 @@ bool wasm_parse_graph(
     }
     daw_audio_mixer_state mixer{};
     if (version == DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION
-      || version == DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY) {
+      || version >= DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY) {
       if (!wasm_read_u64(bytes, byte_count, &offset, &mixer.instance_id)
         || !wasm_read_f32(bytes, byte_count, &offset, &mixer.gain)
         || !wasm_read_f32(bytes, byte_count, &offset, &mixer.pan)
@@ -5041,7 +6406,7 @@ bool wasm_parse_graph(
     (*nodes)[index] = {
       .id = id, .kind = wasm_graph_kind(kind), .input_layout = input_layout, .output_layout = output_layout,
       .input_bus = input_bus, .latency_frames = latency, .external_latency_frames = external_latency,
-      .instrument = instrument, .mixer = mixer,
+      .instrument = instrument, .mixer = mixer, .keep_latency = keep_latency,
     };
   }
   for (uint32_t index = 0; index < edge_count; ++index) {
@@ -5448,6 +6813,10 @@ extern "C" daw_audio_core_result daw_audio_core_create(
     return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
   }
   core->config = *config;
+  if (!allocate_graph_stage_buffers(*core)) {
+    delete core;
+    return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  }
   *out_core = to_handle(core);
   return DAW_AUDIO_CORE_OK;
 }
@@ -5456,7 +6825,291 @@ extern "C" void daw_audio_core_destroy(daw_audio_core_handle core) {
   delete to_core(core);
 }
 
-ContinuityPreparationResult prepare_continuity_state(Core &core);
+void reclaim_retired_slots(Core &core);
+void release_prepared_runtime(Core &core);
+daw_audio_core_result prepare_runtime_ownership(Core &core);
+daw_audio_core_result refresh_prepared_node(Core &core, uint32_t index);
+bool mark_replaced_node(const Core &core, const GraphRevision &current, GraphRevision &next, uint32_t node);
+
+// Control-side reader ownership. Retained live identities and delayed ghosts
+// reserve rings. A zero-delay ghost still needs no ring.
+// Dropped owners finish their last read/write in the old plan's render epoch;
+// publication at the next boundary transfers their rings. Preparation must
+// never reset those callback-owned descriptors or write their storage.
+bool prepare_tap_histories(Core &core, GraphRevision &next) {
+  const auto &current = *core.published_graph;
+  std::array<bool, Core::kTapHistorySlots> occupied{};
+  std::array<uint16_t, kMaximumGraphNodes> by_id{};
+  for (uint32_t node = 0; node < current.node_count; ++node) {
+    by_id[node] = static_cast<uint16_t>(node);
+  }
+  const auto end = by_id.begin() + current.node_count;
+  std::sort(by_id.begin(), end, [&](uint16_t left, uint16_t right) {
+    return current.nodes[left].id < current.nodes[right].id;
+  });
+  // Reserve retained readers before assigning any new owner, irrespective of
+  // node order. Runtime generation distinguishes replacement from retention.
+  for (uint32_t node = 0; node < next.node_count; ++node) {
+    const uint64_t id = next.nodes[node].id;
+    const auto old = std::lower_bound(by_id.begin(), end, id, [&](uint16_t index, uint64_t key) {
+      return current.nodes[index].id < key;
+    });
+    const bool retained = old != end && current.nodes[*old].id == id
+      && current.node_slots[*old] == next.node_slots[node]
+      && current.node_generations[*old] == next.node_generations[node];
+    for (uint32_t tap = 0; tap < kGraphStageCount; ++tap) {
+      next.reset_tap_histories[node][tap] = !retained;
+      if (retained) {
+        next.tap_history_slots[node][tap] = current.tap_history_slots[*old][tap];
+        occupied[next.tap_history_slots[node][tap]] = true;
+      }
+    }
+  }
+  // A delayed ghost keeps the old owner, not a second history bank. Reserve its
+  // readers before transferring any dropped owner's ring to a fresh live tap.
+  // The ordinary 192-ring bound remains a genuine capacity limit.
+  for (uint32_t edge = next.edge_count; edge < next.total_edge_count(); ++edge) {
+    if (next.read_heads[edge].delay == 0) continue;
+    const uint32_t source = next.edge_source_indices[edge];
+    if (source < next.node_count) continue;
+    const uint32_t stage = next.edges[edge].tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX ? kGraphPreFxStage
+      : next.edges[edge].tap == DAW_AUDIO_GRAPH_EDGE_PRE_FADER ? kGraphPreFaderStage : kGraphOutputStage;
+    const uint32_t slot = next.tap_history_slots[source][stage];
+    if (!next.ghost_history_writers[source][stage] && occupied[slot]) return false;
+    next.ghost_history_writers[source][stage] = true;
+    occupied[slot] = true;
+  }
+  uint32_t free_slot = 0;
+  for (uint32_t node = 0; node < next.node_count; ++node) {
+    for (uint32_t tap = 0; tap < kGraphStageCount; ++tap) {
+      if (!next.reset_tap_histories[node][tap]) continue;
+      while (free_slot < occupied.size() && occupied[free_slot]) ++free_slot;
+      if (free_slot == occupied.size()) return false;
+      next.tap_history_slots[node][tap] = static_cast<uint16_t>(free_slot);
+      occupied[free_slot++] = true;
+    }
+  }
+  return true;
+}
+
+#if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+// Native reserves kMaximumGraphLatencyFrames for every tap; that does not fit the
+// fixed 256 MiB Wasm memory, so the rings here follow the readers. Every tap a node
+// owns keeps this floor, so a delay raised later still has its history to read.
+constexpr uint32_t kPortableTapHistoryFloorFrames = 4096;
+
+// Control and render share one thread here, so a prepare may move the rings. They
+// only grow: the published plan keeps reading them, and a grown ring carries its
+// history over. A ring covers the longest delay any head of the plan reads.
+bool configure_portable_tap_histories(Core &core, const GraphRevision &graph) {
+  std::array<uint32_t, Core::kTapHistorySlots> capacities{};
+  for (uint32_t slot = 0; slot < capacities.size(); ++slot) capacities[slot] = core.graph_tap_histories[slot].capacity;
+  const auto grow = [&](uint32_t slot, uint32_t frames) {
+    uint32_t capacity = 1;
+    while (capacity < frames) capacity *= 2;
+    capacities[slot] = std::max(capacities[slot], capacity);
+  };
+  for (uint32_t node = 0; node < graph.node_count; ++node) {
+    for (uint32_t tap = 0; tap < kGraphStageCount; ++tap) grow(graph.tap_history_slots[node][tap], kPortableTapHistoryFloorFrames);
+  }
+  for (uint32_t edge = 0; edge < graph.total_edge_count(); ++edge) {
+    const auto &reader = graph.edges[edge];
+    const auto &head = graph.read_heads[edge];
+    const uint32_t stage = reader.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX ? kGraphPreFxStage
+      : reader.tap == DAW_AUDIO_GRAPH_EDGE_PRE_FADER ? kGraphPreFaderStage : kGraphOutputStage;
+    grow(graph.tap_history_slots[graph.edge_source_indices[edge]][stage],
+      std::max({head.delay, head.previous_delay, head.stopped_delay}));
+  }
+  std::array<std::size_t, Core::kTapHistorySlots> offsets{};
+  std::size_t samples = 0;
+  bool grown = false;
+  for (uint32_t slot = 0; slot < capacities.size(); ++slot) {
+    offsets[slot] = samples;
+    samples += static_cast<std::size_t>(capacities[slot]) * 2u;
+    grown = grown || capacities[slot] != core.graph_tap_histories[slot].capacity;
+  }
+  if (!grown) return true;
+  std::unique_ptr<float[]> storage(new (std::nothrow) float[samples]());
+  if (!storage) return false;
+  volatile float *pages = storage.get();
+  for (std::size_t sample = 0; sample < samples; sample += 1024u) pages[sample] = 0.0F;
+  for (uint32_t slot = 0; slot < capacities.size(); ++slot) {
+    const auto &old = core.graph_tap_histories[slot];
+    const uint64_t first = std::max<uint64_t>(old.first_frame, old.end_frame - std::min(old.end_frame, uint64_t{old.capacity}));
+    for (uint32_t channel = 0; channel < 2; ++channel) {
+      for (uint64_t frame = first; frame < old.end_frame; ++frame) {
+        storage[offsets[slot] + channel * capacities[slot] + (frame & (capacities[slot] - 1u))]
+          = core.graph_tap_storage[old.offset + channel * old.capacity + (frame & (old.capacity - 1u))];
+      }
+    }
+  }
+  for (uint32_t slot = 0; slot < capacities.size(); ++slot) {
+    core.graph_tap_histories[slot].offset = offsets[slot];
+    core.graph_tap_histories[slot].capacity = capacities[slot];
+  }
+  core.graph_tap_storage = std::move(storage);
+  return true;
+}
+#endif
+
+// Control-side read-head preparation. Keep the compiler's validated minimum
+// table for stopped playback; a running graph pins its master budget on lowers.
+// Heads share the retained pre-gain tap, never another copy of the signal.
+daw_audio_core_result prepare_latency_heads(Core &core, GraphRevision &next, bool stopped = false) {
+  const auto &current = *core.published_graph;
+  const bool running = !stopped && core.transport_running.load(std::memory_order_acquire);
+  std::array<uint32_t, kMaximumGraphNodes> padding{};
+  std::array<bool, kMaximumGraphNodes> spectral_raise{};
+  if (running) for (uint32_t index = 0; index < next.processor_count; ++index) {
+    const auto &processor = next.processors[index];
+    padding[processor.node_index] += processor.spectral_compensation;
+    if (processor.spectral_predecessor >= 0) {
+      const auto &prior = next.spectral_predecessors[processor.spectral_predecessor];
+      spectral_raise[processor.node_index] = spectral_raise[processor.node_index]
+        || processor.spectral.fft_size + processor.spectral_compensation
+          > prior.spectral.fft_size + prior.spectral_compensation;
+    }
+  }
+  const uint32_t old_budget = core.latency_budget.load(std::memory_order_acquire);
+  std::array<uint32_t, kMaximumGraphNodes> paths{};
+  std::array<uint32_t, kMaximumGraphNodes> inputs{};
+  std::array<bool, kMaximumGraphNodes> kept{};
+  std::array<bool, kMaximumGraphNodes> normal{};
+  for (uint32_t ordered = 0; ordered < next.node_count; ++ordered) {
+    const uint32_t node = next.process_order[ordered];
+    const auto range = next.incoming_edge_ranges[node];
+    kept[node] = next.nodes[node].keep_latency != 0;
+    normal[node] = range.count == 0 && !kept[node];
+    for (uint32_t position = range.start; position < range.start + range.count; ++position) {
+      const uint32_t edge = next.incoming_edge_indices[position];
+      const uint32_t source = next.edge_source_indices[edge];
+      if (source >= next.node_count) continue;
+      kept[node] = kept[node] || kept[source];
+      if (!normal[source]) continue;
+      normal[node] = true;
+      uint32_t arrival = paths[source];
+      if (next.edges[edge].tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX)
+        arrival -= next.nodes[source].latency_frames + next.nodes[source].external_latency_frames + padding[source];
+      inputs[node] = std::max(inputs[node], arrival);
+    }
+    if (next.nodes[node].keep_latency != 0) normal[node] = false;
+    paths[node] = inputs[node] + next.nodes[node].latency_frames + next.nodes[node].external_latency_frames + padding[node];
+  }
+  next.minimum_latency = normal[next.master_index] ? paths[next.master_index] : 0u;
+  next.latency_budget = running ? std::max(old_budget, next.minimum_latency) : next.minimum_latency;
+  next.latency_raise = running && current.revision != 0 && next.latency_budget > old_budget
+    ? next.latency_budget - old_budget : 0;
+  next.latency_origin = core.completed_graph_frame.load(std::memory_order_acquire);
+  next.latency_end = next.latency_origin;
+  if (next.latency_raise != 0) next.latency_end += next.fade_frames * 2u;
+  // Normal contributions enter a mixed bus already compensated to output
+  // content time. The shared bus (and every downstream bus/return) then needs
+  // no compensation, preserving the monitored contribution without DSP lanes.
+  std::array<uint32_t, kMaximumGraphNodes> downstream{};
+  std::array<uint32_t, kMaximumGraphNodes> shortest{};
+  shortest.fill(UINT32_MAX);
+  shortest[next.master_index] = downstream[next.master_index] = next.nodes[next.master_index].latency_frames
+    + next.nodes[next.master_index].external_latency_frames + padding[next.master_index];
+  for (uint32_t ordered = next.node_count; ordered-- > 0;) {
+    const uint32_t target = next.process_order[ordered];
+    const auto range = next.incoming_edge_ranges[target];
+    for (uint32_t position = range.start; position < range.start + range.count; ++position) {
+      const uint32_t edge = next.incoming_edge_indices[position];
+      const uint32_t source = next.edge_source_indices[edge];
+      if (source >= next.node_count) continue;
+      if (shortest[target] == UINT32_MAX) continue;
+      const uint32_t latency = next.edges[edge].tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX ? 0u
+        : next.nodes[source].latency_frames + next.nodes[source].external_latency_frames + padding[source];
+      downstream[source] = std::max(downstream[source], downstream[target] + latency);
+      shortest[source] = std::min(shortest[source], shortest[target] + latency);
+    }
+  }
+  // One shared nonlinear bus cannot give its normal contribution two different
+  // pre-merge delays without executing independent DSP lanes. Reject that
+  // topology explicitly rather than delaying its monitored contribution.
+  for (uint32_t node = 0; node < next.node_count; ++node)
+    if (kept[node] && normal[node] && shortest[node] != UINT32_MAX && shortest[node] != downstream[node]) {
+      core.graph_validation_diagnostic = {
+        .code = DAW_AUDIO_CORE_GRAPH_VALIDATION_KEEP_LATENCY_DIVERGENT_MIXED_BUS,
+        .index = node, .actual = downstream[node], .limit = shortest[node]};
+      return DAW_AUDIO_CORE_GRAPH_COMPATIBILITY_REJECTED;
+    }
+  std::array<uint16_t, kMaximumGraphEdges> old_edges{};
+  for (uint32_t edge = 0; edge < current.edge_count; ++edge) old_edges[edge] = static_cast<uint16_t>(edge);
+  const auto old_end = old_edges.begin() + current.edge_count;
+  std::sort(old_edges.begin(), old_end, [&](uint16_t left, uint16_t right) {
+    return current.edges[left].id < current.edges[right].id;
+  });
+  for (uint32_t edge = 0; edge < next.edge_count; ++edge) {
+    const uint32_t source = next.edge_source_indices[edge];
+    const uint32_t target = next.edge_target_indices[edge];
+    auto &head = next.read_heads[edge];
+    uint32_t arrival = paths[source];
+    if (next.edges[edge].tap == DAW_AUDIO_GRAPH_EDGE_PRE_FX)
+      arrival -= next.nodes[source].latency_frames + next.nodes[source].external_latency_frames + padding[source];
+    const bool skip = kept[source] || next.nodes[target].keep_latency != 0;
+    head.stopped_delay = skip || inputs[target] <= arrival ? 0u : inputs[target] - arrival;
+    head.delay = head.stopped_delay;
+    if (!skip && kept[target]) {
+      const uint32_t remaining = downstream[target];
+      head.stopped_delay = next.minimum_latency > remaining + arrival ? next.minimum_latency - remaining - arrival : 0u;
+      head.delay = next.latency_budget > remaining + arrival ? next.latency_budget - remaining - arrival : 0u;
+    } else if (!skip && target == next.master_index) head.delay += next.latency_budget - next.minimum_latency;
+    head.previous_delay = head.delay;
+    const auto &after = next.edges[edge];
+    const auto old = std::lower_bound(old_edges.begin(), old_end, after.id, [&](uint16_t index, uint64_t id) {
+      return current.edges[index].id < id;
+    });
+    const bool retained = old != old_end && current.edges[*old].id == after.id
+      && current.edges[*old].from_node_id == after.from_node_id
+      && current.edges[*old].to_node_id == after.to_node_id && current.edges[*old].tap == after.tap
+      && current.edges[*old].sidechain == after.sidechain
+      && current.edges[*old].target_processor_id == after.target_processor_id;
+    if (retained) {
+      head.previous_delay = running && old_budget == current.latency_budget
+        && core.latency_shrunk_revision.load(std::memory_order_acquire) != current.revision
+        ? current.read_heads[*old].delay : current.read_heads[*old].stopped_delay;
+    }
+    head.seam = next.latency_origin;
+    if (running && retained && head.previous_delay != head.delay) {
+      if (next.latency_raise != 0) head.seam += next.fade_frames;
+      else {
+        head.seam += std::max(head.previous_delay, head.delay);
+        head.crossfade_frames = next.fade_frames * 2u;
+      }
+      next.latency_end = std::max(next.latency_end, head.seam + head.crossfade_frames);
+    }
+    // A spectral raise already aligns the predecessor to the new stage at the
+    // write seam. Read the new tap segment at that segment's arrival, instead
+    // of mixing read heads with incompatible effective source latencies.
+    if (running && retained && after.tap != DAW_AUDIO_GRAPH_EDGE_PRE_FX && spectral_raise[source]) {
+      head.seam = next.latency_origin + (next.latency_raise != 0 ? next.fade_frames : 0u) + head.delay;
+      head.crossfade_frames = 0;
+      next.latency_end = std::max(next.latency_end, head.seam);
+    }
+  }
+  if (running) {
+    // Stopped playback removes stage-local compensation as well as the pinned
+    // master budget. Prepare that independent raw-latency table off-thread.
+    std::array<uint32_t, kMaximumGraphEdges> delays{};
+    const auto budget = next.latency_budget, raise = next.latency_raise;
+    const auto end = next.latency_end;
+    const auto origin = next.latency_origin;
+    const auto heads = next.read_heads;
+    const auto result = prepare_latency_heads(core, next, true);
+    if (result != DAW_AUDIO_CORE_OK) return result;
+    for (uint32_t edge = 0; edge < next.edge_count; ++edge) delays[edge] = next.read_heads[edge].stopped_delay;
+    const auto raw_minimum = next.minimum_latency;
+    next.read_heads = heads;
+    for (uint32_t edge = 0; edge < next.edge_count; ++edge) next.read_heads[edge].stopped_delay = delays[edge];
+    next.latency_budget = budget;
+    next.minimum_latency = raw_minimum;
+    next.latency_raise = raise;
+    next.latency_end = end;
+    next.latency_origin = origin;
+  }
+  return DAW_AUDIO_CORE_OK;
+}
 
 extern "C" daw_audio_core_result daw_audio_core_prepare(
   daw_audio_core_handle core_handle,
@@ -5474,26 +7127,169 @@ extern "C" daw_audio_core_result daw_audio_core_prepare_graph(
   const daw_audio_graph_prepare_request *request) {
   Core *core = to_core(core_handle);
   if (core == nullptr || request == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-  const auto prepared = std::unique_ptr<GraphRevision>(new (std::nothrow) GraphRevision{});
-  if (!prepared) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-  const daw_audio_core_result result = prepare_graph_revision(*core, *request, prepared.get());
+  // Ghosts copy the published plan's processors, which applying a patch rewrites
+  // in the callback: preparing beside an unresolved patch would read a torn plan.
+  for (uint32_t index = 0; index < 2; ++index) {
+    if (core->staged_processor_state_patches[index].state.load(std::memory_order_acquire) >= 2) {
+      return DAW_AUDIO_CORE_PROCESSOR_PATCH_PENDING;
+    }
+  }
+  GraphRevision *prepared = &core->graph_prepare_scratch[0];
+  const daw_audio_core_result result = prepare_graph_revision(*core, *request, prepared);
   if (result != DAW_AUDIO_CORE_OK) return result;
-  /* PDC delay storage belongs to a revision. Resizing it while rendering
-   * would click and violate RT ownership, so callers retire then publish. */
-  if (has_pdc_change((*core->published_graph), *prepared)) return DAW_AUDIO_CORE_LATENCY_CHANGE_DEFERRED;
+  // A new prepare replaces any unpublished plan: its fresh slots go back first.
+  release_prepared_runtime(*core);
+  core->prepared_revision = 0;
+  reclaim_retired_slots(*core);
   (*core->prepared_graph) = *prepared;
-  core->prepared_revision = request->graph_revision;
-  core->prepared_continuity = prepare_continuity_state(*core);
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-  core->prepared_native_hooks = {};
-  if (!initialize_native_graph_stages(core->prepared_native_hooks, *core->prepared_graph)) {
+  const daw_audio_core_result ownership = prepare_runtime_ownership(*core);
+  if (ownership != DAW_AUDIO_CORE_OK) {
+    release_prepared_runtime(*core);
+    return ownership;
+  }
+  const auto latency = prepare_latency_heads(*core, *core->prepared_graph);
+  if (latency != DAW_AUDIO_CORE_OK) {
+    release_prepared_runtime(*core);
+    return latency;
+  }
+  if (!prepare_tap_histories(*core, *core->prepared_graph)) {
+    release_prepared_runtime(*core);
+    return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  }
+#if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  if (!configure_portable_tap_histories(*core, *core->prepared_graph)) {
+    release_prepared_runtime(*core);
     return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
   }
 #endif
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  std::destroy_at(core->prepared_native_hooks);
+  std::construct_at(core->prepared_native_hooks);
+  if (!initialize_native_graph_stages(*core->prepared_native_hooks, *core->prepared_graph)) {
+    release_prepared_runtime(*core);
+    return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  }
+#endif
+  core->prepared_revision = request->graph_revision;
   return DAW_AUDIO_CORE_OK;
 }
 
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+namespace {
+bool configuration_instrument_matches(Core& core, const uint64_t node_id, const uint32_t kind) {
+  const auto& graph = configuration_graph(core);
+  const auto index = graph_node_index(graph, node_id);
+  return index >= 0 && graph.nodes[index].kind == DAW_AUDIO_GRAPH_NODE_INSTRUMENT
+    && graph.nodes[index].instrument.kind == kind;
+}
+
+bool retained_scheduled_node(const GraphRevision& previous, const GraphRevision& next, uint64_t id) {
+  const auto old_index = graph_node_index(previous, id);
+  const auto new_index = graph_node_index(next, id);
+  return old_index >= 0 && new_index >= 0
+    && previous.nodes[old_index].kind == next.nodes[new_index].kind
+    && previous.node_slots[old_index] == next.node_slots[new_index]
+    && previous.node_generations[old_index] == next.node_generations[new_index];
+}
+
+const GraphRevision::Processor* scheduled_processor(const GraphRevision& graph, uint64_t id) {
+  const auto end = graph.scheduled_processor_lookup.begin() + graph.processor_count;
+  const auto found = std::lower_bound(graph.scheduled_processor_lookup.begin(), end, id,
+    [&graph](uint16_t index, uint64_t target) { return graph.processors[index].instance_id < target; });
+  return found != end && graph.processors[*found].instance_id == id ? &graph.processors[*found] : nullptr;
+}
+
+const daw_audio_graph_node_descriptor* scheduled_mixer(const GraphRevision& graph, uint64_t id) {
+  const auto end = graph.scheduled_mixer_lookup.begin() + graph.node_count;
+  const auto found = std::lower_bound(graph.scheduled_mixer_lookup.begin(), end, id,
+    [&graph](uint16_t index, uint64_t target) { return graph.nodes[index].mixer.instance_id < target; });
+  return found != end && graph.nodes[*found].mixer.instance_id == id ? &graph.nodes[*found] : nullptr;
+}
+}
+
+bool daw::audio_core::RetainsScheduledTarget(const daw_audio_core_handle handle,
+  const uint32_t previous_revision, const daw_audio_sample_source_event& event) noexcept {
+  const Core* core = to_core(handle);
+  return core != nullptr && core->prepared_graph->revision == previous_revision
+    && retained_scheduled_node(*core->prepared_graph, *core->published_graph, event.source_node_id);
+}
+
+bool daw::audio_core::RetainsScheduledTarget(const daw_audio_core_handle handle,
+  const uint32_t previous_revision, const daw_audio_processor_event& event) noexcept {
+  const Core* core = to_core(handle);
+  if (core == nullptr || core->prepared_graph->revision != previous_revision) return false;
+  const auto& previous = *core->prepared_graph;
+  const auto& next = *core->published_graph;
+  const auto* old_processor = scheduled_processor(previous, event.processor_instance_id);
+  const auto* new_processor = scheduled_processor(next, event.processor_instance_id);
+  if (old_processor != nullptr && new_processor != nullptr)
+    return old_processor->node_id == new_processor->node_id && old_processor->kind == new_processor->kind
+      && retained_scheduled_node(previous, next, new_processor->node_id)
+      && processor_declares_target(*new_processor, event.parameter_target);
+  const auto* old_mixer = scheduled_mixer(previous, event.processor_instance_id);
+  const auto* new_mixer = scheduled_mixer(next, event.processor_instance_id);
+  return old_processor == nullptr && new_processor == nullptr && old_mixer != nullptr && new_mixer != nullptr
+    && old_mixer->id == new_mixer->id && retained_scheduled_node(previous, next, new_mixer->id)
+    && valid_mixer_parameter_value(event.parameter_target, event.value);
+}
+
+daw::audio_core::NativeLatencyTransition daw::audio_core::InspectLatencyTransition(
+  const daw_audio_core_handle handle) noexcept {
+  const Core *core = to_core(handle);
+  if (core == nullptr) return {};
+  return {
+    .budget = core->latency_budget.load(std::memory_order_acquire),
+    .revision = core->latency_move_revision.load(std::memory_order_acquire),
+    .completed_revision = core->latency_completed_revision.load(std::memory_order_acquire),
+    .completed_frame = core->completed_graph_frame.load(std::memory_order_acquire),
+  };
+}
+
+std::uint32_t daw::audio_core::PublishedGraphLatency(const daw_audio_core_handle handle) noexcept {
+  const Core *core = to_core(handle);
+  return core == nullptr ? 0u : core->published_graph->minimum_latency;
+}
+
+void daw::audio_core::StopLatencyTransition(const daw_audio_core_handle handle) noexcept {
+  Core *core = to_core(handle);
+  if (core == nullptr) return;
+  core->latency_shrunk_revision = core->published_revision;
+  core->latency_budget.store(core->published_graph->minimum_latency, std::memory_order_release);
+  core->transport_running.store(false, std::memory_order_release);
+  core->latency_completed_revision.store(core->published_revision, std::memory_order_release);
+}
+
+bool daw::audio_core::ValidateInstrumentState(
+  const daw_audio_core_handle handle, const uint64_t node_id,
+  const daw_audio_synth_state& state) noexcept {
+  auto* core = to_core(handle);
+  return core != nullptr && configuration_instrument_matches(*core, node_id, DAW_AUDIO_INSTRUMENT_KIND_SYNTH)
+    && valid_synth_state(state);
+}
+
+bool daw::audio_core::ValidateInstrumentState(
+  const daw_audio_core_handle handle, const uint64_t node_id, const uint32_t kind,
+  const daw_audio_sampler_state& state, const std::span<const daw_audio_sample_zone> zones) noexcept {
+  auto* core = to_core(handle);
+  if (core == nullptr || (kind != DAW_AUDIO_INSTRUMENT_KIND_SAMPLER && kind != DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK)
+    || !configuration_instrument_matches(*core, node_id, kind)
+    || !valid_sampler_state(state) || zones.size() != state.zone_count) return false;
+  for (const auto& zone : zones) {
+    if (!valid_sample_zone(*core, zone)
+      || (kind == DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK
+        && (zone.key_low != zone.key_high || zone.round_robin_group != 0))) return false;
+  }
+  return true;
+}
+
+bool daw::audio_core::ValidateInstrumentState(
+  const daw_audio_core_handle handle, const uint64_t node_id,
+  const daw_audio_granular_state& state) noexcept {
+  auto* core = to_core(handle);
+  return core != nullptr && configuration_instrument_matches(*core, node_id, DAW_AUDIO_INSTRUMENT_KIND_GRANULAR)
+    && valid_granular_state(*core, state);
+}
+
 daw_audio_core_result daw::audio_core::RegisterNativeGraphHook(
   const daw_audio_core_handle core_handle,
   const NativeGraphHookRegistration& registration
@@ -5501,7 +7297,7 @@ daw_audio_core_result daw::audio_core::RegisterNativeGraphHook(
   Core *core = to_core(core_handle);
   if (core == nullptr || registration.graph_revision == 0
     || (registration.hook == nullptr && (registration.observer == nullptr || !registration.bindings.empty()))
-    || registration.bindings.size() > kMaximumGraphNodes
+    || registration.bindings.size() > kMaximumLiveNodes
     || core->prepared_revision != registration.graph_revision
     || (*core->prepared_graph).revision != registration.graph_revision) {
     return DAW_AUDIO_CORE_INVALID_ARGUMENT;
@@ -5515,7 +7311,7 @@ daw_audio_core_result daw::audio_core::RegisterNativeGraphHook(
   next.observer = registration.observer;
   next.observer_attachment = registration.observer_attachment;
   if (next.observer != nullptr && next.observer_attachment == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-  std::array<std::array<NativeGraphHookBinding, DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE>, kMaximumGraphNodes> node_bindings{};
+  std::array<std::array<NativeGraphHookBinding, DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE>, kMaximumLiveNodes> node_bindings{};
   std::array<std::uint32_t, kMaximumGraphNodes> node_binding_counts{};
   for (const NativeGraphHookBinding& binding : registration.bindings) {
     const int32_t node_index = graph_node_index((*core->prepared_graph), binding.node_id);
@@ -5543,11 +7339,16 @@ daw_audio_core_result daw::audio_core::RegisterNativeGraphHook(
   for (std::uint32_t node_index = 0; node_index < (*core->prepared_graph).node_count; ++node_index) {
     const std::uint32_t binding_count = node_binding_counts[node_index];
     if (binding_count == 0) continue;
+    // External stages are placed among the plan's own processors. Fading ghosts
+    // are not part of that numbering; they are put back after their anchors below.
     std::array<NativeGraphStage, kMaximumNativeGraphStagesPerNode> ordinary_stages{};
+    std::array<NativeGraphStage, kMaximumNativeGraphStagesPerNode> ghost_stages{};
     std::uint32_t ordinary_count = 0;
+    std::uint32_t ghost_count = 0;
     for (std::uint32_t stage_index = 0; stage_index < next.stage_counts[node_index]; ++stage_index) {
       const NativeGraphStage &stage = next.stages[node_index][stage_index];
-      ordinary_stages[ordinary_count++] = stage;
+      if ((*core->prepared_graph).processors[stage.processor_index].ghost) ghost_stages[ghost_count++] = stage;
+      else ordinary_stages[ordinary_count++] = stage;
     }
     std::uint32_t effect_count = 0;
     for (std::uint32_t binding_index = 0; binding_index < binding_count; ++binding_index) {
@@ -5610,10 +7411,24 @@ daw_audio_core_result daw::audio_core::RegisterNativeGraphHook(
       rebuilt[position] = ordinary_stages[built_in_index++];
     }
     if (built_in_index != ordinary_count) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+    std::uint32_t total_count = final_count;
+    for (std::uint32_t ghost_index = 0; ghost_index < ghost_count; ++ghost_index) {
+      const int32_t anchor = (*core->prepared_graph).processors[ghost_stages[ghost_index].processor_index].chain_anchor;
+      std::uint32_t position = 0;
+      if (anchor >= 0) {
+        while (position < total_count && !(rebuilt[position].kind == NativeGraphStageKind::kBuiltIn
+          && rebuilt[position].processor_index == anchor)) ++position;
+        if (position == total_count) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+        ++position;
+      }
+      if (total_count >= kMaximumNativeGraphStagesPerNode) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+      for (std::uint32_t end = total_count++; end > position; --end) rebuilt[end] = rebuilt[end - 1];
+      rebuilt[position] = ghost_stages[ghost_index];
+    }
     next.stages[node_index] = rebuilt;
-    next.stage_counts[node_index] = final_count;
+    next.stage_counts[node_index] = total_count;
   }
-  core->prepared_native_hooks = next;
+  *core->prepared_native_hooks = next;
   return DAW_AUDIO_CORE_OK;
 }
 #endif
@@ -5625,11 +7440,11 @@ extern "C" daw_audio_core_result daw_audio_core_prepare_graph_bytes(
   Core *core = to_core(core_handle);
   if (core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   core->graph_validation_diagnostic = {};
-  std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes> nodes{};
-  std::array<daw_audio_graph_edge_descriptor, kMaximumGraphEdges> edges{};
-  std::array<daw_audio_processor_descriptor, kMaximumGraphProcessors> processors{};
-  std::array<std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS>, kMaximumGraphProcessors> targets{};
-  std::array<std::array<uint8_t, DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES>, kMaximumGraphProcessors> states{};
+  std::array<daw_audio_graph_node_descriptor, kMaximumLiveNodes> nodes{};
+  std::array<daw_audio_graph_edge_descriptor, kMaximumLiveEdges> edges{};
+  std::array<daw_audio_processor_descriptor, kMaximumLiveProcessors> processors{};
+  std::array<std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS>, kMaximumLiveProcessors> targets{};
+  std::array<std::array<uint8_t, DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES>, kMaximumLiveProcessors> states{};
   daw_audio_graph_prepare_request request{};
   if (!wasm_parse_graph(
     graph_bytes,
@@ -5654,11 +7469,39 @@ bool same_float(float left, float right) {
   return left == right;
 }
 
+// The synth and sampler states are packed 4-byte words, so a byte compare is a value compare. A sample zone and the granular
+// state open with a 64-bit handle that sits on an 8-byte boundary: they carry padding that the caller leaves as its heap held
+// it, so they compare by field.
+static_assert(sizeof(daw_audio_synth_state) == 156 && sizeof(daw_audio_sampler_state) == 88);
+
+bool same_zone(const daw_audio_sample_zone &left, const daw_audio_sample_zone &right) {
+  return left.asset == right.asset && left.key_low == right.key_low && left.key_high == right.key_high
+    && left.velocity_low == right.velocity_low && left.velocity_high == right.velocity_high
+    && left.root_note == right.root_note && left.tune_cents == right.tune_cents && left.gain == right.gain
+    && left.pan == right.pan && left.round_robin_group == right.round_robin_group
+    && left.round_robin_index == right.round_robin_index && left.playback_mode == right.playback_mode
+    && left.start_frame == right.start_frame && left.end_frame == right.end_frame
+    && left.loop_start_frame == right.loop_start_frame && left.loop_end_frame == right.loop_end_frame
+    && left.crossfade_frame_count == right.crossfade_frame_count && left.choke_group == right.choke_group;
+}
+
+bool same_granular(const daw_audio_granular_state &left, const daw_audio_granular_state &right) {
+  return left.version == right.version && left.asset == right.asset && left.seed == right.seed
+    && left.max_grains == right.max_grains && left.window_shape == right.window_shape && left.freeze == right.freeze
+    && left.grain_size_ms == right.grain_size_ms && left.density_hz == right.density_hz && left.position == right.position
+    && left.spray == right.spray && left.pitch_semitones == right.pitch_semitones
+    && left.reverse_probability == right.reverse_probability && left.stereo_spread == right.stereo_spread;
+}
+
+bool same_zones(const InstrumentConfiguration &left, const InstrumentConfiguration &right) {
+  return std::equal(left.zones.begin(), left.zones.end(), right.zones.begin(), same_zone);
+}
+
 bool same_instrument_configuration(
   const daw_audio_graph_node_descriptor &current_node,
   const daw_audio_graph_node_descriptor &next_node,
-  const InstrumentNodeState &current,
-  const InstrumentNodeState &next) {
+  const InstrumentConfiguration &current,
+  const InstrumentConfiguration &next) {
   if (current_node.instrument.kind != next_node.instrument.kind
     || current_node.instrument.version != next_node.instrument.version
     || current_node.instrument.voice_capacity != next_node.instrument.voice_capacity
@@ -5666,20 +7509,26 @@ bool same_instrument_configuration(
   for (uint32_t index = 0; index < DAW_AUDIO_CORE_MAX_INSTRUMENT_PARAMETERS; ++index) {
     if (current_node.instrument.parameter_targets[index] != next_node.instrument.parameter_targets[index]) return false;
   }
+  const InstrumentConfiguration before = discrete_part(current);
+  const InstrumentConfiguration after = discrete_part(next);
   switch (next_node.instrument.kind) {
     case DAW_AUDIO_INSTRUMENT_KIND_SYNTH:
-      return std::memcmp(&current.synth, &next.synth, sizeof(current.synth)) == 0;
+      return std::memcmp(&before.synth, &after.synth, sizeof(before.synth)) == 0;
     case DAW_AUDIO_INSTRUMENT_KIND_SAMPLER:
     case DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK:
-      return std::memcmp(&current.sampler, &next.sampler, sizeof(current.sampler)) == 0
-        && std::memcmp(current.zones.data(), next.zones.data(), sizeof(current.zones)) == 0;
+      return std::memcmp(&before.sampler, &after.sampler, sizeof(before.sampler)) == 0
+        && same_zones(before, after);
     case DAW_AUDIO_INSTRUMENT_KIND_GRANULAR:
-      return std::memcmp(&current.granular, &next.granular, sizeof(current.granular)) == 0;
+      return same_granular(before.granular, after.granular);
     default:
       return true;
   }
 }
 
+// Whether a processor's slot (history, tails, live overrides) can serve the next
+// plan's processor. Bypass is a parameter, not a structure: it is applied by the
+// renderer, which ramps it where the DSP defines a ramp, so toggling it never
+// replaces the slot.
 bool compatible_processor_history(
   const GraphRevision::Processor &current,
   const GraphRevision::Processor &next) {
@@ -5688,38 +7537,33 @@ bool compatible_processor_history(
     || current.state_version != next.state_version
     || current.state_size != next.state_size
     || current.input_layout != next.input_layout
-    || current.output_layout != next.output_layout
-    || current.bypassed != next.bypassed) return false;
+    || current.output_layout != next.output_layout) return false;
   switch (next.kind) {
     case DAW_AUDIO_PROCESSOR_KIND_UTILITY:
-      return current.utility.enabled == next.utility.enabled
-        && current.utility.dc_block == next.utility.dc_block
+      return current.utility.dc_block == next.utility.dc_block
         && current.utility.input_mode == next.utility.input_mode
         && current.utility.matrix == next.utility.matrix
         && current.utility.swap == next.utility.swap;
     case DAW_AUDIO_PROCESSOR_KIND_SATURATOR:
-      return current.saturator.enabled == next.saturator.enabled
-        && current.saturator.curve == next.saturator.curve
+      return current.saturator.curve == next.saturator.curve
         && current.saturator.color == next.saturator.color
         && same_float(current.saturator.color_frequency_hz, next.saturator.color_frequency_hz);
     case DAW_AUDIO_PROCESSOR_KIND_EQ:
-      if (current.eq.enabled != next.eq.enabled || current.eq.mono != next.eq.mono) return false;
+      if (current.eq.mono != next.eq.mono) return false;
       for (uint32_t band = 0; band < 8; ++band) {
         if (current.eq.bands[band].enabled != next.eq.bands[band].enabled
           || current.eq.bands[band].type != next.eq.bands[band].type) return false;
       }
       return true;
     case DAW_AUDIO_PROCESSOR_KIND_GATE:
-      return current.gate.enabled == next.gate.enabled
-        && current.gate.mode == next.gate.mode
+      return current.gate.mode == next.gate.mode
         && current.gate.detector == next.gate.detector
         && current.gate.sidechain_enabled == next.gate.sidechain_enabled
         && same_float(current.gate.lookahead_ms, next.gate.lookahead_ms)
         && same_float(current.gate.sidechain_frequency_hz, next.gate.sidechain_frequency_hz)
         && same_float(current.gate.sidechain_q, next.gate.sidechain_q);
     case DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR:
-      return current.compressor.enabled == next.compressor.enabled
-        && current.compressor.auto_release == next.compressor.auto_release
+      return current.compressor.auto_release == next.compressor.auto_release
         && current.compressor.detector_mode == next.compressor.detector_mode
         && current.compressor.dynamics_mode == next.compressor.dynamics_mode
         && current.compressor.envelope_curve == next.compressor.envelope_curve
@@ -5729,20 +7573,16 @@ bool compatible_processor_history(
         && same_float(current.compressor.sidechain_frequency_hz, next.compressor.sidechain_frequency_hz)
         && same_float(current.compressor.sidechain_q, next.compressor.sidechain_q);
     case DAW_AUDIO_PROCESSOR_KIND_LIMITER:
-      return current.limiter.enabled == next.limiter.enabled
-        && current.limiter.detector_oversampling == next.limiter.detector_oversampling
+      return current.limiter.detector_oversampling == next.limiter.detector_oversampling
         && same_float(current.limiter.lookahead_ms, next.limiter.lookahead_ms);
     case DAW_AUDIO_PROCESSOR_KIND_SPECTRAL:
-      return current.spectral.enabled == next.spectral.enabled
-        && current.spectral.fft_size == next.spectral.fft_size
+      return current.spectral.fft_size == next.spectral.fft_size
         && current.spectral.overlap == next.spectral.overlap;
     case DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER:
-      return current.autofilter.enabled == next.autofilter.enabled
-        && current.autofilter.mode == next.autofilter.mode
+      return current.autofilter.mode == next.autofilter.mode
         && current.autofilter.quality == next.autofilter.quality;
     case DAW_AUDIO_PROCESSOR_KIND_LOFI:
-      return current.lofi.enabled == next.lofi.enabled
-        && current.lofi.bit_depth == next.lofi.bit_depth
+      return current.lofi.bit_depth == next.lofi.bit_depth
         && current.lofi.quantization == next.lofi.quantization
         && current.lofi.dither == next.lofi.dither
         && current.lofi.seed == next.lofi.seed;
@@ -5758,280 +7598,1205 @@ bool compatible_processor_history(
   }
 }
 
-bool same_core_graph_shape(const GraphRevision &current, const GraphRevision &next) {
-  if (current.revision == 0
-    || current.edge_count != next.edge_count) return false;
-  bool has_continuity_state = current.processor_count > 0;
-  for (uint32_t index = 0; index < current.node_count; ++index) {
-    const auto &left = current.nodes[index];
-    const daw_audio_graph_node_descriptor *right = nullptr;
-    for (uint32_t next_index = 0; next_index < next.node_count; ++next_index) {
-      if (next.nodes[next_index].id == left.id) {
-        right = &next.nodes[next_index];
-        break;
+struct ProcessorContinuityMap {
+  std::array<int32_t, kMaximumLiveProcessors> previous{};
+  std::array<int32_t, kMaximumLiveProcessors> next{};
+};
+
+// Preparation only: immutable instance IDs, no reads of callback-owned
+// parameters or DSP histories. Fixed storage also bounds preparation memory.
+// A portable core cannot bridge a live FFT-size change: the retained stage-input
+// history that does it is native-sized (kSpectralInputFrames). The stage is replaced
+// instead, as a removal plus an insertion: the old one fades out as a ghost and the
+// new one starts fresh. Native keeps the spectral history across sizes.
+bool replaced_by_spectral_size_change(
+  const GraphRevision::Processor &current, const GraphRevision::Processor &next) {
+#if !defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  return current.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL && next.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL
+    && current.spectral.fft_size != next.spectral.fft_size;
+#else
+  (void)current;
+  (void)next;
+  return false;
+#endif
+}
+
+ProcessorContinuityMap build_processor_continuity_map(
+  const GraphRevision &current, const GraphRevision &next) {
+  ProcessorContinuityMap map{};
+  map.previous.fill(-1);
+  map.next.fill(-1);
+  std::array<uint16_t, kMaximumLiveProcessors> current_order{};
+  std::array<uint16_t, kMaximumLiveProcessors> next_order{};
+  for (uint32_t index = 0; index < current.processor_count; ++index)
+    current_order[index] = static_cast<uint16_t>(index);
+  for (uint32_t index = 0; index < next.processor_count; ++index)
+    next_order[index] = static_cast<uint16_t>(index);
+  std::sort(current_order.begin(), current_order.begin() + current.processor_count,
+    [&](uint16_t left, uint16_t right) {
+      return current.processors[left].instance_id < current.processors[right].instance_id;
+    });
+  std::sort(next_order.begin(), next_order.begin() + next.processor_count,
+    [&](uint16_t left, uint16_t right) {
+      return next.processors[left].instance_id < next.processors[right].instance_id;
+    });
+  uint32_t old_position = 0;
+  uint32_t new_position = 0;
+  while (old_position < current.processor_count && new_position < next.processor_count) {
+    const auto old_index = current_order[old_position];
+    const auto new_index = next_order[new_position];
+    const uint64_t old_id = current.processors[old_index].instance_id;
+    const uint64_t new_id = next.processors[new_index].instance_id;
+    if (old_id < new_id) ++old_position;
+    else if (new_id < old_id) ++new_position;
+    else {
+      if (!replaced_by_spectral_size_change(current.processors[old_index], next.processors[new_index])) {
+        map.previous[new_index] = old_index;
+        map.next[old_index] = new_index;
       }
+      ++old_position;
+      ++new_position;
     }
-    if (right == nullptr) return false;
-    if (left.kind != right->kind
-      || left.input_layout != right->input_layout
-      || left.output_layout != right->output_layout
-      || left.input_bus != right->input_bus
-      || left.latency_frames != right->latency_frames
-      || left.external_latency_frames != right->external_latency_frames) return false;
-    has_continuity_state = has_continuity_state || left.kind == DAW_AUDIO_GRAPH_NODE_INSTRUMENT;
   }
-  if (!has_continuity_state) return false;
+  return map;
+}
+
+void initialize_processor_slot(Core &core, uint32_t slot) {
+  core.utility_histories[slot] = {};
+  core.saturator_histories[slot] = {};
+  core.eq_histories[slot] = {};
+  core.dynamics_histories[slot] = {};
+  core.modulation_histories[slot] = {};
+  core.autofilter_histories[slot] = {};
+  core.lofi_histories[slot] = {};
+  core.processor_overrides[slot].count = 0;
+}
+
+// Everything the callback writes into a node slot besides the instrument voices
+// (which assign_prepared_node resets, along with the configuration, when it hands
+// the slot out): the reorder dip, the layout folds, the fader's latched values and
+// ramp, and the instruments that were fading out beside this node's. A slot that
+// left a plan carries none of it into the next node that takes it.
+void initialize_node_slot(Core &core, uint32_t slot) {
+  end_node_blend(core, core.node_blends[slot]);
+  Core::NodeBlend &blend = core.node_blends[slot];
+  blend.partner_generation = 0;
+  blend.descriptor = {};
+  core.node_dips[slot] = {};
+  core.node_folds[slot] = {};
+  core.mixer_latches[slot] = {};
+  core.mixer_ramps[slot] = {};
+}
+
+// Delay, reverb and spectral histories live in small pools that follow the
+// lifecycle of the processor slot that owns them.
+void free_processor_slot_histories(Core &core, uint32_t slot) {
+  for (uint32_t &owner : core.delay_slot_owners) if (owner == slot + 1) owner = 0;
+  for (uint32_t &owner : core.reverb_slot_owners) if (owner == slot + 1) owner = 0;
+  for (uint32_t &owner : core.spectral_slot_owners) if (owner == slot + 1) owner = 0;
+}
+
+// Control thread only. A retired slot is reusable once the render epoch it
+// retired in has completed; the generation moves on before anything can name it again.
+void reclaim_retired_slots(Core &core) {
+  const uint64_t completed = core.render_epoch.load(std::memory_order_acquire);
+  const auto reclaimable = [completed](const RuntimeSlot &slot) {
+    return slot.state.load(std::memory_order_acquire) == kSlotRetired
+      && completed >= slot.retired_epoch.load(std::memory_order_relaxed);
+  };
+  const auto free_slot = [&core](RuntimeSlot &slot) {
+    slot.generation.fetch_add(1, std::memory_order_relaxed);
+    slot.state.store(kSlotFree, std::memory_order_relaxed);
+    slot.fade_elapsed.store(0, std::memory_order_relaxed);
+    ++core.reclaimed_slots;
+  };
+  for (uint32_t index = 0; index < kProcessorRuntimeSlots; ++index) {
+    RuntimeSlot &slot = core.processor_slots[index];
+    if (!reclaimable(slot)) continue;
+    free_slot(slot);
+    free_processor_slot_histories(core, index);
+    initialize_processor_slot(core, index);
+    slot.state.store(kSlotInitialized, std::memory_order_release);
+  }
+  for (uint32_t index = 0; index < kNodeRuntimeSlots; ++index) {
+    RuntimeSlot &slot = core.node_slots[index];
+    if (!reclaimable(slot)) continue;
+    free_slot(slot);
+    initialize_node_slot(core, index);
+    slot.state.store(kSlotInitialized, std::memory_order_release);
+  }
+}
+
+template <std::size_t Count>
+int32_t acquire_runtime_slot(std::array<RuntimeSlot, Count> &slots) {
+  for (uint32_t index = 0; index < Count; ++index) {
+    if (slots[index].state.load(std::memory_order_relaxed) == kSlotInitialized) {
+      slots[index].state.store(kSlotPrepared, std::memory_order_release);
+      return static_cast<int32_t>(index);
+    }
+  }
+  return -1;
+}
+
+int32_t acquire_history_owner(std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE> &owners, uint32_t slot) {
+  for (uint32_t index = 0; index < owners.size(); ++index) {
+    if (owners[index] == 0) {
+      owners[index] = slot + 1;
+      return static_cast<int32_t>(index);
+    }
+  }
+  return -1;
+}
+
+// Rollback of an unpublished plan: its fresh slots go back, untouched, to initialized.
+// Slots the plan shares with the published plan (or ghosts) are active and stay put.
+void release_prepared_runtime(Core &core) {
+  if (!core.prepared_runtime_held) return;
+  const GraphRevision &plan = *core.prepared_graph;
+  for (uint32_t index = 0; index < plan.processor_count; ++index) {
+    const auto &processor = plan.processors[index];
+    RuntimeSlot &slot = core.processor_slots[processor.history_slot];
+    if (slot.state.load(std::memory_order_relaxed) != kSlotPrepared
+      || slot.generation.load(std::memory_order_relaxed) != processor.generation) continue;
+    free_processor_slot_histories(core, processor.history_slot);
+    slot.state.store(kSlotInitialized, std::memory_order_release);
+  }
+  for (uint32_t index = 0; index < plan.total_node_count(); ++index) {
+    RuntimeSlot &slot = core.node_slots[plan.node_slots[index]];
+    if (slot.state.load(std::memory_order_relaxed) == kSlotPrepared
+      && slot.generation.load(std::memory_order_relaxed) == plan.node_generations[index]) {
+      slot.state.store(kSlotInitialized, std::memory_order_release);
+    }
+  }
+  core.prepared_runtime_held = false;
+}
+
+// The fixed number of frames a deleted entry needs to reach silence.
+uint32_t deletion_fade_frames(uint32_t sample_rate_hz) {
+  return std::max<uint32_t>(1, static_cast<uint32_t>((static_cast<uint64_t>(sample_rate_hz) * 5u + 500u) / 1000u));
+}
+
+// Entries the new plan drops are kept as ghosts so they can fade out instead of
+// being cut. A deleted node only needs to survive if it still feeds something
+// that remains. A ghost is built only from what the published plan fixed at
+// prepare time; the callback-owned parameter overrides stay in the runtime slot
+// the ghost shares. Running out of transition capacity, a deletion that has no dry
+// path to fade to, and fading entries that would form a cycle are failed prepares
+// (CAPACITY_EXCEEDED, GRAPH_COMPATIBILITY_REJECTED): none of them ever produces a
+// plan that cuts a deletion or resets what the edit did not touch. A deletion that
+// changes latency moves the read heads (prepare_latency_heads), as on every host.
+daw_audio_core_result append_deletion_ghosts(
+  Core &core, const GraphRevision &current, GraphRevision &next,
+  const ProcessorContinuityMap &processors) {
+  const uint32_t old_nodes = current.total_node_count();
+  std::array<int32_t, kMaximumGraphNodes> node_to_next{};
+  std::array<bool, kMaximumGraphNodes> absent{};
+  std::array<bool, kMaximumGraphNodes> needed{};
+  node_to_next.fill(-1);
+  for (uint32_t index = 0; index < old_nodes; ++index) {
+    if (index < current.node_count) {
+      node_to_next[index] = graph_node_index(next, current.nodes[index].id);
+      absent[index] = node_to_next[index] < 0;
+    } else {
+      // A same-ID live node is a different incarnation. Keep the old ghost's
+      // slot/generation and its routes until its callback-owned fade completes.
+      absent[index] = core.node_slots[current.node_slots[index]].state.load(std::memory_order_acquire) == kSlotActive;
+    }
+  }
+  std::array<uint32_t, kMaximumGraphNodes> position{};
+  for (uint32_t order = 0; order < old_nodes; ++order) position[current.process_order[order]] = order;
+  std::array<uint16_t, kMaximumGraphEdges> by_source{};
+  const uint32_t old_edges = current.total_edge_count();
+  for (uint32_t index = 0; index < old_edges; ++index) by_source[index] = static_cast<uint16_t>(index);
+  std::sort(by_source.begin(), by_source.begin() + old_edges, [&](uint16_t left, uint16_t right) {
+    return position[current.edge_source_indices[left]] > position[current.edge_source_indices[right]];
+  });
+  // A fading processor still being controlled by a key keeps its source alive too;
+  // a key whose processor already finished fading is not worth a transition node.
+  const auto controlled_processor_alive = [&](uint32_t edge_index) {
+    if (current.edges[edge_index].sidechain == 0) return true;
+    const uint32_t target = current.edge_target_processors[edge_index];
+    return target < current.processor_count
+      || core.processor_slots[current.processors[target].history_slot].state.load(std::memory_order_acquire) == kSlotActive;
+  };
+  for (uint32_t order = 0; order < old_edges; ++order) {
+    const uint32_t index = by_source[order];
+    const uint32_t from = current.edge_source_indices[index];
+    const uint32_t to = current.edge_target_indices[index];
+    if (absent[from] && controlled_processor_alive(index)
+      && (node_to_next[to] >= 0 || (absent[to] && needed[to]))) needed[from] = true;
+  }
+  const auto same_route = [](const daw_audio_graph_edge_descriptor &left, const daw_audio_graph_edge_descriptor &right) {
+    return left.from_node_id == right.from_node_id && left.to_node_id == right.to_node_id
+      && left.sidechain == right.sidechain
+      && (left.sidechain != 0 ? left.target_processor_id == right.target_processor_id : left.tap == right.tap);
+  };
+  // A route that joined against a fading node is still joining when the next edit
+  // arrives before that fade is over: the node outlives the edit, and the route (or
+  // the fading copy of it) keeps the join it had.
+  for (uint32_t edge = 0; edge < old_edges; ++edge) {
+    const uint32_t join = current.edge_join_nodes[edge];
+    if (join != 0 && absent[join - 1]) needed[join - 1] = true;
+  }
+  uint32_t ghost_nodes = 0;
+  for (uint32_t index = 0; index < old_nodes; ++index) {
+    if (!absent[index] || !needed[index]) continue;
+    if (ghost_nodes >= kMaximumGhostNodes) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    const uint32_t ghost_index = next.node_count + ghost_nodes++;
+    node_to_next[index] = static_cast<int32_t>(ghost_index);
+    next.nodes[ghost_index] = current.nodes[index];
+    next.node_slots[ghost_index] = current.node_slots[index];
+    next.node_generations[ghost_index] = current.node_generations[index];
+    next.tap_history_slots[ghost_index] = current.tap_history_slots[index];
+  }
+  const auto inherit_join = [&](uint32_t edge, uint32_t old) {
+    const uint32_t join = current.edge_join_nodes[old];
+    if (join != 0 && node_to_next[join - 1] >= static_cast<int32_t>(next.node_count)) {
+      next.edge_join_nodes[edge] = static_cast<uint16_t>(node_to_next[join - 1] + 1);
+    }
+  };
+  uint32_t ghost_edges = 0;
+  const auto inherit_reader = [&](uint32_t edge, uint32_t old) {
+    const uint32_t delay = core.latency_budget.load(std::memory_order_acquire) == current.latency_budget
+      ? current.read_heads[old].delay : current.read_heads[old].stopped_delay;
+    next.edges[edge].pdc_delay_frames = delay;
+    next.read_heads[edge] = {.previous_delay = delay, .delay = delay, .stopped_delay = delay};
+  };
+  for (uint32_t order = 0; order < old_edges; ++order) {
+    const uint32_t index = by_source[order];
+    if (current.edges[index].sidechain != 0) continue;
+    const int32_t from = node_to_next[current.edge_source_indices[index]];
+    const int32_t to = node_to_next[current.edge_target_indices[index]];
+    const bool from_ghost = from >= static_cast<int32_t>(next.node_count);
+    const bool to_ghost = to >= static_cast<int32_t>(next.node_count);
+    if (from < 0 || to < 0 || !(from_ghost || to_ghost)) continue;
+    if (ghost_edges >= kMaximumGhostEdges) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    const uint32_t ghost_index = next.edge_count + ghost_edges++;
+    next.edges[ghost_index] = current.edges[index];
+    next.edge_previous[ghost_index] = static_cast<uint16_t>(index + 1u);
+    inherit_reader(ghost_index, index);
+    next.edge_source_indices[ghost_index] = static_cast<uint16_t>(from);
+    next.edge_target_indices[ghost_index] = static_cast<uint16_t>(to);
+    inherit_join(ghost_index, index);
+  }
+  std::array<uint32_t, kMaximumGraphNodes> chain_lengths{};
+  for (uint32_t index = 0; index < next.processor_count; ++index) ++chain_lengths[next.processors[index].node_index];
+  // Where each processor of the published plan stands in this one, -1 when it is gone.
+  std::array<int32_t, kMaximumGraphProcessors> processor_to_next{};
+  processor_to_next.fill(-1);
+  uint32_t ghost_processors = 0;
+  // Walk each old chain in order so a ghost can name the processor it followed.
+  for (uint32_t old_node = 0; old_node < old_nodes; ++old_node) {
+    const int32_t node = node_to_next[old_node];
+    if (node < 0) continue;
+    const GraphRevision::Range chain = current.processor_ranges[old_node];
+    int32_t anchor = -1;
+    for (uint32_t link = chain.start; link < static_cast<uint32_t>(chain.start) + chain.count; ++link) {
+      const uint32_t index = current.processor_indices[link];
+      const auto &old = current.processors[index];
+      if (index < current.processor_count) {
+        const int32_t kept = processors.next[index];
+        if (kept >= 0 && next.processors[static_cast<uint32_t>(kept)].kind == old.kind) {
+          processor_to_next[index] = kept;
+          if (next.processors[static_cast<uint32_t>(kept)].node_index == node) anchor = kept;
+          continue;
+        }
+      } else if (core.processor_slots[old.history_slot].state.load(std::memory_order_acquire) != kSlotActive) {
+        continue;
+      }
+      // A survivor's crossfade back to the dry signal needs a stage that neither
+      // delays nor changes layout; otherwise the deletion cannot be faded.
+      if (node < static_cast<int32_t>(next.node_count)) {
+        if (old.input_layout != old.output_layout
+          || old.input_layout != next.nodes[static_cast<uint32_t>(node)].output_layout) {
+          return DAW_AUDIO_CORE_GRAPH_COMPATIBILITY_REJECTED;
+        }
+      }
+      if (ghost_processors >= kMaximumGhostProcessors
+        || ++chain_lengths[static_cast<uint32_t>(node)] > DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE * 2u) {
+        return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+      }
+      const int32_t ghost_index = static_cast<int32_t>(next.processor_count + ghost_processors++);
+      auto &ghost = next.processors[static_cast<uint32_t>(ghost_index)];
+      ghost = old;
+      ghost.ghost = true;
+      // A stage already fading on its own clock keeps it when its node is deleted
+      // too; the node's envelope then multiplies the rest of that fade.
+      ghost.detached = old.detached || node < static_cast<int32_t>(next.node_count);
+      ghost.node_index = static_cast<uint16_t>(node);
+      ghost.node_id = next.nodes[static_cast<uint32_t>(node)].id;
+      ghost.control_slot = static_cast<uint32_t>(ghost_index);
+      ghost.chain_anchor = anchor;
+      processor_to_next[index] = ghost_index;
+      anchor = ghost_index;
+    }
+  }
+  for (uint32_t index = 0; index < current.total_processor_count(); ++index) {
+    next.processor_remap[index] = static_cast<int16_t>(processor_to_next[index]);
+  }
+  // A key keeps feeding a processor that fades, and a key that fades keeps feeding
+  // the processor it controlled; an edge between two surviving entries is the
+  // request's own business.
+  for (uint32_t index = 0; index < old_edges; ++index) {
+    if (current.edges[index].sidechain == 0) continue;
+    const int32_t from = node_to_next[current.edge_source_indices[index]];
+    const int32_t to = node_to_next[current.edge_target_indices[index]];
+    const int32_t target = processor_to_next[current.edge_target_processors[index]];
+    if (from < 0 || to < 0 || target < 0) continue;
+    if (from < static_cast<int32_t>(next.node_count) && target < static_cast<int32_t>(next.processor_count)) continue;
+    if (ghost_edges >= kMaximumGhostEdges) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    const uint32_t ghost_index = next.edge_count + ghost_edges++;
+    next.edges[ghost_index] = current.edges[index];
+    next.edge_previous[ghost_index] = static_cast<uint16_t>(index + 1u);
+    inherit_reader(ghost_index, index);
+    next.edge_source_indices[ghost_index] = static_cast<uint16_t>(from);
+    next.edge_target_indices[ghost_index] = static_cast<uint16_t>(to);
+    next.edge_target_processors[ghost_index] = static_cast<uint16_t>(target);
+    inherit_join(ghost_index, index);
+  }
+  // Routes between surviving nodes are not cut or started either. A deleted one
+  // keeps carrying its signal through a transition node that fades out; a new one
+  // from a source that already sounds enters against the fade-out of the deleted
+  // node it replaces (ungrouping), or else against a fade-in clock. Either way the
+  // routes involved never sum to more than one route's worth.
+  const auto transition_node = [&](uint32_t layout) -> int32_t {
+    if (ghost_nodes >= kMaximumGhostNodes) return -1;
+    const int32_t slot = acquire_runtime_slot(core.node_slots);
+    if (slot < 0) return -1;
+    core.prepared_runtime_held = true;
+    const uint32_t index = next.node_count + ghost_nodes++;
+    next.ghost_node_count = ghost_nodes;
+    next.nodes[index] = {};
+    next.nodes[index].id = kTransitionNodeId | index;
+    next.nodes[index].kind = DAW_AUDIO_GRAPH_NODE_MIXER;
+    next.nodes[index].input_layout = layout;
+    next.nodes[index].output_layout = layout;
+    next.node_slots[index] = static_cast<uint16_t>(slot);
+    next.node_generations[index] = core.node_slots[static_cast<uint32_t>(slot)].generation.load(std::memory_order_relaxed);
+    return static_cast<int32_t>(index);
+  };
   for (uint32_t index = 0; index < current.edge_count; ++index) {
-    const auto &left = current.edges[index];
-    const auto &right = next.edges[index];
-    if (left.id != right.id || left.from_node_id != right.from_node_id
-      || left.to_node_id != right.to_node_id
-      || left.target_processor_id != right.target_processor_id
-      || left.tap != right.tap || left.sidechain != right.sidechain
-      || left.pdc_delay_frames != right.pdc_delay_frames) return false;
+    const daw_audio_graph_edge_descriptor &old = current.edges[index];
+    const int32_t from = node_to_next[current.edge_source_indices[index]];
+    const int32_t to = node_to_next[current.edge_target_indices[index]];
+    if (from < 0 || to < 0 || from >= static_cast<int32_t>(next.node_count)
+      || to >= static_cast<int32_t>(next.node_count)) continue;
+    const int32_t target = old.sidechain != 0 ? processor_to_next[current.edge_target_processors[index]] : -1;
+    if (old.sidechain != 0 && (target < 0 || target >= static_cast<int32_t>(next.processor_count))) continue;
+    bool kept = false;
+    for (uint32_t other = 0; other < next.edge_count && !kept; ++other) kept = same_route(old, next.edges[other]);
+    if (kept) continue;
+    const int32_t carrier = transition_node(next.nodes[static_cast<uint32_t>(from)].output_layout);
+    if (carrier < 0 || ghost_edges + 2 > kMaximumGhostEdges) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    const uint64_t carrier_id = next.nodes[static_cast<uint32_t>(carrier)].id;
+    const uint32_t entering = next.edge_count + ghost_edges++;
+    next.edges[entering] = {};
+    next.edges[entering].id = old.id;
+    next.edges[entering].from_node_id = old.from_node_id;
+    next.edges[entering].to_node_id = carrier_id;
+    next.edges[entering].gain = old.gain;
+    next.edges[entering].tap = old.tap;
+    next.edge_previous[entering] = static_cast<uint16_t>(index + 1u);
+    inherit_reader(entering, index);
+    next.edge_source_indices[entering] = static_cast<uint16_t>(from);
+    next.edge_target_indices[entering] = static_cast<uint16_t>(carrier);
+    const uint32_t leaving = next.edge_count + ghost_edges++;
+    next.edges[leaving] = {};
+    next.edges[leaving].id = old.id;
+    next.edges[leaving].from_node_id = carrier_id;
+    next.edges[leaving].to_node_id = old.to_node_id;
+    next.edges[leaving].target_processor_id = old.target_processor_id;
+    next.edges[leaving].gain = 1.0F;
+    next.edges[leaving].tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER;
+    next.edges[leaving].sidechain = old.sidechain;
+    next.edge_source_indices[leaving] = static_cast<uint16_t>(carrier);
+    next.edge_target_indices[leaving] = static_cast<uint16_t>(to);
+    if (old.sidechain != 0) next.edge_target_processors[leaving] = static_cast<uint16_t>(target);
   }
-  for (uint32_t index = 0; index < current.processor_count; ++index) {
-    const auto &processor = current.processors[index];
-    const GraphRevision::Processor *match = nullptr;
-    for (uint32_t next_index = 0; next_index < next.processor_count; ++next_index) {
-      if (next.processors[next_index].instance_id == processor.instance_id) {
-        match = &next.processors[next_index];
-        break;
-      }
+  int32_t clock = -1;
+  for (uint32_t edge = 0; edge < next.edge_count; ++edge) {
+    const daw_audio_graph_edge_descriptor &added = next.edges[edge];
+    int32_t existing = -1;
+    for (uint32_t old = 0; old < current.edge_count && existing < 0; ++old) {
+      if (same_route(current.edges[old], added)) existing = static_cast<int32_t>(old);
     }
-    if (match == nullptr) {
-      if (!processor_is_retirable(current, processor)) return false;
+    if (existing >= 0) next.edge_previous[edge] = static_cast<uint16_t>(existing + 1);
+    const int32_t source = graph_node_index(current, added.from_node_id);
+    if (added.pdc_delay_frames != 0 || source < 0) continue;
+    if (existing >= 0) {
+      inherit_join(edge, static_cast<uint32_t>(existing));
       continue;
     }
-    if (!compatible_processor_history(processor, *match)) return false;
+    std::array<bool, kMaximumGraphNodes> seen{};
+    std::array<uint16_t, kMaximumGraphNodes> queue{};
+    uint32_t head = 0;
+    uint32_t tail = 0;
+    queue[tail++] = static_cast<uint16_t>(source);
+    for (; head < tail && added.sidechain == 0 && next.edge_join_nodes[edge] == 0; ++head) {
+      for (uint32_t old = 0; old < old_edges && next.edge_join_nodes[edge] == 0; ++old) {
+        const uint32_t target = current.edge_target_indices[old];
+        if (current.edges[old].sidechain != 0 || current.edge_source_indices[old] != queue[head]
+          || target >= current.node_count || !absent[target] || seen[target]) continue;
+        seen[target] = true;
+        if (node_to_next[target] >= static_cast<int32_t>(next.node_count)) {
+          next.edge_join_nodes[edge] = static_cast<uint16_t>(node_to_next[target] + 1);
+        } else {
+          queue[tail++] = static_cast<uint16_t>(target);
+        }
+      }
+    }
+    if (next.edge_join_nodes[edge] != 0) continue;
+    if (clock < 0) clock = transition_node(DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+    if (clock < 0) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    next.edge_join_nodes[edge] = static_cast<uint16_t>(clock + 1);
+  }
+  next.ghost_node_count = ghost_nodes;
+  next.ghost_edge_count = ghost_edges;
+  next.ghost_processor_count = ghost_processors;
+  if (order_graph_nodes(next)) return DAW_AUDIO_CORE_OK;
+  for (uint32_t index = next.node_count; index < next.total_node_count(); ++index) {
+    RuntimeSlot &slot = core.node_slots[next.node_slots[index]];
+    if (slot.state.load(std::memory_order_relaxed) == kSlotPrepared) slot.state.store(kSlotInitialized, std::memory_order_release);
+  }
+  next.ghost_node_count = 0;
+  next.ghost_edge_count = 0;
+  next.ghost_processor_count = 0;
+  order_graph_nodes(next);
+  return DAW_AUDIO_CORE_GRAPH_COMPATIBILITY_REJECTED;
+}
+
+// Plans name slots that the previous plan owned: those it neither keeps nor
+// fades out are retired by publish. Computed here so publish stays an integer loop.
+void collect_released_slots(Core &core) {
+  const GraphRevision &current = *core.published_graph;
+  GraphRevision &next = *core.prepared_graph;
+  std::array<bool, kProcessorRuntimeSlots> processor_kept{};
+  std::array<bool, kNodeRuntimeSlots> node_kept{};
+  for (uint32_t index = 0; index < next.total_processor_count(); ++index) {
+    processor_kept[next.processors[index].history_slot] = true;
+  }
+  for (uint32_t index = 0; index < next.spectral_predecessor_count; ++index)
+    processor_kept[next.spectral_predecessors[index].history_slot] = true;
+  for (uint32_t index = 0; index < next.total_node_count(); ++index) node_kept[next.node_slots[index]] = true;
+  // A replaced instrument's slot stays active beside its replacement; the node
+  // retires it itself once the fade has run.
+  for (uint32_t index = 0; index < next.node_count; ++index) {
+    if (next.node_replaces[index] != 0) node_kept[current.node_slots[next.node_replaces[index] - 1u]] = true;
+  }
+  next.released_processor_count = 0;
+  next.released_node_count = 0;
+  for (uint32_t index = 0; index < current.spectral_predecessor_count; ++index) {
+    const auto &processor = current.spectral_predecessors[index];
+    if (!processor_kept[processor.history_slot])
+      next.released_processors[next.released_processor_count++] = {
+        static_cast<uint16_t>(processor.history_slot), processor.generation};
+  }
+  for (uint32_t index = 0; index < current.total_processor_count(); ++index) {
+    const auto &processor = current.processors[index];
+    if (!processor_kept[processor.history_slot]) {
+      next.released_processors[next.released_processor_count++] = {
+        static_cast<uint16_t>(processor.history_slot), processor.generation};
+    }
+  }
+  for (uint32_t index = 0; index < current.total_node_count(); ++index) {
+    if (!node_kept[current.node_slots[index]]) {
+      next.released_nodes[next.released_node_count++] = {current.node_slots[index], current.node_generations[index]};
+    }
+  }
+}
+
+// A node keeps its slot (and so its voices and live overrides) only when the
+// latency verdict was accepted and, for instruments, the configuration is
+// unchanged. A node whose own configuration changed gets a fresh slot initialized
+// from the prepared configuration; no other node is touched.
+// Returns false when no node slot is free.
+bool assign_prepared_node(Core &core, uint32_t index) {
+  GraphRevision &next = *core.prepared_graph;
+  const GraphRevision &current = *core.published_graph;
+  RuntimeSlot &previous_slot = core.node_slots[next.node_slots[index]];
+  if (previous_slot.state.load(std::memory_order_relaxed) == kSlotPrepared
+    && previous_slot.generation.load(std::memory_order_relaxed) == next.node_generations[index]) {
+    previous_slot.state.store(kSlotInitialized, std::memory_order_release);
+  }
+  const auto &node = next.nodes[index];
+  const int32_t previous = current.revision == 0 ? -1 : graph_node_index(current, node.id);
+  const bool retained = core.prepared_continuity == ContinuityPreparationResult::kAccepted && previous >= 0
+    && current.nodes[static_cast<uint32_t>(previous)].kind == node.kind
+    && (node.kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT
+      || (core.prepared_instrument_previous_nodes[index] == previous
+        && same_instrument_configuration(
+          current.nodes[static_cast<uint32_t>(previous)], node,
+          (*core.published_instrument_configs)[static_cast<uint32_t>(previous)],
+          (*core.prepared_instrument_configs)[index])));
+  if (retained) {
+    next.node_slots[index] = current.node_slots[static_cast<uint32_t>(previous)];
+    next.node_generations[index] = current.node_generations[static_cast<uint32_t>(previous)];
+    return true;
+  }
+  const int32_t slot_index = acquire_runtime_slot(core.node_slots);
+  if (slot_index < 0) return false;
+  core.prepared_runtime_held = true;
+  next.node_slots[index] = static_cast<uint16_t>(slot_index);
+  next.node_generations[index] = core.node_slots[slot_index].generation.load(std::memory_order_relaxed);
+  InstrumentNodeState &runtime = core.instrument_runtime[slot_index];
+  runtime = {};
+  set_up_instrument(runtime, (*core.prepared_instrument_configs)[index]);
+  return true;
+}
+
+// Instrument configuration changed on the prepared plan: the node may switch
+// between keeping the published slot and getting a fresh one.
+daw_audio_core_result refresh_prepared_node(Core &core, uint32_t index) {
+  const bool assigned = assign_prepared_node(core, index);
+  bool capacity = true;
+  if (core.published_revision != 0 && core.prepared_continuity == ContinuityPreparationResult::kAccepted) {
+    capacity = mark_replaced_node(core, *core.published_graph, *core.prepared_graph, index);
+  }
+  collect_released_slots(core);
+  return assigned && capacity ? DAW_AUDIO_CORE_OK : DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+}
+
+// Where a processor's bypass position lives, whichever kind it is.
+float *bypass_level(Core &core, const GraphRevision::Processor &processor) {
+  switch (processor.kind) {
+    case DAW_AUDIO_PROCESSOR_KIND_UTILITY: return &core.utility_histories[processor.history_slot].bypass;
+    case DAW_AUDIO_PROCESSOR_KIND_SATURATOR: return &core.saturator_histories[processor.history_slot].bypass;
+    case DAW_AUDIO_PROCESSOR_KIND_EQ: return &core.eq_histories[processor.history_slot].bypass;
+    case DAW_AUDIO_PROCESSOR_KIND_GATE:
+    case DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR:
+    case DAW_AUDIO_PROCESSOR_KIND_LIMITER: return &core.dynamics_histories[processor.history_slot].bypass;
+    case DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER: return &core.autofilter_histories[processor.history_slot].bypass;
+    case DAW_AUDIO_PROCESSOR_KIND_LOFI: return &core.lofi_histories[processor.history_slot].bypass;
+    case DAW_AUDIO_PROCESSOR_KIND_CHORUS:
+    case DAW_AUDIO_PROCESSOR_KIND_FLANGER:
+    case DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE:
+    case DAW_AUDIO_PROCESSOR_KIND_PHASER:
+    case DAW_AUDIO_PROCESSOR_KIND_TREMOLO:
+    case DAW_AUDIO_PROCESSOR_KIND_AUTOPAN: return &core.modulation_histories[processor.history_slot].bypass;
+    case DAW_AUDIO_PROCESSOR_KIND_DELAY: return &core.delay_histories[processor.delay_slot].bypass;
+    case DAW_AUDIO_PROCESSOR_KIND_REVERB: return &core.reverb_histories[processor.reverb_slot].bypass;
+    case DAW_AUDIO_PROCESSOR_KIND_SPECTRAL: return &core.spectral_histories[processor.spectral_slot].bypass;
+    default: return nullptr;
+  }
+}
+
+// Whether the plan entry asks for its dry signal: bypassed, or its own enabled flag off.
+bool bypass_requested(const GraphRevision::Processor &processor) {
+  if (processor.bypassed != 0) return true;
+  switch (processor.kind) {
+    case DAW_AUDIO_PROCESSOR_KIND_UTILITY: return processor.utility.enabled == 0;
+    case DAW_AUDIO_PROCESSOR_KIND_SATURATOR: return processor.saturator.enabled == 0;
+    case DAW_AUDIO_PROCESSOR_KIND_EQ: return processor.eq.enabled == 0;
+    case DAW_AUDIO_PROCESSOR_KIND_GATE: return processor.gate.enabled == 0;
+    case DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR: return processor.compressor.enabled == 0;
+    case DAW_AUDIO_PROCESSOR_KIND_LIMITER: return processor.limiter.enabled == 0;
+    case DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER: return processor.autofilter.enabled == 0;
+    case DAW_AUDIO_PROCESSOR_KIND_LOFI: return processor.lofi.enabled == 0;
+    case DAW_AUDIO_PROCESSOR_KIND_CHORUS:
+    case DAW_AUDIO_PROCESSOR_KIND_FLANGER: return processor.delay_modulation.enabled == 0;
+    case DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE: return processor.ensemble.enabled == 0;
+    case DAW_AUDIO_PROCESSOR_KIND_PHASER: return processor.phaser.enabled == 0;
+    case DAW_AUDIO_PROCESSOR_KIND_TREMOLO:
+    case DAW_AUDIO_PROCESSOR_KIND_AUTOPAN: return processor.amplitude_modulation.enabled == 0;
+    case DAW_AUDIO_PROCESSOR_KIND_DELAY: return processor.delay.enabled == 0;
+    case DAW_AUDIO_PROCESSOR_KIND_REVERB: return processor.reverb.enabled == 0;
+    case DAW_AUDIO_PROCESSOR_KIND_SPECTRAL: return processor.spectral.enabled == 0;
+    default: return false;
+  }
+}
+
+// A processor that gets a fresh slot starts its bypass where it is asked to sit, so
+// one that is built bypassed (a graph's first plan, a replacement or an addition)
+// is dry from its first sample instead of flashing wet while a ramp climbs from
+// zero. One that joins a node that is already sounding starts on its dry signal
+// and ramps in (an effect appearing in a sounding chain is a transition, not a
+// cut). One that replaces another of the same identity is overwritten by
+// hand_off_bypass at publish. Preparation only, on a slot the callback has not
+// seen yet.
+void seed_bypass(Core &core, const GraphRevision::Processor &fresh, bool joining) {
+  if (float *level = bypass_level(core, fresh)) {
+    *level = joining || bypass_requested(fresh) ? 1.0F : 0.0F;
+  }
+}
+
+// Callback side of publish, integers and floats it owns only: a processor that
+// replaced another of the same identity continues the bypass ramp where the old
+// one actually stands, whether or not it has settled. The old slot is still
+// active here (publish retires it afterwards) and the generation proves it is the
+// one the plan was prepared against.
+void hand_off_bypass(Core &core, const GraphRevision &replaced, const GraphRevision &plan) {
+  for (uint32_t index = 0; index < plan.processor_count; ++index) {
+    const GraphRevision::Processor &fresh = plan.processors[index];
+    if (fresh.bypass_source < 0 || static_cast<uint32_t>(fresh.bypass_source) >= replaced.processor_count) continue;
+    const GraphRevision::Processor &old = replaced.processors[static_cast<uint32_t>(fresh.bypass_source)];
+    const RuntimeSlot &slot = core.processor_slots[old.history_slot];
+    if (old.instance_id != fresh.instance_id || old.kind != fresh.kind
+      || slot.state.load(std::memory_order_acquire) != kSlotActive
+      || slot.generation.load(std::memory_order_relaxed) != old.generation) continue;
+    float *from = bypass_level(core, old);
+    float *to = bypass_level(core, fresh);
+    if (from != nullptr && to != nullptr) *to = *from;
+  }
+}
+
+// A node that gets a fresh slot where the published plan had one keeps that
+// predecessor rendering beside it while it fades out (a replaced instrument).
+// Also re-run when an instrument's configuration is set on the prepared plan,
+// which can swap the node between keeping its slot and getting a fresh one.
+// False when the predecessor already carries as many unfinished replacements as a
+// node may: the edit fails instead of cutting the oldest.
+bool mark_replaced_node(const Core &core, const GraphRevision &current, GraphRevision &next, uint32_t node) {
+  const int32_t previous = graph_node_index(current, next.nodes[node].id);
+  const bool replaced = previous >= 0 && current.nodes[static_cast<uint32_t>(previous)].kind == next.nodes[node].kind
+    && next.node_slots[node] != current.node_slots[static_cast<uint32_t>(previous)];
+  next.node_replaces[node] = replaced ? static_cast<uint16_t>(previous + 1) : 0;
+  return !replaced
+    || core.node_blends[current.node_slots[static_cast<uint32_t>(previous)]].depth.load(std::memory_order_acquire)
+      < kMaximumNodeBlends;
+}
+
+// Preparation only, once slots are assigned: the surviving nodes whose stages run
+// in a different order than they do now and so dip at publish. (A layout change and a
+// replaced instrument crossfade their waveforms instead.) False when a replacement
+// exceeds the blend capacity.
+bool mark_reordered_nodes(
+  const Core &core, const GraphRevision &current, GraphRevision &next, const ProcessorContinuityMap &processors) {
+  bool capacity = true;
+  for (uint32_t node = 0; node < next.node_count; ++node) {
+    capacity = mark_replaced_node(core, current, next, node) && capacity;
+    const int32_t previous = graph_node_index(current, next.nodes[node].id);
+    if (previous < 0 || current.nodes[static_cast<uint32_t>(previous)].kind != next.nodes[node].kind) continue;
+    const GraphRevision::Range old_chain = current.processor_ranges[static_cast<uint32_t>(previous)];
+    const GraphRevision::Range new_chain = next.processor_ranges[node];
+    int32_t last_position = -1;
+    for (uint32_t link = new_chain.start; link < static_cast<uint32_t>(new_chain.start) + new_chain.count; ++link) {
+      const uint32_t index = next.processor_indices[link];
+      const int32_t kept = index < next.processor_count ? processors.previous[index] : -1;
+      if (kept < 0) continue;
+      int32_t position = -1;
+      for (uint32_t old = 0; old < old_chain.count; ++old) {
+        if (current.processor_indices[old_chain.start + old] == static_cast<uint32_t>(kept)) position = static_cast<int32_t>(old);
+      }
+      if (position < 0) continue;
+      if (position < last_position) next.node_reordered[node] = true;
+      last_position = std::max(last_position, position);
+    }
+  }
+  return capacity;
+}
+
+// Carries the dip of the node `node` of `plan`, which stood at `previous` in the plan
+// being left, across the publish. A node whose stages now run in a different order
+// than the one it renders starts to dip; one already dipping keeps fading out
+// through the order it was keeping, named in the new plan, and from where its
+// output stands. A dip that has nothing left to keep returns from where it stands.
+void carry_node_dip(
+  Core &core, const GraphRevision &replaced, GraphRevision &plan, uint32_t node, uint32_t previous, bool reordered) {
+  Core::NodeDip &dip = core.node_dips[plan.node_slots[node]];
+  const bool keeping_order = dip.phase == Core::kDipFadingOut;
+  if (!reordered && !keeping_order) return;
+  // The order the node renders now: the published chain, with the stages a dip is
+  // keeping back in the order they ran.
+  const GraphRevision::Range published = replaced.processor_ranges[previous];
+  const auto kept_end = dip.order.begin() + dip.count;
+  std::array<uint16_t, kMaximumNodeChain> order{};
+  uint32_t order_count = 0;
+  uint32_t taken = 0;
+  for (uint32_t link = published.start; link < static_cast<uint32_t>(published.start) + published.count; ++link) {
+    uint32_t index = replaced.processor_indices[link];
+    if (index >= replaced.total_processor_count()) continue;
+    if (keeping_order && std::find(dip.order.begin(), kept_end, index) != kept_end) index = dip.order[taken++];
+    const int32_t survivor = plan.processor_remap[index];
+    if (survivor >= 0 && plan.processors[static_cast<uint32_t>(survivor)].node_index == node
+      && find_processor_renderer(plan.processors[static_cast<uint32_t>(survivor)].kind) != nullptr) {
+      order[order_count++] = static_cast<uint16_t>(survivor);
+    }
+  }
+  // It differs when the plan's chain would run those stages another way round.
+  bool differs = false;
+  const GraphRevision::Range chain = plan.processor_ranges[node];
+  const auto order_end = order.begin() + order_count;
+  uint32_t position = 0;
+  for (uint32_t link = chain.start; link < static_cast<uint32_t>(chain.start) + chain.count; ++link) {
+    const uint32_t index = plan.processor_indices[link];
+    if (index >= plan.total_processor_count() || std::find(order.begin(), order_end, index) == order_end) continue;
+    differs = differs || order[position] != index;
+    ++position;
+  }
+  if (differs) {
+    dip.order = order;
+    dip.count = order_count;
+    if (!keeping_order) {
+      if (dip.phase == Core::kDipNone) dip.level = dip_half_frames(plan);
+      dip.phase = Core::kDipFadingOut;
+    }
+  } else if (keeping_order) {
+    dip.phase = Core::kDipFadingIn;
+    dip.count = 0;
+  }
+}
+
+// The voices a full instrument of `capacity` would keep out of `voices`, best first
+// by `outranks`; the rest are the ones it would give way.
+template <typename Voice, typename Outranks>
+std::array<bool, kMaximumInstrumentVoices> surviving_voices(
+  const std::array<Voice, kMaximumInstrumentVoices> &voices, uint32_t capacity, Outranks outranks) {
+  std::array<bool, kMaximumInstrumentVoices> keep{};
+  for (uint32_t kept = 0; kept < capacity; ++kept) {
+    int32_t best = -1;
+    for (uint32_t index = 0; index < voices.size(); ++index) {
+      if (voices[index].active && !keep[index] && (best < 0 || outranks(voices[index], voices[static_cast<uint32_t>(best)]))) {
+        best = static_cast<int32_t>(index);
+      }
+    }
+    if (best < 0) break;
+    keep[static_cast<uint32_t>(best)] = true;
+  }
+  return keep;
+}
+
+template <typename Voice>
+void carry_voices(
+  const std::array<Voice, kMaximumInstrumentVoices> &voices, const std::array<bool, kMaximumInstrumentVoices> &keep,
+  std::array<Voice, kMaximumInstrumentVoices> &into) {
+  uint32_t carried = 0;
+  for (uint32_t index = 0; index < voices.size(); ++index) {
+    if (keep[index]) into[carried++] = voices[index];
+  }
+}
+
+// Whether two zones are the same zone of a sampler, edited or not: a zone is named
+// by what it answers to (its keys, velocities and round-robin place), never by its
+// asset, tuning, gain, pan or ranges, which are what an edit changes.
+bool same_sample_zone(const daw_audio_sample_zone &left, const daw_audio_sample_zone &right) {
+  return left.key_low == right.key_low && left.key_high == right.key_high
+    && left.velocity_low == right.velocity_low && left.velocity_high == right.velocity_high
+    && left.round_robin_group == right.round_robin_group && left.round_robin_index == right.round_robin_index;
+}
+
+// Seeds the instrument that replaces another at publish: the replacement keeps its
+// own configuration and takes over what the old one was playing, so a held note goes
+// on at the phase it had and the edit applies to it at once (render reads every
+// configured value per frame). It also takes over the continuous values the old one
+// had applied (a zone's only while it is the same zone), so a drag already under way
+// goes on from where it was and the edited targets slew from there. Callback side of publish, floats and integers only,
+// into a slot nothing has rendered yet. Both slots then render the same voices
+// across the 5 ms crossfade, whose weights sum to one, so the seam has no level bump.
+//
+// What carries, and why:
+//
+//  Synth (voices[], sustain, expression, next_age)
+//   voices        carried whole: note, note_id, velocity, references, held and released,
+//                 envelope levels and stages, oscillator, LFO and noise phase, filter
+//                 history. All of it is signal state; every setting (waveform, filter
+//                 mode, envelope times, level, pan) is read from the replacement's configuration
+//                 each frame, so none is stored in a voice.
+//   sustain       carried: the pedal is a held controller, not a setting. A note-off
+//                 after the edit finds its voice by note_id and releases it.
+//   expression    carried (controller state). next_age carried so ages stay ordered.
+//   synth (live)  NOT carried: the replacement's configuration is the authority, as it is for a
+//                 slot with no predecessor.
+//   polyphony     lowered: the voices a full instrument would keep (not released
+//                 first, then newest) carry into slots 0..capacity-1 and the rest stay
+//                 in the old slot, fading with its crossfade. Raised: every voice carries.
+//
+//  Sampler and Drum Rack (sample_voices[], round_robin_cursors, next_age; no pedal)
+//   voices        carried with their zone re-resolved in the replacement's zones by what the
+//                 zone answers to (same index first). A voice whose zone is gone is not
+//                 carried, nor is one a one-shot (or a swapped asset) left past the new
+//                 zone's end: it stays in the old slot and ends on the crossfade.
+//   zone values   end, loop, mode, crossfade, gain, pan and choke are read through the
+//                 zone each frame; asset, tuning and start are re-derived by
+//                 `follow_sample_zone` on the first frame, keeping the playhead (a start
+//                 edit moves it by the same distance).
+//   position, amp/filter/LFO state, forced release, velocity, note, note_id, age:
+//                 carried (signal state and identity).
+//   round_robin_cursors, next_age: carried (place in a rotation, age order).
+//   sampler       NOT carried: configuration.
+//
+//  Granular (grains[], note ids and ages, count, next age, random state, next grain
+//  frame, frozen position)
+//   grains        carried (index below the replacement's max_grains): cursor, step, age, length and pan are
+//                 what a grain was spawned with; window shape and the rest of the state
+//                 are read from the configuration each frame. Grains past a lowered
+//                 max_grains stay in the old slot and fade with it.
+//   note state    carried: the held notes (ids, ages, count, next age) keep sounding and
+//                 a note-off after the edit ends the right one.
+//   random state, next grain frame: carried, so spawning goes on where it was.
+//   frozen position: carried only while freeze is on before and after; otherwise the
+//                 replacement captures it afresh.
+void seed_instrument_runtime(
+  const daw_audio_graph_node_descriptor &plan_node, const InstrumentNodeState &from, InstrumentNodeState &to) {
+  const uint32_t capacity = plan_node.instrument.voice_capacity;
+  const auto carry = [](float &applied, float before) { applied = before; };
+  switch (plan_node.instrument.kind) {
+    case DAW_AUDIO_INSTRUMENT_KIND_SYNTH:
+      visit_synth(to.applied.synth, from.applied.synth, carry);
+      to.sustain = from.sustain;
+      to.expression = from.expression;
+      to.next_age = from.next_age;
+      carry_voices(from.voices, surviving_voices(from.voices, capacity, [](const InstrumentVoice &a, const InstrumentVoice &b) {
+        return a.released != b.released ? !a.released : a.age > b.age;
+      }), to.voices);
+      break;
+    case DAW_AUDIO_INSTRUMENT_KIND_SAMPLER:
+    case DAW_AUDIO_INSTRUMENT_KIND_DRUM_RACK: {
+      visit_sampler(to.applied.sampler, from.applied.sampler, carry);
+      for (uint32_t zone = 0; zone < std::min(to.sampler.zone_count, from.sampler.zone_count); ++zone) {
+        if (same_sample_zone(from.zones[zone], to.zones[zone])) visit_zone(to.applied.zones[zone], from.applied.zones[zone], carry);
+      }
+      to.round_robin_cursors = from.round_robin_cursors;
+      to.next_age = from.next_age;
+      std::array<SampleVoice, kMaximumInstrumentVoices> voices = from.sample_voices;
+      for (SampleVoice &voice : voices) {
+        if (!voice.active) continue;
+        const daw_audio_sample_zone &before = from.zones[voice.zone];
+        uint32_t zone = voice.zone;
+        if (zone >= to.sampler.zone_count || !same_sample_zone(before, to.zones[zone])) {
+          for (zone = 0; zone < to.sampler.zone_count && !same_sample_zone(before, to.zones[zone]); ++zone) {}
+        }
+        const bool found = zone < to.sampler.zone_count;
+        const daw_audio_sample_zone &after = found ? to.zones[zone] : before;
+        const double shifted = voice.position + static_cast<double>(after.start_frame) - static_cast<double>(voice.start_frame);
+        const bool past_end = shifted >= static_cast<double>(after.end_frame)
+          && (after.playback_mode == DAW_AUDIO_SAMPLE_PLAYBACK_ONE_SHOT || after.asset != voice.asset);
+        voice.zone = zone;
+        voice.active = found && !past_end;
+      }
+      carry_voices(voices, surviving_voices(voices, capacity, [](const SampleVoice &a, const SampleVoice &b) {
+        return a.age > b.age;
+      }), to.sample_voices);
+      break;
+    }
+    case DAW_AUDIO_INSTRUMENT_KIND_GRANULAR: {
+      visit_granular(to.applied.granular, from.applied.granular, carry);
+      for (uint32_t index = 0; index < to.granular.max_grains; ++index) to.grains[index] = from.grains[index];
+      to.granular_note_ids = from.granular_note_ids;
+      to.granular_note_ages = from.granular_note_ages;
+      to.granular_note_count = from.granular_note_count;
+      to.granular_next_note_age = from.granular_next_note_age;
+      to.granular_random_state = from.granular_random_state;
+      to.granular_next_frame = from.granular_next_frame;
+      if (from.granular.freeze != 0 && to.granular.freeze != 0) to.granular_frozen_position = from.granular_frozen_position;
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+// Callback side of publish, floats and integers it owns only. Every node starts or
+// carries its dip (a deleted node's ghost too: its stages are ghosts now, and it
+// keeps the order its output was fading through). A replaced instrument's
+// predecessor stays active beside it (publish does not retire it): the node starts
+// its fade-in against it, and takes over the predecessor's layout folds and dip so
+// neither starts from nothing. `replaced` is the plan being left, whose slots are
+// still active here and whose generation proves each is the one the plan was
+// prepared against.
+void begin_node_dips(Core &core, const GraphRevision &replaced, GraphRevision &plan) {
+  for (uint32_t node = 0; node < plan.node_count; ++node) {
+    const uint32_t slot = plan.node_slots[node];
+    if (plan.node_replaces[node] != 0 && plan.node_replaces[node] <= replaced.node_count) {
+      const uint32_t old_index = plan.node_replaces[node] - 1u;
+      const uint32_t old_slot = replaced.node_slots[old_index];
+      if (runtime_slot_renderable(core, core.node_slots[old_slot], replaced.node_generations[old_index])) {
+        core.node_dips[slot] = core.node_dips[old_slot];
+        core.node_folds[slot] = core.node_folds[old_slot];
+        Core::NodeBlend &blend = core.node_blends[slot];
+        blend.partner = static_cast<uint16_t>(old_slot + 1u);
+        blend.partner_generation = replaced.node_generations[old_index];
+        blend.elapsed = 0;
+        blend.descriptor = replaced.nodes[old_index].instrument;
+        blend.depth.store(core.node_blends[old_slot].depth.load(std::memory_order_acquire) + 1u, std::memory_order_release);
+        if (replaced.nodes[old_index].instrument.kind == plan.nodes[node].instrument.kind) {
+          seed_instrument_runtime(plan.nodes[node], core.instrument_runtime[old_slot], core.instrument_runtime[slot]);
+        }
+      }
+    }
+    const int32_t previous = graph_node_index(replaced, plan.nodes[node].id);
+    if (previous >= 0) carry_node_dip(core, replaced, plan, node, static_cast<uint32_t>(previous), plan.node_reordered[node]);
+  }
+  for (uint32_t ghost = plan.node_count; ghost < plan.total_node_count(); ++ghost) {
+    for (uint32_t old = 0; old < replaced.total_node_count(); ++old) {
+      if (replaced.node_slots[old] == plan.node_slots[ghost]) carry_node_dip(core, replaced, plan, ghost, old, false);
+    }
+  }
+}
+
+// Callback side of publish. A kept instrument whose configuration changed (only in
+// its continuous values, or it would have been replaced) takes the edited one as its
+// targets: its voices go on and the values it applies slew there. An unchanged one
+// keeps what a live event set.
+void begin_instrument_edits(Core &core, const GraphRevision &replaced, const GraphRevision &plan) {
+  for (uint32_t node = 0; node < plan.node_count; ++node) {
+    if (plan.nodes[node].kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT) continue;
+    const int32_t previous = graph_node_index(replaced, plan.nodes[node].id);
+    if (previous < 0 || replaced.node_slots[static_cast<uint32_t>(previous)] != plan.node_slots[node]) continue;
+    const InstrumentConfiguration &before = (*core.published_instrument_configs)[static_cast<uint32_t>(previous)];
+    const InstrumentConfiguration &after = (*core.prepared_instrument_configs)[node];
+    const bool same = std::memcmp(&before.synth, &after.synth, sizeof(after.synth)) == 0
+      && std::memcmp(&before.sampler, &after.sampler, sizeof(after.sampler)) == 0
+      && same_zones(before, after) && same_granular(before.granular, after.granular);
+    if (!same) set_instrument_targets(core.instrument_runtime[plan.node_slots[node]], after);
+  }
+}
+
+// Callback side of publish, beside the dips. Every retained node drops what it
+// latched: the committed descriptor wins until the schedule sets a value again.
+// When that or the descriptor changes what the node applies, its gains move there
+// from the ones it applied last over the plan's fade, as its layout folds do.
+void begin_mixer_ramps(Core &core, const GraphRevision &replaced, const GraphRevision &plan) {
+  for (uint32_t node = 0; node < plan.node_count; ++node) {
+    const int32_t previous = graph_node_index(replaced, plan.nodes[node].id);
+    const uint32_t slot = plan.node_slots[node];
+    if (previous < 0 || replaced.node_slots[static_cast<uint32_t>(previous)] != slot) continue;
+    const daw_audio_mixer_state &before = replaced.nodes[static_cast<uint32_t>(previous)].mixer;
+    const daw_audio_mixer_state &after = plan.nodes[node].mixer;
+    Core::MixerLatch &latch = core.mixer_latches[slot];
+    Core::MixerRamp &ramp = core.mixer_ramps[slot];
+    const bool changed = latch.mask != 0 || before.instance_id != after.instance_id || before.gain != after.gain
+      || before.pan != after.pan || before.muted != after.muted || before.soloed != after.soloed;
+    if (ramp.seen && changed) {
+      ramp.from = ramp.applied;
+      ramp.elapsed = 0;
+      ramp.frames = plan.fade_frames;
+    }
+    latch.mask = 0;
+  }
+}
+
+// Callback side of publish, beside the fader ramps. An edge that carries on one of
+// the plan being left keeps its move; once that edge has sounded, a gain the plan
+// changes is reached from the one it applied last over the plan's fade, as a kept
+// fader's is. A route the plan adds still enters against its join, and a dropped
+// one still fades out as its ghost.
+void begin_edge_ramps(Core &core, const GraphRevision &replaced, const GraphRevision &plan) {
+  const auto &applied = core.edge_ramps[core.edge_ramp_bank];
+  auto &ramps = core.edge_ramps[core.edge_ramp_bank ^ 1u];
+  for (uint32_t edge = 0; edge < plan.total_edge_count(); ++edge) {
+    ramps[edge] = {};
+    if (plan.edge_previous[edge] == 0) continue;
+    const uint32_t previous = plan.edge_previous[edge] - 1u;
+    const Core::EdgeRamp &before = applied[previous];
+    const float gain = replaced.edges[previous].gain;
+    ramps[edge] = before;
+    if (before.seen && gain != plan.edges[edge].gain) {
+      ramps[edge] = {.from = edge_ramp_gain(before, gain, before.elapsed), .frames = plan.fade_frames, .seen = true};
+    }
+  }
+  core.edge_ramp_bank ^= 1u;
+}
+
+// Prepares the runtime of the plan just copied into the prepared slot: instrument
+// configuration, the topology verdict, deletion ghosts, and slot ownership. All of
+// it happens off the callback; on failure nothing the callback uses has changed.
+daw_audio_core_result prepare_runtime_ownership(Core &core) {
+  GraphRevision &next = *core.prepared_graph;
+  const GraphRevision &current = *core.published_graph;
+  const bool has_current = current.revision != 0 && core.published_revision != 0;
+  core.prepared_instrument_previous_nodes.fill(-1);
+  for (uint32_t index = 0; index < next.node_count; ++index) {
+    auto &configuration = (*core.prepared_instrument_configs)[index];
+    configuration = {};
+    const int32_t previous = has_current ? graph_node_index(current, next.nodes[index].id) : -1;
+    if (previous >= 0) {
+      const auto &current_node = current.nodes[static_cast<uint32_t>(previous)];
+      if (current_node.kind == next.nodes[index].kind
+        && current_node.instrument.kind == next.nodes[index].instrument.kind) {
+        core.prepared_instrument_previous_nodes[index] = previous;
+        configuration = (*core.published_instrument_configs)[static_cast<uint32_t>(previous)];
+      }
+    }
+    if (next.nodes[index].kind == DAW_AUDIO_GRAPH_NODE_INSTRUMENT
+      && next.nodes[index].instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH
+      && configuration.synth.version == 0) configuration.synth = default_synth_state();
+  }
+  next.fade_frames = deletion_fade_frames(core.config.sample_rate_hz);
+  const auto processors = has_current ? build_processor_continuity_map(current, next) : ProcessorContinuityMap{};
+  core.prepared_continuity = ContinuityPreparationResult::kAccepted;
+  next.node_reordered.fill(false);
+  next.processor_remap.fill(-1);
+  next.node_replaces.fill(0);
+  next.edge_previous.fill(0);
+  if (has_current) {
+    const daw_audio_core_result ghosts = append_deletion_ghosts(core, current, next, processors);
+    if (ghosts != DAW_AUDIO_CORE_OK) return ghosts;
+  }
+  build_graph_ranges(next);
+  for (uint32_t index = 0; index < next.processor_count; ++index) {
+    auto &processor = next.processors[index];
+    // Each processor keeps its slot unless its own structure changed; a latency
+    // change starts every processor from fresh slots. Fresh slots are initialized
+    // here rather than reset by publish.
+    const int32_t previous = has_current && core.prepared_continuity == ContinuityPreparationResult::kAccepted
+      ? processors.previous[index] : -1;
+    if (previous >= 0 && compatible_processor_history(current.processors[static_cast<uint32_t>(previous)], processor)) {
+      const auto &kept = current.processors[static_cast<uint32_t>(previous)];
+      processor.history_slot = kept.history_slot;
+      processor.delay_slot = kept.delay_slot;
+      processor.reverb_slot = kept.reverb_slot;
+      processor.spectral_slot = kept.spectral_slot;
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+      processor.spectral_compensation = core.transport_running.load(std::memory_order_acquire)
+        && core.latency_shrunk_revision.load(std::memory_order_acquire) != current.revision
+          ? kept.spectral_compensation : 0u;
+#endif
+      processor.generation = kept.generation;
+      if (kept.spectral_predecessor >= 0
+        && core.processor_slots[current.spectral_predecessors[kept.spectral_predecessor].history_slot].state.load(std::memory_order_acquire) == kSlotActive
+        && core.processor_slots[current.spectral_predecessors[kept.spectral_predecessor].history_slot].generation.load(std::memory_order_relaxed)
+          == current.spectral_predecessors[kept.spectral_predecessor].generation) {
+        if (next.spectral_predecessor_count == kMaximumSpectralProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+        processor.spectral_predecessor = static_cast<int32_t>(next.spectral_predecessor_count++);
+        next.spectral_predecessors[processor.spectral_predecessor] = current.spectral_predecessors[kept.spectral_predecessor];
+      }
+      continue;
+    }
+    const int32_t slot = acquire_runtime_slot(core.processor_slots);
+    if (slot < 0) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    core.prepared_runtime_held = true;
+    processor.history_slot = static_cast<uint32_t>(slot);
+    processor.generation = core.processor_slots[slot].generation.load(std::memory_order_relaxed);
+    if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY) {
+      const int32_t owned = acquire_history_owner(core.delay_slot_owners, processor.history_slot);
+      if (owned < 0) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+      processor.delay_slot = static_cast<uint32_t>(owned);
+      std::destroy_at(&core.delay_histories[owned]);
+      std::construct_at(&core.delay_histories[owned]);
+    } else if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB) {
+      const int32_t owned = acquire_history_owner(core.reverb_slot_owners, processor.history_slot);
+      if (owned < 0) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+      processor.reverb_slot = static_cast<uint32_t>(owned);
+      std::destroy_at(&core.reverb_histories[owned]);
+      std::construct_at(&core.reverb_histories[owned]);
+    } else if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) {
+      const int32_t owned = acquire_history_owner(core.spectral_slot_owners, processor.history_slot);
+      if (owned < 0) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+      processor.spectral_slot = static_cast<uint32_t>(owned);
+      std::destroy_at(&core.spectral_histories[owned]);
+      std::construct_at(&core.spectral_histories[owned]);
+      reset_spectral_history(core.spectral_histories[owned], processor.spectral);
+      std::destroy_at(&core.spectral_inputs[owned]);
+      std::construct_at(&core.spectral_inputs[owned]);
+      core.spectral_inputs[owned].initialize_samples();
+      if (previous >= 0 && current.processors[previous].kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) {
+        if (next.spectral_predecessor_count == kMaximumSpectralProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+        processor.spectral_predecessor = static_cast<int32_t>(next.spectral_predecessor_count++);
+        next.spectral_predecessors[processor.spectral_predecessor] = current.processors[previous];
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+        const auto &prior = current.processors[previous];
+        if (core.transport_running.load(std::memory_order_acquire)
+          && next.nodes[processor.node_index].keep_latency == 0) {
+          const uint32_t padding = core.latency_shrunk_revision.load(std::memory_order_acquire) == current.revision
+            ? 0u : prior.spectral_compensation;
+          processor.spectral_compensation = std::max(prior.spectral.fft_size + padding,
+            processor.spectral.fft_size) - processor.spectral.fft_size;
+        }
+#endif
+        next.spectral_predecessors[processor.spectral_predecessor].spectral_predecessor = -1;
+        // The old stage has no cache entry. render_chain_frame forwards the
+        // effective Freeze control; other controls retain this configuration.
+        next.spectral_predecessors[processor.spectral_predecessor].parameter_count = 0;
+        // Prepare the new algorithm from an atomic, retained stage-input
+        // window. This is control-side only; it never reads mutable FFT state
+        // or executes an upstream processor. Publication catches up only the
+        // samples that arrived while this immutable revision was in flight.
+        auto &input = core.spectral_inputs[current.processors[previous].spectral_slot];
+        auto &history = core.spectral_histories[owned];
+        const bool valid_snapshot = input.read(core.spectral_state_snapshot, current.processors[previous].spectral);
+        const uint64_t end = input.end.load(std::memory_order_acquire);
+        const uint64_t begin = end - std::min<uint64_t>(end,
+          spectral_warm_frames(processor.spectral) + processor.spectral_compensation);
+        const uint32_t parameters = processor.parameter_count;
+        processor.parameter_count = 0;
+        for (uint64_t cursor = begin; cursor < end; ++cursor) {
+          const uint32_t at = cursor & (kSpectralInputFrames - 1u);
+          float left = 0.0F, right = 0.0F;
+          render_spectral_processor(core, processor, 0,
+            input.sample(0, at), input.sample(1, at),
+            input.sample(2, at), input.sample(3, at),
+            &left, &right);
+        }
+        processor.parameter_count = parameters;
+        if (valid_snapshot)
+          transfer_spectral_persistent(core.spectral_state_snapshot, current.processors[previous].spectral,
+            history, processor.spectral);
+        else history.transfer_map = prepare_spectral_transfer(current.processors[previous].spectral.fft_size,
+          processor.spectral.fft_size);
+        // Serial zero means no analysis frame has been published yet. In
+        // particular, an unobserved Gate starts at unity, not snapshot zeros.
+        history.prepared_state_serial = core.spectral_state_snapshot.state_serial == 0
+          ? UINT64_MAX : core.spectral_state_snapshot.state_serial;
+        history.prepared_state_mode = valid_snapshot ? current.processors[previous].spectral.mode : UINT32_MAX;
+        history.prepared_state_fft_size = valid_snapshot ? current.processors[previous].spectral.fft_size : 0;
+        // A preempted preparation may have lost its oldest samples. Do not
+        // expose that partial warmup or race an overwritten window: this is
+        // genuine bounded-history exhaustion, not a published transition.
+        const uint64_t completed = input.end.load(std::memory_order_acquire);
+        if (completed - begin >= kSpectralInputFrames) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+        history.warm_cursor = end;
+        history.transition_started = true;
+      }
+    }
+    seed_bypass(core, processor, has_current && previous < 0 && graph_node_index(current, processor.node_id) >= 0);
+    if (previous >= 0 && current.processors[static_cast<uint32_t>(previous)].kind == processor.kind) {
+      processor.bypass_source = previous;
+    }
+  }
+  for (uint32_t index = next.processor_count; index < next.total_processor_count(); ++index) {
+    auto &ghost = next.processors[index];
+    if (ghost.spectral_predecessor < 0) continue;
+    const auto &predecessor = current.spectral_predecessors[ghost.spectral_predecessor];
+    if (next.spectral_predecessor_count == kMaximumSpectralProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    ghost.spectral_predecessor = static_cast<int32_t>(next.spectral_predecessor_count++);
+    next.spectral_predecessors[ghost.spectral_predecessor] = predecessor;
+  }
+  for (uint32_t index = 0; index < next.node_count; ++index) {
+    if (!assign_prepared_node(core, index)) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  }
+  if (has_current && core.prepared_continuity == ContinuityPreparationResult::kAccepted
+    && !mark_reordered_nodes(core, current, next, processors)) {
+    return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  }
+  collect_released_slots(core);
+  return DAW_AUDIO_CORE_OK;
+}
+
+// Callback side of publish, integers only: every slot the plan names must still be
+// prepared or active at the generation the plan recorded.
+bool prepared_runtime_current(const Core &core, const GraphRevision &plan) {
+  const auto current = [](const RuntimeSlot &slot, uint32_t generation) {
+    const uint32_t state = slot.state.load(std::memory_order_acquire);
+    return (state == kSlotPrepared || state == kSlotActive)
+      && slot.generation.load(std::memory_order_relaxed) == generation;
+  };
+  // Ghosts are exempt: one may finish fading between prepare and publish, and
+  // then simply does not render.
+  for (uint32_t index = 0; index < plan.processor_count; ++index) {
+    if (!current(core.processor_slots[plan.processors[index].history_slot], plan.processors[index].generation)) return false;
+  }
+  for (uint32_t index = 0; index < plan.node_count; ++index) {
+    if (!current(core.node_slots[plan.node_slots[index]], plan.node_generations[index])) return false;
   }
   return true;
 }
 
-ContinuityPreparationResult prepare_continuity_state(Core &core) {
-  const GraphRevision &current_graph = (*core.published_graph);
-  GraphRevision &next_graph = (*core.prepared_graph);
-  for (uint32_t index = 0; index < kMaximumGraphNodes; ++index) {
-    (*core.prepared_instruments)[index] = (*core.published_instrument_configs)[index];
+void activate_prepared_runtime(Core &core, const GraphRevision &plan) {
+  const auto activate = [](RuntimeSlot &slot) {
+    uint32_t expected = kSlotPrepared;
+    slot.state.compare_exchange_strong(expected, kSlotActive, std::memory_order_release, std::memory_order_relaxed);
+  };
+  for (uint32_t index = 0; index < plan.processor_count; ++index) activate(core.processor_slots[plan.processors[index].history_slot]);
+  for (uint32_t index = 0; index < plan.total_node_count(); ++index) activate(core.node_slots[plan.node_slots[index]]);
+  const auto retire = [&core](RuntimeSlot &slot, uint32_t generation) {
+    if (slot.state.load(std::memory_order_relaxed) == kSlotActive
+      && slot.generation.load(std::memory_order_relaxed) == generation) retire_runtime_slot(core, slot);
+  };
+  for (uint32_t index = 0; index < plan.released_processor_count; ++index) {
+    retire(core.processor_slots[plan.released_processors[index].index], plan.released_processors[index].generation);
   }
-  if (core.published_revision != 0 && !same_core_graph_shape(current_graph, next_graph)) {
-    return ContinuityPreparationResult::kIncompatible;
-  }
-
-  std::array<bool, kMaximumGraphProcessors> preserve_history{};
-  std::array<bool, kMaximumDelayProcessors> preserve_delay{};
-  std::array<bool, kMaximumReverbProcessors> preserve_reverb{};
-  std::array<bool, kMaximumSpectralProcessors> preserve_spectral{};
-  std::array<bool, kMaximumDelayProcessors> used_delay{};
-  std::array<bool, kMaximumReverbProcessors> used_reverb{};
-  for (uint32_t index = 0; index < kMaximumRetirementLanes; ++index) {
-    auto &prepared = (*core.prepared_retirement_lanes)[index];
-    const auto &published = (*core.published_retirement_lanes)[index];
-    prepared.processor = published.processor;
-    prepared.generation = published.generation;
-    prepared.remaining_frames.store(
-      published.remaining_frames.load(std::memory_order_relaxed),
-      std::memory_order_relaxed);
-    prepared.source_delay_slot = published.source_delay_slot;
-    prepared.source_reverb_slot = published.source_reverb_slot;
-  }
-  for (uint32_t index = 0; index < next_graph.processor_count; ++index) {
-    const auto &processor = next_graph.processors[index];
-    if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY && processor.delay_slot < kMaximumDelayProcessors) {
-      used_delay[processor.delay_slot] = true;
-    }
-    if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB && processor.reverb_slot < kMaximumReverbProcessors) {
-      used_reverb[processor.reverb_slot] = true;
-    }
-    for (uint32_t current_index = 0; current_index < current_graph.processor_count; ++current_index) {
-      const auto &current = current_graph.processors[current_index];
-      if (!compatible_processor_history(current, processor)) continue;
-      preserve_history[processor.history_slot] = true;
-      if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY
-        && processor.delay_slot < kMaximumDelayProcessors
-        && current.delay_slot == processor.delay_slot) preserve_delay[processor.delay_slot] = true;
-      if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB
-        && processor.reverb_slot < kMaximumReverbProcessors
-        && current.reverb_slot == processor.reverb_slot) preserve_reverb[processor.reverb_slot] = true;
-      if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL
-        && processor.spectral_slot < kMaximumSpectralProcessors
-        && current.spectral_slot == processor.spectral_slot) preserve_spectral[processor.spectral_slot] = true;
-      break;
-    }
-  }
-  for (uint32_t index = 0; index < current_graph.processor_count; ++index) {
-    const auto &current = current_graph.processors[index];
-    bool retained = false;
-    for (uint32_t next_index = 0; next_index < next_graph.processor_count; ++next_index) {
-      const auto &next = next_graph.processors[next_index];
-      if (current.instance_id == next.instance_id && current.kind == next.kind) {
-        retained = true;
-        break;
-      }
-    }
-    if (retained || !processor_is_retirable(current_graph, current)) continue;
-    if ((current.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY
-      && current.delay_slot < kMaximumDelayProcessors && used_delay[current.delay_slot])
-      || (current.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB
-      && current.reverb_slot < kMaximumReverbProcessors && used_reverb[current.reverb_slot])) {
-      return ContinuityPreparationResult::kIncompatible;
-    }
-    uint32_t lane_index = kMaximumRetirementLanes;
-    for (uint32_t candidate = 0; candidate < kMaximumRetirementLanes; ++candidate) {
-      if (!(*core.prepared_retirement_lanes)[candidate].remaining_frames.load(std::memory_order_relaxed)) {
-        lane_index = candidate;
-        break;
-      }
-    }
-    if (lane_index == kMaximumRetirementLanes) {
-      return ContinuityPreparationResult::kRetirementCapacityExceeded;
-    }
-    auto &lane = (*core.prepared_retirement_lanes)[lane_index];
-    lane.processor = current;
-    materialize_latched_time_effect_state(lane.processor, core.config.sample_rate_hz);
-    lane.processor.control_slot = kMaximumGraphProcessors - 1;
-    lane.processor.parameter_count = 0;
-    lane.processor.live_parameter_valid.fill(false);
-    lane.processor.live_parameter_values.fill(0.0F);
-    lane.generation = ++core.retirement_generation;
-    lane.source_delay_slot = current.delay_slot;
-    lane.source_reverb_slot = current.reverb_slot;
-    lane.remaining_frames.store(
-      std::min(
-        lane.processor.tail_frames,
-        core.config.sample_rate_hz * kMaximumRetirementSeconds),
-      std::memory_order_relaxed);
-    if (current.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY && current.delay_slot < kMaximumDelayProcessors) {
-      preserve_delay[current.delay_slot] = true;
-    }
-    if (current.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB && current.reverb_slot < kMaximumReverbProcessors) {
-      preserve_reverb[current.reverb_slot] = true;
-    }
-  }
-
-  for (uint32_t slot = 0; slot < kMaximumGraphProcessors; ++slot) {
-    core.prepared_reset_history[slot] = !preserve_history[slot];
-  }
-  for (uint32_t slot = 0; slot < kMaximumDelayProcessors; ++slot) {
-    core.prepared_reset_delay[slot] = !preserve_delay[slot];
-  }
-  for (uint32_t slot = 0; slot < kMaximumReverbProcessors; ++slot) {
-    core.prepared_reset_reverb[slot] = !preserve_reverb[slot];
-  }
-  for (uint32_t slot = 0; slot < kMaximumSpectralProcessors; ++slot) {
-    core.prepared_reset_spectral[slot] = !preserve_spectral[slot];
-  }
-  for (uint32_t index = 0; index < next_graph.processor_count; ++index) {
-    auto &processor = next_graph.processors[index];
-    processor.control_slot = index;
-    processor.live_parameter_values.fill(0.0F);
-    processor.live_parameter_valid.fill(false);
-  }
-  *core.prepared_instrument_configs = *core.published_instrument_configs;
-  for (uint32_t node_index = 0; node_index < next_graph.node_count; ++node_index) {
-    const auto &node = next_graph.nodes[node_index];
-    bool retained = false;
-    for (uint32_t current_index = 0; current_index < current_graph.node_count; ++current_index) {
-      const auto &current = current_graph.nodes[current_index];
-      if (current.id == node.id && current.kind == node.kind
-        && current.instrument.kind == node.instrument.kind) {
-        retained = true;
-        break;
-      }
-    }
-    if (!retained) (*core.prepared_instruments)[node_index] = {};
-    if (node.kind == DAW_AUDIO_GRAPH_NODE_INSTRUMENT
-      && node.instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH
-      && (*core.prepared_instruments)[node_index].synth.version == 0) {
-      (*core.prepared_instruments)[node_index].synth = default_synth_state();
-    }
-  }
-  return ContinuityPreparationResult::kAccepted;
-}
-
-bool instrument_configurations_compatible(Core &core) {
-  if (core.published_revision == 0) return true;
-  const GraphRevision &current_graph = *core.published_graph;
-  const GraphRevision &next_graph = *core.prepared_graph;
-  for (uint32_t next_index = 0; next_index < next_graph.node_count; ++next_index) {
-    const auto &next_node = next_graph.nodes[next_index];
-    if (next_node.kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT) continue;
-    for (uint32_t current_index = 0; current_index < current_graph.node_count; ++current_index) {
-      const auto &current_node = current_graph.nodes[current_index];
-      if (current_node.id != next_node.id || current_node.kind != next_node.kind) continue;
-      if (!same_instrument_configuration(
-        current_node, next_node,
-        (*core.published_instrument_configs)[current_index],
-        (*core.prepared_instruments)[next_index])) return false;
-      break;
-    }
-  }
-  return true;
-}
-
-void snapshot_instrument_configurations(Core &core) {
-  for (uint32_t index = 0; index < kMaximumGraphNodes; ++index) {
-    (*core.prepared_instrument_configs)[index].synth = (*core.prepared_instruments)[index].synth;
-    (*core.prepared_instrument_configs)[index].sampler = (*core.prepared_instruments)[index].sampler;
-    (*core.prepared_instrument_configs)[index].zones = (*core.prepared_instruments)[index].zones;
-    (*core.prepared_instrument_configs)[index].round_robin_cursors = (*core.prepared_instruments)[index].round_robin_cursors;
-    (*core.prepared_instrument_configs)[index].granular = (*core.prepared_instruments)[index].granular;
-  }
-}
-
-void clear_retirement_lanes(
-  Core &core,
-  std::array<Core::RetirementLane, kMaximumRetirementLanes> &lanes,
-  const bool release_slots) {
-  for (auto &lane : lanes) {
-    if (release_slots) release_retirement_lane_slot(core, lane);
-    lane.processor = {};
-    lane.generation = 0;
-    lane.source_delay_slot = kMaximumDelayProcessors;
-    lane.source_reverb_slot = kMaximumReverbProcessors;
-    lane.remaining_frames.store(0, std::memory_order_relaxed);
-  }
-}
-
-void merge_prepared_retirement_runtime(Core &core) {
-  for (uint32_t index = 0; index < kMaximumRetirementLanes; ++index) {
-    auto &prepared = (*core.prepared_retirement_lanes)[index];
-    const auto &published = (*core.published_retirement_lanes)[index];
-    if (prepared.remaining_frames.load(std::memory_order_relaxed) == 0) continue;
-    if (prepared.generation == published.generation) continue;
-    if (prepared.processor.kind == DAW_AUDIO_PROCESSOR_KIND_DELAY
-      && prepared.source_delay_slot < kMaximumDelayProcessors) {
-      core.delay_slot_owners[prepared.source_delay_slot].store(
-        prepared.generation, std::memory_order_release);
-    } else if (prepared.processor.kind == DAW_AUDIO_PROCESSOR_KIND_REVERB
-      && prepared.source_reverb_slot < kMaximumReverbProcessors) {
-      core.reverb_slot_owners[prepared.source_reverb_slot].store(
-        prepared.generation, std::memory_order_release);
-    }
-  }
-}
-
-void merge_prepared_instrument_runtime(Core &core) {
-  if (core.published_revision == 0) return;
-  const GraphRevision &current_graph = *core.published_graph;
-  const GraphRevision &next_graph = *core.prepared_graph;
-  for (uint32_t next_index = 0; next_index < next_graph.node_count; ++next_index) {
-    const auto &next_node = next_graph.nodes[next_index];
-    if (next_node.kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT) continue;
-    for (uint32_t current_index = 0; current_index < current_graph.node_count; ++current_index) {
-      const auto &current_node = current_graph.nodes[current_index];
-      if (current_node.id != next_node.id || current_node.kind != next_node.kind
-        || current_node.instrument.kind != next_node.instrument.kind) continue;
-      const InstrumentNodeState staged = (*core.prepared_instruments)[next_index];
-      (*core.prepared_instruments)[next_index] = (*core.published_instruments)[current_index];
-      auto &merged = (*core.prepared_instruments)[next_index];
-      merged.synth = staged.synth;
-      merged.sampler = staged.sampler;
-      merged.zones = staged.zones;
-      merged.round_robin_cursors = staged.round_robin_cursors;
-      merged.granular = staged.granular;
-      break;
-    }
+  for (uint32_t index = 0; index < plan.released_node_count; ++index) {
+    retire(core.node_slots[plan.released_nodes[index].index], plan.released_nodes[index].generation);
   }
 }
 
@@ -6042,56 +8807,52 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
   if (core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   if (expected_revision == 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   if (core->prepared_revision != expected_revision) return DAW_AUDIO_CORE_STALE_REVISION;
+  if (core->latency_move_revision.load(std::memory_order_acquire)
+    > core->latency_completed_revision.load(std::memory_order_acquire))
+    return DAW_AUDIO_CORE_LATENCY_MOVE_PENDING;
   if ((*core->prepared_graph).revision == expected_revision) {
-    if (core->prepared_continuity == ContinuityPreparationResult::kAccepted
-      && !instrument_configurations_compatible(*core)) {
-      core->prepared_continuity = ContinuityPreparationResult::kIncompatible;
+    if (!prepared_runtime_current(*core, *core->prepared_graph)) {
+      core->stale_references.fetch_add(1, std::memory_order_relaxed);
+      return DAW_AUDIO_CORE_STALE_REVISION;
     }
-    switch (core->prepared_continuity) {
-    case ContinuityPreparationResult::kAccepted:
-      for (uint32_t slot = 0; slot < kMaximumGraphProcessors; ++slot) {
-        if (!core->prepared_reset_history[slot]) continue;
-        core->utility_histories[slot] = {};
-        core->saturator_histories[slot] = {};
-        core->eq_histories[slot] = {};
-        core->dynamics_histories[slot] = {};
-        core->modulation_histories[slot] = {};
-        core->autofilter_histories[slot] = {};
-        core->lofi_histories[slot] = {};
-      }
-      for (uint32_t slot = 0; slot < kMaximumDelayProcessors; ++slot) {
-        if (core->prepared_reset_delay[slot]) core->delay_histories[slot] = {};
-      }
-      for (uint32_t slot = 0; slot < kMaximumReverbProcessors; ++slot) {
-        if (core->prepared_reset_reverb[slot]) core->reverb_histories[slot] = {};
-      }
-      for (uint32_t slot = 0; slot < kMaximumSpectralProcessors; ++slot) {
-        if (core->prepared_reset_spectral[slot]) core->spectral_histories[slot] = {};
-      }
-      merge_prepared_instrument_runtime(*core);
-      merge_prepared_retirement_runtime(*core);
-      break;
-    case ContinuityPreparationResult::kIncompatible:
-    case ContinuityPreparationResult::kRetirementCapacityExceeded:
-      std::memset(core->utility_histories.data(), 0, sizeof(core->utility_histories));
-      std::memset(core->saturator_histories.data(), 0, sizeof(core->saturator_histories));
-      std::memset(core->eq_histories.data(), 0, sizeof(core->eq_histories));
-      std::memset(core->dynamics_histories.data(), 0, sizeof(core->dynamics_histories));
-      std::memset(core->modulation_histories.data(), 0, sizeof(core->modulation_histories));
-      std::memset(core->delay_histories.data(), 0, sizeof(core->delay_histories));
-      std::memset(core->reverb_histories.data(), 0, sizeof(core->reverb_histories));
-      std::memset(core->spectral_histories.data(), 0, sizeof(core->spectral_histories));
-      std::memset(core->autofilter_histories.data(), 0, sizeof(core->autofilter_histories));
-      std::memset(core->lofi_histories.data(), 0, sizeof(core->lofi_histories));
-      clear_retirement_lanes(*core, *core->published_retirement_lanes, true);
-      clear_retirement_lanes(*core, *core->prepared_retirement_lanes, false);
-      break;
+    hand_off_bypass(*core, *core->published_graph, *core->prepared_graph);
+    begin_node_dips(*core, *core->published_graph, *core->prepared_graph);
+    begin_instrument_edits(*core, *core->published_graph, *core->prepared_graph);
+    begin_mixer_ramps(*core, *core->published_graph, *core->prepared_graph);
+    begin_edge_ramps(*core, *core->published_graph, *core->prepared_graph);
+    activate_prepared_runtime(*core, *core->prepared_graph);
+    for (uint32_t index = 0; index < core->prepared_graph->processor_count; ++index) {
+      const auto &processor = core->prepared_graph->processors[index];
+      if (processor.spectral_predecessor < 0) continue;
+      auto &history = core->spectral_histories[processor.spectral_slot];
+      history.freeze_source_deadline = core->graph_write_frame + 2u * processor.spectral.fft_size
+        + processor.spectral_compensation + 2u * core->prepared_graph->fade_frames
+        + core->config.max_frames_per_block;
+      history.freeze_source_latched = false;
+      history.freeze_changed_after_latch = false;
     }
-    snapshot_instrument_configurations(*core);
+    // This is the same block-boundary/reader-epoch handoff as runtime slots.
+    // Delayed ghosts keep their reserved histories; only fresh live owners reset.
+    for (uint32_t node = 0; node < core->prepared_graph->node_count; ++node) {
+      for (uint32_t tap = 0; tap < kGraphStageCount; ++tap) {
+        if (!core->prepared_graph->reset_tap_histories[node][tap]) continue;
+        auto &history = core->graph_tap_histories[core->prepared_graph->tap_history_slots[node][tap]];
+        history.first_frame = core->graph_write_frame;
+        history.end_frame = core->graph_write_frame;
+      }
+    }
+    core->prepared_runtime_held = false;
+    core->latency_publication_shift = core->graph_write_frame - core->prepared_graph->latency_origin;
+    const bool running = core->transport_running.load(std::memory_order_acquire);
+    core->latency_shrunk_revision = running ? 0u : expected_revision;
+    core->latency_budget.store(running ? core->prepared_graph->latency_budget
+      : core->prepared_graph->minimum_latency, std::memory_order_release);
+    core->latency_move_revision.store(expected_revision, std::memory_order_release);
+    if (!running || (core->prepared_graph->latency_end == core->prepared_graph->latency_origin
+      && core->prepared_graph->spectral_predecessor_count == 0))
+      core->latency_completed_revision.store(expected_revision, std::memory_order_release);
     std::swap(core->published_graph, core->prepared_graph);
-    std::swap(core->published_instruments, core->prepared_instruments);
     std::swap(core->published_instrument_configs, core->prepared_instrument_configs);
-    std::swap(core->published_retirement_lanes, core->prepared_retirement_lanes);
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
     std::swap(core->published_native_hooks, core->prepared_native_hooks);
 #endif
@@ -6109,18 +8870,24 @@ extern "C" daw_audio_core_result daw_audio_core_cancel_prepared_graph(
   if (expected_revision == 0 || core->prepared_revision != expected_revision) {
     return DAW_AUDIO_CORE_STALE_REVISION;
   }
+  release_prepared_runtime(*core);
   core->prepared_revision = 0;
   core->prepared_continuity = ContinuityPreparationResult::kAccepted;
-  clear_retirement_lanes(*core, *core->prepared_retirement_lanes, false);
   return DAW_AUDIO_CORE_OK;
 }
 
 extern "C" uint32_t daw_audio_core_prepared_graph_continuity(
   daw_audio_core_handle core_handle) {
   Core *core = to_core(core_handle);
-  return core != nullptr
-    && core->prepared_continuity == ContinuityPreparationResult::kAccepted
-    && instrument_configurations_compatible(*core) ? 1U : 0U;
+  return core != nullptr && core->prepared_continuity == ContinuityPreparationResult::kAccepted ? 1U : 0U;
+}
+
+extern "C" uint32_t daw_audio_core_reclaim_retired_runtime(daw_audio_core_handle core_handle) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr) return 0;
+  const uint32_t before = core->reclaimed_slots;
+  reclaim_retired_slots(*core);
+  return core->reclaimed_slots - before;
 }
 
 extern "C" daw_audio_core_result daw_audio_core_stage_processor_state_patch(
@@ -6260,8 +9027,7 @@ extern "C" daw_audio_core_result daw_audio_core_apply_staged_processor_state_pat
       current.spectral = staged.spectral;
       current.autofilter = staged.autofilter;
       current.lofi = staged.lofi;
-      current.live_parameter_values.fill(0.0F);
-      current.live_parameter_valid.fill(false);
+      core->processor_overrides[current.history_slot].count = 0;
       result = DAW_AUDIO_CORE_OK;
       break;
     }
@@ -6291,16 +9057,28 @@ extern "C" daw_audio_core_result daw_audio_core_retire(
   if (core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   if (expected_revision == 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   if (core->published_revision != expected_revision) return DAW_AUDIO_CORE_STALE_REVISION;
+  // The reader may still be inside the plan being retired: its slots only
+  // become reusable once that render epoch has completed.
+  for (RuntimeSlot &slot : core->processor_slots) {
+    if (slot.state.load(std::memory_order_relaxed) == kSlotActive) retire_runtime_slot(*core, slot);
+  }
+  for (RuntimeSlot &slot : core->node_slots) {
+    if (slot.state.load(std::memory_order_relaxed) == kSlotActive) retire_runtime_slot(*core, slot);
+  }
   core->published_revision = 0;
-  (*core->published_graph).revision = 0;
-  (*core->published_graph).node_count = 0;
-  (*core->published_graph).edge_count = 0;
-  (*core->published_graph).processor_count = 0;
-  (*core->published_graph).master_index = kMaximumGraphNodes;
+  GraphRevision &published = *core->published_graph;
+  published.revision = 0;
+  published.node_count = 0;
+  published.edge_count = 0;
+  published.processor_count = 0;
+  published.ghost_node_count = 0;
+  published.ghost_edge_count = 0;
+  published.ghost_processor_count = 0;
+  published.master_index = kMaximumGraphNodes;
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-  core->published_native_hooks = {};
+  *core->published_native_hooks = {};
 #endif
-  clear_instrument_voices(*core);
+  reclaim_retired_slots(*core);
   return DAW_AUDIO_CORE_OK;
 }
 
@@ -6315,11 +9093,61 @@ extern "C" daw_audio_core_result daw_audio_core_configure_utility(
   return DAW_AUDIO_CORE_OK;
 }
 
-extern "C" daw_audio_core_result daw_audio_core_process(
+extern "C" daw_audio_core_result daw_audio_core_validate_instrument_target(
   daw_audio_core_handle core_handle,
-  const daw_audio_core_process_block *block) {
+  const daw_audio_instrument_event *event) {
+  const Core *core = to_core(core_handle);
+  if (core == nullptr || event == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  const auto &graph = *core->published_graph;
+  const int32_t index = graph_node_index(graph, event->node_id);
+  if (index < 0 || graph.nodes[static_cast<uint32_t>(index)].kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT) {
+    return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  }
+  if (event->type != DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER) return DAW_AUDIO_CORE_OK;
+  const auto &descriptor = graph.nodes[static_cast<uint32_t>(index)].instrument;
+  // Use the same setter as render validation, on local scalar configuration,
+  // never read/copy the concurrently changing instrument runtime.
+  daw_audio_synth_state candidate{};
+  return descriptor.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH
+    && instrument_declares_target(descriptor, event->note)
+    && set_synth_parameter(candidate, event->note, event->value)
+      ? DAW_AUDIO_CORE_OK : DAW_AUDIO_CORE_INVALID_ARGUMENT;
+}
+
+extern "C" uint32_t daw_audio_core_rejected_instrument_event_index(
+  daw_audio_core_handle core_handle) {
+  const Core *core = to_core(core_handle);
+  return core == nullptr ? UINT32_MAX : core->rejected_instrument_event_index;
+}
+
+static daw_audio_core_result process_block(
+  daw_audio_core_handle core_handle,
+  const daw_audio_core_process_block *block,
+  uint8_t *rejected_events) {
   Core *core = to_core(core_handle);
-  if (core == nullptr || block == nullptr || block->outputs == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  if (core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  core->rejected_instrument_event_index = UINT32_MAX;
+  if (rejected_events != nullptr) std::fill_n(rejected_events, DAW_AUDIO_CORE_MAX_INSTRUMENT_EVENTS, uint8_t{0});
+  if (block == nullptr || block->outputs == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  // Every call counts as one render epoch once it returns, whatever it rendered.
+  const struct EpochGuard {
+    Core &core;
+    ~EpochGuard() {
+      core.render_epoch.fetch_add(1, std::memory_order_release);
+      // Publish completion after the reader epoch, not from inside graph render.
+      // Control may reclaim a descriptor as soon as it acquires this snapshot.
+      const auto &graph = *core.published_graph;
+      bool stages_complete = true;
+      for (uint32_t index = 0; index < graph.spectral_predecessor_count; ++index) {
+        const auto &processor = graph.spectral_predecessors[index];
+        const auto &slot = core.processor_slots[processor.history_slot];
+        if (slot.state.load(std::memory_order_relaxed) == kSlotActive
+          && slot.generation.load(std::memory_order_relaxed) == processor.generation) stages_complete = false;
+      }
+      if (stages_complete && core.graph_write_frame >= graph.latency_end + core.latency_publication_shift)
+        core.latency_completed_revision.store(graph.revision, std::memory_order_release);
+    }
+  } epoch{*core};
   if (!valid_abi(block->abi_version)) return DAW_AUDIO_CORE_UNSUPPORTED_VERSION;
   if (core->published_revision == 0) return DAW_AUDIO_CORE_NOT_PREPARED;
   if (block->frame_count == 0 || block->frame_count > core->config.max_frames_per_block
@@ -6332,7 +9160,7 @@ extern "C" daw_audio_core_result daw_audio_core_process(
   for (uint32_t channel = 0; channel < block->channel_count; ++channel) {
     if (block->outputs[channel] == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }
-  if (!bind_process_transport(*core, *block)) {
+  if (!bind_process_transport(*core, *block, rejected_events)) {
     return (block->parameter_block_count > 0 || block->event_count > 0 || block->instrument_event_count > 0)
       && block->graph_revision != (*core->published_graph).revision ? DAW_AUDIO_CORE_STALE_REVISION : DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }
@@ -6370,6 +9198,20 @@ extern "C" daw_audio_core_result daw_audio_core_process(
   return DAW_AUDIO_CORE_OK;
 }
 
+extern "C" daw_audio_core_result daw_audio_core_process(
+  daw_audio_core_handle core_handle,
+  const daw_audio_core_process_block *block) {
+  return process_block(core_handle, block, nullptr);
+}
+
+extern "C" daw_audio_core_result daw_audio_core_process_valid_instrument_events(
+  daw_audio_core_handle core_handle,
+  const daw_audio_core_process_block *block,
+  uint8_t *rejected_events) {
+  if (rejected_events == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  return process_block(core_handle, block, rejected_events);
+}
+
 extern "C" daw_audio_core_result daw_audio_core_set_transport(
   daw_audio_core_handle core_handle,
   const daw_audio_transport_state *state) {
@@ -6377,15 +9219,32 @@ extern "C" daw_audio_core_result daw_audio_core_set_transport(
   if (core == nullptr || state == nullptr || !valid_transport_state(*state)) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   if (state->epoch < core->transport.epoch) return DAW_AUDIO_CORE_STALE_REVISION;
   if (state->epoch != core->transport.epoch) {
-    clear_sample_sources(*core);
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-    release_instrument_voices(*core);
-#else
-    clear_instrument_voices(*core);
+    if (core->transport.running == 0 && state->running == 0 && state->frame != core->transport.frame) {
+      // A stopped seek starts a fresh input timeline, not a continuation of the
+      // previous DC estimate. A running locate primes with running=0 too:
+      // require the previous transport to be stopped, preserving its estimate.
+      // Keep musical tails and bypass ramps intact.
+      const auto clear_dc = [](UtilityHistory &history) {
+        history.dc_x1_left = history.dc_x1_right = 0.0F;
+        history.dc_y1_left = history.dc_y1_right = 0.0F;
+      };
+      clear_dc(core->utility_history);
+      for (auto &history : core->utility_histories) clear_dc(history);
+    }
 #endif
+    clear_sample_sources(*core);
+    release_instrument_voices(*core);
     core->last_event_sequence = 0;
+    for (Core::MixerLatch &latch : core->mixer_latches) latch.mask = 0;
   }
   core->transport = *state;
+  core->transport_running.store(state->running != 0, std::memory_order_release);
+  if (state->running == 0) {
+    core->latency_shrunk_revision = core->published_revision;
+    core->latency_budget.store(core->published_graph->minimum_latency, std::memory_order_release);
+    core->latency_completed_revision.store(core->published_revision, std::memory_order_release);
+  }
   return DAW_AUDIO_CORE_OK;
 }
 
@@ -6400,7 +9259,13 @@ extern "C" daw_audio_core_result daw_audio_core_configure_synth(
   if (node_index < 0 || graph.nodes[static_cast<uint32_t>(node_index)].kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT) {
     return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }
-  configuration_instruments(*core)[static_cast<uint32_t>(node_index)].synth = *state;
+  const auto index = static_cast<uint32_t>(node_index);
+  if (core->prepared_revision != 0) {
+    (*core->prepared_instrument_configs)[index].synth = *state;
+    return refresh_prepared_node(*core, index);
+  }
+  (*core->published_instrument_configs)[index].synth = *state;
+  set_up_instrument(published_instrument(*core, index), (*core->published_instrument_configs)[index]);
   return DAW_AUDIO_CORE_OK;
 }
 
@@ -6426,10 +9291,15 @@ extern "C" daw_audio_core_result daw_audio_core_configure_sampler(
       return DAW_AUDIO_CORE_INVALID_ARGUMENT;
     }
   }
-  InstrumentNodeState &instrument = configuration_instruments(*core)[static_cast<uint32_t>(node_index)];
-  instrument.sampler = *state;
-  for (uint32_t index = 0; index < state->zone_count; ++index) instrument.zones[index] = zones[index];
-  for (uint32_t index = state->zone_count; index < instrument.zones.size(); ++index) instrument.zones[index] = {};
+  const auto node_slot = static_cast<uint32_t>(node_index);
+  auto &configuration = core->prepared_revision != 0
+    ? (*core->prepared_instrument_configs)[node_slot] : (*core->published_instrument_configs)[node_slot];
+  configuration.sampler = *state;
+  for (uint32_t index = 0; index < state->zone_count; ++index) configuration.zones[index] = zones[index];
+  for (uint32_t index = state->zone_count; index < configuration.zones.size(); ++index) configuration.zones[index] = {};
+  if (core->prepared_revision != 0) return refresh_prepared_node(*core, node_slot);
+  InstrumentNodeState &instrument = published_instrument(*core, node_slot);
+  set_up_instrument(instrument, configuration);
   instrument.round_robin_cursors.fill(0);
   return DAW_AUDIO_CORE_OK;
 }
@@ -6447,8 +9317,13 @@ extern "C" daw_audio_core_result daw_audio_core_configure_granular(
   if (node.kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT || node.instrument.kind != DAW_AUDIO_INSTRUMENT_KIND_GRANULAR) {
     return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }
-  InstrumentNodeState &instrument = configuration_instruments(*core)[static_cast<uint32_t>(node_index)];
-  instrument.granular = *state;
+  const auto index = static_cast<uint32_t>(node_index);
+  if (core->prepared_revision != 0) {
+    (*core->prepared_instrument_configs)[index].granular = *state;
+    return refresh_prepared_node(*core, index);
+  }
+  (*core->published_instrument_configs)[index].granular = *state;
+  set_up_instrument(published_instrument(*core, index), (*core->published_instrument_configs)[index]);
   return DAW_AUDIO_CORE_OK;
 }
 
@@ -6473,32 +9348,16 @@ extern "C" daw_audio_core_result daw_audio_core_schedule_sample_source(
     return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }
   SampleSource *target = nullptr;
-  for (SampleSource &source : *core->active_sample_sources) {
+  for (uint32_t index = 0; index < kMaximumSampleSources; ++index) {
+    auto &source = (*core->active_sample_sources)[index];
     if (!source.active) {
       target = &source;
       break;
     }
   }
   if (target == nullptr) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-  *target = {
-    .source_node_id = event->source_node_id,
-    .asset = event->asset,
-    .start_frame = event->start_frame,
-    .stop_frame = event->stop_frame,
-    .source_offset_frame = event->source_offset_frame,
-    .source_offset_fraction = event->source_offset_fraction,
-    .source_frame_count = event->source_frame_count,
-    .gain = event->gain,
-    .fade_in_start_frame = event->fade_in_start_frame,
-    .fade_in_end_frame = event->fade_in_end_frame,
-    .fade_out_start_frame = event->fade_out_start_frame,
-    .fade_out_end_frame = event->fade_out_end_frame,
-    .fade_in_curve = event->fade_in_curve,
-    .fade_in_curve_position = event->fade_in_curve_position,
-    .fade_out_curve = event->fade_out_curve,
-    .fade_out_curve_position = event->fade_out_curve_position,
-    .active = true,
-  };
+  *target = make_sample_source(*event);
+  bind_sample_source_node(*target, *core->published_graph);
   core->last_event_sequence = event->sequence;
   return DAW_AUDIO_CORE_OK;
 }
@@ -6515,9 +9374,7 @@ extern "C" daw_audio_core_result daw_audio_core_replace_sample_sources(
     || event_count > kMaximumSampleSources || (event_count != 0 && events == nullptr)) {
     return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   }
-  auto *staged = core->active_sample_sources == &core->sample_source_tables[0]
-    ? &core->sample_source_tables[1]
-    : &core->sample_source_tables[0];
+  auto *staged = &inactive_sample_source_table(*core);
   for (SampleSource &source : *staged) source.active = false;
   uint64_t previous_sequence = 0;
   for (uint32_t index = 0; index < event_count; ++index) {
@@ -6609,9 +9466,18 @@ extern "C" daw_audio_core_result daw_audio_core_replace_sample_sources(
       .paged = event.kind == 1,
       .active = true,
     };
+    bind_sample_source_node((*staged)[index], *core->published_graph);
     previous_sequence = event.sequence;
   }
-  core->active_sample_sources = staged;
+  if (core->transport.running != 0) {
+    // A running transport swaps at its own frame: sources that match keep their cursor and the rest fade over 6 ms
+    // instead of cutting. A stopped one has nothing sounding, so the table is simply replaced.
+    if (!reconcile_sample_sources(*core, {staged->data(), event_count}, core->transport.frame, true)) {
+      return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+    }
+  } else {
+    core->active_sample_sources = staged;
+  }
   core->last_event_sequence = event_count == 0 ? 0 : previous_sequence;
   return DAW_AUDIO_CORE_OK;
 }
@@ -6808,7 +9674,8 @@ extern "C" daw_audio_core_result daw_audio_core_schedule_prepared_sample_source(
       != DAW_AUDIO_GRAPH_NODE_SOURCE) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   } else if (event->source_node_id != 0) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   SampleSource *target = nullptr;
-  for (SampleSource &source : *core->active_sample_sources) {
+  for (uint32_t index = 0; index < kMaximumSampleSources; ++index) {
+    auto &source = (*core->active_sample_sources)[index];
     if (!source.active) {
       target = &source;
       break;
@@ -6827,6 +9694,7 @@ extern "C" daw_audio_core_result daw_audio_core_schedule_prepared_sample_source(
     .fade_out_curve = event->fade_out_curve, .fade_out_curve_position = event->fade_out_curve_position,
     .paged_preparation = preparation, .paged = true, .active = true,
   };
+  bind_sample_source_node(*target, *core->published_graph);
   core->last_event_sequence = event->sequence;
   return DAW_AUDIO_CORE_OK;
 }
@@ -7024,6 +9892,8 @@ extern "C" daw_audio_core_result daw_audio_core_wasm_graph_initialize_planar(
     .sample_rate_hz = sample_rate_hz,
   };
   if (!valid_config(config) || max_input_buses == 0 || max_input_buses > kMaximumChannels) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  // Reconfigure is stopped, with no concurrent reader. Portable rings are sized
+  // from the first graph's actual readers, rather than native transition capacity.
   wasm_asset_core.reset();
   wasm_asset_core.reset(new (std::nothrow) Core{});
   if (wasm_asset_core == nullptr || !initialize_core_storage(*wasm_asset_core)) {
@@ -7033,6 +9903,11 @@ extern "C" daw_audio_core_result daw_audio_core_wasm_graph_initialize_planar(
   }
   wasm_graph_core = wasm_asset_core.get();
   wasm_graph_core->config = config;
+  if (!allocate_graph_stage_buffers(*wasm_graph_core)) {
+    wasm_asset_core.reset();
+    wasm_graph_core = nullptr;
+    return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  }
   const daw_audio_paged_asset_config paged_config{
     .abi_version = DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION,
     .page_frames = DAW_AUDIO_CORE_WASM_PAGED_PAGE_FRAMES,
@@ -7054,11 +9929,11 @@ extern "C" daw_audio_core_result daw_audio_core_wasm_graph_prepare(
   const uint8_t *graph_bytes,
   uint32_t graph_byte_count) {
   if (!wasm_graph_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
-  std::array<daw_audio_graph_node_descriptor, kMaximumGraphNodes> nodes{};
-  std::array<daw_audio_graph_edge_descriptor, kMaximumGraphEdges> edges{};
-  std::array<daw_audio_processor_descriptor, kMaximumGraphProcessors> processors{};
-  std::array<std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS>, kMaximumGraphProcessors> targets{};
-  std::array<std::array<uint8_t, DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES>, kMaximumGraphProcessors> states{};
+  std::array<daw_audio_graph_node_descriptor, kMaximumLiveNodes> nodes{};
+  std::array<daw_audio_graph_edge_descriptor, kMaximumLiveEdges> edges{};
+  std::array<daw_audio_processor_descriptor, kMaximumLiveProcessors> processors{};
+  std::array<std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS>, kMaximumLiveProcessors> targets{};
+  std::array<std::array<uint8_t, DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES>, kMaximumLiveProcessors> states{};
   daw_audio_graph_prepare_request request{};
   if (!wasm_parse_graph(graph_bytes, graph_byte_count, &request, &nodes, &edges, &processors, &targets, &states)) {
     return DAW_AUDIO_CORE_INVALID_ARGUMENT;
@@ -7619,14 +10494,7 @@ extern "C" daw_audio_core_result daw_audio_core_get_asset_revision(
   return DAW_AUDIO_CORE_OK;
 }
 
-extern "C" daw_audio_core_result daw_audio_core_release_asset(
-  daw_audio_core_handle core_handle,
-  daw_audio_asset_handle asset) {
-  Core *core = to_core(core_handle);
-  if (core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
-  AssetSlot *slot = find_asset(core, asset);
-  if (slot == nullptr) return DAW_AUDIO_CORE_INVALID_HANDLE;
-  if (asset_is_active(*core, asset)) return DAW_AUDIO_CORE_ASSET_IN_USE;
+void release_asset_storage(Core *core, AssetSlot *slot, daw_audio_asset_handle asset) {
   slot->occupied = false;
   slot->revision = 0;
   slot->frame_count = 0;
@@ -7642,5 +10510,130 @@ extern "C" daw_audio_core_result daw_audio_core_release_asset(
   }
   ++slot->generation;
   if (slot->generation == 0) ++slot->generation;
+}
+
+extern "C" daw_audio_core_result daw_audio_core_release_asset(
+  daw_audio_core_handle core_handle,
+  daw_audio_asset_handle asset) {
+  Core *core = to_core(core_handle);
+  if (core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  AssetSlot *slot = find_asset(core, asset);
+  if (slot == nullptr) return DAW_AUDIO_CORE_INVALID_HANDLE;
+  if (asset_is_active(*core, asset)) return DAW_AUDIO_CORE_ASSET_IN_USE;
+  release_asset_storage(core, slot, asset);
   return DAW_AUDIO_CORE_OK;
 }
+
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+// DAW_REALTIME_CALLBACK_HELPER_BEGIN native-source-seam-declarations
+bool daw::audio_core::ReconcileSampleSources(daw_audio_core_handle handle,
+  std::span<const daw_audio_sample_source_event> events, int64_t frame, bool apply) noexcept {
+  Core *core = to_core(handle);
+  if (core == nullptr || events.size() > kMaximumSampleSources) return false;
+  uint64_t floor = core->last_event_sequence;
+  const auto &graph = configuration_graph(*core);
+  // Only a hard replace stages in the inactive table, and the host never calls it, so the callback may borrow it.
+  auto &declared = inactive_sample_source_table(*core);
+  for (uint32_t index = 0; index < events.size(); ++index) {
+    const auto &event = events[index];
+    if (!valid_sample_source_event(event) || event.start_frame > frame || event.stop_frame <= frame
+      || event.epoch != core->transport.epoch || event.sequence <= floor) return false;
+    floor = event.sequence;
+    const auto *asset = find_asset(core, event.asset);
+    if (asset == nullptr || event.source_offset_frame >= asset->frame_count
+      || event.source_frame_count > asset->frame_count - event.source_offset_frame) return false;
+    const auto node = graph_node_index(graph, event.source_node_id);
+    if (node < 0 || graph.nodes[static_cast<uint32_t>(node)].kind != DAW_AUDIO_GRAPH_NODE_SOURCE) return false;
+    declared[index] = make_sample_source(event);
+    bind_sample_source_node(declared[index], graph);
+  }
+  if (!reconcile_sample_sources(*core, {declared.data(), events.size()}, frame, apply)) return false;
+  if (apply) core->last_event_sequence = floor;
+  return true;
+}
+// DAW_REALTIME_CALLBACK_HELPER_END native-source-seam-declarations
+
+void daw::audio_core::RequestAssetRetirement(daw_audio_core_handle handle, daw_audio_asset_handle asset) noexcept {
+  Core *core = to_core(handle);
+  uint32_t index = 0, generation = 0;
+  if (core == nullptr || !decode_asset_handle(asset, &index, &generation)
+    || index >= core->config.max_assets || find_asset(core, asset) == nullptr) return;
+  auto& retirement = core->asset_retirements[index];
+  auto open = retirement.load(std::memory_order_acquire);
+  if ((open & 3U) == 0) retirement.compare_exchange_strong(open, open + 1, std::memory_order_release);
+}
+
+void daw::audio_core::CancelAssetRetirement(daw_audio_core_handle handle, daw_audio_asset_handle asset) noexcept {
+  Core *core = to_core(handle);
+  uint32_t index = 0, generation = 0;
+  if (core == nullptr || !decode_asset_handle(asset, &index, &generation)
+    || index >= core->config.max_assets || find_asset(core, asset) == nullptr) return;
+  auto& retirement = core->asset_retirements[index];
+  // Advance the ticket even when the callback is scanning this request. An old
+  // scan cannot acknowledge a later request after renewed ownership (ABA).
+  auto previous = retirement.load(std::memory_order_acquire);
+  while (!retirement.compare_exchange_weak(previous, (previous & ~uint64_t{3}) + 4,
+    std::memory_order_acq_rel)) {}
+}
+
+// DAW_REALTIME_CALLBACK_HELPER_BEGIN native-asset-reader-completion
+bool daw::audio_core::CompleteAssetReaders(daw_audio_core_handle handle, uint64_t completing_epoch) noexcept {
+  Core *core = to_core(handle);
+  if (core == nullptr) return false;
+  bool pending = false;
+  for (uint32_t index = 0; index < core->config.max_assets; ++index)
+    pending = pending || (core->asset_retirements[index].load(std::memory_order_acquire) & 3U) == 1;
+  if (!pending) return false;
+  bool ready = false;
+  std::array<bool, kMaximumAssets> referenced{};
+  const auto retain = [&](daw_audio_asset_handle asset) {
+    uint32_t index = 0, generation = 0;
+    if (decode_asset_handle(asset, &index, &generation) && index < core->config.max_assets) referenced[index] = true;
+  };
+  for (const auto &source : *core->active_sample_sources)
+    if (source.active) retain(source.asset);
+  for (uint32_t node = 0; node < kNodeRuntimeSlots; ++node) {
+    // Prepared configuration belongs to the control thread and is protected
+    // by its host lease. Only active/fading runtimes are callback readers.
+    if (core->node_slots[node].state.load(std::memory_order_acquire) != kSlotActive) continue;
+    const auto &instrument = core->instrument_runtime[node];
+    for (uint32_t zone = 0; zone < instrument.sampler.zone_count; ++zone) retain(instrument.zones[zone].asset);
+    for (const auto &voice : instrument.sample_voices) if (voice.active) retain(voice.asset);
+    retain(instrument.granular.asset);
+  }
+  for (uint32_t index = 0; index < core->config.max_assets; ++index) {
+    auto &retirement = core->asset_retirements[index];
+    auto requested = retirement.load(std::memory_order_acquire);
+    if ((requested & 3U) != 1) continue;
+    // This host extension owns resident/mapped assets only. Portable paged
+    // cache preparations keep their separate pin-count/release contract.
+    if (!referenced[index] && !core->assets[index].paged) {
+      core->asset_retirement_epochs[index].store(completing_epoch, std::memory_order_relaxed);
+      ready = retirement.compare_exchange_strong(requested, requested + 1, std::memory_order_release) || ready;
+    }
+  }
+  return ready;
+}
+// DAW_REALTIME_CALLBACK_HELPER_END native-asset-reader-completion
+
+bool daw::audio_core::ReclaimAsset(daw_audio_core_handle handle, daw_audio_asset_handle asset,
+  bool device_stopped, uint64_t completed_epoch) noexcept {
+  Core *core = to_core(handle);
+  if (core == nullptr) return false;
+  uint32_t index = 0, generation = 0;
+  if (!decode_asset_handle(asset, &index, &generation) || index >= core->config.max_assets) return false;
+  auto &retirement = core->asset_retirements[index];
+  if (device_stopped) {
+    if (asset_is_active(*core, asset)) return false;
+  } else if ((retirement.load(std::memory_order_acquire) & 3U) != 2
+    || completed_epoch < core->asset_retirement_epochs[index].load(std::memory_order_relaxed)) return false;
+  AssetSlot *slot = find_asset(core, asset);
+  if (slot == nullptr) return false;
+  // The callback never touches ready metadata. The host waits for the completed
+  // render epoch before entering here and forbids new references meanwhile.
+  release_asset_storage(core, slot, asset);
+  const auto previous = retirement.load(std::memory_order_relaxed);
+  retirement.store((previous & ~uint64_t{3}) + 4, std::memory_order_release);
+  return true;
+}
+#endif

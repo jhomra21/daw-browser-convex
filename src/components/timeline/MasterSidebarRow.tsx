@@ -2,7 +2,6 @@ import {
   type Component,
   Show,
   createMemo,
-  onCleanup,
 } from "solid-js";
 import {
   automationEnvelopeValueRange,
@@ -14,6 +13,7 @@ import {
 } from "@daw-browser/shared";
 import type { TrackStereoLevels } from "@daw-browser/audio-engine/audio-engine";
 import { LANE_HEIGHT, clampAutomationLaneHeight } from "~/lib/timeline-utils";
+import { useDrag } from "~/hooks/useDrag";
 import { cn } from "~/lib/utils";
 import AutomationParameterPicker from "./automation-parameter-picker";
 import MixerVolumeSlider from "./MixerVolumeSlider";
@@ -113,31 +113,23 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
     volumeEnvelope()
       ? automationEnvelopeValueRange(volumeEnvelope(), { min: 0, max: 2 })
       : undefined;
-  let cleanupAutomationResize: (() => void) | undefined;
-  const startAutomationResize = (event: PointerEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const startY = event.clientY;
-    const startHeight = automationHeight();
-    const move = (moveEvent: PointerEvent) => {
+  let automationResizeStartY = 0;
+  let automationResizeStartHeight = 0;
+  const automationResize = useDrag({
+    onDragStart: (pos) => {
+      automationResizeStartY = pos.y;
+      automationResizeStartHeight = automationHeight();
+    },
+    onDragMove: (pos) => {
       props.automation.onResizeLane(
-        clampAutomationLaneHeight(startHeight + moveEvent.clientY - startY),
+        clampAutomationLaneHeight(automationResizeStartHeight + pos.y - automationResizeStartY),
       );
-    };
-    const cleanup = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", cleanup);
-      window.removeEventListener("pointercancel", cleanup);
-      if (cleanupAutomationResize === cleanup)
-        cleanupAutomationResize = undefined;
-    };
-    cleanupAutomationResize?.();
-    cleanupAutomationResize = cleanup;
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", cleanup, { once: true });
-    window.addEventListener("pointercancel", cleanup, { once: true });
+    },
+  });
+  const startAutomationResize = (event: PointerEvent) => {
+    event.stopPropagation();
+    automationResize.onPointerDown(event);
   };
-  onCleanup(() => cleanupAutomationResize?.());
 
   const contextMenuItems = (): TimelineContextMenuItem[] => [
     { kind: "label", label: "Master" },

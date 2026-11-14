@@ -140,6 +140,17 @@ const normalizeZone = (value: JsonValue, index: number): SamplerZone | undefined
   }
 }
 
+// A range edit that crosses the other bound stops at it (Ableton), so the zone is not dropped by normalization.
+const clampEditedBound = (low: number, high: number, editedLow: boolean, editedHigh: boolean): [number, number] =>
+  editedLow && !editedHigh ? [Math.min(low, high), high] : editedHigh && !editedLow ? [low, Math.max(low, high)] : [low, high]
+
+export function applySamplerZoneEdit(zone: SamplerZone, updates: Partial<SamplerZone>): SamplerZone {
+  const edited = { ...zone, ...updates, id: zone.id }
+  const [keyLow, keyHigh] = clampEditedBound(edited.keyLow, edited.keyHigh, updates.keyLow !== undefined, updates.keyHigh !== undefined)
+  const [velocityLow, velocityHigh] = clampEditedBound(edited.velocityLow, edited.velocityHigh, updates.velocityLow !== undefined, updates.velocityHigh !== undefined)
+  return { ...edited, keyLow, keyHigh, velocityLow, velocityHigh }
+}
+
 export function normalizeSamplerParams(input: SamplerParamsInput): SamplerParams {
   const defaults = createDefaultSamplerParams()
   const zones = (input.zones ?? []).flatMap((zone, index) => {

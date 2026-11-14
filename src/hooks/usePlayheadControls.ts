@@ -5,10 +5,14 @@ import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { useTimelinePlayback } from './useTimelinePlayback'
 import type { LivePlaybackCompileContext, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from '~/lib/live-playback-snapshot'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
+import type { SampledInstrumentRegionBudget } from '~/lib/sampled-instrument-region-budget'
+import type { NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
+import type { NativePlaybackFault } from '~/lib/desktop/native-playback-controller'
 
 type Options = {
   audioEngine: AudioEngine
   tracks: Accessor<RuntimeTrack[]>
+  bpm?: Accessor<number>
   ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
   resolveAudioSource?: AudioPcmSourceResolver
   loopEnabled?: Accessor<boolean>
@@ -22,9 +26,15 @@ type Options = {
     enabled: Accessor<boolean>
     projectId?: Accessor<string>
     projectGeneration?: Accessor<number>
+    keepLatencyNodeIds?: Accessor<ReadonlySet<string>>
+    playbackInputs?: Accessor<object>
+    getDesiredProcessorState?: NonNullable<Parameters<typeof useTimelinePlayback>[2]>["getDesiredProcessorState"]
+    getProcessorTarget?: NonNullable<Parameters<typeof useTimelinePlayback>[2]>["getProcessorTarget"]
     compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
     captureNativeVstStates?: (capture: { projectId: string; instanceIds: readonly string[] }) => Promise<void>
-    reportFault?: (message: string) => void
+    reportFault?: (fault: NativePlaybackFault, options?: { retainPlayback: true }) => void
+    instrumentBudget?: SampledInstrumentRegionBudget
+    onInstrumentPreparation?: (trackIds: readonly string[], status: NativeInstrumentPreparation) => void
   }
   portableBrowserPlayback?: {
     projectGeneration?: Accessor<number>
@@ -33,12 +43,14 @@ type Options = {
   }
 }
 
-export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, resolveAudioSource, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond, visibleStartSec, preflightPlayback, requiresNativeAudio, nativePlayback, portableBrowserPlayback }: Options) {
+export function usePlayheadControls({ audioEngine, tracks, bpm, ensureClipBuffer, resolveAudioSource, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond, visibleStartSec, preflightPlayback, requiresNativeAudio, nativePlayback, portableBrowserPlayback }: Options) {
   const playback = useTimelinePlayback(audioEngine, {
+    bpm,
     loopEnabled,
     loopStartSec,
     loopEndSec,
     getTracks: tracks,
+    preflightPlayback,
     hydrateLegacyAudio: async () => {
       const pendingBuffers: Promise<void>[] = []
       for (const track of tracks()) {
@@ -98,7 +110,6 @@ export function usePlayheadControls({ audioEngine, tracks, ensureClipBuffer, res
   }
 
   const requestPlay = async () => {
-    if (preflightPlayback && !await preflightPlayback()) return
     await playback.handlePlay(tracks())
   }
 

@@ -1,0 +1,45 @@
+// B6F5PROBE (step 3-5): the newest-edit matrix for the portable browser session, on the B6f5 harness in
+// useTimelinePlayback.test.ts. Appended in memory only. A playing session adopts mixer, master and automation edits on its
+// own core: those cells also require one adoption and no new session.
+const b6f5ProbeStates: B6f5State[] = ['paused', 'stopped', 'playing', 'pending-warm-play', 'pending-cold-play-precompile', 'pending-cold-play-postcompile',
+  'pending-pause', 'pending-stop', 'rebuild-precompile', 'rebuild-before-commit', 'rebuild-after-commit',
+  'paused-reprepare-precompile', 'paused-reprepare-postcompile']
+const b6f5ProbeKinds: B6f5Kind[] = ['mixer', 'master', 'automation', 'structural', 'proc-live', 'proc-nonlive', 'synth-live', 'synth-nonlive', 'sampled']
+
+const b6f5ProbeAdoptionCell = (kind: B6f5Kind, nativeEnabled: boolean) => runB6f5(async (live) => {
+  await live.playFrom(1)
+  const session = live.liveSession()
+  const mark = live.mark()
+  live.edit(kind)
+  await live.expectEnd(true, undefined, mark, kind, true)
+  expect({ same: live.liveSession() === session, adoptions: session?.adoptions }).toEqual({ same: true, adoptions: 1 })
+  console.log('B6F5-ADOPTION', JSON.stringify({ kind, nativeEnabled, adoptions: session?.adoptions }))
+}, nativeEnabled)
+
+// Cost of following a fader while playing: one edit per settled adoption (the slowest drag) and one burst of edits
+// inside a single adoption (the fastest).
+for (const nativeEnabled of [false, true]) test(`B6F5PROBE cost native-${nativeEnabled ? 'on' : 'off'} fader drag while playing`, () => runB6f5(async (live, world) => {
+  await live.playFrom(1)
+  const session = live.liveSession()
+  const sessions = world.sessions.length
+  for (let frame = 1; frame <= 20; frame += 1) {
+    live.setVolume(frame / 40)
+    await live.until(() => session?.adoptions === frame)
+  }
+  const slow = { rebuilds: world.sessions.length - sessions, adoptions: session?.adoptions ?? 0 }
+  for (let frame = 1; frame <= 20; frame += 1) live.setVolume(0.5 + frame / 100)
+  await live.until(() => session?.graph?.nodes.find((node) => node.id === track.id)?.mixer?.gain === 0.7
+    && session.publishedRevision === session.graph.revision)
+  const burst = { rebuilds: world.sessions.length - sessions - slow.rebuilds, adoptions: (session?.adoptions ?? 0) - slow.adoptions }
+  console.log('B6F5-DRAG', JSON.stringify({ nativeEnabled, slow, burst }))
+  expect({ slow, burstRebuilds: burst.rebuilds, playing: live.playback.isPlaying() })
+    .toEqual({ slow: { rebuilds: 0, adoptions: 20 }, burstRebuilds: 0, playing: true })
+  expect(burst.adoptions).toBeWithin(1, 3)
+}, nativeEnabled))
+
+const b6f5ProbeOnly = process.env.B6F5_ONLY?.split(',')
+for (const nativeEnabled of [false, true]) for (const state of b6f5ProbeStates) for (const kind of b6f5ProbeKinds) {
+  const name = `B6F5PROBE native-${nativeEnabled ? 'on' : 'off'} ${state} ${kind}`
+  if (b6f5ProbeOnly && !b6f5ProbeOnly.some((part) => name.includes(part))) continue
+  test(name, () => state === 'playing' && b6f5AdoptedKinds.has(kind) ? b6f5ProbeAdoptionCell(kind, nativeEnabled) : b6f5Cell(state, kind, nativeEnabled))
+}

@@ -26,7 +26,7 @@ export const desktopDiagnosticsSchemaV2 = z.object({
     submittedVstSegments: z.number().int().nonnegative(),
   }).strict().optional(),
   audio: z.object({
-    state: z.enum(["suspended", "running", "closed", "uninitialized"]),
+    state: z.enum(["suspended", "running", "closed", "uninitialized", "interrupted"]),
     sampleRate: z.number().finite().nullable(),
     requestedSampleRate: z.number().finite().nullable(),
     latencyHint: z.union([z.enum(["balanced", "interactive", "playback"]), z.number().finite()]).nullable(),
@@ -45,7 +45,7 @@ export const desktopDiagnosticsSchemaV2 = z.object({
     activeChannels: z.number().int().positive().nullable(),
     requestedSampleRate: z.number().finite().positive().nullable(),
     activeSampleRate: z.number().finite().positive().nullable(),
-    transport: z.enum(["sab", "transferable"]).nullable(),
+    transport: z.enum(["sab", "transferable", "native-spool"]).nullable(),
     capturedFrames: z.number().int().nonnegative().nullable(),
     overrunFrames: z.number().int().nonnegative().nullable(),
     droppedFrames: z.number().int().nonnegative().nullable(),

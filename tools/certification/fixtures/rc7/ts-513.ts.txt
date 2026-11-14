@@ -1,0 +1,30 @@
+// RC6 resume, row 513 second catch: `tsc --noEmit -p tsconfig.json` (the root typecheck's second step) run through the
+// TypeScript compiler API with H served from memory. Each spec change (`from` -> `to`, exact anchor once) is applied to
+// H's text before the program is built (spec path in DV01_OVERLAY_FILE, as run-check.py passes it); no file is written. Prints every diagnostic as tsc does and exits 2 when any exist.
+import { createRequire } from 'node:module'
+import { readFileSync } from 'node:fs'
+const R = '/Users/juan/Documents/daw-browser-convex'
+const ts = createRequire(`${R}/package.json`)('typescript')
+const spec = JSON.parse(readFileSync(process.env.DV01_OVERLAY_FILE ?? '', 'utf8'))
+const H = `${R}/src/hooks/useTimelinePlayback.ts`
+let text = readFileSync(H, 'utf8')
+for (const change of spec.changes) {
+  const n = text.split(change.from).length - 1
+  if (n !== 1) throw new Error(`anchor matches ${n}`)
+  text = text.replace(change.from, () => change.to)
+  console.log('DV01-TS513-APPLIED', change.file)
+}
+const parsed = ts.getParsedCommandLineOfConfigFile(`${R}/tsconfig.json`, { noEmit: true }, { ...ts.sys, onUnRecoverableConfigFileDiagnostic: (d) => { throw new Error(ts.flattenDiagnosticMessageText(d.messageText, '\n')) } })
+const host = ts.createCompilerHost(parsed.options)
+const getSourceFile = host.getSourceFile.bind(host); const readFile = host.readFile.bind(host)
+host.getSourceFile = (f, lv, ...rest) => (f === H ? ts.createSourceFile(f, text, lv, true) : getSourceFile(f, lv, ...rest))
+host.readFile = (f) => (f === H ? text : readFile(f))
+const program = ts.createProgram({ rootNames: parsed.fileNames, options: parsed.options, host, projectReferences: parsed.projectReferences })
+if (!program.getRootFileNames().includes(H)) throw new Error('H is not a root file')
+const diags = ts.getPreEmitDiagnostics(program)
+for (const d of diags) {
+  const where = d.file ? `${d.file.fileName.replace(`${R}/`, '')}(${d.file.getLineAndCharacterOfPosition(d.start).line + 1},${d.file.getLineAndCharacterOfPosition(d.start).character + 1}): ` : ''
+  console.log(`${where}error TS${d.code}: ${ts.flattenDiagnosticMessageText(d.messageText, '\n')}`)
+}
+console.log(`typescript ${ts.version}; root files ${parsed.fileNames.length}; diagnostics ${diags.length}`)
+process.exit(diags.length ? 2 : 0)

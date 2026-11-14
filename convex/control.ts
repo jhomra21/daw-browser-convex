@@ -40,7 +40,7 @@ import { executeControlPlanV1 } from "./controlExecution";
 import { ControlDomainError, preflightControlRequestV1 } from "./controlPreflight";
 import { readProjectControlSnapshotV1, readProjectControlSnapshotV2 } from "./controlSnapshot";
 import { getProjectRole, requireAuthenticatedIdentity, requireProjectAccess } from "./projectAccess";
-import { advanceProjectRevision } from "./projectRows";
+import { advanceProjectRevision, assertEffectWriterRevisions, prospectiveRevision } from "./projectRows";
 import { captureRecoveryPayload, isRecoverableAction, loadRecovery } from "./controlRecovery";
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
 
@@ -627,6 +627,9 @@ export const commitV1 = mutation({
       ) return approvalError(requirement)
       await ctx.db.patch(approval._id, { consumedAt: Date.now() })
     }
+    const expectedEffectsRevision = controlPlan.applied
+      ? await prospectiveRevision(ctx, parsed.projectId)
+      : undefined;
     let execution: Awaited<ReturnType<typeof executeControlPlanV1>>
     try {
       execution = await executeControlPlanV1(ctx, { projectId: parsed.projectId, actorId: userId, plan: controlPlan, recoveries })
@@ -637,7 +640,15 @@ export const commitV1 = mutation({
       }
       execution = failure("internal", "Control execution failed.")
     }
-    if (controlPlan.applied) await advanceProjectRevision(ctx, parsed.projectId)
+    if (controlPlan.applied) {
+      const advanced = await advanceProjectRevision(ctx, parsed.projectId)
+      if (advanced.revision !== expectedEffectsRevision) {
+        throw new Error("Effect row stamp diverged from the control revision.")
+      }
+      if ("effectRevisions" in execution) {
+        assertEffectWriterRevisions(execution.effectRevisions, advanced.revision)
+      }
+    }
     const committed = result(
       requestDigest,
       parsed,

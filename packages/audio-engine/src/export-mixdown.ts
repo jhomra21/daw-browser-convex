@@ -8,6 +8,7 @@ import {
   assert,
   cloneMidiClip,
   type AutomationEnvelope,
+  type AudioPcmSourceDescriptor,
   type DrumRackParams,
   normalizeSynthParams,
   type SynthParamsInput,
@@ -30,11 +31,11 @@ import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/t
 import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { ResolvedMixerGraph } from './mixer/types'
 import { scheduleAutomationEnvelope, type AutomationAudioBinding } from './automation'
-import { compileTrackMidiExpressionSchedule } from './midi-expression-scheduling'
+import { compileTrackMidiExpressionSchedule, findTrackAutomationEnvelope, indexTrackAutomationEnvelopes } from './midi-expression-scheduling'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { getExportRangeBounds, type ExportRange } from './export-range'
 import { convertStereoToMonoSample } from './mixer/channel-layout'
-import { scanTruePeak } from './true-peak-scanner'
+import { scanTruePeakAsync } from './true-peak-scanner'
 import { observeResource, type ResourceObserver } from './runtime-diagnostics'
 import { resolveExportMixerGraph } from './export-mixer-graph'
 import type { ExportFx } from './export-types'
@@ -59,7 +60,6 @@ import { resolvePortableWasmManifestUrl } from './worklet-manifest'
 import { preparePortablePagedStretchAssets } from './portable-stretch-paging'
 import { createAudioPcmSourceDescriptor, getAudioBufferSessionIdentity } from './media-pages'
 import type { PreparedStretchArtifactRepository } from './prepared-stretch-store'
-import type { AudioPcmSourceDescriptor } from './media-pages'
 import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
 import { localizeSampledInstrumentSeconds } from './sampled-instrument-region'
 export { encodeAudioBuffer, encodeAudioChunks, type EncodeAudioBufferOptions, type EncodeAudioBufferTarget } from './export-encoding'
@@ -177,7 +177,7 @@ export function resolveExportLimiterCeilingDbtp(
   return ceilings.length === 0 ? undefined : Math.min(...ceilings)
 }
 
-export function assertExportTruePeakWithinLimiterCeiling(
+export async function assertExportTruePeakWithinLimiterCeiling(
   buffer: {
     numberOfChannels: number
     length: number
@@ -185,9 +185,9 @@ export function assertExportTruePeakWithinLimiterCeiling(
   },
   ceilingDbtp: number | undefined,
   signal?: AbortSignal,
-): void {
+): Promise<void> {
   if (ceilingDbtp === undefined) return
-  const measured = scanTruePeak(buffer, signal)
+  const measured = await scanTruePeakAsync(buffer, signal)
   if (measured.peakDbtp > ceilingDbtp + 0.1) {
     throw new Error(
       `Export true peak ${measured.peakDbtp.toFixed(2)} dBTP exceeds the reachable limiter ceiling ${ceilingDbtp.toFixed(2)} dBTP (+0.10 dB tolerance).`,
@@ -1174,6 +1174,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
         fallback,
       )
     }
+    const envelopeIndex = indexTrackAutomationEnvelopes(prepared.automationEnvelopes)
     for (const resolvedTrack of graph.channels) {
       const track = prepared.trackById.get(resolvedTrack.channel.id)
       if (!track) continue
@@ -1192,13 +1193,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
         const descriptor = getAutomationParameterDescriptor(event.target.parameterId)
         const mappingKey = `${track.id}\u0000${midiMappingTargetKey(event.target)}`
         const baselines = mappingBindingBaselines.get(mappingKey) ?? new Map<AutomationAudioBinding['param'], number>()
-        const envelope = prepared.automationEnvelopes.find((candidate) => (
-          candidate.enabled
-          && candidate.target.kind === 'track'
-          && candidate.target.trackId === track.id
-          && candidate.target.effectInstanceId === event.target.effectInstanceId
-          && candidate.parameterId === event.target.parameterId
-        ))
+        const envelope = findTrackAutomationEnvelope(envelopeIndex, track.id, event.target)
         const value = event.phase === 'restore'
           ? envelope
             ? valueAtAutomationTime(envelope.points, event.timeSec, descriptor?.defaultValue ?? 0)
@@ -1382,7 +1377,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
       rendered,
       (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
     )
-    assertExportTruePeakWithinLimiterCeiling(
+    await assertExportTruePeakWithinLimiterCeiling(
       output,
       resolveExportLimiterCeilingDbtp(graph),
       prepared.signal,

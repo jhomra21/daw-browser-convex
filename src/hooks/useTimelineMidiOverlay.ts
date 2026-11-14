@@ -1,12 +1,8 @@
 import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
 
-import {
-  clampTimelineMidiBounds,
-  timelineMidiBoundsEqual,
-  type TimelineMidiBounds,
-} from '~/lib/timeline-midi-bounds'
 import type { AudioEngine, LiveMidiNoteHandle } from '@daw-browser/audio-engine/audio-engine'
 import { canUseLocalStorage } from '~/lib/timeline-storage'
+import { DEFAULT_NOTE_VELOCITY } from '~/lib/midi-editor-grid'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { automationTargetKey, compileMidiMappingSourceIndex, isClipKindCompatibleWithTrack, midiMappingValue, normalizeLegacyMidiClip, type MidiMappingSourceEvent } from '@daw-browser/shared'
@@ -32,7 +28,8 @@ type UseTimelineMidiOverlayOptions = {
   playheadSec: Accessor<number>
   selection: TimelineSelectionController
   activeRecordingTargetId?: Accessor<string | null>
-  canOpenMidiEditorFor?: (clipId: string) => boolean
+  // Clip shown in the docked MIDI editor (bottom panel Clip tab), or null when none is shown.
+  dockedMidiClipId: Accessor<string | null>
   nativeLiveMidi?: {
     isActive: () => boolean
     isAvailable: () => boolean
@@ -44,10 +41,6 @@ type UseTimelineMidiOverlayOptions = {
 
 type UseTimelineMidiOverlayReturn = {
   midiEditorClipId: Accessor<string | null>
-  midiCard: Accessor<TimelineMidiBounds>
-  closeMidiEditor: () => void
-  openMidiEditorFor: (clipId: string) => void
-  changeMidiCardBounds: (next: TimelineMidiBounds) => void
   auditionNote: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void
   midiKeyboard: {
     enabled: Accessor<boolean>
@@ -66,34 +59,13 @@ type LiveBackendHandle =
 type LiveNote =
   | { handle: number; arpeggiator: ReturnType<typeof createLiveMidiArpeggiator<LiveBackendHandle>> }
 
-type MidiBoundsPayload = { x?: unknown; y?: unknown; w?: unknown; h?: unknown }
-
-const isMidiBoundsPayload = (cause: unknown): cause is MidiBoundsPayload => (
-  typeof cause === 'object' && cause !== null
-)
-
-const isFiniteNumber = (cause: unknown): cause is number => (
-  typeof cause === 'number' && Number.isFinite(cause)
-)
-
-function readMidiBounds(cause: unknown): TimelineMidiBounds | null {
-  if (!isMidiBoundsPayload(cause)) return null
-  const { x, y, w, h } = cause
-  if (!isFiniteNumber(x) || !isFiniteNumber(y) || !isFiniteNumber(w) || !isFiniteNumber(h)) return null
-  return { x, y, w, h }
-}
-
 export function useTimelineMidiOverlay(
   options: UseTimelineMidiOverlayOptions,
 ): UseTimelineMidiOverlayReturn {
   const midiAccess = useMidiAccess()
   const requiresNativeAudio = options.requiresNativeAudio === true
-  const [midiEditorClipId, setMidiEditorClipId] = createSignal<string | null>(null)
   const [midiKeyboardEnabled, setMidiKeyboardEnabled] = createSignal(false)
   const [projectionRevision, setProjectionRevision] = createSignal(0)
-  const [midiCard, setMidiCard] = createSignal<TimelineMidiBounds>(
-    clampTimelineMidiBounds({ x: 80, y: 80, w: 720, h: 360 }),
-  )
   const activeLiveNotes = new Map<number, LiveNote>()
   const activeMappingTargets = new Map<string, {
     sourceId: string
@@ -101,7 +73,6 @@ export function useTimelineMidiOverlay(
     target: { parameterId: string; effectInstanceId?: string }
   }>()
   let scheduledMappingTargetKeys = new Set<string>()
-  let midiCardPersistTimer: number | null = null
   const auditionReleaseTimers = createAuditionReleaseTimerOwnership({
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     clear: (timer) => window.clearTimeout(timer),
@@ -112,31 +83,15 @@ export function useTimelineMidiOverlay(
     return projectMidiProjectTracks(options.projectId(), options.tracks())
   })
   const trackIndex = createMemo(() => createTimelineTrackIndex(projectedTracks()))
+  // Derived, so a docked clip that is gone or lost its MIDI resolves to null.
+  const midiEditorClipId = createMemo(() => {
+    const clipId = options.dockedMidiClipId()
+    return clipId && trackIndex().clipEntryById.get(clipId)?.clip.midi ? clipId : null
+  })
 
   const midiKeyboardStorageKey = () => {
     const projectId = options.projectId() || 'default'
     return `mb:midi_kb:${projectId}`
-  }
-
-  const midiCardStorageKey = () => {
-    const projectId = options.projectId() || 'default'
-    return `mb:midi_card:${projectId}`
-  }
-
-  const schedulePersistMidiCard = () => {
-    if (midiCardPersistTimer) {
-      clearTimeout(midiCardPersistTimer)
-      midiCardPersistTimer = null
-    }
-    const storageKey = midiCardStorageKey()
-    const bounds = midiCard()
-    midiCardPersistTimer = window.setTimeout(() => {
-      midiCardPersistTimer = null
-      if (!canUseLocalStorage()) return
-      try {
-        window.localStorage.setItem(storageKey, JSON.stringify(bounds))
-      } catch {}
-    }, 250)
   }
 
   const isPlayableMidiTrack = (track: Track | undefined) => isClipKindCompatibleWithTrack(track, 'midi')
@@ -266,23 +221,6 @@ export function useTimelineMidiOverlay(
   const stopNativeLiveNotes = () => {
     forceStopAllLiveNotes()
   }
-  const closeMidiEditor = () => setMidiEditorClipId(null)
-
-  const openMidiEditorFor = (clipId: string) => {
-    if (options.canOpenMidiEditorFor && !options.canOpenMidiEditorFor(clipId)) return
-    const match = trackIndex().clipEntryById.get(clipId)
-    if (match?.clip.midi) {
-      setMidiEditorClipId(clipId)
-    }
-  }
-
-  const changeMidiCardBounds = (next: TimelineMidiBounds) => {
-    const clamped = clampTimelineMidiBounds(next)
-    if (timelineMidiBoundsEqual(midiCard(), clamped)) return
-    setMidiCard(clamped)
-    schedulePersistMidiCard()
-  }
-
   const previewInstrumentNote = (trackId: string, pitch: number, velocity: number) => {
     const instrumentKind = options.audioEngine.getTrackInstrumentKind(trackId)
     if (instrumentKind === 'drum-rack') return options.audioEngine.previewDrumRackNote(trackId, pitch, velocity)
@@ -291,7 +229,7 @@ export function useTimelineMidiOverlay(
     return false
   }
 
-  const auditionNote = (trackId: string, pitch: number, velocity = 0.9, durSec = 0.35) => {
+  const auditionNote = (trackId: string, pitch: number, velocity = DEFAULT_NOTE_VELOCITY, durSec = 0.35) => {
     try {
       if (!isPlayableMidiTrack(trackIndex().trackById.get(trackId))) return
       const auditionArpeggiator = createLiveMidiArpeggiator<LiveBackendHandle>({
@@ -360,7 +298,7 @@ export function useTimelineMidiOverlay(
     } catch {}
   }
 
-  const startLiveNote = (pitch: number, velocity = 0.9) => {
+  const startLiveNote = (pitch: number, velocity = DEFAULT_NOTE_VELOCITY) => {
     try {
       if (midiSuspended) return
       if (activeLiveNotes.has(pitch)) return
@@ -370,32 +308,10 @@ export function useTimelineMidiOverlay(
   }
 
   createEffect(() => {
-    const key = midiCardStorageKey()
-    if (!canUseLocalStorage()) return
-    try {
-      const raw = window.localStorage.getItem(key)
-      if (!raw) return
-      const parsed = readMidiBounds(JSON.parse(raw))
-      if (parsed) {
-        setMidiCard(clampTimelineMidiBounds(parsed))
-      }
-    } catch {}
-  })
-
-  createEffect(() => {
     const unsubscribe = subscribeMidiProjectProjection(options.projectId(), () => {
       setProjectionRevision((revision) => revision + 1)
     })
     onCleanup(unsubscribe)
-  })
-
-  createEffect(() => {
-    const clipId = midiEditorClipId()
-    if (!clipId) return
-    const match = trackIndex().clipEntryById.get(clipId)
-    if (!match?.clip.midi) {
-      setMidiEditorClipId(null)
-    }
   })
 
   createEffect(() => {
@@ -596,10 +512,6 @@ export function useTimelineMidiOverlay(
   })
 
   onCleanup(() => {
-    if (midiCardPersistTimer) {
-      clearTimeout(midiCardPersistTimer)
-      midiCardPersistTimer = null
-    }
     removeNativeLiveMidiReset?.()
     forceStopAllLiveNotes()
     auditionReleaseTimers.clear()
@@ -609,10 +521,6 @@ export function useTimelineMidiOverlay(
 
   return {
     midiEditorClipId,
-    midiCard,
-    closeMidiEditor,
-    openMidiEditorFor,
-    changeMidiCardBounds,
     auditionNote,
     midiKeyboard: {
       enabled: midiKeyboardEnabled,

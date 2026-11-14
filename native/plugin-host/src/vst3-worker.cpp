@@ -1,5 +1,7 @@
 #include "vst3-worker.h"
+#include "../../audio-core/include/daw/graph_latency.h"
 #include "automation-observation.h"
+#include "../../acceptance-evidence.h"
 
 #include "vst3-bus-arrangement.h"
 #include "public.sdk/source/vst/hosting/eventlist.h"
@@ -25,6 +27,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <cmath>
 #include <cstdio>
@@ -65,6 +68,15 @@ using Steinberg::Vst::ProcessData;
 using Steinberg::Vst::ProcessSetup;
 
 constexpr std::size_t kMaximumPluginBinaryBytes = 2U * 1024U * 1024U * 1024U;
+
+static_assert(RestartFlag::kReloadComponent == Steinberg::Vst::kReloadComponent
+  && RestartFlag::kIoChanged == Steinberg::Vst::kIoChanged
+  && RestartFlag::kParamValuesChanged == Steinberg::Vst::kParamValuesChanged
+  && RestartFlag::kLatencyChanged == Steinberg::Vst::kLatencyChanged
+  && RestartFlag::kParamTitlesChanged == Steinberg::Vst::kParamTitlesChanged
+  && RestartFlag::kMidiCCAssignmentChanged == Steinberg::Vst::kMidiCCAssignmentChanged
+  && RestartFlag::kNoteExpressionChanged == Steinberg::Vst::kNoteExpressionChanged,
+  "RestartFlag must mirror the VST3 SDK restart flags");
 
 class BoundedStateStream final : public IBStream {
  public:
@@ -173,11 +185,14 @@ class WorkerHostContext final : public IHostApplication, public IComponentHandle
     return QueueEditorParameterEdit(id, value) ? Steinberg::kResultOk : Steinberg::kResultFalse;
   }
   Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID) override { return Steinberg::kResultOk; }
+  // A plug-in may call this from any thread. The flags are only recorded here;
+  // the worker thread decodes and acts on them in Vst3Worker::ApplyPendingRestart.
   Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32 flags) override {
-    if (notifications_.size() < notifications_.capacity()) {
-      notifications_.push_back({.kind = WorkerNotificationKind::kRestart, .message = "Plugin requested a bounded component restart.", .value = static_cast<std::uint32_t>(flags)});
-    }
+    pendingRestartFlags_.fetch_or(static_cast<std::uint32_t>(flags), std::memory_order_acq_rel);
     return Steinberg::kResultOk;
+  }
+  std::uint32_t TakePendingRestartFlags() {
+    return pendingRestartFlags_.exchange(0, std::memory_order_acq_rel);
   }
   Steinberg::tresult PLUGIN_API queryInterface(const TUID iid, void** object) override {
     if (!object) return Steinberg::kInvalidArgument;
@@ -219,6 +234,7 @@ class WorkerHostContext final : public IHostApplication, public IComponentHandle
 
  private:
   std::vector<WorkerNotification>& notifications_;
+  std::atomic<std::uint32_t> pendingRestartFlags_{0};
   BoundedEditorParameterState<kMaximumWorkerEvents> editorParameterState_;
 };
 
@@ -539,7 +555,8 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
   implementation_->midiMapping = nullptr;
   implementation_->hasMidiParameters = {};
   if (!IsTrustedLaunch(request.eligibility) || request.classId.size() != 32 || !ValidSetup(request.setup)) {
-    implementation_->notifications.push_back({.kind = WorkerNotificationKind::kFault, .message = "Worker launch record is not trusted.", .value = 0});
+    implementation_->notifications.push_back({.kind = WorkerNotificationKind::kFault, .message = "Worker launch record is not trusted.",
+      .value = EncodeWorkerFault(WorkerFaultOrigin::kLaunchNotTrusted)});
     return false;
   }
   const auto classId = VST3::UID::fromString(request.classId);
@@ -548,7 +565,10 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
     static_cast<void>(PrepareVst3EditorRuntime());
   }
   std::string error;
-  implementation_->module = VST3::Hosting::Module::create(request.eligibility.canonicalBundlePath, error);
+  {
+    daw::acceptance::Step timing("module-load");
+    implementation_->module = VST3::Hosting::Module::create(request.eligibility.canonicalBundlePath, error);
+  }
   if (!implementation_->module) return false;
   const auto factory = implementation_->module->getFactory();
   const auto classInfos = factory.classInfos();
@@ -564,6 +584,7 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
     ? WorkerPluginRole::kEffect
     : WorkerPluginRole::kInstrument;
   implementation_->module->getFactory().setHostContext(static_cast<IHostApplication*>(&implementation_->context));
+  daw::acceptance::Step initialization_timing("component-init");
   implementation_->component = implementation_->module->getFactory().createInstance<IComponent>(*classId);
   if (!implementation_->component || implementation_->component->initialize(static_cast<IHostApplication*>(&implementation_->context)) != Steinberg::kResultOk) {
     Dispose();
@@ -574,6 +595,8 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
     Dispose();
     return false;
   }
+  initialization_timing.Finish();
+  daw::acceptance::Step controller_timing("controller-init");
   implementation_->controller = Steinberg::FUnknownPtr<IEditController>(implementation_->component);
   implementation_->controllerIsComponent = static_cast<bool>(implementation_->controller);
   if (!implementation_->controller) {
@@ -690,7 +713,10 @@ std::optional<WorkerManifest> Vst3Worker::PreflightManifest(
     static_cast<Steinberg::int32>(implementation_->setup.maximumBlockFrames),
     implementation_->setup.sampleRate,
   };
-  if (implementation_->processor->setupProcessing(setup) != Steinberg::kResultOk) return std::nullopt;
+  {
+    daw::acceptance::Step timing("preflight-setupProcessing");
+    if (implementation_->processor->setupProcessing(setup) != Steinberg::kResultOk) return std::nullopt;
+  }
   implementation_->processContextRequirements =
     Steinberg::FUnknownPtr<IProcessContextRequirements>(implementation_->processor);
   implementation_->processContextRequirementsFlags = implementation_->processContextRequirements
@@ -699,7 +725,11 @@ std::optional<WorkerManifest> Vst3Worker::PreflightManifest(
   const auto latency = implementation_->processor->getLatencySamples();
   const auto tail = implementation_->processor->getTailSamples();
   const auto normalizedTail = NormalizeWorkerTailFrames(tail);
-  if (latency > 10'000'000 || !normalizedTail) return std::nullopt;
+  if (latency > kMaximumGraphLatencyFrames) {
+    std::fprintf(stderr, "This plug-in reports %u frames of latency. The product maximum is 65,536 frames (1.37 s at 48 kHz).\n", latency);
+    return std::nullopt;
+  }
+  if (!normalizedTail) return std::nullopt;
   std::vector<WorkerParameterDescriptor> parameters;
   bool supportsBypass = false;
   if (implementation_->controller) {
@@ -810,7 +840,10 @@ bool Vst3Worker::ConfigureTransport(WorkerTransport& transport, const WorkerStat
     static_cast<Steinberg::int32>(implementation_->setup.maximumBlockFrames),
     implementation_->setup.sampleRate
   };
-  if (implementation_->processor->setupProcessing(setup) != Steinberg::kResultOk) return false;
+  {
+    daw::acceptance::Step timing("setupProcessing");
+    if (implementation_->processor->setupProcessing(setup) != Steinberg::kResultOk) return false;
+  }
 
   const auto prepare = [&](const Steinberg::Vst::BusDirection direction, std::vector<AudioBusBuffers>& buses, std::vector<std::vector<Steinberg::Vst::Sample32*>>& pointers, const std::size_t expectedChannels) {
     const auto count = implementation_->component->getBusCount(Steinberg::Vst::kAudio, direction);
@@ -847,18 +880,26 @@ bool Vst3Worker::ConfigureTransport(WorkerTransport& transport, const WorkerStat
     implementation_->editorView = nullptr;
     return false;
   }
-  if (initialState && !ApplyState(*initialState)) {
-    implementation_->editorView = nullptr;
-    return false;
+  {
+    daw::acceptance::Step timing(initialState ? "setState" : "setState-not-required");
+    if (initialState && !ApplyState(*initialState)) {
+      implementation_->editorView = nullptr;
+      return false;
+    }
   }
-  if (implementation_->component->setActive(true) != Steinberg::kResultOk) {
-    implementation_->editorView = nullptr;
-    return false;
-  }
-  const auto processingResult = implementation_->processor->setProcessing(true);
-  if (!IsAcceptedWorkerProcessingTransitionResult(processingResult)) {
-    implementation_->editorView = nullptr;
-    return false;
+  {
+    daw::acceptance::Step activation_timing("setActive");
+    if (implementation_->component->setActive(true) != Steinberg::kResultOk) {
+      implementation_->editorView = nullptr;
+      return false;
+    }
+    activation_timing.Finish();
+    daw::acceptance::Step processing_timing("setProcessing");
+    const auto processingResult = implementation_->processor->setProcessing(true);
+    if (!IsAcceptedWorkerProcessingTransitionResult(processingResult)) {
+      implementation_->editorView = nullptr;
+      return false;
+    }
   }
   implementation_->active = true;
   implementation_->processing = true;
@@ -1126,6 +1167,32 @@ bool Vst3Worker::ApplyState(const WorkerState& state) {
 }
 
 bool Vst3Worker::SetState(const WorkerState& state) {
+  return ReactivateComponent(&state);
+}
+
+void Vst3Worker::ApplyPendingRestart() {
+  const auto effects = DecodeRestartFlags(implementation_->context.TakePendingRestartFlags());
+  if (!ready()) return;
+  const auto notify = [this](const WorkerNotificationKind kind, const char* const message, const std::uint32_t value) {
+    if (implementation_->notifications.size() < implementation_->notifications.capacity()) {
+      implementation_->notifications.push_back({.kind = kind, .message = message, .value = value});
+    }
+  };
+  if (effects.componentRestart) {
+    notify(WorkerNotificationKind::kRestart, "Plugin requested a bounded component restart.", 0);
+    if (!ReactivateComponent(nullptr)) {
+      notify(WorkerNotificationKind::kFault, "Plugin component restart failed.", 0);
+      return;
+    }
+  } else if (effects.refreshMetadata) {
+    RefreshLifecycleMetadata();
+  }
+  if (effects.latencyChanged || effects.componentRestart) {
+    notify(WorkerNotificationKind::kLatency, "Plugin latency.", implementation_->processor->getLatencySamples());
+  }
+}
+
+bool Vst3Worker::ReactivateComponent(const WorkerState* const state) {
   if (!ready()) return false;
   const auto wasActive = implementation_->active;
   const auto wasProcessing = implementation_->processing;
@@ -1133,7 +1200,7 @@ bool Vst3Worker::SetState(const WorkerState& state) {
   implementation_->processing = false;
   if (wasActive && implementation_->component->setActive(false) != Steinberg::kResultOk) return false;
   implementation_->active = false;
-  if (!ApplyState(state)) return false;
+  if (state && !ApplyState(*state)) return false;
   if (wasActive && implementation_->component->setActive(true) != Steinberg::kResultOk) return false;
   implementation_->active = wasActive;
   if (wasProcessing && !IsAcceptedWorkerProcessingTransitionResult(implementation_->processor->setProcessing(true))) return false;

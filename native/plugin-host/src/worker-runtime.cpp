@@ -1,5 +1,6 @@
 #include "worker-supervisor.h"
 #include "worker-control-protocol.h"
+#include "../../acceptance-evidence.h"
 
 #include <algorithm>
 #include <array>
@@ -232,10 +233,22 @@ bool WorkerRuntime::Start(
     && posix_spawn_file_actions_addclose(&fileActions, response[0]) == 0
     && posix_spawn_file_actions_addclose(&fileActions, wake.readDescriptor()) == 0;
   pid_t child = -1;
-  char* const environment[] = {nullptr};
+  std::string evidence_environment;
+  if (const auto* directory = std::getenv("DAW_AE08_EVIDENCE_DIR")) {
+    evidence_environment = std::string("DAW_AE08_EVIDENCE_DIR=") + directory;
+  }
+  char* const environment[] = {evidence_environment.empty() ? nullptr : evidence_environment.data(), nullptr};
+  const auto spawnStarted = std::chrono::steady_clock::now();
   const auto spawnResult = spawnConfigured
     ? posix_spawn(&child, configuration.executable.c_str(), &fileActions, &attributes, arguments.data(), environment)
     : EINVAL;
+  if (daw::acceptance::Enabled()) {
+    char fields[256];
+    std::snprintf(fields, sizeof(fields), ",\"workerPid\":%d,\"durationMs\":%.6f,\"result\":%d",
+      child, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - spawnStarted).count(),
+      spawnResult);
+    daw::acceptance::Event("worker-spawn", fields);
+  }
   if (attributesReady) posix_spawnattr_destroy(&attributes);
   if (actionsReady) posix_spawn_file_actions_destroy(&fileActions);
   if (spawnResult != 0) {
@@ -403,10 +416,17 @@ bool WorkerRuntime::CancelPublishedSubmission(const std::size_t slotIndex, const
 }
 
 bool WorkerRuntime::DispatchPublishedSubmission(const std::size_t slotIndex, const std::uint64_t sequence) {
-  if (!transport_ || transport_->slot(slotIndex).sequence != sequence) return false;
+  if (!transport_ || sequence == 0
+    || slotIndex >= transport_->layout().bytes / transport_->layout().slotBytes) return false;
   if (startup_ && startup_->setup.mode == WorkerProcessSetup::Mode::kRealtime) {
-    return true;
+    // The callback already woke the realtime worker. This queued record is
+    // bookkeeping: its slot may have completed, been released and reused
+    // before the service drains it. Health, not the new slot's sequence,
+    // determines whether this runtime can still accept that bookkeeping.
+    const auto currentHealth = health();
+    return currentHealth == WorkerHealth::kStarting || currentHealth == WorkerHealth::kReady;
   }
+  if (transport_->slot(slotIndex).sequence != sequence) return false;
   return WriteWorkerControlCommand(controlWriteDescriptor_, WorkerControlCommand::kProcess);
 }
 
@@ -516,6 +536,21 @@ WorkerHealth WorkerRuntime::health() const {
     if (result == 0 && childInfo.si_pid == childProcessId_) return WorkerHealth::kFaulted;
   }
   return transport_->health();
+}
+
+std::uint32_t WorkerRuntime::faultValue() const {
+  if (childProcessId_ >= 0) {
+    siginfo_t childInfo{};
+    // Observe without reaping: Stop still owns child/process-group cleanup.
+    const auto result = waitid(P_PID, childProcessId_, &childInfo, WEXITED | WNOHANG | WNOWAIT);
+    if (result == 0 && childInfo.si_pid == childProcessId_) {
+      const auto origin = childInfo.si_code == CLD_EXITED ? WorkerFaultOrigin::kChildExit
+        : childInfo.si_code == CLD_KILLED || childInfo.si_code == CLD_DUMPED
+          ? WorkerFaultOrigin::kChildSignal : WorkerFaultOrigin::kUnknown;
+      return EncodeWorkerFault(origin, childInfo.si_code, childInfo.si_status);
+    }
+  }
+  return EncodeWorkerFault(WorkerFaultOrigin::kTransportFault);
 }
 
 int WorkerRuntime::processGroupId() const noexcept {

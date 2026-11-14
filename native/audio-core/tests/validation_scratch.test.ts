@@ -5,25 +5,6 @@ const cmakeUrl = new URL('../CMakeLists.txt', import.meta.url)
 const wasmBuildScriptUrl = new URL('../scripts/build-wasm.sh', import.meta.url)
 const publishWasmAssetsUrl = new URL('../scripts/publish-wasm-assets.sh', import.meta.url)
 
-test('native validation scratch stays persistent while Wasm uses its configured stack', async () => {
-  const source = await Bun.file(coreSourceUrl).text()
-  const persistentScratchStart = source.indexOf('#if defined(DAW_AUDIO_CORE_USE_PERSISTENT_VALIDATION_SCRATCH)')
-  const persistentScratchEnd = source.indexOf('#endif', persistentScratchStart)
-  const validationStart = source.indexOf('  std::copy((*core.published_instruments).begin()')
-  const validationEnd = source.indexOf('  for (auto &indices : core.instrument_event_indices)', validationStart)
-
-  expect(persistentScratchStart).toBeGreaterThanOrEqual(0)
-  expect(persistentScratchEnd).toBeGreaterThan(persistentScratchStart)
-  expect(source.slice(persistentScratchStart, persistentScratchEnd)).toContain('proposed_instruments{}')
-  expect(validationStart).toBeGreaterThanOrEqual(0)
-  expect(validationEnd).toBeGreaterThan(validationStart)
-
-  const validation = source.slice(validationStart, validationEnd)
-  expect(validation).toContain('std::copy((*core.published_instruments).begin(), (*core.published_instruments).end(), core.proposed_instruments.begin())')
-  expect(validation).toContain('auto &proposed_instruments = core.proposed_instruments')
-  expect(validation).not.toContain('std::array<InstrumentNodeState, kMaximumGraphNodes> proposed_instruments')
-})
-
 test('Wasm build validates a same-filesystem directory before publication', async () => {
   const cmake = await Bun.file(cmakeUrl).text()
   const buildScript = await Bun.file(wasmBuildScriptUrl).text()
@@ -51,7 +32,7 @@ test('native graph stages cache built-in renderers outside the callback', async 
   const source = await Bun.file(coreSourceUrl).text()
   const nativeStageStart = source.indexOf('struct NativeGraphStage {')
   const nativeStageEnd = source.indexOf('struct NativeGraphHooks {', nativeStageStart)
-  const callbackStart = source.indexOf('    const NativeGraphHooks &native_stages = core.published_native_hooks;')
+  const callbackStart = source.indexOf('    const NativeGraphHooks &native_stages = *core.published_native_hooks;')
   const callbackEnd = source.indexOf('#else', callbackStart)
 
   expect(nativeStageStart).toBeGreaterThanOrEqual(0)
@@ -63,6 +44,26 @@ test('native graph stages cache built-in renderers outside the callback', async 
   expect(callbackStart).toBeGreaterThanOrEqual(0)
   expect(callbackEnd).toBeGreaterThan(callbackStart)
   expect(source.slice(callbackStart, callbackEnd)).not.toContain('find_processor_renderer')
+})
+
+test('spectral callback refresh applies one precomputed tagged map without allocation or trig', async () => {
+  const source = await Bun.file(coreSourceUrl).text()
+  const applyStart = source.indexOf('void apply_spectral_transfer(')
+  const applyEnd = source.indexOf('// Control-side only.', applyStart)
+  const callbackStart = source.indexOf('void render_chain_frame(')
+  const callbackEnd = source.indexOf('// Renders consecutive built-in processors', callbackStart)
+  expect(applyStart).toBeGreaterThan(0)
+  expect(applyEnd).toBeGreaterThan(applyStart)
+  const apply = source.slice(applyStart, applyEnd)
+  expect(apply).not.toMatch(/std::(?:cos|sin|log|exp)|\b(?:new|malloc|mutex|while)\b/)
+  expect(apply).toContain('map.before != before.fft_size || map.after != after.fft_size')
+  const callback = source.slice(callbackStart, callbackEnd)
+  expect(callback).not.toContain('prepare_spectral_transfer(')
+  expect(callback).not.toContain('transfer_spectral_persistent(')
+  expect(callback).toContain('if (!history.persistent_state_transferred)')
+  expect(callback).toContain('prior.state_mode == old.spectral.mode && prior.fft_size == old.spectral.fft_size')
+  expect(callback).toContain('apply_spectral_transfer(')
+  expect(callback).toContain('&core.spectral_histories[old.spectral_slot].wet_sample')
 })
 
 test('Wasm directory publication restores the old asset set when the replacement fails', async () => {

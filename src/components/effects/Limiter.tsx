@@ -1,6 +1,7 @@
 import { createDefaultLimiterParams, type LimiterParams } from '@daw-browser/shared'
 import EffectShell from '~/components/effects/EffectShell'
 import Knob from '~/components/ui/knob'
+import { formatDeviceDb, formatDeviceMilliseconds, formatDevicePercent } from '~/lib/device-value-format'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { createEffect, createSignal, onCleanup } from 'solid-js'
 
@@ -34,13 +35,13 @@ export default function Limiter(props: LimiterProps) {
       <div class="device-controls-with-footer grid min-h-0 flex-1 gap-3 px-3 py-3">
         <div class="grid grid-cols-2 place-content-center gap-x-5 gap-y-4">
           <Knob label="Ceiling" value={props.params.ceilingDbtp} valueLabel={`${props.params.ceilingDbtp.toFixed(1)} dBTP`} resetValue={defaults.ceilingDbtp} min={-12} max={0} step={0.1} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get("limiter.ceiling")} automated={props.automationRangesByParameterId?.has("limiter.ceiling")} onAutomationSelect={() => props.onAutomationParameterTouch?.("limiter.ceiling")} onValueChange={(ceilingDbtp) => { props.onManualAutomationOverride?.("limiter.ceiling"); props.onChange({ ceilingDbtp }) }} />
-          <Knob label="Release" value={props.params.releaseMs} valueLabel={`${Math.round(props.params.releaseMs)} ms`} resetValue={defaults.releaseMs} min={20} max={1000} step={1} logarithmic disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get("limiter.release")} automated={props.automationRangesByParameterId?.has("limiter.release")} onAutomationSelect={() => props.onAutomationParameterTouch?.("limiter.release")} onValueChange={(releaseMs) => { props.onManualAutomationOverride?.("limiter.release"); props.onChange({ releaseMs }) }} />
+          <Knob label="Release" value={props.params.releaseMs} valueLabel={formatDeviceMilliseconds(props.params.releaseMs, 0)} resetValue={defaults.releaseMs} min={20} max={1000} step={1} logarithmic disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get("limiter.release")} automated={props.automationRangesByParameterId?.has("limiter.release")} onAutomationSelect={() => props.onAutomationParameterTouch?.("limiter.release")} onValueChange={(releaseMs) => { props.onManualAutomationOverride?.("limiter.release"); props.onChange({ releaseMs }) }} />
           <div class="col-span-2 flex justify-center">
-            <Knob label="Link" value={props.params.link} valueLabel={`${Math.round(props.params.link * 100)}%`} resetValue={defaults.link} min={0} max={1} step={0.01} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get("limiter.link")} automated={props.automationRangesByParameterId?.has("limiter.link")} onAutomationSelect={() => props.onAutomationParameterTouch?.("limiter.link")} onValueChange={(link) => { props.onManualAutomationOverride?.("limiter.link"); props.onChange({ link }) }} />
+            <Knob label="Link" value={props.params.link} valueLabel={formatDevicePercent(props.params.link)} resetValue={defaults.link} min={0} max={1} step={0.01} disabled={!props.params.enabled} automationRange={props.automationRangesByParameterId?.get("limiter.link")} automated={props.automationRangesByParameterId?.has("limiter.link")} onAutomationSelect={() => props.onAutomationParameterTouch?.("limiter.link")} onValueChange={(link) => { props.onManualAutomationOverride?.("limiter.link"); props.onChange({ link }) }} />
           </div>
         </div>
         <div class="grid divide-y divide-border border border-border bg-background/80 text-center text-2xs text-muted-foreground">
-          <span class="px-1 py-1.5">Gain reduction <span class="text-yellow-300">{gainReductionDb().toFixed(1)} dB</span></span>
+          <span class="px-1 py-1.5">Gain reduction <span class="text-yellow-300">{formatDeviceDb(gainReductionDb(), 1)}</span></span>
           <div class="grid grid-cols-2 divide-x divide-border">
             <span class="px-1 py-1.5">5 ms latency</span>
             <span class="px-1 py-1.5">4x true peak</span>

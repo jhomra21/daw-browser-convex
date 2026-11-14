@@ -1,5 +1,6 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
-import { assert, assertDefined, buildClipCreatePayload, buildQueuedAudioClipCreatePayload, normalizeAudioWarp, sanitizeLegacyMidiClipForCreate } from '@daw-browser/shared'
+import { assert, assertDefined, buildClipCreatePayload, buildQueuedAudioClipCreatePayload, normalizeAudioWarp, normalizeLegacyMidiClip, sanitizeLegacyMidiClipForCreate } from '@daw-browser/shared'
+import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { ClipCreateSnapshot, SharedTimelineClipCreatePayload } from '@daw-browser/shared'
 import type { ClipBufferWriter } from '~/lib/clip-buffer-cache'
 import { uploadClipSampleUrl } from '~/lib/clip-sample-url'
@@ -113,12 +114,12 @@ export function buildLocalClip(input: BuildLocalClipInput): RuntimeClip {
     sourceDurationSec: clip.source?.durationSec,
     sourceSampleRate: clip.source?.sampleRate,
     sourceChannelCount: clip.source?.channelCount,
-    midi: clip.midi,
+    midi: clip.midi ? normalizeLegacyMidiClip(clip.midi) : undefined,
     leftPadSec: clip.timing?.leftPadSec,
     bufferOffsetSec: clip.timing?.bufferOffsetSec,
     audioWarp: normalizeAudioWarp(clip.audioWarp),
     gain: clip.gain,
-    fades: clip.fades,
+    fades: clip.fades ? normalizeClipFades(clip.fades, clip.duration) : undefined,
     midiOffsetBeats: clip.timing?.midiOffsetBeats,
   }
 }

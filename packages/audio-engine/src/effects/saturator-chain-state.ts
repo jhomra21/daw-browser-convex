@@ -18,6 +18,8 @@ export function createSaturatorChainState(): SaturatorChainState {
       const nextSignature = serializeSaturatorParams(normalized)
       if (signature === nextSignature) return { changed: false, requiresRoutingRebuild: false }
       const requiresRoutingRebuild = enabled !== normalized.enabled && (enabled !== null || normalized.enabled)
+      // The signature names what the nodes hold only once every write has landed.
+      signature = null
       if (!normalized.enabled) {
         if (saturator) {
           disconnectSaturatorChain(saturator)

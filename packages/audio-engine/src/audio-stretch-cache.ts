@@ -4,7 +4,8 @@ import {
   writeBuffer,
   type AudioStretchRuntimeClip,
 } from './audio-stretch-rendering'
-import { createAudioPcmSourceDescriptor, getAudioBufferSessionIdentity, type AudioPcmSourceDescriptor } from './media-pages'
+import { createAudioPcmSourceDescriptor, getAudioBufferSessionIdentity } from './media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import {
   createAudioStretchReadPlan,
   DEFAULT_STRETCH_MATERIALIZATION_MAX_BYTES,

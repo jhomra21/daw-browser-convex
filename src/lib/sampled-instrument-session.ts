@@ -9,12 +9,14 @@ import {
   type SampledInstrumentRegionBudget,
 } from '~/lib/sampled-instrument-region-budget'
 import type { SampledInstrumentRegionLoaderOptions } from '~/lib/sampled-instrument-region-loader'
+import type { NativeInstrumentBudgetPolicy, NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
 
 export type SampledInstrumentSession = {
   aggregateBudget: SampledInstrumentRegionBudget
   samplerBufferSync: ReturnType<typeof createSamplerBufferSync>
   drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>
   createExportScope: () => SampledInstrumentRegionBudgetScope
+  setNativePreparation: (trackIds: readonly string[], status: NativeInstrumentPreparation) => void
   dispose: () => void
 }
 
@@ -22,10 +24,14 @@ export const createSampledInstrumentSession = (
   options: SampledInstrumentRegionLoaderOptions & {
     projectId: NonNullable<SampledInstrumentRegionLoaderOptions['projectId']>
     aggregateMaxBytes?: number
+    nativeAudio?: () => boolean
+    nativeMemoryPolicy?: NativeInstrumentBudgetPolicy
   },
 ): SampledInstrumentSession => {
   const aggregateBudget = createSampledInstrumentRegionBudget(
-    options.aggregateMaxBytes ?? DEFAULT_SAMPLED_INSTRUMENT_AGGREGATE_BYTES,
+    options.aggregateMaxBytes ?? (options.nativeAudio?.()
+      ? options.nativeMemoryPolicy?.aggregateBytes ?? 0
+      : DEFAULT_SAMPLED_INSTRUMENT_AGGREGATE_BYTES),
   )
   const samplerBufferSync = createSamplerBufferSync({
     ...options,
@@ -40,6 +46,12 @@ export const createSampledInstrumentSession = (
     aggregateBudget,
     samplerBufferSync,
     drumRackBufferSync,
+    setNativePreparation: (trackIds, status) => {
+      for (const trackId of trackIds) {
+        samplerBufferSync.setNativePreparation(trackId, status)
+        drumRackBufferSync.setNativePreparation(trackId, status)
+      }
+    },
     createExportScope: () => aggregateBudget.createScope(`prepared-export:${crypto.randomUUID()}`),
     dispose: () => {
       if (disposed) return

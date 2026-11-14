@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { describe, expect, test } from 'bun:test'
 import { audioStretchCacheTestInternals, createAudioStretchCache } from './audio-stretch-cache'
-import type { AudioPcmSourceDescriptor } from './media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
 import { createPreparedStretchArtifactSessionRepository } from './prepared-stretch-store'
 import { preparedStretchTestLockManager } from './prepared-stretch-test-lock-manager'

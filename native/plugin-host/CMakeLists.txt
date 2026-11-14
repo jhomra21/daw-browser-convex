@@ -75,9 +75,9 @@ if(DAW_HAS_WNO_UNNECESSARY_VIRTUAL_SPECIFIER)
     PROPERTIES COMPILE_FLAGS "-Wno-unnecessary-virtual-specifier"
   )
 endif()
-find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
-find_library(SECURITY_FRAMEWORK Security REQUIRED)
-target_link_libraries(daw-vst3-sdk-hosting PUBLIC "${COCOA_FRAMEWORK}" "${SECURITY_FRAMEWORK}")
+# -framework, not a find_library path: a cached path adds -F for that SDK, which makes its headers non-system and
+# -Werror then fails on the SDK's own deprecations (a build directory outlives the Xcode it was configured with).
+target_link_libraries(daw-vst3-sdk-hosting PUBLIC "-framework Cocoa" "-framework Security")
 
 add_executable(daw-vst3-worker src/worker-main.cpp)
 target_link_libraries(daw-vst3-worker PRIVATE daw-vst3-worker-runtime daw-vst3-sdk-hosting)
@@ -91,6 +91,54 @@ add_executable(daw-vst3-scanner
 target_include_directories(daw-vst3-scanner PRIVATE "${VST3_SDK_PATH}")
 target_compile_options(daw-vst3-scanner PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(daw-vst3-scanner PRIVATE daw-vst3-sdk-hosting)
+
+# A failure-injection plug-in for host tests. It is not part of the production plug-in set:
+# nothing installs, signs, packages or catalogs it.
+option(DAW_BUILD_AE08_TEST_PLUGIN "Build the AE-08 failure-injection test VST3 (never packaged)." OFF)
+if(DAW_BUILD_AE08_TEST_PLUGIN)
+  set(AE08_SDK "${VST3_SDK_PATH}")
+  add_library(ae08-test-effect MODULE
+    test-plugin/ae08-test-effect.cpp
+    test-plugin/ae08-test-editor.mm
+    "${AE08_SDK}/public.sdk/source/main/pluginfactory.cpp"
+    "${AE08_SDK}/public.sdk/source/main/macmain.cpp"
+    "${AE08_SDK}/public.sdk/source/main/moduleinit.cpp"
+    "${AE08_SDK}/public.sdk/source/vst/vstsinglecomponenteffect.cpp"
+    "${AE08_SDK}/public.sdk/source/vst/vstaudioeffect.cpp"
+    "${AE08_SDK}/public.sdk/source/vst/vstcomponent.cpp"
+    "${AE08_SDK}/public.sdk/source/vst/vstcomponentbase.cpp"
+    "${AE08_SDK}/public.sdk/source/vst/vstbus.cpp"
+    "${AE08_SDK}/public.sdk/source/vst/vstparameters.cpp"
+    "${AE08_SDK}/public.sdk/source/vst/vstinitiids.cpp"
+    "${AE08_SDK}/base/source/baseiids.cpp"
+    "${AE08_SDK}/base/source/fbuffer.cpp"
+    "${AE08_SDK}/base/source/fdebug.cpp"
+    "${AE08_SDK}/base/source/fobject.cpp"
+    "${AE08_SDK}/base/source/fstreamer.cpp"
+    "${AE08_SDK}/base/source/fstring.cpp"
+    "${AE08_SDK}/base/source/updatehandler.cpp"
+    "${AE08_SDK}/base/thread/source/fcondition.cpp"
+    "${AE08_SDK}/base/thread/source/flock.cpp"
+    "${AE08_SDK}/pluginterfaces/base/conststringtable.cpp"
+    "${AE08_SDK}/pluginterfaces/base/coreiids.cpp"
+    "${AE08_SDK}/pluginterfaces/base/funknown.cpp"
+    "${AE08_SDK}/pluginterfaces/base/ustring.cpp"
+    "${AE08_SDK}/public.sdk/source/common/pluginview.cpp"
+    "${AE08_SDK}/public.sdk/source/common/commoniids.cpp"
+  )
+  target_include_directories(ae08-test-effect PRIVATE "${AE08_SDK}")
+  target_compile_definitions(ae08-test-effect PRIVATE RELEASE=1)
+  target_compile_options(ae08-test-effect PRIVATE -Wno-deprecated-declarations -Wno-unnecessary-virtual-specifier)
+  set_target_properties(ae08-test-effect PROPERTIES
+    BUNDLE TRUE
+    BUNDLE_EXTENSION vst3
+    PREFIX ""
+    SUFFIX ""
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/test-plugin/Info.plist.in"
+  )
+  set_source_files_properties(test-plugin/ae08-test-editor.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+  target_link_libraries(ae08-test-effect PRIVATE "-framework CoreFoundation" "-framework AppKit")
+endif()
 
 if(BUILD_TESTING)
   add_executable(daw-plugin-host-worker-test

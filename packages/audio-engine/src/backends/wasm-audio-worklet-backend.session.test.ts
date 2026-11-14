@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 
 import { audioCoreContractVersion, type AudioAssetRef, type AudioCoreGraphSnapshot } from "../../../audio-core-contract/src"
 import { PortableWasmPlaybackSession } from "./wasm-audio-worklet-backend"
+import { encodePortableGraphEnvelope } from "../native-host-wire"
 import {
   portableWasmProtocolVersion,
   type PortableWasmControlMessage,
@@ -184,6 +185,21 @@ test("bounds an unacknowledged portable preparation request", async () => {
   expect(fixture.calls).toEqual(["prepare-graph", "dispose"])
 })
 
+// A framed publish waits for the render thread to reach its seam, so a stalled context is a late publication to cancel,
+// not a fault of the session; every other request that times out still is.
+test("a framed publish that times out is late and cancelled by revision, not a session fault", async () => {
+  const fixture = createSession(false, responseFor, 5)
+  const faults: string[] = []
+  fixture.session.onFault((error) => faults.push(error.message))
+  await expect(fixture.session.publishGraph(2, { requireContinuity: true, publicationFrame: 100 })).rejects.toThrow("graph-published was late")
+  await expect(fixture.session.publishGraph(3, { requireContinuity: true })).rejects.toThrow("timed out")
+  expect({ calls: fixture.calls, faults, active: fixture.session.isActive }).toEqual({
+    calls: ["publish-graph", "cancel-publication", "publish-graph", "dispose"],
+    faults: ["Portable playback control request timed out."],
+    active: false,
+  })
+})
+
 test("dispose rejects unresolved portable requests and closes the dispatcher", async () => {
   const fixture = createSession(false, responseFor, 1_000)
   const pending = fixture.session.prepareGraph({
@@ -207,4 +223,75 @@ test("dispose rejects unresolved portable requests and closes the dispatcher", a
   await expect(pending).rejects.toThrow("disposed")
   expect(fixture.calls).toEqual(["prepare-graph", "dispose"])
   expect(fixture.node.port.onmessage).toBeNull()
+})
+
+test("B6f5 posts the graph envelope encoded on the main thread and the adoption continuity requirement", async () => {
+  const posted: PortableWasmControlMessage[] = []
+  const transfers: unknown[] = []
+  let handler: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null = null
+  const node: AudioWorkletNode = Object.assign(Object.create(null), {
+    port: {
+      get onmessage() { return handler },
+      set onmessage(next: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null) { handler = next },
+      postMessage(message: PortableWasmControlMessage, transfer?: unknown[]) {
+        posted.push(message)
+        transfers.push(transfer)
+        if (isPortableRequest(message)) handler?.(new MessageEvent("message", { data: message.type === "publish-graph" && message.revision === 3
+          ? { version: portableWasmProtocolVersion, type: "graph-published", requestId: message.requestId, revision: 3, result: "rejected" }
+          : message.type === "publish-graph" && message.revision === 4
+            ? { version: portableWasmProtocolVersion, type: "graph-published", requestId: message.requestId, revision: 4, result: "late" }
+            : message.type === "publish-graph" && message.publicationFrame !== undefined
+              ? { version: portableWasmProtocolVersion, type: "graph-published", requestId: message.requestId, revision: message.revision, result: "published" }
+              : responseFor(message) }))
+      },
+      close() {},
+    },
+    onprocessorerror: null,
+    connect() {},
+    disconnect() {},
+  })
+  const session = new PortableWasmPlaybackSession(node)
+  const snapshot: AudioCoreGraphSnapshot = {
+    version: audioCoreContractVersion, revision: 2, contractHash: "test", masterNodeId: "master", edges: [], assets: [],
+    nodes: [{ id: "master", kind: "master", inputLayout: "stereo", outputLayout: "stereo", latencyFrames: 0, processorOrder: [] }],
+  }
+  await session.prepareGraph(snapshot)
+  await session.publishGraph(2, { requireContinuity: true })
+  await expect(session.publishGraph(3, { requireContinuity: true })).rejects.toThrow("graph-published was rejected")
+  await expect(session.publishGraph(4, { requireContinuity: true, publicationFrame: 100 })).rejects.toThrow("graph-published was late")
+  await session.publishGraph(5, { requireContinuity: true, publicationFrame: 200 })
+  const prepare = posted[0]
+  expect(prepare?.type === "prepare-graph" ? [prepare.envelope, transfers[0]] : undefined)
+    .toEqual([encodePortableGraphEnvelope(snapshot), [encodePortableGraphEnvelope(snapshot).buffer]])
+  expect(posted.slice(1)).toEqual([
+    { version: portableWasmProtocolVersion, type: "publish-graph", requestId: 2, revision: 2, requireContinuity: true },
+    { version: portableWasmProtocolVersion, type: "publish-graph", requestId: 3, revision: 3, requireContinuity: true },
+    { version: portableWasmProtocolVersion, type: "publish-graph", requestId: 4, revision: 4, requireContinuity: true, publicationFrame: 100 },
+    { version: portableWasmProtocolVersion, type: "publish-graph", requestId: 5, revision: 5, requireContinuity: true, publicationFrame: 200 },
+  ])
+})
+
+test("C9a an adoption publish posts the sources of its revision with it", async () => {
+  const posted: PortableWasmControlMessage[] = []
+  let handler: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null = null
+  const node: AudioWorkletNode = Object.assign(Object.create(null), {
+    port: {
+      get onmessage() { return handler },
+      set onmessage(next: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null) { handler = next },
+      postMessage(message: PortableWasmControlMessage) {
+        posted.push(message)
+        if (isPortableRequest(message)) handler?.(new MessageEvent("message", { data: responseFor(message) }))
+      },
+      close() {},
+    },
+    onprocessorerror: null,
+    connect() {},
+    disconnect() {},
+  })
+  const session = new PortableWasmPlaybackSession(node)
+  const sources = { epoch: 2, ordinary: [], prepared: [] }
+  await session.publishGraph(2, { requireContinuity: true, publicationFrame: 100, sources })
+  expect(posted).toEqual([
+    { version: portableWasmProtocolVersion, type: "publish-graph", requestId: 1, revision: 2, requireContinuity: true, publicationFrame: 100, sources },
+  ])
 })

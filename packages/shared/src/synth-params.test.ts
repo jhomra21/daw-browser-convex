@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  SYNTH_PARAMETER_LIMITS,
   SYNTH_STATE_VERSION,
   createDefaultSynthParams,
   mergeSynthParams,
@@ -16,7 +17,7 @@ describe('synth parameter contract', () => {
     first.filter.envelope.attackSec = 1
     expect(second.oscillators[0].level).toBe(0.7)
     expect(second.filter.envelope.attackSec).toBe(0.005)
-    expect(second.polyphony).toBe(1)
+    expect(second.polyphony).toBe(16)
   })
 
   test('normalizes unknown values and clamps every numeric domain', () => {
@@ -45,6 +46,13 @@ describe('synth parameter contract', () => {
       noise: { enabled: false, level: 0.25 },
       gain: 1.5, pan: -1, polyphony: 10, retrigger: true,
     })
+  })
+
+  test('caps polyphony at the 32 voices the audio core holds, on load and on update', () => {
+    expect(SYNTH_PARAMETER_LIMITS.polyphony.max).toBe(32)
+    expect(normalizeSynthParams({ polyphony: 128 }).polyphony).toBe(32)
+    expect(normalizeSynthParams({ polyphony: 32 }).polyphony).toBe(32)
+    expect(mergeSynthParams(createDefaultSynthParams(), { polyphony: 100 }).polyphony).toBe(32)
   })
 
   test('migrates legacy state with equal oscillator levels and serializes v2', () => {

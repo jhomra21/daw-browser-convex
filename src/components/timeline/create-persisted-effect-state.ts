@@ -1,12 +1,16 @@
-import {
-  createEffect,
-  createMemo,
-  createSignal,
-  onCleanup,
-  untrack,
-  type Accessor,
-} from 'solid-js'
+import { createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor } from 'solid-js'
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
+import { isAbortError } from '~/lib/dom-errors'
+import type { AudioEngine, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
+import { SampledInstrumentSyncSupersededError } from '~/lib/sampled-instrument-sync-error'
+import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery } from '~/lib/live-processor-control'
+import {
+  createParameterGestureOwner,
+  type GestureLifetime,
+  type ParameterDrain,
+  type ParameterSaveResult,
+  type ParameterGestureHandle,
+} from '~/components/timeline/parameter-gesture-owner'
 
 type PersistedEffectContext = {
   projectId?: string
@@ -19,611 +23,207 @@ type PersistedEffectStateOptions<TRow, TParams> = {
   scopeId?: Accessor<string | undefined>
   row: Accessor<TRow>
   readQueryParams: (row: TRow) => TParams | undefined
+  readQueryThrough?: (row: TRow) => number
   readVisibleParams?: (targetId: string) => TParams | undefined
   createInitialParams: (targetId: string) => TParams | undefined
   serializeParams: (params: TParams) => string
-  applyToEngine: (targetId: string, params: TParams) => void | Promise<void>
+  applyToEngine: (targetId: string, params: TParams, edit: LiveProcessorEditIdentity | undefined) => EngineDisposition | Promise<EngineDisposition>
+  audioEngine?: Accessor<AudioEngine>
+  usesLegacyAudioEngine?: Accessor<boolean>
   clearFromEngine?: (targetId: string) => void
-  persistParams: (targetId: string, params: TParams, context: PersistedEffectContext) => void | Promise<void>
-  persistRemove?: (targetId: string, context: PersistedEffectContext) => void | Promise<void>
-  clearAfterPersistRemove?: (context: PersistedEffectContext) => boolean
+  persistParams: (targetId: string, params: TParams, context: PersistedEffectContext) => ParameterSaveResult | Promise<ParameterSaveResult>
   createPersistContext?: () => PersistedEffectContext
-  onParamsApplied?: (targetId: string, previous: TParams | undefined, next: TParams) => void
-  onApplyCompleted?: (
-    targetId: string,
-    previous: TParams | undefined,
-    next: TParams,
-    context?: PersistedEffectContext,
-  ) => void
-  onEngineStateChanged?: (
-    targetId: string,
-    previous: TParams | undefined,
-    next: TParams,
-    source: 'remote',
-    context?: PersistedEffectContext,
-  ) => void
-  onPersistError?: (cause: unknown) => void
-  onParamsCommitted?: (
-    targetId: string,
-    previous: TParams | undefined,
-    next: TParams,
-    context: PersistedEffectContext,
-  ) => void
-  onQueryRow?: (targetId: string, row: TRow) => void
+  // Allocation observes the desired transition, not a claim about installed engine content.
+  allocateEdit?: (targetId: string, from: TParams | undefined, to: TParams) => LiveProcessorEditIdentity | undefined
+  registerDelivery?: (targetId: string, params: TParams, edit: LiveProcessorEditIdentity | undefined, gesture: ProcessorDelivery["gesture"], lifetime: GestureLifetime) => DeliveryRegistration | undefined
+  history?: (targetId: string, previous: TParams | undefined, next: TParams, edit: LiveProcessorEditIdentity | undefined, context: PersistedEffectContext) => void
+  // The newest release of a target reached its row: playback learns the structural change.
+  announce?: (targetId: string, next: TParams, edit: LiveProcessorEditIdentity | undefined) => void | Promise<void>
+  // The row the engine held was removed remotely and the engine was cleared: playback learns the structural change.
+  announceRemoved?: (targetId: string) => void | Promise<void>
+  onPersistError?: (cause: Error, context: PersistedEffectContext | undefined) => void
+  onEngineApplyError?: (cause: unknown, context: PersistedEffectContext | undefined) => void
+  // A released edit whose portable apply threw: it was not saved.
+  onReleaseFailed?: (cause: Error, context: PersistedEffectContext) => void
   isRemote?: () => boolean
   isMissingRowLoaded?: () => boolean
-  debounceMs?: number
-  remoteOverwriteAfterMs?: number
+  // Losing write access ends every open gesture without committing it.
+  canWrite?: Accessor<boolean>
 }
 
 type PersistedEffectState<TParams> = {
   add: () => void
   addForTarget: (targetId: string) => void
-  flushPending: () => Promise<void>
+  flushPending: () => Promise<ParameterDrain<string>>
+  gestureOwner: ParameterGestureHandle
   params: Accessor<TParams | undefined>
-  readDraftForTarget: (targetId: string) => TParams | undefined
+  // What the panel shows, the engine plays and the export projection carries: an open preview over the committed value.
   readForTarget: (targetId: string) => TParams | undefined
-  removeForTarget: (targetId: string) => boolean
+  // Only what is ahead of the persisted row: an open preview, else a committed value not yet echoed.
+  readProvisionalForTarget: (targetId: string) => TParams | undefined
   reset: () => void
   setForTarget: (targetId: string, params: TParams) => void
-  syncRemoteForTarget: (targetId: string, params: TParams | undefined) => void
+  syncRemoteForTarget: (targetId: string, params: TParams | undefined, through?: number) => void
   update: (updater: (prev: TParams) => TParams) => void
   updateForTarget: (targetId: string, updater: (prev: TParams) => TParams) => void
 }
 
-type PendingParamsCommit<TParams> = {
-  targetId: string
-  previous: TParams | undefined
-  next: TParams
-  serialized: string
-}
-
-type PendingRemoteApply<TParams> = {
-  targetId: string
-  next: TParams | undefined
-  serialized: string | undefined
-}
-
+// The parameter-gesture adapter of a persisted track effect (instrument, arpeggiator) plus the ingestion of its row.
 export function createPersistedEffectState<TRow, TParams>(
   options: PersistedEffectStateOptions<TRow, TParams>,
 ): PersistedEffectState<TParams> {
   const [remoteByTarget, setRemoteByTarget] = createSignal<Record<string, TParams | undefined>>({})
-  const [draftByTarget, setDraftByTarget] = createSignal<Record<string, TParams | undefined>>({})
-  const [deletedByTarget, setDeletedByTarget] = createSignal<Record<string, true | undefined>>({})
-  const saveTimers = new Map<string, ReturnType<typeof setTimeout>>()
-  const lastLocalEdit = new Map<string, number>()
-  const persistAttemptByTarget = new Map<string, number>()
-  const persistContextByTarget = new Map<string, PersistedEffectContext>()
-  const targetByKey = new Map<string, string>()
-  const pendingCommitByTarget = new Map<string, PendingParamsCommit<TParams>>()
-  const pendingApplyByTarget = new Map<string, Promise<void>>()
-  const pendingRemoteApplyByTarget = new Map<string, PendingRemoteApply<TParams>>()
-  const pendingWritesByProject = new Map<string, Set<Promise<void>>>()
   const registeredFlushers = new Map<string, () => void>()
-  const appliedEngineStateByTarget = new Map<string, string | undefined>()
-  const appliedEngineParamsByTarget = new Map<string, TParams | undefined>()
 
-  function keyForTarget(targetId: string) {
+  const keyForTarget = (targetId: string) => {
     const scopeId = options.scopeId?.()
     return scopeId ? `${scopeId}:${targetId}` : targetId
   }
+  const persistContext = (lifetime: GestureLifetime): PersistedEffectContext => ({
+    projectId: lifetime.projectId,
+    userId: lifetime.userId,
+    projectGeneration: lifetime.generation,
+  })
+  const currentContext = (): PersistedEffectContext => options.createPersistContext?.() ?? {}
 
-  function clearDraft(targetId: string, key = keyForTarget(targetId)) {
-    const timer = saveTimers.get(key)
-    if (timer) {
-      clearTimeout(timer)
-      saveTimers.delete(key)
-    }
-    persistAttemptByTarget.delete(key)
-    persistContextByTarget.delete(key)
-    targetByKey.delete(key)
-    pendingCommitByTarget.delete(key)
-    pendingRemoteApplyByTarget.delete(key)
-    lastLocalEdit.delete(key)
-    setDraftByTarget((prev) => {
-      if (!(key in prev)) return prev
-      const next = { ...prev }
-      delete next[key]
-      return next
-    })
+  // Every release allocates its edit synchronously, so a project's flusher exists before any of its work awaits.
+  const ensureProjectFlusher = (projectId: string | undefined) => {
+    if (!projectId || registeredFlushers.has(projectId)) return
+    registeredFlushers.set(projectId, registerPendingLocalProjectWriteFlusher('effects', projectId, async () => { await owner.flushPending(projectId) }))
   }
 
-  function clearDeleted(key: string) {
-    setDeletedByTarget((prev) => {
-      if (!(key in prev)) return prev
-      const next = { ...prev }
-      delete next[key]
-      return next
-    })
-  }
-
-  function clearReconciledDraft(targetId: string, key = keyForTarget(targetId)) {
-    const timer = saveTimers.get(key)
-    if (timer) {
-      clearTimeout(timer)
-      saveTimers.delete(key)
-    }
-    targetByKey.delete(key)
-    pendingRemoteApplyByTarget.delete(key)
-    lastLocalEdit.delete(key)
-    setDraftByTarget((prev) => {
-      if (!(key in prev)) return prev
-      const next = { ...prev }
-      delete next[key]
-      return next
-    })
-  }
-
-  function readCurrent(targetId: string) {
-    const key = keyForTarget(targetId)
-    if (deletedByTarget()[key]) return undefined
-    return draftByTarget()[key]
-      ?? remoteByTarget()[key]
-      ?? options.readVisibleParams?.(targetId)
-  }
-
-  function flushTarget(targetId: string, key = keyForTarget(targetId)) {
-    const timer = saveTimers.get(key)
-    if (!timer) return
-    clearTimeout(timer)
-    saveTimers.delete(key)
-    const params = draftByTarget()[key]
-    if (!params) return
-    persistNow(targetId, key, params, persistContextByTarget.get(key) ?? {})
-  }
-
-  function persistNow(targetId: string, key: string, params: TParams, context: PersistedEffectContext) {
-    const attempt = (persistAttemptByTarget.get(key) ?? 0) + 1
-    persistAttemptByTarget.set(key, attempt)
-    const serialized = options.serializeParams(params)
-    const write = Promise.resolve()
-      .then(() => options.persistParams(targetId, params, context))
-      .then(
-        () => {
-          if (persistAttemptByTarget.get(key) !== attempt) return
-          const pendingCommit = pendingCommitByTarget.get(key)
-          if (!pendingCommit || pendingCommit.serialized !== serialized) return
-          options.onParamsCommitted?.(pendingCommit.targetId, pendingCommit.previous, pendingCommit.next, context)
-          pendingCommitByTarget.delete(key)
-          const current = untrack(() => draftByTarget()[key])
-          if (!current || options.serializeParams(current) === serialized) {
-            persistAttemptByTarget.delete(key)
-            persistContextByTarget.delete(key)
-          }
-        },
-        (cause) => {
-          if (persistAttemptByTarget.get(key) !== attempt) return
-          const current = untrack(() => draftByTarget()[key])
-          if (!current) return
-          if (options.serializeParams(current) !== serialized) return
-          options.onPersistError?.(cause)
-          persistAttemptByTarget.delete(key)
-          throw cause
-        },
-      )
-      .then(() => undefined)
-      .finally(() => {
-        if (!context.projectId) return
-        const pendingWrites = pendingWritesByProject.get(context.projectId)
-        pendingWrites?.delete(write)
-        if (pendingWrites?.size === 0) pendingWritesByProject.delete(context.projectId)
-      })
-    if (context.projectId) {
-      const pendingWrites = pendingWritesByProject.get(context.projectId) ?? new Set<Promise<void>>()
-      pendingWrites.add(write)
-      pendingWritesByProject.set(context.projectId, pendingWrites)
-    }
-    void write.catch(() => undefined)
-  }
-
-  function persistRemoveNow(targetId: string, key: string, context: PersistedEffectContext) {
-    if (!options.persistRemove) return
-    const attempt = (persistAttemptByTarget.get(key) ?? 0) + 1
-    persistAttemptByTarget.set(key, attempt)
-    const write = Promise.resolve()
-      .then(() => options.persistRemove?.(targetId, context))
-      .then(
-        () => {
-          if (persistAttemptByTarget.get(key) !== attempt) return
-          persistAttemptByTarget.delete(key)
-          persistContextByTarget.delete(key)
-          targetByKey.delete(key)
-          if (options.clearAfterPersistRemove?.(context) ?? true) {
-            syncRemote(targetId, undefined)
-            clearDeleted(key)
-          }
-        },
-        (cause) => {
-          if (persistAttemptByTarget.get(key) !== attempt) return
-          options.onPersistError?.(cause)
-          persistAttemptByTarget.delete(key)
-          persistContextByTarget.delete(key)
-          targetByKey.delete(key)
-          clearDeleted(key)
-          throw cause
-        },
-      )
-      .then(() => undefined)
-      .finally(() => {
-        if (!context.projectId) return
-        const pendingWrites = pendingWritesByProject.get(context.projectId)
-        pendingWrites?.delete(write)
-        if (pendingWrites?.size === 0) pendingWritesByProject.delete(context.projectId)
-      })
-    if (context.projectId) {
-      const pendingWrites = pendingWritesByProject.get(context.projectId) ?? new Set<Promise<void>>()
-      pendingWrites.add(write)
-      pendingWritesByProject.set(context.projectId, pendingWrites)
-    }
-    void write.catch(() => undefined)
-  }
-
-  function ensureProjectFlusher(projectId: string) {
-    if (registeredFlushers.has(projectId)) return
-    registeredFlushers.set(projectId, registerPendingLocalProjectWriteFlusher('effects', projectId, async () => {
-      await flushPending(projectId)
-    }))
-  }
-
-  function persistOrSchedule(targetId: string, key: string, params: TParams) {
-    targetByKey.set(key, targetId)
-    const debounceMs = options.debounceMs ?? 0
-    if (debounceMs <= 0) {
-      persistNow(targetId, key, params, persistContextByTarget.get(key) ?? {})
-      return
-    }
-
-    const previousTimer = saveTimers.get(key)
-    if (previousTimer) clearTimeout(previousTimer)
-    // Batch quick effect tweaks into one persistence write and cancel any
-    // leftover timers during cleanup.
-    saveTimers.set(key, setTimeout(() => flushTarget(targetId, key), debounceMs))
-  }
-
-  function applyParams(
-    targetId: string,
-    previous: TParams | undefined,
-    next: TParams,
-  ) {
-    const key = keyForTarget(targetId)
-    const serializedNext = options.serializeParams(next)
-    if (previous !== undefined && options.serializeParams(previous) === serializedNext) return
-    pendingRemoteApplyByTarget.delete(key)
-    const pendingCommit = pendingCommitByTarget.get(key)
-    lastLocalEdit.set(key, Date.now())
-    const context = options.createPersistContext?.() ?? {}
-    if (context.projectId) ensureProjectFlusher(context.projectId)
-    persistContextByTarget.set(key, context)
-    targetByKey.set(key, targetId)
-    setDraftByTarget((prev) => ({
-      ...prev,
-      [key]: next,
-    }))
-    clearDeleted(key)
-    pendingCommitByTarget.set(key, {
-      targetId,
-      previous: pendingCommit?.previous ?? previous,
-      next,
-      serialized: serializedNext,
-    })
-    const previousApply = pendingApplyByTarget.get(key)
-    const runApply = () => options.applyToEngine(targetId, next)
-    const apply = previousApply
-      ? previousApply.then(runApply, runApply)
-      : Promise.resolve(runApply())
-    options.onParamsApplied?.(targetId, previous, next)
-    pendingApplyByTarget.set(key, apply)
-    void apply
-      .then(() => {
-        if (pendingApplyByTarget.get(key) !== apply) return
-        pendingApplyByTarget.delete(key)
-        pendingRemoteApplyByTarget.delete(key)
-        appliedEngineStateByTarget.set(key, serializedNext)
-        appliedEngineParamsByTarget.set(key, next)
-        persistOrSchedule(targetId, key, next)
-        options.onApplyCompleted?.(targetId, previous, next, persistContextByTarget.get(key))
-      })
-      .catch((cause: unknown) => {
-        if (pendingApplyByTarget.get(key) === apply) pendingApplyByTarget.delete(key)
-        options.onPersistError?.(cause)
-      })
-  }
-
-  function applyLocalClearToEngine(targetId: string) {
-    const key = keyForTarget(targetId)
-    pendingRemoteApplyByTarget.delete(key)
-    const previousApply = pendingApplyByTarget.get(key)
-    const runClear = () => options.clearFromEngine?.(targetId)
-    const apply = previousApply
-      ? previousApply.then(runClear, runClear)
-      : Promise.resolve(runClear())
-    pendingApplyByTarget.set(key, apply)
-    void apply.then(() => {
-      if (pendingApplyByTarget.get(key) !== apply) return
-      pendingApplyByTarget.delete(key)
-      appliedEngineStateByTarget.set(key, undefined)
-      appliedEngineParamsByTarget.set(key, undefined)
-    }).catch((cause: unknown) => {
-      if (pendingApplyByTarget.get(key) === apply) pendingApplyByTarget.delete(key)
-      options.onPersistError?.(cause)
-    })
-  }
-
-  function applyRemoteToEngine(targetId: string, next: TParams | undefined, capturedKey = keyForTarget(targetId)) {
-    const key = capturedKey
-    if (options.scopeId && key !== keyForTarget(targetId)) return
-    if (draftByTarget()[key] || deletedByTarget()[key]) return
-    const serialized = next === undefined ? undefined : options.serializeParams(next)
-    if (
-      appliedEngineStateByTarget.has(key)
-      && appliedEngineStateByTarget.get(key) === serialized
-    ) return
-    if (pendingApplyByTarget.has(key)) {
-      pendingRemoteApplyByTarget.set(key, { targetId, next, serialized })
-      return
-    }
-    const applyContext = options.createPersistContext?.()
-    const previous = appliedEngineParamsByTarget.get(key)
-    const applied = next === undefined
-      ? options.clearFromEngine?.(targetId)
-      : options.applyToEngine(targetId, next)
-    const apply = Promise.resolve(applied)
-    pendingApplyByTarget.set(key, apply)
-    void apply.then(() => {
-      if (pendingApplyByTarget.get(key) !== apply) return
-      if (options.scopeId && key !== keyForTarget(targetId)) {
-        pendingApplyByTarget.delete(key)
-        pendingRemoteApplyByTarget.delete(key)
-        return
+  // Resolves with what the engine answered for the value. A replacement is waited for (it may still fail), but it installed
+  // other params: the value itself was superseded. An aborted apply installed nothing.
+  const applyToEngine = async (targetId: string, params: TParams, edit: LiveProcessorEditIdentity | undefined): Promise<EngineDisposition> => {
+    let apply = Promise.resolve().then(() => options.applyToEngine(targetId, params, edit))
+    let replaced = false
+    for (;;) {
+      try {
+        const result = await apply
+        return replaced ? 'superseded' : result
+      } catch (cause) {
+        if (cause instanceof SampledInstrumentSyncSupersededError) {
+          apply = cause.replacement
+          replaced = true
+          continue
+        }
+        if (isAbortError(cause)) return 'dropped'
+        throw cause
       }
-      pendingApplyByTarget.delete(key)
-      const queued = pendingRemoteApplyByTarget.get(key)
-      pendingRemoteApplyByTarget.delete(key)
-      appliedEngineStateByTarget.set(key, serialized)
-      appliedEngineParamsByTarget.set(key, next)
-
-      const remoteSnapshot = untrack(() => remoteByTarget())
-      const currentRemote = queued ?? (key in remoteSnapshot
-        ? {
-            targetId,
-            next: remoteSnapshot[key],
-            serialized: remoteSnapshot[key] === undefined
-              ? undefined
-              : options.serializeParams(remoteSnapshot[key]),
-          }
-        : undefined)
-      const hasLocalState = untrack(() => Boolean(draftByTarget()[key] || deletedByTarget()[key]))
-      const shouldReplay = (
-        currentRemote !== undefined
-        && !hasLocalState
-        && currentRemote.serialized !== serialized
-      )
-      if (shouldReplay) {
-        applyRemoteToEngine(targetId, currentRemote.next, key)
-        return
-      }
-      if (currentRemote?.serialized === serialized && next !== undefined) {
-        options.onEngineStateChanged?.(targetId, previous, next, 'remote', applyContext)
-      }
-    }).catch((cause: unknown) => {
-      if (pendingApplyByTarget.get(key) !== apply) return
-      pendingApplyByTarget.delete(key)
-      pendingRemoteApplyByTarget.delete(key)
-      options.onPersistError?.(cause)
-      const remoteSnapshot = untrack(() => remoteByTarget())
-      const currentRemote = key in remoteSnapshot
-        ? {
-            next: remoteSnapshot[key],
-            serialized: remoteSnapshot[key] === undefined
-              ? undefined
-              : options.serializeParams(remoteSnapshot[key]),
-          }
-        : undefined
-      const hasLocalState = untrack(() => Boolean(draftByTarget()[key] || deletedByTarget()[key]))
-      if (
-        currentRemote !== undefined
-        && !hasLocalState
-        && currentRemote.serialized !== serialized
-      ) {
-        applyRemoteToEngine(targetId, currentRemote.next, key)
-      }
-    })
+    }
   }
 
-  function applyUpdate(targetId: string, updater: (prev: TParams) => TParams) {
-    const previous = readCurrent(targetId)
-    const initial = previous ?? options.createInitialParams(targetId)
-    if (!initial) return
-    applyParams(targetId, previous, updater(initial))
-  }
-
-  const params = createMemo(() => {
-    const targetId = options.targetId()
-    if (!targetId) return undefined
-    return readCurrent(targetId)
+  const committed = (targetId: string) => remoteByTarget()[keyForTarget(targetId)] ?? options.readVisibleParams?.(targetId)
+  const owner = createParameterGestureOwner<string, TParams>({
+    key: keyForTarget,
+    scope: () => {
+      const context = currentContext()
+      return { projectId: context.projectId, userId: context.userId, generation: context.projectGeneration ?? 0 }
+    },
+    exists: (targetId) => committed(targetId) !== undefined,
+    canWrite: () => options.canWrite?.() ?? true,
+    equal: (_target, a, b) => options.serializeParams(a) === options.serializeParams(b),
+    initial: options.createInitialParams,
+    committed,
+    rowsReachEngine: () => true,
+    apply: applyToEngine,
+    registerDelivery: options.registerDelivery,
+    rowApplied: (targetId, row, edit) => options.announce?.(targetId, row, edit),
+    clear: (targetId) => options.clearFromEngine?.(targetId),
+    rowRemoved: (targetId) => options.announceRemoved?.(targetId),
+    persist: async (record) => options.persistParams(record.target, record.latest, persistContext(record.lifetime)),
+    history: (record) => options.history?.(record.target, record.baseline, record.latest, record.edit, persistContext(record.lifetime)),
+    announce: (record) => options.announce?.(record.target, record.latest, record.edit),
+    allocateEdit: (targetId, from, to) => {
+      ensureProjectFlusher(currentContext().projectId)
+      return options.allocateEdit?.(targetId, from, to)
+    },
+    onError: (stage, cause, record) => {
+      const context = record ? persistContext(record.lifetime) : currentContext()
+      if (stage === 'persist') options.onPersistError?.(cause instanceof Error ? cause : new Error('The effect could not be saved.'), context)
+      else if (record) options.onReleaseFailed?.(cause instanceof Error ? cause : new Error("The effect could not be applied to playback."), context)
+      else options.onEngineApplyError?.(cause, context)
+    },
   })
 
-  function syncRemote(targetId: string, nextParams: TParams | undefined) {
+  const syncRemote = (targetId: string, nextParams: TParams | undefined, through = 0) => {
     const key = keyForTarget(targetId)
     setRemoteByTarget((prev) => {
       const current = prev[key]
       if (
-        current === nextParams ||
-        (
-          current !== undefined &&
-          nextParams !== undefined &&
-          options.serializeParams(current) === options.serializeParams(nextParams)
-        )
+        current === nextParams
+        || (current !== undefined && nextParams !== undefined && options.serializeParams(current) === options.serializeParams(nextParams))
       ) return prev
       return { ...prev, [key]: nextParams }
     })
+    owner.external(targetId, nextParams, through)
+  }
 
-    if (nextParams === undefined && deletedByTarget()[key]) {
-      clearDeleted(key)
-      return
-    }
+  createEffect(on(
+    () => ({ engine: options.audioEngine?.(), legacy: options.usesLegacyAudioEngine?.() ?? true }),
+    (next, previous) => {
+      if (previous && (next.engine !== previous.engine || next.legacy && !previous.legacy)) {
+        owner.reinstall()
+      }
+    },
+  ))
 
-    const draft = draftByTarget()[key]
-    if (!draft) {
-      if (nextParams && (options.isRemote?.() ?? true)) applyRemoteToEngine(targetId, nextParams)
-      return
-    }
-
-    const nextSerialized = nextParams ? options.serializeParams(nextParams) : undefined
-    const draftSerialized = options.serializeParams(draft)
-    if (nextSerialized && draftSerialized === nextSerialized) {
-      clearReconciledDraft(targetId, key)
-      return
-    }
-
-    const overwriteAfterMs = options.remoteOverwriteAfterMs ?? 0
-    if (overwriteAfterMs <= 0 || saveTimers.has(key)) return
-    const lastEdit = lastLocalEdit.get(key) ?? 0
-    if (Date.now() - lastEdit >= overwriteAfterMs) {
-      clearDraft(targetId, key)
-      if (nextParams && (options.isRemote?.() ?? true)) applyRemoteToEngine(targetId, nextParams)
-    }
+  if (options.canWrite) {
+    createEffect(on(options.canWrite, (canWrite) => {
+      if (!canWrite) owner.closeAll('cancel')
+    }, { defer: true }))
   }
 
   createEffect(() => {
     const targetId = options.targetId()
     if (!targetId) return
-
     const row = options.row()
     if (row === undefined) {
-      if (options.isMissingRowLoaded?.()) syncRemote(targetId, undefined)
+      if (options.isMissingRowLoaded?.()) untrack(() => syncRemote(targetId, undefined))
       return
     }
-
-    options.onQueryRow?.(targetId, row)
-
-    syncRemote(targetId, options.readQueryParams(row))
+    const params = options.readQueryParams(row)
+    const through = options.readQueryThrough?.(row) ?? 0
+    untrack(() => syncRemote(targetId, params, through))
   })
-
-  createEffect(() => {
-    const targetId = options.targetId()
-    if (!targetId) return
-    const next = params()
-    if (!next) {
-      const key = keyForTarget(targetId)
-      if (deletedByTarget()[key]) {
-        applyLocalClearToEngine(targetId)
-        return
-      }
-      applyRemoteToEngine(targetId, undefined)
-      return
-    }
-    applyRemoteToEngine(targetId, next)
-  })
-
-  const flushPending = async (projectId?: string) => {
-    while (true) {
-      const pendingApplies = [...pendingApplyByTarget.entries()]
-        .filter(([key]) => {
-          if (!projectId) return true
-          return persistContextByTarget.get(key)?.projectId === projectId
-        })
-        .map(([, apply]) => apply)
-      if (pendingApplies.length === 0) break
-      await Promise.all(pendingApplies)
-    }
-    for (const [key, timer] of Array.from(saveTimers.entries())) {
-      const context = persistContextByTarget.get(key)
-      if (projectId && context?.projectId !== projectId) continue
-      const targetId = targetByKey.get(key)
-      if (!targetId) continue
-      clearTimeout(timer)
-      saveTimers.delete(key)
-      const params = draftByTarget()[key]
-      if (params) persistNow(targetId, key, params, context ?? {})
-    }
-    for (const [key, params] of Object.entries(draftByTarget())) {
-      if (saveTimers.has(key) || persistAttemptByTarget.has(key)) continue
-      const context = persistContextByTarget.get(key)
-      if (projectId && context?.projectId !== projectId) continue
-      const targetId = targetByKey.get(key)
-      if (targetId && params) persistNow(targetId, key, params, context ?? {})
-    }
-    const pendingWrites = projectId
-      ? pendingWritesByProject.get(projectId)
-      : new Set(Array.from(pendingWritesByProject.values()).flatMap((writes) => Array.from(writes)))
-    await Promise.all(Array.from(pendingWrites ?? []))
-  }
 
   onCleanup(() => {
-    void flushPending().finally(() => {
-      pendingRemoteApplyByTarget.clear()
-      for (const unregister of registeredFlushers.values()) unregister()
-      registeredFlushers.clear()
-    })
+    for (const unregister of registeredFlushers.values()) unregister()
+    registeredFlushers.clear()
   })
 
+  const params = createMemo(() => {
+    const targetId = options.targetId()
+    return targetId ? owner.effective(targetId) : undefined
+  })
   const addForTarget = (targetId: string) => {
     const initial = options.createInitialParams(targetId)
-    if (!initial) return
-    applyUpdate(targetId, () => initial)
-  }
-
-  const removeForTarget = (targetId: string) => {
-    const key = keyForTarget(targetId)
-    const previous = readCurrent(targetId)
-    if (!previous) return false
-    const timer = saveTimers.get(key)
-    if (timer) {
-      clearTimeout(timer)
-      saveTimers.delete(key)
-    }
-    pendingRemoteApplyByTarget.delete(key)
-    setDraftByTarget((prev) => {
-      if (!(key in prev)) return prev
-      const next = { ...prev }
-      delete next[key]
-      return next
-    })
-    pendingCommitByTarget.delete(key)
-    lastLocalEdit.set(key, Date.now())
-    const context = options.createPersistContext?.() ?? {}
-    if (context.projectId) ensureProjectFlusher(context.projectId)
-    persistContextByTarget.set(key, context)
-    targetByKey.set(key, targetId)
-    setDeletedByTarget((prev) => ({
-      ...prev,
-      [key]: true,
-    }))
-    persistRemoveNow(targetId, key, context)
-    return true
+    if (initial) owner.set(targetId, initial)
   }
 
   return {
     add: () => {
       const targetId = options.targetId()
-      if (!targetId) return
-      addForTarget(targetId)
+      if (targetId) addForTarget(targetId)
     },
     addForTarget,
-    flushPending,
+    flushPending: () => owner.flushPending(),
+    gestureOwner: owner.handle(() => options.targetId() ?? ''),
     params,
-    readDraftForTarget: (targetId) => draftByTarget()[keyForTarget(targetId)],
-    readForTarget: readCurrent,
-    removeForTarget,
+    readForTarget: owner.effective,
+    readProvisionalForTarget: owner.provisional,
     reset: () => {
       const targetId = options.targetId()
       if (!targetId) return
       const initial = options.createInitialParams(targetId)
-      if (!initial) return
-      applyUpdate(targetId, () => initial)
+      if (initial) owner.set(targetId, initial)
     },
-    setForTarget: (targetId, params) => {
-      applyParams(targetId, readCurrent(targetId), params)
-    },
+    setForTarget: owner.set,
     syncRemoteForTarget: syncRemote,
     update: (updater) => {
       const targetId = options.targetId()
-      if (!targetId) return
-      applyUpdate(targetId, updater)
+      if (targetId) owner.write(targetId, updater)
     },
-    updateForTarget: (targetId, updater) => {
-      applyUpdate(targetId, updater)
-    },
+    updateForTarget: owner.write,
   }
 }

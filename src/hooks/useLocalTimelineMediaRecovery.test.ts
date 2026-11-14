@@ -9,6 +9,8 @@ import { createLocalAsset } from "~/lib/local-assets"
 import type { Track } from "@daw-browser/timeline-core/types"
 import { useClipBuffers } from "./useClipBuffers"
 import { useMissingMediaRecovery } from "./useLocalTimelineMediaRecovery"
+import { loadLocalHistory, saveLocalHistory } from "~/lib/local-history"
+import { buildTrackVolumeHistoryEntry } from "~/lib/undo/builders"
 
 class TestAudioBuffer implements AudioBuffer {
   readonly duration = 1
@@ -59,6 +61,14 @@ test("reconciliation reloads the canonical local repository snapshot", async () 
   const repository = createLocalTimelineRepository(project.id)
   const track = (await repository.loadSnapshot()).tracks[0]
   if (!track) throw new Error("Expected default track.")
+  const history = {
+    undo: [buildTrackVolumeHistoryEntry({ projectId: project.id, track: { ...track, clips: [] },
+      scope: "local", from: 1, to: 0.5 })],
+    redo: [buildTrackVolumeHistoryEntry({ projectId: project.id, track: { ...track, clips: [] },
+      scope: "local", from: 0.5, to: 0.25 })],
+  }
+  await saveLocalHistory(project.id, history)
+  const reconciledNames: string[] = []
 
   await createRoot(async (dispose) => {
     const [projectId] = createSignal(project.id)
@@ -81,6 +91,7 @@ test("reconciliation reloads the canonical local repository snapshot", async () 
       preloadClipBuffer: async () => undefined,
       removeClip: async () => false,
       projection: {
+        reconcileLocalSnapshot: (snapshot) => { reconciledNames.push(snapshot.tracks[0]?.name ?? "") },
         insertLocalClip: () => undefined,
         removeLocalClips: () => undefined,
       },
@@ -141,6 +152,8 @@ test("reconciliation reloads the canonical local repository snapshot", async () 
       signal: new AbortController().signal,
     })
     expect(recovery.localTimelineSnapshot()?.tracks[0]?.name).toBe("Drums Acceptance")
+    expect(reconciledNames).toEqual(["Track 1", "Drums Acceptance"])
+    expect(await loadLocalHistory(project.id)).toEqual(history)
     dispose()
   })
 })
@@ -392,6 +405,34 @@ test("mount hydration bounds concurrent media loads", async () => {
       signal: new AbortController().signal,
     })
     expect(maximumActiveLoads).toBe(4)
+    dispose()
+  })
+})
+
+test("a newer same-generation reload supersedes an older queued local snapshot", async () => {
+  const project = await createLocalProject(`Latest snapshot ${crypto.randomUUID()}`)
+  const repository = createLocalTimelineRepository(project.id)
+  const [track] = (await repository.loadSnapshot()).tracks
+  if (!track) throw new Error("Expected default track.")
+  const clip = await repository.createClip({ trackId: track.id, name: "Canonical", startSec: 0,
+    duration: 1, sourceAssetKey: "asset:latest", sourceKind: "upload" })
+  let hydrationLoads = 0
+  await createRoot(async (dispose) => {
+    const recovery = useMissingMediaRecovery({
+      projectId: () => project.id, mountedProjectGeneration: () => 1,
+      remoteTimelineAvailable: () => false, localTimelineReloadVersion: () => 0,
+      userId: () => undefined, renderTracks: () => [], audioEngine: new AudioEngine(),
+      audioBufferCache: { storeBuffer: () => {}, storeBuffers: () => {}, removeBuffer: () => {} },
+      getClipBuffer: () => new TestAudioBuffer(),
+      preloadClipBuffer: async () => { hydrationLoads++ },
+      removeClip: async () => false,
+      projection: { insertLocalClip: () => {}, removeLocalClips: () => {} },
+      selection: { selectedClip: () => null, setSelectedClip: () => {}, setSelectedClipIds: () => {},
+        selectTrackTarget: () => {} },
+    })
+    await Promise.all([recovery.reloadLocalTimeline(), recovery.reloadLocalTimeline()])
+    expect(hydrationLoads).toBe(1)
+    expect(recovery.localTimelineSnapshot()?.clips[0]?.id).toBe(clip.id)
     dispose()
   })
 })

@@ -1,17 +1,39 @@
 #include "worker-control-service.h"
 
 #include <chrono>
+#include <cinttypes>
+#include <cstdio>
 
 namespace daw::plugin_host {
 namespace {
 
+void LogIncident(const WorkerDiagnostic& diagnostic, const std::uint64_t generation) {
+  if (diagnostic.kind != WorkerDiagnosticKind::kFault
+    && diagnostic.kind != WorkerDiagnosticKind::kMiss
+    && diagnostic.kind != WorkerDiagnosticKind::kRestart) return;
+  const auto fault = diagnostic.kind == WorkerDiagnosticKind::kFault;
+  // One bounded stdio call keeps concurrent service lines intact; never runs
+  // on the audio callback or includes plugin identity/authentication tokens.
+  std::fprintf(stderr,
+    "[vst-worker-incident] {\"kind\":%" PRIu32 ",\"workerGeneration\":%" PRIu64
+    ",\"sequence\":%" PRIu64 ",\"transportEpoch\":%" PRIu32
+    ",\"originCode\":%" PRIu32 ",\"childCode\":%" PRIu32
+    ",\"childStatus\":%" PRIu32 ",\"value\":%" PRIu32 "}\n",
+    static_cast<std::uint32_t>(diagnostic.kind), generation, diagnostic.sequence, diagnostic.transport_epoch,
+    fault ? diagnostic.value & 0xffU : 0U,
+    fault ? (diagnostic.value >> 8U) & 0xffU : 0U,
+    fault ? (diagnostic.value >> 16U) & 0xffU : 0U, diagnostic.value);
+}
+
 void DrainDiagnostics(
   WorkerRuntime& runtime,
   SpscQueue<WorkerDiagnostic, kMaximumWorkerSlots>& diagnostics,
+  const std::uint64_t generation,
   const WorkerControlService::DiagnosticListener listener,
   void* const context
 ) {
   while (const auto diagnostic = runtime.ReadDiagnostic()) {
+    LogIncident(*diagnostic, generation);
     if (diagnostic->kind != WorkerDiagnosticKind::kParameterEdit) {
       static_cast<void>(diagnostics.TryPush(*diagnostic));
     }
@@ -78,8 +100,9 @@ bool WorkerControlService::Start(
 ) {
   Stop();
   health_.store(WorkerHealth::kStarting, std::memory_order_release);
+  ++incidentWorkerGeneration_;
   if (!runtime_.Start(startup, configuration, request)) {
-    PublishFault();
+    PublishFault(EncodeWorkerFault(WorkerFaultOrigin::kStartupFailure));
     return false;
   }
   running_.store(true, std::memory_order_release);
@@ -106,6 +129,7 @@ bool WorkerControlService::Restart() {
   const auto restarted = runtime_.Restart();
   health_.store(restarted ? WorkerHealth::kStarting : WorkerHealth::kFaulted, std::memory_order_release);
   if (restarted) {
+    ++incidentWorkerGeneration_;
     running_.store(true, std::memory_order_release);
     thread_ = std::thread(&WorkerControlService::Run, this);
   }
@@ -171,6 +195,7 @@ WorkerSubmissionStatus WorkerControlService::ProcessOffline(
   const std::chrono::milliseconds timeout
 ) {
   bool completed = false;
+  auto faultValue = EncodeWorkerFault(WorkerFaultOrigin::kOfflineCompletionFailure);
   {
     std::lock_guard lock(control_mutex_);
     if (!running_.load(std::memory_order_acquire)) return WorkerSubmissionStatus::kUnavailable;
@@ -182,6 +207,7 @@ WorkerSubmissionStatus WorkerControlService::ProcessOffline(
       submission.context
     )) return WorkerSubmissionStatus::kInvalid;
     if (!runtime_.DispatchPublishedSubmission(submission.slotIndex, submission.sequence)) {
+      faultValue = EncodeWorkerFault(WorkerFaultOrigin::kDispatchFailure);
       static_cast<void>(runtime_.CancelPublishedSubmission(submission.slotIndex, submission.sequence));
     } else {
       completed = runtime_.WaitForOfflineCompletion(submission.slotIndex, submission.sequence, timeout);
@@ -191,7 +217,7 @@ WorkerSubmissionStatus WorkerControlService::ProcessOffline(
     health_.store(runtime_.health(), std::memory_order_release);
     return WorkerSubmissionStatus::kAccepted;
   }
-  PublishFault();
+  PublishFault(faultValue, submission.sequence);
   running_.store(false, std::memory_order_release);
   NotifyService();
   if (thread_.joinable()) thread_.join();
@@ -275,6 +301,7 @@ WorkerHealth WorkerControlService::ReadHealthFromCallback() const noexcept {
 void WorkerControlService::Run() {
   while (running_.load(std::memory_order_acquire)) {
     QueuedSubmission submission{};
+    std::uint64_t dispatchFailureSequence = 0;
     auto currentHealth = health_.load(std::memory_order_acquire) == WorkerHealth::kFaulted
       ? WorkerHealth::kFaulted
       : runtime_.health();
@@ -289,6 +316,7 @@ void WorkerControlService::Run() {
         if (!runtime_.DispatchPublishedSubmission(submission.slotIndex, submission.sequence)) {
           static_cast<void>(runtime_.CancelPublishedSubmission(submission.slotIndex, submission.sequence));
           dispatchFailed = true;
+          dispatchFailureSequence = submission.sequence;
         }
       }
       currentHealth = dispatchFailed ? WorkerHealth::kFaulted : runtime_.health();
@@ -297,12 +325,15 @@ void WorkerControlService::Run() {
     DrainDiagnostics(
       runtime_,
       diagnostics_,
+      incidentWorkerGeneration_,
       diagnosticListener_.load(std::memory_order_acquire),
       diagnosticContext_.load(std::memory_order_relaxed)
     );
     WorkerDiagnostic callbackDiagnostic{};
     bool callbackFault = false;
+    std::uint64_t missedSequence = 0;
     while (callbackDiagnostics_.TryPop(callbackDiagnostic)) {
+      LogIncident(callbackDiagnostic, incidentWorkerGeneration_);
       if (callbackDiagnostic.kind != WorkerDiagnosticKind::kParameterEdit) {
         static_cast<void>(diagnostics_.TryPush(callbackDiagnostic));
       }
@@ -318,14 +349,17 @@ void WorkerControlService::Run() {
         health_.store(WorkerHealth::kFaulted, std::memory_order_release);
         running_.store(false, std::memory_order_release);
         callbackFault = true;
+        missedSequence = callbackDiagnostic.sequence;
       }
     }
     if (callbackFault) {
-      PublishFault();
+      PublishFault(EncodeWorkerFault(WorkerFaultOrigin::kCallbackMissTermination), missedSequence);
       break;
     }
     if (currentHealth == WorkerHealth::kFaulted && previousHealth != WorkerHealth::kFaulted) {
-      PublishFault();
+      PublishFault(dispatchFailureSequence != 0
+        ? EncodeWorkerFault(WorkerFaultOrigin::kDispatchFailure) : runtime_.faultValue(),
+        dispatchFailureSequence);
     }
     if (running_.load(std::memory_order_acquire)) {
       std::unique_lock lock(wake_mutex_);
@@ -343,9 +377,10 @@ void WorkerControlService::NotifyService() noexcept {
   wake_ready_.notify_one();
 }
 
-void WorkerControlService::PublishFault() noexcept {
+void WorkerControlService::PublishFault(const std::uint32_t value, const std::uint64_t sequence) noexcept {
   health_.store(WorkerHealth::kFaulted, std::memory_order_release);
-  const WorkerDiagnostic diagnostic{.kind = WorkerDiagnosticKind::kFault};
+  const WorkerDiagnostic diagnostic{.kind = WorkerDiagnosticKind::kFault, .value = value, .sequence = sequence};
+  LogIncident(diagnostic, incidentWorkerGeneration_);
   static_cast<void>(diagnostics_.TryPush(diagnostic));
   const auto listener = diagnosticListener_.load(std::memory_order_acquire);
   if (listener != nullptr) listener(diagnostic, diagnosticContext_.load(std::memory_order_relaxed));

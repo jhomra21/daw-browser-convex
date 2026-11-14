@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 
-import { decodeAudioPages, decodedSampleStartFrame, type DecodedAudioPage } from './media-pages'
+import { decodeAudioPages, decodedSampleStartFrame } from './media-pages'
+import type { DecodedAudioPage } from '@daw-browser/shared'
 
 const writeAscii = (bytes: Uint8Array, offset: number, value: string) => {
   bytes.set(new TextEncoder().encode(value), offset)

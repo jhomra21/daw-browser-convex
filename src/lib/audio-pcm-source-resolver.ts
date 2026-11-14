@@ -3,8 +3,8 @@ import {
   getAudioBufferSessionIdentity,
   inspectAudioSourceMetadata,
   sha256File,
-  type AudioPcmSourceDescriptor,
 } from '@daw-browser/audio-engine/media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import { isLocalProjectAssetKey, resolveClipSampleUrl } from '@daw-browser/shared'
 import { getLocalAsset, readLocalAssetBytes } from '~/lib/local-assets'
 import { resolveSamplePlaybackUrlForRuntime } from '~/lib/renderer-api-url'
@@ -317,8 +317,4 @@ const settleClearedPending = (entry: PendingDescriptorResolution) => {
     entry.subscribers.delete(subscriber)
     subscriber.reject(new DOMException('The operation was aborted.', 'AbortError'))
   }
-}
-
-export const audioPcmSourceResolverCacheLimits = {
-  descriptorEntries: MAX_DESCRIPTOR_CACHE_ENTRIES,
 }

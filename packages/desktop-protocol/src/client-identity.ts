@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto"
 import { constants } from "node:fs"
-import { chmod, link, lstat, mkdir, open, realpath, rm } from "node:fs/promises"
+import { chmod, link, lstat, mkdir, open, rm } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
 
@@ -54,10 +54,10 @@ const ensurePrivateDirectory = async (directory: string) => {
   await validatePrivateDirectory(directory)
 }
 
-const readIdentity = async (file: string, directory: string) => {
+const readIdentity = async (file: string) => {
   let info
   try {
-    info = await lstat(file)
+    info = await lstat(file, { bigint: true })
   } catch (error) {
     if (hasErrorCode(error, "ENOENT")) return undefined
     throw error
@@ -65,27 +65,27 @@ const readIdentity = async (file: string, directory: string) => {
   if (
     !info.isFile()
     || info.isSymbolicLink()
-    || (process.platform !== "win32" && (info.mode & 0o077) !== 0)
+    || (process.platform !== "win32" && (info.mode & 0o077n) !== 0n)
   ) {
     throw new Error("Host actor identity is not private.")
   }
 
-  const resolvedDirectory = await realpath(directory)
-  const resolvedFile = await realpath(file)
-  if (path.dirname(resolvedFile) !== resolvedDirectory) {
-    throw new Error("Host actor identity is not contained by its directory.")
-  }
-
+  // The file's parent is the directory validatePrivateDirectory just checked.
+  // Do not realpath the file: while a publisher's temp hard link exists, Bun on
+  // macOS can resolve through that link and fail with ENOENT once it is removed.
+  // The dev/ino comparison below detects substitution between lstat and open.
   const handle = await open(
     file,
     process.platform === "win32" ? "r" : constants.O_RDONLY | constants.O_NOFOLLOW,
   )
   let contents: string
   try {
-    const openedInfo = await handle.stat()
+    const openedInfo = await handle.stat({ bigint: true })
     if (
       !openedInfo.isFile()
-      || (process.platform !== "win32" && (openedInfo.mode & 0o077) !== 0)
+      || openedInfo.dev !== info.dev
+      || openedInfo.ino !== info.ino
+      || (process.platform !== "win32" && (openedInfo.mode & 0o077n) !== 0n)
     ) {
       throw new Error("Host actor identity is not private.")
     }
@@ -156,7 +156,7 @@ const publishIdentity = async (file: string, directory: string) => {
     }
     if (won) await syncDirectory(directory)
 
-    const actorId = await readIdentity(file, directory)
+    const actorId = await readIdentity(file)
     if (actorId === undefined) throw new Error("Host actor identity publication failed.")
     return actorId
   } finally {
@@ -172,7 +172,7 @@ export const loadDesktopActorIdentity = (defaultFile: string, configuredPath?: s
   const file = resolveHostActorPath(defaultFile, configuredPath)
   const directory = path.dirname(file)
   return ensurePrivateDirectory(directory).then(async () => {
-    const actorId = await readIdentity(file, directory)
+    const actorId = await readIdentity(file)
     if (actorId !== undefined) return actorId
     return publishIdentity(file, directory)
   })

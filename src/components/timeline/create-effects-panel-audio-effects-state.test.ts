@@ -1,16 +1,29 @@
 import { describe, expect, test } from "bun:test";
 import "fake-indexeddb/auto";
-import { createRoot, createSignal } from "solid-js";
-import { AudioEngine, type AudioEffectRuntimeInstance } from "@daw-browser/audio-engine/audio-engine";
-import { AUDIO_EFFECT_CONTRACTS, type AudioEffectInstance } from "@daw-browser/shared";
+import { createComponent, createRenderEffect, createRoot, createSignal, Show, type Accessor, type JSX } from "solid-js";
+import { AudioEngine, type AudioEffectRuntimeInstance, type EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
+import { AUDIO_EFFECT_CONTRACTS, type AudioEffectInstance, type AudioEffectKind, type JsonValue } from "@daw-browser/shared";
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types";
-import type { EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
+import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDeliveryOutcome } from "~/lib/live-processor-control";
+import type { EffectParamsCommitPayload } from "~/lib/undo/types";
+import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import {
-  createAudioEffectInstanceIdentityCache,
   createEffectsPanelAudioDevice,
+  indexFirstAudioEffectRowsByKind,
+  publishEffectOperation,
+  registerAudioEffectCardInteractionCleanup,
 } from "./create-effects-panel-audio-effects-state";
+import { createAudioEffectInstanceIdentityCache } from "./create-effects-panel-instance-identity-cache";
+import { publishEffects } from "./create-effects-panel-state";
+import { deleteLocalEffectInstance, listLocalEffects, setLocalEffect, setLocalEffectInstance, type LocalEffectRow } from "~/lib/local-effects";
+import * as localChanges from "~/lib/local-project-changes";
+import { ParameterGestureHolder } from "./parameter-gesture-owner";
+import { createProcessorEditRegistry } from "./create-processor-edit-registry";
+import { createLocalEffectsView } from "./create-local-effects-view";
+import { z } from "zod";
 
 type PersistOrder = (targetId: string, order: AudioEffectInstance[]) => void | Promise<void>;
+type EffectsPanelContext = Parameters<typeof createEffectsPanelAudioDevice>[0];
 
 class SpyAudioEngine extends AudioEngine {
   readonly trackFxCalls: Array<{ trackId: string; instances: AudioEffectRuntimeInstance[] }> = [];
@@ -18,18 +31,33 @@ class SpyAudioEngine extends AudioEngine {
   deferMasterFx = false;
   private resolveMasterFx?: () => void;
 
-  override async setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]) {
+  override async setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]): Promise<EngineDisposition> {
     this.trackFxCalls.push({ trackId, instances });
+    return "applied";
   }
 
   override async setMasterFxInstances(instances: AudioEffectRuntimeInstance[]) {
     this.masterFxCalls.push(instances);
-    if (this.deferMasterFx) {
-      await new Promise<void>((resolve) => {
-        this.resolveMasterFx = resolve;
-      });
-    }
-    await super.setMasterFxInstances(instances);
+    await this.waitForMasterFxRelease();
+    return super.setMasterFxInstances(instances);
+  }
+
+  override async setMasterFxInstance(instance: AudioEffectRuntimeInstance) {
+    this.masterFxCalls.push([instance]);
+    await this.waitForMasterFxRelease();
+    return super.setMasterFxInstance(instance);
+  }
+
+  override async setTrackFxInstance(trackId: string, instance: AudioEffectRuntimeInstance) {
+    this.trackFxCalls.push({ trackId, instances: [instance] });
+    return super.setTrackFxInstance(trackId, instance);
+  }
+
+  private async waitForMasterFxRelease() {
+    if (!this.deferMasterFx) return;
+    await new Promise<void>((resolve) => {
+      this.resolveMasterFx = resolve;
+    });
   }
 
   releaseMasterFx() {
@@ -45,10 +73,14 @@ const createDevice = (
     projectId?: string;
     projectGeneration?: number;
     targetId?: string;
+    usesLegacyAudioEngine?: boolean;
+    localEffectsView?: EffectsPanelContext["localEffectsView"];
+    deliverProcessor?: EffectsPanelContext["deliverProcessor"];
     persistAudioEffectOrder?: PersistOrder;
     persistSidechainRoute?: (targetTrackId: string, effectInstanceId: string, sourceTrackId?: string) => Promise<void>;
     sidechainRoutes?: ExternalSidechainRoute[];
-    onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
+    allocateProcessorEdit?: EffectsPanelContext["allocateProcessorEdit"];
+    onEffectParamsCommitted?: EffectsPanelContext["onEffectParamsCommitted"];
   } = {},
 ) => {
   const [currentTargetId, setCurrentTargetId] = createSignal(options.targetId ?? "track-1");
@@ -65,9 +97,13 @@ const createDevice = (
       sidechainRoutes,
       canWriteCurrentTargetEffects,
       projectGeneration,
+      usesLegacyAudioEngine: () => options.usesLegacyAudioEngine ?? true,
+      localEffectsView: options.localEffectsView,
+      allocateProcessorEdit: options.allocateProcessorEdit ?? createProcessorEditRegistry(() => 120).allocate,
+      deliverProcessor: options.deliverProcessor,
+      onEffectParamsCommitted: options.onEffectParamsCommitted,
       persistAudioEffectOrder: options.persistAudioEffectOrder,
       persistSidechainRoute: options.persistSidechainRoute,
-      onEffectParamsCommitted: options.onEffectParamsCommitted,
     },
     currentTargetId,
     () => undefined,
@@ -82,13 +118,249 @@ const createDevice = (
   };
 };
 
+type NonKeyedEffectShowProps = {
+  when: { id: string } | undefined;
+  keyed?: false;
+  children: (effect: Accessor<{ id: string }>) => JSX.Element;
+};
+const renderNonKeyedEffectShow = (props: NonKeyedEffectShowProps) => (
+  createComponent<NonKeyedEffectShowProps>(Show, props)
+);
+
 describe("effects panel instance engine synchronization", () => {
+  test("W24 structural edit persists and records history before its native receipt ends", async () => {
+    const projectId = `project:step6-w24-${crypto.randomUUID()}`;
+    const instanceId = "spectral:step6-w24";
+    const initial = AUDIO_EFFECT_CONTRACTS.spectral.createDefaultParams();
+    await setLocalEffectInstance(projectId, "track-1", "spectral", initial, { instanceId });
+    const terminal = Promise.withResolvers<ProcessorDeliveryOutcome>();
+    const registered = Promise.withResolvers<void>();
+    const history: EffectParamsCommitPayload[] = [];
+    const registrations: { key: string; serial: number }[] = [];
+    let answered = false;
+    let dispose = () => {};
+    const fixture = createRoot(end => {
+      dispose = end;
+      const view = createLocalEffectsView({ projectId: () => projectId });
+      return { view, ...createDevice(new SpyAudioEngine(), { projectId, usesLegacyAudioEngine: false,
+        localEffectsView: view,
+        deliverProcessor: () => {
+          registered.resolve();
+          const receipt = { key: instanceId, serial: registrations.length + 1 };
+          registrations.push(receipt);
+          return { receipt, settled: terminal.promise };
+        },
+        onEffectParamsCommitted: payload => { history.push(payload); },
+      }) };
+    });
+    void terminal.promise.then(() => { answered = true; });
+    try {
+      await fixture.view.reload();
+      fixture.device.spectral.changeInstance(instanceId, params => ({
+        ...params, state: { ...params.state, fftSize: 4096 },
+      }));
+      await registered.promise;
+      const before: unknown = await fixture.device.flushPending();
+      expect(answered).toBe(false);
+      expect(history).toHaveLength(1);
+      const rows = await listLocalEffects(projectId);
+      expect(rows.find(row => row.instanceId === instanceId)?.params).toMatchObject({ state: { fftSize: 4096 } });
+      terminal.resolve({ state: "refused", reason: "apply-failed" });
+      await terminal.promise;
+      const after: unknown = await fixture.device.flushPending();
+      expect(answered).toBe(true);
+      expect(history).toHaveLength(1);
+      expect(await listLocalEffects(projectId)).toEqual(rows);
+      console.log("STEP6-W24", JSON.stringify({ savedBeforeNative: true, historyBeforeNative: 1,
+        historyAfterNative: history.length, answered, drainBefore: before ?? "void", drainAfter: after ?? "void" }));
+      expect(registrations).toHaveLength(2);
+      expect(before).toEqual({ unanswered: registrations.map(receipt => expect.objectContaining({ receipt })), admitted: [] });
+      expect(after).toEqual({ unanswered: [], admitted: [] });
+    } finally { terminal.resolve({ state: "unavailable" }); dispose(); }
+  });
+
+  test("3B1 a real audio adapter records history without waiting for native settlement", async () => {
+    const projectId = `project:3b0-native-${crypto.randomUUID()}`;
+    const instanceId = "audio-effect:3b0-native";
+    const initial = AUDIO_EFFECT_CONTRACTS.compressor.createDefaultParams();
+    await setLocalEffectInstance(projectId, "track-1", "compressor", initial, { instanceId });
+    let finish = (_result: ProcessorDeliveryOutcome) => {};
+    const held = new Promise<ProcessorDeliveryOutcome>((resolve) => { finish = resolve; });
+    let entered = () => {};
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const history: number[] = [];
+    let dispose = () => {};
+    const fixture = createRoot((end) => {
+      dispose = end;
+      const view = createLocalEffectsView({ projectId: () => projectId });
+      const device = createDevice(new SpyAudioEngine(), {
+        projectId, usesLegacyAudioEngine: false,
+        localEffectsView: view,
+        deliverProcessor: () => { entered(); return { receipt: { key: instanceId, serial: 1 }, settled: held }; },
+        onEffectParamsCommitted: () => { history.push(1); },
+      });
+      return { ...device, view };
+    });
+    // Join the shared local reader's publication instead of waiting on elapsed time.
+    await fixture.view.reload();
+    fixture.device.compressor.changeInstance(instanceId, (params) => ({ ...params, thresholdDb: -33 }));
+    await started;
+    await fixture.device.flushPending();
+    expect(history).toEqual([1]);
+    finish({ state: "refused", reason: "native-refused" });
+    await fixture.device.flushPending();
+    expect(history).toEqual([1]);
+    dispose();
+  });
+
+  const terminalGestureBrowserChild = process.env.EFFECT_TERMINAL_GESTURE_BROWSER_CHILD === "1";
+  test.skipIf(terminalGestureBrowserChild)(
+    "runs the terminal knob gesture regression with Solid's browser runtime",
+    async () => {
+      const child = Bun.spawn([
+        "perl", "-e", "alarm shift; exec @ARGV", "120",
+        "bun",
+        "--conditions=browser",
+        "test",
+        "--timeout", "30000",
+        import.meta.path,
+        "-t",
+        "flushes the latest knob gesture stamp without rolling back its committed value",
+      ], {
+        env: { ...process.env, EFFECT_TERMINAL_GESTURE_BROWSER_CHILD: "1" },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [stdout, stderr, code] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ]);
+      if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
+      expect(code).toBe(0);
+    },
+  );
+
+  test.skipIf(process.env.EFFECT_CARD_CLEANUP_BROWSER_CHILD === "1")(
+    "runs card cleanup regressions with Solid's browser runtime",
+    () => {
+      const result = Bun.spawnSync([
+        "perl", "-e", "alarm shift; exec @ARGV", "120",
+        "bun",
+        "--conditions=browser",
+        "test",
+        "--timeout", "30000",
+        import.meta.path,
+        "--test-name-pattern",
+        "cancels captured IDs when non-keyed Show content is invalidated|cancels a replaced effect interaction with its previous effect ID",
+      ], {
+        env: { ...process.env, EFFECT_CARD_CLEANUP_BROWSER_CHILD: "1" },
+      });
+      expect(result.exitCode).toBe(0);
+    },
+  );
+
+  test.skipIf(process.env.EFFECT_CARD_CLEANUP_BROWSER_CHILD !== "1")(
+    "cancels captured IDs when non-keyed Show content is invalidated",
+    () => {
+      const canceled: Array<{ effectId: string; targetId: string | undefined }> = [];
+      let activeEffectId: string | undefined;
+      const audioEffects = {
+        beginInteraction: (effectId: string, _targetId?: string) => {
+          activeEffectId = effectId;
+        },
+        interruptGesture: (effectId: string, targetId?: string) => {
+          canceled.push({ effectId, targetId });
+        },
+      };
+      const [effect, setEffect] = createSignal<{ id: string } | undefined>({ id: "effect-show" });
+      let dispose = () => {};
+      createRoot((disposeRoot) => {
+        dispose = disposeRoot;
+        return renderNonKeyedEffectShow({
+          get when() {
+            return effect();
+          },
+          get children() {
+            return (shownEffect: Accessor<{ id: string }>) => {
+              registerAudioEffectCardInteractionCleanup({
+                audioEffects: () => audioEffects,
+                effectId: () => shownEffect().id,
+                targetId: () => "track-show",
+                ownerKey: () => `project:1:${shownEffect().id}`,
+              });
+              createRenderEffect(() => audioEffects.beginInteraction(shownEffect().id, "track-show"));
+              return "";
+            };
+          },
+        });
+      });
+
+      expect(activeEffectId).toBe("effect-show");
+      expect(() => setEffect(undefined)).not.toThrow();
+      expect(canceled).toEqual([{ effectId: "effect-show", targetId: "track-show" }]);
+      dispose();
+    },
+  );
+
+  test.skipIf(process.env.EFFECT_CARD_CLEANUP_BROWSER_CHILD !== "1")(
+    "cancels a replaced effect interaction with its previous effect ID",
+    () => {
+      const events: string[] = [];
+      let activeEffectId: string | undefined;
+      const audioEffects = {
+        beginInteraction: (effectId: string) => {
+          activeEffectId = effectId;
+          events.push(`begin:${effectId}`);
+        },
+        interruptGesture: (effectId: string, targetId?: string) => {
+          events.push(`cancel:${effectId}:${targetId}`);
+        },
+      };
+      const [effect, setEffect] = createSignal<{ id: string } | undefined>({ id: "effect-old" });
+      let dispose = () => {};
+      createRoot((disposeRoot) => {
+        dispose = disposeRoot;
+        return renderNonKeyedEffectShow({
+          get when() {
+            return effect();
+          },
+          get children() {
+            return (shownEffect: Accessor<{ id: string }>) => {
+              registerAudioEffectCardInteractionCleanup({
+                audioEffects: () => audioEffects,
+                effectId: () => shownEffect().id,
+                targetId: () => "track-current",
+                ownerKey: () => `project:1:${shownEffect().id}`,
+              });
+              createRenderEffect(() => audioEffects.beginInteraction(shownEffect().id));
+              return "";
+            };
+          },
+        });
+      });
+
+      setEffect({ id: "effect-new" });
+      expect(events).toEqual([
+        "begin:effect-old",
+        "begin:effect-new",
+        "cancel:effect-old:track-current",
+      ]);
+      expect(activeEffectId).toBe("effect-new");
+      dispose();
+      expect(events.at(-1)).toBe("cancel:effect-new:track-current");
+    },
+  );
+
   test("commits a real reverb edit with the persisted row instance ID", async () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();
       const commits: EffectParamsCommitPayload[] = [];
       const { device } = createDevice(engine, {
-        onEffectParamsCommitted: (payload) => commits.push(payload),
+        projectId: `project:reverb-${crypto.randomUUID()}`,
+        onEffectParamsCommitted: (payload) => {
+          commits.push(payload);
+        },
       });
       await device.addByKindToTarget("track-1", "reverb");
       const inserted = engine.trackFxCalls.at(-1)?.instances[0];
@@ -115,7 +387,9 @@ describe("effects panel instance engine synchronization", () => {
       const { device, setProjectGeneration, setProjectId } = createDevice(engine, {
         projectId: "project:stale-effect-commit",
         targetId: "master",
-        onEffectParamsCommitted: (payload) => commits.push(payload),
+        onEffectParamsCommitted: (payload) => {
+          commits.push(payload);
+        },
       });
       await device.addByKindToTarget("master", "delay");
       const inserted = engine.masterFxCalls.at(-1)?.[0];
@@ -164,6 +438,89 @@ describe("effects panel instance engine synchronization", () => {
     });
   });
 
+  test.skipIf(!terminalGestureBrowserChild)(
+    "flushes the latest knob gesture stamp without rolling back its committed value",
+    async () => {
+    const projectId = `project:terminal-gesture-${crypto.randomUUID()}`;
+    const instance = { id: "utility:terminal", kind: "utility" } satisfies AudioEffectInstance;
+    await setLocalEffectInstance(projectId, "track-1", "utility", AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams(), {
+      instanceId: instance.id, index: 0,
+    });
+    await createRoot(async (dispose) => {
+      const engine = new SpyAudioEngine();
+      let latest: { signature: string; edit: LiveProcessorEditIdentity } | undefined;
+      const previews: Array<{ sequence: number | undefined; gainDb: number }> = [];
+      const flushes: Array<{ sequence: number | undefined; gainDb: number }> = [];
+      const commits: EffectParamsCommitPayload[] = [];
+      const events: string[] = [];
+      const { device } = createDevice(engine, {
+        projectId,
+        usesLegacyAudioEngine: false,
+        // The registry's rule: equal content on the member is the same write and keeps its identity.
+        allocateProcessorEdit: (payload) => {
+          const signature = JSON.stringify(payload.to);
+          if (latest?.signature === signature) return latest.edit;
+          const order = (latest?.edit.order ?? 0) + 1;
+          latest = {
+            signature,
+            edit: {
+              id: `test-edit-${order}`,
+              order,
+              target: { nodeId: payload.targetId, instanceId: payload.instanceId ?? "", kindId: 1, incarnation: 1 },
+              content: { params: payload.to },
+            },
+          };
+          return latest.edit;
+        },
+        deliverProcessor: (edit, gesture): DeliveryRegistration => {
+          const params = z.object({ state: z.object({ gainDb: z.number() }) }).parse(edit.content.params);
+          if (gesture?.holds) {
+            events.push(`preview:${edit.order}`);
+            previews.push({ sequence: edit.order, gainDb: params.state.gainDb });
+          } else {
+            events.push(`flush:${edit.order}`);
+            flushes.push({ sequence: edit.order, gainDb: params.state.gainDb });
+          }
+          return { receipt: { key: edit.target.instanceId, serial: edit.order }, settled: Promise.resolve({ state: "applied" }) };
+        },
+        onEffectParamsCommitted: (payload) => {
+          events.push("commit");
+          commits.push(payload);
+        },
+      });
+      // Wait for the real persisted row, not an optimistic insertion with an empty query.
+      await new Promise<void>((resolve) => {
+        createRenderEffect(() => {
+          if (device.snapshotExportRows(["track-1"]).some((row) => row.instanceId === instance.id)) resolve();
+        });
+      });
+
+      const gesture = device.gestureOwner(instance.id, "utility");
+      const holder = new ParameterGestureHolder();
+      gesture.open(holder);
+      gesture.tick(holder, () => device.utility.changeInstance(instance.id, (params) => ({
+        ...params,
+        state: { ...params.state, gainDb: -3 },
+      })));
+      gesture.tick(holder, () => device.utility.changeInstance(instance.id, (params) => ({
+        ...params,
+        state: { ...params.state, gainDb: -6 },
+      })));
+      gesture.end(holder);
+      await device.flushPending();
+
+      // Previews are one per frame and the gesture ended inside one, so only the release reaches the engine. Each tick took
+      // an order when it was written (1, 2); the release is the equal content of the second and keeps its identity.
+      expect(previews).toEqual([]);
+      expect(flushes).toEqual([{ sequence: 2, gainDb: -6 }]);
+      expect(commits.at(-1)).toMatchObject({ to: { state: { gainDb: -6 } } });
+      expect(device.paramsForInstance(instance)).toMatchObject({ state: { gainDb: -6 } });
+      expect(events).toEqual(["flush:2", "commit"]);
+      dispose();
+    });
+    },
+  );
+
   test("applies an optimistic reorder without waiting for persisted rows", async () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();
@@ -195,7 +552,7 @@ describe("effects panel instance engine synchronization", () => {
       device.delay.changeInstance(instanceId, (params) => ({ ...params, feedback: 0.8 }));
       await addPromise;
 
-      expect(engine.trackFxCalls.length).toBe(before);
+      expect(engine.trackFxCalls.slice(before).every(call => call.instances.every(instance => instance.kind !== "delay" || instance.params.feedback !== 0.8))).toBe(true);
       dispose();
     });
   });
@@ -325,7 +682,24 @@ describe("effects panel instance engine synchronization", () => {
   test("projects draft edits, all-target insertions, reorders, and removals into export rows", async () => {
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();
-      const { device } = createDevice(engine, { projectId: `project:effects-export-projection-${crypto.randomUUID()}` });
+      let sequence = 0;
+      const commits: Array<{ feedback: number }> = [];
+      const { device } = createDevice(engine, {
+        projectId: `project:effects-export-projection-${crypto.randomUUID()}`,
+        allocateProcessorEdit: (payload) => {
+          const order = ++sequence;
+          return {
+            id: `test-edit-${order}`,
+            order,
+            target: { nodeId: payload.targetId, instanceId: payload.instanceId ?? "", kindId: 1, incarnation: 1 },
+            content: { params: payload.to },
+          };
+        },
+        onEffectParamsCommitted: (payload) => {
+          if (payload.effect === "delay" && "feedback" in payload.to)
+            commits.push({ feedback: payload.to.feedback });
+        },
+      });
 
       const delayAdd = device.addByKindToTarget("track-1", "delay");
       expect(device.snapshotExportRows(["track-1"])).toEqual([
@@ -339,8 +713,17 @@ describe("effects panel instance engine synchronization", () => {
         .find((row) => row.effect === "delay");
       if (!delay?.instanceId) throw new Error("Expected a projected delay.");
       device.delay.changeInstance(delay.instanceId, (params) => ({ ...params, feedback: 0.8 }));
+      const firstSequence = sequence;
       expect(device.snapshotExportRows(["track-1"])
         .find((row) => row.effect === "delay")?.params).toMatchObject({ feedback: 0.8 });
+      device.delay.changeInstance(delay.instanceId, (params) => ({ ...params, feedback: 0.9 }));
+      const secondSequence = sequence;
+      expect(secondSequence).toBeGreaterThan(firstSequence);
+      await device.flushPending();
+      expect(commits.slice(-2)).toEqual([
+        { feedback: 0.8 },
+        { feedback: 0.9 },
+      ]);
 
       device.reorder({ id: delay.instanceId, kind: "delay" }, 1);
       expect(device.snapshotExportRows(["track-1"]).map((row) => row.effect)).toEqual(["chorus", "delay"]);
@@ -438,13 +821,300 @@ describe("effects panel instance engine synchronization", () => {
 
   test("keeps persisted effect instance identity stable across row refreshes", () => {
     const cache = createAudioEffectInstanceIdentityCache();
-    const initial = cache.get("track-1", "delay-1", "delay");
-    const refreshed = cache.get("track-1", "delay-1", "delay");
-    const changedKind = cache.get("track-1", "delay-1", "reverb");
+    cache.retain([{ targetId: "track-1", id: "delay-1", kind: "delay" }]);
+    const initial = cache.instance("track-1", "delay-1", "delay");
+    cache.retain([{ targetId: "track-1", id: "delay-1", kind: "delay" }]);
 
-    expect(refreshed).toBe(initial);
-    expect(changedKind).not.toBe(initial);
-    cache.prune(new Set(["track-1:delay-1"]));
-    expect(cache.get("track-1", "delay-1", "delay")).not.toBe(initial);
+    expect(cache.instance("track-1", "delay-1", "delay")).toBe(initial);
+    expect(cache.instance("track-1", "delay-1", "reverb")).not.toBe(initial);
+    cache.retain([]);
+    expect(cache.instance("track-1", "delay-1", "delay")).not.toBe(initial);
   });
+
+  test("looks up the first duplicate instance row matching each effect kind", () => {
+    const utilityParams = AUDIO_EFFECT_CONTRACTS.utility.normalizeParams({ version: 1, state: { gainDb: -7 } });
+    const utilityKind: AudioEffectKind = "utility";
+    const delayKind: AudioEffectKind = "delay";
+    const firstRow = {
+      targetId: "track-1",
+      instanceId: "duplicate",
+      kind: utilityKind,
+      params: utilityParams,
+    };
+    const laterRow = {
+      ...firstRow,
+      params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams(),
+    };
+    const differentKindRow = {
+      ...firstRow,
+      kind: delayKind,
+      params: AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams(),
+    };
+    const index = indexFirstAudioEffectRowsByKind([firstRow, laterRow, differentKindRow]);
+
+    expect(index.get("track-1:duplicate:utility")).toBe(firstRow);
+    expect(index.get("track-1:duplicate:delay")).toBe(differentKindRow);
+  });
+});
+
+const loadViewModule = () => import("./create-local-effects-view");
+const utilityRow = (id: string, value = 0): LocalEffectRow<JsonValue> => ({
+  id: `track-1:effect:${id}`, targetId: "track-1", effect: "utility", instanceId: id, params: { value }, index: 0, updatedAt: 1,
+});
+const deferred = <T,>() => {
+  let resolve: (value: T) => void = () => undefined;
+  let reject: (cause: Error) => void = () => undefined;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+};
+const createViewHarness = async (list: (projectId: string) => Promise<LocalEffectRow<JsonValue>[]>, initialProject: string | undefined) => {
+  const { createLocalEffectsViewOwner } = await loadViewModule();
+  let project = initialProject;
+  const publications: Array<{ through: number; ids: string[] } | undefined> = [];
+  const errors: Array<string | undefined> = [];
+  const owner = createLocalEffectsViewOwner({
+    currentProjectId: () => project,
+    list,
+    publish: (view) => publications.push(view && { through: view.through, ids: view.rows.map((row) => row.id) }),
+    fail: (error) => errors.push(error?.message),
+  });
+  return {
+    owner, publications, errors,
+    switchProject: (next: string | undefined) => { project = next; owner.sync(); },
+  };
+};
+
+describe("local effects row sequence and lifetime-fenced view", () => {
+  test("setLocalEffect and setLocalEffectInstance return the row with the change sequence their write produced", async () => {
+    const projectId = `project:local-sequence-${crypto.randomUUID()}`;
+    const before = localChanges.localProjectChangeSequence(projectId);
+    const first = await setLocalEffectInstance(projectId, "track-1", "utility", { value: 1 }, { instanceId: "utility:1", index: 0 });
+    expect(first.row).toMatchObject({ instanceId: "utility:1", params: { value: 1 } });
+    expect(first.sequence).toBe(before + 1);
+    const second = await setLocalEffect(projectId, "track-1", "arp", { value: 2 });
+    expect(second.row).toMatchObject({ effect: "arp" });
+    expect(second.sequence).toBe(before + 2);
+    expect(localChanges.localProjectChangeSequence(projectId)).toBe(before + 2);
+    // The sequence is per project.
+    expect(localChanges.localProjectChangeSequence(`project:other-${crypto.randomUUID()}`)).toBe(0);
+  });
+
+  test("overlapping reloads publish the newest read and drop an older one that finishes late", async () => {
+    const projectId = `project:view-overlap-${crypto.randomUUID()}`;
+    const first = deferred<LocalEffectRow<JsonValue>[]>();
+    const second = deferred<LocalEffectRow<JsonValue>[]>();
+    const reads = [first, second];
+    const harness = await createViewHarness(() => reads.shift()?.promise ?? Promise.resolve([]), projectId);
+    harness.switchProject(projectId);
+    localChanges.notifyLocalProjectChanged(projectId);
+    second.resolve([utilityRow("newer")]);
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    first.resolve([utilityRow("older")]);
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(harness.publications.map((view) => view?.ids)).toEqual([["track-1:effect:newer"]]);
+    harness.owner.dispose();
+  });
+
+  test("an older reload that finishes first is superseded by the newer one in order", async () => {
+    const projectId = `project:view-order-${crypto.randomUUID()}`;
+    const first = deferred<LocalEffectRow<JsonValue>[]>();
+    const second = deferred<LocalEffectRow<JsonValue>[]>();
+    const reads = [first, second];
+    const harness = await createViewHarness(() => reads.shift()?.promise ?? Promise.resolve([]), projectId);
+    harness.switchProject(projectId);
+    localChanges.notifyLocalProjectChanged(projectId);
+    first.resolve([utilityRow("older")]);
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    second.resolve([utilityRow("newer")]);
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    const published = harness.publications.flatMap((view) => view ? [view] : []);
+    expect(published.map((view) => view.ids)).toEqual([["track-1:effect:older"], ["track-1:effect:newer"]]);
+    expect(published[1]!.through).toBeGreaterThan(published[0]!.through);
+    harness.owner.dispose();
+  });
+
+  test("a result from an ended lifetime is dropped, whether the project changed or the view was disposed", async () => {
+    const projectA = `project:view-a-${crypto.randomUUID()}`;
+    const projectB = `project:view-b-${crypto.randomUUID()}`;
+    const pendingA = deferred<LocalEffectRow<JsonValue>[]>();
+    const harness = await createViewHarness(
+      (projectId) => projectId === projectA ? pendingA.promise : Promise.resolve([utilityRow("from-b")]),
+      projectA,
+    );
+    harness.switchProject(projectA);
+    harness.switchProject(projectB);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    pendingA.resolve([utilityRow("from-a")]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(harness.publications.flatMap((view) => view?.ids ?? [])).toEqual(["track-1:effect:from-b"]);
+
+    const pendingB = deferred<LocalEffectRow<JsonValue>[]>();
+    const later = await createViewHarness(() => pendingB.promise, projectB);
+    later.switchProject(projectB);
+    later.owner.dispose();
+    pendingB.resolve([utilityRow("late")]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(later.publications).toEqual([]);
+    harness.owner.dispose();
+  });
+
+  test("a failed query keeps the last good view and reports the error instead of removing rows", async () => {
+    const projectId = `project:view-error-${crypto.randomUUID()}`;
+    let attempt = 0;
+    const harness = await createViewHarness(async () => {
+      attempt += 1;
+      if (attempt === 2) throw new Error("local read failed");
+      return [utilityRow(`read-${attempt}`)];
+    }, projectId);
+    harness.switchProject(projectId);
+    await harness.owner.reload();
+    await expect(harness.owner.reload()).rejects.toThrow("local read failed");
+    expect(harness.publications.map((view) => view?.ids)).toEqual([["track-1:effect:read-1"]]);
+    expect(harness.errors.at(-1)).toBe("local read failed");
+    localChanges.notifyLocalProjectChanged(projectId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(harness.publications.at(-1)?.ids).toEqual(["track-1:effect:read-3"]);
+    expect(harness.errors.at(-1)).toBeUndefined();
+    harness.owner.dispose();
+  });
+
+  test("leaving a local project resets the view", async () => {
+    const projectId = `project:view-reset-${crypto.randomUUID()}`;
+    const harness = await createViewHarness(async () => [utilityRow("kept")], projectId);
+    harness.switchProject(projectId);
+    await harness.owner.reload();
+    harness.switchProject(undefined);
+    expect(harness.publications.map((view) => view?.ids)).toEqual([["track-1:effect:kept"], undefined]);
+    harness.owner.dispose();
+  });
+
+  test("one view serves both consumers: one read per change, and removal and load both reach them", async () => {
+    const { listLocalEffects } = await import("~/lib/local-effects");
+    const projectId = `project:view-shared-${crypto.randomUUID()}`;
+    let reads = 0;
+    const harness = await createViewHarness(async (id) => { reads += 1; return await listLocalEffects(id); }, projectId);
+    const device: Promise<unknown>[] = [];
+    const sync: Promise<unknown>[] = [];
+    harness.owner.watchReloads((load) => device.push(load));
+    harness.owner.watchReloads((load) => sync.push(load));
+    harness.switchProject(projectId);
+    await harness.owner.reload();
+    const written = await setLocalEffectInstance(projectId, "track-1", "utility", { value: 1 }, { instanceId: "utility:1", index: 0 });
+    await harness.owner.reload();
+    await Promise.all([...device, ...sync]);
+    expect(device).toHaveLength(sync.length);
+    expect(device.length).toBeGreaterThan(0);
+    expect(harness.publications.at(-1)?.ids).toEqual(["track-1:effect:utility:1"]);
+    expect(harness.publications.at(-1)!.through).toBeGreaterThanOrEqual(written.sequence);
+    const readsAfterLoad = reads;
+    await deleteLocalEffectInstance(projectId, "track-1", "utility", "utility:1");
+    await harness.owner.reload();
+    expect(harness.publications.at(-1)?.ids).toEqual([]);
+    expect(reads).toBeGreaterThan(readsAfterLoad);
+    // Each change cost one read for both consumers, not one per consumer.
+    expect(reads).toBeLessThanOrEqual(readsAfterLoad + 2);
+    harness.owner.dispose();
+  });
+
+  test("N1 data plane (local): a foreign write that lands before our acknowledgement is ordered after it by sequence", async () => {
+    const { listLocalEffects } = await import("~/lib/local-effects");
+    const projectId = `project:view-n1-${crypto.randomUUID()}`;
+    const harness = await createViewHarness(listLocalEffects, projectId);
+    harness.switchProject(projectId);
+    const ours = setLocalEffectInstance(projectId, "track-1", "utility", { value: 1 }, { instanceId: "utility:1", index: 0 });
+    const foreign = await setLocalEffectInstance(projectId, "track-1", "utility", { value: 7 }, { instanceId: "utility:1", index: 0 });
+    await harness.owner.reload();
+    // Our acknowledgement is delivered only now, after the view already read the foreign row.
+    const acknowledged = await ours;
+    const view = harness.publications.at(-1);
+    expect(acknowledged.sequence).toBeLessThan(foreign.sequence);
+    expect(view!.through).toBeGreaterThanOrEqual(foreign.sequence);
+    expect(view!.through).toBeGreaterThan(acknowledged.sequence);
+    const row = (await listLocalEffects(projectId)).find((entry) => entry.instanceId === "utility:1");
+    expect(row?.params).toEqual({ value: 7 });
+    harness.owner.dispose();
+  });
+});
+
+test("effects publication preserves applied, admitted, and rejected outcomes", async () => {
+  const originalFetch = globalThis.fetch;
+  const publication = (status: number, result: JsonValue) => {
+    globalThis.fetch = Object.assign(
+      async () => new Response(JSON.stringify(result), { status }),
+      { preconnect: originalFetch.preconnect },
+    );
+  };
+  const operation: SharedTimelineOperation = {
+    kind: "effects.setDelayParams",
+    payload: {
+      trackId: "track-1",
+      instanceId: "delay-1",
+      params: AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams(),
+    },
+  };
+  try {
+    publication(200, { status: "applied", effectId: "effect-1", revision: 3 });
+    for (const publish of [
+      (projectId: string) => publishEffectOperation(projectId, "user-1", operation),
+      (projectId: string) => publishEffects(projectId, "user-1", operation),
+    ]) {
+      publication(200, { status: "applied", effectId: "effect-1", revision: 3 });
+      expect(await publish(`publisher-applied-${crypto.randomUUID()}`))
+        .toMatchObject({
+          kind: "applied",
+          result: { status: "applied", effectId: "effect-1", revision: { kind: "ordered", revision: 3 } },
+        });
+
+      publication(503, { status: "unavailable" });
+      expect(await publish(`publisher-admitted-${crypto.randomUUID()}`)).toMatchObject({ kind: "admitted" });
+
+      publication(403, { status: "forbidden" });
+      expect(await publish(`publisher-rejected-${crypto.randomUUID()}`)).toMatchObject({ kind: "rejected" });
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+describe("effect edits the engine did not install", () => {
+  class RefusingEngine extends SpyAudioEngine {
+    readonly outcome: EngineDisposition;
+
+    constructor(outcome: EngineDisposition) {
+      super();
+      this.outcome = outcome;
+    }
+
+    override async setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]): Promise<EngineDisposition> {
+      this.trackFxCalls.push({ trackId, instances });
+      return this.outcome;
+    }
+
+    override async setTrackFxInstance(trackId: string, instance: AudioEffectRuntimeInstance): Promise<EngineDisposition | "not-held"> {
+      this.trackFxCalls.push({ trackId, instances: [instance] });
+      return this.outcome;
+    }
+  }
+
+  for (const [outcome, committed] of [["dropped", 0], ["superseded", 0], ["applied", 1], ["joined", 1]] as const) {
+    test(`a released edit the engine answered ${outcome} is entered in history ${committed} times`, async () => {
+      await createRoot(async (dispose) => {
+        const engine = new RefusingEngine(outcome);
+        const commits: EffectParamsCommitPayload[] = [];
+        const { device } = createDevice(engine, { projectId: `project:portable-outcome-${crypto.randomUUID()}`, onEffectParamsCommitted: (payload) => { commits.push(payload); } });
+        expect(await device.addByKindToTarget("track-1", "delay")).toBe(true);
+        const delay = engine.trackFxCalls[0]?.instances[0];
+        if (!delay) throw new Error("Expected delay");
+        await device.flushPending();
+        engine.trackFxCalls.length = 0;
+        commits.length = 0;
+        device.delay.changeInstance(delay.id, (params) => ({ ...params, feedback: 0.8 }));
+        await device.flushPending();
+
+        expect(engine.trackFxCalls).toHaveLength(1);
+        expect(commits).toHaveLength(committed);
+        dispose();
+      });
+    });
+  }
 });

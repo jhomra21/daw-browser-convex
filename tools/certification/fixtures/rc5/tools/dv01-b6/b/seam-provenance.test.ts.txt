@@ -1,0 +1,9 @@
+import { expect, test } from "bun:test"
+import createHookFixture from "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-hook"
+
+test("B6 mounted hook constructs the production history callback", async () => {
+  const fixture = await createHookFixture(() => {}, 1)
+  try {
+    expect(Reflect.get(globalThis, "b6ProductionSeamConstructions")).toBe(1)
+  } finally { await fixture.cleanup() }
+})

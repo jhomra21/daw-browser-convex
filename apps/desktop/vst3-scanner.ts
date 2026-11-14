@@ -51,7 +51,7 @@ const writeFrame = (body: string) => {
   return frame
 }
 
-export const assertSafeVst3Bundle = async (bundlePath: string, directories: readonly string[]) => {
+const assertSafeVst3Bundle = async (bundlePath: string, directories: readonly string[]) => {
   const canonicalBundle = await canonicalizeVst3ScannerBundlePath(bundlePath)
   const canonicalDirectories = await Promise.all(directories.map((directory) => realpath(directory, "utf8")))
   if (!canonicalDirectories.some((directory) => inside(canonicalBundle, directory))) {

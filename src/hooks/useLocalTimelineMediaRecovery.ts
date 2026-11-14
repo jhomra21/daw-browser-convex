@@ -1,14 +1,17 @@
-import { type Accessor, createEffect, createSignal, onCleanup } from "solid-js";
+import { type Accessor, batch, createEffect, createSignal, onCleanup } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
-import { getAudioSourceMetadata } from "~/lib/audio-source";
 import type { ClipBufferWriter, EnsureClipBuffer } from "~/lib/clip-buffer-cache";
 import { createLocalAsset, deleteLocalAsset } from "~/lib/local-assets";
 import { isLocalId } from "@daw-browser/shared";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { runWithConcurrency } from "~/lib/run-with-concurrency";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
+import { readAudioFileMetadata } from "~/lib/media/audio-file-metadata";
+import { isAbortError } from "~/lib/dom-errors";
+import type { TimelineSnapshot } from "~/lib/timeline-repository/types";
 
 type ProjectionActions = {
+  reconcileLocalSnapshot?: (snapshot: TimelineSnapshot) => void;
   insertLocalClip: (trackId: Track["id"], clip: Clip) => void;
   removeLocalClips: (clipIds: Iterable<string>) => void;
 };
@@ -37,6 +40,8 @@ type Input = {
   removeClip: (input: { trackId: Track["id"]; clipId: string }) => Promise<boolean>;
   projection: ProjectionActions;
   selection: SelectionActions;
+  notify?: (title: string, message: string) => void;
+  onLocalSaveFailed?: (projectId: string, message: string) => void;
 };
 
 const MAX_CONCURRENT_HYDRATION_LOADS = 4;
@@ -50,8 +55,9 @@ const pickReplacementAudioFile = async (): Promise<File | null> => {
         types: [{ description: "Audio", accept: { "audio/*": [] } }],
       });
       return await handle.getFile();
-    } catch {
-      return null;
+    } catch (error) {
+      if (isAbortError(error)) return null;
+      throw error;
     }
   }
 
@@ -64,6 +70,8 @@ const pickReplacementAudioFile = async (): Promise<File | null> => {
   });
 };
 
+const errorMessage = (error: Error) => error.message;
+
 export const useMissingMediaRecovery = (input: Input) => {
   const [localTimelineSnapshot, setLocalTimelineSnapshot] = createSignal<
     Awaited<ReturnType<ReturnType<typeof createLocalTimelineRepository>["loadSnapshot"]>> | null
@@ -71,6 +79,8 @@ export const useMissingMediaRecovery = (input: Input) => {
   const [mountedLocalMediaReady, setMountedLocalMediaReady] = createSignal(false);
 
   let reloadTail = Promise.resolve();
+  let reloadVersion = 0;
+  let mounted = true;
   let hydrationScope = "";
   let hydrationController: AbortController | undefined;
   const hydrateSnapshotMedia = async (
@@ -115,7 +125,11 @@ export const useMissingMediaRecovery = (input: Input) => {
     if (!isCurrent()) return false;
     return pending.every((clip) => input.getClipBuffer(clip.id) !== undefined);
   };
-  onCleanup(() => hydrationController?.abort());
+  onCleanup(() => {
+    mounted = false;
+    reloadVersion++;
+    hydrationController?.abort();
+  });
   const reloadLocalTimeline = async (guard?: {
     projectId?: string;
     mountedProjectGeneration?: number;
@@ -123,8 +137,11 @@ export const useMissingMediaRecovery = (input: Input) => {
   }) => {
     const rid = guard?.projectId ?? input.projectId();
     const generation = guard?.mountedProjectGeneration ?? input.mountedProjectGeneration();
+    const version = ++reloadVersion;
     const isCurrent = () => (
-      !guard?.signal?.aborted
+      mounted
+      && version === reloadVersion
+      && !guard?.signal?.aborted
       && input.projectId() === rid
       && input.mountedProjectGeneration() === generation
     );
@@ -138,7 +155,10 @@ export const useMissingMediaRecovery = (input: Input) => {
       const snapshot = await createLocalTimelineRepository(rid).loadSnapshot();
       if (isCurrent()) {
         setMountedLocalMediaReady(false);
-        setLocalTimelineSnapshot(snapshot.tracks.length > 0 || isLocalProject ? snapshot : null);
+        batch(() => {
+          input.projection.reconcileLocalSnapshot?.(snapshot);
+          setLocalTimelineSnapshot(snapshot.tracks.length > 0 || isLocalProject ? snapshot : null);
+        });
         await Promise.resolve();
         const mediaReady = await hydrateSnapshotMedia(snapshot, {
           projectId: rid,
@@ -181,73 +201,108 @@ export const useMissingMediaRecovery = (input: Input) => {
   });
 
   const removeMissingMediaClip = async (trackId: Track["id"], clipId: string) => {
-    if (!await input.removeClip({ trackId, clipId })) return;
-    input.projection.removeLocalClips([clipId]);
-    if (input.selection.selectedClip()?.clipId === clipId) input.selection.setSelectedClip(null);
-    input.selection.setSelectedClipIds((current) => {
-      const next = new Set(current);
-      next.delete(clipId);
-      return next;
-    });
-    input.selection.selectTrackTarget(trackId, {
-      clearClipSelection: false,
-      clearPrimaryClip: false,
-    });
+    const projectId = input.projectId();
+    const generation = input.mountedProjectGeneration();
+    const isCurrent = () => (
+      input.projectId() === projectId
+      && input.mountedProjectGeneration() === generation
+    );
+    try {
+      if (!await input.removeClip({ trackId, clipId })) return;
+      if (!isCurrent()) return;
+      input.projection.removeLocalClips([clipId]);
+      if (input.selection.selectedClip()?.clipId === clipId) input.selection.setSelectedClip(null);
+      input.selection.setSelectedClipIds((current) => {
+        const next = new Set(current);
+        next.delete(clipId);
+        return next;
+      });
+      input.selection.selectTrackTarget(trackId, {
+        clearClipSelection: false,
+        clearPrimaryClip: false,
+      });
+    } catch (error) {
+      if (!isCurrent()) return;
+      const failure = error instanceof Error ? error : new Error("The media operation could not be completed.");
+      input.notify?.("Media removal failed", errorMessage(failure));
+    }
   };
 
   const replaceMissingMediaClip = async (trackId: Track["id"], clipId: string) => {
     const rid = input.projectId();
     if (!rid || !isLocalId("project", rid)) return;
-    const track = input.renderTracks().find((entry) => entry.id === trackId);
-    const clip = track?.clips.find((entry) => entry.id === clipId);
-    if (!clip) return;
-    const file = await pickReplacementAudioFile();
-    if (!file) return;
-    const decoded = await input.audioEngine.decodeAudioData(await file.arrayBuffer());
-    const source = getAudioSourceMetadata(decoded);
-    const asset = await createLocalAsset({
-      projectId: rid,
-      file,
-      metadata: { ...source, sourceKind: 'upload' },
-    });
-    const sourceKind: Clip["sourceKind"] = "upload";
-    const updated = {
-      ...clip,
-      name: file.name || clip.name,
-      buffer: decoded,
-      mediaStatus: undefined,
-      duration: decoded.duration,
-      sourceAssetKey: asset.id,
-      sourceKind,
-      sourceDurationSec: source.durationSec,
-      sourceSampleRate: source.sampleRate,
-      sourceChannelCount: source.channelCount,
-      sampleUrl: undefined,
-    };
-    const row = await createLocalTimelineRepository(rid).updateClip({
-      clipId,
-      name: updated.name,
-      duration: updated.duration,
-      sourceAssetId: asset.id,
-      sourceAssetKey: asset.id,
-      sourceKind,
-      sourceDurationSec: source.durationSec,
-      sourceSampleRate: source.sampleRate,
-      sourceChannelCount: source.channelCount,
-      sampleUrl: null,
-    });
-    if (!row) {
-      await deleteLocalAsset(rid, asset.id);
-      return;
+    const generation = input.mountedProjectGeneration();
+    const isCurrent = () => input.projectId() === rid && input.mountedProjectGeneration() === generation;
+    let newAssetId: string | undefined;
+    try {
+      const track = input.renderTracks().find((entry) => entry.id === trackId);
+      const clip = track?.clips.find((entry) => entry.id === clipId);
+      if (!clip) return;
+      const file = await pickReplacementAudioFile();
+      if (!file) return;
+      const source = await readAudioFileMetadata(file);
+      const decoded = await input.audioEngine.decodeAudioData(await file.arrayBuffer());
+      if (!isCurrent()) return;
+      const asset = await createLocalAsset({
+        projectId: rid,
+        file,
+        metadata: { ...source, sourceKind: "upload" },
+      });
+      newAssetId = asset.id;
+      if (!isCurrent()) throw new DOMException("The media replacement was canceled.", "AbortError");
+      const sourceKind: Clip["sourceKind"] = "upload";
+      const updated = {
+        ...clip,
+        name: file.name || clip.name,
+        buffer: decoded,
+        mediaStatus: undefined,
+        duration: decoded.duration,
+        sourceAssetKey: asset.id,
+        sourceKind,
+        sourceDurationSec: source.durationSec,
+        sourceSampleRate: source.sampleRate,
+        sourceChannelCount: source.channelCount,
+        sampleUrl: undefined,
+      };
+      const row = await createLocalTimelineRepository(rid).updateClip({
+        clipId,
+        name: updated.name,
+        duration: updated.duration,
+        sourceAssetId: asset.id,
+        sourceAssetKey: asset.id,
+        sourceKind,
+        sourceDurationSec: source.durationSec,
+        sourceSampleRate: source.sampleRate,
+        sourceChannelCount: source.channelCount,
+        sampleUrl: null,
+      });
+      if (!row) throw new Error("The clip could not be updated.");
+      newAssetId = undefined;
+      const activeTrack = input.renderTracks().find((entry) => entry.id === trackId);
+      const activeClip = activeTrack?.clips.find((entry) => entry.id === clipId);
+      if (!isCurrent() || !activeClip) return;
+      input.audioBufferCache.storeBuffer(clipId, decoded);
+      input.projection.removeLocalClips([clipId]);
+      input.projection.insertLocalClip(trackId, updated);
+    } catch (error) {
+      if (newAssetId) {
+        const snapshot = await createLocalTimelineRepository(rid).loadSnapshot().catch(() => null);
+        const referenced = snapshot?.clips.some((entry) =>
+          entry.id === clipId && (entry.sourceAssetId === newAssetId || entry.sourceAssetKey === newAssetId),
+        );
+        if (snapshot && !referenced) await deleteLocalAsset(rid, newAssetId).catch(() => null);
+      }
+      if (isAbortError(error)) return;
+      if (!isCurrent()) return;
+      const failure = error instanceof Error ? error : new Error("The media replacement could not be completed.");
+      const message = errorMessage(failure);
+      if (failure.name === "LocalAssetWriteError" || newAssetId) {
+        input.onLocalSaveFailed?.(rid, message);
+      } else {
+        input.notify?.("Media replacement failed", message);
+      }
     }
-    const activeTrack = input.renderTracks().find((entry) => entry.id === trackId);
-    const activeClip = activeTrack?.clips.find((entry) => entry.id === clipId);
-    if (input.projectId() !== rid || !activeClip) return;
-    input.audioBufferCache.storeBuffer(clipId, decoded);
-    input.projection.removeLocalClips([clipId]);
-    input.projection.insertLocalClip(trackId, updated);
   };
-
   return {
     localTimelineSnapshot,
     mountedLocalMediaReady,

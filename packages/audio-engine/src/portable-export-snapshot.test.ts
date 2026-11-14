@@ -12,16 +12,24 @@ import {
   createDefaultPhaserParams,
   createDefaultReverbParams,
   createDefaultSaturatorParams,
+  createDefaultDrumRackParams,
+  createDefaultGranularParams,
   createDefaultSamplerParams,
   createDefaultSynthParams,
   createDefaultTremoloParams,
   createDefaultUtilityParams,
   type SamplerParams,
   type SamplerZone,
+  type DrumRackParams,
+  type GranularParams,
 } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import { audioCoreContractVersion } from '../../audio-core-contract/src/index'
-import { compilePortableExportSnapshot } from './portable-export-snapshot'
+import {
+  compilePortableExportSnapshot,
+  localizeInstrumentFx,
+  type PortableExportSnapshotInput,
+} from './portable-export-snapshot'
 import type { ExportFx } from './export-types'
 import type { PortablePreparedStretchAsset } from './portable-stretch-preparation'
 
@@ -166,7 +174,7 @@ test('localizes bounded sampled instrument regions for portable compilation', ()
       },
     },
   }
-  const result = compilePortableExportSnapshot({
+  const input: PortableExportSnapshotInput = {
     tracks: [track([clip({ midi: { wave: 'sine', notes: [] } })], { kind: 'instrument' })],
     bpm: 120,
     range: { mode: 'custom', startSec: 0, endSec: 1 },
@@ -176,15 +184,286 @@ test('localizes bounded sampled instrument regions for portable compilation', ()
     firstSequence: 1,
     fx,
     allowInstruments: true,
+  }
+  const result = compilePortableExportSnapshot(input)
+  const nativeMetadata = compilePortableExportSnapshot({
+    ...input,
+    instrumentRegionMode: 'metadata',
+    capabilityTarget: 'native',
   })
 
   if (!result.supported) throw new Error(result.reasons.join('\n'))
+  if (!nativeMetadata.supported) throw new Error(nativeMetadata.reasons.join('\n'))
+  const portablePcm = result.assets[0]?.pcm
+  const portablePlane = portablePcm?.planes[0]
+  const portableTransferable = result.assets[0]?.transferables[0]
+  if (!portablePcm || !portablePlane || !portableTransferable) {
+    throw new Error('Expected portable PCM and transferable plane.')
+  }
   expect(result.assets).toMatchObject([{
     asset: { frameCount: 24_000, sampleRateHz: 48_000, channelCount: 1 },
+    pcm: { frameCount: 24_000, planes: [new Float32Array(24_000)] },
   }])
+  expect(portableTransferable === portablePlane.buffer).toBe(true)
+  expect(nativeMetadata.assets).toMatchObject([{
+    asset: { frameCount: 24_000, sampleRateHz: 48_000, channelCount: 1 },
+    transferables: [],
+  }])
+  expect(nativeMetadata.assets[0]).not.toHaveProperty('pcm')
+  expect(nativeMetadata.instrumentRegionSources).toHaveLength(1)
+  expect(nativeMetadata.instrumentRegionSources?.[0]?.buffer).toBe(
+    fx.trackFx?.['track-1']?.samplerBuffers?.get('zone-1')?.buffer,
+  )
   expect(result.graph.nodes.find((node) => node.id === 'track-1')?.instrument).toMatchObject({
     kind: 'sampler',
-    zones: [{ startFrame: 0, endFrame: 24_000 }],
+    zones: [{ startFrame: 0, endFrame: 24_000, loopStartFrame: 0, loopEndFrame: 0 }],
+  })
+})
+
+test('collects localized drum-rack and granular metadata while preserving portable PCM', () => {
+  const sample: SamplerZone['sample'] = {
+    assetKey: 'instrument-source',
+    url: 'https://samples.example/source.wav',
+    sourceKind: 'url',
+    source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 },
+  }
+  const firstBuffer = new TestAudioBuffer([new Float32Array(24_000).fill(0.2)], 48_000)
+  const secondBuffer = new TestAudioBuffer([new Float32Array(24_000).fill(-0.8)], 48_000)
+  const drumParams: DrumRackParams = {
+    ...createDefaultDrumRackParams(),
+    pads: createDefaultDrumRackParams().pads.map((pad, index) => index < 3
+      ? { ...pad, sample }
+      : pad),
+  }
+  const granularParams: GranularParams = {
+    ...createDefaultGranularParams(),
+    zone: {
+      id: 'grain-zone',
+      sample,
+      keyLow: 0,
+      keyHigh: 127,
+      velocityLow: 1,
+      velocityHigh: 127,
+      rootNote: 60,
+      tuneCents: 0,
+      gain: 1,
+      pan: 0,
+      roundRobinGroup: 0,
+      roundRobinIndex: 0,
+      playbackMode: 'forward-loop',
+      startSec: 0.25,
+      endSec: 0.75,
+      loopStartSec: 0.375,
+      loopEndSec: 0.625,
+      crossfadeSec: 0,
+      chokeGroup: 0,
+    },
+  }
+  const drumFx: ExportFx = {
+    masterFxInstances: [],
+    trackFx: {
+      'track-1': {
+        instances: [],
+        instrument: { kind: 'drum-rack', instanceId: 'drums-1', params: drumParams },
+        drumRackBuffers: new Map([
+          ['pad-36', { buffer: firstBuffer, sourceStartFrame: 0 }],
+          ['pad-37', { buffer: secondBuffer, sourceStartFrame: 24_000 }],
+          ['pad-38', { buffer: firstBuffer, sourceStartFrame: 0 }],
+        ]),
+      },
+    },
+  }
+  const drumInput: PortableExportSnapshotInput = {
+    tracks: [track([clip({ midi: { wave: 'sine', notes: [] } })], { kind: 'instrument' })],
+    bpm: 120,
+    range: { mode: 'custom', startSec: 0, endSec: 1 },
+    sampleRateHz: 48_000,
+    revision: 1,
+    epoch: 1,
+    firstSequence: 1,
+    fx: drumFx,
+    allowInstruments: true,
+  }
+  const drumPortable = compilePortableExportSnapshot(drumInput)
+  const drumMetadata = compilePortableExportSnapshot({
+    ...drumInput,
+    instrumentRegionMode: 'metadata',
+    capabilityTarget: 'native',
+  })
+  if (!drumPortable.supported || !drumMetadata.supported) {
+    throw new Error([...(!drumPortable.supported ? drumPortable.reasons : []), ...(!drumMetadata.supported ? drumMetadata.reasons : [])].join('\n'))
+  }
+  expect(drumMetadata.instrumentRegionSources?.map(({ sourceAssetKey }) => sourceAssetKey)).toEqual(
+    drumMetadata.assets.map(({ sourceAssetKey }) => sourceAssetKey ?? ''),
+  )
+  expect(drumMetadata.instrumentRegionSources?.map(({ buffer }) => buffer.getChannelData(0)[0])).toEqual([
+    new Float32Array([0.2])[0],
+    new Float32Array([-0.8])[0],
+  ])
+  expect(drumMetadata.assets.map(({ asset }) => asset.frameCount)).toEqual([24_000, 24_000])
+  expect(drumMetadata.assets.every(({ pcm, transferables }) => pcm === undefined && transferables.length === 0)).toBe(true)
+  expect(drumPortable.assets[0]?.pcm?.planes[0]?.[0]).toBe(new Float32Array([0.2])[0])
+  expect(drumPortable.assets[1]?.pcm?.planes[0]?.[0]).toBe(new Float32Array([-0.8])[0])
+  expect(drumPortable.assets.every(({ transferables, pcm }) => transferables[0] === pcm?.planes[0]?.buffer)).toBe(true)
+
+  const granularBuffer = new TestAudioBuffer([new Float32Array(24_000).fill(0.4)], 48_000)
+  const granularInput: PortableExportSnapshotInput = {
+    ...drumInput,
+    fx: {
+      masterFxInstances: [],
+      trackFx: {
+        'track-1': {
+          instances: [],
+          instrument: { kind: 'granular', instanceId: 'granular-1', params: granularParams },
+          granularBuffer: { assetKey: sample.assetKey, buffer: granularBuffer, sourceStartFrame: 12_000 },
+        },
+      },
+    },
+  }
+  const granular = compilePortableExportSnapshot({
+    ...granularInput,
+    instrumentRegionMode: 'metadata',
+    capabilityTarget: 'native',
+  })
+  if (!granular.supported) throw new Error(granular.reasons.join('\n'))
+  expect(granular.instrumentRegionSources?.map(({ sourceAssetKey }) => sourceAssetKey)).toEqual([
+    granular.assets[0]?.sourceAssetKey ?? '',
+  ])
+  expect(granular.instrumentRegionSources?.[0]?.buffer).toBe(granularBuffer)
+  const granularPortable = compilePortableExportSnapshot(granularInput)
+  if (!granularPortable.supported) throw new Error(granularPortable.reasons.join('\n'))
+  const granularPcm = granularPortable.assets[0]?.pcm
+  const granularPlane = granularPcm?.planes[0]
+  const granularTransferable = granularPortable.assets[0]?.transferables[0]
+  if (!granularPcm || !granularPlane || !granularTransferable) {
+    throw new Error('Expected granular portable PCM and transferable plane.')
+  }
+  expect(granularPlane[0]).toBe(new Float32Array([0.4])[0])
+  expect(granularTransferable === granularPlane.buffer).toBe(true)
+  expect(granular.graph.nodes.find((node) => node.id === 'track-1')?.instrument).toMatchObject({
+    kind: 'granular',
+    assetId: granular.assets[0]?.asset.assetId,
+  })
+})
+
+test('rejects metadata-mode instrument dimensions conflicting with a registered asset', () => {
+  const sample: SamplerZone['sample'] = {
+    assetKey: 'localized-key',
+    url: 'https://samples.example/source.wav',
+    sourceKind: 'url',
+    source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 },
+  }
+  const params: SamplerParams = {
+    ...createDefaultSamplerParams(),
+    zones: [{
+      id: 'zone-conflict',
+      sample,
+      keyLow: 0,
+      keyHigh: 127,
+      velocityLow: 1,
+      velocityHigh: 127,
+      rootNote: 60,
+      tuneCents: 0,
+      gain: 1,
+      pan: 0,
+      roundRobinGroup: 0,
+      roundRobinIndex: 0,
+      playbackMode: 'one-shot',
+      startSec: 0,
+      endSec: 1,
+      crossfadeSec: 0,
+      chokeGroup: 0,
+    }],
+  }
+  const fx: ExportFx = {
+    masterFxInstances: [],
+    trackFx: {
+      'track-1': {
+        instances: [],
+        instrument: { kind: 'sampler', instanceId: 'sampler-1', params },
+        samplerBuffers: new Map([['zone-conflict', {
+          buffer: new TestAudioBuffer([floats([0.25, -0.25, 0.75, -0.75])], 48_000),
+          sourceStartFrame: 0,
+        }]]),
+      },
+    },
+  }
+  const localizedFx = localizeInstrumentFx(fx)
+  const localizedKey = localizedFx?.trackFx?.['track-1']?.instrument?.kind === 'sampler'
+    ? localizedFx.trackFx['track-1'].instrument.params.zones[0]?.sample.assetKey
+    : undefined
+  if (!localizedKey) throw new Error('Expected localized sampler region key.')
+  const result = compilePortableExportSnapshot({
+    tracks: [track([clip({
+      sourceAssetKey: localizedKey,
+      buffer: new TestAudioBuffer([new Float32Array(100)], 48_000),
+    })], { kind: 'instrument' })],
+    bpm: 120,
+    range: { mode: 'custom', startSec: 0, endSec: 1 },
+    sampleRateHz: 48_000,
+    revision: 1,
+    epoch: 1,
+    firstSequence: 1,
+    fx,
+    metadataSourceAssets: [{
+      sourceAssetKey: localizedKey,
+      frameCount: 100,
+      sampleRateHz: 48_000,
+      channelCount: 1,
+    }],
+    allowInstruments: true,
+    instrumentRegionMode: 'metadata',
+    capabilityTarget: 'native',
+  })
+  expect(result).toMatchObject({
+    supported: false,
+    reasons: [`Instrument region "${localizedKey}" resolves inconsistently.`],
+  })
+
+  const sharedParams: SamplerParams = {
+    ...params,
+    zones: [
+      params.zones[0],
+      { ...params.zones[0], id: 'zone-shared' },
+    ].filter((zone): zone is SamplerZone => zone !== undefined),
+  }
+  const shared = compilePortableExportSnapshot({
+    tracks: [track([clip({ midi: { wave: 'sine', notes: [] } })], { kind: 'instrument' })],
+    bpm: 120,
+    range: { mode: 'custom', startSec: 0, endSec: 1 },
+    sampleRateHz: 48_000,
+    revision: 1,
+    epoch: 1,
+    firstSequence: 1,
+    fx: {
+      masterFxInstances: [],
+      trackFx: {
+        'track-1': {
+          instances: [],
+          instrument: { kind: 'sampler', instanceId: 'sampler-shared', params: sharedParams },
+          samplerBuffers: new Map([
+            ['zone-conflict', {
+              buffer: new TestAudioBuffer([floats([0.1, 0.2, 0.3, 0.4])], 48_000),
+              sourceStartFrame: 0,
+            }],
+            ['zone-shared', {
+              buffer: new TestAudioBuffer([
+                floats([0.5, 0.6, 0.7, 0.8]),
+                floats([-0.5, -0.6, -0.7, -0.8]),
+              ], 48_000),
+              sourceStartFrame: 0,
+            }],
+          ]),
+        },
+      },
+    },
+    allowInstruments: true,
+    instrumentRegionMode: 'metadata',
+    capabilityTarget: 'native',
+  })
+  expect(shared).toMatchObject({
+    supported: false,
+    reasons: [expect.stringMatching(/^Instrument region ".+" resolves inconsistently\.$/)],
   })
 })
 

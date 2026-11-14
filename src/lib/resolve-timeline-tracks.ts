@@ -39,10 +39,11 @@ export type TimelineViewTrackLike<TTrackId extends string = Track['id']> = {
 
 export type TimelineViewLike<TTrackId extends string = Track['id']> = {
   tracks: Array<TimelineViewTrackLike<TTrackId>>
-  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; color?: string; leftPadSec?: number; bufferOffsetSec?: number; midiOffsetBeats?: number; audioWarp?: Clip['audioWarp']; gain?: number; fades?: Partial<ClipFades> }>
+  clips: Array<{ _id: string; trackId: TTrackId; startSec: number; duration: number; fades?: Partial<ClipFades>; sourceKind?: string } & Partial<Omit<Clip, 'fades' | 'sourceKind'>>>
 }
 
 export type ClipTimelinePatch<TTrackId extends string = Track['id']> = {
+  color?: string
   trackId?: TTrackId
   startSec?: number
   duration?: number
@@ -331,6 +332,7 @@ export function isClipPatchReflected<TTrackId extends string>(
   patch: ClipTimelinePatch<TTrackId>,
   serverClip: ServerTimelineIndex<TTrackId>['clipRowsById'] extends Map<string, infer TValue> ? TValue : never,
 ): boolean {
+  if (patch.color !== undefined && patch.color !== serverClip.color) return false
   if (patch.trackId !== undefined && patch.trackId !== serverClip.trackId) return false
   if (patch.startSec !== undefined && !nearlyEqual(patch.startSec, serverClip.startSec)) return false
   if (patch.duration !== undefined && !nearlyEqual(patch.duration, serverClip.duration)) return false
@@ -342,6 +344,29 @@ export function isClipPatchReflected<TTrackId extends string>(
   if (patch.midiOffsetBeats !== undefined && !nearlyEqual(patch.midiOffsetBeats, serverClip.midiOffsetBeats)) return false
   return true
 }
+
+// Exhaustive against the persisted Clip shape: a newly added domain field must
+// choose its normalization here rather than silently disappearing from full echoes.
+export const normalizedPersistedClip = (clip: Partial<Omit<Clip, 'sourceKind'>> & { duration: number; sourceKind?: string }) => ({
+  historyRef: clip.historyRef ?? clip.id,
+  name: clip.name ?? 'Clip',
+  color: clip.color ?? getDefaultClipColor({ sourceKind: sanitizeAudioSourceKind(clip.sourceKind), midi: clip.midi }),
+  startSec: clip.startSec,
+  duration: clip.duration,
+  sourceAssetKey: clip.sourceAssetKey,
+  sourceKind: sanitizeAudioSourceKind(clip.sourceKind),
+  sourceDurationSec: clip.sourceDurationSec,
+  sourceSampleRate: clip.sourceSampleRate,
+  sourceChannelCount: clip.sourceChannelCount,
+  sampleUrl: clip.sampleUrl,
+  leftPadSec: clip.leftPadSec ?? 0,
+  bufferOffsetSec: clip.bufferOffsetSec ?? 0,
+  midiOffsetBeats: clip.midiOffsetBeats ?? 0,
+  audioWarp: normalizeAudioWarp(clip.audioWarp),
+  gain: clip.gain ?? 1,
+  fades: normalizeClipFades(clip.fades, clip.duration),
+  midi: clip.midi ? normalizeLegacyMidiClip(clip.midi) : undefined,
+}) satisfies Record<keyof Omit<Clip, 'id' | 'mediaStatus' | 'waveformAssetKey'>, Clip[keyof Clip]>
 
 export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): RuntimeTrack[] {
   const projectedTracks: RuntimeTrack[] = []

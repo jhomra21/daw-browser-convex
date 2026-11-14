@@ -126,39 +126,19 @@ export const sliceNativeProcessorAutomationEvents = (
   return sortNativeProcessorAutomationEvents(sliced)
 }
 
-export const nativeProcessorAutomationEventsAtCallbackBoundaries = (
+// The host expands a linear segment into values per callback block and never writes its end frame, so a segment that ends
+// inside the window gets a set that lands on its end value.
+export const nativeProcessorAutomationEventsWithRampEnds = (
   events: readonly NativeProcessorAutomationEvent[],
-  maximumFramesPerBlock: number,
-  callbackStartFrame: number,
   windowEndFrame: number,
 ): NativeProcessorAutomationEvent[] => {
-  if (!Number.isSafeInteger(maximumFramesPerBlock) || maximumFramesPerBlock <= 0) {
-    throw new Error("Native processor automation callback block size is invalid.")
-  }
-  if (!Number.isSafeInteger(callbackStartFrame) || callbackStartFrame < 0
-    || !Number.isSafeInteger(windowEndFrame) || windowEndFrame <= callbackStartFrame) {
+  if (!Number.isSafeInteger(windowEndFrame) || windowEndFrame <= 0) {
     throw new Error("Native processor automation window end is invalid.")
   }
   const projected: NativeProcessorAutomationEvent[] = []
   for (const event of events) {
-    if (event.kind === "set") {
-      projected.push(event)
-      continue
-    }
-    let frame = event.frame
-    while (frame < event.endFrame) {
-      projected.push({
-        kind: "set",
-        processorInstanceId: event.processorInstanceId,
-        parameterTarget: event.parameterTarget,
-        frame,
-        value: linearValueAtFrame(event, frame),
-      })
-      const nextBoundary = callbackStartFrame
-        + (Math.floor((frame - callbackStartFrame) / maximumFramesPerBlock) + 1) * maximumFramesPerBlock
-      frame = Math.min(event.endFrame, nextBoundary)
-    }
-    if (event.endFrame < windowEndFrame) {
+    projected.push(event)
+    if (event.kind === "linear" && event.endFrame < windowEndFrame) {
       projected.push({
         kind: "set",
         processorInstanceId: event.processorInstanceId,

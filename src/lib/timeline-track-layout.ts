@@ -1,4 +1,3 @@
-import { collectTrackDescendantIds } from '@daw-browser/shared'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { clientYToTimelineTrackY, COLLAPSED_LANE_HEIGHT, DEFAULT_AUTOMATION_LANE_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
 
@@ -114,26 +113,85 @@ export const buildGroupClipOverview = (
   groupId: Track['id'],
   tracks: readonly Track[],
 ): GroupClipOverviewSegment[] => {
-  const descendantIds = collectTrackDescendantIds(tracks, groupId)
-  const segments = tracks.filter((track) => descendantIds.has(track.id)).flatMap((track) => (
-    track.clips.map((clip) => ({
-      startSec: clip.startSec,
-      endSec: clip.startSec + clip.duration,
-      color: clip.color,
-    }))
-  ))
+  return buildGroupClipOverviews(tracks, new Set([groupId])).get(groupId) ?? []
+}
 
-  segments.sort((left, right) => left.startSec - right.startSec)
-  const merged: GroupClipOverviewSegment[] = []
-  for (const segment of segments) {
-    const last = merged[merged.length - 1]
-    if (last && last.color === segment.color && segment.startSec <= last.endSec) {
-      last.endSec = Math.max(last.endSec, segment.endSec)
+export const buildGroupClipOverviews = (
+  tracks: readonly Track[],
+  requestedGroupIds: ReadonlySet<Track['id']>,
+  hierarchyByTrackId?: ReadonlyMap<string, string>,
+): Map<Track['id'], GroupClipOverviewSegment[]> => {
+  if (requestedGroupIds.size === 0) return new Map()
+
+  const parentByTrackId = hierarchyByTrackId ?? (() => {
+    const parents = new Map<string, string>()
+    for (const track of tracks) {
+      if (track.groupId) parents.set(track.id, track.groupId)
+    }
+    return parents
+  })()
+  const segmentsByGroupId = new Map<Track['id'], GroupClipOverviewSegment[]>()
+  const tracksById = new Map<Track['id'], Track>()
+  const childrenByGroupId = new Map<Track['id'], Track[]>()
+  const roots: Track[] = []
+  for (const track of tracks) {
+    tracksById.set(track.id, track)
+    if (requestedGroupIds.has(track.id)) segmentsByGroupId.set(track.id, [])
+  }
+  for (const track of tracks) {
+    const parentId = parentByTrackId.get(track.id)
+    if (parentId && tracksById.has(parentId)) {
+      const children = childrenByGroupId.get(parentId) ?? []
+      children.push(track)
+      childrenByGroupId.set(parentId, children)
     } else {
-      merged.push({ ...segment })
+      roots.push(track)
     }
   }
-  return merged
+  const visitedTrackIds = new Set<Track['id']>()
+  const stack: { track: Track; requestedAncestors: Track['id'][] }[] = []
+  for (const root of [...roots, ...tracks]) {
+    if (visitedTrackIds.has(root.id)) continue
+    stack.push({ track: root, requestedAncestors: [] })
+    while (stack.length > 0) {
+      const current = stack.pop()
+      if (!current || visitedTrackIds.has(current.track.id)) continue
+      visitedTrackIds.add(current.track.id)
+      const requestedAncestors = requestedGroupIds.has(current.track.id)
+        ? [...current.requestedAncestors, current.track.id]
+        : current.requestedAncestors
+      for (const groupId of requestedAncestors) {
+        const segments = segmentsByGroupId.get(groupId)
+        if (!segments) continue
+        for (const clip of current.track.clips) {
+          segments.push({
+            startSec: clip.startSec,
+            endSec: clip.startSec + clip.duration,
+            color: clip.color,
+          })
+        }
+      }
+      for (const child of childrenByGroupId.get(current.track.id) ?? []) {
+        stack.push({ track: child, requestedAncestors })
+      }
+    }
+  }
+
+  const overviews = new Map<Track['id'], GroupClipOverviewSegment[]>()
+  for (const [groupId, segments] of segmentsByGroupId) {
+    segments.sort((left, right) => left.startSec - right.startSec)
+    const merged: GroupClipOverviewSegment[] = []
+    for (const segment of segments) {
+      const last = merged[merged.length - 1]
+      if (last && last.color === segment.color && segment.startSec <= last.endSec) {
+        last.endSec = Math.max(last.endSec, segment.endSec)
+      } else {
+        merged.push({ ...segment })
+      }
+    }
+    overviews.set(groupId, merged)
+  }
+  return overviews
 }
 
 type TrackLayoutRowOptions = {

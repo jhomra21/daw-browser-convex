@@ -27,6 +27,7 @@ export type ApplicationMenuTemplate = {
   visible?: boolean
   checked?: boolean
   accelerator?: string
+  registerAccelerator?: boolean
   submenu?: ApplicationMenuTemplate[]
   click?: () => void
 }
@@ -67,6 +68,10 @@ export const applicationMenuItemIds = {
   logout: "daw-menu-logout",
   undo: "daw-menu-undo",
   redo: "daw-menu-redo",
+  cut: "daw-menu-cut",
+  copy: "daw-menu-copy",
+  paste: "daw-menu-paste",
+  selectAll: "daw-menu-select-all",
   duplicate: "daw-menu-duplicate",
   delete: "daw-menu-delete",
   keyboardShortcuts: "daw-menu-keyboard-shortcuts",
@@ -76,6 +81,7 @@ export const applicationMenuItemIds = {
   metronome: "daw-menu-metronome",
   loop: "daw-menu-loop",
   grid: "daw-menu-grid",
+  follow: "daw-menu-follow",
   zoomIn: "daw-menu-zoom-in",
   zoomOut: "daw-menu-zoom-out",
   zoomToFit: "daw-menu-zoom-to-fit",
@@ -101,10 +107,20 @@ const menuIds = applicationMenuItemIds
 const initialState: DesktopApplicationMenuState = {
   ready: false,
   canExportArchive: false,
+  canUndo: false,
+  canRedo: false,
+  canCut: false,
+  canCopy: false,
+  canPaste: false,
+  canSelectAll: false,
+  canDuplicateSelection: false,
+  canDeleteSelection: false,
+  editableFocused: false,
   signedIn: false,
   metronomeEnabled: false,
   loopEnabled: false,
   gridEnabled: false,
+  followEnabled: false,
   syncMix: false,
   gridDenominator: 4,
   extensionContributions: [],
@@ -137,10 +153,10 @@ export const createApplicationMenuTemplate = (
       commandItem(menuIds.openSamplesDashboard, "Open Samples Dashboard", "open-samples-dashboard", sendCommand),
       commandItem(menuIds.openExportDashboard, "Open Export Dashboard", "open-export-dashboard", sendCommand),
       separator(),
-      commandItem(menuIds.importAudio, "Import Audio Files...", "import-audio", sendCommand),
-      commandItem(menuIds.importArchive, "Import .dawproject...", "import-archive", sendCommand),
-      commandItem(menuIds.exportArchive, "Export .dawproject...", "export-archive", sendCommand),
-      commandItem(menuIds.exportMixdown, "Export Mixdown...", "export-mixdown", sendCommand),
+      commandItem(menuIds.importAudio, "Import Audio Files…", "import-audio", sendCommand),
+      commandItem(menuIds.importArchive, "Import .dawproject…", "import-archive", sendCommand),
+      commandItem(menuIds.exportArchive, "Export .dawproject…", "export-archive", sendCommand),
+      commandItem(menuIds.exportMixdown, "Export Mixdown…", "export-mixdown", sendCommand),
       separator(),
       commandItem(menuIds.signIn, "Sign In", "sign-in", sendCommand),
       commandItem(menuIds.account, "Account", "open-account-dashboard", sendCommand),
@@ -150,14 +166,27 @@ export const createApplicationMenuTemplate = (
     ],
   }
 
+  // macOS: the menu key equivalent owns the key (it fires before the renderer sees it), and the renderer
+  // routes text-field undo/redo itself. Elsewhere the renderer owns the key and the menu only displays it.
+  const menuShortcut = (accelerator: string, options: { macOwnsKey: boolean }): ApplicationMenuTemplate => {
+    if (platform !== "darwin") return { accelerator, registerAccelerator: false }
+    return options.macOwnsKey ? { accelerator } : {}
+  }
+
   const editMenu: ApplicationMenuTemplate = {
     label: "Edit",
     submenu: [
-      commandItem(menuIds.undo, "Undo", "undo", sendCommand),
-      commandItem(menuIds.redo, "Redo", "redo", sendCommand),
+      { ...commandItem(menuIds.undo, "Undo", "undo", sendCommand), ...menuShortcut("CmdOrCtrl+Z", { macOwnsKey: true }) },
+      { ...commandItem(menuIds.redo, "Redo", "redo", sendCommand), ...menuShortcut("CmdOrCtrl+Shift+Z", { macOwnsKey: true }) },
       separator(),
-      commandItem(menuIds.duplicate, "Duplicate", "duplicate", sendCommand),
-      commandItem(menuIds.delete, "Delete", "delete", sendCommand),
+      // Cut has no timeline action, so its click is set in applyState and always targets the focused field.
+      { id: menuIds.cut, label: "Cut", ...menuShortcut("CmdOrCtrl+X", { macOwnsKey: true }) },
+      { ...commandItem(menuIds.copy, "Copy", "copy", sendCommand), ...menuShortcut("CmdOrCtrl+C", { macOwnsKey: true }) },
+      { ...commandItem(menuIds.paste, "Paste", "paste", sendCommand), ...menuShortcut("CmdOrCtrl+V", { macOwnsKey: true }) },
+      { ...commandItem(menuIds.selectAll, "Select All", "select-all", sendCommand), ...menuShortcut("CmdOrCtrl+A", { macOwnsKey: true }) },
+      separator(),
+      { ...commandItem(menuIds.duplicate, "Duplicate", "duplicate", sendCommand), ...menuShortcut("CmdOrCtrl+D", { macOwnsKey: true }) },
+      { ...commandItem(menuIds.delete, "Delete", "delete", sendCommand), ...menuShortcut("Delete", { macOwnsKey: false }) },
       separator(),
       commandItem(menuIds.keyboardShortcuts, "Keyboard Shortcuts", "keyboard-shortcuts", sendCommand),
     ],
@@ -173,6 +202,11 @@ export const createApplicationMenuTemplate = (
       { ...commandItem(menuIds.metronome, "Metronome", "toggle-metronome", sendCommand), type: "checkbox" },
       { ...commandItem(menuIds.loop, "Loop", "toggle-loop", sendCommand), type: "checkbox" },
       { ...commandItem(menuIds.grid, "Grid", "toggle-grid", sendCommand), type: "checkbox" },
+      {
+        ...commandItem(menuIds.follow, "Follow", "toggle-follow", sendCommand),
+        type: "checkbox",
+        ...menuShortcut(platform === "darwin" ? "Alt+Shift+F" : "CmdOrCtrl+Shift+F", { macOwnsKey: true }),
+      },
       separator(),
       commandItem(menuIds.zoomIn, "Zoom In", "zoom-in", sendCommand),
       commandItem(menuIds.zoomOut, "Zoom Out", "zoom-out", sendCommand),
@@ -276,10 +310,6 @@ const statefulIds = [
   menuIds.importAudio,
   menuIds.importArchive,
   menuIds.exportMixdown,
-  menuIds.undo,
-  menuIds.redo,
-  menuIds.duplicate,
-  menuIds.delete,
   menuIds.keyboardShortcuts,
   menuIds.assetsBrowser,
   menuIds.effectsBrowser,
@@ -287,6 +317,7 @@ const statefulIds = [
   menuIds.metronome,
   menuIds.loop,
   menuIds.grid,
+  menuIds.follow,
   menuIds.zoomIn,
   menuIds.zoomOut,
   menuIds.zoomToFit,
@@ -300,6 +331,25 @@ const statefulIds = [
   menuIds.addInstrumentTrack,
 ] as const
 
+type EditingWebContents = {
+  cut: () => void
+  copy: () => void
+  paste: () => void
+  selectAll: () => void
+}
+
+// Electron types the click window as BaseWindow; the focused BrowserWindow carries webContents at runtime.
+const editingClick = (
+  state: DesktopApplicationMenuState,
+  sendCommand: (command: DesktopApplicationMenuMessage) => void,
+  native: keyof EditingWebContents,
+  command: DesktopApplicationMenuMessage | null,
+) => (_menuItem: ApplicationMenuItem, focusedWindow: { webContents?: EditingWebContents } | undefined) => {
+  // A focused field gets the native editing command from the page, like Electron's role items.
+  if (state.editableFocused || command === null) focusedWindow?.webContents?.[native]()
+  else sendCommand(command)
+}
+
 const applyState = (
   menu: ApplicationMenu,
   state: DesktopApplicationMenuState,
@@ -311,6 +361,28 @@ const applyState = (
   }
   const archive = menu.getMenuItemById(menuIds.exportArchive)
   if (archive) archive.enabled = state.ready && state.canExportArchive
+  const availability: ReadonlyArray<readonly [string, boolean]> = [
+    [menuIds.undo, state.canUndo],
+    [menuIds.redo, state.canRedo],
+    [menuIds.duplicate, state.canDuplicateSelection],
+    [menuIds.delete, state.canDeleteSelection],
+  ]
+  for (const [id, available] of availability) {
+    const item = menu.getMenuItemById(id)
+    if (item) item.enabled = state.ready && available
+  }
+  const editing: ReadonlyArray<readonly [string, boolean, keyof EditingWebContents, DesktopApplicationMenuMessage | null]> = [
+    [menuIds.cut, state.canCut, "cut", null],
+    [menuIds.copy, state.canCopy, "copy", "copy"],
+    [menuIds.paste, state.canPaste, "paste", "paste"],
+    [menuIds.selectAll, state.canSelectAll, "selectAll", "select-all"],
+  ]
+  for (const [id, available, native, command] of editing) {
+    const item = menu.getMenuItemById(id)
+    if (!item) continue
+    item.enabled = state.ready && available
+    item.click = editingClick(state, sendCommand, native, command)
+  }
   const signIn = menu.getMenuItemById(menuIds.signIn)
   if (signIn) {
     signIn.enabled = state.ready
@@ -332,6 +404,8 @@ const applyState = (
   if (loop) loop.checked = state.loopEnabled
   const grid = menu.getMenuItemById(menuIds.grid)
   if (grid) grid.checked = state.gridEnabled
+  const follow = menu.getMenuItemById(menuIds.follow)
+  if (follow) follow.checked = state.followEnabled
   const syncMix = menu.getMenuItemById(menuIds.syncMix)
   if (syncMix) {
     syncMix.enabled = state.ready

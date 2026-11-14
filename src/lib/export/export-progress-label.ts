@@ -27,7 +27,22 @@ export const formatExportProgressLabel = (
   if (progress?.currentStemName) {
     return `${job.name}: ${progress.currentStemName}${formatLabel}${formatCount} (${progress.completedStems ?? 0}/${progress.totalStems ?? 0})`
   }
-  if (progress?.phase === 'rendering') return `${job.name}: Rendering...`
+  if (progress?.phase === 'rendering') {
+    const renderedFrames = progress.renderedFrames
+    const totalRenderFrames = progress.totalRenderFrames
+    if (
+      renderedFrames !== undefined
+      && totalRenderFrames !== undefined
+      && Number.isFinite(renderedFrames)
+      && Number.isFinite(totalRenderFrames)
+      && renderedFrames >= 0
+      && totalRenderFrames > 0
+    ) {
+      const percentage = Math.max(0, Math.min(100, Math.round(renderedFrames / totalRenderFrames * 100)))
+      return `${job.name}: Rendering ${percentage}%`
+    }
+    return `${job.name}: Rendering...`
+  }
   if (progress?.phase === 'saving') return `${job.name}: Saving${formatLabel}${formatCount}...`
   if (progress?.phase === 'encoding' && progress.sizeBytes !== undefined) {
     return `${job.name}: Encoding${formatLabel}${formatCount}... ${formatBytes(progress.sizeBytes)} written`

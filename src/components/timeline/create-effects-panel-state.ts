@@ -4,19 +4,30 @@ import {
   onCleanup,
   type Accessor,
 } from "solid-js";
+import type { ParameterGestureHandle } from "~/components/timeline/parameter-gesture-owner";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
-import { createLocalEffectRows } from "~/components/timeline/create-local-effect-rows";
+import { createLocalEffectsView } from "~/components/timeline/create-local-effects-view";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
 import type { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
-import type { createSamplerBufferSync, GranularLoadStatus, SamplerLoadStatus } from "~/lib/sampler-buffer-sync";
+import type { NativeInstrumentPreparation } from "~/lib/desktop/native-instrument-budget-policy";
+import type { NativeBuiltInParameterPayload } from "~/lib/desktop/native-built-in-parameter-mapper";
+import { nativeInstrumentContentKey, type DeliveryRegistration, type LiveProcessorEditIdentity, type ProcessorDelivery, type PublicationJoin } from "~/lib/live-processor-control";
+import { parameterSaveResult } from "~/components/timeline/parameter-gesture-owner";
+import { compileLiveNativeInstrumentConfigurations } from "@daw-browser/audio-engine/live-native-projection";
+import { localizeInstrumentFx } from "@daw-browser/audio-engine/portable-export-snapshot";
+import { validateInstrumentBuffers } from "~/lib/live-playback-snapshot";
+import type { createSamplerBufferSync, GranularLoadStatus, NativeInstrumentRetryIdentity, SamplerLoadStatus } from "~/lib/sampler-buffer-sync";
 import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnapshot, isLocalId,
   createDefaultArpeggiatorParams,
+  arpeggiatorParamsSchema,
+  normalizeArpeggiatorParams,
   createDefaultDrumRackParams,
   createDefaultSynthParams,
   mergeSynthParams,
   INSTRUMENT_CONTRACTS,
   normalizeTrackInstrumentParams,
   createInstrumentInstanceId,
+  applySamplerZoneEdit,
   type ArpeggiatorParams,
   type DrumRackParams,
   type DrumRackSampleAssignment,
@@ -29,7 +40,9 @@ import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnaps
   type TrackInstrumentParams } from "@daw-browser/shared";
 import type { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
-import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
+import { setLocalEffect } from "~/lib/local-effects";
+import type { LocalEffectsViewSource } from "~/components/timeline/create-local-effects-view";
+import { publishDurableEffectsOperation, publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import { buildSharedClipCreateOperation, type SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { toLocalTimelineClip } from "~/lib/timeline-repository/track-row-adapter";
@@ -39,17 +52,20 @@ import {
   readOptimisticGrantScope,
   type OptimisticGrantWrite,
 } from "~/lib/optimistic-grant-scope";
-import type { EffectParamsByEffect, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
+import type { EffectParamsByEffect, EffectParamsCommitOptions, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import type { FunctionArgs, FunctionReturnType } from "convex/server";
-import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
+import type { AudioEngine, EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import type { SampledInstrumentBuffer } from "@daw-browser/audio-engine/sampled-instrument-region";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import type { AddMidiClipOptions } from "~/components/timeline/timeline-device-insert-actions";
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
 type LocalArpRow = LocalEffectRow<ArpeggiatorParams>;
-type LocalInstrumentRow = LocalEffectRow<TrackInstrumentParams>;
 type ArpRow = RoomEffectRow | LocalArpRow | undefined;
-type InstrumentRow = RoomEffectRow | LocalInstrumentRow | undefined;
+type InstrumentRow = RoomEffectRow | undefined;
+
+export const publishEffects = async (projectId: string, userId: string, operation: SharedTimelineOperation) => (
+  await publishDurableEffectsOperation({ projectId, userId, operation })
+);
 
 type EffectsPanelContext = {
   audioEngine: Accessor<AudioEngine>;
@@ -60,12 +76,22 @@ type EffectsPanelContext = {
   grantClipWrite?: OptimisticGrantWrite;
   onSelectClip?: (trackId: Track["id"], clipId: string, startSec: number) => void;
   insertLocalClip?: (trackId: Track["id"], clip: Clip) => void;
-  onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string) => void;
-  onStructuralPlaybackChange?: (targetId: Track["id"], next: TrackInstrumentParams) => void;
+  onEffectParamsCommitted?: <Effect extends EffectType>(payload: EffectParamsCommitPayload<Effect>, projectId?: string, options?: EffectParamsCommitOptions) => void;
+  onStructuralPlaybackChange?: (targetId: Track["id"], next: TrackInstrumentParams | undefined, edit?: LiveProcessorEditIdentity) => Promise<void>;
+  deliverProcessor?: (edit: LiveProcessorEditIdentity, gesture?: ProcessorDelivery["gesture"]) => DeliveryRegistration;
+  joinPublication?: (join: PublicationJoin) => DeliveryRegistration;
+  applyPortableProcessor?: (edit: LiveProcessorEditIdentity) => Promise<EngineDisposition | undefined>;
+  usesLegacyAudioEngine?: Accessor<boolean>;
+  canWrite?: Accessor<boolean>;
+  allocateProcessorEdit?: (payload: NativeBuiltInParameterPayload) => LiveProcessorEditIdentity | undefined;
   projectGeneration?: Accessor<number>;
-  onLocalSaveFailed?: (message: string) => void;
+  onLocalSaveFailed?: (projectId: string, message: string) => void;
+  onEffectError?: (title: string, message: string) => void;
   samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
   drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>;
+  trackSampledInstrumentWork?: (work: Promise<EngineDisposition>) => void;
+  localEffectsView?: LocalEffectsViewSource;
+  retryNativeInstrumentPreparation?: (identity: NativeInstrumentRetryIdentity) => Promise<void>;
 };
 
 type EffectsPanelInstrumentDevice = {
@@ -77,11 +103,12 @@ type EffectsPanelInstrumentDevice = {
     addToTarget: (targetId: Track["id"]) => Promise<boolean>;
     change: (updates: Partial<ArpeggiatorParams>) => void;
     params: Accessor<ArpeggiatorParams | undefined>;
-    readDraftForTarget: (targetId: string) => ArpeggiatorParams | undefined;
+    gestureOwner: ParameterGestureHandle;
+    readProvisionalForTarget: (targetId: string) => ArpeggiatorParams | undefined;
     readForTarget: (targetId: string) => ArpeggiatorParams | undefined;
     reset: () => void;
     setForTarget: (targetId: Track["id"], params: ArpeggiatorParams) => boolean;
-    syncRemoteForTarget: (targetId: string, params: ArpeggiatorParams | undefined) => void;
+    syncRemoteForTarget: (targetId: string, params: ArpeggiatorParams | undefined, through?: number) => void;
     toggle: (enabled: boolean) => void;
   };
   synth: {
@@ -94,8 +121,9 @@ type EffectsPanelInstrumentDevice = {
     assignSampleToPad: (padId: string, sample: DrumRackSampleAssignment) => void;
     buffers: (targetId: string, params: DrumRackParams) => ReadonlyMap<string, SampledInstrumentBuffer> | undefined;
     subscribeBuffers: (listener: () => void) => () => void;
+    nativeStatus: Accessor<NativeInstrumentPreparation | undefined>;
+    retry: () => void;
     params: Accessor<DrumRackParams | undefined>;
-    readDraftForTarget: (targetId: string) => DrumRackParams | undefined;
     readForTarget: (targetId: string) => DrumRackParams | undefined;
     reset: () => void;
     updatePad: (padId: string, updates: Partial<DrumRackParams["pads"][number]>) => void;
@@ -118,6 +146,7 @@ type EffectsPanelInstrumentDevice = {
     update: (updates: Partial<GranularParams>) => void;
   };
   activeInstrument: Accessor<TrackInstrumentParams | undefined>;
+  gestureOwner: ParameterGestureHandle;
   snapshotInstrumentBuffers: (
     targetId: string,
     instrument: TrackInstrumentParams,
@@ -125,17 +154,14 @@ type EffectsPanelInstrumentDevice = {
     samplerBuffers?: ReadonlyMap<string, SampledInstrumentBuffer>;
     drumRackBuffers?: ReadonlyMap<string, SampledInstrumentBuffer>;
     granularBuffer?: { assetKey: string } & SampledInstrumentBuffer;
+    unavailableSampleAssetKeys?: readonly string[];
   } | undefined;
-  readDraftInstrumentForTarget: (targetId: string) => TrackInstrumentParams | undefined;
   readInstrumentForTarget: (targetId: string) => TrackInstrumentParams | undefined;
-  syncRemoteInstrumentForTarget: (targetId: string, params: TrackInstrumentParams | undefined) => void;
+  syncRemoteInstrumentForTarget: (targetId: string, params: TrackInstrumentParams | undefined, through?: number) => void;
   setInstrumentForTarget: (targetId: Track["id"], instrument: TrackInstrumentParams) => boolean;
   switchInstrument: (kind: InstrumentKind) => void;
   switchInstrumentForTarget: (targetId: Track["id"], kind: InstrumentKind) => boolean;
 };
-
-export const EFFECT_PANEL_SAVE_DEBOUNCE_MS = 200;
-export const EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS = 800;
 
 export function createEffectsPanelInstrumentDevice(
   context: EffectsPanelContext,
@@ -159,26 +185,22 @@ export function createEffectsPanelInstrumentDevice(
   };
   const drumRackBufferSync = context.drumRackBufferSync;
   const samplerBufferSync = context.samplerBufferSync;
+  const localEffectsView = context.localEffectsView ?? createLocalEffectsView({
+    projectId: context.projectId,
+    onError: context.onEffectError,
+  });
   const [samplerStatusVersion, setSamplerStatusVersion] = createSignal(0);
   onCleanup(samplerBufferSync.subscribe(() => setSamplerStatusVersion((version) => version + 1)));
-  const localArp = createLocalEffectRows<ArpeggiatorParams>({
-    projectId: context.projectId,
-    targetId: getTrackTargetId,
-    effect: "arp",
-  });
-  const localInstrument = createLocalEffectRows<TrackInstrumentParams>({
-    projectId: context.projectId,
-    targetId: getTrackTargetId,
-    effect: "instrument",
-    normalize: (params) => normalizeTrackInstrumentParams(params) ?? { kind: "synth", instanceId: createInstrumentInstanceId(), params: createDefaultSynthParams() },
-  });
-
+  onCleanup(drumRackBufferSync.subscribe(() => setSamplerStatusVersion((version) => version + 1)));
+  // A permanent rejection is an outcome of the publication; the callers here have always surfaced it as a failure.
   function persistInstrument(trackId: Track["id"], instrument: TrackInstrumentParams, persistContext: { projectId?: string; userId?: string }) {
     const projectId = persistContext.projectId;
     const userId = persistContext.userId;
     if (!projectId) return;
     if (isLocalId("project", projectId)) {
-      return localInstrument.persist(projectId, trackId, instrument);
+      const normalized = normalizeTrackInstrumentParams(instrument);
+      if (!normalized) return;
+      return setLocalEffect(projectId, trackId, "instrument", normalized);
     }
     if (!userId) return;
 
@@ -186,7 +208,7 @@ export function createEffectsPanelInstrumentDevice(
       kind: "instruments.setTrackInstrument",
       payload: { trackId, instrument },
     };
-    return publishDurableSharedTimelineOperation({ projectId, userId, operation });
+    return publishEffects(projectId, userId, operation);
   }
 
   function persistArpeggiator(trackId: Track["id"], params: FunctionArgs<typeof convexApi.effects.setArpeggiatorParams>["params"], persistContext: { projectId?: string; userId?: string }) {
@@ -194,7 +216,7 @@ export function createEffectsPanelInstrumentDevice(
     const userId = persistContext.userId;
     if (!projectId) return;
     if (isLocalId("project", projectId)) {
-      return localArp.persist(projectId, trackId, params);
+      return setLocalEffect(projectId, trackId, "arp", params);
     }
     if (!userId) return;
 
@@ -202,7 +224,7 @@ export function createEffectsPanelInstrumentDevice(
       kind: "effects.setArpeggiatorParams",
       payload: { trackId, params },
     };
-    return publishDurableSharedTimelineOperation({ projectId, userId, operation });
+    return publishEffects(projectId, userId, operation);
   }
 
   function commitArpChange(
@@ -217,22 +239,42 @@ export function createEffectsPanelInstrumentDevice(
       effect: "arp",
       from: previous,
       to: next,
-    }, projectId);
+    }, projectId, { mergeHistory: false });
   }
+
+  const instrumentPayload = (targetId: string, from: TrackInstrumentParams, to: TrackInstrumentParams, edit?: LiveProcessorEditIdentity): EffectParamsCommitPayload<"instrument"> => (
+    { targetId, effect: "instrument", from, to, edit }
+  );
+  // A failed save reaches the panel the way the effects chain reports it: a local project's save notice, a shared project's effect error.
+  const reportSaveFailure = (error: Error, persistContext: { projectId?: string } | undefined) => {
+    const projectId = persistContext?.projectId;
+    if (projectId && isLocalId("project", projectId)) context.onLocalSaveFailed?.(projectId, error.message);
+    else context.onEffectError?.("Effect save failed", error.message);
+  };
+  // A thrown portable apply fails the release before saving; native settlement
+  // is independent and never vetoes persistence.
+  const reportReleaseFailure = (error: Error, persistContext: { projectId?: string } | undefined) => {
+    const message = error.message;
+    const projectId = persistContext?.projectId;
+    if (projectId && isLocalId("project", projectId)) context.onLocalSaveFailed?.(projectId, message);
+    else context.onEffectError?.("Effect playback update failed", message);
+  };
 
   function commitInstrumentChange(
     targetId: Track["id"],
     previous: EffectParamsByEffect["instrument"] | undefined,
     next: EffectParamsByEffect["instrument"],
+    edit: LiveProcessorEditIdentity | undefined,
     projectId?: string,
   ): void {
     if (previous === undefined) return;
     context.onEffectParamsCommitted?.({
       targetId,
       effect: "instrument",
+      edit,
       from: previous,
       to: next,
-    }, projectId);
+    }, projectId, { mergeHistory: false });
   }
 
   const remoteEffectForTarget = (targetId: string | undefined, effectType: "instrument" | "synth" | "arpeggiator") => {
@@ -244,16 +286,31 @@ export function createEffectsPanelInstrumentDevice(
     }
     return rows?.find((row) => row.trackId === targetId && row.type === effectType && row.targetType === "track");
   };
+  const localArpeggiatorForTarget = (targetId: string | undefined): LocalArpRow | undefined => {
+    const projectId = context.projectId();
+    if (!projectId || !targetId || localEffectsView.view()?.projectId !== projectId) return undefined;
+    const row = localEffectsView.view()?.rows.find((candidate) => (
+      candidate.targetId === targetId && candidate.effect === "arp"
+    ));
+    if (!row) return undefined;
+    const params = arpeggiatorParamsSchema.safeParse(row.params);
+    return params.success ? { ...row, params: normalizeArpeggiatorParams(params.data) } : undefined;
+  };
 
   const arpState = createPersistedEffectState<ArpRow, ArpeggiatorParams>({
+    audioEngine: context.audioEngine,
+    usesLegacyAudioEngine: context.usesLegacyAudioEngine,
     targetId: getTrackTargetId,
     scopeId: context.projectId,
-    row: () => isLocalProject() ? localArp.row(getTrackTargetId()) : remoteEffectForTarget(getTrackTargetId(), "arpeggiator"),
+    row: () => isLocalProject()
+      ? localArpeggiatorForTarget(getTrackTargetId())
+      : remoteEffectForTarget(getTrackTargetId(), "arpeggiator"),
     readQueryParams: (row) => row?.params,
+    readQueryThrough: (row) => isLocalProject() ? localEffectsView.view()?.through ?? 0 : row && "revision" in row ? row.revision ?? 0 : 0,
     createInitialParams: () => createDefaultArpeggiatorParams(),
     serializeParams: (params) => JSON.stringify(params),
     applyToEngine: (targetId, params) => {
-      context.audioEngine().setTrackArpeggiator(targetId, params);
+      return context.audioEngine().setTrackArpeggiator(targetId, params);
     },
     clearFromEngine: (targetId) => {
       context.audioEngine().clearTrackArpeggiator(targetId);
@@ -265,19 +322,17 @@ export function createEffectsPanelInstrumentDevice(
     }),
     isRemote: () => !isLocalProject(),
     persistParams: async (targetId, params, persistContext) => {
-      const track = getTrackByTargetId(targetId);
-      if (!track) return;
-      await persistArpeggiator(track.id, params, persistContext);
+      const result = await persistArpeggiator(targetId, params, persistContext);
+      return result ? parameterSaveResult(result) : { kind: "rejected", reason: "The effect write has no project or user." };
     },
+    canWrite: context.canWrite,
     isMissingRowLoaded: () => isLocalProject()
-      ? localArp.isLoaded(getTrackTargetId())
+      ? localEffectsView.view()?.projectId === context.projectId()
       : context.roomEffects?.() !== undefined,
-    remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
-    onPersistError: (error) => {
-      if (!isLocalProject()) return;
-      context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
-    },
-    onParamsCommitted: (targetId, previous, next, persistContext) => {
+    onPersistError: reportSaveFailure,
+    onEngineApplyError: (error) => context.onEffectError?.("Effect playback update failed", error instanceof Error ? error.message : "The effect could not be applied to playback."),
+    onReleaseFailed: reportReleaseFailure,
+    history: (targetId, previous, next, _edit, persistContext) => {
       const track = getTrackByTargetId(targetId);
       if (!track) return;
       commitArpChange(track.id, previous, next, persistContext.projectId);
@@ -285,28 +340,42 @@ export function createEffectsPanelInstrumentDevice(
   });
 
   const instrumentState = createPersistedEffectState<InstrumentRow, TrackInstrumentParams>({
+    audioEngine: context.audioEngine,
+    usesLegacyAudioEngine: context.usesLegacyAudioEngine,
     targetId: getTrackTargetId,
     scopeId: context.projectId,
-    row: () => isLocalProject() ? localInstrument.row(getTrackTargetId()) : remoteEffectForTarget(getTrackTargetId(), "instrument"),
+    // Local rows arrive for every track through useEffectsPanelAudioSync.
+    // A second selected-row cache can replay stale values after a save echo.
+    row: () => isLocalProject() ? undefined : remoteEffectForTarget(getTrackTargetId(), "instrument"),
     readQueryParams: (row) => row ? readInstrumentParamsFromEffectRow(row) : undefined,
+    readQueryThrough: (row) => row?.revision ?? 0,
     readVisibleParams: () => undefined,
     createInitialParams: () => undefined,
     serializeParams: (params) => JSON.stringify(params),
-    applyToEngine: (targetId, params) => {
+    applyToEngine: (targetId, params, edit) => {
       if (params.kind === "synth") {
-        context.audioEngine().setTrackInstrument(targetId, { instrument: params });
-        return;
+        drumRackBufferSync.clearTrack(targetId);
+        samplerBufferSync.clearTrack(targetId);
+        const applied = context.audioEngine().setTrackInstrument(targetId, { instrument: params });
+        // Live MIDI keeps playing through the browser engine; prepared portable playback takes the same values live.
+        // The session records what it took in its own prepared snapshot, so the owner keeps the browser result.
+        return !(context.usesLegacyAudioEngine?.() ?? true) && edit && context.applyPortableProcessor
+          ? context.applyPortableProcessor(edit).then(() => applied)
+          : applied;
       }
+      let work: Promise<EngineDisposition>;
       if (params.kind === "drum-rack") {
         samplerBufferSync.clearTrack(targetId);
-        return drumRackBufferSync.syncTrack(context.audioEngine(), targetId, params.params, params.instanceId);
-      }
-      if (params.kind === "granular") {
+        work = drumRackBufferSync.syncTrack(context.audioEngine(), targetId, params.params, params.instanceId);
+      } else if (params.kind === "granular") {
         drumRackBufferSync.clearTrack(targetId);
-        return samplerBufferSync.syncGranularTrack(context.audioEngine(), targetId, params.params, params.instanceId);
+        work = samplerBufferSync.syncGranularTrack(context.audioEngine(), targetId, params.params, params.instanceId);
+      } else {
+        drumRackBufferSync.clearTrack(targetId);
+        work = samplerBufferSync.syncTrack(context.audioEngine(), targetId, params.params, params.instanceId);
       }
-      drumRackBufferSync.clearTrack(targetId);
-      return samplerBufferSync.syncTrack(context.audioEngine(), targetId, params.params, params.instanceId);
+      context.trackSampledInstrumentWork?.(work);
+      return work;
     },
     clearFromEngine: (targetId) => {
       drumRackBufferSync.clearTrack(targetId);
@@ -319,35 +388,36 @@ export function createEffectsPanelInstrumentDevice(
       projectGeneration: context.projectGeneration?.(),
     }),
     persistParams: async (targetId, params, persistContext) => {
+      const result = await persistInstrument(targetId, params, persistContext);
+      return result ? parameterSaveResult(result) : { kind: "rejected", reason: "The instrument write has no project or user." };
+    },
+    canWrite: context.canWrite,
+    isMissingRowLoaded: () => !isLocalProject() && context.roomEffects?.() !== undefined,
+    allocateEdit: (targetId, _from, to) => to.kind === "synth" ? context.allocateProcessorEdit?.(instrumentPayload(targetId, to, to)) : undefined,
+    registerDelivery: (targetId, params, edit, gesture, lifetime) => {
+      if (context.usesLegacyAudioEngine?.() ?? true) return undefined;
+      if (params.kind === "synth") return edit ? context.deliverProcessor?.(edit, gesture) : undefined;
+      const buffers = params.kind === "sampler"
+        ? { samplerBuffers: samplerBufferSync.snapshotSamplerBuffers(targetId, params), unavailableSampleAssetKeys: samplerBufferSync.snapshotUnavailableAssetKeys(targetId, params) }
+        : params.kind === "drum-rack"
+          ? (() => { const snapshot = drumRackBufferSync.snapshotBuffers(targetId, params); return { drumRackBuffers: snapshot?.buffers, unavailableSampleAssetKeys: snapshot?.unavailableSampleAssetKeys }; })()
+          : { granularBuffer: samplerBufferSync.snapshotGranularBuffer(targetId, params), unavailableSampleAssetKeys: samplerBufferSync.snapshotUnavailableAssetKeys(targetId, params) };
+      const trackFx = { [targetId]: { instances: [], instrument: params, ...buffers } };
+      validateInstrumentBuffers(trackFx);
+      const fx = localizeInstrumentFx({ masterVolume: 1, masterFxInstances: [], trackFx });
+      const configuration = compileLiveNativeInstrumentConfigurations([], fx).configurations.find(entry => entry.nodeId === targetId);
+      if (!configuration) throw new Error(`Native instrument content is unavailable for "${targetId}".`);
+      return context.joinPublication?.({ target: { nodeId: targetId, instanceId: params.instanceId }, contentKey: nativeInstrumentContentKey(configuration.state), lifetime: lifetime.incarnation });
+    },
+    announce: (targetId, next, edit) => context.onStructuralPlaybackChange?.(targetId, next, edit),
+    announceRemoved: (targetId) => context.onStructuralPlaybackChange?.(targetId, undefined),
+    onPersistError: reportSaveFailure,
+    onEngineApplyError: (error) => context.onEffectError?.("Effect playback update failed", error instanceof Error ? error.message : "The effect could not be applied to playback."),
+    onReleaseFailed: reportReleaseFailure,
+    history: (targetId, previous, next, edit, persistContext) => {
       const track = getTrackByTargetId(targetId);
       if (!track) return;
-      await persistInstrument(track.id, params, persistContext);
-    },
-    isMissingRowLoaded: () => isLocalProject()
-      ? localInstrument.isLoaded(getTrackTargetId())
-      : context.roomEffects?.() !== undefined,
-    debounceMs: EFFECT_PANEL_SAVE_DEBOUNCE_MS,
-    remoteOverwriteAfterMs: EFFECT_PANEL_LOCAL_EDIT_SUPPRESS_MS,
-    onApplyCompleted: (targetId, previous, next, applyContext) => {
-      if (!applyContext || applyContext.projectId !== context.projectId()
-        || (applyContext.projectGeneration !== undefined
-          && applyContext.projectGeneration !== context.projectGeneration?.())) return;
-      context.onStructuralPlaybackChange?.(targetId, next);
-    },
-    onEngineStateChanged: (targetId, previous, next, _source, applyContext) => {
-      if (!applyContext || applyContext.projectId !== context.projectId()
-        || (applyContext.projectGeneration !== undefined
-          && applyContext.projectGeneration !== context.projectGeneration?.())) return;
-      context.onStructuralPlaybackChange?.(targetId, next);
-    },
-    onPersistError: (error) => {
-      if (!isLocalProject()) return;
-      context.onLocalSaveFailed?.(error instanceof Error ? error.message : "Local effect could not be saved.");
-    },
-    onParamsCommitted: (targetId, previous, next, persistContext) => {
-      const track = getTrackByTargetId(targetId);
-      if (!track) return;
-      commitInstrumentChange(track.id, previous, next, persistContext.projectId);
+      commitInstrumentChange(track.id, previous, next, edit, persistContext.projectId);
     },
   });
 
@@ -502,11 +572,6 @@ export function createEffectsPanelInstrumentDevice(
   async function addArpeggiatorToTarget(targetId: Track["id"]): Promise<boolean> {
     const track = getTrackByTargetId(targetId);
     if (!track || track.kind !== "instrument") return false;
-    const projectId = context.projectId();
-    if (projectId && isLocalId("project", projectId)) {
-      const row = await localArp.fetchRow(projectId, targetId);
-      if (row?.params !== undefined) return false;
-    }
     if (arpState.readForTarget(targetId)) return false;
     arpState.addForTarget(targetId);
     return true;
@@ -579,7 +644,8 @@ export function createEffectsPanelInstrumentDevice(
       addToTarget: addArpeggiatorToTarget,
       change: handleArpChange,
       params: arpState.params,
-      readDraftForTarget: arpState.readDraftForTarget,
+      gestureOwner: arpState.gestureOwner,
+      readProvisionalForTarget: arpState.readProvisionalForTarget,
       readForTarget: arpState.readForTarget,
       reset: arpState.reset,
       setForTarget: setArpeggiatorForTarget,
@@ -601,15 +667,29 @@ export function createEffectsPanelInstrumentDevice(
       buffers: (targetId, params) => {
         const instrument = instrumentState.readForTarget(targetId);
         return instrument?.kind === "drum-rack"
-          ? context.drumRackBufferSync.snapshotBuffers(targetId, { kind: "drum-rack", instanceId: instrument.instanceId, params })
+          ? context.drumRackBufferSync.snapshotBuffers(targetId, { kind: "drum-rack", instanceId: instrument.instanceId, params })?.buffers
           : undefined;
       },
       subscribeBuffers: context.drumRackBufferSync.subscribe,
-      params: drumRackParams,
-      readDraftForTarget: (targetId) => {
-        const current = instrumentState.readDraftForTarget(targetId);
-        return current?.kind === "drum-rack" ? current.params : undefined;
+      nativeStatus: () => {
+        samplerStatusVersion();
+        const targetId = getTrackTargetId();
+        return targetId ? drumRackBufferSync.getNativePreparation(targetId) : undefined;
       },
+      retry: () => {
+        const targetId = getTrackTargetId();
+        if (!targetId) return;
+        const instrument = instrumentState.readForTarget(targetId);
+        if (instrument?.kind !== "drum-rack") return;
+        void drumRackBufferSync.retryTrack(
+          context.audioEngine(),
+          targetId,
+          instrument.params,
+          instrument.instanceId,
+          context.retryNativeInstrumentPreparation,
+        );
+      },
+      params: drumRackParams,
       readForTarget: readDrumRackForTarget,
       reset: () => {
         const targetId = getTrackTargetId();
@@ -623,7 +703,14 @@ export function createEffectsPanelInstrumentDevice(
       status: samplerStatus,
       retryZone: (zoneId) => {
         const targetId = getTrackTargetId();
-        if (targetId) samplerBufferSync.retryZone(context.audioEngine(), targetId, zoneId);
+        if (targetId) {
+          void samplerBufferSync.retryZone(
+            context.audioEngine(),
+            targetId,
+            zoneId,
+            context.retryNativeInstrumentPreparation,
+          );
+        }
       },
       reset: () => {
         const targetId = getTrackTargetId();
@@ -636,7 +723,7 @@ export function createEffectsPanelInstrumentDevice(
         instrumentState.updateForTarget(targetId, (previous) => ({
           kind: "sampler",
           instanceId: previous.kind === "sampler" ? previous.instanceId : createInstrumentInstanceId(),
-          params: { ...(previous.kind === "sampler" ? previous.params : INSTRUMENT_CONTRACTS.sampler.createDefaultParams()), ...updates },
+          params: INSTRUMENT_CONTRACTS.sampler.normalizeParams({ ...(previous.kind === "sampler" ? previous.params : INSTRUMENT_CONTRACTS.sampler.createDefaultParams()), ...updates }),
         }));
       },
       updateZone: (zoneId, updates) => {
@@ -644,7 +731,7 @@ export function createEffectsPanelInstrumentDevice(
         if (!targetId) return;
         instrumentState.updateForTarget(targetId, (previous) => {
           const params = previous.kind === "sampler" ? previous.params : INSTRUMENT_CONTRACTS.sampler.createDefaultParams();
-          return { kind: "sampler", instanceId: previous.kind === "sampler" ? previous.instanceId : createInstrumentInstanceId(), params: { ...params, zones: params.zones.map((zone) => zone.id === zoneId ? { ...zone, ...updates, id: zone.id } : zone) } };
+          return { kind: "sampler", instanceId: previous.kind === "sampler" ? previous.instanceId : createInstrumentInstanceId(), params: INSTRUMENT_CONTRACTS.sampler.normalizeParams({ ...params, zones: params.zones.map((zone) => zone.id === zoneId ? applySamplerZoneEdit(zone, updates) : zone) }) };
         });
       },
       addZone: (zone) => {
@@ -669,7 +756,13 @@ export function createEffectsPanelInstrumentDevice(
       status: granularStatus,
       retry: () => {
         const targetId = getTrackTargetId();
-        if (targetId) samplerBufferSync.retryGranular(context.audioEngine(), targetId);
+        if (targetId) {
+          samplerBufferSync.retryGranular(
+            context.audioEngine(),
+            targetId,
+            context.retryNativeInstrumentPreparation,
+          );
+        }
       },
       reset: () => {
         const targetId = getTrackTargetId();
@@ -682,27 +775,34 @@ export function createEffectsPanelInstrumentDevice(
         instrumentState.updateForTarget(targetId, (previous) => ({
           kind: "granular",
           instanceId: previous.kind === "granular" ? previous.instanceId : createInstrumentInstanceId(),
-          params: { ...(previous.kind === "granular" ? previous.params : INSTRUMENT_CONTRACTS.granular.createDefaultParams()), ...updates },
+          params: INSTRUMENT_CONTRACTS.granular.normalizeParams({ ...(previous.kind === "granular" ? previous.params : INSTRUMENT_CONTRACTS.granular.createDefaultParams()), ...updates }),
         }));
       },
     },
     activeInstrument: instrumentState.params,
+    gestureOwner: instrumentState.gestureOwner,
     snapshotInstrumentBuffers: (targetId: string, instrument: TrackInstrumentParams) => {
       if (instrument.kind === "sampler") {
         const buffers = samplerBufferSync.snapshotSamplerBuffers(targetId, instrument);
-        return buffers ? { samplerBuffers: buffers } : undefined;
+        const unavailableSampleAssetKeys = samplerBufferSync.snapshotUnavailableAssetKeys(targetId, instrument);
+        return buffers && unavailableSampleAssetKeys
+          ? { samplerBuffers: buffers, unavailableSampleAssetKeys }
+          : undefined;
       }
       if (instrument.kind === "drum-rack") {
-        const buffers = drumRackBufferSync.snapshotBuffers(targetId, instrument);
-        return buffers ? { drumRackBuffers: buffers } : undefined;
+        const snapshot = drumRackBufferSync.snapshotBuffers(targetId, instrument);
+        return snapshot
+          ? { drumRackBuffers: snapshot.buffers, unavailableSampleAssetKeys: snapshot.unavailableSampleAssetKeys }
+          : undefined;
       }
       if (instrument.kind === "granular") {
         const buffer = samplerBufferSync.snapshotGranularBuffer(targetId, instrument);
-        return buffer ? { granularBuffer: buffer } : undefined;
+        const unavailableSampleAssetKeys = samplerBufferSync.snapshotUnavailableAssetKeys(targetId, instrument);
+        if (buffer) return { granularBuffer: buffer, unavailableSampleAssetKeys };
+        return unavailableSampleAssetKeys?.length ? { unavailableSampleAssetKeys } : undefined;
       }
       return undefined;
     },
-    readDraftInstrumentForTarget: instrumentState.readDraftForTarget,
     readInstrumentForTarget: instrumentState.readForTarget,
     syncRemoteInstrumentForTarget: instrumentState.syncRemoteForTarget,
     setInstrumentForTarget,

@@ -1189,6 +1189,7 @@ const createPersistentRepository = (input: {
       if (candidate) break
     }
     if (!candidate) return
+    const range = validateRange(startFrame, endFrame, candidate.manifest.frameCount)
     const release = await holdLock(lockManager, writeLockName(candidate.manifest.writeId), 'shared')
     let db: IDBDatabase | undefined
     const leaseId = crypto.randomUUID()
@@ -1212,13 +1213,13 @@ const createPersistentRepository = (input: {
         return result
       })
       if (!manifest) return
-      const range = validateRange(startFrame, endFrame, manifest.frameCount)
-      let expected = range.start
-      while (expected < range.end) {
+      const currentRange = validateRange(startFrame, endFrame, manifest.frameCount)
+      let expected = currentRange.start
+      while (expected < currentRange.end) {
         const alignedStart = Math.floor(expected / manifest.pageFrames) * manifest.pageFrames
         const page = await transaction<PreparedStretchArtifactPage | undefined>(db, ['pages'], 'readonly', async (tx) => {
           const cursorRequest = tx.objectStore('pages').index('byWriteStart').openCursor(
-            IDBKeyRange.bound([manifest?.writeId ?? '', alignedStart], [manifest?.writeId ?? '', range.end - 1]),
+            IDBKeyRange.bound([manifest?.writeId ?? '', alignedStart], [manifest?.writeId ?? '', currentRange.end - 1]),
           )
           return new Promise<PreparedStretchArtifactPage | undefined>((resolve, reject) => {
             cursorRequest.onsuccess = () => {
@@ -1241,17 +1242,17 @@ const createPersistentRepository = (input: {
           throw new Error('Prepared Stretch artifact pages do not cover the requested range.')
         }
         const pageEnd = page.startFrame + page.frameCount
-        const localStart = Math.max(range.start, page.startFrame) - page.startFrame
-        const localEnd = Math.min(range.end, pageEnd) - page.startFrame
+        const localStart = Math.max(currentRange.start, page.startFrame) - page.startFrame
+        const localEnd = Math.min(currentRange.end, pageEnd) - page.startFrame
         yield {
           ...page,
-          startFrame: Math.max(range.start, page.startFrame),
+          startFrame: Math.max(currentRange.start, page.startFrame),
           frameCount: localEnd - localStart,
           planes: page.planes.map((plane) => plane.slice(localStart, localEnd)),
         }
-        expected = Math.min(range.end, pageEnd)
+        expected = Math.min(currentRange.end, pageEnd)
       }
-      if (expected !== range.end) throw new Error('Prepared Stretch artifact pages do not cover the requested range.')
+      if (expected !== currentRange.end) throw new Error('Prepared Stretch artifact pages do not cover the requested range.')
     } finally {
       if (db) {
         await transaction(db, ['leases'], 'readwrite', async (tx) => {

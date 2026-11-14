@@ -12,7 +12,6 @@ export function createDelayChainState(): DelayChainState {
   let delay: DelayNodeChain | null = null
   let params: DelayParamsLite | null = null
   let signature: string | null = null
-  let enabled: boolean | null = null
   let pingPong: boolean | null = null
   let currentBpm = 120
   return {
@@ -23,39 +22,33 @@ export function createDelayChainState(): DelayChainState {
       const normalized = normalizeDelayParams(nextParams)
       const nextSignature = serializeDelayParams(normalized)
       if (signature === nextSignature && (!normalized.enabled || normalized.mode !== 'sync' || !bpmChanged)) return { changed: false, requiresRoutingRebuild: false }
-      const enabledChanged = enabled !== normalized.enabled && (enabled !== null || normalized.enabled)
-      const topologyChanged = normalized.enabled && pingPong !== null && pingPong !== normalized.pingPong
-      const requiresRoutingRebuild = enabledChanged || topologyChanged
+      // Disabling only makes the chain's output dry: it stays in the routing and keeps
+      // running on its input, so enabling it again brings back the echo of recent audio.
+      const topologyChanged = pingPong !== null && pingPong !== normalized.pingPong
+      // The signature names what the nodes hold only once every write has landed.
+      signature = null
       params = normalized
-      if (!normalized.enabled) {
-        if (delay) {
-          disconnectDelayChain(delay)
-          delay = null
-        }
-        signature = nextSignature
-        enabled = false
-        pingPong = normalized.pingPong
-        return { changed: true, requiresRoutingRebuild }
-      }
       if (topologyChanged && delay) {
         disconnectDelayChain(delay)
         delay = null
       }
+      const created = !delay
       if (!delay) delay = createDelayNodeChain(ctx, normalized, currentBpm)
       else applyDelayNodeChainParams(delay, normalized, currentBpm)
       signature = nextSignature
-      enabled = true
       pingPong = normalized.pingPong
-      return { changed: true, requiresRoutingRebuild }
+      return { changed: true, requiresRoutingRebuild: created }
     },
     setBpm: (bpm) => {
       currentBpm = bpm
-      if (delay && params?.mode === 'sync') applyDelayNodeChainParams(delay, params, currentBpm)
+      if (!delay || params?.mode !== 'sync') return
+      signature = null
+      applyDelayNodeChainParams(delay, params, currentBpm)
+      signature = serializeDelayParams(params)
     },
     close: () => {
       params = null
       signature = null
-      enabled = null
       pingPong = null
       if (delay) {
         disconnectDelayChain(delay)

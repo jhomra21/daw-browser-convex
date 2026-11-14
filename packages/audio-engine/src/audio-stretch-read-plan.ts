@@ -1,6 +1,6 @@
 import { getAudioClipTimeMap, getMarkerWarpTimelineSegments, type AudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import type { Clip } from '@daw-browser/timeline-core/types'
-import type { AudioPcmSourceDescriptor } from './media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import { WSOLA_MAX_CHANNEL_COUNT } from './audio-stretching'
 
 export type AudioStretchReadPlanSegment = {

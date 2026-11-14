@@ -13,7 +13,9 @@
 #include <limits>
 #include <poll.h>
 #include <mutex>
+#include <signal.h>
 #include <string>
+#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 
@@ -24,12 +26,15 @@ using daw::plugin_host::CreatePortableSharedMemoryDescriptor;
 using daw::plugin_host::ChannelMask;
 using daw::plugin_host::IsWorkerLaunchEligible;
 using daw::plugin_host::WorkerDiagnosticKind;
+using daw::plugin_host::WorkerFaultOrigin;
+using daw::plugin_host::EncodeWorkerFault;
 using daw::plugin_host::WorkerHealth;
 using daw::plugin_host::WorkerLaunchEligibility;
 using daw::plugin_host::WorkerSlotStatus;
 using daw::plugin_host::WorkerTransportEvent;
 using daw::plugin_host::WorkerEventKind;
 using daw::plugin_host::WorkerTransport;
+using daw::plugin_host::WorkerRuntime;
 using daw::plugin_host::WorkerTransportRequest;
 using daw::plugin_host::WorkerWakeSignal;
 using daw::plugin_host::SpscQueue;
@@ -157,10 +162,246 @@ WorkerPreflightResult AvailablePreflight() {
   return result;
 }
 
+// Bounded waits observe an owned real child, never an audio callback. The test
+// controls dispatch timing explicitly instead of racing the service scheduler.
+bool WaitForRuntimeReady(WorkerRuntime& runtime) {
+  for (int attempt = 0; attempt < 500; ++attempt) {
+    if (runtime.health() == WorkerHealth::kReady) return true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  return false;
+}
+
+bool WaitForRuntimeCompletion(WorkerRuntime& runtime, const std::uint64_t sequence) {
+  for (int attempt = 0; attempt < 500; ++attempt) {
+    if (runtime.ReadCompleted(0, sequence)) return true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  return false;
+}
+
+bool CheckDelayedRuntimeDispatch(const std::string& executable) {
+  WorkerRuntime runtime;
+  if (!Check(!runtime.DispatchPublishedSubmission(0, 100)
+    && runtime.Start(NoPluginStartup(), Configuration(executable), Request())
+    && runtime.processGroupId() > 0 && runtime.processGroupId() != getpgrp()
+    && WaitForRuntimeReady(runtime), "realtime dispatch fixture launch failed")) return false;
+  std::array<float, 128> input{};
+  std::array<float, 128> output{};
+  input[0] = 0.25F;
+  if (!Check(runtime.CopyInput(0, input) && runtime.PublishSubmission(0, 100, 64, {})
+    && runtime.NotifyRealtimeWorker() && WaitForRuntimeCompletion(runtime, 100)
+    && runtime.DispatchPublishedSubmission(0, 100)
+    && runtime.CopyCompletedOutput(0, 100, output) && output[0] == input[0],
+    "direct realtime wake did not complete and release sequence100")) return false;
+  input[0] = -0.5F;
+  if (!Check(runtime.CopyInput(0, input) && runtime.PublishSubmission(0, 101, 64, {})
+    && runtime.NotifyRealtimeWorker() && WaitForRuntimeCompletion(runtime, 101)
+    && runtime.transport()->slot(0).sequence == 101
+    && runtime.health() == WorkerHealth::kReady,
+    "healthy realtime slot reuse did not complete sequence101")) return false;
+  if (!Check(!runtime.ReadCompleted(0, 100) && !runtime.CopyCompletedOutput(0, 100, output)
+    && !runtime.CancelPublishedSubmission(0, 100) && runtime.ReadCompleted(0, 101),
+    "stale output/cancellation affected a reused realtime slot")) return false;
+  const auto staleDispatch = runtime.DispatchPublishedSubmission(0, 100);
+  std::cout << "[stale-realtime-dispatch] oldSequence=100 currentSequence=101"
+    << " workerHealthy=" << (runtime.health() == WorkerHealth::kReady)
+    << " staleDispatch=" << staleDispatch << '\n';
+  if (!Check(staleDispatch && runtime.DispatchPublishedSubmission(0, 101)
+    && !runtime.DispatchPublishedSubmission(Request().slotCount, 101)
+    && !runtime.DispatchPublishedSubmission(0, 0)
+    && runtime.CopyCompletedOutput(0, 101, output) && output[0] == input[0],
+    "healthy realtime dispatch revalidated a completed/reused slot")) return false;
+  if (!Check(runtime.TerminateForFault() && runtime.health() == WorkerHealth::kFaulted
+    && !runtime.DispatchPublishedSubmission(0, 101),
+    "faulted runtime accepted realtime dispatch bookkeeping")) return false;
+  runtime.Stop();
+  return Check(!runtime.DispatchPublishedSubmission(0, 101) && !runtime.NotifyRealtimeWorker(),
+    "stopped runtime retained dispatch/wake capability");
+}
+
+bool CheckOfflineDispatchSequence(const std::string& executable) {
+  WorkerRuntime runtime;
+  auto startup = NoPluginStartup();
+  startup.setup.mode = WorkerProcessSetup::Mode::kOffline;
+  if (!Check(runtime.Start(startup, Configuration(executable), Request())
+    && WaitForRuntimeReady(runtime), "offline dispatch fixture launch failed")) return false;
+  std::array<float, 128> input{};
+  std::array<float, 128> output{};
+  input[0] = 0.375F;
+  if (!Check(runtime.CopyInput(0, input) && runtime.PublishSubmission(0, 100, 64, {})
+    && !runtime.DispatchPublishedSubmission(0, 99)
+    && runtime.DispatchPublishedSubmission(0, 100)
+    && runtime.WaitForOfflineCompletion(0, 100, std::chrono::milliseconds(1000))
+    && runtime.CopyCompletedOutput(0, 100, output) && output[0] == input[0],
+    "offline matching command/response/output sequence failed")) return false;
+  input[0] = -0.125F;
+  if (!Check(runtime.CopyInput(0, input) && runtime.PublishSubmission(0, 101, 64, {})
+    && !runtime.DispatchPublishedSubmission(0, 100)
+    && !runtime.DispatchPublishedSubmission(Request().slotCount, 101)
+    && runtime.transport()->slot(0).status == WorkerSlotStatus::kSubmitted
+    && runtime.DispatchPublishedSubmission(0, 101)
+    && runtime.WaitForOfflineCompletion(0, 101, std::chrono::milliseconds(1000))
+    && !runtime.CopyCompletedOutput(0, 100, output)
+    && runtime.CopyCompletedOutput(0, 101, output) && output[0] == input[0]
+    && runtime.health() == WorkerHealth::kReady,
+    "stale offline dispatch was accepted or corrupted the next response")) return false;
+  return true;
+}
+
+bool CheckRuntimeFaultAndWakeFailure(const std::string& executable) {
+  WorkerRuntime runtime;
+  if (!Check(runtime.Start(NoPluginStartup(), Configuration(executable), Request())
+    && WaitForRuntimeReady(runtime), "runtime fault fixture launch failed")) return false;
+  auto sharedTransport = WorkerTransport::MapInherited(
+    dup(runtime.transport()->fileDescriptor()), runtime.transport()->token()
+  );
+  if (!Check(sharedTransport.has_value(), "runtime fault shared mapping failed")) return false;
+  sharedTransport->PublishHealth(WorkerHealth::kFaulted);
+  if (!Check(runtime.health() == WorkerHealth::kFaulted
+    && runtime.faultValue() == EncodeWorkerFault(WorkerFaultOrigin::kTransportFault)
+    && !runtime.DispatchPublishedSubmission(0, 100),
+    "shared transport fault was ignored by realtime dispatch")) return false;
+  runtime.Stop();
+  sharedTransport.reset();
+  if (!Check(runtime.Start(NoPluginStartup(), Configuration(executable), Request())
+    && WaitForRuntimeReady(runtime) && kill(runtime.processGroupId(), SIGTERM) == 0,
+    "owned runtime signal fixture failed")) return false;
+  for (int attempt = 0; attempt < 500 && runtime.health() != WorkerHealth::kFaulted; ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  return Check(runtime.health() == WorkerHealth::kFaulted
+    && runtime.faultValue() == EncodeWorkerFault(WorkerFaultOrigin::kChildSignal, CLD_KILLED, SIGTERM)
+    && runtime.PublishSubmission(0, 100, 64, {}) && !runtime.NotifyRealtimeWorker()
+    && !runtime.DispatchPublishedSubmission(0, 100)
+    && runtime.CancelPublishedSubmission(0, 100)
+    && runtime.transport()->slot(0).status == WorkerSlotStatus::kFree,
+    "dead worker wake/dispatch succeeded or failed wake could not cancel its slot");
+}
+
+struct DelayedServiceDrain {
+  std::mutex mutex;
+  std::condition_variable ready;
+  bool entered = false;
+  bool released = false;
+  bool drained = false;
+  std::atomic<std::uint32_t> faults{0};
+
+  static void Listen(const daw::plugin_host::WorkerDiagnostic& diagnostic, void* context) noexcept {
+    auto& gate = *static_cast<DelayedServiceDrain*>(context);
+    if (diagnostic.kind == WorkerDiagnosticKind::kFault) gate.faults.fetch_add(1);
+    std::unique_lock lock(gate.mutex);
+    if (diagnostic.kind == WorkerDiagnosticKind::kReady) {
+      gate.entered = true;
+      gate.ready.notify_all();
+      // Test-only control-service pause; direct worker/callback ownership stays
+      // live. Deadline guarantees cleanup even if the test producer fails.
+      gate.ready.wait_for(lock, std::chrono::seconds(5), [&] { return gate.released; });
+    } else if (diagnostic.kind == WorkerDiagnosticKind::kLatency && diagnostic.value == 42) {
+      gate.drained = true;
+      gate.ready.notify_all();
+    }
+  }
+
+  bool Wait(const bool forDrain) {
+    std::unique_lock lock(mutex);
+    return ready.wait_for(lock, std::chrono::seconds(5), [&] { return forDrain ? drained : entered; });
+  }
+
+  void Release() {
+    std::lock_guard lock(mutex);
+    released = true;
+    ready.notify_all();
+  }
+};
+
+bool CheckDelayedServiceDispatch(const std::string& executable) {
+  WorkerControlService service;
+  DelayedServiceDrain gate;
+  service.SetDiagnosticListener(DelayedServiceDrain::Listen, &gate);
+  const auto passed = [&] {
+    if (!Check(service.Start(NoPluginStartup(), Configuration(executable), Request()) && gate.Wait(false),
+      "delayed service fixture did not reach its ready barrier")) return false;
+    const auto callback = service.callbackPort();
+    std::array<float, 128> input{};
+    std::array<float, 128> output{};
+    for (std::uint64_t sequence = 100; sequence < 100 + daw::plugin_host::kMaximumWorkerSlots; ++sequence) {
+      input[0] = static_cast<float>(sequence) / 256.0F;
+      if (!Check(callback.CopyInput(0, input)
+        && callback.Submit({.slotIndex = 0, .sequence = sequence, .numSamples = 64}) == WorkerSubmissionStatus::kAccepted,
+        "direct wake submission failed while service was paused")) return false;
+      for (int attempt = 0; attempt < 500 && !callback.ReadCompleted(0, sequence); ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      }
+      if (!Check(callback.CopyCompletedOutput(0, sequence, output) && output[0] == input[0],
+        "worker did not complete/release/reuse ahead of delayed service drain")) return false;
+    }
+    const auto rejectedSequence = 100 + daw::plugin_host::kMaximumWorkerSlots;
+    if (!Check(callback.Submit({.slotIndex = 0, .sequence = rejectedSequence, .numSamples = 64})
+      == WorkerSubmissionStatus::kQueueFull
+      && callback.ReadStatus(0, rejectedSequence) == WorkerSlotStatus::kFree,
+      "full bookkeeping queue did not reject/cancel only the new submission")) return false;
+    gate.Release();
+    auto resumed = WorkerSubmissionStatus::kQueueFull;
+    for (int attempt = 0; attempt < 500 && resumed == WorkerSubmissionStatus::kQueueFull; ++attempt) {
+      resumed = callback.Submit({.slotIndex = 0, .sequence = 200, .numSamples = 64});
+      if (resumed == WorkerSubmissionStatus::kQueueFull) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      }
+    }
+    // Reclaimed queue space proves a subsequent service submission-drain
+    // iteration began. Only then queue its end-of-iteration diagnostic marker.
+    if (!Check(resumed == WorkerSubmissionStatus::kAccepted
+      && callback.PublishDiagnostic({.kind = WorkerDiagnosticKind::kLatency, .value = 42}),
+      "service drain did not reclaim queue space for the observation marker")) return false;
+    if (!Check(gate.Wait(true) && service.health() == WorkerHealth::kReady && gate.faults.load() == 0,
+      "delayed service drain faulted a healthy reused realtime slot")) return false;
+    // Quiesce the callback before replacing transport; pending queue entries
+    // may remain, but none may be reinterpreted against the next generation.
+    const auto generation = service.workerGeneration();
+    if (!Check(service.Restart() && service.workerGeneration() != generation
+      && !callback.ReadCompleted(0, 200),
+      "pending bookkeeping/completion leaked into restarted generation")) return false;
+    service.Stop();
+    return Check(service.workerGeneration() == 0
+      && callback.Submit({.slotIndex = 0, .sequence = 201, .numSamples = 64}) == WorkerSubmissionStatus::kUnavailable
+      && !callback.ReadCompleted(0, 200) && gate.faults.load() == 0,
+      "teardown retained old queue/generation work or suppressed a dispatch fault");
+  }();
+  gate.Release();
+  service.Stop();  // Join before destroying the diagnostic listener's context.
+  return passed;
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
   if (argc != 2) return EXIT_FAILURE;
+  const auto delayedRuntimePassed = CheckDelayedRuntimeDispatch(argv[1]);
+  const auto delayedServicePassed = CheckDelayedServiceDispatch(argv[1]);
+  if (!delayedRuntimePassed || !delayedServicePassed) return EXIT_FAILURE;
+  if (!CheckOfflineDispatchSequence(argv[1]) || !CheckRuntimeFaultAndWakeFailure(argv[1])) return EXIT_FAILURE;
+  // Origin must fit the existing value field without changing shared/wire ABI.
+  if (!Check(sizeof(daw::plugin_host::WorkerDiagnostic) == 32
+    && static_cast<std::uint32_t>(WorkerDiagnosticKind::kFault) == 4
+    && static_cast<std::uint32_t>(WorkerDiagnosticKind::kMiss) == 6
+    && EncodeWorkerFault(WorkerFaultOrigin::kChildSignal, CLD_KILLED, SIGTERM)
+      == (2U | (static_cast<std::uint32_t>(CLD_KILLED) << 8U) | (SIGTERM << 16U))
+    && EncodeWorkerFault(WorkerFaultOrigin::kChildExit, 0x101, 0x1ff) == 0x00ff'0101U,
+    "fault origin encoding changed ABI, enum values, or byte bounds")) return EXIT_FAILURE;
+  {
+    auto faultTransport = WorkerTransport::Create(*CreateWorkerTransportLayout(Request()));
+    if (!Check(faultTransport.has_value(), "fault transport fixture failed")) return EXIT_FAILURE;
+    constexpr std::array<std::uint32_t, 4> values{0, 0xff, 0xffff'ffffU, 0x00ab'cd0bU};
+    for (const auto value : values) {
+      if (!Check(faultTransport->PublishDiagnostic({
+        .kind = WorkerDiagnosticKind::kFault, .value = value, .sequence = 91,
+      }), "fault origin publication failed")) return EXIT_FAILURE;
+      const auto fault = faultTransport->ReadDiagnostic();
+      if (!Check(fault && fault->value == value && fault->sequence == 91,
+        "unknown origin or process sequence was not preserved")) return EXIT_FAILURE;
+    }
+  }
   {
     BoundedEditorParameterState<3> state;
     if (!Check(!state.Queue(1, 2.0), "invalid editor parameter value was accepted")) return EXIT_FAILURE;
@@ -217,10 +458,60 @@ int main(int argc, char* argv[]) {
     "realtime worker incorrectly disables editor runtime")) return EXIT_FAILURE;
   if (!Check(!daw::plugin_host::WorkerProcessModeUsesEditorRuntime(WorkerProcessSetup::Mode::kOffline),
     "offline worker enables editor runtime")) return EXIT_FAILURE;
+  {
+    using daw::plugin_host::DecodeRestartFlags;
+    namespace flag = daw::plugin_host::RestartFlag;
+    const auto parameterOnly = DecodeRestartFlags(flag::kParamValuesChanged | flag::kParamTitlesChanged);
+    if (!Check(parameterOnly.refreshMetadata && !parameterOnly.latencyChanged && !parameterOnly.componentRestart,
+      "parameter-only restart was not decoded as a metadata refresh")) return EXIT_FAILURE;
+    const auto latencyOnly = DecodeRestartFlags(flag::kLatencyChanged);
+    if (!Check(!latencyOnly.refreshMetadata && latencyOnly.latencyChanged && !latencyOnly.componentRestart,
+      "latency restart was not decoded as a latency report")) return EXIT_FAILURE;
+    const auto component = DecodeRestartFlags(flag::kReloadComponent | flag::kLatencyChanged);
+    if (!Check(component.componentRestart && component.latencyChanged && !component.refreshMetadata,
+      "component restart was not decoded as a worker-local re-setup")) return EXIT_FAILURE;
+    const auto ioChanged = DecodeRestartFlags(flag::kIoChanged);
+    if (!Check(ioChanged.componentRestart, "bus change was not decoded as a component restart")) return EXIT_FAILURE;
+    const auto ignored = DecodeRestartFlags(flag::kMidiCCAssignmentChanged | flag::kNoteExpressionChanged);
+    if (!Check(!ignored.refreshMetadata && !ignored.latencyChanged && !ignored.componentRestart,
+      "unrelated restart flags had an effect")) return EXIT_FAILURE;
+  }
+  {
+    using daw::plugin_host::EncodeWorkerFault;
+    using daw::plugin_host::IsPluginFaultOrigin;
+    using daw::plugin_host::WorkerFaultOrigin;
+    for (const auto origin : {
+      WorkerFaultOrigin::kChildExit, WorkerFaultOrigin::kChildSignal, WorkerFaultOrigin::kConfigureFailure,
+      WorkerFaultOrigin::kConfigureException, WorkerFaultOrigin::kProcessFailure,
+      WorkerFaultOrigin::kProcessException, WorkerFaultOrigin::kWorkerNotification,
+    }) {
+      if (!Check(IsPluginFaultOrigin(EncodeWorkerFault(origin, 2, 9)), "a plug-in origin was attributed to us")) return EXIT_FAILURE;
+    }
+    for (const auto origin : {
+      WorkerFaultOrigin::kUnknown, WorkerFaultOrigin::kTransportFault, WorkerFaultOrigin::kDispatchFailure,
+      WorkerFaultOrigin::kCallbackMissTermination, WorkerFaultOrigin::kStartupFailure,
+      WorkerFaultOrigin::kStartupException, WorkerFaultOrigin::kUnknownWorkerNotification,
+      WorkerFaultOrigin::kOfflineCompletionFailure, WorkerFaultOrigin::kControlIoFailure,
+      WorkerFaultOrigin::kLaunchNotTrusted,
+    }) {
+      if (!Check(!IsPluginFaultOrigin(EncodeWorkerFault(origin, 2, 9)), "our own origin was attributed to the plug-in")) return EXIT_FAILURE;
+    }
+    // A fault notification that names no origin is the plug-in's; the worker's own trust refusal names its origin.
+    using daw::plugin_host::EncodeFaultNotification;
+    if (!Check(IsPluginFaultOrigin(EncodeFaultNotification(0)), "an unnamed fault notification was not the plug-in's")) return EXIT_FAILURE;
+    const auto untrusted = EncodeFaultNotification(EncodeWorkerFault(WorkerFaultOrigin::kLaunchNotTrusted));
+    if (!Check(!IsPluginFaultOrigin(untrusted) && (untrusted & 0xffU) == static_cast<std::uint32_t>(WorkerFaultOrigin::kLaunchNotTrusted),
+      "a refused launch record was attributed to the plug-in")) return EXIT_FAILURE;
+  }
   auto invalidStartup = NoPluginStartup();
   invalidStartup.classId = "not-allowed";
   if (!Check(!daw::plugin_host::IsValidWorkerStartupRequest(invalidStartup), "no-plugin startup accepted plugin data")) return EXIT_FAILURE;
   auto instrumentHello = Hello();
+  auto latencyManifest = instrumentHello.manifest;
+  latencyManifest.latencyFrames = 65'536;
+  if (!Check(daw::plugin_host::IsValidWorkerManifest(latencyManifest), "product maximum latency was rejected")) return EXIT_FAILURE;
+  latencyManifest.latencyFrames = 65'537;
+  if (!Check(!daw::plugin_host::IsValidWorkerManifest(latencyManifest), "latency above product maximum was accepted")) return EXIT_FAILURE;
   instrumentHello.manifest.role = WorkerPluginRole::kInstrument;
   instrumentHello.manifest.inputBuses.clear();
   instrumentHello.manifest.transport.inputChannels = 0;
@@ -644,6 +935,8 @@ int main(int argc, char* argv[]) {
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   }
   if (!Check(callback.health() == WorkerHealth::kReady, "worker restart did not restore callback health")) return EXIT_FAILURE;
+  if (!Check(service.Restart() && service.Restart() && !service.Restart(),
+    "fault instrumentation changed the three-restart budget")) return EXIT_FAILURE;
   service.Stop();
   if (!Check(service.health() == WorkerHealth::kStopped, "worker control service cleanup failed")) return EXIT_FAILURE;
 
@@ -656,10 +949,42 @@ int main(int argc, char* argv[]) {
   if (!Check(deadWorker.health() == WorkerHealth::kFaulted, "worker death was not surfaced")) return EXIT_FAILURE;
   if (!Check(deadWorker.workerProcessGroupId() > 0,
     "exited worker lost its process-group identity before cleanup")) return EXIT_FAILURE;
+  const auto exitedFault = deadWorker.ReadDiagnostic();
+  if (!Check(exitedFault && exitedFault->kind == WorkerDiagnosticKind::kFault
+    && exitedFault->value == EncodeWorkerFault(WorkerFaultOrigin::kChildExit, CLD_EXITED, 1),
+    "child exit code was not attributed")) return EXIT_FAILURE;
+  siginfo_t exitedInfo{};
+  if (!Check(waitid(P_PID, deadWorker.workerProcessGroupId(), &exitedInfo, WEXITED | WNOHANG | WNOWAIT) == 0
+    && exitedInfo.si_pid == deadWorker.workerProcessGroupId() && exitedInfo.si_status == 1,
+    "fault attribution reaped child before cleanup")) return EXIT_FAILURE;
   deadWorker.Stop();
   if (!Check(deadWorker.workerProcessGroupId() == -1,
     "worker process-group identity was not cleared after cleanup")) return EXIT_FAILURE;
   deadWorker.Stop();
+
+  WorkerControlService signaledWorker;
+  if (!Check(signaledWorker.Start(NoPluginStartup(), Configuration(argv[1]), Request()),
+    "signal test child launch failed")) return EXIT_FAILURE;
+  bool signalReady = false;
+  for (int attempt = 0; attempt < 500 && !signalReady; ++attempt) {
+    while (const auto next = signaledWorker.ReadDiagnostic()) {
+      signalReady = next->kind == WorkerDiagnosticKind::kReady;
+    }
+    if (!signalReady) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  if (!Check(signalReady && kill(signaledWorker.workerProcessGroupId(), SIGTERM) == 0,
+    "owned test worker signal failed")) return EXIT_FAILURE;
+  std::optional<daw::plugin_host::WorkerDiagnostic> signalFault;
+  for (int attempt = 0; attempt < 500 && !signalFault; ++attempt) {
+    while (const auto next = signaledWorker.ReadDiagnostic()) {
+      if (next->kind == WorkerDiagnosticKind::kFault) signalFault = next;
+    }
+    if (!signalFault) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  if (!Check(signalFault
+    && signalFault->value == EncodeWorkerFault(WorkerFaultOrigin::kChildSignal, CLD_KILLED, SIGTERM),
+    "owned child signal was not attributed")) return EXIT_FAILURE;
+  signaledWorker.Stop();
 
   WorkerControlService missedWorker;
   if (!Check(missedWorker.Start(NoPluginStartup(), Configuration(argv[1]), Request()),
@@ -682,6 +1007,24 @@ int main(int argc, char* argv[]) {
     "callback miss did not terminate the worker child")) return EXIT_FAILURE;
   if (!Check(!missedCallback.ReadCompleted(0, 11),
     "faulted callback transport reported a completion")) return EXIT_FAILURE;
+  bool sawMiss = false;
+  bool sawTerminationFault = false;
+  for (int attempt = 0; attempt < 100 && !sawTerminationFault; ++attempt) {
+    while (const auto next = missedWorker.ReadDiagnostic()) {
+      if (next->kind == WorkerDiagnosticKind::kMiss) {
+        if (!Check(!sawTerminationFault && next->sequence == 11,
+          "callback miss ordering or sequence changed")) return EXIT_FAILURE;
+        sawMiss = true;
+      } else if (next->kind == WorkerDiagnosticKind::kFault) {
+        if (!Check(sawMiss && next->sequence == 11
+          && next->value == EncodeWorkerFault(WorkerFaultOrigin::kCallbackMissTermination),
+          "watchdog fault preceded miss or was mislabeled as child signal")) return EXIT_FAILURE;
+        sawTerminationFault = true;
+      }
+    }
+    if (!sawTerminationFault) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  if (!Check(sawMiss && sawTerminationFault, "callback miss/termination evidence missing")) return EXIT_FAILURE;
   missedWorker.Stop();
   missedWorker.Stop();
   return EXIT_SUCCESS;

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test'
 import { createRoot, createSignal } from 'solid-js'
 
-import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import { arrangementWaveformScheduler } from '@daw-browser/waveforms/arrangement-waveform'
 import { clearWaveformAssetCache } from '@daw-browser/waveforms/asset-store'
 import { drawWaveformSignal } from '@daw-browser/waveforms/draw-waveform-signal'

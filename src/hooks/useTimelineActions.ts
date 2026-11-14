@@ -14,6 +14,7 @@ import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import { buildClipColorHistoryEntry, buildTrackColorCascadeHistoryEntry, buildTrackGroupHistoryEntry, buildTrackReorderHistoryEntry, buildTrackUngroupHistoryEntry } from '~/lib/undo/builders'
 import { TIMELINE_DEFAULT_GROUP_COLOR, TIMELINE_DEFAULT_TRACK_COLOR } from '~/lib/preferences/app-preferences'
 import { createTimelineTrackIndex, type TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
+import { RECORDING_TARGET_LOCKED_BADGE, type RecordingTargetLock } from '~/lib/track-recording-target'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
@@ -59,17 +60,21 @@ type UseTimelineActionsOptions = {
     pushHistory: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   }
   defaultColors?: TimelineTrackDefaultColors
+  recordingTargetLock?: RecordingTargetLock
+  notify?: (title: string, message: string) => void
   automationEnvelopes: Accessor<AutomationEnvelope[]>
   sidechainRoutes: Accessor<ExternalSidechainRoute[]>
   applyAutomationEnvelope: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
   navigation: {
     trackLookup: Accessor<TimelineTrackIndex<AudioBuffer>>
     selection: TimelineSelectionController
+    isPlaying: Accessor<boolean>
     setPlayhead: (nextSec: number, tracks: RuntimeTrack[]) => void
-    openMidiEditorFor: (clipId: string) => void
+    openClipDetailFor: (clipId: string) => void
     ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
     getScrollElement: () => HTMLDivElement | undefined
-      setVisibleStartSec: (startSec: number) => void
+    visibleStartSec: Accessor<number>
+    setVisibleStartSec: (startSec: number) => void
     pixelsPerSecond: Accessor<number>
   }
 }
@@ -241,6 +246,11 @@ export function useTimelineActions(
       : undefined
   }
 
+  const refuseLockedTarget = (refusal: string | undefined) => {
+    if (refusal) options.notify?.(RECORDING_TARGET_LOCKED_BADGE, refusal)
+    return refusal !== undefined
+  }
+
   const persistTrackPatch = async (
     projectId: string,
     trackId: Track['id'],
@@ -319,7 +329,7 @@ export function useTimelineActions(
     if (!projectId) return
     const tracksForReorder = tracks.map((track, index) => ({ ...track, index }))
     const plan = planTrackReorder({ tracks: tracksForReorder, moveRootIds, target })
-    if (!plan) return
+    if (!plan || refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.patches))) return
     const trackById = new Map(tracks.map((track) => [track.id, track]))
     const patchByTrackId = new Map(plan.patches.map((patch) => [patch.trackId, patch]))
     const updates = tracksForReorder.map((track) => {
@@ -362,13 +372,20 @@ export function useTimelineActions(
     const tracks = options.tracks()
     const pendingGroupTrackId = '__pending_group_track__'
     const plan = planGroupTracks({ tracks, selectedTrackIds: trackIds, groupTrackId: pendingGroupTrackId })
-    if (!plan) return
+    if (!plan || refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.childUpdates))) return
     const groupTrack = await createTimelineTrack({
       channelRole: 'group',
       color: plan.groupTrack.color,
       index: plan.groupTrack.index,
     }, { pushHistory: false, select: false })
     if (!groupTrack) return
+    // A take can start while the group track is being created; it is discarded instead of rerouting the target.
+    if (refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.childUpdates))) {
+      if (isLocalId('project', projectId)) await createLocalTimelineRepository(projectId).deleteTrack(groupTrack.id)
+      else await options.creation.removeCloudTrack(groupTrack)
+      options.creation.removeLocalTrack(groupTrack.id)
+      return
+    }
     const trackById = new Map(tracks.map((track) => [track.id, track]))
     const childUpdateByTrackId = new Map(plan.childUpdates.map((update) => [update.trackId, update]))
     const reorderUpdates = [
@@ -428,7 +445,11 @@ export function useTimelineActions(
     if (!groupTrack) return
     const plan = planUngroupTracks({ tracks, groupId })
     if (!plan) return
+    const refuseUngroup = () => refuseLockedTarget(options.recordingTargetLock?.refuseChange(plan.childUpdates, [groupId]))
+    if (refuseUngroup()) return
     const effects = await loadTrackEffectSnapshot(projectId, groupId)
+    // A take can start while the effects load; the write must see the lock as it is now.
+    if (refuseUngroup()) return
     const automation = options.automationEnvelopes()
       .filter((envelope) => envelope.target.kind === 'track' && envelope.target.trackId === groupId)
     const trackById = new Map(tracks.map((track) => [track.id, track]))
@@ -511,7 +532,7 @@ export function useTimelineActions(
     const tracks = options.tracks()
     const plan = planMoveTrackToGroup({ tracks, trackId, groupId })
     const track = tracks.find((entry) => entry.id === trackId)
-    if (!plan || !track) return
+    if (!plan || !track || refuseLockedTarget(options.recordingTargetLock?.refuseChange([plan]))) return
     await persistTrackPatch(projectId, trackId, { groupId: plan.groupId, outputTargetId: plan.outputTargetId }, track.sends)
     applyTrackPatch(track, { groupId: plan.groupId, outputTargetId: plan.outputTargetId })
   }
@@ -683,11 +704,14 @@ export function useTimelineActions(
 
   function jumpToClip(trackId: Track['id'], clipId: string, startSec: number): void {
     options.navigation.selection.selectPrimaryClip({ trackId, clipId })
-    options.navigation.setPlayhead(Math.max(0, startSec), options.tracks())
-    options.navigation.openMidiEditorFor(clipId)
+    const targetStartSec = Math.max(0, startSec)
+    if (!options.navigation.isPlaying()) {
+      options.navigation.setPlayhead(targetStartSec, options.tracks())
+    }
+    options.navigation.openClipDetailFor(clipId)
 
+    const match = options.navigation.trackLookup().clipEntryById.get(clipId)
     try {
-      const match = options.navigation.trackLookup().clipEntryById.get(clipId)
       if (match && match.trackId === trackId && !match.clip.buffer) {
         void options.navigation.ensureClipBuffer(clipId, match.clip.sampleUrl)
       }
@@ -696,11 +720,11 @@ export function useTimelineActions(
     try {
       const scrollElement = options.navigation.getScrollElement()
       if (!scrollElement) return
-      const width = scrollElement.clientWidth
-      options.navigation.setVisibleStartSec(Math.max(
-        0,
-        startSec - width / Math.max(1e-9, options.navigation.pixelsPerSecond()) / 2,
-      ))
+      const visibleStartSec = options.navigation.visibleStartSec()
+      const visibleSec = scrollElement.clientWidth / Math.max(1e-9, options.navigation.pixelsPerSecond())
+      const targetEndSec = targetStartSec + (match?.clip.duration ?? 0)
+      if (targetEndSec > visibleStartSec && targetStartSec < visibleStartSec + visibleSec) return
+      options.navigation.setVisibleStartSec(Math.max(0, targetStartSec - visibleSec / 2))
     } catch {}
   }
 

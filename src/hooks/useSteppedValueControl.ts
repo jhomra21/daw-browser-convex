@@ -1,5 +1,7 @@
 import { createSignal } from 'solid-js'
 import { useDrag } from '~/hooks/useDrag'
+import { useParameterGesture } from '~/components/effects/effect-parameter-interaction'
+import { WHEEL_IDLE_MS } from '~/lib/wheel-idle'
 
 type Point = { x: number, y: number }
 
@@ -18,9 +20,6 @@ type UseSteppedValueControlOptions = {
   disabled: () => boolean
   onValueChange: (value: number) => void
   valueFromDrag: (context: DragValueContext) => number
-  onInteractionStart?: (value: number) => void
-  onInteractionEnd?: (value: number) => void
-  onInteractionCancel?: (value: number) => void
 }
 
 export function quantizeSteppedValue(value: number, min: number, max: number, step: number) {
@@ -29,25 +28,46 @@ export function quantizeSteppedValue(value: number, min: number, max: number, st
   return Math.max(min, Math.min(max, Number(stepped.toFixed(6))))
 }
 
+const isValueKey = (key: string) => (
+  key === 'ArrowUp' || key === 'ArrowRight' || key === 'ArrowDown' || key === 'ArrowLeft'
+  || key === 'PageUp' || key === 'PageDown' || key === 'Home' || key === 'End'
+)
+
+// Maps pointer, key and wheel input onto gesture verbs. Whether a gesture is open is the owner's to say;
+// this control only shows the value it is moving and restores it when the gesture is cancelled.
 export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
   const [dragValue, setDragValue] = createSignal<number | null>(null)
   let startPosition: Point = { x: 0, y: 0 }
   let startValue = options.value()
+  let gestureStartValue = startValue
+  // startValue rebases when Shift toggles precision; cancel restores the value from before the gesture.
   let fineDrag = false
-  let lastEmittedValue = options.value()
+  // Registered before useDrag so a dispose cancels a live drag before this gesture ends (cleanups run last-in first).
+  const gesture = useParameterGesture({
+    onClosed: () => {
+      drag.cancelDrag()
+      setDragValue(null)
+    },
+  })
+  // The wheel is a separate holder: it never ends a drag or key hold that is open at the same time.
+  const wheelGesture = useParameterGesture({ idleMs: WHEEL_IDLE_MS })
   const visualValue = () => dragValue() ?? options.value()
   const normalizeValue = (value: number) => quantizeSteppedValue(value, options.min(), options.max(), options.step())
-  const emitValue = (value: number) => {
-    if (value === lastEmittedValue) return
-    lastEmittedValue = value
-    options.onValueChange(value)
-  }
-  const setVisualValue = (value: number) => {
-    lastEmittedValue = options.value()
+  // Drag and key hold show their own value until the gesture ends, so the control never lags the pointer.
+  const show = (value: number) => {
     const finalValue = normalizeValue(value)
     setDragValue(finalValue)
-    emitValue(finalValue)
-    queueMicrotask(() => setDragValue(null))
+    gesture.tick(() => options.onValueChange(finalValue))
+  }
+  const endGesture = () => {
+    gesture.end()
+    setDragValue(null)
+  }
+  const cancelGesture = (restore = true) => {
+    gesture.cancel()
+    // Without an owner nothing restores the value for us.
+    if (restore && !gesture.owned) options.onValueChange(gestureStartValue)
+    setDragValue(null)
   }
   const drag = useDrag({
     disabled: options.disabled,
@@ -55,10 +75,10 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
       event.stopPropagation()
       startPosition = position
       startValue = visualValue()
+      gestureStartValue = startValue
       fineDrag = event.shiftKey
-      lastEmittedValue = startValue
       setDragValue(startValue)
-      options.onInteractionStart?.(startValue)
+      gesture.open()
     },
     onDragMove: (currentPosition, event) => {
       event.preventDefault()
@@ -67,70 +87,78 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
         startValue = visualValue()
         fineDrag = event.shiftKey
       }
-      const finalValue = normalizeValue(options.valueFromDrag({
-        startValue,
-        startPosition,
-        currentPosition,
-        fine: fineDrag,
-      }))
-      setDragValue(finalValue)
-      emitValue(finalValue)
+      show(options.valueFromDrag({ startValue, startPosition, currentPosition, fine: fineDrag }))
     },
     onDragEnd: (_position, event) => {
       event.preventDefault()
-      options.onInteractionEnd?.(visualValue())
-      setDragValue(null)
+      endGesture()
     },
-    onDragCancel: (_position, _event) => {
-      options.onInteractionCancel?.(visualValue())
-      setDragValue(null)
-    },
+    onDragCancel: (reason) => cancelGesture(reason === 'cancel'),
   })
   const handleKeyDown = (event: KeyboardEvent) => {
     if (options.disabled()) return
-    const largeStep = options.step() * 10
-    let nextValue: number | undefined
-
-    switch (event.key) {
-      case 'ArrowUp':
-      case 'ArrowRight':
-        nextValue = visualValue() + options.step()
-        break
-      case 'ArrowDown':
-      case 'ArrowLeft':
-        nextValue = visualValue() - options.step()
-        break
-      case 'PageUp':
-        nextValue = visualValue() + largeStep
-        break
-      case 'PageDown':
-        nextValue = visualValue() - largeStep
-        break
-      case 'Home':
-        nextValue = options.min()
-        break
-      case 'End':
-        nextValue = options.max()
-        break
-      default:
-        return
+    // macOS can swallow keyup while Cmd is held, which would leave a keyboard hold open.
+    if (event.metaKey || event.ctrlKey || event.altKey) return
+    // Escape abandons whatever this control holds open, whichever input source opened it.
+    if (event.key === 'Escape' && (gesture.isOpen() || wheelGesture.isOpen()) && !drag.isDragging()) {
+      event.preventDefault()
+      event.stopPropagation()
+      wheelGesture.cancel()
+      cancelGesture()
+      return
     }
-
+    if (!isValueKey(event.key)) return
+    // Auto-repeat only continues a hold: after Escape or an owner close it must not open a new gesture.
+    if (event.repeat && !gesture.isOpen()) {
+      event.preventDefault()
+      return
+    }
+    const largeStep = options.step() * 10
+    const nextValue = {
+      ArrowUp: visualValue() + options.step(),
+      ArrowRight: visualValue() + options.step(),
+      ArrowDown: visualValue() - options.step(),
+      ArrowLeft: visualValue() - options.step(),
+      PageUp: visualValue() + largeStep,
+      PageDown: visualValue() - largeStep,
+      Home: options.min(),
+      End: options.max(),
+    }[event.key]
+    if (nextValue === undefined) return
     event.preventDefault()
-    setVisualValue(nextValue)
+    if (!gesture.isOpen()) {
+      gestureStartValue = visualValue()
+      gesture.open()
+    }
+    show(nextValue)
+  }
+  const handleKeyUp = (event: KeyboardEvent) => {
+    if (isValueKey(event.key) && !drag.isDragging()) endGesture()
+  }
+  const handleBlur = () => {
+    wheelGesture.end()
+    if (!drag.isDragging()) endGesture()
   }
   const handleWheel = (event: WheelEvent) => {
     if (options.disabled() || event.deltaY === 0) return
     event.preventDefault()
-    setVisualValue(visualValue() + (event.deltaY < 0 ? options.step() : -options.step()))
+    wheelGesture.open()
+    const next = normalizeValue(visualValue() + (event.deltaY < 0 ? options.step() : -options.step()))
+    wheelGesture.tick(() => options.onValueChange(next))
+  }
+  // Reset and typed entry are one edit: open, move, close.
+  const commitValue = (value: number) => {
+    gesture.once(() => options.onValueChange(normalizeValue(value)))
   }
 
   return {
+    commitValue,
+    handleBlur,
+    handleKeyDown,
+    handleKeyUp,
     handleWheel,
     isDragging: drag.isDragging,
-    handleKeyDown,
     onPointerDown: drag.onPointerDown,
-    setVisualValue,
     visualValue,
   }
 }

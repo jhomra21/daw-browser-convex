@@ -53,6 +53,8 @@ type AppPreferencesContextValue = {
     setDefaultGroupColor: (color: string) => void
     resetDefaultTrackColor: () => void
     resetDefaultGroupColor: () => void
+    follow: () => boolean
+    setFollow: (enabled: boolean) => void
   }
   audio: {
     preferences: () => AudioPreferences
@@ -190,6 +192,11 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
     setPreferences("timeline", "defaultGroupColor", TIMELINE_DEFAULT_GROUP_COLOR)
   }
 
+  const setFollow = (enabled: boolean) => {
+    if (preferences.timeline.follow === enabled) return
+    setPreferences("timeline", "follow", enabled)
+  }
+
   const resolveDefaultTimelineColor = (color: string) => {
     if (color === TIMELINE_DEFAULT_TRACK_COLOR) return `var(--${TIMELINE_DEFAULT_TRACK_COLOR})`
     if (color === TIMELINE_DEFAULT_GROUP_COLOR) return `var(--${TIMELINE_DEFAULT_GROUP_COLOR})`
@@ -230,7 +237,9 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           setDefaultTrackColor,
           setDefaultGroupColor,
           resetDefaultTrackColor,
-          resetDefaultGroupColor
+          resetDefaultGroupColor,
+          follow: () => preferences.timeline.follow,
+          setFollow,
         },
         audio: {
           preferences: () => preferences.audio,

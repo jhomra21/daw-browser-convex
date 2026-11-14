@@ -15,6 +15,7 @@ import {
   parseBrowserProjectId,
   pingProjectCdp,
   probeProjectCdp,
+  rows,
 } from "./v3-import-process"
 import {
   assertArchiveSnapshot,
@@ -149,6 +150,62 @@ const fullLoadFramePerformanceSchema = z.object({
   }).strict(),
 }).strict()
 
+export const ownedV3CdpEndpoint = async (profile: string, rootPid: number, executablePath: string, diagnostics?: {
+  announcedEndpoint: string;
+  observe: (stage: string, facts: Record<string, boolean | number>) => void;
+}) => {
+  diagnostics?.observe("capability-file-read", {})
+  const [portText, capability] = (await readFile(path.join(profile, "DevToolsActivePort"), "utf8")).trim().split(/\r?\n/)
+  const port = Number(portText)
+  if (!Number.isInteger(port) || port < 1 || port > 65_535 || !capability) {
+    throw new Error("Electron debugging capability file is invalid.")
+  }
+  const endpoint = `ws://127.0.0.1:${port}${capability}`
+  diagnostics?.observe("capability-file-parsed", { endpointMatchesAnnouncement: endpoint === diagnostics.announcedEndpoint })
+  const listener = Bun.spawn(["lsof", "-nP", `-iTCP@127.0.0.1:${port}`, "-sTCP:LISTEN", "-t"], { stdout: "pipe", stderr: "pipe" })
+  const listenerOutput = (await new Response(listener.stdout).text()).trim()
+  const pids = listenerOutput ? listenerOutput.split(/\s+/).map(Number) : []
+  const listenerExit = await listener.exited
+  diagnostics?.observe("listener-inspected", { listenerExit, listenerCount: pids.length })
+  if (listenerExit !== 0 && listenerExit !== 1) throw new Error("Could not inspect the Electron debugging listener.")
+  const processes = await rows()
+  if (diagnostics) {
+    const wide = Bun.spawn(["ps", "-ww", "-p", String(rootPid), "-o", "command="], { stdout: "pipe", stderr: "pipe" })
+    const command = (await new Response(wide.stdout).text()).trim()
+    diagnostics.observe("wide-root-arguments", {
+      inspectionSucceeded: await wide.exited === 0,
+      executableMatches: command.startsWith(`${executablePath} `),
+      profileMatches: command.split(/\s+/).includes(`--user-data-dir=${profile}`),
+      debuggingArgumentsMatch: command.split(/\s+/).includes("--remote-debugging-port=0")
+        && command.split(/\s+/).includes("--remote-debugging-address=127.0.0.1"),
+      matchesRowsCommand: command === processes.find((row) => row.pid === rootPid)?.command,
+    })
+  }
+  const identity = verifyElectronLaunchIdentity({ rootPid, executablePath, profilePath: profile, port, listenerPids: pids, processes, websocketUrl: endpoint,
+    observe: diagnostics ? (predicate, matched) => diagnostics.observe(predicate, { matched }) : undefined })
+  if (!identity.verified) throw new Error(identity.reason)
+  const plan = createCleanupPlan(processes, rootPid)
+  if (!plan) throw new Error("No owned process group")
+  return { endpoint, plan }
+}
+
+export const cleanupV3Run = async (
+  directory: string, rootPid: number, executablePath: string, plan?: ReturnType<typeof createCleanupPlan>,
+) => {
+  const profile = path.join(directory, "profile")
+  const current = await rows()
+  const owned = current.find((row) => row.pid === rootPid && row.command.includes(executablePath)
+    && row.command.includes(`--user-data-dir=${profile}`))
+  const ownedPlan = plan ?? (owned ? createCleanupPlan(current, rootPid) : undefined)
+  if (owned && ownedPlan && ownedPlan.processGroupId === owned.processGroupId && ownedPlan.processGroupId !== process.pid) {
+    process.kill(-ownedPlan.processGroupId, "SIGTERM")
+    // Keep the existing bounded grace period for owned OS processes to exit before escalation.
+    await delay(1000)
+    for (const pid of cleanupSurvivors(ownedPlan, await rows())) process.kill(pid, "SIGKILL")
+  }
+  return cleanupOwnedRunDirectory(directory, await rows())
+}
+
 const main = async () => {
   const output = Bun.argv[2]
   const mode = parseControlMode(Bun.argv[3])
@@ -230,23 +287,15 @@ const main = async () => {
   app.on("exit", (code, signal) => {
     lifecycle = (lifecycle + `[quiet-capture-lifecycle] stage=main-exit code=${code ?? "null"} signal=${signal ?? "null"}\n`).slice(-32_000)
   })
-  if (!app.pid) throw new Error("No Electron PID")
+  const appPid = app.pid
+  if (!appPid) throw new Error("No Electron PID")
   let plan: ReturnType<typeof createCleanupPlan> | undefined
   let cleanupPromise: Promise<Awaited<ReturnType<typeof cleanupOwnedRunDirectory>>> | null = null
   const cleanupRun = () => {
     if (cleanupPromise) return cleanupPromise
     cleanupPromise = (async () => {
       if (attached) await browserCommand(session, ["close"]).catch(() => undefined)
-      const current = await rows()
-      const owned = current.find((row) => row.pid === app.pid && row.command.includes(executable)
-        && row.command.includes(`--user-data-dir=${profile}`))
-      const ownedPlan = plan ?? (owned ? createCleanupPlan(current, app.pid) : undefined)
-      if (owned && ownedPlan?.processGroupId === owned.processGroupId && ownedPlan.processGroupId !== process.pid) {
-        process.kill(-ownedPlan.processGroupId, "SIGTERM")
-        await delay(1000)
-        for (const pid of cleanupSurvivors(ownedPlan, await rows())) process.kill(pid, "SIGKILL")
-      }
-      return cleanupOwnedRunDirectory(directory, await rows())
+      return cleanupV3Run(directory, appPid, executable, plan)
     })()
     return cleanupPromise
   }
@@ -286,22 +335,19 @@ const main = async () => {
       rendererEvents: boundedRendererEvents(events), rendererSamples: metrics.slice(-120) }
   }
   try {
+    let lastLaunchError = "CDP did not become available."
+    // Preserve the existing bounded wait for the OS-created capability file/listener; no readiness is inferred from elapsed time.
     for (let i = 0; i < 30 && !endpoint; i++) {
       try {
-        const [portText, capability] = (await readFile(path.join(profile, "DevToolsActivePort"), "utf8")).trim().split(/\r?\n/)
-        const port = Number(portText)
-        const listener = Bun.spawn(["lsof", "-nP", `-iTCP@127.0.0.1:${port}`, "-sTCP:LISTEN", "-t"], { stdout: "pipe" })
-        const pids = (await new Response(listener.stdout).text()).trim().split(/\s+/).map(Number)
-        const url = `ws://127.0.0.1:${port}${capability}`
-        const processes = await rows()
-        const identity = verifyElectronLaunchIdentity({ rootPid: app.pid, executablePath: executable, profilePath: profile, port, listenerPids: pids, processes, websocketUrl: url })
-        if (!identity.verified) throw new Error(identity.reason)
-        plan = createCleanupPlan(processes, app.pid)
-        if (!plan) throw new Error("No owned process group")
-        endpoint = url
-      } catch { await delay(1000) }
+        const launch = await ownedV3CdpEndpoint(profile, appPid, executable)
+        plan = launch.plan
+        endpoint = launch.endpoint
+      } catch (error) {
+        lastLaunchError = String(error)
+        await delay(1000)
+      }
     }
-    if (!endpoint || !plan) throw new Error("Owned CDP endpoint unavailable")
+    if (!endpoint || !plan) throw new Error(`Owned CDP endpoint unavailable: ${lastLaunchError}`)
     if (process.env.DAW_BENCHMARK_FORCE_FAILURE === "after-launch") {
       throw new Error("Forced benchmark failure after verified launch.")
     }

@@ -1,6 +1,4 @@
-import type { SynthEnvelopeParams, SynthFilterMode, SynthWave } from '@daw-browser/shared'
-
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
+import { clamp, type SynthEnvelopeParams, type SynthFilterMode, type SynthWave } from '@daw-browser/shared'
 
 const pathFromPoints = (points: readonly [number, number][]) => (
   points.map(([x, y], index) => `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`).join(' ')

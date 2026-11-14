@@ -2,7 +2,7 @@ import { createEffect, createMemo, createSignal, onCleanup, onMount, type Compon
 
 import { drawWaveformSignal } from '@daw-browser/waveforms/draw-waveform-signal'
 import type { Clip } from '@daw-browser/timeline-core/types'
-import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import { useAppPreferences } from '~/context/app-preferences'
 import { resolveClipColor } from '~/lib/clip-color'
 import { useSampleDetailWaveformOverview } from '~/hooks/useSampleDetailWaveformOverview'

@@ -35,6 +35,7 @@ const createRoot = () => {
   }
   const root = {
     getDirectoryHandle: async (name: string) => name === 'assets' ? assets : root,
+    removeEntry: async () => undefined,
   }
   return { files, root, writes }
 }
@@ -189,10 +190,10 @@ test('removes a newly written file when opening persistence fails', async () => 
     configurable: true,
     value: { getDirectory: async () => root },
   })
+  const open = indexedDB.open
   try {
     const project = await createLocalProject(`Assets ${crypto.randomUUID()}`)
     await purgeLocalProjectCache(project.id)
-    const open = indexedDB.open
     indexedDB.open = () => {
       throw new Error('DB open failed')
     }
@@ -201,8 +202,8 @@ test('removes a newly written file when opening persistence fails', async () => 
       file: new File(['abc'], 'kick.wav', { type: 'audio/wav' }),
     })).rejects.toThrow('DB open failed')
     expect(files.size).toBe(0)
-    indexedDB.open = open
   } finally {
+    indexedDB.open = open
     if (storage) Object.defineProperty(navigator, 'storage', storage)
     else Reflect.deleteProperty(navigator, 'storage')
   }

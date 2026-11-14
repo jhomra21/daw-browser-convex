@@ -59,7 +59,7 @@ type AudioImportTransactionContext = {
   clips: ImportClipContext
   cloud: ImportCloudContext
   rollback: AutoCreatedTrackRollback
-  onLocalSaveFailed?: (message: string) => void
+  onLocalSaveFailed?: (projectId: string, message: string) => void
 }
 
 type AudioSourceClipInput = {
@@ -241,7 +241,7 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
           ? error.message
           : 'Audio could not be saved to local project storage.'
         const guidance = `${message} Free project storage or choose another storage location, then retry the import.`
-        context.onLocalSaveFailed?.(guidance)
+        context.onLocalSaveFailed?.(projectId, guidance)
         await context.rollback.removeLocalTrack(projectId, input.autoCreatedTrack)
         return { status: 'local-save-failed', message: guidance }
       }
@@ -272,6 +272,8 @@ export function createAudioImportTransaction(context: AudioImportTransactionCont
         if (input.autoCreatedTrack && context.project.isActiveProjectTrack(projectId, input.track.id)) {
           context.clips.pushTrackClipCreateHistory(input.autoCreatedTrack, created.clipId, created.clip)
         }
+        // A metadata-only import is projected without audio: request its decode, as a projected URL import does.
+        if (!input.decoded) preloadProjectedClip(projectId, input.track.id, created.clipId)
       } catch (error) {
         if (created && input.isCurrentProject?.() === false) {
           await createLocalTimelineRepository(projectId).deleteClip(created.clipId).catch(() => undefined)

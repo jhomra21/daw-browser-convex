@@ -206,7 +206,7 @@ test('round trips the bounded native worker artifact and runtime hello contract'
       artifact: { id: 'daw-vst3-worker', version: '3' },
       startupProtocolVersion: 1,
       controlProtocolVersion: 2,
-      transportAbiVersion: 6,
+      transportAbiVersion: 7,
       architecture: 'arm64',
       role: 'effect',
       latencyFrames: 32,
@@ -473,4 +473,24 @@ test('rejects paths, invalid fingerprints, and out-of-bounds attachment dimensio
       nativeGraphNodeId: `${index + 1}`,
     })),
   }))).toThrow()
+})
+
+test('worker contract versions match the native plugin-host header', async () => {
+  const header = await Bun.file(new URL('../../../native/plugin-host/src/worker-supervisor.h', import.meta.url)).text()
+  const nativeConstant = (name: string) => header.match(new RegExp(`\\b${name} = "?([^";]+)"?;`))?.[1]
+  expect({
+    transportAbi: nativeConstant('kWorkerTransportAbiVersion'),
+    manifest: nativeConstant('kWorkerManifestVersion'),
+    startupProtocol: nativeConstant('kWorkerStartupProtocolVersion'),
+    controlProtocol: nativeConstant('kWorkerControlProtocolVersion'),
+    artifactId: nativeConstant('kWorkerArtifactId'),
+    artifactVersion: nativeConstant('kWorkerArtifactVersion'),
+  }).toEqual({
+    transportAbi: `${nativeVst3WorkerTransportAbiVersion}`,
+    manifest: `${nativeVst3WorkerManifestVersion}`,
+    startupProtocol: `${nativeVst3WorkerStartupProtocolVersion}`,
+    controlProtocol: `${nativeVst3WorkerControlProtocolVersion}`,
+    artifactId: nativeVst3WorkerArtifactId,
+    artifactVersion: nativeVst3WorkerArtifactVersion,
+  })
 })

@@ -6,6 +6,7 @@ import {
   type StreamingExportAnalysis,
 } from '@daw-browser/audio-engine/streaming-export-fidelity'
 import { createStreamingTruePeakLimiter } from '@daw-browser/audio-engine/streaming-true-peak-limiter'
+import { dbFromLinear, linearFromDb } from '@daw-browser/shared'
 
 import type { ExportRenderSettings } from '~/lib/export/export-settings'
 import type { NativeOfflinePcmSpoolSession } from '~/lib/export/native-offline-pcm-spool'
@@ -26,8 +27,6 @@ type Pipeline = {
   limiters: ReturnType<typeof createStreamingTruePeakLimiter>[]
 }
 
-const linearFromDb = (value: number) => 10 ** (value / 20)
-const dbFromLinear = (value: number) => value > 0 ? 20 * Math.log10(value) : Number.NEGATIVE_INFINITY
 
 async function* applyGainToChunks(
   chunks: AsyncIterable<AudioBuffer>,

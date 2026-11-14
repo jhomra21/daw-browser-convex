@@ -77,7 +77,7 @@ Solid rules: `AGENTS-solid.md`
 - Use `@tanstack/solid-query` for API state management
 - Import paths use `~` alias for `./src` directory
 - Components should be in `src/components/` with proper organization
-- Ableton reference images live at `/private/tmp/ableton-ui-reference` (add more as you need and as you research)
+- Ableton reference images live at `docs/ableton-ui-reference/` (index in its `README.md`; add more as you need and as you research). Follow Ableton's layout and UX patterns, not its colors or styling; keep our current theme.
 
 ### Backend (Hono + Cloudflare Workers)
 - API routes in `api/index.ts` using Hono framework

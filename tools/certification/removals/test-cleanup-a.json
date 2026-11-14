@@ -1,0 +1,22 @@
+{
+ "ruling": "acceptance-reports/ae-08-phase-5-2026-10-18/TEST-CLEANUP-A-REPORT.md",
+ "removed": [
+  { "file": "src/components/Timeline.test.ts", "test": "B6 hook fixture and Timeline use the production history seam, never a fixture copy" },
+  { "file": "src/components/Timeline.test.ts", "test": "STEP5 B7 shared playback input boundary is used by Timeline and both fixtures" },
+  { "file": "src/components/Timeline.test.ts", "test": "3B1 r2 comments and audio-adapter witness describe registration and independent native settlement" },
+  { "file": "src/components/Timeline.test.ts", "test": "records effect history without dispatching native delivery or rebuilding playback" },
+  { "file": "src/components/Timeline.test.ts", "test": "bypasses degraded external processors and excludes persisted degraded rows from playback" },
+  { "file": "src/components/Timeline.test.ts", "test": "rebuilds prepared browser or native ownership with captured project intent" },
+  { "file": "src/components/Timeline.test.ts", "test": "keeps graph revisions stable during compilation and bumps them at structural rebuild boundaries" },
+  { "file": "src/components/Timeline.test.ts", "test": "hands an inserted processor to the bound rebuild compiler and verifies current persistence" },
+  { "file": "src/components/Timeline.test.ts", "test": "offers trusted VST3 catalog recovery without retrying playback automatically" },
+  { "file": "src/components/Timeline.test.ts", "test": "routes browser keyboard toggles through the extension host exactly once" },
+  { "file": "src/hooks/useTimelinePlayback.test.ts", "test": "keeps browser startup portable-first and runtime faults stop without fallback" },
+  { "file": "src/hooks/useTimelinePlayback.test.ts", "test": "keeps lifecycle state reactive while limiting it to native backend selection" },
+  { "file": "src/lib/desktop/native-playback-lifecycle.browser.test.ts", "test": "terminal session cancellation preserves the device fault notice without rebuilding" },
+  { "file": "src/lib/retained-waveform.test.ts", "test": "waveform request planning > keeps global interval ownership stable under tiny pans and tier changes" },
+  { "file": "native/audio-core/tests/validation_scratch.test.ts", "test": "native validation scratch stays persistent while Wasm uses its configured stack" },
+  { "file": "apps/desktop/package-scripts.test.ts", "test": "uses the local helper for start and package and the release helper for make" },
+  { "file": "apps/desktop/export-output-contract.test.ts", "test": "desktop export output stays on the scoped capability bridge" }
+ ]
+}

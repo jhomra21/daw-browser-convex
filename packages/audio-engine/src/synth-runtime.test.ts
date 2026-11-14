@@ -1307,3 +1307,29 @@ describe('synth runtime characterization', () => {
     expect(oscillators.every((oscillator) => oscillator.stops.includes(0.156))).toBe(true)
   })
 })
+describe('synth runtime delivery', () => {
+  test('skips equal params', () => {
+    const { runtime } = createRuntime()
+
+    expect(runtime.setTrackSynth('track-1', createDefaultSynthParams(), 'instrument:synth:1')).toBe('skipped')
+  })
+
+  test('applies changed params', () => {
+    const { runtime } = createRuntime()
+
+    expect(runtime.setTrackSynth('track-1', { ...createDefaultSynthParams(), gain: 0.6 })).toBe('applied')
+  })
+
+  test('drops params it cannot install without an audio context', () => {
+    const runtime = createSynthRuntime({
+      ensureAudio: () => {},
+      getAudioContext: () => null,
+      getBpm: () => 60,
+      timelineToCtxTime: (time) => time,
+      ensureTrackInput: () => createTestAudio().ctx.createGain(),
+      sources: createSourceRegistry(),
+    })
+
+    expect(runtime.setTrackSynth('track-1', createDefaultSynthParams())).toBe('dropped')
+  })
+})

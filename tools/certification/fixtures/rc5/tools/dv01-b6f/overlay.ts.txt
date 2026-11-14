@@ -1,0 +1,25 @@
+import { plugin } from "bun"
+import { readFileSync } from "node:fs"
+
+// B6f probe overlay. Appends the probe source to useTimelinePlayback.test.ts in memory and, when a spec is given,
+// applies its exact-anchor changes (each anchor must occur exactly once). Nothing is written to disk.
+const probeFile = process.env.DV01_B6F_PROBE ?? ""
+const specFile = process.env.DV01_OVERLAY_FILE ?? ""
+const spec: { id: string; changes: { file: string; from: string; to: string }[] } = specFile
+  ? JSON.parse(readFileSync(specFile, "utf8")) : { id: "none", changes: [] }
+console.log("DV01-B6F-OVERLAY-LOADED", spec.id, spec.changes.length, probeFile ? "probe" : "no-probe")
+plugin({ name: `dv01-b6f-${spec.id}`, setup(build) {
+  build.onLoad({ filter: /\.(ts|tsx)$/ }, ({ path }) => {
+    let contents = readFileSync(path, "utf8")
+    for (const change of spec.changes.filter(change => path.endsWith(change.file))) {
+      if (contents.split(change.from).length !== 2) throw new Error("Overlay requires one exact anchor: " + spec.id + " " + change.file)
+      contents = contents.replace(change.from, change.to)
+      console.log("DV01-B6F-OVERLAY-APPLIED", spec.id, change.file)
+    }
+    if (probeFile && path.endsWith("/src/hooks/useTimelinePlayback.test.ts")) {
+      contents += "\n" + readFileSync(probeFile, "utf8")
+      console.log("DV01-B6F-PROBE-APPENDED")
+    }
+    return { contents, loader: path.endsWith(".tsx") ? "tsx" : "ts" }
+  })
+} })

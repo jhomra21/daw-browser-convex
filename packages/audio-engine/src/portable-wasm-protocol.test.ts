@@ -829,3 +829,54 @@ test('accepts bounded sampler and drum-rack state DTOs before the worklet', () =
     state: { ...sampler, kind: 'drum-rack' },
   })).toBeNull()
 })
+
+test('B6f5 publish-graph carries an adoption continuity requirement and prepare-graph a pre-encoded envelope', () => {
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, requireContinuity: true,
+  })).toEqual({ version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, requireContinuity: true })
+  expect(parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, requireContinuity: false,
+  })).toBeNull()
+  const framed = (publicationFrame: number | string) => parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, requireContinuity: true, publicationFrame,
+  })
+  expect(framed(256)).toEqual({ version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, requireContinuity: true, publicationFrame: 256 })
+  // A publication frame is a safe integer from 0, and only an adoption (requireContinuity) carries one.
+  for (const publicationFrame of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '256']) expect(framed(publicationFrame)).toBeNull()
+  expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, publicationFrame: 256 })).toBeNull()
+  expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'cancel-publication', revision: 2 }))
+    .toEqual({ version: portableWasmProtocolVersion, type: 'cancel-publication', revision: 2 })
+  for (const revision of [0, 1.5, '2']) {
+    expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'cancel-publication', revision })).toBeNull()
+  }
+  const snapshot = {
+    version: audioCoreContractVersion, revision: 1, contractHash: 'test', masterNodeId: 'master', edges: [], assets: [],
+    nodes: [{ id: 'master', kind: 'master', inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: 0, processorOrder: [] }],
+  }
+  const envelope = new Uint8Array([3, 0, 0, 0])
+  expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'prepare-graph', requestId: 1, snapshot, envelope }))
+    .toMatchObject({ type: 'prepare-graph', envelope })
+  expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'prepare-graph', requestId: 1, snapshot, envelope: [3] })).toBeNull()
+})
+
+// AE-08 phase 8 step 9a: the sources of a published revision ride on its adoption publish.
+test('C9a publish-graph carries the source table of its revision, only with an adoption, in one epoch and sequence order', () => {
+  const event = (sequence: number, epoch = 2) => ({
+    version: audioCoreContractVersion, epoch, sequence, sourceNodeId: 'track-1', assetId: 'asset:one', startFrame: 0, stopFrame: 128,
+    sourceOffsetFrame: 0, sourceFrameCount: 128, gain: 1, fadeInStartFrame: 0, fadeInEndFrame: 0, fadeOutStartFrame: 128, fadeOutEndFrame: 128,
+  })
+  const prepared = { ...event(2), preparationId: 4, assetId: undefined }
+  const publish = (sources: { epoch?: number; ordinary: readonly object[]; prepared: readonly object[] }, publicationFrame?: number, requireContinuity: boolean = true) => parsePortableWasmControlMessage({
+    version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, ...(requireContinuity && { requireContinuity }), publicationFrame, sources,
+  })
+  const table = { epoch: 2, ordinary: [event(1)], prepared: [prepared] }
+  expect(publish(table, 256)).toMatchObject({ type: 'publish-graph', publicationFrame: 256, sources: table })
+  expect(publish(table)).toMatchObject({ type: 'publish-graph', sources: table })
+  expect(publish({ epoch: 2, ordinary: [], prepared: [] })).toMatchObject({ sources: { ordinary: [], prepared: [] } })
+  expect(publish(table, 256, false)).toBeNull()
+  expect(publish({ ...table, epoch: 3 })).toBeNull()
+  expect(publish({ ...table, prepared: [{ ...prepared, sequence: 1 }] })).toBeNull()
+  expect(publish({ ...table, ordinary: [{ ...event(1), gain: Number.NaN }] })).toBeNull()
+  expect(publish({ epoch: 2, ordinary: Array.from({ length: 257 }, (_, index) => event(index + 1)), prepared: [] })).toBeNull()
+  expect(publish({ ordinary: [], prepared: [] })).toBeNull()
+})

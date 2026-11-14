@@ -1,5 +1,6 @@
-import { onCleanup, type Accessor } from "solid-js";
+import type { Accessor } from "solid-js";
 import { clampTimelineLeftBrowserWidth } from "~/lib/timeline-left-browser-preferences";
+import { useDrag } from "~/hooks/useDrag";
 
 type UseTimelineLeftBrowserResizeOptions = {
   widthPx: Accessor<number>;
@@ -10,7 +11,6 @@ type UseTimelineLeftBrowserResizeOptions = {
 };
 
 export function useTimelineLeftBrowserResize(options: UseTimelineLeftBrowserResizeOptions) {
-  let resizing = false;
   let resizeStartX = 0;
   let resizeStartWidth = 0;
   let resizeContainerWidth = 0;
@@ -22,42 +22,17 @@ export function useTimelineLeftBrowserResize(options: UseTimelineLeftBrowserResi
     resizeRightSidebarWidth,
   );
 
-  function onPointerMove(event: PointerEvent): void {
-    if (!resizing) return;
-    const delta = event.clientX - resizeStartX;
-    options.previewWidthPx(clampWidth(resizeStartWidth + delta));
-  }
-
-  function onPointerUp(event: PointerEvent): void {
-    if (!resizing) return;
-    resizing = false;
-    const delta = event.clientX - resizeStartX;
-    options.commitWidthPx(clampWidth(resizeStartWidth + delta));
-    window.removeEventListener("pointermove", onPointerMove);
-    window.removeEventListener("pointerup", onPointerUp);
-    window.removeEventListener("pointercancel", onPointerUp);
-  }
-
-  function onPointerDown(event: PointerEvent): void {
-    event.preventDefault();
-    if (event.currentTarget instanceof HTMLElement) {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    }
-    resizing = true;
-    resizeStartX = event.clientX;
-    resizeStartWidth = options.widthPx();
-    resizeContainerWidth = options.getContainerElement()?.clientWidth ?? 0;
-    resizeRightSidebarWidth = options.rightSidebarWidthPx();
-    window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("pointerup", onPointerUp);
-    window.addEventListener("pointercancel", onPointerUp);
-  }
-
-  onCleanup(() => {
-    window.removeEventListener("pointermove", onPointerMove);
-    window.removeEventListener("pointerup", onPointerUp);
-    window.removeEventListener("pointercancel", onPointerUp);
+  const drag = useDrag({
+    onDragStart: (pos) => {
+      resizeStartX = pos.x;
+      resizeStartWidth = options.widthPx();
+      resizeContainerWidth = options.getContainerElement()?.clientWidth ?? 0;
+      resizeRightSidebarWidth = options.rightSidebarWidthPx();
+    },
+    onDragMove: (pos) => options.previewWidthPx(clampWidth(resizeStartWidth + pos.x - resizeStartX)),
+    onDragEnd: (pos) => options.commitWidthPx(clampWidth(resizeStartWidth + pos.x - resizeStartX)),
+    onDragCancel: () => options.previewWidthPx(resizeStartWidth),
   });
 
-  return { onPointerDown };
+  return { onPointerDown: drag.onPointerDown };
 }

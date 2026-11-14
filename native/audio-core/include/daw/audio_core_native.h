@@ -12,6 +12,59 @@
 
 namespace daw::audio_core {
 
+// Callback seam only. Admission is read-only; apply follows successful graph
+// publication with the same frozen bank. False leaves all source state intact.
+// Spanning declarations preserve the accepted wire start/offset origin; frame
+// is the publication time, not necessarily the declaration's start time.
+[[nodiscard]] bool ReconcileSampleSources(daw_audio_core_handle core,
+  std::span<const daw_audio_sample_source_event> sources, std::int64_t frame,
+  bool apply) noexcept;
+
+// Host closes queue/configuration admission before requesting reclamation.
+// The callback acknowledges only after its last source/voice/page reader ends.
+// Ready slots remain closed until the control thread frees or cancels them.
+void RequestAssetRetirement(daw_audio_core_handle core, daw_audio_asset_handle asset) noexcept;
+void CancelAssetRetirement(daw_audio_core_handle core, daw_audio_asset_handle asset) noexcept;
+[[nodiscard]] bool CompleteAssetReaders(daw_audio_core_handle core, std::uint64_t completing_epoch) noexcept;
+[[nodiscard]] bool ReclaimAsset(daw_audio_core_handle core, daw_audio_asset_handle asset,
+  bool device_stopped, std::uint64_t completed_epoch) noexcept;
+
+struct NativeLatencyTransition {
+  std::uint32_t budget = 0;
+  std::uint32_t revision = 0;
+  std::uint32_t completed_revision = 0;
+  std::uint64_t completed_frame = 0;
+};
+
+// Atomic observation only. Completion is published after the last fade sample
+// and the reader epoch; the host forwards that event through its RT bridge.
+[[nodiscard]] NativeLatencyTransition InspectLatencyTransition(daw_audio_core_handle core) noexcept;
+// The published graph's own latency, not the pinned budget a lower leaves in place. The graph pointer is
+// swapped by publication, so call it only on the thread that publishes, right after the publish returns.
+[[nodiscard]] std::uint32_t PublishedGraphLatency(daw_audio_core_handle core) noexcept;
+// Device-stop boundary only, after the last callback has returned.
+void StopLatencyTransition(daw_audio_core_handle core) noexcept;
+
+// Publication boundary only, before the previous bank can be prepared again.
+// Compare live identities, not fading ghosts. No allocation or runtime mutation.
+[[nodiscard]] bool RetainsScheduledTarget(daw_audio_core_handle core,
+  std::uint32_t previous_revision, const daw_audio_sample_source_event& event) noexcept;
+[[nodiscard]] bool RetainsScheduledTarget(daw_audio_core_handle core,
+  std::uint32_t previous_revision, const daw_audio_processor_event& event) noexcept;
+
+// Control-thread, allocation-free admission against the selected prepared or
+// published graph and its asset table. Reuses the configure-state validators
+// without mutating configuration, runtime slots, voices, or asset ownership.
+[[nodiscard]] bool ValidateInstrumentState(
+  daw_audio_core_handle core, std::uint64_t node_id,
+  const daw_audio_synth_state& state) noexcept;
+[[nodiscard]] bool ValidateInstrumentState(
+  daw_audio_core_handle core, std::uint64_t node_id, std::uint32_t kind,
+  const daw_audio_sampler_state& state, std::span<const daw_audio_sample_zone> zones) noexcept;
+[[nodiscard]] bool ValidateInstrumentState(
+  daw_audio_core_handle core, std::uint64_t node_id,
+  const daw_audio_granular_state& state) noexcept;
+
 constexpr std::uint32_t kNativeGraphStageAppend = 0xffff'ffffU;
 
 /* Native-only event meanings. They are intentionally outside the portable

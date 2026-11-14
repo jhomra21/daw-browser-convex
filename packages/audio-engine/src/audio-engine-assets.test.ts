@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import { AudioEngine, type AudioEffectRuntimeInstance } from './audio-engine'
+import { AudioEngine, type AudioEffectRuntimeInstance, type EngineDisposition } from './audio-engine'
 import { audioCoreContractVersion, type AudioAssetRef } from '../../audio-core-contract/src/index'
 
 class FxInterceptingAudioEngine extends AudioEngine {
   readonly calls: Array<{ trackId: string; instances: AudioEffectRuntimeInstance[] }> = []
 
-  override async setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]) {
+  override async setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]): Promise<EngineDisposition> {
     this.calls.push({ trackId, instances })
+    return 'applied'
   }
 }
 

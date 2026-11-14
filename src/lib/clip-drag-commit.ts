@@ -146,24 +146,25 @@ export const commitMovedClipDrag = async (input: MoveCommitInput) => {
       return false;
     }
   }));
-  const successfulMoves = input.plannedMoves.filter((_, index) => moveApplied[index]);
-  const failedMoves = input.previousMoves.filter((_, index) => !moveApplied[index]);
-
-  if (failedMoves.length > 0) {
-    input.commitClipMoves(failedMoves);
-    if (input.addedTrackId && input.plannedMoves.some((move, index) => !moveApplied[index] && move.trackId === input.addedTrackId)) {
-      input.cleanupUnusedAddedTrack(input.addedTrackId);
-    }
-    for (const rollbackAnchor of failedMoves) {
-      if (rollbackAnchor.clipId === input.selectionAfterCommit.clipId) {
-        input.selection.selectPrimaryClip(
-          { trackId: rollbackAnchor.trackId, clipId: rollbackAnchor.clipId },
-          input.selectionAfterCommit.preserveClipIds ? { preserveClipIds: true } : undefined,
-        );
-        break;
-      }
-    }
+  if (moveApplied.every(Boolean)) {
+    pushMoveHistory(input, input.plannedMoves);
+    return;
   }
 
-  pushMoveHistory(input, successfulMoves);
+  // A multi-clip move is all-or-nothing: revert the clips whose cloud write landed so the
+  // arrangement matches the restored projection, and record no history for the rejected move.
+  input.commitClipMoves(input.previousMoves);
+  await Promise.all(input.plannedMoves.flatMap((move, index) => {
+    const previous = input.previousPositions.get(move.clipId);
+    if (!moveApplied[index] || !previous) return [];
+    return [input.moveCloudClip({ clipId: move.clipId, ...previous }).catch(() => false)];
+  }));
+  if (input.addedTrackId) input.cleanupUnusedAddedTrack(input.addedTrackId);
+  const rollbackAnchor = input.previousMoves.find((move) => move.clipId === input.selectionAfterCommit.clipId);
+  if (rollbackAnchor) {
+    input.selection.selectPrimaryClip(
+      { trackId: rollbackAnchor.trackId, clipId: rollbackAnchor.clipId },
+      input.selectionAfterCommit.preserveClipIds ? { preserveClipIds: true } : undefined,
+    );
+  }
 };

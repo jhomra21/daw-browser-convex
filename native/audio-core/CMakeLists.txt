@@ -28,6 +28,24 @@ if(BUILD_TESTING)
   target_compile_features(daw-audio-core-test PRIVATE cxx_std_20)
   target_link_libraries(daw-audio-core-test PRIVATE daw-audio-core)
   add_test(NAME daw-audio-core-test COMMAND daw-audio-core-test)
+  add_executable(daw-audio-core-spectral-transfer-test tests/audio_core_test.cpp tests/utility_fixture.cpp tests/graph_fixture.cpp)
+  target_compile_features(daw-audio-core-spectral-transfer-test PRIVATE cxx_std_20)
+  target_include_directories(daw-audio-core-spectral-transfer-test PRIVATE include generated)
+  target_compile_definitions(daw-audio-core-spectral-transfer-test PRIVATE
+    DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS=1 DAW_AUDIO_CORE_USE_PERSISTENT_VALIDATION_SCRATCH=1
+    DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS=1)
+  foreach(contract IN ITEMS spectral-snapshot-mode spectral-frozen-tone spectral-transfer-flat
+      spectral-transfer-pink spectral-transfer-narrow spectral-transfer-endpoints
+      spectral-transfer-relearn spectral-transfer-late spectral-recapture-bound
+      spectral-freeze-gesture-0 spectral-freeze-gesture-1
+      spectral-freeze-gesture-2 spectral-freeze-gesture-3
+      spectral-freeze-toggle-0 spectral-freeze-toggle-1)
+    add_test(NAME daw-spectral-${contract}
+      COMMAND daw-audio-core-spectral-transfer-test --phase-4-contract ${contract})
+  endforeach()
+  # The spectral-transfer binary includes audio_core.cpp, so it can read the core's voices directly.
+  add_test(NAME daw-phase6i-replacement-leaves-no-voice-on-a-missing-zone
+    COMMAND daw-audio-core-spectral-transfer-test --phase-6i-contract zones-gone)
   add_executable(daw-audio-core-graph-fixture tests/graph_fixture_cli.cpp tests/graph_fixture.cpp)
   target_compile_features(daw-audio-core-graph-fixture PRIVATE cxx_std_20)
   target_link_libraries(daw-audio-core-graph-fixture PRIVATE daw-audio-core)
@@ -112,6 +130,7 @@ if(DAW_AUDIO_CORE_BUILD_WASM_HARNESS)
   set(DAW_AUDIO_CORE_WASM_HARNESS_EXPORTS
     ${DAW_AUDIO_CORE_WASM_EXPORTS}
     _daw_audio_core_wasm_harness_abi_version
+    _daw_audio_core_wasm_harness_struct_layout
     _daw_audio_core_wasm_fixture_protocol_version
     _daw_audio_core_graph_fixture_protocol_version
     _daw_audio_core_run_utility_fixture

@@ -33,27 +33,25 @@ const EFFECT_TYPES: ReadonlySet<string> = new Set([
 const isEffectType = (value: JsonValue): value is EffectType => isJsonString(value) && EFFECT_TYPES.has(value)
 
 function isPersistedHistoryEnvelope(value: JsonValue): value is PersistedHistoryEnvelope {
-  return isRecord(value)
+  return isJsonObject(value)
     && isNumber(value.version)
     && READABLE_PERSISTED_HISTORY_VERSIONS.has(value.version)
     && Array.isArray(value.undo)
     && Array.isArray(value.redo)
 }
 
-const isRecord = (value: JsonValue): value is JsonObject => isJsonObject(value)
-
 const isString = (value: JsonValue): value is string => isJsonString(value)
 const isNumber = (value: JsonValue): value is number => isJsonNumber(value) && Number.isFinite(value)
 const isBoolean = (value: JsonValue): value is boolean => isJsonBoolean(value)
 const isScope = (value: JsonValue) => value === 'shared' || value === 'local'
 const isAudioWarp = (value: JsonValue) => normalizeAudioWarp(value) !== undefined
-const isClipFades = (value: JsonValue) => isRecord(value)
+const isClipFades = (value: JsonValue) => isJsonObject(value)
   && isNumber(value.fadeInSec)
   && isNumber(value.fadeOutSec)
   && isNumber(value.fadeInCurve)
   && isNumber(value.fadeOutCurve)
 
-const isClipTiming = (value: JsonValue) => isRecord(value)
+const isClipTiming = (value: JsonValue) => isJsonObject(value)
   && isNumber(value.startSec)
   && isNumber(value.duration)
   && (value.leftPadSec === undefined || isNumber(value.leftPadSec))
@@ -63,17 +61,31 @@ const isClipTiming = (value: JsonValue) => isRecord(value)
   && (value.fades === undefined || isClipFades(value.fades))
   && (value.midiOffsetBeats === undefined || isNumber(value.midiOffsetBeats))
 
-const isRoutingSnapshot = (value: JsonValue) => isRecord(value)
+const isMidiNote = (value: JsonValue) => isJsonObject(value)
+  && isString(value.id)
+  && isNumber(value.beat)
+  && isNumber(value.length)
+  && isNumber(value.pitch)
+  && isNumber(value.channel)
+  && (value.velocity === undefined || isNumber(value.velocity))
+
+const isMidiNoteChange = (value: JsonValue) => isJsonObject(value)
+  && isString(value.id)
+  && (value.before !== undefined || value.after !== undefined)
+  && (value.before === undefined || isMidiNote(value.before))
+  && (value.after === undefined || isMidiNote(value.after))
+
+const isRoutingSnapshot = (value: JsonValue) => isJsonObject(value)
   && Array.isArray(value.sends)
-  && value.sends.every((send) => isRecord(send) && isString(send.targetTrackRef) && isNumber(send.amount))
+  && value.sends.every((send) => isJsonObject(send) && isString(send.targetTrackRef) && isNumber(send.amount))
   && (value.outputTargetRef === undefined || isString(value.outputTargetRef))
 
-const isSidechainRouteSnapshot = (value: JsonValue) => isRecord(value)
+const isSidechainRouteSnapshot = (value: JsonValue) => isJsonObject(value)
   && isString(value.sourceTrackRef)
   && isString(value.targetTrackRef)
   && isString(value.effectInstanceId)
 
-const isClipSnapshot = (value: JsonValue) => isRecord(value)
+const isClipSnapshot = (value: JsonValue) => isJsonObject(value)
   && isString(value.clipRef)
   && isNumber(value.startSec)
   && isNumber(value.duration)
@@ -90,10 +102,10 @@ const isClipSnapshot = (value: JsonValue) => isRecord(value)
   && (value.fades === undefined || isClipFades(value.fades))
   && (
     value.timing === undefined
-    || isRecord(value.timing) && isClipTiming({ startSec: 0, duration: 0, ...value.timing })
+    || isJsonObject(value.timing) && isClipTiming({ startSec: 0, duration: 0, ...value.timing })
   )
 
-const isTrackCreateData = (value: JsonValue) => isRecord(value)
+const isTrackCreateData = (value: JsonValue) => isJsonObject(value)
   && isString(value.trackRef)
   && isNumber(value.index)
   && (value.currentTrackId === undefined || isString(value.currentTrackId))
@@ -102,7 +114,7 @@ const isTrackCreateData = (value: JsonValue) => isRecord(value)
   && (value.collapsed === undefined || isBoolean(value.collapsed))
   && (value.color === undefined || isString(value.color))
 
-const isTrackSnapshot = (value: JsonValue) => isRecord(value)
+const isTrackSnapshot = (value: JsonValue) => isJsonObject(value)
   && (value.trackRef === undefined || isString(value.trackRef))
   && isNumber(value.index)
   && isString(value.name)
@@ -113,28 +125,28 @@ const isTrackSnapshot = (value: JsonValue) => isRecord(value)
   && (value.channelRole === undefined || value.channelRole === 'track' || value.channelRole === 'group' || value.channelRole === 'return')
   && isRoutingSnapshot(value.routing)
 
-const isTrackGroupChildUpdate = (value: JsonValue) => isRecord(value)
+const isTrackGroupChildUpdate = (value: JsonValue) => isJsonObject(value)
   && isString(value.trackRef)
   && (value.previousGroupRef === undefined || isString(value.previousGroupRef))
   && (value.previousOutputTargetRef === undefined || isString(value.previousOutputTargetRef))
   && (value.nextOutputTargetRef === undefined || isString(value.nextOutputTargetRef))
 
-const isTrackUngroupChildSnapshot = (value: JsonValue) => isRecord(value)
+const isTrackUngroupChildSnapshot = (value: JsonValue) => isJsonObject(value)
   && isString(value.trackRef)
   && isString(value.previousGroupRef)
   && (value.previousOutputTargetRef === undefined || isString(value.previousOutputTargetRef))
   && (value.nextOutputTargetRef === undefined || isString(value.nextOutputTargetRef))
 
-const isAutomationPoint = (value: JsonValue) => isRecord(value)
+const isAutomationPoint = (value: JsonValue) => isJsonObject(value)
   && isString(value.id)
   && isNumber(value.timeSec)
   && isNumber(value.value)
   && (value.interpolation === 'linear' || value.interpolation === 'hold')
 
-const isAutomationEnvelope = (value: JsonValue) => isRecord(value)
+const isAutomationEnvelope = (value: JsonValue) => isJsonObject(value)
   && isString(value.id)
   && isString(value.projectId)
-  && isRecord(value.target)
+  && isJsonObject(value.target)
   && (value.target.kind === 'master' || (value.target.kind === 'track' && isString(value.target.trackId)))
   && isString(value.targetKey)
   && isString(value.parameterId)
@@ -148,10 +160,10 @@ const isTrackAutomationSnapshot = (value: JsonValue) => (
 )
 
 const isTrackEffectSnapshot = (value: JsonValue) => {
-  if (!isRecord(value)) return false
+  if (!isJsonObject(value)) return false
   const audioEffects = value.audioEffects
   return (audioEffects === undefined || (Array.isArray(audioEffects) && audioEffects.every((effect) => (
-    isRecord(effect)
+    isJsonObject(effect)
     && isAudioEffectKind(effect.effect)
     && effect.params !== undefined
     && (effect.instanceId === undefined || isString(effect.instanceId))
@@ -182,29 +194,31 @@ function isHistoryEntryData(type: string, data: JsonObject, allowSectionEdit: bo
       return isString(data.trackRef) && isClipSnapshot(data.clip)
     case 'clip-delete':
       return Array.isArray(data.items)
-        && data.items.every((item) => isRecord(item) && isString(item.trackRef) && isClipSnapshot(item.clip))
+        && data.items.every((item) => isJsonObject(item) && isString(item.trackRef) && isClipSnapshot(item.clip))
         && (data.legacyRecreate === undefined || isBoolean(data.legacyRecreate))
         && (data.deleteOperationId === undefined || isString(data.deleteOperationId))
     case 'clips-move':
       return Array.isArray(data.moves)
-        && data.moves.every((move) => isRecord(move)
+        && data.moves.every((move) => isJsonObject(move)
           && isString(move.clipRef)
-          && isRecord(move.from)
+          && isJsonObject(move.from)
           && isString(move.from.trackRef)
           && isNumber(move.from.startSec)
-          && isRecord(move.to)
+          && isJsonObject(move.to)
           && isString(move.to.trackRef)
           && isNumber(move.to.startSec))
     case 'clip-timing':
       return isString(data.clipRef) && isClipTiming(data.from) && isClipTiming(data.to)
     case 'clip-audio-warp':
       return isString(data.clipRef)
-        && isRecord(data.from)
+        && isJsonObject(data.from)
         && isAudioWarp(data.from.audioWarp)
-        && isRecord(data.to)
+        && isJsonObject(data.to)
         && isAudioWarp(data.to.audioWarp)
     case 'clip-fades':
       return isString(data.clipRef) && isClipFades(data.from) && isClipFades(data.to)
+    case 'clip-midi-notes':
+      return isString(data.clipRef) && Array.isArray(data.changes) && data.changes.every(isMidiNoteChange)
     case 'clip-color':
       return isString(data.clipRef)
         && (data.from === undefined || isString(data.from))
@@ -212,7 +226,7 @@ function isHistoryEntryData(type: string, data: JsonObject, allowSectionEdit: bo
     case 'track-create':
       return isTrackCreateData(data)
     case 'track-clip-create':
-      return isRecord(data.track) && isTrackCreateData(data.track) && isRecord(data.clip) && isClipSnapshot(data.clip)
+      return isJsonObject(data.track) && isTrackCreateData(data.track) && isJsonObject(data.clip) && isClipSnapshot(data.clip)
     case 'track-delete':
       return isTrackSnapshot(data.track)
         && Array.isArray(data.clips)
@@ -230,7 +244,7 @@ function isHistoryEntryData(type: string, data: JsonObject, allowSectionEdit: bo
     case 'track-group':
       return isString(data.groupTrackRef)
         && (data.currentGroupTrackId === undefined || isString(data.currentGroupTrackId))
-        && isRecord(data.groupTrack)
+        && isJsonObject(data.groupTrack)
         && isNumber(data.groupTrack.index)
         && isString(data.groupTrack.name)
         && (data.groupTrack.color === undefined || isString(data.groupTrack.color))
@@ -253,18 +267,18 @@ function isHistoryEntryData(type: string, data: JsonObject, allowSectionEdit: bo
         && (data.to === undefined || isString(data.to))
     case 'track-color-cascade':
       return Array.isArray(data.tracks)
-        && data.tracks.every((update) => isRecord(update)
+        && data.tracks.every((update) => isJsonObject(update)
           && isString(update.trackRef)
           && (update.from === undefined || isString(update.from))
           && (update.to === undefined || isString(update.to)))
         && Array.isArray(data.clips)
-        && data.clips.every((update) => isRecord(update)
+        && data.clips.every((update) => isJsonObject(update)
           && isString(update.clipRef)
           && (update.from === undefined || isString(update.from))
           && isString(update.to))
     case 'track-reorder':
       return Array.isArray(data.patches)
-        && data.patches.every((patch) => isRecord(patch)
+        && data.patches.every((patch) => isJsonObject(patch)
           && isString(patch.trackRef)
           && isNumber(patch.fromIndex)
           && isNumber(patch.toIndex)
@@ -276,8 +290,8 @@ function isHistoryEntryData(type: string, data: JsonObject, allowSectionEdit: bo
       return (data.trackRef === undefined || isString(data.trackRef))
         && (data.instanceId === undefined || isString(data.instanceId))
         && isEffectType(data.effect)
-        && isRecord(data.from)
-        && isRecord(data.to)
+        && isJsonObject(data.from)
+        && isJsonObject(data.to)
     case 'automation-envelope-change':
       return (data.before === null || isAutomationEnvelope(data.before))
         && (data.after === null || isAutomationEnvelope(data.after))
@@ -291,10 +305,10 @@ function isHistoryEntryValue(
   allowSectionEdit: boolean,
   version: number,
 ): value is JsonObject & HistoryEntry {
-  return isRecord(value)
+  return isJsonObject(value)
     && typeof value.type === 'string'
     && typeof value.projectId === 'string'
-    && isRecord(value.data)
+    && isJsonObject(value.data)
     && isHistoryEntryData(value.type, value.data, allowSectionEdit, version)
 }
 

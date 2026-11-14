@@ -1,4 +1,4 @@
-import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 
 export const peakAssetFormatVersion = 4
 export const waveformIntervalsPerChunk = 1024

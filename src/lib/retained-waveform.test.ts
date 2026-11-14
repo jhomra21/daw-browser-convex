@@ -11,7 +11,7 @@ import {
   retainWaveformData,
 } from './retained-waveform'
 import { loadWaveformSourceData } from '@daw-browser/waveforms/select-waveform-window'
-import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 
 describe('waveform request planning', () => {
   const intervalDataFor = (
@@ -193,24 +193,6 @@ describe('waveform request planning', () => {
     })
     expect(plan.requests).toHaveLength(1)
     expect(plan.requests[0]?.priority).toBe(0)
-  })
-
-  test('keeps global interval ownership stable under tiny pans and tier changes', () => {
-    const globalOwner = (frame: number, framesPerInterval: number) => (
-      Math.floor(frame / framesPerInterval)
-    )
-    const requestRelativeOwner = (
-      frame: number,
-      requestStartFrame: number,
-      framesPerInterval: number,
-    ) => Math.floor((frame - requestStartFrame) / framesPerInterval)
-    const frame = 16_384
-    expect(globalOwner(frame, 128)).toBe(globalOwner(frame, 128))
-    expect(globalOwner(frame + 1, 128)).toBe(globalOwner(frame + 1, 128))
-    expect(globalOwner(frame, 256)).toBe(Math.floor(frame / 256))
-    expect(requestRelativeOwner(frame, 0, 128)).not.toBe(
-      requestRelativeOwner(frame, 1, 128),
-    )
   })
 
   test('uses aligned transient interval tiers before exact samples', () => {

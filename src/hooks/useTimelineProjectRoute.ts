@@ -25,6 +25,31 @@ export const settlePopstateProjectTransition = async (input: {
   input.resolve()
 }
 
+export const openProjectFromDashboard = async (input: {
+  nextProjectId: string
+  open: () => Promise<void>
+  mountedProjectId: () => string
+  closeDashboard: () => void
+  latestRequest: { current: number }
+}) => {
+  const request = ++input.latestRequest.current
+  await input.open()
+  if (request === input.latestRequest.current && input.mountedProjectId() === input.nextProjectId) {
+    input.closeDashboard()
+  }
+}
+
+export const createProjectFromDashboard = async <Outcome extends { status: 'success' | 'error' }>(input: {
+  create: () => Promise<Outcome>
+  closeDashboard: () => void
+  latestRequest: { current: number }
+}) => {
+  const request = ++input.latestRequest.current
+  const outcome = await input.create()
+  if (request === input.latestRequest.current && outcome.status === 'success') input.closeDashboard()
+  return outcome
+}
+
 const updateRoomUrl = (projectId: string, mode: 'push' | 'replace') => {
   try {
     const url = new URL(window.location.href)

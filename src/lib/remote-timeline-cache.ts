@@ -9,7 +9,7 @@ import {
 } from '@daw-browser/shared'
 import { createLocalProjectEntityRow, openLocalProjectDb, type LocalProjectAssetRow, type LocalProjectStoredValue } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
+import { withLocalProjectAssetLock, withLocalStorageRootLock } from '~/lib/local-project-asset-lock'
 import { normalizeProjectMixState } from '~/lib/project-mix-state'
 import type { TimelineClipRow, TimelineTrackRow } from '~/lib/timeline-repository/types'
 import { getDefaultClipColor } from '~/lib/clip-color'
@@ -167,57 +167,59 @@ const cacheRemoteTimelineSnapshotUnlocked = async (
     sidechainRoutes: [],
   })
   const db = await openLocalProjectDb(projectId)
-  const tx = db.transaction(['entities', 'assets', 'projectState', 'syncState'], 'readwrite')
-  const cachedSummary = await tx.objectStore('syncState').get(REMOTE_CACHE_KEY)
-  const cacheValue = cachedSummary?.value
-  const shouldRewriteTimelineCache =
-    readSignature(cacheValue, 'tracksSignature') !== nextTracksSignature ||
-    readSignature(cacheValue, 'clipsSignature') !== nextClipsSignature ||
-    readSignature(cacheValue, 'assetsSignature') !== nextAssetsSignature
-  const timelineWrites = shouldRewriteTimelineCache
-    ? await Promise.all([
-        tx.objectStore('entities').index('by-kind').getAll(TRACK_KIND),
-        tx.objectStore('entities').index('by-kind').getAll(CLIP_KIND),
-        tx.objectStore('entities').index('by-kind').getAll(SIDECHAIN_KIND),
-      ]).then(([cachedTracks, cachedClips, cachedSidechains]) => [
-        ...cachedTracks.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
-        ...cachedClips.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
-        ...cachedSidechains.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
-        ...tracks.map((track) => tx.objectStore('entities').put(createLocalProjectEntityRow(TRACK_KIND, track.id, track, timestamp))),
-        ...clipsWithExistingTracks.map((clip) => tx.objectStore('entities').put(createLocalProjectEntityRow(CLIP_KIND, clip.id, clip, timestamp))),
-        ...sidechainRoutes.map((route) => tx.objectStore('entities').put(createLocalProjectEntityRow(SIDECHAIN_KIND, localSidechainRouteRowId(route.targetTrackId, route.effectInstanceId), route, timestamp))),
-        ...assets.map((asset) => tx.objectStore('assets').put(asset)),
-        ...clipsWithExistingTracks.flatMap((clip) => clip.sourceAssetKey && clip.sampleUrl
-      ? [tx.objectStore('syncState').put({
-          key: `cloud-url:asset:${clip.sourceAssetKey}`,
-          value: clip.sampleUrl,
-          updatedAt: timestamp,
-        })]
-      : []),
-      ])
-    : []
-  await Promise.all([
-    ...timelineWrites,
-    tx.objectStore('projectState').put({
-      key: 'projectMix',
-      value: normalizeProjectMixState(data.mixerSettings),
-      updatedAt: timestamp,
-    }),
-    tx.objectStore('syncState').put({
-      key: REMOTE_CACHE_KEY,
-      value: {
-        cachedAt: timestamp,
-        trackCount: tracks.length,
-        clipCount: clipsWithExistingTracks.length,
-        assetCount: assets.length,
-        tracksSignature: nextTracksSignature,
-        clipsSignature: nextClipsSignature,
-        assetsSignature: nextAssetsSignature,
-      },
-      updatedAt: timestamp,
-    }),
-    tx.done,
-  ])
+  await withLocalStorageRootLock(async () => {
+    const tx = db.transaction(['entities', 'assets', 'projectState', 'syncState'], 'readwrite')
+    const cachedSummary = await tx.objectStore('syncState').get(REMOTE_CACHE_KEY)
+    const cacheValue = cachedSummary?.value
+    const shouldRewriteTimelineCache =
+      readSignature(cacheValue, 'tracksSignature') !== nextTracksSignature ||
+      readSignature(cacheValue, 'clipsSignature') !== nextClipsSignature ||
+      readSignature(cacheValue, 'assetsSignature') !== nextAssetsSignature
+    const timelineWrites = shouldRewriteTimelineCache
+      ? await Promise.all([
+          tx.objectStore('entities').index('by-kind').getAll(TRACK_KIND),
+          tx.objectStore('entities').index('by-kind').getAll(CLIP_KIND),
+          tx.objectStore('entities').index('by-kind').getAll(SIDECHAIN_KIND),
+        ]).then(([cachedTracks, cachedClips, cachedSidechains]) => [
+          ...cachedTracks.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
+          ...cachedClips.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
+          ...cachedSidechains.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
+          ...tracks.map((track) => tx.objectStore('entities').put(createLocalProjectEntityRow(TRACK_KIND, track.id, track, timestamp))),
+          ...clipsWithExistingTracks.map((clip) => tx.objectStore('entities').put(createLocalProjectEntityRow(CLIP_KIND, clip.id, clip, timestamp))),
+          ...sidechainRoutes.map((route) => tx.objectStore('entities').put(createLocalProjectEntityRow(SIDECHAIN_KIND, localSidechainRouteRowId(route.targetTrackId, route.effectInstanceId), route, timestamp))),
+          ...assets.map((asset) => tx.objectStore('assets').put(asset)),
+          ...clipsWithExistingTracks.flatMap((clip) => clip.sourceAssetKey && clip.sampleUrl
+        ? [tx.objectStore('syncState').put({
+            key: `cloud-url:asset:${clip.sourceAssetKey}`,
+            value: clip.sampleUrl,
+            updatedAt: timestamp,
+          })]
+        : []),
+        ])
+      : []
+    await Promise.all([
+      ...timelineWrites,
+      tx.objectStore('projectState').put({
+        key: 'projectMix',
+        value: normalizeProjectMixState(data.mixerSettings),
+        updatedAt: timestamp,
+      }),
+      tx.objectStore('syncState').put({
+        key: REMOTE_CACHE_KEY,
+        value: {
+          cachedAt: timestamp,
+          trackCount: tracks.length,
+          clipCount: clipsWithExistingTracks.length,
+          assetCount: assets.length,
+          tracksSignature: nextTracksSignature,
+          clipsSignature: nextClipsSignature,
+          assetsSignature: nextAssetsSignature,
+        },
+        updatedAt: timestamp,
+      }),
+      tx.done,
+    ])
+  })
   notifyLocalProjectChanged(projectId)
 }
 

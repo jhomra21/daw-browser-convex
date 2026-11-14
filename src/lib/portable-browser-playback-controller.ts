@@ -20,10 +20,11 @@ import {
   portableWasmProtocolVersion,
   type PortableWasmPreparedSourceEvent,
   type PortableWasmStatusMessage,
+  type PortableWasmInstrumentEvent,
 } from "@daw-browser/audio-engine/portable-wasm-protocol"
 import { RECORDER_BLOCK_FRAMES, RECORDER_MAX_QUEUED_BLOCKS } from "@daw-browser/audio-engine/recording-protocol"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
-import { arrangementFrameForLoop, loopFramesForTransport } from "@daw-browser/audio-engine/loop-frame-schedule"
+import { arrangementFrameForLoop, effectiveLoopForStart, loopFramesForTransport, type LoopFrames } from "@daw-browser/audio-engine/loop-frame-schedule"
 import { compilePreparedPortableLiveSession } from "~/lib/portable-live-session"
 import type { LivePlaybackCompileContext, LivePlaybackSnapshot, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from "~/lib/live-playback-snapshot"
 import { createPortableRecordingWriter } from "~/lib/recording/portable-recording-writer"
@@ -42,15 +43,25 @@ import {
   type PreparedStretchArtifactRepository,
 } from "@daw-browser/audio-engine/prepared-stretch-store"
 import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver"
-import type { AudioPcmSourceDescriptor, DecodedAudioPage } from "@daw-browser/audio-engine/media-pages"
+import { isLiveEventOnlyInstrumentChange, isLiveParameterChange, nativeBuiltInLiveStateCovered } from "~/lib/desktop/native-built-in-parameter-mapper"
+import {
+  mergeSynthParams, normalizeTrackInstrumentParams, parseJsonValue,
+  type AudioPcmSourceDescriptor, type DecodedAudioPage, type SynthParamsUpdate, type TrackInstrumentParams,
+} from "@daw-browser/shared"
+import type { AudioEffectRuntimeInstance } from "@daw-browser/audio-engine/audio-engine"
+import { createAudioEffectParameterPayload } from "~/components/timeline/audio-effect-parameter-payload"
 
 type PortableStartResult = "started" | "unavailable"
+// A locate the session cannot take without having failed (nothing was touched) is the caller's to rebuild.
+type PortableSeekResult = PortableStartResult | "rebuild"
+export type PortableAdoptionResult = "adopted" | "unchanged" | "failed" | "unavailable"
 type PortablePreparedStretch = PortablePreparedStretchAsset | PortablePagedStretchAsset
 type PortableOrdinaryDescriptor = {
   asset: AudioAssetRef
   descriptor: AudioPcmSourceDescriptor
 }
 type PortableScheduleRange = Extract<PreparedPortableSession, { supported: true }>["scheduleRange"]
+type PortableSchedule = Extract<PreparedPortableSession, { supported: true }>["schedule"]
 type PortableSessionFault = {
   error?: Error
 }
@@ -59,6 +70,7 @@ type PortableSession = Pick<
   PortableWasmPlaybackSession,
   | "connectInput" | "dispose" | "installSchedule" | "markActive" | "onFault" | "onRecordingStatus" | "postRecordingControl" | "prepareGraph" | "publishGraph" | "registerAsset" | "scheduleSources" | "setTransport"
 > & {
+  releaseAsset?: PortableWasmPlaybackSession["releaseAsset"]
   pagedCapabilities?: PortableWasmPlaybackSession["pagedCapabilities"]
   registerPagedAsset?: PortableWasmPlaybackSession["registerPagedAsset"]
   writeAssetPage?: PortableWasmPlaybackSession["writeAssetPage"]
@@ -69,6 +81,7 @@ type PortableSession = Pick<
   releaseAssetPreparation?: PortableWasmPlaybackSession["releaseAssetPreparation"]
   trimAssetPages?: PortableWasmPlaybackSession["trimAssetPages"]
   queueProcessorEvents?: PortableWasmPlaybackSession["queueProcessorEvents"]
+  queueInstrumentEvents?: PortableWasmPlaybackSession["queueInstrumentEvents"]
   reenableProcessorAutomation?: PortableWasmPlaybackSession["reenableProcessorAutomation"]
   onTransportPosition?: PortableWasmPlaybackSession["onTransportPosition"]
   onGraphContinuity?: PortableWasmPlaybackSession["onGraphContinuity"]
@@ -87,6 +100,7 @@ type PortableBackend = {
 }
 
 const portableRecordingControlTimeoutMs = 2_000
+const maxAdoptionResubmits = 8
 // The native portable core reserves this fixed preparation table. It is not
 // part of the wire capability payload, so the backend exposes the local
 // default alongside the runtime paged capabilities.
@@ -136,6 +150,12 @@ const instrumentAssetKeys = (snapshot: LivePlaybackSnapshot) => new Set(
   }),
 )
 
+const unavailableInstrumentAssetKeys = (snapshot: LivePlaybackSnapshot) => [
+  ...new Set(Object.values(snapshot.mixer.fx.trackFx ?? {}).flatMap(
+    (entry) => entry.unavailableSampleAssetKeys ?? [],
+  )),
+]
+
 const isInstalledSnapshotAsset = (
   snapshot: LivePlaybackSnapshot,
   assetId: string,
@@ -153,14 +173,23 @@ const isInstalledSnapshotAsset = (
   return !usedByStretch || usedByInstalledSource || instrumentKeys.has(assetId)
 }
 
-const reportedPositionFrame = (
-  frame: number,
-  transport: LivePlaybackTransport | undefined,
-  sampleRateHz: number,
-) => arrangementFrameForLoop(
-  frame,
-  transport ? loopFramesForTransport(transport, sampleRateHz) : undefined,
-)
+// The transport counts raw frames straight on through a loop. A segment says how to read raw frames from `fromFrame` on
+// as arrangement frames: the loop in raw frames, and how far raw runs ahead of the arrangement (an adopted loop edit
+// moves the seam to an arrangement position that is not its raw frame).
+type PositionSegment = { fromFrame: number; loop: LoopFrames | undefined; deltaFrames: number }
+
+const positionSegmentIndex = (segments: readonly PositionSegment[], frame: number) =>
+  Math.max(0, segments.findLastIndex((segment) => segment.fromFrame <= frame))
+
+const arrangementFrameAt = (segments: readonly PositionSegment[], frame: number) => {
+  const segment = segments[positionSegmentIndex(segments, frame)]
+  return segment ? arrangementFrameForLoop(frame, segment.loop) - segment.deltaFrames : frame
+}
+
+const initialPositionSegments = (transport: LivePlaybackTransport, sampleRateHz: number): PositionSegment[] =>
+  [{ fromFrame: 0, loop: loopFramesForTransport(transport, sampleRateHz), deltaFrames: 0 }]
+
+type AdoptionLoop = Pick<LivePlaybackTransport, "loopEnabled" | "loopStartSec" | "loopEndSec">
 
 const assetRegistry = (
   snapshot: LivePlaybackSnapshot,
@@ -169,6 +198,7 @@ const assetRegistry = (
   ordinaryDescriptors: ReadonlyMap<string, PortableOrdinaryDescriptor> = new Map(),
 ): PortableAssetRegistryInput => ({
   projectGeneration: generation,
+  unavailableProjectAssetIds: unavailableInstrumentAssetKeys(snapshot),
   assets: [
     ...(() => {
       const instrumentKeys = instrumentAssetKeys(snapshot)
@@ -220,6 +250,8 @@ const resolveOrdinaryDescriptors = async (
   snapshot: LivePlaybackSnapshot,
   resolveSource: AudioPcmSourceResolver | undefined,
   signal?: AbortSignal,
+  // The descriptors of the session already playing: its assets are not resolved again.
+  known: ReadonlyMap<string, PortableOrdinaryDescriptor> = new Map(),
 ) => {
   const clipsByAsset = new Map<string, LivePlaybackSnapshot["tracks"][number]["clips"][number]>()
   for (const track of snapshot.tracks) {
@@ -234,6 +266,11 @@ const resolveOrdinaryDescriptors = async (
   const descriptors = new Map<string, PortableOrdinaryDescriptor>()
   for (const asset of snapshot.assets) {
     if (asset.buffer || !clipsByAsset.has(asset.assetId)) continue
+    const resolved = known.get(asset.assetId)
+    if (resolved) {
+      descriptors.set(asset.assetId, resolved)
+      continue
+    }
     if (!resolveSource) throw new Error(`Audio asset "${asset.assetId}" has no source resolver.`)
     const clip = clipsByAsset.get(asset.assetId)
     if (!clip) continue
@@ -271,6 +308,8 @@ const preparedSession = (
   preparedStretchAssets: readonly PortablePreparedStretch[] = [],
   sourceRangeStartSec?: number,
   ordinaryDescriptors: ReadonlyMap<string, PortableOrdinaryDescriptor> = new Map(),
+  // The raw frame that plays the playhead, when it is not the playhead's own frame (see PositionSegment).
+  originFrame = Math.round(snapshot.transport.playheadSec * sampleRateHz),
 ): PreparedPortableSession => compilePreparedPortableLiveSession(snapshot, {
   assetRegistry: assetRegistry(snapshot, projectGeneration, preparedStretchAssets, ordinaryDescriptors),
   preparedStretchAssets: new Map(preparedStretchAssets.map((asset) => [asset.clipId, asset])),
@@ -278,7 +317,7 @@ const preparedSession = (
   transportEpoch: epoch,
   timeOrigin: {
     timelineSec: snapshot.transport.playheadSec,
-    frame: Math.round(snapshot.transport.playheadSec * sampleRateHz),
+    frame: originFrame,
   },
   rangeEndSec: Math.min(
     snapshot.transport.playheadSec + horizonSec,
@@ -286,16 +325,270 @@ const preparedSession = (
   ),
   sourceRangeStartSec,
   clipSpanningNoteOn: true,
+  // An id that depends on the note and not on the compile origin lets a seam reconcile match a sounding note to the
+  // same note in a schedule compiled from a later origin.
+  stableNoteIds: true,
   sourceFirstSequence,
   loop: snapshot.transport,
 })
 
+// The eight synth fields the live events carry. A compile reads the project, which a knob drag only reaches on release,
+// so the values the session accepted since `since` are laid over it; a field the accepted instrument did not move
+// keeps what the compile read.
+const withAcceptedLiveSynthValues = (
+  snapshot: LivePlaybackSnapshot, since: LivePlaybackSnapshot, accepted: LivePlaybackSnapshot,
+): LivePlaybackSnapshot => {
+  const fx = snapshot.mixer.fx
+  const trackFx = Object.fromEntries(Object.entries(fx.trackFx ?? {}).map(([id, entry]) => {
+    const now = accepted.mixer.fx.trackFx?.[id]?.instrument
+    const before = since.mixer.fx.trackFx?.[id]?.instrument
+    const compiled = entry.instrument
+    if (now?.kind !== "synth" || before?.kind !== "synth" || compiled?.kind !== "synth"
+      || now.instanceId !== before.instanceId || now.instanceId !== compiled.instanceId) return [id, entry]
+    const moved = (from: number, to: number) => !Object.is(from, to)
+    const a = now.params, b = before.params
+    const update: SynthParamsUpdate = {
+      ...(moved(a.gain, b.gain) && { gain: a.gain }),
+      ...(moved(a.pan, b.pan) && { pan: a.pan }),
+      filter: {
+        ...(moved(a.filter.frequencyHz, b.filter.frequencyHz) && { frequencyHz: a.filter.frequencyHz }),
+        ...(moved(a.filter.q, b.filter.q) && { q: a.filter.q }),
+      },
+      ampEnvelope: {
+        ...(moved(a.ampEnvelope.attackSec, b.ampEnvelope.attackSec) && { attackSec: a.ampEnvelope.attackSec }),
+        ...(moved(a.ampEnvelope.decaySec, b.ampEnvelope.decaySec) && { decaySec: a.ampEnvelope.decaySec }),
+        ...(moved(a.ampEnvelope.sustain, b.ampEnvelope.sustain) && { sustain: a.ampEnvelope.sustain }),
+        ...(moved(a.ampEnvelope.releaseSec, b.ampEnvelope.releaseSec) && { releaseSec: a.ampEnvelope.releaseSec }),
+      },
+    }
+    return [id, { ...entry, instrument: { ...compiled, params: mergeSynthParams(compiled.params, update) } }]
+  }))
+  return { ...snapshot, mixer: { ...snapshot.mixer, fx: { ...fx, trackFx } } }
+}
+
+// What a playing portable session adopts live (D5): track volume, mute, solo, sends and output, the mixer graph and
+// its automation, master volume, and processor or instrument edits the parameter mapper takes live. `next` with all of
+// that taken from `previous` fingerprints as `previous` exactly when nothing else changed.
+const withLiveContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
+  const previousTracks = new Map(previous.tracks.map((track) => [track.id, track]))
+  const liveInstance = (targetId: string, instance: AudioEffectRuntimeInstance, before: readonly AudioEffectRuntimeInstance[] = []) => {
+    const installed = before.find((entry) => entry.id === instance.id)
+    if (!installed || JSON.stringify({ ...installed, params: null }) !== JSON.stringify({ ...instance, params: null })) return instance
+    return isLiveParameterChange(createAudioEffectParameterPayload(
+      { targetId, instanceId: instance.id, kind: instance.kind }, installed.params, instance.params), next.bpm) ? installed : instance
+  }
+  const trackFx = next.mixer.fx.trackFx && Object.fromEntries(Object.entries(next.mixer.fx.trackFx).map(([id, entry]) => {
+    const installed = previous.mixer.fx.trackFx?.[id]
+    const instrument = installed?.instrument && entry.instrument && installed.instrument.instanceId === entry.instrument.instanceId
+      && isLiveParameterChange({ targetId: id, effect: "instrument", from: installed.instrument, to: entry.instrument }, next.bpm)
+      ? installed.instrument : entry.instrument
+    return [id, { ...entry, instrument, instances: entry.instances.map((instance) => liveInstance(id, instance, installed?.instances)) }]
+  }))
+  return {
+    ...next,
+    tracks: next.tracks.map((track) => {
+      const installed = previousTracks.get(track.id)
+      return installed ? { ...track, volume: installed.volume, muted: installed.muted, soloed: installed.soloed,
+        sends: installed.sends, outputTargetId: installed.outputTargetId } : track
+    }),
+    mixer: { ...next.mixer, graph: previous.mixer.graph, automationEnvelopes: previous.mixer.automationEnvelopes, fx: {
+      ...next.mixer.fx,
+      masterVolume: previous.mixer.fx.masterVolume,
+      masterFxInstances: next.mixer.fx.masterFxInstances.map((instance) => liveInstance("master", instance, previous.mixer.fx.masterFxInstances)),
+      trackFx,
+    } },
+  }
+}
+
+type SnapshotClip = LivePlaybackSnapshot["tracks"][number]["clips"][number]
+
+const hasStretchClips = (snapshot: LivePlaybackSnapshot) => snapshot.tracks.some((track) => track.clips.some((clip) => (
+  clip.audioWarp?.enabled === true && clip.audioWarp.mode === "stretch"
+)))
+
+// The clips of a track the seam carries, as `installed` has them: every MIDI clip, and of the audio clips their start,
+// duration, trim offset, gain, fades, warp and the asset they play, and their addition or deletion. A warped clip's
+// Stretch artifact is prepared for the candidate before the seam, so its placement and warp are carried like any other.
+const withSeamClips = (next: readonly SnapshotClip[], installed: readonly SnapshotClip[]): SnapshotClip[] => {
+  const incoming = new Map(next.map((clip) => [clip.id, clip]))
+  return installed.map((clip) => {
+    const edited = incoming.get(clip.id)
+    if (clip.midi || !edited) return clip
+    const { startSec, duration, bufferOffsetSec, gain, fades, audioWarp, sourceAssetKey, sourceKind, sourceDurationSec, sourceSampleRate,
+      sourceChannelCount, sampleUrl, buffer } = clip
+    return { ...edited, startSec, duration, bufferOffsetSec, gain, fades, audioWarp, sourceAssetKey, sourceKind, sourceDurationSec,
+      sourceSampleRate, sourceChannelCount, sampleUrl, buffer }
+  })
+}
+
+// The instances of `next` as `installed` has them where an edit leaves the same effect (the id and kind), whatever else of
+// its parameters moved: the core reconfigures it under continuity, keeping its history when its structure allows and
+// starting it again otherwise, and moves the read heads where its delay changed, as native does through the same calls
+// (CORE:7542-7609, 8689-8717). A Spectral fftSize change is replaced instead: the old stage fades out as a ghost and a
+// fresh stage of the new size starts (`replaced_by_spectral_size_change`).
+const withInstalledEffectParams = (next: readonly AudioEffectRuntimeInstance[], installed: readonly AudioEffectRuntimeInstance[] = []): AudioEffectRuntimeInstance[] => {
+  const installedByKey = new Map(installed.map((instance) => [effectKey(instance), instance]))
+  return next.map((instance) => installedByKey.get(effectKey(instance)) ?? instance)
+}
+
+// What a playing session adopts at a seam, beyond what it takes live: the tempo, the loop fields, the clips of tracks it
+// already plays (`withSeamClips`, the warp and the asset a clip plays included), the assets the instruments and clips it
+// plays name, the instrument of each track it plays (an edit, another kind or another instance: the core crossfades the
+// replaced one out, CORE:8162-8194, and the held notes follow `keepsInstrumentVoices`), and the parameters of the effects
+// it plays that the live path does not take (`withInstalledEffectParams`). `next` with that taken from `previous`
+// fingerprints as `previous` when nothing else changed. The tracks added or deleted are no part of the comparison
+// (`onSharedTracks`), nor are the effects those tracks have inserted, removed or moved (`onKeptEffects`). Still refused: a
+// sample that becomes or ceases to be available.
+const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
+  const previousTracks = new Map(previous.tracks.map((track) => [track.id, track]))
+  const trackFx = next.mixer.fx.trackFx && Object.fromEntries(Object.entries(next.mixer.fx.trackFx).map(([id, entry]) => {
+    const installed = previous.mixer.fx.trackFx?.[id]
+    return [id, installed ? { ...entry, instrument: installed.instrument, instances: withInstalledEffectParams(entry.instances, installed.instances) } : entry]
+  }))
+  return {
+    ...next,
+    assets: previous.assets,
+    bpm: previous.bpm,
+    transport: {
+      ...next.transport,
+      loopEnabled: previous.transport.loopEnabled,
+      loopStartSec: previous.transport.loopStartSec,
+      loopEndSec: previous.transport.loopEndSec,
+    },
+    tracks: next.tracks.map((track) => {
+      const installed = previousTracks.get(track.id)
+      return installed ? { ...track, channelRole: installed.channelRole, groupId: installed.groupId, clips: withSeamClips(track.clips, installed.clips) } : track
+    }),
+    mixer: { ...next.mixer, fx: { ...next.mixer.fx, masterFxInstances: withInstalledEffectParams(next.mixer.fx.masterFxInstances, previous.mixer.fx.masterFxInstances), trackFx } },
+  }
+}
+
+// `snapshot` as the tracks `other` also has play it: a track added or deleted is no edit of the tracks both sides play.
+const onSharedTracks = (snapshot: LivePlaybackSnapshot, other: LivePlaybackSnapshot): LivePlaybackSnapshot => {
+  const shared = new Set(other.tracks.map((track) => track.id))
+  const trackFx = snapshot.mixer.fx.trackFx && Object.fromEntries(Object.entries(snapshot.mixer.fx.trackFx).filter(([id]) => shared.has(id)))
+  return { ...snapshot, tracks: snapshot.tracks.filter((track) => shared.has(track.id)), mixer: { ...snapshot.mixer, fx: { ...snapshot.mixer.fx, trackFx } } }
+}
+
+const effectKey = (instance: AudioEffectRuntimeInstance) => `${instance.id}\0${instance.kind}`
+
+// `snapshot` with the effects an adoption carries taken out of the comparison: every one inserted, removed, replaced
+// (another kind under the same id) or moved leaves only what both sides keep, by id. The core keeps a survivor's history
+// by instance id, fades a removed one over its 5 ms ghost, dips a node whose stages were reordered and moves the read
+// heads where the node's delay changed. A surviving effect's own edit stays in the comparison (`withLiveContentOf` decides
+// which are live). Both snapshots hold the tracks both sides play (`onSharedTracks`), so each track has an entry on both,
+// empty when it has no effects.
+const onKeptEffects = (snapshot: LivePlaybackSnapshot, other: LivePlaybackSnapshot): LivePlaybackSnapshot => {
+  const own = snapshot.mixer.fx.trackFx ?? {}
+  const theirs = other.mixer.fx.trackFx ?? {}
+  const trackFx = Object.fromEntries(snapshot.tracks.map(({ id }) => {
+    const entry = own[id]
+    const kept = new Set((theirs[id]?.instances ?? []).map(effectKey))
+    return [id, { ...entry, instances: (entry?.instances ?? []).filter((instance) => kept.has(effectKey(instance))).sort((left, right) => left.id.localeCompare(right.id)) }]
+  }))
+  return { ...snapshot, mixer: { ...snapshot.mixer, fx: { ...snapshot.mixer.fx, trackFx } } }
+}
+
+// `next` in the order the session built its graph in, with the tracks it adds after the rest. A track's place among the
+// others sounds like nothing, so a reorder is the session's own graph again, and the node and edge lists keep their places.
+const inSessionOrder = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
+  const ranked = <T>(items: readonly T[], id: (item: T) => string, before: readonly string[]) => {
+    const rank = new Map(before.map((entry, index) => [entry, index]))
+    return [...items].sort((left, right) => (rank.get(id(left)) ?? rank.size) - (rank.get(id(right)) ?? rank.size))
+  }
+  const trackIds = previous.tracks.map((track) => track.id)
+  const trackFx = next.mixer.fx.trackFx
+    && Object.fromEntries(ranked(Object.entries(next.mixer.fx.trackFx), ([id]) => id, Object.keys(previous.mixer.fx.trackFx ?? {})))
+  return {
+    ...next,
+    tracks: ranked(next.tracks, (track) => track.id, trackIds),
+    assets: ranked(next.assets, (asset) => asset.assetId, previous.assets.map((asset) => asset.assetId)),
+    mixer: {
+      ...next.mixer,
+      graph: { ...next.mixer.graph, channels: ranked(next.mixer.graph.channels, (entry) => entry.channel.id, trackIds) },
+      fx: { ...next.mixer.fx, trackFx },
+    },
+  }
+}
+
+// The worklet rejects a schedule with more events than this.
+const maxScheduleEvents = 256
+
+// How far before the end of its schedule a session extends it.
+const scheduleLeadSec = (horizonSec: number) => Math.min(5, Math.max(0.05, horizonSec * 0.25))
+
+// Rendered frames between the last position report and the seam an adoption publishes at. The playing position is up to a
+// report interval past the last report (the worklet reports every sampleRate / 20 rendered frames); on top of that the seam
+// covers the slowest recent round trip from choosing a seam to the publish reaching the worklet, and two render quanta for
+// the message itself. A seam that is still too near answers late, and the resubmit chooses a later one.
+const maxAdoptionSeamLeadSec = 0.25
+const renderQuantumFrames = 128
+const recentSeamRoundTripCount = 32
+// What a session's first adoption assumes, as the native bound lead does (25 ms).
+const coldSeamRoundTripMs = 25
+const adoptionSeamLeadFrames = (sampleRate: number, roundTripsMs: readonly number[]) => {
+  const slowest = [...roundTripsMs].sort((a, b) => a - b)[Math.ceil(0.99 * roundTripsMs.length) - 1] ?? coldSeamRoundTripMs
+  return Math.min(
+    Math.round(maxAdoptionSeamLeadSec * sampleRate),
+    Math.floor(sampleRate / 20) + Math.ceil(slowest * sampleRate / 1000) + 2 * renderQuantumFrames,
+  )
+}
+
+// An adopted schedule starts at `seamFrame` while the session keeps sounding what the old schedule started before it.
+// A note that sounds at the seam and is not the same note in `next` gets a note-off at the seam; one that survives keeps
+// its voice, because a repeated note-on would stick a Synth (it then needs two note-offs) and double a Sampler.
+// Whether an edit leaves an instrument its voices, as native's retained rule does (NS:1227-1231) and the core's
+// `same_instrument_configuration` does (CORE:7510): the same instance with the same configuration and the same samples.
+// A Synth moves the eight fields its live events carry without replacing its slot.
+const keepsInstrumentVoices = (before: TrackInstrumentParams | undefined, after: TrackInstrumentParams | undefined) =>
+  before !== undefined && after !== undefined && before.instanceId === after.instanceId && before.kind === after.kind
+  && (before.kind === "synth" && after.kind === "synth" ? isLiveEventOnlyInstrumentChange(before, after) : JSON.stringify(before) === JSON.stringify(after))
+
+const reconcileAtSeam = (input: {
+  previous: PortableSchedule
+  next: PortableSchedule
+  seamFrame: number
+  keepsVoices: (trackId: string) => boolean
+  // A deleted track's node is not in the candidate, so a note-off for it would reject the staged schedule; the core's
+  // 5 ms deletion fade ends its voices.
+  hasTrack: (trackId: string) => boolean
+}): PortableSchedule => {
+  const { previous, next, seamFrame } = input
+  const noteKey = (event: { target: { trackId: string }; noteId: number }) => `${event.target.trackId}\0${event.noteId}`
+  const sounding = new Map<string, Extract<PortableSchedule["events"][number], { type: "note-on" }>>()
+  for (const event of previous.events) {
+    if (event.frame >= seamFrame) continue
+    if (event.type === "note-on") sounding.set(noteKey(event), event)
+    else if (event.type === "note-off") sounding.delete(noteKey(event))
+  }
+  const continued = new Set<PortableSchedule["events"][number]>()
+  for (const event of next.events) {
+    if (event.type !== "note-on" || event.frame !== seamFrame) continue
+    const held = sounding.get(noteKey(event))
+    if (held && held.pitch === event.pitch && held.velocity === event.velocity && input.keepsVoices(event.target.trackId)) {
+      continued.add(event)
+      sounding.delete(noteKey(event))
+    }
+  }
+  const releases = [...sounding.values()].filter((held) => input.hasTrack(held.target.trackId)).map((held): PortableSchedule["events"][number] => ({
+    type: "note-off", target: held.target, noteId: held.noteId, pitch: held.pitch, frame: seamFrame, sequence: 0,
+  }))
+  // `next` starts at the seam, so the releases go first: a release precedes a note-on at the same frame.
+  return {
+    ...next,
+    events: [...releases, ...next.events.filter((event) => !continued.has(event))]
+      .map((event, index) => ({ ...event, sequence: index + 1 })),
+  }
+}
+
 type PortablePagedPreparation = {
   id: number
   assetId: string
+  // The range it prepared: a source with the same offset and coverage can play from it.
+  sourceOffsetFrame: number
+  coverageEnd: number
   pageKeys: readonly string[]
   stopFrame: number
-  epoch: number
   released: boolean
 }
 
@@ -554,6 +847,46 @@ const readPortableWasmPages = async function* (input: {
   }
 }
 
+// Registers an asset of a prepared graph with the worklet, from pages when a descriptor or a Stretch artifact serves it
+// and from its decoded buffer otherwise.
+const registerGraphAsset = async (
+  session: PortableSession,
+  asset: AudioAssetRef,
+  snapshot: LivePlaybackSnapshot,
+  preparedStretchAssets: readonly PortablePreparedStretch[],
+  ordinaryDescriptors: ReadonlyMap<string, PortableOrdinaryDescriptor>,
+  generation: number,
+) => {
+  const source = snapshot.assets.find((candidate) => candidate.assetId === asset.assetId)
+  const preparedSource = preparedStretchAssets.find((candidate) => candidate.asset.assetId === asset.assetId)
+  if ((preparedSource && isPagedStretchAsset(preparedSource)) || ordinaryDescriptors.has(asset.assetId)) {
+    if (preparedSource && isPagedStretchAsset(preparedSource) && preparedSource.manifest.pageFrames !== portableWasmPagedPageFrames) {
+      throw new Error(`Portable Stretch artifact "${preparedSource.artifactId}" has an incompatible page size.`)
+    }
+    if (!session.registerPagedAsset) throw new Error("Portable playback backend does not expose paged asset support.")
+    const registration = await session.registerPagedAsset(asset, generation)
+    if (registration.status !== "registered") {
+      throw new Error(`Portable paged audio asset "${asset.assetId}" was rejected (${registration.status}).`)
+    }
+    return
+  }
+  const pcm = preparedSource?.pcm ?? (source?.buffer ? planarPcm(source.buffer) : undefined)
+  if (!pcm) throw new Error(`Portable playback asset "${asset.assetId}" is not hydrated.`)
+  const result = await session.registerAsset(asset, pcm, generation)
+  if (result.status !== "registered") throw new Error(`Portable audio asset "${asset.assetId}" was rejected.`)
+}
+
+const preparedRangeKey = (assetId: string, sourceOffsetFrame: number, coverageEnd: number) =>
+  `${assetId}:${sourceOffsetFrame}:${coverageEnd}`
+
+const releasePreparations = async (session: PortableSession, preparations: readonly PortablePagedPreparation[], generation: number) => {
+  await Promise.all(preparations.map(async (preparation) => {
+    if (preparation.released) return
+    const result = await Promise.resolve(session.releaseAssetPreparation?.(preparation.id, generation)).catch(() => undefined)
+    if (result === "released") preparation.released = true
+  }))
+}
+
 const preparePagedSources = async (input: {
   session: PortableSession
   sources: readonly Extract<PreparedPortableSession, { supported: true }>["sources"][number][]
@@ -564,6 +897,9 @@ const preparePagedSources = async (input: {
   preparationCapacity: number
   baselinePreparationCount?: number
   pinnedPageKeys?: ReadonlySet<string>
+  // Preparations of an earlier attempt: a source whose range one of them holds plays from it, and the caller releases the
+  // ones left over. The pages of those ranges are resident already.
+  reusable?: readonly PortablePagedPreparation[]
   signal?: AbortSignal
 }): Promise<{
   events: readonly PortableWasmPreparedSourceEvent[]
@@ -604,11 +940,22 @@ const preparePagedSources = async (input: {
     baselinePreparationCount: input.baselinePreparationCount,
   })
   if (capacityError) throw capacityError
+  const spare = new Map<string, PortablePagedPreparation[]>()
+  for (const preparation of input.reusable ?? []) {
+    const key = preparedRangeKey(preparation.assetId, preparation.sourceOffsetFrame, preparation.coverageEnd)
+    spare.set(key, [...spare.get(key) ?? [], preparation])
+  }
+  const reused = new Map<typeof input.sources[number], PortablePagedPreparation>()
   for (const source of input.sources) {
     const asset = pagedAssets.get(source.assetId)
     if (!asset) continue
     const coverage = pagedSourceCoverage(asset, source)
     if (!coverage) throw new Error(`Portable Stretch source range for "${source.sourceIdentity}" is invalid.`)
+    const held = spare.get(preparedRangeKey(source.assetId, source.sourceOffsetFrame, coverage.coverageEnd))?.pop()
+    if (held) {
+      reused.set(source, held)
+      continue
+    }
     const pages = requiredPages.get(source.assetId) ?? new Set<number>()
     for (let page = coverage.firstPage; page <= coverage.lastPage; page += 1) pages.add(page)
     requiredPages.set(source.assetId, pages)
@@ -618,6 +965,7 @@ const preparePagedSources = async (input: {
     throw new Error(`Portable paged playback requires ${unionPageCount} resident pages, but only ${availableSlots} are available.`)
   }
   const preparations: PortablePagedPreparation[] = []
+  const created: PortablePagedPreparation[] = []
   try {
     input.signal?.throwIfAborted()
     for (const [assetId, pages] of requiredPages) {
@@ -682,6 +1030,12 @@ const preparePagedSources = async (input: {
       input.signal?.throwIfAborted()
       const asset = pagedAssets.get(source.assetId)
       if (!asset) continue
+      const held = reused.get(source)
+      if (held) {
+        events.push({ ...source, preparationId: held.id })
+        preparations.push({ ...held, stopFrame: source.stopFrame })
+        continue
+      }
       const coverage = pagedSourceCoverage(asset, source)
       if (!coverage) throw new Error(`Portable Stretch source range for "${source.sourceIdentity}" is invalid.`)
       const range = await input.session.prepareAssetRange(
@@ -699,20 +1053,70 @@ const preparePagedSources = async (input: {
         ...source,
         preparationId: range.preparationId,
       })
-      preparations.push({
+      const preparation = {
         id: range.preparationId,
         assetId: source.assetId,
+        sourceOffsetFrame: source.sourceOffsetFrame,
+        coverageEnd: coverage.coverageEnd,
         pageKeys: coverage.pageKeys,
         stopFrame: source.stopFrame,
-        epoch: input.generation,
         released: false,
-      })
+      }
+      preparations.push(preparation)
+      created.push(preparation)
     }
     return { events, preparations }
   } catch (error) {
-    await Promise.all(preparations.map((preparation) => input.session.releaseAssetPreparation?.(preparation.id, input.generation)))
+    await Promise.all(created.map((preparation) => input.session.releaseAssetPreparation?.(preparation.id, input.generation)))
     throw error
   }
+}
+
+const withPreparations = (
+  events: readonly PortableWasmPreparedSourceEvent[],
+  preparations: readonly PortablePagedPreparation[],
+): PortablePreparedSource[] => events.map((event) => ({
+  ...event,
+  preparation: preparations.find((preparation) => preparation.id === event.preparationId)
+    ?? (() => { throw new Error(`Portable preparation ${event.preparationId} is missing.`) })(),
+}))
+
+// The sources the worklet plays from a registered asset; the rest play from pages.
+const ordinarySourcesOf = (
+  sources: readonly Extract<PreparedPortableSession, { supported: true }>["sources"][number][],
+  preparedStretchAssets: readonly PortablePreparedStretch[],
+  ordinaryDescriptors: ReadonlyMap<string, PortableOrdinaryDescriptor>,
+) => sources.filter((source) => (
+  !preparedStretchAssets.some((candidate) => isPagedStretchAsset(candidate) && candidate.asset.assetId === source.assetId)
+  && !ordinaryDescriptors.has(source.assetId)
+))
+
+// Shrinks a window a page at a time until its paged sources fit the session's page and preparation capacity. `refused`
+// is a window that does not compile; `no-fit` is one that fits at no size.
+const fitPagedWindow = async (input: {
+  horizonSec: number
+  pageSec: number
+  compile: (horizonSec: number) => Extract<PreparedPortableSession, { supported: true }> | undefined
+  // A refresh keeps the sources it holds and prepares the rest.
+  isNew?: (source: Extract<PreparedPortableSession, { supported: true }>["sources"][number]) => boolean
+  prepare: (sources: Extract<PreparedPortableSession, { supported: true }>["sources"]) => ReturnType<typeof preparePagedSources>
+}): Promise<{
+  candidate: Extract<PreparedPortableSession, { supported: true }>
+  sources: Extract<PreparedPortableSession, { supported: true }>["sources"]
+  paged: Awaited<ReturnType<typeof preparePagedSources>>
+} | "refused" | "no-fit"> => {
+  const { isNew } = input
+  for (let horizonSec = input.horizonSec; horizonSec >= input.pageSec; horizonSec -= input.pageSec) {
+    const candidate = input.compile(horizonSec)
+    if (!candidate) return "refused"
+    const sources = isNew ? candidate.sources.filter(isNew) : candidate.sources
+    try {
+      return { candidate, sources, paged: await input.prepare(sources) }
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("requires ")) throw error
+    }
+  }
+  return "no-fit"
 }
 
 const scheduleSourcesInGlobalOrder = async (input: {
@@ -810,6 +1214,8 @@ type PortableRecordingSession = {
  */
 export const createPortableBrowserPlaybackController = (input: {
   compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
+  // The content identity of a compiled snapshot, as native adoption compares it; without it nothing is adopted live.
+  fingerprintSnapshot?: (snapshot: LivePlaybackSnapshot) => string
   getAudioContext: () => AudioContext | null
   scheduleHorizonSec?: number
   getProjectGeneration?: () => number
@@ -817,6 +1223,8 @@ export const createPortableBrowserPlaybackController = (input: {
   createBuffer?: (channels: number, frames: number, sampleRate: number) => AudioBuffer
   reportFault?: (message: string) => void
   onGraphContinuity?: (message: Extract<PortableWasmStatusMessage, { type: "graph-continuity" }>) => void
+  // A resubmitted adoption or seek ended without failing: the caller compares its baseline against what is now playing.
+  onAdoptionResubmitted?: (result: PortableAdoptionResult | PortableStartResult) => void
   backend?: PortableBackend
   select?: (project: PortablePreparedQualification) => Promise<PortableWasmBackendSelection>
   createRecordingWriter?: typeof createPortableRecordingWriter
@@ -836,7 +1244,13 @@ export const createPortableBrowserPlaybackController = (input: {
   let lifecycleGeneration = 0
   let recording: PortableRecordingSession | undefined
   let epoch = 0
+  // Paged assets and their preparations belong to the session's creation epoch. The transport epoch moves on a locate and
+  // must not: the worklet answers a paged call under any other generation as stale, or releases every asset.
+  let assetGeneration = 0
   let positionFrame = 0
+  // Oldest first; the segment in effect is the last one that starts at or before the reported raw frame.
+  let positionSegments: readonly PositionSegment[] = []
+  const arrangementFrame = () => arrangementFrameAt(positionSegments, positionFrame)
   let positionSequence = 0
   let activeSourceSequence = 0
   let refreshPromise: Promise<PortableStartResult> | undefined
@@ -844,13 +1258,43 @@ export const createPortableBrowserPlaybackController = (input: {
   let failedRefreshEndFrame: number | undefined
   let activeRevision: number | undefined
   let activeGraph: AudioCoreGraphSnapshot | undefined
+  let activeSnapshot: LivePlaybackSnapshot | undefined
   let activeFrameSchedule: Extract<PreparedPortableSession, { supported: true }>["schedule"] | undefined
   let activePreparedStretchAssets: readonly PortablePreparedStretch[] = []
   let activeOrdinarySources: readonly Extract<PreparedPortableSession, { supported: true }>["sources"][number][] = []
   let activeOrdinaryDescriptors: ReadonlyMap<string, PortableOrdinaryDescriptor> = new Map()
   let activePreparedSources: readonly PortablePreparedSource[] = []
   let activePreparations: readonly PortablePagedPreparation[] = []
+  // The preparations, registered assets and Stretch artifacts (with their leases) a failed adoption attempt made stay for
+  // the resubmit of the same desired state (UD 8), so a slow preparation converges instead of starting over. They go when
+  // the desired state changes, when the resubmits run out, and with the session.
+  type AdoptionCache = {
+    fingerprint: string
+    preparations: readonly PortablePagedPreparation[]
+    assets: readonly string[]
+    stretch: readonly PortablePreparedStretch[] | undefined
+  }
+  let adoptionCache: AdoptionCache | undefined
+  // Assets and Stretch leases an adoption replaced: the old sources stop at the seam, so they go once the position has
+  // reached it and the core no longer reads them.
+  let retiredAssets: readonly { assetId: string; seamFrame: number }[] = []
+  let retiredStretch: readonly { assets: readonly PortablePreparedStretch[]; seamFrame: number }[] = []
   let nextLiveProcessorSequence = 0
+  let adopting = false
+  let adoptionQueued: Promise<PortableAdoptionResult> | undefined
+  // The newest loop an adoption was asked for: the waiting adoption compiles with it, and so does a resubmit.
+  let latestLoop: AdoptionLoop = { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 }
+  let adoptionTail: Promise<unknown> = Promise.resolve()
+  let adoptionPublish: Promise<PortableAdoptionResult> | undefined
+  // Milliseconds from choosing a seam to the publish being posted or refused, for the adoptions this session made recently.
+  let seamRoundTripsMs: readonly number[] = []
+  // Synth sends past the adoption barrier and not yet answered; an adoption folds the values they carry once they settle.
+  const liveInstrumentSends = new Set<Promise<unknown>>()
+  // Failed operations waiting for rendered-frame reports to run again (UD 8): `wait` more reports, `resubmits` made so far.
+  const retries = new Map<"adoption" | "seek", { resubmits: number; wait: number; run: (resubmits: number) => Promise<void> }>()
+  // Locates run one after the other; the newest wins through `transportIntent`.
+  let seekTail: Promise<unknown> = Promise.resolve()
+  let pendingSeeks = 0
   let nextRecordingSessionId = 1
   let unsubscribeFault: (() => void) | undefined
   let startupAbortController: AbortController | undefined
@@ -861,27 +1305,60 @@ export const createPortableBrowserPlaybackController = (input: {
     await Promise.all([...leases].map((lease) => lease.release().catch(() => undefined)))
   }
 
+  const prepareStretch = (snapshot: LivePlaybackSnapshot, projectGeneration: number, signal?: AbortSignal) => preparePortablePagedStretchAssets({
+    tracks: snapshot.tracks,
+    projectBpm: snapshot.bpm,
+    projectGeneration: safeProjectGeneration(projectGeneration),
+    repository: stretchRepository,
+    resolveSource: input.resolveSource,
+    signal,
+  })
+
+  const prepareCandidateStretch = async (snapshot: LivePlaybackSnapshot, projectGeneration: number) => {
+    if (!hasStretchClips(snapshot)) return []
+    const preparation = await prepareStretch(snapshot, projectGeneration)
+    if (!preparation.supported) throw new Error(preparation.message)
+    return preparation.assets
+  }
+
+  const disposeAdoptionCache = async (session: PortableSession | undefined) => {
+    const cache = adoptionCache
+    adoptionCache = undefined
+    if (!cache) return
+    if (session) {
+      await releasePreparations(session, cache.preparations, assetGeneration)
+      await Promise.all(cache.assets.map((assetId) => session.releaseAsset?.(assetId, assetGeneration).catch(() => undefined)))
+    }
+    await releasePreparedStretchAssets(cache.stretch ?? [])
+  }
+
   const clearActiveSessionState = () => {
     const session = active
-    const generation = epoch
-    const cleanup: Promise<unknown>[] = []
+    const cleanup: Promise<unknown>[] = [disposeAdoptionCache(session)]
     active = undefined
     activeProjectGeneration = undefined
     activeTransport = undefined
+    positionSegments = []
+    seamRoundTripsMs = []
     activeScheduleRange = undefined
     activeRevision = undefined
     activeGraph = undefined
+    activeSnapshot = undefined
     activeFrameSchedule = undefined
-    if (session?.releaseAssetPreparation && generation !== undefined) {
+    retries.clear()
+    if (session?.releaseAssetPreparation) {
       for (const preparation of activePreparations) {
         if (!preparation.released) {
-          cleanup.push(session.releaseAssetPreparation(preparation.id, generation).then((result) => {
+          cleanup.push(session.releaseAssetPreparation(preparation.id, assetGeneration).then((result) => {
             if (result === "released") preparation.released = true
           }).catch(() => undefined))
         }
       }
     }
     activePreparations = []
+    retiredAssets = []
+    cleanup.push(releasePreparedStretchAssets(retiredStretch.flatMap((retired) => retired.assets)))
+    retiredStretch = []
     activeOrdinarySources = []
     activeOrdinaryDescriptors = new Map()
     activePreparedSources = []
@@ -891,13 +1368,37 @@ export const createPortableBrowserPlaybackController = (input: {
     return Promise.all(cleanup)
   }
 
+  // The session owns its graph revision: an adoption advances it past the Timeline's nativePlaybackRevision, so a
+  // compile made while a session is active carries the revision that session publishes. That holds only for content the
+  // session can carry, what it plays apart from what it takes live; any other content needs a rebuild. A refresh or
+  // adoption never installs it on this session (the worklet rejects a schedule for nodes it lacks).
+  const compileSnapshot = async (
+    transport: LivePlaybackTransport,
+    context?: LivePlaybackCompileContext,
+  ): Promise<LivePlaybackSnapshotCompilation> => {
+    const compilation = await input.compileSnapshot(transport, context)
+    const fingerprint = input.fingerprintSnapshot
+    if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation
+    const next = inSessionOrder(compilation.snapshot, activeSnapshot)
+    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a
+    // refresh or a start does not: they extend the graph that plays.
+    const [compared, installed] = context?.liveAdoption
+      ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),
+        onKeptEffects(onSharedTracks(activeSnapshot, next), next)]
+      : [next, activeSnapshot]
+    if (fingerprint(withLiveContentOf(compared, activeSnapshot)) !== fingerprint(installed)) {
+      return { supported: false, reasons: ["Portable playback requires a schedule rebuild."] }
+    }
+    return { ...compilation, snapshot: { ...next, revision: activeRevision } }
+  }
+
   const releaseRuntime = async (runtime: PreparedRuntime | undefined) => {
     if (!runtime || runtime.released) return
     runtime.released = true
     const releases: Promise<unknown>[] = []
     for (const preparation of runtime.preparations) {
       if (!preparation.released) {
-        const release = runtime.session.releaseAssetPreparation?.(preparation.id, runtime.epoch)
+        const release = runtime.session.releaseAssetPreparation?.(preparation.id, runtime.assetGeneration)
         if (release) {
           releases.push(release.then((result) => {
             if (result === "released") preparation.released = true
@@ -911,20 +1412,33 @@ export const createPortableBrowserPlaybackController = (input: {
     runtime.session.dispose()
   }
 
-  const releaseExpiredPreparations = async (session: PortableSession, frame: number, generation: number) => {
+  const releaseExpiredPreparations = async (session: PortableSession, frame: number) => {
     const expired = activePreparations.filter((preparation) => !preparation.released && preparation.stopFrame <= frame)
-    if (!session.releaseAssetPreparation || expired.length === 0) return
-    const results = await Promise.all(expired.map(async (preparation) => ({
-      preparation,
-      result: await session.releaseAssetPreparation?.(preparation.id, generation),
-    })))
-    const released = new Set(
-      results.filter((entry) => entry.result === "released").map((entry) => entry.preparation.id),
-    )
-    for (const preparation of expired) {
-      if (released.has(preparation.id)) preparation.released = true
+    if (session.releaseAssetPreparation && expired.length > 0) {
+      const results = await Promise.all(expired.map(async (preparation) => ({
+        preparation,
+        result: await session.releaseAssetPreparation?.(preparation.id, assetGeneration),
+      })))
+      const released = new Set(
+        results.filter((entry) => entry.result === "released").map((entry) => entry.preparation.id),
+      )
+      for (const preparation of expired) {
+        if (released.has(preparation.id)) preparation.released = true
+      }
+      activePreparations = activePreparations.filter((preparation) => !released.has(preparation.id))
     }
-    activePreparations = activePreparations.filter((preparation) => !released.has(preparation.id))
+    // After the preparations: a paged asset answers asset-in-use while one holds it. It is asked again at the next report.
+    const due = retiredAssets.filter((retired) => retired.seamFrame <= frame)
+    retiredAssets = retiredAssets.filter((retired) => !due.includes(retired))
+    const answers = await Promise.all(due.map(async (retired) => ({
+      retired,
+      status: (await session.releaseAsset?.(retired.assetId, assetGeneration).catch(() => undefined))?.status,
+    })))
+    retiredAssets = [...retiredAssets, ...answers.filter((answer) => answer.status === "asset-in-use").map((answer) => answer.retired)]
+    // The leases go with the assets: nothing reads the old artifacts once the position is past the seam.
+    const expiredStretch = retiredStretch.filter((retired) => retired.seamFrame <= frame)
+    retiredStretch = retiredStretch.filter((retired) => !expiredStretch.includes(retired))
+    await releasePreparedStretchAssets(expiredStretch.flatMap((retired) => retired.assets))
   }
 
   const teardownSession = () => {
@@ -982,8 +1496,10 @@ export const createPortableBrowserPlaybackController = (input: {
   type PreparedRuntime = {
     session: PortableSession
     prepared: Extract<PreparedPortableSession, { supported: true }>
+    snapshot: LivePlaybackSnapshot
     projectGeneration: number
     epoch: number
+    assetGeneration: number
     transport: LivePlaybackTransport
     requestedFrame: number
     unsubscribeFault: () => void
@@ -995,7 +1511,6 @@ export const createPortableBrowserPlaybackController = (input: {
     preparedSources: readonly PortablePreparedSource[]
     released: boolean
   }
-
   const prepareRuntime = async (
     transport: LivePlaybackTransport,
     generation: number,
@@ -1020,20 +1535,11 @@ export const createPortableBrowserPlaybackController = (input: {
     let transferredStretchOwnership = false
     startupAbortController = preparationAbortController
     try {
-      const compilation = await input.compileSnapshot(transport, compileContext)
+      const compilation = await compileSnapshot(transport, compileContext)
       if (cancelled()) return undefined
       if (!compilation.supported) return undefined
-      if (compilation.snapshot.tracks.some((track) => track.clips.some((clip) => (
-        clip.audioWarp?.enabled === true && clip.audioWarp.mode === "stretch"
-      )))) {
-        const preparation = await preparePortablePagedStretchAssets({
-          tracks: compilation.snapshot.tracks,
-          projectBpm: compilation.snapshot.bpm,
-          projectGeneration: safeProjectGeneration(projectGeneration),
-          repository: stretchRepository,
-          resolveSource: input.resolveSource,
-          signal: preparationAbortController.signal,
-        })
+      if (hasStretchClips(compilation.snapshot)) {
+        const preparation = await prepareStretch(compilation.snapshot, projectGeneration, preparationAbortController.signal)
         if (!preparation.supported) {
           input.reportFault?.(preparation.message)
           return undefined
@@ -1103,28 +1609,9 @@ export const createPortableBrowserPlaybackController = (input: {
       )) {
         throw new Error("Portable playback backend does not expose paged asset support.")
       }
-      const registerPagedAsset = playbackSession.registerPagedAsset
       for (const asset of startupPrepared.graph.assets) {
-        const source = compilation.snapshot.assets.find((candidate) => candidate.assetId === asset.assetId)
-        const preparedSource = preparedStretchAssets.find((candidate) => candidate.asset.assetId === asset.assetId)
-        const ordinaryDescriptor = ordinaryDescriptors.get(asset.assetId)
-        if ((preparedSource && isPagedStretchAsset(preparedSource)) || ordinaryDescriptor) {
-          if (preparedSource && isPagedStretchAsset(preparedSource)
-            && preparedSource.manifest.pageFrames !== portableWasmPagedPageFrames) {
-            throw new Error(`Portable Stretch artifact "${preparedSource.artifactId}" has an incompatible page size.`)
-          }
-          if (!registerPagedAsset) throw new Error("Portable playback backend does not expose paged asset support.")
-          const registration = await registerPagedAsset(asset, nextEpoch)
-          if (registration.status !== "registered") {
-            throw new Error(`Portable paged audio asset "${asset.assetId}" was rejected (${registration.status}).`)
-          }
-          continue
-        }
-        const pcm = preparedSource?.pcm ?? (source?.buffer ? planarPcm(source.buffer) : undefined)
-        if (!pcm) throw new Error(`Portable playback asset "${asset.assetId}" is not hydrated.`)
-        const result = await playbackSession.registerAsset(asset, pcm, nextEpoch)
+        await registerGraphAsset(playbackSession, asset, compilation.snapshot, preparedStretchAssets, ordinaryDescriptors, nextEpoch)
         if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
-        if (result.status !== "registered") throw new Error(`Portable audio asset "${asset.assetId}" was rejected.`)
       }
       await playbackSession.publishGraph(startupPrepared.graph.revision)
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
@@ -1145,10 +1632,7 @@ export const createPortableBrowserPlaybackController = (input: {
       const preparedSourceEvents = paged.events
       const preparations = paged.preparations
       runtimePreparations = preparations
-      const ordinarySources = startupPrepared.sources.filter((source) => (
-        !preparedStretchAssets.some((candidate) => isPagedStretchAsset(candidate) && candidate.asset.assetId === source.assetId)
-        && !ordinaryDescriptors.has(source.assetId)
-      ))
+      const ordinarySources = ordinarySourcesOf(startupPrepared.sources, preparedStretchAssets, ordinaryDescriptors)
       await replaceSourcesAtomically({
         session: playbackSession,
         revision: startupPrepared.graph.revision,
@@ -1170,21 +1654,29 @@ export const createPortableBrowserPlaybackController = (input: {
       playbackSession.onTransportPosition?.((position) => {
         if (
           active !== playbackSession
-          || position.epoch !== nextEpoch
+          // The live epoch: a locate moves it on this session, and the replacement of a refresh is gated by `active`.
+          || position.epoch !== epoch
           || position.sequence <= positionSequence
         ) return
         if (position.frame < positionFrame && position.running) return
         positionSequence = position.sequence
         positionFrame = position.frame
-        void releaseExpiredPreparations(playbackSession, position.frame, nextEpoch).catch(() => undefined)
+        void releaseExpiredPreparations(playbackSession, position.frame).catch(() => undefined)
+        for (const [kind, retry] of retries) {
+          if (--retry.wait > 0) continue
+          retries.delete(kind)
+          void retry.run(retry.resubmits).catch(() => undefined)
+        }
       })
       playbackSession.onGraphContinuity?.((message) => input.onGraphContinuity?.(message))
       if (runTransport) playbackSession.markActive()
       const runtime = {
         session: playbackSession,
         prepared: startupPrepared,
+        snapshot: compilation.snapshot,
         projectGeneration,
         epoch: nextEpoch,
+        assetGeneration: nextEpoch,
         transport: { ...transport },
         requestedFrame,
         unsubscribeFault: unsubscribeSessionFault,
@@ -1193,11 +1685,7 @@ export const createPortableBrowserPlaybackController = (input: {
         ordinaryDescriptors,
         preparations,
         ordinarySources,
-        preparedSources: preparedSourceEvents.map((event) => ({
-          ...event,
-          preparation: preparations.find((preparation) => preparation.id === event.preparationId)
-            ?? (() => { throw new Error(`Portable preparation ${event.preparationId} is missing.`) })(),
-        })),
+        preparedSources: withPreparations(preparedSourceEvents, preparations),
         released: false,
       }
       transferredStretchOwnership = true
@@ -1227,10 +1715,12 @@ export const createPortableBrowserPlaybackController = (input: {
     active = runtime.session
     activeProjectGeneration = runtime.projectGeneration
     activeTransport = runtime.transport
+    positionSegments = initialPositionSegments(runtime.transport, runtime.prepared.schedule.sampleRateHz)
     activeScheduleRange = runtime.prepared.scheduleRange
     activeFrameSchedule = runtime.prepared.schedule
     activeRevision = runtime.prepared.graph.revision
     activeGraph = runtime.prepared.graph
+    activeSnapshot = runtime.snapshot
     activeOrdinarySources = runtime.ordinarySources
     activeOrdinaryDescriptors = runtime.ordinaryDescriptors
     activePreparedSources = runtime.preparedSources
@@ -1238,6 +1728,7 @@ export const createPortableBrowserPlaybackController = (input: {
     activePreparations = runtime.preparations
     playing = runTransport
     epoch = runtime.epoch
+    assetGeneration = runtime.assetGeneration
     positionFrame = runTransport ? runtime.requestedFrame : runtime.prepared.schedule.timeOrigin.frame
     positionSequence = 0
     unsubscribeFault = runtime.unsubscribeFault
@@ -1248,7 +1739,7 @@ export const createPortableBrowserPlaybackController = (input: {
   }
 
   const startAttempt = async (
-    transport: LivePlaybackTransport,
+    configuredTransport: LivePlaybackTransport,
     generation: number,
     projectGeneration: number,
     runTransport: boolean,
@@ -1256,35 +1747,18 @@ export const createPortableBrowserPlaybackController = (input: {
   ): Promise<PortableStartResult> => {
     const context = input.getAudioContext()
     if (!context) return "unavailable"
+    const transport = effectiveLoopForStart(
+      configuredTransport,
+      Math.round(configuredTransport.playheadSec * context.sampleRate),
+      context.sampleRate,
+    )
     const cancelled = () => generation !== lifecycleGeneration
       || projectGeneration !== (input.getProjectGeneration?.() ?? 0)
-    const requestedFrame = Math.round(transport.playheadSec * context.sampleRate)
-    const horizonSec = input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC
-    const requestedScheduleEndFrame = requestedFrame
-      + Math.round(horizonSec * context.sampleRate)
-    const compatibleWithActiveSchedule = activeTransport !== undefined
-      && activeScheduleRange !== undefined
-      && !activeTransport.loopEnabled
-      && !transport.loopEnabled
-      && Number.isSafeInteger(requestedFrame)
-      && requestedFrame >= activeScheduleRange.startFrame
-      && Number.isSafeInteger(requestedScheduleEndFrame)
-      && requestedScheduleEndFrame <= activeScheduleRange.endFrame
-    if (active && activeProjectGeneration === projectGeneration && compatibleWithActiveSchedule) {
-      try {
-        await active.setTransport(epoch, runTransport, requestedFrame)
-        positionFrame = requestedFrame
-        if (cancelled()) {
-          void teardownSession()
-          return "unavailable"
-        }
-        if (runTransport) active.markActive()
-        playing = runTransport
-        return "started"
-      } catch (error) {
-        if (!cancelled()) {
-          input.reportFault?.(error instanceof Error ? error.message : "Portable browser playback could not resume.")
-        }
+    // A kept session resumes where it stands, with the loop a start would run: a locate to the playhead, then the run.
+    if (active && activeProjectGeneration === projectGeneration) {
+      const resumed = await seek(configuredTransport.playheadSec, configuredTransport, runTransport)
+      if (resumed !== "rebuild") {
+        if (!cancelled()) return resumed
         void teardownSession()
         return "unavailable"
       }
@@ -1311,11 +1785,12 @@ export const createPortableBrowserPlaybackController = (input: {
   }
 
   const refreshSchedule = (): Promise<PortableStartResult> => {
-    if (!playing || !active || refreshPromise) return refreshPromise ?? Promise.resolve<PortableStartResult>("started")
+    // An adoption in flight owns the session's revision and schedule; the next tick refreshes after it.
+    if (!playing || !active || refreshPromise || adopting || pendingSeeks > 0) return refreshPromise ?? Promise.resolve<PortableStartResult>("started")
     const context = input.getAudioContext()
     if (!context) return Promise.resolve("started")
     const horizonSec = input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC
-    const leadSec = Math.min(5, Math.max(0.05, horizonSec * 0.25))
+    const leadSec = scheduleLeadSec(horizonSec)
     const currentFrame = positionFrame
     const endFrame = activeScheduleRange?.endFrame
     if (failedRefreshEndFrame !== undefined && currentFrame >= failedRefreshEndFrame) {
@@ -1331,307 +1806,166 @@ export const createPortableBrowserPlaybackController = (input: {
       return Promise.resolve("started")
     }
     const previousSession = active
-    const previousUnsubscribeFault = unsubscribeFault
     const generation = lifecycleGeneration
     const projectGeneration = input.getProjectGeneration?.() ?? 0
     const intent = transportIntent
+    const arrangementNow = arrangementFrame()
     const transport: LivePlaybackTransport = {
       ...(activeTransport ?? {
         state: "playing",
-        playheadSec: currentFrame / context.sampleRate,
         loopEnabled: false,
         loopStartSec: 0,
         loopEndSec: 0,
       }),
       state: "playing",
-      playheadSec: currentFrame / context.sampleRate,
+      playheadSec: arrangementNow / context.sampleRate,
+    }
+    // The window plays the arrangement from here at the raw frame the session stands on, with the loop shifted by how far
+    // raw runs ahead of the arrangement, as an adoption's schedule does.
+    const runLoop = effectiveLoopForStart(transport, arrangementNow, context.sampleRate)
+    const deltaSec = (currentFrame - arrangementNow) / context.sampleRate
+    const windowTransport: LivePlaybackTransport = {
+      ...transport,
+      loopEnabled: runLoop.loopEnabled,
+      loopStartSec: runLoop.loopStartSec + deltaSec,
+      loopEndSec: runLoop.loopEndSec + deltaSec,
     }
     const refreshAbortController = new AbortController()
     startupAbortController = refreshAbortController
     const request: Promise<PortableStartResult> = (async (): Promise<PortableStartResult> => {
-      if (recording) {
-        const nextEpoch = epoch
-        await releaseExpiredPreparations(previousSession, currentFrame, nextEpoch)
-        activeOrdinarySources = activeOrdinarySources.filter((source) => source.stopFrame > currentFrame)
-        activePreparedSources = activePreparedSources.filter((source) => !source.preparation.released)
-        const baselineOrdinarySources = activeOrdinarySources
-        const baselinePreparedSources = activePreparedSources
-        const baselineSchedule = activeFrameSchedule
-        const baselineScheduleRange = activeScheduleRange
-        const baselinePreparations = activePreparations
-        const baselineEndFrame = activeScheduleRange?.endFrame ?? currentFrame
-        const compilation = await input.compileSnapshot(transport)
-        if (
-          generation !== lifecycleGeneration
-          || intent !== transportIntent
-          || projectGeneration !== (input.getProjectGeneration?.() ?? 0)
-          || active !== previousSession
-          || !playing
-          || !compilation.supported
-          || compilation.snapshot.transport.loopEnabled
-          || compilation.snapshot.revision !== activeRevision
-        ) return "unavailable"
-        const extensionStartFrame = baselineEndFrame
-        const pageSec = portableWasmPagedPageFrames / context.sampleRate
-        const requestedExtensionSec = horizonSec + (extensionStartFrame - currentFrame) / context.sampleRate
-        const restoreBaseline = async () => {
-          if (!baselineSchedule) throw new Error("Portable scheduler cannot roll back a failed refresh.")
-          await replaceSourcesAtomically({
-            session: previousSession,
-            revision: baselineSchedule.revision,
-            epoch: nextEpoch,
-            ordinary: baselineOrdinarySources,
-            prepared: baselinePreparedSources,
-          })
-          await previousSession.installSchedule(baselineSchedule)
-        }
-        let prepared: Extract<PreparedPortableSession, { supported: true }> | undefined
-        let paged: Awaited<ReturnType<typeof preparePagedSources>> | undefined
-        let extensionSources: Extract<PreparedPortableSession, { supported: true }>["sources"] = []
-        let candidateHorizonSec = requestedExtensionSec
-        try {
-          while (candidateHorizonSec >= pageSec) {
+      const nextEpoch = epoch
+      await releaseExpiredPreparations(previousSession, currentFrame)
+      activeOrdinarySources = activeOrdinarySources.filter((source) => source.stopFrame > currentFrame)
+      activePreparedSources = activePreparedSources.filter((source) => !source.preparation.released)
+      const baselineOrdinarySources = activeOrdinarySources
+      const baselinePreparedSources = activePreparedSources
+      const baselineSchedule = activeFrameSchedule
+      const baselineScheduleRange = activeScheduleRange
+      const baselinePreparations = activePreparations
+      const baselineEndFrame = activeScheduleRange?.endFrame ?? currentFrame
+      const compilation = await compileSnapshot(transport)
+      if (
+        generation !== lifecycleGeneration
+        || intent !== transportIntent
+        || projectGeneration !== (input.getProjectGeneration?.() ?? 0)
+        || active !== previousSession
+        || !playing
+        || !compilation.supported
+        || compilation.snapshot.revision !== activeRevision
+      ) return "unavailable"
+      const extensionStartFrame = baselineEndFrame
+      const pageSec = portableWasmPagedPageFrames / context.sampleRate
+      const requestedExtensionSec = horizonSec + (extensionStartFrame - currentFrame) / context.sampleRate
+      // An adoption shortens the window its schedule covers, not the sources the session holds: those reach past
+      // `extensionStartFrame`, and the compile from there lists them again.
+      const held = new Set([...baselineOrdinarySources, ...baselinePreparedSources].map((source) => `${source.sourceNodeId}:${source.startFrame}`))
+      const restoreBaseline = async () => {
+        if (!baselineSchedule) throw new Error("Portable scheduler cannot roll back a failed refresh.")
+        await replaceSourcesAtomically({
+          session: previousSession,
+          revision: baselineSchedule.revision,
+          epoch: nextEpoch,
+          ordinary: baselineOrdinarySources,
+          prepared: baselinePreparedSources,
+        })
+        await previousSession.installSchedule(baselineSchedule)
+      }
+      let prepared: Extract<PreparedPortableSession, { supported: true }> | undefined
+      let paged: Awaited<ReturnType<typeof preparePagedSources>> | undefined
+      let extensionSources: Extract<PreparedPortableSession, { supported: true }>["sources"] = []
+      try {
+        const fit = await fitPagedWindow({
+          horizonSec: requestedExtensionSec,
+          pageSec,
+          isNew: (source) => source.startFrame >= extensionStartFrame && !held.has(`${source.sourceNodeId}:${source.startFrame}`),
+          compile: (candidateHorizonSec) => {
             const candidate = preparedSession(
-              compilation.snapshot,
+              { ...compilation.snapshot, transport: windowTransport },
               context.sampleRate,
               nextEpoch,
               safeProjectGeneration(projectGeneration),
               candidateHorizonSec,
               activeSourceSequence + 1,
               activePreparedStretchAssets,
-              extensionStartFrame / context.sampleRate,
+              undefined,
               activeOrdinaryDescriptors,
+              currentFrame,
             )
-            if (!candidate.supported
-              || candidate.graph.revision !== activeRevision
-              || candidate.graph.assets.some((asset) => !activeGraph?.assets.some((current) => current.assetId === asset.assetId))) {
-              return "unavailable"
-            }
-            const candidateSources = candidate.sources.filter((source) => source.startFrame >= extensionStartFrame)
-            try {
-              const candidatePaged = await preparePagedSources({
-                session: previousSession,
-                sources: candidateSources,
-                preparedStretchAssets: activePreparedStretchAssets,
-                ordinaryDescriptors: activeOrdinaryDescriptors,
-                repository: stretchRepository,
-                generation: nextEpoch,
-                preparationCapacity: previousSession.pagedCapabilities?.preparationCount ?? portablePagedPreparationCapacity,
-                baselinePreparationCount: baselinePreparations.length,
-                signal: refreshAbortController.signal,
-                pinnedPageKeys: new Set(baselinePreparations.flatMap((preparation) => preparation.pageKeys)),
-              })
-              prepared = candidate
-              paged = candidatePaged
-              extensionSources = candidateSources
-              break
-            } catch (error) {
-              if (!(error instanceof Error) || !error.message.includes("requires ")) throw error
-              candidateHorizonSec -= pageSec
-            }
-          }
-          if (!prepared || !paged) throw new Error("Portable schedule refresh could not fit the pinned page horizon.")
-          const ordinarySources = extensionSources.filter((source) => (
-            !activePreparedStretchAssets.some((candidate) => isPagedStretchAsset(candidate) && candidate.asset.assetId === source.assetId)
-            && !activeOrdinaryDescriptors.has(source.assetId)
-          ))
-          await replaceSourcesAtomically({
+            return candidate.supported
+              && candidate.graph.revision === activeRevision
+              && !candidate.graph.assets.some((asset) => !activeGraph?.assets.some((current) => current.assetId === asset.assetId))
+              ? candidate : undefined
+          },
+          prepare: (sources) => preparePagedSources({
             session: previousSession,
-            revision: prepared.graph.revision,
-            epoch: nextEpoch,
-            ordinary: [...baselineOrdinarySources, ...ordinarySources],
-            prepared: [...baselinePreparedSources.map((source) => ({
-              ...source,
-              preparationId: source.preparation.id,
-            })), ...paged.events],
-          })
-          await previousSession.installSchedule(prepared.schedule)
-          if (
-            generation !== lifecycleGeneration
-            || intent !== transportIntent
-            || projectGeneration !== (input.getProjectGeneration?.() ?? 0)
-            || active !== previousSession
-            || !playing
-          ) throw new Error("Portable schedule refresh was cancelled.")
-          activeScheduleRange = prepared.scheduleRange
-          activeFrameSchedule = prepared.schedule
-          activePreparations = [...baselinePreparations, ...paged.preparations]
-          activeOrdinarySources = [...baselineOrdinarySources, ...ordinarySources]
-          activePreparedSources = [
-            ...baselinePreparedSources,
-            ...paged.events.map((event) => ({
-              ...event,
-              preparation: paged?.preparations.find((preparation) => preparation.id === event.preparationId)
-                ?? (() => { throw new Error(`Portable preparation ${event.preparationId} is missing.`) })(),
-            })),
-          ]
-          activeSourceSequence = extensionSources.length === 0
-            ? activeSourceSequence
-            : extensionSources[extensionSources.length - 1]?.sequence ?? activeSourceSequence
-          activeTransport = { ...transport }
-          return "started"
-        } catch (error) {
-          try {
-            await restoreBaseline()
-            activePreparations = baselinePreparations
-            activeOrdinarySources = baselineOrdinarySources
-            activePreparedSources = baselinePreparedSources
-            activeScheduleRange = baselineScheduleRange
-            activeFrameSchedule = baselineSchedule
-          } catch (rollbackError) {
-            void teardownSession()
-            input.reportFault?.(rollbackError instanceof Error ? rollbackError.message : "Portable schedule refresh rollback failed.")
-            return "unavailable"
-          }
-          if (paged) {
-            await Promise.all(paged.preparations.map(async (preparation) => {
-              if (!preparation.released) {
-                const result = await previousSession.releaseAssetPreparation?.(preparation.id, nextEpoch)
-                if (result === "released") preparation.released = true
-              }
-            }))
-          }
-          failedRefreshEndFrame = activeScheduleRange?.endFrame
-          input.reportFault?.(error instanceof Error ? error.message : "Portable schedule refresh failed.")
-          return "unavailable"
-        }
-      }
-
-      const stillCurrent = () => generation === lifecycleGeneration
-        && intent === transportIntent
-        && projectGeneration === (input.getProjectGeneration?.() ?? 0)
-      const preservesActiveGraph = (runtime: PreparedRuntime | undefined) => runtime !== undefined
-        && runtime.prepared.graph.revision === activeRevision
-        && runtime.prepared.graph.assets.length === (activeGraph?.assets.length ?? 0)
-        && runtime.prepared.graph.assets.every((asset) => (
-          activeGraph?.assets.some((current) => current.assetId === asset.assetId)
-        ))
-      const hasPagedSources = (runtime: PreparedRuntime) => (
-        runtime.ordinaryDescriptors.size > 0
-        || runtime.preparedStretchAssets.some(isPagedStretchAsset)
-      )
-      const hasContinuationCoverage = (runtime: PreparedRuntime, frame: number) => {
-        const requiredEndFrame = frame + (
-          hasPagedSources(runtime)
-            ? portableWasmPagedPageFrames
-            : Math.round(horizonSec * context.sampleRate)
-        )
-        return Number.isSafeInteger(frame)
-          && frame >= runtime.prepared.scheduleRange.startFrame
-          && frame < runtime.prepared.scheduleRange.endFrame
-          && Number.isSafeInteger(requiredEndFrame)
-          && requiredEndFrame <= runtime.prepared.scheduleRange.endFrame
-      }
-      const replacementTransport = (frame: number): LivePlaybackTransport => ({
-        ...transport,
-        playheadSec: frame / context.sampleRate,
-      })
-
-      let runtime = await prepareRuntime(
-        transport,
-        generation,
-        projectGeneration,
-        false,
-        epoch + 1,
-        1,
-      )
-      let latestFrame = positionFrame
-      let valid = runtime !== undefined
-        && preservesActiveGraph(runtime)
-        && runtime.sessionFault.error === undefined
-        && stillCurrent()
-        && active === previousSession
-        && playing
-      if (valid && runtime && !hasContinuationCoverage(runtime, latestFrame)) {
-        await releaseRuntime(runtime)
-        runtime = await prepareRuntime(
-          replacementTransport(positionFrame),
-          generation,
-          projectGeneration,
-          false,
-          epoch + 1,
-          1,
-        )
-        latestFrame = positionFrame
-        valid = runtime !== undefined
-          && preservesActiveGraph(runtime)
-          && runtime.sessionFault.error === undefined
-          && stillCurrent()
-          && active === previousSession
-          && playing
-          && runtime !== undefined
-          && hasContinuationCoverage(runtime, latestFrame)
-      }
-      if (!valid || !runtime) {
-        if (runtime && !preservesActiveGraph(runtime)) {
-          input.reportFault?.("Portable schedule refresh changed the active graph.")
-        }
-        if (runtime?.sessionFault.error) {
-          input.reportFault?.(runtime.sessionFault.error.message)
-        }
+            sources,
+            preparedStretchAssets: activePreparedStretchAssets,
+            ordinaryDescriptors: activeOrdinaryDescriptors,
+            repository: stretchRepository,
+            generation: assetGeneration,
+            preparationCapacity: previousSession.pagedCapabilities?.preparationCount ?? portablePagedPreparationCapacity,
+            baselinePreparationCount: baselinePreparations.length,
+            signal: refreshAbortController.signal,
+            pinnedPageKeys: new Set(baselinePreparations.flatMap((preparation) => preparation.pageKeys)),
+          }),
+        })
+        if (fit === "refused") return "unavailable"
+        if (fit === "no-fit") throw new Error("Portable schedule refresh could not fit the pinned page horizon.")
+        prepared = fit.candidate
+        paged = fit.paged
+        extensionSources = fit.sources
+        const ordinarySources = ordinarySourcesOf(extensionSources, activePreparedStretchAssets, activeOrdinaryDescriptors)
+        await replaceSourcesAtomically({
+          session: previousSession,
+          revision: prepared.graph.revision,
+          epoch: nextEpoch,
+          ordinary: [...baselineOrdinarySources, ...ordinarySources],
+          prepared: [...baselinePreparedSources.map((source) => ({
+            ...source,
+            preparationId: source.preparation.id,
+          })), ...paged.events],
+        })
+        await previousSession.installSchedule(prepared.schedule)
         if (
-          (!runtime
-            || !preservesActiveGraph(runtime)
-            || runtime.sessionFault.error !== undefined
-            || !hasContinuationCoverage(runtime, latestFrame))
-          && stillCurrent()
-          && active === previousSession
-          && playing
-        ) failedRefreshEndFrame = activeScheduleRange?.endFrame
-        await releaseRuntime(runtime)
-        return "unavailable"
-      }
-
-      // The old session remains audible during preparation. Once all checks
-      // pass, make the handoff a hard boundary before starting the prepared
-      // replacement so two sessions can never run at once.
-      latestFrame = positionFrame
-      if (!hasContinuationCoverage(runtime, latestFrame) || runtime.sessionFault.error !== undefined || !stillCurrent()
-        || active !== previousSession || !playing) {
-        await releaseRuntime(runtime)
-        if (stillCurrent() && active === previousSession && playing) {
-          failedRefreshEndFrame = activeScheduleRange?.endFrame
-        }
-        return "unavailable"
-      }
-      previousUnsubscribeFault?.()
-      unsubscribeFault = undefined
-      clearActiveSessionState()
-      try {
-        previousSession.dispose()
-      } catch (error) {
-        await releaseRuntime(runtime)
-        if (stillCurrent()) {
-          input.reportFault?.(error instanceof Error ? error.message : "Portable schedule refresh could not dispose the old session.")
-        }
-        return "unavailable"
-      }
-      try {
-        await runtime.session.setTransport(runtime.epoch, true, latestFrame)
-        if (!stillCurrent() || runtime.sessionFault.error) {
-          throw runtime.sessionFault.error ?? new Error("Portable schedule refresh was cancelled.")
-        }
-        runtime.session.markActive()
-        if (!stillCurrent() || runtime.sessionFault.error) {
-          throw runtime.sessionFault.error ?? new Error("Portable schedule refresh was cancelled.")
-        }
-        commitRuntime(runtime, true)
-        positionFrame = latestFrame
-        activeTransport = {
-          ...runtime.transport,
-          state: "playing",
-          playheadSec: latestFrame / context.sampleRate,
-        }
+          generation !== lifecycleGeneration
+          || intent !== transportIntent
+          || projectGeneration !== (input.getProjectGeneration?.() ?? 0)
+          || active !== previousSession
+          || !playing
+        ) throw new Error("Portable schedule refresh was cancelled.")
+        activeScheduleRange = prepared.scheduleRange
+        activeFrameSchedule = prepared.schedule
+        activePreparations = [...baselinePreparations, ...paged.preparations]
+        activeOrdinarySources = [...baselineOrdinarySources, ...ordinarySources]
+        activePreparedSources = [...baselinePreparedSources, ...withPreparations(paged.events, paged.preparations)]
+        activeSourceSequence = extensionSources.length === 0
+          ? activeSourceSequence
+          : extensionSources[extensionSources.length - 1]?.sequence ?? activeSourceSequence
+        activeTransport = { ...transport }
         return "started"
       } catch (error) {
-        await releaseRuntime(runtime)
-        if (stillCurrent()) {
-          input.reportFault?.(
-            error instanceof Error && error.message !== "Portable schedule refresh was cancelled."
-              ? error.message
-              : "Portable schedule refresh could not start the replacement.",
-          )
+        try {
+          await restoreBaseline()
+          activePreparations = baselinePreparations
+          activeOrdinarySources = baselineOrdinarySources
+          activePreparedSources = baselinePreparedSources
+          activeScheduleRange = baselineScheduleRange
+          activeFrameSchedule = baselineSchedule
+        } catch (rollbackError) {
+          void teardownSession()
+          input.reportFault?.(rollbackError instanceof Error ? rollbackError.message : "Portable schedule refresh rollback failed.")
+          return "unavailable"
         }
+        if (paged) {
+          await Promise.all(paged.preparations.map(async (preparation) => {
+            if (!preparation.released) {
+              const result = await previousSession.releaseAssetPreparation?.(preparation.id, assetGeneration)
+              if (result === "released") preparation.released = true
+            }
+          }))
+        }
+        failedRefreshEndFrame = activeScheduleRange?.endFrame
+        input.reportFault?.(error instanceof Error ? error.message : "Portable schedule refresh failed.")
         return "unavailable"
       }
     })().catch((cause: unknown): PortableStartResult => {
@@ -1648,6 +1982,412 @@ export const createPortableBrowserPlaybackController = (input: {
       if (refreshPromise === request) refreshPromise = undefined
     })
     return request
+  }
+
+  // Native adoption on the portable session: compile the newest desired state from a seam a quarter second ahead of the
+  // rendered position, reconcile the notes sounding at the seam against the schedule they started in, then prepare,
+  // install and publish at exactly that frame on the same core. A publication that is refused or late is a failed
+  // adoption that a resubmit retries, as is what the session cannot carry. A paused session adopts the same way at the
+  // frame it stands on, with no lead and an immediate publish.
+  const adoptLive = async (loop: AdoptionLoop): Promise<PortableAdoptionResult> => {
+    // A locate rebuilds the schedule the adoption would reconcile against; the follow adopts again after it.
+    if (pendingSeeks > 0) return "unavailable"
+    while (refreshPromise) await refreshPromise
+    const session = active
+    const audioContext = input.getAudioContext()
+    const previous = activeSnapshot
+    const schedule = activeFrameSchedule
+    const range = activeScheduleRange
+    const transport = activeTransport
+    const revision = activeRevision
+    const fingerprint = input.fingerprintSnapshot
+    if (!session || !audioContext || !previous || !schedule || !range || !transport || revision === undefined) return "unavailable"
+    if (!fingerprint) {
+      console.error("[portable-playback] defect: the controller has no fingerprintSnapshot, so no edit can be adopted")
+      return "unavailable"
+    }
+    const generation = lifecycleGeneration
+    const intent = transportIntent
+    const wasPlaying = playing
+    const current = () => active === session && playing === wasPlaying && generation === lifecycleGeneration && intent === transportIntent
+    // A compile that throws has changed nothing, and an edit that cannot be installed leaves the old graph playing for
+    // the next adoption to retry; a rebuild would end the take and gap the audio for an edit the user expects to hear
+    // without either.
+    const failed = (): PortableAdoptionResult => current() ? "failed" : "unavailable"
+    const sampleRate = audioContext.sampleRate
+    const projectGeneration = safeProjectGeneration(activeProjectGeneration ?? 0)
+    const publishing = Promise.withResolvers<PortableAdoptionResult>()
+    let attempt: AdoptionCache | undefined
+    let committed = false
+    adopting = true
+    try {
+      // A run keeps its loop off while the playhead is at or past the loop's end, as a start would. A take keeps the loop
+      // it runs with: its refresh reads raw frames as arrangement frames and stops at a loop, so the follow adopts the
+      // loop edit once the take has ended.
+      const arrangementNow = arrangementFrame()
+      const compilation = await compileSnapshot({
+        ...transport, ...effectiveLoopForStart(recording ? previous.transport : loop, arrangementNow, sampleRate), state: wasPlaying ? "playing" : "paused", playheadSec: arrangementNow / sampleRate,
+      }, { liveAdoption: true })
+      if (!current()) return "unavailable"
+      // Content the session cannot carry at a seam (`compileSnapshot`) is a failed adoption: it retries, and exhaustion is a defect.
+      if (!compilation.supported) return failed()
+      const next = compilation.snapshot
+      const desired = fingerprint(next)
+      if (adoptionCache && adoptionCache.fingerprint !== desired) await disposeAdoptionCache(session)
+      if (desired === fingerprint(previous)) return "unchanged"
+      // This attempt owns what the failed one kept; a failed attempt hands it on again.
+      const owned: AdoptionCache = { fingerprint: desired, preparations: adoptionCache?.preparations ?? [], assets: adoptionCache?.assets ?? [], stretch: adoptionCache?.stretch }
+      adoptionCache = undefined
+      attempt = owned
+      // The candidate's Stretch artifacts are prepared at its tempo and placement, as native prepares them (C:3289-3305). The
+      // seam is chosen after this, so a slow preparation spends none of its lead.
+      owned.stretch ??= await prepareCandidateStretch(next, projectGeneration)
+      if (!current()) return "unavailable"
+      // The candidate's assets: the Stretch artifacts it prepared, and the session's own with what the edit added.
+      const resources = {
+        preparedStretchAssets: owned.stretch,
+        ordinaryDescriptors: await resolveOrdinaryDescriptors(next, input.resolveSource, undefined, activeOrdinaryDescriptors),
+      }
+      if (!current()) return "unavailable"
+      // From here live sends wait for the publish (R2) and so reach the revision that carries them; sends already in
+      // flight settle first, so the candidate holds every live value the session accepted while the compile ran.
+      adoptionPublish = publishing.promise
+      await Promise.all(liveInstrumentSends)
+      if (!current()) return "unavailable"
+      const folded = withAcceptedLiveSynthValues(next, previous, activeSnapshot ?? previous)
+      // The schedule plays the arrangement from `arrangementAt` at raw frame `rawFrame`, with the loop as given.
+      const compileFrom = (rawFrame: number, arrangementAt: number, scheduleLoop: AdoptionLoop, horizonFrames: number) => preparedSession(
+        { ...folded, revision: revision + 1, transport: { ...folded.transport, ...scheduleLoop, playheadSec: arrangementAt / sampleRate } },
+        sampleRate, epoch, projectGeneration, horizonFrames / sampleRate, 1, resources.preparedStretchAssets, undefined, resources.ordinaryDescriptors, rawFrame)
+      // The graph does not depend on the origin, so it is prepared first and the seam is chosen after that round trip.
+      const provisional = compileFrom(positionFrame, arrangementNow, folded.transport, range.endFrame - positionFrame)
+      if (!provisional.supported) return failed()
+      await session.prepareGraph(provisional.graph)
+      if (!current()) return "unavailable"
+      // The worklet resolves instrument zones and sources by asset id when it publishes, so what the edit added is
+      // registered before the seam is chosen: registering takes time the seam's lead must not lose. The old assets stay
+      // registered while the old sources play, and are released after the seam (retiredAssets).
+      const registered = new Set([...(activeGraph?.assets ?? []).map((asset) => asset.assetId), ...owned.assets])
+      for (const asset of provisional.graph.assets) {
+        if (registered.has(asset.assetId)) continue
+        await registerGraphAsset(session, asset, next, resources.preparedStretchAssets, resources.ordinaryDescriptors, assetGeneration)
+        owned.assets = [...owned.assets, asset.assetId]
+        if (!current()) return "unavailable"
+      }
+      const leadFrames = Math.round(scheduleLeadSec(input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC) * sampleRate)
+      // A stopped transport has no publish race: the seam is where it stands and the publish below is immediate.
+      const seamLeadFrames = adoptionSeamLeadFrames(sampleRate, seamRoundTripsMs)
+      const seamChosenAt = performance.now()
+      const seamFrame = wasPlaying ? positionFrame + seamLeadFrames : positionFrame
+      const recordSeamRoundTrip = () => {
+        seamRoundTripsMs = [...seamRoundTripsMs, performance.now() - seamChosenAt].slice(-recentSeamRoundTripCount)
+      }
+      if (wasPlaying) console.debug(`[portable-playback] adoption seam ${seamLeadFrames} frames ahead of the last report (clamp ${Math.round(maxAdoptionSeamLeadSec * sampleRate)})`)
+      const keepsVoices = (trackId: string) =>
+        keepsInstrumentVoices(previous.mixer.fx.trackFx?.[trackId]?.instrument, folded.mixer.fx.trackFx?.[trackId]?.instrument)
+      const candidateTrackIds = new Set(folded.tracks.map((track) => track.id))
+      const hasTrack = (trackId: string) => candidateTrackIds.has(trackId)
+      // Raw frames run on through a loop, so the seam's arrangement position is rarely its raw frame. The schedule is
+      // compiled in raw frames: its loop is shifted by the difference, and the loop is off for the run when the
+      // arrangement position at the seam is at or past the loop's end.
+      const seamArrangement = arrangementFrameAt(positionSegments, seamFrame)
+      const deltaFrames = seamFrame - seamArrangement
+      const runLoop = effectiveLoopForStart(folded.transport, seamArrangement, sampleRate)
+      const scheduleLoop: AdoptionLoop = {
+        loopEnabled: runLoop.loopEnabled,
+        loopStartSec: runLoop.loopStartSec + deltaFrames / sampleRate,
+        loopEndSec: runLoop.loopEndSec + deltaFrames / sampleRate,
+      }
+      // The recording refresh reads raw frames as arrangement frames.
+      if (recording && deltaFrames !== 0) return failed()
+      // The window shrinks until the schedule fits what the worklet installs and its paged sources fit the pages and
+      // preparations the session holds beside the active ones; the next refresh extends it. It starts at the old end, or
+      // at a full horizon when the seam is within the lead of it: that is where an edit the refresh refused lands, and
+      // no refresh can extend the schedule until this adoption has carried the edit. A graph that depends on the origin
+      // leaves nothing to publish.
+      const reusable = owned.preparations
+      const oldWindowFrames = range.endFrame - seamFrame
+      const startWindowFrames = oldWindowFrames > leadFrames ? oldWindowFrames : Math.round((input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC) * sampleRate)
+      const fitted = await (async () => {
+        for (let horizonFrames = startWindowFrames; horizonFrames > leadFrames; horizonFrames = Math.floor(horizonFrames / 2)) {
+          const compiled = compileFrom(seamFrame, seamArrangement, scheduleLoop, horizonFrames)
+          if (!compiled.supported || JSON.stringify(compiled.graph) !== JSON.stringify(provisional.graph)) return undefined
+          const reconciled = reconcileAtSeam({ previous: schedule, next: compiled.schedule, seamFrame, keepsVoices, hasTrack })
+          if (reconciled.events.length > maxScheduleEvents) continue
+          try {
+            const paged = await preparePagedSources({
+              session,
+              sources: compiled.sources,
+              ...resources,
+              repository: stretchRepository,
+              generation: assetGeneration,
+              preparationCapacity: session.pagedCapabilities?.preparationCount ?? portablePagedPreparationCapacity,
+              baselinePreparationCount: activePreparations.length,
+              pinnedPageKeys: new Set(activePreparations.flatMap((preparation) => preparation.pageKeys)),
+              reusable,
+            })
+            return { candidate: compiled, adopted: reconciled, paged }
+          } catch (error) {
+            if (!(error instanceof Error) || !error.message.includes("requires ")) throw error
+          }
+        }
+        return undefined
+      })()
+      if (!fitted) return failed()
+      const { candidate, adopted, paged } = fitted
+      // The commit keeps these preparations; a failed attempt leaves them to the resubmit.
+      owned.preparations = paged.preparations
+      const reusedIds = new Set(paged.preparations.map((preparation) => preparation.id))
+      await releasePreparations(session, reusable.filter((preparation) => !reusedIds.has(preparation.id)), assetGeneration)
+      await session.installSchedule(adopted)
+      if (!current()) return "unavailable"
+      // Once posted, the publish decides which revision the worklet plays, whatever the transport did meanwhile.
+      const graph = activeGraph
+      activeRevision = candidate.graph.revision
+      activeGraph = candidate.graph
+      const ordinary = ordinarySourcesOf(candidate.sources, resources.preparedStretchAssets, resources.ordinaryDescriptors)
+      // The sources travel with the publish: the worklet swaps them in with the graph, so no block plays one without the other.
+      const sources = { epoch, ordinary, prepared: paged.events }
+      recordSeamRoundTrip()
+      const published = session.publishGraph(candidate.graph.revision, wasPlaying ? { requireContinuity: true, publicationFrame: seamFrame, sources } : { requireContinuity: true, sources }).then((): PortableAdoptionResult => {
+        if (active !== session) return "unavailable"
+        // The compiled schedule, not the installed one: it still holds the note-on of a voice that continues from before
+        // the seam, which the next reconcile needs to know that voice sounds.
+        activeFrameSchedule = candidate.schedule
+        activeScheduleRange = candidate.scheduleRange
+        activeSnapshot = {
+          ...folded,
+          revision: candidate.graph.revision,
+          transport: { ...folded.transport, loopEnabled: runLoop.loopEnabled },
+        }
+        activeTransport = { ...transport, loopEnabled: runLoop.loopEnabled, loopStartSec: runLoop.loopStartSec, loopEndSec: runLoop.loopEndSec }
+        positionSegments = [
+          ...positionSegments.slice(positionSegmentIndex(positionSegments, positionFrame)),
+          { fromFrame: seamFrame, loop: loopFramesForTransport(scheduleLoop, sampleRate), deltaFrames },
+        ]
+        // The old sources stop at the seam, so their preparations end there; the position reports release them once the
+        // position reaches it, and a paused session is at it already.
+        activePreparations = [
+          ...activePreparations.map((preparation) => ({ ...preparation, stopFrame: Math.min(preparation.stopFrame, seamFrame) })),
+          ...paged.preparations,
+        ]
+        const candidateAssets = new Set(candidate.graph.assets.map((asset) => asset.assetId))
+        retiredAssets = [
+          ...retiredAssets,
+          ...(graph?.assets ?? []).filter((asset) => !candidateAssets.has(asset.assetId)).map((asset) => ({ assetId: asset.assetId, seamFrame })),
+        ]
+        activeOrdinarySources = ordinary
+        activePreparedSources = withPreparations(paged.events, paged.preparations)
+        activeSourceSequence = candidate.sources.at(-1)?.sequence ?? 0
+        retiredStretch = [...retiredStretch, { assets: activePreparedStretchAssets, seamFrame }]
+        activePreparedStretchAssets = resources.preparedStretchAssets
+        activeOrdinaryDescriptors = resources.ordinaryDescriptors
+        committed = true
+        void releaseExpiredPreparations(session, positionFrame).catch(() => undefined)
+        return "adopted"
+      }, (): PortableAdoptionResult => {
+        // A refusal, or a publication that came too late, leaves the worklet on the revision it plays; so does the session.
+        // A late answer arrives after the seam: the time it took is what the seam had to cover, so the resubmit's seam
+        // is chosen with it.
+        recordSeamRoundTrip()
+        if (active === session) {
+          activeRevision = revision
+          activeGraph = graph
+        }
+        return failed()
+      })
+      publishing.resolve(published)
+      return await published
+    } catch {
+      return failed()
+    } finally {
+      if (attempt && !committed) {
+        if (active === session) adoptionCache = attempt
+        else void releasePreparedStretchAssets(attempt.stretch ?? [])
+      }
+      adopting = false
+      publishing.resolve("unavailable")
+      adoptionPublish = undefined
+    }
+  }
+
+  // At most one adoption runs and one waits; the waiting one compiles when it starts, so it carries the newest edit.
+  const adoptQueued = (loop: AdoptionLoop): Promise<PortableAdoptionResult> => {
+    latestLoop = loop
+    if (adoptionQueued) return adoptionQueued
+    const run = adoptionTail.then(() => {
+      adoptionQueued = undefined
+      return adoptLive(latestLoop)
+    })
+    adoptionQueued = run
+    adoptionTail = run.catch(() => undefined)
+    return run
+  }
+
+  // UD 8: a failed instrument staging keeps the playing graph and is resubmitted after min(2^r, 16(r+1)) rendered-frame
+  // reports (the worklet's transport-position messages are the block boundary; no timer), up to 8 times. Exhaustion is a
+  // defect: the edit stays in the project and the next adoption publishes it.
+  const retryWaitReports = (resubmits: number) => Math.min(2 ** resubmits, 16 * (resubmits + 1))
+
+  const settleAdoption = (result: PortableAdoptionResult, resubmits: number) => {
+    retries.delete("adoption")
+    if (result !== "failed") return
+    if (resubmits >= maxAdoptionResubmits) {
+      const message = `instrument adoption failed after ${maxAdoptionResubmits} resubmits; the edit applies on the next successful publication`
+      console.error(`[portable-playback] defect: ${message}`)
+      input.reportFault?.(`Playback could not apply an edit: ${message}`)
+      void disposeAdoptionCache(active)
+      return
+    }
+    console.warn(`[portable-playback] instrument adoption failed; resubmit ${resubmits + 1} of ${maxAdoptionResubmits} at a later block boundary`)
+    retries.set("adoption", { resubmits, wait: retryWaitReports(resubmits), run: resubmitAdoption })
+  }
+
+  const adoptSchedule = async (loop: AdoptionLoop): Promise<PortableAdoptionResult> => {
+    const result = await adoptQueued(loop)
+    settleAdoption(result, 0)
+    return result
+  }
+
+  const resubmitAdoption = async (resubmits: number) => {
+    const result = await adoptQueued(latestLoop)
+    settleAdoption(result, resubmits + 1)
+    if (result !== "failed") input.onAdoptionResubmitted?.(result)
+  }
+
+  // A locate in place, in native's order: stop at the new position and epoch (the core clears its sources there), free the
+  // old pages and prepare the target's, install the schedule and its sources, then run. It compiles the snapshot the
+  // session holds, not the project: an edit that landed meanwhile is adopted by the follow after the locate.
+  // `resume` is a start on the paused session: it locates, then runs the transport at the target.
+  const seekAttempt = async (sec: number, loop: AdoptionLoop, intent: number, resubmits: number, resume: boolean): Promise<PortableSeekResult> => {
+    while (refreshPromise) await refreshPromise
+    await adoptionTail
+    const session = active
+    const audioContext = input.getAudioContext()
+    const snapshot = activeSnapshot
+    const revision = activeRevision
+    if (!session || !audioContext || !snapshot || revision === undefined
+      || activeProjectGeneration !== (input.getProjectGeneration?.() ?? 0)) return "rebuild"
+    const generation = lifecycleGeneration
+    const superseded = () => active !== session || generation !== lifecycleGeneration
+    const sampleRate = audioContext.sampleRate
+    const frame = Math.round(sec * sampleRate)
+    const nextEpoch = epoch + 1
+    const running = playing
+    const target = effectiveLoopForStart({ ...snapshot.transport, ...loop, playheadSec: sec }, frame, sampleRate)
+    const horizonSec = Math.max(input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC, portableWasmPagedPageFrames / sampleRate)
+    const compile = (windowSec: number) => {
+      const candidate = preparedSession({ ...snapshot, transport: target }, sampleRate, nextEpoch, safeProjectGeneration(activeProjectGeneration ?? 0),
+        windowSec, 1, activePreparedStretchAssets, undefined, activeOrdinaryDescriptors)
+      return candidate.supported && candidate.graph.revision === revision ? candidate : undefined
+    }
+    if (!compile(horizonSec)) {
+      console.warn("[portable-playback] seek refused: the active snapshot does not compile at the target")
+      return "rebuild"
+    }
+    let paged: Awaited<ReturnType<typeof preparePagedSources>> | undefined
+    try {
+      await session.setTransport(nextEpoch, false, frame)
+      if (superseded()) return "unavailable"
+      epoch = nextEpoch
+      positionFrame = frame
+      positionSequence = 0
+      positionSegments = initialPositionSegments(target, sampleRate)
+      // The core cleared its sources at the epoch change, so every preparation has ended.
+      await releaseExpiredPreparations(session, Number.POSITIVE_INFINITY)
+      const held = activePreparations
+      const fit = await fitPagedWindow({
+        horizonSec,
+        pageSec: portableWasmPagedPageFrames / sampleRate,
+        compile,
+        prepare: (sources) => preparePagedSources({
+          session,
+          sources,
+          preparedStretchAssets: activePreparedStretchAssets,
+          ordinaryDescriptors: activeOrdinaryDescriptors,
+          repository: stretchRepository,
+          generation: assetGeneration,
+          preparationCapacity: session.pagedCapabilities?.preparationCount ?? portablePagedPreparationCapacity,
+          baselinePreparationCount: held.length,
+          pinnedPageKeys: new Set(held.flatMap((preparation) => preparation.pageKeys)),
+        }),
+      })
+      if (fit === "refused" || fit === "no-fit") throw new Error("Portable playback could not fit the window at the seek target.")
+      paged = fit.paged
+      await session.installSchedule(fit.candidate.schedule)
+      const ordinary = ordinarySourcesOf(fit.sources, activePreparedStretchAssets, activeOrdinaryDescriptors)
+      await replaceSourcesAtomically({ session, revision, epoch: nextEpoch, ordinary, prepared: fit.paged.events })
+      if (superseded()) return "unavailable"
+      activeFrameSchedule = fit.candidate.schedule
+      activeScheduleRange = fit.candidate.scheduleRange
+      activeOrdinarySources = ordinary
+      activePreparations = [...held, ...fit.paged.preparations]
+      activePreparedSources = withPreparations(fit.paged.events, fit.paged.preparations)
+      activeSourceSequence = fit.sources.at(-1)?.sequence ?? 0
+      activeTransport = { ...target, state: running || resume ? "playing" : "paused" }
+      activeSnapshot = { ...snapshot, transport: { ...snapshot.transport, loopEnabled: target.loopEnabled, loopStartSec: target.loopStartSec, loopEndSec: target.loopEndSec } }
+      failedRefreshEndFrame = undefined
+      // A newer locate or a pause leaves the session stopped at the schedule this one installed.
+      if ((running || resume) && intent === transportIntent) {
+        await session.setTransport(nextEpoch, true, frame)
+        session.markActive()
+        playing = true
+      }
+      return "started"
+    } catch (cause) {
+      if (superseded()) return "unavailable"
+      // A rejected first stop changed nothing: the old position keeps playing on its old schedule and the retry targets
+      // the locate. Once the transport stands at the new epoch, the old schedule belongs to the old epoch and what was
+      // installed may be partial: nothing may refresh, adopt or resume on it until a locate completes.
+      const stopped = epoch === nextEpoch
+      if (stopped) {
+        activeScheduleRange = undefined
+        activeFrameSchedule = undefined
+      }
+      if (paged) {
+        activePreparations = [...new Set([...activePreparations, ...paged.preparations])]
+        await releaseExpiredPreparations(session, Number.POSITIVE_INFINITY)
+      }
+      const failure = cause instanceof Error ? cause : new Error("Portable playback could not seek.")
+      // Rendered-frame reports are the retry clock, so a running transport keeps running while it waits: after the stop,
+      // it plays whatever of the target's content was installed.
+      const waiting = running && resubmits < maxAdoptionResubmits
+        && (!stopped || await session.setTransport(epoch, true, frame).then(() => true, () => false))
+      if (waiting) {
+        session.markActive()
+        console.warn(`[portable-playback] seek failed; resubmit ${resubmits + 1} of ${maxAdoptionResubmits} at a later block boundary`)
+        retries.set("seek", {
+          resubmits,
+          wait: retryWaitReports(resubmits),
+          run: (done) => intent === transportIntent && generation === lifecycleGeneration
+            ? queueSeek(stopped ? arrangementFrame() / sampleRate : sec, loop, intent, done + 1, false).then((result) => {
+              if (result === "started") input.onAdoptionResubmitted?.(result)
+            })
+            : Promise.resolve(),
+        })
+        return "unavailable"
+      }
+      console.error(`[portable-playback] defect: seek failed${running ? ` after ${resubmits} resubmits` : ""}: ${failure.message}`)
+      input.reportFault?.(failure.message)
+      void teardownSession()
+      return "unavailable"
+    }
+  }
+
+  const queueSeek = (sec: number, loop: AdoptionLoop, intent: number, resubmits: number, resume: boolean): Promise<PortableSeekResult> => {
+    pendingSeeks += 1
+    const run = seekTail
+      .then((): Promise<PortableSeekResult> | PortableSeekResult =>
+        intent === transportIntent ? seekAttempt(sec, loop, intent, resubmits, resume) : active ? "started" : "unavailable")
+      .finally(() => { pendingSeeks -= 1 })
+    seekTail = run.catch(() => undefined)
+    return run
+  }
+
+  const seek = async (sec: number, loop: AdoptionLoop, resume = false): Promise<PortableSeekResult> => {
+    if (recording) throw new Error("Portable recording must stop before playback can seek.")
+    retries.delete("seek")
+    return queueSeek(sec, loop, ++transportIntent, 0, resume)
   }
 
   const start = (transport: LivePlaybackTransport, compileContext?: LivePlaybackCompileContext): Promise<PortableStartResult> => {
@@ -1686,12 +2426,16 @@ export const createPortableBrowserPlaybackController = (input: {
 
   const ensurePrepared = (transport: LivePlaybackTransport, compileContext?: LivePlaybackCompileContext): Promise<PortableStartResult> => {
     if (pendingStart) return pendingStart
-    if (active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0)) {
+    // A paused session is prepared only where it stands: another playhead seeks it in place.
+    const context = input.getAudioContext()
+    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context
+    if (keptPaused && positionFrame === Math.round(transport.playheadSec * keptPaused.sampleRate)) {
       return Promise.resolve("started")
     }
     const generation = lifecycleGeneration
     const projectGeneration = input.getProjectGeneration?.() ?? 0
-    const request = startAttempt(transport, generation, projectGeneration, false, compileContext)
+    const request = keptPaused ? seek(transport.playheadSec, transport).then((result): PortableStartResult => result === "rebuild" ? "unavailable" : result)
+      : startAttempt(transport, generation, projectGeneration, false, compileContext)
     pendingStart = request
     pendingStartMode = "preview"
     void request.finally(() => {
@@ -1720,6 +2464,8 @@ export const createPortableBrowserPlaybackController = (input: {
     transportIntent += 1
     startupAbortController?.abort()
     startupAbortController = undefined
+    // A locate in flight finishes its burst without running; the pause then stops it at the epoch it left.
+    await seekTail
     const session = active
     if (!session || !playing) return
     if (recording) throw new Error("Portable recording must stop before playback can pause.")
@@ -1728,6 +2474,8 @@ export const createPortableBrowserPlaybackController = (input: {
     try {
       await session.setTransport(epoch, false, Math.round(playheadSec * context.sampleRate))
       positionFrame = Math.round(playheadSec * context.sampleRate)
+      // The transport now stands at the arrangement frame itself.
+      positionSegments = []
       if (active === session) playing = false
     } catch (error) {
       if (active === session) {
@@ -1746,7 +2494,7 @@ export const createPortableBrowserPlaybackController = (input: {
     if (!context || !baselineSchedule || !baselineScheduleRange || activeRevision === undefined || !activeGraph) {
       throw new Error("Portable recording requires an active schedule.")
     }
-    await releaseExpiredPreparations(playbackSession, positionFrame, epoch)
+    await releaseExpiredPreparations(playbackSession, positionFrame)
     const projectGeneration = input.getProjectGeneration?.() ?? 0
     const transport: LivePlaybackTransport = {
       ...(activeTransport ?? {
@@ -1759,7 +2507,7 @@ export const createPortableBrowserPlaybackController = (input: {
       state: "playing",
       playheadSec: positionFrame / context.sampleRate,
     }
-    const compilation = await input.compileSnapshot(transport)
+    const compilation = await compileSnapshot(transport)
     if (
       !compilation.supported
       || compilation.snapshot.transport.loopEnabled
@@ -1991,18 +2739,89 @@ export const createPortableBrowserPlaybackController = (input: {
     }
   }
 
+  const rememberInstrumentParameters = (targetId: string, instrument: TrackInstrumentParams) => {
+    if (!activeSnapshot) return
+    const trackFx = activeSnapshot.mixer.fx.trackFx ?? {}
+    activeSnapshot = { ...activeSnapshot, mixer: { ...activeSnapshot.mixer,
+      fx: { ...activeSnapshot.mixer.fx, trackFx: { ...trackFx, [targetId]: { ...trackFx[targetId], instrument } } } } }
+  }
+
   const queueLiveProcessorControl = async (
     request: LiveProcessorControlRequest,
   ): Promise<LiveProcessorControlResult> => {
-    if (!active || !active.queueProcessorEvents || activeRevision === undefined || activeGraph === undefined) {
+    // A start in flight may have compiled before this edit: it reaches the session that start commits.
+    if (!active && pendingStart) await pendingStart.catch(() => undefined)
+    // An adoption publish decides which revision the worklet plays; a send waits for its answer.
+    if (adoptionPublish) await adoptionPublish
+    if (!active || activeRevision === undefined || activeGraph === undefined) {
       return { accepted: false, reason: "unprepared" }
     }
     if (request.revision !== undefined && request.revision !== activeRevision
       || request.epoch !== undefined && request.epoch !== epoch) {
       return { accepted: false, reason: "stale" }
     }
+    const snapshot = activeSnapshot
+    const instrumentEntry = Object.entries(snapshot?.mixer.fx.trackFx ?? {})
+      .find(([, fx]) => fx.instrument?.instanceId === request.instanceId)
+    if (snapshot && instrumentEntry) {
+      const session = active
+      const node = activeGraph.nodes.find((entry) => entry.id === instrumentEntry[0])
+      if (node?.instrument?.kind !== "synth" || !session.queueInstrumentEvents) return { accepted: false, reason: "unsupported" }
+      // The live events carry the eight live parameters; every other change to the instrument reaches the session
+      // through the published configuration of the next adoption, so it stays out of the prepared snapshot until then.
+      const prepared = instrumentEntry[1].instrument
+      const edited = request.edit && normalizeTrackInstrumentParams(parseJsonValue(request.edit.content.params) ?? null)
+      if (request.edit && !(prepared && edited
+        && isLiveParameterChange({ targetId: node.id, effect: "instrument", from: prepared, to: edited }, snapshot.bpm))) {
+        return { accepted: false, reason: "unsupported" }
+      }
+      if (request.values.length === 0) {
+        const sequence = ++nextLiveProcessorSequence
+        return { accepted: true, sequence, appliedSequence: sequence }
+      }
+      const targets = new Map(node.instrument.parameterTargets.map((entry) => [entry.id, entry.target]))
+      const events = request.values.map((value) => {
+        const target = targets.get(value.parameterId)
+        return target === undefined || !Number.isFinite(value.value) ? undefined : {
+          nodeId: node.id, type: "parameter", noteId: 1, sequence: ++nextLiveProcessorSequence,
+          frameOffset: 0, channel: 0, note: target, value: value.value,
+        } satisfies PortableWasmInstrumentEvent
+      })
+      if (events.some((event) => event === undefined)) return { accepted: false, reason: "unsupported" }
+      const revision = activeRevision
+      const deliveryEpoch = epoch
+      const sequence = nextLiveProcessorSequence
+      const settled = Promise.withResolvers<void>()
+      liveInstrumentSends.add(settled.promise)
+      try {
+        const acceptedEvents = events.flatMap(event => event === undefined ? [] : [event])
+        await session.queueInstrumentEvents(deliveryEpoch, acceptedEvents, { revision, sequence })
+        if (active !== session || activeRevision !== revision || epoch !== deliveryEpoch) return { accepted: false, reason: "stale" }
+        // The session now plays the edit; the prepared snapshot follows, so the release announce finds nothing to rebuild.
+        if (edited && prepared && isLiveEventOnlyInstrumentChange(prepared, edited)) rememberInstrumentParameters(node.id, edited)
+        return { accepted: true, sequence, appliedSequence: sequence }
+      } catch (error) {
+        return { accepted: false, reason: "bridge-error", error: String(error) }
+      } finally {
+        liveInstrumentSends.delete(settled.promise)
+        settled.resolve()
+      }
+    }
+    if (!active.queueProcessorEvents) return { accepted: false, reason: "unsupported" }
     const processor = resolveGraphProcessor(activeGraph, request.instanceId)
     if (!processor) return { accepted: false, reason: "unsupported" }
+    if (request.edit) {
+      const targetId = processor.node.id === activeGraph.masterNodeId ? "master" : processor.node.id
+      const installed = (targetId === "master" ? activeSnapshot?.mixer.fx.masterFxInstances
+        : activeSnapshot?.mixer.fx.trackFx?.[targetId]?.instances)?.find(instance => instance.id === request.instanceId)
+      const timing = request.edit.content.timing
+      const values = Object.fromEntries(request.values.map(value => [value.parameterId, value.value]))
+      if (!installed || !timing || request.edit.target.nodeId !== targetId
+        || request.edit.target.kindId !== processor.processor.kindId
+        || !nativeBuiltInLiveStateCovered({ enabled: !processor.processor.bypassed, input: installed }, timing, values)) {
+        return { accepted: false, reason: "unsupported" }
+      }
+    }
     const events = request.values.map((value) => {
       const target = processor.parameterTargets.get(value.parameterId)
       return target === undefined || !Number.isFinite(value.value)
@@ -2034,6 +2853,7 @@ export const createPortableBrowserPlaybackController = (input: {
     preview: queueLiveProcessorControl,
     flush: queueLiveProcessorControl,
     reenableAutomation: async (instanceId, parameterIds, revision, transportEpoch) => {
+      if (adoptionPublish) await adoptionPublish
       if (revision !== activeRevision || transportEpoch !== epoch) return { accepted: false, reason: "stale" }
       if (!active || !active.reenableProcessorAutomation) return { accepted: false, reason: "unsupported" }
       const processor = activeGraph === undefined ? undefined : resolveGraphProcessor(activeGraph, instanceId)
@@ -2055,6 +2875,7 @@ export const createPortableBrowserPlaybackController = (input: {
     instanceId: string,
     parameterIds: readonly string[],
   ): Promise<LiveProcessorControlResult> => {
+    if (adoptionPublish) await adoptionPublish
     if (activeRevision === undefined || activeGraph === undefined) {
       return { accepted: false, reason: "unprepared" }
     }
@@ -2070,6 +2891,13 @@ export const createPortableBrowserPlaybackController = (input: {
     cancelRecording,
     isActive: () => playing,
     isPrepared: () => active !== undefined,
+    preparedInstrumentIdentity: (targetId: string) => {
+      if (!active || !activeGraph) return undefined
+      const instrument = activeSnapshot?.mixer.fx.trackFx?.[targetId]?.instrument
+      return instrument ? { kind: instrument.kind, instanceId: instrument.instanceId } : null
+    },
+    preparedInstrument: (targetId: string) => activeSnapshot?.mixer.fx.trackFx?.[targetId]?.instrument,
+    rememberInstrumentParameters,
     isPreparing: () => pendingStart !== undefined,
     liveProcessorControl,
     reenableProcessorAutomation,
@@ -2077,10 +2905,12 @@ export const createPortableBrowserPlaybackController = (input: {
     ensurePrepared,
     rebuildPrepared,
     refreshSchedule,
+    adoptSchedule,
+    seek,
     currentPositionSec: () => {
       const context = input.getAudioContext()
       return context
-        ? reportedPositionFrame(positionFrame, activeTransport, context.sampleRate) / context.sampleRate
+        ? arrangementFrame() / context.sampleRate
         : undefined
     },
   }

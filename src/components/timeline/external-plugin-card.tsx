@@ -6,6 +6,7 @@ import { automationTargetKey, externalAutomationParameterId } from "@daw-browser
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { NativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
 import { externalProcessorStatusLabel } from "~/lib/external-plugin-ui";
+import { vstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
 import {
   nativeEditorAnchorFromElement,
   nativeEditorAvailabilityMessage,
@@ -149,6 +150,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
   const [autoOpenStarted, setAutoOpenStarted] = createSignal(false);
   let autoOpenFailed = false;
   let editorInstanceId: string | undefined;
+  const failed = () => vstInstanceFailed(props.processor.instanceId);
   const editorBridgeAvailable = () => Boolean(window.dawDesktop?.audioHost?.session.editor);
   const editorAvailable = () => nativeEditorCommandAvailable(
     editorBridgeAvailable(),
@@ -274,8 +276,20 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
   });
   return (
     <EffectShell
+      class={failed() ? "opacity-60" : undefined}
       title={props.processor.manifest.identity.name}
       typeLabel={`${props.processor.manifest.identity.vendor} · VST3`}
+      titleActions={(
+        <Show when={failed()}>
+          <span
+            role="status"
+            class="shrink-0 text-[10px] text-amber-300"
+            title="This plug-in stopped working and is muted. Other audio keeps playing. Replace or remove it."
+          >
+            Plug-in failed
+          </span>
+        </Show>
+      )}
       enabled={!props.processor.bypassed}
       onToggleEnabled={(enabled) => updateBypass(!enabled)}
       disabled={!props.canWrite}
@@ -323,7 +337,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
       )}
     >
       <div class="flex min-w-52 flex-1 flex-col gap-2 p-3 text-xs">
-        <div class="font-medium text-foreground">{externalProcessorStatusLabel(props.processor)}</div>
+        <div class="font-medium text-foreground">{externalProcessorStatusLabel(props.processor, failed())}</div>
         <ExternalPluginParameters
           processor={props.processor}
           enqueueParameter={props.enqueueParameter}

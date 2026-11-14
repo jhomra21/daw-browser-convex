@@ -1,4 +1,6 @@
-import { createSignal, createUniqueId, For, type JSX } from 'solid-js'
+import { createSignal, createUniqueId, For, type JSX, untrack } from 'solid-js'
+import { useDrag } from '~/hooks/useDrag'
+import { useParameterGesture } from '~/components/effects/effect-parameter-interaction'
 import { cn } from '~/lib/utils'
 
 const GRAPH_WIDTH = 180
@@ -56,33 +58,40 @@ export function DraggableDeviceGraph(props: {
   const [activeHandle, setActiveHandle] = createSignal<DeviceGraphHandle>()
   let graphRef: HTMLDivElement | undefined
   let dragBounds: DOMRect | undefined
-  const graphPoint = (event: PointerEvent) => {
+  const gesture = useParameterGesture({ onClosed: () => drag.cancelDrag() })
+  const graphPoint = (position: { x: number, y: number }) => {
     const bounds = dragBounds ?? graphRef?.getBoundingClientRect()
     if (!bounds) return { x: 0, y: 0 }
     return {
-      x: clampGraphValue(((event.clientX - bounds.left) / bounds.width) * GRAPH_WIDTH, 0, GRAPH_WIDTH),
-      y: clampGraphValue(((event.clientY - bounds.top) / bounds.height) * GRAPH_HEIGHT, 0, GRAPH_HEIGHT),
+      x: clampGraphValue(((position.x - bounds.left) / bounds.width) * GRAPH_WIDTH, 0, GRAPH_WIDTH),
+      y: clampGraphValue(((position.y - bounds.top) / bounds.height) * GRAPH_HEIGHT, 0, GRAPH_HEIGHT),
     }
   }
-  const dragActiveHandle = (event: PointerEvent) => {
-    if (activeHandle()) event.preventDefault()
-    activeHandle()?.onDrag(graphPoint(event))
-  }
-  const endDrag = (event: PointerEvent) => {
-    if (graphRef?.hasPointerCapture(event.pointerId)) {
-      graphRef.releasePointerCapture(event.pointerId)
-    }
+  const finishDrag = () => {
     dragBounds = undefined
     setActiveHandle()
   }
+  // A handle drag is one gesture. Escape, pointer cancel and lost capture are handled by useDrag.
+  const drag = useDrag({
+    disabled: () => props.disabled,
+    onDragMove: (position, event) => {
+      event.preventDefault()
+      gesture.tick(() => untrack(activeHandle)?.onDrag(graphPoint(position)))
+    },
+    onDragEnd: () => {
+      finishDrag()
+      gesture.end()
+    },
+    onDragCancel: () => {
+      finishDrag()
+      gesture.cancel()
+    },
+  })
 
   return (
     <div
       ref={(element) => (graphRef = element)}
       class={cn('relative h-[116px] shrink-0 touch-none overflow-hidden bg-background', props.class)}
-      onPointerMove={dragActiveHandle}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
     >
       <svg
         viewBox={`0 0 ${GRAPH_WIDTH} ${GRAPH_HEIGHT}`}
@@ -114,17 +123,34 @@ export function DraggableDeviceGraph(props: {
             }}
             disabled={props.disabled}
             onPointerDown={(event) => {
-              if (props.disabled) return
-              event.preventDefault()
+              if (props.disabled || drag.isDragging()) return
               dragBounds = graphRef?.getBoundingClientRect()
-              graphRef?.setPointerCapture(event.pointerId)
               setActiveHandle(handle)
-              handle.onDrag(graphPoint(event))
+              gesture.open()
+              gesture.tick(() => handle.onDrag(graphPoint({ x: event.clientX, y: event.clientY })))
+              drag.onPointerDown(event)
             }}
             onKeyDown={(event) => {
-              if (props.disabled) return
-              handle.onKeyDown?.(event)
+              if (props.disabled || event.metaKey || event.ctrlKey || event.altKey) return
+              if (event.key === 'Escape' && gesture.isOpen()) {
+                event.preventDefault()
+                event.stopPropagation()
+                gesture.cancel()
+                return
+              }
+              if (graphKey(event.key) === undefined) return
+              // Auto-repeat only continues a hold: after Escape or an owner close it must not open a new gesture.
+              if (event.repeat && !gesture.isOpen()) {
+                event.preventDefault()
+                return
+              }
+              gesture.open()
+              gesture.tick(() => handle.onKeyDown?.(event))
             }}
+            onKeyUp={(event) => {
+              if (graphKey(event.key) !== undefined) gesture.end()
+            }}
+            onBlur={() => gesture.end()}
           />
         )}
       </For>

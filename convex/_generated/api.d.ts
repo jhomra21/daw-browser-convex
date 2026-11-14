@@ -10,7 +10,6 @@
 
 import type * as assetFolders from "../assetFolders.js";
 import type * as assets from "../assets.js";
-import type * as resumableAssetUploads from "../resumableAssetUploads.js";
 import type * as audioWarpValidator from "../audioWarpValidator.js";
 import type * as authIdentity from "../authIdentity.js";
 import type * as automation from "../automation.js";
@@ -37,6 +36,8 @@ import type * as projectMixerSettings from "../projectMixerSettings.js";
 import type * as projectRows from "../projectRows.js";
 import type * as projects from "../projects.js";
 import type * as r2Deletes from "../r2Deletes.js";
+import type * as resumableAssetUploads from "../resumableAssetUploads.js";
+import type * as resumableUploadLifecycle from "../resumableUploadLifecycle.js";
 import type * as sampleRows from "../sampleRows.js";
 import type * as samples from "../samples.js";
 import type * as shareInvites from "../shareInvites.js";
@@ -57,7 +58,6 @@ import type {
 declare const fullApi: ApiFromModules<{
   assetFolders: typeof assetFolders;
   assets: typeof assets;
-  resumableAssetUploads: typeof resumableAssetUploads;
   audioWarpValidator: typeof audioWarpValidator;
   authIdentity: typeof authIdentity;
   automation: typeof automation;
@@ -84,6 +84,8 @@ declare const fullApi: ApiFromModules<{
   projectRows: typeof projectRows;
   projects: typeof projects;
   r2Deletes: typeof r2Deletes;
+  resumableAssetUploads: typeof resumableAssetUploads;
+  resumableUploadLifecycle: typeof resumableUploadLifecycle;
   sampleRows: typeof sampleRows;
   samples: typeof samples;
   shareInvites: typeof shareInvites;

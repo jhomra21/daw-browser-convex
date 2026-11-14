@@ -384,6 +384,7 @@ test("detaches Solid-wrapped local runtime domains before export submission", as
     getCloudRenderRows: () => createMutable({ effects: [], automationEnvelopes: [] }),
     getAutomationPatches: () => automation,
     getEffectsExportSnapshot: () => ({
+      awaitInstrumentReadiness: async () => undefined,
       snapshotEffectsProjection: () => ({
         replaceAudioEffectTargets: [{
           targetId: "track-solid-runtime",
@@ -455,6 +456,7 @@ test("uses one hydrated sampled render state for native planning and queued rend
     getCloudRenderRows: () => undefined,
     getAutomationPatches: () => [],
     getEffectsExportSnapshot: () => ({
+      awaitInstrumentReadiness: async () => undefined,
       snapshotEffectsProjection: () => ({
         replaceAudioEffectTargets: [],
         upsertDeviceRows: [],
@@ -784,6 +786,7 @@ test("captures effects projection and routes after flushing effect persistence",
     getCloudRenderRows: () => ({ effects: [], automationEnvelopes: [] }),
     getAutomationPatches: () => automation.map((envelope) => ({ targetKey: envelope.targetKey, envelope })),
     getEffectsExportSnapshot: () => ({
+      awaitInstrumentReadiness: async () => undefined,
       snapshotEffectsProjection: () => ({
         replaceAudioEffectTargets: [{ targetId: trackId, rows: effects }],
         upsertDeviceRows: [],
@@ -841,6 +844,7 @@ test("rejects when effects flushing switches projects before capturing remaining
     getCloudRenderRows: () => ({ effects: [], automationEnvelopes: [] }),
     getAutomationPatches: () => [],
     getEffectsExportSnapshot: () => ({
+      awaitInstrumentReadiness: async () => undefined,
       snapshotEffectsProjection: () => ({ replaceAudioEffectTargets: [], upsertDeviceRows: [] }),
       snapshotSidechainRoutes: () => [],
       flushPending: async () => {

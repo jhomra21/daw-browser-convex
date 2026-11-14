@@ -84,10 +84,12 @@ export type PortableAssetRegistryEntry = {
 export type PortableAssetRegistryInput = {
   projectGeneration: number
   assets: readonly PortableAssetRegistryEntry[]
+  unavailableProjectAssetIds?: readonly string[]
 }
 
 type PortableAssetRegistry = {
   assets: ReadonlyMap<string, PortableAssetRegistryEntry>
+  unavailableProjectAssetIds: ReadonlySet<string>
   errors: readonly string[]
 }
 
@@ -113,9 +115,9 @@ const positiveSafeInteger = (value: number) => Number.isSafeInteger(value) && va
 const nonnegativeSafeInteger = (value: number) => Number.isSafeInteger(value) && value >= 0
 
 const indexPortableAssets = (input: PortableAssetRegistryInput | undefined): PortableAssetRegistry => {
-  if (!input) return { assets: new Map(), errors: ['No portable asset registry was provided.'] }
+  if (!input) return { assets: new Map(), unavailableProjectAssetIds: new Set(), errors: ['No portable asset registry was provided.'] }
   if (!positiveSafeInteger(input.projectGeneration)) {
-    return { assets: new Map(), errors: ['The portable asset registry project generation is invalid.'] }
+    return { assets: new Map(), unavailableProjectAssetIds: new Set(), errors: ['The portable asset registry project generation is invalid.'] }
   }
   const assets = new Map<string, PortableAssetRegistryEntry>()
   const portableIds = new Set<string>()
@@ -146,7 +148,7 @@ const indexPortableAssets = (input: PortableAssetRegistryInput | undefined): Por
     assets.set(entry.projectAssetId, entry)
     portableIds.add(entry.portableAssetId)
   }
-  return { assets, errors }
+  return { assets, unavailableProjectAssetIds: new Set(input.unavailableProjectAssetIds ?? []), errors }
 }
 
 const assetForSample = (
@@ -154,7 +156,10 @@ const assetForSample = (
   sample: { assetKey: string; source: { durationSec: number; sampleRate: number; channelCount: number } },
 ) => {
   const entry = registry.assets.get(sample.assetKey)
-  if (!entry) throw new Error(`Sample asset "${sample.assetKey}" is not registered for the portable session.`)
+  if (!entry) {
+    if (registry.unavailableProjectAssetIds.has(sample.assetKey)) return undefined
+    throw new Error(`Sample asset "${sample.assetKey}" is not registered for the portable session.`)
+  }
   if (entry.decoded.sampleRateHz !== sample.source.sampleRate
     || entry.decoded.channelCount !== sample.source.channelCount
     || entry.decoded.frameCount !== frameAt(sample.source.durationSec, sample.source.sampleRate)) {
@@ -168,20 +173,22 @@ const frameAt = (seconds: number, sampleRate: number) => Math.round(seconds * sa
 const samplerZone = (
   zone: SamplerParams['zones'][number],
   registry: PortableAssetRegistry,
-): AudioCoreSampleZone => {
+): AudioCoreSampleZone | undefined => {
   const asset = assetForSample(registry, zone.sample)
+  if (!asset) return undefined
   const startFrame = frameAt(zone.startSec, asset.decoded.sampleRateHz)
   const endFrame = Math.min(
     asset.decoded.frameCount,
     frameAt(zone.endSec ?? zone.sample.source.durationSec, asset.decoded.sampleRateHz),
   )
+  // One-shot zones never loop; the loop collapses to the zone start so the graph contract's loop bounds hold.
   const loopStartFrame = zone.playbackMode !== 'one-shot'
     ? frameAt(zone.loopStartSec ?? zone.startSec, asset.decoded.sampleRateHz)
-    : 0
+    : startFrame
   const loopEndFrame = zone.playbackMode !== 'one-shot'
     ? Math.min(asset.decoded.frameCount, frameAt(zone.loopEndSec ?? zone.endSec ?? zone.sample.source.durationSec, asset.decoded.sampleRateHz))
-    : 0
-  if (endFrame <= startFrame || loopEndFrame > 0 && loopEndFrame <= loopStartFrame) {
+    : startFrame
+  if (endFrame <= startFrame || (zone.playbackMode !== 'one-shot' && loopEndFrame > 0 && loopEndFrame <= loopStartFrame)) {
     throw new Error(`${zone.id}: browser sample bounds resolve to an empty portable range.`)
   }
   return {
@@ -249,7 +256,10 @@ export const compilePortableSamplerConfiguration = (
       lfoAmplitude: params.lfo.amp,
       lfoPan: params.lfo.pan,
       retrigger: params.retrigger,
-      zones: params.zones.map((zone) => samplerZone(zone, registry)),
+      zones: params.zones.flatMap((zone) => {
+        const compiled = samplerZone(zone, registry)
+        return compiled ? [compiled] : []
+      }),
     },
   }
 }
@@ -265,7 +275,8 @@ export const compilePortableDrumRackConfiguration = (
   if (params.pads.some((pad) => pad.sample) && registry.errors.length > 0) throw new Error(registry.errors.join(' '))
   const validatedPads = params.pads.flatMap((pad) => {
     if (!pad.sample) return []
-    return [{ pad, sample: pad.sample, asset: assetForSample(registry, pad.sample) }]
+    const asset = assetForSample(registry, pad.sample)
+    return asset ? [{ pad, sample: pad.sample, asset }] : []
   })
   const zones: AudioCoreSampleZone[] = validatedPads.flatMap(({ pad, sample, asset }) => {
     if (pad.mute) return []
@@ -287,8 +298,8 @@ export const compilePortableDrumRackConfiguration = (
       playbackMode: 'one-shot',
       startFrame,
       endFrame,
-      loopStartFrame: 0,
-      loopEndFrame: 0,
+      loopStartFrame: startFrame,
+      loopEndFrame: startFrame,
       crossfadeFrameCount: 0,
       chokeGroup: pad.chokeGroup,
     }]
@@ -416,7 +427,7 @@ const mixerState = (id: string, gain: number, muted: boolean): AudioCoreMixerSta
 export const compilePortableSessionInput = (input: PortableSessionCompilerInput) => {
   const assets = input.assetRegistry
     ? indexPortableAssets(input.assetRegistry)
-    : { assets: new Map<string, PortableAssetRegistryEntry>(), errors: [] }
+    : { assets: new Map<string, PortableAssetRegistryEntry>(), unavailableProjectAssetIds: new Set<string>(), errors: [] }
   const sampled = Object.entries(input.fx.trackFx ?? {}).flatMap(([trackId, fx]) => {
     const instrument = fx.instrument
     return !instrument || instrument.kind === 'synth' ? [] : [{ trackId, ...compileSampledInstrument(trackId, instrument, input.assetRegistry) }]

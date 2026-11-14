@@ -15,6 +15,63 @@ import type {
   PreparedStretchArtifactRepository,
 } from "@daw-browser/audio-engine/prepared-stretch-store"
 
+test("staged sources reuse active page work and discard only staged registrations", async () => {
+  const buffer = new EagerAudioBuffer()
+  const descriptor = createAudioPcmSourceDescriptor({
+    identity: "stable", durationSec: buffer.duration, frameCount: buffer.length,
+    sampleRate: buffer.sampleRate, channelCount: 1, source: buffer,
+  })
+  const source = { sourceAssetKey: "active", sessionAssetId: 1, frameCount: buffer.length,
+    sampleRateHz: buffer.sampleRate, channelCount: 1, descriptor }
+  const writes: number[] = []
+  const manager = createNativeTimelinePageManager({ sources: [source],
+    writePage: async (page) => { writes.push(page.sessionAssetId) } })
+  await manager.ensureRanges([{ sourceAssetKey: "active", startFrame: 0, endFrame: 5 }])
+  const discard = manager.addSources([{ ...source, sourceAssetKey: "staged", sessionAssetId: 2 }])
+  await manager.ensureRanges([
+    { sourceAssetKey: "active", startFrame: 0, endFrame: 5 },
+    { sourceAssetKey: "staged", startFrame: 0, endFrame: 5 },
+  ])
+  expect(writes).toEqual([1, 2])
+  await discard()
+  await manager.ensureRanges([{ sourceAssetKey: "active", startFrame: 0, endFrame: 5 }])
+  expect(writes).toEqual([1, 2])
+  expect(manager.isDisposed()).toBe(false)
+  await expect(manager.ensureRanges([{ sourceAssetKey: "staged", startFrame: 0, endFrame: 5 }])).rejects.toThrow("not registered")
+  await manager.removeSources([1])
+  manager.addSources([{ ...source, sessionAssetId: 3 }])
+  await manager.ensureRanges([{ sourceAssetKey: "active", startFrame: 0, endFrame: 5 }])
+  expect(writes).toEqual([1, 2, 3])
+  await manager.dispose()
+})
+
+test("immutable replacement registrations hydrate both sides and retire only the old session", async () => {
+  const buffer = new EagerAudioBuffer()
+  const descriptor = createAudioPcmSourceDescriptor({ identity: "original", durationSec: buffer.duration,
+    frameCount: buffer.length, sampleRate: buffer.sampleRate, channelCount: 1, source: buffer })
+  const source = { sourceAssetKey: "asset", sessionAssetId: 1, frameCount: buffer.length,
+    sampleRateHz: buffer.sampleRate, channelCount: 1, descriptor }
+  const pages: NativeHostMappedAssetPage[] = []
+  const manager = createNativeTimelinePageManager({ sources: [source],
+    writePage: async (page) => { pages.push(page) } })
+  const replacement = new EagerAudioBuffer()
+  replacement.copyToChannel(new Float32Array([0.9]), 0)
+  const replacementDescriptor = createAudioPcmSourceDescriptor({ identity: "replacement", durationSec: replacement.duration,
+    frameCount: replacement.length, sampleRate: replacement.sampleRate, channelCount: 1, source: replacement })
+  manager.addSources([{ ...source, sourceAssetKey: "asset:native-session:2", sessionAssetId: 2, descriptor: replacementDescriptor }])
+  await manager.ensureRanges([
+    { sourceAssetKey: "asset", startFrame: 0, endFrame: 5 },
+    { sourceAssetKey: "asset:native-session:2", startFrame: 0, endFrame: 5 },
+  ])
+  expect(pages.map((page) => page.sessionAssetId).toSorted()).toEqual([1, 2])
+  await manager.removeSources([1])
+  await manager.ensureRanges([{ sourceAssetKey: "asset:native-session:2", startFrame: 0, endFrame: 5 }])
+  expect(pages).toHaveLength(2)
+  expect((await manager.readPage("asset:native-session:2", 0, 5)).sessionAssetId).toBe(2)
+  await expect(manager.readPage("asset", 0, 5)).rejects.toThrow("not registered")
+  await manager.dispose()
+})
+
 class EagerAudioBuffer implements AudioBuffer {
   readonly duration = 5 / 48_000
   readonly length = 5
@@ -316,6 +373,59 @@ test("copies bounded pages from an eager buffer without a source URL", async () 
   expect(eagerPageSamples[0]).toBeCloseTo(0.3, 5)
   expect(eagerPageSamples[1]).toBeCloseTo(0.4, 5)
   manager.dispose()
+})
+
+test("bounds full instrument-region hydration to page and payload limits", async () => {
+  const frameCount = 20_000
+  const region = new LongEagerAudioBuffer(frameCount)
+  const pages: NativeHostMappedAssetPage[] = []
+  const manager = createNativeTimelinePageManager({
+    pageFrames: frameCount,
+    sources: [{
+      sourceAssetKey: "localized-instrument-region",
+      sessionAssetId: 9,
+      frameCount,
+      sampleRateHz: region.sampleRate,
+      channelCount: region.numberOfChannels,
+      descriptor: descriptorForBuffer(region),
+    }],
+    writePage: async (page) => { pages.push(page) },
+  })
+
+  await manager.ensureRanges([{
+    sourceAssetKey: "localized-instrument-region",
+    startFrame: 0,
+    endFrame: frameCount,
+  }])
+
+  expect(pages.map((page) => page.frameCount)).toEqual([16_384, 3_616])
+  expect(pages.every((page) => (
+    page.frameCount <= 16_384
+    && page.planarPcm.byteLength + nativeAudioHostFrameHeaderBytes <= nativeAudioHostMaximumPayloadBytes
+  ))).toBe(true)
+  await manager.dispose()
+})
+
+test("never rewrites a fully prepared immutable instrument after upload hints are evicted", async () => {
+  const frameCount = 130 * 16_384
+  const region = new LongEagerAudioBuffer(frameCount)
+  let writes = 0
+  const manager = createNativeTimelinePageManager({
+    sources: [{
+      sourceAssetKey: "instrument", sessionAssetId: 9, frameCount,
+      sampleRateHz: region.sampleRate, channelCount: region.numberOfChannels,
+      descriptor: descriptorForBuffer(region), immutableAfterPreparation: true,
+    }],
+    writePage: async () => { writes += 1 },
+    prepareRange: async () => undefined,
+  })
+  const ranges = [{ sourceAssetKey: "instrument", startFrame: 0, endFrame: frameCount }]
+  await manager.ensureRanges(ranges)
+  expect(writes).toBe(130)
+  manager.invalidateRanges(ranges)
+  await manager.ensureRanges(ranges)
+  expect(writes).toBe(130)
+  await manager.dispose()
 })
 
 test("detaches one canceled caller from shared page hydration", async () => {

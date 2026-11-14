@@ -1,0 +1,21 @@
+import type { Accessor } from "solid-js"
+import type { Track } from "@daw-browser/timeline-core/types"
+import { buildEffectParamsHistoryEntry } from "/Users/juan/Documents/daw-browser-convex/src/lib/undo/builders"
+import type { EffectParamsCommitOptions, EffectParamsCommitPayload, HistoryEntry } from "/Users/juan/Documents/daw-browser-convex/src/lib/undo/types"
+
+// Timeline's commit callback is history only. Delivery and its recovery belong to the native boundary.
+export default function createTimelineCommitPath(input: {
+  projectId: Accessor<string | undefined>
+  tracks: Accessor<Track[]>
+  pushHistory: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
+}) {
+  return {
+    committed: (payload: EffectParamsCommitPayload, committedProjectId?: string, options?: EffectParamsCommitOptions) => {
+      const projectId = committedProjectId ?? input.projectId()
+      if (projectId !== input.projectId()) return
+      const entry = buildEffectParamsHistoryEntry({ projectId, tracks: input.tracks(), payload })
+      if (options?.mergeHistory === false) input.pushHistory(entry)
+      else input.pushHistory(entry, `fx:${payload.effect}:${payload.targetId}:${payload.instanceId ?? ""}`, 600)
+    },
+  }
+}

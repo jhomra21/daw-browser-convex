@@ -1,7 +1,7 @@
 import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from 'solid-js'
 
 import type { WaveformSourceData } from '@daw-browser/waveforms/types'
-import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import type { RuntimeClip } from '~/lib/timeline-runtime-types'
 import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import {

@@ -2,9 +2,12 @@ import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
 import type { ArpeggiatorParams, AudioEffectKind, AutomationEnvelope, AutoFilterParamsEnvelope, AutoPanParamsEnvelope, ChorusParamsEnvelope, CompressorParams, DelayParams, EnsembleParamsEnvelope, EqParams, FlangerParamsEnvelope, GateParamsEnvelope, LimiterParamsEnvelope, LoFiParamsEnvelope, PhaserParamsEnvelope, ReverbParams, SaturatorParams, SpectralParamsEnvelope, SynthParams, TrackInstrumentParams, TremoloParamsEnvelope, UtilityParamsEnvelope } from '@daw-browser/shared'
 import type { AudioWarp, Track, TrackChannelRole, TrackSend } from '@daw-browser/timeline-core/types'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
+import type { MidiEditorNote } from '~/lib/midi-editor-grid'
+import type { LiveProcessorEditIdentity } from '~/lib/live-processor-control'
 
 export type TrackRef = string
 export type ClipRef = string
+export type MidiNoteHistoryChange = { id: string; before?: MidiEditorNote; after?: MidiEditorNote }
 export type HistoryScope = 'shared' | 'local'
 
 export type ClipTiming = {
@@ -161,6 +164,7 @@ type EffectParamsCommitPayloadMap = {
     targetId: EffectTargetId<Effect>
     effect: Effect
     instanceId?: string
+    edit?: LiveProcessorEditIdentity
     from: EffectParamsByEffect[Effect]
     to: EffectParamsByEffect[Effect]
   }
@@ -168,9 +172,11 @@ type EffectParamsCommitPayloadMap = {
 
 export type EffectParamsCommitPayload<Effect extends EffectType = EffectType> = EffectParamsCommitPayloadMap[Effect]
 
+export type EffectParamsCommitOptions = { mergeHistory?: boolean }
+
 type EffectParamsHistoryEntryData<Effect extends EffectType = EffectType> =
   Effect extends EffectType
-    ? Omit<EffectParamsCommitPayload<Effect>, 'targetId'> & { trackRef?: TrackRef }
+    ? Omit<EffectParamsCommitPayload<Effect>, 'targetId' | 'edit'> & { trackRef?: TrackRef }
     : never
 
 export type EffectParamsHistoryEntry<Effect extends EffectType = EffectType> = {
@@ -276,6 +282,15 @@ export type HistoryEntry =
         clipRef: ClipRef
         from: ClipAudioWarpSnapshot
         to: ClipAudioWarpSnapshot
+      }
+    }
+  | {
+      // Notes changed by one MIDI editor edit, keyed by note id. Undo and redo replay them as insert, update, and delete.
+      type: 'clip-midi-notes'
+      projectId: string
+      data: {
+        clipRef: ClipRef
+        changes: MidiNoteHistoryChange[]
       }
     }
   | {

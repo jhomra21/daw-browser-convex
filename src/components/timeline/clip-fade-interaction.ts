@@ -1,4 +1,5 @@
 import { normalizeClipFades, type ClipFadeSide, type FadePoint, type NormalizedClipFades } from '@daw-browser/timeline-core/clip-fades'
+import { formatBarsBeatsSixteenths, formatBarsBeatsSixteenthsDuration } from '~/lib/musical-time-format'
 
 export type FadeInteractionMode = 'fadeInStart' | 'fadeInEnd' | 'fadeOutStart' | 'fadeOutEnd' | 'curve'
 
@@ -164,6 +165,7 @@ export const updateFadeDraftForKeyboard = (
 export const clipFadeControlValueText = (
   fades: NormalizedClipFades,
   mode: FadeInteractionMode,
+  bpm: number,
 ): string => {
   if (mode === 'curve') return ''
   const value = mode === 'fadeInStart'
@@ -173,7 +175,9 @@ export const clipFadeControlValueText = (
       : mode === 'fadeOutStart'
         ? fades.fadeOutSec
         : fades.fadeOutEndSec
-  return `${value.toFixed(2)} seconds`
+  return mode === 'fadeInStart' || mode === 'fadeOutEnd'
+    ? formatBarsBeatsSixteenths(value, bpm)
+    : formatBarsBeatsSixteenthsDuration(value, bpm)
 }
 
 export const curveFadeControlValueText = (point: FadePoint): string => (

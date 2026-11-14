@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "daw/graph_latency.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -10,7 +11,7 @@ extern "C" {
 #define DAW_AUDIO_CORE_PAGED_ASSET_ABI_VERSION 1u
 #define DAW_AUDIO_CORE_WASM_PAGED_PAGE_FRAMES 16384u
 /* 128 stereo pages use 16 MiB of Float32 storage. This intentionally leaves
- * the existing fixed-256 MiB Wasm artifact's 16 MiB eager-allocation headroom
+ * the fixed-memory Wasm artifact's 16 MiB eager-allocation headroom
  * intact; a 256-slot pool would consume 32 MiB. */
 #define DAW_AUDIO_CORE_WASM_PAGED_PAGE_SLOTS 128u
 #define DAW_AUDIO_CORE_WASM_PAGED_MAX_CHANNELS 2u
@@ -39,6 +40,7 @@ extern "C" {
 #define DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_LEGACY_2 2u
 #define DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_LEGACY 1u
 #define DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY 4u
+#define DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY 5u
 #define DAW_AUDIO_CORE_WASM_GRAPH_HEADER_BYTES 24u
 #define DAW_AUDIO_CORE_WASM_GRAPH_NODE_BYTES 28u
 #define DAW_AUDIO_CORE_WASM_GRAPH_NODE_WITH_INSTRUMENT_BYTES 132u
@@ -66,12 +68,20 @@ typedef enum daw_audio_core_result {
   DAW_AUDIO_CORE_PROCESSOR_STATE_INVALID = 11,
   DAW_AUDIO_CORE_NO_DATA = 12,
   DAW_AUDIO_CORE_GRAPH_COMPATIBILITY_REJECTED = 13,
-  DAW_AUDIO_CORE_RETIREMENT_CAPACITY_EXCEEDED = 14
+  DAW_AUDIO_CORE_RETIREMENT_CAPACITY_EXCEEDED = 14,
+  /* A staged processor patch has not been applied or cancelled yet. The callback
+   * may still write the published plan, so preparing from it is refused. */
+  DAW_AUDIO_CORE_PROCESSOR_PATCH_PENDING = 15,
+  /* Publication remains refused until the callback's move-complete event for the
+   * previous latency move. This is not a failed graph prepare. */
+  DAW_AUDIO_CORE_LATENCY_MOVE_PENDING = 16
 } daw_audio_core_result;
 
 typedef enum daw_audio_core_graph_validation_code {
   DAW_AUDIO_CORE_GRAPH_VALIDATION_NONE = 0,
-  DAW_AUDIO_CORE_GRAPH_VALIDATION_PDC_DELAY_EXCEEDS_RING_CAPACITY = 1
+  DAW_AUDIO_CORE_GRAPH_VALIDATION_PDC_DELAY_EXCEEDS_RING_CAPACITY = 1,
+  DAW_AUDIO_CORE_GRAPH_VALIDATION_PATH_LATENCY_EXCEEDS_PRODUCT_MAXIMUM = 2,
+  DAW_AUDIO_CORE_GRAPH_VALIDATION_KEEP_LATENCY_DIVERGENT_MIXED_BUS = 3
 } daw_audio_core_graph_validation_code;
 
 typedef struct daw_audio_core_graph_validation_diagnostic {
@@ -269,7 +279,10 @@ typedef enum daw_audio_mixer_parameter {
 
 /* Node fader state is copied at prepare time. Mixer events are sample-frame
  * commands: an event at offset N is applied before rendering sample N and
- * remains in effect until superseded. Equal-offset events are last-wins. */
+ * remains in effect, across blocks, until superseded. Equal-offset events are
+ * last-wins. A publish that keeps the node, or a new transport epoch, returns
+ * every value to the descriptor; a publish that changes what a kept node's
+ * fader applies moves its gain there over the plan's fade. */
 typedef struct daw_audio_mixer_state {
   uint64_t instance_id;
   float gain;
@@ -535,8 +548,13 @@ typedef struct daw_audio_graph_node_descriptor {
   uint32_t external_latency_frames;
   daw_audio_instrument_state_descriptor instrument;
   daw_audio_mixer_state mixer;
+  /* Native Keep Latency: an armed or monitored source bypasses output PDC and
+   * is excluded from the compensated budget. Recording clocks are unchanged. */
+  uint32_t keep_latency;
 } daw_audio_graph_node_descriptor;
 
+/* A publish that keeps an edge's route (its source, target, and tap or keyed
+ * processor) and changes its gain moves the gain there over the plan's fade. */
 typedef struct daw_audio_graph_edge_descriptor {
   uint64_t id;
   uint64_t from_node_id;
@@ -1120,12 +1138,35 @@ daw_audio_core_result daw_audio_core_cancel_staged_processor_state_patch(
 daw_audio_core_result daw_audio_core_retire(
   daw_audio_core_handle core,
   uint32_t expected_revision);
+/* Control thread. Makes the runtime slots of plans published over on this core
+ * reusable once the render epoch they retired in has completed; each reused slot
+ * gets a new generation, so a stale plan can never name it again. Returns the
+ * number of slots made reusable. */
+uint32_t daw_audio_core_reclaim_retired_runtime(
+  daw_audio_core_handle core);
 daw_audio_core_result daw_audio_core_configure_utility(
   daw_audio_core_handle core,
   const daw_audio_utility_state *state);
+/* Admission checks immutable published graph metadata only. Does not inspect or
+ * mutate live voices; call on the control thread while publication is stable. */
+daw_audio_core_result daw_audio_core_validate_instrument_target(
+  daw_audio_core_handle core,
+  const daw_audio_instrument_event *event);
+/* Render thread, immediately after process. UINT32_MAX means no individual
+ * instrument rejection (for example, a retryable block/processor failure). */
+uint32_t daw_audio_core_rejected_instrument_event_index(daw_audio_core_handle core);
 daw_audio_core_result daw_audio_core_process(
   daw_audio_core_handle core,
   const daw_audio_core_process_block *block);
+/* Render thread. One transactional validation pass excludes individually invalid
+ * instrument events in order, then renders the accepted subset in this block.
+ * rejected_events must hold MAX_INSTRUMENT_EVENTS bytes; each call clears it.
+ * Inspect it only after OK; block-wide failures remain retryable. The strict
+ * process entry point above retains its all-or-nothing contract. */
+daw_audio_core_result daw_audio_core_process_valid_instrument_events(
+  daw_audio_core_handle core,
+  const daw_audio_core_process_block *block,
+  uint8_t *rejected_events);
 daw_audio_core_result daw_audio_core_set_transport(
   daw_audio_core_handle core,
   const daw_audio_transport_state *state);

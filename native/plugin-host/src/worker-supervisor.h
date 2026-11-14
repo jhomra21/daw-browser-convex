@@ -295,6 +295,91 @@ enum class WorkerDiagnosticKind : std::uint32_t {
   kScheduledAutomationInput,
 };
 
+// VST3 `IComponentHandler::restartComponent` flags; vst3-worker.cpp asserts they match the SDK.
+namespace RestartFlag {
+constexpr std::uint32_t kReloadComponent = 1U << 0U;
+constexpr std::uint32_t kIoChanged = 1U << 1U;
+constexpr std::uint32_t kParamValuesChanged = 1U << 2U;
+constexpr std::uint32_t kLatencyChanged = 1U << 3U;
+constexpr std::uint32_t kParamTitlesChanged = 1U << 4U;
+constexpr std::uint32_t kMidiCCAssignmentChanged = 1U << 5U;
+constexpr std::uint32_t kNoteExpressionChanged = 1U << 6U;
+}  // namespace RestartFlag
+
+// What a plug-in's restart request asks of the worker. Only a component restart
+// needs the worker to re-set the component up; the others refresh what the host
+// already knows and never reach the host as a restart.
+struct RestartEffects {
+  bool refreshMetadata = false;
+  bool latencyChanged = false;
+  bool componentRestart = false;
+};
+
+constexpr RestartEffects DecodeRestartFlags(const std::uint32_t flags) noexcept {
+  return {
+    .refreshMetadata = (flags & (RestartFlag::kParamValuesChanged | RestartFlag::kParamTitlesChanged)) != 0,
+    .latencyChanged = (flags & RestartFlag::kLatencyChanged) != 0,
+    .componentRestart = (flags & (RestartFlag::kReloadComponent | RestartFlag::kIoChanged)) != 0,
+  };
+}
+
+// Fault-only value semantics; other diagnostic values retain their contracts.
+// Bits 0..7: origin, 8..15: waitid si_code, 16..23: si_status, 24..31: reserved.
+enum class WorkerFaultOrigin : std::uint32_t {
+  kUnknown = 0,
+  kChildExit = 1,
+  kChildSignal = 2,
+  kTransportFault = 3,
+  kDispatchFailure = 4,
+  kCallbackMissTermination = 5,
+  kStartupFailure = 6,
+  kStartupException = 7,
+  kConfigureFailure = 8,
+  kConfigureException = 9,
+  kProcessFailure = 10,
+  kProcessException = 11,
+  kWorkerNotification = 12,
+  kUnknownWorkerNotification = 13,
+  kOfflineCompletionFailure = 14,
+  kControlIoFailure = 15,
+  // The worker refused the launch record: our trust gate said no, whatever the plug-in is.
+  kLaunchNotTrusted = 16,
+};
+
+constexpr std::uint32_t EncodeWorkerFault(
+  const WorkerFaultOrigin origin,
+  const std::uint32_t childCode = 0,
+  const std::uint32_t childStatus = 0
+) noexcept {
+  return (static_cast<std::uint32_t>(origin) & 0xffU)
+    | ((childCode & 0xffU) << 8U) | ((childStatus & 0xffU) << 16U);
+}
+
+// A fault notification raised inside the worker names its own origin in `value`; one that names none came from the
+// plug-in's component callbacks.
+constexpr std::uint32_t EncodeFaultNotification(const std::uint32_t value) noexcept {
+  return value != 0 ? value : EncodeWorkerFault(WorkerFaultOrigin::kWorkerNotification);
+}
+
+// Only the plug-in's own process or API is the plug-in's fault: the child exiting or being killed,
+// setup or processing failing, and a failed component restart. Transport, dispatch, callback-miss,
+// startup, control IO and unknown-notification origins are ours. The TypeScript coordinator keeps the
+// same set (apps/desktop/native-vst3-coordinator.ts, pluginFaultOrigins).
+constexpr bool IsPluginFaultOrigin(const std::uint32_t faultValue) noexcept {
+  switch (static_cast<WorkerFaultOrigin>(faultValue & 0xffU)) {
+    case WorkerFaultOrigin::kChildExit:
+    case WorkerFaultOrigin::kChildSignal:
+    case WorkerFaultOrigin::kConfigureFailure:
+    case WorkerFaultOrigin::kConfigureException:
+    case WorkerFaultOrigin::kProcessFailure:
+    case WorkerFaultOrigin::kProcessException:
+    case WorkerFaultOrigin::kWorkerNotification:
+      return true;
+    default:
+      return false;
+  }
+}
+
 struct WorkerDiagnostic {
   WorkerDiagnosticKind kind = WorkerDiagnosticKind::kFault;
   std::uint32_t value = 0;
@@ -462,6 +547,7 @@ class WorkerRuntime {
   [[nodiscard]] bool DiscardLate(std::size_t slotIndex, std::uint64_t sequence);
   [[nodiscard]] WorkerHealth callbackHealth() const;
   [[nodiscard]] WorkerHealth health() const;
+  [[nodiscard]] std::uint32_t faultValue() const;
   [[nodiscard]] int processGroupId() const noexcept;
   [[nodiscard]] std::optional<WorkerDiagnostic> ReadDiagnostic();
   [[nodiscard]] std::optional<WorkerTailMetadata> ReadTailMetadata() const;

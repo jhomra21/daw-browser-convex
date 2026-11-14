@@ -1,0 +1,14 @@
+{
+ "name": "ae08-phase8-step11c-runner",
+ "sequence": 33,
+ "createdAt": "2026-11-13T23:30:00.000Z",
+ "revert": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 11c. The Chromium edit-class rows (native-playback-lifecycle.browser.test.ts, its runtime and the timeline runtime), the phase 8 packaged rows (ae-08-phase-8-fixture.ts, analyze-ae-08-phase-8.ts, --phase 8 and a judged --rows in ae-08-live-graph.ts; analyze-ae-08-continuity.ts takes the selected phase 5 rows) and one native-playback-controller.ts fix: an unsent record whose parameter its processor has no target for took its verdict from no send, because every progress frame redispatched it and each redispatch discarded the previous attempt's verdict (a renderer livelock on a spectral insert, found by the packaged phase 5 effect-state row). No arm's code is deleted and no recorded expectation moves, so no arm is retired or re-pointed. The 227 live mutation arms anchored in those files (analyzer:521-525, c0:511/514/515/518/519, diag:169/382/385/390/418/419, the rc2 controller rows and the rc2 evidence searches) and the gates f-controller (667/1/0 judged unchanged) and rc1-g-controller passed one at a time with --only --jobs 1 (229 of 229). The pinned analyze-ae-08-continuity.ts, ae-08-live-graph.ts and ae-08-phase-5-fixture.ts hashes and the watched hashes of the controller are not moved here: they stay for --full.",
+  "expectationsSha256": "64a3dc1a71c1531a36689a4ced6ab7f671bda35d465c550607db24275ecc0c4e"
+ },
+ "watched": [],
+ "changes": [],
+ "seedRecordChanges": []
+}

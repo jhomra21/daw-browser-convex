@@ -19,5 +19,6 @@ export type ExportFx = {
     drumRackBuffers?: DrumRackResolvedBuffers
     samplerBuffers?: SamplerResolvedBuffers
     granularBuffer?: GranularInstalledBuffer
+    unavailableSampleAssetKeys?: readonly string[]
   }>
 }

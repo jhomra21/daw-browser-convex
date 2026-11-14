@@ -38,6 +38,7 @@ import {
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { ControlDomainError } from "./controlPreflight";
+import { prospectiveRevision } from "./projectRows";
 import { readProjectControlSnapshotV2 } from "./controlSnapshot";
 import { findSampleRow } from "./sampleRows";
 
@@ -698,10 +699,15 @@ const ensureEffectTarget = async (ctx: RecoveryCtx, projectId: string, effect: R
   ))) {
     throw new ControlDomainError("validation", "Recovery processor collides with current state.", actionIndex);
   }
+  const revision = await prospectiveRevision(ctx, projectId);
+  let shifted = false;
   for (const row of rows) {
-    if (row.index >= effect.index) await ctx.db.patch(row._id, { index: row.index + 1 });
+    if (row.index >= effect.index) {
+      await ctx.db.patch(row._id, { index: row.index + 1, revision });
+      shifted = true;
+    }
   }
-  return track;
+  return { track, revision: shifted ? revision : undefined };
 };
 
 const restoreEffectBundle = async (
@@ -711,8 +717,11 @@ const restoreEffectBundle = async (
   mappings: Mapping[],
   actionIndex: number,
 ) => {
+  const revision = await prospectiveRevision(ctx, projectId);
+  const effectRevisions: number[] = [];
   for (const item of data.effects) {
-    const track = await ensureEffectTarget(ctx, projectId, item.effect, actionIndex);
+    const target = await ensureEffectTarget(ctx, projectId, item.effect, actionIndex);
+    if (target.revision !== undefined) effectRevisions.push(target.revision);
     const instrument = normalizePersistedInstrumentParams(
       item.effect.processor.kind,
       item.effect.instanceId ?? null,
@@ -721,13 +730,15 @@ const restoreEffectBundle = async (
     const id = await ctx.db.insert("effects", {
       projectId: item.effect.projectId,
       targetType: item.effect.target.kind,
-      trackId: track === undefined ? undefined : track._id,
+      trackId: target.track === undefined ? undefined : target.track._id,
       index: item.effect.index,
       type: instrument ? "instrument" : item.effect.processor.kind,
       instanceId: item.effect.instanceId,
       params: instrument ?? item.effect.processor.params,
       createdAt: item.effect.createdAt,
+      revision,
     });
+    effectRevisions.push(revision);
     mappings.push({ entity: "effect", sourceId: item.id, restoredId: String(id) });
   }
   for (const item of data.automation) {
@@ -776,6 +787,7 @@ const restoreEffectBundle = async (
     });
     mappings.push({ entity: "sidechain", sourceId: item.id, restoredId: String(id) });
   }
+  return effectRevisions;
 };
 
 const restoredTrackId = (ctx: RecoveryCtx, map: Map<string, Id<"tracks">>, id: string | undefined) => {
@@ -793,6 +805,7 @@ const restoreTrackBundle = async (
   },
   mappings: Mapping[],
 ) => {
+  const effectRevisions: number[] = [];
   const existingTracks = await ctx.db.query("tracks").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect();
   const channels = await ctx.db.query("mixerChannels").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect();
   const channelByTrackId = new Map(channels.map((channel) => [String(channel.trackId), channel]));
@@ -902,6 +915,7 @@ const restoreTrackBundle = async (
       sends,
     });
   }
+  const effectRevision = await prospectiveRevision(ctx, input.projectId);
   for (const item of input.data.effects) {
     const effect = item.effect;
     const trackId = effect.target.kind === "track" ? resolve(effect.target.trackId) : undefined;
@@ -921,8 +935,10 @@ const restoreTrackBundle = async (
       index: effect.index, type: instrument ? "instrument" : effect.processor.kind,
       instanceId: effect.instanceId,
       params: instrument ?? effect.processor.params, createdAt: effect.createdAt,
+      revision: effectRevision,
     });
     mappings.push({ entity: "effect", sourceId: item.id, restoredId: String(id) });
+    effectRevisions.push(effectRevision);
   }
   for (const item of input.data.clips) {
     const clip = item.clip;
@@ -984,6 +1000,7 @@ const restoreTrackBundle = async (
     const id = await ctx.db.insert("sidechainRoutes", { projectId: sidechain.projectId, sourceTrackId, targetTrackId, effectInstanceId: sidechain.effectInstanceId });
     mappings.push({ entity: "sidechain", sourceId: item.id, restoredId: String(id) });
   }
+  return effectRevisions;
 };
 
 type RangeRecoveryData = Extract<RecoveryPayload, { kind: "timeline.range.delete" }>["data"];
@@ -1159,6 +1176,7 @@ export const restoreRecovery = async (
 ) => {
   const { row, payload } = input.recovery;
   const mappings: Mapping[] = [];
+  let effectRevisions: number[] = [];
   if (payload.kind === "track.delete") {
     if (
       payload.data.tracks.some((entry) => !isCloudRecoveryOwnershipV1(entry.ownership))
@@ -1166,7 +1184,7 @@ export const restoreRecovery = async (
     ) {
       throw new ControlDomainError("validation", "Local recovery ownership cannot be restored to cloud.", input.actionIndex);
     }
-    await restoreTrackBundle(ctx, {
+    effectRevisions = await restoreTrackBundle(ctx, {
       projectId: input.projectId,
       data: payload.data,
       survivors: payload.data.survivors,
@@ -1179,7 +1197,7 @@ export const restoreRecovery = async (
     ) {
       throw new ControlDomainError("validation", "Local recovery ownership cannot be restored to cloud.", input.actionIndex);
     }
-    await restoreTrackBundle(ctx, {
+    effectRevisions = await restoreTrackBundle(ctx, {
       projectId: input.projectId,
       data: payload.data,
       survivors: payload.data.children.map((child) => ({
@@ -1291,8 +1309,8 @@ export const restoreRecovery = async (
     });
     mappings.push({ entity: "sidechain", sourceId: data.sidechainId, restoredId: String(id) });
   } else {
-    await restoreEffectBundle(ctx, input.projectId, payload.data, mappings, input.actionIndex);
+    effectRevisions = await restoreEffectBundle(ctx, input.projectId, payload.data, mappings, input.actionIndex);
   }
   await ctx.db.patch(row._id, { consumedAt: Date.now() });
-  return { actionIndex: input.actionIndex, recoveryId: String(row._id), entities: mappings };
+  return { actionIndex: input.actionIndex, recoveryId: String(row._id), entities: mappings, effectRevisions };
 };

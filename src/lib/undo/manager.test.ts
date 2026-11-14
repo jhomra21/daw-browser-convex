@@ -52,9 +52,13 @@ describe('createUndoManager', () => {
     manager.push(createCompressorEntry(-42), 'track-1:compressor')
 
     const undo = manager.snapshot().undo
-    expect(undo).toHaveLength(2)
-    expect(undo[0]).toEqual(createCompressorEntry(-30))
-    expect(undo[1]).toEqual(createCompressorEntry(-42))
+    expect(undo).toHaveLength(1)
+    const merged = undo[0]
+    expect(merged?.type).toBe('effect-params')
+    if (merged?.type === 'effect-params') {
+      expect(merged.data.from).toEqual(compressorParams)
+      expect(merged.data.to).toEqual({ ...compressorParams, thresholdDb: -42 })
+    }
   })
 
   test('keeps separate effect instance parameter entries', () => {
@@ -77,8 +81,13 @@ describe('createUndoManager', () => {
     manager.push(createMasterCompressorEntry(-42), 'master:master-compressor')
 
     const undo = manager.snapshot().undo
-    expect(undo).toHaveLength(2)
-    expect(undo[1]).toEqual(createMasterCompressorEntry(-42))
+    expect(undo).toHaveLength(1)
+    const merged = undo[0]
+    expect(merged?.type).toBe('effect-params')
+    if (merged?.type === 'effect-params') {
+      expect(merged.data.from).toEqual(compressorParams)
+      expect(merged.data.to).toEqual({ ...compressorParams, thresholdDb: -42 })
+    }
   })
 })
 

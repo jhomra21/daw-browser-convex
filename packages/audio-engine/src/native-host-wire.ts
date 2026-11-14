@@ -19,8 +19,11 @@ import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-prot
 
 const graphEnvelopeVersion = 3
 const graphEnvelopeVersionExternalLatency = 4
+const graphEnvelopeVersionKeepLatency = 5
 const nativeGraphFrameHeaderBytes = 12
-const nativeDisconnectedSourceBus = 0xffff_ffff
+// DAW_AUDIO_GRAPH_INPUT_BUS_DISCONNECTED: no source reads a live input bus, on
+// either engine; the portable live input carries the recording microphone.
+const disconnectedSourceBus = 0xffff_ffff
 const maximumNativeAssetId = 0xffff_ffff
 const nativeTextEncoder = new TextEncoder()
 
@@ -50,6 +53,8 @@ export type NativeHostTransport = {
 }
 
 export type NativeHostRecordingConfiguration = {
+  projectId?: string
+  projectGeneration?: number
   deviceUid: string
   generation: number
   sessionId: bigint
@@ -60,6 +65,8 @@ export type NativeHostRecordingConfiguration = {
   punchStartFrame: number
   punchEndFrame: number | null
   monitoring: boolean
+  // The graph node of the track the take records onto: native refuses a revision that removes or reroutes it.
+  targetNodeId: bigint
 }
 
 export type NativeHostRecordingBlock = {
@@ -87,6 +94,18 @@ export type NativeHostRecordingStatus = {
   fatal: boolean
   active: boolean
   configured: boolean
+  spool?: {
+    state: number
+    error: number
+    systemError: number
+    writtenFrames: number
+    writtenBytes: number
+    writtenBlocks: number
+    published: boolean
+    partialRetained: boolean
+    sampleRateHz: number
+    channelCount: number
+  }
 }
 
 export type NativeHostMeterEntry = {
@@ -347,11 +366,9 @@ export const nativeProcessorLayoutsForState = (
  * Only portable projections enter this boundary; file paths and Web Audio
  * objects never cross into the native host.
  */
-type SourceBusPolicy = (sourceBus: number) => number
-
 const encodeGraphEnvelope = (
   snapshot: AudioCoreGraphSnapshot,
-  sourceBusPolicy: SourceBusPolicy,
+  keepLatencyNodeIds?: ReadonlySet<string>,
 ) => {
   const processorLayouts = new Map<number, { input: 'mono' | 'stereo'; output: 'mono' | 'stereo' }>()
   const processors = snapshot.nodes.flatMap((node) => {
@@ -367,9 +384,11 @@ const encodeGraphEnvelope = (
   const hasExternalLatency = snapshot.nodes.some((node) => (
     (node.externalLatencyFrames ?? 0) > 0
   ))
-  const hasExtendedNode = hasExternalLatency
-  const version = hasExternalLatency ? graphEnvelopeVersionExternalLatency : graphEnvelopeVersion
-  const nodeBytes = hasExtendedNode ? 136 : 132
+  const hasKeepLatency = (keepLatencyNodeIds?.size ?? 0) > 0
+  const hasExtendedNode = hasExternalLatency || hasKeepLatency
+  const version = hasKeepLatency ? graphEnvelopeVersionKeepLatency
+    : hasExternalLatency ? graphEnvelopeVersionExternalLatency : graphEnvelopeVersion
+  const nodeBytes = hasKeepLatency ? 140 : hasExtendedNode ? 136 : 132
   let byteLength = 24 + snapshot.nodes.length * nodeBytes + snapshot.edges.length * 48
   for (const { processor } of processors) byteLength += 48 + processor.state.byteLength + processor.parameterTargets.length * 4
   const output = new Uint8Array(byteLength)
@@ -380,18 +399,18 @@ const encodeGraphEnvelope = (
   view.setUint32(12, snapshot.edges.length, true)
   view.setUint32(16, processors.length, true)
   let offset = 24
-  let sourceBus = 0
   for (const node of snapshot.nodes) {
     writeId(view, offset, node.id)
     view.setUint32(offset + 8, nodeKind(node.kind), true)
     view.setUint32(offset + 12, node.inputLayout === "mono" ? 1 : 2, true)
     view.setUint32(offset + 16, node.outputLayout === "mono" ? 1 : 2, true)
-    view.setUint32(offset + 20, node.kind === "source" ? sourceBusPolicy(sourceBus++) : 0, true)
+    view.setUint32(offset + 20, node.kind === "source" ? disconnectedSourceBus : 0, true)
     view.setUint32(offset + 24, node.latencyFrames, true)
-    const instrumentOffset = hasExtendedNode ? offset + 32 : offset + 28
+    const instrumentOffset = hasKeepLatency ? offset + 36 : hasExtendedNode ? offset + 32 : offset + 28
     if (hasExtendedNode) {
       view.setUint32(offset + 28, node.externalLatencyFrames ?? 0, true)
     }
+    if (hasKeepLatency) view.setUint32(offset + 32, keepLatencyNodeIds?.has(node.id) ? 1 : 0, true)
     const instrument = node.kind === "instrument" ? node.instrument : undefined
     view.setUint32(instrumentOffset, instrument?.kind === 'synth' ? 1 : instrument?.kind === 'sampler' ? 2 : instrument?.kind === 'drum-rack' ? 3 : instrument?.kind === 'granular' ? 4 : 0, true)
     view.setUint32(instrumentOffset + 4, instrument?.version ?? 0, true)
@@ -442,11 +461,10 @@ const encodeGraphEnvelope = (
   return output
 }
 
-export const encodePortableGraphEnvelope = (snapshot: AudioCoreGraphSnapshot) =>
-  encodeGraphEnvelope(snapshot, (sourceBus) => sourceBus)
+export const encodePortableGraphEnvelope = (snapshot: AudioCoreGraphSnapshot) => encodeGraphEnvelope(snapshot)
 
-export const serializeNativeGraph = (snapshot: AudioCoreGraphSnapshot) => {
-  const output = encodeGraphEnvelope(snapshot, () => nativeDisconnectedSourceBus)
+export const serializeNativeGraph = (snapshot: AudioCoreGraphSnapshot, keepLatencyNodeIds?: ReadonlySet<string>) => {
+  const output = encodeGraphEnvelope(snapshot, keepLatencyNodeIds)
   const frame = new Uint8Array(nativeGraphFrameHeaderBytes + output.byteLength)
   const frameView = new DataView(frame.buffer)
   frameView.setBigUint64(0, BigInt(snapshot.revision), false)
@@ -622,6 +640,8 @@ export const serializeNativeInstrumentEvents = (epoch: number, events: readonly 
 export type NativeScheduleWindow = {
   revision: number
   epoch: number
+  preparedRevision?: number
+  requestedPublicationFrame?: number
   windowId?: number
   startFrame: number
   endFrame: number
@@ -649,7 +669,27 @@ export type NativeVstAutomationSegment = {
   interpolation: "linear" | "hold"
 }
 
+export type NativeProcessorPatchRefusal =
+  | "unavailable" | "preparing" | "claim-pending" | "invalid"
+  | "stale-revision" | "stage-failed" | "not-claimed" | "apply-failed"
+
+/** Native's typed answer to one processor state patch (decoded wire status, tokens as u64). */
+export type NativeProcessorPatchStatus =
+  | { outcome: "applied" }
+  | { outcome: "claimed"; token: bigint }
+  | { outcome: "refused"; refusal: NativeProcessorPatchRefusal; coreResult: number; token?: bigint }
+
 export type NativeScheduleProgress = {
+  /** Native reclaims only. Absent on legacy 80-byte progress, never an admission opportunity. */
+  admissionCapacityGeneration?: bigint
+  /** Completed latency transitions. Absent on 80- and 88-byte progress. */
+  latencyCompletionGeneration?: bigint
+  /**
+   * The last claimed processor patch whose resolution native has reported. Absent below 112
+   * bytes and when no claim has resolved. `token` is a decimal u64: it may exceed
+   * `Number.MAX_SAFE_INTEGER` and travels as text, parsed with `BigInt` where it is compared.
+   */
+  processorPatchResolved?: { token: string; result: number }
   revision: number
   epoch: number
   progressSequence: bigint
@@ -676,11 +716,18 @@ export const serializeNativeScheduleWindow = (window: NativeScheduleWindow) => {
   const chunkIndex = window.chunkIndex ?? 0
   const chunkCount = window.chunkCount ?? 1
   const endsSchedule = window.endsSchedule ?? (chunkIndex === chunkCount - 1)
+  const preparedRevision = window.preparedRevision ?? 0
+  const requestedPublicationFrame = window.requestedPublicationFrame ?? 0
   if (
     !Number.isSafeInteger(window.revision) || window.revision <= 0 || window.revision > 0xffff_ffff
     || !Number.isSafeInteger(window.epoch) || window.epoch <= 0 || window.epoch > 0xffff_ffff
     || !Number.isSafeInteger(window.startFrame) || window.startFrame < 0
     || !Number.isSafeInteger(window.endFrame) || window.endFrame <= window.startFrame
+    || !Number.isInteger(preparedRevision) || preparedRevision < 0 || preparedRevision > 0xffff_ffff
+    || (preparedRevision === 0 && requestedPublicationFrame !== 0)
+    || (preparedRevision !== 0 && (preparedRevision !== window.revision
+      || !Number.isSafeInteger(requestedPublicationFrame)
+      || requestedPublicationFrame <= 0 || requestedPublicationFrame > window.startFrame))
     || !Number.isSafeInteger(windowId) || windowId <= 0
     || !Number.isSafeInteger(chunkIndex) || chunkIndex < 0
     || !Number.isSafeInteger(chunkCount) || chunkCount <= 0
@@ -692,8 +739,11 @@ export const serializeNativeScheduleWindow = (window: NativeScheduleWindow) => {
     || sampleSourceEvents.length > nativeAudioHostMaximumSourceEvents
     || vstAutomationSegments.length > nativeAudioHostMaximumScheduleAutomationSegments
     || processorAutomationEvents.length > nativeAudioHostMaximumScheduleAutomationSegments
-    || instrumentEvents.some((event) => event.frameOffset < window.startFrame || event.frameOffset >= window.endFrame)
-    || sampleSourceEvents.some((event) => event.startFrame < window.startFrame || event.startFrame >= window.endFrame)
+    || instrumentEvents.some((event) => event.frameOffset < window.startFrame || event.frameOffset >= window.endFrame
+      || event.frameOffset - window.startFrame > 0xffff_ffff)
+    || sampleSourceEvents.some((event) => event.startFrame >= window.endFrame
+      || (event.startFrame < window.startFrame && !(preparedRevision !== 0
+        && window.startFrame === requestedPublicationFrame && event.stopFrame > window.startFrame)))
     || vstAutomationSegments.some((segment, index) => (
       !Number.isInteger(segment.parameterId) || segment.parameterId < 0 || segment.parameterId > 0xffff_ffff
       || !Number.isSafeInteger(segment.startFrame) || segment.startFrame < window.startFrame
@@ -715,10 +765,14 @@ export const serializeNativeScheduleWindow = (window: NativeScheduleWindow) => {
         : !Number.isFinite(event.value))
     ))
   ) throw new Error("Native schedule window is invalid.")
-  const instrumentBytes = serializeNativeInstrumentEvents(window.epoch, instrumentEvents)
-  const sourceBytes = serializeNativeSourceEvents(sampleSourceEvents, window.assets ?? [])
+  const instrumentBytes = serializeNativeInstrumentEvents(window.epoch, instrumentEvents.map((event) => ({
+    ...event,
+    frameOffset: event.frameOffset - window.startFrame,
+  })))
+  const sourceBytes = serializeNativeSourceEvents(sampleSourceEvents, window.assets ?? [],
+    preparedRevision !== 0 && window.startFrame === requestedPublicationFrame ? window.startFrame : undefined)
   const automationBytes = encodedInstanceIds.reduce((total, instanceBytes) => total + 44 + instanceBytes.byteLength, 0)
-  const output = new Uint8Array(60 + instrumentBytes.byteLength - 4 + sourceBytes.byteLength - 4 + automationBytes + processorAutomationEvents.length * 40)
+  const output = new Uint8Array(72 + instrumentBytes.byteLength - 4 + sourceBytes.byteLength - 4 + automationBytes + processorAutomationEvents.length * 40)
   const view = new DataView(output.buffer)
   view.setUint32(0, window.revision, true)
   view.setUint32(4, window.epoch, true)
@@ -732,7 +786,9 @@ export const serializeNativeScheduleWindow = (window: NativeScheduleWindow) => {
   view.setUint32(48, sampleSourceEvents.length, true)
   view.setUint32(52, vstAutomationSegments.length, true)
   view.setUint32(56, processorAutomationEvents.length, true)
-  let offset = 60
+  view.setUint32(60, preparedRevision, true)
+  view.setBigUint64(64, BigInt(requestedPublicationFrame), true)
+  let offset = 72
   output.set(instrumentBytes.subarray(4), offset)
   offset += instrumentBytes.byteLength - 4
   output.set(sourceBytes.subarray(4), offset)
@@ -882,6 +938,7 @@ export type NativeSourceEvent = Pick<AudioCoreSampleSourceEventDto,
 export const serializeNativeSourceEvents = (
   events: readonly NativeSourceEvent[],
   assets: readonly NativeSessionAsset[],
+  seamFrame = Number.NEGATIVE_INFINITY,
 ) => {
   if (events.length > nativeAudioHostMaximumSourceEvents) {
     throw new Error("Native source event payload exceeds its bounds.")
@@ -894,9 +951,10 @@ export const serializeNativeSourceEvents = (
   let previousStartFrame: number | undefined
   let previousSequence: number | undefined
   for (const [index, event] of events.entries()) {
+    const effectiveStartFrame = Math.max(seamFrame, event.startFrame)
     if (previousStartFrame !== undefined && (
-      event.startFrame < previousStartFrame
-      || (event.startFrame === previousStartFrame && event.sequence <= (previousSequence ?? 0))
+      effectiveStartFrame < previousStartFrame
+      || (effectiveStartFrame === previousStartFrame && event.sequence <= (previousSequence ?? 0))
     )) {
       throw new Error(
         `Native source events must be sorted by (startFrame, sequence); record ${index} is out of order.`,
@@ -916,7 +974,7 @@ export const serializeNativeSourceEvents = (
       || !Number.isFinite(event.sourceOffsetFraction ?? 0)
       || (event.sourceOffsetFraction ?? 0) < 0 || (event.sourceOffsetFraction ?? 0) >= 1
     ) throw new Error("Native source event is invalid.")
-    previousStartFrame = event.startFrame
+    previousStartFrame = effectiveStartFrame
     previousSequence = event.sequence
     view.setUint32(offset, event.epoch, true)
     view.setBigUint64(offset + 4, BigInt(event.sequence), true)

@@ -1,0 +1,14 @@
+{
+ "name": "ae08-phase9-runner-p4",
+ "sequence": 40,
+ "createdAt": "2026-11-14T12:00:00.000Z",
+ "revert": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 9 runner part 4 (cherry-picks of t3/ff951776 bf3b3d07, bfbde61c, 670cc906, 0d2e3ad1, with -x; hand record, no --bless). The only conflict was the import block of ae-08-phase-9-launch.ts: record 39 removed waitTestPluginCard (the vst-undo performer is gone), part 4 added the recording imports; both kept. Product change: apps/desktop/ae08-evidence.ts ae08Evidence gains ae08ControlCommitReceived and apps/desktop/main.ts calls it in the socket frame handler; it writes nothing unless DAW_AE08_EVIDENCE_DIR is set and the operation is control.commit with an idempotencyKey. The analyzer only gains three `export` keywords (attributePublications, appliedLatencyMatches, compareLatency), no logic moves. No arm's code is deleted and no recorded expectation moves, so no arm is retired or re-pointed. Arms and gates anchored in the touched files ran one at a time with --only --jobs 1: the 14 arms c0:m514/m519 (control and mutant selftests) and analyzer:521..525 (control and mutant), and gates g-analyzer-selftest (still 38 rejected), g-c0fg-oxlint and g-c0-oxlint: all PASS unchanged. g-tools-typecheck FAILS on a count difference only (15 diagnostics against the recorded 17: the two native-spool-wav.test.ts diagnostics no longer occur, a file this change does not touch; both ae-08-live-graph.ts diagnostics are recorded and none is new); I did not run the gate before the picks, so I do not claim it was already failing; it is left for --full. bun tools/typecheck.ts: no new errors (101 known). Self-tests of matrix, launch, compare, devices, live-graph, portable-campaign and the analyzer pass. Root lint 17 warnings, 5 errors (baseline). Left for --full, not touched: pinned hashes of tools/acceptance/ae-08-live-graph.ts, ae-08-phase-5-fixture.ts and analyze-ae-08-continuity.ts; the new untracked ae-08-phase-9-record.ts and the changed ae-08-phase-9-{compare,launch,matrix,rows}.ts (unpinned); the watched apps/desktop/main.ts and apps/desktop/ae08-evidence.ts hashes in the gitStatus listing.",
+  "expectationsSha256": "cff0d5d995f2b9b9ca38de3ee7ef2ded30c9b51758efb08647d48d456f6a75ae"
+ },
+ "watched": [],
+ "changes": [],
+ "seedRecordChanges": []
+}

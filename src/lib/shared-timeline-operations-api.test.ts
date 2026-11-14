@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { JsonValue } from '@daw-browser/shared'
 import {
+  decodeEffectsOperationResult,
   publishSharedTimelineOperation,
   SharedTimelineOperationRejectedError,
 } from './shared-timeline-operations-api'
@@ -48,4 +49,26 @@ test('preserves null results for operations whose contract permits them', async 
     kind: 'tracks.lock',
     payload: { trackId: 'track-1' },
   }, { fetch })).resolves.toBeNull()
+})
+
+test('decodes effects results with optional row revisions and rejects malformed replies', () => {
+  expect(decodeEffectsOperationResult({ status: 'applied', effectId: 'effect-1' }))
+    .toEqual({ status: 'applied', effectId: 'effect-1', revision: { kind: 'committed-unordered' } })
+  expect(decodeEffectsOperationResult({ status: 'applied', effectId: 'effect-1', revision: 0 }))
+    .toEqual({ status: 'applied', effectId: 'effect-1', revision: { kind: 'committed-unordered' } })
+  expect(decodeEffectsOperationResult({ status: 'applied', effectId: 'effect-1', revision: 4 }))
+    .toEqual({ status: 'applied', effectId: 'effect-1', revision: { kind: 'ordered', revision: 4 } })
+  expect(decodeEffectsOperationResult({ status: 'invalid' })).toEqual({ status: 'invalid' })
+  expect(() => decodeEffectsOperationResult({ status: 'applied', effectId: 1, revision: -1 })).toThrow()
+  expect(() => decodeEffectsOperationResult({ status: 'applied', revision: '4' })).toThrow()
+  expect(() => decodeEffectsOperationResult({ status: 'applied', effectId: 'effect-1', revision: 0.5 })).toThrow()
+  expect(() => decodeEffectsOperationResult({
+    status: 'applied',
+    effectId: 'effect-1',
+    revision: Number.MAX_SAFE_INTEGER + 1,
+  })).toThrow()
+  expect(() => decodeEffectsOperationResult({ status: 'applied', effectId: '', revision: 1 })).toThrow()
+  expect(() => decodeEffectsOperationResult({ status: 'applied', effectId: 'effect-1', revision: 1.5 })).toThrow()
+  expect(() => decodeEffectsOperationResult({ status: 'applied', effectId: 'effect-1', revision: Number.MAX_SAFE_INTEGER })).not.toThrow()
+  expect(() => decodeEffectsOperationResult(null)).toThrow()
 })

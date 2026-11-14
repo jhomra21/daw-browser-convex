@@ -1,0 +1,14 @@
+{
+ "name": "ae08-phase9-packaged-diagnosis-fixes",
+ "sequence": 43,
+ "createdAt": "2026-11-14T22:00:00.000Z",
+ "revert": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 9 packaged diagnosis fixes (hand record, no --bless). Covers cf42eb1c (apps/desktop MIDI request grant), ca616da7 (phase 9 VST and recording oracle rows), 358fed28, 714bf902 and e342356f. 358fed28 (ae-08-live-graph.ts): each launch removes its own /tmp/daw-e-* run directory in a finally and logs run-directory-removed (witness red/green: two-launch run left 2 directories before, 0 after). 714bf902 (Timeline.tsx onExternalPluginInserted): a Play landing while a VST insertion is staged supersedes its adoption with the plug-in staged but unbound; the baseline state capture is refused and the insertion adopts once more in the transport state then (witness: Timeline.test.ts source order check; open-editor 5 runs at --vst-repetitions 10, 0 failures, where it failed about 1 run in 4). e342356f (useTimelinePlayback.ts readNativePreviewTrackFingerprint): an absent leftPadSec, bufferOffsetSec or midiOffsetBeats fingerprints as 0, as the compiles read it, so a commit's first store emission (the persisted row's defaults) republishes nothing before the edit (witness: useTimelinePlayback.test.ts, red then green; paged-playback edit 2 passes in 3 of 3 runs, it failed before). No arm's code is deleted and no recorded expectation moves, so no arm is retired or re-pointed. Verified: the 502 non-search, non-retired arms whose targets, witnesses or fuzz sources include Timeline.tsx, Timeline.test.ts, useTimelinePlayback.ts, useTimelinePlayback.test.ts or ae-08-live-graph.ts, each run with --only --jobs 1 in three runs (168, 167, 167 jobs), all PASS, 0 failing. useTimelinePlayback.test.ts and Timeline.test.ts 263 pass, 1 skip, 2 fail (the 2 known HT reds), bun run typecheck 0, bun tools/typecheck.ts no new errors (101 known), ae-08-live-graph self-test pass. Pinned hashes that changed (left for --full, none edited): expectations.json and manifest-7a.json entries for tools/acceptance/ae-08-live-graph.ts (already stale at record 42), src/hooks/useTimelinePlayback.ts, src/hooks/useTimelinePlayback.test.ts, src/components/Timeline.tsx and src/components/Timeline.test.ts where pinned. Fuzz seeds were not re-run: the hook fingerprint change touches no fuzz source and record 42 already notes the hook seed-summary drift that predates it.",
+  "expectationsSha256": "cff0d5d995f2b9b9ca38de3ee7ef2ded30c9b51758efb08647d48d456f6a75ae"
+ },
+ "watched": [],
+ "changes": [],
+ "seedRecordChanges": []
+}

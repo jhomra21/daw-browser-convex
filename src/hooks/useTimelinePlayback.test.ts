@@ -1315,6 +1315,9 @@ test('fingerprints all playback-relevant audio clip compiler fields for paused p
   expect(fingerprint).toContain("clips.map((clip)")
   expect(fingerprint).toContain("buffer: readBufferFingerprint(buffer)")
   expect(fingerprint).not.toContain("clip.id")
+  // The compiles read an absent offset as 0 (`?? 0`), and a persisted row carries 0 where a live create carries none: the
+  // two compile alike, so they fingerprint alike, or a commit's first store emission republishes an unchanged graph.
+  for (const field of ["leftPadSec", "bufferOffsetSec", "midiOffsetBeats"]) expect(fingerprint).toContain(`${field}: ${field} ?? 0`)
 })
 
 test('waits for audio clip hydration before native paused preview and retries after hydration', async () => {

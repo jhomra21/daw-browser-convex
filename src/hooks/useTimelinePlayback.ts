@@ -2093,9 +2093,10 @@ export function useTimelinePlayback(
         // fields are named, as a track's are, because a persisted row and a projected create order them differently.
         const { id, historyRef, mediaStatus, startSec, duration, sourceAssetKey, sourceKind, sourceDurationSec, sourceSampleRate,
           sourceChannelCount, leftPadSec, bufferOffsetSec, audioWarp, gain, fades, sampleUrl, midi, midiOffsetBeats } = clip
+        // An absent offset compiles as 0, and a persisted row carries 0 where a live create carries none.
         return { id, historyRef, mediaStatus, startSec, duration, sourceAssetKey, sourceKind, sourceDurationSec, sourceSampleRate,
-          sourceChannelCount, leftPadSec, bufferOffsetSec, audioWarp, gain, fades, sampleUrl, midi, midiOffsetBeats,
-          buffer: readBufferFingerprint(buffer) } satisfies Record<keyof Omit<Track['clips'][number], 'name' | 'color' | 'waveformAssetKey'> | 'buffer',
+          sourceChannelCount, leftPadSec: leftPadSec ?? 0, bufferOffsetSec: bufferOffsetSec ?? 0, audioWarp, gain, fades, sampleUrl, midi,
+          midiOffsetBeats: midiOffsetBeats ?? 0, buffer: readBufferFingerprint(buffer) } satisfies Record<keyof Omit<Track['clips'][number], 'name' | 'color' | 'waveformAssetKey'> | 'buffer',
             Track['clips'][number][keyof Track['clips'][number]] | ReturnType<typeof readBufferFingerprint>>
       }),
     })),

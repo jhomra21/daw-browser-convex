@@ -44658,7 +44658,7 @@
       "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and the follow adopts it during the take",
       "W-C9-clip-R an audio clip move during a take is adopted and the take refresh schedules the moved clip once",
       "W-C9-track-5 a reorder is the session's own graph again: unchanged, nothing published, and the next edit keeps the node order",
-      "W-F20c a loop edit after a wrap maps positions across the seam, compiles the loop shifted and refreshes from the arrangement position",
+      "W-F20c a loop edit after a wrap maps positions across the seam, compiles the loop shifted and extends in place from the arrangement position",
       "W-R7 an adoption that shortens the window while recording does not make the refresh schedule a source twice"
      ],
      "fuzz": null,

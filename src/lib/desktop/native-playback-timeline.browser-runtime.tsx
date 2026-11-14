@@ -35,16 +35,14 @@ const portableLoopProbe = async (refreshProbe = false) => {
   const reached = Promise.withResolvers<void>()
   const release = Promise.withResolvers<void>()
   const applied = Promise.withResolvers<void>()
-  const reconciliationReached = Promise.withResolvers<void>()
-  const reconciliationApplied = Promise.withResolvers<void>()
-  const pendingApplied = Promise.withResolvers<void>()
-  let reconciliationPending = true
+  let installs = 0
   const starts: { session: number; frame: number }[] = []
   const coverage: { session: number; startFrame: number; endFrame: number }[] = []
   const portableFaults: string[] = []
   const synth = { kind: 'synth', instanceId: 'portable:synth', params: createDefaultSynthParams() } satisfies TrackInstrumentParams
   const controller = createPortableBrowserPlaybackController({
-    scheduleHorizonSec: refreshProbe ? 0.1 : undefined,
+    // The in-place extension fits whole pages (16 384 frames), so the window has to be longer than one.
+    scheduleHorizonSec: refreshProbe ? 1.2 : undefined,
     reportFault: (message) => portableFaults.push(message),
     getAudioContext: () => context,
     compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
@@ -75,7 +73,8 @@ const portableLoopProbe = async (refreshProbe = false) => {
         if (refreshProbe) coverage.push({
           session, startFrame: schedule.timeOrigin.frame, endFrame: schedule.timeOrigin.frame + 4_800,
         })
-        if (refreshProbe && session === 2) { reached.resolve(); await release.promise }
+        // The handoff extends the running session in place: its second install is the held one.
+        if (refreshProbe && (installs += 1) === 2) { reached.resolve(); await release.promise }
       }, markActive: () => undefined,
       onFault: () => () => true, onRecordingStatus: () => () => true,
       postRecordingControl: () => undefined, prepareGraph: async () => undefined,
@@ -83,12 +82,6 @@ const portableLoopProbe = async (refreshProbe = false) => {
       queueInstrumentEvents: async (deliveryEpoch, events) => {
         liveValues.push(...events.map(event => ({ session, epoch: deliveryEpoch, target: event.note, value: event.value })))
         if (refreshProbe) await applied.promise
-        if (refreshProbe && session === 1 && events.some(event => event.value === 947)) await pendingApplied.promise
-        if (refreshProbe && session === 2 && reconciliationPending) {
-          reconciliationPending = false
-          reconciliationReached.resolve()
-          await reconciliationApplied.promise
-        }
       },
       registerAsset: async () => ({ status: 'registered', handle: { slot: 0, generation: 1 } }),
       scheduleSources: async () => undefined, setTransport: async (nextEpoch, running, frame) => {
@@ -106,8 +99,7 @@ const portableLoopProbe = async (refreshProbe = false) => {
   try {
     const cold = await start(refreshProbe ? 0 : 0.8)
     if (refreshProbe) {
-      report?.({ version: 2, type: 'transport-position', sessionId: 1, epoch, sequence: 1, running: true, frame: 4_000 })
-      const reportPrevious = report
+      report?.({ version: 2, type: 'transport-position', sessionId: 1, epoch, sequence: 1, running: true, frame: 50_000 })
       const refresh = controller.refreshSchedule()
       await reached.promise
       let settled = false
@@ -134,13 +126,8 @@ const portableLoopProbe = async (refreshProbe = false) => {
       const pending = controller.liveProcessorControl.flush({
         instanceId: synth.instanceId, values: [{ parameterId: 'synth.filterCutoffHz', value: 947 }],
       })
-      release.resolve()
       const handoffStarted = performance.now()
-      // The baseline cancels instead of reconciling. Resolve the observation
-      // from either outcome so it fails an assertion, rather than hanging.
-      void refresh.then(() => reconciliationReached.resolve())
-      await reconciliationReached.promise
-      pendingApplied.resolve()
+      release.resolve()
       const pendingResult = await pending
       controller.rememberInstrumentParameters('portable-track', {
         ...synth, params: { ...synth.params, filter: { ...synth.params.filter, frequencyHz: 947 } },
@@ -151,14 +138,12 @@ const portableLoopProbe = async (refreshProbe = false) => {
       controller.rememberInstrumentParameters('portable-track', {
         ...synth, params: { ...synth.params, filter: { ...synth.params.filter, frequencyHz: 946 } },
       })
-      reconciliationApplied.resolve()
-      reportPrevious?.({ version: 2, type: 'transport-position', sessionId: 1, epoch: 1, sequence: 3, running: true, frame: 4_500 })
       const staleRefresh = await refresh
       const handoffMs = performance.now() - handoffStarted
       const preserved = controller.preparedInstrument('portable-track')
       const nextRefresh = await controller.refreshSchedule()
       const replacement = controller.preparedInstrument('portable-track')
-      return { settledBeforeApplied, result, pendingResult, concurrent, staleRefresh, nextRefresh, preserved, replacement, sessions, liveValues, starts, coverage, handoffMs }
+      return { settledBeforeApplied, result, pendingResult, concurrent, staleRefresh, nextRefresh, preserved, replacement, sessions, liveValues, starts, coverage, handoffMs, faults: portableFaults }
     }
     const mapped = mapNativeBuiltInParameterCommit({
       targetId: 'portable-track', effect: 'instrument', from: synth,

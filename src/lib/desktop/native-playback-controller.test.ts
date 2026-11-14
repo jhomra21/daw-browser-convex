@@ -9562,6 +9562,28 @@ test("insert, remove and undo of a trusted VST while playing stage live, never s
   } finally { await controller.dispose() }
 })
 
+test("a Play that starts while a paused VST insertion is still being staged leaves the transport running", async () => {
+  const { fixture, controller, edit, transport } = vstJoinFixture()
+  const coordinate = fixture.bridge.session.coordinateVstAttachments
+  const staging = Promise.withResolvers<void>()
+  const entered = Promise.withResolvers<void>()
+  fixture.bridge.session.coordinateVstAttachments = async (request) => {
+    entered.resolve()
+    await staging.promise
+    return coordinate(request)
+  }
+  try {
+    expect(await controller.ensureLivePreview(0)).toBe("started")
+    const insertion = edit(true, "insert")
+    await entered.promise
+    const play = controller.start(transport)
+    staging.resolve()
+    expect(await insertion).toEqual({ status: "adopted" })
+    expect(await play).toBe("started")
+    expect({ active: controller.isActive(), running: fixture.transports.at(-1)?.running }).toEqual({ active: true, running: true })
+  } finally { await controller.dispose() }
+})
+
 // Each refused staging waits for native progress reports, never a timer: this feeds one per macrotask until `done`.
 const feedProgress = async (fixture: ReturnType<typeof createBridge>, done: () => boolean) => {
   for (let frame = 0; !done() && frame < 2000; frame++) {

@@ -41,7 +41,3 @@ export const removeTestPlugin = async (context: Ui) => {
     if(!button)throw new Error('Test plug-in Delete button missing');button.click();return true})()`)
   await waitForUi(context, "The test plug-in device card is still in the UI", `!${externalDevice}`)
 }
-
-// The state an undo or a redo must reach.
-export const waitTestPluginCard = (context: Pick<Phase5Context, "evaluate">, present: boolean) =>
-  waitForUi(context, `The test plug-in device card ${present ? "did not return" : "did not leave"}`, `${present ? "" : "!"}${externalDevice}`)

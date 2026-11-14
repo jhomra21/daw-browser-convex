@@ -15,6 +15,7 @@ import {
 } from "@daw-browser/plugin-host-protocol"
 import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import { portableGraphContractHash } from "@daw-browser/audio-core-contract/generated"
+import { NativeAudioHostCommandError } from "./audio-host"
 import { parsePluginCatalogData, type PluginCatalogData } from "./plugin-catalog"
 import {
   coordinateNativeVst3Attachments,
@@ -888,10 +889,18 @@ test("stops on retirement failure after retaining the newly published revision",
 })
 
 // A stateful plug-in carries captured state, so its verdict is never taken from the cache.
-const ledgerHarness = (stateful: boolean, clock = { now: 0 }, refused: ReadonlySet<string> = new Set()) => {
+const ledgerHarness = (
+  stateful: boolean,
+  clock = { now: 0 },
+  refused: ReadonlySet<string> = new Set(),
+  retired: ReadonlySet<string> = new Set(),
+) => {
   const calls: string[] = []
   const ledger = createNativeVst3AttachmentLedger({
-    detachVst: async (instanceId) => { calls.push(`detach:${instanceId}`) },
+    detachVst: async (instanceId) => {
+      calls.push(`detach:${instanceId}`)
+      if (retired.has(instanceId)) throw new NativeAudioHostCommandError(11)
+    },
   }, () => clock.now)
   const stateBytes = new Uint8Array([1, 2, 3])
   const state = { bytes: stateBytes, sha256: createHash("sha256").update(stateBytes).digest("hex") }
@@ -931,7 +940,7 @@ const ledgerHarness = (stateful: boolean, clock = { now: 0 }, refused: ReadonlyS
 test("a later plan attaches only the instances it adds", async () => {
   const { calls, ledger, run } = ledgerHarness(true)
   expect(await run([first])).toEqual({ ok: true, attached: 1 })
-  await ledger.published()
+  ledger.published()
   calls.length = 0
   expect(await run([first, second])).toEqual({ ok: true, attached: 1 })
   expect(calls).toEqual([`preflight:${second.instanceId}`, `attach:${second.instanceId}`])
@@ -948,21 +957,50 @@ test("a rolled back revision attaches its staged instances again", async () => {
   ])
 })
 
-test("a changed instance is detached before it is attached and a removed one only after publication", async () => {
+// The host binds every instance it still holds into the graph it prepares, and rejects one the graph no longer declares.
+test("a changed instance is detached before it is attached and a removed one before the plan that drops it is prepared", async () => {
   const { calls, ledger, run } = ledgerHarness(true)
   await run([first, second])
-  await ledger.published()
+  ledger.published()
   calls.length = 0
   const moved = { ...first, stageIndex: 1 }
   await run([moved])
   expect(calls).toEqual([
     `preflight:${first.instanceId}`,
+    `detach:${second.instanceId}`,
     `detach:${first.instanceId}`,
     `attach:${first.instanceId}`,
   ])
   calls.length = 0
-  await ledger.published()
+  ledger.published()
+  expect(calls).toEqual([])
+})
+
+test("a removal whose revision was rolled back is neither detached twice nor lost when the plug-in comes back", async () => {
+  const { calls, ledger, run } = ledgerHarness(true)
+  await run([first, second])
+  ledger.published()
+  calls.length = 0
+  await run([first])
+  ledger.rolledBack()
+  await run([first])
   expect(calls).toEqual([`detach:${second.instanceId}`])
+  calls.length = 0
+  await run([first, second])
+  expect(calls).toEqual([`attach:${second.instanceId}`])
+})
+
+test("a removal of an instance the host already retired is not refused, and the plug-in loads anew when it comes back", async () => {
+  const { calls, ledger, run } = ledgerHarness(true, { now: 0 }, new Set(), new Set([second.instanceId]))
+  await run([first, second])
+  ledger.published()
+  calls.length = 0
+  expect(await run([first])).toEqual({ ok: true, attached: 0 })
+  ledger.published()
+  expect(calls).toEqual([`detach:${second.instanceId}`])
+  calls.length = 0
+  await run([first, second])
+  expect(calls).toEqual([`preflight:${second.instanceId}`, `attach:${second.instanceId}`])
 })
 
 const extraInstance = (index: number) => attachment({
@@ -975,16 +1013,16 @@ const extraInstance = (index: number) => attachment({
 test("a removed instance that comes back within the parking bounds skips its preflight", async () => {
   const { calls, ledger, run, clock } = ledgerHarness(true)
   await run([first, second])
-  await ledger.published()
+  ledger.published()
   await run([second])
-  await ledger.published()
+  ledger.published()
   calls.length = 0
   clock.now = 59_999
   await run([first, second])
   expect(calls).toEqual([`attach:${first.instanceId}`])
-  await ledger.published()
+  ledger.published()
   await run([second])
-  await ledger.published()
+  ledger.published()
   calls.length = 0
   clock.now += 60_000
   await run([first, second])
@@ -995,9 +1033,9 @@ test("only the four newest removed instances stay parked", async () => {
   const { calls, ledger, run } = ledgerHarness(true)
   const extras = [1, 2, 3, 4, 5].map(extraInstance)
   await run([second, ...extras])
-  await ledger.published()
+  ledger.published()
   await run([second])
-  await ledger.published()
+  ledger.published()
   calls.length = 0
   await run([second, ...extras])
   expect(calls.filter((call) => call.startsWith("preflight:"))).toEqual([`preflight:${extras[0]!.instanceId}`])
@@ -1288,7 +1326,7 @@ test("main host events: a lost host ends the session", () => {
 test("the session ledger starts per transaction, continues across live coordinations and tolerates a revision before any plan", async () => {
   const session = createNativeVst3SessionLedger()
   const host = { detachVst: async () => undefined }
-  await session.published()
+  session.published()
   session.rolledBack()
   const live = session.forHost(host)
   expect(session.forHost(host)).toBe(live)

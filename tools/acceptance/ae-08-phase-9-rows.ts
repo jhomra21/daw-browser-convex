@@ -77,8 +77,9 @@ export const burstRows: BurstRow[] = [
     needs: `${absentDevice("BlackHole 2ch")}; same unverified recording steps as record-target-guard, then the take must equal the tone sample for sample` } },
   { name: "vst-insert", latencyClass: "vst-insert", packaged: { repeat: "vst-burst", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-absent", prepare: testPlugin,
     cycle: [{ edits: ["vst-insert"], state: "vst-present" }, { edits: ["vst-remove"], state: "vst-absent" }] } },
+  // Removing an external plug-in is not an undo history entry (EffectsPanel removeExternalProcessor), so the plug-in comes back by a new insert.
   { name: "vst-remove-undo", latencyClass: "plain", packaged: { repeat: "vst-burst", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-present", prepare: insertedTestPlugin,
-    cycle: [{ edits: ["vst-remove"], state: "vst-absent" }, { edits: ["vst-undo"], state: "vst-present" }] } },
+    cycle: [{ edits: ["vst-remove"], state: "vst-absent" }, { edits: ["vst-insert"], state: "vst-present" }] } },
   { name: "vst-latency-switch", latencyClass: "raise", packaged: { repeat: "vst-burst", periodSec: null, fixture: "phase5:raw-tempo", start: "latency-low", prepare: insertedTestPlugin,
     cycle: [{ edits: ["latency-high"], state: "latency-high" }, { edits: ["latency-low"], state: "latency-low" }] } },
   { name: "open-editor", latencyClass: "vst-insert", packaged: { repeat: "single", periodSec: null, fixture: null, start: "vst-present", prepare: insertedTestPlugin,

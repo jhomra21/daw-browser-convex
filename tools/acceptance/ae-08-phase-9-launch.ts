@@ -10,7 +10,7 @@ import { deleteTrackThroughUi, exportReference, pressHistoryKey, selectFftSize, 
 import { burstSchedule, judgeStored, MIN_WINDOW_MS, parseHostLines, repetitionsFor, runBurst, type Perform, type Timings } from "./ae-08-phase-9-matrix"
 import { phase9Matrix, type Row } from "./ae-08-phase-9-rows"
 import { iacPort, selectMidiInputScript, sendMidiNote } from "./ae-08-phase-9-devices"
-import { insertTestPlugin, prepareTestPlugin, removeTestPlugin, waitTestPluginCard } from "./ae-08-phase-9-vst"
+import { insertTestPlugin, prepareTestPlugin, removeTestPlugin } from "./ae-08-phase-9-vst"
 
 // One packaged launch of phase 9: the row's phase 5 start state, then either a burst of its edits (settled on host evidence) or the
 // same timeline with no edits (a reference, or the calibration duplicate of one). Edits go through the public control actions or the
@@ -90,7 +90,6 @@ export const createPerformer = ({ context, runtime, observe, setup }: Performers
     ["clip-delete", deleteImportedClip],
     ["vst-insert", async () => { await insertTestPlugin(context); return unmoved }],
     ["vst-remove", async () => { await removeTestPlugin(context); return unmoved }],
-    ["vst-undo", async () => { await pressHistoryKey(context, false); await waitTestPluginCard(context, true); return unmoved }],
     ["latency-high", testPluginLatency(1, 0, 4096)],
     ["latency-low", testPluginLatency(0, 4096, 0)],
     ["silent-track-create", () => commit([{ kind: "track.create", name: silentTrack, trackKind: "audio" }])],
@@ -273,8 +272,6 @@ export const selfTest = async () => {
   check(insert.calls[0]?.includes("ae08") === true && insert.calls[0]?.includes(".click()") === true && insert.calls.some((call) => call.includes("[data-external-effect-id]")), `vst-insert clicks the plug-in's browser entry and waits for its card: ${insert.calls[0]}`)
   const take = await run("vst-remove")
   check(take.calls[0]?.includes("'Delete'") === true && take.calls.every((call) => !call.startsWith("interact")), "vst-remove clicks the device card's Delete button")
-  const vstUndo = await run("vst-undo")
-  check(vstUndo.calls[0]?.includes("shiftKey:false") === true && vstUndo.calls.some((call) => call.includes("[data-external-effect-id]")), "vst-undo presses undo and waits for the card to return")
   const high = await run("latency-high"), low = await run("latency-low")
   const latencyAction = (normalizedValue: number) => `mutate ${JSON.stringify([{ kind: "external-plugin.parameters.set", target: { kind: "track", track: ref("track-1") }, processor: ref("external-1"), changes: [{ parameterId: 1, normalizedValue }] }])}`
   check(high.calls[0] === latencyAction(1) && high.moved.fromLatencyFrames === 0 && high.moved.toLatencyFrames === 4096, `latency-high sets the Latency parameter to its top step: ${high.calls[0]}`)

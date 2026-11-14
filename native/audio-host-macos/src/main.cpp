@@ -1043,7 +1043,7 @@ int main() {
       case daw::audio_host_macos::ControlType::kVstDetach: {
         std::size_t offset = 0;
         std::string instanceId;
-        accepted = session && ReadString(payload, offset, instanceId) && offset == payload.size() && session->DetachVstReference(instanceId);
+        accepted = control_session && ReadString(payload, offset, instanceId) && offset == payload.size() && control_session->DetachVstReference(instanceId);
         break;
       }
       case daw::audio_host_macos::ControlType::kVstEditor: {

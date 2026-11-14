@@ -745,14 +745,12 @@ export const createNativeVst3AttachmentLedger = (
   const staged = new Map<string, LedgerEntry>()
   const parked = new Map<string, { load: string; at: number }>()
   const verdicts = new Map<string, AvailablePreflight>()
-  let removed: string[] = []
   const parkedLoad = (instanceId: string) => {
     const entry = parked.get(instanceId)
     return entry !== undefined && now() - entry.at < parkedAgeMs ? entry.load : undefined
   }
   return {
-    // Splits a plan into new instances, changed instances (detached first) and staged ones it dropped.
-    // It also records which active instances the plan removed, for the next publication.
+    // Splits a plan into new instances, changed instances (detached first), staged ones it dropped and active ones it removed.
     reconcile(entries: ReadonlyMap<string, LedgerEntry>) {
       const attach: string[] = []
       const replace: string[] = []
@@ -761,9 +759,9 @@ export const createNativeVst3AttachmentLedger = (
         if (current === undefined) attach.push(instanceId)
         else if (current.plugin !== entry.plugin || current.binding !== entry.binding) replace.push(instanceId)
       }
-      removed = [...active.keys()].filter((instanceId) => !entries.has(instanceId))
+      const removed = [...active.keys()].filter((instanceId) => !entries.has(instanceId))
       const dropped = [...staged.keys()].filter((instanceId) => !entries.has(instanceId))
-      return { attach, replace, dropped: dropped.filter((instanceId) => !active.has(instanceId)) }
+      return { attach, replace, removed, dropped: dropped.filter((instanceId) => !active.has(instanceId)) }
     },
     parkedMatches: (instanceId: string, load: string) => parkedLoad(instanceId) === load,
     verdict: (key: string) => verdicts.get(key),
@@ -774,27 +772,34 @@ export const createNativeVst3AttachmentLedger = (
       await host.detachVst(instanceId, transactionToken)
       staged.delete(instanceId)
     },
-    // The revision is live: staged instances are active, removed ones are detached and the host parks them.
-    async published() {
+    // The host parks a removed instance before the revision that drops it is prepared, because it binds every instance it
+    // still holds into a prepared graph. The live graph keeps rendering it until that revision publishes. A rolled back
+    // removal leaves it parked, so a plan that restores it attaches it again from the host's parking. A host that refuses
+    // the detach no longer holds the instance (it retires a staged one whose worker was not ready when its revision
+    // published): nothing is parked and a restoring plan loads it anew.
+    release: async (instanceId: string, transactionToken?: string) => {
+      const entry = active.get(instanceId)
+      if (entry === undefined) return
+      try {
+        await host.detachVst(instanceId, transactionToken)
+      } catch (error) {
+        if (!(error instanceof NativeAudioHostCommandError) || error.reason !== "refused") throw error
+        active.delete(instanceId)
+        return
+      }
+      active.delete(instanceId)
+      parked.delete(instanceId)
+      parked.set(instanceId, { load: entry.load, at: now() })
+      for (const oldest of [...parked.keys()].slice(0, Math.max(0, parked.size - maximumParkedInstances))) parked.delete(oldest)
+    },
+    // The revision is live: staged instances are active.
+    published() {
       for (const [instanceId, entry] of staged) active.set(instanceId, entry)
       staged.clear()
-      for (const instanceId of removed) {
-        const entry = active.get(instanceId)
-        active.delete(instanceId)
-        if (entry === undefined) continue
-        await host.detachVst(instanceId)
-        parked.delete(instanceId)
-        parked.set(instanceId, { load: entry.load, at: now() })
-      }
-      removed = []
-      for (const instanceId of [...parked.keys()].slice(0, Math.max(0, parked.size - maximumParkedInstances))) {
-        parked.delete(instanceId)
-      }
     },
     // A rollback retires every staged instance in the host, so the next plan attaches them again.
     rolledBack() {
       staged.clear()
-      removed = []
     },
   }
 }
@@ -950,6 +955,7 @@ const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3Coor
     // only after preflight so graph publication and VST attachment commit
     // atomically as one native session.
     for (const instanceId of delta?.dropped ?? []) await ledger?.detach(instanceId, input.transactionToken)
+    for (const instanceId of delta?.removed ?? []) await ledger?.release(instanceId, input.transactionToken)
     for (const candidate of pending) {
       const instanceId = candidate.attachment.instanceId
       const { stateRevision: _stateRevision, ...attachment } = candidate.native

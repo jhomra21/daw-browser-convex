@@ -4190,6 +4190,9 @@ export const createNativePlaybackController = (input: {
           binding = undefined
           executeReconcile(reconcile)
           input.onInstrumentPreparation?.(preparedInstrumentTrackIds, { state: "ready" })
+          // The published bank has no window, and its coordinator was disposed above. A Play that waited for this
+          // publication must find the priming already registered when its wait ends.
+          if (paused && !active && publicationEpoch === transportEpoch) pausedPriming = reprimePausedAdoption()
           return true
         }
         for (;;) {
@@ -4428,12 +4431,9 @@ export const createNativePlaybackController = (input: {
       const { outcome, content } = await runAdoption(start.attempt)
       processorState.settleAdoption(start.attempt, outcome, content)
       void drainStatePatches()
-      // An edit adopted while no transport runs has no window for its bank. The owner holds the bank when the new epoch
-      // ends its domain, so the transition follows the settlement. A pause that moved the epoch primed the bank itself.
-      if (outcome.status === "adopted" && !active && start.attempt.fields.epoch === transportEpoch) {
-        pausedPriming = reprimePausedAdoption()
-        await pausedPriming
-      }
+      // An edit adopted while no transport runs has no window for its bank: the priming its publication started
+      // settles before the next adoption.
+      if (outcome.status === "adopted") await pausedPriming
       start = processorState.nextAdoption(adoptionFields(), outcome.status === "blocked" || outcome.status === "failed")
     }
   }

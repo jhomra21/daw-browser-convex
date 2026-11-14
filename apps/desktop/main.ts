@@ -1822,8 +1822,8 @@ const registerIpc = () => {
             : operation === "rollback" ? await supervisor.rollbackGraphRevision(revision)
             : await supervisor.retireGraphRevision(revision)
         }
-        // The host detaches and parks what the live graph dropped, and retires what a rollback left staged.
-        if (result.status === "published") await attachmentLedger.published()
+        // The ledger takes what the published graph staged as active, and drops what a rollback left staged.
+        if (result.status === "published") attachmentLedger.published()
         if (operation === "rollback") attachmentLedger.rolledBack()
         const current = supervisor.status()
         if (generation !== rendererGeneration || current.generation !== owner.generation
@@ -2088,7 +2088,7 @@ const registerIpc = () => {
       await supervisor.commitTransaction(envelope.data.transactionToken)
       activeRendererTransactions.delete(envelope.data.transactionToken)
       activeEditorProjectBindings.commit(envelope.data.transactionToken)
-      await attachmentLedger.published()
+      attachmentLedger.published()
       return { ok: true as const }
     } catch (error) {
       activeRendererTransactions.delete(envelope.data.transactionToken)

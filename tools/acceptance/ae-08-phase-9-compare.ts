@@ -188,8 +188,21 @@ export const compareTrust = (events: readonly HostEvent[], editWallMs: number): 
   return changed.length ? `the refused insert changed the session: ${named(changed)}` : undefined
 }
 
+// An import lands at the playhead, which differs per cycle, while the reference export imports at 0 (the launch asserts it). The clip's
+// sound is the same shifted in time, so the state an import enters is the reference with the edited (right) channel moved to the start
+// the live clip actually took; the frames before it are the state that was left (the clip's absence).
+export const placedAt = (present: Pcm, absent: Pcm, startSec: number): Pcm => {
+  const start = Math.round(startSec * present.sampleRate)
+  const samples = Float32Array.from(present.samples)
+  for (let frame = 0; frame < samples.length / present.channels; frame++) {
+    const index = frame * present.channels + 1
+    samples[index] = (frame < start ? absent.samples[index] : present.samples[index - start * present.channels]) ?? NaN
+  }
+  return { ...present, samples }
+}
+
 const logged = z.object({ edits: z.array(z.object({ index: z.number(), name: z.string(), wallMs: z.number(), settledWallMs: z.number().optional(), publicationFrame: z.number(),
-  fromLatencyFrames: z.number(), toLatencyFrames: z.number() })) })
+  fromLatencyFrames: z.number(), toLatencyFrames: z.number(), startSec: z.number().optional() })) })
 const publicationLine = z.object({ event: z.literal("graph-publish"), cause: z.literal("block-boundary"), pid: z.number(), wallMs: z.number(), transportEpoch: z.number(),
   publicationFrame: z.number().positive(), graphLatencyFrames: z.number(), pinnedLatencyFrames: z.number() })
 const nativeLines = (text: string) => text.slice(0, text.lastIndexOf("\n") + 1).split("\n").filter(Boolean).map((line) => JSON.parse(line))
@@ -201,7 +214,7 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
   const { launchOut, directory, row } = input
   const { edits } = logged.parse(JSON.parse(await readFile(path.join(directory, "phase9-edits.json"), "utf8")))
   const steps = [...Map.groupBy(edits, (edit) => edit.index)].map(([index, group]) => ({ index, editWallMs: Math.min(...group.map((edit) => edit.wallMs)),
-    settledWallMs: group[0]?.settledWallMs, publicationFrame: group[0]?.publicationFrame ?? 0 }))
+    settledWallMs: group[0]?.settledWallMs, publicationFrame: group[0]?.publicationFrame ?? 0, startSec: group.find((edit) => edit.startSec !== undefined)?.startSec }))
   if (row.judge === "take") return judgeBurst(steps, input.captureEndWallMs, compareTake(takeResult.parse(JSON.parse(await readFile(path.join(directory, takeFile), "utf8")))))
   const texts = await Promise.all(input.natives.map((name) => readFile(path.join(launchOut, name), "utf8")))
   const hostEvents = texts.flatMap(parseHostLines)
@@ -216,8 +229,12 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
   const seams = steps.map((step) => step.publicationFrame)
   const captured = Math.max(...mine.map((block) => block.transportFrame + block.frames))
   if (row.judge === "states") {
-    const states = await Promise.all([row.start, ...steps.map((step) => row.cycle[(step.index - 1) % row.cycle.length]?.state ?? "")]
+    const [initial, ...entered] = await Promise.all([row.start, ...steps.map((step) => row.cycle[(step.index - 1) % row.cycle.length]?.state ?? "")]
       .map((state) => readWav(input.stateFile(state))))
+    const states = initial ? [initial, ...entered.map((state, position) => {
+      const startSec = steps[position]?.startSec
+      return startSec === undefined ? state : placedAt(state, initial, startSec)
+    })] : []
     const endFrame = Math.min(captured, ...states.map((state) => state.samples.length / state.channels))
     const entries = steps.map((step) => row.cycle[(step.index - 1) % row.cycle.length]?.entry)
     return judgeBurst(steps, input.captureEndWallMs, compareStates({ output: transportIndexed(capture, mine, endFrame), states, seams, entries, endFrame }))
@@ -339,6 +356,15 @@ export const selfTest = () => {
   check(once(deleted(tone, tone)).outcome === "fail", "a clip that still sounds after the delete fails")
   check(once(deleted((frame) => frame < seam ? 0 : 0, tone)).outcome === "fail", "a clip that never sounded proves nothing")
   check(once(deleted((frame) => frame < seam + fade ? tone(frame) : 0, (frame) => frame < seam ? tone(frame) : 0)).outcome === "fail", "a retained source that stops with the delete fails")
+  // An import places its clip at the playhead: the live output holds the present state shifted to that start. The reference built at 0
+  // fails against it; the reference moved to the same start passes.
+  const absent = deleted(() => 0, tone), present = deleted((frame) => tone(frame * 1.7 + 3), tone)
+  const start = 1, importSeam = seams[0] ?? 0
+  const live = deleted((frame) => frame < start * sampleRate ? 0 : tone((frame - start * sampleRate) * 1.7 + 3), tone)
+  const importWindow = (reference: Pcm) => judgeBurst(steps.slice(0, 1), 10_000, compareStates({ output: live, states: [absent, reference], seams: [importSeam], entries: ["cut"], endFrame }))
+  check(importWindow(placedAt(present, absent, start)).outcome === "pass", "a reference placed at the live clip's start passes")
+  const unplaced = importWindow(present)
+  check(unplaced.outcome === "fail" && unplaced.editIndex === 1, `a reference built at 0 against a clip placed later fails: ${JSON.stringify(unplaced)}`)
   // A raise row: the Spectral on the master path goes 700 to 4300 frames of latency and back, twice. Only the first raise moves the
   // pinned budget, so only it shifts the retained channel (by 3600 frames); the lowers and the second raise move nothing.
   const low = 700, high = 4300, latencyEnd = 800_000, publicationFrames = [100_000, 300_000, 500_000, 700_000]

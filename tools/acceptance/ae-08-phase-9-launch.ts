@@ -36,13 +36,15 @@ export type Phase9Launch =
   | { role: "reference" | "calibration"; rows: Row[]; frames: number; contentSeconds: number }
 
 // The ids a performer needs from the project; `observe` reads them from a fresh snapshot, so a performer never holds a stale one.
-export type Observed = { spectralEffectId: string | undefined; limiterEffectId: string | undefined; externalEffectId: string | undefined; trackId: (name: string) => string | undefined; clipId: (name: string) => string | undefined }
+export type Observed = { spectralEffectId: string | undefined; limiterEffectId: string | undefined; externalEffectId: string | undefined; trackId: (name: string) => string | undefined; clipId: (name: string) => string | undefined
+  clipStartSec: (name: string) => number | undefined }
 export const observeSnapshot = (state: ProjectSnapshotV2, changedTrackId: string): Observed => ({
   spectralEffectId: state.processors.find((entry) => "trackId" in entry.target && entry.target.trackId === changedTrackId && entry.processor.kind === "spectral")?.id,
   limiterEffectId: state.processors.find((entry) => "trackId" in entry.target && entry.target.trackId === changedTrackId && entry.processor.kind === "limiter")?.id,
   externalEffectId: state.processors.find((entry) => "trackId" in entry.target && entry.target.trackId === changedTrackId && entry.processor.kind === "external-vst3")?.id,
   trackId: (name) => state.tracks.find((track) => track.name === name)?.id,
   clipId: (name) => state.clips.find((clip) => clip.name.includes(name))?.id,
+  clipStartSec: (name) => state.clips.find((clip) => clip.name.includes(name))?.startSec,
 })
 
 type Performers = {
@@ -111,7 +113,12 @@ export const createPerformer = ({ context, runtime, observe, setup }: Performers
     ["track-delete", async () => { await deleteTrackThroughUi(context, "Changed right"); await changedClip(false); return unmoved }],
     ["undo", history(false, true)],
     ["redo", history(true, false)],
-    ["asset-import", async () => { await runtime(["import", "--path", setup.changedFile]); await waitImportedClip(context, "changed"); return unmoved }],
+    // The import takes the playhead for its start; the oracle needs the start the clip really took (placedAt in the compare).
+    ["asset-import", async () => {
+      await runtime(["import", "--path", setup.changedFile])
+      await waitImportedClip(context, "changed")
+      return { ...unmoved, startSec: required((await observe()).clipStartSec("changed"), "Imported changed clip start") }
+    }],
     ["asset-clip-delete", deleteImportedClip],
     ["clip-delete", deleteImportedClip],
     ["vst-insert", async () => { await insertTestPlugin(context); return unmoved }],
@@ -229,8 +236,13 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
   if (launch.role === "burst") for (const row of launch.rows.filter((entry) => entry.judge === "states")) {
     const exported = new Set([row.start])
     await exportReference(context, stateName(row.name, row.start), launch.contentSeconds)
+    // The transport is stopped: put the playhead at 0 so an import places its clip at 0, the start placedAt shifts from.
+    await runtime(["seek", "0"])
     for (const step of row.cycle) {
-      for (const edit of step.edits) await perform(edit)
+      for (const edit of step.edits) {
+        const { startSec } = await perform(edit)
+        if (startSec !== undefined && startSec !== 0) throw new Error(`The reference ${edit} placed its clip at ${startSec} s, not 0`)
+      }
       if (!exported.has(step.state)) await exportReference(context, stateName(row.name, step.state), launch.contentSeconds)
       exported.add(step.state)
     }
@@ -268,7 +280,7 @@ const check = (condition: boolean, message: string) => { if (!condition) throw n
 
 export const selfTest = async () => {
   const calls: string[] = []
-  const observed: Observed = { spectralEffectId: "spectral-1", limiterEffectId: "limiter-1", externalEffectId: "external-1", trackId: (name) => name === silentTrack ? "silent-1" : undefined, clipId: (name) => name === "changed" ? "clip-1" : undefined }
+  const observed: Observed = { spectralEffectId: "spectral-1", limiterEffectId: "limiter-1", externalEffectId: "external-1", trackId: (name) => name === silentTrack ? "silent-1" : undefined, clipId: (name) => name === "changed" ? "clip-1" : undefined, clipStartSec: (name) => name === "changed" ? 2 : undefined }
   const perform = createPerformer({
     context: {
       mutate: async (actions) => { calls.push(`mutate ${JSON.stringify(actions)}`); return 4242 },
@@ -326,6 +338,7 @@ export const selfTest = async () => {
 
   const imported = await run("asset-import")
   check(imported.calls[0] === "runtime import --path /tmp/changed.wav", "asset-import imports the changed file")
+  check(imported.moved.startSec === 2, "asset-import reports the start the clip took")
   const deleted = await run("asset-clip-delete")
   check(deleted.calls[0] === `mutate ${JSON.stringify([{ kind: "clip.delete", clip: ref("clip-1") }])}`, "asset-clip-delete names the observed clip")
 

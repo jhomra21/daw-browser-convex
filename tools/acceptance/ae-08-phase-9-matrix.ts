@@ -178,10 +178,10 @@ export const awaitPublicationComplete = (out: string, sinceWallMs: number, raise
 
 // ---- Per-launch capture ----
 export type LoggedEdit = { index: number; name: string; wallMs: number; settledWallMs: number | undefined;
-  revision: number; publicationFrame: number; fromLatencyFrames: number; toLatencyFrames: number }
+  revision: number; publicationFrame: number; fromLatencyFrames: number; toLatencyFrames: number; startSec?: number }
 // `wallMs` is when the app received the edit's commit (its control-commit-received line), for an edit that goes through the control
 // protocol. An edit made in the UI has none and counts from the start of its step.
-export type Perform = (edit: string) => Promise<{ fromLatencyFrames: number; toLatencyFrames: number; wallMs?: number }>
+export type Perform = (edit: string) => Promise<{ fromLatencyFrames: number; toLatencyFrames: number; wallMs?: number; startSec?: number }>
 // A VST edit waits for a worker to start (the plan assumes 20 s per insert), so its deadline is longer.
 const settleDeadlineMs = (row: Row) => row.repeat === "vst-burst" ? 60_000 : 15_000
 

@@ -17,6 +17,7 @@ import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import { portableGraphContractHash } from "@daw-browser/audio-core-contract/generated"
 import { NativeAudioHostCommandError } from "./audio-host"
 import { parsePluginCatalogData, type PluginCatalogData } from "./plugin-catalog"
+import { preflightVst3Insertion } from "./vst3-insertion-preflight"
 import {
   coordinateNativeVst3Attachments,
   createNativeVst3AttachmentLedger,
@@ -888,7 +889,6 @@ test("stops on retirement failure after retaining the newly published revision",
   expect(creation.coordinator.snapshot().revision).toBe(11)
 })
 
-// A stateful plug-in carries captured state, so its verdict is never taken from the cache.
 const ledgerHarness = (
   stateful: boolean,
   clock = { now: 0 },
@@ -966,7 +966,6 @@ test("a changed instance is detached before it is attached and a removed one bef
   const moved = { ...first, stageIndex: 1 }
   await run([moved])
   expect(calls).toEqual([
-    `preflight:${first.instanceId}`,
     `detach:${second.instanceId}`,
     `detach:${first.instanceId}`,
     `attach:${first.instanceId}`,
@@ -1000,7 +999,7 @@ test("a removal of an instance the host already retired is not refused, and the 
   expect(calls).toEqual([`detach:${second.instanceId}`])
   calls.length = 0
   await run([first, second])
-  expect(calls).toEqual([`preflight:${second.instanceId}`, `attach:${second.instanceId}`])
+  expect(calls).toEqual([`attach:${second.instanceId}`])
 })
 
 const extraInstance = (index: number) => attachment({
@@ -1018,14 +1017,15 @@ test("a removed instance that comes back within the parking bounds skips its pre
   ledger.published()
   calls.length = 0
   clock.now = 59_999
-  await run([first, second])
+  // Another sample rate has no cached verdict, so a preflight shows the parking is what skipped it.
+  await run([first, second], { sampleRateHz: 44_100 })
   expect(calls).toEqual([`attach:${first.instanceId}`])
   ledger.published()
   await run([second])
   ledger.published()
   calls.length = 0
   clock.now += 60_000
-  await run([first, second])
+  await run([first, second], { sampleRateHz: 32_000 })
   expect(calls).toEqual([`preflight:${first.instanceId}`, `attach:${first.instanceId}`])
 })
 
@@ -1037,7 +1037,7 @@ test("only the four newest removed instances stay parked", async () => {
   await run([second])
   ledger.published()
   calls.length = 0
-  await run([second, ...extras])
+  await run([second, ...extras], { sampleRateHz: 44_100 })
   expect(calls.filter((call) => call.startsWith("preflight:"))).toEqual([`preflight:${extras[0]!.instanceId}`])
 })
 
@@ -1054,7 +1054,7 @@ test("a refused plan keeps the staged instance it would have dropped, so the nex
   const { calls, run } = ledgerHarness(true, { now: 0 }, refused)
   await run([first, second])
   refused.add(extraInstance(1).instanceId)
-  expect(await run([second, extraInstance(1)])).toMatchObject({ ok: false, code: "worker-crashed" })
+  expect(await run([second, extraInstance(1)], { sampleRateHz: 44_100 })).toMatchObject({ ok: false, code: "worker-crashed" })
   calls.length = 0
   expect(await run([first, second])).toEqual({ ok: true, attached: 0 })
   expect(calls).toEqual([])
@@ -1068,10 +1068,10 @@ test("a dropped staged instance is detached once the plan that drops it is accep
   expect(calls).toEqual([`detach:${first.instanceId}`])
   calls.length = 0
   expect(await run([first, second])).toEqual({ ok: true, attached: 1 })
-  expect(calls).toEqual([`preflight:${first.instanceId}`, `attach:${first.instanceId}`])
+  expect(calls).toEqual([`attach:${first.instanceId}`])
 })
 
-test("a cached verdict is not reused when the sample rate, the state revision or the fingerprints differ", async () => {
+test("a cached verdict is not reused when the sample rate or the fingerprints differ, and a state revision only echoes", async () => {
   const { calls, run } = ledgerHarness(false)
   await run([first])
   const sibling = extraInstance(1)
@@ -1081,7 +1081,7 @@ test("a cached verdict is not reused when the sample rate, the state revision or
   const later = extraInstance(2)
   calls.length = 0
   await run([first, sibling, { ...later, stateRevision: 8 }], { sampleRateHz: 44_100 })
-  expect(calls).toEqual([`preflight:${later.instanceId}`, `attach:${later.instanceId}`])
+  expect(calls).toEqual([`attach:${later.instanceId}`])
   const refingerprinted = { ...extraInstance(3), bundleFingerprint: "c".repeat(64) }
   const moved = catalog()
   const { launchEligibility } = moved.entries[0]
@@ -1090,6 +1090,75 @@ test("a cached verdict is not reused when the sample rate, the state revision or
   calls.length = 0
   await run([refingerprinted], { sampleRateHz: 44_100, catalog: moved })
   expect(calls).toContain(`preflight:${refingerprinted.instanceId}`)
+})
+
+test("a captured state does not defeat the cached verdict", async () => {
+  const { calls, run } = ledgerHarness(true)
+  await run([first])
+  calls.length = 0
+  await run([first, extraInstance(1)])
+  expect(calls).toEqual([`attach:${extraInstance(1).instanceId}`])
+})
+
+// The insertion preflight runs the worker with the transport and sample rate staging will use, so what it learned is the verdict staging
+// would learn. The worker only echoes the state revision (native/plugin-host vst3-worker.cpp), and the preflight is given no state.
+const insertPlugin = async (session: ReturnType<typeof createNativeVst3SessionLedger>, source: typeof first, sampleRateHz = 48_000) => {
+  const spawned: string[] = []
+  const inserted = await preflightVst3Insertion({
+    request: { instanceId: source.instanceId, reference: {
+      version: 1, classId: source.catalogIdentity.classId, vendorId: source.catalogIdentity.vendorId, architecture: "arm64",
+      bundleFingerprint: source.bundleFingerprint, binaryFingerprint: source.binaryFingerprint, scannerCatalogVersion: 2 } },
+    catalog: catalog(),
+    workerPath: "/Resources/daw-vst3-worker",
+    sampleRateHz,
+    maximumFramesPerBlock: source.workerTransport.maximumFrames,
+    rememberVerdict: (attachment, result) => session.rememberVerdict(attachment, sampleRateHz, result),
+    preflight: async ({ attachment: input }) => {
+      spawned.push(`preflight:${input.instanceId}`)
+      return available({ ...source, stateRevision: input.stateRevision })
+    },
+  })
+  return { inserted, spawned }
+}
+
+test("an inserted plug-in stages with no second preflight, and a changed fingerprint still preflights", async () => {
+  const session = createNativeVst3SessionLedger()
+  const calls: string[] = []
+  const stage = (candidate: typeof first, trusted = catalog()) => coordinateNativeVst3Attachments({
+    serializedPlan: plan([candidate]),
+    sampleRateHz: 48_000,
+    workerPath: "/Resources/daw-vst3-worker",
+    catalogStore: { load: async () => trusted },
+    audioHost: host(calls),
+    ledger: session.forHost({ detachVst: async () => undefined }),
+    capturedVstStates: new Map(),
+    requiredVstStateInstanceIds: new Set(),
+    preflight: async ({ attachment: input }) => {
+      calls.push(`preflight:${input.instanceId}`)
+      return available(candidate)
+    },
+  })
+  const { inserted, spawned } = await insertPlugin(session, first)
+  expect(inserted.ok).toBe(true)
+  expect(spawned).toEqual([`preflight:${first.instanceId}`])
+  // The processor row's state revision (7) is not the insertion's (0).
+  expect(await stage(first)).toEqual({ ok: true, attached: 1 })
+  expect(calls).toEqual([`attach:${first.instanceId}`])
+
+  const moved = catalog()
+  const { launchEligibility } = moved.entries[0]
+  if (!launchEligibility) throw new Error("Missing launch eligibility")
+  launchEligibility.bundleFingerprint = "c".repeat(64)
+  calls.length = 0
+  expect(await stage({ ...first, bundleFingerprint: "c".repeat(64) }, moved)).toEqual({ ok: true, attached: 1 })
+  expect(calls).toEqual([`preflight:${first.instanceId}`, `attach:${first.instanceId}`])
+
+  // A new transaction is a new session: nothing inserted before it is taken on trust.
+  await insertPlugin(session, first)
+  session.begin()
+  calls.length = 0
+  await stage(first)
+  expect(calls).toEqual([`preflight:${first.instanceId}`, `attach:${first.instanceId}`])
 })
 
 test("a plug-in whose trust was revoked is unresolved even when its verdict was cached", async () => {

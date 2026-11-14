@@ -166,6 +166,7 @@ import type {
 } from "@daw-browser/audio-engine/native-host-wire"
 import {
   decodeNativeExternalAttachmentPlan,
+  maxVst3WorkerFrames,
   nativeVst3InsertionPreflightRequestSchema,
 } from "@daw-browser/plugin-host-protocol"
 import {
@@ -2234,11 +2235,15 @@ const registerIpc = () => {
       if (!device?.available) {
         return { ok: false as const, code: "host-unavailable" as const, message: "No native audio output device is available." }
       }
-      const preflightInput = {
+      const preflightInput: Parameters<typeof preflightVst3Insertion>[0] = {
         request: request.data,
         catalog: await store.load(),
         workerPath,
         sampleRateHz: device.nominalSampleRateHz,
+        maximumFramesPerBlock: Math.min(device.maximumFramesPerBlock, maxVst3WorkerFrames),
+        rememberVerdict: (attachment, result) => {
+          attachmentLedger.rememberVerdict(attachment, device.nominalSampleRateHz, result)
+        },
       }
       const first = await preflightVst3Insertion(preflightInput)
       if (first.ok || first.code !== "stale-catalog") return first

@@ -19,7 +19,7 @@ import { resolveVst3Attachment } from "./vst3-attachment"
 import { preflightNativeVst3Worker } from "./vst3-preflight"
 
 type Attachment = NativeExternalAttachmentPlan["attachments"][number]
-type PreflightAttachment = ResolvedVst3Attachment & { stateRevision: number }
+export type PreflightAttachment = ResolvedVst3Attachment & { stateRevision: number }
 type CapturedVst3State = { bytes: Uint8Array; sha256: string }
 
 export type NativeVst3CoordinatorFailureCode =
@@ -721,9 +721,12 @@ const loadKey = (native: PreflightAttachment, stateSha256: string | undefined) =
   native.workerTransport, native.parameterIds, native.initialParameterValues, stateSha256 ?? "",
 ])
 
+// What a preflight can learn: the worker loads this binary with this transport at this rate. It is given no state, and it only
+// echoes the state revision (a cached verdict takes the attachment's own), so neither is part of the key.
 const verdictKey = (native: PreflightAttachment, sampleRateHz: number) => JSON.stringify([
   native.classId, native.vendorId, native.bundleFingerprint, native.binaryFingerprint, native.role,
-  native.workerTransport, native.stateRevision, sampleRateHz,
+  native.workerTransport.slotCount, native.workerTransport.maximumFrames, native.workerTransport.inputChannels,
+  native.workerTransport.outputChannels, native.workerTransport.maximumEventsPerBlock, sampleRateHz,
 ])
 
 const ledgerEntry = (attachment: Attachment, native: PreflightAttachment, stateSha256: string | undefined): LedgerEntry => ({
@@ -740,11 +743,11 @@ const ledgerEntry = (attachment: Attachment, native: PreflightAttachment, stateS
 export const createNativeVst3AttachmentLedger = (
   host: Pick<NativeAudioHostSupervisor, "detachVst">,
   now: () => number = Date.now,
+  verdicts = new Map<string, AvailablePreflight>(),
 ) => {
   const active = new Map<string, LedgerEntry>()
   const staged = new Map<string, LedgerEntry>()
   const parked = new Map<string, { load: string; at: number }>()
-  const verdicts = new Map<string, AvailablePreflight>()
   const parkedLoad = (instanceId: string) => {
     const entry = parked.get(instanceId)
     return entry !== undefined && now() - entry.at < parkedAgeMs ? entry.load : undefined
@@ -811,9 +814,18 @@ export type NativeVst3AttachmentLedger = ReturnType<typeof createNativeVst3Attac
 // transaction commit, a published revision and a rollback reach the one in force.
 export const createNativeVst3SessionLedger = () => {
   let ledger: NativeVst3AttachmentLedger | undefined
+  // Held beside the ledger because an insertion's preflight arrives before the session has coordinated any plug-in.
+  let verdicts = new Map<string, AvailablePreflight>()
   return {
-    begin: () => { ledger = undefined },
-    forHost: (host: Pick<NativeAudioHostSupervisor, "detachVst">) => ledger ??= createNativeVst3AttachmentLedger(host),
+    begin: () => {
+      ledger = undefined
+      verdicts = new Map()
+    },
+    forHost: (host: Pick<NativeAudioHostSupervisor, "detachVst">) => ledger ??= createNativeVst3AttachmentLedger(host, Date.now, verdicts),
+    // An insertion's preflight is the verdict staging the plug-in would learn.
+    rememberVerdict: (attachment: PreflightAttachment, sampleRateHz: number, result: AvailablePreflight) => {
+      verdicts.set(verdictKey(attachment, sampleRateHz), result)
+    },
     published: () => ledger?.published(),
     rolledBack: () => ledger?.rolledBack(),
   }
@@ -893,9 +905,9 @@ const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3Coor
     // The host takes a parked instance back as it was preflighted, so there is nothing to load.
     if (ledger && entry && ledger.parkedMatches(instanceId, entry.load)) continue
     const key = verdictKey(candidate.native, input.sampleRateHz)
-    const cached = input.capturedVstStates?.has(instanceId) ? undefined : ledger?.verdict(key)
+    const cached = ledger?.verdict(key)
     const result = cached
-      ? { ...cached, hello: { ...cached.hello, instanceId } }
+      ? { ...cached, hello: { ...cached.hello, instanceId, manifest: { ...cached.hello.manifest, stateRevision: candidate.native.stateRevision } } }
       : await runPreflight({
         workerPath: input.workerPath,
         attachment: candidate.native,
@@ -917,7 +929,7 @@ const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3Coor
         instanceId,
       }
     }
-    if (ledger && !cached && !input.capturedVstStates?.has(instanceId)) ledger.rememberVerdict(key, result)
+    if (ledger && !cached) ledger.rememberVerdict(key, result)
     if (
       !candidate.attachment.bypassed
       && result.hello.manifest.supportsState === true

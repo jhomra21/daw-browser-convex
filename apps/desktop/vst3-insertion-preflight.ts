@@ -1,14 +1,15 @@
 import type {
   NativeVst3InsertionPreflightRequest,
   NativeVst3InsertionPreflightResult,
+  NativeVst3PreflightResult,
 } from "@daw-browser/plugin-host-protocol"
 import type { PluginCatalogData } from "./plugin-catalog"
 import { resolveVst3Attachment } from "./vst3-attachment"
 import { preflightNativeVst3Worker } from "./vst3-preflight"
+import type { PreflightAttachment } from "./native-vst3-coordinator"
 
 const effectWorkerTransport = {
   slotCount: 2,
-  maximumFrames: 512,
   inputChannels: 2,
   outputChannels: 2,
   maximumEventsPerBlock: 128,
@@ -33,6 +34,9 @@ export const preflightVst3Insertion = async (input: {
   catalog: PluginCatalogData
   workerPath: string
   sampleRateHz: number
+  // The runtime's block size: staging preflights with it, so the verdict handed to `rememberVerdict` is the one staging needs.
+  maximumFramesPerBlock: number
+  rememberVerdict: (attachment: PreflightAttachment, result: Extract<NativeVst3PreflightResult, { status: "available" }>) => void
   preflight?: typeof preflightNativeVst3Worker
 }): Promise<NativeVst3InsertionPreflightResult> => {
   const classIsCataloged = input.catalog.entries.some((entry) => (
@@ -47,30 +51,32 @@ export const preflightVst3Insertion = async (input: {
   const instrument = resolved.role === "instrument"
   const workerTransport = {
     ...effectWorkerTransport,
+    maximumFrames: input.maximumFramesPerBlock,
     inputChannels: instrument ? 0 : 2,
+  }
+  const attachment: PreflightAttachment = {
+    graphNodeId: 1n,
+    stageIndex: 0,
+    instanceId: input.request.instanceId,
+    classId: resolved.classId,
+    vendorId: resolved.vendorId,
+    canonicalBundlePath: resolved.canonicalBundlePath,
+    canonicalExecutablePath: resolved.canonicalExecutablePath,
+    bundleFingerprint: resolved.bundleFingerprint,
+    binaryFingerprint: resolved.binaryFingerprint,
+    scannerProtocolVersion: resolved.scannerProtocolVersion,
+    role: resolved.role,
+    inputLayout: instrument ? "none" : "stereo",
+    outputLayout: "stereo",
+    declaredLatencyFrames: 0,
+    transportLatencyFrames: workerTransport.maximumFrames,
+    workerTransport,
+    stateRevision: 0,
   }
   const result = await (input.preflight ?? preflightNativeVst3Worker)({
     workerPath: input.workerPath,
     sampleRateHz: input.sampleRateHz,
-    attachment: {
-      graphNodeId: 1n,
-      stageIndex: 0,
-      instanceId: input.request.instanceId,
-      classId: resolved.classId,
-      vendorId: resolved.vendorId,
-      canonicalBundlePath: resolved.canonicalBundlePath,
-      canonicalExecutablePath: resolved.canonicalExecutablePath,
-      bundleFingerprint: resolved.bundleFingerprint,
-      binaryFingerprint: resolved.binaryFingerprint,
-      scannerProtocolVersion: resolved.scannerProtocolVersion,
-      role: resolved.role,
-      inputLayout: instrument ? "none" : "stereo",
-      outputLayout: "stereo",
-      declaredLatencyFrames: 0,
-      transportLatencyFrames: workerTransport.maximumFrames,
-      workerTransport,
-      stateRevision: 0,
-    },
+    attachment,
   })
   if (result.status === "unavailable") return failure(result.code, result.message)
   if (
@@ -85,6 +91,7 @@ export const preflightVst3Insertion = async (input: {
       ? "The VST3 instrument does not expose no enabled audio inputs and one supported stereo output bus."
       : "The VST3 plug-in does not expose one supported stereo input and output bus.")
   }
+  input.rememberVerdict(attachment, result)
   return {
     ok: true,
     manifest: {

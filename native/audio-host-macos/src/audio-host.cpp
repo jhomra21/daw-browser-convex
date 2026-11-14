@@ -1397,6 +1397,7 @@ struct AudioHost::Impl {
     acceptance_pinned_latency.store(daw::audio_core::InspectLatencyTransition(core).budget, std::memory_order_relaxed);
     acceptance_graph_latency.store(daw::audio_core::PublishedGraphLatency(core), std::memory_order_relaxed);
   }
+  std::uint64_t acceptance_observed_processor_sequence = 0;
   std::uint32_t acceptance_observed_epoch = UINT32_MAX;
   bool acceptance_observed_running = false;
   // Evidence-only ordinal. WorkerControlService::workerGeneration is a private
@@ -2173,6 +2174,18 @@ struct AudioHost::Impl {
             acceptance_observed_epoch = schedule_progress_epoch.load();
             acceptance_observed_running = schedule_progress_running.load();
             Evidence("transport");
+          }
+          // A live parameter write, such as a manual override of an automated one, publishes no graph: the callback's
+          // applied sequence is the only sign it landed. Reset to zero by a stop, which is not an application.
+          const auto processor_sequence = schedule_progress_processor.load(std::memory_order_acquire);
+          if (acceptance_tap && processor_sequence != acceptance_observed_processor_sequence) {
+            acceptance_observed_processor_sequence = processor_sequence;
+            if (processor_sequence != 0) {
+              char detail[64];
+              std::snprintf(detail, sizeof(detail), ",\"appliedProcessorSequence\":\"%llu\"",
+                static_cast<unsigned long long>(processor_sequence));
+              Evidence("processor-sequence-applied", "block-boundary", 0, detail);
+            }
           }
           NotifyScheduleProgress();
         }
@@ -3697,8 +3710,19 @@ ProcessorPatchStatus AudioHost::QueueProcessorStatePatch(const std::span<const s
   const daw_audio_core_handle core = impl_->active_core.load(std::memory_order_acquire);
   const auto staged = daw_audio_core_stage_processor_state_patch(core, &patch);
   if (staged != DAW_AUDIO_CORE_OK) return refused(Refusal::kStageFailed, staged);
+  // A patch the core applied is the only line a state change that publishes no graph leaves, so it is the settle point.
+  const auto applied_with_evidence = [&](const std::uint32_t result) {
+    const auto status = applied_or_failed(result);
+    if (status.outcome == ProcessorPatchOutcome::kApplied && daw::acceptance::Enabled()) {
+      char detail[96];
+      std::snprintf(detail, sizeof(detail), ",\"nodeId\":\"%llu\",\"instanceId\":%u,\"kind\":%u",
+        static_cast<unsigned long long>(node_id), instance_id, kind);
+      impl_->Evidence("processor-patch-applied", "", revision, detail);
+    }
+    return status;
+  };
   if (impl_->state.load(std::memory_order_acquire) != LifecycleState::kRunning) {
-    return applied_or_failed(daw_audio_core_apply_staged_processor_state_patch(core));
+    return applied_with_evidence(daw_audio_core_apply_staged_processor_state_patch(core));
   }
   const std::uint64_t token = ++impl_->processor_patch_sequence;
   impl_->processor_patch_requested.store(token, std::memory_order_release);
@@ -3723,7 +3747,7 @@ ProcessorPatchStatus AudioHost::QueueProcessorStatePatch(const std::span<const s
     impl_->Evidence("processor-patch-timeout", "callback-claimed-patch-unresolved");
     return {ProcessorPatchOutcome::kClaimed, Refusal::kNone, 0, token};
   }
-  return applied_or_failed(impl_->processor_patch_result.load(std::memory_order_acquire));
+  return applied_with_evidence(impl_->processor_patch_result.load(std::memory_order_acquire));
 }
 
 bool AudioHost::QueueInstrumentEvents(const std::span<const std::uint8_t> payload) {

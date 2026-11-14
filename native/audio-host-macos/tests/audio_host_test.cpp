@@ -3431,7 +3431,8 @@ struct EvidenceLog {
   static std::optional<std::uint64_t> Field(const std::string& line, const std::string& key) {
     const auto at = line.find("\"" + key + "\":");
     if (at == std::string::npos) return std::nullopt;
-    return std::strtoull(line.c_str() + at + key.size() + 3, nullptr, 10);
+    const char* value = line.c_str() + at + key.size() + 3;
+    return std::strtoull(*value == '"' ? value + 1 : value, nullptr, 10);
   }
 };
 
@@ -5330,6 +5331,63 @@ void TestParameterBatchIsAllOrNothing() {
   assert(applied_sequence() == 9);
 }
 
+// A processor state patch (a Limiter lookahead change) publishes no graph. The host writes one line when the core
+// applied it, inline while stopped and on the callback's acknowledgement while running, and none for a refusal.
+void TestProcessorPatchWritesAnApplyLine() {
+  EvidenceLog log;
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48000,
+    .max_frames_per_block = 4, .channel_count = 2, .revision = 1}));
+  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.F, 0, true)));
+  assert(host.QueueProcessorStatePatch(ProcessorStatePatch(9, 6.F)).outcome == ProcessorPatchOutcome::kRefused);
+  assert(log.Lines("processor-patch-applied", 0).empty());
+  assert(host.QueueProcessorStatePatch(ProcessorStatePatch(2, 6.F)).outcome == ProcessorPatchOutcome::kApplied);
+  assert(log.Lines("processor-patch-applied", 1).size() == 1);
+  assert(host.StartDiagnosticMode());
+  auto running = std::async(std::launch::async, [&host] { return host.QueueProcessorStatePatch(ProcessorStatePatch(2, -6.F)); });
+  std::array<float, 4> signal{1.F, 1.F, 1.F, 1.F}, left{}, right{};
+  const std::array<const float*, 2> input{signal.data(), signal.data()};
+  const std::array<float*, 2> output{left.data(), right.data()};
+  for (unsigned attempt = 0; attempt < 500 && running.wait_for(std::chrono::milliseconds(2)) != std::future_status::ready; ++attempt)
+    assert(host.ProcessPlanar(input, output, 4));
+  assert(running.get().outcome == ProcessorPatchOutcome::kApplied);
+  const auto lines = log.Lines("processor-patch-applied", 2);
+  host.Stop();
+  assert(lines.size() == 2);
+  for (const auto& line : lines)
+    assert(EvidenceLog::Field(line, "requestedRevision") == 2 && EvidenceLog::Field(line, "nodeId") == 2
+      && EvidenceLog::Field(line, "instanceId") == 77 && EvidenceLog::Field(line, "kind") == DAW_AUDIO_PROCESSOR_KIND_UTILITY);
+}
+
+// A manual override of an automated parameter is a live batched write, and publishes no graph either. The line
+// carries the sequence the callback applied, once per sequence.
+void TestManualParameterWriteWritesAnApplyLine() {
+  EvidenceLog log;
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48000,
+    .max_frames_per_block = 128, .channel_count = 2, .revision = 1}));
+  assert(host.PrepareAndPublishGraph(1, GraphSnapshot(1, 1.F, 0, true)));
+  assert(host.SetTransport(1, false, 0));
+  assert(host.StartDiagnosticMode());
+  assert(host.SetTransport(1, true, 0));
+  std::array<float, 128> signal{}, left{}, right{};
+  signal.fill(1.F);
+  const std::array<const float*, 2> input{signal.data(), signal.data()};
+  const std::array<float*, 2> output{left.data(), right.data()};
+  // The bridge reports the newest sequence it observes, so each one is awaited before the next is queued.
+  std::vector<std::string> lines;
+  for (const std::uint64_t sequence : {9, 10}) {
+    assert(host.QueueParameterEvents(ParameterBatch(sequence, 77, 1)));
+    assert(host.ProcessPlanar(input, output, 128));
+    assert(host.ProcessPlanar(input, output, 128));
+    lines = log.Lines("processor-sequence-applied", lines.size() + 1);
+  }
+  host.Stop();
+  assert(lines.size() == 2);
+  assert(EvidenceLog::Field(lines[0], "appliedProcessorSequence") == 9
+    && EvidenceLog::Field(lines[1], "appliedProcessorSequence") == 10);
+}
+
 // T8: every QueueProcessorStatePatch branch returns a valid outcome/refusal/token combination.
 void TestPatchStatusBranchesAreValid() {
   const auto expect = [](const ProcessorPatchStatus& status, const ProcessorPatchOutcome outcome,
@@ -6481,6 +6539,8 @@ int main() {
   TestPatchClaimAckBeforeRecordStillReports();
   TestPatchClaimResultsStayCoherentWhenAlternating();
   TestParameterBatchIsAllOrNothing();
+  TestProcessorPatchWritesAnApplyLine();
+  TestManualParameterWriteWritesAnApplyLine();
   TestPatchStatusBranchesAreValid();
   TestNativeMeterQueueAggregatesPostGraphOutput();
   TestNativeVstAttachmentBoundsAndLatencyContract();

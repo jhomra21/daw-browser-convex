@@ -27,6 +27,7 @@ import { assignSampleToDrumRackPad, buildClipCreatePayload, type ClipCreateSnaps
   INSTRUMENT_CONTRACTS,
   normalizeTrackInstrumentParams,
   createInstrumentInstanceId,
+  applySamplerZoneEdit,
   type ArpeggiatorParams,
   type DrumRackParams,
   type DrumRackSampleAssignment,
@@ -730,7 +731,7 @@ export function createEffectsPanelInstrumentDevice(
         if (!targetId) return;
         instrumentState.updateForTarget(targetId, (previous) => {
           const params = previous.kind === "sampler" ? previous.params : INSTRUMENT_CONTRACTS.sampler.createDefaultParams();
-          return { kind: "sampler", instanceId: previous.kind === "sampler" ? previous.instanceId : createInstrumentInstanceId(), params: INSTRUMENT_CONTRACTS.sampler.normalizeParams({ ...params, zones: params.zones.map((zone) => zone.id === zoneId ? { ...zone, ...updates, id: zone.id } : zone) }) };
+          return { kind: "sampler", instanceId: previous.kind === "sampler" ? previous.instanceId : createInstrumentInstanceId(), params: INSTRUMENT_CONTRACTS.sampler.normalizeParams({ ...params, zones: params.zones.map((zone) => zone.id === zoneId ? applySamplerZoneEdit(zone, updates) : zone) }) };
         });
       },
       addZone: (zone) => {

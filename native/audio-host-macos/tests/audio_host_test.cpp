@@ -5841,6 +5841,23 @@ void AttachReadyInstances(daw::audio_host_macos::AudioHost& host, const std::vec
   for (const auto id : ids) assert(WaitForVstHealth(host, id, NativeVstWorkerHealth::kReady));
 }
 
+// The renderer asks for the revision that carries a reported latency as soon as it hears the report, which can be
+// before the host's next control pass has read it: the preparation reads it itself.
+void TestRevisionPreparedRightAfterALatencyReportBindsTheNewLatency() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  StartRunningHostWithGraph(host);
+  AttachReadyInstances(host, {kFirstVstInstance});
+  PublishRunningRevision(host, 3, 36);
+  assert(AudioHostTestAccess::PublishWorkerDiagnostic(host, kFirstVstInstance,
+    {.kind = daw::plugin_host::WorkerDiagnosticKind::kLatency, .value = 99}));
+  assert(NextWorkerNotification(host, WorkerNotificationKind::kLatency));
+  // 99 declared plus the transport's 4.
+  PublishRunningRevision(host, 4, 103);
+  assert(OwnershipOf(host, kFirstVstInstance) == Ownership::kActive);
+  host.Stop();
+}
+
 void TestParkedInstanceRejoinsWithoutAReload() {
   const NoPluginWorkers no_plugin;
   daw::audio_host_macos::AudioHost host;
@@ -6585,6 +6602,7 @@ int main() {
   TestCaptureBoundRoutingIsLocked();
   TestCaptureDoesNotBindANodeAPreparedRevisionDrops();
   TestStagedAttachmentThatIsNotReadyIsRetiredAtPublication();
+  TestRevisionPreparedRightAfterALatencyReportBindsTheNewLatency();
   TestRollbackRetiresEveryStagedAttachment();
   TestUndoBeforePublicationBindsNothing();
   TestRapidInsertUndoBurstKeepsEveryInstanceOwned();

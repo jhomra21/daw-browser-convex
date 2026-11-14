@@ -2909,6 +2909,9 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
   const auto status = [this, revision](const GraphRevisionStatusCode code) {
     return impl_->GraphStatus(code, revision);
   };
+  // The renderer prepares as soon as it hears a worker's latency report, which can be before the control loop has
+  // read it; the graph's latency and the attachment bindings must agree.
+  ProcessNativeVstControl();
   if (impl_->active_core.load(std::memory_order_acquire) == 0 || revision == 0
     || snapshot.size() <= kNativeGraphFrameHeaderBytes || snapshot.size() > kMaximumControlPayloadBytes) {
     return status(GraphRevisionStatusCode::kInvalidRevision);

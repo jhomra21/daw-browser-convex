@@ -9562,6 +9562,24 @@ test("insert, remove and undo of a trusted VST while playing stage live, never s
   } finally { await controller.dispose() }
 })
 
+for (const playing of [true, false]) test(`a latency report of a plug-in inserted ${playing ? "while playing" : "while paused"} publishes a revision with the new latency`, async () => {
+  const { fixture, controller, edit, transport } = vstJoinFixture()
+  const instanceId = nativeAttachmentPlan.attachments[0].instanceId
+  try {
+    expect(await (playing ? controller.start(transport) : controller.ensureLivePreview(0))).toBe("started")
+    const session = fixture.bridge.session.revisions
+    const { prepare, publish, inspect } = session
+    expect(await edit(true, "insert")).toEqual({ status: "adopted" })
+    Object.assign(session, { prepare, publish, inspect })
+    const before = fixture.graphPayloads.length
+    const calls = fixture.calls.length
+    fixture.emitVstInstanceEvent({ kind: "latency", instanceId, latencyFrames: 4096 })
+    await step7Turns()
+    expect(fixture.graphPayloads.length).toBe(before + 1)
+    expect(fixture.calls.slice(calls)).toContain("revision-publish")
+  } finally { await controller.dispose() }
+})
+
 test("a Play that starts while a paused VST insertion is still being staged leaves the transport running", async () => {
   const { fixture, controller, edit, transport } = vstJoinFixture()
   const coordinate = fixture.bridge.session.coordinateVstAttachments

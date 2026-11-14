@@ -291,7 +291,13 @@ const burstStepEdits = (edits: z.infer<typeof planSchema>["edits"]) => [...Map.g
 // effect-state row logs the FFT click as an action); phase 8 logs one edit start; phase 9 logs every step's edits.
 export const judgeStoredRow = async (directory: string, file: string) => {
   const plan = planSchema.parse(JSON.parse(await readFile(path.join(directory, file), "utf8")))
-  const host = parseHostLines(await readFile(path.join(directory, "host.jsonl"), "utf8"))
+  // A launch that failed before its capture left a row directory with no host.jsonl: that row is a setup failure, not a crash.
+  const hostFile = Bun.file(path.join(directory, "host.jsonl"))
+  if (!(await hostFile.exists())) {
+    const verdict: BurstVerdict = { outcome: "setup", detail: "no host.jsonl in the row directory (the launch failed before its capture)", judged: 0 }
+    return { row: path.basename(directory), phase: plan.phase, edits: plan.edits.length, verdict }
+  }
+  const host = parseHostLines(await hostFile.text())
   const actions = await jsonl(path.join(directory, "actions.jsonl"))
   const end = wallOf(actions, "capture-end")
   const edits: { wallMs: number; raise: boolean; settledWallMs?: number }[] = plan.phase === 9 ? burstStepEdits(plan.edits)

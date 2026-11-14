@@ -421,6 +421,12 @@ export const selfTest = async () => {
     const judged = await judgeStored(directory)
     check(judged.length === 2 && judged.every((entry) => entry.phase === 9) && judged.find((entry) => entry.row === first.name)?.edits === 2, `stored phase 9 rows are judged by step: ${JSON.stringify(judged)}`)
     check(judged.every((entry) => entry.verdict.outcome === "pass"), `settled windows over 1 s pass: ${JSON.stringify(judged.map((entry) => entry.verdict))}`)
+    // A failed launch leaves a row directory with no host.jsonl: it is that row's setup failure, and the other rows are still judged.
+    await mkdir(path.join(directory, "failed-launch"))
+    await writeFile(path.join(directory, "failed-launch", "phase9-edits.json"), JSON.stringify({ phase: 9, row: "failed-launch", edits: [] }))
+    const withFailure = await judgeStored(directory)
+    check(withFailure.length === 3 && withFailure.find((entry) => entry.row === "failed-launch")?.verdict.outcome === "setup"
+      && withFailure.filter((entry) => entry.verdict.outcome === "pass").length === 2, `a row with no host.jsonl is a setup failure and the rest are judged: ${JSON.stringify(withFailure)}`)
   } finally { await rm(directory, { recursive: true }) }
   console.log("ae-08 phase 9 launch self-test: pass")
 }

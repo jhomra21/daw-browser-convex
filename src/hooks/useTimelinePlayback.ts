@@ -2245,8 +2245,9 @@ export function useTimelinePlayback(
       } else if (projectionChanged && playAttempt === undefined
         && (portableBrowserPlayback.isPrepared() || portableBrowserPlayback.isPreparing())) {
         if (portableBrowserPlayback.isPrepared()) {
-          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).
-          adoptPortableEdits()
+          // The kept paused session adopts the edit in place, once the clips it adds are hydrated: the effect runs again
+          // when they are. What it cannot carry replaces it (requestTimelineSchedule).
+          if (!pendingAudioHydration) adoptPortableEdits()
           return
         }
         // A session still preparing finishes first; the edit is adopted once it has.

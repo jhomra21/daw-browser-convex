@@ -8812,6 +8812,31 @@ test('UD7n W-S11d-C1 an unhydrated clip inserted into a prepared preview keeps t
   }, { enabled: true })
 })
 
+test('UD7n W-S11d-C2 an unhydrated clip inserted into a paused portable session keeps the session, stages nothing, and is adopted after hydration', async () => {
+  const warned = spyOn(console, 'warn').mockImplementation(() => undefined)
+  try {
+    await runB6f5(async (live, world) => {
+      await live.pausedAt(1)
+      for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
+      const session = live.liveSession()
+      const mark = live.mark()
+      live.setTracks((current) => [...current, audioTrack(null)])
+      for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
+      const unhydrated = { sameSession: live.liveSession() === session, quiet: live.mark() === mark, adoptions: session?.adoptions, warned: warned.mock.calls.length }
+      live.setTracks((current) => [...current.slice(0, 2), audioTrack(new TestAudioBuffer())])
+      await live.until(() => (session?.adoptions ?? 0) > 0)
+      await live.settle()
+      expect({ unhydrated, sameSession: live.liveSession() === session, closed: session?.closed, adoptions: session?.adoptions,
+        sessionsAfterMark: world.sessions.filter((entry) => entry.createdSeq > mark).length, prepared: live.playback.isPortableBrowserPlaybackPrepared(),
+        playing: live.playback.isPlaying(), warned: warned.mock.calls.length })
+        .toEqual({ unhydrated: { sameSession: true, quiet: true, adoptions: 0, warned: 0 }, sameSession: true, closed: false, adoptions: 1,
+          sessionsAfterMark: 0, prepared: true, playing: false, warned: 0 })
+    }, false)
+  } finally {
+    warned.mockRestore()
+  }
+})
+
 // AE-08 phase 8 step 11d (E): a browser session cannot host a VST3, so inserting one while only the browser session is
 // prepared is an edit the session adopts in place, never a rebuild. The device shows the E6 limitation.
 for (const playing of [true, false]) {
@@ -8850,3 +8875,34 @@ for (const playing of [true, false]) {
     }
   })
 }
+
+// The limitation belongs to the browser session: a drop that enables native playback in the same gesture lets the native
+// session host the instance, and the notice clears then, not before.
+test('UD7n W-S11d-E2 the browser limit notice clears when the native session hosts the instance', async () => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  const [nativeEnabled, setNativeEnabled] = createSignal(false)
+  const inserted = { ...insertedExternalProcessor(), targetId: track.id }
+  const faults: string[] = []
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+  try {
+    await withFakeRaf(async () => createRoot(async (dispose) => {
+      const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
+        { getTracks: () => [track] }, { enabled: nativeEnabled, projectId: () => 'project',
+          reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
+          compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: [track],
+            renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }) })
+      addInstanceLimit(inserted.instanceId, 'The browser engine does not host VST3 plug-ins yet.')
+      for (let index = 0; index < 40; index += 1) await flushMicrotasks()
+      const before = { prepared: playback.isNativePlaybackPrepared(), limited: instanceLimit(inserted.instanceId) !== undefined }
+      setNativeEnabled(true)
+      for (let index = 0; index < 40; index += 1) await flushMicrotasks()
+      expect({ before, prepared: playback.isNativePlaybackPrepared(), limited: instanceLimit(inserted.instanceId) !== undefined, faults })
+        .toEqual({ before: { prepared: false, limited: true }, prepared: true, limited: false, faults: [] })
+      dispose()
+    }))
+  } finally {
+    clearInstanceLimits()
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})

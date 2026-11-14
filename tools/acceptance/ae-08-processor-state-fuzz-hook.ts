@@ -319,9 +319,15 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
       trace: trace.length, persistenceFailures, panelErrors, aborts: time.effectTransactions().filter((entry) => entry.state === "aborted").length, prepares: h.counts.get("prepare") ?? 0, publishes: h.counts.get("publish") ?? 0,
       assets: [...h.assets.keys()], sources: [...h.activeBank.sources.keys()],
       coldInstalls: ["stop", "configure", "initial-graph"].reduce((total, name) => total + (h.counts.get(name) ?? 0), 0) })
+    // What native held before the previous step: a teardown ends the session this step, before native's state is read.
+    let teardowns = 0
+    let nativeFft = h.nativeFields(h.active).fft
     const observe = () => {
       bridge.synchronizeSupervisor()
       refreshDesired()
+      if ((h.counts.get("teardown") ?? 0) !== teardowns) ledger.checkLatencyOwed(nativeFft)
+      teardowns = h.counts.get("teardown") ?? 0
+      nativeFft = h.nativeFields(h.active).fft
       const current = knob()
       if (current !== lastKnob) {
         checked("I10")
@@ -629,6 +635,7 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
         return
       }
       ledger.checkRejections()
+      if (mode === "drained") ledger.checkLatencyOwed(h.nativeFields(h.active).fft)
       if (mode === "b5c-live" || mode === "b5c-structure") {
         if (!retryCounts) throw new Error("Missing B5c before capture");
         checked("I6");

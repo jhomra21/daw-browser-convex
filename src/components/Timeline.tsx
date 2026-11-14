@@ -110,6 +110,7 @@ import {
   vst3TrustDisclosure,
 } from "~/lib/external-plugin-ui";
 import {
+  createLocalExternalProcessorCache,
   getLocalExternalProcessor,
   listLocalExternalProcessors,
   persistLocalExternalProcessorState,
@@ -465,6 +466,8 @@ const Timeline: Component<TimelineProps> = (props) => {
     processorStructure: processorEdits.structure(),
   }), undefined, { equals: (previous, next) => replaceEqualDeep(previous, next) === previous });
   let nativePlaybackRevision = 1;
+  const localExternalProcessors = createLocalExternalProcessorCache();
+  onCleanup(localExternalProcessors.dispose);
   const compilePlaybackSnapshot = async (
     transport: LivePlaybackTransport,
     context: LivePlaybackCompileContext | undefined,
@@ -489,6 +492,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       const projectedEffects = !instrumentReadiness && context?.instrumentOverride
         ? withInstrumentOverride(effectsProjection ?? { replaceAudioEffectTargets: [], upsertDeviceRows: [] }, context.instrumentOverride.targetId, context.instrumentOverride.instrument)
         : effectsProjection;
+      const compiledProjectId = projectId();
+      // The processor list does not depend on the render state, so its read (a cache hit unless the project changed) runs beside it.
+      const persistedProcessors = isLocalId("project", compiledProjectId)
+        ? localExternalProcessors.read(compiledProjectId)
+        : undefined;
       const renderState = await createExportRenderStateSnapshot({
         projectId: projectId(),
         userId: userId(),
@@ -516,9 +524,8 @@ const Timeline: Component<TimelineProps> = (props) => {
         renderState: hydratedRenderState,
         sidechainRoutes: snapshotSidechains,
       });
-      const compiledProjectId = projectId();
-      if (!result.supported || !isLocalId("project", compiledProjectId)) return result;
-      const liveProcessors = (await listLocalExternalProcessors(compiledProjectId))
+      if (!result.supported || !persistedProcessors) return result;
+      const liveProcessors = (await persistedProcessors)
         .filter((processor) => !processor.bypassed && processor.health.state !== "degraded");
       const processors = await resolveNativeLivePlaybackProcessors({
         projectId: compiledProjectId,

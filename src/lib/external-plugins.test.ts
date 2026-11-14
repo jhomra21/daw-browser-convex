@@ -7,6 +7,7 @@ import type { DrumRackPadSample, SamplerZone, TrackInstrumentParams } from '@daw
 import type { LocalProjectStoredValue } from '~/lib/local-project-db'
 import {
   appendLocalExternalProcessor,
+  createLocalExternalProcessorCache,
   deleteLocalExternalProcessor,
   listLocalExternalProcessors,
   mergeLocalExternalProcessorParameterOverride,
@@ -367,6 +368,29 @@ const createLegacyProcessor = (instanceId: string, index: number) => {
     },
   }
 }
+
+test('the processor cache lists once, refreshes on a project change, and serves each project its own list', async () => {
+  const project = await createLocalProject(`Processor cache ${crypto.randomUUID()}`)
+  const other = await createLocalProject(`Processor cache other ${crypto.randomUUID()}`)
+  const listed: string[] = []
+  const cache = createLocalExternalProcessorCache((projectId) => { listed.push(projectId); return listLocalExternalProcessors(projectId) })
+  expect(await cache.read(project.id)).toEqual([])
+  expect(await cache.read(project.id)).toEqual([])
+  expect(listed).toEqual([project.id])
+
+  const instanceId = crypto.randomUUID()
+  await setLocalExternalProcessor(project.id, createProcessor(instanceId))
+  expect((await cache.read(project.id)).map((processor) => processor.instanceId)).toEqual([instanceId])
+  expect((await cache.read(project.id)).map((processor) => processor.instanceId)).toEqual([instanceId])
+  expect(listed).toEqual([project.id, project.id])
+
+  expect(await cache.read(other.id)).toEqual([])
+  expect(listed).toEqual([project.id, project.id, other.id])
+  cache.dispose()
+  await cache.read(other.id)
+  expect(listed).toHaveLength(4)
+  cache.dispose()
+})
 
 test('atomically merges a VST parameter override and strips discovery paths', async () => {
   const project = await createLocalProject(`Parameter feedback ${crypto.randomUUID()}`)

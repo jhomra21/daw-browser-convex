@@ -11,9 +11,9 @@ type LocalExportRenderRowsSnapshot = {
 
 export const captureLocalExportRenderRowsSnapshot = async (
   projectId: string,
-  options?: Parameters<typeof flushLocalProjectPendingWrites>[1],
+  options?: Parameters<typeof flushLocalProjectPendingWrites>[1] & { skipFlush?: boolean },
 ): Promise<LocalExportRenderRowsSnapshot> => {
-  await flushLocalProjectPendingWrites(projectId, options)
+  if (!options?.skipFlush) await flushLocalProjectPendingWrites(projectId, options)
   const db = await openLocalProjectDb(projectId)
   const tx = db.transaction("entities", "readonly")
   const index = tx.store.index("by-kind")

@@ -698,13 +698,13 @@ export const createExportRenderStateSnapshot = async (input: {
     externalPluginPolicy = 'browser-export',
   } = input
   const fx = createExportFx(masterVolume)
-  const localProject = projectId ? await getLocalProject(projectId) : undefined
-  const localOnly = projectId ? isLocalId('project', projectId) || localProject !== undefined : false
+  const localOnly = projectId ? isLocalId('project', projectId) || await getLocalProject(projectId) !== undefined : false
   if (localOnly && projectId) {
-    // Playback reads the effects draft without draining its preparation-dependent
-    // owner. Other write kinds, and every write kind for export, still flush.
+    // Playback reads the effects draft without draining its preparation-dependent owner. The only rows read are effects and
+    // automation envelopes; the other pending-write kinds and the timeline writes never write those rows, and an automation
+    // edit in flight is in `automationPatches` until it persists. So a projected playback capture flushes nothing.
     const rows = await captureLocalExportRenderRowsSnapshot(projectId,
-      externalPluginPolicy === 'native-playback' && effectsProjection ? { excludeKinds: ['effects'] } : undefined)
+      externalPluginPolicy === 'native-playback' && effectsProjection ? { skipFlush: true } : undefined)
     if (externalPluginPolicy === 'browser-export') {
       assertBrowserExportHasNoLiveExternalPlugins(await listLocalExternalProcessors(projectId))
     }

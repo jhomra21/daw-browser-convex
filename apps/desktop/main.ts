@@ -153,6 +153,7 @@ import {
   verifyPackagedNativeReleaseArtifacts,
 } from "./native-release-artifacts"
 import type {
+  NativeAudioDevice,
   NativeHostDeviceConfiguration,
   NativeHostPcmAsset,
   NativeHostMappedAssetPage,
@@ -1381,14 +1382,14 @@ const registerIpc = () => {
       return { ok: false as const, error: "The native audio host is unavailable." }
     }
   })
-  ipcMain.handle(listDevicesChannel, async (event) => {
+  ipcMain.handle(listDevicesChannel, async (event): Promise<{ ok: true; devices: NativeAudioDevice[] } | { ok: false; error: string }> => {
     if (!audioHostAllowed(event) || !audioHostSupervisor) {
-      return { ok: false as const, error: "The native audio host is unavailable." }
+      return { ok: false, error: "The native audio host is unavailable." }
     }
     try {
-      return { ok: true as const, devices: await audioHostSupervisor.listDevices() }
+      return { ok: true, devices: await audioHostSupervisor.listDevices() }
     } catch {
-      return { ok: false as const, error: "The native audio host is unavailable." }
+      return { ok: false, error: "The native audio host is unavailable." }
     }
   })
   // oxlint-disable-next-line anti-slop/no-unknown-parameters -- the argument is a catch-clause value, classified at the boundary

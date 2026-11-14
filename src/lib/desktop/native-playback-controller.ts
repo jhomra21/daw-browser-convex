@@ -4455,11 +4455,15 @@ export const createNativePlaybackController = (input: {
         continue
       }
       attempt.fields = adoptionFields()
+      const transportIntent = stagedTransportIntent
       const run = await executeAdoption(attempt)
+      // A publication a pause or seek cancelled ends the attempt; one a Play's transport move cancelled held nothing,
+      // so the intent runs again in the new epoch.
+      const endedByDrop = !!attempt.publication && transportIntent !== stagedTransportIntent
       if (run.transport && !mismatched) {
         loop = run.transport
         mismatched = true
-      } else if (attempt.publication || run.outcome.status !== "superseded" || attempt.fields.epoch === transportEpoch || !processorState.isNewest(attempt))
+      } else if (run.outcome.status !== "superseded" || endedByDrop || attempt.fields.epoch === transportEpoch || !processorState.isNewest(attempt))
         return run
     }
   }

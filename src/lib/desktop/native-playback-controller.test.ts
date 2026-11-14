@@ -626,6 +626,29 @@ describe("DV01 STEP7 latency publication witnesses", () => {
     })
   }
 
+  test("a schedule adoption whose publication a Play's transport move cancels runs again in the new epoch", async () => {
+    const f = await step7Host()
+    try {
+      await f.act({ kind: "pause" })
+      await f.advance()
+      await f.act({ kind: "submit-schedule", mode: "A" })
+      await f.until(() => f.fixture.enabled().some(action => action.kind === "resolve-compile"))
+      const compile = f.fixture.enabled().find(action => action.kind === "resolve-compile")
+      if (!compile) throw new Error("Missing held adoption compile")
+      await f.act({ kind: "start", value: 1 })
+      await f.act(compile)
+      // The adoption's Prepare is sent; the Play's compile then ends, and its transport moves the epoch under it.
+      const playCompile = f.fixture.enabled().find(action => action.kind === "resolve-compile")
+      if (!playCompile) throw new Error("Missing held Play compile")
+      await f.act(playCompile)
+      await f.advance()
+      const answers = f.fixture.state().waiters.filter(waiter => waiter.name === "schedule-adoption:A")
+      expect(answers.map(waiter => waiter.result)).toEqual([{ status: "adopted" }])
+      expect(f.fixture.pending()).toEqual([])
+      expect(f.fixture.failures).toEqual([])
+    } finally { await f.close() }
+  })
+
   test("B6d2 an admitted latency edit pause cancels gives way to the newer latency edit queued behind it", async () => {
     const f = await step7Host()
     try {
@@ -6767,7 +6790,7 @@ test("re-enables canonical external automation against the prepared attachment",
 
 test("re-enabling a built-in lane publishes the schedule from the current position with the lane", async () => {
   const fixture = createBridge()
-  const target = { kind: "track" as const, trackId: "track", effectInstanceId: "utility:1" }
+  const target: AutomationEnvelope["target"] = { kind: "track", trackId: "track", effectInstanceId: "utility:1" }
   const lane: AutomationEnvelope = {
     id: "gain-lane",
     projectId: "project:1",
@@ -13356,9 +13379,10 @@ test("a stored native output device id reaches the output resolver and a missing
   const requested: Array<string | undefined> = []
   const bridge = {
     ...fixture.bridge,
-    resolveOutputDevice: async (id?: string) => {
+    resolveOutputDevice: async (id?: string): ReturnType<typeof fixture.bridge.resolveOutputDevice> => {
       requested.push(id)
-      return id === undefined ? fixture.bridge.resolveOutputDevice() : { ok: true as const, device: null }
+      const reply = await fixture.bridge.resolveOutputDevice()
+      return id === undefined ? reply : { ok: true, device: { ...reply.device, available: false } }
     },
   }
   const faults: string[] = []
@@ -13380,9 +13404,10 @@ test("a stored native input device id reaches the input resolver and a missing o
   const requested: Array<string | undefined> = []
   const bridge = {
     ...fixture.bridge,
-    resolveInputDevice: async (id?: string) => {
+    resolveInputDevice: async (id?: string): ReturnType<typeof fixture.bridge.resolveInputDevice> => {
       requested.push(id)
-      return id === undefined ? fixture.bridge.resolveInputDevice() : { ok: true as const, device: null }
+      const reply = await fixture.bridge.resolveInputDevice()
+      return id === undefined ? reply : { ok: true, device: { ...reply.device, available: false } }
     },
   }
   const controller = createObservedController({

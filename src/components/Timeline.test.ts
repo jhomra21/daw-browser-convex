@@ -147,6 +147,13 @@ test("opens an inserted VST editor only after the matching playback rebuild", as
     .toBeLessThan(handler.indexOf("await syncPlaybackBackend(renderTracks(), insertionIntent)"));
   // A prepared native session, playing or paused, joins the plug-in in place: the insertion never names a rebuild.
   expect(handler).not.toContain("rebuildPlaybackBackend");
+  // A Play that lands while the insertion is staged supersedes its adoption and leaves the plug-in unbound: the baseline
+  // state capture is refused, and the insertion adopts once more, in the transport state then, before it is read again.
+  const baselineCapture = handler.indexOf("captureVstState(processor.instanceId)");
+  const adoptAgain = handler.indexOf("await syncPlaybackBackend(renderTracks(), captureInsertionIntent())");
+  expect(baselineCapture).toBeGreaterThan(0);
+  expect(adoptAgain).toBeGreaterThan(baselineCapture);
+  expect(adoptAgain).toBeLessThan(handler.indexOf("captureVstState(processor.instanceId)", baselineCapture + 1));
   // A plug-in that failed while staged never opens its editor as ready.
   expect(handler.indexOf("vstInstanceFailed(processor.instanceId)"))
     .toBeGreaterThan(handler.indexOf("await syncPlaybackBackend(renderTracks(), insertionIntent)"));

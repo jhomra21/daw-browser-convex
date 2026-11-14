@@ -2086,7 +2086,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       const insertedProjectId = intent.projectId ?? projectId();
       // The drop's project guards the insertion; the transport is read now, because a trust prompt or a plug-in scan
       // can outlast a Play or a Pause, and a session adopts only the transport state it is in.
-      const insertionIntent: TimelinePlaybackRebuildIntent = {
+      const captureInsertionIntent = (): TimelinePlaybackRebuildIntent => ({
         ...captureStructuralPlaybackIntent(),
         projectId: intent.projectId,
         projectGeneration: intent.projectGeneration,
@@ -2094,7 +2094,8 @@ const Timeline: Component<TimelineProps> = (props) => {
           projectId: insertedProjectId,
           processor,
         },
-      };
+      });
+      const insertionIntent = captureInsertionIntent();
       const request: ExternalProcessorEditorRequest = {
         instanceId: processor.instanceId,
         projectId: intent.projectId ?? projectId(),
@@ -2123,7 +2124,14 @@ const Timeline: Component<TimelineProps> = (props) => {
           return;
         }
         if (processor.manifest.supportsState) {
-          const capture = await window.dawDesktop?.audioHost?.session.captureVstState(processor.instanceId);
+          let capture = await window.dawDesktop?.audioHost?.session.captureVstState(processor.instanceId);
+          if (!capture?.ok) {
+            // A Play that lands while the insertion is staged moves the transport epoch under it: the adoption ends
+            // superseded with the plug-in staged but unbound, and nothing adopts it again while the session plays.
+            // Adopt once more in the transport state the session is in now.
+            await syncPlaybackBackend(renderTracks(), captureInsertionIntent());
+            capture = await window.dawDesktop?.audioHost?.session.captureVstState(processor.instanceId);
+          }
           if (!capture?.ok) {
             throw new Error(`Native VST3 baseline state capture failed${capture?.error ? `: ${capture.error}` : "."}`);
           }

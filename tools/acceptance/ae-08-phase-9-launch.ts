@@ -53,9 +53,9 @@ type Performers = {
   observe: () => Promise<Observed>
   setup: { changedTrackId: string; changedFile: string }
 }
-const required = (id: string | undefined, what: string) => {
-  if (id === undefined) throw new Error(`${what} missing`)
-  return id
+const required = <Value>(value: Value | undefined, what: string) => {
+  if (value === undefined) throw new Error(`${what} missing`)
+  return value
 }
 
 // The edit names of the built rows (ae-08-phase-9-matrix.ts) and what each does. Each returns the latency move it declares.

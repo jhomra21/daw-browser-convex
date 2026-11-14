@@ -18,7 +18,7 @@ import { phase5Rows, runPhase5Fixture } from "./ae-08-phase-5-fixture"
 import { phase8Rows, runPhase8Fixture } from "./ae-08-phase-8-fixture"
 import { analyzePhase8Campaign } from "./analyze-ae-08-phase-8"
 import { contentSecondsFor, exportRowEvidence, runPhase9Launch, stateName, type Phase9Launch } from "./ae-08-phase-9-launch"
-import { assumedTimings, burstSchedule, chooseVstRepetitions, commitReceivedWallMs, judgeStored, launchesFor, launchPlan, measuredEditsSchema, measuredTimings, pooled,
+import { assumedTimings, burstSchedule, chooseVstRepetitions, breakdownLine, breakdownStored, commitReceivedWallMs, judgeStored, launchesFor, launchPlan, measuredEditsSchema, measuredTimings, pooled,
   readTimings, repetitionsFor, type Trial } from "./ae-08-phase-9-matrix"
 import { phase9Matrix, phase9Rows } from "./ae-08-phase-9-rows"
 import { judgeRowCapture } from "./ae-08-phase-9-compare"
@@ -648,7 +648,7 @@ const assemble = async (directory: string, prefix = ""): Promise<Pcm> => {
   return { sampleRate, channels, samples }
 }
 
-const usage = "Usage: ae-08-live-graph.ts --phase 1|2|3|4|5|6|6i|7|8|9 [--out /absolute/dir] [--rows a,b,…] [--matrix] [--repetitions N] [--vst-repetitions N] [--judge-only /absolute/dir] [--timings /absolute/phase9-timings.json] [--overnight]"
+const usage = "Usage: ae-08-live-graph.ts --phase 1|2|3|4|5|6|6i|7|8|9 [--out /absolute/dir] [--rows a,b,…] [--matrix] [--repetitions N] [--vst-repetitions N] [--judge-only /absolute/dir [--breakdown]] [--timings /absolute/phase9-timings.json] [--overnight]"
 const knownPhases = ["1", "2", "3", "4", "5", "6", "6i", "7", "8", "9"]
 const positiveInteger = (flag: string, value: string) => {
   const number = Number(value)
@@ -662,6 +662,7 @@ export const parseRunnerArgs = (args: string[]) => {
   const values = new Map<string, string>()
   let matrix = false
   let overnight = false
+  let breakdown = false
   for (let index = 0; index < args.length; index++) {
     const key = args[index]
     if (key === "--matrix") {
@@ -671,6 +672,10 @@ export const parseRunnerArgs = (args: string[]) => {
     }
     if (key === "--overnight") {
       overnight = true
+      continue
+    }
+    if (key === "--breakdown") {
+      breakdown = true
       continue
     }
     const value = args[index + 1]
@@ -701,8 +706,9 @@ export const parseRunnerArgs = (args: string[]) => {
   const timings = values.get("--timings")
   if (timings !== undefined && (phase !== "9" || !path.isAbsolute(timings))) throw new Error("--timings /absolute/phase9-timings.json applies to phase 9")
   if (overnight && phase !== "9") throw new Error("--overnight applies to phase 9")
+  if (breakdown && judgeOnly === undefined) throw new Error("--breakdown reports the stored evidence named by --judge-only")
   if (phase === "9" && !matrix && !rows && judgeOnly === undefined) throw new Error("--phase 9 needs --matrix, --rows or --judge-only")
-  return { phase, out, rows, matrix, repetitions, vstRepetitions, judgeOnly, timings, overnight }
+  return { phase, out, rows, matrix, repetitions, vstRepetitions, judgeOnly, timings, overnight, breakdown }
 }
 // Only a complete pass over every row can certify: the campaign analysis needs all rows (analyze-ae-08-continuity.ts). Phase 5 certifies
 // a single pass; phase 9 repeats each row by design.
@@ -745,6 +751,8 @@ const selfTest = () => {
   refused(["--phase", "5", "--out", "/tmp/x", "--timings", "/tmp/t.json"], /applies to phase 9/)
   refused(["--phase", "9", "--out", "/tmp/x", "--matrix", "--timings", "relative.json"], /applies to phase 9/)
   refused(["--phase", "8", "--out", "/tmp/x", "--overnight"], /applies to phase 9/)
+  refused(["--phase", "9", "--out", "/tmp/x", "--matrix", "--breakdown"], /--breakdown reports the stored evidence/)
+  if (!parseRunnerArgs(["--phase", "9", "--judge-only", "/tmp/y", "--breakdown"]).breakdown) throw new Error("--breakdown parse failed")
   const phase8 = parseRunnerArgs(["--phase", "8", "--out", "/tmp/x", "--rows", "paused-structural"])
   if (phase8.rows?.join() !== "paused-structural" || nonCertifyingReason(phase8) !== "filtered") throw new Error("Phase 8 filtered parse failed")
   if (nonCertifyingReason(parseRunnerArgs(["--phase", "8", "--out", "/tmp/x"]))) throw new Error("A full phase 8 pass must certify")
@@ -757,6 +765,12 @@ const main = async () => {
   const parsed = parseRunnerArgs(Bun.argv.slice(2))
   const { out } = parsed
   const phase = Number.parseInt(parsed.phase)
+  if (parsed.judgeOnly !== undefined && parsed.breakdown) {
+    const found = await breakdownStored(parsed.judgeOnly)
+    for (const entry of found) for (const line of breakdownLine(entry)) console.log(line)
+    if (!found.length) throw new Error(`No phase 9 rows under ${parsed.judgeOnly}`)
+    return
+  }
   if (parsed.judgeOnly !== undefined) {
     const judged = await judgeStored(parsed.judgeOnly)
     for (const entry of judged) console.log(`phase${entry.phase} ${entry.row}: ${entry.edits} edit(s) ${entry.verdict.outcome.toUpperCase()}${entry.verdict.editIndex === undefined ? "" : ` at edit ${entry.verdict.editIndex}: ${entry.verdict.detail}`}`)

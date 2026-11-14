@@ -161,6 +161,33 @@ export const playedBlocks = (blocks: readonly CaptureBlock[], firstEditWallMs: n
 export const lifecycleBetween = (events: readonly HostEvent[], fromWallMs: number, toWallMs: number) =>
   events.filter((event) => event.wallMs >= fromWallMs && event.wallMs <= toWallMs && /stop|teardown|rebuild|host-exit|host-spawn|device-configure/i.test(event.event))
 
+// The VST rows that judge on host evidence. A restart is a worker spawned again or a host restart request after the edit.
+const restartsBetween = (events: readonly HostEvent[], fromWallMs: number, toWallMs: number) =>
+  [...lifecycleBetween(events, fromWallMs, toWallMs), ...events.filter((event) => /^(worker-spawn|host-restart-request)$/.test(event.event) && event.wallMs >= fromWallMs && event.wallMs <= toWallMs)]
+const named = (events: readonly HostEvent[]) => events.map((event) => event.event).join(", ")
+
+// An edit made while the editor is open publishes in place: after any step the editor is never reported closed and nothing restarts.
+export const compareEditor = (events: readonly HostEvent[], editWallMs: (index: number) => number): Compare => (window) => {
+  const from = editWallMs(window.index)
+  const closed = events.filter((event) => event.event === "vst-editor-state" && event.open === false && event.wallMs >= from && event.wallMs <= window.toWallMs)
+  if (closed.length) return "the editor was reported closed after the edit"
+  const restarted = restartsBetween(events, from, window.toWallMs)
+  return restarted.length ? `the edit restarted something: ${named(restarted)}` : undefined
+}
+
+// The failed plug-in is muted on its own, nothing replaces or restarts it, and the unrelated source keeps sounding: the delete row's capture
+// check (the plug-in's channel is silent after the fade, never a dry fallback), with nothing restarted.
+export const compareFault = (input: { events: readonly HostEvent[]; output: Pcm; seam: number; endFrame: number; editWallMs: number }): Compare => (window) => {
+  const restarted = restartsBetween(input.events, input.editWallMs, window.toWallMs)
+  return restarted.length ? `the fault restarted or replaced something: ${named(restarted)}` : compareDelete(input)(window)
+}
+
+// A refused insert changes nothing: no graph is requested or published and nothing restarts.
+export const compareTrust = (events: readonly HostEvent[], editWallMs: number): Compare => (window) => {
+  const changed = [...restartsBetween(events, editWallMs, window.toWallMs), ...events.filter((event) => /^graph-publish(-request)?$/.test(event.event) && event.wallMs >= editWallMs && event.wallMs <= window.toWallMs)]
+  return changed.length ? `the refused insert changed the session: ${named(changed)}` : undefined
+}
+
 const logged = z.object({ edits: z.array(z.object({ index: z.number(), name: z.string(), wallMs: z.number(), settledWallMs: z.number().optional(), publicationFrame: z.number(),
   fromLatencyFrames: z.number(), toLatencyFrames: z.number() })) })
 const publicationLine = z.object({ event: z.literal("graph-publish"), cause: z.literal("block-boundary"), pid: z.number(), wallMs: z.number(), transportEpoch: z.number(),
@@ -177,6 +204,10 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
     settledWallMs: group[0]?.settledWallMs, publicationFrame: group[0]?.publicationFrame ?? 0 }))
   if (row.judge === "take") return judgeBurst(steps, input.captureEndWallMs, compareTake(takeResult.parse(JSON.parse(await readFile(path.join(directory, takeFile), "utf8")))))
   const texts = await Promise.all(input.natives.map((name) => readFile(path.join(launchOut, name), "utf8")))
+  const hostEvents = texts.flatMap(parseHostLines)
+  const editWallMs = (index: number) => steps.find((step) => step.index === index)?.editWallMs ?? 0
+  if (row.judge === "editor") return judgeBurst(steps, input.captureEndWallMs, compareEditor(hostEvents, editWallMs))
+  if (row.judge === "trust") return judgeBurst(steps, input.captureEndWallMs, compareTrust(hostEvents, editWallMs(1)))
   const blocks = texts.flatMap(nativeLines).flatMap((entry) => entry.event === "capture-block" ? [captureBlock.parse(entry)] : [])
   const played = playedBlocks(blocks, steps[0]?.editWallMs ?? 0)
   if (!played) return { outcome: "setup", detail: "no capture blocks after the first edit", judged: 0 }
@@ -204,8 +235,9 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
     return judgeBurst(steps, input.captureEndWallMs, compareLatencyMoves({ output, edits, publications, startingPinned, endFrame: Math.min(captured, rowEnd) }))
   }
   if (row.judge === "sustained") return judgeBurst(steps, input.captureEndWallMs, compareSustained({ output, seams, endFrame: captured }))
+  if (row.judge === "fault") return judgeBurst(steps, input.captureEndWallMs, compareFault({ events: hostEvents, output, seam: seams[0] ?? 0, endFrame: captured, editWallMs: editWallMs(1) }))
   if (row.judge === "delete") {
-    const cold = lifecycleBetween(texts.flatMap(parseHostLines), steps[0]?.editWallMs ?? 0, input.captureEndWallMs)
+    const cold = lifecycleBetween(hostEvents, steps[0]?.editWallMs ?? 0, input.captureEndWallMs)
     if (cold.length) return { outcome: "fail", editIndex: 1, detail: `the delete stopped or restarted the session: ${cold.map((event) => event.event).join(", ")}`, judged: 1 }
     return judgeBurst(steps, input.captureEndWallMs, compareDelete({ output, seam: seams[0] ?? 0, endFrame: captured }))
   }
@@ -359,6 +391,27 @@ export const selfTest = () => {
   const event = (name: string, wallMs: number) => parseHostLines(`${JSON.stringify({ event: name, wallMs })}\n`)
   check(lifecycleBetween([...event("host-spawn", 1500), ...event("graph-publish", 1600)], 1000, 2000).length === 1, "a host restart after the edit is a lifecycle event")
   check(lifecycleBetween(event("transport-stop", 500), 1000, 2000).length === 0, "an event before the edit is not")
+  // The editor row: closed after the edit, or anything restarted, fails; an edit that publishes in place with the editor open passes.
+  const lines = (...entries: object[]) => parseHostLines(entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n")
+  const editedAt = (index: number) => index * 1000
+  const one = (compare: Compare) => judgeBurst(steps.slice(0, 1), 10_000, compare)
+  check(one(compareEditor(lines({ event: "vst-editor-state", open: true, wallMs: 1500 }, { event: "graph-publish", wallMs: 1800 }), editedAt)).outcome === "pass", "an edit that publishes with the editor open passes")
+  check(one(compareEditor(lines({ event: "vst-editor-state", open: false, wallMs: 1800 }), editedAt)).outcome === "fail", "an editor reported closed after the edit fails")
+  check(one(compareEditor(lines({ event: "worker-spawn", wallMs: 1800 }), editedAt)).outcome === "fail", "a worker spawned again after the edit fails")
+  check(one(compareEditor(lines({ event: "host-restart-request", wallMs: 1800 }), editedAt)).outcome === "fail", "a host restart request after the edit fails")
+  check(one(compareEditor(lines({ event: "vst-editor-state", open: false, wallMs: 500 }), editedAt)).outcome === "pass", "an editor closed before the edit is not the edit's")
+  // The fault row: the delete row's capture check plus nothing restarted.
+  const faultInput = (events: ReturnType<typeof lines>, right: (frame: number) => number) => ({ events, output: deleted(right, tone), seam, endFrame, editWallMs: 1000 })
+  const gone = (frame: number) => frame < seam + fade ? tone(frame) : 0
+  check(one(compareFault(faultInput(lines({ event: "attachment-fault-isolated", cause: "plugin-fault", wallMs: 1200 }), gone))).outcome === "pass", "a muted plug-in beside a live source passes")
+  check(one(compareFault(faultInput(lines({ event: "host-spawn", wallMs: 1300 }), gone))).outcome === "fail", "a fault that restarts the host fails")
+  check(one(compareFault(faultInput(lines({ event: "device-stop", wallMs: 1300 }), gone))).outcome === "fail", "a fault that stops the session fails")
+  check(one(compareFault(faultInput(lines(), tone))).outcome === "fail", "a plug-in that still sounds, or a dry fallback, fails")
+  check(one(compareFault({ ...faultInput(lines(), gone), output: deleted(gone, (frame) => frame < seam ? tone(frame) : 0) })).outcome === "fail", "unrelated audio that stops fails")
+  // The trust row: a refusal changes nothing, so any publication request or restart after it fails.
+  check(one(compareTrust(lines({ event: "graph-publish", wallMs: 500 }), 1000)).outcome === "pass", "nothing after the refusal passes")
+  check(one(compareTrust(lines({ event: "graph-publish-request", wallMs: 1500 }), 1000)).outcome === "fail", "a graph request after the refusal fails")
+  check(one(compareTrust(lines({ event: "worker-spawn", wallMs: 1500 }), 1000)).outcome === "fail", "a worker spawned after the refusal fails")
   console.log("ae-08 phase 9 compare self-test: pass")
 }
 

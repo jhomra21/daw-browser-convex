@@ -5,7 +5,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { z } from "zod"
 import { ae08ControlCommitReceived } from "../../apps/desktop/ae08-evidence"
-import { phase9Matrix, phase9Rows, type LatencyClass, type Row } from "./ae-08-phase-9-rows"
+import { phase9Matrix, phase9Rows, type LatencyClass, type Row, type Settle } from "./ae-08-phase-9-rows"
 
 // AE-08 phase 9 matrix (plan §8 steps 1-2): one packaged launch per row class carries N alternating edits. This file owns
 // the burst schedule, settling on host evidence, publication spacing, the reference rule, fail-fast judging, pooled statistics,
@@ -106,7 +106,7 @@ export const chooseVstRepetitions = (launches: readonly Row[][], repetitions: nu
 // ---- Settling on host evidence ----
 const hostEventSchema = z.object({ event: z.string(), cause: z.string().default(""), wallMs: z.number().default(0),
   revision: z.number().default(0), frame: z.number().default(0), publicationFrame: z.number().default(0), transportEpoch: z.number().default(0),
-  idempotencyKey: z.string().default("") })
+  idempotencyKey: z.string().default(""), open: z.boolean().optional() })
 export type HostEvent = z.infer<typeof hostEventSchema>
 export class SetupFailure extends Error {}
 
@@ -130,11 +130,13 @@ export type Settled = { wallMs: number; revision: number; publicationFrame: numb
 // An edit that publishes no graph (a live parameter write: the built-in parameter mapper turns a Limiter lookahead change or a knob
 // drag into one) settles on the line the host logs when the callback applies the parameter sequence while the transport runs; that
 // line's `frame` stands for the publication frame (the transport frame it was logged at).
-export const publicationComplete = (events: readonly HostEvent[], sinceWallMs: number, raise: boolean, settle?: "sequence" | "asset"): Settled | undefined => {
-  if (settle === "sequence") {
-    const applied = events.find((event) => event.event === "processor-sequence-applied" && event.frame > 0 && event.wallMs >= sinceWallMs)
-    return applied && { wallMs: applied.wallMs, revision: applied.revision, publicationFrame: applied.frame }
-  }
+// A step that publishes no graph settles on another host line: the editor-open line, a plug-in fault line, or the applied sequence. It
+// names no publication frame unless the host stamped one, and runBurst then takes the transport frame at its wall time.
+const settledOn = (event: HostEvent | undefined): Settled | undefined => event && { wallMs: event.wallMs, revision: event.revision, publicationFrame: event.frame }
+export const publicationComplete = (events: readonly HostEvent[], sinceWallMs: number, raise: boolean, settle?: Settle): Settled | undefined => {
+  if (settle === "sequence") return settledOn(events.find((event) => event.event === "processor-sequence-applied" && event.frame > 0 && event.wallMs >= sinceWallMs))
+  if (settle === "editor-open") return settledOn(events.find((event) => event.event === "vst-editor-state" && event.open === true && event.wallMs >= sinceWallMs))
+  if (settle === "plugin-fault") return settledOn(events.find((event) => event.event === "attachment-fault-isolated" && event.cause === "plugin-fault" && event.wallMs >= sinceWallMs))
   // An import publishes its empty track first and the decoded asset after: the asset's publication is the first one an asset-install
   // since the edit precedes.
   const publish = events.find((event) => event.event === "graph-publish" && event.cause === "block-boundary"
@@ -154,7 +156,7 @@ const nativeEvents = async (out: string) => (await Promise.all((await readdir(ou
 
 // The host appends native-<pid>.jsonl as it runs (native/acceptance-evidence.h), so this waits on file changes. The deadline only
 // reports a missing line as a setup failure; it never counts as a pass.
-export const awaitPublicationComplete = (out: string, sinceWallMs: number, raise: boolean, deadlineMs: number, settle?: "sequence" | "asset") =>
+export const awaitPublicationComplete = (out: string, sinceWallMs: number, raise: boolean, deadlineMs: number, settle?: Settle) =>
   new Promise<Settled>((resolve, reject) => {
     const watcher = watch(out, () => void check())
     const timer = setTimeout(() => finish(() => reject(new SetupFailure(`no publication-complete line within ${deadlineMs} ms of the edit`))), deadlineMs)
@@ -194,8 +196,9 @@ export const publicationSpacingFrames = (sampleRate: number) => Math.round(sampl
 // publication. Writes phase9-edits.json (the shape ae-08-latency-gates.ts reads) and latency-class.json into `directory`, the
 // row's own folder under the run, even when a step fails. `out` is the launch capture the host appends its evidence to. After each
 // settle, `afterSettle` records what the runner samples per publication, and `hold` waits until the transport has rendered a frame.
+// A settle that is not a publication has no frame of its own, and `frameAt` gives the transport frame at its wall time.
 export const runBurst = async (input: { out: string; directory: string; row: Row; repetitions: number; perform: Perform; deadlineMs?: number
-  hold: (frame: number) => Promise<void>; afterSettle: (settled: Settled) => Promise<void>; sampleRate: number
+  hold: (frame: number) => Promise<void>; afterSettle: (settled: Settled) => Promise<void>; sampleRate: number; frameAt: (wallMs: number) => number
   mark: (event: string, fields?: Record<string, string | number | boolean>) => Promise<void> }) => {
   const { out, directory, row, mark } = input
   const logged: LoggedEdit[] = []
@@ -208,8 +211,10 @@ export const runBurst = async (input: { out: string; directory: string; row: Row
       for (const edit of step.edits) moves.push({ name: edit, ...await input.perform(edit) })
       const raise = moves.some((move) => move.toLatencyFrames > move.fromLatencyFrames)
       // A refused commit publishes nothing: its step is settled when the refusal returns, and no frame is waited for.
-      const settled = row.settle === "refused" ? { wallMs: Date.now(), revision: 0, publicationFrame: 0 }
-        : await awaitPublicationComplete(out, wallMs, raise, input.deadlineMs ?? settleDeadlineMs(row), step.settle ?? row.settle)
+      const settleOn = step.settle ?? row.settle
+      const found = settleOn === "refused" ? { wallMs: Date.now(), revision: 0, publicationFrame: 0 }
+        : await awaitPublicationComplete(out, wallMs, raise, input.deadlineMs ?? settleDeadlineMs(row), settleOn)
+      const settled = found.publicationFrame > 0 || settleOn === "refused" ? found : { ...found, publicationFrame: input.frameAt(found.wallMs) }
       const { wallMs: settledWallMs, revision, publicationFrame } = settled
       await mark("burst-settled", { row: row.name, index: step.index, settledWallMs })
       for (const move of moves) logged.push({ ...move, index: step.index, wallMs: move.wallMs ?? wallMs, settledWallMs, revision, publicationFrame })
@@ -351,6 +356,14 @@ export const selfTest = async () => {
     "an asset step settles on the publication after the asset-install, a plain step on the first")
   check(publicationComplete(host(early, withAsset), 900, false, "asset") === undefined && publicationComplete(host(install, withAsset), 1151, false, "asset") === undefined,
     "an asset step does not settle without an asset-install since its edit")
+  // Steps that publish no graph settle on their own host line.
+  const editorLine = (open: boolean, wallMs: number) => ({ event: "vst-editor-state", instanceId: "i-1", open, wallMs })
+  check(publicationComplete(host(editorLine(true, 1000)), 900, false, "editor-open")?.wallMs === 1000, "the editor-open step settles on its vst-editor-state open line")
+  check(publicationComplete(host(editorLine(false, 1000)), 900, false, "editor-open") === undefined && publicationComplete(host(editorLine(true, 800)), 900, false, "editor-open") === undefined,
+    "a closed editor or an earlier line is not its settle")
+  const fault = (cause: string) => ({ event: "attachment-fault-isolated", cause, wallMs: 1000, frame: 120000 })
+  check(publicationComplete(host(fault("plugin-fault")), 900, false, "plugin-fault")?.publicationFrame === 120000 && publicationComplete(host(fault("host-defect")), 900, false, "plugin-fault") === undefined,
+    "the fault step settles on a plug-in fault, never on a host defect")
   // Pooled statistics on a synthetic set: 18 rows of 20 clean edits, then one failing at edit 12.
   const clean = Array.from({ length: 18 }, (_, row): Trial => ({ row: `r${row}`, verdict: { outcome: "pass", judged: 20 } }))
   const allClean = pooled(clean)
@@ -422,7 +435,7 @@ export const selfTest = async () => {
   // The burst runner against a fake performer that appends the host's publication line.
   const burstDirectory = await mkdtemp(path.join(tmpdir(), "ae08-phase9-burst-"))
   const held: number[] = [], inventoried: number[] = []
-  const quiet = { sampleRate: 48000, hold: async (frame: number) => { held.push(frame) }, afterSettle: async (settled: Settled) => { inventoried.push(settled.revision) } }
+  const quiet = { sampleRate: 48000, frameAt: (wallMs: number) => wallMs, hold: async (frame: number) => { held.push(frame) }, afterSettle: async (settled: Settled) => { inventoried.push(settled.revision) } }
   try {
     const tempo = find("tempo-burst")
     const edits: string[] = []
@@ -436,6 +449,14 @@ export const selfTest = async () => {
     const written = z.object({ phase: z.number(), edits: z.array(z.object({ index: z.number() })) }).parse(JSON.parse(await readFile(path.join(burstDirectory, tempo.name, "phase9-edits.json"), "utf8")))
     check(written.phase === 9 && written.edits.map((edit) => edit.index).join() === "1,2,3,4", "phase9-edits.json lists the edits by step")
     check(await readFile(path.join(burstDirectory, tempo.name, "latency-class.json"), "utf8") === `{"class":"plain"}`, "the row declares its class")
+    // An editor step settles on the editor line, and its frame is the transport frame at that wall time.
+    const opened = await runBurst({ out: burstDirectory, directory: path.join(burstDirectory, "editor"), repetitions: 1, mark: async () => undefined, ...quiet, afterSettle: async () => undefined,
+      row: { ...tempo, name: "editor", start: "s", cycle: [{ edits: ["open"], state: "s", settle: "editor-open" }] },
+      perform: async () => {
+        await appendFile(path.join(burstDirectory, "native-1.jsonl"), `${JSON.stringify({ event: "vst-editor-state", open: true, wallMs: Date.now() })}\n`)
+        return { fromLatencyFrames: 0, toLatencyFrames: 0 }
+      } })
+    check(opened[0]?.settledWallMs !== undefined && opened[0]?.publicationFrame === opened[0]?.settledWallMs, `the editor step settles on its line at the frame of that time: ${JSON.stringify(opened)}`)
     // Edits that share a step run in their declared order and settle once.
     const paired: string[] = []
     const pairedLogged = await runBurst({ out: burstDirectory, directory: path.join(burstDirectory, "paired"), repetitions: 2, mark: async () => undefined, ...quiet,

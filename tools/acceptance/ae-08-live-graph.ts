@@ -87,10 +87,10 @@ const run = async (out: string, edited: boolean, fixtureKind: string, phase = 1,
   const profile = path.join(privateDirectory, "profile")
   await mkdir(profile, { mode: 0o700 })
   // A row's device must be present before the app starts: an absent one is a setup failure, never a pass. A VST row's profile gets
-  // the phase 6 test plug-in's folder in its plug-in catalog; trust still goes through the UI.
+  // the phase 6 test plug-in's folder in its plug-in catalog; trust still goes through the UI, and the trust row never takes that step.
   if (launch) {
     await checkDevices(launch.rows)
-    if (launch.rows.some((row) => row.prepare?.includes("vst-trust"))) await seedPluginCatalog(profile, privateDirectory)
+    if (launch.rows.some((row) => row.prepare?.includes("vst-trust") || row.judge === "trust")) await seedPluginCatalog(profile, privateDirectory)
   }
   // Exclusive lock is deliberately retained on failure; no other invocation can
   // attach to this disposable profile or reuse incomplete evidence.

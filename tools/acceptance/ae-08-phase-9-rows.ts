@@ -4,17 +4,21 @@
 
 // The class each row declares for ae-08-latency-gates.ts (its latency-class.json).
 export type LatencyClass = "plain" | "raise" | "asset" | "vst-insert"
+// What an edit that publishes no graph, or not the first one, settles on: the host's applied parameter sequence line, the publication
+// that carries a decoded asset (not the track-only one an import makes first), the host's editor-open or plug-in fault line, or, for a
+// commit the app refuses, the return of the refusal.
+export type Settle = "sequence" | "asset" | "refused" | "editor-open" | "plugin-fault"
 // How a step is entered when it is not the analyzer's 6 ms crossfade: "ghost" (a removed track's node fades over 5 ms on top of its
-// source's 6 ms), "cut" (a restored track or a decoded asset sounds from its publication). `settle: "asset"` settles the step on the
-// publication that carries the asset, not on the track-only publication an import makes first.
-export type Step = { edits: string[]; state: string; entry?: "ghost" | "cut"; settle?: "asset" }
+// source's 6 ms), "cut" (a restored track or a decoded asset sounds from its publication).
+export type Step = { edits: string[]; state: string; entry?: "ghost" | "cut"; settle?: Settle }
 // Which check judges a row's bursts: "states" compares the capture with an offline export of each state (the analyzer's judgeBurst),
 // "sustained" requires a held live note to stay unbroken, "delete" judges a clip delete on host evidence and its own capture,
 // "take" requires the in-app recording's take to equal the tone played into BlackHole,
 // "latency" checks the host's reported latencies against the declared moves and the retained channel against its source shifted by
 // the published moves (a pinned lower leaves the shift, so no per-state export can stand for a raise row's later states),
 // and no check means the row is only settled and gated on host evidence.
-export type Judge = "states" | "sustained" | "delete" | "latency" | "take"
+// "editor", "fault" and "trust" judge the VST rows on host evidence (no restart, the editor stays open) and the capture.
+export type Judge = "states" | "sustained" | "delete" | "latency" | "take" | "editor" | "fault" | "trust"
 export type PackagedRun = {
   // burst: --repetitions edits. vst-burst: --vst-repetitions edits. single: one pass of the cycle. launch: one edit per launch, repeated --repetitions times.
   repeat: "burst" | "vst-burst" | "single" | "launch"
@@ -29,9 +33,8 @@ export type PackagedRun = {
   // A hardware device the row needs. A launch checks that it is present before the app starts.
   device?: "iac-midi" | "blackhole"
   judge?: Judge
-  // What a step settles on when its edits publish no graph: the host's applied parameter sequence line, or, for a commit the app
-  // refuses, the return of the refusal.
-  settle?: "sequence" | "refused"
+  // What every step of the row settles on, unless the step names its own.
+  settle?: Settle
   // What a launch of this row needs that no current fixture provides.
   needs?: string
 }
@@ -94,15 +97,15 @@ export const burstRows: BurstRow[] = [
     cycle: [{ edits: ["vst-remove"], state: "vst-absent" }, { edits: ["vst-insert"], state: "vst-present" }] } },
   { name: "vst-latency-switch", latencyClass: "raise", packaged: { repeat: "vst-burst", periodSec: null, fixture: "phase5:raw-tempo", start: "latency-low", prepare: insertedTestPlugin,
     cycle: [{ edits: ["latency-high"], state: "latency-high" }, { edits: ["latency-low"], state: "latency-low" }] } },
-  { name: "open-editor", latencyClass: "vst-insert", packaged: { repeat: "single", periodSec: null, fixture: null, start: "vst-present", prepare: insertedTestPlugin,
-    cycle: [{ edits: ["editor-open"], state: "editor-open" }],
-    needs: "an open editor publishes no graph, so the row has no settle line and the test plug-in may offer no editor at all; the first VST launch shows whether the control exists" } },
-  { name: "faulty-plugin", latencyClass: "vst-insert", packaged: { repeat: "single", periodSec: null, fixture: null, start: "vst-present", prepare: insertedTestPlugin,
-    cycle: [{ edits: ["vst-fault"], state: "vst-failed" }],
-    needs: "the expected verdict (unrelated audio live, failure reported, no fallback) has no host evidence line contract until the first VST launch shows what the host logs" } },
-  { name: "trust-negative", latencyClass: "vst-insert", packaged: { repeat: "single", periodSec: null, fixture: null, start: "vst-absent",
-    cycle: [{ edits: ["untrusted-insert"], state: "vst-rejected" }],
-    needs: "needs the bundle left untrusted in the private profile (no vst-trust step) and a refusal verdict; a refused insert publishes nothing to settle on" } },
+  // Opening the editor publishes no graph: it settles on the host's vst-editor-state line. The edit after it must publish in place with the editor still open.
+  { name: "open-editor", latencyClass: "vst-insert", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-present", prepare: insertedTestPlugin, judge: "editor",
+    cycle: [{ edits: ["editor-open"], state: "editor-open", settle: "editor-open" }, { edits: ["latency-high"], state: "latency-high" }] } },
+  // The plug-in is crashed through its Fault parameter: the host isolates it, the device reports it, and the unrelated source keeps sounding.
+  { name: "faulty-plugin", latencyClass: "vst-insert", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-present", prepare: insertedTestPlugin, judge: "fault",
+    cycle: [{ edits: ["vst-fault"], state: "vst-failed", settle: "plugin-fault" }] } },
+  // The bundle stays untrusted: its browser entry is refused with the trust reason and nothing restarts.
+  { name: "trust-negative", latencyClass: "vst-insert", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-absent", judge: "trust",
+    cycle: [{ edits: ["untrusted-insert"], state: "vst-rejected", settle: "refused" }] } },
   // Portable-only rows: the portable engine has no packaged counterpart for them.
   { name: "mixer-gain", latencyClass: "plain", portable: { from: "base", to: "gain", latency: false } },
   { name: "clip-note", latencyClass: "plain", portable: { from: "base", to: "note", latency: false } },

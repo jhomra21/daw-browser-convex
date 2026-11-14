@@ -13,7 +13,7 @@ import { takeFile } from "./ae-08-phase-9-compare"
 import { writeWav } from "./ae08-wav"
 import { blackhole, iacPort, makeTone, playToneIntoBlackhole, selectAudioInputScript, selectMidiInputScript, sendMidiNote } from "./ae-08-phase-9-devices"
 import { armRecordTarget, finishRecording, recordingTargetLockedReason, startRecording, toneSeconds, verifyHandedOverTake } from "./ae-08-phase-9-record"
-import { insertTestPlugin, prepareTestPlugin, removeTestPlugin } from "./ae-08-phase-9-vst"
+import { awaitTestPluginFailure, insertTestPlugin, openTestPluginEditor, prepareTestPlugin, refuseUntrustedPlugin, removeTestPlugin } from "./ae-08-phase-9-vst"
 
 // One packaged launch of phase 9: the row's phase 5 start state, then either a burst of its edits (settled on host evidence) or the
 // same timeline with no edits (a reference, or the calibration duplicate of one). Edits go through the public control actions or the
@@ -116,6 +116,15 @@ export const createPerformer = ({ context, runtime, observe, setup }: Performers
     ["clip-delete", deleteImportedClip],
     ["vst-insert", async () => { await insertTestPlugin(context); return unmoved }],
     ["vst-remove", async () => { await removeTestPlugin(context); return unmoved }],
+    ["editor-open", async () => { await openTestPluginEditor(context); return unmoved }],
+    // The test plug-in's Fault parameter (id 2): its second step, 1/3 normalized, aborts the worker's next process call.
+    ["vst-fault", async () => {
+      const { wallMs } = await commit([{ kind: "external-plugin.parameters.set", target,
+        processor: ref(required((await observe()).externalEffectId, "Test plug-in processor")), changes: [{ parameterId: 2, normalizedValue: 1 / 3 }] }])
+      await awaitTestPluginFailure(context)
+      return { ...unmoved, wallMs }
+    }],
+    ["untrusted-insert", async () => { await refuseUntrustedPlugin(context, "Changed right"); return unmoved }],
     ["latency-high", testPluginLatency(1, 0, 4096)],
     ["latency-low", testPluginLatency(0, 4096, 0)],
     ["silent-track-create", () => commit([{ kind: "track.create", name: silentTrack, trackKind: "audio" }])],
@@ -192,6 +201,7 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
     await mark("asset-inventory", { revision: 0, installedAssets: await installedAssets() })
     for (const row of launch.rows) {
       const logged = await runBurst({ out, directory: path.join(launch.directory, row.name), row, perform, mark, sampleRate,
+        frameAt: (wallMs) => Math.max(1, Math.round((wallMs - playWallMs) * sampleRate / 1000)),
         repetitions: repetitionsFor(row, launch.repetitions, launch.vstRepetitions),
         afterSettle: async (settled) => mark("asset-inventory", { revision: settled.revision, installedAssets: await installedAssets() }),
         hold: (frame) => waitNativeFrame(context, frame) })
@@ -333,6 +343,16 @@ export const selfTest = async () => {
   const latencyAction = (normalizedValue: number) => `mutate ${JSON.stringify([{ kind: "external-plugin.parameters.set", target: { kind: "track", track: ref("track-1") }, processor: ref("external-1"), changes: [{ parameterId: 1, normalizedValue }] }])}`
   check(high.calls[0] === latencyAction(1) && high.moved.fromLatencyFrames === 0 && high.moved.toLatencyFrames === 4096, `latency-high sets the Latency parameter to its top step: ${high.calls[0]}`)
   check(low.calls[0] === latencyAction(0) && low.moved.fromLatencyFrames === 4096 && low.moved.toLatencyFrames === 0, "latency-low sets it back")
+  // The editor opens through the card's Open UI button and is awaited as Close UI; the fault sets the Fault parameter's crash step and
+  // waits for the card to report it; the untrusted insert opens the dashboard, finds the trust prompt and no plug-in entry, and clicks nothing.
+  const editor = await run("editor-open")
+  check(editor.calls[0]?.includes(`"Open UI"`) === true && editor.calls[0]?.includes(".click()") === true && editor.calls.some((call) => call.includes(`"Close UI"`)), `editor-open clicks Open UI and awaits Close UI: ${editor.calls[0]}`)
+  const faulty = await run("vst-fault")
+  const faultAction = `mutate ${JSON.stringify([{ kind: "external-plugin.parameters.set", target: { kind: "track", track: ref("track-1") }, processor: ref("external-1"), changes: [{ parameterId: 2, normalizedValue: 1 / 3 }] }])}`
+  check(faulty.calls[0] === faultAction && faulty.moved.wallMs === 4242 && faulty.calls.some((call) => call.includes("Plug-in failed")), `vst-fault crashes the plug-in and awaits its failure on the card: ${faulty.calls[0]}`)
+  const refusal = await run("untrusted-insert")
+  check(refusal.calls.some((call) => call.includes("I understand and trust the VST3 plug-ins I add.")) && refusal.calls.some((call) => call.includes("'Rescan','Add directory'"))
+    && refusal.calls.every((call) => !call.includes(".click()") || !call.includes("ae08")), `untrusted-insert asks for trust and clicks no plug-in entry: ${refusal.calls}`)
   check((await run("clip-delete")).calls[0] === `mutate ${JSON.stringify([{ kind: "clip.delete", clip: ref("clip-1") }])}`, "clip-delete names the observed clip")
   // Prepare steps: the trust flow opens the plug-ins dashboard and acknowledges trust; an unknown step is refused.
   const prepared: string[] = []

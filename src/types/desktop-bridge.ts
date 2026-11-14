@@ -270,6 +270,8 @@ type DesktopBridge = {
   benchmarkSabRecording?: boolean
   /** True only when the app was launched with DAW_AE08_EXTERNAL_NATIVE_SESSION=1: the acceptance runner owns the native session. */
   acceptanceExternalNativeSession?: boolean
+  /** Present only when the app was launched with DAW_AE08_EVIDENCE_DIR: logs one renderer mark of the edit-to-publish path. */
+  ae08Mark?: (name: string, key: string) => void
   benchmarkHeartbeat?: () => Promise<{ mainEpochMs: number } | null>
   traceDiagnosticsV2(id: string, stage: "controller-before-native" | "controller-after-native" | "controller-parsed"): void
   setRequestHandler(next: DesktopRequestHandler | undefined, onCancel?: DesktopRequestCancellationHandler): void

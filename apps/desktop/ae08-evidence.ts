@@ -2,6 +2,7 @@ import { appendFileSync } from "node:fs"
 import path from "node:path"
 import { z } from "zod"
 import type { DesktopRequestV2 } from "@daw-browser/desktop-protocol"
+import { ae08RendererMarks } from "@daw-browser/desktop-protocol/ipc-channels"
 
 // Private, opt-in acceptance evidence. Never serialize native payloads or state.
 export const ae08Evidence = (event: string, fields: Record<string, string | number | boolean | null> = {}) => {
@@ -20,4 +21,12 @@ export const ae08ControlCommitReceived = (frame: Pick<DesktopRequestV2, "operati
   if (frame.operation !== "control.commit") return
   const commit = commitKey.safeParse(frame.input)
   if (commit.success) ae08Evidence("control-commit-received", { idempotencyKey: commit.data.idempotencyKey })
+}
+
+const rendererMark = z.tuple([z.enum(ae08RendererMarks), z.string().max(64)])
+
+// A renderer mark of the edit-to-publish path. The key is the commit's idempotency key or an adoption's hash.
+export const ae08RendererMark = (message: unknown) => {
+  const mark = rendererMark.safeParse(message)
+  if (mark.success) ae08Evidence(mark.data[0], { key: mark.data[1] })
 }

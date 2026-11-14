@@ -1,6 +1,7 @@
 import { compileLiveNativeProjection, resolveMixerTiming, type LiveNativeProjection } from "@daw-browser/audio-engine/live-native-projection"
 import { effectiveLoopForStart } from "@daw-browser/audio-engine/loop-frame-schedule"
 import { NativePlaybackAbortError } from "./native-playback-abort"
+import { ae08AdoptionMarker } from "./ae08-marks"
 import { nativeExternalLatencyFrames as nativeOfflineExternalLatencyFrames } from "~/lib/export/native-offline-render-plan"
 import {
   nativeAudioHostMaximumInstalledAssets,
@@ -3465,6 +3466,7 @@ export const createNativePlaybackController = (input: {
   ) => {
       const candidate = payload.kind === "schedule" ? payload.candidate : undefined
       const attempt = payload.kind === "schedule" ? payload.attempt : undefined
+      ae08AdoptionMarker(attempt?.intent.key)?.("lane-admitted")
       const intent = payload.kind === "schedule" ? payload.intent : stagedTransportIntent
       const abandonCandidate = async () => {
         await candidate?.dispose()
@@ -3922,6 +3924,7 @@ export const createNativePlaybackController = (input: {
         })
         // Native refuses a prepare while a patch claim is unreported (design 2.4.6): none is sent until the fence opens.
         await quietPublicationLane()
+        ae08AdoptionMarker(attempt?.intent.key)?.("fence-open")
         if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
         // The host attaches a plug-in this graph adds and starts its worker before the graph that binds it is prepared.
         // A removed one goes in the same plan, with no instance left in it, and is detached once the graph is live.
@@ -3967,6 +3970,7 @@ export const createNativePlaybackController = (input: {
         // Provisional: long enough for the prepare and hydration below. The seam binds late, after them.
         let seam = chooseFrame(BigInt(coordinator.currentFrame()), 16)
         let observed = sequence
+        ae08AdoptionMarker(attempt?.intent.key)?.("prepare-sent")
         let ready = await withoutLane(revisions.prepare({
           projectId, projectRevision: snapshot.revision, bytes: serializeNativeGraph(graph, serializedKeepLatencyNodeIds),
           requestedPublicationFrame: BigInt(seam),
@@ -4389,7 +4393,7 @@ export const createNativePlaybackController = (input: {
       const kept = processorState.takeRetained(intent)
       const reusable = kept && isScheduleCandidateValid(kept) ? kept : undefined
       if (kept && !reusable) await kept.dispose()
-      const preparation = reusable ?? await prepareScheduleRevision(intent.context)
+      const preparation = reusable ?? await prepareScheduleRevision({ ...intent.context, mark: ae08AdoptionMarker(intent.key) })
       if (preparation.status === "retry") return preparation.transport ? { ...superseded, transport: preparation.transport } : superseded
       if (preparation.status === "failed") return { outcome: { status: "failed", reason: preparation.reason } }
       // A limitation settles the intent without the refusal the UD 8 retry reopens.

@@ -34,6 +34,7 @@ import {
 } from "@daw-browser/desktop-protocol"
 import type { DesktopApplicationMenuMessage } from "@daw-browser/desktop-protocol/application-menu"
 import {
+  ae08RendererMarkChannel,
   applicationMenuCommandChannel,
   diagnosticsChannel,
   diagnosticsV2TraceChannel,
@@ -181,7 +182,7 @@ import {
 import { packagedRendererRoot, rendererAssetPath } from "./renderer-path"
 import { createNativeVstProjectBindings } from "./native-vst-project-bindings"
 import { createApplicationMenuController } from "./application-menu"
-import { ae08ControlCommitReceived, ae08Evidence } from "./ae08-evidence"
+import { ae08ControlCommitReceived, ae08Evidence, ae08RendererMark } from "./ae08-evidence"
 import { deliverToRenderer } from "./renderer-delivery"
 import { createRendererLifecycleOwner } from "./renderer-lifecycle"
 import { createOfflinePcmAckTracker } from "./offline-pcm-ack"
@@ -1147,6 +1148,9 @@ const registerIpc = () => {
     && event.senderFrame !== null
     && sameAppOrigin(event.senderFrame.url)
   )
+  if (process.env.DAW_AE08_EVIDENCE_DIR) ipcMain.on(ae08RendererMarkChannel, (event, message) => {
+    if (audioHostAllowed(event)) ae08RendererMark(message)
+  })
   installBenchmarkHeartbeat({
     app,
     ipcMain,

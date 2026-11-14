@@ -470,10 +470,12 @@ const Timeline: Component<TimelineProps> = (props) => {
     context: LivePlaybackCompileContext | undefined,
     automationPatches: () => ExportAutomationPatch[],
   ) => {
+    context?.mark?.("compile-start");
     const effects = effectsExportSnapshot();
     // Every playback compile reads the canonical effects draft. Draining its
     // owner could wait on a structural handoff that awaits this preparation.
     const instrumentReadiness = await effects?.awaitInstrumentReadiness(context?.instrumentOverride);
+    context?.mark?.("compile-instruments-ready");
     try {
       const effectsProjection = instrumentReadiness?.projection ?? effects?.snapshotEffectsProjection();
       const processorStateSequence = processorEdits.sequence();
@@ -501,6 +503,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         effectsProjection: projectedEffects,
         automationPatches: automationPatches(),
       });
+      context?.mark?.("compile-render-state-ready");
       const hydratedRenderState = instrumentReadiness?.hydrateInstrumentBuffers(renderState)
         ?? effects?.hydrateInstrumentBuffers?.(renderState) ?? renderState;
       const result = compileLivePlaybackSnapshot({
@@ -523,6 +526,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         seed: context?.externalProcessor,
         readPersisted: getLocalExternalProcessor,
       });
+      context?.mark?.("compile-processors-ready");
       if (processors.length === 0) return result;
       const attachmentPlan = compileNativeExternalAttachmentPlan({
         target: "native",
@@ -570,6 +574,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       };
     } finally {
       instrumentReadiness?.release();
+      context?.mark?.("compile-end");
     }
   };
   const exportService = createTimelineExportService({

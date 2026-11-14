@@ -1,5 +1,6 @@
 import { resolveLiveMixerGraph } from "@daw-browser/audio-engine/live-mixer-runtime"
 import type { ExternalProcessor } from "@daw-browser/external-plugins"
+import type { Ae08RendererMark } from "~/lib/desktop/ae08-marks"
 import { resolveDesiredPlaybackFx, type ExportCloudRenderRowsSnapshot, type ExportRenderStateSnapshot } from "~/lib/export/run-export-job"
 import type { ExportEffectsProjection } from "~/lib/export/export-effect-rows"
 import { nativeInstrumentContentKey, type DesiredInstrument } from "~/lib/live-processor-control"
@@ -28,6 +29,8 @@ export type LivePlaybackTransport = {
 
 export type LivePlaybackCompileContext = {
   liveAdoption?: true
+  /** Acceptance evidence marks of this adoption's compile; present only while the evidence channel is on. */
+  mark?: (name: Ae08RendererMark) => void
   instrumentOverride?: {
     targetId: string
     instrument: TrackInstrumentParams

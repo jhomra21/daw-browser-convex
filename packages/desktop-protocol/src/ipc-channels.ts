@@ -63,6 +63,13 @@ export const vstEditorCapturedStateAckChannel = "daw:audio-host:vst-editor-captu
 export const vstEditorStateChannel = "daw:audio-host:vst-editor-state"
 export const vstParameterEditChannel = "daw:audio-host:vst-parameter-edit"
 export const vstInstanceEventChannel = "daw:audio-host:vst-instance-event"
+export const ae08RendererMarkChannel = "daw:ae08:renderer-mark"
+// Renderer marks of the edit-to-publish path. Each carries a commit key (control-*) or an adoption key (the rest).
+export const ae08RendererMarks = [
+  "control-handler-entry", "control-reload-before-done", "control-commit-done", "control-store-emitted",
+  "compile-start", "compile-instruments-ready", "compile-render-state-ready", "compile-processors-ready", "compile-end",
+  "lane-admitted", "fence-open", "prepare-sent",
+] as const
 export const benchmarkHeartbeatChannel = "daw:benchmark:heartbeat"
 export const benchmarkRendererPingChannel = "daw:benchmark:renderer-ping"
 export const benchmarkRendererPongChannel = "daw:benchmark:renderer-pong"

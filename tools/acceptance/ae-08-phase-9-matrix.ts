@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { z } from "zod"
 import { ae08ControlCommitReceived } from "../../apps/desktop/ae08-evidence"
+import { ae08RendererMarks } from "@daw-browser/desktop-protocol/ipc-channels"
 import { phase9Matrix, phase9Rows, type LatencyClass, type Row, type Settle } from "./ae-08-phase-9-rows"
 
 // AE-08 phase 9 matrix (plan §8 steps 1-2): one packaged launch per row class carries N alternating edits. This file owns
@@ -106,7 +107,7 @@ export const chooseVstRepetitions = (launches: readonly Row[][], repetitions: nu
 // ---- Settling on host evidence ----
 const hostEventSchema = z.object({ event: z.string(), cause: z.string().default(""), wallMs: z.number().default(0),
   revision: z.number().default(0), frame: z.number().default(0), publicationFrame: z.number().default(0), transportEpoch: z.number().default(0),
-  idempotencyKey: z.string().default(""), open: z.boolean().optional(), pid: z.number().default(0), requestedRevision: z.number().default(0) })
+  idempotencyKey: z.string().default(""), key: z.string().default(""), open: z.boolean().optional(), pid: z.number().default(0), requestedRevision: z.number().default(0) })
 export type HostEvent = z.infer<typeof hostEventSchema>
 export class SetupFailure extends Error {}
 
@@ -324,10 +325,14 @@ export const judgeStored = async (directory: string) => Promise.all((await store
 
 // ---- Edit-to-publish breakdown (the runner's --breakdown) ----
 // Where the time from an edit to its publication goes, by the lines the app and the host log: the app's receipt of the commit, the
-// host's graph-prepare, graph-publish-request and graph-publish of the revision the edit's publication carries. The renderer logs no
-// line when it compiles the graph, so the span between the commit and graph-prepare is one: it holds the renderer's compile, and the
-// breakdown does not split it.
-export type EditBreakdown = { index: number; name: string; fromCommit: boolean; toPrepareMs: number; toRequestMs: number; toPublishMs: number }
+// host's graph-prepare, graph-publish-request and graph-publish of the revision the edit's publication carries. The span from the
+// commit to graph-prepare is split by the renderer marks (packages/desktop-protocol ae08RendererMarks), logged when the app runs with
+// DAW_AE08_EVIDENCE_DIR: the control handler's marks carry the commit's idempotency key, the compile and lane marks the key of the
+// adoption whose prepare-sent is the last before that graph-prepare. A mark the evidence lacks is skipped, so its span is merged.
+const commitMarkNames = ae08RendererMarks.filter((name) => name.startsWith("control-"))
+const adoptionMarkNames = ae08RendererMarks.filter((name) => !name.startsWith("control-"))
+export type EditSpan = { from: string; to: string; ms: number }
+export type EditBreakdown = { index: number; name: string; fromCommit: boolean; toPrepareMs: number; toRequestMs: number; toPublishMs: number; spans: EditSpan[] }
 export const editBreakdowns = (events: readonly HostEvent[], edits: readonly { index: number; name: string; wallMs: number }[]): (EditBreakdown | { index: number; name: string; missing: string })[] =>
   edits.map((edit) => {
     const publishAt = events.findIndex((event) => event.event === "graph-publish" && event.cause === "block-boundary" && event.publicationFrame > 0 && event.wallMs >= edit.wallMs)
@@ -337,8 +342,19 @@ export const editBreakdowns = (events: readonly HostEvent[], edits: readonly { i
     const request = prepare && events.slice(events.indexOf(prepare) + 1, publishAt)
       .find((event) => event.event === "graph-publish-request" && event.pid === publish.pid && event.requestedRevision === publish.revision)
     if (!prepare || !request) return { index: edit.index, name: edit.name, missing: `revision ${publish.revision} has no ${prepare ? "graph-publish-request" : "graph-prepare"} before its publication` }
-    return { index: edit.index, name: edit.name, fromCommit: events.some((event) => event.event === "control-commit-received" && event.wallMs === edit.wallMs),
-      toPrepareMs: prepare.wallMs - edit.wallMs, toRequestMs: request.wallMs - edit.wallMs, toPublishMs: publish.wallMs - edit.wallMs }
+    const received = events.find((event) => event.event === "control-commit-received" && event.wallMs === edit.wallMs)
+    const sent = events.findLast((event) => event.event === "prepare-sent" && event.wallMs >= edit.wallMs && event.wallMs <= prepare.wallMs)
+    const points = [
+      { name: received ? "commit-received" : "edit-start", wallMs: edit.wallMs },
+      ...(received ? commitMarkNames.flatMap((name) => events.find((event) => event.event === name && event.key === received.idempotencyKey) ?? []) : [])
+        .map((event) => ({ name: event.event, wallMs: event.wallMs })),
+      ...(sent ? adoptionMarkNames.flatMap((name) => events.findLast((event) => event.event === name && event.key === sent.key && event.wallMs <= sent.wallMs) ?? []) : [])
+        .map((event) => ({ name: event.event, wallMs: event.wallMs })),
+      { name: "graph-prepare", wallMs: prepare.wallMs },
+    ]
+    return { index: edit.index, name: edit.name, fromCommit: received !== undefined,
+      toPrepareMs: prepare.wallMs - edit.wallMs, toRequestMs: request.wallMs - edit.wallMs, toPublishMs: publish.wallMs - edit.wallMs,
+      spans: points.slice(1).map((point, at) => ({ from: points[at]?.name ?? "", to: point.name, ms: point.wallMs - (points[at]?.wallMs ?? point.wallMs) })) }
   })
 
 const breakdownEdits = z.object({ edits: z.array(z.object({ index: z.number(), name: z.string(), wallMs: z.number() })) })
@@ -351,7 +367,7 @@ export const breakdownStored = async (directory: string) => Promise.all((await s
 }))
 export const breakdownLine = (entry: Awaited<ReturnType<typeof breakdownStored>>[number]) => entry.breakdowns === undefined ? [`${entry.row}: no host.jsonl (setup failure)`]
   : entry.breakdowns.map((found) => "missing" in found ? `${entry.row} edit ${found.index} ${found.name}: ${found.missing}`
-    : `${entry.row} edit ${found.index} ${found.name}: +${found.toPrepareMs} ms graph-prepare (renderer compile: no log line, inside this span), +${found.toRequestMs} ms graph-publish-request, +${found.toPublishMs} ms graph-publish${found.fromCommit ? "" : " (counted from the step start: a UI edit has no control-commit-received line)"}`)
+    : `${entry.row} edit ${found.index} ${found.name}: +${found.toPrepareMs} ms graph-prepare (${found.spans.length > 1 ? found.spans.map((span) => `${span.from} -> ${span.to} ${span.ms} ms`).join(", ") : "no renderer marks in host.jsonl"}), +${found.toRequestMs} ms graph-publish-request, +${found.toPublishMs} ms graph-publish${found.fromCommit ? "" : " (counted from the step start: a UI edit has no control-commit-received line)"}`)
 
 // ---- Self-test ----
 const steps = (count: number, settled: (index: number) => number | undefined = (index) => index * 4000 + 1500) =>
@@ -560,14 +576,31 @@ export const selfTest = async () => {
   // The breakdown: a commit received at 1000 reaches graph-prepare at 1040, the request at 1060 and the publication at 1100; a second edit
   // has no prepare for its publication; a third has no publication.
   const line = (event: string, wallMs: number, fields: Partial<HostEvent> = {}) => ({ event, wallMs, pid: 7, ...fields })
-  const lines = host(line("control-commit-received", 1000), line("graph-prepare", 1040, { requestedRevision: 5 }), line("graph-publish-request", 1060, { requestedRevision: 5 }),
+  const lines = host(line("control-commit-received", 1000, { idempotencyKey: "commit-a" }), line("graph-prepare", 1040, { requestedRevision: 5 }), line("graph-publish-request", 1060, { requestedRevision: 5 }),
     line("graph-publish", 1100, { cause: "block-boundary", revision: 5, publicationFrame: 96256 }),
     line("graph-publish", 3100, { cause: "block-boundary", revision: 6, publicationFrame: 192256 }))
   const [timed, unprepared, unpublished] = editBreakdowns(lines, [{ index: 1, name: "tempo-137", wallMs: 1000 }, { index: 2, name: "tempo-120", wallMs: 3000 }, { index: 3, name: "tempo-137", wallMs: 4000 }])
   check(timed !== undefined && "toPublishMs" in timed && timed.toPrepareMs === 40 && timed.toRequestMs === 60 && timed.toPublishMs === 100 && timed.fromCommit, `breakdown stages: ${JSON.stringify(timed)}`)
   check(unprepared !== undefined && "missing" in unprepared && /no graph-prepare/.test(unprepared.missing), `a publication with no prepare line is reported: ${JSON.stringify(unprepared)}`)
   check(unpublished !== undefined && "missing" in unpublished && /no graph-publish/.test(unpublished.missing), `an edit with no publication is reported: ${JSON.stringify(unpublished)}`)
-  check(breakdownLine({ row: "r", breakdowns: [timed ?? { index: 0, name: "", missing: "" }] })[0]?.includes("renderer compile: no log line") === true, "the report says the renderer compile has no line")
+  check(timed !== undefined && "spans" in timed && timed.spans.length === 1 && timed.spans[0]?.from === "commit-received" && timed.spans[0].to === "graph-prepare" && timed.spans[0].ms === 40, `without marks the one span is commit to prepare: ${JSON.stringify(timed)}`)
+  check(breakdownLine({ row: "r", breakdowns: [timed ?? { index: 0, name: "", missing: "" }] })[0]?.includes("no renderer marks in host.jsonl") === true, "the report says when the evidence has no renderer marks")
+  // With marks: the commit's own marks, then the adoption whose prepare-sent is the last before graph-prepare (an earlier adoption's marks
+  // under another key are ignored), then graph-prepare. Each span runs from one mark to the next.
+  const mark = (event: string, wallMs: number, key: string) => line(event, wallMs, { key })
+  const marked = host(line("control-commit-received", 1000, { idempotencyKey: "commit-a" }), mark("control-handler-entry", 1004, "commit-a"), mark("control-reload-before-done", 1020, "commit-a"),
+    mark("control-commit-done", 1035, "commit-a"), mark("control-store-emitted", 1060, "commit-a"),
+    mark("compile-start", 800, "old"), mark("prepare-sent", 900, "old"),
+    mark("compile-start", 1061, "new"), mark("compile-instruments-ready", 1065, "new"), mark("compile-render-state-ready", 1070, "new"), mark("compile-processors-ready", 1072, "new"),
+    mark("compile-end", 1073, "new"), mark("lane-admitted", 1080, "new"), mark("fence-open", 1081, "new"), mark("prepare-sent", 1082, "new"),
+    line("graph-prepare", 1090, { requestedRevision: 5 }), line("graph-publish-request", 1100, { requestedRevision: 5 }),
+    line("graph-publish", 1130, { cause: "block-boundary", revision: 5, publicationFrame: 96256 }))
+  const [spanned] = editBreakdowns(marked, [{ index: 1, name: "tempo-137", wallMs: 1000 }])
+  const names = spanned !== undefined && "spans" in spanned ? spanned.spans.map((span) => `${span.from}>${span.to}:${span.ms}`) : []
+  check(names.join(" ") === "commit-received>control-handler-entry:4 control-handler-entry>control-reload-before-done:16 control-reload-before-done>control-commit-done:15 "
+    + "control-commit-done>control-store-emitted:25 control-store-emitted>compile-start:1 compile-start>compile-instruments-ready:4 compile-instruments-ready>compile-render-state-ready:5 "
+    + "compile-render-state-ready>compile-processors-ready:2 compile-processors-ready>compile-end:1 compile-end>lane-admitted:7 lane-admitted>fence-open:1 fence-open>prepare-sent:1 prepare-sent>graph-prepare:8", `marked spans: ${names.join(" ")}`)
+  check(breakdownLine({ row: "r", breakdowns: spanned ? [spanned] : [] })[0]?.includes("compile-end -> lane-admitted 7 ms") === true, "the report lists every span")
   console.log("ae-08 phase 9 matrix self-test: pass")
 }
 

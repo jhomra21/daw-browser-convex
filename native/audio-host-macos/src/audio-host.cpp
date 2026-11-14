@@ -1094,6 +1094,12 @@ void ForwardWorkerDiagnostic(
   if (*kind == WorkerNotificationKind::kParameterEdit) {
     static_cast<void>(attachment->SetAutomationOverride(diagnostic.parameter_id));
   }
+  if (*kind == WorkerNotificationKind::kEditorState && daw::acceptance::Enabled()) {
+    char fields[384];
+    std::snprintf(fields, sizeof(fields), ",\"instanceId\":\"%s\",\"open\":%s",
+      attachment->metadata.instance_id.c_str(), diagnostic.value != 0 ? "true" : "false");
+    daw::acceptance::Event("vst-editor-state", fields);
+  }
   const std::lock_guard lock(sink.mutex);
   static_cast<void>(sink.notifications.Push(IdentifyWorkerNotification(
     attachment->metadata,

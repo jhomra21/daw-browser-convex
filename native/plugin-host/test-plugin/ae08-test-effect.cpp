@@ -1,6 +1,9 @@
 // DAW AE08 Test Effect: a stereo VST3 effect whose only purpose is to make the host's
 // dynamic-staging failure modes reproducible. It is never packaged or cataloged.
+#include "ae08-test-editor.h"
+#include "public.sdk/source/common/pluginview.h"
 #include "public.sdk/source/main/pluginfactory.h"
+#include "pluginterfaces/gui/iplugview.h"
 #include "public.sdk/source/vst/vstsinglecomponenteffect.h"
 #include "pluginterfaces/base/ibstream.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
@@ -38,8 +41,29 @@ int StepOf(const ParamValue normalized) {
   return normalized < 0.0 ? 0 : normalized > 1.0 ? 3 : static_cast<int>(normalized * 3.0 + 0.5);
 }
 
+class Ae08TestEditor final : public CPluginView {
+ public:
+  Ae08TestEditor() : CPluginView(&kBounds) {}
+  tresult PLUGIN_API isPlatformTypeSupported(FIDString type) override {
+    return FIDStringsEqual(type, kPlatformTypeNSView) ? kResultTrue : kResultFalse;
+  }
+  void attachedToParent() override { child_ = Ae08AttachPlainView(systemWindow, kBounds.getWidth(), kBounds.getHeight()); }
+  void removedFromParent() override {
+    if (child_) Ae08RemovePlainView(child_);
+    child_ = nullptr;
+  }
+
+ private:
+  static inline const ViewRect kBounds{0, 0, 240, 120};
+  void* child_ = nullptr;
+};
+
 class Ae08TestEffect final : public SingleComponentEffect {
  public:
+  IPlugView* PLUGIN_API createView(FIDString name) override {
+    return FIDStringsEqual(name, ViewType::kEditor) ? new Ae08TestEditor : nullptr;
+  }
+
   static FUnknown* createInstance(void*) { return static_cast<IAudioProcessor*>(new Ae08TestEffect); }
 
   tresult PLUGIN_API initialize(FUnknown* context) override {

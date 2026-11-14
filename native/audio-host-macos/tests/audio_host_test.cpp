@@ -5544,6 +5544,27 @@ void TestLatencyReportPublishesWithoutStop() {
   host.Stop();
 }
 
+void TestEditorStateReportIsAcceptanceEvidence() {
+  EvidenceLog log;
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  ConfigureDiagnosticHost(host);
+  assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 17)));
+  assert(host.StartDiagnosticMode());
+  assert(WaitForVstHealth(host, kFirstVstInstance, NativeVstWorkerHealth::kReady));
+  for (const std::uint32_t open : {1U, 0U}) {
+    assert(AudioHostTestAccess::PublishWorkerDiagnostic(host, kFirstVstInstance,
+      {.kind = daw::plugin_host::WorkerDiagnosticKind::kEditorState, .value = open}));
+    assert(NextWorkerNotification(host, WorkerNotificationKind::kEditorState));
+  }
+  const auto lines = log.Lines("vst-editor-state", 2);
+  assert(lines.size() == 2);
+  const std::string instance = "\"instanceId\":\"" + std::string(kFirstVstInstance) + "\"";
+  assert(lines[0].find(instance) != std::string::npos && lines[0].find("\"open\":true") != std::string::npos);
+  assert(lines[1].find(instance) != std::string::npos && lines[1].find("\"open\":false") != std::string::npos);
+  host.Stop();
+}
+
 void TestComponentRestartIsWorkerLocal() {
   const NoPluginWorkers no_plugin;
   daw::audio_host_macos::AudioHost host;
@@ -6608,6 +6629,7 @@ int main() {
   TestWorkerNotificationCarriesRevisionIdentity();
   TestWorkerNotificationQueuePolicy();
   TestLatencyReportPublishesWithoutStop();
+  TestEditorStateReportIsAcceptanceEvidence();
   TestComponentRestartIsWorkerLocal();
   TestWorkerFaultIsolatesOnlyThatAttachment();
   TestStagedAttachmentJoinsAPublishedGraph();

@@ -99,6 +99,7 @@ if(DAW_BUILD_AE08_TEST_PLUGIN)
   set(AE08_SDK "${VST3_SDK_PATH}")
   add_library(ae08-test-effect MODULE
     test-plugin/ae08-test-effect.cpp
+    test-plugin/ae08-test-editor.mm
     "${AE08_SDK}/public.sdk/source/main/pluginfactory.cpp"
     "${AE08_SDK}/public.sdk/source/main/macmain.cpp"
     "${AE08_SDK}/public.sdk/source/main/moduleinit.cpp"
@@ -135,7 +136,8 @@ if(DAW_BUILD_AE08_TEST_PLUGIN)
     SUFFIX ""
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/test-plugin/Info.plist.in"
   )
-  target_link_libraries(ae08-test-effect PRIVATE "-framework CoreFoundation")
+  set_source_files_properties(test-plugin/ae08-test-editor.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+  target_link_libraries(ae08-test-effect PRIVATE "-framework CoreFoundation" "-framework AppKit")
 endif()
 
 if(BUILD_TESTING)

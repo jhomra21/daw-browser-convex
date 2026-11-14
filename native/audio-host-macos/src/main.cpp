@@ -507,6 +507,25 @@ bool WriteInputDeviceList(const std::vector<std::uint8_t>& payload) {
   return WriteFrame(daw::audio_host_macos::ControlType::kRecordingDeviceList, response);
 }
 
+bool WriteDeviceInventory() {
+  std::vector<std::uint8_t> records;
+  std::uint32_t count = 0;
+  for (const auto& device : daw::audio_host_macos::EnumerateDevices()) {
+    if (device.input_channels == 0 && device.output_channels == 0) continue;
+    WriteString(records, daw::audio_host_macos::CoreAudioDeviceId(device.uid));
+    WriteString(records, device.name);
+    WriteU32(records, device.nominal_sample_rate_hz);
+    WriteU32(records, device.input_channels);
+    WriteU32(records, device.output_channels);
+    WriteU32(records, device.available ? 1 : 0);
+    ++count;
+  }
+  std::vector<std::uint8_t> response;
+  WriteU32(response, count);
+  response.insert(response.end(), records.begin(), records.end());
+  return WriteFrame(daw::audio_host_macos::ControlType::kDeviceInventory, response);
+}
+
 bool InstallAsset(daw::audio_host_macos::AudioHost& host, const std::vector<std::uint8_t>& payload) {
   constexpr std::size_t header_bytes = 24;
   if (payload.size() < header_bytes || (payload.size() - header_bytes) % sizeof(float) != 0) return false;
@@ -876,6 +895,10 @@ int main() {
     }
     if (request->type == daw::audio_host_macos::ControlType::kDeviceList) {
       if (!WriteDeviceList(payload)) return EXIT_FAILURE;
+      continue;
+    }
+    if (request->type == daw::audio_host_macos::ControlType::kDeviceInventoryQuery) {
+      if (!payload.empty() || !WriteDeviceInventory()) return EXIT_FAILURE;
       continue;
     }
     if (request->type == daw::audio_host_macos::ControlType::kTransactionBegin) {

@@ -272,6 +272,15 @@ export type NativeInputDevice = {
   available: boolean
 }
 
+export type NativeAudioDevice = {
+  deviceId: `coreaudio:${string}`
+  name: string
+  nominalSampleRateHz: number
+  inputChannelCount: number
+  outputChannelCount: number
+  available: boolean
+}
+
 export const nativeGraphNodeId = (value: string) => {
   let hash = 0xcbf29ce484222325n
   for (const character of value) {

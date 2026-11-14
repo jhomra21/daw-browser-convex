@@ -294,7 +294,7 @@ std::optional<AudioDevice> SelectOutputDevice(const std::optional<std::string_vi
 
 std::optional<AudioDevice> SelectInputDevice(const std::optional<std::string_view> preferred_uid) {
   AudioDeviceID id = preferred_uid ? DeviceForUid(*preferred_uid) : kAudioObjectUnknown;
-  if (id == kAudioObjectUnknown) {
+  if (id == kAudioObjectUnknown && !preferred_uid) {
     const AudioObjectPropertyAddress address{
       .mSelector = kAudioHardwarePropertyDefaultInputDevice,
       .mScope = kAudioObjectPropertyScopeGlobal,

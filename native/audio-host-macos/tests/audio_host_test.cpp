@@ -840,6 +840,7 @@ void TestDeviceNamespace() {
   assert(!daw::audio_host_macos::CoreAudioDeviceUid("default"));
   assert(!daw::audio_host_macos::CoreAudioDeviceUid("coreaudio:"));
   assert(!daw::audio_host_macos::SelectOutputDevice("definitely-unavailable-daw-device"));
+  assert(!daw::audio_host_macos::SelectInputDevice("definitely-unavailable-daw-device"));
 }
 
 void TestControlFrames() {

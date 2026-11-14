@@ -59,6 +59,7 @@ import type {
   NativeOfflinePcmChunk,
   NativeHostTransport,
   NativeInputDevice,
+  NativeAudioDevice,
 } from "@daw-browser/audio-engine/native-host-wire"
 import { serializeNativeSpectrumSelection } from "@daw-browser/audio-engine/native-host-wire"
 
@@ -111,6 +112,8 @@ const {
   recordingStatus: recordingStatusType,
   recordingDeviceQuery: recordingDeviceQueryType,
   recordingDeviceList: recordingDeviceListType,
+  deviceInventoryQuery: deviceInventoryQueryType,
+  deviceInventory: deviceInventoryType,
   graphPrepare: graphPrepareType,
   graphPublish: graphPublishType,
   graphRetire: graphRetireType,
@@ -589,6 +592,7 @@ type NativeHostRequestType =
   | typeof recordingStopType
   | typeof recordingCancelType
   | typeof recordingDeviceQueryType
+  | typeof deviceInventoryQueryType
   | typeof graphPrepareType
   | typeof graphPublishType
   | typeof graphRetireType
@@ -1249,6 +1253,7 @@ type PendingControl = {
   diagnosticsResolve?: (value: NativeHostDiagnostics) => void
   devicesResolve?: (value: NativeOutputDevice | null) => void
   inputDeviceResolve?: (value: NativeInputDevice | null) => void
+  deviceInventoryResolve?: (value: NativeAudioDevice[]) => void
   graphRevisionResolve?: (value: NativeGraphRevisionStatus) => void
   graphRequestedRevision?: number
   patchStatusResolve?: (value: NativeProcessorPatchStatus) => void
@@ -1344,6 +1349,7 @@ export type NativeAudioHostSupervisor = {
   setTransport(input: NativeHostTransport, transactionToken?: string): Promise<void>
   resolveOutputDevice(preferredDeviceId?: string): Promise<NativeOutputDevice | null>
   resolveInputDevice(preferredDeviceId?: string): Promise<NativeInputDevice | null>
+  listDevices(): Promise<NativeAudioDevice[]>
   startAudio(): Promise<void>
   startDiagnosticAudio(): Promise<void>
   stopAudio(reason?: string): Promise<void>
@@ -1849,22 +1855,55 @@ export const createNativeAudioHostSupervisor = (
       instanceId: payload.subarray(24).toString("utf8"),
     }
   }
+  const deviceStringReader = (payload: Buffer, start: number) => {
+    let offset = start
+    return {
+      offset: () => offset,
+      advance: (bytes: number) => { offset += bytes },
+      string: () => {
+        if (offset + 4 > payload.byteLength) return undefined
+        const length = payload.readUInt32BE(offset)
+        offset += 4
+        if (length === 0 || offset + length > payload.byteLength) return undefined
+        const value = payload.subarray(offset, offset + length).toString("utf8")
+        offset += length
+        return value
+      },
+    }
+  }
+  const decodeDeviceInventory = (frame: Buffer): NativeAudioDevice[] | undefined => {
+    const payload = frame.subarray(headerBytes)
+    if (payload.byteLength < 4) return undefined
+    const count = payload.readUInt32BE(0)
+    const reader = deviceStringReader(payload, 4)
+    const devices: NativeAudioDevice[] = []
+    for (let index = 0; index < count; index += 1) {
+      const deviceId = reader.string()
+      const name = reader.string()
+      const offset = reader.offset()
+      if (!deviceId || !coreAudioDeviceId(deviceId) || !name || offset + 16 > payload.byteLength) return undefined
+      const availability = payload.readUInt32BE(offset + 12)
+      if (availability !== 0 && availability !== 1) return undefined
+      devices.push({
+        deviceId,
+        name,
+        nominalSampleRateHz: payload.readUInt32BE(offset),
+        inputChannelCount: payload.readUInt32BE(offset + 4),
+        outputChannelCount: payload.readUInt32BE(offset + 8),
+        available: availability === 1,
+      })
+      reader.advance(16)
+    }
+    return reader.offset() === payload.byteLength ? devices : undefined
+  }
   const decodeOutputDevice = (frame: Buffer): NativeOutputDevice | null | undefined => {
     const payload = frame.subarray(headerBytes)
     if (payload.byteLength === 4 && payload.readUInt32BE(0) === 0) return null
     if (payload.byteLength < 4 || payload.readUInt32BE(0) !== 1) return undefined
-    let offset = 4
-    const readString = () => {
-      if (offset + 4 > payload.byteLength) return undefined
-      const length = payload.readUInt32BE(offset)
-      offset += 4
-      if (length === 0 || offset + length > payload.byteLength) return undefined
-      const value = payload.subarray(offset, offset + length).toString("utf8")
-      offset += length
-      return value
-    }
-    const deviceId = readString()
-    const name = readString()
+    const reader = deviceStringReader(payload, 4)
+    const deviceId = reader.string()
+    const name = reader.string()
+    const offset = reader.offset()
     if (!deviceId || !coreAudioDeviceId(deviceId) || !name || offset + 16 !== payload.byteLength) return undefined
     const nominalSampleRateHz = payload.readUInt32BE(offset)
     const outputChannelCount = payload.readUInt32BE(offset + 4)
@@ -2128,6 +2167,16 @@ export const createNativeAudioHostSupervisor = (
         pending = undefined
         dispatchNext()
         resolve(device)
+      } else if (frame.readUInt32BE(8) === deviceInventoryType && pending?.deviceInventoryResolve) {
+        const current = pending
+        const resolve = pending.deviceInventoryResolve
+        const devices = decodeDeviceInventory(frame)
+        if (devices === undefined) return lost("The native audio host returned an invalid device inventory response.")
+        logControlAck(current)
+        clearTimeout(pending.deadline)
+        pending = undefined
+        dispatchNext()
+        resolve(devices)
       } else if (frame.readUInt32BE(8) === graphRevisionStatusType && pending?.graphRevisionResolve) {
         const resolve = pending.graphRevisionResolve
         const current = pending
@@ -3094,6 +3143,39 @@ export const createNativeAudioHostSupervisor = (
         }
         const currentPending = pending
         logControlEnqueue(recordingDeviceQueryType, requestId, enqueuedAt)
+        const stdinBackpressure = !current.stdin.write(frame)
+        if (currentPending) {
+          currentPending.stdinBackpressure = stdinBackpressure
+          logControlWrite(currentPending, current, stdinBackpressure)
+        }
+      })
+    },
+    async listDevices() {
+      assertTransactionAccess(undefined)
+      await supervisor.start()
+      const current = child
+      const frame = encodeNativeAudioHostControlFrame(deviceInventoryQueryType)
+      if (!current || pending || !frame) throw new Error("The native audio host device inventory request is invalid.")
+      return new Promise<NativeAudioDevice[]>((resolve, reject) => {
+        const deadline = setTimeout(
+          () => controlTimedOut("The native audio host device inventory request timed out."),
+          nativeAudioHostControlWatchdogMs,
+        )
+        const requestId = ++nextControlRequestId
+        const enqueuedAt = Date.now()
+        const dispatchedAt = performance.now()
+        pending = {
+          deadline,
+          reject,
+          resolve: () => undefined,
+          requestType: deviceInventoryQueryType,
+          requestId,
+          enqueuedAt,
+          dispatchedAt,
+          deviceInventoryResolve: resolve,
+        }
+        const currentPending = pending
+        logControlEnqueue(deviceInventoryQueryType, requestId, enqueuedAt)
         const stdinBackpressure = !current.stdin.write(frame)
         if (currentPending) {
           currentPending.stdinBackpressure = stdinBackpressure

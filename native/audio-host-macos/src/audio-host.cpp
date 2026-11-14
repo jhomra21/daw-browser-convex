@@ -1289,7 +1289,7 @@ std::optional<ControlFrame> DecodeControlFrame(std::span<const std::uint8_t> byt
   const std::uint32_t length = ReadU32(bytes.data() + 12);
   if (length > kMaximumControlPayloadBytes || bytes.size() != kControlFrameHeaderBytes + length) return std::nullopt;
   if (type < static_cast<std::uint32_t>(ControlType::kHostHello)
-    || type > static_cast<std::uint32_t>(ControlType::kProcessorStatePatchStatus)) return std::nullopt;
+    || type > static_cast<std::uint32_t>(ControlType::kDeviceInventory)) return std::nullopt;
   return ControlFrame{
     .type = static_cast<ControlType>(type),
     .payload = {bytes.begin() + static_cast<std::ptrdiff_t>(kControlFrameHeaderBytes), bytes.end()},

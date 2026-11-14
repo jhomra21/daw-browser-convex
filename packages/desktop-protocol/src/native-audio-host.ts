@@ -2,7 +2,7 @@ export const nativeAudioHostMagic = 0x44415748
 import { nativeExternalAttachmentPlanSchema, maxNativeExternalAttachments } from "@daw-browser/plugin-host-protocol"
 import { z } from "zod"
 
-export const nativeAudioHostProtocolVersion = 29
+export const nativeAudioHostProtocolVersion = 30
 export const nativeAudioHostArtifactId = "daw-audio-host-macos/v10"
 export const nativeKeepLatencyDivergentMixedBusDiagnostic = 3
 export const nativeAudioHostFrameHeaderBytes = 16
@@ -73,6 +73,8 @@ export const nativeAudioHostControlTypes = {
   mappedAssetPrepareRange: 59,
   mappedAssetRelease: 60,
   processorStatePatchStatus: 61,
+  deviceInventoryQuery: 62,
+  deviceInventory: 63,
 } as const
 
 export const nativeAudioHostMaximumDeviceIdBytes = 4_096

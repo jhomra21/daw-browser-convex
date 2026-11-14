@@ -76,6 +76,11 @@ const device = () => frame(19, Buffer.concat([
 const inputDevice = () => frame(35, Buffer.concat([
   u32(1), string("coreaudio:fixture-input"), string("Fixture Input"), u32(48000), u32(2), u32(512), u32(1),
 ]))
+const deviceInventory = () => frame(63, Buffer.concat([
+  u32(2),
+  string("coreaudio:fixture-input"), string("Fixture Input"), u32(48000), u32(2), u32(0), u32(1),
+  string("coreaudio:fixture"), string("Fixture Output"), u32(44100), u32(0), u32(2), u32(0),
+]))
 const ack = (type, status = 1, text = "") => frame(13, Buffer.concat([u32(type), u32(status), Buffer.from(text)]))
 const vstState = (instanceId = "11111111-1111-4111-8111-111111111111") => {
   const state = Buffer.from([1, 2, 3])
@@ -230,6 +235,8 @@ process.stdin.on("data", (chunk) => {
       process.stdout.write(device())
     } else if (type === 34) {
       process.stdout.write(inputDevice())
+    } else if (type === 62) {
+      process.stdout.write(deviceInventory())
     } else if (type === 28 && process.env.MODE?.startsWith("spool")
       && (payload.length !== 152 + payload.readUInt32BE(56) + payload.readUInt32BE(140) || payload.readBigUInt64BE(144) !== 1n)) {
       // The wire carries the capture target node at 144, ahead of the device UID and root path.
@@ -366,7 +373,7 @@ describe("native audio host protocol", () => {
     expect(encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.graphRollback)).toEqual(
       Buffer.from([
         0x44, 0x41, 0x57, 0x48,
-        0x00, 0x00, 0x00, 0x1d,
+        0x00, 0x00, 0x00, 0x1e,
         0x00, 0x00, 0x00, 0x27,
         0x00, 0x00, 0x00, 0x00,
       ]),
@@ -2355,6 +2362,32 @@ test("resolves the host default output device and rejects foreign device namespa
       available: true,
     })
     await expect(fixture.supervisor.resolveOutputDevice("web:default")).rejects.toThrow("native audio host device request is invalid")
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+test("round-trips the native device inventory with both channel directions", async () => {
+  const fixture = await fixtureSupervisor()
+  try {
+    await expect(fixture.supervisor.listDevices()).resolves.toEqual([
+      {
+        deviceId: "coreaudio:fixture-input",
+        name: "Fixture Input",
+        nominalSampleRateHz: 48_000,
+        inputChannelCount: 2,
+        outputChannelCount: 0,
+        available: true,
+      },
+      {
+        deviceId: "coreaudio:fixture",
+        name: "Fixture Output",
+        nominalSampleRateHz: 44_100,
+        inputChannelCount: 0,
+        outputChannelCount: 2,
+        available: false,
+      },
+    ])
   } finally {
     await fixture.supervisor.teardown()
     await fixture.dispose()

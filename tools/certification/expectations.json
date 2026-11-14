@@ -28061,8 +28061,8 @@
       "B6d4 a Stop issued after a locate superseded a waiting Play still stops",
       "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d7 a locate during a Pause that cancels a pending Play keeps its paused rebuild and reports no fault",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
@@ -30289,7 +30289,7 @@
       "fail": 6
      },
      "fails": [
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
@@ -31507,8 +31507,8 @@
       "fail": 2
      },
      "fails": [
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start"
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start"
      ],
      "fuzz": null,
      "rejection": null,
@@ -31630,8 +31630,8 @@
       "fail": 2
      },
      "fails": [
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start"
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start"
      ],
      "fuzz": null,
      "rejection": null,
@@ -31752,8 +31752,8 @@
       "fail": 4
      },
      "fails": [
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -37089,8 +37089,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint\n",
-       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive())\n            previewProjectionBaseline = trackFingerprint\n          return result\n"
+       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
       }
      ]
     },
@@ -37152,8 +37152,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint\n",
-       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive())\n            previewProjectionBaseline = trackFingerprint\n          return result\n"
+       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
       }
      ]
     },
@@ -37211,8 +37211,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint\n",
-       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive())\n            previewProjectionBaseline = trackFingerprint\n          return result\n"
+       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
       }
      ]
     },
@@ -37806,8 +37806,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "      const seekSequence = nativeSeekSequence\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n",
-       "to": "      let seekSequence = nativeSeekSequence\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n"
+       "from": "      const seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n",
+       "to": "      let seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n"
       }
      ]
     },
@@ -37869,8 +37869,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "      const seekSequence = nativeSeekSequence\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n",
-       "to": "      let seekSequence = nativeSeekSequence\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n"
+       "from": "      const seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n",
+       "to": "      let seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n"
       }
      ]
     },
@@ -37930,8 +37930,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "      const seekSequence = nativeSeekSequence\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n",
-       "to": "      let seekSequence = nativeSeekSequence\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n"
+       "from": "      const seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n",
+       "to": "      let seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n"
       }
      ]
     },
@@ -40477,8 +40477,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint\n",
-       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive())\n            previewProjectionBaseline = trackFingerprint\n          return result\n"
+       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
       }
      ]
     },
@@ -40540,8 +40540,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint\n",
-       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive())\n            previewProjectionBaseline = trackFingerprint\n          return result\n"
+       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
       }
      ]
     },
@@ -40603,8 +40603,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint\n",
-       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive())\n            previewProjectionBaseline = trackFingerprint\n          return result\n"
+       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
       }
      ]
     },
@@ -40664,8 +40664,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint\n",
-       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive())\n            previewProjectionBaseline = trackFingerprint\n          return result\n"
+       "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+       "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
       }
      ]
     },
@@ -44919,7 +44919,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : readDesiredScheduleFingerprint()",
+       "from": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : desiredAtStart",
        "to": "previewProjectionBaseline = readDesiredScheduleFingerprint()"
       }
      ]
@@ -44987,7 +44987,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : readDesiredScheduleFingerprint()",
+       "from": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : desiredAtStart",
        "to": "previewProjectionBaseline = readDesiredScheduleFingerprint()"
       }
      ]
@@ -45083,7 +45083,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : readDesiredScheduleFingerprint()",
+       "from": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : desiredAtStart",
        "to": "previewProjectionBaseline = readDesiredScheduleFingerprint()"
       }
      ]
@@ -46863,8 +46863,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? []))\n      followPortableEdits()\n",
-       "to": "        void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? []))\n"
+       "from": "    if (isPlaying()) {\n      followPortableEdits()\n      return\n    }\n",
+       "to": "    if (isPlaying()) {\n      return\n    }\n"
       }
      ]
     },
@@ -46936,8 +46936,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? []))\n      followPortableEdits()\n",
-       "to": "        void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? []))\n"
+       "from": "    if (isPlaying()) {\n      followPortableEdits()\n      return\n    }\n",
+       "to": "    if (isPlaying()) {\n      return\n    }\n"
       }
      ]
     },
@@ -47010,8 +47010,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? []))\n      followPortableEdits()\n",
-       "to": "        void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? []))\n"
+       "from": "    if (isPlaying()) {\n      followPortableEdits()\n      return\n    }\n",
+       "to": "    if (isPlaying()) {\n      return\n    }\n"
       }
      ]
     },
@@ -66592,7 +66592,7 @@
       "fail": 6
      },
      "fails": [
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
@@ -66948,8 +66948,8 @@
       "fail": 4
      },
      "fails": [
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -67280,7 +67280,7 @@
       "fail": 6
      },
      "fails": [
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
@@ -67888,8 +67888,8 @@
      },
      "fails": [
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -67954,8 +67954,8 @@
       "fail": 4
      },
      "fails": [
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],

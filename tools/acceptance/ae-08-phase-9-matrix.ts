@@ -127,17 +127,19 @@ export const commitReceivedWallMs = async (out: string, idempotencyKey: string) 
 // Publication-complete: the first in-place publication at or after the edit; for a raise also its latency-move-complete. `wallMs` is
 // when it completed; `revision` and `publicationFrame` are the publication's own.
 export type Settled = { wallMs: number; revision: number; publicationFrame: number }
-// An edit that publishes no graph settles on the line the host logs when it applies the processor patch or parameter sequence while
-// the transport runs; that line's `frame` stands for the publication frame (the transport frame it was logged at).
-const appliedEvent = { patch: "processor-patch-applied", sequence: "processor-sequence-applied" }
-type Applied = keyof typeof appliedEvent
-export const publicationComplete = (events: readonly HostEvent[], sinceWallMs: number, raise: boolean, settle?: Applied): Settled | undefined => {
-  if (settle !== undefined) {
-    const applied = events.find((event) => event.event === appliedEvent[settle] && event.frame > 0 && event.wallMs >= sinceWallMs)
+// An edit that publishes no graph (a live parameter write: the built-in parameter mapper turns a Limiter lookahead change or a knob
+// drag into one) settles on the line the host logs when the callback applies the parameter sequence while the transport runs; that
+// line's `frame` stands for the publication frame (the transport frame it was logged at).
+export const publicationComplete = (events: readonly HostEvent[], sinceWallMs: number, raise: boolean, settle?: "sequence" | "asset"): Settled | undefined => {
+  if (settle === "sequence") {
+    const applied = events.find((event) => event.event === "processor-sequence-applied" && event.frame > 0 && event.wallMs >= sinceWallMs)
     return applied && { wallMs: applied.wallMs, revision: applied.revision, publicationFrame: applied.frame }
   }
+  // An import publishes its empty track first and the decoded asset after: the asset's publication is the first one an asset-install
+  // since the edit precedes.
   const publish = events.find((event) => event.event === "graph-publish" && event.cause === "block-boundary"
-    && event.publicationFrame > 0 && event.wallMs >= sinceWallMs)
+    && event.publicationFrame > 0 && event.wallMs >= sinceWallMs
+    && (settle !== "asset" || events.some((install) => install.event === "asset-install" && install.wallMs >= sinceWallMs && install.wallMs <= event.wallMs)))
   if (!publish) return undefined
   const { revision, publicationFrame } = publish
   if (!raise) return { wallMs: publish.wallMs, revision, publicationFrame }
@@ -146,12 +148,13 @@ export const publicationComplete = (events: readonly HostEvent[], sinceWallMs: n
   return complete && { wallMs: complete.wallMs, revision, publicationFrame }
 }
 
-const nativeEvents = async (out: string) => (await Promise.all((await readdir(out)).filter((name) => /^native-\d+\.jsonl$/.test(name))
+// The main process logs its own lines (an asset-install) to host.jsonl as it runs, the native host to native-<pid>.jsonl.
+const nativeEvents = async (out: string) => (await Promise.all((await readdir(out)).filter((name) => name === "host.jsonl" || /^native-\d+\.jsonl$/.test(name))
   .map(async (name) => parseHostLines(await readFile(path.join(out, name), "utf8"))))).flat()
 
 // The host appends native-<pid>.jsonl as it runs (native/acceptance-evidence.h), so this waits on file changes. The deadline only
 // reports a missing line as a setup failure; it never counts as a pass.
-export const awaitPublicationComplete = (out: string, sinceWallMs: number, raise: boolean, deadlineMs: number, settle?: Applied) =>
+export const awaitPublicationComplete = (out: string, sinceWallMs: number, raise: boolean, deadlineMs: number, settle?: "sequence" | "asset") =>
   new Promise<Settled>((resolve, reject) => {
     const watcher = watch(out, () => void check())
     const timer = setTimeout(() => finish(() => reject(new SetupFailure(`no publication-complete line within ${deadlineMs} ms of the edit`))), deadlineMs)
@@ -206,7 +209,7 @@ export const runBurst = async (input: { out: string; directory: string; row: Row
       const raise = moves.some((move) => move.toLatencyFrames > move.fromLatencyFrames)
       // A refused commit publishes nothing: its step is settled when the refusal returns, and no frame is waited for.
       const settled = row.settle === "refused" ? { wallMs: Date.now(), revision: 0, publicationFrame: 0 }
-        : await awaitPublicationComplete(out, wallMs, raise, input.deadlineMs ?? settleDeadlineMs(row), row.settle)
+        : await awaitPublicationComplete(out, wallMs, raise, input.deadlineMs ?? settleDeadlineMs(row), step.settle ?? row.settle)
       const { wallMs: settledWallMs, revision, publicationFrame } = settled
       await mark("burst-settled", { row: row.name, index: step.index, settledWallMs })
       for (const move of moves) logged.push({ ...move, index: step.index, wallMs: move.wallMs ?? wallMs, settledWallMs, revision, publicationFrame })
@@ -268,15 +271,16 @@ const wallOf = (events: Awaited<ReturnType<typeof jsonl>>, name: string) => {
 }
 const planSchema = z.object({
   phase: z.number(), row: z.string().optional(), editStart: z.number().optional(),
-  edits: z.array(z.object({ index: z.number().optional(), wallMs: z.number(), fromLatencyFrames: z.number().default(0), toLatencyFrames: z.number().default(0) })).default([]),
+  edits: z.array(z.object({ index: z.number().optional(), wallMs: z.number(), settledWallMs: z.number().optional(), fromLatencyFrames: z.number().default(0), toLatencyFrames: z.number().default(0) })).default([]),
   commits: z.array(z.object({ wallMs: z.number() })).default([]),
   effectState: z.object({ fromLatencyFrames: z.number(), toLatencyFrames: z.number() }).optional(),
 })
 const editFiles = ["phase4-edits.json", "phase5-edits.json", "phase8-edits.json", "phase9-edits.json"]
 
-// The edits of one burst step share an index; the step starts at its first edit and raises if any of them does.
+// The edits of one burst step share an index; the step starts at its first edit and raises if any of them does. A phase 9 step
+// settles on the line its row names (graph publication, applied sequence, asset publication), which the runner stored.
 const burstStepEdits = (edits: z.infer<typeof planSchema>["edits"]) => [...Map.groupBy(edits, (edit) => edit.index)].map(([, group]) => ({
-  wallMs: Math.min(...group.map((edit) => edit.wallMs)), raise: group.some((edit) => edit.toLatencyFrames > edit.fromLatencyFrames) }))
+  wallMs: Math.min(...group.map((edit) => edit.wallMs)), raise: group.some((edit) => edit.toLatencyFrames > edit.fromLatencyFrames), settledWallMs: group[0]?.settledWallMs }))
 
 // A stored row is judged as a burst of its edits. Phase 4 logs each edit; phase 5 logs the commits that follow an edit start (the
 // effect-state row logs the FFT click as an action); phase 8 logs one edit start; phase 9 logs every step's edits.
@@ -285,14 +289,14 @@ export const judgeStoredRow = async (directory: string, file: string) => {
   const host = parseHostLines(await readFile(path.join(directory, "host.jsonl"), "utf8"))
   const actions = await jsonl(path.join(directory, "actions.jsonl"))
   const end = wallOf(actions, "capture-end")
-  const edits = plan.phase === 9 ? burstStepEdits(plan.edits)
+  const edits: { wallMs: number; raise: boolean; settledWallMs?: number }[] = plan.phase === 9 ? burstStepEdits(plan.edits)
     : plan.phase === 4 ? plan.edits.map((edit) => ({ wallMs: edit.wallMs, raise: edit.toLatencyFrames > edit.fromLatencyFrames }))
     : plan.effectState ? [{ wallMs: wallOf(actions, "effect-fft-edit"), raise: plan.effectState.toLatencyFrames > plan.effectState.fromLatencyFrames }]
       : plan.phase === 8 ? [{ wallMs: z.number().parse(plan.editStart), raise: false }]
         : [z.number().parse(plan.editStart), ...plan.commits.map((commit) => commit.wallMs)].slice(0, Math.max(1, plan.commits.length))
           .map((wallMs) => ({ wallMs, raise: false }))
   const steps = edits.map((edit, position) => ({ index: position + 1, editWallMs: edit.wallMs,
-    settledWallMs: publicationComplete(host, edit.wallMs, edit.raise)?.wallMs }))
+    settledWallMs: edit.settledWallMs ?? publicationComplete(host, edit.wallMs, edit.raise)?.wallMs }))
   return { row: path.basename(directory), phase: plan.phase, edits: steps.length, verdict: judgeBurst(steps, end, () => undefined) }
 }
 
@@ -331,15 +335,22 @@ export const selfTest = async () => {
   check(publicationComplete(host(publish, moved), 1001, false) === undefined, "a publication before the edit is not the edit's")
   check(publicationComplete(host({ ...publish, publicationFrame: 0 }), 900, false) === undefined, "a publication at frame 0 is startup, not an edit")
   check(parseHostLines(`${JSON.stringify(publish)}\n{"event":"gra`).length === 1, "a torn trailing line is ignored")
-  // An edit that publishes no graph settles on its own applied line: the patch for a patch row, the sequence for a sequence row.
-  const patch = { event: "processor-patch-applied", cause: "", revision: 4, transportEpoch: 1, frame: 120000, wallMs: 1200 }
+  // An edit that publishes no graph settles on its own applied-sequence line, not on a graph publication.
   const sequence = { event: "processor-sequence-applied", cause: "block-boundary", revision: 4, transportEpoch: 1, frame: 130000, wallMs: 1300 }
-  check(publicationComplete(host(publish, patch, sequence), 900, false, "patch")?.wallMs === 1200 && publicationComplete(host(publish, patch, sequence), 900, false, "sequence")?.wallMs === 1300,
-    "a patch row settles on the applied patch and a sequence row on the applied sequence, not on a graph publication")
-  check(publicationComplete(host(publish), 900, false, "patch") === undefined && publicationComplete(host(sequence), 900, false, "patch") === undefined, "a graph publication or a sequence line does not settle a patch row")
-  check(publicationComplete(host(patch), 1201, false, "patch") === undefined, "a patch applied before the edit is not the edit's")
-  check(publicationComplete(host({ ...patch, frame: 0 }), 900, false, "patch") === undefined, "a patch applied at frame 0 is startup, not an edit")
-  check(publicationComplete(host(patch), 900, false, "patch")?.publicationFrame === 120000, "the applied line's frame stands for the publication frame")
+  check(publicationComplete(host(publish, sequence), 900, false, "sequence")?.wallMs === 1300, "a sequence row settles on the applied sequence, not on a graph publication")
+  check(publicationComplete(host(publish), 900, false, "sequence") === undefined, "a graph publication does not settle a sequence row")
+  check(publicationComplete(host(sequence), 1301, false, "sequence") === undefined, "a sequence applied before the edit is not the edit's")
+  check(publicationComplete(host({ ...sequence, frame: 0 }), 900, false, "sequence") === undefined, "a sequence applied at frame 0 is startup, not an edit")
+  check(publicationComplete(host(sequence), 900, false, "sequence")?.publicationFrame === 130000, "the applied line's frame stands for the publication frame")
+  check(publicationComplete(host(sequence), 900, false) === undefined, "a sequence line does not settle a row that waits for a graph publication")
+  // An import publishes its track first and the decoded asset after an asset-install; the step settles on the asset's publication.
+  const install = { event: "asset-install", wallMs: 1150 }
+  const early = { ...publish, wallMs: 1000, revision: 7, publicationFrame: 96256 }
+  const withAsset = { ...publish, wallMs: 1200, revision: 8, publicationFrame: 120000 }
+  check(publicationComplete(host(early, install, withAsset), 900, false, "asset")?.publicationFrame === 120000 && publicationComplete(host(early, install, withAsset), 900, false)?.publicationFrame === 96256,
+    "an asset step settles on the publication after the asset-install, a plain step on the first")
+  check(publicationComplete(host(early, withAsset), 900, false, "asset") === undefined && publicationComplete(host(install, withAsset), 1151, false, "asset") === undefined,
+    "an asset step does not settle without an asset-install since its edit")
   // Pooled statistics on a synthetic set: 18 rows of 20 clean edits, then one failing at edit 12.
   const clean = Array.from({ length: 18 }, (_, row): Trial => ({ row: `r${row}`, verdict: { outcome: "pass", judged: 20 } }))
   const allClean = pooled(clean)

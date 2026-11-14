@@ -27,6 +27,9 @@ const spectralFrames = (fftSize: 512 | 4096) => getSpectralLatencyFrames(fftSize
 const silentTrack = "Silent publication target"
 // Native progress frames are lower bounds on what has been heard, so a window is closed this long after its second.
 const windowMarginMs = 250
+// One native-progress wait is bounded by the page deadline (25 s). A no-edit launch is as long as its burst, so it waits in steps of
+// audio the deadline always covers.
+const referenceStepFrames = sampleRate * 10
 
 export type Phase9Launch =
   | { role: "burst"; rows: Row[]; repetitions: number; vstRepetitions: number; directory: string; contentSeconds: number }
@@ -197,7 +200,10 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
       const lastSettled = logged.at(-1)?.settledWallMs
       if (lastSettled !== undefined) await waitNativeFrame(context, Math.ceil((lastSettled + MIN_WINDOW_MS + windowMarginMs - playWallMs) * sampleRate / 1000))
     }
-  } else await waitNativeFrame(context, launch.frames)
+  } else for (let next = Math.min(referenceStepFrames, launch.frames); ; next = Math.min(next + referenceStepFrames, launch.frames)) {
+    await waitNativeFrame(context, next)
+    if (next === launch.frames) break
+  }
   if (prepare.includes("midi-hold")) await sendMidiNote("off", heldNote)
   if (launch.role === "burst" && takeRow && before) {
     const toneFailure = await tone

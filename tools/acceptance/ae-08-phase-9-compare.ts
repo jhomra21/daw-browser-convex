@@ -5,7 +5,7 @@ import { appliedLatencyMatches, attributePublications, compareLatency, judgeBurs
 import { readWav, type Pcm } from "./ae08-wav"
 import { phase5AssetSample } from "./ae-08-phase-5-fixture"
 import { judgeBurst, parseHostLines, type BurstVerdict, type Compare, type HostEvent } from "./ae-08-phase-9-matrix"
-import type { Row } from "./ae-08-phase-9-rows"
+import type { Row, Step } from "./ae-08-phase-9-rows"
 
 // The per-window checks of a phase 9 row, over the launch capture. "states" rows use the analyzer's judgeBurst with one offline
 // export per state as the reference and each step's settling publication as a seam; "sustained" and "delete" rows judge the capture
@@ -25,16 +25,35 @@ export const transportIndexed = (capture: Pcm, blocks: readonly CaptureBlock[], 
   return { ...capture, samples }
 }
 
-// One analyzer call per burst; the callback reads its answer for each oracle window. Step k of the burst is publication k: window
-// index k (1-based) is the analyzer's edit k - 1.
-export const compareStates = (input: { output: Pcm; states: readonly Pcm[]; seams: readonly number[]; endFrame: number }): Compare => {
-  const { output, states, seams, endFrame } = input
-  const verdict = judgeStates(output, states, seams, { fadeFrames: fadeFramesFor(output.sampleRate), endFrame })
+// One analyzer call per window (step k of the burst is publication k, window index k is 1-based). The analyzer crossfades the state
+// left into the state entered over 6 ms; a step whose entry is not that crossfade says how it differs (Step.entry), and its window is
+// judged against the state the product really leaves: a removed graph node also fades over 5 ms (the phase 3 ghost, phase 5's
+// remove-readd-track model), and a restored track or a decoded asset starts at its publication, which is the entered state left
+// and entered at once.
+const ghostFrames = (sampleRate: number) => Math.round(sampleRate * 0.005)
+const leftState = (before: Pcm, after: Pcm, seam: number, to: number, entry: Step["entry"]): Pcm => {
+  if (entry === "cut") return after
+  if (entry !== "ghost") return before
+  const ghost = ghostFrames(before.sampleRate)
+  const samples = before.samples.slice(0, to * before.channels)
+  for (let frame = seam; frame < to; frame++) {
+    const gain = Math.max(0, Math.fround(1 - Math.fround((frame - seam) / ghost)))
+    for (let channel = 0; channel < before.channels; channel++) samples[frame * before.channels + channel] = Math.fround((samples[frame * before.channels + channel] ?? NaN) * gain)
+  }
+  return { ...before, samples }
+}
+export const compareStates = (input: { output: Pcm; states: readonly Pcm[]; seams: readonly number[]; entries: readonly Step["entry"][]; endFrame: number }): Compare => {
+  const { output, states, seams, entries, endFrame } = input
+  const verdicts = seams.map((seam, edit) => {
+    const before = states[edit], after = states[edit + 1], to = seams[edit + 1] ?? endFrame
+    return before && after ? judgeStates(output, [leftState(before, after, seam, to, entries[edit]), after], [seam], { fadeFrames: fadeFramesFor(output.sampleRate), endFrame: to }) : undefined
+  })
   return (window) => {
+    const verdict = verdicts[window.index - 1]
+    if (verdict === undefined) return `no analyzer window for edit ${window.index}`
     if (!verdict.wellFormed) return "the capture, the state references and the seams do not line up (rate, channels, length or seam order)"
-    const found = verdict.windows[window.index - 1]
-    if (found === undefined) return `no analyzer window for edit ${window.index}`
-    return verdict.failedEdits.includes(found.edit)
+    const found = verdict.windows[0]
+    return found && !verdict.passed
       ? `${found.mismatches} samples differ from the entered state in [${found.seamFrame}, ${found.endFrame}) (first at ${found.firstMismatch}, max ${found.maxAbsDifference}${found.covered ? "" : ", window shorter than the fade"})`
       : undefined
   }
@@ -46,29 +65,38 @@ export const compareStates = (input: { output: Pcm; states: readonly Pcm[]; seam
 // the host's reported graph and pinned latencies against the declared edits (publishedLatencyMatchesMoves), and the left channel against
 // the shifted source (compareLatency, with its fade and exact shift). A fixture whose declared moves never reach the master path
 // reports 0 for both and fails the first check at its first publication.
+// The retained track is created without a volume, so it plays at the default track volume (src/lib/tracks.ts), applied in float32.
+const defaultTrackVolume = Math.fround(0.8)
+const sourceThroughTrack = (frame: number) => Math.fround(Math.fround(phase5AssetSample(frame, false)) * defaultTrackVolume)
 export type LatencyEdit = { name: string; fromLatencyFrames: number; toLatencyFrames: number; wallMs: number }
 export type LatencyPublication = { wallMs: number; publicationFrame: number; graphLatencyFrames: number; pinnedLatencyFrames: number }
-export const compareLatencyMoves = (input: { output: Pcm; edits: readonly LatencyEdit[]; publications: readonly LatencyPublication[]; endFrame: number }): Compare => {
-  const { output, edits, publications, endFrame } = input
+// Rows merged into one launch share the pinned budget, so a row starts at the budget the rows before it left (`startingPinned`) and is
+// judged from half a second before its first publication to its own end: what an earlier row's raise or the next row's raise did to
+// the capture outside that span is not this row's.
+export const compareLatencyMoves = (input: { output: Pcm; edits: readonly LatencyEdit[]; publications: readonly LatencyPublication[]; startingPinned: number
+  endFrame: number }): Compare => {
+  const { output, edits, publications, startingPinned, endFrame } = input
   const attributed = attributePublications([...edits], publications)
   if (!attributed) return () => `${publications.length} publications do not match the ${edits.length} declared edits (a lost, extra or early revision)`
   const reported = attributed.findIndex((_, index) => !appliedLatencyMatches(attributed.slice(0, index + 1)))
   if (reported >= 0) return (window) => window.index === reported + 1
     ? `the published latency ${publications[reported]?.graphLatencyFrames}/${publications[reported]?.pinnedLatencyFrames} (graph/pinned) differs from the declared move of edit ${window.index}` : undefined
-  const initial = attributed[0]?.edits[0]?.fromLatencyFrames ?? 0
-  let pinned = initial
+  let pinned = startingPinned
   const moves = attributed.map(({ publication, edits: group }) => {
     const graph = group.at(-1)?.toLatencyFrames ?? 0
     const raiseFrames = Math.max(0, graph - pinned)
     pinned = Math.max(pinned, graph)
     return { publicationFrame: publication.publicationFrame, raiseFrames }
   })
+  const from = Math.max(0, (publications[0]?.publicationFrame ?? 0) - output.sampleRate / 2)
+  const length = endFrame - from
   const source: Pcm = { sampleRate: output.sampleRate, channels: 1,
-    samples: Float32Array.from({ length: endFrame }, (_, frame) => frame < initial ? 0 : phase5AssetSample(frame - initial, false)) }
-  const left: Pcm = { ...output, channels: 1, samples: Float32Array.from({ length: endFrame }, (_, frame) => output.samples[frame * output.channels] ?? NaN) }
-  const verdict = compareLatency(left, source, moves.filter((move) => move.raiseFrames > 0), 0, endFrame, publications.map((publication) => publication.publicationFrame))
+    samples: Float32Array.from({ length }, (_, frame) => from + frame < startingPinned ? 0 : sourceThroughTrack(from + frame - startingPinned)) }
+  const left: Pcm = { ...output, channels: 1, samples: Float32Array.from({ length }, (_, frame) => output.samples[(from + frame) * output.channels] ?? NaN) }
+  const verdict = compareLatency(left, source, moves.filter((move) => move.raiseFrames > 0).map((move) => ({ ...move, publicationFrame: move.publicationFrame - from })), 0, length,
+    publications.map((publication) => publication.publicationFrame - from))
   return (window) => verdict.passed || window.index !== (verdict.failedPublication ?? 0) + 1 ? undefined
-    : `${verdict.mismatches} retained-channel samples differ from the source shifted by the published moves (first at ${verdict.firstMismatch}, max ${verdict.maxAbsDifference})`
+    : `${verdict.mismatches} retained-channel samples differ from the source shifted by the published moves (first at ${(verdict.firstMismatch ?? 0) + from}, max ${verdict.maxAbsDifference})`
 }
 
 // A held live note on the edited (right) channel never goes quiet: no run of 1 ms of near-silence (a sine's zero crossing is a frame
@@ -160,17 +188,20 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
     const states = await Promise.all([row.start, ...steps.map((step) => row.cycle[(step.index - 1) % row.cycle.length]?.state ?? "")]
       .map((state) => readWav(input.stateFile(state))))
     const endFrame = Math.min(captured, ...states.map((state) => state.samples.length / state.channels))
-    return judgeBurst(steps, input.captureEndWallMs, compareStates({ output: transportIndexed(capture, mine, endFrame), states, seams, endFrame }))
+    const entries = steps.map((step) => row.cycle[(step.index - 1) % row.cycle.length]?.entry)
+    return judgeBurst(steps, input.captureEndWallMs, compareStates({ output: transportIndexed(capture, mine, endFrame), states, seams, entries, endFrame }))
   }
   const output = transportIndexed(capture, mine, captured)
   if (row.judge === "latency") {
     const firstEditWallMs = steps[0]?.editWallMs ?? 0
-    const publications = texts.flatMap(nativeLines).flatMap((entry) => {
+    const launchPublications = texts.flatMap(nativeLines).flatMap((entry) => {
       const line = publicationLine.safeParse(entry)
-      return line.success && line.data.pid === owner.pid && line.data.transportEpoch === owner.transportEpoch
-        && line.data.wallMs >= firstEditWallMs && line.data.wallMs <= input.captureEndWallMs ? [line.data] : []
+      return line.success && line.data.pid === owner.pid && line.data.transportEpoch === owner.transportEpoch ? [line.data] : []
     }).sort((a, b) => a.publicationFrame - b.publicationFrame)
-    return judgeBurst(steps, input.captureEndWallMs, compareLatencyMoves({ output, edits, publications, endFrame: captured }))
+    const publications = launchPublications.filter((line) => line.wallMs >= firstEditWallMs && line.wallMs <= input.captureEndWallMs)
+    const startingPinned = launchPublications.findLast((line) => line.wallMs < firstEditWallMs)?.pinnedLatencyFrames ?? edits[0]?.fromLatencyFrames ?? 0
+    const rowEnd = Math.max(...mine.filter((block) => block.wallMs <= input.captureEndWallMs).map((block) => block.transportFrame + block.frames))
+    return judgeBurst(steps, input.captureEndWallMs, compareLatencyMoves({ output, edits, publications, startingPinned, endFrame: Math.min(captured, rowEnd) }))
   }
   if (row.judge === "sustained") return judgeBurst(steps, input.captureEndWallMs, compareSustained({ output, seams, endFrame: captured }))
   if (row.judge === "delete") {
@@ -218,8 +249,23 @@ export const selfTest = () => {
   const badTake = verdictOf(compareTake({ passed: false, offset: 1200, mismatches: 7 }))
   check(badTake.outcome === "fail" && badTake.editIndex === 1 && /7 samples/.test(badTake.detail ?? ""), `a take that differs from the tone fails: ${JSON.stringify(badTake)}`)
   check(takeResult.safeParse({ passed: true }).success === false, "the stored answer names passed, offset and mismatches")
-  const states9 = (output: Pcm) => verdictOf(compareStates({ output, states, seams, endFrame }))
+  const states9 = (output: Pcm, entries: Step["entry"][] = []) => verdictOf(compareStates({ output, states, seams, entries, endFrame }))
   check(states9(render()).outcome === "pass", "a clean burst passes")
+  // A restored track or a decoded asset sounds from its publication; a removed track also fades over 5 ms (the ghost) inside the 6 ms.
+  const entered = (entry: "cut" | "ghost") => render((output) => {
+    const from = seams[2] ?? 0
+    for (let frame = from; frame < (seams[3] ?? 0); frame++) {
+      const index = frame * channels + 1, next = states[3]?.samples[index] ?? NaN
+      const ghost = entry === "ghost" ? Math.max(0, Math.fround(1 - Math.fround((frame - from) / Math.round(sampleRate * 0.005)))) : 0
+      const fadeOut = Math.max(0, Math.fround(1 - Math.fround((frame - from) / fade)))
+      output.samples[index] = entry === "cut" ? next : Math.fround(Math.fround((states[2]?.samples[index] ?? NaN) * ghost) * fadeOut + next * (1 - fadeOut))
+    }
+  })
+  const declared = (entry: "cut" | "ghost") => [undefined, undefined, entry]
+  check(states9(entered("cut"), declared("cut")).outcome === "pass" && states9(entered("ghost"), declared("ghost")).outcome === "pass", "a cut and a ghost entry pass when the step declares them")
+  const undeclaredCut = states9(entered("cut")), undeclaredGhost = states9(entered("ghost"))
+  check(undeclaredCut.outcome === "fail" && undeclaredCut.editIndex === 3 && undeclaredGhost.outcome === "fail" && undeclaredGhost.editIndex === 3, "a cut or a ghost the step does not declare fails")
+  check(states9(render(), declared("cut")).outcome === "fail" && states9(render(), declared("ghost")).outcome === "fail", "a plain crossfade fails a step that declares a cut or a ghost")
   const held = states9(render((output) => { for (let frame = seams[2] ?? 0; frame < (seams[3] ?? 0); frame++) output.samples[frame * channels + 1] = states[2]?.samples[frame * channels + 1] ?? NaN }))
   check(held.outcome === "fail" && held.editIndex === 3, `a publication that holds the old state fails at its own edit: ${JSON.stringify(held)}`)
   const click = states9(render((output) => { output.samples[((seams[4] ?? 0) + 5000) * channels] += 1e-3 }))
@@ -227,7 +273,7 @@ export const selfTest = () => {
   const gap = states9(render((output) => { for (let frame = (seams[1] ?? 0) + 9000; frame < (seams[1] ?? 0) + 9100; frame++) output.samples[frame * channels] = NaN }))
   check(gap.outcome === "fail" && gap.editIndex === 2, `frames no capture block covered fail: ${JSON.stringify(gap)}`)
   const crowded = judgeBurst(steps.map((step, position) => position === 2 ? { ...step, publicationFrame: (seams[1] ?? 0) + fade - 1 } : step), 100_000,
-    compareStates({ output: render(), states, seams: [seams[0] ?? 0, seams[1] ?? 0, (seams[1] ?? 0) + fade - 1, ...seams.slice(3)], endFrame }))
+    compareStates({ output: render(), states, seams: [seams[0] ?? 0, seams[1] ?? 0, (seams[1] ?? 0) + fade - 1, ...seams.slice(3)], entries: [], endFrame }))
   check(crowded.outcome === "fail", "a window shorter than the fade fails")
   check(states9({ ...render(), sampleRate: 44100 }).outcome === "fail", "a capture at another rate fails")
   // The capture is rebuilt by transport frame; an uncovered frame is NaN.
@@ -278,14 +324,14 @@ export const selfTest = () => {
         if (frame >= seamAt) shift += move.raiseFrames
         if (frame >= move.publicationFrame && frame < seamAt + 240) gain *= frame < seamAt ? (seamAt - frame) / 240 : (frame - seamAt) / 240
       }
-      samples[frame * channels] = frame < shift ? 0 : Math.fround(Math.fround(phase5AssetSample(frame - shift, false)) * Math.fround(gain))
+      samples[frame * channels] = frame < shift ? 0 : Math.fround(sourceThroughTrack(frame - shift) * Math.fround(gain))
     }
     return { sampleRate, channels, samples }
   }
   const raised = (frames: number) => [{ publicationFrame: publicationFrames[0] ?? 0, raiseFrames: frames }]
   const latencySteps = latencyEdits.map((edit, position) => ({ index: position + 1, editWallMs: edit.wallMs, settledWallMs: edit.wallMs + 1500 }))
-  const raiseRow = (output: Pcm, reports = honest, publications = reportedBy(reports)) =>
-    judgeBurst(latencySteps, 20_000, compareLatencyMoves({ output, edits: latencyEdits, publications, endFrame: latencyEnd }))
+  const raiseRow = (output: Pcm, reports = honest, publications = reportedBy(reports), startingPinned = low) =>
+    judgeBurst(latencySteps, 20_000, compareLatencyMoves({ output, edits: latencyEdits, publications, startingPinned, endFrame: latencyEnd }))
   check(raiseRow(retainedAfter(raised(high - low))).outcome === "pass", "a raise row whose master path follows the declared moves passes")
   const monitored = raiseRow(retainedAfter([], 0), [0, 0, 0, 0].map(() => ({ graph: 0, pinned: 0 })))
   check(monitored.outcome === "fail" && monitored.editIndex === 1 && /published latency 0\/0/.test(monitored.detail ?? ""), `a fixture whose Spectral is monitored reports 0 and fails at the first publication: ${JSON.stringify(monitored)}`)
@@ -293,6 +339,18 @@ export const selfTest = () => {
   check(lostLower.outcome === "fail" && lostLower.editIndex === 2, `a lower that is reported as the pinned level fails at its own edit: ${JSON.stringify(lostLower)}`)
   const wrongShift = raiseRow(retainedAfter(raised(high - low + 1)))
   check(wrongShift.outcome === "fail" && wrongShift.editIndex === 1, `a raise that shifts by one frame too many fails at its edit: ${JSON.stringify(wrongShift)}`)
+  const atUnity = retainedAfter(raised(high - low))
+  const untouchedByTrackVolume = raiseRow({ ...atUnity, samples: atUnity.samples.map((sample) => Math.fround(sample / defaultTrackVolume)) })
+  check(untouchedByTrackVolume.outcome === "fail" && untouchedByTrackVolume.editIndex === 1, `a retained channel that skipped the track volume fails: ${JSON.stringify(untouchedByTrackVolume)}`)
+  // A row merged after another that already raised the budget starts at `high`: its own first raise moves nothing, and an earlier raise
+  // in the capture is not its own.
+  const absorbed = raiseRow(retainedAfter([], high), honest, reportedBy(honest), high)
+  check(absorbed.outcome === "pass", `a row that starts at a budget already raised passes without a shift: ${JSON.stringify(absorbed)}`)
+  const wrongStart = raiseRow(retainedAfter([], high), honest, reportedBy(honest), low)
+  check(wrongStart.outcome === "fail" && wrongStart.editIndex === 1, `a row judged from the wrong starting budget fails at its first edit: ${JSON.stringify(wrongStart)}`)
+  const earlierRaise = retainedAfter([{ publicationFrame: 20_000, raiseFrames: 900 }, { publicationFrame: publicationFrames[0] ?? 0, raiseFrames: high - low - 900 }], low)
+  const foreign = judgeBurst(latencySteps, 20_000, compareLatencyMoves({ output: earlierRaise, edits: latencyEdits, publications: reportedBy(honest), startingPinned: low + 900, endFrame: latencyEnd }))
+  check(foreign.outcome === "pass", `a raise made before the row started is not the row's: ${JSON.stringify(foreign)}`)
   const unpinned = raiseRow(retainedAfter([...raised(high - low), { publicationFrame: publicationFrames[2] ?? 0, raiseFrames: high - low }]))
   check(unpinned.outcome === "fail" && unpinned.editIndex === 3, `a second raise to a level already reached must not shift again: ${JSON.stringify(unpinned)}`)
   const extra = raiseRow(retainedAfter(raised(high - low)), honest, [...reportedBy(honest), { wallMs: 9000, publicationFrame: 150_000, graphLatencyFrames: high, pinnedLatencyFrames: high }]

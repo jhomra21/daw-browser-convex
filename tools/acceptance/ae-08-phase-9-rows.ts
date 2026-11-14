@@ -4,7 +4,10 @@
 
 // The class each row declares for ae-08-latency-gates.ts (its latency-class.json).
 export type LatencyClass = "plain" | "raise" | "asset" | "vst-insert"
-export type Step = { edits: string[]; state: string }
+// How a step is entered when it is not the analyzer's 6 ms crossfade: "ghost" (a removed track's node fades over 5 ms on top of its
+// source's 6 ms), "cut" (a restored track or a decoded asset sounds from its publication). `settle: "asset"` settles the step on the
+// publication that carries the asset, not on the track-only publication an import makes first.
+export type Step = { edits: string[]; state: string; entry?: "ghost" | "cut"; settle?: "asset" }
 // Which check judges a row's bursts: "states" compares the capture with an offline export of each state (the analyzer's judgeBurst),
 // "sustained" requires a held live note to stay unbroken, "delete" judges a clip delete on host evidence and its own capture,
 // "take" requires the in-app recording's take to equal the tone played into BlackHole,
@@ -26,9 +29,9 @@ export type PackagedRun = {
   // A hardware device the row needs. A launch checks that it is present before the app starts.
   device?: "iac-midi" | "blackhole"
   judge?: Judge
-  // What a step settles on when its edits publish no graph: the host's applied processor patch or applied parameter sequence line, or,
-  // for a commit the app refuses, the return of the refusal.
-  settle?: "patch" | "sequence" | "refused"
+  // What a step settles on when its edits publish no graph: the host's applied parameter sequence line, or, for a commit the app
+  // refuses, the return of the refusal.
+  settle?: "sequence" | "refused"
   // What a launch of this row needs that no current fixture provides.
   needs?: string
 }
@@ -52,17 +55,19 @@ export const burstRows: BurstRow[] = [
     portable: { from: "spec512", to: "spec1024", latency: true } },
   { name: "raise-lower-burst", latencyClass: "raise", packaged: { repeat: "burst", periodSec: null, fixture: raiseState, start: "spectral-512", judge: "latency",
     cycle: [{ edits: ["fft-4096", "fft-512"], state: "spectral-512" }] } },
-  // The limiter's path delay stays fixed at 5 ms (audio_core.cpp:3196), so a lookahead change is a processor patch and publishes no graph.
+  // The limiter's path delay stays fixed at 5 ms (audio_core.cpp:3196), so a lookahead change is a live parameter write
+  // (limiter.lookaheadMs in native-built-in-parameter-mapper.ts) and publishes no graph.
   { name: "lookahead-transition", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:limiter-state", start: "limiter-lookahead-5",
-    judge: "states", settle: "patch",
+    judge: "states", settle: "sequence",
     cycle: [{ edits: ["lookahead-1ms"], state: "limiter-lookahead-1" }, { edits: ["lookahead-5ms"], state: "limiter-lookahead-5" }] } },
   { name: "undo-redo-burst", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:remove-readd-track", start: "restored", judge: "states",
-    cycle: [{ edits: ["track-delete"], state: "deleted" }, { edits: ["undo"], state: "restored" }, { edits: ["redo"], state: "deleted" }, { edits: ["undo"], state: "restored" }] } },
+    cycle: [{ edits: ["track-delete"], state: "deleted", entry: "ghost" }, { edits: ["undo"], state: "restored", entry: "cut", settle: "asset" },
+      { edits: ["redo"], state: "deleted", entry: "ghost" }, { edits: ["undo"], state: "restored", entry: "cut", settle: "asset" }] } },
   // Ruling 3: one delete per launch, judged on host evidence and the capture itself, never against a reference.
   { name: "delete-while-starting", latencyClass: "plain", packaged: { repeat: "launch", periodSec: null, fixture: "phase5:delete-clip", start: "clip-present", judge: "delete",
     cycle: [{ edits: ["clip-delete"], state: "clip-deleted" }] } },
   { name: "paged-playback", latencyClass: "asset", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:add-paged-asset", start: "paged-asset-absent", judge: "states",
-    cycle: [{ edits: ["asset-import"], state: "paged-asset-present" }, { edits: ["asset-clip-delete"], state: "paged-asset-absent" }] } },
+    cycle: [{ edits: ["asset-import"], state: "paged-asset-present", entry: "cut", settle: "asset" }, { edits: ["asset-clip-delete"], state: "paged-asset-absent" }] } },
   // The states of the next two rows sound alike, so the analyzer's fade model compares them exactly.
   { name: "held-note-unrelated-edit", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-note", start: "base", judge: "states",
     cycle: [{ edits: ["silent-track-create"], state: "extra-track" }, { edits: ["silent-track-delete"], state: "base" }] } },

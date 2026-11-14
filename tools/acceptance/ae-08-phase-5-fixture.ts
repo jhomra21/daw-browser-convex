@@ -334,6 +334,10 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
     if (!utility) throw new Error("Lane fixture's Utility missing")
     await mutate([{ kind: "automation.set", target, effect: ref(utility.id), parameterId: "utility.gainDb", enabled: true,
       points: [{ id: "lane-start", timeSec: 0, value: 0, interpolation: "linear" }, { id: "lane-end", timeSec: contentSeconds ?? 24, value: 0, interpolation: "linear" }] }])
+    // A lane written through the control protocol reaches the effects panel on a product reload (its knob shows the automation dot and a
+    // manual drag overrides it); a panel opened before the reload does not know the lane.
+    await context.reload()
+    await waitImportedClip(context, "retained")
   }
   if (spectralRow || row === "lane-state") {
     await context.evaluate(`(()=>{

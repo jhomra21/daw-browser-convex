@@ -103,10 +103,12 @@ const preferenceKey = "daw-browser.app-preferences.v1"
 const writePreferences = (change: string) => `(()=>{const key=${JSON.stringify(preferenceKey)};
   const preferences=JSON.parse(localStorage.getItem(key)??"{}");preferences.version=9;${change};
   localStorage.setItem(key,JSON.stringify(preferences));return true})()`
+// The desktop native engine records from audio.nativeInputDeviceId, a coreaudio:<uid> from the host's own device list.
 export const selectAudioInputScript = (label: string) => `(async()=>{
-  const device=(await navigator.mediaDevices.enumerateDevices()).find(entry=>entry.kind==="audioinput"&&entry.label.includes(${JSON.stringify(label)}));
-  if(!device)throw new Error(${JSON.stringify(`${label} is not an audio input of the private profile`)});
-  return ${writePreferences("preferences.audio={...preferences.audio,inputDeviceId:device.deviceId}")};
+  const reply=await window.dawDesktop.audioHost.listDevices();
+  const device=reply.ok&&reply.devices.find(entry=>entry.available&&entry.inputChannelCount>0&&entry.name===${JSON.stringify(label)});
+  if(!device)throw new Error(${JSON.stringify(`${label} is not a native audio input of the private profile`)});
+  return ${writePreferences("preferences.audio={...preferences.audio,nativeInputDeviceId:device.deviceId}")};
 })()`
 export const selectMidiInputScript = (name: string) => `(async()=>{
   const access=await navigator.requestMIDIAccess({sysex:false});
@@ -157,7 +159,7 @@ export const selfTest = async () => {
   check(!verifyTakeAgainstTone({ ...take(100), samples: take(100).samples.subarray(0, 200 * 2) }, tone).passed, "a take shorter than the tone fails")
   check(!verifyTakeAgainstTone({ sampleRate: 48000, channels: 2, samples: new Float32Array(1000) }, tone).passed, "a silent take fails")
   // The selection scripts touch only the page's preferences for the named device.
-  check(selectAudioInputScript(blackhole).includes("inputDeviceId") && selectAudioInputScript(blackhole).includes(preferenceKey) && !selectAudioInputScript(blackhole).includes("setSinkId"), "BlackHole is selected in the profile's preferences")
+  check(selectAudioInputScript(blackhole).includes("nativeInputDeviceId") && selectAudioInputScript(blackhole).includes(preferenceKey) && !selectAudioInputScript(blackhole).includes("setSinkId"), "BlackHole is selected in the profile's preferences")
   check(selectMidiInputScript(iacPort).includes("selectedInputIds") && selectMidiInputScript(iacPort).includes(JSON.stringify(iacPort)), "IAC is selected in the profile's preferences")
   console.log("ae-08 phase 9 devices self-test: pass")
 }

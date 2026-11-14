@@ -382,7 +382,7 @@ export const selfTest = async () => {
   check(prepared[0]?.includes("selectedInputIds") === true && prepared[1] === "reload" && prepared[2]?.includes("Live MIDI") === true, "midi-select-iac writes the profile's MIDI input, reloads and selects the live track")
   prepared.length = 0
   await performPrepare(prepareContext, "record-select-input")
-  check(prepared[0]?.includes("inputDeviceId") === true && prepared[0]?.includes(blackhole) === true && prepared[1] === "reload", "record-select-input selects BlackHole in the profile's preferences and reloads")
+  check(prepared[0]?.includes("nativeInputDeviceId") === true && prepared[0]?.includes(blackhole) === true && prepared[1] === "reload", "record-select-input selects BlackHole in the profile's preferences and reloads")
   prepared.length = 0
   await performPrepare(prepareContext, "record-arm")
   check(prepared[0]?.includes("Arm track") === true && prepared[0]?.includes("Changed right") === true && prepared[0]?.includes(".click()") === true && prepared[1]?.includes("Disarm track") === true,

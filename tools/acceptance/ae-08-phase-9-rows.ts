@@ -7,10 +7,11 @@ export type LatencyClass = "plain" | "raise" | "asset" | "vst-insert"
 export type Step = { edits: string[]; state: string }
 // Which check judges a row's bursts: "states" compares the capture with an offline export of each state (the analyzer's judgeBurst),
 // "sustained" requires a held live note to stay unbroken, "delete" judges a clip delete on host evidence and its own capture,
+// "take" requires the in-app recording's take to equal the tone played into BlackHole,
 // "latency" checks the host's reported latencies against the declared moves and the retained channel against its source shifted by
 // the published moves (a pinned lower leaves the shift, so no per-state export can stand for a raise row's later states),
 // and no check means the row is only settled and gated on host evidence.
-export type Judge = "states" | "sustained" | "delete" | "latency"
+export type Judge = "states" | "sustained" | "delete" | "latency" | "take"
 export type PackagedRun = {
   // burst: --repetitions edits. vst-burst: --vst-repetitions edits. single: one pass of the cycle. launch: one edit per launch, repeated --repetitions times.
   repeat: "burst" | "vst-burst" | "single" | "launch"
@@ -25,8 +26,9 @@ export type PackagedRun = {
   // A hardware device the row needs. A launch checks that it is present before the app starts.
   device?: "iac-midi" | "blackhole"
   judge?: Judge
-  // The host line a step settles on when its edits publish no graph: an applied processor patch or an applied parameter sequence.
-  settle?: "patch" | "sequence"
+  // What a step settles on when its edits publish no graph: the host's applied processor patch or applied parameter sequence line, or,
+  // for a commit the app refuses, the return of the refusal.
+  settle?: "patch" | "sequence" | "refused"
   // What a launch of this row needs that no current fixture provides.
   needs?: string
 }
@@ -39,7 +41,7 @@ export type PortableCampaignRow = PortableRun & { row: string; class: LatencyCla
 const raiseState = "phase5:raise-state"
 const testPlugin = ["vst-trust"]
 const insertedTestPlugin = ["vst-trust", "vst-insert"]
-const absentDevice = (device: string) => `NOT CERTIFIABLE UNTIL ${device} IS PRESENT: the launch checks for it first and fails as a setup failure, never a pass`
+const recording = ["record-select-input", "record-arm"]
 
 export const burstRows: BurstRow[] = [
   { name: "attach-remove-long-latency", latencyClass: "raise", packaged: { repeat: "burst", periodSec: null, fixture: raiseState, start: "spectral-512", judge: "latency",
@@ -74,13 +76,12 @@ export const burstRows: BurstRow[] = [
   { name: "sustained-live-midi", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:live-midi", start: "base", judge: "sustained",
     device: "iac-midi", prepare: ["midi-select-iac", "midi-hold"],
     cycle: [{ edits: ["silent-track-create"], state: "extra-track" }, { edits: ["silent-track-delete"], state: "base" }] } },
-  { name: "record-target-guard", latencyClass: "plain", packaged: { repeat: "launch", periodSec: null, fixture: null, start: "armed", device: "blackhole",
-    cycle: [{ edits: ["target-delete-refused"], state: "armed" }],
-    needs: `${absentDevice("BlackHole 2ch")}; the in-app recording steps (select BlackHole in the private profile, arm, Start recording, play the tone, Stop recording, export the take) `
-      + "have no existing runner path and are unverified; the commit refusal itself is RECORDING_TARGET_LOCKED_REASON (track-recording-target.ts)" } },
-  { name: "unaffected-input", latencyClass: "plain", packaged: { repeat: "launch", periodSec: null, fixture: null, start: "recording", device: "blackhole",
-    cycle: [{ edits: ["silent-track-create"], state: "recording" }],
-    needs: `${absentDevice("BlackHole 2ch")}; same unverified recording steps as record-target-guard, then the take must equal the tone sample for sample` } },
+  // The recording rows (ae-08-phase-9-record.ts): the commit that deletes the armed target is refused and publishes nothing, so the step
+  // settles when the refusal returns; the unrelated edit publishes as usual. Both judge the take against the tone sample for sample.
+  { name: "record-target-guard", latencyClass: "plain", packaged: { repeat: "launch", periodSec: null, fixture: "phase5:raw-tempo", start: "armed", device: "blackhole",
+    prepare: recording, judge: "take", settle: "refused", cycle: [{ edits: ["target-delete-refused"], state: "armed" }] } },
+  { name: "unaffected-input", latencyClass: "plain", packaged: { repeat: "launch", periodSec: null, fixture: "phase5:raw-tempo", start: "recording", device: "blackhole",
+    prepare: recording, judge: "take", cycle: [{ edits: ["silent-track-create"], state: "recording" }] } },
   { name: "vst-insert", latencyClass: "vst-insert", packaged: { repeat: "vst-burst", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-absent", prepare: testPlugin,
     cycle: [{ edits: ["vst-insert"], state: "vst-present" }, { edits: ["vst-remove"], state: "vst-absent" }] } },
   // Removing an external plug-in is not an undo history entry (EffectsPanel removeExternalProcessor), so the plug-in comes back by a new insert.

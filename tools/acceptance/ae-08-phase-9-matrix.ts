@@ -130,7 +130,8 @@ export type Settled = { wallMs: number; revision: number; publicationFrame: numb
 // An edit that publishes no graph settles on the line the host logs when it applies the processor patch or parameter sequence while
 // the transport runs; that line's `frame` stands for the publication frame (the transport frame it was logged at).
 const appliedEvent = { patch: "processor-patch-applied", sequence: "processor-sequence-applied" }
-export const publicationComplete = (events: readonly HostEvent[], sinceWallMs: number, raise: boolean, settle?: Row["settle"]): Settled | undefined => {
+type Applied = keyof typeof appliedEvent
+export const publicationComplete = (events: readonly HostEvent[], sinceWallMs: number, raise: boolean, settle?: Applied): Settled | undefined => {
   if (settle !== undefined) {
     const applied = events.find((event) => event.event === appliedEvent[settle] && event.frame > 0 && event.wallMs >= sinceWallMs)
     return applied && { wallMs: applied.wallMs, revision: applied.revision, publicationFrame: applied.frame }
@@ -150,7 +151,7 @@ const nativeEvents = async (out: string) => (await Promise.all((await readdir(ou
 
 // The host appends native-<pid>.jsonl as it runs (native/acceptance-evidence.h), so this waits on file changes. The deadline only
 // reports a missing line as a setup failure; it never counts as a pass.
-export const awaitPublicationComplete = (out: string, sinceWallMs: number, raise: boolean, deadlineMs: number, settle?: Row["settle"]) =>
+export const awaitPublicationComplete = (out: string, sinceWallMs: number, raise: boolean, deadlineMs: number, settle?: Applied) =>
   new Promise<Settled>((resolve, reject) => {
     const watcher = watch(out, () => void check())
     const timer = setTimeout(() => finish(() => reject(new SetupFailure(`no publication-complete line within ${deadlineMs} ms of the edit`))), deadlineMs)
@@ -203,7 +204,9 @@ export const runBurst = async (input: { out: string; directory: string; row: Row
       const moves = []
       for (const edit of step.edits) moves.push({ name: edit, ...await input.perform(edit) })
       const raise = moves.some((move) => move.toLatencyFrames > move.fromLatencyFrames)
-      const settled = await awaitPublicationComplete(out, wallMs, raise, input.deadlineMs ?? settleDeadlineMs(row), row.settle)
+      // A refused commit publishes nothing: its step is settled when the refusal returns, and no frame is waited for.
+      const settled = row.settle === "refused" ? { wallMs: Date.now(), revision: 0, publicationFrame: 0 }
+        : await awaitPublicationComplete(out, wallMs, raise, input.deadlineMs ?? settleDeadlineMs(row), row.settle)
       const { wallMs: settledWallMs, revision, publicationFrame } = settled
       await mark("burst-settled", { row: row.name, index: step.index, settledWallMs })
       for (const move of moves) logged.push({ ...move, index: step.index, wallMs: move.wallMs ?? wallMs, settledWallMs, revision, publicationFrame })
@@ -451,6 +454,11 @@ export const selfTest = async () => {
     const failure = await runBurst({ out: failing, directory: failing, row: { ...tempo, name: "failing" }, repetitions: 2, mark: async () => undefined, deadlineMs: 100, ...quiet,
       perform: async () => ({ fromLatencyFrames: 0, toLatencyFrames: 0 }) }).then(() => "resolved", (error) => error instanceof SetupFailure ? "setup" : "other")
     check(failure === "setup" && JSON.parse(await readFile(path.join(failing, "phase9-edits.json"), "utf8")).edits.length === 0, `a missing line is a setup failure with evidence kept, got ${failure}`)
+    // A refused commit publishes nothing, so its step settles when the refusal returns, with no line to wait for.
+    const refusedDirectory = path.join(burstDirectory, "refused")
+    const refused = await runBurst({ out: refusedDirectory, directory: refusedDirectory, row: { ...tempo, name: "refused", settle: "refused" }, repetitions: 2, mark: async () => undefined, deadlineMs: 100, ...quiet,
+      perform: async () => ({ fromLatencyFrames: 0, toLatencyFrames: 0 }) }).then((edits) => edits, () => [])
+    check(refused.length === 2 && refused.every((edit) => edit.settledWallMs !== undefined && edit.publicationFrame === 0), `a refused step settles on its return: ${JSON.stringify(refused)}`)
   } finally { await rm(burstDirectory, { recursive: true }) }
   // The app's own commit stamp, written by the product helper and read back by the runner.
   const evidence = await mkdtemp(path.join(tmpdir(), "ae08-phase9-stamp-"))

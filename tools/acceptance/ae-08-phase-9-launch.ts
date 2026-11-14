@@ -9,7 +9,10 @@ import { deleteTrackThroughUi, dragUtilityGainKnob, exportReference, pressHistor
   waitNativeFrame, liveMidiTrack, type Phase5Context } from "./ae-08-phase-5-fixture"
 import { burstSchedule, judgeStored, MIN_WINDOW_MS, parseHostLines, repetitionsFor, runBurst, type Perform, type Timings } from "./ae-08-phase-9-matrix"
 import { phase9Matrix, type Row } from "./ae-08-phase-9-rows"
-import { iacPort, selectMidiInputScript, sendMidiNote } from "./ae-08-phase-9-devices"
+import { takeFile } from "./ae-08-phase-9-compare"
+import { writeWav } from "./ae08-wav"
+import { blackhole, iacPort, makeTone, playToneIntoBlackhole, selectAudioInputScript, selectMidiInputScript, sendMidiNote } from "./ae-08-phase-9-devices"
+import { armRecordTarget, finishRecording, recordingTargetLockedReason, startRecording, toneSeconds, verifyHandedOverTake } from "./ae-08-phase-9-record"
 import { insertTestPlugin, prepareTestPlugin, removeTestPlugin } from "./ae-08-phase-9-vst"
 
 // One packaged launch of phase 9: the row's phase 5 start state, then either a burst of its edits (settled on host evidence) or the
@@ -71,9 +74,17 @@ export const createPerformer = ({ context, runtime, observe, setup }: Performers
       processor: ref(required((await observe()).externalEffectId, "Test plug-in processor")), changes: [{ parameterId: 1, normalizedValue }] }])
     return { ...move(from, to), wallMs }
   }
+  // The armed recording target cannot be deleted: the commit must be refused with the lock's reason, and a commit that goes through fails the row.
+  const refuseTargetDelete = async () => {
+    const refusal = await context.mutate([{ kind: "track.delete", track: ref(setup.changedTrackId) }]).then(() => undefined, (error) => String(error))
+    if (refusal === undefined) throw new Error("Deleting the armed recording target was committed")
+    if (!refusal.includes(recordingTargetLockedReason)) throw new Error(`Deleting the armed recording target was refused for another reason: ${refusal}`)
+    return unmoved
+  }
   const lookahead = (lookaheadMs: number) => async () => commit([{ kind: "effect.upsert", target, effectKind: "limiter",
     effect: ref(required((await observe()).limiterEffectId, "Limiter device")), params: { version: 1, state: { ...createDefaultLimiterParams(), lookaheadMs } } }])
   const performers = new Map([
+    ["target-delete-refused", refuseTargetDelete],
     ["lookahead-1ms", lookahead(1)],
     ["lookahead-5ms", lookahead(5)],
     // The drag overrides the lane on the Utility Gain knob; the transport's red button re-enables it.
@@ -135,6 +146,11 @@ const fixtureRow = (rows: readonly Row[]) => {
 // once the transport runs and released after the last window.
 const heldNote = 69
 export const performPrepare = async (context: Pick<Phase5Context, "evaluate" | "interact" | "reload">, step: string) => {
+  if (step === "record-select-input") {
+    await context.evaluate(selectAudioInputScript(blackhole))
+    return context.reload()
+  }
+  if (step === "record-arm") return armRecordTarget(context)
   if (step === "vst-trust") return prepareTestPlugin(context, "Changed right")
   if (step === "vst-insert") return insertTestPlugin(context)
   if (step === "midi-select-iac") {
@@ -159,9 +175,13 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
   await runtime(["seek", "0"])
   await mark("capture-start")
   const playWallMs = Date.now()
-  await runtime(["play"])
+  // A recording row starts the transport by Start recording and plays its tone into BlackHole from the start of the burst, so its edit
+  // lands inside the take.
+  const takeRow = launch.role === "burst" ? launch.rows.find((row) => row.judge === "take") : undefined
+  const before = takeRow ? await startRecording(context) : (await runtime(["play"]), undefined)
   await waitNativeFrame(context, warmupFrames)
   if (prepare.includes("midi-hold")) await performPrepare(context, "midi-hold")
+  const tone = takeRow ? playToneIntoBlackhole(path.join(out, "tone.wav"), toneSeconds).then(() => undefined, (error) => error instanceof Error ? error : new Error(String(error))) : undefined
   if (launch.role === "burst") {
     // Asset inventory: the installed-asset count the host reports, recorded before the burst and after each publication with that
     // publication's revision.
@@ -179,6 +199,12 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
     }
   } else await waitNativeFrame(context, launch.frames)
   if (prepare.includes("midi-hold")) await sendMidiNote("off", heldNote)
+  if (launch.role === "burst" && takeRow && before) {
+    const toneFailure = await tone
+    if (toneFailure !== undefined) throw toneFailure
+    const verdict = await finishRecording(context, { before, file: path.join(out, "take.wav") })
+    await writeFile(path.join(launch.directory, takeRow.name, takeFile), JSON.stringify(verdict))
+  }
   await mark("capture-end")
   await writeFile(path.join(out, "diagnostics-active.json"), JSON.stringify(await runtime(["diagnostics-v2"]), null, 2))
   await runtime(["stop"])
@@ -311,6 +337,34 @@ export const selfTest = async () => {
   prepared.length = 0
   await performPrepare(prepareContext, "midi-select-iac")
   check(prepared[0]?.includes("selectedInputIds") === true && prepared[1] === "reload" && prepared[2]?.includes("Live MIDI") === true, "midi-select-iac writes the profile's MIDI input, reloads and selects the live track")
+  prepared.length = 0
+  await performPrepare(prepareContext, "record-select-input")
+  check(prepared[0]?.includes("inputDeviceId") === true && prepared[0]?.includes(blackhole) === true && prepared[1] === "reload", "record-select-input selects BlackHole in the profile's preferences and reloads")
+  prepared.length = 0
+  await performPrepare(prepareContext, "record-arm")
+  check(prepared[0]?.includes("Arm track") === true && prepared[0]?.includes("Changed right") === true && prepared[0]?.includes(".click()") === true && prepared[1]?.includes("Disarm track") === true,
+    "record-arm clicks the arm button of the changed track and waits for it to be pressed")
+  // The armed target's delete must be refused with the lock's reason; a commit that goes through, or another refusal, fails the row.
+  const guard = (mutate: () => Promise<number>) => createPerformer({
+    context: { mutate, evaluate: async () => undefined, interact: async () => undefined, read: async (_, schema) => schema.parse(0), reload: async () => undefined },
+    runtime: async () => undefined, observe: async () => observed, setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" } })("target-delete-refused")
+  check((await guard(async () => { throw new Error(`validation: ${recordingTargetLockedReason}`) })).toLatencyFrames === 0, "a refusal carrying the lock's reason is the expected outcome")
+  check(await guard(async () => 1).then(() => "performed", (error) => error instanceof Error && /was committed/.test(error.message) ? "committed" : "other") === "committed", "a delete that is committed fails the row")
+  check(await guard(async () => { throw new Error("validation: stale revision") }).then(() => "performed", (error) => error instanceof Error && /another reason/.test(error.message) ? "other reason" : "other") === "other reason", "a refusal for another reason fails the row")
+  // The take as the page hands it over: the tone behind a silent lead is the tone; the same take with one sample changed is not.
+  const handedOver = await mkdtemp(path.join(tmpdir(), "ae08-phase9-take-"))
+  try {
+    const tone = makeTone(toneSeconds)
+    const take = (change?: (samples: Float32Array) => void) => {
+      const samples = new Float32Array(tone.samples.length + 2 * 4800)
+      samples.set(tone.samples, 2 * 2400)
+      change?.(samples)
+      return writeWav(path.join(handedOver, "built.wav"), { ...tone, samples }).then(() => readFile(path.join(handedOver, "built.wav")).then((bytes) => bytes.toString("base64")))
+    }
+    const exact = await verifyHandedOverTake(await take(), path.join(handedOver, "take.wav"))
+    check(exact.passed && exact.offset === 2400, `a take equal to the tone passes at its own offset: ${JSON.stringify(exact)}`)
+    check(!(await verifyHandedOverTake(await take((samples) => { samples[2 * 2400 + 1000] += 1e-6 }), path.join(handedOver, "take.wav"))).passed, "a take with one changed sample fails")
+  } finally { await rm(handedOver, { recursive: true }) }
   check(await performPrepare(prepareContext, "no-such-step").then(() => false, (error) => error instanceof Error && error.message === "No phase 9 prepare step no-such-step"), "an unknown prepare step is refused")
   const rejected = await perform("no-such-edit").then(() => "performed", (error) => error instanceof Error ? error.message : "other")
   check(rejected === "No phase 9 performer for no-such-edit", `an unknown edit is refused, got ${rejected}`)

@@ -114,6 +114,13 @@ export const compareDelete = (input: { output: Pcm; seam: number; endFrame: numb
   }
 }
 
+// The recording rows: the launch compared the take with the tone (verifyTakeAgainstTone) and stored its answer beside the row's edits.
+// The take is the row's one output, so every window of the burst holds or fails with it.
+export const takeFile = "take.json"
+export const takeResult = z.object({ passed: z.boolean(), offset: z.number(), mismatches: z.number() })
+export const compareTake = (take: z.infer<typeof takeResult>): Compare => () => take.passed ? undefined
+  : `the take differs from the tone in ${take.mismatches} samples (first non-silent frame ${take.offset})`
+
 // The burst plays in one transport epoch. The pause that ends it opens the next epoch at the frame it stopped on, and the blocks
 // it renders there (its fade-out, then repeats of that frame) are not the timeline: indexed by frame they would overwrite the
 // last played block.
@@ -140,6 +147,7 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
   const { edits } = logged.parse(JSON.parse(await readFile(path.join(directory, "phase9-edits.json"), "utf8")))
   const steps = [...Map.groupBy(edits, (edit) => edit.index)].map(([index, group]) => ({ index, editWallMs: Math.min(...group.map((edit) => edit.wallMs)),
     settledWallMs: group[0]?.settledWallMs, publicationFrame: group[0]?.publicationFrame ?? 0 }))
+  if (row.judge === "take") return judgeBurst(steps, input.captureEndWallMs, compareTake(takeResult.parse(JSON.parse(await readFile(path.join(directory, takeFile), "utf8")))))
   const texts = await Promise.all(input.natives.map((name) => readFile(path.join(launchOut, name), "utf8")))
   const blocks = texts.flatMap(nativeLines).flatMap((entry) => entry.event === "capture-block" ? [captureBlock.parse(entry)] : [])
   const played = playedBlocks(blocks, steps[0]?.editWallMs ?? 0)
@@ -205,6 +213,11 @@ export const selfTest = () => {
   }
   const steps = seams.map((seam, position) => ({ index: position + 1, editWallMs: position * 4000, settledWallMs: position * 4000 + 1500, publicationFrame: seam }))
   const verdictOf = (compare: Compare) => judgeBurst(steps, edits * 4000 + 4000, compare)
+  // A take that is not the tone fails the row at its first edit; the answer's file name is the one the launch writes.
+  check(verdictOf(compareTake({ passed: true, offset: 1200, mismatches: 0 })).outcome === "pass", "a take equal to the tone passes")
+  const badTake = verdictOf(compareTake({ passed: false, offset: 1200, mismatches: 7 }))
+  check(badTake.outcome === "fail" && badTake.editIndex === 1 && /7 samples/.test(badTake.detail ?? ""), `a take that differs from the tone fails: ${JSON.stringify(badTake)}`)
+  check(takeResult.safeParse({ passed: true }).success === false, "the stored answer names passed, offset and mismatches")
   const states9 = (output: Pcm) => verdictOf(compareStates({ output, states, seams, endFrame }))
   check(states9(render()).outcome === "pass", "a clean burst passes")
   const held = states9(render((output) => { for (let frame = seams[2] ?? 0; frame < (seams[3] ?? 0); frame++) output.samples[frame * channels + 1] = states[2]?.samples[frame * channels + 1] ?? NaN }))

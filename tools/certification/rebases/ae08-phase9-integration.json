@@ -1,0 +1,4666 @@
+{
+ "name": "ae08-phase9-integration",
+ "sequence": 44,
+ "createdAt": "2026-11-15T00:00:00.000Z",
+ "revert": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 9 integration (hand record, no --bless). Covers d5543700..HEAD of this part: the PARENT-RULING-LATENCY-OWED-ORACLE implementation, the guard tests, the record-seeds fix, and 1844427d.\n\nRuling implemented: the hook fuzz oracle (tools/acceptance/ae-08-processor-state-fuzz-hook.ts, -hook-waiters.ts, -host.ts) judges an owed latency edit at the first quiescent live point after it became owed (no lost session, started and prepared, no outstanding host reply, no held publication, no pending transition, delivered and current progress, no unsettled waiter or uncompiled compilation) and at the drain, never at a teardown. A teardown carries the debt into the next session, a newer latency edit replaces it, and an undo that leaves desired == native passes. The failure's domain is now live.\n\nSeed table on the final oracle at HEAD: 66, 281, 112, 10, 336, 851, 889 pass; 610, 625, 683, 744, 958 (failing in an earlier oracle iteration) pass. Negative control: on HEAD, disabling the Play-transport fix (lane publication check, 6666fcab Play-wait gate, f973b39d endedByDrop) still passes 66 and 281, because later gating makes the lost edit unreachable there. On a tree archived at f4ffbda2 (tools/acceptance from HEAD) with only the lane check removed, seed 66 and seed 281 fail I1 (native fft 2048, desired 512); with the check kept they pass. 1844427d is still needed: reverting its owner change fails seed 889 (I1) and the C witness 'B6d2 a latency edit whose paused-domain retry a seek cancels reaches native in the seek's domain'.\n\nGuard tests: two DV01 STEP7 tests in native-playback-controller.test.ts (a Play resumes in the prepared epoch and in a new epoch while a burst of schedule adoptions keeps arriving). A mutation of the runAdoption gate does not fail them, so they guard only; no schedule-adoption starvation defect exists. tools/certification/record-seeds.ts no longer refuses to write when summary hashes differ (a diagnostic only, as in FAST-CERT).\n\nSeed records: re-recorded 1000 controller and 1000 hook seeds on the final oracle. Controller unchanged. Hook: only ceilings (compileCount), rejections and exercised moved on 350 fields; no seed fails; compileCount drift is the intended drift already ruled (rejection lists moved on seeds where a latency edit was cancelled in the ending-transport domain). Summary hashes differ on every hook seed and on controller seed 4 (known drift), left for --full; no pinned hash is edited here.\n\nArm anchors re-pointed to the source as it now stands: rc2:399:0:mutant and diag:385/390-plus-399 (the owner's cancel loop now also takes an admitted execution, from 1844427d) and rc2:historical-75:0:mutant (its first anchor was ambiguous after f973b39d; it now includes the preceding nextPatch line). The mutants are otherwise unchanged. The 4 re-pointed mutants and their controls were re-run and pass.\n\nPrevious worker's list: no 'as const' remains in d5543700..HEAD; runAdoption root fix f973b39d present and it removed the 714bf902 Timeline retry; runner temp-dir leaks fixed by 0dfab6b5. Native: protocol 30, ctest 24/24, plug-in-gated host tests pass; artifact id stays daw-audio-host-macos/v10 because the hello handshake and every control frame already carry and check protocolVersion. FAST-CERT arms impacted by the 44 changed files (722 non-search, non-retired arms) were run with --only --jobs 1 in four chunks; all pass after the anchors above.",
+  "expectationsSha256": "cff0d5d995f2b9b9ca38de3ee7ef2ded30c9b51758efb08647d48d456f6a75ae"
+ },
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:399:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "      if (!execution || !execution.receipts.some(receipt => record.cohort.has(receipt))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
+   "new": "      if (!execution || !(execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:399:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "      if (execution && execution.receipts.some(receipt => record.cohort.has(receipt))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)",
+   "new": "      if (execution && (execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:385:385-plus-399",
+    "spec",
+    "changes",
+    "#1",
+    "from"
+   ],
+   "old": "      if (!execution || !execution.receipts.some(receipt => record.cohort.has(receipt))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
+   "new": "      if (!execution || !(execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:385:385-plus-399",
+    "spec",
+    "changes",
+    "#1",
+    "to"
+   ],
+   "old": "      if (execution && execution.receipts.some(receipt => record.cohort.has(receipt))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)",
+   "new": "      if (execution && (execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:390:390-plus-399",
+    "spec",
+    "changes",
+    "#1",
+    "from"
+   ],
+   "old": "      if (!execution || !execution.receipts.some(receipt => record.cohort.has(receipt))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
+   "new": "      if (!execution || !(execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:390:390-plus-399",
+    "spec",
+    "changes",
+    "#1",
+    "to"
+   ],
+   "old": "      if (execution && execution.receipts.some(receipt => record.cohort.has(receipt))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)",
+   "new": "      if (execution && (execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-75:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "if (processorState.publication()) return undefined",
+   "new": "nextPatch((desired) => {\n      if (processorState.publication()) return undefined"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-75:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "if (processorState.publication()?.phase === \"held\") return undefined",
+   "new": "nextPatch((desired) => {\n      if (processorState.publication()?.phase === \"held\") return undefined"
+  }
+ ],
+ "seedRecordChanges": [
+  {
+   "path": [
+    "hook",
+    "#3",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#9",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#10",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#11",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#12",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#13",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#16",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#20",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#22",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#26",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#28",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#36",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#37",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#40",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#41",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 12
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#42",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#43",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#45",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#50",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#53",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#54",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#54",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#56",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#62",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 31
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#63",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#65",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#68",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#71",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#73",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#77",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#80",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#82",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#86",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#89",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 32
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#90",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#92",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#97",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#98",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#100",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#101",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#111",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#113",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#116",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#117",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#120",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#122",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#126",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#127",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 32
+   },
+   "new": {
+    "compileCount": 36
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#132",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#134",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#139",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#139",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#145",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 12
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#148",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#148",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#149",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 32
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#152",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#153",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#157",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#160",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#161",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#164",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#166",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#169",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#172",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#174",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#177",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#182",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#183",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#186",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#188",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#190",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#195",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#196",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#203",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 31
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#204",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#205",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#207",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#208",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#211",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#213",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#214",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#215",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#216",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#217",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#218",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#226",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#228",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#229",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#230",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#232",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#241",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#242",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#243",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#247",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#251",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#253",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#255",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#256",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#260",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 33
+   },
+   "new": {
+    "compileCount": 32
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#274",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#275",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#280",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#284",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#286",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#293",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#293",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#295",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#299",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#302",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#307",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#308",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 31
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#314",
+    "rejections"
+   ],
+   "old": [
+    "flush|cancelled|ending-transport-domain",
+    "flush|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#317",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#320",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#324",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#325",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#327",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#328",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#331",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#335",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": [
+    "latency|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#335",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#343",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#344",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#350",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#351",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#352",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 11
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#353",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#367",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#368",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#371",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#379",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#380",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#381",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#387",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#388",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 32
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#390",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#397",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#400",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#401",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#404",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 30
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#412",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#413",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#415",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#420",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#422",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#423",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#427",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#430",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#434",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#435",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#438",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#440",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#441",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#452",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#454",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#456",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#456",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 11
+   },
+   "new": {
+    "compileCount": 10
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#462",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#463",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#464",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#472",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#473",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#479",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#481",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#484",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#485",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#491",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#493",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#497",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#497",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#498",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 33
+   },
+   "new": {
+    "compileCount": 37
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#501",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#511",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#513",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#515",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#517",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#518",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#519",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#521",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#522",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#526",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#528",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#530",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#536",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#539",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#541",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#542",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#542",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#549",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#551",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#554",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#558",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#559",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#562",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#563",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#565",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#566",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#576",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#577",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#579",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#580",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#587",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "flush|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#592",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#597",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#601",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#602",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#607",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#610",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#613",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#614",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#616",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#619",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#622",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#624",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#624",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#626",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#628",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#630",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 32
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#631",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#632",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#632",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#634",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#636",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#637",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#638",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#647",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#651",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#652",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#656",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#657",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#660",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#661",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#663",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#663",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#670",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#672",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#677",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#683",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#684",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#685",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#688",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#693",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#695",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#695",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#699",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#699",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#703",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#705",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#708",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#709",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#712",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#714",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 32
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#715",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#720",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#721",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 13
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#722",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#723",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#725",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#736",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#740",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#741",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#742",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#749",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#753",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#757",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 29
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#759",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#765",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 12
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#769",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#772",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#773",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#774",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#784",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#789",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#790",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#794",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#794",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#802",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 26
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#803",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#803",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#806",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#808",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#810",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 25
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#811",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#815",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#820",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-incarnation",
+    "latency|cancelled|ending-incarnation"
+   ],
+   "new": [
+    "latency|cancelled|ending-incarnation"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#820",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#822",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#831",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#832",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#835",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 33
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#837",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 31
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#839",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 28
+   },
+   "new": {
+    "compileCount": 31
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#841",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#843",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#845",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#846",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#847",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 12
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#849",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#850",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#850",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 31
+   },
+   "new": {
+    "compileCount": 33
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#853",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#854",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#856",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#857",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#858",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#866",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#869",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#870",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#874",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#877",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#880",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#881",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 27
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#885",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#886",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 12
+   },
+   "new": {
+    "compileCount": 11
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#888",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#896",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#898",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#899",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#900",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#904",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#905",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 25
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#911",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#923",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#926",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 16
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#930",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 17
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#931",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#932",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 20
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#934",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 16
+   },
+   "new": {
+    "compileCount": 22
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#942",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 31
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#943",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#945",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#949",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 12
+   },
+   "new": {
+    "compileCount": 14
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#951",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 15
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#955",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 18
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#956",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 26
+   },
+   "new": {
+    "compileCount": 30
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#957",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 29
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#960",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 14
+   },
+   "new": {
+    "compileCount": 13
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#961",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 17
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#964",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 22
+   },
+   "new": {
+    "compileCount": 21
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#967",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 15
+   },
+   "new": {
+    "compileCount": 19
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#970",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 27
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#974",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#978",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 21
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#979",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#981",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 24
+   },
+   "new": {
+    "compileCount": 23
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#990",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 20
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#994",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 18
+   },
+   "new": {
+    "compileCount": 24
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#996",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 23
+   },
+   "new": {
+    "compileCount": 28
+   }
+  },
+  {
+   "path": [
+    "hook",
+    "#998",
+    "ceilings"
+   ],
+   "old": {
+    "compileCount": 19
+   },
+   "new": {
+    "compileCount": 22
+   }
+  }
+ ]
+}

@@ -12570,8 +12570,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "if (processorState.publication()) return undefined",
-       "to": "if (processorState.publication()?.phase === \"held\") return undefined"
+       "from": "nextPatch((desired) => {\n      if (processorState.publication()) return undefined",
+       "to": "nextPatch((desired) => {\n      if (processorState.publication()?.phase === \"held\") return undefined"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
@@ -23595,8 +23595,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "      if (!execution || !execution.receipts.some(receipt => record.cohort.has(receipt))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
-       "to": "      if (execution && execution.receipts.some(receipt => record.cohort.has(receipt))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)"
+       "from": "      if (!execution || !(execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
+       "to": "      if (execution && (execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)"
       }
      ],
      "bounded": false,
@@ -58027,8 +58027,8 @@
       },
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "      if (!execution || !execution.receipts.some(receipt => record.cohort.has(receipt))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
-       "to": "      if (execution && execution.receipts.some(receipt => record.cohort.has(receipt))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)"
+       "from": "      if (!execution || !(execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
+       "to": "      if (execution && (execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)"
       }
      ],
      "bounded": false,
@@ -61987,8 +61987,8 @@
       },
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "      if (!execution || !execution.receipts.some(receipt => record.cohort.has(receipt))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
-       "to": "      if (execution && execution.receipts.some(receipt => record.cohort.has(receipt))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)"
+       "from": "      if (!execution || !(execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        || evidence === \"promoted\" || evidence === \"uncertain\") continue\n      if (evidence !== \"cancelled\" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, \"cancelled\", false)\n      else if (execution === target.patch) {\n        target.patch = undefined\n        execution.state = \"queued\"\n        target.queuedPatch = execution\n      }",
+       "to": "      if (execution && (execution.state === \"admitted\" || execution.receipts.some(receipt => record.cohort.has(receipt)))\n        && evidence !== \"promoted\" && evidence !== \"uncertain\"\n        && !(evidence === \"cancelled\" && execution === target.queuedPatch)) settle(execution, \"cancelled\", false)"
       }
      ],
      "bounded": false,

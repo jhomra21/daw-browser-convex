@@ -1,4 +1,5 @@
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js"
+import type { NativeAudioDevice } from "@daw-browser/audio-engine/native-host-wire"
 import { useAppPreferences } from "~/context/app-preferences"
 import { areAudioDeviceListsEqual, buildActiveInputProbeConstraints, canUseStereoRecording, filterAudioDevices, isSelectedDeviceAvailable, resolveAudioRuntimeConfiguration, resolveRecordingChannelOptions } from "~/lib/audio-settings-core"
 import { getAudioEngine, getAudioSinkStatus, playAudioOutputTestTone, subscribeAudioSinkStatus } from "~/lib/audio-engine-singleton"
@@ -15,9 +16,31 @@ type OutputSelectableMediaDevices = MediaDevices & {
 const supportsOutputSelection = (mediaDevices: MediaDevices): mediaDevices is OutputSelectableMediaDevices =>
   "selectAudioOutput" in mediaDevices && typeof mediaDevices.selectAudioOutput === "function"
 
+function NativeDeviceSelect(props: {
+  id: string
+  devices: NativeAudioDevice[]
+  selectedId: string
+  unavailableLabel: string
+  onSelect: (deviceId: string) => void
+}) {
+  const unavailable = () => props.selectedId !== "" && !props.devices.some((device) => device.deviceId === props.selectedId)
+  return (
+    <select id={props.id} class="h-8 border border-border bg-background px-2 text-sm" onChange={(event) => props.onSelect(event.currentTarget.value)}>
+      <option value="" selected={!props.selectedId}>System default</option>
+      <Show when={unavailable()}>
+        <option value={props.selectedId} selected>{props.unavailableLabel}</option>
+      </Show>
+      <For each={props.devices}>{(device) => <option value={device.deviceId} selected={device.deviceId === props.selectedId}>{device.name}</option>}</For>
+    </select>
+  )
+}
+
 export function DashboardAudioView() {
   const preferences = useAppPreferences()
   const requiresNativeAudio = import.meta.env.VITE_DESKTOP === "true"
+  const [nativeDevices, setNativeDevices] = createSignal<NativeAudioDevice[]>([])
+  const nativeInputs = createMemo(() => nativeDevices().filter((device) => device.available && device.inputChannelCount > 0))
+  const nativeOutputs = createMemo(() => nativeDevices().filter((device) => device.available && device.outputChannelCount > 0))
   const [devices, setDevices] = createSignal<MediaDeviceInfo[]>([])
   const [deviceError, setDeviceError] = createSignal("")
   const [sinkStatus, setSinkStatus] = createSignal(getAudioSinkStatus())
@@ -59,6 +82,16 @@ export function DashboardAudioView() {
     } catch (error) {
       if (requestId !== deviceRequestId) return
       setDeviceError(error instanceof Error ? error.message : "Unable to enumerate audio devices.")
+    }
+  }
+
+  const refreshNativeDevices = async () => {
+    const reply = await globalThis.window?.dawDesktop?.audioHost?.listDevices()
+    if (reply?.ok) {
+      setNativeDevices(reply.devices)
+      setDeviceError("")
+    } else {
+      setDeviceError(reply?.error ?? "The native audio host is unavailable.")
     }
   }
 
@@ -197,6 +230,7 @@ export function DashboardAudioView() {
 
   onMount(() => {
     void refreshDevices()
+    if (requiresNativeAudio) void refreshNativeDevices()
     void resolveCalibrationPlatformIdentity(navigator).then(setPlatformIdentity)
     const onDeviceChange = () => {
       inputProbeRequestId += 1
@@ -222,30 +256,55 @@ export function DashboardAudioView() {
   return (
     <DashboardScrollView>
       <DashboardSection title="Audio Devices" description="Device labels become available after browser permission is granted.">
-        <DashboardRow
-          label="Recording input"
-          controlId="audio-recording-input"
-          value={!isSelectedDeviceAvailable(selectedInputDeviceId(), audioDevices().inputs) ? "Saved device is currently unavailable." : undefined}
-          action={
-            <select id="audio-recording-input" class="h-8 border border-border bg-background px-2 text-sm" onChange={(event) => {
-              inputProbeRequestId += 1
-              setActiveInputSettings(null)
-              preferences.audio.setInputDeviceId(event.currentTarget.value)
-            }}>
-              <option value="" selected={!selectedInputDeviceId()}>System default</option>
-              <Show when={selectedInputDeviceId() && !isSelectedDeviceAvailable(selectedInputDeviceId(), audioDevices().inputs)}>
-                <option value={selectedInputDeviceId()} selected>Saved microphone (unavailable)</option>
-              </Show>
-              <For each={audioDevices().inputs}>{(device) => <option value={device.deviceId} selected={device.deviceId === selectedInputDeviceId()}>{device.label || "Microphone"}</option>}</For>
-            </select>
-          }
-        />
-        <DashboardRow label="Microphone permission" action={<button type="button" class="h-8 border border-border px-3 text-sm" onClick={requestMicrophone}>Request access</button>} />
-        <DashboardRow
-          label="Playback output"
-          value={!isSelectedDeviceAvailable(preferences.audio.preferences().outputDeviceId, audioDevices().outputs) ? "Saved output requires reconnection or reauthorization." : sinkStatusText()}
-          action={<div class="flex gap-2"><button type="button" class="h-8 border border-border px-3 text-sm" onClick={useSystemOutput}>System output</button><button type="button" class="h-8 border border-border px-3 text-sm" onClick={chooseOutput}>Choose output</button></div>}
-        />
+        <Show when={requiresNativeAudio} fallback={<>
+          <DashboardRow
+            label="Recording input"
+            controlId="audio-recording-input"
+            value={!isSelectedDeviceAvailable(selectedInputDeviceId(), audioDevices().inputs) ? "Saved device is currently unavailable." : undefined}
+            action={
+              <select id="audio-recording-input" class="h-8 border border-border bg-background px-2 text-sm" onChange={(event) => {
+                inputProbeRequestId += 1
+                setActiveInputSettings(null)
+                preferences.audio.setInputDeviceId(event.currentTarget.value)
+              }}>
+                <option value="" selected={!selectedInputDeviceId()}>System default</option>
+                <Show when={selectedInputDeviceId() && !isSelectedDeviceAvailable(selectedInputDeviceId(), audioDevices().inputs)}>
+                  <option value={selectedInputDeviceId()} selected>Saved microphone (unavailable)</option>
+                </Show>
+                <For each={audioDevices().inputs}>{(device) => <option value={device.deviceId} selected={device.deviceId === selectedInputDeviceId()}>{device.label || "Microphone"}</option>}</For>
+              </select>
+            }
+          />
+          <DashboardRow label="Microphone permission" action={<button type="button" class="h-8 border border-border px-3 text-sm" onClick={requestMicrophone}>Request access</button>} />
+          <DashboardRow
+            label="Playback output"
+            value={!isSelectedDeviceAvailable(preferences.audio.preferences().outputDeviceId, audioDevices().outputs) ? "Saved output requires reconnection or reauthorization." : sinkStatusText()}
+            action={<div class="flex gap-2"><button type="button" class="h-8 border border-border px-3 text-sm" onClick={useSystemOutput}>System output</button><button type="button" class="h-8 border border-border px-3 text-sm" onClick={chooseOutput}>Choose output</button></div>}
+          />
+        </>}>
+          <DashboardRow
+            label="Recording input"
+            controlId="audio-native-recording-input"
+            action={<NativeDeviceSelect
+              id="audio-native-recording-input"
+              devices={nativeInputs()}
+              selectedId={preferences.audio.preferences().nativeInputDeviceId}
+              unavailableLabel="Saved microphone (unavailable)"
+              onSelect={preferences.audio.setNativeInputDeviceId}
+            />}
+          />
+          <DashboardRow
+            label="Playback output"
+            controlId="audio-native-playback-output"
+            action={<NativeDeviceSelect
+              id="audio-native-playback-output"
+              devices={nativeOutputs()}
+              selectedId={preferences.audio.preferences().nativeOutputDeviceId}
+              unavailableLabel="Saved output (unavailable)"
+              onSelect={preferences.audio.setNativeOutputDeviceId}
+            />}
+          />
+        </Show>
       </DashboardSection>
 
       <DashboardSection title="Audio Engine" description="Changes apply to the next audio context and never rebuild an active graph.">

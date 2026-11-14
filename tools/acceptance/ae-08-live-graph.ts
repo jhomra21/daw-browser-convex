@@ -8,7 +8,7 @@ import { createDefaultReverbParams, createDefaultSpectralParams, createDefaultUt
 import { controlApprovalResultSchemaV1, controlCapabilitiesSchemaV2, controlCommitResultSchemaV1,
   controlPreviewResultSchemaV1, projectCurrentResultSchema, projectSnapshotSchemaV2 } from "@daw-browser/control"
 import { browserCommand as browserCommandRaw } from "../performance/browser-harness"
-import { createPrivateRunDirectory, electronRendererTarget } from "../performance/30-track/electron"
+import { cleanupOwnedRunDirectory, createPrivateRunDirectory, electronRendererTarget } from "../performance/30-track/electron"
 import { ownedV3CdpEndpoint } from "../performance/30-track/v3-import-acceptance"
 import { command } from "../performance/30-track/v3-import-workload"
 import { nested, waitForAcceptanceEvent } from "../performance/30-track/native-acceptance-ui"
@@ -81,9 +81,21 @@ const fixture = async (file: string, impulse: boolean, identifyContentTime = fal
   await writeWav(file, { sampleRate, channels, samples })
 }
 
+// Every launch owns one private run directory (its profile). All evidence the row keeps is written to `out`, so the directory is
+// removed when the launch ends, however it ends, and the removal is recorded beside the other actions.
 const run = async (out: string, edited: boolean, fixtureKind: string, phase = 1, launch?: Phase9Launch) => {
   await mkdir(out, { mode: 0o700 })
   const privateDirectory = await createPrivateRunDirectory("/tmp")
+  try {
+    return await runIn(privateDirectory, out, edited, fixtureKind, phase, launch)
+  } finally {
+    const cleanup = await cleanupOwnedRunDirectory(privateDirectory, [])
+    await appendFile(path.join(out, "actions.jsonl"), `${JSON.stringify({ event: "run-directory-removed", wallMs: Date.now(),
+      removed: cleanup.removed, bytesRemoved: cleanup.bytesRemoved, error: cleanup.error })}\n`, { mode: 0o600 })
+  }
+}
+
+const runIn = async (privateDirectory: string, out: string, edited: boolean, fixtureKind: string, phase: number, launch?: Phase9Launch) => {
   const profile = path.join(privateDirectory, "profile")
   await mkdir(profile, { mode: 0o700 })
   // A row's device must be present before the app starts: an absent one is a setup failure, never a pass. A VST row's profile gets
@@ -92,8 +104,7 @@ const run = async (out: string, edited: boolean, fixtureKind: string, phase = 1,
     await checkDevices(launch.rows)
     if (launch.rows.some((row) => row.prepare?.includes("vst-trust") || row.judge === "trust")) await seedPluginCatalog(profile, privateDirectory)
   }
-  // Exclusive lock is deliberately retained on failure; no other invocation can
-  // attach to this disposable profile or reuse incomplete evidence.
+  // Exclusive lock: no other invocation can attach to this disposable profile while the launch owns it.
   const lock = await open(path.join(profile, "ae08-owner.lock"), "wx", 0o600)
   await lock.writeFile(JSON.stringify({ pid: process.pid }))
   await lock.close()

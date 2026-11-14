@@ -650,7 +650,7 @@ test('reports the portable playhead inside the active loop without changing raw 
   controller.dispose()
 })
 
-test('refreshes the portable schedule before its installed range ends', async () => {
+test('hands the portable schedule off in place before its installed range ends', async () => {
   const calls: string[] = []
   const sessions = [
     createSession(calls, async () => undefined),
@@ -676,181 +676,17 @@ test('refreshes the portable schedule before its installed range ends', async ()
   })
 
   await expect(controller.start(compilation().snapshot.transport)).resolves.toBe("started")
+  const callsBeforeHandoff = calls.length
   sessions[0]?.emitPosition(80_000)
   const firstRefresh = controller.refreshSchedule()
   expect(controller.refreshSchedule()).toBe(firstRefresh)
   await expect(firstRefresh).resolves.toBe("started")
 
-  expect(sessionIndex).toBe(2)
-  expect(calls.filter((call) => call === "mark-active")).toHaveLength(2)
-  expect(calls.filter((call) => call === "dispose")).toHaveLength(1)
+  expect(sessionIndex).toBe(1)
+  expect(calls.slice(callsBeforeHandoff)).not.toContain("prepare-graph")
+  expect(calls).not.toContain("dispose")
+  expect(calls.filter((call) => call === "mark-active")).toHaveLength(1)
   expect(controller.isActive()).toBeTrue()
-  controller.dispose()
-})
-
-test('refreshes from the latest old-session position without overlapping sessions', async () => {
-  const calls: string[] = []
-  const replacementInstalling = Promise.withResolvers<void>()
-  const releaseReplacement = Promise.withResolvers<void>()
-  const sessions = [
-    createSession(calls, async () => undefined),
-    createSession(calls, async () => {
-      replacementInstalling.resolve()
-      await releaseReplacement.promise
-    }),
-    createSession(calls, async () => undefined),
-  ]
-  let sessionIndex = 0
-  const controller = createPortableBrowserPlaybackController({
-    compileSnapshot: async (transport) => {
-      const base = compilation()
-      return { ...base, snapshot: { ...base.snapshot, transport } }
-    },
-    getAudioContext: () => context,
-    scheduleHorizonSec: 2,
-    backend: {
-      createPlaybackSession: async () => {
-        const session = sessions[sessionIndex]
-        sessionIndex += 1
-        if (!session) throw new Error("Unexpected extra portable session.")
-        return session
-      },
-    },
-    select: async () => selected,
-  })
-
-  await expect(controller.start(compilation().snapshot.transport)).resolves.toBe("started")
-  sessions[0]?.emitPosition(80_000)
-  const refresh = controller.refreshSchedule()
-  await replacementInstalling.promise
-  sessions[0]?.emitPosition(90_000, 2)
-  releaseReplacement.resolve()
-
-  await expect(refresh).resolves.toBe("started")
-  expect(sessions[2]?.transports).toEqual([
-    { running: false, frame: 90_000 },
-    { running: true, frame: 90_000 },
-  ])
-  expect(calls.lastIndexOf("dispose")).toBeLessThan(calls.lastIndexOf("start-transport"))
-  expect(calls.lastIndexOf("dispose")).toBeLessThan(calls.lastIndexOf("mark-active"))
-  expect(controller.currentPositionSec()).toBe(90_000 / context.sampleRate)
-  sessions[0]?.fail(new Error("stale old-session fault"))
-  expect(controller.isActive()).toBeTrue()
-  controller.dispose()
-})
-
-test('keeps the current portable session active when a rolling refresh fails', async () => {
-  const calls: string[] = []
-  let sessionIndex = 0
-  let activeSession: ReturnType<typeof createSession> | undefined
-  const controller = createPortableBrowserPlaybackController({
-    compileSnapshot: async (transport) => {
-      const base = compilation()
-      return { ...base, snapshot: { ...base.snapshot, transport } }
-    },
-    getAudioContext: () => context,
-    scheduleHorizonSec: 2,
-    backend: {
-      createPlaybackSession: async () => {
-        sessionIndex += 1
-        const session = createSession(calls, async () => {
-          if (sessionIndex === 2) throw new Error("replacement rejected")
-        })
-        if (sessionIndex === 1) activeSession = session
-        return session
-      },
-    },
-    select: async () => selected,
-  })
-
-  await expect(controller.start(compilation().snapshot.transport)).resolves.toBe("started")
-  expect(controller.isActive()).toBeTrue()
-  activeSession?.emitPosition(80_000)
-  await expect(controller.refreshSchedule()).resolves.toBe("unavailable")
-  expect(sessionIndex).toBe(2)
-  expect(controller.isActive()).toBeTrue()
-  controller.dispose()
-})
-
-test('keeps the old session and retries once when the replacement range is stale', async () => {
-  const calls: string[] = []
-  const sessions = [
-    createSession(calls, async () => undefined),
-    createSession(calls, async () => undefined),
-    createSession(calls, async () => undefined),
-  ]
-  let sessionIndex = 0
-  let compileCalls = 0
-  const controller = createPortableBrowserPlaybackController({
-    compileSnapshot: async (transport) => {
-      compileCalls += 1
-      const base = compilation()
-      const snapshotTransport = compileCalls > 1
-        ? { ...transport, playheadSec: 0 }
-        : transport
-      return { ...base, snapshot: { ...base.snapshot, transport: snapshotTransport } }
-    },
-    getAudioContext: () => context,
-    scheduleHorizonSec: 2,
-    backend: {
-      createPlaybackSession: async () => {
-        const session = sessions[sessionIndex]
-        sessionIndex += 1
-        if (!session) throw new Error("Unexpected extra portable session.")
-        return session
-      },
-    },
-    select: async () => selected,
-  })
-
-  await expect(controller.start(compilation().snapshot.transport)).resolves.toBe("started")
-  sessions[0]?.emitPosition(80_000)
-  await expect(controller.refreshSchedule()).resolves.toBe("unavailable")
-
-  expect(compileCalls).toBe(3)
-  expect(sessionIndex).toBe(3)
-  expect(controller.isActive()).toBeTrue()
-  expect(calls.filter((call) => call === "dispose")).toHaveLength(2)
-  controller.dispose()
-})
-
-test('stops truthfully when a prepared replacement cannot start after old disposal', async () => {
-  const calls: string[] = []
-  const faults: string[] = []
-  const sessions = [
-    createSession(calls, async () => undefined),
-    createSession(calls, async () => undefined, async (running) => {
-      if (running) throw new Error("replacement start rejected")
-    }),
-  ]
-  let sessionIndex = 0
-  const controller = createPortableBrowserPlaybackController({
-    compileSnapshot: async (transport) => {
-      const base = compilation()
-      return { ...base, snapshot: { ...base.snapshot, transport } }
-    },
-    getAudioContext: () => context,
-    scheduleHorizonSec: 2,
-    backend: {
-      createPlaybackSession: async () => {
-        const session = sessions[sessionIndex]
-        sessionIndex += 1
-        if (!session) throw new Error("Unexpected extra portable session.")
-        return session
-      },
-    },
-    select: async () => selected,
-    reportFault: (message) => faults.push(message),
-  })
-
-  await expect(controller.start(compilation().snapshot.transport)).resolves.toBe("started")
-  sessions[0]?.emitPosition(80_000)
-  await expect(controller.refreshSchedule()).resolves.toBe("unavailable")
-
-  expect(controller.isActive()).toBeFalse()
-  expect(controller.isPrepared()).toBeFalse()
-  expect(faults).toContain("replacement start rejected")
-  expect(calls.indexOf("dispose")).toBeLessThan(calls.lastIndexOf("start-transport"))
   controller.dispose()
 })
 
@@ -1442,8 +1278,8 @@ test('fits metadata-only ordinary startup pages and refreshes from the bounded h
 
   initialSession.emitPosition(20 * context.sampleRate)
   await expect(controller.refreshSchedule()).resolves.toBe('started')
-  expect(sessionIndex).toBe(2)
-  expect(sessions[1]?.writtenPages.size).toBeGreaterThan(0)
+  expect(sessionIndex).toBe(1)
+  expect(initialSession.writtenPages.size).toBeGreaterThan(0)
   expect(controller.isActive()).toBeTrue()
   controller.dispose()
 })
@@ -2326,7 +2162,7 @@ test('B6f5 R6 a schedule refresh after an adoption continues the adopted revisio
     expect(await controller.adoptSchedule(noLoop)).toBe('adopted')
     sessions[0]?.emitPosition(80_000)
     expect({ refresh: await controller.refreshSchedule(), faults, sessions: sessionIndex, refreshedRevision: graphs.at(-1)?.revision, gain: b6f5Gain(graphs.at(-1)) })
-      .toEqual({ refresh: 'started', faults: [], sessions: 2, refreshedRevision: 2, gain: 0.5 })
+      .toEqual({ refresh: 'started', faults: [], sessions: 1, refreshedRevision: 2, gain: 0.5 })
   } finally { controller.dispose() }
 })
 
@@ -2581,7 +2417,7 @@ test('W-F20a a loop edit while playing installs and publishes a schedule for the
 // that difference: the schedule is the one a start at the seam's arrangement position would compile, moved by the
 // difference; positions before the seam read the old loop and positions from it on the new one, with no jump; a refresh
 // then starts from the arrangement position.
-test('W-F20c a loop edit after a wrap maps positions across the seam, compiles the loop shifted and refreshes from the arrangement position', async () => {
+test('W-F20c a loop edit after a wrap maps positions across the seam, compiles the loop shifted and extends in place from the arrangement position', async () => {
   const notes = [0, 1, 2, 3].map((beat) => w8Note(`n${beat}`, beat, 0.25))
   const edited: W8Loop = { loopEnabled: true, loopStartSec: 0.5, loopEndSec: 1.5 }
   const f = await w8Fixture({ clipSec: 40, notes, loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } })
@@ -2610,7 +2446,7 @@ test('W-F20c a loop edit after a wrap maps positions across the seam, compiles t
     f.position(1_250_000, 1, 5)
     expect(await f.controller.refreshSchedule()).toBe('started')
     expect({ sessions: f.sessions(), origin: f.installs.at(-1)?.timeOrigin, position: f.controller.currentPositionSec() })
-      .toEqual({ sessions: 2, origin: { timelineSec: sec(50_000), frame: 50_000 }, position: sec(50_000) })
+      .toEqual({ sessions: 1, origin: { timelineSec: sec(50_000), frame: 1_250_000 }, position: sec(50_000) })
   } finally { f.controller.dispose(); reference.controller.dispose() }
 })
 
@@ -3037,7 +2873,7 @@ test('W-E3-5 a seek supersedes an adoption in flight, the older of two seeks, an
     const seek = refreshing.controller.seek(3, refreshing.noLoop)
     expect({ refresh: await refresh, seek: await seek, sessions: refreshing.sessions(), position: refreshing.controller.currentPositionSec(),
       origin: refreshing.installs.at(-1)?.timeOrigin.frame })
-      .toEqual({ refresh: 'unavailable', seek: 'started', sessions: 2, position: 3, origin: 144_000 })
+      .toEqual({ refresh: 'unavailable', seek: 'started', sessions: 1, position: 3, origin: 144_000 })
   } finally { refreshing.controller.dispose() }
 })
 

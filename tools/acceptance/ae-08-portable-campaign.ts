@@ -114,7 +114,7 @@ const withoutTheEdit = (burst: Burst, row: Row): Burst => row.latency
 const transitionFactor = 4
 const referenceFailure = (reference: Reference, check: string, detail: string): Failure => ({ row: `reference:${reference.state}`, check, owner: "oracle", detail })
 const judgeReference = (reference: Reference): Failure[] => [
-  ...(reference.sessions !== 1 ? [referenceFailure(reference, "reference-session", `${reference.sessions} sessions in a no-edit run (a schedule handoff replaced the session)`)] : []),
+  ...(reference.sessions !== 1 ? [referenceFailure(reference, "reference-session", `${reference.sessions} sessions in a no-edit run (a schedule handoff restarted the session)`)] : []),
   ...(reference.integrity.gaps.length || reference.integrity.nonFinite ? [referenceFailure(reference, "reference-integrity", JSON.stringify(reference.integrity.gaps))] : []),
 ]
 
@@ -229,7 +229,8 @@ const fixtureServer = async () => {
   return server
 }
 
-const handoffFreeSeconds = 24
+// Past the 30 s schedule horizon, so every reference crosses at least one schedule handoff.
+const referenceSeconds = 60
 const browserSession = `ae08-portable-${crypto.randomUUID()}`
 const browser = async (...args: string[]) => {
   const { AGENT_BROWSER_CDP: _cdp, AGENT_BROWSER_SESSION: _session, ...inherited } = process.env
@@ -272,15 +273,13 @@ const campaign = async (out: string, rowNames: readonly string[], edits: number)
     await browser("open", `http://127.0.0.1:${server.port}/`)
     clock = await evalJson("portableCampaign.workletClock()", z.string())
     const adoption = await evalJson(`portableCampaign.adoptionTiming(${edits * 2})`, timingSchema)
-    // Every run stays under the controller's 25 s schedule handoff (30 s horizon, 5 s lead), which replaces the session.
-    const seconds = handoffFreeSeconds
     // A capture gap off every edit window is the machine stalling the audio device, not the engine: that run is repeated and counted.
     const stalls = { references: 0, bursts: 0 }
     for (const state of new Set(rows.flatMap((row) => [row.from, row.to]))) {
       // The state's first clean run is as long as a burst and is the reference its bursts compare against; the second, shorter, is the duplicate that calibrates.
       for (let clean = 0, attempts = 0; clean < 2; attempts++) {
         if (attempts === 5) throw new Error(`Reference ${state} kept stalling the audio device`)
-        const run = await evalJson(`portableCampaign.reference(${JSON.stringify(state)}, ${clean === 0 ? seconds : 4})`, referenceSchema)
+        const run = await evalJson(`portableCampaign.reference(${JSON.stringify(state)}, ${clean === 0 ? referenceSeconds : 4})`, referenceSchema)
         if (run.integrity.gaps.length) stalls.references += 1
         else { references.push(run); clean += 1 }
       }

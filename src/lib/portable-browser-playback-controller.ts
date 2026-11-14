@@ -332,19 +332,6 @@ const preparedSession = (
   loop: snapshot.transport,
 })
 
-// A live instrument edit the session accepted (rememberInstrumentParameters) outlives a compile that read the
-// desired state before it.
-const withAcceptedInstruments = (snapshot: LivePlaybackSnapshot, accepted: LivePlaybackSnapshot): LivePlaybackSnapshot => {
-  const fx = snapshot.mixer.fx
-  const trackFx = Object.fromEntries(Object.entries(fx.trackFx ?? {}).map(([id, entry]) => {
-    const instrument = accepted.mixer.fx.trackFx?.[id]?.instrument
-    // A compile that differs elsewhere read newer content, which carries the live values itself.
-    return [id, instrument && entry.instrument && isLiveEventOnlyInstrumentChange(instrument, entry.instrument)
-      ? { ...entry, instrument } : entry]
-  }))
-  return { ...snapshot, mixer: { ...snapshot.mixer, fx: { ...fx, trackFx } } }
-}
-
 // The eight synth fields the live events carry. A compile reads the project, which a knob drag only reaches on release,
 // so the values the session accepted since `since` are laid over it; a field the accepted instrument did not move
 // keeps what the compile read.
@@ -1508,10 +1495,6 @@ export const createPortableBrowserPlaybackController = (input: {
     preparedSources: readonly PortablePreparedSource[]
     released: boolean
   }
-  // During a rolling handoff, live deliveries also reach the replacement.
-  // This closes the async reconciliation gap without waiting for quiet input.
-  let parameterReplacement: PreparedRuntime | undefined
-
   const prepareRuntime = async (
     transport: LivePlaybackTransport,
     generation: number,
@@ -1520,7 +1503,6 @@ export const createPortableBrowserPlaybackController = (input: {
     nextEpoch: number,
     sourceFirstSequence: number,
     compileContext?: LivePlaybackCompileContext,
-    parameterSnapshot?: LivePlaybackSnapshot,
   ): Promise<PreparedRuntime | undefined> => {
     const context = input.getAudioContext()
     if (!context) return undefined
@@ -1537,10 +1519,9 @@ export const createPortableBrowserPlaybackController = (input: {
     let transferredStretchOwnership = false
     startupAbortController = preparationAbortController
     try {
-      let compilation = await compileSnapshot(transport, compileContext)
+      const compilation = await compileSnapshot(transport, compileContext)
       if (cancelled()) return undefined
       if (!compilation.supported) return undefined
-      if (parameterSnapshot) compilation = { ...compilation, snapshot: withAcceptedInstruments(compilation.snapshot, parameterSnapshot) }
       if (hasStretchClips(compilation.snapshot)) {
         const preparation = await prepareStretch(compilation.snapshot, projectGeneration, preparationAbortController.signal)
         if (!preparation.supported) {
@@ -1809,11 +1790,10 @@ export const createPortableBrowserPlaybackController = (input: {
       return Promise.resolve("started")
     }
     const previousSession = active
-    const previousUnsubscribeFault = unsubscribeFault
     const generation = lifecycleGeneration
     const projectGeneration = input.getProjectGeneration?.() ?? 0
     const intent = transportIntent
-    // The refresh builds a new session whose raw frames are arrangement frames, so it starts from the arrangement position.
+    const arrangementNow = arrangementFrame()
     const transport: LivePlaybackTransport = {
       ...(activeTransport ?? {
         state: "playing",
@@ -1822,330 +1802,154 @@ export const createPortableBrowserPlaybackController = (input: {
         loopEndSec: 0,
       }),
       state: "playing",
-      playheadSec: arrangementFrame() / context.sampleRate,
+      playheadSec: arrangementNow / context.sampleRate,
+    }
+    // The window plays the arrangement from here at the raw frame the session stands on, with the loop shifted by how far
+    // raw runs ahead of the arrangement, as an adoption's schedule does.
+    const runLoop = effectiveLoopForStart(transport, arrangementNow, context.sampleRate)
+    const deltaSec = (currentFrame - arrangementNow) / context.sampleRate
+    const windowTransport: LivePlaybackTransport = {
+      ...transport,
+      loopEnabled: runLoop.loopEnabled,
+      loopStartSec: runLoop.loopStartSec + deltaSec,
+      loopEndSec: runLoop.loopEndSec + deltaSec,
     }
     const refreshAbortController = new AbortController()
     startupAbortController = refreshAbortController
     const request: Promise<PortableStartResult> = (async (): Promise<PortableStartResult> => {
-      if (recording) {
-        const nextEpoch = epoch
-        await releaseExpiredPreparations(previousSession, currentFrame)
-        activeOrdinarySources = activeOrdinarySources.filter((source) => source.stopFrame > currentFrame)
-        activePreparedSources = activePreparedSources.filter((source) => !source.preparation.released)
-        const baselineOrdinarySources = activeOrdinarySources
-        const baselinePreparedSources = activePreparedSources
-        const baselineSchedule = activeFrameSchedule
-        const baselineScheduleRange = activeScheduleRange
-        const baselinePreparations = activePreparations
-        const baselineEndFrame = activeScheduleRange?.endFrame ?? currentFrame
-        const compilation = await compileSnapshot(transport)
+      const nextEpoch = epoch
+      await releaseExpiredPreparations(previousSession, currentFrame)
+      activeOrdinarySources = activeOrdinarySources.filter((source) => source.stopFrame > currentFrame)
+      activePreparedSources = activePreparedSources.filter((source) => !source.preparation.released)
+      const baselineOrdinarySources = activeOrdinarySources
+      const baselinePreparedSources = activePreparedSources
+      const baselineSchedule = activeFrameSchedule
+      const baselineScheduleRange = activeScheduleRange
+      const baselinePreparations = activePreparations
+      const baselineEndFrame = activeScheduleRange?.endFrame ?? currentFrame
+      const compilation = await compileSnapshot(transport)
+      if (
+        generation !== lifecycleGeneration
+        || intent !== transportIntent
+        || projectGeneration !== (input.getProjectGeneration?.() ?? 0)
+        || active !== previousSession
+        || !playing
+        || !compilation.supported
+        || compilation.snapshot.revision !== activeRevision
+      ) return "unavailable"
+      const extensionStartFrame = baselineEndFrame
+      const pageSec = portableWasmPagedPageFrames / context.sampleRate
+      const requestedExtensionSec = horizonSec + (extensionStartFrame - currentFrame) / context.sampleRate
+      // An adoption shortens the window its schedule covers, not the sources the session holds: those reach past
+      // `extensionStartFrame`, and the compile from there lists them again.
+      const held = new Set([...baselineOrdinarySources, ...baselinePreparedSources].map((source) => `${source.sourceNodeId}:${source.startFrame}`))
+      const restoreBaseline = async () => {
+        if (!baselineSchedule) throw new Error("Portable scheduler cannot roll back a failed refresh.")
+        await replaceSourcesAtomically({
+          session: previousSession,
+          revision: baselineSchedule.revision,
+          epoch: nextEpoch,
+          ordinary: baselineOrdinarySources,
+          prepared: baselinePreparedSources,
+        })
+        await previousSession.installSchedule(baselineSchedule)
+      }
+      let prepared: Extract<PreparedPortableSession, { supported: true }> | undefined
+      let paged: Awaited<ReturnType<typeof preparePagedSources>> | undefined
+      let extensionSources: Extract<PreparedPortableSession, { supported: true }>["sources"] = []
+      try {
+        const fit = await fitPagedWindow({
+          horizonSec: requestedExtensionSec,
+          pageSec,
+          isNew: (source) => source.startFrame >= extensionStartFrame && !held.has(`${source.sourceNodeId}:${source.startFrame}`),
+          compile: (candidateHorizonSec) => {
+            const candidate = preparedSession(
+              { ...compilation.snapshot, transport: windowTransport },
+              context.sampleRate,
+              nextEpoch,
+              safeProjectGeneration(projectGeneration),
+              candidateHorizonSec,
+              activeSourceSequence + 1,
+              activePreparedStretchAssets,
+              undefined,
+              activeOrdinaryDescriptors,
+              currentFrame,
+            )
+            return candidate.supported
+              && candidate.graph.revision === activeRevision
+              && !candidate.graph.assets.some((asset) => !activeGraph?.assets.some((current) => current.assetId === asset.assetId))
+              ? candidate : undefined
+          },
+          prepare: (sources) => preparePagedSources({
+            session: previousSession,
+            sources,
+            preparedStretchAssets: activePreparedStretchAssets,
+            ordinaryDescriptors: activeOrdinaryDescriptors,
+            repository: stretchRepository,
+            generation: assetGeneration,
+            preparationCapacity: previousSession.pagedCapabilities?.preparationCount ?? portablePagedPreparationCapacity,
+            baselinePreparationCount: baselinePreparations.length,
+            signal: refreshAbortController.signal,
+            pinnedPageKeys: new Set(baselinePreparations.flatMap((preparation) => preparation.pageKeys)),
+          }),
+        })
+        if (fit === "refused") return "unavailable"
+        if (fit === "no-fit") throw new Error("Portable schedule refresh could not fit the pinned page horizon.")
+        prepared = fit.candidate
+        paged = fit.paged
+        extensionSources = fit.sources
+        const ordinarySources = ordinarySourcesOf(extensionSources, activePreparedStretchAssets, activeOrdinaryDescriptors)
+        await replaceSourcesAtomically({
+          session: previousSession,
+          revision: prepared.graph.revision,
+          epoch: nextEpoch,
+          ordinary: [...baselineOrdinarySources, ...ordinarySources],
+          prepared: [...baselinePreparedSources.map((source) => ({
+            ...source,
+            preparationId: source.preparation.id,
+          })), ...paged.events],
+        })
+        await previousSession.installSchedule(prepared.schedule)
         if (
           generation !== lifecycleGeneration
           || intent !== transportIntent
           || projectGeneration !== (input.getProjectGeneration?.() ?? 0)
           || active !== previousSession
           || !playing
-          || !compilation.supported
-          || compilation.snapshot.transport.loopEnabled
-          || compilation.snapshot.revision !== activeRevision
-        ) return "unavailable"
-        const extensionStartFrame = baselineEndFrame
-        const pageSec = portableWasmPagedPageFrames / context.sampleRate
-        const requestedExtensionSec = horizonSec + (extensionStartFrame - currentFrame) / context.sampleRate
-        // An adoption shortens the window its schedule covers, not the sources the session holds: those reach past
-        // `extensionStartFrame`, and the compile from there lists them again.
-        const held = new Set([...baselineOrdinarySources, ...baselinePreparedSources].map((source) => `${source.sourceNodeId}:${source.startFrame}`))
-        const restoreBaseline = async () => {
-          if (!baselineSchedule) throw new Error("Portable scheduler cannot roll back a failed refresh.")
-          await replaceSourcesAtomically({
-            session: previousSession,
-            revision: baselineSchedule.revision,
-            epoch: nextEpoch,
-            ordinary: baselineOrdinarySources,
-            prepared: baselinePreparedSources,
-          })
-          await previousSession.installSchedule(baselineSchedule)
-        }
-        let prepared: Extract<PreparedPortableSession, { supported: true }> | undefined
-        let paged: Awaited<ReturnType<typeof preparePagedSources>> | undefined
-        let extensionSources: Extract<PreparedPortableSession, { supported: true }>["sources"] = []
-        try {
-          const fit = await fitPagedWindow({
-            horizonSec: requestedExtensionSec,
-            pageSec,
-            isNew: (source) => source.startFrame >= extensionStartFrame && !held.has(`${source.sourceNodeId}:${source.startFrame}`),
-            compile: (candidateHorizonSec) => {
-              const candidate = preparedSession(
-                compilation.snapshot,
-                context.sampleRate,
-                nextEpoch,
-                safeProjectGeneration(projectGeneration),
-                candidateHorizonSec,
-                activeSourceSequence + 1,
-                activePreparedStretchAssets,
-                extensionStartFrame / context.sampleRate,
-                activeOrdinaryDescriptors,
-              )
-              return candidate.supported
-                && candidate.graph.revision === activeRevision
-                && !candidate.graph.assets.some((asset) => !activeGraph?.assets.some((current) => current.assetId === asset.assetId))
-                ? candidate : undefined
-            },
-            prepare: (sources) => preparePagedSources({
-              session: previousSession,
-              sources,
-              preparedStretchAssets: activePreparedStretchAssets,
-              ordinaryDescriptors: activeOrdinaryDescriptors,
-              repository: stretchRepository,
-              generation: assetGeneration,
-              preparationCapacity: previousSession.pagedCapabilities?.preparationCount ?? portablePagedPreparationCapacity,
-              baselinePreparationCount: baselinePreparations.length,
-              signal: refreshAbortController.signal,
-              pinnedPageKeys: new Set(baselinePreparations.flatMap((preparation) => preparation.pageKeys)),
-            }),
-          })
-          if (fit === "refused") return "unavailable"
-          if (fit === "no-fit") throw new Error("Portable schedule refresh could not fit the pinned page horizon.")
-          prepared = fit.candidate
-          paged = fit.paged
-          extensionSources = fit.sources
-          const ordinarySources = ordinarySourcesOf(extensionSources, activePreparedStretchAssets, activeOrdinaryDescriptors)
-          await replaceSourcesAtomically({
-            session: previousSession,
-            revision: prepared.graph.revision,
-            epoch: nextEpoch,
-            ordinary: [...baselineOrdinarySources, ...ordinarySources],
-            prepared: [...baselinePreparedSources.map((source) => ({
-              ...source,
-              preparationId: source.preparation.id,
-            })), ...paged.events],
-          })
-          await previousSession.installSchedule(prepared.schedule)
-          if (
-            generation !== lifecycleGeneration
-            || intent !== transportIntent
-            || projectGeneration !== (input.getProjectGeneration?.() ?? 0)
-            || active !== previousSession
-            || !playing
-          ) throw new Error("Portable schedule refresh was cancelled.")
-          activeScheduleRange = prepared.scheduleRange
-          activeFrameSchedule = prepared.schedule
-          activePreparations = [...baselinePreparations, ...paged.preparations]
-          activeOrdinarySources = [...baselineOrdinarySources, ...ordinarySources]
-          activePreparedSources = [...baselinePreparedSources, ...withPreparations(paged.events, paged.preparations)]
-          activeSourceSequence = extensionSources.length === 0
-            ? activeSourceSequence
-            : extensionSources[extensionSources.length - 1]?.sequence ?? activeSourceSequence
-          activeTransport = { ...transport }
-          return "started"
-        } catch (error) {
-          try {
-            await restoreBaseline()
-            activePreparations = baselinePreparations
-            activeOrdinarySources = baselineOrdinarySources
-            activePreparedSources = baselinePreparedSources
-            activeScheduleRange = baselineScheduleRange
-            activeFrameSchedule = baselineSchedule
-          } catch (rollbackError) {
-            void teardownSession()
-            input.reportFault?.(rollbackError instanceof Error ? rollbackError.message : "Portable schedule refresh rollback failed.")
-            return "unavailable"
-          }
-          if (paged) {
-            await Promise.all(paged.preparations.map(async (preparation) => {
-              if (!preparation.released) {
-                const result = await previousSession.releaseAssetPreparation?.(preparation.id, assetGeneration)
-                if (result === "released") preparation.released = true
-              }
-            }))
-          }
-          failedRefreshEndFrame = activeScheduleRange?.endFrame
-          input.reportFault?.(error instanceof Error ? error.message : "Portable schedule refresh failed.")
-          return "unavailable"
-        }
-      }
-
-      const stillCurrent = () => generation === lifecycleGeneration
-        && intent === transportIntent
-        && projectGeneration === (input.getProjectGeneration?.() ?? 0)
-      const preservesActiveGraph = (runtime: PreparedRuntime | undefined) => runtime !== undefined
-        && runtime.prepared.graph.revision === activeRevision
-        && runtime.prepared.graph.assets.length === (activeGraph?.assets.length ?? 0)
-        && runtime.prepared.graph.assets.every((asset) => (
-          activeGraph?.assets.some((current) => current.assetId === asset.assetId)
-        ))
-      const hasPagedSources = (runtime: PreparedRuntime) => (
-        runtime.ordinaryDescriptors.size > 0
-        || runtime.preparedStretchAssets.some(isPagedStretchAsset)
-      )
-      const hasContinuationCoverage = (runtime: PreparedRuntime, frame: number, handoff = false) => {
-        const requiredEndFrame = frame + (
-          hasPagedSources(runtime)
-            ? portableWasmPagedPageFrames
-            // Preparation targets a full horizon. At handoff, allow the old
-            // transport to advance while retaining the refresh lead.
-            : Math.round((handoff ? leadSec : horizonSec) * context.sampleRate)
-        )
-        return Number.isSafeInteger(frame)
-          && frame >= runtime.prepared.scheduleRange.startFrame
-          && frame < runtime.prepared.scheduleRange.endFrame
-          && Number.isSafeInteger(requiredEndFrame)
-          && requiredEndFrame <= runtime.prepared.scheduleRange.endFrame
-      }
-      const replacementTransport = (frame: number): LivePlaybackTransport => ({
-        ...transport,
-        playheadSec: frame / context.sampleRate,
-      })
-
-      let runtime = await prepareRuntime(
-        transport,
-        generation,
-        projectGeneration,
-        false,
-        epoch + 1,
-        1,
-        undefined,
-        activeSnapshot,
-      )
-      let latestFrame = arrangementFrame()
-      let valid = runtime !== undefined
-        && preservesActiveGraph(runtime)
-        && runtime.sessionFault.error === undefined
-        && stillCurrent()
-        && active === previousSession
-        && playing
-      if (valid && runtime && !hasContinuationCoverage(runtime, latestFrame)) {
-        await releaseRuntime(runtime)
-        runtime = await prepareRuntime(
-          replacementTransport(arrangementFrame()),
-          generation,
-          projectGeneration,
-          false,
-          epoch + 1,
-          1,
-          undefined,
-          activeSnapshot,
-        )
-        latestFrame = arrangementFrame()
-        valid = runtime !== undefined
-          && preservesActiveGraph(runtime)
-          && runtime.sessionFault.error === undefined
-          && stillCurrent()
-          && active === previousSession
-          && playing
-          && runtime !== undefined
-          && hasContinuationCoverage(runtime, latestFrame)
-      }
-      if (!valid || !runtime) {
-        if (runtime && !preservesActiveGraph(runtime)) {
-          input.reportFault?.("Portable schedule refresh changed the active graph.")
-        }
-        if (runtime?.sessionFault.error) {
-          input.reportFault?.(runtime.sessionFault.error.message)
-        }
-        if (
-          (!runtime
-            || !preservesActiveGraph(runtime)
-            || runtime.sessionFault.error !== undefined
-            || !hasContinuationCoverage(runtime, latestFrame))
-          && stillCurrent()
-          && active === previousSession
-          && playing
-        ) failedRefreshEndFrame = activeScheduleRange?.endFrame
-        await releaseRuntime(runtime)
-        return "unavailable"
-      }
-
-      // The old session remains audible during preparation. Once all checks
-      // pass, make the handoff a hard boundary before starting the prepared
-      // replacement so two sessions can never run at once.
-      parameterReplacement = runtime
-      try {
-        const acceptedSnapshot = activeSnapshot
-        const events: PortableWasmInstrumentEvent[] = []
-        for (const node of runtime.prepared.graph.nodes) {
-          const accepted = acceptedSnapshot?.mixer.fx.trackFx?.[node.id]?.instrument
-          const preparedInstrument = runtime.snapshot.mixer.fx.trackFx?.[node.id]?.instrument
-          if (!accepted || accepted.kind !== "synth" || node.instrument?.kind !== "synth"
-            || !preparedInstrument || accepted.instanceId !== preparedInstrument.instanceId) continue
-          const mapped = mapNativeBuiltInParameterCommit({
-            targetId: node.id, effect: "instrument", from: preparedInstrument, to: accepted,
-          }, acceptedSnapshot?.bpm ?? runtime.snapshot.bpm)
-          for (const value of mapped?.values ?? []) {
-            const target = node.instrument.parameterTargets.find(entry => entry.id === value.parameterId)
-            if (target) events.push({
-              nodeId: node.id, type: "parameter", noteId: 1, sequence: ++nextLiveProcessorSequence,
-              frameOffset: 0, channel: 0, note: target.target, value: value.value,
-            })
-          }
-        }
-        if (events.length > 0) {
-          if (!runtime.session.queueInstrumentEvents) throw new Error("Portable replacement cannot reconcile instrument parameters.")
-          await runtime.session.queueInstrumentEvents(runtime.epoch, events, {
-            revision: runtime.prepared.graph.revision, sequence: nextLiveProcessorSequence,
-          })
-        }
-        // rememberInstrumentParameters keeps this snapshot current while the
-        // applied acknowledgement is in flight.
-        if (acceptedSnapshot && activeSnapshot === acceptedSnapshot) runtime.snapshot = acceptedSnapshot
-      } catch (error) {
-        parameterReplacement = undefined
-        await releaseRuntime(runtime)
-        failedRefreshEndFrame = activeScheduleRange?.endFrame
-        input.reportFault?.(error instanceof Error ? error.message : "Portable parameter reconciliation failed.")
-        return "unavailable"
-      }
-      latestFrame = arrangementFrame()
-      if (!hasContinuationCoverage(runtime, latestFrame, true) || runtime.sessionFault.error !== undefined || !stillCurrent()
-        || active !== previousSession || !playing) {
-        parameterReplacement = undefined
-        await releaseRuntime(runtime)
-        if (stillCurrent() && active === previousSession && playing) {
-          failedRefreshEndFrame = activeScheduleRange?.endFrame
-        }
-        return "unavailable"
-      }
-      previousUnsubscribeFault?.()
-      unsubscribeFault = undefined
-      clearActiveSessionState()
-      try {
-        previousSession.dispose()
-      } catch (error) {
-        parameterReplacement = undefined
-        await releaseRuntime(runtime)
-        if (stillCurrent()) {
-          input.reportFault?.(error instanceof Error ? error.message : "Portable schedule refresh could not dispose the old session.")
-        }
-        return "unavailable"
-      }
-      try {
-        await runtime.session.setTransport(runtime.epoch, true, latestFrame)
-        if (!stillCurrent() || runtime.sessionFault.error) {
-          throw runtime.sessionFault.error ?? new Error("Portable schedule refresh was cancelled.")
-        }
-        runtime.session.markActive()
-        if (!stillCurrent() || runtime.sessionFault.error) {
-          throw runtime.sessionFault.error ?? new Error("Portable schedule refresh was cancelled.")
-        }
-        commitRuntime(runtime, true)
-        parameterReplacement = undefined
-        positionFrame = latestFrame
-        activeTransport = {
-          ...runtime.transport,
-          state: "playing",
-          playheadSec: latestFrame / context.sampleRate,
-        }
+        ) throw new Error("Portable schedule refresh was cancelled.")
+        activeScheduleRange = prepared.scheduleRange
+        activeFrameSchedule = prepared.schedule
+        activePreparations = [...baselinePreparations, ...paged.preparations]
+        activeOrdinarySources = [...baselineOrdinarySources, ...ordinarySources]
+        activePreparedSources = [...baselinePreparedSources, ...withPreparations(paged.events, paged.preparations)]
+        activeSourceSequence = extensionSources.length === 0
+          ? activeSourceSequence
+          : extensionSources[extensionSources.length - 1]?.sequence ?? activeSourceSequence
+        activeTransport = { ...transport }
         return "started"
       } catch (error) {
-        parameterReplacement = undefined
-        await releaseRuntime(runtime)
-        if (stillCurrent()) {
-          input.reportFault?.(
-            error instanceof Error && error.message !== "Portable schedule refresh was cancelled."
-              ? error.message
-              : "Portable schedule refresh could not start the replacement.",
-          )
+        try {
+          await restoreBaseline()
+          activePreparations = baselinePreparations
+          activeOrdinarySources = baselineOrdinarySources
+          activePreparedSources = baselinePreparedSources
+          activeScheduleRange = baselineScheduleRange
+          activeFrameSchedule = baselineSchedule
+        } catch (rollbackError) {
+          void teardownSession()
+          input.reportFault?.(rollbackError instanceof Error ? rollbackError.message : "Portable schedule refresh rollback failed.")
+          return "unavailable"
         }
+        if (paged) {
+          await Promise.all(paged.preparations.map(async (preparation) => {
+            if (!preparation.released) {
+              const result = await previousSession.releaseAssetPreparation?.(preparation.id, assetGeneration)
+              if (result === "released") preparation.released = true
+            }
+          }))
+        }
+        failedRefreshEndFrame = activeScheduleRange?.endFrame
+        input.reportFault?.(error instanceof Error ? error.message : "Portable schedule refresh failed.")
         return "unavailable"
       }
     })().catch((cause: unknown): PortableStartResult => {
@@ -2153,7 +1957,6 @@ export const createPortableBrowserPlaybackController = (input: {
       input.reportFault?.(cause instanceof Error ? cause.message : "Portable schedule refresh failed.")
       return "unavailable"
     }).finally(() => {
-      parameterReplacement = undefined
       if (startupAbortController === refreshAbortController) {
         startupAbortController = undefined
       }
@@ -2915,7 +2718,6 @@ export const createPortableBrowserPlaybackController = (input: {
     const trackFx = activeSnapshot.mixer.fx.trackFx ?? {}
     activeSnapshot = { ...activeSnapshot, mixer: { ...activeSnapshot.mixer,
       fx: { ...activeSnapshot.mixer.fx, trackFx: { ...trackFx, [targetId]: { ...trackFx[targetId], instrument } } } } }
-    if (parameterReplacement) parameterReplacement.snapshot = activeSnapshot
   }
 
   const queueLiveProcessorControl = async (
@@ -2968,15 +2770,6 @@ export const createPortableBrowserPlaybackController = (input: {
       try {
         const acceptedEvents = events.flatMap(event => event === undefined ? [] : [event])
         await session.queueInstrumentEvents(deliveryEpoch, acceptedEvents, { revision, sequence })
-        // Preparation can finish while the old session's applied ack is in
-        // flight. Discover the replacement after that ack, not at submission.
-        const replacement = parameterReplacement
-        if (replacement?.session.queueInstrumentEvents) {
-          const replacementEvents = acceptedEvents.map(event => ({ ...event, sequence: ++nextLiveProcessorSequence }))
-          await replacement.session.queueInstrumentEvents(replacement.epoch, replacementEvents, {
-            revision, sequence: nextLiveProcessorSequence,
-          })
-        }
         if (active !== session || activeRevision !== revision || epoch !== deliveryEpoch) return { accepted: false, reason: "stale" }
         // The session now plays the edit; the prepared snapshot follows, so the release announce finds nothing to rebuild.
         if (edited && prepared && isLiveEventOnlyInstrumentChange(prepared, edited)) rememberInstrumentParameters(node.id, edited)

@@ -13350,6 +13350,50 @@ test("native Complete imports the retained take instead of subscribing to PCM de
   expect(controller.isRecording()).toBeFalse()
 })
 
+test("a stored native output device id reaches the output resolver and a missing one is reported", async () => {
+  const savedOutput = "coreaudio:BlackHole2ch_UID"
+  const fixture = createBridge()
+  const requested: Array<string | undefined> = []
+  const resolveOutputDevice = fixture.bridge.resolveOutputDevice
+  fixture.bridge.resolveOutputDevice = async (id) => {
+    requested.push(id)
+    return id === undefined ? resolveOutputDevice() : { ok: true as const, device: null }
+  }
+  const faults: string[] = []
+  const controller = createObservedController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+    getOutputDeviceId: () => savedOutput,
+    reportUnavailable: true,
+    reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
+  })
+  await expect(controller.start(input().transport)).resolves.toBe("unavailable")
+  expect(requested).toEqual([savedOutput])
+  expect(faults).toEqual(["Saved output (unavailable)"])
+})
+
+test("a stored native input device id reaches the input resolver and a missing one never starts recording", async () => {
+  const savedInput = "coreaudio:BlackHole2ch_UID"
+  const fixture = createBridge()
+  const requested: Array<string | undefined> = []
+  const resolveInputDevice = fixture.bridge.resolveInputDevice
+  fixture.bridge.resolveInputDevice = async (id) => {
+    requested.push(id)
+    return id === undefined ? resolveInputDevice() : { ok: true as const, device: null }
+  }
+  const controller = createObservedController({
+    bridge: fixture.bridge,
+    compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
+  })
+  await controller.start(input().transport)
+  await expect(controller.startRecording({ appSessionId: "missing-input", projectId: "local:test", projectGeneration: 0, targetTrackId: "track-1",
+    layout: "mono", inputChannel: 0, gain: 1, polarity: 1, monitoring: true, punchStartFrame: 120, inputDeviceId: savedInput,
+  })).rejects.toThrow("Saved microphone (unavailable)")
+  expect(requested).toEqual([savedInput])
+  expect(fixture.recordingTargets).toEqual([])
+  expect(controller.isRecording()).toBeFalse()
+})
+
 test("recording Finish and delayed import success or failure do not retire the playback owner", async () => {
   for (const importFails of [false, true]) {
     const fixture = createBridge()

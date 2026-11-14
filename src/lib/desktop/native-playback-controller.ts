@@ -535,6 +535,8 @@ export const createNativePlaybackController = (input: {
     instruments?: ReadonlyMap<string, DesiredInstrument>
   }
   getProjectId?: () => string
+  // `coreaudio:<uid>` of the saved output; empty or omitted plays on the system default output.
+  getOutputDeviceId?: () => string
   getProjectGeneration?: () => number
   getKeepLatencyNodeIds?: () => ReadonlySet<string>
   resolveSource?: AudioPcmSourceResolver
@@ -1902,12 +1904,17 @@ export const createNativePlaybackController = (input: {
       }
       const supportError = nativeSnapshotSupportError(snapshot)
       if (supportError) return unavailable(supportError)
-      const deviceReply = await bridge.resolveOutputDevice()
+      const outputDeviceId = input.getOutputDeviceId?.() || undefined
+      const deviceReply = await bridge.resolveOutputDevice(outputDeviceId)
       if (cancelled()) return "unavailable"
       if (!deviceReply.ok && indicatesNativeHostConnectionLoss(deviceReply.error)) {
         markNativeHostConnectionLost(deviceReply.error)
       }
-      if (!deviceReply.ok || !deviceReply.device?.available) return unavailable("No native audio output device is available for the active VST3 effect.")
+      if (!deviceReply.ok || !deviceReply.device?.available) return unavailable(
+        outputDeviceId && deviceReply.ok
+          ? "Saved output (unavailable)"
+          : "No native audio output device is available for the active VST3 effect.",
+      )
       const runtimeMaximumFrames = Math.min(deviceReply.device.maximumFramesPerBlock, maxVst3WorkerFrames)
       sampleRate = deviceReply.device.nominalSampleRateHz
       maximumFramesPerBlock = runtimeMaximumFrames
@@ -2809,6 +2816,8 @@ export const createNativePlaybackController = (input: {
     isCurrent?: () => boolean
     // The track the take records onto: native keeps its node and routing fixed while the take runs.
     targetTrackId: string
+    // `coreaudio:<uid>` of the saved microphone; omitted records from the system default input.
+    inputDeviceId?: string
     layout: "mono" | "stereo"
     inputChannel: number
     gain: number
@@ -2875,8 +2884,10 @@ export const createNativePlaybackController = (input: {
     })
     recording = session
     try {
-      const inputDeviceReply = await bridge.resolveInputDevice()
+      const inputDeviceReply = await bridge.resolveInputDevice(recordingInput.inputDeviceId)
       const inputDevice = inputDeviceReply.ok ? inputDeviceReply.device : null
+      if (recordingInput.inputDeviceId && inputDeviceReply.ok && !inputDevice?.available)
+        throw new Error("Saved microphone (unavailable)")
       if (!inputDevice?.available || inputChannels.some((channel) => channel >= inputDevice.inputChannelCount))
         throw new Error("No compatible native recording input device is available.")
       if (!session.isCurrent()) throw new Error("Recording scope changed.")

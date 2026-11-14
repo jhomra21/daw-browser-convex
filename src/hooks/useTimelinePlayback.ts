@@ -31,6 +31,7 @@ type NativePlaybackOptions = {
   enabled?: Accessor<boolean>
   projectId?: Accessor<string>
   projectGeneration?: Accessor<number>
+  outputDeviceId?: Accessor<string>
   compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
   captureNativeVstStates?: (capture: { projectId: string; instanceIds: readonly string[] }) => Promise<void>
   reportFault?: Parameters<typeof createNativePlaybackController>[0]["reportFault"]
@@ -279,6 +280,7 @@ export function useTimelinePlayback(
     bridge: audioHostBridge,
     getProjectId: nativeOptions?.projectId,
     getProjectGeneration: nativeOptions?.projectGeneration,
+    getOutputDeviceId: nativeOptions?.outputDeviceId,
     getKeepLatencyNodeIds: nativeOptions?.keepLatencyNodeIds,
     getDesiredProcessorState: nativeOptions?.getDesiredProcessorState,
     getProcessorTarget: nativeOptions?.getProcessorTarget,

@@ -764,6 +764,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       enabled: () => requiresNativeAudio || appPreferences.audio.preferences().nativePlaybackEnabled,
       projectId,
       projectGeneration: mountedProjectGeneration,
+      outputDeviceId: () => appPreferences.audio.preferences().nativeOutputDeviceId,
       keepLatencyNodeIds: (): ReadonlySet<string> => {
         const ids = new Set(recordingKeepLatencyNodeIds())
         const midiTarget = activeMidiRecordingTargetId()

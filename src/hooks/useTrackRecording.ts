@@ -773,6 +773,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       const native = await nativeRecording.controller.start({
         appSessionId: engineCaptureSessionId,
         targetTrackId: trackId,
+        inputDeviceId: audioPreferences().nativeInputDeviceId || undefined,
         projectId: rid,
         projectGeneration: startGeneration,
         isCurrent: isStartCurrent,

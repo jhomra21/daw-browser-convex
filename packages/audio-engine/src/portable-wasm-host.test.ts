@@ -1330,6 +1330,22 @@ test('B6f5 phase 6i a sampler zone gain edit reaches a held note on the built co
   }
 })
 
+// A Sampler edit that keeps every zone's asset key leaves the PCM the held voice reads as it is: an edit to a zone the note
+// does not play renders the very samples a run with no adoption renders, bit for bit. The same edit to the played zone
+// changes them, so the comparison can fail.
+const zoneGainAt = (state: AudioCoreInstrumentState, key: number, gain: number): AudioCoreInstrumentState =>
+  state.kind === 'sampler' ? { ...state, zones: state.zones.map((zone) => zone.keyLow === key ? { ...zone, gain } : zone) } : state
+test('B6f5 phase 6i a Sampler edit that keeps the asset key renders the held voice\'s PCM bit for bit across the adoption on the built core', async () => {
+  const steady = heldSampler('sampler', 1, 8)
+  const reference = await playHeldNotes([steady, steady], [52], false, 60)
+  const unplayedZone = await playHeldNotes([steady, zoneGainAt(steady, 53, 0.5)], [52], true, 60)
+  const playedZone = await playHeldNotes([steady, zoneGainAt(steady, 52, 0.5)], [52], true, 60)
+  expect({ sounding: peakOf(reference) > 0.02, sameLength: unplayedZone.length === reference.length,
+    bitExact: unplayedZone.every((sample, index) => Object.is(sample, reference[index])),
+    playedZoneMoves: settledDeviation(playedZone, reference, 40 * 128) > 0.05 })
+    .toEqual({ sounding: true, sameLength: true, bitExact: true, playedZoneMoves: true })
+})
+
 // Phase 6i, Mechanism B. A drag is a run of publications of one value, a few blocks apart (640 frames, the fastest a pointer
 // delivers them). Held to what a steady instrument at any of the dragged values plays: the output may not step by more than
 // the steepest slope any of them has, and a gliding pitch may not change its period by more than 2.5% between cycles.

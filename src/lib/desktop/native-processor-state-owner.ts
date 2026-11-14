@@ -1077,11 +1077,12 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
           answerReceipt(receipt, { state: "unavailable" })
     }
     // A transport that cancels the publication leaves its patch's content owed: the patch waits in the queue for the
-    // next domain, unless a newer one is already queued. An admitted patch here never reached native: one that changes
+    // next domain, unless a newer one is already queued. A retry's publication does not hold the receipts an earlier
+    // cancel answered, so an admitted patch is owed whether or not it holds one. An admitted patch here never reached native: one that changes
     // latency is carried only by the publication, and one sent to native is answered, or its claim released, in the
     // lane before a publication runs.
     for (const target of targets.values()) for (const execution of [target.patch, target.queuedPatch]) {
-      if (!execution || !execution.receipts.some(receipt => record.cohort.has(receipt))
+      if (!execution || !(execution.state === "admitted" || execution.receipts.some(receipt => record.cohort.has(receipt)))
         || evidence === "promoted" || evidence === "uncertain") continue
       if (evidence !== "cancelled" || (target.queuedPatch && execution !== target.queuedPatch)) settle(execution, "cancelled", false)
       else if (execution === target.patch) {

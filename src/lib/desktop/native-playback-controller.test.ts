@@ -567,6 +567,22 @@ describe("DV01 STEP7 latency publication witnesses", () => {
     } finally { await f.close() }
   })
 
+  test("B6d2 a latency edit whose paused-domain retry a seek cancels reaches native in the seek's domain", async () => {
+    const f = await step7Host()
+    try {
+      await f.act({ kind: "latency", value: 2048 })
+      await f.execute("prepare"); await f.deliver("prepare")
+      await f.act({ kind: "pause" })
+      await f.until(() => f.fixture.state().commands.some(command => command.name === "prepare") || f.fixture.state().pendingControl?.name === "prepare")
+      await f.act({ kind: "seek", value: 0.25 })
+      await f.advance()
+      expect(f.fixture.state().actual.fft).toBe(2048)
+      expect(f.fixture.state().actual.latency).toBe(2048)
+      expect(f.fixture.pending()).toEqual([])
+      expect(f.fixture.failures).toEqual([])
+    } finally { await f.close() }
+  })
+
   for (const { path, playhead } of [{ path: "resume in the prepared epoch", playhead: 0 }, { path: "resume in a new epoch at another frame", playhead: 1 }]) {
     test(`a latency edit pressed while a Play compiles waits for the Play (${path}) and still leaves native on the edit's value`, async () => {
       const f = await step7Host()

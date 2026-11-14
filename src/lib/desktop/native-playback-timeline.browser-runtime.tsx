@@ -67,6 +67,12 @@ const portableLoopProbe = async (refreshProbe = false) => {
     }),
     backend: { createPlaybackSession: async () => {
       const session = ++sessions
+      if (refreshProbe && session > 1) {
+        // A handoff that rebuilds would otherwise wait forever for an install that never reaches the held one.
+        const rebuilt = new Error('The schedule handoff rebuilt the session instead of extending it in place.')
+        reached.reject(rebuilt)
+        throw rebuilt
+      }
       return {
       connectInput: () => () => undefined, dispose: () => undefined,
       installSchedule: async (schedule) => {

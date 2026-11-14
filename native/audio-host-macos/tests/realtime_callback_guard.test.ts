@@ -204,11 +204,18 @@ test('CoreAudio callback paths contain no scheduler wake, wait, or lock operatio
   // enable, which changes which filters exist, is structural.
   expect([...processorHistory.matchAll(/\.enabled/g)].length).toBe(2)
   expect(processorHistory).toContain('bands[band].enabled')
-  const latencyVerdict = core.slice(core.indexOf('bool latency_continuity_compatible('),
-    core.indexOf('void initialize_processor_slot('))
-  expect(latencyVerdict.length).toBeGreaterThan(0)
-  for (const token of ['input_bus', 'input_layout', 'output_layout', 'bypassed', 'compatible_processor_history', 'kind']) {
-    expect(mentions(latencyVerdict, token)).toBe(false)
+  // No graph-wide verdict is left at all: a latency change moves read heads, and
+  // the one structural replacement, a Spectral FFT size change, is decided per
+  // processor from its own kind and size and nothing else.
+  for (const verdict of ['latency_continuity_compatible', 'spectral_size_continuity_compatible', '= ContinuityPreparationResult::kIncompatible']) {
+    expect(core).not.toContain(verdict)
+  }
+  const sizeReplacement = core.slice(core.indexOf('bool replaced_by_spectral_size_change('),
+    core.indexOf('ProcessorContinuityMap build_processor_continuity_map('))
+  expect(sizeReplacement.length).toBeGreaterThan(0)
+  expect(sizeReplacement).toContain('spectral.fft_size')
+  for (const token of ['input_bus', 'input_layout', 'output_layout', 'bypassed', 'compatible_processor_history']) {
+    expect(mentions(sizeReplacement, token)).toBe(false)
   }
   expect(core).not.toContain('prepared_instrument_configurations_compatible')
   // A deleted key hands the detector back to the processor's own input as it

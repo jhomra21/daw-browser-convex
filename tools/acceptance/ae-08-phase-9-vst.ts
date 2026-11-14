@@ -34,11 +34,11 @@ export const insertTestPlugin = async (context: Ui) => {
   await waitForUi(context, "The inserted test plug-in has no device card", `Boolean(${externalDevice})`)
 }
 
-// The removal: the device card's context menu, "Delete device" (EffectsPanel.tsx externalProcessorContextMenuItems).
+// The removal: the card's own Delete button (external-plugin-card.tsx), which removes the device as its context menu does. The
+// context menu belongs to the card's header inside the boundary, so an event dispatched on the outer card never reaches it.
 export const removeTestPlugin = async (context: Ui) => {
-  await context.evaluate(`(()=>{const card=${externalDevice};if(!card)throw new Error('Test plug-in device card missing');
-    card.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:250,clientY:250}));return true})()`)
-  await context.interact(["find", "text", "Delete device", "click", "--exact"])
+  await context.evaluate(`(()=>{const button=[...(${externalDevice}?.querySelectorAll('button')??[])].find(b=>b.textContent?.trim()==='Delete');
+    if(!button)throw new Error('Test plug-in Delete button missing');button.click();return true})()`)
   await waitForUi(context, "The test plug-in device card is still in the UI", `!${externalDevice}`)
 }
 

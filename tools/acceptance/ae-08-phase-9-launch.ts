@@ -51,35 +51,36 @@ const required = (id: string | undefined, what: string) => {
 
 // The edit names of the built rows (ae-08-phase-9-matrix.ts) and what each does. Each returns the latency move it declares.
 export const createPerformer = ({ context, runtime, observe, setup }: Performers): Perform => {
-  const { mutate } = context
+  // An edit through the control protocol is stamped when its commit is issued.
+  const commit = async (actions: Parameters<Performers["context"]["mutate"]>[0]) => ({ ...unmoved, wallMs: await context.mutate(actions) })
   const target = { kind: "track", track: ref(setup.changedTrackId) }
   const changedClip = (present: boolean) => waitForUi(context, `Changed clip ${present ? "not restored" : "not removed"} in the UI`,
     `${present ? "" : "!"}[...document.querySelectorAll('[data-timeline-clip]')].some(e=>e.getAttribute('title')?.includes('changed'))`)
-  const settings = (tempoBpm: number) => async () => { await mutate([{ kind: "project.settings.set", tempoBpm }]); return unmoved }
+  const settings = (tempoBpm: number) => () => commit([{ kind: "project.settings.set", tempoBpm }])
   const fft = (from: 512 | 4096, to: 512 | 4096) => async () => { await selectFftSize(context, to); return move(spectralFrames(from), spectralFrames(to)) }
   const history = (redo: boolean, clipPresent: boolean) => async () => { await pressHistoryKey(context, redo); await changedClip(clipPresent); return unmoved }
   const deleteImportedClip = async () => {
-    await mutate([{ kind: "clip.delete", clip: ref(required((await observe()).clipId("changed"), "Imported changed clip")) }])
+    const committed = await commit([{ kind: "clip.delete", clip: ref(required((await observe()).clipId("changed"), "Imported changed clip")) }])
     await changedClip(false)
-    return unmoved
+    return committed
   }
   // The test plug-in's Latency parameter (id 1, four steps) in normalized units: 0 is 0 frames, 1 is 4096 (run-ae08-test-plugin.ts).
   const testPluginLatency = (normalizedValue: number, from: number, to: number) => async () => {
-    await mutate([{ kind: "external-plugin.parameters.set", target,
+    const { wallMs } = await commit([{ kind: "external-plugin.parameters.set", target,
       processor: ref(required((await observe()).externalEffectId, "Test plug-in processor")), changes: [{ parameterId: 1, normalizedValue }] }])
-    return move(from, to)
+    return { ...move(from, to), wallMs }
   }
   const performers = new Map([
     ["fft-4096", fft(512, 4096)],
     ["fft-512", fft(4096, 512)],
     ["spectral-remove", async () => {
-      await mutate([{ kind: "effect.remove", target, effectKind: "spectral", effect: ref(required((await observe()).spectralEffectId, "Spectral device")) }])
-      return move(spectralFrames(512), 0)
+      const { wallMs } = await commit([{ kind: "effect.remove", target, effectKind: "spectral", effect: ref(required((await observe()).spectralEffectId, "Spectral device")) }])
+      return { ...move(spectralFrames(512), 0), wallMs }
     }],
     ["spectral-attach", async () => {
-      await mutate([{ kind: "effect.upsert", target, effectKind: "spectral",
+      const { wallMs } = await commit([{ kind: "effect.upsert", target, effectKind: "spectral",
         params: { version: 1, state: { ...createDefaultSpectralParams(), fftSize: 512, mix: 1 } } }])
-      return move(0, spectralFrames(512))
+      return { ...move(0, spectralFrames(512)), wallMs }
     }],
     ["track-delete", async () => { await deleteTrackThroughUi(context, "Changed right"); await changedClip(false); return unmoved }],
     ["undo", history(false, true)],
@@ -92,10 +93,9 @@ export const createPerformer = ({ context, runtime, observe, setup }: Performers
     ["vst-undo", async () => { await pressHistoryKey(context, false); await waitTestPluginCard(context, true); return unmoved }],
     ["latency-high", testPluginLatency(1, 0, 4096)],
     ["latency-low", testPluginLatency(0, 4096, 0)],
-    ["silent-track-create", async () => { await mutate([{ kind: "track.create", name: silentTrack, trackKind: "audio" }]); return unmoved }],
+    ["silent-track-create", () => commit([{ kind: "track.create", name: silentTrack, trackKind: "audio" }])],
     ["silent-track-delete", async () => {
-      await mutate([{ kind: "track.delete", track: ref(required((await observe()).trackId(silentTrack), silentTrack)) }])
-      return unmoved
+      return commit([{ kind: "track.delete", track: ref(required((await observe()).trackId(silentTrack), silentTrack)) }])
     }],
     ["tempo-137", settings(137)],
     ["tempo-120", settings(120)],
@@ -216,7 +216,7 @@ export const selfTest = async () => {
   const observed: Observed = { spectralEffectId: "spectral-1", externalEffectId: "external-1", trackId: (name) => name === silentTrack ? "silent-1" : undefined, clipId: (name) => name === "changed" ? "clip-1" : undefined }
   const perform = createPerformer({
     context: {
-      mutate: async (actions) => { calls.push(`mutate ${JSON.stringify(actions)}`) },
+      mutate: async (actions) => { calls.push(`mutate ${JSON.stringify(actions)}`); return 4242 },
       evaluate: async (script) => { calls.push(`evaluate ${script}`) },
       interact: async (args) => { calls.push(`interact ${args.join(" ")}`) },
       reload: async () => { calls.push("reload") },
@@ -235,6 +235,7 @@ export const selfTest = async () => {
 
   const tempo = await run("tempo-137")
   check(tempo.calls[0] === `mutate ${JSON.stringify([{ kind: "project.settings.set", tempoBpm: 137 }])}` && tempo.moved.toLatencyFrames === 0, `tempo-137: ${tempo.calls}`)
+  check(tempo.moved.wallMs === 4242, "a control edit reports the wall time of its commit")
   check((await run("tempo-120")).calls[0] === `mutate ${JSON.stringify([{ kind: "project.settings.set", tempoBpm: 120 }])}`, "tempo-120")
 
   const raise = await run("fft-4096")
@@ -271,7 +272,7 @@ export const selfTest = async () => {
   const insert = await run("vst-insert")
   check(insert.calls[0]?.includes("ae08") === true && insert.calls[0]?.includes(".click()") === true && insert.calls.some((call) => call.includes("[data-external-effect-id]")), `vst-insert clicks the plug-in's browser entry and waits for its card: ${insert.calls[0]}`)
   const take = await run("vst-remove")
-  check(take.calls[0]?.includes("contextmenu") === true && take.calls.some((call) => call === "interact find text Delete device click --exact"), "vst-remove uses the device's Delete device menu item")
+  check(take.calls[0]?.includes("'Delete'") === true && take.calls.every((call) => !call.startsWith("interact")), "vst-remove clicks the device card's Delete button")
   const vstUndo = await run("vst-undo")
   check(vstUndo.calls[0]?.includes("shiftKey:false") === true && vstUndo.calls.some((call) => call.includes("[data-external-effect-id]")), "vst-undo presses undo and waits for the card to return")
   const high = await run("latency-high"), low = await run("latency-low")

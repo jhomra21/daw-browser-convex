@@ -16,7 +16,8 @@ export type Phase5Context = {
   profile: string
   row: string
   snapshot: () => Promise<ProjectSnapshotV2>
-  mutate: (actions: z.infer<ReturnType<typeof z.json>>[]) => Promise<void>
+  // Resolves to the wall time just before the commit was issued: the moment the host can first see the edit.
+  mutate: (actions: z.infer<ReturnType<typeof z.json>>[]) => Promise<number>
   interact: (args: string[]) => Promise<void>
   evaluate: (script: string) => Promise<void>
   read: <Value>(script: string, schema: z.ZodType<Value>) => Promise<Value>

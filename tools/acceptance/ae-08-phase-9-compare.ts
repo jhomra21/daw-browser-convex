@@ -11,7 +11,7 @@ import type { Row } from "./ae-08-phase-9-rows"
 // against itself (ruling item 3 for the delete row).
 export const fadeFramesFor = (sampleRate: number) => Math.round(sampleRate * 0.006)
 
-const captureBlock = z.object({ event: z.literal("capture-block"), pid: z.number(), captureId: z.number(), transportFrame: z.number(), offset: z.number(), frames: z.number(), wallMs: z.number() })
+const captureBlock = z.object({ event: z.literal("capture-block"), pid: z.number(), captureId: z.number(), transportEpoch: z.number(), transportFrame: z.number(), offset: z.number(), frames: z.number(), wallMs: z.number() })
 export type CaptureBlock = z.infer<typeof captureBlock>
 
 // The capture indexed by transport frame, as checkPhase5 builds it. A frame no block covers stays NaN, so it fails every compare
@@ -82,6 +82,14 @@ export const compareDelete = (input: { output: Pcm; seam: number; endFrame: numb
   }
 }
 
+// The burst plays in one transport epoch. The pause that ends it opens the next epoch at the frame it stopped on, and the blocks
+// it renders there (its fade-out, then repeats of that frame) are not the timeline: indexed by frame they would overwrite the
+// last played block.
+export const playedBlocks = (blocks: readonly CaptureBlock[], firstEditWallMs: number) => {
+  const owner = blocks.find((block) => block.transportFrame > 0 && block.wallMs >= firstEditWallMs)
+  return owner && { owner, mine: blocks.filter((block) => block.pid === owner.pid && block.captureId === owner.captureId && block.transportEpoch === owner.transportEpoch) }
+}
+
 // No cold lifecycle event between the edit and the end of the capture: a delete is one session, never a stop and start.
 export const lifecycleBetween = (events: readonly HostEvent[], fromWallMs: number, toWallMs: number) =>
   events.filter((event) => event.wallMs >= fromWallMs && event.wallMs <= toWallMs && /stop|teardown|rebuild|host-exit|host-spawn|device-configure/i.test(event.event))
@@ -99,10 +107,10 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
     settledWallMs: group[0]?.settledWallMs, publicationFrame: group[0]?.publicationFrame ?? 0 }))
   const texts = await Promise.all(input.natives.map((name) => readFile(path.join(launchOut, name), "utf8")))
   const blocks = texts.flatMap(nativeLines).flatMap((entry) => entry.event === "capture-block" ? [captureBlock.parse(entry)] : [])
-  const owner = blocks.find((block) => block.transportFrame > 0 && block.wallMs >= (steps[0]?.editWallMs ?? 0))
-  if (!owner) return { outcome: "setup", detail: "no capture blocks after the first edit", judged: 0 }
+  const played = playedBlocks(blocks, steps[0]?.editWallMs ?? 0)
+  if (!played) return { outcome: "setup", detail: "no capture blocks after the first edit", judged: 0 }
+  const { owner, mine } = played
   const capture = await readWav(path.join(launchOut, `output-${owner.pid}-${owner.captureId}.wav`))
-  const mine = blocks.filter((block) => block.pid === owner.pid && block.captureId === owner.captureId)
   const seams = steps.map((step) => step.publicationFrame)
   const captured = Math.max(...mine.map((block) => block.transportFrame + block.frames))
   if (row.judge === "states") {
@@ -167,9 +175,13 @@ export const selfTest = () => {
   check(states9({ ...render(), sampleRate: 44100 }).outcome === "fail", "a capture at another rate fails")
   // The capture is rebuilt by transport frame; an uncovered frame is NaN.
   const capture: Pcm = { sampleRate, channels, samples: Float32Array.from({ length: 8 }, (_, index) => index + 1) }
-  const indexed = transportIndexed(capture, [{ event: "capture-block", pid: 1, captureId: 1, transportFrame: 10, offset: 0, frames: 2, wallMs: 0 },
-    { event: "capture-block", pid: 1, captureId: 1, transportFrame: 13, offset: 2, frames: 2, wallMs: 0 }], 16)
+  const indexed = transportIndexed(capture, [{ event: "capture-block", pid: 1, captureId: 1, transportEpoch: 1, transportFrame: 10, offset: 0, frames: 2, wallMs: 0 },
+    { event: "capture-block", pid: 1, captureId: 1, transportEpoch: 1, transportFrame: 13, offset: 2, frames: 2, wallMs: 0 }], 16)
   check(indexed.samples[20] === 1 && indexed.samples[23] === 4 && Number.isNaN(indexed.samples[24]) && indexed.samples[26] === 5 && Number.isNaN(indexed.samples[0]), "capture blocks land at their transport frames, the rest is NaN")
+  // The pause that ends a burst repeats its stop frame in the next epoch; those blocks are not part of the played timeline.
+  const block = (transportEpoch: number, transportFrame: number, offset: number): CaptureBlock => ({ event: "capture-block", pid: 1, captureId: 1, transportEpoch, transportFrame, offset, frames: 512, wallMs: 5 })
+  const tail = playedBlocks([block(2, 0, 0), block(3, 512, 512), block(3, 1024, 1024), block(4, 1536, 1536), block(4, 1536, 2048)], 1)
+  check(tail?.mine.map((entry) => entry.transportFrame).join() === "512,1024", `blocks after the pause are not the timeline: ${tail?.mine.map((entry) => entry.transportFrame).join()}`)
   // A held live note must sound in every 10 ms block of every window.
   const sine = (silence?: [number, number]): Pcm => {
     const samples = new Float32Array(endFrame * channels)

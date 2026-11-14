@@ -154,7 +154,9 @@ export const awaitPublicationComplete = (out: string, sinceWallMs: number, raise
 // ---- Per-launch capture ----
 export type LoggedEdit = { index: number; name: string; wallMs: number; settledWallMs: number | undefined;
   revision: number; publicationFrame: number; fromLatencyFrames: number; toLatencyFrames: number }
-export type Perform = (edit: string) => Promise<{ fromLatencyFrames: number; toLatencyFrames: number }>
+// `wallMs` is when the host could first see the edit, for an edit that goes through the control protocol (its preview and commit round
+// trips are the runner's, not the product's). An edit made in the UI has none and counts from the start of its step.
+export type Perform = (edit: string) => Promise<{ fromLatencyFrames: number; toLatencyFrames: number; wallMs?: number }>
 // A VST edit waits for a worker to start (the plan assumes 20 s per insert), so its deadline is longer.
 const settleDeadlineMs = (row: Row) => row.repeat === "vst-burst" ? 60_000 : 15_000
 
@@ -185,7 +187,7 @@ export const runBurst = async (input: { out: string; directory: string; row: Row
       const settled = await awaitPublicationComplete(out, wallMs, raise, input.deadlineMs ?? settleDeadlineMs(row))
       const { wallMs: settledWallMs, revision, publicationFrame } = settled
       await mark("burst-settled", { row: row.name, index: step.index, settledWallMs })
-      for (const move of moves) logged.push({ index: step.index, wallMs, settledWallMs, revision, publicationFrame, ...move })
+      for (const move of moves) logged.push({ ...move, index: step.index, wallMs: move.wallMs ?? wallMs, settledWallMs, revision, publicationFrame })
       await input.afterSettle(settled)
       await input.hold(publicationFrame + publicationSpacingFrames(input.sampleRate))
     }
@@ -406,6 +408,15 @@ export const selfTest = async () => {
     check(spacing >= Math.round(48000 * 0.006) && spacing >= 48000 / 2 + 4096 && spacing >= 48000 && publicationSpacingFrames(44100) >= 44100 / 2 + 4096, `spacing ${spacing} frames covers a fade, 0.5 s + 4096 and the 1 s window`)
     check(held[0] === 96001 + spacing && held.slice(0, 4).every((frame) => frame > 96000 + spacing), `each step holds one spacing past its publication: ${held}`)
     check(inventoried.length >= 4 && inventoried.every((revision) => revision === 4), "an asset inventory is taken after each settled publication, with its revision")
+    // An edit through the control protocol counts from its commit, not from the start of its step; a UI edit counts from the step.
+    let stampedCount = 0
+    const stamped = await runBurst({ out: burstDirectory, directory: path.join(burstDirectory, "stamped"), repetitions: 2, mark: async () => undefined, ...quiet,
+      row: { ...tempo, name: "stamped", start: "s", cycle: [{ edits: ["committed", "ui"], state: "s" }] },
+      perform: async (edit) => {
+        await appendFile(path.join(burstDirectory, "native-1.jsonl"), `${JSON.stringify({ ...publish, publicationFrame: 98000 + (stampedCount += 1), wallMs: Date.now() })}\n`)
+        return edit === "committed" ? { fromLatencyFrames: 0, toLatencyFrames: 0, wallMs: 12345 } : { fromLatencyFrames: 0, toLatencyFrames: 0 }
+      } })
+    check(stamped[0]?.wallMs === 12345 && (stamped[1]?.wallMs ?? 0) > 1_000_000, `a committed edit logs its commit time: ${stamped.map((edit) => edit.wallMs)}`)
     check(paired.join() === "first,second,first,second" && pairedLogged.length === 4 && new Set(pairedLogged.map((edit) => edit.settledWallMs)).size <= 2, `paired edits keep their order: ${paired}`)
     // A step without a publication fails the launch as a setup failure, and the evidence of the steps before it is still written.
     const failing = path.join(burstDirectory, "failing")

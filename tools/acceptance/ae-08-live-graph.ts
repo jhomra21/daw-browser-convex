@@ -279,14 +279,15 @@ const run = async (out: string, edited: boolean, fixtureKind: string, phase = 1,
         const preview = controlPreviewResultSchemaV1.parse(await command(profile, ["preview", "--request", "-", "--target", "host"], payload))
         const approvalToken = preview.approval?.required
           ? controlApprovalResultSchemaV1.parse(await command(profile, ["approval", "--request", "-", "--target", "host"], payload)).approvalToken : undefined
-        const committed = controlCommitResultSchemaV1.parse(await command(profile, ["commit", "--request", "-", "--target", "host"],
+        const committedAt = Date.now()
+        controlCommitResultSchemaV1.parse(await command(profile, ["commit", "--request", "-", "--target", "host"],
           JSON.stringify({ ...request, approvalToken, idempotencyKey: `ae08-${crypto.randomUUID()}` })))
         await snapshot()
-        return committed
+        return committedAt
       }
       if (phase === 5 || phase === 8 || phase === 9) {
         const fixtureContext = { out, profile, row: fixtureKind, snapshot, mark,
-          mutate: async (actions: z.infer<ReturnType<typeof z.json>>[]) => { await mutate(actions) },
+          mutate,
           interact: async (args: string[]) => { await browserCommand(session, args) },
           evaluate: async (script: string) => { await browserCommand(session, ["eval", script]) },
           read: async <Value>(script: string, schema: z.ZodType<Value>) => schema.parse(nested(await browserCommand(session, ["eval", script]))),
@@ -853,7 +854,8 @@ const main = async () => {
       }
       await verifyPackagedArtifacts(resources, artifacts)
       // Each row names the launch captures (output.wav per launch) that its windows are compared in.
-      for (const [index, launch] of launches.entries()) for (const row of launch)
+      // A launch whose burst failed has exported no row folders, and its failure is what the verdict reports.
+      for (const [index, launch] of launches.entries()) for (const row of campaign.some((entry) => entry.launch === index + 1 && entry.role === "burst" && !entry.failure) ? launch : [])
         await writeFile(path.join(rowsFolder(index), row.name, "launch.json"), JSON.stringify(Object.fromEntries(
           campaign.filter((entry) => entry.launch === index + 1).map((entry) => [entry.role, `launch-${entry.launch}-${entry.role}`]))))
       await writeFile(path.join(out, "phase9-timings.json"), JSON.stringify(measuredTimings(measuredRows,

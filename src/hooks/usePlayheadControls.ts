@@ -26,6 +26,7 @@ type Options = {
     enabled: Accessor<boolean>
     projectId?: Accessor<string>
     projectGeneration?: Accessor<number>
+    outputDeviceId?: Accessor<string>
     keepLatencyNodeIds?: Accessor<ReadonlySet<string>>
     playbackInputs?: Accessor<object>
     getDesiredProcessorState?: NonNullable<Parameters<typeof useTimelinePlayback>[2]>["getDesiredProcessorState"]

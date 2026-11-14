@@ -114,6 +114,7 @@ type UseTrackRecordingOptions = {
       start: (input: {
         appSessionId: string
         targetTrackId: string
+        inputDeviceId?: string
         layout: "mono" | "stereo"
         inputChannel: number
         gain: number

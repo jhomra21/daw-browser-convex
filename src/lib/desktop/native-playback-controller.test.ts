@@ -13354,14 +13354,16 @@ test("a stored native output device id reaches the output resolver and a missing
   const savedOutput = "coreaudio:BlackHole2ch_UID"
   const fixture = createBridge()
   const requested: Array<string | undefined> = []
-  const resolveOutputDevice = fixture.bridge.resolveOutputDevice
-  fixture.bridge.resolveOutputDevice = async (id) => {
-    requested.push(id)
-    return id === undefined ? resolveOutputDevice() : { ok: true as const, device: null }
+  const bridge = {
+    ...fixture.bridge,
+    resolveOutputDevice: async (id?: string) => {
+      requested.push(id)
+      return id === undefined ? fixture.bridge.resolveOutputDevice() : { ok: true as const, device: null }
+    },
   }
   const faults: string[] = []
   const controller = createObservedController({
-    bridge: fixture.bridge,
+    bridge,
     compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
     getOutputDeviceId: () => savedOutput,
     reportUnavailable: true,
@@ -13376,13 +13378,15 @@ test("a stored native input device id reaches the input resolver and a missing o
   const savedInput = "coreaudio:BlackHole2ch_UID"
   const fixture = createBridge()
   const requested: Array<string | undefined> = []
-  const resolveInputDevice = fixture.bridge.resolveInputDevice
-  fixture.bridge.resolveInputDevice = async (id) => {
-    requested.push(id)
-    return id === undefined ? resolveInputDevice() : { ok: true as const, device: null }
+  const bridge = {
+    ...fixture.bridge,
+    resolveInputDevice: async (id?: string) => {
+      requested.push(id)
+      return id === undefined ? fixture.bridge.resolveInputDevice() : { ok: true as const, device: null }
+    },
   }
   const controller = createObservedController({
-    bridge: fixture.bridge,
+    bridge,
     compileSnapshot: async () => compileLivePlaybackSnapshot(input()),
   })
   await controller.start(input().transport)

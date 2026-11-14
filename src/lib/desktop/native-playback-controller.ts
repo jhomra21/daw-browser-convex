@@ -3256,11 +3256,11 @@ export const createNativePlaybackController = (input: {
     instanceId: string,
     parameterIds: readonly string[],
   ): Promise<LiveProcessorControlResult> => {
-    if (!prepared || !preparedGraph) return { accepted: false, reason: "unprepared" }
+    if (!prepared || !preparedGraph || !preparedSnapshot) return { accepted: false, reason: "unprepared" }
     const externalParameters = parameterIds.map((parameterId) => parseExternalAutomationParameterId(parameterId))
     const externalInstanceId = externalParameters[0]?.instanceId
     if (externalInstanceId !== undefined) {
-      const attachment = preparedSnapshot?.nativeExternalAttachmentPlan?.attachments
+      const attachment = preparedSnapshot.nativeExternalAttachmentPlan?.attachments
         .find((candidate) => candidate.instanceId === externalInstanceId)
       const parameters = new Map(attachment?.parameters?.map((parameter) => [parameter.id, parameter]))
       const targets = externalParameters
@@ -3287,7 +3287,15 @@ export const createNativePlaybackController = (input: {
     const targets = parameterIds.map((parameterId) => processor.parameterTargets.get(parameterId))
       .filter((target): target is number => target !== undefined)
     if (targets.length !== parameterIds.length) return { accepted: false, reason: "unsupported" }
-    return { accepted: true, sequence: ++nextLiveProcessorSequence }
+    // Native resolves a lane only from the schedule it was published with, and a lane overridden by hand is left out of
+    // that compile. The lane drives again once a publication from the current position carries it.
+    const sequence = ++nextLiveProcessorSequence
+    const key = `reenable-automation:${sequence}`
+    const { loopEnabled, loopStartSec, loopEndSec } = preparedSnapshot.transport
+    const outcome = await adoptSchedule({ key, schedule: key, context: {}, loop: { loopEnabled, loopStartSec, loopEndSec } }, true)
+    return outcome.status === "adopted" || outcome.status === "unchanged"
+      ? { accepted: true, sequence }
+      : { accepted: false, reason: "bridge-error", error: `The native schedule did not take the re-enabled lane (${outcome.status}).` }
   }
 
   // Aborted when the transport domain ends, and the compile is abandoned at that moment: what it returns later is

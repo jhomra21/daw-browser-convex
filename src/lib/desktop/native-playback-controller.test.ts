@@ -28,7 +28,7 @@ import { createAudioStretchCache } from "@daw-browser/audio-engine/audio-stretch
 import { createPreparedStretchArtifactRepository } from "@daw-browser/audio-engine/prepared-stretch-store"
 import { compileLiveNativeProjection } from "@daw-browser/audio-engine/live-native-projection"
 import { getEffectTiming } from "@daw-browser/audio-engine/effects/timing"
-import { automationTargetKey, createDefaultDelayParams, normalizeDelayParams, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams, createDefaultReverbParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultUtilityParams, mergeSynthParams, AUDIO_EFFECT_CONTRACTS, externalAutomationParameterId, type AudioPcmSourceDescriptor, type TrackInstrumentParams, type SamplerZone, type SynthParamsUpdate } from "@daw-browser/shared"
+import { automationTargetKey, createDefaultDelayParams, normalizeDelayParams, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams, createDefaultReverbParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultUtilityParams, mergeSynthParams, AUDIO_EFFECT_CONTRACTS, externalAutomationParameterId, type AutomationEnvelope, type AudioPcmSourceDescriptor, type TrackInstrumentParams, type SamplerZone, type SynthParamsUpdate } from "@daw-browser/shared"
 import { nativeGraphNodeId, serializeNativeGraph, serializeNativeInstrumentStates, serializeNativeProcessorEvents, type NativeHostMappedAsset, type NativeHostMappedAssetPage, type NativeHostMeterBatch, type NativeHostPcmAsset, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeHostTransport, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import { listLocalEffects, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects"
 import { AudioEngine, type AudioEffectRuntimeInstance, type SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
@@ -6762,6 +6762,51 @@ test("re-enables canonical external automation against the prepared attachment",
     [externalAutomationParameterId("22222222-2222-4222-8222-222222222222", 7)],
   )).resolves.toEqual({ accepted: false, reason: "unsupported" })
   expect(fixture.reenablePayloads).toHaveLength(1)
+  await controller.dispose()
+})
+
+test("re-enabling a built-in lane publishes the schedule from the current position with the lane", async () => {
+  const fixture = createBridge()
+  const target = { kind: "track" as const, trackId: "track", effectInstanceId: "utility:1" }
+  const lane: AutomationEnvelope = {
+    id: "gain-lane",
+    projectId: "project:1",
+    target,
+    targetKey: automationTargetKey(target, "utility.gainDb"),
+    parameterId: "utility.gainDb",
+    enabled: true,
+    points: [
+      { id: "start", timeSec: 0, value: -12, interpolation: "linear" },
+      { id: "end", timeSec: 6, value: 0, interpolation: "linear" },
+    ],
+    updatedAt: 1,
+  }
+  // The compile stands for the timeline's: a lane the user overrode by hand is left out of the playback snapshot.
+  let overridden = false
+  const controller = createObservedController({
+    bridge: fixture.bridge,
+    getProjectId: () => "project:1",
+    compileSnapshot: async (transport) => {
+      const base = utilityPlaybackInput()
+      return compileLivePlaybackSnapshot({
+        ...base,
+        transport,
+        renderState: { ...base.renderState, automationEnvelopes: overridden ? [] : [lane] },
+      })
+    },
+  })
+  overridden = true
+  await expect(controller.start(utilityPlaybackInput().transport)).resolves.toBe("started")
+  expect(decodeNativeProcessorEvents(fixture.schedulePayloads)).toEqual([])
+  const sent = fixture.schedulePayloads.length
+
+  overridden = false
+  acknowledgeStagedPublication(fixture)
+  await expect(controller.reenableProcessorAutomation("utility:1", ["utility.gainDb"]))
+    .resolves.toMatchObject({ accepted: true })
+
+  expect(fixture.calls.filter((call) => call === "stage-prepare")).toHaveLength(1)
+  expect(decodeNativeProcessorEvents(fixture.schedulePayloads.slice(sent)).length).toBeGreaterThan(0)
   await controller.dispose()
 })
 

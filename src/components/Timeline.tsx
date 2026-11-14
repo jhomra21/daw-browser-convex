@@ -427,6 +427,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [effectsExportSnapshot, setEffectsExportSnapshot] =
     createSignal<EffectsPanelExportSnapshot>();
   let getAutomationPatches: () => ExportAutomationPatch[] = () => [];
+  let getPlaybackAutomationPatches: () => ExportAutomationPatch[] = () => [];
   const processorEdits = createProcessorEditRegistry(bpm);
   const desiredFx = createMemo(() => {
     const data = fullView.data;
@@ -459,14 +460,15 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
     automationEnvelopes: fullView.data?.automationEnvelopes,
     masterVolume: masterVolume.volume(),
-    automation: getAutomationPatches(),
+    automation: getPlaybackAutomationPatches(),
     sidechains: effectsExportSnapshot()?.snapshotSidechainRoutes() ?? sidechainRoutes(),
     processorStructure: processorEdits.structure(),
   }), undefined, { equals: (previous, next) => replaceEqualDeep(previous, next) === previous });
   let nativePlaybackRevision = 1;
   const compilePlaybackSnapshot = async (
     transport: LivePlaybackTransport,
-    context?: LivePlaybackCompileContext,
+    context: LivePlaybackCompileContext | undefined,
+    automationPatches: () => ExportAutomationPatch[],
   ) => {
     const effects = effectsExportSnapshot();
     // Every playback compile reads the canonical effects draft. Draining its
@@ -497,7 +499,7 @@ const Timeline: Component<TimelineProps> = (props) => {
             }
           : undefined,
         effectsProjection: projectedEffects,
-        automationPatches: getAutomationPatches(),
+        automationPatches: automationPatches(),
       });
       const hydratedRenderState = instrumentReadiness?.hydrateInstrumentBuffers(renderState)
         ?? effects?.hydrateInstrumentBuffers?.(renderState) ?? renderState;
@@ -768,7 +770,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         if (midiTarget) ids.add(midiTarget)
         return ids
       },
-      compileSnapshot: compilePlaybackSnapshot,
+      compileSnapshot: (transport, context) => compilePlaybackSnapshot(transport, context, getPlaybackAutomationPatches),
       getProcessorTarget: processorEdits.target,
       getDesiredProcessorState: (snapshot, sampleRate) => compileDesiredNativeProcessorState(
         snapshot, sampleRate, processorEdits.sequence(), effectsExportSnapshot()?.snapshotEffectsProjection(),
@@ -852,7 +854,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
     portableBrowserPlayback: requiresNativeAudio ? undefined : {
       projectGeneration: mountedProjectGeneration,
-      compileSnapshot: compilePlaybackSnapshot,
+      compileSnapshot: (transport, context) => compilePlaybackSnapshot(transport, context, getAutomationPatches),
       reportFault: (message) => notify("Portable browser playback stopped", message),
     },
   });
@@ -986,6 +988,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   });
   onCleanup(() => vstParameterFeedback?.dispose());
   getAutomationPatches = () => automation.snapshotExportPatches();
+  getPlaybackAutomationPatches = () => automation.snapshotPlaybackPatches();
   const {
     pendingSharedTrackVolumes,
     pendingSharedTrackRouting,

@@ -5,6 +5,7 @@ import type { LiveProcessorControlResult } from "~/lib/live-processor-control";
 import {
   automationTargetKey,
   automationEnvelopeFromRow,
+  builtInOverriddenAutomationTargetKeys,
   createAutomationTarget,
   externalAutomationParameterId,
   automationTargetKeysAfterReEnable,
@@ -443,6 +444,10 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       if (!entry.parameterIds.includes(envelope.parameterId)) entry.parameterIds.push(envelope.parameterId);
       byProcessor.set(key, entry);
     }
+    const next = automationTargetKeysAfterReEnable(current, reEnabledTargetKeys);
+    // Native compiles its schedule without the overridden lanes, so the lanes are released before the playback backend
+    // publishes the schedule that carries them again.
+    setOverriddenAutomationTargetKeys(next);
     const reenableProcessorAutomation = options.reenableProcessorAutomation;
     if (reenableProcessorAutomation) {
       const results = await Promise.all(
@@ -451,10 +456,11 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
         )),
       );
       const playbackControlAttempted = results.some((result) => result.accepted || result.reason !== "unavailable");
-      if (playbackControlAttempted && results.some((result) => !result.accepted)) return;
+      if (playbackControlAttempted && results.some((result) => !result.accepted)) {
+        setOverriddenAutomationTargetKeys(current);
+        return;
+      }
     }
-    const next = automationTargetKeysAfterReEnable(current, reEnabledTargetKeys);
-    setOverriddenAutomationTargetKeys(next);
     options.audioEngine.cancelAutomationSchedules(reEnabledTargetKeys, automationEnvelopes());
     options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(automationEnvelopes(), next));
     if (options.isPlaying()) options.audioEngine.scheduleAutomationFromPlayhead(options.playheadSec(), { targetKeys: reEnabledTargetKeys });
@@ -980,6 +986,15 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   return {
     envelopes: persistedAutomation.envelopes,
     snapshotExportPatches: (): ExportAutomationPatch[] => persistedAutomation.snapshotPatches(),
+    // An overridden lane is out of the native playback snapshot, so native holds the value set by hand. An offline
+    // export still applies it.
+    snapshotPlaybackPatches: (): ExportAutomationPatch[] => {
+      const held = builtInOverriddenAutomationTargetKeys(persistedAutomation.envelopes(), overriddenAutomationTargetKeys());
+      return [
+        ...persistedAutomation.snapshotPatches().filter((patch) => !held.has(patch.targetKey)),
+        ...[...held].map((targetKey) => ({ targetKey, envelope: undefined })),
+      ];
+    },
     envelopesByTargetKey: automationEnvelopesByTargetKey,
     evaluatedValuesByTargetKey,
     applyEnvelope: applyAutomationEnvelopeState,

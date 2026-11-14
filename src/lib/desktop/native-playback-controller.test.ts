@@ -567,6 +567,27 @@ describe("DV01 STEP7 latency publication witnesses", () => {
     } finally { await f.close() }
   })
 
+  test("a Play whose run transport lands between a latency edit's Prepare and Publish still leaves native on the edit's value", async () => {
+    const f = await step7Host()
+    try {
+      await f.act({ kind: "pause" })
+      await f.advance()
+      await f.act({ kind: "start" })
+      await f.until(() => f.fixture.enabled().some(action => action.kind === "resolve-compile"))
+      const compile = f.fixture.enabled().find(action => action.kind === "resolve-compile")
+      if (!compile) throw new Error("Missing held Play compile")
+      await f.act({ kind: "latency", value: 2048 })
+      await f.execute("prepare")
+      await f.act(compile)
+      await f.execute("transport")
+      await f.advance()
+      expect(f.fixture.state().actual.fft).toBe(2048)
+      expect(f.fixture.state().actual.latency).toBe(2048)
+      expect(f.fixture.pending()).toEqual([])
+      expect(f.fixture.failures).toEqual([])
+    } finally { await f.close() }
+  })
+
   test("B6d2 an admitted latency edit pause cancels gives way to the newer latency edit queued behind it", async () => {
     const f = await step7Host()
     try {

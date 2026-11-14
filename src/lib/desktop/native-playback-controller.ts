@@ -1727,8 +1727,11 @@ export const createNativePlaybackController = (input: {
             // A same-frame seek may still be stopping and priming this epoch. Resume in its transaction lane,
             // after its existing transition/accepted waits, and keep a following pause ordered behind the resume.
             const coordinator = previousCoordinator
-            return await queuePreparedTransportTransition(async () => {
+            const result = await queuePreparedTransportTransition(async () => {
               if (cancelled()) return "unavailable"
+              // A publication admitted while this Play compiled holds its prepared bank outside the lane: a run transport
+              // now would make native discard it. Start again: the attempt waits for it outside the lane first.
+              if (processorState.publication()) return undefined
               const runTransitionId = ++nextTransportTransitionId
               assertReply(await bridge.session.setTransport(
                 nativeTransportFor(effectiveSnapshot, transportEpoch, true, frame, runTransitionId),
@@ -1742,6 +1745,7 @@ export const createNativePlaybackController = (input: {
               livePreviewActive = true
               return resumed()
             })
+            return result ?? startAttempt(transport, generation, projectGeneration, runTransport, compileContext, previewAttempt)
           }
           const nextCoordinator = createCoordinatorForEpoch({
             snapshot: effectiveSnapshot,

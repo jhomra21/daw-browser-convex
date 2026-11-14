@@ -40,6 +40,7 @@ import {
   hostRequestChannel,
   hostResponseChannel,
   lifecycleChannel,
+  listDevicesChannel,
   lossChannel,
   meterBatchChannel,
   offlineCancelChannel,
@@ -1376,6 +1377,16 @@ const registerIpc = () => {
     }
     try {
       return { ok: true as const, device: await audioHostSupervisor.resolveInputDevice(deviceId.data) }
+    } catch {
+      return { ok: false as const, error: "The native audio host is unavailable." }
+    }
+  })
+  ipcMain.handle(listDevicesChannel, async (event) => {
+    if (!audioHostAllowed(event) || !audioHostSupervisor) {
+      return { ok: false as const, error: "The native audio host is unavailable." }
+    }
+    try {
+      return { ok: true as const, devices: await audioHostSupervisor.listDevices() }
     } catch {
       return { ok: false as const, error: "The native audio host is unavailable." }
     }

@@ -1,6 +1,7 @@
 import { expect, mock, test } from "bun:test"
 import { readFile } from "node:fs/promises"
 import {
+  listDevicesChannel,
   resolveOutputDeviceChannel,
   sessionConfigureRecordingChannel,
   sessionInstallAssetChannel,
@@ -72,6 +73,10 @@ test("exposes only the macOS arm64 typed PCM asset session surface to renderers"
   invocations.length = 0
   await audioHost.resolveOutputDevice("device-1")
   expect(invocations).toEqual([{ channel: resolveOutputDeviceChannel, args: ["device-1"] }])
+
+  invocations.length = 0
+  await audioHost.listDevices()
+  expect(invocations).toEqual([{ channel: listDevicesChannel, args: [] }])
 
   for (const [platform, arch] of [["linux", "arm64"], ["darwin", "x64"], ["win32", "x64"]]) {
     expect((await loadPreload(platform, arch)).audioHost).toBeUndefined()

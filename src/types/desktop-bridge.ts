@@ -1,4 +1,5 @@
 import type {
+  NativeAudioDevice,
   NativeInputDevice,
   NativeHostMeterBatch,
   NativeHostSpectrumFrame,
@@ -259,6 +260,7 @@ type NativeSessionBridge = {
 
 type NativeOutputDeviceReply = { ok: true; device: NativeOutputDevice | null } | { ok: false; error: string }
 type NativeInputDeviceReply = { ok: true; device: NativeInputDevice | null } | { ok: false; error: string }
+type NativeDeviceListReply = { ok: true; devices: NativeAudioDevice[] } | { ok: false; error: string }
 export type DesktopAudioLifecycle = {
   state: "suspended" | "recovering" | "ready" | "failed"
   powerGeneration: number
@@ -293,6 +295,7 @@ type DesktopBridge = {
     diagnostics(): Promise<NativeAudioHostDiagnosticsReply>
     resolveOutputDevice(preferredDeviceId?: string): Promise<NativeOutputDeviceReply>
     resolveInputDevice(preferredDeviceId?: string): Promise<NativeInputDeviceReply>
+    listDevices(): Promise<NativeDeviceListReply>
     session: NativeSessionBridge
     recordingSpool: NativeRecordingSpoolBridge
     offlineRender: {

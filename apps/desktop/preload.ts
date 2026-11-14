@@ -38,6 +38,7 @@ import {
   hostRequestChannel,
   hostResponseChannel,
   lifecycleChannel,
+  listDevicesChannel,
   lossChannel,
   meterBatchChannel,
   offlineCancelChannel,
@@ -121,6 +122,7 @@ import type {
   NativeScheduleProgress,
   NativeInputDevice,
   NativeOutputDevice,
+  NativeAudioDevice,
   NativeOfflineRenderPlan,
   NativeOfflinePcmChunk,
   NativeOfflineMappedAsset,
@@ -218,6 +220,7 @@ type NativeVstEditorCommand = Parameters<NonNullable<DesktopBridge["audioHost"]>
 type NativeVstEditorReply = Awaited<ReturnType<NonNullable<DesktopBridge["audioHost"]>["session"]["editor"]>>
 type NativeOutputDeviceReply = { ok: true; device: NativeOutputDevice | null } | { ok: false; error: string }
 type NativeInputDeviceReply = { ok: true; device: NativeInputDevice | null } | { ok: false; error: string }
+type NativeDeviceListReply = { ok: true; devices: NativeAudioDevice[] } | { ok: false; error: string }
 type NativeVstAttachmentCoordinationInput = Parameters<NonNullable<DesktopBridge["audioHost"]>["session"]["coordinateVstAttachments"]>[0]
 const invokeNativeSession = <Value>(channel: string, value?: Value, transactionToken?: string): Promise<NativeSessionReply> =>
   ipcRenderer.invoke(channel, { value, transactionToken })
@@ -233,6 +236,7 @@ const invokeNativeOutputDevice = (preferredDeviceId?: string): Promise<NativeOut
   ipcRenderer.invoke(resolveOutputDeviceChannel, preferredDeviceId)
 const invokeNativeInputDevice = (preferredDeviceId?: string): Promise<NativeInputDeviceReply> =>
   ipcRenderer.invoke(resolveInputDeviceChannel, preferredDeviceId)
+const invokeNativeDeviceList = (): Promise<NativeDeviceListReply> => ipcRenderer.invoke(listDevicesChannel)
 const validExportRequestId = (requestId: string) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(requestId)
 const invalidExportRequest = () => Promise.reject(new Error("Invalid export output request."))
 
@@ -378,6 +382,7 @@ const desktopBridge = {
       diagnostics: (): Promise<NativeAudioHostDiagnosticsReply> => ipcRenderer.invoke(diagnosticsChannel),
       resolveOutputDevice: invokeNativeOutputDevice,
       resolveInputDevice: invokeNativeInputDevice,
+      listDevices: invokeNativeDeviceList,
       session: {
         revisions: createNativeRevisionSession((operation, input) => ipcRenderer.invoke({
           prepare: sessionPrepareGraphRevisionChannel, publish: sessionPublishGraphRevisionChannel,

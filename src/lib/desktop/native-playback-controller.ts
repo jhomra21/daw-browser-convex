@@ -3402,6 +3402,10 @@ export const createNativePlaybackController = (input: {
       const admitted = await queuePreparedTransportTransition(async () => {
         const held = processorState.publication()
         if (held) return { waiting: held }
+        // A Play resuming the paused session settles first, as a schedule adoption does in `runAdoption`: an edit admitted
+        // while it compiles would hold its bank again when the Play's run transport is due, and a burst could starve it.
+        if (payload.kind === "latency" && prepared && !active && pendingStartMode === "play" && pendingStart)
+          return { starting: pendingStart }
         type Step = Awaited<ReturnType<typeof executePublication>>
         let yielded = Promise.withResolvers<Step>()
         const execution = executePublication(payload, (record, register) => {
@@ -3422,6 +3426,10 @@ export const createNativePlaybackController = (input: {
         })
         return { step: await Promise.race([execution, yielded.promise]) }
       })
+      if (admitted.starting) {
+        await admitted.starting.then(() => undefined, () => undefined)
+        continue
+      }
       if (admitted.waiting) {
         const outcome = await admitted.waiting.terminal
         if (payload.kind === "latency" && admitted.waiting.kind === "latency" && outcome.status !== "adopted")

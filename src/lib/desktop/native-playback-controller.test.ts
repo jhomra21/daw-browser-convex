@@ -567,26 +567,64 @@ describe("DV01 STEP7 latency publication witnesses", () => {
     } finally { await f.close() }
   })
 
-  test("a Play whose run transport lands between a latency edit's Prepare and Publish still leaves native on the edit's value", async () => {
-    const f = await step7Host()
-    try {
-      await f.act({ kind: "pause" })
-      await f.advance()
-      await f.act({ kind: "start" })
-      await f.until(() => f.fixture.enabled().some(action => action.kind === "resolve-compile"))
-      const compile = f.fixture.enabled().find(action => action.kind === "resolve-compile")
-      if (!compile) throw new Error("Missing held Play compile")
-      await f.act({ kind: "latency", value: 2048 })
-      await f.execute("prepare")
-      await f.act(compile)
-      await f.execute("transport")
-      await f.advance()
-      expect(f.fixture.state().actual.fft).toBe(2048)
-      expect(f.fixture.state().actual.latency).toBe(2048)
-      expect(f.fixture.pending()).toEqual([])
-      expect(f.fixture.failures).toEqual([])
-    } finally { await f.close() }
-  })
+  for (const { path, playhead } of [{ path: "resume in the prepared epoch", playhead: 0 }, { path: "resume in a new epoch at another frame", playhead: 1 }]) {
+    test(`a latency edit pressed while a Play compiles waits for the Play (${path}) and still leaves native on the edit's value`, async () => {
+      const f = await step7Host()
+      try {
+        await f.act({ kind: "pause" })
+        await f.advance()
+        await f.act({ kind: "start", value: playhead })
+        await f.until(() => f.fixture.enabled().some(action => action.kind === "resolve-compile"))
+        const compile = f.fixture.enabled().find(action => action.kind === "resolve-compile")
+        if (!compile) throw new Error("Missing held Play compile")
+        await f.act({ kind: "latency", value: 2048 })
+        await f.act(compile)
+        await f.advance()
+        expect(f.fixture.state().actual.fft).toBe(2048)
+        expect(f.fixture.state().actual.latency).toBe(2048)
+        expect(f.fixture.pending()).toEqual([])
+        expect(f.fixture.failures).toEqual([])
+      } finally { await f.close() }
+    })
+  }
+
+  for (const { path, playhead } of [{ path: "resume in the prepared epoch", playhead: 0 }, { path: "resume in a new epoch at another frame", playhead: 1 }]) {
+    test(`a Play (${path}) still runs within two recompiles while a burst of latency edits keeps a publication in flight`, async () => {
+      const f = await step7Host()
+      try {
+        await f.act({ kind: "pause" })
+        await f.advance()
+        const compileEvents = () => f.events.filter(event => z.object({ event: z.literal("compile") }).safeParse(event).success).length
+        const before = compileEvents()
+        const compiles = () => compileEvents() - before
+        await f.act({ kind: "start", value: playhead })
+        const playRunning = () => f.fixture.state().waiters.findLast(waiter => waiter.name === "start")?.settled === true
+        const heldCompile = () => f.fixture.enabled().find(action => action.kind === "resolve-compile")
+        await f.until(() => heldCompile() !== undefined)
+        const sizes = [2048, 4096, 512]
+        let last = 512
+        for (let edit = 0; edit < 20; edit++) {
+          last = sizes[edit % sizes.length] ?? 512
+          // Each edit is issued while the Play's compile is held, and that compile is released only after it.
+          await f.act({ kind: "latency", value: last })
+          const compile = heldCompile()
+          if (compile) await f.act(compile)
+          for (let step = 0; step < 300 && !playRunning() && !heldCompile(); step++) {
+            const action = f.next()
+            if (!action) break
+            await f.act(action)
+          }
+        }
+        // The first compile plus at most two recompiles, with the burst still going when the Play runs.
+        expect(playRunning()).toBe(true)
+        expect(compiles()).toBeLessThanOrEqual(3)
+        await f.advance()
+        expect(f.fixture.state().actual.fft).toBe(last)
+        expect(f.fixture.pending()).toEqual([])
+        expect(f.fixture.failures).toEqual([])
+      } finally { await f.close() }
+    })
+  }
 
   test("B6d2 an admitted latency edit pause cancels gives way to the newer latency edit queued behind it", async () => {
     const f = await step7Host()

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { watch } from "node:fs"
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { z } from "zod"
@@ -32,6 +32,11 @@ export type Row = {
 }
 
 const effectState = "phase5:effect-state"
+// The packaged catalog scans only /Library/Audio/Plug-Ins/VST3 and ~/Library/Audio/Plug-Ins/VST3 (plugin-catalog.ts:674); adding a folder
+// is a native open dialog (main.ts:2172). run-ae08-test-plugin.ts builds the test plug-in under /tmp and states it is never installed into a
+// VST3 folder, so a launch cannot reach it without writing into the user's home or changing the app. Needs a parent ruling.
+const vstNeeds = "the phase 6 test plug-in (/tmp/ae08-p6z-native/plugin-host/ae08-test-effect.vst3) is not in a folder the packaged catalog scans, and its builder forbids installing it; "
+  + "the insert, remove, undo and latency (external-plugin.parameters.set, parameter id 1) steps would reuse the phase 5 setup once it is reachable"
 export const phase9Matrix: Row[] = [
   { name: "attach-remove-long-latency", latencyClass: "raise", repeat: "burst", periodSec: null, fixture: effectState, start: "spectral-512",
     cycle: [{ edits: ["spectral-remove"], state: "spectral-absent" }, { edits: ["spectral-attach"], state: "spectral-512" }] },
@@ -39,50 +44,56 @@ export const phase9Matrix: Row[] = [
     cycle: [{ edits: ["fft-4096"], state: "spectral-4096" }, { edits: ["fft-512"], state: "spectral-512" }] },
   { name: "raise-lower-burst", latencyClass: "raise", repeat: "burst", periodSec: null, fixture: effectState, start: "spectral-512",
     cycle: [{ edits: ["fft-4096", "fft-512"], state: "spectral-512" }] },
-  { name: "lookahead-transition", latencyClass: "raise", repeat: "burst", periodSec: null, fixture: null, start: "limiter-lookahead-0",
-    cycle: [{ edits: ["lookahead-5ms"], state: "limiter-lookahead-5" }, { edits: ["lookahead-0ms"], state: "limiter-lookahead-0" }],
-    needs: "effect-state variant with a Limiter (lookaheadMs 0 and 5) in place of Spectral; the setup builds only Spectral and Utility" },
+  { name: "lookahead-transition", latencyClass: "plain", repeat: "burst", periodSec: null, fixture: null, start: "limiter-lookahead-5",
+    cycle: [{ edits: ["lookahead-1ms"], state: "limiter-lookahead-1" }, { edits: ["lookahead-5ms"], state: "limiter-lookahead-5" }],
+    needs: "no settle evidence: a Limiter lookahead change (1..5 ms, effects-params.ts:796) is a parameter patch, and the limiter's path delay stays fixed at 5 ms "
+      + "(audio_core.cpp:3196), so the host logs no graph-publish for it; the only patch line is the failure line processor-patch-timeout (audio-host.cpp:3706). "
+      + "Needs a host evidence line for an applied processor patch (native change)" },
   { name: "undo-redo-burst", latencyClass: "plain", repeat: "burst", periodSec: null, fixture: "phase5:remove-readd-track", start: "restored",
     cycle: [{ edits: ["track-delete"], state: "deleted" }, { edits: ["undo"], state: "restored" },
       { edits: ["redo"], state: "deleted" }, { edits: ["undo"], state: "restored" }] },
-  { name: "delete-while-starting", latencyClass: "plain", repeat: "burst", periodSec: null, fixture: "phase5:delete-clip", start: "clip-restored-stopped",
-    cycle: [{ edits: ["play", "clip-delete"], state: "clip-deleted-playing" }, { edits: ["stop", "undo"], state: "clip-restored-stopped" }] },
+  { name: "delete-while-starting", latencyClass: "plain", repeat: "burst", periodSec: null, fixture: null, start: "clip-restored-playing",
+    cycle: [{ edits: ["stop", "play", "clip-delete"], state: "clip-deleted-playing" }, { edits: ["clip-restore"], state: "clip-restored-playing" }],
+    needs: "its reference cannot replay the burst's stop and play restarts at the same transport frames (they are timed by the settle), so a no-edit capture would not "
+      + "be comparable; needs a frame-scheduled restart in both. An external clip delete also has no UI undo (ae-08-phase-5-fixture.ts remove-readd-track comment)" },
   { name: "paged-playback", latencyClass: "asset", repeat: "burst", periodSec: null, fixture: "phase5:add-paged-asset", start: "paged-asset-absent",
     cycle: [{ edits: ["asset-import"], state: "paged-asset-present" }, { edits: ["asset-clip-delete"], state: "paged-asset-absent" }] },
   { name: "held-note-unrelated-edit", latencyClass: "plain", repeat: "burst", periodSec: null, fixture: "phase5:held-note", start: "base",
-    cycle: [{ edits: ["track-create"], state: "extra-track" }, { edits: ["track-delete"], state: "base" }] },
+    cycle: [{ edits: ["silent-track-create"], state: "extra-track" }, { edits: ["silent-track-delete"], state: "base" }] },
   { name: "tempo-burst", latencyClass: "plain", repeat: "burst", periodSec: null, fixture: "phase5:raw-tempo", start: "tempo-120",
     cycle: [{ edits: ["tempo-137"], state: "tempo-137" }, { edits: ["tempo-120"], state: "tempo-120" }] },
   { name: "manual-automation-override", latencyClass: "plain", repeat: "burst", periodSec: null, fixture: null, start: "lane-armed",
     cycle: [{ edits: ["knob-drag"], state: "lane-overridden" }, { edits: ["lane-rearm"], state: "lane-armed" }],
-    needs: "an automation lane on the Utility gain plus a UI knob drag during playback; effect-state has the drag but no lane" },
+    needs: "no settle evidence: a manual override of an automated parameter is a live parameter write, which the host logs no publication for (see lookahead-transition); "
+      + "the lane (automation.set) and the knob drag (phase 5 effect-state) exist" },
   { name: "sustained-live-midi", latencyClass: "plain", repeat: "burst", periodSec: null, fixture: null, start: "base",
     cycle: [{ edits: ["track-create"], state: "extra-track" }, { edits: ["track-delete"], state: "base" }],
-    needs: "a live MIDI input source (virtual port or device) holding a note on an instrument track; no fixture drives MIDI input" },
+    needs: "NOT CERTIFIABLE HERE: needs a MIDI input source. This machine lists only the built-in and iPhone microphones (system_profiler SPAudioDataType), no loopback or "
+      + "virtual MIDI driver, and no C1 or phase 7 tool drives MIDI input (phase 7 fixture and rows do not exist, RUN throws 'Phase 7 is not implemented yet')" },
   { name: "record-target-guard", latencyClass: "plain", repeat: "burst", periodSec: null, fixture: null, start: "armed",
     cycle: [{ edits: ["target-edit"], state: "armed" }],
-    needs: "an input device and a take that is actually recording (11c: effect-state arms a track for monitoring only)" },
+    needs: "NOT CERTIFIABLE HERE: needs a really recording take on an input device. Only physical microphones exist here and no existing runner records (C1 effect-state only arms for monitoring); phase 7 rows do not exist" },
   { name: "unaffected-input", latencyClass: "plain", repeat: "burst", periodSec: null, fixture: null, start: "recording",
     cycle: [{ edits: ["unrelated-edit"], state: "recording" }],
-    needs: "recording + unrelated edit (11c): input device, an open take, and independent take verification" },
+    needs: "NOT CERTIFIABLE HERE: recording plus an unrelated edit needs the same input device and independent take verification (see record-target-guard)" },
   { name: "vst-insert", latencyClass: "vst-insert", repeat: "vst-burst", periodSec: null, fixture: null, start: "vst-absent",
     cycle: [{ edits: ["vst-insert"], state: "vst-present" }, { edits: ["vst-remove"], state: "vst-absent" }],
-    needs: "VST insert row in the phase 5 fixture shape; the trusted Valhalla flow exists only in run() for phases 1-4 (11c)" },
+    needs: vstNeeds },
   { name: "vst-remove-undo", latencyClass: "plain", repeat: "vst-burst", periodSec: null, fixture: null, start: "vst-present",
     cycle: [{ edits: ["vst-remove"], state: "vst-absent" }, { edits: ["undo"], state: "vst-present" }],
-    needs: "the same VST insert fixture, started with the plug-in present" },
+    needs: vstNeeds },
   { name: "vst-latency-switch", latencyClass: "raise", repeat: "vst-burst", periodSec: null, fixture: null, start: "latency-low",
     cycle: [{ edits: ["latency-high"], state: "latency-high" }, { edits: ["latency-low"], state: "latency-low" }],
-    needs: "the phase 6 test plug-in with a latency switch, reached through the packaged runner (also covers live latency notification)" },
+    needs: vstNeeds },
   { name: "open-editor", latencyClass: "vst-insert", repeat: "single", periodSec: null, fixture: null, start: "vst-present",
     cycle: [{ edits: ["editor-open"], state: "editor-open" }],
-    needs: "the VST insert fixture plus a UI step that opens the plug-in editor" },
+    needs: "not wired: no selector for the editor-open control is known (EffectsPanel.tsx offers no named editor button) and an open editor publishes no graph, so the row has no settle line; observe it in the first VST launch" },
   { name: "faulty-plugin", latencyClass: "vst-insert", repeat: "single", periodSec: null, fixture: null, start: "vst-absent",
     cycle: [{ edits: ["faulty-insert"], state: "vst-failed" }],
-    needs: "the phase 6 test plug-in with its fault switch; the packaged runner has only the Valhalla path" },
+    needs: "not wired: the test plug-in's Fault parameter (id 2) is reachable by external-plugin.parameters.set, but the expected verdict (unrelated audio live, failure reported, no fallback) has no host evidence line contract until the first VST launch shows what the host logs" },
   { name: "trust-negative", latencyClass: "vst-insert", repeat: "single", periodSec: null, fixture: null, start: "vst-absent",
     cycle: [{ edits: ["untrusted-insert"], state: "vst-rejected" }],
-    needs: "an untrusted or fingerprint-changed plug-in in the packaged profile" },
+    needs: "not wired: needs a second, untrusted or fingerprint-changed bundle in the private profile and a refusal verdict; a refused insert publishes nothing to settle on" },
 ]
 export const phase9Rows = phase9Matrix.map((row) => row.name)
 
@@ -102,38 +113,67 @@ export const mergeLaunches = (rows: readonly Row[]) => rows.reduce<Row[][]>((lau
   return joins ? [...launches.slice(0, -1), [...last, row]] : [...launches, [row]]
 }, [])
 
-// Timing assumptions of plan §8 (about 2 s to settle plus the 1 s oracle window per edit; 20 s per VST insert, measured in phase 6
-// first) and the phase 8 smoke (about 10 s per launch plus import and reload). Replace them with C2 timings.
-export const LAUNCH_SECONDS = 25
-export const STEP_SECONDS = 3
-export const VST_STEP_SECONDS = 20
+// Seconds per launch, per edit and per VST edit. The defaults are plan §8's assumptions (about 2 s to settle plus the 1 s oracle window
+// per edit, 20 s per VST insert) and the phase 8 smoke (about 10 s per launch plus import and reload); `--timings <evidence dir>`
+// replaces them with what a real phase 9 run measured (`measuredTimings`).
+export type Timings = { launchSeconds: number; stepSeconds: number; vstStepSeconds: number }
+export const assumedTimings: Timings = { launchSeconds: 25, stepSeconds: 3, vstStepSeconds: 20 }
+// The certifying budget of plan §13 answer 4.
+export const BUDGET_SECONDS = 70 * 60
+export const FALLBACK_VST_REPETITIONS = 10
 const REFERENCE_PERIODS = 2
 
 type Reference = { kind: "full-length"; seconds: number } | { kind: "per-state"; states: string[]; seconds: number }
-export const referencePlan = (row: Row, steps: number): Reference => row.periodSec === null
-  ? { kind: "full-length", seconds: steps * (row.repeat === "vst-burst" ? VST_STEP_SECONDS : STEP_SECONDS) }
+export const referencePlan = (row: Row, steps: number, timings: Timings): Reference => row.periodSec === null
+  ? { kind: "full-length", seconds: steps * (row.repeat === "vst-burst" ? timings.vstStepSeconds : timings.stepSeconds) }
   : { kind: "per-state", states: [...new Set(row.cycle.map((step) => step.state))], seconds: REFERENCE_PERIODS * row.periodSec }
+
+// Launches in run order: each merged launch is a burst and then its no-edit reference of the burst's length, and the first launch
+// of each latency class adds one no-edit duplicate (calibration) after them, because tolerance is calibrated once per class.
+export type LaunchStep = { role: "burst" | "reference" | "calibration"; launch: number; latencyClass: LatencyClass }
+export const launchPlan = (launches: readonly Row[][]): LaunchStep[] => {
+  const calibrated = new Set<LatencyClass>()
+  return launches.flatMap((launch, index) => {
+    const latencyClass = launch[0]?.latencyClass
+    if (latencyClass === undefined) return []
+    const roles: LaunchStep["role"][] = calibrated.has(latencyClass) ? ["burst", "reference"] : ["burst", "reference", "calibration"]
+    calibrated.add(latencyClass)
+    return roles.map((role) => ({ role, launch: index, latencyClass }))
+  })
+}
 
 // A launch is its merged rows' bursts plus one reference launch (per state for periodic rows, one per state's seconds), and each
 // latency class adds one calibration launch as long as its longest reference.
-export const wallSeconds = (launches: readonly Row[][], repetitions: number, vstRepetitions: number) => {
+export const wallSeconds = (launches: readonly Row[][], repetitions: number, vstRepetitions: number, timings: Timings = assumedTimings) => {
   const sum = (values: number[]) => values.reduce((total, value) => total + value, 0)
   const costs = launches.map((launch) => {
     const bursts = launch.map((row) => {
       const steps = burstSchedule(row, repetitionsFor(row, repetitions, vstRepetitions)).length
-      return { steps, burst: steps * (row.repeat === "vst-burst" ? VST_STEP_SECONDS : STEP_SECONDS), row }
+      return { steps, burst: steps * (row.repeat === "vst-burst" ? timings.vstStepSeconds : timings.stepSeconds), row }
     })
     const burst = sum(bursts.map((entry) => entry.burst))
     const first = bursts[0]
     const reference = first === undefined ? 0 : sum(bursts.map((entry) => {
-      const plan = referencePlan(entry.row, entry.steps)
+      const plan = referencePlan(entry.row, entry.steps, timings)
       return plan.kind === "per-state" ? plan.states.length * plan.seconds : plan.seconds
     }))
     return { latencyClass: first?.row.latencyClass, burst, reference }
   })
   const longest = new Map<LatencyClass | undefined, number>()
   for (const cost of costs) longest.set(cost.latencyClass, Math.max(longest.get(cost.latencyClass) ?? 0, cost.reference))
-  return sum(costs.map((cost) => 2 * LAUNCH_SECONDS + cost.burst + cost.reference)) + sum([...longest.values()].map((reference) => LAUNCH_SECONDS + reference))
+  return sum(costs.map((cost) => 2 * timings.launchSeconds + cost.burst + cost.reference))
+    + sum([...longest.values()].map((reference) => timings.launchSeconds + reference))
+}
+
+// The certifying run keeps the requested VST repetitions unless the budget would exceed 70 min; then only the VST burst rows drop
+// to 10 (the overnight run keeps its own count). Non-VST rows and aperiodic references are never shortened.
+export const chooseVstRepetitions = (launches: readonly Row[][], repetitions: number, requested: number, timings: Timings) => {
+  const minutes = (vstRepetitions: number) => wallSeconds(launches, repetitions, vstRepetitions, timings) / 60
+  const requestedMinutes = minutes(requested)
+  if (requestedMinutes <= BUDGET_SECONDS / 60 || requested <= FALLBACK_VST_REPETITIONS || !launches.some((launch) => launch.some((row) => row.repeat === "vst-burst")))
+    return { vstRepetitions: requested, why: `${requested} VST repetitions: ${requestedMinutes.toFixed(1)} min fits ${BUDGET_SECONDS / 60} min or no VST burst row is selected` }
+  return { vstRepetitions: FALLBACK_VST_REPETITIONS, why: `${requested} VST repetitions would take ${requestedMinutes.toFixed(1)} min, over ${BUDGET_SECONDS / 60} min: `
+    + `the VST burst rows drop to ${FALLBACK_VST_REPETITIONS} (${minutes(FALLBACK_VST_REPETITIONS).toFixed(1)} min); the overnight run keeps ${requested}` }
 }
 
 // ---- Settling on host evidence ----
@@ -184,14 +224,17 @@ export const awaitPublicationComplete = (out: string, sinceWallMs: number, raise
 export type LoggedEdit = { index: number; name: string; wallMs: number; settledWallMs: number | undefined;
   fromLatencyFrames: number; toLatencyFrames: number }
 export type Perform = (edit: string) => Promise<{ fromLatencyFrames: number; toLatencyFrames: number }>
-const SETTLE_DEADLINE_MS = 15_000
+// A VST edit waits for a worker to start (the plan assumes 20 s per insert), so its deadline is longer.
+const settleDeadlineMs = (row: Row) => row.repeat === "vst-burst" ? 60_000 : 15_000
 
 // Runs one row's burst inside a launch. Each step's edits run together; the step settles once, when the host has logged the
-// publication. Writes phase9-edits.json (the shape ae-08-latency-gates.ts reads) and latency-class.json even when a step fails.
-export const runBurst = async (input: { out: string; row: Row; repetitions: number; perform: Perform
+// publication. Writes phase9-edits.json (the shape ae-08-latency-gates.ts reads) and latency-class.json into `directory`, the
+// row's own folder under the run, even when a step fails. `out` is the launch capture the host appends its evidence to.
+export const runBurst = async (input: { out: string; directory: string; row: Row; repetitions: number; perform: Perform; deadlineMs?: number
   mark: (event: string, fields?: Record<string, string | number | boolean>) => Promise<void> }) => {
-  const { out, row, mark } = input
+  const { out, directory, row, mark } = input
   const logged: LoggedEdit[] = []
+  await mkdir(directory, { recursive: true })
   try {
     for (const step of burstSchedule(row, input.repetitions)) {
       const wallMs = Date.now()
@@ -199,13 +242,13 @@ export const runBurst = async (input: { out: string; row: Row; repetitions: numb
       const moves = []
       for (const edit of step.edits) moves.push({ name: edit, ...await input.perform(edit) })
       const raise = moves.some((move) => move.toLatencyFrames > move.fromLatencyFrames)
-      const settledWallMs = await awaitPublicationComplete(out, wallMs, raise, SETTLE_DEADLINE_MS)
+      const settledWallMs = await awaitPublicationComplete(out, wallMs, raise, input.deadlineMs ?? settleDeadlineMs(row))
       await mark("burst-settled", { row: row.name, index: step.index, settledWallMs })
       for (const move of moves) logged.push({ index: step.index, wallMs, settledWallMs, ...move })
     }
   } finally {
-    await writeFile(path.join(out, "phase9-edits.json"), JSON.stringify({ phase: 9, row: row.name, edits: logged }, null, 2))
-    await writeFile(path.join(out, "latency-class.json"), JSON.stringify({ class: row.latencyClass }))
+    await writeFile(path.join(directory, "phase9-edits.json"), JSON.stringify({ phase: 9, row: row.name, edits: logged }, null, 2))
+    await writeFile(path.join(directory, "latency-class.json"), JSON.stringify({ class: row.latencyClass }))
   }
   return logged
 }
@@ -258,20 +301,25 @@ const wallOf = (events: Awaited<ReturnType<typeof jsonl>>, name: string) => {
 }
 const planSchema = z.object({
   phase: z.number(), row: z.string().optional(), editStart: z.number().optional(),
-  edits: z.array(z.object({ wallMs: z.number(), fromLatencyFrames: z.number().default(0), toLatencyFrames: z.number().default(0) })).default([]),
+  edits: z.array(z.object({ index: z.number().optional(), wallMs: z.number(), fromLatencyFrames: z.number().default(0), toLatencyFrames: z.number().default(0) })).default([]),
   commits: z.array(z.object({ wallMs: z.number() })).default([]),
   effectState: z.object({ fromLatencyFrames: z.number(), toLatencyFrames: z.number() }).optional(),
 })
-const editFiles = ["phase4-edits.json", "phase5-edits.json", "phase8-edits.json"]
+const editFiles = ["phase4-edits.json", "phase5-edits.json", "phase8-edits.json", "phase9-edits.json"]
+
+// The edits of one burst step share an index; the step starts at its first edit and raises if any of them does.
+const burstStepEdits = (edits: z.infer<typeof planSchema>["edits"]) => [...Map.groupBy(edits, (edit) => edit.index)].map(([, group]) => ({
+  wallMs: Math.min(...group.map((edit) => edit.wallMs)), raise: group.some((edit) => edit.toLatencyFrames > edit.fromLatencyFrames) }))
 
 // A stored row is judged as a burst of its edits. Phase 4 logs each edit; phase 5 logs the commits that follow an edit start (the
-// effect-state row logs the FFT click as an action); phase 8 logs one edit start.
+// effect-state row logs the FFT click as an action); phase 8 logs one edit start; phase 9 logs every step's edits.
 export const judgeStoredRow = async (directory: string, file: string) => {
   const plan = planSchema.parse(JSON.parse(await readFile(path.join(directory, file), "utf8")))
   const host = parseHostLines(await readFile(path.join(directory, "host.jsonl"), "utf8"))
   const actions = await jsonl(path.join(directory, "actions.jsonl"))
   const end = wallOf(actions, "capture-end")
-  const edits = plan.phase === 4 ? plan.edits.map((edit) => ({ wallMs: edit.wallMs, raise: edit.toLatencyFrames > edit.fromLatencyFrames }))
+  const edits = plan.phase === 9 ? burstStepEdits(plan.edits)
+    : plan.phase === 4 ? plan.edits.map((edit) => ({ wallMs: edit.wallMs, raise: edit.toLatencyFrames > edit.fromLatencyFrames }))
     : plan.effectState ? [{ wallMs: wallOf(actions, "effect-fft-edit"), raise: plan.effectState.toLatencyFrames > plan.effectState.fromLatencyFrames }]
       : plan.phase === 8 ? [{ wallMs: z.number().parse(plan.editStart), raise: false }]
         : [z.number().parse(plan.editStart), ...plan.commits.map((commit) => commit.wallMs)].slice(0, Math.max(1, plan.commits.length))
@@ -336,9 +384,9 @@ export const selfTest = async () => {
   check(burstSchedule(burst, 20).every((step) => step.edits.join() === "fft-4096,fft-512"), "a raise and a lower share one step")
   check(burstSchedule(find("undo-redo-burst"), 10).length === 12, "undo/redo rounds up to whole cycles")
   const periodic = { ...fft, periodSec: 1 }
-  const shortReferences = referencePlan(periodic, 100)
+  const shortReferences = referencePlan(periodic, 100, assumedTimings)
   check(shortReferences.kind === "per-state" && shortReferences.states.length === 2 && shortReferences.seconds === 2, "a periodic row gets two short per-state references")
-  const fullReference = referencePlan(fft, 100)
+  const fullReference = referencePlan(fft, 100, assumedTimings)
   check(fullReference.kind === "full-length" && fullReference.seconds === 300, "another row gets one full-length capture")
   check(find("vst-insert").repeat === "vst-burst" && find("open-editor").repeat === "single", "VST repeat classes")
   check(repetitionsFor(find("vst-insert"), 100, 20) === 20 && repetitionsFor(find("open-editor"), 100, 20) === 1
@@ -349,6 +397,63 @@ export const selfTest = async () => {
   check(mergeLaunches([attach, { ...fft, latencyClass: "plain" }]).length === 2, "different latency classes do not merge")
   check(phase9Matrix.every((row) => (row.fixture === null) === (row.needs !== undefined)), "a row is missing exactly when it names what it needs")
   check(new Set(phase9Rows).size === phase9Rows.length, "row names are distinct")
+  // Launch plan: every merged launch is a burst and a reference, and the first launch of each latency class adds the calibration duplicate.
+  const built = phase9Matrix.filter((row) => row.fixture !== null)
+  const launches = mergeLaunches(built)
+  const order = launchPlan(launches)
+  const classes = new Set(launches.map((launch) => launch[0]?.latencyClass))
+  check(order.length === 2 * launches.length + classes.size, `launch plan has ${order.length} launches for ${launches.length} merged launches and ${classes.size} classes`)
+  check(order.filter((step) => step.role === "calibration").length === classes.size, "one calibration per latency class")
+  check(order.every((step, position) => step.role !== "reference" || order[position - 1]?.role === "burst" && order[position - 1]?.launch === step.launch), "a reference follows its own burst")
+  check(order[0]?.role === "burst" && order[1]?.role === "reference" && order[2]?.role === "calibration", "the first launch runs burst, reference, calibration")
+  check(launchPlan([[attach], [fft]]).filter((step) => step.role === "calibration").length === 1, "a second launch of the same class is not calibrated again")
+  check(launchPlan([]).length === 0, "no rows, no launches")
+  // Budget rule: only over 70 min do the VST burst rows drop to 10, and the reason is printed.
+  const withVst = mergeLaunches(phase9Matrix)
+  const slowVst = { ...assumedTimings, vstStepSeconds: 60 }
+  const dropped = chooseVstRepetitions(withVst, 20, 20, slowVst)
+  check(dropped.vstRepetitions === FALLBACK_VST_REPETITIONS && /over 70 min/.test(dropped.why), `a 60 s VST edit drops to 10, got ${JSON.stringify(dropped)}`)
+  const fits = chooseVstRepetitions(withVst, 20, 20, { ...assumedTimings, vstStepSeconds: 5 })
+  check(fits.vstRepetitions === 20 && /fits 70 min/.test(fits.why), `a 5 s VST edit keeps 20, got ${JSON.stringify(fits)}`)
+  check(chooseVstRepetitions(mergeLaunches(built), 20, 20, slowVst).vstRepetitions === 20, "no VST burst row selected, nothing to drop")
+  check(chooseVstRepetitions(withVst, 20, 10, slowVst).vstRepetitions === 10, "a request at or under 10 is never raised or cut")
+  check(wallSeconds(withVst, 20, 10, slowVst) < wallSeconds(withVst, 20, 20, slowVst), "fewer VST repetitions cost less wall time")
+  // Measured timings replace the assumptions: a step is its edit-to-settle time plus the 1 s window.
+  const measured = measuredTimings([{ vst: false, edits: [{ index: 1, wallMs: 0, settledWallMs: 1000 }, { index: 2, wallMs: 5000, settledWallMs: 7000 }] },
+    { vst: true, edits: [{ index: 1, wallMs: 0, settledWallMs: 9000 }] }], [20, 30])
+  check(measured.stepSeconds === 2.5 && measured.vstStepSeconds === 10 && measured.launchSeconds === 25, `measured timings, got ${JSON.stringify(measured)}`)
+  check(measuredTimings([], []).stepSeconds === undefined, "no evidence measures nothing")
+  // The burst runner against a fake performer that appends the host's publication line.
+  const burstDirectory = await mkdtemp(path.join(tmpdir(), "ae08-phase9-burst-"))
+  try {
+    const tempo = find("tempo-burst")
+    const edits: string[] = []
+    const logged = await runBurst({ out: burstDirectory, directory: path.join(burstDirectory, tempo.name), row: tempo, repetitions: 4, mark: async () => undefined,
+      perform: async (edit) => {
+        edits.push(edit)
+        await appendFile(path.join(burstDirectory, "native-1.jsonl"), `${JSON.stringify({ ...publish, publicationFrame: 96000 + edits.length, wallMs: Date.now() })}\n`)
+        return { fromLatencyFrames: 0, toLatencyFrames: 0 }
+      } })
+    check(edits.join() === "tempo-137,tempo-120,tempo-137,tempo-120" && logged.every((edit) => edit.settledWallMs !== undefined), `four edits in schedule order, settled: ${edits}`)
+    const written = z.object({ phase: z.number(), edits: z.array(z.object({ index: z.number() })) }).parse(JSON.parse(await readFile(path.join(burstDirectory, tempo.name, "phase9-edits.json"), "utf8")))
+    check(written.phase === 9 && written.edits.map((edit) => edit.index).join() === "1,2,3,4", "phase9-edits.json lists the edits by step")
+    check(await readFile(path.join(burstDirectory, tempo.name, "latency-class.json"), "utf8") === `{"class":"plain"}`, "the row declares its class")
+    // Edits that share a step run in their declared order and settle once.
+    const paired: string[] = []
+    const pairedLogged = await runBurst({ out: burstDirectory, directory: path.join(burstDirectory, "paired"), repetitions: 2, mark: async () => undefined,
+      row: { ...tempo, name: "paired", start: "s", cycle: [{ edits: ["first", "second"], state: "s" }] },
+      perform: async (edit) => {
+        paired.push(edit)
+        await appendFile(path.join(burstDirectory, "native-1.jsonl"), `${JSON.stringify({ ...publish, publicationFrame: 97000 + paired.length, wallMs: Date.now() })}\n`)
+        return { fromLatencyFrames: 0, toLatencyFrames: 0 }
+      } })
+    check(paired.join() === "first,second,first,second" && pairedLogged.length === 4 && new Set(pairedLogged.map((edit) => edit.settledWallMs)).size <= 2, `paired edits keep their order: ${paired}`)
+    // A step without a publication fails the launch as a setup failure, and the evidence of the steps before it is still written.
+    const failing = path.join(burstDirectory, "failing")
+    const failure = await runBurst({ out: failing, directory: failing, row: { ...tempo, name: "failing" }, repetitions: 2, mark: async () => undefined, deadlineMs: 100,
+      perform: async () => ({ fromLatencyFrames: 0, toLatencyFrames: 0 }) }).then(() => "resolved", (error) => error instanceof SetupFailure ? "setup" : "other")
+    check(failure === "setup" && JSON.parse(await readFile(path.join(failing, "phase9-edits.json"), "utf8")).edits.length === 0, `a missing line is a setup failure with evidence kept, got ${failure}`)
+  } finally { await rm(burstDirectory, { recursive: true }) }
   // The live wait: a line appended later resolves it; no line is a SetupFailure when the deadline passes, never a pass.
   const directory = await mkdtemp(path.join(tmpdir(), "ae08-phase9-"))
   try {
@@ -361,9 +466,30 @@ export const selfTest = async () => {
   console.log("ae-08 phase 9 matrix self-test: pass")
 }
 
-const plan = (args: string[]) => {
+// What a real run measured: the runner writes this next to its evidence (phase9-timings.json). A step costs its edit-to-settle time
+// plus the 1 s oracle window; a launch costs its launch-to-normal-quit time.
+export const measuredEditsSchema = z.array(z.object({ index: z.number(), wallMs: z.number(), settledWallMs: z.number().optional() }))
+type MeasuredEdit = z.infer<typeof measuredEditsSchema>[number]
+export const measuredTimings = (rows: readonly { vst: boolean; edits: readonly MeasuredEdit[] }[], launchSeconds: readonly number[]) => {
+  const mean = (values: number[]) => values.length ? values.reduce((total, value) => total + value, 0) / values.length : undefined
+  const steps = (vst: boolean) => rows.filter((row) => row.vst === vst).flatMap((row) => [...Map.groupBy(row.edits, (edit) => edit.index).values()]
+    .flatMap((group) => group[0]?.settledWallMs === undefined ? [] : [(group[0].settledWallMs - group[0].wallMs + MIN_WINDOW_MS) / 1000]))
+  const stepSeconds = mean(steps(false)), vstStepSeconds = mean(steps(true)), launch = mean([...launchSeconds])
+  return { ...(launch !== undefined && { launchSeconds: launch }), ...(stepSeconds !== undefined && { stepSeconds }), ...(vstStepSeconds !== undefined && { vstStepSeconds }) }
+}
+const timingsSchema = z.object({ launchSeconds: z.number().positive().optional(), stepSeconds: z.number().positive().optional(), vstStepSeconds: z.number().positive().optional() })
+export const readTimings = async (file: string): Promise<Timings> => {
+  const measured = timingsSchema.parse(JSON.parse(await readFile(file, "utf8")))
+  return { launchSeconds: measured.launchSeconds ?? assumedTimings.launchSeconds, stepSeconds: measured.stepSeconds ?? assumedTimings.stepSeconds,
+    vstStepSeconds: measured.vstStepSeconds ?? assumedTimings.vstStepSeconds }
+}
+
+const plan = async (args: string[]) => {
   const number = (flag: string, fallback: number) => Number(args[args.indexOf(flag) + 1] ?? fallback)
   const repetitions = number("--repetitions", 20), vstRepetitions = number("--vst-repetitions", 20)
+  const timingsFile = args[args.indexOf("--timings") + 1]
+  const timings = args.includes("--timings") && timingsFile ? await readTimings(timingsFile) : assumedTimings
+  console.log(`timings: ${timings === assumedTimings ? "ASSUMED" : `measured, ${timingsFile}`} ${JSON.stringify(timings)}`)
   const built = phase9Matrix.filter((row) => row.fixture !== null)
   for (const row of phase9Matrix) {
     const steps = burstSchedule(row, repetitionsFor(row, repetitions, vstRepetitions)).length
@@ -371,11 +497,16 @@ const plan = (args: string[]) => {
   }
   const launches = mergeLaunches(built)
   console.log(`built rows: ${built.length}/${phase9Matrix.length}, launches after merging: ${launches.length}`)
-  console.log(`wall time, built rows: ${(wallSeconds(launches, repetitions, vstRepetitions) / 60).toFixed(1)} min; all rows built: ${(wallSeconds(mergeLaunches(phase9Matrix), repetitions, vstRepetitions) / 60).toFixed(1)} min`)
+  console.log(`launch order: ${launchPlan(launches).map((step) => `${step.role}#${step.launch + 1}`).join(" ")}`)
+  console.log(`wall time, built rows: ${(wallSeconds(launches, repetitions, vstRepetitions, timings) / 60).toFixed(1)} min`)
+  // The VST rows are not built, so the rule is applied to the whole matrix: this is the budget the certifying run would face.
+  const everything = mergeLaunches(phase9Matrix)
+  console.log(`wall time, all rows built: ${(wallSeconds(everything, repetitions, vstRepetitions, timings) / 60).toFixed(1)} min`)
+  console.log(`certifying VST repetitions: ${chooseVstRepetitions(everything, repetitions, vstRepetitions, timings).why}`)
 }
 
 if (import.meta.main) {
   if (Bun.argv[2] === "--self-test") await selfTest()
-  else if (Bun.argv[2] === "--plan") plan(Bun.argv.slice(3))
-  else throw new Error("Usage: ae-08-phase-9-matrix.ts --self-test | --plan [--repetitions N] [--vst-repetitions N]")
+  else if (Bun.argv[2] === "--plan") await plan(Bun.argv.slice(3))
+  else throw new Error("Usage: ae-08-phase-9-matrix.ts --self-test | --plan [--repetitions N] [--vst-repetitions N] [--timings phase9-timings.json]")
 }

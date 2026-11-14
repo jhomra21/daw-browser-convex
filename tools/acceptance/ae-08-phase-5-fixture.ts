@@ -22,22 +22,53 @@ export type Phase5Context = {
   read: <Value>(script: string, schema: z.ZodType<Value>) => Promise<Value>
   reload: () => Promise<void>
   mark: (event: string, fields?: Record<string, string | number | boolean>) => Promise<void>
+  // Phase 9 only: how long the playing content must last, since a burst outlasts phase 5's own 17 s. Phase 5 leaves it unset.
+  contentSeconds?: number
 }
+// What the UI helpers use of the context.
+type UiContext = Pick<Phase5Context, "evaluate" | "interact">
 const ref = (id: string) => ({ source: "persisted", id })
 const record = z.record(z.string(), z.json())
 // browserCommand aborts an eval after browserCommandTimeoutMs; every page-side
 // deadline fires first, so the page's named error, not the abort, reports a stall.
 export const pageDeadlineMs = browserCommandTimeoutMs([]) - 5_000
 // Observe the UI commit, not an arbitrary delay. The deadline is failure-only.
-const waitForUi = (context: Phase5Context, failure: string, ready: string) => context.evaluate(`new Promise((resolve,reject)=>{
+export const waitForUi = (context: Pick<Phase5Context, "evaluate">, failure: string, ready: string) => context.evaluate(`new Promise((resolve,reject)=>{
   const ready=()=>(${ready});
   const observer=new MutationObserver(()=>{if(ready()){observer.disconnect();clearTimeout(timer);resolve(true)}});
   const timer=setTimeout(()=>{observer.disconnect();reject(new Error(${JSON.stringify(failure)}))},${pageDeadlineMs});
   observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true});
   if(ready()){observer.disconnect();clearTimeout(timer);resolve(true)}
 })`)
-export const waitImportedClip = (context: Phase5Context, name: string) => waitForUi(context, `Import UI deadline: ${name}`,
+export const waitImportedClip = (context: Pick<Phase5Context, "evaluate">, name: string) => waitForUi(context, `Import UI deadline: ${name}`,
   `[...document.querySelectorAll('[data-timeline-clip]')].some(e=>e.getAttribute('title')?.includes(${JSON.stringify(name)}))`)
+
+// The Spectral device's FFT size buttons on the selected track.
+export const selectFftSize = async (context: Pick<Phase5Context, "evaluate">, fftSize: 512 | 4096) => {
+  await context.evaluate(`(()=>{
+    const button=[...(document.querySelector('.device-spectral')?.querySelectorAll('button')??[])].find(b=>b.textContent?.trim()===${JSON.stringify(String(fftSize))});
+    if(!button||button.disabled)throw new Error("FFT button unavailable");button.click();return true;
+  })()`)
+  await waitForUi(context, `Spectral FFT ${fftSize} not selected`, `[...(document.querySelector('.device-spectral')?.querySelectorAll('button')??[])]
+    .find(b=>b.textContent?.trim()===${JSON.stringify(String(fftSize))})?.getAttribute('aria-pressed')==='true'`)
+}
+
+// The product's undo and redo shortcuts (Ctrl+Z, Ctrl+Shift+Z) on the timeline window.
+export const pressHistoryKey = (context: Pick<Phase5Context, "evaluate">, redo: boolean) => context.evaluate(`(()=>{
+  document.activeElement?.blur();
+  window.dispatchEvent(new KeyboardEvent('keydown',{key:${redo ? "'Z'" : "'z'"},code:'KeyZ',ctrlKey:true,shiftKey:${redo},bubbles:true}));return true;
+})()`)
+
+// Deletes the track whose selector ends in `: ${name}` through its context menu and the confirmation dialog.
+export const deleteTrackThroughUi = async (context: UiContext, name: string) => {
+  await context.evaluate(`(()=>{
+    const button=[...document.querySelectorAll('button[aria-label]')].find(b=>b.getAttribute('aria-label')?.endsWith(${JSON.stringify(`: ${name}`)}));
+    if(!button)throw new Error("Delete track selector missing");
+    button.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:250,clientY:250}));return true;
+  })()`)
+  await context.interact(["find", "text", "Delete track", "click", "--exact"])
+  await context.interact(["find", "role", "button", "click", "--name", "Delete Track", "--exact"])
+}
 
 // Nonperiodic envelope plus DC prevents a single missing sample from landing
 // on a sine zero and makes a block shift observably wrong at every seam.
@@ -85,12 +116,7 @@ const runEffectStateEdit = async (context: Phase5Context, input: {
   const fftAfterFrame = 48000 * 2, dragAfterFrame = 48000 * 5
   const before = await readKnobDb(context)
   await context.mark("effect-fft-edit")
-  await context.evaluate(`(()=>{
-    const button=[...(document.querySelector('.device-spectral')?.querySelectorAll('button')??[])].find(b=>b.textContent?.trim()==='4096');
-    if(!button||button.disabled)throw new Error("FFT button unavailable");button.click();return true;
-  })()`)
-  await waitForUi(context, "Spectral FFT 4096 not selected", `[...(document.querySelector('.device-spectral')?.querySelectorAll('button')??[])]
-    .find(b=>b.textContent?.trim()==='4096')?.getAttribute('aria-pressed')==='true'`)
+  await selectFftSize(context, 4096)
   await input.waitFrame(dragAfterFrame)
   const knob = await context.read(`JSON.stringify((()=>{
     const box=${utilityGainKnob}.getBoundingClientRect();return {x:Math.round(box.x+box.width/2),y:Math.round(box.y+box.height/2)};
@@ -201,21 +227,23 @@ export const waitNativeFrame = (context: Phase5Context, frame: number) => contex
   });
 })`)
 
-export const runPhase5Fixture = async (context: Phase5Context) => {
-  const { out, profile, row, mutate, snapshot, mark } = context
+// Builds the row's project (retained 180 s source, "Changed right" track and its clip, the row's devices or notes) and
+// reloads it. It plays nothing and captures nothing, so phase 9 reuses it as the start state of a burst.
+export const setupPhase5Fixture = async (context: Phase5Context) => {
+  const { out, profile, row, mutate, snapshot } = context
+  const { contentSeconds } = context
   const runtime = (args: string[]) => command(profile, ["host", ...args])
-  const waitFrame = (frame: number) => waitNativeFrame(context, frame)
   const retainedFile = path.join(out, "retained.wav")
   const changedFile = path.join(out, "changed.wav")
-  await writePhase5Asset(retainedFile, 180, false)
-  await writePhase5Asset(changedFile, row === "add-paged-asset" ? 180 : 30, true)
+  await writePhase5Asset(retainedFile, Math.max(180, contentSeconds ?? 0), false)
+  await writePhase5Asset(changedFile, row === "add-paged-asset" ? 180 : (contentSeconds ?? 24) + 6, true)
   await runtime(["import", "--path", retainedFile])
   await waitImportedClip(context, "retained")
   let state = await snapshot()
   const retained = state.clips.find((clip) => clip.name.includes("retained"))
   if (!retained?.source) throw new Error("Retained fixture import missing")
   await mutate([{ kind: "clip.move", clip: ref(retained.id), track: ref(retained.trackId), startSec: 0 },
-    { kind: "clip.timing.set", clip: ref(retained.id), duration: 180 },
+    { kind: "clip.timing.set", clip: ref(retained.id), duration: Math.max(180, contentSeconds ?? 0) },
     { kind: "project.settings.set", tempoBpm: 120, loopEnabled: false }])
   await mutate([{ kind: "track.create", name: "Changed right", trackKind: "audio" }])
   state = await snapshot()
@@ -234,7 +262,7 @@ export const runPhase5Fixture = async (context: Phase5Context) => {
     if (!clip) throw new Error("Changed fixture import missing")
     changedId = clip.id
     await mutate([{ kind: "clip.move", clip: ref(clip.id), track: ref(changedTrack.id), startSec: 0 },
-      { kind: "clip.timing.set", clip: ref(clip.id), duration: 24 }])
+      { kind: "clip.timing.set", clip: ref(clip.id), duration: contentSeconds ?? 24 }])
   }
   if (row === "effect-state") {
     // Spectral then Utility on the right-only source: the FFT size is audible
@@ -262,8 +290,8 @@ export const runPhase5Fixture = async (context: Phase5Context) => {
           ampEnvelope: { attackSec: 0.005, decaySec: 0.01, sustain: 1, releaseSec: 0.05 } } },
       { kind: "effect.upsert", target: { kind: "track", track: ref(synth.id) }, effectKind: "utility",
         params: { version: 1, state: { ...createDefaultUtilityParams(), balance: 1 } } },
-      { kind: "clip.midi.create", track: ref(synth.id), name: "Held finite note", startSec: 0, duration: 16,
-        wave: "sine", gain: 0.1, notes: [{ id: "phase5-held", beat: 0, length: 24, pitch: 69, velocity: 0.4 }] },
+      { kind: "clip.midi.create", track: ref(synth.id), name: "Held finite note", startSec: 0, duration: contentSeconds ?? 16, wave: "sine", gain: 0.1,
+        notes: [{ id: "phase5-held", beat: 0, length: contentSeconds === undefined ? 24 : contentSeconds * 2, pitch: 69, velocity: 0.4 }] },
     ])
   }
   // Setup is outside the measured interval. A normal product reload makes
@@ -294,6 +322,14 @@ export const runPhase5Fixture = async (context: Phase5Context) => {
       window.__ae08EffectState=state;return true;
     })()`)
   }
+  return { changedTrack, changedId, changedFile }
+}
+
+export const runPhase5Fixture = async (context: Phase5Context) => {
+  const { out, profile, row, mutate, snapshot, mark } = context
+  const runtime = (args: string[]) => command(profile, ["host", ...args])
+  const waitFrame = (frame: number) => waitNativeFrame(context, frame)
+  const { changedTrack, changedId, changedFile } = await setupPhase5Fixture(context)
   await writeFile(path.join(out, "initial-snapshot.json"), JSON.stringify(await snapshot(), null, 2))
   await exportReference(context, "initial-reference")
   await runtime(["seek", "0"])
@@ -329,22 +365,13 @@ export const runPhase5Fixture = async (context: Phase5Context) => {
   } else if (row === "remove-readd-track") {
     // Public recovery remaps IDs. UI deletion records local history, whose
     // undo restores the original ID; an external deletion has no UI undo entry.
-    await context.evaluate(`(()=>{
-      const button=[...document.querySelectorAll('button[aria-label]')].find(b=>b.getAttribute('aria-label')?.endsWith(': Changed right'));
-      if(!button)throw new Error("Delete track selector missing");
-      button.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:250,clientY:250}));return true;
-    })()`)
-    await context.interact(["find", "text", "Delete track", "click", "--exact"])
-    await context.interact(["find", "role", "button", "click", "--name", "Delete Track", "--exact"])
+    await deleteTrackThroughUi(context, "Changed right")
     const deleted = await snapshot()
     if (deleted.tracks.some((track) => track.id === changedTrack.id)) throw new Error("UI track deletion did not commit")
     commits.push({ wallMs: Date.now(), revision: deleted.project.revision })
     await writeFile(path.join(out, `commit-${commits.length}-snapshot.json`), JSON.stringify(deleted, null, 2))
     await waitFrame(48000 * 5)
-    await context.evaluate(`(()=>{
-      document.activeElement?.blur();
-      window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',code:'KeyZ',ctrlKey:true,bubbles:true}));return true;
-    })()`)
+    await pressHistoryKey(context, false)
     await waitImportedClip(context, "changed")
     const restored = await snapshot()
     sameTrackId = restored.tracks.some((track) => track.id === changedTrack.id)

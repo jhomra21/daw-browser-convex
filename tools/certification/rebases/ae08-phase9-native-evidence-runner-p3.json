@@ -1,0 +1,25 @@
+{
+ "name": "ae08-phase9-native-evidence-runner-p3",
+ "sequence": 38,
+ "createdAt": "2026-11-14T06:00:00.000Z",
+ "revert": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 9 integration (cherry-picks of the native batch t3/223c8ce5 acd65836, 8fd69c79, 3d827091 and runner part 3 t3/b91f0f1f e7bc76b3; hand record, no --bless). (1) Re-pointed: analyzer:521:mutant `from`. F3 added `suspend` to the analyzer's warm-resume cold-event regex (`/stop|suspend|start|configure|rebuild|teardown|host-exit|host-spawn/i`); the mutation still replaces that clause with `true`. Run alone with --only --jobs 1: control and mutant PASS with the recorded oracle failure and the same three unrejected defects (the anchor failed first with 'Overlay requires one exact anchor'). The other analyzer arms 522-525 (control and mutant), c0:m514 and c0:m519 ran with --only --jobs 1 and PASS unchanged. (2) g-analyzer-selftest: the self-test prints 38 `\"rejected\": true` lines instead of 36 (F3: warm-resume-across-suspend and resume-across-untimed-stop, both intended pauseBoundary); none is false. (3) Gates run with --only --jobs 1: x-host-ctest, x-host-plugin-tests, x-portable-wasm, f-engine PASS; x-rtguard PASS (5 tests against 4 recorded: the new 'no revision-core branch' test; the first test is repaired, it looked for the removed latency_continuity_compatible and now asserts that no graph-wide verdict exists and that replaced_by_spectral_size_change compares only the Spectral kind and fft_size). x-wasm-source-hash FAILS as expected and is left for --full. (4) Left for --full, not touched: wasm sourceHash c6d13d896671c616ceb5b59bf604f302db311493ee3ba5b3bb10d5f685be4c48 -> 53ba8eb67e2462edf0cbf0c4757dfa7c995906b9be6a05759b39ce81af8c2325 (gate x-wasm-source-hash expects stdout afabc2f5..., already stale; manifest file sha256 b6a5df9a... -> a6983c49764bff7391aeca9ebafa97ea16c15df4f5501ceeb9cfbd03baa9345f, recorded 660e366b and 2cbaa4de; binary sha256 5b5b058089e2c3b3f6defc6d6b9a1c78576e17814ddc1d667121356b7fe37aec unchanged, recorded bba35816 and b60bb1dc); N native sources: native/audio-host-macos/src/audio-host.cpp f88ead1e..., native/audio-host-macos/tests/audio_host_test.cpp 775bc7ea..., native/audio-host-macos/tests/realtime_callback_guard.test.ts 90b37f15..., native/audio-core/src/audio_core.cpp 72afdd0e... and the x-host-ctest file hashes; the analyzer tools/acceptance/analyze-ae-08-continuity.ts (pinned a5c4f5ff...) -> 78bc2484...; the runner files ae-08-live-graph.ts, ae-08-phase-5-fixture.ts, ae-08-phase-9-{launch,matrix,rows,compare,devices,vst}.ts, ae-08-portable-campaign.ts, ae-08-iac-midi.swift (new or changed, unpinned); the Chromium runtime src/lib/desktop/native-playback-timeline.browser-runtime.tsx (its probe now fails fast when the handoff rebuilds the session; ea8069a4...). Gate count notes for --full: x-rtguard 5 against 4, x-portable-wasm 106 against 64, f-engine 4 recorded files moved their counts.",
+  "expectationsSha256": "0f8ed38becb669208be38a202d2b78eabd279be8f31df69e37bf0c7722ac21b2"
+ },
+ "watched": [],
+ "changes": [
+  {
+   "path": ["mutations", "arms", "id=analyzer:521:mutant", "spec", "changes", "#0", "from"],
+   "old": "      && !coldEvent(entry.event, /stop|start|configure|rebuild|teardown|host-exit|host-spawn/i)))",
+   "new": "      && !coldEvent(entry.event, /stop|suspend|start|configure|rebuild|teardown|host-exit|host-spawn/i)))"
+  },
+  {
+   "path": ["gates", "name=g-analyzer-selftest", "judge", "rejected"],
+   "old": 36,
+   "new": 38
+  }
+ ],
+ "seedRecordChanges": []
+}

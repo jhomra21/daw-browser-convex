@@ -1186,7 +1186,7 @@
    "judge": {
     "kind": "selftest",
     "exit": 0,
-    "rejected": 36
+    "rejected": 38
    }
   },
   {
@@ -68287,7 +68287,7 @@
      "changes": [
       {
        "file": "/tools/acceptance/analyze-ae-08-continuity.ts",
-       "from": "      && !coldEvent(entry.event, /stop|start|configure|rebuild|teardown|host-exit|host-spawn/i)))",
+       "from": "      && !coldEvent(entry.event, /stop|suspend|start|configure|rebuild|teardown|host-exit|host-spawn/i)))",
        "to": "      && true))"
       }
      ]

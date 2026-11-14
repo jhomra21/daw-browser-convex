@@ -276,6 +276,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
   });
   return (
     <EffectShell
+      class={failed() ? "opacity-60" : undefined}
       title={props.processor.manifest.identity.name}
       typeLabel={`${props.processor.manifest.identity.vendor} · VST3`}
       titleActions={(

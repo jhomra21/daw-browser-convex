@@ -127,13 +127,15 @@ const peakOf = (pcm: Pcm, channel: number, from: number, to: number) => {
   for (let frame = from; frame < to; frame++) peak = Math.max(peak, Math.abs(pcm.samples[frame * pcm.channels + channel] ?? NaN))
   return peak
 }
-export const compareDelete = (input: { output: Pcm; seam: number; endFrame: number }): Compare => {
+// `audibleUntil` ends the window that must hold the clip when the sound stops before the seam (a crash precedes its isolation).
+export const compareDelete = (input: { output: Pcm; seam: number; endFrame: number; audibleUntil?: number }): Compare => {
   const { output, seam, endFrame } = input
   const fade = fadeFramesFor(output.sampleRate)
+  const audibleUntil = input.audibleUntil ?? seam
   return () => {
-    const beforeFrom = seam - output.sampleRate / 2, afterFrom = seam + fade
+    const beforeFrom = audibleUntil - output.sampleRate / 2, afterFrom = seam + fade
     if (beforeFrom < 0 || endFrame - afterFrom < fade) return "the capture does not hold a window before and after the delete"
-    const present = peakOf(output, 1, beforeFrom, seam)
+    const present = peakOf(output, 1, beforeFrom, audibleUntil)
     if (!(present >= PRESENT_LEVEL)) return `the clip is not audible before the delete (peak ${present}), so its absence proves nothing`
     const after1 = peakOf(output, 1, afterFrom, endFrame)
     if (!(after1 === 0)) return `the deleted clip still sounds after its fade (peak ${after1} against ${present} before)`
@@ -167,19 +169,20 @@ const restartsBetween = (events: readonly HostEvent[], fromWallMs: number, toWal
 const named = (events: readonly HostEvent[]) => events.map((event) => event.event).join(", ")
 
 // An edit made while the editor is open publishes in place: after any step the editor is never reported closed and nothing restarts.
-export const compareEditor = (events: readonly HostEvent[], editWallMs: (index: number) => number): Compare => (window) => {
+export const compareEditor = (events: readonly HostEvent[], playingPid: number, editWallMs: (index: number) => number): Compare => (window) => {
   const from = editWallMs(window.index)
   const closed = events.filter((event) => event.event === "vst-editor-state" && event.open === false && event.wallMs >= from && event.wallMs <= window.toWallMs)
   if (closed.length) return "the editor was reported closed after the edit"
-  const restarted = restartsBetween(events, from, window.toWallMs)
+  const restarted = restartsBetween(events.filter((event) => event.pid === playingPid), from, window.toWallMs)
   return restarted.length ? `the edit restarted something: ${named(restarted)}` : undefined
 }
 
 // The failed plug-in is muted on its own, nothing replaces or restarts it, and the unrelated source keeps sounding: the delete row's capture
 // check (the plug-in's channel is silent after the fade, never a dry fallback), with nothing restarted.
-export const compareFault = (input: { events: readonly HostEvent[]; output: Pcm; seam: number; endFrame: number; editWallMs: number }): Compare => (window) => {
+// The worker dies on its next process call, long before the host reports the isolation (the seam), so the plug-in is audible only up to the edit.
+export const compareFault = (input: { events: readonly HostEvent[]; output: Pcm; seam: number; editFrame: number; endFrame: number; editWallMs: number }): Compare => (window) => {
   const restarted = restartsBetween(input.events, input.editWallMs, window.toWallMs)
-  return restarted.length ? `the fault restarted or replaced something: ${named(restarted)}` : compareDelete(input)(window)
+  return restarted.length ? `the fault restarted or replaced something: ${named(restarted)}` : compareDelete({ ...input, audibleUntil: input.editFrame })(window)
 }
 
 // A refused insert changes nothing: no graph is requested or published and nothing restarts.
@@ -217,14 +220,15 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
     settledWallMs: group[0]?.settledWallMs, publicationFrame: group[0]?.publicationFrame ?? 0, startSec: group.find((edit) => edit.startSec !== undefined)?.startSec }))
   if (row.judge === "take") return judgeBurst(steps, input.captureEndWallMs, compareTake(takeResult.parse(JSON.parse(await readFile(path.join(directory, takeFile), "utf8")))))
   const texts = await Promise.all(input.natives.map((name) => readFile(path.join(launchOut, name), "utf8")))
-  const hostEvents = texts.flatMap(parseHostLines)
-  const editWallMs = (index: number) => steps.find((step) => step.index === index)?.editWallMs ?? 0
-  if (row.judge === "editor") return judgeBurst(steps, input.captureEndWallMs, compareEditor(hostEvents, editWallMs))
-  if (row.judge === "trust") return judgeBurst(steps, input.captureEndWallMs, compareTrust(hostEvents, editWallMs(1)))
   const blocks = texts.flatMap(nativeLines).flatMap((entry) => entry.event === "capture-block" ? [captureBlock.parse(entry)] : [])
   const played = playedBlocks(blocks, steps[0]?.editWallMs ?? 0)
   if (!played) return { outcome: "setup", detail: "no capture blocks after the first edit", judged: 0 }
   const { owner, mine } = played
+  const hostEvents = texts.flatMap(parseHostLines)
+  const editWallMs = (index: number) => steps.find((step) => step.index === index)?.editWallMs ?? 0
+  // Opening an editor starts a second host process for the editor window; its own startup is not a restart of the playing host (owner.pid).
+  if (row.judge === "editor") return judgeBurst(steps, input.captureEndWallMs, compareEditor(hostEvents, owner.pid, editWallMs))
+  if (row.judge === "trust") return judgeBurst(steps, input.captureEndWallMs, compareTrust(hostEvents, editWallMs(1)))
   const capture = await readWav(path.join(launchOut, `output-${owner.pid}-${owner.captureId}.wav`))
   const seams = steps.map((step) => step.publicationFrame)
   const captured = Math.max(...mine.map((block) => block.transportFrame + block.frames))
@@ -252,7 +256,8 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
     return judgeBurst(steps, input.captureEndWallMs, compareLatencyMoves({ output, edits, publications, startingPinned, endFrame: Math.min(captured, rowEnd) }))
   }
   if (row.judge === "sustained") return judgeBurst(steps, input.captureEndWallMs, compareSustained({ output, seams, endFrame: captured }))
-  if (row.judge === "fault") return judgeBurst(steps, input.captureEndWallMs, compareFault({ events: hostEvents, output, seam: seams[0] ?? 0, endFrame: captured, editWallMs: editWallMs(1) }))
+  if (row.judge === "fault") return judgeBurst(steps, input.captureEndWallMs, compareFault({ events: hostEvents, output, seam: seams[0] ?? 0,
+    editFrame: mine.find((block) => block.wallMs >= editWallMs(1))?.transportFrame ?? 0, endFrame: captured, editWallMs: editWallMs(1) }))
   if (row.judge === "delete") {
     const cold = lifecycleBetween(hostEvents, steps[0]?.editWallMs ?? 0, input.captureEndWallMs)
     if (cold.length) return { outcome: "fail", editIndex: 1, detail: `the delete stopped or restarted the session: ${cold.map((event) => event.event).join(", ")}`, judged: 1 }
@@ -421,15 +426,20 @@ export const selfTest = () => {
   const lines = (...entries: object[]) => parseHostLines(entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n")
   const editedAt = (index: number) => index * 1000
   const one = (compare: Compare) => judgeBurst(steps.slice(0, 1), 10_000, compare)
-  check(one(compareEditor(lines({ event: "vst-editor-state", open: true, wallMs: 1500 }, { event: "graph-publish", wallMs: 1800 }), editedAt)).outcome === "pass", "an edit that publishes with the editor open passes")
-  check(one(compareEditor(lines({ event: "vst-editor-state", open: false, wallMs: 1800 }), editedAt)).outcome === "fail", "an editor reported closed after the edit fails")
-  check(one(compareEditor(lines({ event: "worker-spawn", wallMs: 1800 }), editedAt)).outcome === "fail", "a worker spawned again after the edit fails")
-  check(one(compareEditor(lines({ event: "host-restart-request", wallMs: 1800 }), editedAt)).outcome === "fail", "a host restart request after the edit fails")
-  check(one(compareEditor(lines({ event: "vst-editor-state", open: false, wallMs: 500 }), editedAt)).outcome === "pass", "an editor closed before the edit is not the edit's")
+  check(one(compareEditor(lines({ event: "vst-editor-state", open: true, wallMs: 1500 }, { event: "graph-publish", wallMs: 1800 }), 0, editedAt)).outcome === "pass", "an edit that publishes with the editor open passes")
+  check(one(compareEditor(lines({ event: "vst-editor-state", open: false, wallMs: 1800 }), 0, editedAt)).outcome === "fail", "an editor reported closed after the edit fails")
+  check(one(compareEditor(lines({ event: "worker-spawn", wallMs: 1800 }), 0, editedAt)).outcome === "fail", "a worker spawned again after the edit fails")
+  check(one(compareEditor(lines({ event: "host-restart-request", wallMs: 1800 }), 0, editedAt)).outcome === "fail", "a host restart request after the edit fails")
+  check(one(compareEditor(lines({ event: "host-spawn", pid: 7, wallMs: 1100 }, { event: "worker-spawn", pid: 7, wallMs: 1200 }), 1, editedAt)).outcome === "pass", "the editor window's own host starting is not a restart of the playing host")
+  check(one(compareEditor(lines({ event: "worker-spawn", pid: 1, wallMs: 1200 }), 1, editedAt)).outcome === "fail", "the playing host starting a worker fails")
+  check(one(compareEditor(lines({ event: "vst-editor-state", open: false, wallMs: 500 }), 0, editedAt)).outcome === "pass", "an editor closed before the edit is not the edit's")
   // The fault row: the delete row's capture check plus nothing restarted.
-  const faultInput = (events: ReturnType<typeof lines>, right: (frame: number) => number) => ({ events, output: deleted(right, tone), seam, endFrame, editWallMs: 1000 })
+  const faultInput = (events: ReturnType<typeof lines>, right: (frame: number) => number) => ({ events, output: deleted(right, tone), seam, editFrame: seam - sampleRate / 2, endFrame, editWallMs: 1000 })
   const gone = (frame: number) => frame < seam + fade ? tone(frame) : 0
+  const crashed = (frame: number) => frame < seam - sampleRate / 4 ? tone(frame) : 0
   check(one(compareFault(faultInput(lines({ event: "attachment-fault-isolated", cause: "plugin-fault", wallMs: 1200 }), gone))).outcome === "pass", "a muted plug-in beside a live source passes")
+  check(one(compareFault(faultInput(lines(), crashed))).outcome === "pass", "a plug-in that went silent at its crash, before the host reported the isolation, passes")
+  check(one(compareFault({ ...faultInput(lines(), crashed), output: deleted(() => 0, tone) })).outcome === "fail", "a plug-in that was never audible before the edit fails")
   check(one(compareFault(faultInput(lines({ event: "host-spawn", wallMs: 1300 }), gone))).outcome === "fail", "a fault that restarts the host fails")
   check(one(compareFault(faultInput(lines({ event: "device-stop", wallMs: 1300 }), gone))).outcome === "fail", "a fault that stops the session fails")
   check(one(compareFault(faultInput(lines(), tone))).outcome === "fail", "a plug-in that still sounds, or a dry fallback, fails")

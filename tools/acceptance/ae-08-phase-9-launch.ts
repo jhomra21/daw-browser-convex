@@ -13,7 +13,7 @@ import { takeFile } from "./ae-08-phase-9-compare"
 import { writeWav } from "./ae08-wav"
 import { blackhole, iacPort, makeTone, playToneIntoBlackhole, selectAudioInputScript, selectMidiInputScript, sendMidiNote } from "./ae-08-phase-9-devices"
 import { armRecordTarget, finishRecording, recordingTargetLockedReason, startRecording, toneSeconds, verifyHandedOverTake } from "./ae-08-phase-9-record"
-import { awaitTestPluginFailure, insertTestPlugin, openTestPluginEditor, prepareTestPlugin, refuseUntrustedPlugin, removeTestPlugin } from "./ae-08-phase-9-vst"
+import { awaitTestPluginFailure, insertTestPlugin, openTestPluginEditor, prepareTestPlugin, refuseUntrustedPlugin, removeTestPlugin, showUntrustedEffectsBrowser } from "./ae-08-phase-9-vst"
 
 // One packaged launch of phase 9: the row's phase 5 start state, then either a burst of its edits (settled on host evidence) or the
 // same timeline with no edits (a reference, or the calibration duplicate of one). Edits go through the public control actions or the
@@ -131,7 +131,7 @@ export const createPerformer = ({ context, runtime, observe, setup }: Performers
       await awaitTestPluginFailure(context)
       return { ...unmoved, wallMs }
     }],
-    ["untrusted-insert", async () => { await refuseUntrustedPlugin(context, "Changed right"); return unmoved }],
+    ["untrusted-insert", async () => { await refuseUntrustedPlugin(context); return unmoved }],
     ["latency-high", testPluginLatency(1, 0, 4096)],
     ["latency-low", testPluginLatency(0, 4096, 0)],
     ["silent-track-create", () => commit([{ kind: "track.create", name: silentTrack, trackKind: "audio" }])],
@@ -172,6 +172,7 @@ export const performPrepare = async (context: Pick<Phase5Context, "evaluate" | "
   if (step === "record-arm") return armRecordTarget(context)
   if (step === "vst-trust") return prepareTestPlugin(context, "Changed right")
   if (step === "vst-insert") return insertTestPlugin(context)
+  if (step === "vst-untrusted-browser") return showUntrustedEffectsBrowser(context, "Changed right")
   if (step === "midi-select-iac") {
     await context.evaluate(selectMidiInputScript(iacPort))
     await context.reload()
@@ -373,6 +374,9 @@ export const selfTest = async () => {
     reload: async () => { prepared.push("reload") } }
   await performPrepare(prepareContext, "vst-trust")
   check(prepared[0]?.includes("dashboard") === true && prepared.some((call) => call.includes("input[type=checkbox]")) && prepared.includes("reload") && prepared.includes("interact press Escape"), "vst-trust opens the plug-ins dashboard, acknowledges trust and reloads")
+  prepared.length = 0
+  await performPrepare(prepareContext, "vst-untrusted-browser")
+  check(prepared.includes("reload"), "the untrusted effects browser is shown, with its reload, before the capture")
   prepared.length = 0
   await performPrepare(prepareContext, "midi-select-iac")
   check(prepared[0]?.includes("selectedInputIds") === true && prepared[1] === "reload" && prepared[2]?.includes("Live MIDI") === true, "midi-select-iac writes the profile's MIDI input, reloads and selects the live track")

@@ -52,7 +52,9 @@ const takeScript = (projectId: string, assetId: string) => `(async()=>{
 export const finishRecording = async (context: RecordContext & Pick<Phase5Context, "read">, input: { before: ReadonlySet<string>; file: string }) => {
   await context.evaluate(clickButton("Stop recording"))
   await waitForUi(context, "Recording did not stop", settled("Start recording", false))
-  await waitForUi(context, "The take never became a clip", `document.querySelectorAll('[data-timeline-clip]').length>${input.before.size}`)
+  // The take lands after the fixture clip that covers the track from 0, usually outside the timeline's rendered range, so the clip list is read from the
+  // snapshot once the lock's "Finishing recording…" is gone.
+  await waitForUi(context, "The recording never finished", `!document.body.textContent?.includes('Finishing recording')`)
   const state = await context.snapshot()
   const taken = state.clips.filter((clip) => !input.before.has(clip.id))
   const [take] = taken

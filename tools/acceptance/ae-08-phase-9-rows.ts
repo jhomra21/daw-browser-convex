@@ -104,7 +104,7 @@ export const burstRows: BurstRow[] = [
   { name: "faulty-plugin", latencyClass: "vst-insert", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-present", prepare: insertedTestPlugin, judge: "fault",
     cycle: [{ edits: ["vst-fault"], state: "vst-failed", settle: "plugin-fault" }] } },
   // The bundle stays untrusted: its browser entry is refused with the trust reason and nothing restarts.
-  { name: "trust-negative", latencyClass: "vst-insert", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-absent", judge: "trust",
+  { name: "trust-negative", latencyClass: "vst-insert", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-absent", prepare: ["vst-untrusted-browser"], judge: "trust",
     cycle: [{ edits: ["untrusted-insert"], state: "vst-rejected", settle: "refused" }] } },
   // Portable-only rows: the portable engine has no packaged counterpart for them.
   { name: "mixer-gain", latencyClass: "plain", portable: { from: "base", to: "gain", latency: false } },

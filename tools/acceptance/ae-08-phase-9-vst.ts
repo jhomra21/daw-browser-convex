@@ -39,13 +39,18 @@ export const prepareTestPlugin = async (context: Ui, trackName: string) => {
 
 // The refused insert of a bundle that is left untrusted: the dashboard still asks for the trust acknowledgement and offers neither a
 // scan nor a directory, and the effects browser has no plug-in entry to insert, so no device card can appear.
-export const refuseUntrustedPlugin = async (context: Ui, trackName: string) => {
+// The effects tab is shown by `showUntrustedEffectsBrowser`, before the capture, because showing it reloads the app and a reload during the
+// burst restarts the session the burst is measuring.
+export const showUntrustedEffectsBrowser = (context: Ui, trackName: string) => openEffectsBrowser(context, trackName)
+
+export const refuseUntrustedPlugin = async (context: Ui) => {
   await openPluginsDashboard(context)
   await waitForUi(context, "The plug-ins dashboard does not ask for the trust acknowledgement",
     `Boolean(document.body.textContent?.includes('I understand and trust the VST3 plug-ins I add.'))`)
   await waitForUi(context, "The plug-ins dashboard still offers a scan or a directory to an untrusted profile",
     `(()=>{const buttons=[...document.querySelectorAll('button')].filter(b=>['Rescan','Add directory'].includes(b.textContent?.trim()??''));return buttons.length===2&&buttons.every(b=>b.disabled)})()`)
-  await openEffectsBrowser(context, trackName)
+  await context.interact(["press", "Escape"])
+  await waitForUi(context, "The timeline did not return after the plug-ins dashboard", `Boolean(document.querySelector('${browser}'))`)
   await waitForUi(context, "An untrusted plug-in is offered by the effects browser or has a device card",
     `!${testPluginButton}&&!${externalDevice}`)
 }

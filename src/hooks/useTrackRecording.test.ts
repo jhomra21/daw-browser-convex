@@ -23,6 +23,8 @@ const track: Track = {
 const audioPreferences = () => ({
   inputDeviceId: "",
   outputDeviceId: "",
+  nativeInputDeviceId: "",
+  nativeOutputDeviceId: "",
   sampleRate: 48_000 as const,
   latencyMode: "balanced" as const,
   echoCancellation: false,

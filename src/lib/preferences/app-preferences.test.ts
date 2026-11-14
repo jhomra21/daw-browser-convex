@@ -98,6 +98,8 @@ describe("normalizeAppPreferences", () => {
     }).audio).toEqual({
       inputDeviceId: "",
       outputDeviceId: "speaker",
+      nativeInputDeviceId: "",
+      nativeOutputDeviceId: "",
       sampleRate: "default",
       latencyMode: "interactive",
       echoCancellation: false,
@@ -105,6 +107,30 @@ describe("normalizeAppPreferences", () => {
       autoGainControl: true,
       nativePlaybackEnabled: true
     })
+  })
+
+  test("parses saved audio preferences without native devices as empty and keeps only coreaudio native ids", () => {
+    expect(normalizeAppPreferences({
+      version: APP_PREFERENCES_VERSION,
+      audio: { inputDeviceId: "mic", outputDeviceId: "speakers" },
+    }).audio).toEqual({
+      ...defaultAppPreferences.audio,
+      inputDeviceId: "mic",
+      outputDeviceId: "speakers",
+      nativeInputDeviceId: "",
+      nativeOutputDeviceId: "",
+    })
+    expect(normalizeAppPreferences({
+      version: APP_PREFERENCES_VERSION,
+      audio: { nativeInputDeviceId: "coreaudio:BlackHole2ch_UID", nativeOutputDeviceId: "coreaudio:BuiltInSpeakerDevice" },
+    }).audio).toMatchObject({
+      nativeInputDeviceId: "coreaudio:BlackHole2ch_UID",
+      nativeOutputDeviceId: "coreaudio:BuiltInSpeakerDevice",
+    })
+    expect(normalizeAppPreferences({
+      version: APP_PREFERENCES_VERSION,
+      audio: { nativeInputDeviceId: "default", nativeOutputDeviceId: "coreaudio:" },
+    }).audio).toMatchObject({ nativeInputDeviceId: "", nativeOutputDeviceId: "" })
   })
 
   test("preserves version 2 audio preferences while defaulting recording preferences", () => {
@@ -125,6 +151,8 @@ describe("normalizeAppPreferences", () => {
       audio: {
         inputDeviceId: "mic",
         outputDeviceId: "speakers",
+        nativeInputDeviceId: "",
+        nativeOutputDeviceId: "",
         sampleRate: 48000,
         latencyMode: "balanced",
         echoCancellation: true,

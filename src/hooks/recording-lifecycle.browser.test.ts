@@ -102,7 +102,7 @@ window.recordingScenarios = async () => {
       } },
       createTrackForRecording: () => window.createRecordingTrack?.() ?? Promise.resolve(null), notify: message => audioNotices.push(message), onLocalSaveFailed: () => {},
       historyPush: () => { audioHistoryCount += 1 }, audioPreferences: () => ({
-        inputDeviceId: '', outputDeviceId: '', sampleRate: 48000, latencyMode: 'balanced',
+        inputDeviceId: '', outputDeviceId: '', nativeInputDeviceId: '', nativeOutputDeviceId: '', sampleRate: 48000, latencyMode: 'balanced',
         echoCancellation: false, noiseSuppression: false, autoGainControl: false, nativePlaybackEnabled: false,
       }),
       recordingPreferences: () => ({
@@ -217,7 +217,7 @@ window.recordingScenarios = async () => {
       } },
       createTrackForRecording: async () => null, notify: message => setupNotices.push(message), onLocalSaveFailed: () => {},
       historyPush: () => {}, audioPreferences: () => ({
-        inputDeviceId: '', outputDeviceId: '', sampleRate: 48000, latencyMode: 'balanced',
+        inputDeviceId: '', outputDeviceId: '', nativeInputDeviceId: '', nativeOutputDeviceId: '', sampleRate: 48000, latencyMode: 'balanced',
         echoCancellation: false, noiseSuppression: false, autoGainControl: false, nativePlaybackEnabled: false,
       }),
       recordingPreferences: () => ({
@@ -303,7 +303,7 @@ window.recordingScenarios = async () => {
       onLocalSaveFailed: () => {},
       historyPush: () => {},
       audioPreferences: () => ({
-        inputDeviceId: '', outputDeviceId: '', sampleRate: 48000, latencyMode: 'balanced',
+        inputDeviceId: '', outputDeviceId: '', nativeInputDeviceId: '', nativeOutputDeviceId: '', sampleRate: 48000, latencyMode: 'balanced',
         echoCancellation: false, noiseSuppression: false, autoGainControl: false, nativePlaybackEnabled: true,
       }),
       recordingPreferences: () => ({
@@ -1894,7 +1894,7 @@ window.lockScenarios = async () => {
         createTrackForRecording: async () => null, notify: () => {}, onLocalSaveFailed: () => {},
         historyPush: () => {}, targetLock: lock,
         audioPreferences: () => ({
-          inputDeviceId: '', outputDeviceId: '', sampleRate: 48000, latencyMode: 'balanced',
+          inputDeviceId: '', outputDeviceId: '', nativeInputDeviceId: '', nativeOutputDeviceId: '', sampleRate: 48000, latencyMode: 'balanced',
           echoCancellation: false, noiseSuppression: false, autoGainControl: false, nativePlaybackEnabled: native,
         }),
         recordingPreferences: () => ({

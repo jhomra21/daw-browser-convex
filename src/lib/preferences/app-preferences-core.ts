@@ -28,6 +28,9 @@ export type AudioLatencyMode = "interactive" | "balanced" | "playback"
 export type AudioPreferences = {
   inputDeviceId: string
   outputDeviceId: string
+  /** `coreaudio:<uid>` of the desktop native engine's device; empty is the system default. Never a MediaDevices id. */
+  nativeInputDeviceId: string
+  nativeOutputDeviceId: string
   sampleRate: AudioSampleRatePreference
   latencyMode: AudioLatencyMode
   echoCancellation: boolean
@@ -80,6 +83,8 @@ export const defaultAppPreferences: AppPreferences = {
   audio: {
     inputDeviceId: "",
     outputDeviceId: "",
+    nativeInputDeviceId: "",
+    nativeOutputDeviceId: "",
     sampleRate: "default",
     latencyMode: "interactive",
     echoCancellation: false,
@@ -111,6 +116,8 @@ export const parseAppTheme = (value: JsonValue): AppTheme =>
 const parseBoolean = (value: JsonValue, fallback: boolean): boolean =>
   isJsonBoolean(value) ? value : fallback
 const parseDeviceId = (value: JsonValue): string => isJsonString(value) ? value : ""
+const parseNativeDeviceId = (value: JsonValue): string =>
+  isJsonString(value) && value.startsWith("coreaudio:") && value.length > "coreaudio:".length ? value : ""
 const parseFiniteInteger = (value: JsonValue, minimum: number, maximum: number, fallback: number): number =>
   isJsonNumber(value) && Number.isFinite(value)
     ? Math.min(maximum, Math.max(minimum, Math.round(value)))
@@ -246,6 +253,8 @@ export const normalizeAppPreferences = (value: JsonValue): AppPreferences => {
     audio: {
       inputDeviceId: parseDeviceId(audio.inputDeviceId),
       outputDeviceId: parseDeviceId(audio.outputDeviceId),
+      nativeInputDeviceId: parseNativeDeviceId(audio.nativeInputDeviceId),
+      nativeOutputDeviceId: parseNativeDeviceId(audio.nativeOutputDeviceId),
       sampleRate: parseAudioSampleRate(audio.sampleRate),
       latencyMode: parseAudioLatencyMode(audio.latencyMode),
       echoCancellation: parseBoolean(audio.echoCancellation, defaultAppPreferences.audio.echoCancellation),

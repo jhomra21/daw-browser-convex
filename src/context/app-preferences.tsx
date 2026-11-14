@@ -60,6 +60,8 @@ type AppPreferencesContextValue = {
     preferences: () => AudioPreferences
     setInputDeviceId: (deviceId: string) => void
     setOutputDeviceId: (deviceId: string) => void
+    setNativeInputDeviceId: (deviceId: string) => void
+    setNativeOutputDeviceId: (deviceId: string) => void
     setSampleRate: (sampleRate: AudioSampleRatePreference) => void
     setLatencyMode: (latencyMode: AudioLatencyMode) => void
     setEchoCancellation: (enabled: boolean) => void
@@ -245,6 +247,8 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           preferences: () => preferences.audio,
           setInputDeviceId: (deviceId) => setPreferences("audio", "inputDeviceId", deviceId),
           setOutputDeviceId: (deviceId) => setPreferences("audio", "outputDeviceId", deviceId),
+          setNativeInputDeviceId: (deviceId) => setPreferences("audio", "nativeInputDeviceId", deviceId),
+          setNativeOutputDeviceId: (deviceId) => setPreferences("audio", "nativeOutputDeviceId", deviceId),
           setSampleRate: (sampleRate) => setPreferences("audio", "sampleRate", sampleRate),
           setLatencyMode: (latencyMode) => setPreferences("audio", "latencyMode", latencyMode),
           setEchoCancellation: (enabled) => setPreferences("audio", "echoCancellation", enabled),

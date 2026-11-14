@@ -25,6 +25,7 @@ export type Phase5Context = {
   // Phase 9 only: how long the playing content must last, since a burst outlasts phase 5's own 17 s. Phase 5 leaves it unset.
   contentSeconds?: number
 }
+export const liveMidiTrack = "Live MIDI"
 // What the UI helpers use of the context.
 type UiContext = Pick<Phase5Context, "evaluate" | "interact">
 const ref = (id: string) => ({ source: "persisted", id })
@@ -183,7 +184,8 @@ const runEffectStateEdit = async (context: Phase5Context, input: {
     knob: { before, paused, resumed: await readKnobDb(context) } }
 }
 
-const exportReference = async (context: Phase5Context, name: string) => {
+// A whole-project offline mixdown from 0 to `seconds`: the reference of one project state.
+export const exportReference = async (context: Phase5Context, name: string, seconds = 24) => {
   const destination = path.join(context.out, `${name}.wav`)
   // The filesystem notifies completion/progress. No status polling or fixed
   // sleep; the deadline is failure-only and the watcher always closes.
@@ -204,7 +206,7 @@ const exportReference = async (context: Phase5Context, name: string) => {
   })
   try {
     const request = { mode: "mixdown", format: "wav", destination: { kind: "file", path: destination },
-      range: { mode: "custom", startSec: 0, endSec: 24 },
+      range: { mode: "custom", startSec: 0, endSec: seconds },
       render: { sampleRate: 48000, channels: 2, normalization: { mode: "none" }, tail: { mode: "none" } },
       encoding: { wav: { codec: "pcm-f32", dither: "none" } } }
     const result = record.parse(await command(context.profile, ["host", "export", "--request", "-"], JSON.stringify(request)))
@@ -275,10 +277,11 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
         params: { version: 1, state: { ...createDefaultUtilityParams(), gainDb: 0, dcBlock: false } } },
     ])
   }
-  if (row === "held-note") {
-    await mutate([{ kind: "track.create", name: "Held phase 5", trackKind: "instrument" }])
-    const synth = (await snapshot()).tracks.find((track) => track.name === "Held phase 5")
-    if (!synth) throw new Error("Held synth missing")
+  // A sine synth on the right channel only, so the left channel stays the retained source's.
+  const addSineSynthTrack = async (name: string) => {
+    await mutate([{ kind: "track.create", name, trackKind: "instrument" }])
+    const synth = (await snapshot()).tracks.find((track) => track.name === name)
+    if (!synth) throw new Error(`${name} missing`)
     const base = createDefaultSynthParams()
     await mutate([
       { kind: "instrument.set", target: { kind: "track", track: ref(synth.id) }, instrumentKind: "synth",
@@ -290,10 +293,16 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
           ampEnvelope: { attackSec: 0.005, decaySec: 0.01, sustain: 1, releaseSec: 0.05 } } },
       { kind: "effect.upsert", target: { kind: "track", track: ref(synth.id) }, effectKind: "utility",
         params: { version: 1, state: { ...createDefaultUtilityParams(), balance: 1 } } },
-      { kind: "clip.midi.create", track: ref(synth.id), name: "Held finite note", startSec: 0, duration: contentSeconds ?? 16, wave: "sine", gain: 0.1,
-        notes: [{ id: "phase5-held", beat: 0, length: contentSeconds === undefined ? 24 : contentSeconds * 2, pitch: 69, velocity: 0.4 }] },
     ])
+    return synth
   }
+  if (row === "held-note") {
+    const synth = await addSineSynthTrack("Held phase 5")
+    await mutate([{ kind: "clip.midi.create", track: ref(synth.id), name: "Held finite note", startSec: 0, duration: contentSeconds ?? 16, wave: "sine", gain: 0.1,
+      notes: [{ id: "phase5-held", beat: 0, length: contentSeconds === undefined ? 24 : contentSeconds * 2, pitch: 69, velocity: 0.4 }] }])
+  }
+  // Phase 9 only: the same synth, played live from a MIDI input instead of from a clip.
+  if (row === "live-midi") await addSineSynthTrack(liveMidiTrack)
   // Setup is outside the measured interval. A normal product reload makes
   // the offline reference independent of any stale mounted projection.
   await context.reload()

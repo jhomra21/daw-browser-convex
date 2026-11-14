@@ -17,9 +17,12 @@ import { buildPhase3Fixture } from "./ae-08-phase-3-fixture"
 import { phase5Rows, runPhase5Fixture } from "./ae-08-phase-5-fixture"
 import { phase8Rows, runPhase8Fixture } from "./ae-08-phase-8-fixture"
 import { analyzePhase8Campaign } from "./analyze-ae-08-phase-8"
-import { contentSecondsFor, exportRowEvidence, runPhase9Launch, type Phase9Launch } from "./ae-08-phase-9-launch"
-import { assumedTimings, burstSchedule, chooseVstRepetitions, judgeStored, launchPlan, measuredEditsSchema, measuredTimings, mergeLaunches, phase9Matrix, phase9Rows,
-  readTimings, repetitionsFor } from "./ae-08-phase-9-matrix"
+import { contentSecondsFor, exportRowEvidence, runPhase9Launch, stateName, type Phase9Launch } from "./ae-08-phase-9-launch"
+import { assumedTimings, burstSchedule, chooseVstRepetitions, judgeStored, launchesFor, launchPlan, measuredEditsSchema, measuredTimings, pooled,
+  readTimings, repetitionsFor, type Trial } from "./ae-08-phase-9-matrix"
+import { phase9Matrix, phase9Rows } from "./ae-08-phase-9-rows"
+import { judgeRowCapture } from "./ae-08-phase-9-compare"
+import { checkDevices, seedPluginCatalog } from "./ae-08-phase-9-devices"
 import { readWav, writeWav, type Pcm } from "./ae08-wav"
 import { serializeNativeGraph } from "@daw-browser/audio-engine/native-host-wire"
 import { audioCoreContractVersion } from "@daw-browser/audio-core-contract"
@@ -83,6 +86,12 @@ const run = async (out: string, edited: boolean, fixtureKind: string, phase = 1,
   const privateDirectory = await createPrivateRunDirectory("/tmp")
   const profile = path.join(privateDirectory, "profile")
   await mkdir(profile, { mode: 0o700 })
+  // A row's device must be present before the app starts: an absent one is a setup failure, never a pass. A VST row's profile gets
+  // the phase 6 test plug-in's folder in its plug-in catalog; trust still goes through the UI.
+  if (launch) {
+    await checkDevices(launch.rows)
+    if (launch.rows.some((row) => row.prepare?.includes("vst-trust"))) await seedPluginCatalog(profile, privateDirectory)
+  }
   // Exclusive lock is deliberately retained on failure; no other invocation can
   // attach to this disposable profile or reuse incomplete evidence.
   const lock = await open(path.join(profile, "ae08-owner.lock"), "wx", 0o600)
@@ -404,8 +413,9 @@ const run = async (out: string, edited: boolean, fixtureKind: string, phase = 1,
             await browserCommand(session, ["screenshot", path.join(out, `${name}.png`)])
           }
           if (fixtureKind === "overlapping-moves") {
-            // Distinct processors prevent same-instance coalescing. Both UI
-            // intents enter in one renderer turn, before either move completes.
+            // Distinct processors keep the two intents from merging into one request. Both enter in one renderer turn,
+            // before the first move completes; the second waits for that completion, and the analyzer requires that no
+            // publication falls between the first publication and it (overlappingMoveWaitsForCompletion).
             const wallMs = Date.now()
             await mark("latency-edit", { name: "overlapping-raises" })
             await browserCommand(session, ["eval", `(()=>{
@@ -774,7 +784,7 @@ const main = async () => {
     if (phase === 9) {
       const selected = parsed.matrix ? phase9Matrix : phase9Matrix.filter((row) => parsed.rows?.includes(row.name))
       const missing = selected.filter((row) => row.fixture === null)
-      const launches = mergeLaunches(selected.filter((row) => row.fixture !== null))
+      const launches = launchesFor(selected.filter((row) => row.fixture !== null), parsed.repetitions)
       const timings = parsed.timings ? await readTimings(parsed.timings) : assumedTimings
       // The budget rule needs measured timings; the overnight run keeps the requested count.
       const budget = parsed.timings && !parsed.overnight ? chooseVstRepetitions(launches, parsed.repetitions, parsed.vstRepetitions, timings)
@@ -783,6 +793,11 @@ const main = async () => {
       provenance.ownedPids = []
       const rowsDirectory = path.join(out, "phase9")
       await mkdir(rowsDirectory, { mode: 0o700 })
+      // A row that repeats by launch has one launch per repetition; later repetitions keep their own row folders (phase9-r2, ...).
+      const rowsFolder = (launch: number) => {
+        const replica = launches.slice(0, launch).filter((other) => other === launches[launch]).length
+        return replica === 0 ? rowsDirectory : path.join(out, `phase9-r${replica + 1}`)
+      }
       await writeFile(path.join(out, "phase9-plan.json"), JSON.stringify({ vstRepetitions: budget.vstRepetitions, why: budget.why,
         order: launchPlan(launches), launches: launches.map((launch) => launch.map((row) => ({ row: row.name, class: row.latencyClass,
           edits: burstSchedule(row, repetitionsFor(row, parsed.repetitions, budget.vstRepetitions)).length }))),
@@ -790,6 +805,7 @@ const main = async () => {
       const campaign: { launch: number; role: string; seconds: number; capturedSeconds: number; failure?: string }[] = []
       const measuredRows: { vst: boolean; edits: z.infer<typeof measuredEditsSchema> }[] = []
       const bursts = new Map<number, { out: string; frames: number }>()
+      const trials: Trial[] = []
       for (const step of launchPlan(launches)) {
         const rows = launches[step.launch] ?? []
         const name = `launch-${step.launch + 1}-${step.role}`
@@ -798,7 +814,7 @@ const main = async () => {
         if (!first) continue
         const burst = bursts.get(step.launch)
         const launch: Phase9Launch = step.role === "burst"
-          ? { role: "burst", rows, repetitions: parsed.repetitions, vstRepetitions: budget.vstRepetitions, directory: rowsDirectory, contentSeconds }
+          ? { role: "burst", rows, repetitions: parsed.repetitions, vstRepetitions: budget.vstRepetitions, directory: rowsFolder(step.launch), contentSeconds }
           : { role: step.role, rows, frames: burst?.frames ?? 0, contentSeconds }
         const startedAt = Date.now()
         let failure: string | undefined
@@ -813,9 +829,18 @@ const main = async () => {
           await writeWav(path.join(result.out, "output.wav"), await assemble(result.out))
           if (step.role === "burst") {
             bursts.set(step.launch, { out: result.out, frames: Math.round(captured * 48000) })
-            await exportRowEvidence(result.out, rowsDirectory, rows)
-            for (const row of rows) measuredRows.push({ vst: row.repeat === "vst-burst", edits: measuredEditsSchema.parse(
-              JSON.parse(await readFile(path.join(rowsDirectory, row.name, "phase9-edits.json"), "utf8")).edits) })
+            await exportRowEvidence(result.out, rowsFolder(step.launch), rows)
+            const natives = (await readdir(result.out)).filter((entry) => /^native-\d+\.jsonl$/.test(entry))
+            for (const row of rows) {
+              const directory = path.join(rowsFolder(step.launch), row.name)
+              measuredRows.push({ vst: row.repeat === "vst-burst", edits: measuredEditsSchema.parse(JSON.parse(await readFile(path.join(directory, "phase9-edits.json"), "utf8")).edits) })
+              if (row.judge === undefined) continue
+              const captureEnd = (await events(path.join(directory, "actions.jsonl"))).find((entry) => entry.event === "capture-end")
+              const verdict = await judgeRowCapture({ launchOut: result.out, directory, row, natives, captureEndWallMs: Number(captureEnd?.wallMs),
+                stateFile: (state) => path.join(result.out, `${stateName(row.name, state)}.wav`) })
+              trials.push({ row: row.name, verdict })
+              await writeFile(path.join(directory, "verdict.json"), JSON.stringify(verdict, null, 2))
+            }
           }
         } catch (error) {
           failure = error instanceof Error ? error.message : String(error)
@@ -829,15 +854,23 @@ const main = async () => {
       await verifyPackagedArtifacts(resources, artifacts)
       // Each row names the launch captures (output.wav per launch) that its windows are compared in.
       for (const [index, launch] of launches.entries()) for (const row of launch)
-        await writeFile(path.join(rowsDirectory, row.name, "launch.json"), JSON.stringify(Object.fromEntries(
+        await writeFile(path.join(rowsFolder(index), row.name, "launch.json"), JSON.stringify(Object.fromEntries(
           campaign.filter((entry) => entry.launch === index + 1).map((entry) => [entry.role, `launch-${entry.launch}-${entry.role}`]))))
       await writeFile(path.join(out, "phase9-timings.json"), JSON.stringify(measuredTimings(measuredRows,
         campaign.map((entry) => entry.seconds - entry.capturedSeconds)), null, 2))
       const failed = campaign.filter((entry) => entry.failure)
-      // The per-window PCM compare is the analyzer slot (plan §8 step 4); until it is wired no phase 9 run certifies.
-      const verdict = `AE-08 phase 9 NON-CERTIFYING: ${campaign.length} launches, ${failed.length} failed; ${missing.length} rows have no fixture `
-        + `(${missing.map((row) => row.name).join(", ") || "none"}); the per-window PCM compare is not wired.`
-      await writeFile(path.join(out, "verdict.md"), `# AE-08 phase 9\n\n${verdict}\n\nNo continuity certification.\n${failed.map((entry) => `\n- ${entry.role} ${entry.launch}: ${entry.failure}`).join("")}\n`)
+      // A row with a judge is compared per window (ae-08-phase-9-compare.ts); the rest are settled and gated on host evidence only.
+      const settledOnly = launches.flat().filter((row) => row.judge === undefined)
+      const bound = pooled(trials)
+      const reasons = [
+        ...failed.map((entry) => `${entry.role} launch ${entry.launch} failed`),
+        ...missing.map((row) => `${row.name} cannot run: ${row.needs}`),
+        ...[...new Set(settledOnly.map((row) => row.name))].map((name) => `${name} has no per-window compare (settled and gated on host evidence only)`),
+        ...trials.filter((trial) => trial.verdict.outcome !== "pass").map((trial) => `${trial.row}: ${trial.verdict.outcome} at edit ${trial.verdict.editIndex}: ${trial.verdict.detail}`),
+        ...(bound.boundsBelowOnePercent ? [] : [`the pooled bound over ${bound.edits} judged edits is ${(bound.upper * 100).toFixed(2)} % (needs below 1 %, no setup failure)`]),
+      ]
+      const verdict = `AE-08 phase 9 ${reasons.length ? "NON-CERTIFYING" : "PASS"}: ${campaign.length} launches, ${failed.length} failed, ${bound.edits} judged edits, ${bound.failures} failed`
+      await writeFile(path.join(out, "verdict.md"), `# AE-08 phase 9\n\n${verdict}\n${reasons.map((reason) => `\n- ${reason}`).join("")}\n`)
       console.log(`${out}\n${verdict}`)
       if (failed.length) throw new Error(verdict)
       return
@@ -955,7 +988,7 @@ const main = async () => {
     if (result.captureFailures.length || !result.editFreeCapture.passed)
       throw new Error("Post-master capture integrity gate failed; see analysis.json")
     const isolated: { fixture: FixtureKind; verdict: string; directory: string }[] = []
-    // These are phase-1 fixed source oracles, not the reserved phase-9 matrix.
+    // These are phase-1 fixed source oracles, not the phase 9 matrix (--phase 9).
     const fixtureKinds: FixtureKind[] = ["two-tone", "held-note", "reverb-tail"]
     for (const fixtureKind of fixtureKinds) {
       const directory = path.join(out, fixtureKind)

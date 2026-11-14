@@ -12,17 +12,11 @@ import { resolve } from "node:path"
 import { build } from "vite"
 import solidPlugin from "vite-plugin-solid"
 import { z } from "zod"
+import { portableCampaignRows, type PortableCampaignRow } from "./ae-08-phase-9-rows"
 
 const root = resolve(import.meta.dir, "../..")
 
-// The burst schedule as data: each row alternates `to`, `from`, `to`... A state is a name the page knows.
-export type PortableCampaignRow = { row: string; class: "plain" | "raise"; from: string; to: string; latency: boolean }
-export const portableCampaignRows: PortableCampaignRow[] = [
-  { row: "mixer-gain", class: "plain", from: "base", to: "gain", latency: false },
-  { row: "clip-note", class: "plain", from: "base", to: "note", latency: false },
-  { row: "effect-insert-remove", class: "plain", from: "base", to: "effect", latency: false },
-  { row: "latency-raise-lower", class: "raise", from: "spec512", to: "spec1024", latency: true },
-]
+// The burst schedule is declared once in ae-08-phase-9-rows.ts: each row alternates `to`, `from`, `to`... A state is a name the page knows.
 type Row = PortableCampaignRow
 
 const windowSchema = z.array(z.number())
@@ -139,9 +133,9 @@ const selfTest = () => {
     if (!found) throw new Error(`No synthetic edit ${index}`)
     return found
   }
-  const cases: { name: string; mutate: (burst: Burst) => void; check: string | undefined; row?: number; blind?: true }[] = [
+  const cases: { name: string; mutate: (burst: Burst) => void; check: string | undefined; latency?: true; blind?: true }[] = [
     { name: "clean burst", mutate: () => undefined, check: undefined },
-    { name: "clean latency burst", mutate: () => undefined, check: undefined, row: 3 },
+    { name: "clean latency burst", mutate: () => undefined, check: undefined, latency: true },
     { name: "an edit the session refused", mutate: (burst) => { edit(burst, 1).result = "failed" }, check: "adopted" },
     { name: "a second session (a restart)", mutate: (burst) => { burst.sessions = 2 }, check: "no-restart" },
     { name: "a worklet fault", mutate: (burst) => { burst.faults = ["worklet fault"] }, check: "no-fault" },
@@ -150,8 +144,8 @@ const selfTest = () => {
     { name: "a non-finite sample", mutate: (burst) => { burst.integrity.nonFinite = 1 }, check: "finite" },
     { name: "a dropout on the edited channel", mutate: (burst) => { burst.integrity.rightSilence = [{ frame: 30_000, length: 64 }] }, check: "dropout" },
     { name: "a dropout on the unaffected channel", mutate: (burst) => { burst.integrity.leftSilence = [{ frame: 30_000, length: 64 }] }, check: "dropout" },
-    { name: "silence on the edited channel within the declared latency (latency row)", mutate: (burst) => { burst.integrity.rightSilence = [{ frame: 30_000, length: 1_024 }] }, check: undefined, row: 3 },
-    { name: "silence on the edited channel past the declared latency (latency row)", mutate: (burst) => { burst.integrity.rightSilence = [{ frame: 30_000, length: 4_096 }] }, check: "dropout", row: 3 },
+    { name: "silence on the edited channel within the declared latency (latency row)", mutate: (burst) => { burst.integrity.rightSilence = [{ frame: 30_000, length: 1_024 }] }, check: undefined, latency: true },
+    { name: "silence on the edited channel past the declared latency (latency row)", mutate: (burst) => { burst.integrity.rightSilence = [{ frame: 30_000, length: 4_096 }] }, check: "dropout", latency: true },
     { name: "the unaffected channel moves by one sample (non-latency row)", mutate: (burst) => { burst.left.fullMaxDiff = 1e-3; burst.left.firstDiffFrame = 41_000 }, check: "unaffected-exact" },
     { name: "a difference of one float32 ulp is inside the capture's resolution", mutate: (burst) => { burst.left.fullMaxDiff = floatUlp }, check: undefined },
     { name: "the states' own no-edit difference widens the band", mutate: (burst) => { burst.left.stateSpread = 3 * floatUlp; burst.left.fullMaxDiff = 12 * floatUlp; edit(burst, 0).leftMaxDiff = 12 * floatUlp }, check: undefined },
@@ -161,11 +155,11 @@ const selfTest = () => {
     { name: "a difference of five float32 ulp is not", mutate: (burst) => { burst.left.fullMaxDiff = 5 * floatUlp }, check: "unaffected-exact" },
     { name: "a tone off by five ulp of its amplitude", mutate: (burst) => { edit(burst, 1).rightTones = [0.8 + 5 * floatUlp, 0] }, check: "edit-applied" },
     { name: "the unaffected channel moves in one edit's window", mutate: (burst) => { edit(burst, 2).leftMaxDiff = 1e-3 }, check: "unaffected-exact" },
-    { name: "a lower that moves the unaffected channel back (the policy keeps L until the transport stops)", mutate: (burst) => { edit(burst, 1).measuredShift = 0 }, check: "declared-move", row: 3 },
+    { name: "a lower that moves the unaffected channel back (the policy keeps L until the transport stops)", mutate: (burst) => { edit(burst, 1).measuredShift = 0 }, check: "declared-move", latency: true },
     { name: "the unaffected channel moves with no declared latency", mutate: (burst) => { edit(burst, 0).measuredShift = 3 }, check: "declared-move" },
-    { name: "a raise that moves the unaffected channel by the wrong frames (latency row)", mutate: (burst) => { edit(burst, 0).measuredShift = 256 }, check: "declared-move", row: 3 },
-    { name: "a latency row tolerates the declared move in the full compare", mutate: (burst) => { burst.left.fullMaxDiff = 0.3 }, check: undefined, row: 3 },
-    { name: "a latency row still fails a steady window that is not the declared move", mutate: (burst) => { edit(burst, 1).leftMaxDiff = 1e-3 }, check: "unaffected-exact", row: 3 },
+    { name: "a raise that moves the unaffected channel by the wrong frames (latency row)", mutate: (burst) => { edit(burst, 0).measuredShift = 256 }, check: "declared-move", latency: true },
+    { name: "a latency row tolerates the declared move in the full compare", mutate: (burst) => { burst.left.fullMaxDiff = 0.3 }, check: undefined, latency: true },
+    { name: "a latency row still fails a steady window that is not the declared move", mutate: (burst) => { edit(burst, 1).leftMaxDiff = 1e-3 }, check: "unaffected-exact", latency: true },
     { name: "the edit is not applied (state A tones after a B edit)", mutate: (burst) => { edit(burst, 0).rightTones = [0.8, 0] }, check: "edit-applied" },
     { name: "the deleted contribution is still audible", mutate: (burst) => { edit(burst, 1).rightTones = [0.8, 0.05] }, check: "edit-applied" },
     { name: "an edit with no measured window", mutate: (burst) => { edit(burst, 3).rightTones = undefined }, check: "edit-applied" },
@@ -173,7 +167,7 @@ const selfTest = () => {
   ]
   let bad = 0
   for (const testCase of cases) {
-    const tested = portableCampaignRows[testCase.row ?? 0]
+    const tested = portableCampaignRows.find((candidate) => candidate.latency === (testCase.latency === true))
     if (!tested) throw new Error("Unknown synthetic row")
     const calibration = syntheticCalibration(tested)
     if (testCase.blind) calibration.expected.set(tested.to, calibration.expected.get(tested.from) ?? [])

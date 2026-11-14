@@ -7,8 +7,10 @@ export type LatencyClass = "plain" | "raise" | "asset" | "vst-insert"
 export type Step = { edits: string[]; state: string }
 // Which check judges a row's bursts: "states" compares the capture with an offline export of each state (the analyzer's judgeBurst),
 // "sustained" requires a held live note to stay unbroken, "delete" judges a clip delete on host evidence and its own capture,
+// "latency" checks the host's reported latencies against the declared moves and the retained channel against its source shifted by
+// the published moves (a pinned lower leaves the shift, so no per-state export can stand for a raise row's later states),
 // and no check means the row is only settled and gated on host evidence.
-export type Judge = "states" | "sustained" | "delete"
+export type Judge = "states" | "sustained" | "delete" | "latency"
 export type PackagedRun = {
   // burst: --repetitions edits. vst-burst: --vst-repetitions edits. single: one pass of the cycle. launch: one edit per launch, repeated --repetitions times.
   repeat: "burst" | "vst-burst" | "single" | "launch"
@@ -31,7 +33,8 @@ type BurstRow = { name: string; latencyClass: LatencyClass; packaged?: PackagedR
 export type Row = PackagedRun & { name: string; latencyClass: LatencyClass }
 export type PortableCampaignRow = PortableRun & { row: string; class: LatencyClass }
 
-const effectState = "phase5:effect-state"
+// The effect-state devices with the Spectral on the master path, so a declared latency move reaches it.
+const raiseState = "phase5:raise-state"
 const testPlugin = ["vst-trust"]
 const insertedTestPlugin = ["vst-trust", "vst-insert"]
 const nativeEvidence = (what: string) => `no settle evidence: ${what} is a live parameter write or patch, and the host logs no graph-publish for it. `
@@ -39,13 +42,13 @@ const nativeEvidence = (what: string) => `no settle evidence: ${what} is a live 
 const absentDevice = (device: string) => `NOT CERTIFIABLE UNTIL ${device} IS PRESENT: the launch checks for it first and fails as a setup failure, never a pass`
 
 export const burstRows: BurstRow[] = [
-  { name: "attach-remove-long-latency", latencyClass: "raise", packaged: { repeat: "burst", periodSec: null, fixture: effectState, start: "spectral-512",
+  { name: "attach-remove-long-latency", latencyClass: "raise", packaged: { repeat: "burst", periodSec: null, fixture: raiseState, start: "spectral-512", judge: "latency",
     cycle: [{ edits: ["spectral-remove"], state: "spectral-absent" }, { edits: ["spectral-attach"], state: "spectral-512" }] } },
   { name: "fft-transition", latencyClass: "raise",
-    packaged: { repeat: "burst", periodSec: null, fixture: effectState, start: "spectral-512",
+    packaged: { repeat: "burst", periodSec: null, fixture: raiseState, start: "spectral-512", judge: "latency",
       cycle: [{ edits: ["fft-4096"], state: "spectral-4096" }, { edits: ["fft-512"], state: "spectral-512" }] },
     portable: { from: "spec512", to: "spec1024", latency: true } },
-  { name: "raise-lower-burst", latencyClass: "raise", packaged: { repeat: "burst", periodSec: null, fixture: effectState, start: "spectral-512",
+  { name: "raise-lower-burst", latencyClass: "raise", packaged: { repeat: "burst", periodSec: null, fixture: raiseState, start: "spectral-512", judge: "latency",
     cycle: [{ edits: ["fft-4096", "fft-512"], state: "spectral-512" }] } },
   { name: "lookahead-transition", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: null, start: "limiter-lookahead-5",
     cycle: [{ edits: ["lookahead-1ms"], state: "limiter-lookahead-1" }, { edits: ["lookahead-5ms"], state: "limiter-lookahead-5" }],

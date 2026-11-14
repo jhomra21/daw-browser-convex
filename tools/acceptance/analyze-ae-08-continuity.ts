@@ -455,7 +455,7 @@ type Phase4Edit = { name: string; fromLatencyFrames: number; toLatencyFrames: nu
 // precede an edit it carries. A publication's move is the net rise of its turn, max(0, last.to - first.from), which
 // is the sum of the raises for a run of contiguous raises. A turn that raises then lowers moves only by the net.
 // Turns are judged strictly: edits closer than one compile duration fail the row even when the audio is right.
-const attributePublications = <Publication extends { wallMs: number; publicationFrame: number }>(
+export const attributePublications = <Publication extends { wallMs: number; publicationFrame: number }>(
   edits: readonly Phase4Edit[], publications: readonly Publication[]) => {
   const turns: Phase4Edit[][] = []
   for (const edit of edits) {
@@ -480,7 +480,7 @@ const publishedMoves = (attributed: NonNullable<ReturnType<typeof attributePubli
 // What the host reports at each publication, which PCM cannot show: a lost lower whose delay equals the pinned budget
 // sounds like a pinned one. The graph latency is what the publication's last edit asked for. The pinned budget only
 // rises while playing, so a lower leaves it at the highest graph latency so far.
-const appliedLatencyMatches = <Publication extends { graphLatencyFrames: number; pinnedLatencyFrames: number }>(
+export const appliedLatencyMatches = <Publication extends { graphLatencyFrames: number; pinnedLatencyFrames: number }>(
   attributed: readonly { publication: Publication; edits: readonly Phase4Edit[] }[]) => {
   let pinned = attributed[0]?.edits[0]?.fromLatencyFrames ?? 0
   return attributed.every(({ publication, edits: group }) => {
@@ -504,7 +504,7 @@ const latencySample = (reference: Pcm, frame: number, channel: number, move: Lat
 // publicationFrames lists every publication of the burst, lowers included. Each frame is judged against its own
 // window's expectation, and the first mismatch is reported with the publication whose window holds it (null before
 // the first publication).
-const compareLatency = (output: Pcm, reference: Pcm, move: LatencyMove | LatencyMove[], tolerance: number, endFrame: number,
+export const compareLatency = (output: Pcm, reference: Pcm, move: LatencyMove | LatencyMove[], tolerance: number, endFrame: number,
   publicationFrames: readonly number[] = []) => {
   const moves = Array.isArray(move) ? move : [move]
   let mismatches = 0, nonFinite = 0, clipped = 0, maxAbsDifference = 0, firstMismatch: number | null = null

@@ -442,9 +442,9 @@ export const selfTest = async () => {
   try {
     process.env.DAW_AE08_EVIDENCE_DIR = evidence
     const before = Date.now()
-    ae08ControlCommitReceived("control.preview", { idempotencyKey: "preview-key" })
-    ae08ControlCommitReceived("control.commit", { version: "v1" })
-    ae08ControlCommitReceived("control.commit", { idempotencyKey: "commit-key" })
+    ae08ControlCommitReceived({ operation: "control.preview", input: { idempotencyKey: "preview-key" } })
+    ae08ControlCommitReceived({ operation: "control.commit", input: { version: "v1" } })
+    ae08ControlCommitReceived({ operation: "control.commit", input: { idempotencyKey: "commit-key" } })
     const received = await commitReceivedWallMs(evidence, "commit-key")
     check(received >= before && received <= Date.now(), "the runner reads the wall time the app logged for its commit")
     check(parseHostLines(await readFile(path.join(evidence, "host.jsonl"), "utf8")).length === 1, "only a commit that carries a key is stamped")

@@ -900,7 +900,7 @@ const handleSocket = (socket: Socket) => {
       return
     }
     const rendererId = correlation.create(frame.id)
-    ae08ControlCommitReceived(frame.operation, frame.input)
+    ae08ControlCommitReceived(frame)
     if (diagnosticsTraceEnabled && frame.operation === "diagnostics.snapshot.v2") {
       const start = diagnosticsTrace.start()
       diagnosticsStarts.set(rendererId, start)

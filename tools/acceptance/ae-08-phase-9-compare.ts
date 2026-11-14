@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
-import { judgeBurst as judgeStates } from "./analyze-ae-08-continuity"
+import { appliedLatencyMatches, attributePublications, compareLatency, judgeBurst as judgeStates } from "./analyze-ae-08-continuity"
 import { readWav, type Pcm } from "./ae08-wav"
+import { phase5AssetSample } from "./ae-08-phase-5-fixture"
 import { judgeBurst, parseHostLines, type BurstVerdict, type Compare, type HostEvent } from "./ae-08-phase-9-matrix"
 import type { Row } from "./ae-08-phase-9-rows"
 
@@ -37,6 +38,37 @@ export const compareStates = (input: { output: Pcm; states: readonly Pcm[]; seam
       ? `${found.mismatches} samples differ from the entered state in [${found.seamFrame}, ${found.endFrame}) (first at ${found.firstMismatch}, max ${found.maxAbsDifference}${found.covered ? "" : ", window shorter than the fade"})`
       : undefined
   }
+}
+
+// A raise row on the unmonitored Spectral fixture. The retained left channel is the phase 5 source, delayed by the Spectral's latency
+// from the start (the master path latency) and by every raise the budget has not yet absorbed. The budget only rises while playing,
+// so a lower, or a raise back to a level already reached, moves nothing. Two checks, both from the analyzer:
+// the host's reported graph and pinned latencies against the declared edits (publishedLatencyMatchesMoves), and the left channel against
+// the shifted source (compareLatency, with its fade and exact shift). A fixture whose declared moves never reach the master path
+// reports 0 for both and fails the first check at its first publication.
+export type LatencyEdit = { name: string; fromLatencyFrames: number; toLatencyFrames: number; wallMs: number }
+export type LatencyPublication = { wallMs: number; publicationFrame: number; graphLatencyFrames: number; pinnedLatencyFrames: number }
+export const compareLatencyMoves = (input: { output: Pcm; edits: readonly LatencyEdit[]; publications: readonly LatencyPublication[]; endFrame: number }): Compare => {
+  const { output, edits, publications, endFrame } = input
+  const attributed = attributePublications([...edits], publications)
+  if (!attributed) return () => `${publications.length} publications do not match the ${edits.length} declared edits (a lost, extra or early revision)`
+  const reported = attributed.findIndex((_, index) => !appliedLatencyMatches(attributed.slice(0, index + 1)))
+  if (reported >= 0) return (window) => window.index === reported + 1
+    ? `the published latency ${publications[reported]?.graphLatencyFrames}/${publications[reported]?.pinnedLatencyFrames} (graph/pinned) differs from the declared move of edit ${window.index}` : undefined
+  const initial = attributed[0]?.edits[0]?.fromLatencyFrames ?? 0
+  let pinned = initial
+  const moves = attributed.map(({ publication, edits: group }) => {
+    const graph = group.at(-1)?.toLatencyFrames ?? 0
+    const raiseFrames = Math.max(0, graph - pinned)
+    pinned = Math.max(pinned, graph)
+    return { publicationFrame: publication.publicationFrame, raiseFrames }
+  })
+  const source: Pcm = { sampleRate: output.sampleRate, channels: 1,
+    samples: Float32Array.from({ length: endFrame }, (_, frame) => frame < initial ? 0 : phase5AssetSample(frame - initial, false)) }
+  const left: Pcm = { ...output, channels: 1, samples: Float32Array.from({ length: endFrame }, (_, frame) => output.samples[frame * output.channels] ?? NaN) }
+  const verdict = compareLatency(left, source, moves.filter((move) => move.raiseFrames > 0), 0, endFrame, publications.map((publication) => publication.publicationFrame))
+  return (window) => verdict.passed || window.index !== (verdict.failedPublication ?? 0) + 1 ? undefined
+    : `${verdict.mismatches} retained-channel samples differ from the source shifted by the published moves (first at ${verdict.firstMismatch}, max ${verdict.maxAbsDifference})`
 }
 
 // A held live note on the edited (right) channel never goes quiet: no run of 1 ms of near-silence (a sine's zero crossing is a frame
@@ -94,7 +126,10 @@ export const playedBlocks = (blocks: readonly CaptureBlock[], firstEditWallMs: n
 export const lifecycleBetween = (events: readonly HostEvent[], fromWallMs: number, toWallMs: number) =>
   events.filter((event) => event.wallMs >= fromWallMs && event.wallMs <= toWallMs && /stop|teardown|rebuild|host-exit|host-spawn|device-configure/i.test(event.event))
 
-const logged = z.object({ edits: z.array(z.object({ index: z.number(), wallMs: z.number(), settledWallMs: z.number().optional(), publicationFrame: z.number() })) })
+const logged = z.object({ edits: z.array(z.object({ index: z.number(), name: z.string(), wallMs: z.number(), settledWallMs: z.number().optional(), publicationFrame: z.number(),
+  fromLatencyFrames: z.number(), toLatencyFrames: z.number() })) })
+const publicationLine = z.object({ event: z.literal("graph-publish"), cause: z.literal("block-boundary"), pid: z.number(), wallMs: z.number(), transportEpoch: z.number(),
+  publicationFrame: z.number().positive(), graphLatencyFrames: z.number(), pinnedLatencyFrames: z.number() })
 const nativeLines = (text: string) => text.slice(0, text.lastIndexOf("\n") + 1).split("\n").filter(Boolean).map((line) => JSON.parse(line))
 
 // Judges one stored row of a launch: steps and seams from its phase9-edits.json, the capture from the launch folder.
@@ -120,6 +155,15 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
     return judgeBurst(steps, input.captureEndWallMs, compareStates({ output: transportIndexed(capture, mine, endFrame), states, seams, endFrame }))
   }
   const output = transportIndexed(capture, mine, captured)
+  if (row.judge === "latency") {
+    const firstEditWallMs = steps[0]?.editWallMs ?? 0
+    const publications = texts.flatMap(nativeLines).flatMap((entry) => {
+      const line = publicationLine.safeParse(entry)
+      return line.success && line.data.pid === owner.pid && line.data.transportEpoch === owner.transportEpoch
+        && line.data.wallMs >= firstEditWallMs && line.data.wallMs <= input.captureEndWallMs ? [line.data] : []
+    }).sort((a, b) => a.publicationFrame - b.publicationFrame)
+    return judgeBurst(steps, input.captureEndWallMs, compareLatencyMoves({ output, edits, publications, endFrame: captured }))
+  }
   if (row.judge === "sustained") return judgeBurst(steps, input.captureEndWallMs, compareSustained({ output, seams, endFrame: captured }))
   if (row.judge === "delete") {
     const cold = lifecycleBetween(texts.flatMap(parseHostLines), steps[0]?.editWallMs ?? 0, input.captureEndWallMs)
@@ -204,6 +248,43 @@ export const selfTest = () => {
   check(once(deleted(tone, tone)).outcome === "fail", "a clip that still sounds after the delete fails")
   check(once(deleted((frame) => frame < seam ? 0 : 0, tone)).outcome === "fail", "a clip that never sounded proves nothing")
   check(once(deleted((frame) => frame < seam + fade ? tone(frame) : 0, (frame) => frame < seam ? tone(frame) : 0)).outcome === "fail", "a retained source that stops with the delete fails")
+  // A raise row: the Spectral on the master path goes 700 to 4300 frames of latency and back, twice. Only the first raise moves the
+  // pinned budget, so only it shifts the retained channel (by 3600 frames); the lowers and the second raise move nothing.
+  const low = 700, high = 4300, latencyEnd = 800_000, publicationFrames = [100_000, 300_000, 500_000, 700_000]
+  const latencyEdits: LatencyEdit[] = [low, high, low, high].map((from, edit) => ({ name: edit % 2 ? "fft-512" : "fft-4096", fromLatencyFrames: from,
+    toLatencyFrames: from === low ? high : low, wallMs: 1000 + edit * 4000 }))
+  const reportedBy = (reports: readonly { graph: number; pinned: number }[]): LatencyPublication[] => publicationFrames.map((publicationFrame, index) =>
+    ({ wallMs: 2500 + index * 4000, publicationFrame, graphLatencyFrames: reports[index]?.graph ?? NaN, pinnedLatencyFrames: reports[index]?.pinned ?? NaN }))
+  const honest = [{ graph: high, pinned: high }, { graph: low, pinned: high }, { graph: high, pinned: high }, { graph: low, pinned: high }]
+  const retainedAfter = (shifts: readonly { publicationFrame: number; raiseFrames: number }[], initial = low): Pcm => {
+    const samples = new Float32Array(latencyEnd * channels).fill(0.5)
+    for (let frame = 0; frame < latencyEnd; frame++) {
+      let shift = initial, gain = 1
+      for (const move of shifts) {
+        const seamAt = move.publicationFrame + 240
+        if (frame >= seamAt) shift += move.raiseFrames
+        if (frame >= move.publicationFrame && frame < seamAt + 240) gain *= frame < seamAt ? (seamAt - frame) / 240 : (frame - seamAt) / 240
+      }
+      samples[frame * channels] = frame < shift ? 0 : Math.fround(Math.fround(phase5AssetSample(frame - shift, false)) * Math.fround(gain))
+    }
+    return { sampleRate, channels, samples }
+  }
+  const raised = (frames: number) => [{ publicationFrame: publicationFrames[0] ?? 0, raiseFrames: frames }]
+  const latencySteps = latencyEdits.map((edit, position) => ({ index: position + 1, editWallMs: edit.wallMs, settledWallMs: edit.wallMs + 1500 }))
+  const raiseRow = (output: Pcm, reports = honest, publications = reportedBy(reports)) =>
+    judgeBurst(latencySteps, 20_000, compareLatencyMoves({ output, edits: latencyEdits, publications, endFrame: latencyEnd }))
+  check(raiseRow(retainedAfter(raised(high - low))).outcome === "pass", "a raise row whose master path follows the declared moves passes")
+  const monitored = raiseRow(retainedAfter([], 0), [0, 0, 0, 0].map(() => ({ graph: 0, pinned: 0 })))
+  check(monitored.outcome === "fail" && monitored.editIndex === 1 && /published latency 0\/0/.test(monitored.detail ?? ""), `a fixture whose Spectral is monitored reports 0 and fails at the first publication: ${JSON.stringify(monitored)}`)
+  const lostLower = raiseRow(retainedAfter(raised(high - low)), honest.map((report, index) => index === 1 ? { ...report, graph: high } : report))
+  check(lostLower.outcome === "fail" && lostLower.editIndex === 2, `a lower that is reported as the pinned level fails at its own edit: ${JSON.stringify(lostLower)}`)
+  const wrongShift = raiseRow(retainedAfter(raised(high - low + 1)))
+  check(wrongShift.outcome === "fail" && wrongShift.editIndex === 1, `a raise that shifts by one frame too many fails at its edit: ${JSON.stringify(wrongShift)}`)
+  const unpinned = raiseRow(retainedAfter([...raised(high - low), { publicationFrame: publicationFrames[2] ?? 0, raiseFrames: high - low }]))
+  check(unpinned.outcome === "fail" && unpinned.editIndex === 3, `a second raise to a level already reached must not shift again: ${JSON.stringify(unpinned)}`)
+  const extra = raiseRow(retainedAfter(raised(high - low)), honest, [...reportedBy(honest), { wallMs: 9000, publicationFrame: 150_000, graphLatencyFrames: high, pinnedLatencyFrames: high }]
+    .sort((a, b) => a.publicationFrame - b.publicationFrame))
+  check(extra.outcome === "fail", `a publication no edit made fails: ${JSON.stringify(extra)}`)
   const event = (name: string, wallMs: number) => parseHostLines(`${JSON.stringify({ event: name, wallMs })}\n`)
   check(lifecycleBetween([...event("host-spawn", 1500), ...event("graph-publish", 1600)], 1000, 2000).length === 1, "a host restart after the edit is a lifecycle event")
   check(lifecycleBetween(event("transport-stop", 500), 1000, 2000).length === 0, "an event before the edit is not")

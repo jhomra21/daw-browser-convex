@@ -74,14 +74,12 @@ export const deleteTrackThroughUi = async (context: UiContext, name: string) => 
 
 // Nonperiodic envelope plus DC prevents a single missing sample from landing
 // on a sine zero and makes a block shift observably wrong at every seam.
+export const phase5AssetSample = (frame: number, right: boolean) => 0.08 + 0.025 * Math.sin(frame * (right ? 0.039 : 0.027))
+  + 0.015 * Math.sin(frame * frame * (right ? 1.7e-8 : 1e-8))
 export const writePhase5Asset = async (file: string, seconds: number, right: boolean) => {
   const sampleRate = 48000
   const samples = new Float32Array(seconds * sampleRate * 2)
-  for (let frame = 0; frame < seconds * sampleRate; frame++) {
-    const value = 0.08 + 0.025 * Math.sin(frame * (right ? 0.039 : 0.027))
-      + 0.015 * Math.sin(frame * frame * (right ? 1.7e-8 : 1e-8))
-    samples[frame * 2 + (right ? 1 : 0)] = value
-  }
+  for (let frame = 0; frame < seconds * sampleRate; frame++) samples[frame * 2 + (right ? 1 : 0)] = phase5AssetSample(frame, right)
   await writeWav(file, { sampleRate, channels: 2, samples })
 }
 
@@ -267,7 +265,10 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
     await mutate([{ kind: "clip.move", clip: ref(clip.id), track: ref(changedTrack.id), startSec: 0 },
       { kind: "clip.timing.set", clip: ref(clip.id), duration: contentSeconds ?? 24 }])
   }
-  if (row === "effect-state") {
+  // Phase 9 only: "raise-state" has the effect-state devices but never arms the track for monitoring, so the Spectral stays on the
+  // master path and its declared latency moves reach it (the monitored effect-state row keeps its Spectral out of compensation).
+  const spectralRow = row === "effect-state" || row === "raise-state"
+  if (spectralRow) {
     // Spectral then Utility on the right-only source: the FFT size is audible
     // as content delay and the gain as level. No DC block, so gain stays pure.
     const target = { kind: "track", track: ref(changedTrack.id) }
@@ -308,14 +309,16 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
   // the offline reference independent of any stale mounted projection.
   await context.reload()
   await waitImportedClip(context, "retained")
-  if (row === "effect-state") {
-    const index = (await snapshot()).tracks.findIndex((track) => track.id === changedTrack.id) + 1
+  if (spectralRow) {
     await context.evaluate(`(()=>{
       const button=[...document.querySelectorAll('button[aria-label]')].find(b=>b.getAttribute('aria-label')?.endsWith(': Changed right'));
       if(!button)throw new Error("Effect-state track selector missing");button.click();return true;
     })()`)
     await waitForUi(context, "Effect-state devices missing",
       `document.querySelectorAll('.device-spectral').length===1&&(()=>{try{return !!${utilityGainKnob}}catch{return false}})()`)
+  }
+  if (row === "effect-state") {
+    const index = (await snapshot()).tracks.findIndex((track) => track.id === changedTrack.id) + 1
     // Monitoring keeps the edited FFT path out of compensation (phase 4 Keep
     // Latency), so the left source keeps zero latency and nulls exactly.
     await context.evaluate(`(()=>{

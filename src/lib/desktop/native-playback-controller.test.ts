@@ -9818,7 +9818,7 @@ test("a Play that starts while a paused VST insertion is still being staged leav
 })
 
 // Pause-keeps-graph: a Pause or Stop over a pending resume abandons the Play, never the session it resumes.
-for (const route of ["pause", "stop"] as const) test(`a ${route} over a Play resuming the paused session abandons the resume and keeps the prepared session`, async () => {
+for (const route of ["pause", "stop"]) test(`a ${route} over a Play resuming the paused session abandons the resume and keeps the prepared session`, async () => {
   const fixture = createBridge()
   const snapshotInput = input()
   let compileGate: Promise<void> | undefined

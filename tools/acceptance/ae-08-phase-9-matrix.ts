@@ -107,7 +107,8 @@ export const chooseVstRepetitions = (launches: readonly Row[][], repetitions: nu
 // ---- Settling on host evidence ----
 const hostEventSchema = z.object({ event: z.string(), cause: z.string().default(""), wallMs: z.number().default(0),
   revision: z.number().default(0), frame: z.number().default(0), publicationFrame: z.number().default(0), transportEpoch: z.number().default(0),
-  idempotencyKey: z.string().default(""), key: z.string().default(""), open: z.boolean().optional(), pid: z.number().default(0), requestedRevision: z.number().default(0) })
+  idempotencyKey: z.string().default(""), key: z.string().default(""), open: z.boolean().optional(), pid: z.number().default(0), requestedRevision: z.number().default(0),
+  processorAutomationEvents: z.number().default(0) })
 export type HostEvent = z.infer<typeof hostEventSchema>
 export class SetupFailure extends Error {}
 
@@ -134,6 +135,11 @@ export type Settled = { wallMs: number; revision: number; publicationFrame: numb
 // A step that publishes no graph settles on another host line: the editor-open line, a plug-in fault line, or the applied sequence. It
 // names no publication frame unless the host stamped one, and runBurst then takes the transport frame at its wall time.
 const settledOn = (event: HostEvent | undefined): Settled | undefined => event && { wallMs: event.wallMs, revision: event.revision, publicationFrame: event.frame }
+// The automation lane events in the schedule windows the main process sent for a publication's revision since the edit
+// (apps/desktop/audio-host.ts logs one schedule-window line per window).
+const laneEventsOf = (events: readonly HostEvent[], publish: HostEvent, sinceWallMs: number) =>
+  events.filter((window) => window.event === "schedule-window" && window.revision === publish.revision && window.wallMs >= sinceWallMs && window.wallMs <= publish.wallMs)
+    .map((window) => window.processorAutomationEvents)
 export const publicationComplete = (events: readonly HostEvent[], sinceWallMs: number, raise: boolean, settle?: Settle): Settled | undefined => {
   if (settle === "sequence") return settledOn(events.find((event) => event.event === "processor-sequence-applied" && event.frame > 0 && event.wallMs >= sinceWallMs))
   if (settle === "editor-open") return settledOn(events.find((event) => event.event === "vst-editor-state" && event.open === true && event.wallMs >= sinceWallMs))
@@ -142,7 +148,9 @@ export const publicationComplete = (events: readonly HostEvent[], sinceWallMs: n
   // since the edit precedes.
   const publish = events.find((event) => event.event === "graph-publish" && event.cause === "block-boundary"
     && event.publicationFrame > 0 && event.wallMs >= sinceWallMs
-    && (settle !== "asset" || events.some((install) => install.event === "asset-install" && install.wallMs >= sinceWallMs && install.wallMs <= event.wallMs)))
+    && (settle !== "asset" || events.some((install) => install.event === "asset-install" && install.wallMs >= sinceWallMs && install.wallMs <= event.wallMs))
+    && (settle !== "lane" || laneEventsOf(events, event, sinceWallMs).some((count) => count > 0))
+    && (settle !== "lane-free" || laneEventsOf(events, event, sinceWallMs).length > 0 && laneEventsOf(events, event, sinceWallMs).every((count) => count === 0)))
   if (!publish) return undefined
   const { revision, publicationFrame } = publish
   if (!raise) return { wallMs: publish.wallMs, revision, publicationFrame }
@@ -401,6 +409,14 @@ export const selfTest = async () => {
   check(publicationComplete(host({ ...sequence, frame: 0 }), 900, false, "sequence") === undefined, "a sequence applied at frame 0 is startup, not an edit")
   check(publicationComplete(host(sequence), 900, false, "sequence")?.publicationFrame === 130000, "the applied line's frame stands for the publication frame")
   check(publicationComplete(host(sequence), 900, false) === undefined, "a sequence line does not settle a row that waits for a graph publication")
+  // A lane step settles on the publication whose schedule windows carry the lane, not on one without it.
+  const laneWindow = (revision: number, wallMs: number, processorAutomationEvents: number) => ({ event: "schedule-window", revision, wallMs, processorAutomationEvents })
+  check(publicationComplete(host(laneWindow(4, 1000, 0), publish), 900, false, "lane") === undefined, "a publication without the lane does not settle a lane step")
+  check(publicationComplete(host(laneWindow(4, 1000, 2), publish), 900, false, "lane")?.revision === 4, "a publication whose windows carry the lane settles a lane step")
+  check(publicationComplete(host(laneWindow(3, 1000, 2), publish), 900, false, "lane") === undefined, "another revision's lane windows are not the publication's")
+  check(publicationComplete(host(laneWindow(4, 1000, 0), publish), 900, false, "lane-free")?.revision === 4, "a publication whose windows carry no lane settles a lane-free step")
+  check(publicationComplete(host(laneWindow(4, 1000, 2), publish), 900, false, "lane-free") === undefined && publicationComplete(host(publish), 900, false, "lane-free") === undefined,
+    "a publication with a lane, or with no windows at all, does not settle a lane-free step")
   // An import publishes its track first and the decoded asset after an asset-install; the step settles on the asset's publication.
   const install = { event: "asset-install", wallMs: 1150 }
   const early = { ...publish, wallMs: 1000, revision: 7, publicationFrame: 96256 }

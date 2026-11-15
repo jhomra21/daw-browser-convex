@@ -15,6 +15,10 @@
 //
 // Definitions, all read from host.jsonl (the host logs the native applied frame, not the requested one):
 // - bind: the first `graph-publish-request` of a revision. Lead = publication frame - bind frame, in blocks.
+//   Only a publication that binds a seam has a lead: a latency publication (a plug-in's own latency report) prepares with no
+//   requested frame and native publishes it at the next block boundary, so its lead is 0 by design. A seam-bound publication
+//   stages schedule windows against its prepared revision before it publishes (the host's `schedule-window` lines); one with none
+//   is a latency publication. Evidence with no `schedule-window` line at all (from before the line existed) judges every lead.
 // - rebase: the publication frame moved past the bound seam (lead above LEAD_MAX_BLOCKS). A re-sent Publish at the
 //   same seam is not a rebase.
 // - prepare to publish: `graph-prepare` to `graph-publish`. Edit to publish: the first edit the publication carries
@@ -50,7 +54,7 @@ type Gate = "inputs" | "lead" | "rebase" | "prepare-to-publish" | "prep-time" | 
 type Failure = { row: string; gate: Gate; detail: string }
 type Status = "PASS" | "INCOMPLETE" | "FAIL"
 type Publication = {
-  row: string; revision: number; publicationFrame: number; asset: boolean; class: Class; raise: boolean; leadBlocks: number; prepareToPublishMs: number; prepMs: number
+  row: string; revision: number; publicationFrame: number; asset: boolean; class: Class; raise: boolean; leadBlocks: number; seamBound: boolean; prepareToPublishMs: number; prepMs: number
   editToPublishMs: number | undefined; completeFrames: number | undefined; blocksBeforeBind: number
 }
 type Analysis = { publications: Publication[]; failures: Failure[]; rows: { row: string; status: Status }[]; status: Status }
@@ -95,6 +99,7 @@ const classOf = (declared: Class | undefined, asset: boolean, raise: boolean, bl
 const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<typeof editsSchema>["edits"], declared: Class | undefined) => {
   const drafts: (Omit<Publication, "class" | "raise" | "editToPublishMs"> & { wallMs: number })[] = []
   const failures: Failure[] = []
+  const windowed = events.some((event) => event.event === "schedule-window")
   events.forEach((publish, index) => {
     if (publish.event !== "graph-publish" || publish.cause !== "block-boundary" || publish.publicationFrame === 0) return
     const revision = publish.revision
@@ -112,8 +117,9 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<ty
     const asset = events.some((event) => event.event === "asset-install" && event.pid === publish.pid
       && event.wallMs >= prepare.event.wallMs && event.wallMs <= publish.wallMs)
     const blocksBeforeBind = Math.max(1, Math.round((bind.frame - prepare.event.frame) / BLOCK))
+    const seamBound = !windowed || events.slice(prepare.index + 1, index).some((event) => event.event === "schedule-window" && event.revision === revision)
     drafts.push({
-      row, revision, publicationFrame: publish.publicationFrame, asset, blocksBeforeBind, wallMs: publish.wallMs,
+      row, revision, publicationFrame: publish.publicationFrame, asset, blocksBeforeBind, seamBound, wallMs: publish.wallMs,
       leadBlocks: (publish.publicationFrame - bind.frame) / BLOCK, prepareToPublishMs: publish.wallMs - prepare.event.wallMs,
       prepMs: armed.wallMs - prepare.event.wallMs, completeFrames: complete ? complete.frame - publish.publicationFrame : undefined,
     })
@@ -152,9 +158,9 @@ const judgePublication = (publication: Publication): Failure[] => {
   const allowedComplete = COMPLETE_BASE_FRAMES + BLOCK * Math.min(publication.blocksBeforeBind, COMPLETE_MAX_BLOCKS_BEFORE_BIND)
   const fail = (gate: Gate, detail: string): Failure => ({ row, gate, detail: `rev ${revision} ${detail}` })
   return [
-    ...(!Number.isInteger(leadBlocks) || leadBlocks < LEAD_MIN_BLOCKS || leadBlocks > LEAD_MAX_BLOCKS
+    ...(publication.seamBound && (!Number.isInteger(leadBlocks) || leadBlocks < LEAD_MIN_BLOCKS || leadBlocks > LEAD_MAX_BLOCKS)
       ? [fail("lead", `lead ${leadBlocks} blocks, want ${LEAD_MIN_BLOCKS}..${LEAD_MAX_BLOCKS}`)] : []),
-    ...(leadBlocks > LEAD_MAX_BLOCKS ? [fail("rebase", "publication frame moved past the bound seam")] : []),
+    ...(publication.seamBound && leadBlocks > LEAD_MAX_BLOCKS ? [fail("rebase", "publication frame moved past the bound seam")] : []),
     ...(limits.prepareToPublishMaxMs !== undefined && publication.prepareToPublishMs > limits.prepareToPublishMaxMs
       ? [fail("prepare-to-publish", `${publication.prepareToPublishMs} > ${limits.prepareToPublishMaxMs} ms (${publication.class})`)] : []),
     ...(limits.editToPublishMaxMs !== undefined && (publication.editToPublishMs ?? 0) > limits.editToPublishMaxMs
@@ -220,9 +226,12 @@ const phaseOf = (run: string) => {
 type Spec = {
   leadBlocks?: number; prepMs?: number; totalMs?: number; editMs?: number; blocksBeforeBind?: number; raise?: boolean
   install?: boolean; resend?: boolean; completeFrames?: number | "none"
+  // A latency publication stages no schedule window against its revision. A row without `windowed` has no schedule-window line at
+  // all, as in evidence from before the line existed.
+  unbound?: boolean
 }
 // `delivers` writes the continuity analysis.json naming the publication at that index as the asset's; `noAsset` writes one naming none.
-type RowOptions = { sampleRate?: number; declare?: string; delivers?: number; noAsset?: true }
+type RowOptions = { sampleRate?: number; declare?: string; delivers?: number; noAsset?: true; windowed?: true }
 const syntheticRow = (specs: readonly Spec[], options: RowOptions = {}) => {
   const base = { cause: "", pid: 1, transportEpoch: 5 }
   const lines: object[] = [{ event: "device-session", pid: 1, wallMs: 0, sampleRate: options.sampleRate ?? SAMPLE_RATE, blockSize: BLOCK }]
@@ -239,6 +248,7 @@ const syntheticRow = (specs: readonly Spec[], options: RowOptions = {}) => {
     if (spec.install) lines.push({ ...base, event: "asset-install", wallMs: wall + 5 })
     lines.push(request(bindFrame + BLOCK, wall + (spec.prepMs ?? 4)))
     if (spec.resend) lines.push(request(publicationFrame - BLOCK, wall + 18))
+    if (options.windowed && !spec.unbound) lines.push({ event: "schedule-window", wallMs: wall + 3, revision })
     lines.push({ ...base, event: "graph-publish", cause: "block-boundary", wallMs: wall + (spec.totalMs ?? 30), frame: publicationFrame, publicationFrame, revision, requestedRevision: 0 })
     if (spec.completeFrames !== "none")
       lines.push({ ...base, event: "latency-move-complete", wallMs: wall + 100, frame: publicationFrame + (spec.completeFrames ?? COMPLETE_BASE_FRAMES + BLOCK * blocksBeforeBind), revision, requestedRevision: 0 })
@@ -284,6 +294,11 @@ const selfTest = async (c1Runs: readonly string[]) => {
     { name: "prep time p50 9 ms", status: "FAIL", fails: ["prep-time"], rows: [["two-tone", [{ prepMs: 9 }, { prepMs: 9 }, { prepMs: 9 }]]] },
     { name: "session at 44.1 kHz is an input failure", status: "FAIL", fails: ["inputs"], rows: [["two-tone", clean, { sampleRate: 44100 }]] },
     { name: "unknown declared class is an input failure", status: "FAIL", fails: ["inputs"], rows: [["two-tone", clean, { declare: JSON.stringify({ class: "mystery" }) }]] },
+    { name: "latency publication with no seam (lead 0) in a row with schedule windows is not a lead failure", status: "PASS", fails: [],
+      rows: [["open-editor", withClean({ unbound: true, leadBlocks: 0 }), { windowed: true }]] },
+    { name: "seam-bound publication of a row with schedule windows still fails a lead of 1", status: "FAIL", fails: ["lead"],
+      rows: [["open-editor", withClean({ leadBlocks: 1 }), { windowed: true }]] },
+    { name: "a row with no schedule-window line judges lead 0", status: "FAIL", fails: ["lead"], rows: [["open-editor", withClean({ leadBlocks: 0 })]] },
     { name: "vst-insert row with in-range lead has no frozen limit: INCOMPLETE", status: "INCOMPLETE", fails: [],
       rows: [["two-tone", clean], ["vst-insert", [{ totalMs: 400 }], { declare: JSON.stringify({ class: "vst-insert" }) }]] },
     { name: "vst-insert row still fails the lead gate", status: "FAIL", fails: ["lead", "rebase"],

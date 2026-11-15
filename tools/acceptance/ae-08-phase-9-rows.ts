@@ -5,20 +5,21 @@
 // The class each row declares for ae-08-latency-gates.ts (its latency-class.json).
 export type LatencyClass = "plain" | "raise" | "asset" | "vst-insert"
 // What an edit that publishes no graph, or not the first one, settles on: the host's applied parameter sequence line, the publication
-// that carries a decoded asset (not the track-only one an import makes first), the host's editor-open or plug-in fault line, or, for a
+// that carries a decoded asset (not the track-only one an import makes first), the publication whose schedule windows carry an automation lane ("lane") or none ("lane-free"), the host's editor-open or plug-in fault line, or, for a
 // commit the app refuses, the return of the refusal.
-export type Settle = "sequence" | "asset" | "refused" | "editor-open" | "plugin-fault"
+export type Settle = "sequence" | "asset" | "lane" | "lane-free" | "refused" | "editor-open" | "plugin-fault"
 // How a step is entered when it is not the analyzer's 6 ms crossfade: "ghost" (a removed track's node fades over 5 ms on top of its
 // source's 6 ms), "cut" (a restored track or a decoded asset sounds from its publication).
 export type Step = { edits: string[]; state: string; entry?: "ghost" | "cut"; settle?: Settle }
 // Which check judges a row's bursts: "states" compares the capture with an offline export of each state (the analyzer's judgeBurst),
 // "sustained" requires a held live note to stay unbroken, "delete" judges a clip delete on host evidence and its own capture,
 // "take" requires the in-app recording's take to equal the tone played into BlackHole,
+// "lane" requires the schedule windows an override publishes to carry no automation lane and those of the re-enable to carry it,
 // "latency" checks the host's reported latencies against the declared moves and the retained channel against its source shifted by
 // the published moves (a pinned lower leaves the shift, so no per-state export can stand for a raise row's later states),
 // and no check means the row is only settled and gated on host evidence.
 // "editor", "fault" and "trust" judge the VST rows on host evidence (no restart, the editor stays open) and the capture.
-export type Judge = "states" | "sustained" | "delete" | "latency" | "take" | "editor" | "fault" | "trust"
+export type Judge = "states" | "sustained" | "delete" | "latency" | "lane" | "take" | "editor" | "fault" | "trust"
 export type PackagedRun = {
   // burst: --repetitions edits. vst-burst: --vst-repetitions edits. single: one pass of the cycle. launch: one edit per launch, repeated --repetitions times.
   repeat: "burst" | "vst-burst" | "single" | "launch"
@@ -76,11 +77,11 @@ export const burstRows: BurstRow[] = [
     cycle: [{ edits: ["silent-track-create"], state: "extra-track" }, { edits: ["silent-track-delete"], state: "base" }] } },
   { name: "tempo-burst", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:raw-tempo", start: "tempo-120", judge: "states",
     cycle: [{ edits: ["tempo-137"], state: "tempo-137" }, { edits: ["tempo-120"], state: "tempo-120" }] } },
-  // No judge: an offline export applies a lane the override has turned off in the player, so no export stands for the overridden state.
-  // The row is settled on the applied parameter sequence and gated on host evidence.
-  { name: "manual-automation-override", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:lane-state", start: "lane-armed",
-    settle: "sequence",
-    cycle: [{ edits: ["knob-drag"], state: "lane-overridden" }, { edits: ["lane-rearm"], state: "lane-armed" }] } },
+  // An offline export applies a lane the override has turned off in the player, so no export stands for the overridden state. The drag
+  // settles on the follow publication whose schedule windows carry no lane, the re-enable on the publication whose windows carry it again
+  // (neither is a graph-less parameter write, and the re-enable emits no sequence).
+  { name: "manual-automation-override", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:lane-state", start: "lane-armed", judge: "lane",
+    cycle: [{ edits: ["knob-drag"], state: "lane-overridden", settle: "lane-free" }, { edits: ["lane-rearm"], state: "lane-armed", settle: "lane" }] } },
   { name: "sustained-live-midi", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:live-midi", start: "base", judge: "sustained",
     device: "iac-midi", prepare: ["midi-select-iac", "midi-hold"],
     cycle: [{ edits: ["silent-track-create"], state: "extra-track" }, { edits: ["silent-track-delete"], state: "base" }] } },

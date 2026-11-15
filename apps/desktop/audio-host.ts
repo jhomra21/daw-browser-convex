@@ -3057,6 +3057,8 @@ export const createNativeAudioHostSupervisor = (
     async queueScheduleWindow(bytes, transactionToken) {
       const payload = nativeBinaryPayload(bytes, 56)
       if (!payload) throw new Error("The native schedule window payload is invalid.")
+      // Header offsets 0 and 56 of serializeNativeScheduleWindow: the revision and the processor automation (lane) event count.
+      ae08Evidence("schedule-window", { revision: payload.readUInt32LE(0), processorAutomationEvents: payload.readUInt32LE(56) })
       await request(scheduleWindowType, payload, transactionToken)
     },
     async reenableVstScheduleAutomation(bytes, transactionToken) {

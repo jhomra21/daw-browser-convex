@@ -11,7 +11,7 @@ import { burstSchedule, judgeStored, MIN_WINDOW_MS, parseHostLines, repetitionsF
 import { phase9Matrix, type Row } from "./ae-08-phase-9-rows"
 import { takeFile } from "./ae-08-phase-9-compare"
 import { writeWav } from "./ae08-wav"
-import { blackhole, iacPort, makeTone, playToneIntoBlackhole, selectAudioInputScript, selectMidiInputScript, sendMidiNote } from "./ae-08-phase-9-devices"
+import { blackhole, describeAudioInputScript, iacPort, makeTone, nativeInputDeviceSchema, playToneIntoBlackhole, selectAudioInputScript, selectMidiInputScript, sendMidiNote } from "./ae-08-phase-9-devices"
 import { armRecordTarget, finishRecording, recordingTargetLockedReason, startRecording, toneSeconds, verifyHandedOverTake } from "./ae-08-phase-9-record"
 import { awaitTestPluginFailure, insertTestPlugin, openTestPluginEditor, prepareTestPlugin, refuseUntrustedPlugin, removeTestPlugin, showUntrustedEffectsBrowser } from "./ae-08-phase-9-vst"
 
@@ -190,6 +190,10 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
   const setup = await setupPhase5Fixture({ ...context, row: fixtureRow(launch.rows), contentSeconds: launch.contentSeconds })
   const prepare = [...new Set(launch.rows.flatMap((row) => row.prepare ?? []))]
   for (const step of prepare.filter((entry) => entry !== "midi-hold")) await performPrepare(context, step)
+  if (prepare.includes("record-select-input")) {
+    const listed = await context.read(describeAudioInputScript(blackhole), nativeInputDeviceSchema)
+    await mark("native-input-device", listed)
+  }
   const perform = createPerformer({ context, runtime: async (args) => { await runtime(args) }, setup: { changedTrackId: setup.changedTrack.id, changedFile: setup.changedFile },
     observe: async () => observeSnapshot(await context.snapshot(), setup.changedTrack.id) })
   await runtime(["seek", "0"])

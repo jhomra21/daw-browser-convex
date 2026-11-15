@@ -110,6 +110,15 @@ export const selectAudioInputScript = (label: string) => `(async()=>{
   if(!device)throw new Error(${JSON.stringify(`${label} is not a native audio input of the private profile`)});
   return ${writePreferences("preferences.audio={...preferences.audio,nativeInputDeviceId:device.deviceId}")};
 })()`
+// The host's own listing line for the device, as the evidence of what the profile's selection resolves to.
+export const nativeInputDeviceSchema = z.object({ name: z.string(), deviceId: z.string(), inputChannelCount: z.number(), available: z.boolean() })
+export const describeAudioInputScript = (label: string) => `(async()=>{
+  const reply=await window.dawDesktop.audioHost.listDevices();
+  const device=reply.ok&&reply.devices.find(entry=>entry.name===${JSON.stringify(label)});
+  if(!device)throw new Error(${JSON.stringify(`${label} is not listed by the native host`)});
+  const {name,deviceId,inputChannelCount,available}=device;
+  return JSON.stringify({name,deviceId,inputChannelCount,available});
+})()`
 export const selectMidiInputScript = (name: string) => `(async()=>{
   const access=await navigator.requestMIDIAccess({sysex:false});
   const input=[...access.inputs.values()].find(entry=>entry.name===${JSON.stringify(name)});

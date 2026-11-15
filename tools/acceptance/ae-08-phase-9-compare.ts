@@ -191,6 +191,19 @@ export const compareTrust = (events: readonly HostEvent[], editWallMs: number): 
   return changed.length ? `the refused insert changed the session: ${named(changed)}` : undefined
 }
 
+// The override (odd steps) holds the built-in lane out of the native schedule: a publication follows the drag and none of the schedule
+// windows sent until the re-enable carries a lane event, so the lane cannot move the value. The re-enable (even steps) publishes the
+// windows with the lane again. The lane is judged on the schedule windows the main process sent (audio-host.ts schedule-window lines).
+export const compareLane = (events: readonly HostEvent[], editWallMs: (index: number) => number): Compare => (window) => {
+  const from = editWallMs(window.index)
+  const laneEvents = events.filter((event) => event.event === "schedule-window" && event.wallMs >= from && event.wallMs < window.toWallMs)
+    .reduce((total, event) => total + event.processorAutomationEvents, 0)
+  const published = events.some((event) => event.event === "graph-publish" && event.cause === "block-boundary" && event.publicationFrame > 0 && event.wallMs >= from && event.wallMs < window.toWallMs)
+  if (!published) return "no schedule publication followed the edit"
+  if (window.index % 2 === 1) return laneEvents === 0 ? undefined : `${laneEvents} lane events were still scheduled after the manual override, so the lane would move the value`
+  return laneEvents > 0 ? undefined : "the re-enabled lane's schedule windows carry no lane event"
+}
+
 // An import lands at the playhead, which differs per cycle, while the reference export imports at 0 (the launch asserts it). The clip's
 // sound is the same shifted in time, so the state an import enters is the reference with the edited (right) channel moved to the start
 // the live clip actually took; the frames before it are the state that was left (the clip's absence).
@@ -244,6 +257,11 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
     return judgeBurst(steps, input.captureEndWallMs, compareStates({ output: transportIndexed(capture, mine, endFrame), states, seams, entries, endFrame }))
   }
   const output = transportIndexed(capture, mine, captured)
+  if (row.judge === "lane") {
+    // The schedule-window lines are the main process's, in the launch's host.jsonl.
+    const events = parseHostLines(await readFile(path.join(launchOut, "host.jsonl"), "utf8"))
+    return judgeBurst(steps, input.captureEndWallMs, compareLane(events, editWallMs))
+  }
   if (row.judge === "latency") {
     const firstEditWallMs = steps[0]?.editWallMs ?? 0
     const launchPublications = texts.flatMap(nativeLines).flatMap((entry) => {
@@ -433,6 +451,15 @@ export const selfTest = () => {
   check(one(compareEditor(lines({ event: "host-spawn", pid: 7, wallMs: 1100 }, { event: "worker-spawn", pid: 7, wallMs: 1200 }), 1, editedAt)).outcome === "pass", "the editor window's own host starting is not a restart of the playing host")
   check(one(compareEditor(lines({ event: "worker-spawn", pid: 1, wallMs: 1200 }), 1, editedAt)).outcome === "fail", "the playing host starting a worker fails")
   check(one(compareEditor(lines({ event: "vst-editor-state", open: false, wallMs: 500 }), 0, editedAt)).outcome === "pass", "an editor closed before the edit is not the edit's")
+  // The lane row: the override's publication carries no lane event and nor does any window until the re-enable, whose windows carry it.
+  const published = { event: "graph-publish", cause: "block-boundary", publicationFrame: 100, wallMs: 1500 }
+  const windowOf = (wallMs: number, processorAutomationEvents: number) => ({ event: "schedule-window", revision: 2, wallMs, processorAutomationEvents })
+  const laneStep = (index: number, compare: Compare) => judgeBurst(steps.slice(index - 1, index), 10_000, compare)
+  check(laneStep(1, compareLane(lines(published, windowOf(1400, 0)), editedAt)).outcome === "pass", "an override whose windows carry no lane passes")
+  check(laneStep(1, compareLane(lines(published, windowOf(1400, 0), windowOf(3000, 1)), editedAt)).outcome === "fail", "a lane event scheduled after the override fails")
+  check(laneStep(1, compareLane(lines(windowOf(1400, 0)), editedAt)).outcome === "fail", "an override with no publication fails")
+  check(laneStep(2, compareLane(lines({ ...published, wallMs: 2500 }, windowOf(2400, 3)), editedAt)).outcome === "pass", "a re-enable whose windows carry the lane passes")
+  check(laneStep(2, compareLane(lines({ ...published, wallMs: 2500 }, windowOf(2400, 0)), editedAt)).outcome === "fail", "a re-enable whose windows carry no lane fails")
   // The fault row: the delete row's capture check plus nothing restarted.
   const faultInput = (events: ReturnType<typeof lines>, right: (frame: number) => number) => ({ events, output: deleted(right, tone), seam, editFrame: seam - sampleRate / 2, endFrame, editWallMs: 1000 })
   const gone = (frame: number) => frame < seam + fade ? tone(frame) : 0

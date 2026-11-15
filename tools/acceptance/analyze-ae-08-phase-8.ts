@@ -5,7 +5,7 @@ import { createHash } from "node:crypto"
 import { z } from "zod"
 import { readWav, type Pcm } from "./ae08-wav"
 import { phase8Rows } from "./ae-08-phase-8-fixture"
-import { rawCaptureOffsetsValid } from "./analyze-ae-08-continuity"
+import { coldEvent, rawCaptureOffsetsValid } from "./analyze-ae-08-continuity"
 
 // Phase 8 (C2): a structural edit is adopted by the live host, playing or paused. The verdict comes from host.jsonl:
 // one spawn and one exit at quit, one device identity before and after the edit, no stop/start/configure/rebuild event
@@ -35,7 +35,7 @@ export const checkPhase8 = async ({ plan, host, actions, wav }: Evidence) => {
   const sessions = host.filter((entry) => entry.event === "device-session" && Number(entry.wallMs) < plan.editStart)
   const current = sessions.at(-1)
   const publications = window.filter((entry) => entry.event === "graph-publish")
-  const lifecycle = window.filter((entry) => lifecyclePattern.test(String(entry.event)))
+  const lifecycle = window.filter((entry) => coldEvent(entry.event, lifecyclePattern))
   const blocks = host.filter((entry) => entry.event === "capture-block" && Number(entry.wallMs) <= end)
   const owner = blocks.at(-1)
   if (!owner) throw new Error("No native capture blocks")

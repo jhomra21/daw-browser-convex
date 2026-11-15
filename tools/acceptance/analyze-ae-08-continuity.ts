@@ -3,6 +3,7 @@ import path from "node:path"
 import { appendFile, readFile, writeFile } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import { z } from "zod"
+import { ae08RendererMarks } from "@daw-browser/desktop-protocol/ipc-channels"
 import { readWav, type Pcm } from "./ae08-wav"
 import { phase5Rows } from "./ae-08-phase-5-fixture"
 
@@ -53,7 +54,10 @@ const compare = (output: Pcm, reference: Pcm) => {
 type Entry = Awaited<ReturnType<typeof jsonl>>[number]
 // The VST3 worker supervisor coming up beside the running device is not a device start, so a warm resume or an edit
 // in a row with a worker must not read it as a cold sign.
-const coldEvent = (event: Entry["event"] | undefined, pattern: RegExp) => event !== "worker-supervisor-started" && pattern.test(String(event))
+// The renderer's evidence marks (compile-start, ...) are not host events: they carry no pid, and `start` in their names is not a cold start.
+const rendererMark = (event: Entry["event"] | undefined) => ae08RendererMarks.safeParse(event).success
+export const coldEvent = (event: Entry["event"] | undefined, pattern: RegExp) =>
+  event !== "worker-supervisor-started" && !rendererMark(event) && pattern.test(String(event))
 // An event with no wall time cannot be placed outside a window, so a window never excludes it: it is read, not skipped.
 const inWindow = (entry: Entry, from: number, to: number) =>
   !Number.isFinite(Number(entry.wallMs)) || (Number(entry.wallMs) >= from && Number(entry.wallMs) <= to)
@@ -881,7 +885,10 @@ export const analyzePhase4 = async (directory: string) => {
       && plan.edits[0]?.name === "latency-raise" && lower?.name === "latency-lower"
       && lower?.toLatencyFrames === raise?.fromLatencyFrames,
     everyEditPublished: attribution !== undefined,
-    publishedLatencyMatchesMoves: attribution !== undefined && appliedLatencyMatches(attribution),
+    // A Keep Latency path is left out of the graph's latency, so the host publishes 0 and pins 0 whatever the plug-in's own move.
+    publishedLatencyMatchesMoves: attribution !== undefined && (keepLatency
+      ? attribution.every(({ publication }) => publication.graphLatencyFrames === 0 && publication.pinnedLatencyFrames === 0)
+      : appliedLatencyMatches(attribution)),
     monotonicRevisions: located.every((edit, index) => index === 0 || edit.revision > (located[index - 1]?.revision ?? Infinity)),
     oneHostAndGeneration: owners.length === 1 && Number.isInteger(owners[0]?.lifecycleGeneration)
       && located.every((edit) => edit.pid === pid && edit.transportEpoch === located[0]?.transportEpoch)
@@ -1333,14 +1340,14 @@ export const checkPhase5EffectState = (evidence: EffectStateEvidence) => {
     return peak
   }
   // A resume is warm when the paused graph plays on in the same host and capture:
-  // from span A's last block to span B's first, every host event comes from the
-  // owner process, every capture block from the owner capture, and no event
+  // from span A's last block to span B's first, no event names another process
+  // (renderer marks and schedule windows carry no pid), every capture block comes from the owner capture, and no event
   // stops, starts, configures or rebuilds the device, capture or host.
   const pausedFromWall = Number((spanA && blocks.findLast((block) => Number(block.offset) < spanA.offset + spanA.frames))?.wallMs)
   const resumedWall = Number((spanB && blocks.find((block) => Number(block.offset) === spanB.offset))?.wallMs)
   const warmResume = !!owner && pauseBlocks.length > 0 && measured.every((entry) =>
     !inWindow(entry, pausedFromWall, resumedWall)
-    || (entry.pid === owner.pid && (entry.event !== "capture-block" || entry.captureId === owner.captureId)
+    || ((entry.pid === undefined || entry.pid === owner.pid) && (entry.event !== "capture-block" || entry.captureId === owner.captureId)
       && !coldEvent(entry.event, /stop|suspend|start|configure|rebuild|teardown|host-exit|host-spawn/i)))
   const resumeSteps = spanB ? {
     actual: peakStep((frame) => sample(spanB, frame, 0), spanB.transportFrame, spanB.transportFrame + resumeGuard),

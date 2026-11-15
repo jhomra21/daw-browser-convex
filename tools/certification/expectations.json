@@ -19286,17 +19286,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 227,
+      "pass": 263,
       "skip": 1,
-      "fail": 2
+      "fail": 0
      },
-     "fails": [
-      "failed lifecycle transition cancels delayed native startup",
-      "preserves an explicitly captured native owner across queued generation rebuilds"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -25507,17 +25504,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 227,
+      "pass": 263,
       "skip": 1,
-      "fail": 2
+      "fail": 0
      },
-     "fails": [
-      "failed lifecycle transition cancels delayed native startup",
-      "preserves an explicitly captured native owner across queued generation rebuilds"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -27495,8 +27489,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -27764,8 +27758,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -27901,8 +27895,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -28036,8 +28030,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -28054,13 +28048,13 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 221,
+      "pass": 255,
       "skip": 1,
       "fail": 8
      },
      "fails": [
       "B6d4 a Stop issued after a locate superseded a waiting Play still stops",
-      "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
+      "B6d5 a Stop that cancels a pending Play keeps the prepared graph at the start",
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
       "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
       "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
@@ -29884,7 +29878,7 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(async () => {\n      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n      return ensureLivePortableSession()\n    }).catch(() => undefined)\n",
+       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(ensureLiveGraph).catch(() => undefined)\n",
        "to": ""
       }
      ],
@@ -29897,14 +29891,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 16,
+      "pass": 18,
       "skip": 0,
-      "fail": 5
+      "fail": 3
      },
      "fails": [
-      "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
-      "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
       "does not resume a structural rebuild after stop wins"
      ],
@@ -30009,7 +30001,7 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(async () => {\n      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n      return ensureLivePortableSession()\n    }).catch(() => undefined)\n",
+       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(ensureLiveGraph).catch(() => undefined)\n",
        "to": ""
       }
      ],
@@ -30022,18 +30014,15 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 206,
+      "pass": 244,
       "skip": 1,
-      "fail": 23
+      "fail": 19
      },
      "fails": [
-      "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
-      "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
       "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
@@ -30284,12 +30273,11 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 223,
+      "pass": 258,
       "skip": 1,
-      "fail": 6
+      "fail": 5
      },
      "fails": [
-      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
@@ -30517,8 +30505,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "      if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
       }
      ],
      "bounded": false,
@@ -31131,17 +31119,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 227,
+      "pass": 263,
       "skip": 1,
-      "fail": 2
+      "fail": 0
      },
-     "fails": [
-      "failed lifecycle transition cancels delayed native startup",
-      "preserves an explicitly captured native owner across queued generation rebuilds"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -31872,12 +31857,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 0,
+      "pass": 1,
       "skip": 0,
       "fail": 1
      },
      "fails": [
-      "B6d7 a locate during a Pause that cancels a pending Play keeps its paused rebuild and reports no fault"
+      "B6d7 a locate during a Pause that cancels a cold Play (native audio optional) keeps the rebuild's paused start when the Play's cleanup joins the Pause's dispose"
      ],
      "fuzz": null,
      "rejection": null,
@@ -31994,12 +31979,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 25,
+      "pass": 26,
       "skip": 0,
       "fail": 1
      },
      "fails": [
-      "B6d7 a locate during a Pause that cancels a pending Play keeps its paused rebuild and reports no fault"
+      "B6d7 a locate during a Pause that cancels a cold Play (native audio optional) keeps the rebuild's paused start when the Play's cleanup joins the Pause's dispose"
      ],
      "fuzz": null,
      "rejection": null,
@@ -32115,12 +32100,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 226,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
      "fails": [
-      "B6d7 a locate during a Pause that cancels a pending Play keeps its paused rebuild and reports no fault",
+      "B6d7 a locate during a Pause that cancels a cold Play (native audio optional) keeps the rebuild's paused start when the Play's cleanup joins the Pause's dispose",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -36013,7 +35998,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(async () => {\n      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n      return ensureLivePortableSession()\n    }).catch(() => undefined)\n",
+       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(ensureLiveGraph).catch(() => undefined)\n",
        "to": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(() => {\n      if (nativePreviewRequested) return nativePlayback.ensureLivePreview(untrack(playheadSec))\n    }).catch(() => undefined)\n"
       }
      ]
@@ -36136,7 +36121,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(async () => {\n      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n      return ensureLivePortableSession()\n    }).catch(() => undefined)\n",
+       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(ensureLiveGraph).catch(() => undefined)\n",
        "to": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(() => {\n      if (nativePreviewRequested) return nativePlayback.ensureLivePreview(untrack(playheadSec))\n    }).catch(() => undefined)\n"
       }
      ]
@@ -49001,17 +48986,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 227,
+      "pass": 263,
       "skip": 1,
-      "fail": 2
+      "fail": 0
      },
-     "fails": [
-      "failed lifecycle transition cancels delayed native startup",
-      "preserves an explicitly captured native owner across queued generation rebuilds"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -59208,8 +59190,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -59298,8 +59280,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -59388,8 +59370,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -60095,7 +60077,7 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(async () => {\n      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n      return ensureLivePortableSession()\n    }).catch(() => undefined)\n",
+       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(ensureLiveGraph).catch(() => undefined)\n",
        "to": ""
       }
      ],
@@ -60251,8 +60233,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "      if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
       }
      ],
      "bounded": false,
@@ -63168,8 +63150,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -63258,8 +63240,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -63348,8 +63330,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -64055,7 +64037,7 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(async () => {\n      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n      return ensureLivePortableSession()\n    }).catch(() => undefined)\n",
+       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(ensureLiveGraph).catch(() => undefined)\n",
        "to": ""
       }
      ],
@@ -64211,8 +64193,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "      if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
       }
      ],
      "bounded": false,
@@ -65087,7 +65069,7 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(async () => {\n      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n      return ensureLivePortableSession()\n    }).catch(() => undefined)\n",
+       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(ensureLiveGraph).catch(() => undefined)\n",
        "to": ""
       }
      ],
@@ -65227,8 +65209,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "      if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
       }
      ],
      "bounded": false,
@@ -65704,7 +65686,7 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(async () => {\n      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n      return ensureLivePortableSession()\n    }).catch(() => undefined)\n",
+       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(ensureLiveGraph).catch(() => undefined)\n",
        "to": ""
       }
      ],
@@ -65835,7 +65817,7 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(async () => {\n      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n      return ensureLivePortableSession()\n    }).catch(() => undefined)\n",
+       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(ensureLiveGraph).catch(() => undefined)\n",
        "to": ""
       }
      ],
@@ -65848,20 +65830,17 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 204,
+      "pass": 242,
       "skip": 1,
-      "fail": 25
+      "fail": 21
      },
      "fails": [
       "B6d4 a Stop while the paused replacement is starting keeps a live graph at the start",
-      "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
       "B6d5 a Stop after a locate during an uncommitted paused preview still returns it to the start",
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
-      "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
       "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
@@ -65921,7 +65900,7 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(async () => {\n      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n      return ensureLivePortableSession()\n    }).catch(() => undefined)\n",
+       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(ensureLiveGraph).catch(() => undefined)\n",
        "to": ""
       }
      ],
@@ -65934,18 +65913,15 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 206,
+      "pass": 244,
       "skip": 1,
-      "fail": 23
+      "fail": 19
      },
      "fails": [
-      "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
-      "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
       "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
@@ -66360,7 +66336,7 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(async () => {\n      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n      return ensureLivePortableSession()\n    }).catch(() => undefined)\n",
+       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(ensureLiveGraph).catch(() => undefined)\n",
        "to": ""
       }
      ],
@@ -66373,18 +66349,15 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 206,
+      "pass": 244,
       "skip": 1,
-      "fail": 23
+      "fail": 19
      },
      "fails": [
-      "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
-      "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
       "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
@@ -66444,7 +66417,7 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(async () => {\n      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n      return ensureLivePortableSession()\n    }).catch(() => undefined)\n",
+       "from": "    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(ensureLiveGraph).catch(() => undefined)\n",
        "to": ""
       }
      ],
@@ -66457,18 +66430,15 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 206,
+      "pass": 244,
       "skip": 1,
-      "fail": 23
+      "fail": 19
      },
      "fails": [
-      "B6d5 a Pause that cancels a pending Play keeps a live paused graph at the pause position",
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
-      "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
-      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
       "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
@@ -66547,12 +66517,11 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 223,
+      "pass": 258,
       "skip": 1,
-      "fail": 6
+      "fail": 5
      },
      "fails": [
-      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
@@ -66608,8 +66577,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "      if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
       }
      ],
      "bounded": false,
@@ -66621,11 +66590,12 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 227,
+      "pass": 260,
       "skip": 1,
-      "fail": 2
+      "fail": 3
      },
      "fails": [
+      "a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -66975,12 +66945,12 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 226,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
      "fails": [
-      "B6d7 a locate during a Pause that cancels a pending Play keeps its paused rebuild and reports no fault",
+      "B6d7 a locate during a Pause that cancels a cold Play (native audio optional) keeps the rebuild's paused start when the Play's cleanup joins the Pause's dispose",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -67235,12 +67205,11 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 223,
+      "pass": 258,
       "skip": 1,
-      "fail": 6
+      "fail": 5
      },
      "fails": [
-      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
@@ -67981,13 +67950,13 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 225,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
      "fails": [
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
-      "B6d7 a locate during a Pause that cancels a pending Play keeps its paused rebuild and reports no fault",
+      "B6d7 a locate during a Pause that cancels a cold Play (native audio optional) keeps the rebuild's paused start when the Play's cleanup joins the Pause's dispose",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],
@@ -68047,12 +68016,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 226,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
      "fails": [
-      "B6d7 a locate during a Pause that cancels a pending Play keeps its paused rebuild and reports no fault",
+      "B6d7 a locate during a Pause that cancels a cold Play (native audio optional) keeps the rebuild's paused start when the Play's cleanup joins the Pause's dispose",
       "failed lifecycle transition cancels delayed native startup",
       "preserves an explicitly captured native owner across queued generation rebuilds"
      ],

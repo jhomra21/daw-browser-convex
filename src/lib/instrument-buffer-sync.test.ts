@@ -775,16 +775,16 @@ for (const spec of step5ArpWitnesses) for (const transport of ["playing", "pause
         persistedOctaves: fresh.fx.trackFx?.[f.track.id]?.arp?.octaves ?? null,
         resolvedOctaves: resolved.trackFx?.[f.track.id]?.arp?.octaves ?? null,
       }));
-      // Parent checkpoint-1 ruling: own settlement is expected red too.
-      expect(counts.scheduleCompiles).toBe(transport === "playing" ? 1 : 0);
-      // The arp changes the compiled notes, so a paused edit replaces the preview;
-      // its single initial synth install is the one live send.
-      expect(counts.previewCompiles).toBe(transport === "paused" ? 1 : 0);
-      if (transport === "paused") expect(counts.liveSends).toBe(1);
-      expect(counts.teardowns).toBe(transport === "paused" ? 1 : 0);
-      expect(counts.previewDisposals).toBe(transport === "paused" ? 1 : 0);
-      expect(counts.publishes).toBe(transport === "playing" ? 1 : 0);
-      if (transport === "playing") expect(native.compilations.at(-1)?.renderState.fx.trackFx?.[f.track.id]?.arp).toEqual(expected);
+      // UD 7 / PARENT-RULING-PHASE8-DESIGN D7 (fc321573): a paused edit is adopted in place exactly like
+      // a playing one, so both transports compile and publish once on the kept session.
+      expect(counts.scheduleCompiles).toBe(1);
+      expect(counts.publishes).toBe(1);
+      expect(counts.previewCompiles).toBe(0);
+      expect(counts.previewDisposals).toBe(0);
+      expect(counts.teardowns).toBe(0);
+      expect(counts.liveSends).toBe(0);
+      expect(native.host.calls.slice(before.calls).filter(call => ["begin", "configure", "start", "stop", "teardown"].includes(call))).toEqual([]);
+      expect(native.compilations.at(-1)?.renderState.fx.trackFx?.[f.track.id]?.arp).toEqual(expected);
       if (spec.action === "remove") expect(resolved.trackFx?.[f.track.id]?.arp).toBeUndefined();
     } finally { await native?.close(); f.close(); }
   });

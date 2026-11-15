@@ -2,8 +2,8 @@ import { spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { z } from "zod"
-import { manifestProblems, measurement, provenanceProblems, removalManifest, removalOf, runResult, seedRecordProblems, unfinished, unpaired, weakened, type Provenance, type Removal } from "./bless-rules"
-import { applyChanges, applyRebase, diffJson, expectationsFile, expectationsSchema, getAt, rebasesDir, repoRoot, sameJson, sha256, type JsonValue, type Rebase } from "./expectations"
+import { manifestProblems, measurement, nowPassingOf, parseNowPassing, provenanceProblems, removalManifest, removalOf, runResult, seedRecordProblems, unfinished, unpaired, weakened, type Provenance, type Removal } from "./bless-rules"
+import { applyChanges, applyRebase, diffJson, expectationsFile, expectationsSchema, getAt, leafName, rebasesDir, repoRoot, sameJson, sha256, type JsonValue, type Rebase } from "./expectations"
 import { overlayIdentity, scopeOf } from "./measure"
 import { formatSeedRecords, seedRecords, seedRecordsFile, seedRecordsKey } from "./seed-judge"
 
@@ -30,7 +30,7 @@ const fail = (message: string, detail?: JsonValue): never => {
 }
 
 if (!/^[\w-]+$/.test(name) || (blessing ? reverts.length > 0 || args.includes("--rebase") : reverts.length === 0) || reverts.some((entry) => entry.file === "" || !existsSync(entry.entryCopy))) {
-  console.error("usage: fast-cert.ts --bless <name> [scope flags] [--allow-rise <native count field>…] [--allow-rejection <fixture>:<seed>:<class>…] [--reuse] [--out dir]\n       fast-cert.ts --rebase <name> --revert <repo-relative path>=<entry copy> [--revert …] [--allow-removal <manifest.json>] [scope flags] [--reuse] [--out dir]")
+  console.error("usage: fast-cert.ts --bless <name> [scope flags] [--allow-rise <native count field>…] [--allow-rejection <fixture>:<seed>:<class>…] [--allow-now-passing <file>::<test name>…] [--reuse] [--out dir]\n       fast-cert.ts --rebase <name> --revert <repo-relative path>=<entry copy> [--revert …] [--allow-removal <manifest.json>] [--allow-now-passing <file>::<test name>…] [scope flags] [--reuse] [--out dir]")
   process.exit(2)
 }
 mkdirSync(out, { recursive: true })
@@ -42,6 +42,13 @@ const rejectionNamesFor = (seedPath: string[]) => allowRejection.flatMap(({ matc
   match && match[1] === seedPath[1] && `#${Number(match[2]) - 1}` === seedPath[2] ? [match[3] ?? ""] : [])
 const badRejectionFlag = allowRejection.find(({ match }) => !match)
 if (badRejectionFlag) fail(`--allow-rejection ${badRejectionFlag.spec} is not <controller|hook>:<seed>:<class>`)
+// `--allow-now-passing <file>::<test name>`: a recorded failing test the live run now passes (see nowPassingOf in bless-rules.ts).
+const nowPassing = args.flatMap((value, index) => args[index - 1] === "--allow-now-passing" ? [value] : []).map((spec) => ({ spec, named: parseNowPassing(spec) }))
+const badNowPassing = nowPassing.find(({ named }) => !named)
+if (badNowPassing) fail(`--allow-now-passing ${badNowPassing.spec} is not <file>::<test name>`)
+const nowPassingNames = nowPassing.flatMap(({ named }) => named ?? [])
+const nowPassingUsed = new Set<string>()
+const nowPassingRuling = "acceptance-reports/ae-08-phase-5-2026-10-18/PARENT-RULING-P8-BLESS-BLOCKERS.md"
 // `--allow-removal <manifest.json>`: tests the parent ruled out (see removalManifest in bless-rules.ts). It needs the paired revert run:
 // the reverted log is what each job ran before, the live log what it runs now, and only the tests the manifest names may be lost between them.
 // A removed test that is a killer, or a duplicate entry, refuses the whole run.
@@ -131,17 +138,22 @@ for (const entry of liveObserved) {
   const moved = diffJson(old, entry.value, entry.path)
   if (moved.length === 0) continue
   const seedRecord = entry.path[0] === seedRecordsKey
+  const recorded = z.object({ fails: z.array(z.string()) }).safeParse(old).data?.fails ?? []
+  const passing = nowPassingNames.some(({ test }) => recorded.includes(leafName(test))) ? nowPassingOf(old, logOf(live, entry.job), nowPassingNames) : []
+  for (const leaf of passing) nowPassingUsed.add(leaf)
   const reasons = [
     ...(old === undefined ? ["the expectations hold no such field"] : []),
     ...(reverted && !entry.reaches ? ["the overlay cannot reach this job, so its change is not attributed by the revert"] : []),
     ...(seedRecord ? seedRecordProblems(old, entry.value, allowRise, rejectionNamesFor(entry.path)) : weakened(entry.path, old, entry.value, z.string().safeParse(getAt(arms, [entry.path[2] ?? "", "role"])).data,
-      removalByJob?.get(entry.job))),
+      removalByJob?.get(entry.job), passing)),
   ]
   if (reasons.length > 0) refused.push({ job: entry.job, path: entry.path, reasons })
   // A seed record's changes are paths into seed-records.json, so they leave the `seedRecords` segment behind.
   if (seedRecord) seedRecordChanges.push(...moved.map((change) => ({ ...change, path: change.path.slice(1) })))
   else changes.push(...moved)
 }
+const unusedNowPassing = nowPassingNames.filter(({ test }) => !nowPassingUsed.has(leafName(test)))
+if (unusedNowPassing.length > 0) fail(`--allow-now-passing names a test no observation recorded failing and passing now: ${unusedNowPassing.map(({ file, test }) => `${file}::${test}`).join(", ")}`)
 if (refused.length > 0) {
   console.error(refused.slice(0, 30).map((entry) => `  ${entry.job}: ${entry.reasons.join("; ")}`).join("\n"))
   fail(`${refused.length} measurements may not be recorded`, refused)
@@ -168,6 +180,8 @@ const rebase: Rebase = {
     // A rejection moved only because the parent ruled it legitimate; the record cites that ruling.
     allowedRejections: allowRejection.map(({ spec }) => spec),
     rejectionRuling: allowRejection.length > 0 ? "acceptance-reports/ae-08-phase-5-2026-10-18/PARENT-RULING-SEED-274.md" : null,
+    allowedNowPassing: nowPassing.map(({ spec }) => spec),
+    nowPassingRuling: nowPassing.length > 0 ? nowPassingRuling : null,
     allowedRemovals: removals?.success && removalPath !== undefined && rulingPath !== undefined
       ? { manifest: path.relative(repoRoot, path.resolve(removalPath)), manifestSha256: sha256(removalText ?? ""), ruling: removals.data.ruling, rulingSha256: sha256(readFileSync(rulingPath)), tests: removals.data.removed.length } : null,
     scope: scope.join(" ") || "default",

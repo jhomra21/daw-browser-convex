@@ -101,13 +101,29 @@ export const removalOf = (before: string, after: string, removed: RemovalManifes
   })
   return { claimed, problems: [...problems, ...ambiguous] }
 }
+// A known-red test that now passes (`--allow-now-passing <file>::<test name>`), ruled in PARENT-RULING-P8-BLESS-BLOCKERS.md (addendum 2).
+// It is admitted for one observation only when the test is named, the observation recorded it failing, and its live log passes it in
+// that file; `weakened` then holds every other recorded failure, the pass and skip counts, and the exit to the recorded values.
+export type NowPassing = { file: string, test: string }
+export const parseNowPassing = (spec: string): NowPassing | undefined => {
+  const at = spec.indexOf("::")
+  return at > 0 && at + 2 < spec.length ? { file: spec.slice(0, at), test: spec.slice(at + 2) } : undefined
+}
+export const nowPassingOf = (old: JsonValue | undefined, log: string, names: NowPassing[]) => {
+  const recorded = strings(record.safeParse(old).data?.fails)
+  const passed = passedTests(log)
+  const failed = failedTestsByFile(log)
+  return names.flatMap(({ file, test }) => recorded.includes(leafName(test)) && (passed.get(file) ?? []).some((identity) => named(identity, test)) && !(failed.get(file) ?? []).some((identity) => named(identity, test)) ? [leafName(test)] : [])
+}
 const withinRemoval = (removal: Removal) => Object.values(removal.claimed).reduce((total, count) => total + count, 0)
 
 // B2: a test or defect count may not fall, a skip may not appear, and no verdict field (exit, failing set, status) may move.
 // A fall in `pass` is allowed only as far as `claimed` (the lost passing tests the manifest names, see removalOf), with skip and fail unchanged.
 // A mutant arm may also gain fails (a stronger kill): `pass` may then fall by the fails gained as well.
-const lostWitnesses = (was: JsonValue | undefined, now: JsonValue | undefined, what: string, claimed = 0, mutant = false) => {
-  const before = tally(was)
+// `passing` tests moved from fail to pass in this observation (see nowPassingOf): its recorded tally starts from them already passing.
+const lostWitnesses = (was: JsonValue | undefined, now: JsonValue | undefined, what: string, claimed = 0, mutant = false, passing = 0) => {
+  const recorded = tally(was)
+  const before = recorded && { ...recorded, pass: recorded.pass + passing, fail: recorded.fail - passing }
   const after = tally(now)
   if (!before) return []
   if (!after) return [`${what} counts disappeared`]
@@ -115,14 +131,20 @@ const lostWitnesses = (was: JsonValue | undefined, now: JsonValue | undefined, w
   const ruled = before.pass - after.pass <= claimed + gained && (mutant ? after.fail >= before.fail : after.fail === before.fail) && after.skip === before.skip
   return [...(sum(after) < sum(before) && !ruled ? [`${what}: tests were removed (${sum(before)} -> ${sum(after)})`] : []), ...(after.skip > before.skip ? [`${what}: tests were skipped`] : [])]
 }
-export const weakened = (at: string[], old: JsonValue | undefined, next: JsonValue, role: string | undefined, removal?: Removal) => {
+export const weakened = (at: string[], old: JsonValue | undefined, next: JsonValue, role: string | undefined, removal?: Removal, passing: string[] = []) => {
   const was = record.safeParse(old).data ?? {}
   const now = record.safeParse(next).data ?? {}
   const problems: string[] = []
-  if (!sameJson(was.exit, now.exit)) problems.push("exit moved")
+  // The recorded failing set less the named tests that now pass; what remains is held to the rules below as the recorded set.
+  const wasFails = passing.length === 0 ? was.fails : strings(was.fails).filter((test) => !passing.includes(test))
+  const remaining = strings(now.fails)
+  // An admitted pass lets a control's or gate's exit 1 -> 0 only with nothing left failing; a mutant's exit may not move, so one left
+  // with nothing failing and its exit moved is no longer killed.
+  const cleared = passing.length > 0 && role !== "mutant" && was.exit === 1 && now.exit === 0 && remaining.length === 0
+  if (!sameJson(was.exit, now.exit) && !cleared) problems.push(passing.length > 0 && role === "mutant" && remaining.length === 0 ? "mutant no longer killed" : "exit moved")
   // A mutant arm's failing set may grow and never shrink; every other observation's failing set may not move.
-  if (was.kind === "tests" && role !== "mutant" && !sameJson(was.fails, now.fails)) problems.push("failing tests moved")
-  problems.push(...lostWitnesses(was.counts, now.counts, "counts", removal && withinRemoval(removal), role === "mutant"))
+  if (was.kind === "tests" && role !== "mutant" && !sameJson(wasFails, now.fails)) problems.push("failing tests moved")
+  problems.push(...lostWitnesses(was.counts, now.counts, "counts", removal && withinRemoval(removal), role === "mutant", passing.length))
   const floor = (field: string) => ({ was: z.number().safeParse(was[field]).data, now: z.number().safeParse(now[field]).data })
   const rejected = floor("rejected")
   if (rejected.was !== undefined && !(rejected.now !== undefined && rejected.now >= rejected.was)) problems.push("fewer rejected defects")
@@ -149,8 +171,8 @@ export const weakened = (at: string[], old: JsonValue | undefined, next: JsonVal
   // A rejection record is a position in the event stream: its seeds and its count may not move, its ids follow the stream.
   if (!sameJson(rejectionSeeds(was.rejection), rejectionSeeds(now.rejection))) problems.push("rejection seeds or count moved")
   if (!sameJson(invariants(was.fuzz), invariants(now.fuzz))) problems.push("fuzz status or invariants moved")
-  const lost = strings(was.fails).filter((test) => !strings(now.fails).includes(test))
-  if (role === "mutant" ? lost.length > 0 : !sameJson(was.fails, now.fails)) problems.push("recorded failures moved")
+  const lost = strings(wasFails).filter((test) => !remaining.includes(test))
+  if (role === "mutant" ? lost.length > 0 : !sameJson(wasFails, now.fails)) problems.push("recorded failures moved")
   const oracle = record.safeParse(was.oracle).data
   if (oracle && (record.safeParse(now.oracle).data?.message !== oracle.message || strings(oracle.unrejected).some((defect) => !strings(record.safeParse(now.oracle).data?.unrejected).includes(defect))))
     problems.push("oracle moved or rejects a recorded defect")
@@ -240,6 +262,31 @@ if (import.meta.main) {
   // Real `bun test` output (bun 1.4.2): a `(pass)` line may carry no duration, a `(fail)` line follows its error, and the summary is last.
   const bunLog = ["bun test v1.4.2 (744846f84)", "", "a.test.ts:", "(pass) t1 [0.01ms]", "(pass) suite > t2", "(skip) suite > t3", "", "sub/b.test.ts:", "(pass) u1",
     "error: expect(received).toBe(expected)", "", "Expected: 1", "Received: 2", "", "(fail) t1 [0.07ms]", "", " 3 pass", " 1 skip", " 1 fail", " 4 expect() calls", "Ran 5 tests across 2 files. [2.00ms]"].join("\n")
+  // `--allow-now-passing`: a recorded failing test (a control's or gate's, or a mutant's kill) that the live log now passes.
+  const failing = (exit: number, pass: number, fail: number, fails: string[]) => ({ kind: "tests", exit, counts: { pass, skip: 0, fail }, fails })
+  const nowLog = (passing: string[], failed: string[] = []) => `f.test.ts:\n${passing.map((name) => `(pass) ${name}`).join("\n")}\n${failed.map((name) => `(fail) ${name}`).join("\n")}\n`
+  const admit = (old: JsonValue, log: string, names: string[], next: JsonValue, role: string | undefined) =>
+    weakened(["gates"], old, next, role, undefined, nowPassingOf(old, log, names.map((test) => ({ file: "f.test.ts", test }))))
+  const nowPassingCases = (): [string, boolean][] => [
+    ["B2 now passing: a named recorded failure that passes now is admitted in a control, its exit 1 -> 0 with nothing left failing", admit(failing(1, 5, 1, ["a"]), nowLog(["a"]), ["a"], failing(0, 6, 0, []), "control").length === 0],
+    ["B2 now passing: the same in a gate", admit(failing(1, 5, 1, ["a"]), nowLog(["a"]), ["a"], failing(0, 6, 0, []), undefined).length === 0],
+    ["B2 now passing: an unnamed test that now passes is refused", admit(failing(1, 5, 2, ["a", "b"]), nowLog(["a", "b"]), ["a"], failing(0, 7, 0, []), "control").length > 0],
+    ["B2 now passing: a named test outside the recorded failing set is refused", nowPassingOf(failing(1, 5, 1, ["a"]), nowLog(["a", "z"]), [{ file: "f.test.ts", test: "z" }]).length === 0 && admit(failing(1, 5, 1, ["a"]), nowLog(["a", "z"]), ["z"], failing(0, 6, 0, []), "control").length > 0],
+    ["B2 now passing: a named test that still fails is not admitted", nowPassingOf(failing(1, 5, 1, ["a"]), nowLog([], ["a"]), [{ file: "f.test.ts", test: "a" }]).length === 0],
+    ["B2 now passing: a named test absent from the live log is not admitted", nowPassingOf(failing(1, 5, 1, ["a"]), nowLog(["b"]), [{ file: "f.test.ts", test: "a" }]).length === 0],
+    ["B2 now passing: a named test passing in another file is not admitted", nowPassingOf(failing(1, 5, 1, ["a"]), nowLog(["a"]), [{ file: "g.test.ts", test: "a" }]).length === 0],
+    ["B2 now passing: a control's exit 1 -> 0 with another failure left is refused", admit(failing(1, 5, 2, ["a", "b"]), nowLog(["a"], ["b"]), ["a"], failing(0, 6, 1, ["b"]), "control").length > 0],
+    ["B2 now passing: another recorded failure that moved is refused", admit(failing(1, 5, 2, ["a", "b"]), nowLog(["a"]), ["a"], failing(1, 6, 1, ["c"]), "control").length > 0],
+    ["B2 now passing: a control that gains a failure beside it is refused", admit(failing(1, 5, 1, ["a"]), nowLog(["a"], ["c"]), ["a"], failing(1, 5, 1, ["c"]), "control").length > 0],
+    ["B2 now passing: a pass count that moves beyond the admitted test is refused", admit(failing(1, 5, 1, ["a"]), nowLog(["a"]), ["a"], failing(0, 5, 0, []), "control").length > 0],
+    ["B2 now passing: a skip that appears is refused", admit(failing(1, 5, 1, ["a"]), nowLog(["a"]), ["a"], { ...failing(0, 6, 0, []), counts: { pass: 5, skip: 1, fail: 0 } }, "control").length > 0],
+    ["B2 now passing: a mutant left with its other kills stays killed", admit(failing(1, 5, 2, ["a", "b"]), nowLog(["a"], ["b"]), ["a"], failing(1, 6, 1, ["b"]), "mutant").length === 0],
+    ["B2 now passing: a mutant left unkilled (nothing failing, exit 0) is refused", admit(failing(1, 5, 1, ["a"]), nowLog(["a"]), ["a"], failing(0, 6, 0, []), "mutant").length > 0],
+    ["B2 now passing: a mutant whose expected exit holds with nothing failing is admitted", admit(failing(1, 5, 1, ["a"]), nowLog(["a"]), ["a"], failing(1, 6, 0, []), "mutant").length === 0],
+    ["B2 now passing: without a name a control's recorded failure that passes is still refused", weakened(["gates"], failing(1, 5, 1, ["a"]), failing(0, 6, 0, []), "control").length > 0],
+    ["B2 now passing: a bad spec names no file and test", parseNowPassing("f.test.ts") === undefined && parseNowPassing("::t") === undefined && parseNowPassing("f.test.ts::") === undefined],
+    ["B2 now passing: a spec splits at its first ::", JSON.stringify(parseNowPassing("f.test.ts::a > b::c")) === JSON.stringify({ file: "f.test.ts", test: "a > b::c" })],
+  ]
   const cases: [string, boolean][] = [
     ["B1 a missing seed summary is not measured", fuzzArm !== undefined && throws(() => { measureArm(fuzzArm, { exit: 1, text: "", log: "" }, dir, null) })],
     ["B1 a missing oracle failure is not measured", oracleArm !== undefined && throws(() => { measureArm(oracleArm, { exit: 1, text: "", log: "" }, dir, null) })],
@@ -294,6 +341,7 @@ if (import.meta.main) {
         && problemsOf("/tmp/fast-cert/r1/revert/fixtures/b/x.test.ts:\n(pass) t1\n 1 pass\n", "/tmp/fast-cert/r1/live/fixtures/b/x.test.ts:\n(pass) t1\n 1 pass\n", []).length === 0],
     ["B2 log: a job's own directory is not part of a test's file identity", JSON.stringify([...passedTests("/tmp/fast-cert/r1/jobs/arm_x/fixtures/x.test.ts:\n(pass) t1\n")]) === JSON.stringify([["fixtures/x.test.ts", ["t1"]]])],
     ["B2 log: a repository path named live stays", JSON.stringify([...passedTests("src/live/x.test.ts:\n(pass) t1\n")]) === JSON.stringify([["src/live/x.test.ts", ["t1"]]])],
+    ...nowPassingCases(),
     ["B2 seed record: a moved status", seedRecordProblems(seed, { ...seed, status: "fail" }, []).length > 0],
     ["B2 seed record: a moved failure", seedRecordProblems(seed, { ...seed, failures: ["I1|x|y"] }, []).length > 0],
     ["B2 seed record: a moved rejection", seedRecordProblems(seed, { ...seed, rejections: ["r|c|d"] }, []).length > 0],

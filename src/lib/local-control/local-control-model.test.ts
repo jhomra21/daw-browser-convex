@@ -1,9 +1,19 @@
-import { expect, test } from 'bun:test'
+import { expect, spyOn, test } from 'bun:test'
 import type { ProjectSnapshotV2 } from '@daw-browser/control'
 import { externalProcessorSchema } from '@daw-browser/external-plugins'
 import { isJsonObject } from '@daw-browser/shared'
 import { createLocalProjectEntityRow } from '~/lib/local-project-db'
 import { materializeLocalControlSnapshot, parseLocalProjectStoredJsonValue } from './local-control-model'
+
+test('parses nested stored JSON without building a validation error per container', () => {
+  const stringify = spyOn(JSON, 'stringify')
+  try {
+    expect(parseLocalProjectStoredJsonValue({ a: [1, { b: 'x', c: null }], d: { e: true } }))
+      .toEqual({ a: [1, { b: 'x', c: null }], d: { e: true } })
+    expect(parseLocalProjectStoredJsonValue({ a: Number.NaN })).toBeUndefined()
+    expect(stringify).not.toHaveBeenCalled()
+  } finally { stringify.mockRestore() }
+})
 
 test('materializes a legacy oversized persisted MIDI snapshot', () => {
   const snapshot: ProjectSnapshotV2 = {

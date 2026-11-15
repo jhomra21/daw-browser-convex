@@ -4,7 +4,7 @@ import path from "node:path"
 import { z } from "zod"
 import { expectationsSchema, expectationsFile, failedTestsByFile, leafName, passedTests, perFileCounts, sameJson, testCounts, type JsonValue } from "./expectations"
 import { measureArm } from "./measure"
-import { seedRecord, type SeedRecord } from "./seed-judge"
+import { seedRecord, seedRecords, type SeedRecord } from "./seed-judge"
 
 // The rules a recorded change to expectations.json has to pass, shared by `fast-cert.ts --bless` and `--rebase … --revert` (rebase.ts).
 // Run `bun tools/certification/bless-rules.ts` to prove each rule refuses; it exits 1 when one does not.
@@ -198,7 +198,35 @@ const rejectionProblems = (was: SeedRecord, now: SeedRecord, allowRejection: str
       ...(entry.split("|")[1] === "cancelled" ? [] : [`rejection ${entry} is not a cancelled settlement; its class is a violation at B6`]),
     ]
   })
-export const seedRecordProblems = (old: JsonValue | undefined, next: JsonValue, allowRise: string[], allowRejection: string[] = []) => {
+// A seed may stop exercising an invariant only when the bless names it (`--allow-unexercised <fixture>:<seed>:<invariant>`; `named` holds
+// this seed's invariants), the seed passes with no failure before and after, and the campaign-wide count of seeds exercising that
+// invariant does not fall (`fallen` holds the invariants whose count did, see exercisedFalls), ruled in PARENT-RULING-P8-BLESS-BLOCKERS.md (addendum 3).
+export const parseUnexercised = (spec: string) => {
+  const match = /^(controller|hook):(\d+):(.+)$/.exec(spec)
+  return match ? { fixture: match[1] ?? "", seed: Number(match[2]), invariant: match[3] ?? "" } : undefined
+}
+export const exercisedFalls = (baseline: JsonValue | undefined, observed: { path: string[]; value: JsonValue }[]) => {
+  const was = seedRecords.safeParse(baseline).data
+  if (!was) return []
+  const now = { controller: [...was.controller], hook: [...was.hook] }
+  for (const { path: at, value } of observed) {
+    const live = seedRecord.safeParse(value).data
+    const index = Number(at[2]?.slice(1))
+    if (live && (at[1] === "controller" || at[1] === "hook") && index in now[at[1]]) now[at[1]][index] = live
+  }
+  const count = (records: typeof now, invariant: string) => [...records.controller, ...records.hook].filter((record) => record.exercised.includes(invariant)).length
+  return [...new Set([...was.controller, ...was.hook].flatMap((record) => record.exercised))].filter((invariant) => count(now, invariant) < count(was, invariant))
+}
+type Unexercised = { named: string[]; fallen: string[] }
+const unexercisedProblems = (was: SeedRecord, now: SeedRecord, { named, fallen }: Unexercised) =>
+  was.exercised.filter((invariant) => !now.exercised.includes(invariant)).flatMap((invariant) => {
+    if (!named.includes(invariant)) return [`${invariant} is no longer exercised; it needs --allow-unexercised`]
+    return [
+      ...(was.status === "pass" && now.status === "pass" && was.failures.length === 0 && now.failures.length === 0 ? [] : [`${invariant} was lost on a seed that does not pass cleanly`]),
+      ...(fallen.includes(invariant) ? [`${invariant} is no longer exercised and the campaign-wide count of seeds exercising it fell`] : []),
+    ]
+  })
+export const seedRecordProblems = (old: JsonValue | undefined, next: JsonValue, allowRise: string[], allowRejection: string[] = [], unexercised: Unexercised = { named: [], fallen: [] }) => {
   const was = seedRecord.safeParse(old).data
   const now = seedRecord.safeParse(next).data
   if (!was || !now) return ["seed record is missing or malformed"]
@@ -206,7 +234,7 @@ export const seedRecordProblems = (old: JsonValue | undefined, next: JsonValue, 
     ...(was.status === now.status ? [] : [`status moved ${was.status} -> ${now.status}`]),
     ...(sameJson(was.failures, now.failures) ? [] : ["failures moved"]),
     ...rejectionProblems(was, now, allowRejection),
-    ...was.exercised.filter((invariant) => !now.exercised.includes(invariant)).map((invariant) => `${invariant} is no longer exercised`),
+    ...unexercisedProblems(was, now, unexercised),
     ...Object.entries(now.ceilings).filter(([field, count]) => count > (was.ceilings[field] ?? 0) && !rendererCosts.has(field) && !allowRise.includes(field))
       .map(([field, count]) => `${field} rose ${was.ceilings[field] ?? 0} -> ${count}; a native activity count needs --allow-rise ${field}`),
   ]
@@ -287,6 +315,24 @@ if (import.meta.main) {
     ["B2 now passing: a bad spec names no file and test", parseNowPassing("f.test.ts") === undefined && parseNowPassing("::t") === undefined && parseNowPassing("f.test.ts::") === undefined],
     ["B2 now passing: a spec splits at its first ::", JSON.stringify(parseNowPassing("f.test.ts::a > b::c")) === JSON.stringify({ file: "f.test.ts", test: "a > b::c" })],
   ]
+  // `--allow-unexercised`: a seed that stops exercising a named invariant, while the campaign-wide count of seeds exercising it holds.
+  const lost = { ...seed, exercised: ["I1"] }
+  const hold = { named: ["I2"], fallen: [] }
+  const campaign = (...exercised: string[][]) => ({ controller: [], hook: exercised.map((list) => ({ ...seed, exercised: list })) })
+  const unexercisedCases = (): [string, boolean][] => [
+    ["B2 unexercised: a named loss on a clean seed whose campaign count holds is admitted", seedRecordProblems(seed, lost, [], [], hold).length === 0],
+    ["B2 unexercised: an unnamed loss is refused", seedRecordProblems(seed, lost, [], [], { named: [], fallen: [] }).length > 0],
+    ["B2 unexercised: a loss of another invariant than the named one is refused", seedRecordProblems(seed, { ...seed, exercised: ["I2"] }, [], [], hold).length > 0],
+    ["B2 unexercised: a named loss whose campaign-wide count falls is refused", seedRecordProblems(seed, lost, [], [], { named: ["I2"], fallen: ["I2"] }).length > 0],
+    ["B2 unexercised: a named loss on a seed that fails before is refused", seedRecordProblems({ ...seed, status: "fail", failures: ["I1|x|y"] }, { ...lost, status: "fail", failures: ["I1|x|y"] }, [], [], hold).length > 0],
+    ["B2 unexercised: a named loss on a seed that fails after is refused", seedRecordProblems(seed, { ...lost, status: "fail", failures: ["I1|x|y"] }, [], [], hold).length > 0],
+    ["B2 unexercised: a gained invariant is not a loss", seedRecordProblems(lost, seed, [], [], { named: [], fallen: [] }).length === 0],
+    ["B2 unexercised: the campaign count holds when another seed gains the invariant", exercisedFalls(campaign(["I1", "I2"], ["I1"]), [{ path: ["seedRecords", "hook", "#0"], value: lost }, { path: ["seedRecords", "hook", "#1"], value: seed }]).length === 0],
+    ["B2 unexercised: the campaign count falls when nothing gains the invariant", exercisedFalls(campaign(["I1", "I2"], ["I1"]), [{ path: ["seedRecords", "hook", "#0"], value: lost }]).join() === "I2"],
+    ["B2 unexercised: a seed the run did not observe keeps its recorded invariants", exercisedFalls(campaign(["I1", "I2"], ["I1", "I2"]), [{ path: ["seedRecords", "hook", "#0"], value: lost }]).join() === "I2" && exercisedFalls(campaign(["I1", "I2"], ["I1", "I2"]), [{ path: ["seedRecords", "hook", "#0"], value: lost }, { path: ["seedRecords", "hook", "#1"], value: lost }]).join() === "I2"],
+    ["B2 unexercised: a bad spec names no fixture, seed and invariant", parseUnexercised("hook:321") === undefined && parseUnexercised("hook:x:I9") === undefined && parseUnexercised("other:3:I9") === undefined],
+    ["B2 unexercised: a spec splits fixture, seed and invariant", JSON.stringify(parseUnexercised("hook:321:I9")) === JSON.stringify({ fixture: "hook", seed: 321, invariant: "I9" })],
+  ]
   const cases: [string, boolean][] = [
     ["B1 a missing seed summary is not measured", fuzzArm !== undefined && throws(() => { measureArm(fuzzArm, { exit: 1, text: "", log: "" }, dir, null) })],
     ["B1 a missing oracle failure is not measured", oracleArm !== undefined && throws(() => { measureArm(oracleArm, { exit: 1, text: "", log: "" }, dir, null) })],
@@ -351,6 +397,7 @@ if (import.meta.main) {
     ["B2 seed record: another rejection than the named one is refused", seedRecordProblems(seed, { ...seed, rejections: [cancelled, "flush|cancelled|live"] }, [], [cancelled]).length > 0],
     ["B2 seed record: a named move on a failing seed is refused", seedRecordProblems({ ...seed, status: "fail", failures: ["I1|x|y"] }, { ...seed, status: "fail", failures: ["I1|x|y"], rejections: [cancelled] }, [], [cancelled]).length > 0],
     ["B2 seed record: a named move of a violation class is refused", seedRecordProblems(seed, { ...seed, rejections: [violation] }, [], [violation]).length > 0],
+    ...unexercisedCases(),
     ["B2 seed record: a lost exercised invariant", seedRecordProblems(seed, { ...seed, exercised: ["I1"] }, []).length > 0],
     ["B2 seed record: a missing record", seedRecordProblems(undefined, seed, []).length > 0],
     ["B2 seed record: a native count rise without --allow-rise", seedRecordProblems(seed, { ...seed, ceilings: { ...seed.ceilings, "candidate:accepted": 3 } }, []).length > 0],

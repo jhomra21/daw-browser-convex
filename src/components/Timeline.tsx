@@ -136,6 +136,8 @@ import {
   buildTrackTree,
   computeDepthMap,
   flattenVisibleTracks,
+  reuseTimelineTrackLayout,
+  type TimelineTrackLayout,
 } from "~/lib/timeline-track-layout";
 import { useAppPreferences } from "~/context/app-preferences";
 import { deriveSelectedExportTrackIds } from "~/lib/export/export-settings";
@@ -1283,7 +1285,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
   });
 
-  const trackLayoutModel = createMemo(() => {
+  const trackLayoutModel = createMemo((previous: TimelineTrackLayout | undefined) => {
     const lanes = automation.workspace().lanes;
     const tracks = renderTracks();
     const tree = buildTrackTree(tracks);
@@ -1291,7 +1293,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       tracks.map((track) => [track.id, track.collapsed === true]),
     );
     const visibleTrackIds = flattenVisibleTracks(tree, collapsedById);
-    return buildTimelineTrackLayout({
+    const layout = buildTimelineTrackLayout({
       tracks,
       visibleTrackIds,
       depthByTrackId: computeDepthMap(tree),
@@ -1299,6 +1301,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       heightsByLaneOwnerKey: lanes.heightsByLaneOwnerKey,
       visibleParameterIdsByTrackId: lanes.visibleTargetKeysByTrackId,
     });
+    return previous ? reuseTimelineTrackLayout(previous, layout) : layout;
   });
   const trackLayout = createMemo(() => trackLayoutModel().scrollingRows);
 

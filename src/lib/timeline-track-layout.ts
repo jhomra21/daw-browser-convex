@@ -1,4 +1,5 @@
 import type { Track } from '@daw-browser/timeline-core/types'
+import { reuseEqualByKey, reuseIfSame, sameData } from '~/lib/reuse-equal'
 import { clientYToTimelineTrackY, COLLAPSED_LANE_HEIGHT, DEFAULT_AUTOMATION_LANE_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
 
 export type TimelineTrackLayoutRow = {
@@ -279,6 +280,17 @@ export const buildTimelineTrackLayout = (input: {
     scrollingHeightPx: layoutHeight(scrollingRows),
     returnHeightPx: layoutHeight(returnRows),
   }
+}
+
+// Rows are keyed by identity in the lane list, so a row that did not move keeps its object and its lane stays mounted.
+export const reuseTimelineTrackLayout = (previous: TimelineTrackLayout, next: TimelineTrackLayout): TimelineTrackLayout => {
+  const layout = {
+    ...next,
+    scrollingRows: reuseEqualByKey(previous.scrollingRows, next.scrollingRows, (row) => row.trackId),
+    returnRows: reuseEqualByKey(previous.returnRows, next.returnRows, (row) => row.trackId),
+    displayTrackIds: reuseIfSame(previous.displayTrackIds, next.displayTrackIds),
+  }
+  return sameData(previous, layout) ? previous : layout
 }
 
 const trackClipLaneHeight = (

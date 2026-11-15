@@ -70,6 +70,49 @@ test.skipIf(isServer)('local canonical snapshots retire reflected overlays witho
   } finally { dispose() }
 })
 
+test.skipIf(isServer)('local canonical snapshots keep the identity of tracks and clips another track change leaves alone', () => {
+  const row = { historyRef: 'x', createdAt: 1, updatedAt: 1 }
+  const track = (id: string, index: number): TimelineSnapshot['tracks'][number] => ({
+    ...row, id, historyRef: id, name: id, index, volume: 1, muted: false, soloed: false, kind: 'audio', channelRole: 'track', sends: [],
+  })
+  const clip: TimelineSnapshot['clips'][number] = {
+    ...row, id: 'clip-1', trackId: 'track-1', historyRef: 'clip-1', name: 'Clip', color: '#fff', startSec: 0, duration: 4,
+    audioWarp: { enabled: true, mode: 'repitch', sourceBpm: 120, sourceBeatOffset: 0, markers: [] },
+  }
+  const [snapshot, setSnapshot] = createSignal<TimelineSnapshot | null>({
+    projectId: 'local_project-identity', tracks: [track('track-1', 0)], clips: [clip],
+  })
+  const remember = () => {}
+  const buffer = new Map<string, AudioBuffer>()
+  let dispose = () => {}
+  const resolved = createRoot((cleanup) => {
+    dispose = cleanup
+    return useTimelineResolvedModel({
+      projectId: () => 'local_project-identity', fullViewData: () => undefined, localSnapshot: snapshot, syncMix: () => false,
+      writableTrackIds: () => new Set(), serverTrackState: () => null, localMixByTrackId: () => ({}),
+      pendingSharedTrackVolumes: () => new Map(), pendingSharedTrackRouting: () => new Map(), pendingSharedTrackMix: () => new Map(),
+      projection: { pendingTrackEntriesById: () => new Map(), removedTrackIds: () => new Set(), pendingTrackLocksById: () => new Map(),
+        pendingClipCreatesById: () => new Map(), removedClipIds: () => new Set(), committedClipEditsById: () => new Map(),
+        draftClipEditsById: () => new Map(), previewClipsByTrackId: () => new Map() },
+      identity: { trackHistoryRefsById: () => new Map(), trackNamesByHistoryRef: () => new Map(), clipHistoryRefsById: () => new Map(),
+        rememberTrackProjection: remember, rememberClipHistoryRef: remember },
+      buffers: { getBuffer: (clipId) => buffer.get(clipId), getMediaStatus: () => undefined }, bufferVersion: () => 0,
+    })
+  })
+  try {
+    const [before] = resolved.renderTracks()
+    const beforeClip = before?.clips[0]
+    expect(beforeClip?.id).toBe('clip-1')
+    setSnapshot({ projectId: 'local_project-identity', tracks: [track('track-1', 0), track('track-2', 1)], clips: [clip] })
+    expect(resolved.renderTracks().map((entry) => entry.id)).toEqual(['track-1', 'track-2'])
+    expect(resolved.renderTracks()[0]).toBe(before)
+    expect(resolved.renderTracks()[0]?.clips[0]).toBe(beforeClip)
+    setSnapshot({ projectId: 'local_project-identity', tracks: [track('track-1', 0), track('track-2', 1)], clips: [{ ...clip, startSec: 1 }] })
+    expect(resolved.renderTracks()[0]?.clips[0]).not.toBe(beforeClip)
+    expect(resolved.renderTracks()[0]?.clips[0]?.startSec).toBe(1)
+  } finally { dispose() }
+})
+
 test('clears a reflected committed fade patch without affecting other projection state', () => {
   const fades = { fadeInSec: 1, fadeOutSec: 2, fadeInCurve: 0.5, fadeOutCurve: -0.5 }
   const pendingTrackEntriesById = new Map()

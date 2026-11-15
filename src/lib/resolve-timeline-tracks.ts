@@ -8,6 +8,7 @@ import type { PendingTrackMixState } from '~/lib/timeline-mixer-pending'
 import type { TimelineSnapshot } from '~/lib/timeline-repository/types'
 import { cloneTimelineClip, cloneTimelineTrack } from '~/lib/timeline-clone'
 import { getDefaultClipColor } from '~/lib/clip-color'
+import { reuseEqualByKey } from '~/lib/reuse-equal'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { LocalMixMap } from '~/lib/timeline-storage'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
@@ -561,4 +562,14 @@ export function resolveTimelineTracks(options: ResolveTimelineTracksOptions): Ru
   }
 
   return projectedTracks
+}
+
+// A fresh resolve rebuilds every track and clip. Keeping the previous object for an unchanged one keeps the clip lanes,
+// waveforms and sidebar rows keyed on it mounted when another track changes.
+export const reuseResolvedTracks = (previous: RuntimeTrack[], next: RuntimeTrack[]): RuntimeTrack[] => {
+  const previousById = new Map(previous.map((track) => [track.id, track]))
+  return reuseEqualByKey(previous, next.map((track) => {
+    const before = previousById.get(track.id)
+    return before ? { ...track, clips: reuseEqualByKey(before.clips, track.clips, (clip) => clip.id) } : track
+  }), (track) => track.id)
 }

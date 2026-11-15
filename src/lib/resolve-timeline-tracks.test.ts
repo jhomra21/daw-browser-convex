@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { buildTrackTree, flattenVisibleTracks } from './timeline-track-layout'
+import { reuseEqualByKey } from './reuse-equal'
 import { isClipPatchReflected, resolveTimelineTracks } from './resolve-timeline-tracks'
 import type { TimelineSnapshot, TimelineTrackRow } from './timeline-repository/types'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -37,6 +38,27 @@ const pendingTrack = (input: Pick<TimelineTrackRow, 'id' | 'index'> & Partial<Ti
     outputTargetId: row.outputTargetId,
   }
 }
+
+describe('reuseEqualByKey', () => {
+  const buffer = new Float32Array(1)
+  const entry = (id: string, value = 1, data = buffer) => ({ id, nested: { list: [1, { deep: 'x' }] }, values: new Map([['k', value]]), buffer: data })
+
+  test('keeps an entry equal by value, replaces a changed one, and keeps the array when nothing changed', () => {
+    const previous = [entry('a'), entry('b')]
+    const same = reuseEqualByKey(previous, [entry('a'), entry('b')], (item) => item.id)
+    expect(same).toBe(previous)
+    const changed = reuseEqualByKey(previous, [entry('a'), entry('b', 2), entry('c')], (item) => item.id)
+    expect(changed).not.toBe(previous)
+    expect(changed[0]).toBe(previous[0])
+    expect(changed[1]).not.toBe(previous[1])
+    expect(changed).toHaveLength(3)
+  })
+
+  test('compares anything that is not plain data by reference', () => {
+    const previous = [entry('a')]
+    expect(reuseEqualByKey(previous, [entry('a', 1, new Float32Array(1))], (item) => item.id)[0]).not.toBe(previous[0])
+  })
+})
 
 describe('resolveTimelineTracks', () => {
   test('preserves grouping fields needed by visible track layout', () => {

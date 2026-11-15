@@ -30,6 +30,7 @@ import { createPersistedAutomationState } from "~/components/timeline/create-per
 import { createAutomationSeedEnvelope } from "~/components/timeline/automation-seed-envelope";
 import type { ExportAutomationPatch } from "~/lib/export/run-export-job";
 import { clampAutomationLaneHeight, DEFAULT_AUTOMATION_LANE_HEIGHT } from "~/lib/timeline-utils";
+import { sameData } from "~/lib/reuse-equal";
 import { loadLocalAutomationEnvelopes, setLocalAutomationEnvelope, deleteLocalAutomationEnvelope } from "~/lib/local-automation";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import { buildAutomationEnvelopeHistoryEntry } from "~/lib/undo/builders";
@@ -254,8 +255,9 @@ const replaceAutomationEnvelope = (
 
 export function useTimelineAutomationController(options: TimelineAutomationControllerOptions) {
   const [automationEnvelopes, setAutomationEnvelopes] = createSignal<AutomationEnvelope[]>([]);
-  const [effectInstancesByOwnerKey, setEffectInstancesByOwnerKey] = createSignal<Record<string, AutomationTargetDeviceInstance[]>>({});
-  const [automationValuesByTargetKey, setAutomationValuesByTargetKey] = createSignal<ReadonlyMap<string, number>>(new Map());
+  // Every project change reloads these from storage; an unchanged result must not rebuild the lanes workspace.
+  const [effectInstancesByOwnerKey, setEffectInstancesByOwnerKey] = createSignal<Record<string, AutomationTargetDeviceInstance[]>>({}, { equals: sameData });
+  const [automationValuesByTargetKey, setAutomationValuesByTargetKey] = createSignal<ReadonlyMap<string, number>>(new Map(), { equals: sameData });
   const [effectDataReady, setEffectDataReady] = createSignal(false);
   const [automationDataReady, setAutomationDataReady] = createSignal(false);
   const [overriddenAutomationTargetKeys, setOverriddenAutomationTargetKeys] = createSignal<Set<string>>(new Set());

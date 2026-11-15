@@ -1,6 +1,7 @@
 import type { Failure } from "./ae-08-processor-state-fuzz-oracle"
 
-export const gateSteps = ["A1", "B1", "B2a", "B2b", "B3a-i", "B3a-ii", "B3b", "B4a", "B4b", "B5a", "B5b", "B6"]
+// A1..B6 are the phase 5 steps. P8-11a is phase 8 step 11a, after B6: a Play resuming a paused session adopts a structural edit in place.
+export const gateSteps = ["A1", "B1", "B2a", "B2b", "B3a-i", "B3a-ii", "B3b", "B4a", "B4b", "B5a", "B5b", "B6", "P8-11a"]
 const owned = (signature: string, greenAfter: string) => ({ signature, owner: greenAfter, greenAfter })
 export const classes = [
   owned("stale-stamp-at-dispatch/host-refused/resend", "B3a-ii"),
@@ -172,7 +173,7 @@ export const controllerClassTable = {
     { scenario: "compile-domain-end", seed: 1, greenAfter: "B4a" },
     { scenario: "transport-mismatch", seed: 1, greenAfter: "B4a" },
     { scenario: "abort-no-block", seed: 1, greenAfter: "B4a" },
-    { scenario: "resume-structure", seed: 1, greenAfter: "P8" },
+    { scenario: "resume-structure", seed: 1, greenAfter: "P8-11a" },
     { scenario: "adoption-cancel", seed: 1, greenAfter: "B4a" },
     { scenario: "adoption-aba", seed: 1, greenAfter: "B4a" },
     { scenario: "adoption-context", seed: 1, greenAfter: "B4a" },

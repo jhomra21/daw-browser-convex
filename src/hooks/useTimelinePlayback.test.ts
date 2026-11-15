@@ -368,7 +368,17 @@ if (!globalThis.navigator?.locks) {
     configurable: true,
     value: {
       ...globalThis.navigator,
-      locks: { request: async <Value>(name: string, _options: { ifAvailable?: boolean; mode?: 'shared' | 'exclusive' }, callback: (lock: { name: string } | null) => Promise<Value>) => callback({ name }) },
+      // Test files that run after this one inherit the stub, so it takes both Web Locks call forms.
+      locks: {
+        request: async <Value>(
+          name: string,
+          ...args: [callback: (lock: { name: string } | null) => Promise<Value>]
+            | [options: { ifAvailable?: boolean; mode?: 'shared' | 'exclusive' }, callback: (lock: { name: string } | null) => Promise<Value>]
+        ) => {
+          const callback = args.length === 1 ? args[0] : args[1]
+          return callback({ name })
+        },
+      },
     },
   })
 }

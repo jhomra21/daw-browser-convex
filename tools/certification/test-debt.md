@@ -9,7 +9,6 @@ The MISMATCH rows 382 and 434 keep their killing arms and have no survivor to re
 | `rc2:265:0:mutant` | rc2 265 | `src/lib/desktop/native-processor-state-owner.ts`: `// A submitted state patch, ordered by its edit. Its enabled flag and tail are the // proc` → `// A submitted state patch, ordered by its edit. Its enabled flag and tail are the // proc` | its test command (9 pass) still passes; row disposition "survives (source deletion, accepted)" |
 | `rc2:266:0:mutant` | rc2 266 | `src/lib/desktop/native-playback-controller.ts`: ` if (action === "retry") void sendExecution({ ...resendRequest(execution), resent: executi` → ` if (action === "retry") void sendExecution(resendRequest(execution), true, execution)` | its test command (1 pass) still passes; row disposition "survives (source deletion, accepted)" |
 | `rc2:267:0:mutant` | rc2 267 | `src/lib/desktop/native-playback-controller.ts`: ` state?: Uint8Array values: Readonly<Record<string, number>> desired?: ProcessorDesired ed` → ` state?: Uint8Array values: Readonly<Record<string, number>> desired?: ProcessorDesired ed` | its test command (1 pass) still passes; row disposition "survives (source deletion, accepted)" |
-| `rc2:279:0:mutant` | rc2 279 | `src/lib/desktop/native-processor-state-owner.ts`: ` for (const execution of target.inflight.values()) if (!execution.sent) execution.epoch = ` → `` | its test command (705 pass) still passes; row disposition "survives (diagnostic)" |
 | `rc2:279:2:mutant` | rc2 279 | `src/lib/desktop/native-processor-state-owner.ts`: ` for (const execution of target.inflight.values()) if (!execution.sent) execution.epoch = ` → `` | the fuzz seed 1 still passes; row disposition "survives (diagnostic)" |
 | `rc2:388:1:mutant` | rc2 388 | `src/lib/desktop/native-processor-state-owner.ts`: ` if (evidence !== "cancelled" \|\| (target.queuedPatch && execution !== target.queuedPatch` → ` if (true) settle(execution, "cancelled", false)` | the fuzz seed 989 still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
 | `rc2:389:1:mutant` | rc2 389 | `src/lib/desktop/native-playback-controller.ts`: ` \|\| refreshed.snapshot.assets.some((asset) => !installedSources.has(asset.assetId)) ` → `` | the fuzz seed 107 still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
@@ -77,10 +76,6 @@ The MISMATCH rows 382 and 434 keep their killing arms and have no survivor to re
 | `ledger:508:mutant:matrix` | ledger 508 | `src/hooks/useTimelinePlayback.ts`: `tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId` → `tracks.map(({ id, kind, channelRole, volume, muted, soloed, sends, outputTargetId, clips }` | its test command (238 pass) still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
 | `c0:m513-mutant-proj` | c0 513 | `src/hooks/useTimelinePlayback.ts`: ` return { id, historyRef, mediaStatus, startSec,` → ` return { waveformAssetKey: clip.waveformAssetKey, id, historyRef, mediaStatus, startSec,` | its test command (7 pass) still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
 | `c0:m516-mutant-proj` | c0 516 | `src/hooks/useTimelinePlayback.ts`: ` return { id, historyRef, mediaStatus, startSec,` → ` return { ...clip, name: undefined, color: undefined, waveformAssetKey: undefined, id, historyRef, mediaStatus, startSec,` | its test command (2 pass) still passes. The mutant was caught through a persisted-versus-live key-order difference between the clip the timeline resolves and the clip an undo restores; since `reuseResolvedTracks` keeps the previous clip object for equal content (record 47), that difference never reaches the fingerprint on the projection path. Killed by `c0:m516-mutant-ht5c` (`C0G a clip waveform key or key order change while playing is neither adopted nor rebuilt`); retired in record 48 (AE-08 phase 8 sign-off prep) |
-| `rc2:279:1:mutant` | rc2 279 | `src/lib/desktop/native-processor-state-owner.ts`: ` for (const execution of target.inflight.values()) if (!execution.sent) execution.epoch = epoch` → `` | its test command (the whole HT file) passes. It exited 1 only through the two known reds its control failed too (fixed by d316c00b), so it never had a discriminating witness; its siblings `rc2:279:0` and `:2` are survivors above. Retired in record 51 (AE-08 phase 8 sign-off prep) |
-| `rc2:408:1:mutant` | rc2 408 | `src/hooks/useTimelinePlayback.ts`: `if (!resumePlayback && nativePlayback.getPendingStart()?.mode === "preview") return true` → `if (nativePlayback.getPendingStart()?.mode === "preview") return true` | its test command (the whole HT file) passes; same history as `rc2:279:1`, sibling `rc2:408:0` above. Retired in record 51 |
-| `rc2:433:1:mutant` | rc2 433 | `src/hooks/useTimelinePlayback.ts`: ` if (!mounted \|\| requestedIntentToken !== transportIntentToken) { setIsPlayPending(false) return }` → ` if (!mounted \|\| requestedIntentToken !== transportIntentToken) return ` | its test command (the whole HT file) passes; same history as `rc2:279:1`, sibling `rc2:433:0` above. Retired in record 51 |
-| `ledger:488:mutant:playback` | ledger 488 | `src/lib/portable-browser-playback-controller.ts`: ` return { ...compilation, snapshot: { ...next, revision: activeRevision } }` → ` return compilation ` | its test command (the whole HT file) passes; it exited 1 only through the two known reds its control failed too. Retired in record 51 |
 | `rc2:385:1:mutant` | rc2 385 | `tools/acceptance/ae-08-processor-state-fuzz-host.ts`: asset lookup ignores the capacity limit | the fuzz seed passes; row 385 stays killed by `385:0` and `385:2`. Retired by the MISMATCH ruling (surviving arm) |
 | `rc2:390:1:mutant` | rc2 390 | `src/lib/desktop/native-playback-controller.ts`: drops `ingestProjectedProcessors(refreshed.snapshot)` | the fuzz seed passes; row 390 stays killed by `390:0`. Retired by the MISMATCH ruling (surviving arm) |
 | `rc2:418:0:mutant` | rc2 418 | `src/hooks/useTimelinePlayback.ts`: `pendingStart.promise` → `undefined` | its test command exits 0, no test fails. Row 418 retired as "no witness" by the MISMATCH ruling |
@@ -100,7 +95,6 @@ The MISMATCH rows 382 and 434 keep their killing arms and have no survivor to re
 - `rc2:265:0:control`
 - `rc2:266:0:control`
 - `rc2:267:0:control`
-- `rc2:279:0:control`
 - `rc2:279:2:control`
 - `rc2:388:1:control`
 - `rc2:389:1:control`
@@ -168,7 +162,3 @@ The MISMATCH rows 382 and 434 keep their killing arms and have no survivor to re
 - `ledger:508:control:matrix`
 - `c0:m513-control-proj`
 - `c0:m516-control-proj`
-- `rc2:279:1:control`
-- `rc2:408:1:control`
-- `rc2:433:1:control`
-- `ledger:488:control:playback`

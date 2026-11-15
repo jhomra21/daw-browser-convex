@@ -19095,7 +19095,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 705,
+      "pass": 772,
       "skip": 1,
       "fail": 0
      },
@@ -19159,14 +19159,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 705,
+      "pass": 771,
       "skip": 1,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "a parked unsent batch moves with the ended domain and waits for a frame of the new epoch"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -19184,7 +19186,10 @@
      "src/lib/desktop/native-processor-state-owner.ts"
     ],
     "witnesses": [
-     "src/hooks/useTimelinePlayback.test.ts"
+     "src/lib/desktop/native-playback-controller.test.ts",
+     "src/lib/desktop/native-built-in-parameter-mapper.test.ts",
+     "src/lib/desktop/native-live-playback-processors.test.ts",
+     "src/lib/desktop/native-schedule-coordinator.test.ts"
     ],
     "command": {
      "argv": [
@@ -19195,9 +19200,12 @@
       "/tmp/dv01-b6/rc7/mut/overlay.ts",
       "--timeout",
       "30000",
-      "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts"
+      "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
+      "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-built-in-parameter-mapper.test.ts",
+      "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-live-playback-processors.test.ts",
+      "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-schedule-coordinator.test.ts"
      ],
-     "alarmSeconds": 180,
+     "alarmSeconds": 300,
      "env": {
       "DV01_OVERLAY_FILE": "{{DIR}}/spec.json"
      },
@@ -19214,17 +19222,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 227,
+      "pass": 772,
       "skip": 1,
-      "fail": 2
+      "fail": 0
      },
-     "fails": [
-      "failed lifecycle transition cancels delayed native startup",
-      "preserves an explicitly captured native owner across queued generation rebuilds"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -19242,7 +19247,10 @@
      "src/lib/desktop/native-processor-state-owner.ts"
     ],
     "witnesses": [
-     "src/hooks/useTimelinePlayback.test.ts"
+     "src/lib/desktop/native-playback-controller.test.ts",
+     "src/lib/desktop/native-built-in-parameter-mapper.test.ts",
+     "src/lib/desktop/native-live-playback-processors.test.ts",
+     "src/lib/desktop/native-schedule-coordinator.test.ts"
     ],
     "command": {
      "argv": [
@@ -19253,9 +19261,12 @@
       "/tmp/dv01-b6/rc7/mut/overlay.ts",
       "--timeout",
       "30000",
-      "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts"
+      "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.test.ts",
+      "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-built-in-parameter-mapper.test.ts",
+      "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-live-playback-processors.test.ts",
+      "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-schedule-coordinator.test.ts"
      ],
-     "alarmSeconds": 180,
+     "alarmSeconds": 300,
      "env": {
       "DV01_OVERLAY_FILE": "{{DIR}}/spec.json"
      },
@@ -19278,14 +19289,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 771,
       "skip": 1,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "a parked unsent batch moves with the ended domain and waits for a frame of the new epoch"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -25484,14 +25497,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 265,
       "skip": 1,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "a locate made while playing resumes on the rebuild when a generation change retires its lifecycle under a pending preview"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -31047,14 +31062,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 265,
       "skip": 1,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "a locate that cancels a Play resuming behind a delayed Pause, after a second Pause, leaves no Play pending"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -48850,14 +48867,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 265,
       "skip": 1,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "the Timeline tick refreshes an adopted portable session at the revision it adopted"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,

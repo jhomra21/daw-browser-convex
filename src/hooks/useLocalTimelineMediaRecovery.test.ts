@@ -436,3 +436,32 @@ test("a newer same-generation reload supersedes an older queued local snapshot",
     dispose()
   })
 })
+
+test("a reload for an unmounted generation does not supersede the mounted generation's reload", async () => {
+  const project = await createLocalProject(`Stale reload ${crypto.randomUUID()}`)
+  const repository = createLocalTimelineRepository(project.id)
+  const [track] = (await repository.loadSnapshot()).tracks
+  if (!track) throw new Error("Expected default track.")
+  await createRoot(async (dispose) => {
+    const recovery = useMissingMediaRecovery({
+      projectId: () => project.id, mountedProjectGeneration: () => 2,
+      remoteTimelineAvailable: () => false, localTimelineReloadVersion: () => 0,
+      userId: () => undefined, renderTracks: () => [], audioEngine: new AudioEngine(),
+      audioBufferCache: { storeBuffer: () => {}, storeBuffers: () => {}, removeBuffer: () => {} },
+      getClipBuffer: () => new TestAudioBuffer(),
+      preloadClipBuffer: async () => undefined,
+      removeClip: async () => false,
+      projection: { insertLocalClip: () => {}, removeLocalClips: () => {} },
+      selection: { selectedClip: () => null, setSelectedClip: () => {}, setSelectedClipIds: () => {},
+        selectTrackTarget: () => {} },
+    })
+    await recovery.reloadLocalTimeline()
+    const clip = await repository.createClip({ trackId: track.id, name: "Mounted", startSec: 0,
+      duration: 1, sourceAssetKey: "asset:mounted", sourceKind: "upload" })
+    const mounted = recovery.reloadLocalTimeline()
+    void recovery.reloadLocalTimeline({ projectId: project.id, mountedProjectGeneration: 1 })
+    await mounted
+    expect(recovery.localTimelineSnapshot()?.clips[0]?.id).toBe(clip.id)
+    dispose()
+  })
+})

@@ -2032,6 +2032,9 @@ test('B6f5 a refused adoption answers failed and keeps the session revision; a M
   let volume = 0.8
   let clipDuration = 1
   let refuse = true
+  // The seam lead follows the slowest recent round trip, so a real clock moves the seam by a frame or two between runs and
+  // with it which schedule events fall before the seam. A fixed clock makes every round trip zero.
+  const now = spyOn(performance, 'now').mockReturnValue(0)
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: async (transport) => b6f5Compilation(transport, volume, clipDuration),
     fingerprintSnapshot: b6f5Fingerprint,
@@ -2053,7 +2056,7 @@ test('B6f5 a refused adoption answers failed and keeps the session revision; a M
       active: controller.isActive() })
       .toEqual({ refused: 'failed', retried: 'adopted', structural: 'adopted', revisions: [2, 2, 3],
         afterStructural: ['prepare-graph', 'install-schedule:2', 'publish-graph'], active: true })
-  } finally { controller.dispose() }
+  } finally { controller.dispose(); now.mockRestore() }
 })
 
 // R2: the worklet faults a live send whose revision is not the one it plays (WK processor-events). A send that crosses

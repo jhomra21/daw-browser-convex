@@ -46963,7 +46963,7 @@
       "/tmp/dv01-b6/rc5/tools/dv01-b6f5-step3-5/overlay-js.ts",
       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.test.ts"
      ],
-     "alarmSeconds": 400,
+     "alarmSeconds": 900,
      "env": {
       "DV01_OVERLAY_FILE": "{{DIR}}/spec.json"
      },

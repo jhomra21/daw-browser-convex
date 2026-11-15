@@ -7832,6 +7832,16 @@ test("B6d a same-value release joining a parked unsent batch reaches native afte
   expect(carried.execution.state).toBe("queued")
 })
 
+test("a parked unsent batch moves with the ended domain and waits for a frame of the new epoch", () => {
+  const owner = createNativeProcessorStateOwner()
+  owner.configured(1, new Map([["fx", b6dInstalled(-11)]]))
+  const parked = b6dDispatch(owner, "fx", 71, -19, { epoch: 13, revision: 1 }, 1, true)
+  owner.endDomain(14)
+  // A callback that began before the new transport still reports the ended epoch: it shows nothing about this batch.
+  expect(b6dResent(owner.observe(b6dProgress(1, 13, 1, 0)))).toEqual([])
+  expect(b6dResent(owner.observe(b6dProgress(1, 14, 2, 0)))).toEqual([parked.execution])
+})
+
 test("B6d2 a receipt is not proven while an older sent batch with another value can still apply", () => {
   const owner = createNativeProcessorStateOwner()
   owner.configured(1, new Map([["fx", b6dInstalled(-11)]]))

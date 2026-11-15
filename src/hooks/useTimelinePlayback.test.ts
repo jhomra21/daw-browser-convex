@@ -4133,6 +4133,96 @@ test('serializes a delayed native pause before immediate play', async () => {
   }
 })
 
+test("a locate that cancels a Play resuming behind a delayed Pause, after a second Pause, leaves no Play pending", async () => {
+  const previousWindow = globalThis.window
+  const pauseGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge(undefined, undefined, undefined, pauseGate.promise)
+  let locateOnResume: (() => void) | undefined
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => "project",
+          compileSnapshot: (transport) => { locateOnResume?.(); return nativeRequiredSnapshot(transport) },
+        })
+        await playback.handlePlay([track])
+        fixture.armTransportGate()
+        const pause = playback.handlePause()
+        await flushMicrotasks()
+        const play = playback.handlePlay([track])
+        await flushMicrotasks()
+        const secondPause = playback.handlePause()
+        await flushMicrotasks()
+        locateOnResume = () => { locateOnResume = undefined; playback.setPlayhead(1.5, [track]) }
+        pauseGate.resolve({ ok: true })
+        await Promise.all([pause, play, secondPause])
+        for (let index = 0; index < 60; index += 1) await flushMicrotasks()
+        // The locate cancelled the resuming Play after the second Pause had made its intent stale: the replay from the locate
+        // ends there, and the Play is neither running nor left pending.
+        expect({ located: locateOnResume === undefined, pending: playback.isPlayPending(), playing: playback.isPlaying() })
+          .toEqual({ located: true, pending: false, playing: false })
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
+test("a locate made while playing resumes on the rebuild when a generation change retires its lifecycle under a pending preview", async () => {
+  const previousWindow = globalThis.window
+  const seekGate = Promise.withResolvers<void>()
+  const beginGate = Promise.withResolvers<NativeTransactionReply>()
+  const fixture = createNativeHookBridge()
+  let holdSeek = false
+  const host = { ...fixture.audioHost, session: { ...fixture.audioHost.session, setTransport: async (transport: NativeHostTransport) => {
+    if (holdSeek && transport.running) await seekGate.promise
+    return fixture.audioHost.session.setTransport(transport)
+  } } }
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: host } } })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const [generation, setGeneration] = createSignal(1)
+        const playback = useTimelinePlayback(fake.engine, undefined, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          projectId: () => "project",
+          projectGeneration: generation,
+          compileSnapshot: nativeRequiredSnapshot,
+        })
+        for (let index = 0; index < 20; index += 1) await flushMicrotasks()
+        await playback.handlePlay([track])
+        expect(playback.isPlaying()).toBeTrue()
+        holdSeek = true
+        playback.setPlayhead(2, [track])
+        for (let index = 0; index < 20; index += 1) await flushMicrotasks()
+        // The preview the new generation requests stays pending while the locate's seek settles.
+        fixture.setBeginGate(beginGate.promise)
+        setGeneration(2)
+        for (let index = 0; index < 60; index += 1) await flushMicrotasks()
+        expect(playback.isPlaying()).toBeFalse()
+        holdSeek = false
+        seekGate.resolve()
+        for (let index = 0; index < 60; index += 1) await flushMicrotasks()
+        fixture.setBeginGate(undefined)
+        beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
+        for (let index = 0; index < 100; index += 1) await flushMicrotasks()
+        // The locate was made while playing: the Play resumes on the replacement graph; a preview carries no such intent.
+        expect({ playing: playback.isPlaying(), running: fixture.transportStates.at(-1) }).toEqual({ playing: true, running: true })
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+})
+
 test('serializes play behind an in-flight stop while retaining the native session', async () => {
   const previousWindow = globalThis.window
   const stopGate = Promise.withResolvers<{ ok: true }>()
@@ -7127,6 +7217,9 @@ test('B6f4 a paused-preview re-run with native playback off and no edit keeps th
 // Timeline's processor and instrument bindings (Timeline.tsx:447-468) and a worklet that records what each session holds.
 type B6f5Session = { createdSeq: number; closed: boolean; graph: AudioCoreGraphSnapshot | undefined; publishedRevision: number | undefined
   parameters: string; adoptions: number; installedBpm: number[]; installedNoteOns: number[]
+  // The worklet's transport-position report at a raw frame, on the epoch of the last transport it took.
+  report: (frame: number) => void
+  installedRevisions: number[]
   positions: { seq: number; sec: number; running: boolean }[]
   proc: { seq: number; values: number[] }[]; inst: { seq: number; values: number[] }[] }
 // `refusals`: the next adopting publishes the worklet rejects, a mechanism failure the controller retries.
@@ -7397,7 +7490,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     holds: { resume: resumeHold, compile: compileHold, transport: world.transportHold, pause: world.pauseHold } }
 }
 
-const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5World) => Promise<void>, nativeEnabled: boolean) => {
+const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5World, flushRaf: () => void) => Promise<void>, nativeEnabled: boolean) => {
   const bindings = await b6f5Bindings()
   const previous = {
     window: Object.getOwnPropertyDescriptor(globalThis, 'window'),
@@ -7415,9 +7508,13 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
     readonly port: { onmessage: ((event: { data: PortableWasmStatusMessage }) => void) | null; postMessage: (message: PortableWasmControlMessage) => void; close: () => void }
     constructor() {
       const session: B6f5Session = { createdSeq: ++world.seq, closed: false, graph: undefined, publishedRevision: undefined, parameters: '',
-        adoptions: 0, installedBpm: [], installedNoteOns: [], positions: [], proc: [], inst: [] }
+        adoptions: 0, installedBpm: [], installedNoteOns: [], installedRevisions: [], report: () => {}, positions: [], proc: [], inst: [] }
       world.sessions.push(session)
       world.onNode?.()
+      let transportEpoch = 1
+      let positionSequence = 0
+      session.report = (frame) => this.port.onmessage?.({ data: { version: portableWasmProtocolVersion, type: 'transport-position', sessionId: 1,
+        epoch: transportEpoch, sequence: ++positionSequence, running: true, frame } })
       this.port = {
         onmessage: null,
         postMessage: (message) => {
@@ -7431,12 +7528,14 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
           }
           if (message.type === 'install-schedule') {
             session.installedBpm.push(message.schedule.bpm)
+            session.installedRevisions.push(message.schedule.revision)
             session.installedNoteOns = message.schedule.events.flatMap((event) => event.type === 'note-on' ? [event.frame] : [])
             session.parameters = JSON.stringify(message.schedule.events.filter((event) => event.type.startsWith('parameter')))
             // A schedule staged for the next revision moves no transport: the publish swaps it in at the playing frame.
             const staged = session.publishedRevision !== undefined && message.schedule.revision > session.publishedRevision
             if (!staged) session.positions.push({ seq: world.seq, sec: message.schedule.timeOrigin.timelineSec, running: false })
           }
+          if (message.type === 'transport') transportEpoch = message.epoch
           if (message.type === 'transport') session.positions.push({ seq: world.seq, sec: message.frame / 48_000, running: message.running })
           let response = portableResponseFor(message)
           if (message.type === 'publish-graph' && refused) {
@@ -7474,9 +7573,9 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
   Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (input: string | URL) => (
     String(input).endsWith('.manifest.json') ? new Response(manifest, { status: 200 }) : new Response(wasm, { status: 200 })) })
   try {
-    await withFakeRaf(() => createRoot(async (dispose) => {
+    await withFakeRaf((flushRaf) => createRoot(async (dispose) => {
       try {
-        await body(mountB6f5(world, nativeEnabled, bindings), world)
+        await body(mountB6f5(world, nativeEnabled, bindings), world, flushRaf)
       } finally {
         dispose()
       }
@@ -7577,6 +7676,26 @@ test('B6f5 A a mixer, master, automation or instrument edit while playing is ado
     await live.expectEnd(true, undefined, mark, kind, true)
     expect({ kind, same: live.liveSession() === session, adoptions: session?.adoptions }).toEqual({ kind, same: true, adoptions: 1 })
   }, nativeEnabled)
+})
+
+// R6: the session owns its revision once it adopts one; a schedule refresh compiled at the Timeline's revision still
+// continues the adopted graph, through the hook's own tick.
+test('the Timeline tick refreshes an adopted portable session at the revision it adopted', async () => {
+  await runB6f5(async (live, world, flushRaf) => {
+    await live.playFrom(1)
+    const session = live.liveSession()
+    live.edit('mixer')
+    await live.until(() => session?.adoptions === 1)
+    // The adoption is in flight until the hook has recorded what it carries, after the publish this waits for.
+    for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
+    const installed = session?.installedRevisions.length ?? 0
+    session?.report(30 * 48_000)
+    flushRaf()
+    await live.until(() => (session?.installedRevisions.length ?? 0) > installed)
+    expect({ refreshed: (session?.installedRevisions.length ?? 0) > installed, revision: session?.installedRevisions.at(-1),
+      adopted: session?.publishedRevision, same: live.liveSession() === session, sessions: world.sessions.length })
+      .toEqual({ refreshed: true, revision: session?.publishedRevision, adopted: session?.publishedRevision, same: true, sessions: 1 })
+  }, false)
 })
 
 // E5: a note or tempo edit while playing is a seam adoption on the same core: no session is disposed and Play is not

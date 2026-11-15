@@ -235,6 +235,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     createSignal<string | null>(null);
   // Bound once during setup after the recording hook, before effects run.
   let recordingKeepLatencyNodeIds: () => ReadonlySet<string> = () => new Set();
+  let isTakeInProgress: () => boolean = () => false;
   const [masterCollapsed, setMasterCollapsed] = createSignal(true);
   // Transport tempo & metronome
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
@@ -779,6 +780,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       projectId,
       projectGeneration: mountedProjectGeneration,
       outputDeviceId: () => appPreferences.audio.preferences().nativeOutputDeviceId,
+      isRecording: () => isTakeInProgress(),
       keepLatencyNodeIds: (): ReadonlySet<string> => {
         const ids = new Set(recordingKeepLatencyNodeIds())
         const midiTarget = activeMidiRecordingTargetId()
@@ -1702,6 +1704,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   setProjectTransitionSettlement(() => recordingTransport.leaveProject());
   onCleanup(() => setProjectTransitionSettlement(undefined));
   const isRecording = createMemo(() => isAudioRecording() || midiRecording.isRecording());
+  isTakeInProgress = isRecording;
   const recordingTrackId = createMemo(() => recordingControls.recordingTrackId() ?? midiRecording.recordingTrackId());
   const stopRecording = recordingTransport.stopRecording;
   // A take keeps running through a delete; the lock refuses a delete of its own track.

@@ -1,4 +1,4 @@
-import { batch, createEffect, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
+import { batch, createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor } from 'solid-js'
 
 import { createLocalAudioClip, createUploadedAudioClip, pushClipCreateHistory } from '~/lib/clip-create'
 import type { ClipCreateSnapshot } from '@daw-browser/shared'
@@ -304,6 +304,12 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       console.warn('[useTrackRecording] notify handler failed', err)
     }
   }
+
+  // A take binds its devices when it starts and the playback session moves after it ends, so a change is only noticed.
+  const savedNativeDevices = createMemo(() => `${audioPreferences().nativeInputDeviceId}\n${audioPreferences().nativeOutputDeviceId}`)
+  createEffect(on(savedNativeDevices, () => {
+    if (isRecordingInternal()) emit('Audio device changes apply after the recording stops.')
+  }, { defer: true }))
 
   const selectRecordingTrack = (trackId: Track['id']) => {
     batch(() => {

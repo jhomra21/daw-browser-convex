@@ -32,6 +32,7 @@ type NativePlaybackOptions = {
   projectId?: Accessor<string>
   projectGeneration?: Accessor<number>
   outputDeviceId?: Accessor<string>
+  isRecording?: Accessor<boolean>
   compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
   captureNativeVstStates?: (capture: { projectId: string; instanceIds: readonly string[] }) => Promise<void>
   reportFault?: Parameters<typeof createNativePlaybackController>[0]["reportFault"]
@@ -2316,6 +2317,29 @@ export function useTimelinePlayback(
         })
       })
       .catch(() => undefined)
+  })
+
+  // The saved output device the live session was prepared on. A session binds its device when it is configured, so a
+  // change moves a prepared or playing session through the lifecycle rebuild, at the transport it has. With no session,
+  // the next start resolves the saved device. A take keeps its device: the move waits for the take to end.
+  let sessionOutputDeviceId = untrack(() => nativeOptions?.outputDeviceId?.())
+  createEffect(() => {
+    const outputDeviceId = nativeOptions?.outputDeviceId?.()
+    if (outputDeviceId === sessionOutputDeviceId || nativeOptions?.isRecording?.()) return
+    sessionOutputDeviceId = outputDeviceId
+    untrack(() => {
+      if (!nativePlayback.isActive() && !nativePlayback.isPrepared() && nativePlayback.getPendingStart() === undefined) return
+      void requestTimelineSchedule(loopOptions?.getTracks?.() ?? [], {
+        rebuildBackend: true,
+        resumePlayback: isPlaying(),
+        playheadSec: nativePlayback.currentPositionSec() ?? lastPublishedPlayheadSec,
+        owner: 'native',
+        projectId: nativeOptions?.projectId?.(),
+        projectGeneration: nativeOptions?.projectGeneration?.(),
+      }).catch((cause: unknown) => {
+        console.error('[native-playback] moving the session to the saved output device failed', cause)
+      })
+    })
   })
 
   onCleanup(() => {

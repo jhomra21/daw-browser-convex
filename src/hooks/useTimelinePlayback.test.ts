@@ -2551,6 +2551,145 @@ test('settles a cancelled native start before replacement playback can rebuild',
   }
 })
 
+// A saved native output device change moves the prepared or playing session through the lifecycle rebuild.
+const withOutputDeviceSwitch = async (
+  run: (context: {
+    fixture: ReturnType<typeof createNativeHookBridge>
+    requested: Array<string | undefined>
+    unavailable: Set<string>
+    faults: string[]
+    mount: (options: { outputDeviceId: () => string; isRecording?: () => boolean }) => ReturnType<typeof useTimelinePlayback>
+  }) => Promise<void>,
+) => {
+  const previousWindow = globalThis.window
+  const fixture = createNativeHookBridge()
+  const requested: Array<string | undefined> = []
+  const unavailable = new Set<string>()
+  const faults: string[] = []
+  const resolveDefault = fixture.audioHost.resolveOutputDevice
+  fixture.audioHost.resolveOutputDevice = async (id?: string) => {
+    requested.push(id)
+    const reply = await resolveDefault()
+    return id !== undefined && unavailable.has(id) ? { ok: true as const, device: { ...reply.device, available: false } } : reply
+  }
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        await run({
+          fixture, requested, unavailable, faults,
+          mount: (options) => useTimelinePlayback(fake.engine, { getTracks: () => [track] }, {
+            requiresNativeAudio: true,
+            enabled: () => true,
+            projectId: () => "project",
+            ...options,
+            compileSnapshot: nativeRequiredSnapshot,
+            reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
+          }),
+        })
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
+}
+
+// The rebuild is a chain of in-memory awaits; there is no signal to wait on, so the queue is drained deep.
+const settleRebuild = async () => {
+  for (let turn = 0; turn < 50; turn += 1) await flushMicrotasks()
+}
+
+const lastRunningFrame = (fixture: ReturnType<typeof createNativeHookBridge>) => (
+  fixture.transportFrames[fixture.transportStates.lastIndexOf(true)]
+)
+
+test.skipIf(isServer)('a saved output change moves a playing native session to the new device and keeps the position', async () => {
+  await withOutputDeviceSwitch(async ({ fixture, requested, mount }) => {
+    const [outputId, setOutputId] = createSignal("coreaudio:A")
+    const playback = mount({ outputDeviceId: outputId })
+    playback.setPlayhead(2, [track])
+    await playback.handlePlay([track])
+    expect(playback.isPlaying()).toBeTrue()
+    const beginsBefore = fixture.calls.filter((call) => call === "begin").length
+    const resolvedBefore = requested.length
+
+    setOutputId("coreaudio:B")
+    await settleRebuild()
+
+    expect(requested.slice(resolvedBefore)).toEqual(["coreaudio:B"])
+    expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(beginsBefore + 1)
+    expect(playback.isPlaying()).toBeTrue()
+    expect(playback.isNativePlaybackPrepared()).toBeTrue()
+    expect(lastRunningFrame(fixture)).toBe(96_000)
+  })
+})
+
+test.skipIf(isServer)('a saved output change moves a paused native session and keeps it paused at the position', async () => {
+  await withOutputDeviceSwitch(async ({ fixture, requested, mount }) => {
+    const [outputId, setOutputId] = createSignal("coreaudio:A")
+    const playback = mount({ outputDeviceId: outputId })
+    playback.setPlayhead(2, [track])
+    await playback.handlePlay([track])
+    await playback.handlePause()
+    expect(playback.isNativePlaybackPrepared()).toBeTrue()
+    const resolvedBefore = requested.length
+    const runningBefore = fixture.transportStates.filter(Boolean).length
+
+    setOutputId("coreaudio:B")
+    await settleRebuild()
+
+    expect(requested.slice(resolvedBefore)).toEqual(["coreaudio:B"])
+    expect(playback.isPlaying()).toBeFalse()
+    expect(playback.isNativePlaybackPrepared()).toBeTrue()
+    expect(fixture.transportStates.filter(Boolean)).toHaveLength(runningBefore)
+    expect(playback.playheadSec()).toBe(2)
+  })
+})
+
+test.skipIf(isServer)('a saved output change to a missing device reports it and starts nothing on another device', async () => {
+  await withOutputDeviceSwitch(async ({ fixture, unavailable, faults, mount }) => {
+    const [outputId, setOutputId] = createSignal("coreaudio:A")
+    const playback = mount({ outputDeviceId: outputId })
+    playback.setPlayhead(2, [track])
+    await playback.handlePlay([track])
+    unavailable.add("coreaudio:gone")
+    const startsBefore = fixture.calls.filter((call) => call === "start").length
+
+    setOutputId("coreaudio:gone")
+    await settleRebuild()
+
+    expect(faults).toContain("Saved output (unavailable)")
+    expect(playback.isPlaying()).toBeFalse()
+    expect(playback.isNativePlaybackPrepared()).toBeFalse()
+    expect(fixture.calls.filter((call) => call === "start")).toHaveLength(startsBefore)
+    expect(playback.playheadSec()).toBe(2)
+  })
+})
+
+test.skipIf(isServer)('a saved output change during a take waits for the take to end', async () => {
+  await withOutputDeviceSwitch(async ({ fixture, requested, mount }) => {
+    const [outputId, setOutputId] = createSignal("coreaudio:A")
+    const [recording, setRecording] = createSignal(true)
+    const playback = mount({ outputDeviceId: outputId, isRecording: recording })
+    await playback.handlePlay([track])
+    const beginsBefore = fixture.calls.filter((call) => call === "begin").length
+    const resolvedBefore = requested.length
+
+    setOutputId("coreaudio:B")
+    await settleRebuild()
+    expect(requested.slice(resolvedBefore)).toEqual([])
+    expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(beginsBefore)
+    expect(playback.isPlaying()).toBeTrue()
+
+    setRecording(false)
+    await settleRebuild()
+    expect(requested.slice(resolvedBefore)).toEqual(["coreaudio:B"])
+    expect(playback.isPlaying()).toBeTrue()
+  })
+})
+
 test('cancels an in-flight native preview before selecting portable playback', async () => {
   await withPortableAudioWorklet(async () => {
     const previousWindow = globalThis.window

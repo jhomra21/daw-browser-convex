@@ -1,4 +1,5 @@
-import { createRoot } from "solid-js"
+import { createRoot, createSignal } from "solid-js"
+import { isServer } from "solid-js/web"
 import { expect, test } from "bun:test"
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import type { createLocalAsset } from "~/lib/local-assets"
@@ -71,6 +72,7 @@ const createHarness = (
     tracks?: () => Track[]
     createTrackForRecording?: () => Promise<Track | null>
     historyPush?: Parameters<typeof useTrackRecording>[0]["historyPush"]
+    audioPreferences?: typeof audioPreferences
   },
 ) => {
   // Bun has no global window; redefining it by value would leave a non-writable `undefined` behind for later files.
@@ -78,6 +80,7 @@ const createHarness = (
   const previousNavigator = globalThis.navigator
   const lifecycleListeners: Array<(lifecycle: DesktopAudioLifecycle) => void> = []
   const calls: string[] = []
+  const startedInputDeviceIds: Array<string | undefined> = []
   const mediaTrack = Object.assign(Object.create(null), {
     readyState: "live",
     getSettings: () => ({ channelCount: 1, sampleRate: 48_000 }),
@@ -104,8 +107,9 @@ const createHarness = (
     entries: async function* () {},
   }
   const nativeController = {
-    start: async () => {
+    start: async (request: { inputDeviceId?: string }) => {
       calls.push("native-start")
+      startedInputDeviceIds.push(request.inputDeviceId)
       if (nativeStartFails) throw new Error("native-start-failed")
       return { sampleRate: 48_000, channelCount: 1, startFrame: 0 }
     },
@@ -239,13 +243,14 @@ const createHarness = (
     notify: behavior?.notify ?? (() => undefined),
     onLocalSaveFailed: () => undefined,
     historyPush: behavior?.historyPush ?? (() => undefined),
-    audioPreferences,
+    audioPreferences: behavior?.audioPreferences ?? audioPreferences,
     recordingPreferences,
   })
   return {
     recording,
     nativeController,
     calls,
+    startedInputDeviceIds,
     emit: (lifecycle: DesktopAudioLifecycle) => {
       for (const listener of lifecycleListeners) listener(lifecycle)
     },
@@ -326,6 +331,28 @@ test("desktop native-only recording never falls back to browser capture", async 
     expect(harness.calls).toContain("transport-stop")
     expect(harness.calls).not.toContain("portable-start")
     expect(harness.calls).not.toContain("get-user-media")
+    dispose()
+  })
+  harness.restore()
+})
+
+test.skipIf(isServer)("a device change during a take leaves the take on its devices and is noticed once, then the next take uses it", async () => {
+  const [devices, setDevices] = createSignal({ nativeInputDeviceId: "coreaudio:mic-a", nativeOutputDeviceId: "coreaudio:out-a" })
+  const notifications: string[] = []
+  const harness = createHarness({ state: "ready", powerGeneration: 1 }, true, true, false, true, undefined, {
+    notify: (message) => notifications.push(message),
+    audioPreferences: () => ({ ...audioPreferences(), ...devices() }),
+  })
+  await createRoot(async (dispose) => {
+    await flushLifecycle()
+    await expect(harness.recording.startRecording(track.id)).resolves.toMatchObject({ ok: true })
+    setDevices({ nativeInputDeviceId: "coreaudio:mic-b", nativeOutputDeviceId: "coreaudio:out-a" })
+    await flushLifecycle()
+    expect(harness.startedInputDeviceIds).toEqual(["coreaudio:mic-a"])
+    expect(notifications).toEqual(["Audio device changes apply after the recording stops."])
+    await harness.recording.stopRecording()
+    await expect(harness.recording.startRecording(track.id)).resolves.toMatchObject({ ok: true })
+    expect(harness.startedInputDeviceIds).toEqual(["coreaudio:mic-a", "coreaudio:mic-b"])
     dispose()
   })
   harness.restore()

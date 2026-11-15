@@ -2831,6 +2831,9 @@ test('preserves an explicitly captured native owner across queued generation reb
     const previousWindow = globalThis.window
     const fixture = createNativeHookBridge()
     const [projectGeneration, setProjectGeneration] = createSignal(1)
+    // A native preview is prepared at mount whenever native is enabled and a Play resumes it, so the Play that lands on
+    // the portable session starts before native is enabled.
+    const [nativeEnabled, setNativeEnabled] = createSignal(false)
     const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport']) => (
       compileLivePlaybackSnapshot({
         revision: 1,
@@ -2857,7 +2860,7 @@ test('preserves an explicitly captured native owner across queued generation reb
             engine,
             undefined,
             {
-              enabled: () => true,
+              enabled: nativeEnabled,
               projectId: () => "project",
               projectGeneration,
               compileSnapshot,
@@ -2871,6 +2874,7 @@ test('preserves an explicitly captured native owner across queued generation reb
           await playback.handlePlay([track])
           expect(playback.backendDiagnostics().activeBackend).toBe("portable-browser")
 
+          setNativeEnabled(true)
           setProjectGeneration(2)
           await flushMicrotasks()
           const first = playback.restartTimelineSchedule([track], {

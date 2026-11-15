@@ -1883,7 +1883,9 @@ export const createNativePlaybackController = (input: {
     let startStage = "compile"
     try {
       const snapshotResult = await input.compileSnapshot(transport, compileContext)
-      if (cancelled()) return "unavailable"
+      // A cancelled start of a project that requires native playback stays blocked, as one cancelled later in the
+      // transaction is, so the caller never falls back to a backend that cannot play the project.
+      if (cancelled()) return snapshotResult.supported && snapshotResult.snapshot.requiresNativePlayback === true ? "blocked" : "unavailable"
       if (!snapshotResult.supported) {
         const message = snapshotResult.reasons.join(" ") || "The project cannot be compiled for native playback."
         console.error("[native-vst3] native snapshot unsupported", { error: message })

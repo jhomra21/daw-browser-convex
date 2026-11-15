@@ -657,6 +657,11 @@ export const createLocalControlService = (input: {
       excludeKinds: input.excludePendingWriteKinds,
     })
     assertAvailable()
+    // GC rows are only written by asset.delete and removed by recovery.restore. Rows that expire
+    // meanwhile are collected by the next such commit and by the snapshot, history and recovery reads.
+    const touchesAssetStorage = request.actions.some((action) => (
+      action.kind === 'recovery.restore' || action.kind === 'asset.delete'
+    ))
     const outcome = await withLocalProjectAssetLock(request.projectId, () => {
       assertAvailable()
       // Recovery/asset deletion atomically moves references between assets and
@@ -750,13 +755,11 @@ export const createLocalControlService = (input: {
         excludePendingWriteKinds: input.excludePendingWriteKinds,
         flushPendingWrites: false,
       })
-      return request.actions.some((action) => action.kind === 'recovery.restore' || action.kind === 'asset.delete')
-        ? withLocalStorageRootLock(publish)
-        : publish()
+      return touchesAssetStorage ? withLocalStorageRootLock(publish) : publish()
     })
     let gcFinalized = false
     try {
-      if (input.excludePendingWriteKinds === undefined) {
+      if (touchesAssetStorage && input.excludePendingWriteKinds === undefined) {
         gcFinalized = (await runLocalControlAssetGc(request.projectId, {
           notify: false,
           removeAssetFile: input.removeAssetFile,

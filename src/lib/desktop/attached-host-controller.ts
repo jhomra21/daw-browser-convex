@@ -371,6 +371,7 @@ export const createAttachedHostController = (input: {
   importFiles: (files: readonly File[], signal?: AbortSignal, binding?: ImportProjectBinding) => Promise<ImportSummary>
   setPlayhead: (seconds: number) => void
   enqueueNativeVstParameter?: (event: { instanceId: string; id: number; value: number }) => Promise<boolean>
+  hasReflectableOverlays?: () => boolean
   reconcileMountedLocalTimeline?: (guard: {
     projectId: string;
     mountedProjectGeneration: number;
@@ -409,14 +410,15 @@ export const createAttachedHostController = (input: {
       capabilities: { playback: true, diagnostics: true },
     }
   }
+  const isMountedLocalProject = (mountedProjectId: string, mountedGeneration: number, signal: AbortSignal) => (
+    !signal.aborted
+    && activeController === controller
+    && input.projectId() === mountedProjectId
+    && input.mountedProjectGeneration() === mountedGeneration
+    && isLocalId("project", mountedProjectId)
+  )
   const ensureMountedLocalProject = async (mountedProjectId: string, mountedGeneration: number, signal: AbortSignal) => {
-    if (
-      signal.aborted
-      || activeController !== controller
-      || input.projectId() !== mountedProjectId
-      || input.mountedProjectGeneration() !== mountedGeneration
-      || !isLocalId("project", mountedProjectId)
-    ) return false
+    if (!isMountedLocalProject(mountedProjectId, mountedGeneration, signal)) return false
     const project = await findMountedLocalProject(mountedProjectId)
     if (project === undefined || !input.ensureMountedLocalMedia) {
       return !signal.aborted
@@ -486,9 +488,10 @@ export const createAttachedHostController = (input: {
           },
         },
       })
-      if (request_.operation === "control.commit" && input.reconcileMountedLocalTimeline) {
+      if (request_.operation === "control.commit" && input.reconcileMountedLocalTimeline && input.hasReflectableOverlays?.()) {
         // Retire reflected UI overlays before this commit can supersede their
         // persisted values. A post-commit snapshot alone can miss that echo.
+        // Without overlays there is nothing to retire; the commit flushes pending writes itself.
         await flushLocalProjectPendingWrites(mountedProjectId)
         await input.reconcileMountedLocalTimeline({
           projectId: mountedProjectId,
@@ -539,8 +542,9 @@ export const createAttachedHostController = (input: {
       }
       if (request_.operation === "control.commit" && input.reconcileMountedLocalTimeline) {
         const commitResult = controlCommitResultSchemaV1.safeParse(result)
+        // The project row was just confirmed above; only the mount can have moved since, which needs no storage read.
         if (commitResult.success && commitResult.data.applied && !commitResult.data.idempotencyReplay
-          && await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+          && isMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
           try {
             await input.reconcileMountedLocalTimeline({
               projectId: mountedProjectId,

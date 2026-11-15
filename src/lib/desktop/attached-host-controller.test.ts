@@ -8,6 +8,8 @@ import {
 import { desktopDiagnosticsSchemaV1, desktopDiagnosticsSchemaV2, desktopJsonValueSchema, parseDesktopResult, type DesktopOperationMapV1 } from "@daw-browser/desktop-protocol"
 import { resetRecordingDiagnostics, updateRecordingDiagnostics } from "~/lib/recording/recording-diagnostics"
 import { setLocalExternalProcessor } from "~/lib/external-plugins"
+import { registerPendingLocalProjectWriteFlusher } from "~/lib/local-project-pending-writes"
+import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes"
 import {
   installHermeticWindow,
   resetHermeticBrowserEnvironment,
@@ -131,10 +133,12 @@ const createController = (
   }) => Promise<void>,
   importQueue?: ImportJobQueue,
   audioEngine = new AudioEngine(),
+  hasReflectableOverlays?: () => boolean,
 ) => {
   const queue = createExportQueue()
   return {
     controller: createAttachedHostController({
+      hasReflectableOverlays,
       projectId,
       mountedProjectGeneration,
       isPlaying: () => false,
@@ -880,6 +884,9 @@ test("reconciles persisted overlays before commit and adopts the applied non-rep
         name: snapshot.tracks[0]?.name,
       })
     },
+    undefined,
+    undefined,
+    () => true,
   )
   const unregister = registerController(controller)
   const input = {
@@ -929,6 +936,70 @@ test("reconciles persisted overlays before commit and adopts the applied non-rep
   dispose()
 })
 
+test("a commit reloads the mounted timeline before it only while reflected overlays are pending", async () => {
+  installBridge([])
+  const project = await createLocalProject(`Overlay gated reload ${crypto.randomUUID()}`)
+  const initial = await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id })
+  const track = initial.tracks[0]
+  if (!track) throw new Error("Expected initial track.")
+  let overlays = false
+  let reconciliations = 0
+  const { controller, dispose } = createController(
+    () => project.id,
+    undefined,
+    () => 1,
+    undefined,
+    async () => { reconciliations += 1 },
+    undefined,
+    undefined,
+    () => overlays,
+  )
+  const unregister = registerController(controller)
+  const rename = (name: string) => requestControl(controller, "control.commit", {
+    version: "v1",
+    projectId: project.id,
+    idempotencyKey: `overlay-gated-${name.replaceAll(" ", "-")}`,
+    actions: [{ kind: "track.rename", track: { source: "persisted", id: track.id }, name }],
+  }, undefined, controlActor)
+
+  expect((await rename("No overlays")).result).toMatchObject({ applied: true })
+  expect(reconciliations).toBe(1)
+  overlays = true
+  expect((await rename("With overlays")).result).toMatchObject({ applied: true })
+  expect(reconciliations).toBe(3)
+
+  unregister()
+  dispose()
+})
+
+test("a pending user write is durable before a commit that skips the pre-commit reload", async () => {
+  installBridge([])
+  const project = await createLocalProject(`Flush before commit ${crypto.randomUUID()}`)
+  const initial = await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id })
+  const track = initial.tracks[0]
+  if (!track) throw new Error("Expected initial track.")
+  const order: string[] = []
+  const unregisterFlusher = registerPendingLocalProjectWriteFlusher("midi", project.id, async () => { order.push("flush") })
+  const unsubscribe = subscribeToLocalProjectChanges(project.id, () => { order.push("commit") })
+  const { controller, dispose } = createController(() => project.id, undefined, () => 1, undefined, async () => undefined, undefined, undefined, () => false)
+  const unregister = registerController(controller)
+
+  const result = await requestControl(controller, "control.commit", {
+    version: "v1",
+    projectId: project.id,
+    idempotencyKey: "flush-before-commit",
+    actions: [{ kind: "track.rename", track: { source: "persisted", id: track.id }, name: "Flushed first" }],
+  }, undefined, controlActor)
+  expect(result.result).toMatchObject({ applied: true })
+  expect(order.indexOf("flush")).toBeGreaterThanOrEqual(0)
+  expect(order.indexOf("flush")).toBeLessThan(order.indexOf("commit"))
+
+  unsubscribe()
+  unregisterFlusher()
+  unregister()
+  dispose()
+})
+
 test("surfaces mounted timeline reconciliation failures after an applied commit", async () => {
   installBridge([])
   const project = await createLocalProject(`Failed reconciliation ${crypto.randomUUID()}`)
@@ -942,7 +1013,7 @@ test("surfaces mounted timeline reconciliation failures after an applied commit"
     () => 1,
     undefined,
     async () => {
-      if (++reconciliations === 2) throw new Error("Injected timeline reconciliation failure.")
+      if (++reconciliations === 1) throw new Error("Injected timeline reconciliation failure.")
     },
   )
   const unregister = registerController(controller)
@@ -1030,6 +1101,9 @@ test("suppresses reconciliation when native delivery changes the mounted generat
     async () => {
       reconciliations += 1
     },
+    undefined,
+    undefined,
+    () => true,
   )
   const unregister = registerController(controller)
   const result = await requestControl(controller, "control.commit", {

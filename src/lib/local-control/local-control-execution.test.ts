@@ -99,6 +99,39 @@ test('executes sequential client references and persists the canonical result', 
   expect((await snapshot(project.id)).clips).toHaveLength(1)
 })
 
+test('the timeline reload after a commit equals the committed state and reads it in one transaction', async () => {
+  const project = await createLocalProject(`Reload equality ${crypto.randomUUID()}`)
+  await executeLocalControlRequestV1({
+    projectId: project.id,
+    actions: [
+      { kind: 'track.create', clientRef: 'instrument', trackKind: 'instrument' },
+      {
+        kind: 'clip.midi.create',
+        clientRef: 'clip',
+        track: { source: 'client', clientRef: 'instrument' },
+        startSec: 1,
+        duration: 2,
+        wave: 'sine',
+        notes: [],
+      },
+    ],
+  })
+  const committed = await snapshot(project.id)
+  const transaction = IDBDatabase.prototype.transaction
+  let transactions = 0
+  IDBDatabase.prototype.transaction = function counted(...args: Parameters<typeof transaction>) {
+    transactions += 1
+    return transaction.apply(this, args)
+  }
+  const reloaded = await createLocalTimelineRepository(project.id).loadSnapshot().finally(() => {
+    IDBDatabase.prototype.transaction = transaction
+  })
+  expect(transactions).toBe(1)
+  expect(reloaded.tracks.map((track) => track.id)).toEqual(committed.tracks.map((track) => track.id))
+  expect(reloaded.clips.map((clip) => [clip.id, clip.trackId, clip.startSec, clip.duration]))
+    .toEqual(committed.clips.map((clip) => [clip.id, clip.trackId, clip.startSec, clip.duration]))
+})
+
 test('plans and executes legacy MIDI no-ops without dropping expanded local data', async () => {
   const project = await createLocalProject(`Expanded MIDI ${crypto.randomUUID()}`)
   const created = await executeLocalControlRequestV1({

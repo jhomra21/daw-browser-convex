@@ -2271,6 +2271,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       enqueueNativeVstParameter: nativeVstParameterQueue
         ? (event) => nativeVstParameterQueue.enqueue(event).then((result) => result === "delivered")
         : undefined,
+      hasReflectableOverlays: projection.hasReflectableOverlays,
       reconcileMountedLocalTimeline,
       ensureMountedLocalMedia,
       isMountedLocalMediaReady: mediaRecovery.mountedLocalMediaReady,

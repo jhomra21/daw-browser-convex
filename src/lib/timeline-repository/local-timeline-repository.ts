@@ -460,10 +460,13 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
   const loadSnapshot = async (): Promise<TimelineSnapshot> => {
     await flushLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
+    // One transaction: each separate read waits for its own transaction slot, which is the cost of a reload after a commit.
+    // One transaction: each separate read waits for its own transaction slot, which is the cost of a reload after a commit.
+    const kinds = db.transaction('entities', 'readonly').store.index('by-kind')
     const [trackRows, clipRows, sidechainRows] = await Promise.all([
-      db.getAllFromIndex('entities', 'by-kind', TRACK_KIND),
-      db.getAllFromIndex('entities', 'by-kind', CLIP_KIND),
-      db.getAllFromIndex('entities', 'by-kind', SIDECHAIN_KIND),
+      kinds.getAll(TRACK_KIND),
+      kinds.getAll(CLIP_KIND),
+      kinds.getAll(SIDECHAIN_KIND),
     ])
     const tracks = trackValues(trackRows).sort((left, right) => left.index - right.index)
     const clips = clipValues(clipRows).sort((left, right) => left.startSec - right.startSec)

@@ -37,6 +37,7 @@ type UseTimelineProjectionStateOptions = {
 
 type UseTimelineProjectionStateReturn = {
   reconcileLocalSnapshot: (snapshot: TimelineSnapshot) => void
+  hasReflectableOverlays: () => boolean
   pendingTrackEntriesById: Accessor<Map<Track['id'], PendingTrackEntry>>
   pendingClipCreatesById: Accessor<Map<string, PendingClipCreate>>
   removedTrackIds: Accessor<Set<Track['id']>>
@@ -326,6 +327,14 @@ export function useTimelineProjectionState(
       tracks: snapshot.tracks.map((track) => ({ ...track, _id: track.id })),
       clips: snapshot.clips.map((clip) => ({ ...clip, _id: clip.id })),
     }),
+    hasReflectableOverlays: () => (
+      committedClipEditsById().size > 0
+      || pendingTrackEntriesById().size > 0
+      || pendingClipCreatesById().size > 0
+      || removedTrackIds().size > 0
+      || removedClipIds().size > 0
+      || pendingTrackLocksById().size > 0
+    ),
     pendingTrackEntriesById,
     pendingClipCreatesById,
     removedTrackIds,

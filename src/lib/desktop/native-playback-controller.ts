@@ -572,6 +572,8 @@ export const createNativePlaybackController = (input: {
   let preparedProjectGeneration: number | undefined
   let pendingStart: Promise<NativeStartResult> | undefined
   let pendingStartMode: "play" | "preview" | undefined
+  // The Play currently resuming the prepared session, if any; abandoning it leaves the session as it is.
+  let pendingResume: { abandoned: boolean } | undefined
   let pendingStartCompileContext: LivePlaybackCompileContext | undefined
   let pendingPreviewAttempt: NativePreviewAttempt | undefined
   let lifecycleGeneration = 0
@@ -1611,6 +1613,14 @@ export const createNativePlaybackController = (input: {
     invalidateNativeOwnership()
     return request.catch(() => undefined)
   }
+  // Stop and Pause win over a Play resuming the paused session, not the session: the resume ends without sending a
+  // run transport (or the caller's next paused transport undoes it), and ownership, graph and publications stay.
+  // Settles once the Play has; undefined when no Play is resuming.
+  const abandonResume = () => {
+    if (!pendingResume || !pendingStart) return undefined
+    pendingResume.abandoned = true
+    return pendingStart.then(() => undefined, () => undefined)
+  }
   const handleNativeHostLoss = (error?: string) => {
     if (intentionalHostTransitionDepth > 0) return
     const ownsNativeSession = prepared
@@ -1646,7 +1656,9 @@ export const createNativePlaybackController = (input: {
     let attemptedCoordinator: NativeScheduleCoordinator | undefined
     let attemptedPageManager: NativeTimelinePageManager | undefined
     let attemptStartController = startAbortController
-    const cancelled = () => generation !== lifecycleGeneration
+    const resume = { abandoned: false }
+    const cancelled = () => resume.abandoned
+      || generation !== lifecycleGeneration
       || projectGeneration !== resolveProjectGeneration()
       || preparedProjectIdForAttempt !== input.getProjectId?.()
       || (attemptStartController !== undefined && startAbortController !== attemptStartController)
@@ -1656,9 +1668,12 @@ export const createNativePlaybackController = (input: {
         && (nativeTimelinePageManager !== attemptedPageManager || attemptedPageManager.isDisposed()))
     if (prepared && preparedProjectGeneration === projectGeneration && preparedProjectId === preparedProjectIdForAttempt) {
       let previousCoordinator: NativeScheduleCoordinator | undefined
+      if (runTransport) pendingResume = resume
       try {
         await processorState.publication()?.terminal
         await pausedPriming
+        // Only an abandonment returns here: any other cancellation is read after the compile, as it always was.
+        if (resume.abandoned) return "unavailable"
         previousCoordinator = scheduleCoordinator
         attemptedCoordinator = previousCoordinator
         attemptedPageManager = nativeTimelinePageManager
@@ -1690,6 +1705,8 @@ export const createNativePlaybackController = (input: {
         const refreshed = compiled.supported
           ? { ...compiled, snapshot: { ...compiled.snapshot, transport } }
           : compiled
+        // An abandoned resume must not fall through to a prepare, which replaces the session it was to resume.
+        if (resume.abandoned) return "unavailable"
         // The prepared session schedules only the sources and processors it installed: a recompile that names another
         // source, places other processors or routes other nodes, needs a prepare.
         const installedSources = new Set(preparedSnapshot?.assets.map((asset) => asset.assetId))
@@ -1748,7 +1765,8 @@ export const createNativePlaybackController = (input: {
               livePreviewActive = true
               return resumed()
             })
-            return result ?? startAttempt(transport, generation, projectGeneration, runTransport, compileContext, previewAttempt)
+            if (result !== undefined || resume.abandoned) return result ?? "unavailable"
+            return startAttempt(transport, generation, projectGeneration, runTransport, compileContext, previewAttempt)
           }
           const nextCoordinator = createCoordinatorForEpoch({
             snapshot: effectiveSnapshot,
@@ -1820,6 +1838,9 @@ export const createNativePlaybackController = (input: {
           else await disposeNativeSession(undefined, "native-start-resume-failure")
         }
         return "unavailable"
+      } finally {
+        // A recursive resume registered itself first and owns the slot.
+        if (pendingResume === resume) pendingResume = undefined
       }
     }
     if (prepared) {
@@ -4850,6 +4871,7 @@ export const createNativePlaybackController = (input: {
       ? { mode: pendingStartMode, promise: pendingStart }
       : undefined,
     cancelPendingStart,
+    abandonResume,
     resetNativeHostConnectionLoss,
     start,
     pause,

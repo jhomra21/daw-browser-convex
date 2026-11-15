@@ -842,7 +842,8 @@ export function useTimelinePlayback(
         }, compileContext)
         if (!isCurrentPlayAttempt(token)) {
           reportNativePlaySkip("Native playback start completed after the request was invalidated.")
-          await disposePreparedBackends(undefined, "play-attempt-superseded")
+          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.
+          if (nativeStart === 'started') await disposePreparedBackends(undefined, "play-attempt-superseded")
           return
         }
         if (nativeStart === 'started') {
@@ -1021,6 +1022,10 @@ export function useTimelinePlayback(
     if (untrack(playheadSec) !== sec) return ensureLivePortableSession()
   }
 
+  const ensureLiveGraph = async () => {
+    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === "started") return
+    return ensureLivePortableSession()
+  }
   // A cancelled start takes the paused graph this hook keeps live with it. Once the cancelled Play or rebuild and the
   // dispose settle, prepare it again where the transport now stands: Stop and Pause win over the resume, not the graph.
   const cancelStartKeepingGraph = (reason: string, after?: Promise<void>) => {
@@ -1028,12 +1033,14 @@ export function useTimelinePlayback(
     // A dispose already in flight cancelled only the start it saw; a Play started since then is cancelled here.
     void nativePlayback.cancelPendingStart()
     // A newer owner keeps its own graph: ensureLivePreview answers a live or pending start without replacing it.
-    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(async () => {
-      if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === "started") return
-      return ensureLivePortableSession()
-    }).catch(() => undefined)
+    void Promise.allSettled([cancellation, playAttempt?.promise, rebuildPromise]).then(ensureLiveGraph).catch(() => undefined)
     return cancellation
   }
+  // A Pause or Stop over a native Play resuming the paused session keeps that session: once the abandoned resume
+  // settles, it moves to where the transport now stands. Only a session that no longer exists is prepared again.
+  const keepGraphAfter = (resume: Promise<void>) => resume
+    .then(() => nativePlayback.seekPrepared(untrack(playheadSec)))
+    .then((result) => result === "started" ? undefined : ensureLiveGraph())
 
   const handlePause = async () => {
     setIsRebuildingPlayback(false)
@@ -1047,7 +1054,12 @@ export function useTimelinePlayback(
     const hadPendingPlay = playAttempt !== undefined || rebuildInProgress
     invalidatePlayAttempt()
     if (!isPlaying()) {
-      if (hadPendingPlay) void cancelStartKeepingGraph("pause-cancelled-play").catch(reportNativeStateCaptureFailure)
+      if (hadPendingPlay) {
+        // A rebuild retires its graph, so only a Play resuming this one can be abandoned.
+        const resume = rebuildInProgress ? undefined : nativePlayback.abandonResume()
+        if (resume) void keepGraphAfter(resume).catch(() => undefined)
+        else void cancelStartKeepingGraph("pause-cancelled-play").catch(reportNativeStateCaptureFailure)
+      }
       return
     }
     if (nativePlayback.isActive() || portableBrowserPlayback.isActive()) {
@@ -1117,6 +1129,7 @@ export function useTimelinePlayback(
     const hadPendingPlay = playAttempt !== undefined || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress
     invalidatePlayAttempt()
     if (pendingStop) return pendingStop
+    const resume = rebuildInProgress ? undefined : nativePlayback.abandonResume()
     const stopSeekSequence = ++nativeSeekSequence
     const stop = (async () => {
       const pause = handlePause()
@@ -1125,7 +1138,9 @@ export function useTimelinePlayback(
       publishPlayhead(0)
       await pause
       if (pendingPreview) await pendingPreview.catch(() => undefined)
-      if (hadPendingPlay) {
+      if (resume) {
+        await keepGraphAfter(resume)
+      } else if (hadPendingPlay) {
         void cancelStartKeepingGraph("transport-stop-cancelled-start").catch(reportNativeStateCaptureFailure)
       } else if (requiresNativeAudio && nativePlayback.isPrepared()) {
         if (stopSeekSequence === nativeSeekSequence) {

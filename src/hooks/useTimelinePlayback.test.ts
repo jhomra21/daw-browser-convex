@@ -5320,7 +5320,9 @@ test('B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing ru
 })
 
 for (const route of ['stop', 'pause'] as const) {
-  test(`B6d5 a ${route === 'stop' ? 'Stop' : 'Pause'} that cancels a pending Play keeps a live paused graph at the ${route === 'stop' ? 'start' : 'pause position'}`, async () => {
+  // Pause-keeps-graph: a Pause or Stop over a Play resuming the paused session stops the transport and leaves the
+  // prepared session alone: no stop, teardown or rebuild, and the next Play resumes it without one.
+  test(`B6d5 a ${route === 'stop' ? 'Stop' : 'Pause'} that cancels a pending Play keeps the prepared graph at the ${route === 'stop' ? 'start' : 'pause position'}`, async () => {
     const previousWindow = globalThis.window
     const fixture = createNativeHookBridge()
     const [tracks] = createSignal([track])
@@ -5351,26 +5353,39 @@ for (const route of ['stop', 'pause'] as const) {
           const held = Promise.withResolvers<void>()
           compileGate = held.promise
           const sentBefore = fixture.transportStates.length
+          const callsBefore = fixture.calls.length
           const play = playback.handlePlay(tracks())
           for (let index = 0; index < 20; index += 1) await flushMicrotasks()
           expect(playback.isPlayPending()).toBeTrue()
+          const compiledAtCancel = compiled.length
           const cancelled = route === 'stop' ? playback.handleStop() : playback.handlePause()
           compileGate = undefined
           held.resolve()
           await play
           await cancelled
-          for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
           for (let index = 0; index < 40; index += 1) await flushMicrotasks()
           const position = route === 'stop' ? 0 : 1
-          console.log('B6D5-CANCELLED-PLAY-KEEPS-GRAPH', JSON.stringify({ route, faults, compiled, prepared: playback.isNativePlaybackPrepared(),
-            playing: playback.isPlaying(), playhead: playback.playheadSec(), frame: fixture.transportFrames.at(-1),
-            sent: fixture.transportStates.slice(sentBefore), calls: fixture.calls.slice(-8) }))
+          const afterCancel = fixture.calls.slice(callsBefore)
           expect(faults).toEqual([])
           expect(playback.isPlaying()).toBeFalse()
-          expect(fixture.transportStates.slice(sentBefore)).not.toContain(true)
+          expect(fixture.transportStates.slice(sentBefore).at(-1)).toBeFalse()
           expect(playback.isNativePlaybackPrepared()).toBeTrue()
           expect(playback.playheadSec()).toBe(position)
           expect(fixture.transportFrames.at(-1)).toBe(position * 48_000)
+          // The session is kept: no teardown, no rebuild, and no compile after the one the cancelled Play held.
+          expect(afterCancel).not.toContain('stop')
+          expect(afterCancel).not.toContain('teardown')
+          expect(afterCancel).not.toContain('begin')
+          expect(compiled.length).toBe(compiledAtCancel)
+          // The next Play resumes the kept session without rebuilding it.
+          const callsBeforeResume = fixture.calls.length
+          const compiledBeforeResume = compiled.length
+          await playback.handlePlay(tracks())
+          expect(playback.isPlaying()).toBeTrue()
+          expect(fixture.transportStates.at(-1)).toBeTrue()
+          const resumeCalls = fixture.calls.slice(callsBeforeResume)
+          for (const rebuilt of ['stop', 'teardown', 'begin', 'configure']) expect(resumeCalls).not.toContain(rebuilt)
+          expect(compiled.length - compiledBeforeResume).toBe(1)
           dispose()
         })
       })

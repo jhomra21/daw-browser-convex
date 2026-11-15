@@ -9817,6 +9817,73 @@ test("a Play that starts while a paused VST insertion is still being staged leav
   } finally { await controller.dispose() }
 })
 
+// Pause-keeps-graph: a Pause or Stop over a pending resume abandons the Play, never the session it resumes.
+for (const route of ["pause", "stop"] as const) test(`a ${route} over a Play resuming the paused session abandons the resume and keeps the prepared session`, async () => {
+  const fixture = createBridge()
+  const snapshotInput = input()
+  let compileGate: Promise<void> | undefined
+  const controller = createObservedController({
+    bridge: fixture.bridge, getProjectId: () => "local_project",
+    compileSnapshot: async (transport) => {
+      await compileGate
+      return compileLivePlaybackSnapshot({ ...snapshotInput, transport })
+    },
+  })
+  const playhead = route === "stop" ? 0 : 1
+  try {
+    expect(await controller.ensureLivePreview(1)).toBe("started")
+    expect(controller.abandonResume()).toBeUndefined()
+    const held = Promise.withResolvers<void>()
+    compileGate = held.promise
+    const before = fixture.calls.length
+    const play = controller.start({ ...snapshotInput.transport, playheadSec: 1, state: "playing" })
+    const abandoned = controller.abandonResume()
+    expect(abandoned).toBeDefined()
+    held.resolve()
+    expect(await play).toBe("unavailable")
+    await abandoned
+    expect(controller.abandonResume()).toBeUndefined()
+    expect({ prepared: controller.isPrepared(), active: controller.isActive() }).toEqual({ prepared: true, active: false })
+    expect(await controller.seekPrepared(playhead)).toBe("started")
+    expect(fixture.transports.some((transport) => transport.running)).toBe(false)
+    expect(fixture.transports.at(-1)?.frame).toBe(playhead * 48_000)
+    for (const call of ["stop", "teardown", "begin-transaction"]) expect(fixture.calls.slice(before)).not.toContain(call)
+    compileGate = undefined
+    expect(await controller.start({ ...snapshotInput.transport, playheadSec: playhead, state: "playing" })).toBe("started")
+    expect(fixture.transports.at(-1)?.running).toBe(true)
+    expect(fixture.calls.slice(before)).not.toContain("begin-transaction")
+  } finally { await controller.dispose() }
+})
+
+test("a resume abandoned while an edit publication is in flight lets the publication land and never runs the transport", async () => {
+  const { fixture, controller, edit, transport } = vstJoinFixture()
+  const coordinate = fixture.bridge.session.coordinateVstAttachments
+  const staging = Promise.withResolvers<void>()
+  const entered = Promise.withResolvers<void>()
+  fixture.bridge.session.coordinateVstAttachments = async (request) => {
+    entered.resolve()
+    await staging.promise
+    return coordinate(request)
+  }
+  try {
+    expect(await controller.ensureLivePreview(0)).toBe("started")
+    const insertion = edit(true, "insert")
+    await entered.promise
+    const play = controller.start(transport)
+    const before = fixture.calls.length
+    const abandoned = controller.abandonResume()
+    expect(abandoned).toBeDefined()
+    staging.resolve()
+    expect(await insertion).toEqual({ status: "adopted" })
+    expect(await play).toBe("unavailable")
+    await abandoned
+    expect({ prepared: controller.isPrepared(), active: controller.isActive() }).toEqual({ prepared: true, active: false })
+    expect(fixture.coordinations).toHaveLength(1)
+    expect(fixture.transports.some((paused) => paused.running)).toBe(false)
+    for (const call of ["stop", "teardown", "begin-transaction"]) expect(fixture.calls.slice(before)).not.toContain(call)
+  } finally { await controller.dispose() }
+})
+
 // Each refused staging waits for native progress reports, never a timer: this feeds one per macrotask until `done`.
 const feedProgress = async (fixture: ReturnType<typeof createBridge>, done: () => boolean) => {
   for (let frame = 0; !done() && frame < 2000; frame++) {

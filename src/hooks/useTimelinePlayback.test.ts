@@ -5733,6 +5733,81 @@ test('B6d7 a locate during a Pause that cancels a pending Play keeps its paused 
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
 })
+test("B6d7 a locate during a Pause that cancels a cold Play (native audio optional) keeps the rebuild's paused start when the Play's cleanup joins the Pause's dispose", async () => {
+  const previousWindow = globalThis.window
+  let failBegin = true
+  const beginGate = Promise.withResolvers<NativeTransactionReply>()
+  const fixture = createNativeHookBridge(() => failBegin ? 'begin' : undefined)
+  const [tracks] = createSignal([track])
+  const faults: string[] = []
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
+          requiresNativeAudio: false,
+          enabled: () => true,
+          projectId: () => 'project',
+          compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
+            renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
+          reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
+        })
+        for (let index = 0; index < 20; index += 1) await flushMicrotasks()
+        failBegin = false
+        fixture.setBeginGate(beginGate.promise)
+        const play = playback.handlePlay(tracks())
+        for (let index = 0; index < 20; index += 1) await flushMicrotasks()
+        expect(playback.isPlayPending()).toBeTrue()
+        const pause = playback.handlePause()
+        for (let index = 0; index < 5; index += 1) await flushMicrotasks()
+        // The rebuild requests its paused start while the cancelled Play's cleanup dispose still joins the Pause's.
+        const rebuild = playback.restartTimelineSchedule(tracks(), { rebuildBackend: true, resumePlayback: false, playheadSec: 3, owner: 'native', projectId: 'project' })
+        for (let index = 0; index < 20; index += 1) await flushMicrotasks()
+        fixture.setBeginGate(undefined)
+        beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
+        await Promise.allSettled([play, pause, rebuild])
+        for (let index = 0; index < 60; index += 1) await flushMicrotasks()
+        expect(faults).toEqual([])
+        expect(fixture.transportStates).not.toContain(true)
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        // The join cancels nothing: the rebuild's start is not retried, so it commits once.
+        expect(fixture.transportFrames).toEqual([144_000])
+        expect(fixture.calls.filter(call => call === 'begin')).toHaveLength(3)
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
+test('a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled', async () => {
+  const previousWindow = globalThis.window
+  const resumeGate = Promise.withResolvers<void>()
+  const fixture = createNativeHookBridge()
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+  try {
+    await withFakeRaf(async () => {
+      const engine = { ...createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine, resume: () => resumeGate.promise }
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(engine, undefined, { enabled: () => false, projectId: () => 'project', compileSnapshot: nativeRequiredSnapshot })
+        const play = playback.handlePlay([track])
+        for (let index = 0; index < 20; index += 1) await flushMicrotasks()
+        expect(playback.isPlayPending()).toBeTrue()
+        const pause = playback.handlePause()
+        resumeGate.resolve()
+        await Promise.allSettled([play, pause])
+        for (let index = 0; index < 60; index += 1) await flushMicrotasks()
+        expect(playback.isPlaying()).toBeFalse()
+        expect(fixture.calls).not.toContain('begin')
+        expect(playback.isNativePlaybackPrepared()).toBeFalse()
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
 test('B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position', async () => {
   const previousWindow = globalThis.window
   const fixture = createNativeHookBridge()

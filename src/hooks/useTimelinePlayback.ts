@@ -1545,6 +1545,9 @@ export function useTimelinePlayback(
     ? untrack(() => createDesktopAudioLifecycleReconciler(audioHostBridge, handleAudioLifecycle))
     : undefined
   let previewProjectionBaseline: string | undefined
+  // The newest key submitted to native adoption and not yet settled. An edit back to the baseline while it differs must
+  // still be submitted: it supersedes the compile of the edit before it.
+  let nativeAdoptionKey: string | undefined
   // What the paused native preview in flight compiled, kept across the edits that land before it commits.
   let nativePreviewCompiledFingerprint: string | undefined
   let portableCompiledFingerprint: string | undefined
@@ -1601,12 +1604,13 @@ export function useTimelinePlayback(
     const projectId = nativeOptions?.projectId?.()
     const projectGeneration = nativeOptions?.projectGeneration?.()
     const { isActive, start, end } = getLoopParams()
+    nativeAdoptionKey = key
     const outcome = await nativePlayback.adoptSchedule({
       key,
       schedule: JSON.stringify({ tracks: readNativePreviewTrackFingerprint(tracks), loop: getLoopParams(), bpm: loopOptions?.bpm?.() }),
       context: { instrumentOverride: options?.instrumentOverride, externalProcessor: options?.externalProcessor },
       loop: { loopEnabled: isActive, loopStartSec: start, loopEndSec: end },
-    }, explicit)
+    }, explicit).finally(() => { if (nativeAdoptionKey === key) nativeAdoptionKey = undefined })
     const current = () => mounted && transportIntent === transportIntentToken && seekSequence === nativeSeekSequence
       && lifecycle === nativeLifecycleToken && projectId === nativeOptions?.projectId?.()
       && projectGeneration === nativeOptions?.projectGeneration?.()
@@ -2173,7 +2177,10 @@ export function useTimelinePlayback(
   const followPortableEdits = () => {
     if (rebuildInProgress || playAttempt || !untrack(isPlaying) || !(portableBrowserPlayback.isActive() || nativePlayback.isActive())
       || hasPendingAudioClipHydration()
-      || untrack(() => readDesiredScheduleFingerprint()) === previewProjectionBaseline) return
+      || untrack(() => {
+        const desired = readDesiredScheduleFingerprint()
+        return desired === previewProjectionBaseline && (nativeAdoptionKey === undefined || nativeAdoptionKey === desired)
+      })) return
     adoptPortableEdits()
   }
   createEffect(() => {

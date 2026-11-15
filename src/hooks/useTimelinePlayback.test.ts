@@ -8665,8 +8665,9 @@ for (const paused of [false, true]) {
 
 // AE-08 phase 8 step 11d (A): an edit adopts the transport state the session has when it commits. An intent captured
 // while paused and committed after Play, or an edit that lands while a Play is starting, never stops or restarts it.
-type TransportEditWorld = { fixture: ReturnType<typeof createNativeHookBridge>; seams: bigint[]; compiled: number[]; clipsCompiled: number[]
-  contexts: (LivePlaybackCompileContext | undefined)[]; faults: string[]; lifecycle: () => number }
+// `hold` keeps every compile that starts while it is set until it settles; the compile reads the tracks of the moment it started.
+type TransportEditWorld = { fixture: ReturnType<typeof createNativeHookBridge>; seams: bigint[]; publishes: number[]; compiled: number[]; clipsCompiled: number[]
+  contexts: (LivePlaybackCompileContext | undefined)[]; faults: string[]; lifecycle: () => number; hold: Promise<void> | undefined }
 const withNativeTransportEdit = async (
   run: (world: TransportEditWorld, playback: ReturnType<typeof useTimelinePlayback>, setVolume: (volume: number) => void,
     setTracks: (update: (current: Track<AudioBuffer>[]) => Track<AudioBuffer>[]) => void) => Promise<void>,
@@ -8676,10 +8677,13 @@ const withNativeTransportEdit = async (
   const fixture = createNativeHookBridge(undefined, undefined, options.beginGate, undefined, 'failed', true)
   const [tracks, setTracks] = createSignal<Track<AudioBuffer>[]>([track])
   const seams: bigint[] = []
+  const publishes: number[] = []
   const compiled: number[] = []
   const clipsCompiled: number[] = []
   const contexts: (LivePlaybackCompileContext | undefined)[] = []
   const faults: string[] = []
+  const world: TransportEditWorld = { fixture, seams, publishes, compiled, clipsCompiled, contexts, faults, hold: undefined,
+    lifecycle: () => fixture.calls.filter((call) => ['begin', 'stop', 'teardown', 'configure'].includes(call)).length }
   let revision = 1
   let status: 'prepared' | 'published' = 'prepared'
   let requested = 2
@@ -8696,7 +8700,7 @@ const withNativeTransportEdit = async (
       status = 'prepared'
       return reply()
     },
-    publish: async () => { status = 'published'; return reply() }, inspect: reply, rollback: reply, retire: reply,
+    publish: async () => { status = 'published'; publishes.push(requested); return reply() }, inspect: reply, rollback: reply, retire: reply,
   }
   Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: {
     ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions, configureInstrumentStates: async () => ({ ok: true as const }) },
@@ -8711,12 +8715,12 @@ const withNativeTransportEdit = async (
             contexts.push(context)
             compiled.push(tracks()[0]?.volume ?? Number.NaN)
             clipsCompiled.push(tracks().reduce((count, entry) => count + entry.clips.length, 0))
-            return compileLivePlaybackSnapshot({ revision: revision++, bpm: 120, transport, tracks: tracks(),
+            const compiling = tracks()
+            if (world.hold) await world.hold
+            return compileLivePlaybackSnapshot({ revision: revision++, bpm: 120, transport, tracks: compiling,
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
           } })
-      await run({ fixture, seams, compiled, clipsCompiled, contexts, faults,
-        lifecycle: () => fixture.calls.filter((call) => ['begin', 'stop', 'teardown', 'configure'].includes(call)).length },
-      playback, (volume) => setTracks((current) => current.map((entry) => ({ ...entry, volume }))), setTracks)
+      await run(world, playback, (volume) => setTracks((current) => current.map((entry) => ({ ...entry, volume }))), setTracks)
       dispose()
     }))
   } finally {
@@ -8775,6 +8779,27 @@ test('UD7n W-S11d-A3 an edit whose captured intent names the portable owner adop
       overrides: world.contexts.flatMap((context) => context?.instrumentOverride ? [context.instrumentOverride] : []), faults: world.faults })
       .toEqual({ lifecycle: 0, stops: 0, playing: true, prepared: true, adoptions: 1,
         overrides: [{ targetId: track.id, instrument: replacement }], faults: [] })
+  }, { enabled: true })
+})
+
+// The latest edit wins: an edit back to the adopted state, made while the compile of the edit before it is held, is not
+// skipped as unchanged. It supersedes that compile, which would otherwise publish a state the project no longer has.
+test('UD7n W-S11d-A4 an edit back to the adopted state while the previous edit compiles keeps that edit from publishing', async () => {
+  await withNativeTransportEdit(async (world, playback, setVolume) => {
+    await playback.handlePlay([track])
+    expect(playback.isPlaying()).toBeTrue()
+    world.seams.length = 0
+    world.publishes.length = 0
+    const held = Promise.withResolvers<void>()
+    world.hold = held.promise
+    setVolume(0.25)
+    await flushMicrotasks()
+    setVolume(track.volume)
+    await flushMicrotasks()
+    held.resolve()
+    for (let index = 0; index < 20; index += 1) await flushMicrotasks()
+    expect({ playing: playback.isPlaying(), adoptions: world.seams.length, publishes: world.publishes.length, faults: world.faults })
+      .toEqual({ playing: true, adoptions: 0, publishes: 0, faults: [] })
   }, { enabled: true })
 })
 

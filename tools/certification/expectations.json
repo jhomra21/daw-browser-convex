@@ -56093,17 +56093,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 0,
+      "pass": 2,
       "skip": 0,
-      "fail": 2
+      "fail": 0
      },
-     "fails": [
-      "C0G a track-delete undo of a MIDI clip while native plays publishes once per user action",
-      "C0G a track-delete undo of a sampleUrl clip while native plays publishes once per user action"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,

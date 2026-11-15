@@ -7108,10 +7108,13 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     processorStructure: registry.structure() }))
   const faults: string[] = []
   let compiles = 0
+  // A compile reads the tracks it started with, not the ones that landed while it was held.
+  let compileReadsAtStart = false
   const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]['transport'], context?: LivePlaybackCompileContext) => {
+    const started = tracks()
     if (compileHold.armed) await new Promise<void>((resolve) => holdB6fLive(compileHold, resolve))
     compiles += 1
-    return compileLivePlaybackSnapshot({ revision: compiles, bpm: bpm(), transport, tracks: tracks(),
+    return compileLivePlaybackSnapshot({ revision: compiles, bpm: bpm(), transport, tracks: compileReadsAtStart ? started : tracks(),
       renderState: { fx: fxOf(context?.instrumentOverride), automationEnvelopes: automation() }, sidechainRoutes: [] })
   }
   const engine = {
@@ -7288,7 +7291,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     rebuildBackend: true, resumePlayback, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
   const rebuild = (next: Track[]) => syncPlaybackBackend(next)
-  return { playback, tracks, observeTracksRead: (observer: () => void) => { onTracksRead = observer }, edit, replaceInstrument, addEffect, insertEffect, insertLimiter, rebuild, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, mark: () => world.seq,
+  return { playback, tracks, observeTracksRead: (observer: () => void) => { onTracksRead = observer }, edit, replaceInstrument, addEffect, insertEffect, insertLimiter, rebuild, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, readCompileTracksAtStart: () => { compileReadsAtStart = true }, mark: () => world.seq,
     locate: (sec: number) => playback.setPlayhead(sec, tracks()),
     liveSession: () => world.sessions.filter((session) => !session.closed).at(-1),
     holds: { resume: resumeHold, compile: compileHold, transport: world.transportHold, pause: world.pauseHold } }
@@ -8021,6 +8024,26 @@ test('B6f5 a rename coalesced with an edit and its undo is neither adopted nor r
     expect({ rebuilds: world.sessions.length - sessions, adoptions: session?.adoptions, playing: live.playback.isPlaying(),
       gain: session?.graph?.nodes.find((node) => node.id === track.id)?.mixer?.gain })
       .toEqual({ rebuilds: 0, adoptions: 0, playing: true, gain: track.volume })
+  }, false)
+})
+
+// The latest edit wins: an edit back to the adopted state, made while the compile of the edit before it is held, is not
+// skipped as unchanged. It queues an adoption that compiles the newest state, so the session does not end on the earlier edit.
+test('B6f5 an edit back to the adopted state while the previous edit compiles leaves the session on that state', async () => {
+  await runB6f5(async (live) => {
+    await live.playFrom(1)
+    const session = live.liveSession()
+    live.readCompileTracksAtStart()
+    live.holds.compile.armed = true
+    live.setVolume(0.5)
+    await live.holds.compile.reached.promise
+    live.setVolume(track.volume)
+    releaseB6fLive(live.holds.compile)
+    await live.until(() => session?.adoptions === 2)
+    await live.settle()
+    expect({ adoptions: session?.adoptions, playing: live.playback.isPlaying(),
+      gain: session?.graph?.nodes.find((node) => node.id === track.id)?.mixer?.gain })
+      .toEqual({ adoptions: 2, playing: true, gain: track.volume })
   }, false)
 })
 

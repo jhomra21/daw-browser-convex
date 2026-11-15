@@ -1545,9 +1545,9 @@ export function useTimelinePlayback(
     ? untrack(() => createDesktopAudioLifecycleReconciler(audioHostBridge, handleAudioLifecycle))
     : undefined
   let previewProjectionBaseline: string | undefined
-  // The newest key submitted to native adoption and not yet settled. An edit back to the baseline while it differs must
-  // still be submitted: it supersedes the compile of the edit before it.
-  let nativeAdoptionKey: string | undefined
+  // The newest key submitted to an adoption, native or portable, and not yet settled. An edit back to the baseline while
+  // it differs must still be submitted: it supersedes, or is compiled after, the edit before it.
+  let adoptionKey: string | undefined
   // What the paused native preview in flight compiled, kept across the edits that land before it commits.
   let nativePreviewCompiledFingerprint: string | undefined
   let portableCompiledFingerprint: string | undefined
@@ -1577,7 +1577,9 @@ export function useTimelinePlayback(
       const { isActive, start, end } = getLoopParams()
       const transportIntent = transportIntentToken
       const lifecycle = nativeLifecycleToken
+      adoptionKey = key
       const outcome = await portableBrowserPlayback.adoptSchedule({ loopEnabled: isActive, loopStartSec: start, loopEndSec: end })
+        .finally(() => { if (adoptionKey === key) adoptionKey = undefined })
       if (!mounted || transportIntent !== transportIntentToken || lifecycle !== nativeLifecycleToken) return
       if (paused) {
         if (outcome === "adopted" || outcome === "unchanged") previewProjectionBaseline = key
@@ -1604,13 +1606,13 @@ export function useTimelinePlayback(
     const projectId = nativeOptions?.projectId?.()
     const projectGeneration = nativeOptions?.projectGeneration?.()
     const { isActive, start, end } = getLoopParams()
-    nativeAdoptionKey = key
+    adoptionKey = key
     const outcome = await nativePlayback.adoptSchedule({
       key,
       schedule: JSON.stringify({ tracks: readNativePreviewTrackFingerprint(tracks), loop: getLoopParams(), bpm: loopOptions?.bpm?.() }),
       context: { instrumentOverride: options?.instrumentOverride, externalProcessor: options?.externalProcessor },
       loop: { loopEnabled: isActive, loopStartSec: start, loopEndSec: end },
-    }, explicit).finally(() => { if (nativeAdoptionKey === key) nativeAdoptionKey = undefined })
+    }, explicit).finally(() => { if (adoptionKey === key) adoptionKey = undefined })
     const current = () => mounted && transportIntent === transportIntentToken && seekSequence === nativeSeekSequence
       && lifecycle === nativeLifecycleToken && projectId === nativeOptions?.projectId?.()
       && projectGeneration === nativeOptions?.projectGeneration?.()
@@ -2179,7 +2181,7 @@ export function useTimelinePlayback(
       || hasPendingAudioClipHydration()
       || untrack(() => {
         const desired = readDesiredScheduleFingerprint()
-        return desired === previewProjectionBaseline && (nativeAdoptionKey === undefined || nativeAdoptionKey === desired)
+        return desired === previewProjectionBaseline && (adoptionKey === undefined || adoptionKey === desired)
       })) return
     adoptPortableEdits()
   }

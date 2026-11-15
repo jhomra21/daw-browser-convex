@@ -1,0 +1,223 @@
+{
+ "name": "ae08-phase8-d1-removal",
+ "sequence": 50,
+ "createdAt": "2026-11-15T15:22:02.059Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 160,
+   "new": 157
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 117,
+   "new": 113
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:portable",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 43,
+   "new": 44
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:portable",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
+    "B6f5 R2 a live send crossing an adoption publish never faults the session",
+    "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
+    "B6f5 a playing portable session adopts a mixer edit on the same session and follows it",
+    "B6f5 a refused adoption answers failed and keeps the session revision; a MIDI clip edit is adopted at a seam",
+    "B6f5 adoptions coalesce to one in flight and one queued that carries the newest edit",
+    "C9a-1 an adoption ships the sources compiled at its seam with the publish; a clip after the seam is the source the start scheduled",
+    "C9a-2 the preparations of the old sources are released once the position reaches the seam, the candidate's stay, and teardown releases all",
+    "C9a-3 a refused publish keeps the old sources and their preparations, and a resubmit reuses the candidate preparations it still matches",
+    "C9a-4 the candidate preparations a failed attempt kept are released when the desired state changes",
+    "C9a-5 the candidate preparations are released when the resubmits run out, and when the session is torn down",
+    "W-C9-asset-6 a Drum Rack pad sample swapped while a note is held registers the asset before the publish and is adopted without a rebuild",
+    "W-C9-asset-7 a Granular sample changed, and a Granular track added and deleted, while playing are adopted with the asset registered before the publish",
+    "W-C9-fx-1 an effect inserted beside a delaying effect it keeps while playing is adopted in place: one publish, nothing disposed, the new chain",
+    "W-C9-fx-1 an effect inserted while playing is adopted in place: one publish, nothing disposed, the new chain",
+    "W-C9-fx-1 an effect moved while playing is adopted in place: one publish, nothing disposed, the new chain",
+    "W-C9-fx-1 an effect removed while playing is adopted in place: one publish, nothing disposed, the new chain",
+    "W-C9-fx-1 an effect replaced while playing is adopted in place: one publish, nothing disposed, the new chain",
+    "W-C9-fx-1p an effect inserted beside a delaying effect it keeps on a paused session is adopted in place with the seam at the position",
+    "W-C9-fx-1p an effect inserted on a paused session is adopted in place with the seam at the position",
+    "W-C9-fx-1p an effect moved on a paused session is adopted in place with the seam at the position",
+    "W-C9-fx-1p an effect removed on a paused session is adopted in place with the seam at the position",
+    "W-C9-fx-1p an effect replaced on a paused session is adopted in place with the seam at the position",
+    "W-C9-fx-4 an effect that delays the signal inserted, removed, replaced or moved is adopted with one publish",
+    "W-C9-fx-6 a removal refused by ghost capacity is retried after one position report and adopted",
+    "W-C9-inst-1 a instance replacement of the instrument while a note is held is adopted: released on the old voice at the seam, started on the new instrument",
+    "W-C9-inst-1 a kind replacement of the instrument while a note is held is adopted: released on the old voice at the seam, started on the new instrument",
+    "W-C9-inst-1p a instance replacement of the instrument on a paused session is adopted in place with the seam at the position",
+    "W-C9-inst-1p a kind replacement of the instrument on a paused session is adopted in place with the seam at the position",
+    "W-C9-inst-6 a replacement refused by blend capacity is retried after one position report and adopted",
+    "W-C9-keeps-1 a held note of an instrument whose sample changed is released at the seam and started again there",
+    "W-C9-keeps-2 a held note of an instrument that did not change keeps its voice through an edit elsewhere",
+    "W-C9-proc-1 a processor parameter the live path does not take is adopted in place, playing and paused, with the new state in the published graph",
+    "W-C9-proc-2 a Spectral fftSize change is adopted in place with one publish and the new size in the published graph",
+    "W-C9-track-1 an audio track added while playing is adopted: its node is published, its asset registered first, its clip starts at the seam",
+    "W-C9-track-2 a MIDI track added while playing is adopted: its note that spans the seam starts there and the held note elsewhere keeps its voice",
+    "W-C9-track-3 an audio track deleted while playing leaves no source or node, and its asset is released once the position reaches the seam",
+    "W-C9-track-4 the held note of a deleted MIDI track gets no note-off: its node is not in the candidate and the core ghost ends the voice",
+    "W-C9-track-5 a reorder is the session's own graph again: unchanged, nothing published, and the next edit keeps the node order",
+    "W-C9-track-6 a track added and then deleted on a paused session is adopted in place with the seam at the position",
+    "W-C9-track-7 a track added or deleted where a latency-bearing effect gives routes a delay is adopted with one publish",
+    "W-C9-track-R a track added and deleted during a take is adopted and the take goes on",
+    "W-FB-1 a refused publish and uncarried content answer failed, a missing fingerprint answers unavailable, never a rebuild"
+   ],
+   "new": [
+    "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
+    "B6f5 R2 a live send crossing an adoption publish never faults the session",
+    "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
+    "B6f5 a playing portable session adopts a mixer edit on the same session and follows it",
+    "B6f5 a refused adoption answers failed and keeps the session revision; a MIDI clip edit is adopted at a seam",
+    "B6f5 adoptions coalesce to one in flight and one queued that carries the newest edit",
+    "B6f5 the adoption seam adapts to the round trips of recent adoptions, clamps, and a late publish moves the next seam later",
+    "C9a-1 an adoption ships the sources compiled at its seam with the publish; a clip after the seam is the source the start scheduled",
+    "C9a-2 the preparations of the old sources are released once the position reaches the seam, the candidate's stay, and teardown releases all",
+    "C9a-3 a refused publish keeps the old sources and their preparations, and a resubmit reuses the candidate preparations it still matches",
+    "C9a-4 the candidate preparations a failed attempt kept are released when the desired state changes",
+    "C9a-5 the candidate preparations are released when the resubmits run out, and when the session is torn down",
+    "W-C9-asset-6 a Drum Rack pad sample swapped while a note is held registers the asset before the publish and is adopted without a rebuild",
+    "W-C9-asset-7 a Granular sample changed, and a Granular track added and deleted, while playing are adopted with the asset registered before the publish",
+    "W-C9-fx-1 an effect inserted beside a delaying effect it keeps while playing is adopted in place: one publish, nothing disposed, the new chain",
+    "W-C9-fx-1 an effect inserted while playing is adopted in place: one publish, nothing disposed, the new chain",
+    "W-C9-fx-1 an effect moved while playing is adopted in place: one publish, nothing disposed, the new chain",
+    "W-C9-fx-1 an effect removed while playing is adopted in place: one publish, nothing disposed, the new chain",
+    "W-C9-fx-1 an effect replaced while playing is adopted in place: one publish, nothing disposed, the new chain",
+    "W-C9-fx-1p an effect inserted beside a delaying effect it keeps on a paused session is adopted in place with the seam at the position",
+    "W-C9-fx-1p an effect inserted on a paused session is adopted in place with the seam at the position",
+    "W-C9-fx-1p an effect moved on a paused session is adopted in place with the seam at the position",
+    "W-C9-fx-1p an effect removed on a paused session is adopted in place with the seam at the position",
+    "W-C9-fx-1p an effect replaced on a paused session is adopted in place with the seam at the position",
+    "W-C9-fx-4 an effect that delays the signal inserted, removed, replaced or moved is adopted with one publish",
+    "W-C9-fx-6 a removal refused by ghost capacity is retried after one position report and adopted",
+    "W-C9-inst-1 a instance replacement of the instrument while a note is held is adopted: released on the old voice at the seam, started on the new instrument",
+    "W-C9-inst-1 a kind replacement of the instrument while a note is held is adopted: released on the old voice at the seam, started on the new instrument",
+    "W-C9-inst-1p a instance replacement of the instrument on a paused session is adopted in place with the seam at the position",
+    "W-C9-inst-1p a kind replacement of the instrument on a paused session is adopted in place with the seam at the position",
+    "W-C9-inst-6 a replacement refused by blend capacity is retried after one position report and adopted",
+    "W-C9-keeps-1 a held note of an instrument whose sample changed is released at the seam and started again there",
+    "W-C9-keeps-2 a held note of an instrument that did not change keeps its voice through an edit elsewhere",
+    "W-C9-proc-1 a processor parameter the live path does not take is adopted in place, playing and paused, with the new state in the published graph",
+    "W-C9-proc-2 a Spectral fftSize change is adopted in place with one publish and the new size in the published graph",
+    "W-C9-track-1 an audio track added while playing is adopted: its node is published, its asset registered first, its clip starts at the seam",
+    "W-C9-track-2 a MIDI track added while playing is adopted: its note that spans the seam starts there and the held note elsewhere keeps its voice",
+    "W-C9-track-3 an audio track deleted while playing leaves no source or node, and its asset is released once the position reaches the seam",
+    "W-C9-track-4 the held note of a deleted MIDI track gets no note-off: its node is not in the candidate and the core ghost ends the voice",
+    "W-C9-track-5 a reorder is the session's own graph again: unchanged, nothing published, and the next edit keeps the node order",
+    "W-C9-track-6 a track added and then deleted on a paused session is adopted in place with the seam at the position",
+    "W-C9-track-7 a track added or deleted where a latency-bearing effect gives routes a delay is adopted with one publish",
+    "W-C9-track-R a track added and deleted during a take is adopted and the take goes on",
+    "W-FB-1 a refused publish and uncarried content answer failed, a missing fingerprint answers unavailable, never a rebuild"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:489:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 160,
+   "new": 157
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:476:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 160,
+   "new": 157
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:476:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 153,
+   "new": 150
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:489:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 158,
+   "new": 155
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:498:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 160,
+   "new": 157
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:498:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 154,
+   "new": 151
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 sign-off prep: hand record for the 8 jobs the D1 test removal moves (ledger 476, 489, 490 and 498, control and mutant, all `:portable`; hand record, no --bless). Ruling: PARENT-RULING-P8-BLESS-BLOCKERS.md addendum 3, manifest tools/certification/removals/ae08-phase8-d1.json. The paired `--rebase … --revert` run of PARENT-RULING-ALLOW-REMOVAL-V2 cannot run on this tree (40 of 62 baseline watched files drifted and no commit holds the baseline), so the move is proved by hand, as record 48 did for an arm; the --full bless then runs without --allow-removal.\n\n(1) Name-diff proof. The test names of src/lib/portable-browser-playback-controller.test.ts at e78643dc (139) and at HEAD (136), compared as sorted sets of `test(` names (the file has no describe). Missing from HEAD, 6: the 4 manifest entries ('refreshes from the latest old-session position without overlapping sessions', 'keeps the current portable session active when a rolling refresh fails', 'keeps the old session and retries once when the replacement range is stale', 'stops truthfully when a prepared replacement cannot start after old disposal') and 2 renames: 'refreshes the portable schedule before its installed range ends' -> 'hands the portable schedule off in place before its installed range ends' (5933b727, D1; the manifest's replacedBy) and 'W-F20c ... refreshes from the arrangement position' -> '... extends in place from the arrangement position' (5933b727; record 37 already follows that rename in ledger:476:mutant:portable). Present at HEAD and not at e78643dc, 3: the two renamed names and 'B6f5 the adoption seam adapts to the round trips of recent adoptions, clamps, and a late publish moves the next seam later' (581bfe11, D2). So the lost tests are exactly the 4 manifest tests, and the count moves 160 -> 157 = -4 removed +1 added.\n\n(2) Replacement proof. 'hands the portable schedule off in place before its installed range ends' exists in the file and prints `(pass)` in the control and mutant logs of every one of the 8 jobs that runs it (ledger 476 control and 490 mutant checked line by line; the other controls report 157 pass, 0 fail). No removed name appears in any of the 8 logs.\n\n(3) Measured counts (fast-cert --only the 8 jobs --jobs 1, HEAD 5d8ac844, 0 failing; the same 8 jobs ran twice, see the flake note). Controls 160/0/0 -> 157/0/0. Mutants: 476 153/0/7 -> 150/0/7, 489 158/0/2 -> 155/0/2, 498 154/0/6 -> 151/0/6, 490 117/0/43 -> 113/0/44 (the D2 seam test also fails the 490 mutant: a stronger kill, one added name in `fails`).\n\n(4) Kill proof. For each mutant the script compared the recorded `fails` with the measured ones: no recorded killer is missing, every mutant keeps exit 1 and the same applied count, and the only name added is the D2 seam test in ledger:490:mutant:portable. No arm lost a killer and the manifest names no killer (manifestProblems: none).\n\n(5) Flake found while measuring. ledger:489:control:portable failed once in the first measurement: 'B6f5 a refused adoption answers failed and keeps the session revision; a MIDI clip edit is adopted at a seam' (install-schedule:1 against 2), the failure record 37 noted once. Cause: the adoption seam lead is 2400 + 256 + ceil(slowest recent round trip * 48) frames, the round trips are real `performance.now` deltas, and the structural adoption's seam is at or after the retried one's by 1 to 3 frames when its round trip is the slower; the schedule events before the seam then drop out of the install. Reproduced in-process at 4 failures in 3000 reruns (and 1 in 400) with real round trips of 0.03 to 0.17 ms. Fix 5d8ac844: the test fixes `performance.now` at 0 as the neighbouring seam test already controls its clock; 6000 of 6000 reruns of the test and 100 reruns of the whole file (157 tests, 15700 passes) pass. The product is right (events before the seam belong to the old schedule); the test's expectation was incidental to the timing.",
+  "expectationsSha256": "78930a7c47f00dc25c2a3cd27457d7a362e4304e5e3d3ea9270b356561218a35"
+ }
+}

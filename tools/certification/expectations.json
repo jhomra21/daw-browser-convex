@@ -44518,7 +44518,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 160,
+      "pass": 157,
       "skip": 0,
       "fail": 0
      },
@@ -44648,7 +44648,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 153,
+      "pass": 150,
       "skip": 0,
       "fail": 7
      },
@@ -49117,7 +49117,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 160,
+      "pass": 157,
       "skip": 0,
       "fail": 0
      },
@@ -49242,7 +49242,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 158,
+      "pass": 155,
       "skip": 0,
       "fail": 2
      },
@@ -49355,7 +49355,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 160,
+      "pass": 157,
       "skip": 0,
       "fail": 0
      },
@@ -49545,9 +49545,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 117,
+      "pass": 113,
       "skip": 0,
-      "fail": 43
+      "fail": 44
      },
      "fails": [
       "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
@@ -49556,6 +49556,7 @@
       "B6f5 a playing portable session adopts a mixer edit on the same session and follows it",
       "B6f5 a refused adoption answers failed and keeps the session revision; a MIDI clip edit is adopted at a seam",
       "B6f5 adoptions coalesce to one in flight and one queued that carries the newest edit",
+      "B6f5 the adoption seam adapts to the round trips of recent adoptions, clamps, and a late publish moves the next seam later",
       "C9a-1 an adoption ships the sources compiled at its seam with the publish; a clip after the seam is the source the start scheduled",
       "C9a-2 the preparations of the old sources are released once the position reaches the seam, the candidate's stay, and teardown releases all",
       "C9a-3 a refused publish keeps the old sources and their preparations, and a resubmit reuses the candidate preparations it still matches",
@@ -51833,7 +51834,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 160,
+      "pass": 157,
       "skip": 0,
       "fail": 0
      },
@@ -51958,7 +51959,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 154,
+      "pass": 151,
       "skip": 0,
       "fail": 6
      },

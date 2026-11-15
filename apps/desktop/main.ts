@@ -183,7 +183,7 @@ import {
 import { packagedRendererRoot, rendererAssetPath } from "./renderer-path"
 import { createNativeVstProjectBindings } from "./native-vst-project-bindings"
 import { createApplicationMenuController } from "./application-menu"
-import { ae08ControlCommitReceived, ae08Evidence, ae08RendererMarkSchema } from "./ae08-evidence"
+import { ae08AttachRendererProfile, ae08ControlCommitReceived, ae08Evidence, ae08RendererMarkSchema } from "./ae08-evidence"
 import { deliverToRenderer } from "./renderer-delivery"
 import { createRendererLifecycleOwner } from "./renderer-lifecycle"
 import { createOfflinePcmAckTracker } from "./offline-pcm-ack"
@@ -2291,6 +2291,7 @@ const createWindow = () => {
   // Maximize before the first paint; the minimum-size frame stays as the restore size.
   window_.maximize()
   window_.show()
+  ae08AttachRendererProfile(window_.webContents)
   installBenchmarkWindowTelemetry({
     app,
     window: window_,

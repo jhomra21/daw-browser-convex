@@ -31,6 +31,13 @@ inconsistent block/WAV frame accounting fails the harness.
 Superseded startup hosts wholly outside the measured interval remain lifecycle
 evidence but are not read as PCM.
 
+With `DAW_AE08_RENDERER_PROFILE` also set, the main process profiles the
+renderer's main thread through `webContents.debugger` and writes one V8 CPU
+profile per control commit, `renderer-profile-<idempotencyKey>.json`, covering
+the commit's arrival to the next commit's arrival (the last commit's profile is
+not written). Sampling slows the renderer,
+so latency gate runs leave it off.
+
 `output.wav` preserves device downtime between callback-timestamped segments;
 it is not an offline export. Callback scheduling gaps over a block period plus
 20 ms start a new segment. Wall/monotonic clock pairing has millisecond

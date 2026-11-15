@@ -1,6 +1,9 @@
-import { describe, expect, test } from 'bun:test'
-import { createRoot } from 'solid-js'
+import 'fake-indexeddb/auto'
+import { describe, expect, onTestFinished, test } from 'bun:test'
+import { createRoot, createSignal } from 'solid-js'
+import { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { AutomationEnvelope } from '@daw-browser/shared'
+import { useTimelineAutomationController } from '~/hooks/useTimelineAutomationController'
 import { createPersistedAutomationState } from './create-persisted-automation-state'
 
 const envelope: AutomationEnvelope = {
@@ -303,5 +306,39 @@ describe('createPersistedAutomationState', () => {
       })
       dispose()
     })
+  })
+})
+
+type RemoteEffect = NonNullable<ReturnType<Parameters<typeof useTimelineAutomationController>[0]['remoteEffects']>>[number]
+
+describe('useTimelineAutomationController', () => {
+  test('reloading unchanged effect data keeps the lanes workspace', () => {
+    const previousLocalStorage = globalThis.localStorage
+    Reflect.set(globalThis, 'localStorage', { getItem: () => null, setItem: () => {} })
+    onTestFinished(() => Reflect.set(globalThis, 'localStorage', previousLocalStorage))
+    const reverb = (instanceId: string): RemoteEffect => (
+      { targetType: 'track', trackId: 'track-1', type: 'reverb', instanceId, index: 0, params: {} }
+    )
+    // Solid runs a root's effects after its body returns, so the hook is read from outside createRoot.
+    const { controller, setRemoteEffects } = createRoot((dispose) => {
+      onTestFinished(dispose)
+      const [remoteEffects, setRemoteEffects] = createSignal([reverb('reverb-1')])
+      return {
+        setRemoteEffects,
+        controller: useTimelineAutomationController({
+          projectId: () => 'shared-project', userId: () => 'user-1', tracks: () => [], masterVolume: () => 1, masterReady: () => false,
+          remoteRows: () => [], remoteEffects, audioEngine: new AudioEngine(), isPlaying: () => false,
+          playheadSec: () => 0, selectedTrackId: () => '', pushHistory: () => {},
+        }),
+      }
+    })
+    const lanes = controller.workspace().lanes
+    expect(lanes.effectInstancesByOwnerKey['track-1']).toEqual([{ id: 'reverb-1', kind: 'reverb' }])
+
+    setRemoteEffects([reverb('reverb-1')])
+    expect(controller.workspace().lanes).toBe(lanes)
+
+    setRemoteEffects([reverb('reverb-2')])
+    expect(controller.workspace().lanes.effectInstancesByOwnerKey['track-1']).toEqual([{ id: 'reverb-2', kind: 'reverb' }])
   })
 })

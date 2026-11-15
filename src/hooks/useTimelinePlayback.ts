@@ -1610,6 +1610,10 @@ export function useTimelinePlayback(
     const current = () => mounted && transportIntent === transportIntentToken && seekSequence === nativeSeekSequence
       && lifecycle === nativeLifecycleToken && projectId === nativeOptions?.projectId?.()
       && projectGeneration === nativeOptions?.projectGeneration?.()
+    // A locate ends the publication of an edit that was under way, and the fingerprint the Play recorded already counts the
+    // edit as applied, so nothing follows it: the same request runs again against the moved transport.
+    if (outcome.status === "superseded" && seekSequence !== nativeSeekSequence && mounted && lifecycle === nativeLifecycleToken
+      && transportIntent === transportIntentToken) return requestTimelineSchedule(tracks, options, explicit)
     if (!current()) return
     if (outcome.status === "adopted" || outcome.status === "unchanged") previewProjectionBaseline = key
   }

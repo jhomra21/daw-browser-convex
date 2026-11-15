@@ -841,7 +841,7 @@ test.skipIf(!isServer)('adopted snapshots exercise real Solid reactive effects',
 })
 
 for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejection", "failure", "publish-error", "compile-error", "automation-only", "mixer-only",
-  "progress-retry", "capacity-release", "pending-exhaustion", "rebase-exhaustion", "loop-ui", "loop-adopted", "loop-clip", "loop-inflight", "time-signature", "duplicate", "stale-compile", "burst-during-compile", "inputs-during-compile", "explicit", "effect-only", "stop", "seek", "project"]) {
+  "progress-retry", "capacity-release", "pending-exhaustion", "rebase-exhaustion", "loop-ui", "loop-adopted", "loop-clip", "loop-inflight", "time-signature", "duplicate", "stale-compile", "burst-during-compile", "inputs-during-compile", "explicit", "effect-only", "stop", "seek", "seek-inflight", "project"]) {
   test.skipIf(isServer)(`adopted snapshot ${scenario} preserves the latest live intent`, async () => {
     const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
     const previousBuffer = Object.getOwnPropertyDescriptor(globalThis, "AudioBuffer")
@@ -870,6 +870,7 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
     let failed = ["failure", "rejection", "publish-error", "compile-error", "progress-retry",
       "pending-exhaustion", "rebase-exhaustion"].includes(scenario)
     let publishAttempts = 0
+    let preparing = false
     let compilations = 0
     let revision = 1
     let activeRevision = 1
@@ -893,6 +894,7 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
       prepare: async (request) => {
         expect(request.projectId).toBe("project")
         preparedTracks.push(tracks())
+        if (scenario === "seek-inflight" && changed && !preparing) { preparing = true; publishing.resolve(); await publicationGate.promise }
         revision++
         seam = request.requestedPublicationFrame ?? 0n
         if (failed && scenario === "failure") throw new Error("temporary staging failure")
@@ -1005,6 +1007,16 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
             ])
             expect(fixture.transportPayloads.at(-1)?.cycleStartSec).toBeUndefined()
             expect(fixture.transportPayloads.at(-1)?.cycleEndSec).toBeUndefined()
+          } else if (scenario === "seek-inflight") {
+            setTracks([desired])
+            void playback.restartTimelineSchedule(untrack(tracks), { rebuildBackend: true })
+            await publishing.promise
+            playback.setPlayhead(1, untrack(tracks))
+            publicationGate.resolve()
+            await settle()
+            expect(published).toHaveLength(1)
+            expect(preparedTracks.at(-1)).toEqual([desired])
+            return
           } else if (scenario.startsWith("loop-")) {
             setLoopEnabled(true)
             setLoopEndSec(0.75)

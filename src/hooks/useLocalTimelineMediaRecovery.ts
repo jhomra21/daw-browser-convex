@@ -138,13 +138,12 @@ export const useMissingMediaRecovery = (input: Input) => {
     const rid = guard?.projectId ?? input.projectId();
     const generation = guard?.mountedProjectGeneration ?? input.mountedProjectGeneration();
     const version = ++reloadVersion;
-    const isCurrent = () => (
-      mounted
-      && version === reloadVersion
-      && !guard?.signal?.aborted
+    const isWanted = () => (
+      !guard?.signal?.aborted
       && input.projectId() === rid
       && input.mountedProjectGeneration() === generation
     );
+    const isCurrent = () => mounted && version === reloadVersion && isWanted();
     const operation = reloadTail.catch(() => undefined).then(async () => {
       const isLocalProject = isLocalId("project", rid);
       if (!isCurrent()) return;
@@ -170,6 +169,8 @@ export const useMissingMediaRecovery = (input: Input) => {
     });
     reloadTail = operation.then(() => undefined, () => undefined);
     await operation;
+    // Superseded by a newer reload: wait for it, since it applies the snapshot this caller awaits.
+    if (isWanted()) await reloadTail;
   };
 
   createEffect(() => {

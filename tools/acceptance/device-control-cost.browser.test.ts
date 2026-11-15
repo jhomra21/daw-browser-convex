@@ -186,7 +186,8 @@ class TestAudioBuffer implements AudioBuffer {
 // The capture carries the final live value into later structural work, a cold
 // rebuild and the export read. No independent param() compiler shortcut.
 for (const scenario of ["B15-lookahead", "B26a-cutoff", "B27b-automated-live", "B29a-clip", "B29b-cold", "B29c-export"]) {
-  for (const transport of scenario.startsWith("B29") ? ["playing"] : ["playing", "paused"]) {
+  // A playing session is never rebuilt by an edit (fb679615), so the cold rebuild is a paused preview's.
+  for (const transport of scenario === "B29b-cold" ? ["paused"] : scenario.startsWith("B29") ? ["playing"] : ["playing", "paused"]) {
     test(`STEP5 ${scenario} ${transport} captured live boundary`, async () => {
       const synth: TrackInstrumentParams = { kind: "synth", instanceId: "synth-live", params: createDefaultSynthParams() };
       const compressor = createDefaultCompressorParams();
@@ -246,7 +247,7 @@ for (const scenario of ["B15-lookahead", "B26a-cutoff", "B27b-automated-live", "
           console.log("STEP5 retained live", JSON.stringify({ scenario, liveCounts, structuralCounts: f.counts(beforeStructural) }));
           if (scenario !== "B29c-export") {
             const structural = f.counts(beforeStructural);
-            expect(structural.scheduleCompiles).toBe(1);
+            expect(structural.scheduleCompiles).toBe(scenario === "B29b-cold" ? 0 : 1);
             expect(structural.previewCompiles).toBe(scenario === "B29b-cold" ? 1 : 0);
             expect(f.counts(beforeStructural).publishes).toBe(scenario === "B29a-clip" ? 1 : 0);
           }

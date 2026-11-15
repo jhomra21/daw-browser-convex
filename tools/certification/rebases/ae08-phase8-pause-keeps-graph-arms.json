@@ -1,7 +1,7 @@
 {
  "name": "ae08-phase8-pause-keeps-graph-arms",
  "sequence": 51,
- "createdAt": "2026-11-15T17:04:50.834Z",
+ "createdAt": "2026-11-15T18:02:19.332Z",
  "revert": [],
  "watched": [],
  "changes": [
@@ -561,7 +561,7 @@
     "pass"
    ],
    "old": 204,
-   "new": 242
+   "new": 208
   },
   {
    "path": [
@@ -643,7 +643,7 @@
     "pass"
    ],
    "old": 206,
-   "new": 244
+   "new": 210
   },
   {
    "path": [
@@ -721,7 +721,7 @@
     "pass"
    ],
    "old": 206,
-   "new": 244
+   "new": 210
   },
   {
    "path": [
@@ -799,7 +799,7 @@
     "pass"
    ],
    "old": 206,
-   "new": 244
+   "new": 210
   },
   {
    "path": [
@@ -877,7 +877,7 @@
     "pass"
    ],
    "old": 223,
-   "new": 258
+   "new": 224
   },
   {
    "path": [
@@ -925,7 +925,7 @@
     "pass"
    ],
    "old": 227,
-   "new": 260
+   "new": 226
   },
   {
    "path": [
@@ -963,18 +963,6 @@
     "arms",
     "id=diag:419:419-plus-435",
     "expect",
-    "counts",
-    "pass"
-   ],
-   "old": 226,
-   "new": 260
-  },
-  {
-   "path": [
-    "mutations",
-    "arms",
-    "id=diag:419:419-plus-435",
-    "expect",
     "fails",
     "#0"
    ],
@@ -991,7 +979,7 @@
     "pass"
    ],
    "old": 223,
-   "new": 258
+   "new": 224
   },
   {
    "path": [
@@ -1028,18 +1016,6 @@
     "failed lifecycle transition cancels delayed native startup",
     "preserves an explicitly captured native owner across queued generation rebuilds"
    ]
-  },
-  {
-   "path": [
-    "mutations",
-    "arms",
-    "id=diag:434:434-plus-435-playback",
-    "expect",
-    "counts",
-    "pass"
-   ],
-   "old": 225,
-   "new": 259
   },
   {
    "path": [
@@ -1059,18 +1035,6 @@
     "arms",
     "id=diag:434:435-alone-playback",
     "expect",
-    "counts",
-    "pass"
-   ],
-   "old": 226,
-   "new": 260
-  },
-  {
-   "path": [
-    "mutations",
-    "arms",
-    "id=diag:434:435-alone-playback",
-    "expect",
     "fails",
     "#0"
    ],
@@ -1087,7 +1051,7 @@
     "pass"
    ],
    "old": 223,
-   "new": 258
+   "new": 224
   },
   {
    "path": [
@@ -1124,18 +1088,6 @@
     "failed lifecycle transition cancels delayed native startup",
     "preserves an explicitly captured native owner across queued generation rebuilds"
    ]
-  },
-  {
-   "path": [
-    "mutations",
-    "arms",
-    "id=rc2:421:1:mutant",
-    "expect",
-    "counts",
-    "pass"
-   ],
-   "old": 221,
-   "new": 255
   },
   {
    "path": [
@@ -1159,7 +1111,7 @@
     "pass"
    ],
    "old": 206,
-   "new": 244
+   "new": 210
   },
   {
    "path": [
@@ -1233,35 +1185,11 @@
     "arms",
     "id=rc2:435:2:mutant",
     "expect",
-    "counts",
-    "pass"
-   ],
-   "old": 226,
-   "new": 260
-  },
-  {
-   "path": [
-    "mutations",
-    "arms",
-    "id=rc2:435:2:mutant",
-    "expect",
     "fails",
     "#0"
    ],
    "old": "B6d7 a locate during a Pause that cancels a pending Play keeps its paused rebuild and reports no fault",
    "new": "B6d7 a locate during a Pause that cancels a cold Play (native audio optional) keeps the rebuild's paused start when the Play's cleanup joins the Pause's dispose"
-  },
-  {
-   "path": [
-    "mutations",
-    "arms",
-    "id=rc2:435:1:mutant",
-    "expect",
-    "counts",
-    "pass"
-   ],
-   "old": 25,
-   "new": 26
   },
   {
    "path": [
@@ -1319,18 +1247,6 @@
     "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
     "does not resume a structural rebuild after stop wins"
    ]
-  },
-  {
-   "path": [
-    "mutations",
-    "arms",
-    "id=rc2:435:0:mutant",
-    "expect",
-    "counts",
-    "pass"
-   ],
-   "old": 0,
-   "new": 1
   },
   {
    "path": [
@@ -1544,7 +1460,7 @@
  "seedRecordChanges": [],
  "evidence": {
   "mode": "anchor",
-  "reason": "AE-08 phase 8 sign-off prep, bless part 6 (hand record, no --bless). Ruling: acceptance-reports/ae-08-phase-5-2026-10-18/PARENT-RULING-P8-BLESS-BLOCKERS.md addendum 5 (the 49 arms moved by ed326867, the cherry-pick of cf2259a2: a Pause or Stop over a Play resuming the paused native session abandons the resume and keeps the graph) and addendum 2 (a mutant must stay killed).\n\n(1) The 27 anchor misses (42 spec fields) are re-pointed, the mutation unchanged. cf2259a2 deleted none of the mutated code. It (a) extracted the body of cancelStartKeepingGraph's `.then(async () => {...})` into `ensureLiveGraph` (useTimelinePlayback.ts:1025) and passes it as `.then(ensureLiveGraph)` (:1038), and (b) made the superseded-attempt dispose conditional (`if (nativeStart === 'started') await disposePreparedBackends(...)`, :846). Re-pointed: the arms that delete the whole `void Promise.allSettled(...).then(async () => {...}).catch(...)` statement (427 family, ledger 453 playback/b6f) now anchor on the `.then(ensureLiveGraph)` statement (ledger 453 keeps its `.then(() => { if (nativePreviewRequested) return nativePlayback.ensureLivePreview(...) })` replacement); the 429 family drops `nativePreviewRequested &&` from the first line of ensureLiveGraph; the 416, 420 and 421 arms (which insert a locate-superseded relocation before the isCurrentPlayAttempt check) carry the conditional dispose line in both `from` and `to`. Every multi-change arm was checked by applying its changes in order to the file. The 27 mutants and their controls were run with `--only --jobs 1`: all apply; every control passes the file (HT 263 pass, 1 skip, 0 fail on the unmutated tree after the two witnesses below).\n\n(2) Moved killer sets. Controls now pass every test (the two known reds were fixed by d316c00b), so a mutant's failing tests are all caused by its mutation. The 17 arms whose recorded killers changed beyond the two known reds are set to the measured failing set; the two known reds stay in each recorded failing set that held them (counts keep them failing) so that `--allow-now-passing` moves them in the bless, as addendum 2 requires. The killers are the changes of this record. The other 13 of the 22 arms the pre-check listed as moved lost only the two known reds and keep a non-empty remainder of killers: they are left to the bless. 5 mutations no longer killed: diag:419:419-plus-435, diag:434:435-alone-playback, rc2:435:0, :1 and :2 (mutation 435: the dispose join also cancels the pending start). Reachable. The B6d7 locate test reached the join through the Play's own cleanup dispose; ed326867 stopped that dispose for a resumed Play (:846) but the Play's cleanup still disposes after a cold native start returns cancelled and the Play is not native-required (:939), joining the Pause's dispose at :1455 while a rebuild's paused start is pending. New HT witness: `B6d7 a locate during a Pause that cancels a cold Play (native audio optional) keeps the rebuild's paused start when the Play's cleanup joins the Pause's dispose` (useTimelinePlayback.test.ts:5736, commit 3100a0e5). Red first against the mutant (the start is cancelled and retried: transportFrames [144000,144000], one more begin), green on the real code; rc2:435:0, :1 and :2 and the two diag arms now fail exactly it. \nThe 429 arms (rc2:429:1:mutant, diag:419:419-plus-429, which drop the `nativePreviewRequested` guard) exited 1 only because the two known reds, which their control fails too (the same mutation is a retired survivor as rc2:429:0, :2 and :3 in test-debt.md). Reachable: ensureLivePreview (native-playback-controller.ts:2495) checks the bridge and not `enabled`, so with a desktop bridge and native playback disabled a cancelled legacy Play would start a native preview. New HT witness: `a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled` (useTimelinePlayback.test.ts:5784, 3100a0e5). Red against the mutant (it fails exactly this test), green on the real code.\n\n(3) Four mutants exited 1 only through the two known reds, which their control fails too, and now survive: arm:ledger:488:mutant:playback, arm:rc2:433:1:mutant, arm:rc2:279:1:mutant, arm:rc2:408:1:mutant. None is near cf2259a2 (their mutations sit in portable-browser-playback-controller.ts, the stale-intent play-pending reset, native-processor-state-owner.ts and the preview-start resume guard). Their siblings rc2:433:0, rc2:279:0 and :2, rc2:408:0 are already retired survivors in test-debt.md, with the same mutation. They are retired the way record 48 retired c0:m516-mutant-proj: expect moves to exit 0, no fails (tiers.ts retiredArms then drops them and their orphaned controls), and they are listed in test-debt.md. Addendum 2 would otherwise refuse them as no longer killed; they never had a discriminating witness. Flagged for the parent.\n\nChecks: HT 263 pass, 1 skip, 0 fail. This record changes no source file. g-tools-typecheck: the live diagnostics are 15, all among record 40's 17 (the two native-spool-wav.test.ts TS2339 are gone); none is new. Pinned hashes (including the HT test file) are left for the bless.",
+  "reason": "AE-08 phase 8 sign-off prep, bless part 6 (hand record, no --bless). Ruling: acceptance-reports/ae-08-phase-5-2026-10-18/PARENT-RULING-P8-BLESS-BLOCKERS.md addendum 5 (the 49 arms moved by ed326867, the cherry-pick of cf2259a2: a Pause or Stop over a Play resuming the paused native session abandons the resume and keeps the graph) and addendum 2 (a mutant must stay killed).\n\n(1) The 27 anchor misses (42 spec fields) are re-pointed, the mutation unchanged. cf2259a2 deleted none of the mutated code. It (a) extracted the body of cancelStartKeepingGraph's `.then(async () => {...})` into `ensureLiveGraph` (useTimelinePlayback.ts:1025) and passes it as `.then(ensureLiveGraph)` (:1038), and (b) made the superseded-attempt dispose conditional (`if (nativeStart === 'started') await disposePreparedBackends(...)`, :846). Re-pointed: the arms that delete the whole `void Promise.allSettled(...).then(async () => {...}).catch(...)` statement (427 family, ledger 453 playback/b6f) now anchor on the `.then(ensureLiveGraph)` statement (ledger 453 keeps its `.then(() => { if (nativePreviewRequested) return nativePlayback.ensureLivePreview(...) })` replacement); the 429 family drops `nativePreviewRequested &&` from the first line of ensureLiveGraph; the 416, 420 and 421 arms (which insert a locate-superseded relocation before the isCurrentPlayAttempt check) carry the conditional dispose line in both `from` and `to`. Every multi-change arm was checked by applying its changes in order to the file. The 27 mutants and their controls were run with `--only --jobs 1`: all apply; every control passes the file (HT 263 pass, 1 skip, 0 fail on the unmutated tree after the two witnesses below).\n\n(2) Moved killer sets. Controls now pass every test (the two known reds were fixed by d316c00b), so a mutant's failing tests are all caused by its mutation. The 17 arms whose recorded killers changed beyond the two known reds are set to the measured failing set; the two known reds stay in each recorded failing set that held them (counts keep them failing, and each arm keeps its recorded total of tests, because the judge compares a mutant's total with its control's recorded total plus the control's rise) so that `--allow-now-passing` moves them in the bless, as addendum 2 requires. The killers are the changes of this record. The other 13 of the 22 arms the pre-check listed as moved lost only the two known reds and keep a non-empty remainder of killers: they are left to the bless. 5 mutations no longer killed: diag:419:419-plus-435, diag:434:435-alone-playback, rc2:435:0, :1 and :2 (mutation 435: the dispose join also cancels the pending start). Reachable. The B6d7 locate test reached the join through the Play's own cleanup dispose; ed326867 stopped that dispose for a resumed Play (:846) but the Play's cleanup still disposes after a cold native start returns cancelled and the Play is not native-required (:939), joining the Pause's dispose at :1455 while a rebuild's paused start is pending. New HT witness: `B6d7 a locate during a Pause that cancels a cold Play (native audio optional) keeps the rebuild's paused start when the Play's cleanup joins the Pause's dispose` (useTimelinePlayback.test.ts:5736, commit 3100a0e5). Red first against the mutant (the start is cancelled and retried: transportFrames [144000,144000], one more begin), green on the real code; rc2:435:0, :1 and :2 and the two diag arms now fail exactly it. \nThe 429 arms (rc2:429:1:mutant, diag:419:419-plus-429, which drop the `nativePreviewRequested` guard) exited 1 only because the two known reds, which their control fails too (the same mutation is a retired survivor as rc2:429:0, :2 and :3 in test-debt.md). Reachable: ensureLivePreview (native-playback-controller.ts:2495) checks the bridge and not `enabled`, so with a desktop bridge and native playback disabled a cancelled legacy Play would start a native preview. New HT witness: `a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled` (useTimelinePlayback.test.ts:5784, 3100a0e5). Red against the mutant (it fails exactly this test), green on the real code.\n\n(3) Four mutants exited 1 only through the two known reds, which their control fails too, and now survive: arm:ledger:488:mutant:playback, arm:rc2:433:1:mutant, arm:rc2:279:1:mutant, arm:rc2:408:1:mutant. None is near cf2259a2 (their mutations sit in portable-browser-playback-controller.ts, the stale-intent play-pending reset, native-processor-state-owner.ts and the preview-start resume guard). Their siblings rc2:433:0, rc2:279:0 and :2, rc2:408:0 are already retired survivors in test-debt.md, with the same mutation. They are retired the way record 48 retired c0:m516-mutant-proj: expect moves to exit 0, no fails (tiers.ts retiredArms then drops them and their orphaned controls), and they are listed in test-debt.md. Addendum 2 would otherwise refuse them as no longer killed; they never had a discriminating witness. Flagged for the parent.\n\nChecks: HT 263 pass, 1 skip, 0 fail. This record changes no source file. g-tools-typecheck: the live diagnostics are 15, all among record 40's 17 (the two native-spool-wav.test.ts TS2339 are gone); none is new. Pinned hashes (including the HT test file) are left for the bless.",
   "expectationsSha256": "dcfa2e5e190e2995b3bcb238f64872d4c3a6a52b2753359ed6ccc157d9c9f0ba"
  }
 }

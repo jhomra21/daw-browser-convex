@@ -668,7 +668,7 @@ export function useTimelinePlayback(
   const reportNativePlaySkip = (reason: string) => {
     if (!requiresNativeAudio) return
     lastNativeFault = reason
-    console.error("[native-vst3] native play skipped", { reason })
+    console.error(`[native-vst3] native play skipped: ${reason}`)
   }
 
   const handlePlayForIntent = async (

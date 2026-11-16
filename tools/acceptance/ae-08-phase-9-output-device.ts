@@ -73,7 +73,7 @@ export const createOutputDeviceSteps = (input: { context: Context; out: string; 
     await context.mark("device-switch-observed", { step, before: JSON.stringify(before), after, stateReadRefusals, state: status.state, playheadSec: status.playheadSec, saved,
       blackhole: status.state === "playing" ? JSON.stringify(await blackholeLevels()) : "not captured",
       consoleErrors: JSON.stringify(await context.read(`JSON.stringify(window.ae08ConsoleErrors??[])`, z.array(z.string()))),
-      notices: JSON.stringify(await context.read(`JSON.stringify([...document.querySelectorAll('[role="status"],[role="alert"],[data-sonner-toast]')].map(node=>node.textContent))`, z.array(z.string().nullable()))),
+      notices: JSON.stringify(await context.read(`JSON.stringify([...document.querySelectorAll('[role="status"],[role="alert"],[role="dialog"],[data-sonner-toast]')].map(node=>node.textContent))`, z.array(z.string().nullable()))),
       ...extra })
   }
   // The value goes through the product's own select handler; a saved id the host does not list gets an option for the select to take.

@@ -529,6 +529,31 @@ test("forwards only matching editor open-state changes", async () => {
   await manager.teardownAll()
 })
 
+test("captures editor state when the user closes the editor window, and not on the close command", async () => {
+  const captured: string[] = []
+  const calls: string[] = []
+  const supervisor = fakeSupervisor(calls)
+  const manager = managerFor({
+    calls,
+    supervisors: [supervisor],
+    onCapturedState: ({ instanceId }) => {
+      captured.push(instanceId)
+    },
+  })
+  await manager.execute({ projectId, instanceId: firstInstance, command: "open", serializedPlan: "plan", captureState: true })
+  supervisor.interactionListener?.({ kind: "editor-state", graphRevision: 1, graphNodeId: 1n, instanceId: firstInstance, value: 1 })
+  await manager.execute({ projectId, instanceId: firstInstance, command: "status" })
+  expect(captured).toEqual([])
+  supervisor.interactionListener?.({ kind: "editor-state", graphRevision: 1, graphNodeId: 1n, instanceId: firstInstance, value: 0 })
+  await manager.execute({ projectId, instanceId: firstInstance, command: "status" })
+  expect(captured).toEqual([firstInstance])
+  supervisor.interactionListener?.({ kind: "parameter-edit", graphRevision: 1, graphNodeId: 1n, instanceId: firstInstance, parameterId: 1, normalizedValue: 0.5 })
+  const closing = manager.execute({ projectId, instanceId: firstInstance, command: "close" })
+  supervisor.interactionListener?.({ kind: "editor-state", graphRevision: 1, graphNodeId: 1n, instanceId: firstInstance, value: 0 })
+  await closing
+  expect(calls.filter((call) => call === "get-state")).toHaveLength(2)
+})
+
 test("forwards only matching parameter edits with the bound project and instance", async () => {
   const edits: Array<{ projectId: string; instanceId: string; parameterId: number; normalizedValue: number }> = []
   const supervisor = fakeSupervisor([])

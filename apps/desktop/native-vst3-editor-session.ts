@@ -197,6 +197,15 @@ export const createNativeVst3EditorSessionManager = (
         }
         if (notification.kind === "editor-state") {
           input.onEditorOpenState?.({ projectId, instanceId, open: notification.value === 1 })
+          // A window closed by the user never runs the close command. Queued behind a close command in
+          // flight, this finds the session already torn down and does nothing.
+          if (notification.value !== 1) {
+            void enqueue(instanceId, generation, (queued) => captureEntryState(instanceId, queued)).catch((error) => {
+              console.error("[native-vst3] editor close state capture failed", {
+                error: error instanceof Error ? error.message : "The native VST editor state capture failed.",
+              })
+            })
+          }
         }
         if (notification.kind === "parameter-edit") {
           entry.stateCaptured = false

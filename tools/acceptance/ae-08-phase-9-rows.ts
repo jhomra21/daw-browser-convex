@@ -151,7 +151,13 @@ export const burstRows: BurstRow[] = [
   { name: "output-device-switch", latencyClass: "plain", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "stopped", device: "blackhole",
     prepare: ["record-select-input"], transport: "driven", settle: "returned",
     cycle: ["out-play", "out-to-blackhole-playing", "out-to-speakers-playing", "out-reselect-speakers-playing", "out-pause", "out-to-blackhole-paused",
-      "out-play-after-paused-switch", "out-pause-again", "out-to-speakers-paused", "out-play-back-on-speakers", "out-recording-keeps-devices"].map((edit) => ({ edits: [edit], state: "stopped" })) } },
+      "out-play-after-paused-switch", "out-pause-again", "out-to-speakers-paused", "out-play-back-on-speakers", "out-to-missing-playing", "out-play-with-missing",
+      "out-restore-speakers", "out-play-after-restore", "out-recording-keeps-devices"].map((edit) => ({ edits: [edit], state: "stopped" })) } },
+  // The same switch with the test plug-in inserted and a sampler holding a note (the held-sampler fixture mutes Changed right, so the sampler is the
+  // only source): the rebuild must bring both back.
+  { name: "output-device-switch-instruments", latencyClass: "plain", packaged: { repeat: "single", periodSec: null, fixture: "phase5:held-sampler", start: "stopped", device: "blackhole",
+    prepare: insertedTestPlugin, transport: "driven", settle: "returned",
+    cycle: ["out-play", "out-pause", "out-to-blackhole-paused", "out-play-after-paused-switch", "out-to-speakers-playing"].map((edit) => ({ edits: [edit], state: "stopped" })) } },
   // Portable-only rows: the portable engine has no packaged counterpart for them.
   { name: "mixer-gain", latencyClass: "plain", portable: { from: "base", to: "gain", latency: false } },
   { name: "clip-note", latencyClass: "plain", portable: { from: "base", to: "note", latency: false } },

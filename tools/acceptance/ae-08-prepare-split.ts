@@ -5,6 +5,8 @@
 //                    host's own wait before the reply, to wall-clock millisecond precision)
 //   renderer work  = `prepare-reply-received` to the first `bind-request-sent` mark (an asset publication hydrates in it)
 //   renderer to host = `bind-request-sent` to the host's graph-publish-request
+//   bind to armed  = the bind request to the next publish request of the revision, split at the last host `asset-page-write` between them
+//                    (page time, then post-page time), with the renderer's armed-* staging marks in ms after the bind
 // The renderer marks carry the key of the adoption whose `prepare-sent` is the last before graph-prepare.
 //
 //   bun tools/acceptance/ae-08-prepare-split.ts --run <phaseDir>   (every row directory with a host.jsonl, split in the lo and hi modes)
@@ -17,18 +19,37 @@ export type SplitEvent = { event: string; pid: number; wallMs: number; requested
 // `rendererSteps` splits `rendererMs` at the two host round trips on the path: the reply to the instrument states reply, that to the
 // bind's progress read, and what is left up to the bind request. It is absent from evidence taken before those marks existed.
 export type RendererSteps = { statesMs: number; progressReadMs: number; restMs: number }
+// The span from the bind request to the armed Publish, where the staging spends the seam's lead. Page time runs from the bind to the last
+// host `asset-page-write` in it (0 with none), post-page time from there to the armed request. `marks` are the renderer's staging marks
+// after the bind, in ms from it. It is absent when the revision sent no second publish request (no late bind).
+export type ArmedSplit = { totalMs: number; pageMs: number; postPageMs: number; pages: number; marks: { name: string; ms: number }[] }
 export type PrepareSplit = { hostPrepareMs: number; replyWriteMs: number; hostToRendererMs: number; rendererMs: number; rendererToHostMs: number; spectralWarmMs: number
-  rendererSteps?: RendererSteps }
+  rendererSteps?: RendererSteps; armed?: ArmedSplit }
 
 const hostSteps = ["vst-control", "host-pre", "core", "host-post"]
+const armedMarks = ["armed-cover-end", "armed-stage-returned", "armed-prime-start", "armed-prime-end"]
 const stepMicroseconds = (stepsUs: string) => new Map(stepsUs.split(";").filter(Boolean).map((pair): [string, number] => {
   const [name = "", value = ""] = pair.split("=")
   return [name, Number(value)]
 }))
 
+const earliestFrom = (events: readonly SplitEvent[], from: number, match: (event: SplitEvent) => boolean) =>
+  events.filter((event) => event.wallMs >= from && match(event)).reduce<SplitEvent | undefined>((first, event) => first && first.wallMs <= event.wallMs ? first : event, undefined)
+
+const armedSplit = (events: readonly SplitEvent[], prepare: SplitEvent, request: SplitEvent, key: string): ArmedSplit | undefined => {
+  const armed = earliestFrom(events, request.wallMs + 1, (event) => event.event === "graph-publish-request" && event.pid === prepare.pid && event.requestedRevision === prepare.requestedRevision)
+  if (!armed) return undefined
+  const pages = events.filter((event) => event.event === "asset-page-write" && event.pid === prepare.pid && event.wallMs >= request.wallMs && event.wallMs <= armed.wallMs)
+  const lastPageMs = Math.max(request.wallMs, ...pages.map((event) => event.wallMs))
+  return { totalMs: armed.wallMs - request.wallMs, pageMs: lastPageMs - request.wallMs, postPageMs: armed.wallMs - lastPageMs, pages: pages.length,
+    marks: armedMarks.flatMap((name) => {
+      const mark = earliestFrom(events, request.wallMs, (event) => event.event === name && event.key === key && event.wallMs <= armed.wallMs)
+      return mark ? [{ name, ms: mark.wallMs - request.wallMs }] : []
+    }) }
+}
+
 export const prepareSplit = (events: readonly SplitEvent[], prepare: SplitEvent, request: SplitEvent): PrepareSplit | undefined => {
-  const earliestAfter = (match: (event: SplitEvent) => boolean, from = prepare.wallMs) =>
-    events.filter((event) => event.wallMs >= from && match(event)).reduce<SplitEvent | undefined>((first, event) => first && first.wallMs <= event.wallMs ? first : event, undefined)
+  const earliestAfter = (match: (event: SplitEvent) => boolean, from = prepare.wallMs) => earliestFrom(events, from, match)
   const profile = earliestAfter((event) => event.event === "prepare-profile" && event.pid === prepare.pid && event.requestedRevision === prepare.requestedRevision)
   const reply = earliestAfter((event) => event.event === "prepare-step" && event.pid === prepare.pid && event.step === "graph-prepare-reply")
   const sent = events.findLast((event) => event.event === "prepare-sent" && event.wallMs <= prepare.wallMs)
@@ -42,13 +63,15 @@ export const prepareSplit = (events: readonly SplitEvent[], prepare: SplitEvent,
   return { hostPrepareMs, replyWriteMs: reply.durationMs, hostToRendererMs: received.wallMs - prepare.wallMs - hostPrepareMs - reply.durationMs,
     rendererMs: bound.wallMs - received.wallMs, rendererToHostMs: request.wallMs - bound.wallMs, spectralWarmMs: (steps.get("spectral-warm") ?? 0) / 1000,
     rendererSteps: configured && progressRead ? { statesMs: configured.wallMs - received.wallMs, progressReadMs: progressRead.wallMs - configured.wallMs,
-      restMs: bound.wallMs - progressRead.wallMs } : undefined }
+      restMs: bound.wallMs - progressRead.wallMs } : undefined, armed: armedSplit(events, prepare, request, sent.key) }
 }
 
 const round = (value: number) => Math.round(value * 100) / 100
+const armedLine = (armed: ArmedSplit) => `; bind to armed ${armed.totalMs} ms = page time ${armed.pageMs} ms (${armed.pages} pages) + post-page ${armed.postPageMs} ms`
+  + (armed.marks.length ? ` [after bind: ${armed.marks.map((mark) => `${mark.name} ${mark.ms}`).join(", ")}]` : "")
 export const splitLine = (split: PrepareSplit) => `host prepare ${round(split.hostPrepareMs)} ms, reply write ${round(split.replyWriteMs)} ms, host to renderer ${round(split.hostToRendererMs)} ms, `
   + `renderer work ${round(split.rendererMs)} ms${split.rendererSteps ? ` (states reply ${round(split.rendererSteps.statesMs)} ms, progress read ${round(split.rendererSteps.progressReadMs)} ms, rest ${round(split.rendererSteps.restMs)} ms)` : ""}, `
-  + `renderer to host bind ${round(split.rendererToHostMs)} ms`
+  + `renderer to host bind ${round(split.rendererToHostMs)} ms${split.armed ? armedLine(split.armed) : ""}`
 
 const hostSchema = z.object({ event: z.string(), cause: z.string().default(""), pid: z.number().default(0), wallMs: z.number().default(0), revision: z.number().default(0),
   requestedRevision: z.number().default(0), publicationFrame: z.number().default(0), key: z.string().default(""), stepsUs: z.string().default(""),
@@ -111,7 +134,13 @@ const selfTest = () => {
     line("prepare-profile", 1004, { requestedRevision: 5, stepsUs: "vst-control=100;host-pre=200;core=3000;spectral-warm=500;host-post=700;" }),
     line("prepare-step", 1005, { step: "graph-prepare-reply", durationMs: 0.5 }), line("prepare-reply-received", 1010, { key: "k" }),
     line("bind-states-configured", 1011, { key: "k" }), line("bind-progress-read", 1012, { key: "k" }), line("bind-states-configured", 1011, { key: "other" }),
-    line("bind-request-sent", 1013, { key: "k" }), line("bind-request-sent", 1300, { key: "k" }), line("bind-request-sent", 1013, { key: "other" }), request]
+    line("bind-request-sent", 1013, { key: "k" }), line("bind-request-sent", 1300, { key: "k" }), line("bind-request-sent", 1013, { key: "other" }), request,
+    line("asset-page-write", 1010), line("asset-page-write", 1017), line("asset-page-write", 1022), line("asset-page-write", 1022, { pid: 8 }), line("asset-page-write", 1100),
+    line("armed-cover-end", 1019, { key: "k" }), line("armed-stage-returned", 1030, { key: "k" }), line("armed-prime-start", 1031, { key: "k" }),
+    line("armed-prime-end", 1036, { key: "k" }), line("armed-prime-end", 1020, { key: "other" }), line("graph-publish-request", 1040, { requestedRevision: 5 }),
+    line("graph-publish-request", 1090, { requestedRevision: 5 })]
+  const expectedArmed = { totalMs: 25, pageMs: 7, postPageMs: 18, pages: 2, marks: [{ name: "armed-cover-end", ms: 4 }, { name: "armed-stage-returned", ms: 15 },
+    { name: "armed-prime-start", ms: 16 }, { name: "armed-prime-end", ms: 21 }] }
   const split = prepareSplit(events, prepare, request)
   const expected = { hostPrepareMs: 4, replyWriteMs: 0.5, hostToRendererMs: 5.5, rendererMs: 3, rendererToHostMs: 2, spectralWarmMs: 0.5 }
   const expectedSteps = { statesMs: 1, progressReadMs: 1, restMs: 1 }
@@ -119,6 +148,8 @@ const selfTest = () => {
     ...(split && Object.entries(expected).every(([name, value]) => Math.abs(Number(Object.entries(split).find(([field]) => field === name)?.[1]) - value) < 1e-9) ? []
       : [`split ${JSON.stringify(split)}, expected ${JSON.stringify(expected)}`]),
     ...(JSON.stringify(split?.rendererSteps) === JSON.stringify(expectedSteps) ? [] : [`renderer steps ${JSON.stringify(split?.rendererSteps)}, expected ${JSON.stringify(expectedSteps)}`]),
+    ...(JSON.stringify(split?.armed) === JSON.stringify(expectedArmed) ? [] : [`armed ${JSON.stringify(split?.armed)}, expected ${JSON.stringify(expectedArmed)}`]),
+    ...(prepareSplit(events.filter((event) => event.event !== "graph-publish-request" || event === request), prepare, request)?.armed === undefined ? [] : ["a revision with no second publish request must have no armed split"]),
     ...(prepareSplit(events.filter((event) => event.event !== "bind-progress-read"), prepare, request)?.rendererSteps === undefined ? [] : ["a revision with no progress-read mark must have no renderer steps"]),
     ...(prepareSplit(events.filter((event) => event.event !== "prepare-reply-received" || event.key === "old"), prepare, request) === undefined ? [] : ["a revision with no reply mark must have no split"]),
     ...(prepareSplit(events.filter((event) => event.event !== "bind-request-sent"), prepare, request) === undefined ? [] : ["a revision with no bind mark must have no split"]),

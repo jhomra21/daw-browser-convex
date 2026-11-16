@@ -4396,6 +4396,7 @@ export const createNativePlaybackController = (input: {
               // Cancel only this publication's wait. The active refill remains
               // owned by its coordinator until the transport transition.
               await awaitPreparation(coordinator.coverThrough(seam + maximumFramesPerBlock))
+              hydrationMark?.("armed-cover-end")
               publicationAbort.signal.throwIfAborted()
               staged = coordinator.stageRevision({ ...snapshot, revision: binding.revision },
                 { ...graph, revision: binding.revision }, seam, async () => {
@@ -4407,8 +4408,11 @@ export const createNativePlaybackController = (input: {
                   await waitForOpportunity(rejectedAt)
                 }, { assets, assetSourceKeys: sourceKeys, nativePcmChunkDescriptors: projection.nativePcmChunkDescriptors,
                   preparedStretchAssets: candidate.stretchAssets })
+              hydrationMark?.("armed-stage-returned")
               staged.preflight({ ...graph, revision: binding.revision })
+              hydrationMark?.("armed-prime-start")
               await staged.prime(seam)
+              hydrationMark?.("armed-prime-end")
             } catch (error) {
               const inspection = await inspect()
               if (!inspection?.ok || inspection.revision.status !== "rebase-required") throw error

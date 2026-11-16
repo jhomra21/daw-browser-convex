@@ -2567,10 +2567,10 @@ const withOutputDeviceSwitch = async (
   const unavailable = new Set<string>()
   const faults: string[] = []
   const resolveDefault = fixture.audioHost.resolveOutputDevice
-  fixture.audioHost.resolveOutputDevice = async (id?: string) => {
+  fixture.audioHost.resolveOutputDevice = async (id?: string): Promise<Awaited<ReturnType<typeof resolveDefault>>> => {
     requested.push(id)
     const reply = await resolveDefault()
-    return id !== undefined && unavailable.has(id) ? { ok: true as const, device: { ...reply.device, available: false } } : reply
+    return id !== undefined && unavailable.has(id) ? { ok: true, device: { ...reply.device, available: false } } : reply
   }
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
   try {

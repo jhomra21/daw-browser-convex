@@ -6,7 +6,7 @@ import path from "node:path"
 import { z } from "zod"
 import { ae08ControlCommitReceived } from "../../apps/desktop/ae08-evidence"
 import { ae08RendererMarks } from "@daw-browser/desktop-protocol/ipc-channels"
-import { phase9Matrix, phase9Rows, type LatencyClass, type Row, type Settle } from "./ae-08-phase-9-rows"
+import { phase9Matrix, phase9Rows, phase9RowsWithCalibration, type LatencyClass, type Row, type Settle } from "./ae-08-phase-9-rows"
 
 // AE-08 phase 9 matrix (plan §8 steps 1-2): one packaged launch per row class carries N alternating edits. This file owns
 // the burst schedule, settling on host evidence, publication spacing, the reference rule, fail-fast judging, pooled statistics,
@@ -39,7 +39,7 @@ export const mergeLaunches = (rows: readonly Row[]) => rows.reduce<Row[][]>((lau
 export const launchesFor = (rows: readonly Row[], repetitions: number) => mergeLaunches(rows)
   .flatMap((launch) => launch.every((row) => row.repeat === "launch") ? Array.from({ length: repetitions }, () => launch) : [launch])
 // A row whose edits drive the transport has no audio to keep as a reference, and a launch of rows with no reference is only a burst.
-const burstOnly = (launch: readonly Row[]) => launch.every((row) => row.repeat === "launch" || row.transport === "driven")
+const burstOnly = (launch: readonly Row[]) => launch.every((row) => row.repeat === "launch" || row.transport === "driven" || row.calibration === true)
 
 // Seconds per launch, per edit and per VST edit. The defaults are plan §8's assumptions (about 2 s to settle plus the 1 s oracle window
 // per edit, 20 s per VST insert) and the phase 8 smoke (about 10 s per launch plus import and reload); `--timings <evidence dir>`
@@ -489,6 +489,14 @@ export const selfTest = async () => {
   check(mergeLaunches([attach, { ...fft, device: "iac-midi" }]).length === 2, "different devices do not merge")
   check(phase9Matrix.every((row) => (row.fixture === null) === (row.needs !== undefined)), "a row is missing exactly when it names what it needs")
   check(new Set(phase9Rows).size === phase9Rows.length, "row names are distinct")
+  // The size calibration rows run only when named, as a burst alone, and their swaps are the performers' (5 copies and back, or 1 and back twice).
+  const calibration = phase9RowsWithCalibration.filter((row) => row.calibration)
+  check(calibration.length === 3 && calibration.every((row) => phase9Rows.includes(row.name) && !phase9Matrix.includes(row)), "calibration rows are named but not in the matrix")
+  check(calibration.every((row) => launchPlan(launchesFor([row], 10)).map((step) => step.role).join() === "burst"), "a calibration row's launch has no reference or calibration duplicate")
+  const [small, large] = [calibration.find((row) => row.name === "asset-swap-calibration-100"), calibration.find((row) => row.name === "asset-swap-calibration-300")]
+  check(small !== undefined && small.fixture === "phase5:held-swap:100:5" && burstSchedule(small, 10).map((step) => step.edits[0]).join() === "sampler-swap-asset-1,sampler-swap-back,sampler-swap-asset-2,sampler-swap-back,sampler-swap-asset-3,sampler-swap-back,sampler-swap-asset-4,sampler-swap-back,sampler-swap-asset-5,sampler-swap-back",
+    "the 100 MiB row swaps to five copies, each followed by a swap back")
+  check(large !== undefined && large.fixture === "phase5:held-swap:300:1" && burstSchedule(large, 4).map((step) => step.edits[0]).join() === "sampler-swap-asset-1,sampler-swap-back,sampler-swap-asset-1,sampler-swap-back", "the 300 MiB row swaps to its one copy and back twice")
   // Launch plan: every merged launch is a burst and a reference, and the first launch of each latency class adds the calibration duplicate.
   const built = phase9Matrix.filter((row) => row.fixture !== null && row.repeat !== "launch" && row.transport === undefined)
   const launches = mergeLaunches(built)

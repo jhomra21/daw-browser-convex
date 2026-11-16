@@ -171,6 +171,7 @@ export const createPerformer = ({ context, runtime, playThenPause, transportStat
     // A 1 % louder copy of the sample: the note switches to it at the same playback position and stays unbroken.
     ["sampler-swap-asset", instrumentEdit("sampler", "swap", {})],
     ["sampler-swap-back", instrumentEdit("sampler", "changed", {})],
+    ...[1, 2, 3, 4, 5].map((copy): [string, ReturnType<typeof instrumentEdit>] => [`sampler-swap-asset-${copy}`, instrumentEdit("sampler", `swap-${copy}`, {})]),
     // The user's Play press, the audio host killed by pid while the press is pending, and the app's own report of it.
     ["play-kill-host", async () => {
       const pid = await hostPid()
@@ -575,6 +576,7 @@ export const selfTest = async () => {
   check((await run("drum-rack-gain-half")).calls[0] === instrumentSet(heldInstrumentTrack, "drum-rack", sampledInstrumentParams("drum-rack", sampleAsset("changed"), { gain: 0.5 })), "drum-rack-gain-half sets the pad gain to half")
   check((await run("granular-density-48")).calls[0] === instrumentSet(heldInstrumentTrack, "granular", sampledInstrumentParams("granular", sampleAsset("changed"), { densityHz: 48 })), "granular-density-48 raises the grain density")
   check((await run("sampler-swap-asset")).calls[0] === instrumentSet(heldInstrumentTrack, "sampler", sampledInstrumentParams("sampler", sampleAsset("swap"))), "sampler-swap-asset points the zone at the copy")
+  check((await run("sampler-swap-asset-3")).calls[0] === instrumentSet(heldInstrumentTrack, "sampler", sampledInstrumentParams("sampler", sampleAsset("swap-3"))), "sampler-swap-asset-3 points the zone at the third sized copy")
   check((await run("sampler-swap-back")).calls[0] === instrumentSet(heldInstrumentTrack, "sampler", sampledInstrumentParams("sampler", sampleAsset("changed"))), "sampler-swap-back points it at the changed asset again")
   check((await run("polyphony-2")).calls[0] === instrumentSet(heldSynthTrack, "synth", sineSynthParams(2)) && (await run("polyphony-16")).calls[0] === instrumentSet(heldSynthTrack, "synth", sineSynthParams(16)), "the polyphony edits set the held synth's voices to 2 and 16")
   check((await run("instrument-insert")).calls[0] === instrumentSet(insertTargetTrack, "synth", sineSynthParams()), "instrument-insert sets a synth on the insert target")

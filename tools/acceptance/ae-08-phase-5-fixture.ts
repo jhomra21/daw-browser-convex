@@ -113,8 +113,9 @@ export const phase5AssetSample = (frame: number, right: boolean) => 0.08 + 0.025
   + 0.015 * Math.sin(frame * frame * (right ? 1.7e-8 : 1e-8))
 export const writePhase5Asset = async (file: string, seconds: number, right: boolean, scale = 1) => {
   const sampleRate = 48000
-  const samples = new Float32Array(seconds * sampleRate * 2)
-  for (let frame = 0; frame < seconds * sampleRate; frame++) samples[frame * 2 + (right ? 1 : 0)] = scale * phase5AssetSample(frame, right)
+  const frames = Math.round(seconds * sampleRate)
+  const samples = new Float32Array(frames * 2)
+  for (let frame = 0; frame < frames; frame++) samples[frame * 2 + (right ? 1 : 0)] = scale * phase5AssetSample(frame, right)
   await writeWav(file, { sampleRate, channels: 2, samples })
 }
 
@@ -280,13 +281,17 @@ export const waitNativeFrame = (context: Phase5Context, frame: number) => contex
 // Builds the row's project (retained 180 s source, "Changed right" track and its clip, the row's devices or notes) and
 // reloads it. It plays nothing and captures nothing, so phase 9 reuses it as the start state of a burst.
 export const setupPhase5Fixture = async (context: Phase5Context) => {
-  const { out, profile, row, mutate, snapshot } = context
+  const { out, profile, mutate, snapshot } = context
   const { contentSeconds } = context
+  // "held-swap:<MiB>:<copies>" sizes the swapped samples (stereo 48 kHz float, 8 bytes a frame) and gives the swap that many never-loaded copies.
+  const [row = "", swapMiB, swapCopies] = context.row.split(":")
+  const swapSeconds = swapMiB === undefined ? undefined : Number(swapMiB) * 1048576 / 8 / 48000
+  if (swapSeconds !== undefined && (!(swapSeconds > 0) || !Number.isInteger(Number(swapCopies)) || Number(swapCopies) < 1)) throw new Error(`Fixture ${context.row} needs a size in MiB and a copy count`)
   const runtime = (args: string[]) => command(profile, ["host", ...args])
   const retainedFile = path.join(out, "retained.wav")
   const changedFile = path.join(out, "changed.wav")
   await writePhase5Asset(retainedFile, Math.max(180, contentSeconds ?? 0), false)
-  await writePhase5Asset(changedFile, row === "add-paged-asset" ? 180 : (contentSeconds ?? 24) + 6, true)
+  await writePhase5Asset(changedFile, row === "add-paged-asset" ? 180 : swapSeconds ?? (contentSeconds ?? 24) + 6, true)
   await runtime(["import", "--path", retainedFile])
   await waitImportedClip(context, "retained")
   let state = await snapshot()
@@ -320,14 +325,19 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
   // the same playback position, and the step (under 1.2 % of the level) stays under the held judge's 2 % jump bound. An import lands on the
   // selected track after its last clip, which on Changed right is past the visible timeline (its clips are not in the DOM), so the swap sample
   // is imported onto the empty Track 1 (the retained clip is on Track 2) at the playhead and moved.
+  // The sized copies differ in level by 0.2 % each, so every one is a distinct sample and the largest step (1 %) stays under the same bound.
   if (row === "held-swap") {
-    const swapFile = path.join(out, "swap.wav")
-    await writePhase5Asset(swapFile, (contentSeconds ?? 24) + 6, true, 1.01)
-    await selectTrack("Track 1")
-    await runtime(["import", "--path", swapFile])
-    await waitImportedClip(context, "swap")
-    const copy = required((await snapshot()).clips.find((item) => item.name.includes("swap")), "Swap fixture import")
-    await mutate([{ kind: "clip.move", clip: ref(copy.id), track: ref(changedTrack.id), startSec: 0 }])
+    const copies = swapSeconds === undefined ? [{ name: "swap", scale: 1.01 }]
+      : Array.from({ length: Number(swapCopies) }, (_, index) => ({ name: `swap-${index + 1}`, scale: 1 + 0.002 * (index + 1) }))
+    for (const { name, scale } of copies) {
+      const swapFile = path.join(out, `${name}.wav`)
+      await writePhase5Asset(swapFile, swapSeconds ?? (contentSeconds ?? 24) + 6, true, scale)
+      await selectTrack("Track 1")
+      await runtime(["import", "--path", swapFile])
+      await waitImportedClip(context, name)
+      const copy = required((await snapshot()).clips.find((item) => item.name.includes(name)), "Swap fixture import")
+      await mutate([{ kind: "clip.move", clip: ref(copy.id), track: ref(changedTrack.id), startSec: 0 }])
+    }
     await selectTrack("Changed right")
   }
   // Phase 9 only: "raise-state" has the effect-state devices but never arms the track for monitoring, so the Spectral stays on the

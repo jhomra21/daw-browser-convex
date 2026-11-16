@@ -20,7 +20,7 @@ import { analyzePhase8Campaign } from "./analyze-ae-08-phase-8"
 import { contentSecondsFor, exportRowEvidence, runPhase9Launch, stateName, type Phase9Launch } from "./ae-08-phase-9-launch"
 import { assumedTimings, burstSchedule, chooseVstRepetitions, breakdownLine, breakdownStored, commitReceivedWallMs, judgeStored, launchesFor, launchPlan, measuredEditsSchema, measuredTimings, pooled,
   readTimings, repetitionsFor, type Trial } from "./ae-08-phase-9-matrix"
-import { phase9Matrix, phase9Rows } from "./ae-08-phase-9-rows"
+import { phase9Matrix, phase9Rows, phase9RowsWithCalibration } from "./ae-08-phase-9-rows"
 import { judgeRowCapture } from "./ae-08-phase-9-compare"
 import { checkDevices, seedPluginCatalog } from "./ae-08-phase-9-devices"
 import { readWav, writeWav, type Pcm } from "./ae08-wav"
@@ -808,7 +808,7 @@ const main = async () => {
   await writeFile(path.join(out, "provenance.json"), JSON.stringify(provenance, null, 2))
   try {
     if (phase === 9) {
-      const selected = parsed.matrix ? phase9Matrix : phase9Matrix.filter((row) => parsed.rows?.includes(row.name))
+      const selected = parsed.matrix ? phase9Matrix : phase9RowsWithCalibration.filter((row) => parsed.rows?.includes(row.name))
       const missing = selected.filter((row) => row.fixture === null)
       const launches = launchesFor(selected.filter((row) => row.fixture !== null), parsed.repetitions)
       const timings = parsed.timings ? await readTimings(parsed.timings) : assumedTimings

@@ -46,6 +46,9 @@ export type PackagedRun = {
   // "driven": the row's edits start and stop the transport themselves, so the launch does not press Play, waits for no audio and
   // leaves the host as the row left it.
   transport?: "driven"
+  // A calibration row measures a constant of the latency gates (AE08-ASSET-LOAD-PLAN.md section 1). It runs only when named, never in
+  // `--matrix`, and its launch is a burst with no reference or calibration duplicate.
+  calibration?: true
 }
 export type PortableRun = { from: string; to: string; latency: boolean }
 type BurstRow = { name: string; latencyClass: LatencyClass; packaged?: PackagedRun; portable?: PortableRun }
@@ -128,6 +131,12 @@ export const burstRows: BurstRow[] = [
   // later swap find both samples resident and log no asset line, so no step waits for one: each settles on its first publication.
   { name: "asset-swap-held-note", latencyClass: "asset", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-swap", start: "asset-changed", judge: "held",
     cycle: [{ edits: ["sampler-swap-asset"], state: "asset-copy" }, { edits: ["sampler-swap-back"], state: "asset-changed" }] } },
+  // The size calibration of the asset gate: 27 and 100 MiB swap to five never-loaded copies and back (run with --repetitions 10), 300 MiB
+  // swaps to one copy and back twice (--repetitions 4; the sample is above the resident cap, so every swap uploads).
+  ...[["27", 5], ["100", 5], ["300", 1]].map(([mib, copies]): BurstRow => ({ name: `asset-swap-calibration-${mib}`, latencyClass: "asset",
+    packaged: { repeat: "burst", periodSec: null, fixture: `phase5:held-swap:${mib}:${copies}`, start: "asset-changed", judge: "held", calibration: true,
+      cycle: Array.from({ length: Number(copies) }, (_, index) => [{ edits: [`sampler-swap-asset-${index + 1}`], state: `asset-copy-${index + 1}` },
+        { edits: ["sampler-swap-back"], state: "asset-changed" }]).flat() } })),
   { name: "held-note-sampler", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-sampler", start: "gain-full", judge: "held",
     cycle: [{ edits: ["sampler-gain-half"], state: "gain-half" }, { edits: ["sampler-gain-full"], state: "gain-full" }] } },
   { name: "held-note-drum-rack", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-drum-rack", start: "gain-full", judge: "held",
@@ -165,6 +174,8 @@ export const burstRows: BurstRow[] = [
   { name: "effect-insert-remove", latencyClass: "plain", portable: { from: "base", to: "effect", latency: false } },
 ]
 
-export const phase9Matrix: Row[] = burstRows.flatMap(({ name, latencyClass, packaged }) => packaged ? [{ name, latencyClass, ...packaged }] : [])
-export const phase9Rows = phase9Matrix.map((row) => row.name)
+const packagedRows: Row[] = burstRows.flatMap(({ name, latencyClass, packaged }) => packaged ? [{ name, latencyClass, ...packaged }] : [])
+export const phase9Matrix = packagedRows.filter((row) => row.calibration === undefined)
+export const phase9Rows = packagedRows.map((row) => row.name)
+export const phase9RowsWithCalibration = packagedRows
 export const portableCampaignRows: PortableCampaignRow[] = burstRows.flatMap(({ name, latencyClass, portable }) => portable ? [{ row: name, class: latencyClass, ...portable }] : [])

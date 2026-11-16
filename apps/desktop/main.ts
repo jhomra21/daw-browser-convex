@@ -7,6 +7,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { z } from "zod"
+import { nativeEditorCommandSchema, unsigned32Schema, uuidSchema } from "./native-session-schemas"
 import {
   desktopFrameSchemaV1,
   desktopHelloSchemaV1,
@@ -212,10 +213,8 @@ let recordingBinding: { take: Awaited<ReturnType<typeof prepareRecordingSpool>>;
   rendererGeneration: number; projectId: string; projectGeneration: number;
   captureGeneration: number; sessionId: bigint; ready: boolean; completion?: Promise<void> } | undefined
 
-const unsigned32Schema = z.number().int().min(0).max(0xffff_ffff)
 const positiveUnsigned32Schema = unsigned32Schema.min(1)
 const transactionTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/)
-const uuidSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
 const requestIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/)
 const recoveryCompletionSchema = z.object({
   powerGeneration: z.number().int().safe(),
@@ -304,36 +303,6 @@ const nativeSessionAssetSchema = z.object({
   planarPcm: z.instanceof(Uint8Array),
   contentHashPrefix: z.instanceof(Uint8Array).optional(),
 }).strict()
-const nativeEditorAnchorSchema = z.object({
-  x: z.number().finite().min(-8_000_000).max(8_000_000),
-  y: z.number().finite().min(-8_000_000).max(8_000_000),
-}).passthrough()
-const nativeEditorCommandSchema = z.object({
-  projectId: projectIdSchemaV1,
-  instanceId: uuidSchema,
-  command: z.enum(["open", "close", "focus", "resize", "status"]),
-  serializedPlan: z.string().refine((value) => Buffer.byteLength(value, "utf8") <= 1_048_576).optional(),
-  initialState: z.object({
-    bytes: z.instanceof(Uint8Array).refine((value) => value.byteLength <= 512 * 1024),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/),
-  }).strict().optional(),
-  requiresState: z.boolean().optional(),
-  captureState: z.boolean().optional(),
-  width: unsigned32Schema.max(8192).optional(),
-  height: unsigned32Schema.max(8192).optional(),
-  anchor: nativeEditorAnchorSchema.optional(),
-}).passthrough().refine((value) => (
-  (value.anchor === undefined || value.command === "open" || value.command === "focus")
-  && (
-    (value.command !== "open" && value.command !== "focus" && value.command !== "status")
-    || value.serializedPlan !== undefined
-  )
-)).refine((value) => (
-  (!Object.hasOwn(value, "serializedPlan") || value.serializedPlan !== undefined)
-  && (!Object.hasOwn(value, "width") || value.width !== undefined)
-  && (!Object.hasOwn(value, "height") || value.height !== undefined)
-  && (!Object.hasOwn(value, "anchor") || value.anchor !== undefined)
-))
 const nativeAttachmentCoordinationSchema = z.object({
   projectId: projectIdSchemaV1,
   serializedPlan: z.string().refine((value) => Buffer.byteLength(value, "utf8") <= 1_048_576),

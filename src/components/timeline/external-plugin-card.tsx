@@ -11,6 +11,7 @@ import { ae08UiMark } from "~/lib/desktop/ae08-marks";
 import {
   nativeEditorAnchorFromElement,
   nativeEditorAvailabilityMessage,
+  nativeEditorCommand,
   nativeEditorCommandAvailable,
 } from "~/components/timeline/external-plugin-editor";
 import { isDeviceHeaderTarget, isDeviceInteractiveTarget } from "~/components/timeline/device-interaction";
@@ -207,7 +208,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
         }
         serializedPlan = encodeNativeExternalAttachmentPlan(compilation.plan);
       }
-      const result = await bridge.session.editor({
+      const result = await bridge.session.editor(nativeEditorCommand({
         projectId: props.projectId,
         instanceId: props.processor.instanceId,
         command,
@@ -218,7 +219,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
         ),
         captureState: props.processor.manifest.supportsState,
         anchor: command === "open" || command === "focus" ? props.editorAnchor?.() : undefined,
-      });
+      }));
       if (!result.ok) {
         setEditorMessage(result.error);
         return false;

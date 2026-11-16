@@ -13,6 +13,8 @@ import {
 } from "@daw-browser/desktop-protocol/ipc-channels"
 import type { NativeHostPcmAsset, NativeHostRecordingConfiguration } from "@daw-browser/audio-engine/native-host-wire"
 import type { DesktopBridge } from "../../src/types/desktop-bridge"
+import { nativeEditorCommand } from "../../src/components/timeline/external-plugin-editor"
+import { nativeEditorCommandSchema } from "./native-session-schemas"
 
 const mainPath = new URL("./main.ts", import.meta.url)
 
@@ -228,4 +230,19 @@ test("commits renderer navigation before native transaction registration", async
   expect(navigationHandler).toContain("rendererLifecycle.commitMainFrameNavigation(url)")
   expect(navigationHandler).not.toContain("activateInitialCommittedDocument")
   expect(main).toContain('ipcMain.handle(sessionBeginTransactionChannel')
+})
+
+test("the plug-in card's close command parses with main's editor command schema", () => {
+  const common = {
+    projectId: "project-1",
+    instanceId: "123e4567-e89b-12d3-a456-426614174000",
+    requiresState: true,
+    captureState: true,
+  }
+  expect(nativeEditorCommandSchema.safeParse(nativeEditorCommand({
+    ...common, command: "close", serializedPlan: undefined, initialState: undefined, anchor: undefined,
+  })).success).toBe(true)
+  expect(nativeEditorCommandSchema.safeParse(nativeEditorCommand({
+    ...common, command: "open", serializedPlan: "plan", initialState: undefined, anchor: { x: 1, y: 2 },
+  })).success).toBe(true)
 })

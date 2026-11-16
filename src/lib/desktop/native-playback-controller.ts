@@ -460,6 +460,7 @@ const nativeSnapshotSupportError = (snapshot: LivePlaybackSnapshot): string | un
 
 // The host locks sample memory in whole pages.
 const pageRoundedBytes = (bytes: number) => Math.ceil(bytes / 16_384) * 16_384
+type InstrumentAssetHold = { bytes: number; scope: SampledInstrumentRegionBudgetScope }
 
 const validateInstrumentAssetBudget = (
   assets: readonly AudioCoreGraphSnapshot["assets"][number][],
@@ -591,27 +592,13 @@ export const createNativePlaybackController = (input: {
   let installedAssets: readonly NativeSessionAsset[] = []
   let nextSessionAssetId = 1
   const sessionResourceIds = new Map<string, number>()
-  // Locked bytes of each instrument-region session asset on the host, installed or retired, oldest install first. A sample that
-  // returns while resident uploads nothing: the host keeps a published instrument mapping read-only and locked until released.
-  const instrumentAssetBytes = new Map<number, number>()
+  // Each instrument-region session asset on the host, installed or retired, oldest install first: its locked bytes, and the
+  // budget scope charging them with the buffer lease until the host acknowledges the asset's release. A sample that returns
+  // while resident uploads nothing: the host keeps a published instrument mapping read-only and locked until released.
+  const instrumentAssets = new Map<number, InstrumentAssetHold>()
+  const instrumentReleaseAcks = new Set<Promise<unknown>>()
   // Retired samples stay resident up to this share of the aggregate sample budget, so a swap's peak stays within what it was.
   const residentInstrumentBytesCap = (input.bridge?.instrumentBudgetPolicy?.aggregateBytes ?? 0) / 8
-  const noteInstrumentAssets = (
-    projection: {
-      assets: readonly { asset: AudioCoreGraphSnapshot["assets"][number]; sourceAssetKey: string }[]
-      instrumentRegionSources?: readonly { sourceAssetKey: string }[]
-    },
-    mappings: ReadonlyMap<string, NativeSessionAsset>,
-  ) => {
-    const regionKeys = new Set(projection.instrumentRegionSources?.map(({ sourceAssetKey }) => sourceAssetKey))
-    for (const { asset, sourceAssetKey } of projection.assets) {
-      const mapping = mappings.get(asset.assetId)
-      if (!mapping || !regionKeys.has(sourceAssetKey)) continue
-      instrumentAssetBytes.delete(mapping.sessionAssetId)
-      instrumentAssetBytes.set(mapping.sessionAssetId,
-        pageRoundedBytes(asset.frameCount * asset.channelCount * Float32Array.BYTES_PER_ELEMENT))
-    }
-  }
   const bufferIdentities = new WeakMap<AudioBuffer, number>()
   let nextBufferIdentity = 1
   const resourceKey = (
@@ -638,32 +625,47 @@ export const createNativePlaybackController = (input: {
     scope?.release()
     if (scope) instrumentMemoryScopes.delete(scope)
   }
-  const createInstrumentMemoryScope = (
-    sources: readonly { sourceAssetKey: string; buffer: AudioBuffer }[],
-    assets: AudioCoreGraphSnapshot["assets"],
-    instruments: readonly NonNullable<AudioCoreGraphSnapshot["nodes"][number]["instrument"]>[],
-    maximumBytes: number,
-    scopeName: string,
-    budgetErrorMessage?: string,
-  ) => {
-    if (sources.length === 0) return undefined
+  const createInstrumentScope = (scopeName: string) => {
     if (!instrumentBudget) throw new Error("Native sample memory policy is unavailable.")
-    validateInstrumentAssetBudget(assets, instruments, maximumBytes, budgetErrorMessage)
     const scope = instrumentBudget.createScope(scopeName)
     instrumentMemoryScopes.add(scope)
+    return scope
+  }
+  // One scope per instrument session asset, so its release credits exactly its bytes. A sample that does not fit makes
+  // `evictResident` release the oldest retired one (it resolves once the host acknowledged, which credits it) and retries.
+  const holdInstrumentAssets = async (
+    assets: readonly { asset: AudioCoreGraphSnapshot["assets"][number]; sourceAssetKey: string }[],
+    sources: readonly { sourceAssetKey: string; buffer: AudioBuffer }[],
+    mappings: ReadonlyMap<string, NativeSessionAsset>,
+    evictResident?: () => Promise<boolean>,
+  ) => {
+    const buffers = new Map(sources.map(({ sourceAssetKey, buffer }) => [sourceAssetKey, buffer]))
+    const holds = new Map<number, InstrumentAssetHold>()
     try {
-      scope.lease(sources.map(({ sourceAssetKey, buffer }) => ({
-        key: sourceAssetKey, buffer, bytes: buffer.length * buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT,
-      })), true)
-      for (const { sourceAssetKey, buffer } of sources) {
+      for (const { asset, sourceAssetKey } of assets) {
+        const buffer = buffers.get(sourceAssetKey)
+        const mapping = mappings.get(asset.assetId)
+        if (!buffer || !mapping) continue
         const bytes = buffer.length * buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT
-        scope.set(`resident:${sourceAssetKey}`, pageRoundedBytes(bytes), () => undefined)
+        for (;;) {
+          const scope = createInstrumentScope(`native-asset:${mapping.sessionAssetId}:${crypto.randomUUID()}`)
+          try {
+            scope.lease([{ key: sourceAssetKey, buffer, bytes }], true)
+            scope.set(`resident:${sourceAssetKey}`, pageRoundedBytes(bytes), () => undefined)
+            holds.set(mapping.sessionAssetId, { scope,
+              bytes: pageRoundedBytes(asset.frameCount * asset.channelCount * Float32Array.BYTES_PER_ELEMENT) })
+            break
+          } catch (error) {
+            releaseInstrumentScope(scope)
+            if (!await evictResident?.()) throw error
+          }
+        }
       }
-      return scope
     } catch (error) {
-      releaseInstrumentScope(scope)
+      for (const { scope } of holds.values()) releaseInstrumentScope(scope)
       throw error
     }
+    return holds
   }
   let preparedInstrumentTrackIds: readonly string[] = []
   let preparedSnapshot: LivePlaybackSnapshot | undefined
@@ -1514,6 +1516,7 @@ export const createNativePlaybackController = (input: {
     preparedHostIdentity = undefined
     installedAssets = []
     installedAssetIds = []
+    instrumentAssets.clear()
     preparedStretchAssetsForSession = []
     nativePcmChunkDescriptorsForSession = []
     installedAssetSourceKeys = new Map()
@@ -1878,6 +1881,7 @@ export const createNativePlaybackController = (input: {
       const memoryScope = instrumentMemoryScope
       instrumentMemoryScope = undefined
       installedAssetIds = []
+      instrumentAssets.clear()
       nativeSessionGeneration += 1
       disposeKept(processorState.clear())
       scheduleCoordinator?.dispose()
@@ -1925,6 +1929,11 @@ export const createNativePlaybackController = (input: {
     }
     let attemptedStretchLeaseDispose: (() => Promise<void>) | undefined
     let attemptedInstrumentScope: SampledInstrumentRegionBudgetScope | undefined
+    let attemptedInstrumentHolds = new Map<number, InstrumentAssetHold>()
+    const releaseAttemptedInstrumentMemory = () => {
+      releaseInstrumentScope(attemptedInstrumentScope)
+      for (const { scope } of attemptedInstrumentHolds.values()) releaseInstrumentScope(scope)
+    }
     let instrumentStateAdmitted = false
     let instrumentTrackIds: readonly string[] = []
     let releasePageStaging: (() => void) | undefined
@@ -2057,12 +2066,8 @@ export const createNativePlaybackController = (input: {
         if (!policy) throw new Error("Native sample memory policy is unavailable. Restart desktop audio and retry.")
         validateInstrumentAssetBudget(projection.graph.assets,
           projection.graph.nodes.flatMap((node) => node.instrument ? [node.instrument] : []), policy.deviceDecodedBytes)
-        if (!instrumentBudget) throw new Error("Native sample memory policy is unavailable.")
-        const scope = createInstrumentMemoryScope(instrumentRegionSources, projection.graph.assets,
-          projection.graph.nodes.flatMap((node) => node.instrument ? [node.instrument] : []),
-          policy.deviceDecodedBytes, `native-live:${crypto.randomUUID()}`,
-          "Instrument sample memory budget exceeded (1 GiB per device). Shorten the region or remove samples and retry.")
-        if (!scope) throw new Error("Native sample memory policy is unavailable.")
+        attemptedInstrumentHolds = await holdInstrumentAssets(projection.assets, instrumentRegionSources, sessionAssetsById)
+        const scope = createInstrumentScope(`native-live:${crypto.randomUUID()}`)
         attemptedInstrumentScope = scope
         releasePageStaging = scope.reserve("page-staging", nativeTimelinePageStagingBytes).release
       }
@@ -2262,7 +2267,7 @@ export const createNativePlaybackController = (input: {
             ...committedAssetIds.map((sessionAssetId) => bridge.session.releaseAsset(sessionAssetId)),
           ])
           const reply = await bridge.session.teardown("native-start-cancelled-after-commit").catch(() => undefined)
-          if (reply?.ok) releaseInstrumentScope(attemptedInstrumentScope)
+          if (reply?.ok) releaseAttemptedInstrumentMemory()
         }
         return "unavailable"
       }
@@ -2274,8 +2279,9 @@ export const createNativePlaybackController = (input: {
         const mapping = sessionAssetsById.get(asset.assetId)
         if (mapping) sessionResourceIds.set(resourceKey(asset, snapshotAssetsByKey.get(sourceAssetKey)), mapping.sessionAssetId)
       }
-      instrumentAssetBytes.clear()
-      noteInstrumentAssets(projection, sessionAssetsById)
+      instrumentAssets.clear()
+      for (const [sessionAssetId, hold] of attemptedInstrumentHolds) instrumentAssets.set(sessionAssetId, hold)
+      attemptedInstrumentHolds = new Map()
       nextSessionAssetId = Math.max(nextSessionAssetId, ...assets.map((asset) => asset.sessionAssetId + 1))
       preparedStretchAssetsForSession = preparedStretchAssets
       preparedStretchLeaseSession = attemptedStretchLeaseDispose
@@ -2368,7 +2374,7 @@ export const createNativePlaybackController = (input: {
           // The successor is serialized behind this attempt; retire its host
           // resources without invalidating the successor's renderer generation.
           const teardown = await bridge.session.teardown("native-instrument-start-cancelled").catch(() => undefined)
-          if (teardown?.ok) releaseInstrumentScope(attemptedInstrumentScope)
+          if (teardown?.ok) releaseAttemptedInstrumentMemory()
         }
       }
       else if (!wasCancelled && !hostLost) await disposeNativeSession(undefined, "native-start-failure")
@@ -2406,7 +2412,7 @@ export const createNativePlaybackController = (input: {
       releasePageStaging?.()
       // Phase 2 retains successful locks even after bank cancellation. A failed
       // or pending teardown must retain its charge until teardown or host loss.
-      if (!instrumentStateAdmitted) releaseInstrumentScope(attemptedInstrumentScope)
+      if (!instrumentStateAdmitted) releaseAttemptedInstrumentMemory()
     }
   }
 
@@ -3546,6 +3552,7 @@ export const createNativePlaybackController = (input: {
       let adoptPublication: ((reply: NativeRevisionReply, acknowledgedEpoch?: number) => boolean) | undefined
       let discardAddedSources: (() => Promise<void>) | undefined
       let stagedMemoryScope: SampledInstrumentRegionBudgetScope | undefined
+      let stagedHolds = new Map<number, InstrumentAssetHold>()
       let resourcesPromoted = false
       let retainCandidate = false
       let preparedRevision: number | undefined
@@ -3659,6 +3666,7 @@ export const createNativePlaybackController = (input: {
         if (!resourcesPromoted) {
           await discardAddedSources?.()
           releaseInstrumentScope(stagedMemoryScope)
+          for (const { scope } of stagedHolds.values()) releaseInstrumentScope(scope)
           if (!retainCandidate) await candidate?.dispose()
           if (preparedRevision !== undefined) processorState.unprepared(preparedRevision)
         }
@@ -3951,7 +3959,7 @@ export const createNativePlaybackController = (input: {
         const mappings = new Map(assets.map((mapping) => [mapping.asset.assetId, mapping]))
         const addedAssets = projection.assets.filter(({ asset }) => {
           const mapping = mappings.get(asset.assetId)
-          return mapping && !previousIds.has(mapping.sessionAssetId) && !instrumentAssetBytes.has(mapping.sessionAssetId)
+          return mapping && !previousIds.has(mapping.sessionAssetId) && !instrumentAssets.has(mapping.sessionAssetId)
         })
         const sourceKeys = new Map(projection.assets.map(({ asset, sourceAssetKey }) => {
           const mapping = mappings.get(asset.assetId)
@@ -3963,6 +3971,29 @@ export const createNativePlaybackController = (input: {
         const nextIds = new Set(assets.map((mapping) => mapping.sessionAssetId))
         const removedAssets = installedAssets.filter((mapping) => !nextIds.has(mapping.sessionAssetId))
         removedAssetIds = removedAssets.map((mapping) => mapping.sessionAssetId)
+        const releaseSessionAsset = (sessionAssetId: number, hold: InstrumentAssetHold | undefined) => {
+          const acknowledged = session.releaseAsset(sessionAssetId).then((reply) => {
+            if (reply.ok) releaseInstrumentScope(hold?.scope)
+            return reply
+          })
+          instrumentReleaseAcks.add(acknowledged)
+          const settled = () => { instrumentReleaseAcks.delete(acknowledged) }
+          acknowledged.then(settled, settled)
+          return acknowledged
+        }
+        // A first swap that does not fit in the sample budget gives up the oldest retired sample first, or waits for the
+        // acknowledgement of releases already sent, which credit the budget.
+        const evictResident = async () => {
+          const sessionAssetId = [...instrumentAssets.keys()].find((id) => !previousIds.has(id) && !nextIds.has(id))
+          if (sessionAssetId === undefined) {
+            const pending = [...instrumentReleaseAcks]
+            await Promise.allSettled(pending)
+            return pending.length > 0
+          }
+          const hold = instrumentAssets.get(sessionAssetId)
+          instrumentAssets.delete(sessionAssetId)
+          return (await releaseSessionAsset(sessionAssetId, hold)).ok
+        }
         const oldInstruments = new Map(previousGraph.nodes.map((node) => [node.id, node.instrument]))
         const addedInstruments = graph.nodes.flatMap((node) => {
           if (!node.instrument) return []
@@ -4139,11 +4170,9 @@ export const createNativePlaybackController = (input: {
             if (!instrumentBudget || !policy) throw new Error("Native sample memory policy is unavailable.")
             validateInstrumentAssetBudget(projection.graph.assets, addedInstruments.map(({ state }) => state),
               policy.deviceDecodedBytes)
-            stagedMemoryScope = createInstrumentMemoryScope(instrumentSources, projection.graph.assets,
-              addedInstruments.map(({ state }) => state), policy.deviceDecodedBytes,
-              `native-stage:${crypto.randomUUID()}`)
-            if (!stagedMemoryScope) throw new Error("Native sample memory policy is unavailable.")
+            stagedMemoryScope = createInstrumentScope(`native-stage:${crypto.randomUUID()}`)
             stagedMemoryScope.set("page-staging", nativeTimelinePageStagingBytes, () => undefined)
+            stagedHolds = await holdInstrumentAssets(addedAssets, instrumentSources, mappings, evictResident)
           }
           for (const { asset, pcm, sourceAssetKey, preparedStretchArtifactId } of addedAssets) {
             publicationAbort.signal.throwIfAborted()
@@ -4184,7 +4213,7 @@ export const createNativePlaybackController = (input: {
           await prepareMappedResources(mappedResources, pageManager, sources.filter((source) => source.immutableAfterPreparation)
             .map((source) => ({ sourceAssetKey: source.sourceAssetKey, startFrame: 0, endFrame: source.frameCount })),
           publicationAbort.signal, false, hydrationMark)
-          stagedMemoryScope?.set("page-staging", 0, () => undefined)
+          releaseInstrumentScope(stagedMemoryScope)
           hydrationMark?.("asset-sources-ready")
         }
         publicationAbort.signal.throwIfAborted()
@@ -4266,35 +4295,45 @@ export const createNativePlaybackController = (input: {
           preparedStretchAssetsForSession = candidate.stretchAssets
           preparedStretchLeaseSession = candidate.dispose
           pendingStretchCandidates.delete(candidate.dispose)
-          const heldAssetIds = [...instrumentAssetBytes.keys()]
-          noteInstrumentAssets(projection, mappings)
+          for (const [id, hold] of stagedHolds) instrumentAssets.set(id, hold)
+          // The installed samples are the newest, a returning resident among them.
+          for (const id of nextIds) {
+            const hold = instrumentAssets.get(id)
+            if (!hold) continue
+            instrumentAssets.delete(id)
+            instrumentAssets.set(id, hold)
+          }
+          const released = new Map<number, InstrumentAssetHold | undefined>(
+            removedAssetIds.filter((id) => !instrumentAssets.has(id)).map((id) => [id, undefined]))
+          // A retiree above the cap is never admitted, so it cannot push the smaller residents out.
+          const retired = [...instrumentAssets].filter(([id]) => !nextIds.has(id))
           let residentBytes = 0
           let residentCount = 0
-          for (const [id, bytes] of instrumentAssetBytes) {
-            if (nextIds.has(id)) continue
-            residentBytes += bytes
+          const residents = retired.filter(([id, hold]) => {
+            if (hold.bytes > residentInstrumentBytesCap) { released.set(id, hold); return false }
+            residentBytes += hold.bytes
             residentCount += 1
-          }
+            return true
+          })
           // The host table holds 64 assets; resident samples keep the installed ones within half of it.
-          for (const [id, bytes] of instrumentAssetBytes) {
+          for (const [id, hold] of residents) {
             if (residentBytes <= residentInstrumentBytesCap
               && nextIds.size + residentCount <= nativeAudioHostMaximumInstalledAssets / 2) break
-            if (nextIds.has(id)) continue
-            instrumentAssetBytes.delete(id)
-            residentBytes -= bytes
+            released.set(id, hold)
+            residentBytes -= hold.bytes
             residentCount -= 1
           }
+          for (const id of released.keys()) instrumentAssets.delete(id)
           installedAssets = assets
-          installedAssetIds = [...new Set([...nextIds, ...instrumentAssetBytes.keys()])]
+          installedAssetIds = [...new Set([...nextIds, ...instrumentAssets.keys()])]
           installedAssetSourceKeys = sourceKeys
           nativePcmChunkDescriptorsForSession = projection.nativePcmChunkDescriptors
           resourcesPromoted = true
           advanceScheduleSettledEpoch()
           // Release ACK registers deferred collection, not reusable IDs or a
           // proof that queued sources/fading voices have finished reading.
-          for (const sessionAssetId of new Set([...removedAssetIds, ...heldAssetIds])) {
-            if (nextIds.has(sessionAssetId) || instrumentAssetBytes.has(sessionAssetId)) continue
-            void session.releaseAsset(sessionAssetId).then((reply) => {
+          for (const [sessionAssetId, hold] of released) {
+            void releaseSessionAsset(sessionAssetId, hold).then((reply) => {
               if (!reply.ok) reportStopped(reply.error, { retainPlayback: true })
             }, () => reportStopped("Native deferred asset release failed.", { retainPlayback: true }))
           }

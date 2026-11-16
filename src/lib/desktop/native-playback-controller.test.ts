@@ -8,6 +8,7 @@ import { createRenderEffect, createRoot, createSignal, untrack } from "solid-js"
 import { createNativePlaybackController, nativePlaybackFaultText, type NativePlaybackFault } from "./native-playback-controller"
 import { classifyNativeVst3PlaybackFault, nativeVst3LaunchAuthorizationRequiredMessage } from "~/lib/external-plugin-ui"
 import { createNativeProcessorStateOwner } from "./native-processor-state-owner"
+import { nativeTimelinePageStagingBytes } from "./native-timeline-page-manager"
 import { clearInstanceLimits, instanceLimit, vstInstanceFailed } from "./vst-instance-failures"
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
 import { nativeAudioHostMappedAssetPageHeaderBytes, nativeAudioHostMaximumPayloadBytes } from "@daw-browser/desktop-protocol/native-audio-host"
@@ -5789,6 +5790,69 @@ for (const kind of ['sampler', 'granular', 'drum-rack'] satisfies readonly ('sam
     acknowledgeStagedPublication(fixture)
     expect(await (candidateCompile.release(), candidateAdoption)).toEqual({ status: "adopted" })
     expect(fixture.releasedAssetIds).toEqual(originalAssets)
+    await controller.dispose()
+  })
+
+  // Each swap compiles a fresh buffer of the sample, so it is a first swap that installs a new session asset.
+  const sampleSwapper = async (aggregateBytes: number, seconds: number) => {
+    const fixture = createBridge("runtime-revision-progress")
+    fixture.bridge.instrumentBudgetPolicy.aggregateBytes = aggregateBytes
+    const budget = createSampledInstrumentRegionBudget(aggregateBytes)
+    let desired = sampledNativeInput(kind, seconds)
+    const controller = createObservedController({ bridge: fixture.bridge, getProjectId: () => "local_project",
+      instrumentBudget: budget, compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ ...desired, transport }) })
+    expect(await controller.start(desired.transport)).toBe("started")
+    let revision = 1
+    const swap = async (swapSeconds: number) => {
+      desired = { ...sampledNativeInput(kind, swapSeconds), revision: ++revision }
+      const candidateCompile = holdCompile(controller)
+      const candidateAdoption = controller.adoptSchedule(migrationIntent(`swap-${revision}`), true)
+      await candidateCompile.entered
+      acknowledgeStagedPublication(fixture, revision)
+      expect(await (candidateCompile.release(), candidateAdoption)).toEqual({ status: "adopted" })
+    }
+    return { fixture, budget, controller, swap }
+  }
+
+  test(`an evicted ${kind} sample's budget returns once its release is acknowledged`, async () => {
+    const { fixture, budget, controller, swap } = await sampleSwapper(12 * 1024 ** 2, 5)
+    const oneSample = budget.totalBytes()
+    await swap(5)
+    expect(fixture.releasedAssetIds).toHaveLength(1)
+    expect(budget.totalBytes()).toBe(oneSample)
+    await controller.dispose()
+    expect(budget.totalBytes()).toBe(0)
+  })
+
+  test(`ten first swaps of a ${kind} sample above the resident cap fit a budget sized for two samples`, async () => {
+    // Two 5 s samples and the 4 MiB of page staging fit 12 MiB; a third sample does not.
+    const { budget, controller, swap } = await sampleSwapper(12 * 1024 ** 2, 5)
+    for (let index = 0; index < 10; index++) await swap(5)
+    expect(budget.totalBytes()).toBeLessThanOrEqual(12 * 1024 ** 2)
+    await controller.dispose()
+  })
+
+  test(`retiring an oversized ${kind} sample leaves the smaller residents installed`, async () => {
+    const { fixture, budget, controller, swap } = await sampleSwapper(12 * 1024 ** 2, 0.1)
+    await swap(0.1)
+    const before = fixture.installedAssets.length
+    await swap(5)
+    const oversized = fixture.installedAssets.slice(before).map(({ sessionAssetId }) => sessionAssetId)
+    await swap(0.1)
+    expect(fixture.releasedAssetIds).toEqual(oversized)
+    await controller.dispose()
+    expect(budget.totalBytes()).toBe(0)
+  })
+
+  test(`a ${kind} swap that does not fit releases the oldest resident sample first`, async () => {
+    const { fixture, budget, controller, swap } = await sampleSwapper(24 * 1024 ** 2, 5)
+    const oneSample = budget.totalBytes()
+    await swap(5)
+    const oldest = fixture.installedAssets[0]?.sessionAssetId
+    // Another owner takes the rest, so the budget has room for two samples and the page staging only.
+    budget.reserve("other", 24 * 1024 ** 2 - 2 * oneSample - nativeTimelinePageStagingBytes - 512 * 1024)
+    await swap(5)
+    expect(fixture.releasedAssetIds).toEqual([oldest])
     await controller.dispose()
   })
 

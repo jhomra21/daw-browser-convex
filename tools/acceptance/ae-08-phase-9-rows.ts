@@ -7,7 +7,8 @@ export type LatencyClass = "plain" | "raise" | "asset" | "vst-insert"
 // What an edit that publishes no graph, or not the first one, settles on: the host's applied parameter sequence line, the publication
 // that carries a decoded asset (not the track-only one an import makes first), the publication whose schedule windows carry an automation lane ("lane") or none ("lane-free"), the host's editor-open or plug-in fault line, or, for a
 // commit the app refuses, the return of the refusal.
-export type Settle = "sequence" | "asset" | "lane" | "lane-free" | "refused" | "editor-open" | "plugin-fault"
+// "returned" is for a transport command that is its own observation: the step settles when its edit returns.
+export type Settle = "sequence" | "asset" | "lane" | "lane-free" | "refused" | "editor-open" | "plugin-fault" | "returned"
 // How a step is entered when it is not the analyzer's 6 ms crossfade: "ghost" (a removed track's node fades over 5 ms on top of its
 // source's 6 ms), "cut" (a restored track or a decoded asset sounds from its publication).
 export type Step = { edits: string[]; state: string; entry?: "ghost" | "cut"; settle?: Settle }
@@ -19,7 +20,9 @@ export type Step = { edits: string[]; state: string; entry?: "ghost" | "cut"; se
 // the published moves (a pinned lower leaves the shift, so no per-state export can stand for a raise row's later states),
 // and no check means the row is only settled and gated on host evidence.
 // "editor", "fault" and "trust" judge the VST rows on host evidence (no restart, the editor stays open) and the capture.
-export type Judge = "states" | "sustained" | "delete" | "latency" | "lane" | "take" | "editor" | "fault" | "trust"
+// "host-loss" and "cancelled-start" judge the rows whose edits drive the transport (PackagedRun.transport) on host evidence and the
+// transport state each edit observed; they have no capture to compare.
+export type Judge = "states" | "sustained" | "delete" | "latency" | "lane" | "take" | "editor" | "fault" | "trust" | "host-loss" | "cancelled-start"
 export type PackagedRun = {
   // burst: --repetitions edits. vst-burst: --vst-repetitions edits. single: one pass of the cycle. launch: one edit per launch, repeated --repetitions times.
   repeat: "burst" | "vst-burst" | "single" | "launch"
@@ -38,6 +41,9 @@ export type PackagedRun = {
   settle?: Settle
   // What a launch of this row needs that no current fixture provides.
   needs?: string
+  // "driven": the row's edits start and stop the transport themselves, so the launch does not press Play, waits for no audio and
+  // leaves the host as the row left it.
+  transport?: "driven"
 }
 export type PortableRun = { from: string; to: string; latency: boolean }
 type BurstRow = { name: string; latencyClass: LatencyClass; packaged?: PackagedRun; portable?: PortableRun }
@@ -107,6 +113,16 @@ export const burstRows: BurstRow[] = [
   // The bundle stays untrusted: its browser entry is refused with the trust reason and nothing restarts.
   { name: "trust-negative", latencyClass: "vst-insert", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-absent", prepare: ["vst-untrusted-browser"], judge: "trust",
     cycle: [{ edits: ["untrusted-insert"], state: "vst-rejected", settle: "refused" }] } },
+  // Ruling 3 a: the audio host is killed by pid while a Play of a project with the test plug-in (it needs native) is pending. The transport stays
+  // stopped, the app reports native unavailable, and no session is started.
+  { name: "host-failure-during-play", latencyClass: "plain", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "stopped", prepare: insertedTestPlugin,
+    judge: "host-loss", transport: "driven", settle: "returned", cycle: [{ edits: ["play-kill-host"], state: "stopped" }] } },
+  // Ruling 3 b: a Pause and a Stop issued over a Play whose start has not landed cancel it without a stop, teardown, begin or configure, leave the
+  // transport paused (at 0 after a Stop), and the next Play resumes the same session.
+  { name: "pause-stop-during-play-start", latencyClass: "plain", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "paused",
+    judge: "cancelled-start", transport: "driven", settle: "returned",
+    cycle: [{ edits: ["session-pause"], state: "paused" }, { edits: ["play-then-pause"], state: "paused" }, { edits: ["play-resume"], state: "playing" },
+      { edits: ["session-pause"], state: "paused" }, { edits: ["play-then-stop"], state: "paused" }, { edits: ["play-resume"], state: "playing" }] } },
   // Portable-only rows: the portable engine has no packaged counterpart for them.
   { name: "mixer-gain", latencyClass: "plain", portable: { from: "base", to: "gain", latency: false } },
   { name: "clip-note", latencyClass: "plain", portable: { from: "base", to: "note", latency: false } },

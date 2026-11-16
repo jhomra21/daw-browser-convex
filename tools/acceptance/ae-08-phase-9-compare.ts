@@ -159,14 +159,54 @@ export const playedBlocks = (blocks: readonly CaptureBlock[], firstEditWallMs: n
   return owner && { owner, mine: blocks.filter((block) => block.pid === owner.pid && block.captureId === owner.captureId && block.transportEpoch === owner.transportEpoch) }
 }
 
-// No cold lifecycle event between the edit and the end of the capture: a delete is one session, never a stop and start.
+// No cold lifecycle event between the edit and the end of the capture: a delete is one session, never a stop and start. A session
+// is begun (begin) and configured (device-configure, capture-configure) only when it is built.
 export const lifecycleBetween = (events: readonly HostEvent[], fromWallMs: number, toWallMs: number) =>
-  events.filter((event) => event.wallMs >= fromWallMs && event.wallMs <= toWallMs && /stop|teardown|rebuild|host-exit|host-spawn|device-configure/i.test(event.event))
+  events.filter((event) => event.wallMs >= fromWallMs && event.wallMs <= toWallMs && /stop|teardown|begin|rebuild|host-exit|host-spawn|configure/i.test(event.event))
 
 // The VST rows that judge on host evidence. A restart is a worker spawned again or a host restart request after the edit.
 const restartsBetween = (events: readonly HostEvent[], fromWallMs: number, toWallMs: number) =>
   [...lifecycleBetween(events, fromWallMs, toWallMs), ...events.filter((event) => /^(worker-spawn|host-restart-request)$/.test(event.event) && event.wallMs >= fromWallMs && event.wallMs <= toWallMs)]
 const named = (events: readonly HostEvent[]) => events.map((event) => event.event).join(", ")
+
+// The rows whose edits drive the transport (PackagedRun.transport) observe it themselves: after each edit the launch marks the transport
+// state, its playhead, the host pid and when the edit's cancelling command was issued, and the judge reads those marks with the host evidence.
+export const nativeUnavailableReported = "native-unavailable"
+export const transportObservation = z.object({ event: z.literal("transport-observed"), wallMs: z.number(), edit: z.string(), pid: z.number(), cancelWallMs: z.number(),
+  state: z.string(), playheadSec: z.number(), failure: z.string() })
+export type TransportObservation = z.infer<typeof transportObservation>
+const positionToleranceSec = 0.001
+
+// The audio host dies under a pending Play: the host is reported exited, the transport stays stopped, the app reports native unavailable,
+// and nothing starts a session afterwards (a restarted host is the supervisor's, a started device or published graph would be a session).
+export const compareHostLoss = (events: readonly HostEvent[], observations: readonly TransportObservation[]): Compare => (window) => {
+  const killed = observations.find((observation) => observation.edit === "play-kill-host")
+  if (!killed) return "the host kill was never observed"
+  if (!events.some((event) => event.event === "host-exit" && event.pid === killed.pid && event.wallMs >= killed.cancelWallMs))
+    return `the audio host ${killed.pid} was never reported exited after the kill`
+  if (killed.state !== "stopped") return `the transport is ${killed.state} after the host was lost, not stopped`
+  if (killed.failure !== nativeUnavailableReported) return "the app reported no native-unavailable fault"
+  const started = events.filter((event) => /^(device-start-request|graph-publish)$/.test(event.event) && event.wallMs >= killed.cancelWallMs && event.wallMs <= window.toWallMs)
+  return started.length ? `a session was started after the host was lost: ${named(started)}` : undefined
+}
+
+// A Pause or a Stop over a Play that has not landed cancels it: nothing stops, tears down, begins or configures after the cancel, the transport
+// is paused where the prepared session was (at 0 after a Stop), and the next Play resumes without any of them. "session-pause" only prepares.
+export const compareCancelledStart = (input: { events: readonly HostEvent[]; observations: readonly TransportObservation[]; editName: (index: number) => string
+  editWallMs: (index: number) => number }): Compare => (window) => {
+  const name = input.editName(window.index), from = input.editWallMs(window.index)
+  const seen = input.observations.find((observation) => observation.edit === name && observation.wallMs >= from && observation.wallMs <= window.fromWallMs)
+  if (!seen) return `${name} observed no transport state`
+  const expected = name === "play-resume" ? "playing" : "paused"
+  if (seen.state !== expected) return `the transport is ${seen.state}, not ${expected}, after ${name}`
+  const prepared = input.observations.filter((observation) => observation.wallMs < from).at(-1)
+  if (name === "play-then-stop" && seen.playheadSec !== 0) return `the transport stopped at ${seen.playheadSec} s, not 0`
+  if (name === "play-then-pause" && prepared && Math.abs(seen.playheadSec - prepared.playheadSec) > positionToleranceSec)
+    return `the cancelled Play moved the paused position from ${prepared.playheadSec} s to ${seen.playheadSec} s`
+  if (name === "session-pause") return undefined
+  const cold = lifecycleBetween(input.events, name === "play-resume" ? from : seen.cancelWallMs, window.toWallMs)
+  return cold.length ? `${name} stopped, tore down, began or configured the session: ${named(cold)}` : undefined
+}
 
 // An edit made while the editor is open publishes in place: after any step the editor is never reported closed and nothing restarts.
 export const compareEditor = (events: readonly HostEvent[], playingPid: number, editWallMs: (index: number) => number): Compare => (window) => {
@@ -229,9 +269,17 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
   natives: readonly string[] }): Promise<BurstVerdict> => {
   const { launchOut, directory, row } = input
   const { edits } = logged.parse(JSON.parse(await readFile(path.join(directory, "phase9-edits.json"), "utf8")))
-  const steps = [...Map.groupBy(edits, (edit) => edit.index)].map(([index, group]) => ({ index, editWallMs: Math.min(...group.map((edit) => edit.wallMs)),
+  const steps = [...Map.groupBy(edits, (edit) => edit.index)].map(([index, group]) => ({ index, name: group[0]?.name ?? "", editWallMs: Math.min(...group.map((edit) => edit.wallMs)),
     settledWallMs: group[0]?.settledWallMs, publicationFrame: group[0]?.publicationFrame ?? 0, startSec: group.find((edit) => edit.startSec !== undefined)?.startSec }))
   if (row.judge === "take") return judgeBurst(steps, input.captureEndWallMs, compareTake(takeResult.parse(JSON.parse(await readFile(path.join(directory, takeFile), "utf8")))))
+  if (row.judge === "host-loss" || row.judge === "cancelled-start") {
+    const events = (await Promise.all(["host.jsonl", ...input.natives].map((name) => readFile(path.join(launchOut, name), "utf8")))).flatMap(parseHostLines)
+    const observations = (await readFile(path.join(launchOut, "actions.jsonl"), "utf8")).split("\n").filter(Boolean)
+      .flatMap((line) => { const observed = transportObservation.safeParse(JSON.parse(line)); return observed.success ? [observed.data] : [] })
+    const compare = row.judge === "host-loss" ? compareHostLoss(events, observations)
+      : compareCancelledStart({ events, observations, editName: (index) => steps.find((step) => step.index === index)?.name ?? "", editWallMs: (index) => steps.find((step) => step.index === index)?.editWallMs ?? 0 })
+    return judgeBurst(steps, input.captureEndWallMs, compare, 0)
+  }
   const texts = await Promise.all(input.natives.map((name) => readFile(path.join(launchOut, name), "utf8")))
   const blocks = texts.flatMap(nativeLines).flatMap((entry) => entry.event === "capture-block" ? [captureBlock.parse(entry)] : [])
   const played = playedBlocks(blocks, steps[0]?.editWallMs ?? 0)
@@ -475,6 +523,43 @@ export const selfTest = () => {
   check(one(compareTrust(lines({ event: "graph-publish", wallMs: 500 }), 1000)).outcome === "pass", "nothing after the refusal passes")
   check(one(compareTrust(lines({ event: "graph-publish-request", wallMs: 1500 }), 1000)).outcome === "fail", "a graph request after the refusal fails")
   check(one(compareTrust(lines({ event: "worker-spawn", wallMs: 1500 }), 1000)).outcome === "fail", "a worker spawned after the refusal fails")
+  // The transport rows. Host loss: the host is reported exited, the transport stopped, native unavailable reported, and no session starts after.
+  const observed = (edit: string, wallMs: number, fields: Partial<TransportObservation> = {}): TransportObservation =>
+    ({ event: "transport-observed", wallMs, edit, pid: 7, cancelWallMs: wallMs - 100, state: "stopped", playheadSec: 0, failure: nativeUnavailableReported, ...fields })
+  const lossSteps = [{ index: 1, editWallMs: 1000, settledWallMs: 1500 }]
+  const loss = (events: ReturnType<typeof lines>, fields?: Partial<TransportObservation>) =>
+    judgeBurst(lossSteps, 3000, compareHostLoss(events, [observed("play-kill-host", 1400, fields)]), 0)
+  const exited = { event: "host-exit", pid: 7, wallMs: 1350 }
+  check(loss(lines(exited, { event: "host-spawn", pid: 8, wallMs: 1800 })).outcome === "pass", "a lost host with the transport stopped and a restarted supervisor passes")
+  check(loss(lines()).outcome === "fail", "a kill with no host-exit line fails")
+  check(loss(lines({ ...exited, pid: 9 })).outcome === "fail", "another process's exit is not the killed host's")
+  check(loss(lines(exited), { state: "playing" }).outcome === "fail", "a transport that plays after the host was lost fails")
+  check(loss(lines(exited), { failure: "" }).outcome === "fail", "no native-unavailable report fails")
+  check(loss(lines(exited, { event: "graph-publish", wallMs: 1700 })).outcome === "fail", "a graph published after the host was lost fails")
+  check(loss(lines(exited, { event: "device-start-request", wallMs: 1700 })).outcome === "fail", "a device started after the host was lost fails")
+  check(loss(lines(exited, { event: "device-start-request", wallMs: 1200 })).outcome === "pass", "a start request before the kill is the pending Play's own")
+  // Cancelled start: edit k begins at k s, the cancel is issued 100 ms before its observation, which lands 300 ms in.
+  const names = ["session-pause", "play-then-pause", "play-resume", "session-pause", "play-then-stop", "play-resume"]
+  const cancelSteps = names.map((_, position) => ({ index: position + 1, editWallMs: (position + 1) * 1000, settledWallMs: (position + 1) * 1000 + 400 }))
+  const resting = [{ state: "paused", playheadSec: 1.5 }, { state: "paused", playheadSec: 1.5 }, { state: "playing", playheadSec: 2 },
+    { state: "paused", playheadSec: 2.5 }, { state: "paused", playheadSec: 0 }, { state: "playing", playheadSec: 0.2 }]
+  const honestSeen = names.map((name, position) => observed(name, (position + 1) * 1000 + 300, { failure: "", ...resting[position] }))
+  const cancelled = (events: ReturnType<typeof lines>, observations = honestSeen) => judgeBurst(cancelSteps, 8000, compareCancelledStart({ events, observations,
+    editName: (index) => names[index - 1] ?? "", editWallMs: (index) => index * 1000 }), 0)
+  check(cancelled(lines({ event: "device-configure", wallMs: 1200 }, { event: "device-stop", wallMs: 2050 })).outcome === "pass",
+    "the preparing play and a stop before the cancel are not the cancel's")
+  check(cancelled(lines({ event: "device-stop", wallMs: 2250 })).editIndex === 2, "a device stop after a Pause's cancel fails that step")
+  check(cancelled(lines({ event: "host-teardown-request", wallMs: 5250 })).editIndex === 5, "a teardown after a Stop's cancel fails that step")
+  check(cancelled(lines({ event: "capture-configure", wallMs: 2250 })).editIndex === 2, "a capture configure after the cancel fails")
+  check(cancelled(lines({ event: "begin-transaction", wallMs: 5250 })).editIndex === 5, "a begin after the cancel fails")
+  check(cancelled(lines({ event: "structural-rebuild", wallMs: 3200 })).editIndex === 3, "a rebuild under the next Play fails")
+  check(cancelled(lines({ event: "device-configure", wallMs: 6100 })).editIndex === 6, "a configure under the Play after the Stop fails")
+  const replaced = (position: number, fields: Partial<TransportObservation>) => honestSeen.map((entry, at) => at === position ? { ...entry, ...fields } : entry)
+  check(cancelled(lines(), replaced(1, { state: "playing" })).editIndex === 2, "a Pause that leaves the transport playing fails")
+  check(cancelled(lines(), replaced(1, { playheadSec: 1.6 })).editIndex === 2, "a cancelled Play that moves the paused position fails")
+  check(cancelled(lines(), replaced(4, { playheadSec: 0.5 })).editIndex === 5, "a Stop that leaves the position off 0 fails")
+  check(cancelled(lines(), replaced(2, { state: "paused" })).editIndex === 3, "a Play that does not play fails")
+  check(cancelled(lines(), honestSeen.filter((_, position) => position !== 1)).editIndex === 2, "a step with no observation fails")
   console.log("ae-08 phase 9 compare self-test: pass")
 }
 

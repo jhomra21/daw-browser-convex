@@ -30,7 +30,7 @@ export const burstSchedule = (row: Row, repetitions: number) =>
 export const mergeLaunches = (rows: readonly Row[]) => rows.reduce<Row[][]>((launches, row) => {
   const last = launches.at(-1), tail = last?.at(-1)
   const joins = last && tail && tail.fixture !== null && tail.fixture === row.fixture && tail.latencyClass === row.latencyClass
-    && tail.repeat === row.repeat && row.repeat !== "launch" && tail.periodSec === row.periodSec && tail.cycle.at(-1)?.state === row.start
+    && tail.repeat === row.repeat && row.repeat !== "launch" && tail.transport === undefined && row.transport === undefined && tail.periodSec === row.periodSec && tail.cycle.at(-1)?.state === row.start
     && String(tail.prepare) === String(row.prepare) && tail.device === row.device
   return joins ? [...launches.slice(0, -1), [...last, row]] : [...launches, [row]]
 }, [])
@@ -38,7 +38,8 @@ export const mergeLaunches = (rows: readonly Row[]) => rows.reduce<Row[][]>((lau
 // The launches of a run: a row that repeats by launch gives one launch per repetition.
 export const launchesFor = (rows: readonly Row[], repetitions: number) => mergeLaunches(rows)
   .flatMap((launch) => launch.every((row) => row.repeat === "launch") ? Array.from({ length: repetitions }, () => launch) : [launch])
-const burstOnly = (launch: readonly Row[]) => launch.every((row) => row.repeat === "launch")
+// A row whose edits drive the transport has no audio to keep as a reference, and a launch of rows with no reference is only a burst.
+const burstOnly = (launch: readonly Row[]) => launch.every((row) => row.repeat === "launch" || row.transport === "driven")
 
 // Seconds per launch, per edit and per VST edit. The defaults are plan §8's assumptions (about 2 s to settle plus the 1 s oracle window
 // per edit, 20 s per VST insert) and the phase 8 smoke (about 10 s per launch plus import and reload); `--timings <evidence dir>`
@@ -221,9 +222,10 @@ export const runBurst = async (input: { out: string; directory: string; row: Row
       const raise = moves.some((move) => move.toLatencyFrames > move.fromLatencyFrames)
       // A refused commit publishes nothing: its step is settled when the refusal returns, and no frame is waited for.
       const settleOn = step.settle ?? row.settle
-      const found = settleOn === "refused" ? { wallMs: Date.now(), revision: 0, publicationFrame: 0 }
+      const publishesNothing = settleOn === "refused" || settleOn === "returned"
+      const found = publishesNothing ? { wallMs: Date.now(), revision: 0, publicationFrame: 0 }
         : await awaitPublicationComplete(out, wallMs, raise, input.deadlineMs ?? settleDeadlineMs(row), settleOn)
-      const settled = found.publicationFrame > 0 || settleOn === "refused" ? found : { ...found, publicationFrame: input.frameAt(found.wallMs) }
+      const settled = found.publicationFrame > 0 || publishesNothing ? found : { ...found, publicationFrame: input.frameAt(found.wallMs) }
       const { wallMs: settledWallMs, revision, publicationFrame } = settled
       await mark("burst-settled", { row: row.name, index: step.index, settledWallMs })
       for (const move of moves) logged.push({ ...move, index: step.index, wallMs: move.wallMs ?? wallMs, settledWallMs, revision, publicationFrame })
@@ -248,14 +250,15 @@ export const MIN_WINDOW_MS = 1000
 
 // The oracle window after edit k runs from its publication-complete line to the start of edit k+1 (or the capture end).
 // The burst ends at the first bad edit and counts it once; later edits are never judged.
-export const judgeBurst = (steps: readonly BurstStep[], captureEndWallMs: number, compare: Compare): BurstVerdict => {
+// A row with no audio to compare (host evidence only) needs no 1 s window and passes 0.
+export const judgeBurst = (steps: readonly BurstStep[], captureEndWallMs: number, compare: Compare, minWindowMs = MIN_WINDOW_MS): BurstVerdict => {
   for (const [position, step] of steps.entries()) {
     const judged = position + 1
     if (step.settledWallMs === undefined)
       return { outcome: "setup", editIndex: step.index, detail: "no publication-complete line in host.jsonl", judged }
     const window = { index: step.index, fromWallMs: step.settledWallMs, toWallMs: steps[position + 1]?.editWallMs ?? captureEndWallMs }
-    if (window.toWallMs - window.fromWallMs < MIN_WINDOW_MS)
-      return { outcome: "setup", editIndex: step.index, detail: `oracle window ${window.toWallMs - window.fromWallMs} ms is under ${MIN_WINDOW_MS} ms`, judged }
+    if (window.toWallMs - window.fromWallMs < minWindowMs)
+      return { outcome: "setup", editIndex: step.index, detail: `oracle window ${window.toWallMs - window.fromWallMs} ms is under ${minWindowMs} ms`, judged }
     const failure = compare(window)
     if (failure !== undefined) return { outcome: "fail", editIndex: step.index, detail: failure, judged }
   }
@@ -475,7 +478,7 @@ export const selfTest = async () => {
   check(phase9Matrix.every((row) => (row.fixture === null) === (row.needs !== undefined)), "a row is missing exactly when it names what it needs")
   check(new Set(phase9Rows).size === phase9Rows.length, "row names are distinct")
   // Launch plan: every merged launch is a burst and a reference, and the first launch of each latency class adds the calibration duplicate.
-  const built = phase9Matrix.filter((row) => row.fixture !== null && row.repeat !== "launch")
+  const built = phase9Matrix.filter((row) => row.fixture !== null && row.repeat !== "launch" && row.transport === undefined)
   const launches = mergeLaunches(built)
   const order = launchPlan(launches)
   const classes = new Set(launches.map((launch) => launch[0]?.latencyClass))
@@ -491,14 +494,29 @@ export const selfTest = async () => {
   check(launchesFor([delete1], 5).length === 5 && launchesFor([fft], 5).length === 1, "a launch-repeat row gives one launch per repetition")
   check(launchPlan(launchesFor([delete1], 3)).map((step) => step.role).join() === "burst,burst,burst", "a launch judged on its own capture has no reference")
   check(wallSeconds(launchesFor([delete1], 3), 3, 20) === 3 * (assumedTimings.launchSeconds + assumedTimings.stepSeconds), "a launch-repeat row costs one launch and one edit each time")
+  // A row whose edits drive the transport is one launch of its own, with no reference, whatever the repetitions.
+  const driven = [find("host-failure-during-play"), find("pause-stop-during-play-start")]
+  check(driven.every((row) => row.transport === "driven" && row.settle === "returned"), "the transport rows are driven and settle when their edits return")
+  check(mergeLaunches(driven).length === 2 && mergeLaunches([...driven, fft]).length === 3, "a driven row never merges")
+  check(launchesFor(driven, 20).length === 2 && launchPlan(launchesFor(driven, 20)).map((step) => step.role).join() === "burst,burst", "a driven row is one burst-only launch however many repetitions")
+  // Its steps settle when the edit returns: no host evidence is awaited, and hold is asked for the spacing only.
+  const drivenDirectory = await mkdtemp(path.join(tmpdir(), "ae08-phase9-driven-"))
+  try {
+    const performed: string[] = []
+    const logged = await runBurst({ out: drivenDirectory, directory: drivenDirectory, row: find("pause-stop-during-play-start"), repetitions: 1, sampleRate: 48000, frameAt: () => 0,
+      perform: async (edit) => { performed.push(edit); return { fromLatencyFrames: 0, toLatencyFrames: 0 } }, mark: async () => undefined,
+      hold: async () => undefined, afterSettle: async () => undefined, deadlineMs: 1 })
+    check(performed.join() === "session-pause,play-then-pause,play-resume,session-pause,play-then-stop,play-resume" && logged.every((edit) => edit.settledWallMs !== undefined),
+      `the six cancelled-start edits run in order and settle without host evidence: ${performed}`)
+  } finally { await rm(drivenDirectory, { recursive: true }) }
   check(mergeLaunches([find("vst-insert"), { ...find("vst-remove-undo"), start: "vst-absent" }]).length === 2, "different preparation does not merge")
   // Budget rule: only over 70 min do the VST burst rows drop to 10, and the reason is printed.
   const withVst = launchesFor(phase9Matrix, 20)
   const slowVst = { ...assumedTimings, vstStepSeconds: 60 }
   const dropped = chooseVstRepetitions(withVst, 20, 20, slowVst)
   check(dropped.vstRepetitions === FALLBACK_VST_REPETITIONS && /over 70 min/.test(dropped.why), `a 60 s VST edit drops to 10, got ${JSON.stringify(dropped)}`)
-  const fits = chooseVstRepetitions(withVst, 20, 20, { ...assumedTimings, vstStepSeconds: 1 })
-  check(fits.vstRepetitions === 20 && /fits 70 min/.test(fits.why), `a 1 s VST edit keeps 20, got ${JSON.stringify(fits)}`)
+  const fits = chooseVstRepetitions(withVst, 20, 20, { ...assumedTimings, vstStepSeconds: 0.5 })
+  check(fits.vstRepetitions === 20 && /fits 70 min/.test(fits.why), `a 0.5 s VST edit keeps 20, got ${JSON.stringify(fits)}`)
   check(chooseVstRepetitions(mergeLaunches(built.filter((row) => row.repeat !== "vst-burst")), 20, 20, slowVst).vstRepetitions === 20, "no VST burst row selected, nothing to drop")
   check(chooseVstRepetitions(withVst, 20, 10, slowVst).vstRepetitions === 10, "a request at or under 10 is never raised or cut")
   check(wallSeconds(withVst, 20, 10, slowVst) < wallSeconds(withVst, 20, 20, slowVst), "fewer VST repetitions cost less wall time")

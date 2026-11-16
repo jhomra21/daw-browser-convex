@@ -15,25 +15,28 @@ export const nativeEditorAnchorFromElement = (element: HTMLElement): NativeEdito
 )
 
 // Main's command schema refuses an own key whose value is undefined, so absent fields stay absent.
-export const nativeEditorCommand = (input: {
+type NativeEditorCommand = {
   projectId: string
   instanceId: string
   command: 'open' | 'close' | 'focus'
-  serializedPlan: string | undefined
-  initialState: { bytes: Uint8Array; sha256: string } | undefined
   requiresState: boolean
   captureState: boolean
-  anchor: NativeEditorAnchor | undefined
-}) => ({
-  projectId: input.projectId,
-  instanceId: input.instanceId,
-  command: input.command,
-  requiresState: input.requiresState,
-  captureState: input.captureState,
-  ...(input.serializedPlan === undefined ? {} : { serializedPlan: input.serializedPlan }),
-  ...(input.initialState === undefined ? {} : { initialState: input.initialState }),
-  ...(input.anchor === undefined ? {} : { anchor: input.anchor }),
-})
+  serializedPlan?: string
+  initialState?: { bytes: Uint8Array; sha256: string }
+  anchor?: NativeEditorAnchor
+}
+
+export const nativeEditorCommand = (
+  input: Omit<NativeEditorCommand, 'serializedPlan' | 'initialState' | 'anchor'>
+    & { [Key in 'serializedPlan' | 'initialState' | 'anchor']: NativeEditorCommand[Key] | undefined },
+): NativeEditorCommand => {
+  const { serializedPlan, initialState, anchor, ...required } = input
+  const command: NativeEditorCommand = required
+  if (serializedPlan !== undefined) command.serializedPlan = serializedPlan
+  if (initialState !== undefined) command.initialState = initialState
+  if (anchor !== undefined) command.anchor = anchor
+  return command
+}
 
 export const nativeEditorCommandAvailable = (
   bridgeAvailable: boolean,

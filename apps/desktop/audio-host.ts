@@ -2888,6 +2888,7 @@ export const createNativeAudioHostSupervisor = (
         }
         normalSends.push(queued)
       logControlEnqueue(vstStateGetType, queued.requestId, queued.enqueuedAt)
+        ae08Evidence("vst-state-get", { pid: current.pid ?? null })
         dispatchNext()
       })
       if (!signal) return requestPromise

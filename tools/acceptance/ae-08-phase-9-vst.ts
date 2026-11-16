@@ -69,6 +69,16 @@ export const openTestPluginEditor = async (context: Ui) => {
   await waitForUi(context, "The test plug-in editor did not open", `Boolean(${cardButton("Close UI")})`)
 }
 
+// An inserted plug-in opens its editor on its own, so the open step first closes that one through the card's Close UI and settles
+// when the card offers Open UI again. It returns the wall time of the click.
+export const closeTestPluginEditor = async (context: Ui) => {
+  await waitForUi(context, "The test plug-in editor did not auto-open", `Boolean(${cardButton("Close UI")})`)
+  const clickedWallMs = Date.now()
+  await context.evaluate(`(()=>{const button=${cardButton("Close UI")};if(!button)throw new Error('Test plug-in Close UI button missing');button.click();return true})()`)
+  await waitForUi(context, "The test plug-in editor did not close", `Boolean(${cardButton("Open UI")})`)
+  return clickedWallMs
+}
+
 // A failed plug-in is reported on its own device card.
 export const awaitTestPluginFailure = (context: Ui) =>
   waitForUi(context, "The failed test plug-in is not reported on its device", `Boolean(${externalDevice}?.textContent?.includes('Plug-in failed'))`)

@@ -8,7 +8,7 @@ export type LatencyClass = "plain" | "raise" | "asset" | "vst-insert"
 // that carries a decoded asset (not the track-only one an import makes first), the publication whose schedule windows carry an automation lane ("lane") or none ("lane-free"), the host's editor-open or plug-in fault line, or, for a
 // commit the app refuses, the return of the refusal.
 // "returned" is for a transport command that is its own observation: the step settles when its edit returns.
-export type Settle = "sequence" | "asset" | "lane" | "lane-free" | "refused" | "editor-open" | "plugin-fault" | "returned"
+export type Settle = "sequence" | "asset" | "lane" | "lane-free" | "refused" | "editor-open" | "state-capture" | "plugin-fault" | "returned"
 // How a step is entered when it is not the analyzer's 6 ms crossfade: "ghost" (a removed track's node fades over 5 ms on top of its
 // source's 6 ms), "cut" (a restored track or a decoded asset sounds from its publication).
 export type Step = { edits: string[]; state: string; entry?: "ghost" | "cut"; settle?: Settle }

@@ -144,6 +144,7 @@ const laneEventsOf = (events: readonly HostEvent[], publish: HostEvent, sinceWal
 export const publicationComplete = (events: readonly HostEvent[], sinceWallMs: number, raise: boolean, settle?: Settle): Settled | undefined => {
   if (settle === "sequence") return settledOn(events.find((event) => event.event === "processor-sequence-applied" && event.frame > 0 && event.wallMs >= sinceWallMs))
   if (settle === "editor-open") return settledOn(events.find((event) => event.event === "vst-editor-state" && event.open === true && event.wallMs >= sinceWallMs))
+  if (settle === "state-capture") return settledOn(events.find((event) => event.event === "vst-state-get" && event.wallMs >= sinceWallMs))
   if (settle === "plugin-fault") return settledOn(events.find((event) => event.event === "attachment-fault-isolated" && event.cause === "plugin-fault" && event.wallMs >= sinceWallMs))
   // An import publishes its empty track first and the decoded asset after: the asset's publication is the first one an asset-install
   // since the edit precedes.
@@ -445,6 +446,9 @@ export const selfTest = async () => {
   // Steps that publish no graph settle on their own host line.
   const editorLine = (open: boolean, wallMs: number) => ({ event: "vst-editor-state", instanceId: "i-1", open, wallMs })
   check(publicationComplete(host(editorLine(true, 1000)), 900, false, "editor-open")?.wallMs === 1000, "the editor-open step settles on its vst-editor-state open line")
+  const stateGet = (wallMs: number) => ({ event: "vst-state-get", wallMs })
+  check(publicationComplete(host(stateGet(1000)), 900, false, "state-capture")?.wallMs === 1000 && publicationComplete(host(stateGet(800)), 900, false, "state-capture") === undefined,
+    "the state-capture step settles on a vst-state-get line at or after the close")
   check(publicationComplete(host(editorLine(false, 1000)), 900, false, "editor-open") === undefined && publicationComplete(host(editorLine(true, 800)), 900, false, "editor-open") === undefined,
     "a closed editor or an earlier line is not its settle")
   const fault = (cause: string) => ({ event: "attachment-fault-isolated", cause, wallMs: 1000, frame: 120000 })

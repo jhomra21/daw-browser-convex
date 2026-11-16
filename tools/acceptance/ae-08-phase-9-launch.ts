@@ -8,14 +8,14 @@ import { createAvailableDesktopHostClient } from "@daw-browser/desktop-protocol/
 import { command } from "../performance/30-track/v3-import-workload"
 import { deleteTrackThroughUi, dragUtilityGainKnob, exportReference, heldInstrumentTrack, heldSynthTrack, insertTargetTrack, pressHistoryKey, reorderTargetTrack, required,
   sampledInstrumentParams, selectFftSize, setupPhase5Fixture, sineSynthParams, waitForUi, waitImportedClip, waitNativeFrame, liveMidiTrack, type Phase5Context, type SampleAsset } from "./ae-08-phase-5-fixture"
-import { burstSchedule, judgeStored, MIN_WINDOW_MS, parseHostLines, repetitionsFor, runBurst, type Perform, type Timings } from "./ae-08-phase-9-matrix"
+import { awaitPublicationComplete, burstSchedule, judgeStored, MIN_WINDOW_MS, parseHostLines, repetitionsFor, runBurst, type Perform, type Timings } from "./ae-08-phase-9-matrix"
 import { phase9Matrix, type Row } from "./ae-08-phase-9-rows"
 import { nativeUnavailableReported, takeFile } from "./ae-08-phase-9-compare"
 import { writeWav } from "./ae08-wav"
 import { blackhole, describeAudioInputScript, iacPort, makeTone, nativeInputDeviceSchema, playToneIntoBlackhole, selectAudioInputScript, selectMidiInputScript, sendMidiNote } from "./ae-08-phase-9-devices"
 import { armRecordTarget, finishRecording, recordingTargetLockedReason, startRecording, toneSeconds, verifyHandedOverTake } from "./ae-08-phase-9-record"
 import { createOutputDeviceSteps } from "./ae-08-phase-9-output-device"
-import { awaitTestPluginFailure, insertTestPlugin, openTestPluginEditor, prepareTestPlugin, refuseUntrustedPlugin, removeTestPlugin, showUntrustedEffectsBrowser } from "./ae-08-phase-9-vst"
+import { awaitTestPluginFailure, closeTestPluginEditor, insertTestPlugin, openTestPluginEditor, prepareTestPlugin, refuseUntrustedPlugin, removeTestPlugin, showUntrustedEffectsBrowser } from "./ae-08-phase-9-vst"
 
 // One packaged launch of phase 9: the row's phase 5 start state, then either a burst of its edits (settled on host evidence) or the
 // same timeline with no edits (a reference, or the calibration duplicate of one). Edits go through the public control actions or the
@@ -66,13 +66,15 @@ type Performers = {
   transportStatus: () => Promise<{ state: string; playheadSec: number }>
   // The audio host process the app spawned last, and a way to kill one (the host-loss row kills it by pid).
   hostPid: () => Promise<number>
+  // Resolves when the app logged a plug-in state read from the playback worker at or after the wall time.
+  stateCaptured: (sinceWallMs: number) => Promise<void>
   kill: (pid: number) => void
   observe: () => Promise<Observed>
   setup: { changedTrackId: string; changedFile: string }
 }
 
 // The edit names of the built rows (ae-08-phase-9-matrix.ts) and what each does. Each returns the latency move it declares.
-export const createPerformer = ({ context, runtime, playThenPause, transportStatus, hostPid, kill, observe, setup }: Performers): Perform => {
+export const createPerformer = ({ context, runtime, playThenPause, transportStatus, hostPid, stateCaptured, kill, observe, setup }: Performers): Perform => {
   // An edit through the control protocol is stamped when the app receives its commit.
   const commit = async (actions: Parameters<Performers["context"]["mutate"]>[0]) => ({ ...unmoved, wallMs: await context.mutate(actions) })
   const target = { kind: "track", track: ref(setup.changedTrackId) }
@@ -231,7 +233,11 @@ export const createPerformer = ({ context, runtime, playThenPause, transportStat
     ["clip-delete", deleteImportedClip],
     ["vst-insert", async () => { await insertTestPlugin(context); return unmoved }],
     ["vst-remove", async () => { await removeTestPlugin(context); return unmoved }],
-    ["editor-open", async () => { await openTestPluginEditor(context); return unmoved }],
+    ["editor-open", async () => {
+      await stateCaptured(await closeTestPluginEditor(context))
+      await openTestPluginEditor(context)
+      return unmoved
+    }],
     // The test plug-in's Fault parameter (id 2): its second step, 1/3 normalized, aborts the worker's next process call.
     ["vst-fault", async () => {
       const { wallMs } = await commit([{ kind: "external-plugin.parameters.set", target,
@@ -324,6 +330,7 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
   }
   const performEdit = createPerformer({ context, runtime: async (args) => { await runtime(args) }, playThenPause, transportStatus,
     hostPid: () => lastHostPid(out), kill: (pid) => process.kill(pid, "SIGKILL"),
+    stateCaptured: async (sinceWallMs) => { await awaitPublicationComplete(out, sinceWallMs, false, 10_000, "state-capture") },
     setup: { changedTrackId: setup.changedTrack.id, changedFile: setup.changedFile },
     observe: async () => observeSnapshot(await context.snapshot(), setup.changedTrack.id) })
   const outputDeviceSteps = createOutputDeviceSteps({ context, out, transportStatus })
@@ -445,6 +452,7 @@ export const selfTest = async () => {
     playThenPause: async () => { calls.push("control play then pause"); return 4243 },
     transportStatus: async () => { calls.push("runtime transport-status"); return { state: transport.state, playheadSec: transport.playheadSec } },
     hostPid: async () => 4711,
+    stateCaptured: async (sinceWallMs) => { calls.push(`state-captured ${sinceWallMs > 0}`) },
     kill: (pid) => { calls.push(`kill ${pid}`) },
     observe: async () => observed,
     setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" },
@@ -514,8 +522,13 @@ export const selfTest = async () => {
   check(low.calls[0] === latencyAction(0) && low.moved.fromLatencyFrames === 4096 && low.moved.toLatencyFrames === 0, "latency-low sets it back")
   // The editor opens through the card's Open UI button and is awaited as Close UI; the fault sets the Fault parameter's crash step and
   // waits for the card to report it; the untrusted insert opens the dashboard, finds the trust prompt and no plug-in entry, and clicks nothing.
+  // The inserted plug-in's editor is already open: the step closes it through Close UI, waits for the state capture, then clicks Open UI.
   const editor = await run("editor-open")
-  check(editor.calls[0]?.includes(`"Open UI"`) === true && editor.calls[0]?.includes(".click()") === true && editor.calls.some((call) => call.includes(`"Close UI"`)), `editor-open clicks Open UI and awaits Close UI: ${editor.calls[0]}`)
+  const closeClick = editor.calls.findIndex((call) => call.includes(`"Close UI"`) && call.includes(".click()"))
+  const captured = editor.calls.indexOf("state-captured true")
+  const openClick = editor.calls.findIndex((call) => call.includes(`"Open UI"`) && call.includes(".click()") && !call.includes(`"Close UI"`))
+  check(closeClick >= 0 && captured > closeClick && openClick > captured && editor.calls.some((call) => call.includes(`"Close UI"`) && !call.includes(".click()")),
+    `editor-open closes the auto-opened editor, awaits its state capture, then clicks Open UI and awaits Close UI: ${editor.calls}`)
   const faulty = await run("vst-fault")
   const faultAction = `mutate ${JSON.stringify([{ kind: "external-plugin.parameters.set", target: { kind: "track", track: ref("track-1") }, processor: ref("external-1"), changes: [{ parameterId: 2, normalizedValue: 1 / 3 }] }])}`
   check(faulty.calls[0] === faultAction && faulty.moved.wallMs === 4242 && faulty.calls.some((call) => call.includes("Plug-in failed")), `vst-fault crashes the plug-in and awaits its failure on the card: ${faulty.calls[0]}`)
@@ -592,11 +605,11 @@ export const selfTest = async () => {
   // The armed target's delete must be refused with the lock's reason; a commit that goes through, or another refusal, fails the row.
   const guard = (mutate: () => Promise<number>) => createPerformer({
     context: { mutate, evaluate: async () => undefined, interact: async () => undefined, read: async (_, schema) => schema.parse(0), reload: async () => undefined, mark: async () => undefined },
-    runtime: async () => undefined, playThenPause: async () => 0, transportStatus: async () => ({ state: "paused", playheadSec: 0 }), hostPid: async () => 1, kill: () => undefined, observe: async () => observed, setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" } })("target-delete-refused")
+    runtime: async () => undefined, playThenPause: async () => 0, transportStatus: async () => ({ state: "paused", playheadSec: 0 }), hostPid: async () => 1, stateCaptured: async () => undefined, kill: () => undefined, observe: async () => observed, setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" } })("target-delete-refused")
   check((await guard(async () => { throw new Error(`validation: ${recordingTargetLockedReason}`) })).toLatencyFrames === 0, "a refusal carrying the lock's reason is the expected outcome")
   const reroute = (mutate: (actions: unknown[]) => Promise<number>) => createPerformer({
     context: { mutate, evaluate: async () => undefined, interact: async () => undefined, read: async (_, schema) => schema.parse("Return 4"), reload: async () => undefined, mark: async () => undefined },
-    runtime: async () => undefined, playThenPause: async () => 0, transportStatus: async () => ({ state: "paused", playheadSec: 0 }), hostPid: async () => 1, kill: () => undefined, observe: async () => observed,
+    runtime: async () => undefined, playThenPause: async () => 0, transportStatus: async () => ({ state: "paused", playheadSec: 0 }), hostPid: async () => 1, stateCaptured: async () => undefined, kill: () => undefined, observe: async () => observed,
     setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" } })("target-reroute-refused")
   let requested = ""
   await reroute(async (actions) => { requested = JSON.stringify(actions); throw new Error(`validation: ${recordingTargetLockedReason}`) })

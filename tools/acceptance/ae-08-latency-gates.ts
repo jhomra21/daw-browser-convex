@@ -56,7 +56,10 @@ const LIMITS = {
   "vst-insert": { prepareToPublishMaxMs: 70, editToPublishMaxMs: 250 },
 }
 // Pooled over the plain and raise publications of the run.
-const POOLED = { prepareToPublishP99Ms: 60, prepP50Ms: 8, editToPublishP50Ms: 100 }
+// Prep time is split by population (parent ruling, addendum 14 item 2): publications with spectralPredecessors = 0 hold 8 ms
+// (PARENT-RULING-LAT1-PREP-OVERHEAD.md); those with spectral predecessors hold their own frozen 12 ms (measured p50 9 to 10 ms).
+// Evidence without the field on its graph-publish lines keeps the old single pool at 8 ms.
+const POOLED = { prepareToPublishP99Ms: 60, prepP50Ms: 8, spectralPrepP50Ms: 12, editToPublishP50Ms: 100 }
 
 type Class = keyof typeof LIMITS
 type Gate = "inputs" | "lead" | "rebase" | "prepare-to-publish" | "prep-time" | "edit-to-publish" | "completion"
@@ -64,6 +67,8 @@ type Failure = { row: string; gate: Gate; detail: string }
 type Status = "PASS" | "INCOMPLETE" | "FAIL"
 type Publication = {
   row: string; revision: number; publicationFrame: number; asset: boolean; class: Class; raise: boolean; leadBlocks: number; seamBound: boolean; prepareToPublishMs: number; prepMs: number
+  // The graph-publish line's spectral predecessor count; undefined on evidence from before the field.
+  spectralPredecessors: number | undefined
   editToPublishMs: number | undefined; completeFrames: number | undefined; blocksBeforeBind: number
   // Largest read-head delay change of the publication (0 when the pinned budget grows); undefined without host latency evidence.
   headMoveFrames: number | undefined
@@ -155,6 +160,7 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<ty
     const seamBound = !windowed || events.slice(prepare.index + 1, index).some((event) => event.event === "schedule-window" && event.revision === revision)
     drafts.push({
       row, revision, publicationFrame: publish.publicationFrame, asset, blocksBeforeBind, seamBound, wallMs: publish.wallMs,
+      spectralPredecessors: publish.spectralPredecessors,
       headMoveFrames: previousPublish && headMoveFrames(previousPublish, publish),
       leadBlocks: (publish.publicationFrame - bind.frame) / BLOCK, prepareToPublishMs: publish.wallMs - prepare.event.wallMs,
       prepMs: armed.wallMs - prepare.event.wallMs, completeFrames: complete ? complete.frame - publish.publicationFrame : undefined,
@@ -225,12 +231,16 @@ const judgePooled = (publications: readonly Publication[]): Failure[] => {
   const editMs = pooled.flatMap((publication) => publication.editToPublishMs ?? [])
   const stat = (values: readonly number[], fraction: number) => values.length ? percentile(values, fraction) : 0
   const p99 = stat(pooled.map((publication) => publication.prepareToPublishMs), 0.99)
-  const prepP50 = stat(pooled.map((publication) => publication.prepMs), 0.5)
+  const spectral = pooled.filter((publication) => (publication.spectralPredecessors ?? 0) > 0)
+  const rest = pooled.filter((publication) => !spectral.includes(publication))
+  const prepP50 = stat(rest.map((publication) => publication.prepMs), 0.5)
+  const spectralPrepP50 = stat(spectral.map((publication) => publication.prepMs), 0.5)
   const editP50 = stat(editMs, 0.5)
   const fail = (gate: Gate, detail: string): Failure => ({ row: "(pooled)", gate, detail })
   return [
     ...(p99 > POOLED.prepareToPublishP99Ms ? [fail("prepare-to-publish", `pooled p99 ${p99} > ${POOLED.prepareToPublishP99Ms} ms`)] : []),
     ...(prepP50 > POOLED.prepP50Ms ? [fail("prep-time", `pooled prep p50 ${prepP50} > ${POOLED.prepP50Ms} ms`)] : []),
+    ...(spectralPrepP50 > POOLED.spectralPrepP50Ms ? [fail("prep-time", `pooled spectral prep p50 ${spectralPrepP50} > ${POOLED.spectralPrepP50Ms} ms`)] : []),
     ...(editP50 > POOLED.editToPublishP50Ms ? [fail("edit-to-publish", `pooled p50 ${editP50} > ${POOLED.editToPublishP50Ms} ms`)] : []),
   ]
 }
@@ -364,7 +374,15 @@ const selfTest = async (c1Runs: readonly string[]) => {
     // A UI edit's step starts before the app commits it: with the mark the harness's own latency (here 85 ms) is not the product's.
     { name: "UI edit 160 ms from the step start but 75 ms from its ui mark", status: "PASS", fails: [], rows: [["two-tone", withClean({ editMs: 160, uiMarkMs: 75 })]] },
     { name: "UI edit 160 ms from its ui mark", status: "FAIL", fails: ["edit-to-publish"], rows: [["two-tone", withClean({ editMs: 170, uiMarkMs: 160 })]] },
-    { name: "prep time p50 9 ms", status: "FAIL", fails: ["prep-time"], rows: [["two-tone", [{ prepMs: 9 }, { prepMs: 9 }, { prepMs: 9 }]]] },
+    { name: "old evidence with no spectral field: prep time p50 9 ms keeps the 8 ms pool", status: "FAIL", fails: ["prep-time"], rows: [["two-tone", [{ prepMs: 9 }, { prepMs: 9 }, { prepMs: 9 }]]] },
+    { name: "spectral population at prep p50 9 ms passes its 12 ms pool", status: "PASS", fails: [],
+      rows: [["two-tone", [{ prepMs: 9, spectral: 1 }, { prepMs: 9, spectral: 1 }, { prepMs: 9, spectral: 2 }]]] },
+    { name: "spectral population at prep p50 13 ms fails", status: "FAIL", fails: ["prep-time"],
+      rows: [["two-tone", [{ prepMs: 13, spectral: 1 }, { prepMs: 13, spectral: 1 }, { prepMs: 13, spectral: 1 }]]] },
+    { name: "non-spectral population (spectral 0) at prep p50 9 ms fails the 8 ms pool", status: "FAIL", fails: ["prep-time"],
+      rows: [["two-tone", [{ prepMs: 9, spectral: 0 }, { prepMs: 9, spectral: 0 }, { prepMs: 9, spectral: 0 }]]] },
+    { name: "spectral publications do not lift a non-spectral population over 8 ms", status: "FAIL", fails: ["prep-time"],
+      rows: [["two-tone", [{ prepMs: 9, spectral: 0 }, { prepMs: 9, spectral: 0 }, { prepMs: 9, spectral: 1 }, { prepMs: 9, spectral: 1 }, { prepMs: 9, spectral: 1 }]]] },
     { name: "session at 44.1 kHz is an input failure", status: "FAIL", fails: ["inputs"], rows: [["two-tone", clean, { sampleRate: 44100 }]] },
     { name: "unknown declared class is an input failure", status: "FAIL", fails: ["inputs"], rows: [["two-tone", clean, { declare: JSON.stringify({ class: "mystery" }) }]] },
     { name: "latency publication with no seam (lead 0) in a row with schedule windows is not a lead failure", status: "PASS", fails: [],

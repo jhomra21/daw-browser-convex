@@ -310,6 +310,10 @@ process.stdin.on("data", (chunk) => {
       mappedWritten = 0
       mappedPrepared = false
       process.stdout.write(ack(type))
+    } else if (type === 58 && process.env.MODE === "mapped-page-frame") {
+      const expected = Buffer.concat([u32(7), u64(5), u32(2), Buffer.from(Array.from({ length: 16 }, (_, index) => index + 1))])
+      if (!payload.equals(expected)) process.exit(2)
+      process.stdout.write(ack(type))
     } else if (type === 58 && process.env.MODE === "offline-mapped-pages") {
       const start = Number(payload.readBigUInt64BE(4))
       const count = payload.readUInt32BE(12)
@@ -382,6 +386,28 @@ describe("native audio host protocol", () => {
       ]),
     )
   })
+})
+
+test("a mapped page reaches the host as the same frame bytes as a joined header and payload", async () => {
+  const header = Buffer.alloc(16)
+  header.writeUInt32BE(7, 0)
+  header.writeBigUInt64BE(5n, 4)
+  header.writeUInt32BE(2, 12)
+  const planarPcm = Uint8Array.from({ length: 16 }, (_, index) => index + 1)
+  const frame = encodeNativeAudioHostControlFrame(nativeAudioHostControlTypes.mappedAssetWritePage, [header, planarPcm])
+  expect(frame).toEqual(encodeNativeAudioHostControlFrame(
+    nativeAudioHostControlTypes.mappedAssetWritePage,
+    Buffer.concat([header, planarPcm]),
+  ))
+  expect(frame?.subarray(0, 16).readUInt32BE(12)).toBe(32)
+
+  const fixture = await fixtureSupervisor("mapped-page-frame")
+  try {
+    await fixture.supervisor.writeMappedAssetPage({ sessionAssetId: 7, startFrame: 5, frameCount: 2, planarPcm })
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
 })
 
 test("carries the bounded Stop reason on protocol and control diagnostics", async () => {
@@ -1128,7 +1154,7 @@ type PatchStatusMode =
   | "patch-applied" | "patch-claimed" | "patch-refused-pending" | "patch-refused-stage" | "patch-bad-claim-token"
   | "patch-bad-refusal" | "patch-bad-core" | "patch-bad-length"
 const fixtureSupervisor = async (
-  mode?: ScheduleProgressMode | PatchStatusMode | "device-loss" | "transition-pending" | "offline-instrument-rejected" | "spool-failed-finish" | "spool-slow-stop" | "spool-bad-pool" | "spool-bad-meter" | "spool-bad-active" | "spool-bad-identity" | "spool-bad-totals" | "spool-reserved" | "spool" | "incompatible" | "loss" | "wrong-ack" | "rejected-ack" | "unavailable-ack" | "bad-ack-status" | "state-rejected" | "state-malformed" | "state-mismatch" | "notification" | "meter" | "schedule" | "editor-interaction" | "parameter-edit" | "silent" | "editor-anchor" | "editor-queued" | "ignore-teardown" | "rollback-rejected" | "begin-delayed" | "commit-delayed" | "close-on-configure" | "stop-reason",
+  mode?: ScheduleProgressMode | PatchStatusMode | "device-loss" | "transition-pending" | "offline-instrument-rejected" | "spool-failed-finish" | "spool-slow-stop" | "spool-bad-pool" | "spool-bad-meter" | "spool-bad-active" | "spool-bad-identity" | "spool-bad-totals" | "spool-reserved" | "spool" | "incompatible" | "loss" | "wrong-ack" | "rejected-ack" | "unavailable-ack" | "bad-ack-status" | "state-rejected" | "state-malformed" | "state-mismatch" | "notification" | "meter" | "schedule" | "editor-interaction" | "parameter-edit" | "silent" | "editor-anchor" | "editor-queued" | "ignore-teardown" | "rollback-rejected" | "begin-delayed" | "commit-delayed" | "close-on-configure" | "stop-reason" | "mapped-page-frame",
   onSpawn?: () => void,
   supervisorOptions?: NativeAudioHostSupervisorOptions,
   onChild?: (child: ChildProcessWithoutNullStreams) => void,

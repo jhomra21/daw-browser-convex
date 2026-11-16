@@ -167,15 +167,19 @@ const readinessReason = (value: number): AudioHostHello["readinessReason"] | und
   return undefined
 }
 
-export const encodeNativeAudioHostControlFrame = (type: number, payload: Uint8Array = new Uint8Array()) => {
-  if (payload.byteLength > maximumPayloadBytes) return undefined
-  const output = Buffer.alloc(headerBytes + payload.byteLength)
-  output.writeUInt32BE(magic, 0)
-  output.writeUInt32BE(protocolVersion, 4)
-  output.writeUInt32BE(type, 8)
-  output.writeUInt32BE(payload.byteLength, 12)
-  output.set(payload, headerBytes)
-  return output
+// A payload given as parts is joined into the frame in one copy, so a large page need not be assembled first.
+type NativeControlPayload = Uint8Array | readonly Uint8Array[]
+
+export const encodeNativeAudioHostControlFrame = (type: number, payload: NativeControlPayload = new Uint8Array()) => {
+  const parts = payload instanceof Uint8Array ? [payload] : payload
+  const payloadBytes = parts.reduce((total, part) => total + part.byteLength, 0)
+  if (payloadBytes > maximumPayloadBytes) return undefined
+  const header = Buffer.allocUnsafe(headerBytes)
+  header.writeUInt32BE(magic, 0)
+  header.writeUInt32BE(protocolVersion, 4)
+  header.writeUInt32BE(type, 8)
+  header.writeUInt32BE(payloadBytes, 12)
+  return Buffer.concat([header, ...parts], headerBytes + payloadBytes)
 }
 
 const unsigned32 = (value: number) => Number.isSafeInteger(value) && value >= 0 && value <= 0xffff_ffff
@@ -1502,7 +1506,7 @@ export const createNativeAudioHostSupervisor = (
   }
   type QueuedSend = {
     type: NativeHostRequestType
-    payload?: Buffer
+    payload?: NativeControlPayload
     owner?: symbol
     allowDuringTeardown: boolean
     requestId: number
@@ -2422,7 +2426,7 @@ export const createNativeAudioHostSupervisor = (
   }
   const send = (
     type: NativeHostRequestType,
-    payload?: Buffer,
+    payload?: NativeControlPayload,
     owner?: symbol,
     allowDuringTeardown = false,
     reason?: string,
@@ -2482,7 +2486,7 @@ export const createNativeAudioHostSupervisor = (
     }
     return admitStarted(token)
   }
-  const request = async (type: NativeHostRequestType, payload?: Buffer, token?: string, reason?: string) => {
+  const request = async (type: NativeHostRequestType, payload?: NativeControlPayload, token?: string, reason?: string) => {
     await send(type, payload, await admit(token), false, reason)
   }
   const requestEditor = async (
@@ -2965,13 +2969,12 @@ export const createNativeAudioHostSupervisor = (
         || input.planarPcm.byteLength > maximumPayloadBytes - 16
         || input.planarPcm.byteLength % (input.frameCount * 4) !== 0
       ) throw new Error("The native mapped audio page is invalid.")
-      const payload = Buffer.alloc(16 + input.planarPcm.byteLength)
-      payload.writeUInt32BE(input.sessionAssetId, 0)
-      payload.writeBigUInt64BE(BigInt(input.startFrame), 4)
-      payload.writeUInt32BE(input.frameCount, 12)
-      payload.set(input.planarPcm, 16)
+      const pageHeader = Buffer.allocUnsafe(16)
+      pageHeader.writeUInt32BE(input.sessionAssetId, 0)
+      pageHeader.writeBigUInt64BE(BigInt(input.startFrame), 4)
+      pageHeader.writeUInt32BE(input.frameCount, 12)
       ae08Evidence("asset-page-write", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId, bytes: input.planarPcm.byteLength })
-      await request(mappedAssetWritePageType, payload, transactionToken)
+      await request(mappedAssetWritePageType, [pageHeader, input.planarPcm], transactionToken)
     },
     async prepareMappedAssetRange(sessionAssetId, startFrame, frameCount, transactionToken) {
       if (

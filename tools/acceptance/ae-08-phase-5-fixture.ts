@@ -375,7 +375,7 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
     await mutate([{ kind: "track.create", name: reorderTargetTrack, trackKind: "audio" }])
     const target = { kind: "track", track: ref(required((await snapshot()).tracks.find((track) => track.name === reorderTargetTrack), reorderTargetTrack).id) }
     await mutate([{ kind: "effect.upsert", target, effectKind: "utility", params: { version: 1, state: createDefaultUtilityParams() } },
-      { kind: "effect.upsert", target, effectKind: "saturator", params: { version: 1, state: createDefaultSaturatorParams() } }])
+      { kind: "effect.upsert", target, effectKind: "saturator", params: createDefaultSaturatorParams() }])
   }
   if (heldInstrumentRows.includes(row)) {
     const assetOf = async (name: string): Promise<SampleAsset> => {

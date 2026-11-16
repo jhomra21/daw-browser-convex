@@ -146,6 +146,12 @@ export const burstRows: BurstRow[] = [
     judge: "cancelled-start", transport: "driven", settle: "returned",
     cycle: [{ edits: ["session-pause"], state: "paused" }, { edits: ["play-then-pause"], state: "paused" }, { edits: ["play-resume"], state: "playing" },
       { edits: ["session-pause"], state: "paused" }, { edits: ["play-then-stop"], state: "paused" }, { edits: ["play-resume"], state: "playing" }] } },
+  // The saved native output changes in Audio settings while playing, while paused, and during a take (BlackHole is the other output). It has no
+  // judge: the steps mark the host's lifecycle lines they saw (ae-08-phase-9-output-device.ts) and the evidence is read per step.
+  { name: "output-device-switch", latencyClass: "plain", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "stopped", device: "blackhole",
+    prepare: ["record-select-input"], transport: "driven", settle: "returned",
+    cycle: ["out-play", "out-to-blackhole-playing", "out-to-speakers-playing", "out-reselect-speakers-playing", "out-pause", "out-to-blackhole-paused",
+      "out-play-after-paused-switch", "out-pause-again", "out-to-speakers-paused", "out-play-back-on-speakers", "out-recording-keeps-devices"].map((edit) => ({ edits: [edit], state: "stopped" })) } },
   // Portable-only rows: the portable engine has no packaged counterpart for them.
   { name: "mixer-gain", latencyClass: "plain", portable: { from: "base", to: "gain", latency: false } },
   { name: "clip-note", latencyClass: "plain", portable: { from: "base", to: "note", latency: false } },

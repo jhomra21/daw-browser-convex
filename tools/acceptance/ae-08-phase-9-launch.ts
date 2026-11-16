@@ -13,6 +13,7 @@ import { nativeUnavailableReported, takeFile } from "./ae-08-phase-9-compare"
 import { writeWav } from "./ae08-wav"
 import { blackhole, describeAudioInputScript, iacPort, makeTone, nativeInputDeviceSchema, playToneIntoBlackhole, selectAudioInputScript, selectMidiInputScript, sendMidiNote } from "./ae-08-phase-9-devices"
 import { armRecordTarget, finishRecording, recordingTargetLockedReason, startRecording, toneSeconds, verifyHandedOverTake } from "./ae-08-phase-9-record"
+import { createOutputDeviceSteps } from "./ae-08-phase-9-output-device"
 import { awaitTestPluginFailure, insertTestPlugin, openTestPluginEditor, prepareTestPlugin, refuseUntrustedPlugin, removeTestPlugin, showUntrustedEffectsBrowser } from "./ae-08-phase-9-vst"
 
 // One packaged launch of phase 9: the row's phase 5 start state, then either a burst of its edits (settled on host evidence) or the
@@ -90,8 +91,8 @@ export const createPerformer = ({ context, runtime, transportStatus, hostPid, ki
   }
   // The armed recording target can be neither deleted nor rerouted: the commit must be refused with the lock's reason, and a commit that goes
   // through fails the row.
-  const refuseTargetChange = (change: string, action: { kind: string; track: ReturnType<typeof ref>; output?: null }) => async () => {
-    const refusal = await context.mutate([action]).then(() => undefined, (error) => String(error))
+  const refuseTargetChange = (change: string, action: () => Promise<z.infer<ReturnType<typeof z.json>>>) => async () => {
+    const refusal = await context.mutate([await action()]).then(() => undefined, (error) => String(error))
     if (refusal === undefined) throw new Error(`${change} the armed recording target was committed`)
     if (!refusal.includes(recordingTargetLockedReason)) throw new Error(`${change} the armed recording target was refused for another reason: ${refusal}`)
     return unmoved
@@ -125,8 +126,16 @@ export const createPerformer = ({ context, runtime, transportStatus, hostPid, ki
     return unmoved
   }
   const performers = new Map([
-    ["target-delete-refused", refuseTargetChange("Deleting", { kind: "track.delete", track: ref(setup.changedTrackId) })],
-    ["target-reroute-refused", refuseTargetChange("Rerouting", { kind: "track.routing.set", track: ref(setup.changedTrackId), output: null })],
+    ["target-delete-refused", refuseTargetChange("Deleting", async () => ({ kind: "track.delete", track: ref(setup.changedTrackId) }))],
+    // The armed track already outputs to Master, so a null output is no change, and the planner drops a send to anything but a return track.
+    // The control actions cannot create one: Shift + R adds it, and a send to it changes what the take is bound to.
+    ["target-reroute-refused", refuseTargetChange("Rerouting", async () => {
+      await context.evaluate(`window.dispatchEvent(new KeyboardEvent("keydown",{key:"R",shiftKey:true,bubbles:true,cancelable:true}))`)
+      const returnLabel = `[...document.querySelectorAll('button[aria-label]')].map(b=>b.getAttribute('aria-label')??'').find(label=>/: Return \\d+$/.test(label))`
+      await waitForUi(context, "No return track appeared", `Boolean(${returnLabel})`)
+      const name = (await context.read(`JSON.stringify(${returnLabel}?.split(': ').at(-1))`, z.string()))
+      return { kind: "track.routing.set", track: ref(setup.changedTrackId), sends: [{ target: ref(required((await observe()).trackId(name), name)), amount: 0.5 }] }
+    })],
     ["instrument-remove", async () => commit([{ kind: "instrument.remove", target: await trackNamed(insertTargetTrack) }])],
     ["instrument-insert", async () => commit([{ kind: "instrument.set", target: await trackNamed(insertTargetTrack), instrumentKind: "synth", params: sineSynthParams() }])],
     ["effects-reverse", reorder(true)],
@@ -264,10 +273,13 @@ export const performPrepare = async (context: Pick<Phase5Context, "evaluate" | "
 }
 export const stateName = (row: string, state: string) => `state-${row}-${state}`
 const transportStatusSchema = z.object({ state: z.string(), playheadSec: z.number() })
-// The audio host the app spawned last: the main process's host-spawn lines name its pid.
+// The audio host still running: the main process's host-spawn lines name its pid. A spawn the host-exit lines already closed (the app
+// starts and ends a short-lived host while it inserts a plug-in) is not the session's host.
 const lastHostPid = async (out: string) => {
-  const spawned = parseHostLines(await readFile(path.join(out, "host.jsonl"), "utf8")).findLast((event) => event.event === "host-spawn" && event.pid > 0)
-  if (!spawned) throw new Error("The app logged no audio host spawn")
+  const events = parseHostLines(await readFile(path.join(out, "host.jsonl"), "utf8"))
+  const exited = new Set(events.filter((event) => event.event === "host-exit").map((event) => event.pid))
+  const spawned = events.findLast((event) => event.event === "host-spawn" && event.pid > 0 && !exited.has(event.pid))
+  if (!spawned) throw new Error("The app logged no running audio host")
   return spawned.pid
 }
 const diagnosticsSchema = z.object({ native: z.object({ diagnostics: z.object({ installedAssets: z.number() }) }) })
@@ -282,10 +294,18 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
     const listed = await context.read(describeAudioInputScript(blackhole), nativeInputDeviceSchema)
     await mark("native-input-device", listed)
   }
-  const perform = createPerformer({ context, runtime: async (args) => { await runtime(args) }, transportStatus: async () => transportStatusSchema.parse(await runtime(["transport-status"])),
+  const transportStatus = async () => transportStatusSchema.parse(await runtime(["transport-status"]))
+  const performEdit = createPerformer({ context, runtime: async (args) => { await runtime(args) }, transportStatus,
     hostPid: () => lastHostPid(out), kill: (pid) => process.kill(pid, "SIGKILL"),
     setup: { changedTrackId: setup.changedTrack.id, changedFile: setup.changedFile },
     observe: async () => observeSnapshot(await context.snapshot(), setup.changedTrack.id) })
+  const outputDeviceSteps = createOutputDeviceSteps({ context, out, transportStatus })
+  const perform: Perform = async (edit) => {
+    const step = outputDeviceSteps.get(edit)
+    if (!step) return performEdit(edit)
+    await step()
+    return unmoved
+  }
   await runtime(["seek", "0"])
   await mark("capture-start")
   const playWallMs = Date.now()
@@ -533,12 +553,12 @@ export const selfTest = async () => {
     runtime: async () => undefined, transportStatus: async () => ({ state: "paused", playheadSec: 0 }), hostPid: async () => 1, kill: () => undefined, observe: async () => observed, setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" } })("target-delete-refused")
   check((await guard(async () => { throw new Error(`validation: ${recordingTargetLockedReason}`) })).toLatencyFrames === 0, "a refusal carrying the lock's reason is the expected outcome")
   const reroute = (mutate: (actions: unknown[]) => Promise<number>) => createPerformer({
-    context: { mutate, evaluate: async () => undefined, interact: async () => undefined, read: async (_, schema) => schema.parse(0), reload: async () => undefined, mark: async () => undefined },
+    context: { mutate, evaluate: async () => undefined, interact: async () => undefined, read: async (_, schema) => schema.parse("Return 4"), reload: async () => undefined, mark: async () => undefined },
     runtime: async () => undefined, transportStatus: async () => ({ state: "paused", playheadSec: 0 }), hostPid: async () => 1, kill: () => undefined, observe: async () => observed,
     setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" } })("target-reroute-refused")
   let requested = ""
   await reroute(async (actions) => { requested = JSON.stringify(actions); throw new Error(`validation: ${recordingTargetLockedReason}`) })
-  check(requested === JSON.stringify([{ kind: "track.routing.set", track: ref("track-1"), output: null }]), `the reroute row asks the armed target for no output: ${requested}`)
+  check(requested === JSON.stringify([{ kind: "track.routing.set", track: ref("track-1"), sends: [{ target: ref("track-of-Return 4"), amount: 0.5 }] }]), `the reroute row asks the armed target for a send to a new return track: ${requested}`)
   check(await reroute(async () => 1).then(() => "performed", (error) => error instanceof Error && /Rerouting the armed recording target was committed/.test(error.message) ? "committed" : "other") === "committed", "a reroute that is committed fails the row")
   check(await guard(async () => 1).then(() => "performed", (error) => error instanceof Error && /was committed/.test(error.message) ? "committed" : "other") === "committed", "a delete that is committed fails the row")
   check(await guard(async () => { throw new Error("validation: stale revision") }).then(() => "performed", (error) => error instanceof Error && /another reason/.test(error.message) ? "other reason" : "other") === "other reason", "a refusal for another reason fails the row")

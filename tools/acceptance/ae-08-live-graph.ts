@@ -852,7 +852,8 @@ const main = async () => {
           const actions = await events(path.join(result.out, "actions.jsonl"))
           const stamp = (event: string) => Number(actions.find((entry) => entry.event === event)?.wallMs)
           captured = (stamp("capture-end") - stamp("capture-start")) / 1000
-          await writeWav(path.join(result.out, "output.wav"), await assemble(result.out))
+          // A driven row kills or pauses the host itself and is judged on host evidence, so it may capture no audio.
+          if (!rows.some((row) => row.transport === "driven")) await writeWav(path.join(result.out, "output.wav"), await assemble(result.out))
           if (step.role === "burst") {
             bursts.set(step.launch, { out: result.out, frames: Math.round(captured * 48000) })
             await exportRowEvidence(result.out, rowsFolder(step.launch), rows)

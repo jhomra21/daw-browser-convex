@@ -161,7 +161,7 @@ export const publicationComplete = (events: readonly HostEvent[], sinceWallMs: n
 }
 
 // The main process logs its own lines (an asset-install) to host.jsonl as it runs, the native host to native-<pid>.jsonl.
-const nativeEvents = async (out: string) => (await Promise.all((await readdir(out)).filter((name) => name === "host.jsonl" || /^native-\d+\.jsonl$/.test(name))
+export const nativeEvents = async (out: string) => (await Promise.all((await readdir(out)).filter((name) => name === "host.jsonl" || /^native-\d+\.jsonl$/.test(name))
   .map(async (name) => parseHostLines(await readFile(path.join(out, name), "utf8"))))).flat()
 
 // The host appends native-<pid>.jsonl as it runs (native/acceptance-evidence.h), so this waits on file changes. The deadline only

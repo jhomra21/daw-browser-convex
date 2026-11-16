@@ -24438,7 +24438,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -24499,7 +24499,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 258,
+      "pass": 260,
       "skip": 1,
       "fail": 12
      },
@@ -24942,7 +24942,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -25003,7 +25003,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -25191,7 +25191,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -25258,7 +25258,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -25436,7 +25436,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -25497,7 +25497,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -26043,7 +26043,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -26104,7 +26104,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 265,
+      "pass": 267,
       "skip": 1,
       "fail": 5
      },
@@ -26792,7 +26792,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -26853,7 +26853,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 267,
+      "pass": 269,
       "skip": 1,
       "fail": 3
      },
@@ -27034,7 +27034,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -27095,7 +27095,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -27278,7 +27278,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -27339,7 +27339,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 265,
+      "pass": 267,
       "skip": 1,
       "fail": 5
      },
@@ -27461,8 +27461,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -27672,7 +27672,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -27727,8 +27727,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -27745,11 +27745,12 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 267,
+      "pass": 268,
       "skip": 1,
-      "fail": 3
+      "fail": 4
      },
      "fails": [
+      "B6d5 a Stop over a Play at any point of its start keeps the prepared graph",
       "B6d5 a Stop that cancels a pending Play keeps the prepared graph at the start",
       "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
       "a locate that cancels a Play resuming behind a delayed Pause, after a second Pause, leaves no Play pending"
@@ -27865,8 +27866,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -27942,7 +27943,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -27997,8 +27998,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -28015,12 +28016,13 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 263,
+      "pass": 264,
       "skip": 1,
-      "fail": 7
+      "fail": 8
      },
      "fails": [
       "B6d4 a Stop issued after a locate superseded a waiting Play still stops",
+      "B6d5 a Stop over a Play at any point of its start keeps the prepared graph",
       "B6d5 a Stop that cancels a pending Play keeps the prepared graph at the start",
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
       "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
@@ -28200,7 +28202,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -28261,7 +28263,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -29046,7 +29048,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 21,
+      "pass": 23,
       "skip": 0,
       "fail": 0
      },
@@ -29109,7 +29111,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 20,
+      "pass": 22,
       "skip": 0,
       "fail": 1
      },
@@ -29420,7 +29422,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 21,
+      "pass": 23,
       "skip": 0,
       "fail": 0
      },
@@ -29483,7 +29485,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 19,
+      "pass": 21,
       "skip": 0,
       "fail": 2
      },
@@ -29541,7 +29543,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -29602,7 +29604,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -29662,7 +29664,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 21,
+      "pass": 23,
       "skip": 0,
       "fail": 0
      },
@@ -29725,7 +29727,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 20,
+      "pass": 22,
       "skip": 0,
       "fail": 1
      },
@@ -29784,7 +29786,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 21,
+      "pass": 23,
       "skip": 0,
       "fail": 0
      },
@@ -29847,7 +29849,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 18,
+      "pass": 20,
       "skip": 0,
       "fail": 3
      },
@@ -29906,7 +29908,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -29967,7 +29969,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 253,
+      "pass": 255,
       "skip": 1,
       "fail": 17
      },
@@ -30160,7 +30162,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -30221,7 +30223,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 267,
+      "pass": 269,
       "skip": 1,
       "fail": 3
      },
@@ -30400,7 +30402,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -30461,7 +30463,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -30760,7 +30762,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 21,
+      "pass": 23,
       "skip": 0,
       "fail": 0
      },
@@ -30823,7 +30825,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 20,
+      "pass": 22,
       "skip": 0,
       "fail": 1
      },
@@ -31000,7 +31002,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -31061,7 +31063,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -31120,7 +31122,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 23,
+      "pass": 25,
       "skip": 0,
       "fail": 0
      },
@@ -31170,8 +31172,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": " || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress\n",
-       "to": " || (pendingStart !== undefined && !pendingPreview)\n"
+       "from": "(hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))\n",
+       "to": "(playAttemptPhase !== undefined || (pendingStart !== undefined && !pendingPreview))\n"
       }
      ],
      "bounded": false,
@@ -31180,16 +31182,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 22,
+      "pass": 25,
       "skip": 0,
-      "fail": 1
+      "fail": 0
      },
-     "fails": [
-      "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -31240,7 +31240,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -31288,8 +31288,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": " || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress\n",
-       "to": " || (pendingStart !== undefined && !pendingPreview)\n"
+       "from": "(hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))\n",
+       "to": "(playAttemptPhase !== undefined || (pendingStart !== undefined && !pendingPreview))\n"
       }
      ],
      "bounded": false,
@@ -31298,16 +31298,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 272,
       "skip": 1,
-      "fail": 1
+      "fail": 0
      },
-     "fails": [
-      "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -31483,7 +31481,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 27,
+      "pass": 29,
       "skip": 0,
       "fail": 0
      },
@@ -31546,7 +31544,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 25,
+      "pass": 27,
       "skip": 0,
       "fail": 2
      },
@@ -31604,7 +31602,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -31665,7 +31663,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -31847,7 +31845,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 27,
+      "pass": 29,
       "skip": 0,
       "fail": 0
      },
@@ -31910,7 +31908,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 26,
+      "pass": 28,
       "skip": 0,
       "fail": 1
      },
@@ -31967,7 +31965,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -32028,7 +32026,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -32137,8 +32135,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    const hadPendingPlay = playAttempt !== undefined || rebuildInProgress\n    invalidatePlayAttempt()\n    if (!isPlaying()) {",
-       "to": "    const hadPendingPlay = playAttempt !== undefined\n    invalidatePlayAttempt()\n    if (!isPlaying()) {"
+       "from": "    const hadPendingPlay = hasStartUnderway()\n    invalidatePlayAttempt()\n",
+       "to": "    const hadPendingPlay = playAttemptPhase !== undefined\n    invalidatePlayAttempt()\n"
       }
      ],
      "bounded": false,
@@ -32150,13 +32148,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 0,
+      "pass": 1,
       "skip": 0,
-      "fail": 2
+      "fail": 1
      },
      "fails": [
-      "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
-      "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position"
+      "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate"
      ],
      "fuzz": null,
      "rejection": null,
@@ -32330,7 +32327,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 31,
+      "pass": 33,
       "skip": 0,
       "fail": 0
      },
@@ -32380,8 +32377,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    const hadPendingPlay = playAttempt !== undefined || rebuildInProgress\n    invalidatePlayAttempt()\n    if (!isPlaying()) {",
-       "to": "    const hadPendingPlay = playAttempt !== undefined\n    invalidatePlayAttempt()\n    if (!isPlaying()) {"
+       "from": "    const hadPendingPlay = hasStartUnderway()\n    invalidatePlayAttempt()\n",
+       "to": "    const hadPendingPlay = playAttemptPhase !== undefined\n    invalidatePlayAttempt()\n"
       }
      ],
      "bounded": false,
@@ -32393,13 +32390,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 29,
+      "pass": 32,
       "skip": 0,
-      "fail": 2
+      "fail": 1
      },
      "fails": [
-      "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
-      "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position"
+      "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate"
      ],
      "fuzz": null,
      "rejection": null,
@@ -32451,7 +32447,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -32499,8 +32495,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    const hadPendingPlay = playAttempt !== undefined || rebuildInProgress\n    invalidatePlayAttempt()\n    if (!isPlaying()) {",
-       "to": "    const hadPendingPlay = playAttempt !== undefined\n    invalidatePlayAttempt()\n    if (!isPlaying()) {"
+       "from": "    const hadPendingPlay = hasStartUnderway()\n    invalidatePlayAttempt()\n",
+       "to": "    const hadPendingPlay = playAttemptPhase !== undefined\n    invalidatePlayAttempt()\n"
       }
      ],
      "bounded": false,
@@ -32512,13 +32508,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 271,
       "skip": 1,
-      "fail": 2
+      "fail": 1
      },
      "fails": [
-      "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
-      "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position"
+      "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate"
      ],
      "fuzz": null,
      "rejection": null,
@@ -32678,7 +32673,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -32739,15 +32734,16 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 2,
+      "pass": 1,
       "skip": 0,
-      "fail": 4
+      "fail": 5
      },
      "fails": [
       "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit",
       "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit (host pause held)",
       "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit",
-      "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)"
+      "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)",
+      "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start"
      ],
      "fuzz": null,
      "rejection": null,
@@ -32866,13 +32862,15 @@
      "counts": {
       "pass": 265,
       "skip": 1,
-      "fail": 5
+      "fail": 7
      },
      "fails": [
+      "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit",
       "B6e a Pause after a resuming rebuild's Play commits keeps a live paused graph of the edit (host pause held)",
       "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit",
       "B6e a Pause before a resuming rebuild retires the playing graph keeps a live paused graph of the edit (host pause held)",
+      "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit"
      ],
      "fuzz": null,
@@ -33033,7 +33031,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -33217,7 +33215,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -34765,7 +34763,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -34950,7 +34948,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -35064,7 +35062,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 31,
+      "pass": 33,
       "skip": 0,
       "fail": 0
      },
@@ -35117,7 +35115,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -35241,7 +35239,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 30,
+      "pass": 32,
       "skip": 0,
       "fail": 1
      },
@@ -35302,7 +35300,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -35469,7 +35467,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -35659,7 +35657,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 255,
+      "pass": 257,
       "skip": 1,
       "fail": 15
      },
@@ -35840,7 +35838,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -36026,7 +36024,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -36194,7 +36192,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -36379,7 +36377,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -36547,7 +36545,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -36732,7 +36730,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 267,
+      "pass": 269,
       "skip": 1,
       "fail": 3
      },
@@ -36901,7 +36899,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -37086,7 +37084,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -37252,7 +37250,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -37439,7 +37437,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 266,
+      "pass": 268,
       "skip": 1,
       "fail": 4
      },
@@ -37556,7 +37554,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 31,
+      "pass": 33,
       "skip": 0,
       "fail": 0
      },
@@ -37609,7 +37607,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -37735,7 +37733,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 30,
+      "pass": 32,
       "skip": 0,
       "fail": 1
      },
@@ -37796,7 +37794,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -37964,7 +37962,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -38149,7 +38147,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -38316,7 +38314,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -38501,7 +38499,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -38668,7 +38666,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -38853,7 +38851,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -39020,7 +39018,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -39205,7 +39203,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -39372,7 +39370,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -39557,7 +39555,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -39779,7 +39777,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -40025,7 +40023,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 267,
+      "pass": 269,
       "skip": 1,
       "fail": 3
      },
@@ -40249,7 +40247,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -40497,7 +40495,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -40720,7 +40718,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -40966,7 +40964,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -41243,7 +41241,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -41551,7 +41549,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 266,
+      "pass": 268,
       "skip": 1,
       "fail": 4
      },
@@ -41831,7 +41829,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -42142,7 +42140,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 254,
+      "pass": 256,
       "skip": 1,
       "fail": 16
      },
@@ -42434,7 +42432,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -42741,7 +42739,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -43018,7 +43016,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -43325,7 +43323,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 254,
+      "pass": 256,
       "skip": 1,
       "fail": 16
      },
@@ -44663,7 +44661,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -44901,7 +44899,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 265,
+      "pass": 267,
       "skip": 1,
       "fail": 5
      },
@@ -45079,7 +45077,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -45302,7 +45300,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 266,
+      "pass": 268,
       "skip": 1,
       "fail": 4
      },
@@ -45479,7 +45477,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -45673,7 +45671,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -45847,7 +45845,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -46069,7 +46067,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -46244,7 +46242,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -46436,7 +46434,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -46610,7 +46608,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -46827,7 +46825,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 214,
+      "pass": 216,
       "skip": 1,
       "fail": 56
      },
@@ -47056,7 +47054,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -47266,7 +47264,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -47440,7 +47438,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -47696,7 +47694,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -47931,7 +47929,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -48132,7 +48130,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -48668,7 +48666,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -48863,7 +48861,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -49955,7 +49953,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -50141,7 +50139,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -50820,7 +50818,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -51006,7 +51004,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -51414,7 +51412,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -51600,7 +51598,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 266,
+      "pass": 268,
       "skip": 1,
       "fail": 4
      },
@@ -52809,7 +52807,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -52932,7 +52930,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 267,
+      "pass": 269,
       "skip": 1,
       "fail": 3
      },
@@ -53044,7 +53042,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -53166,7 +53164,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -53276,7 +53274,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -53396,7 +53394,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -53506,7 +53504,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -53684,7 +53682,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -53856,7 +53854,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -54034,7 +54032,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -54206,7 +54204,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -54384,7 +54382,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -54556,7 +54554,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -54734,7 +54732,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -54906,7 +54904,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -55028,7 +55026,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -59065,8 +59063,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -59155,8 +59153,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -59245,8 +59243,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -60342,8 +60340,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": " || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress\n",
-       "to": " || (pendingStart !== undefined && !pendingPreview)\n"
+       "from": "(hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))\n",
+       "to": "(playAttemptPhase !== undefined || (pendingStart !== undefined && !pendingPreview))\n"
       }
      ],
      "bounded": false,
@@ -60576,8 +60574,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    const hadPendingPlay = playAttempt !== undefined || rebuildInProgress\n    invalidatePlayAttempt()\n    if (!isPlaying()) {",
-       "to": "    const hadPendingPlay = playAttempt !== undefined\n    invalidatePlayAttempt()\n    if (!isPlaying()) {"
+       "from": "    const hadPendingPlay = hasStartUnderway()\n    invalidatePlayAttempt()\n",
+       "to": "    const hadPendingPlay = playAttemptPhase !== undefined\n    invalidatePlayAttempt()\n"
       }
      ],
      "bounded": false,
@@ -63025,8 +63023,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -63115,8 +63113,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence && nativePlayback.isPrepared()) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -63205,8 +63203,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
-       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          if (nativeStart === 'started') await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
+       "from": "        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n",
+       "to": "        // A locate superseded this Play on the prepared graph. A locate never cancels Play: play again from it.\n        if (nativeStart !== 'started' && seekSequence !== nativeSeekSequence) {\n          relocated = true\n          return\n        }\n        if (!isCurrentPlayAttempt(token)) {\n          reportNativePlaySkip(\"Native playback start completed after the request was invalidated.\")\n          // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.\n          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.\n          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {\n            await disposePreparedBackends(undefined, \"play-attempt-superseded\")\n          }\n          return\n        }\n        if (nativeStart === 'started') {\n          playAttemptPhase = { token, backend: 'native', state: 'active' }\n          commitPortableStart('native')\n          return\n        }\n        playAttemptPhase = undefined\n        if (requiresNativeAudio) {\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -64302,8 +64300,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": " || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress\n",
-       "to": " || (pendingStart !== undefined && !pendingPreview)\n"
+       "from": "(hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))\n",
+       "to": "(playAttemptPhase !== undefined || (pendingStart !== undefined && !pendingPreview))\n"
       }
      ],
      "bounded": false,
@@ -64536,8 +64534,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    const hadPendingPlay = playAttempt !== undefined || rebuildInProgress\n    invalidatePlayAttempt()\n    if (!isPlaying()) {",
-       "to": "    const hadPendingPlay = playAttempt !== undefined\n    invalidatePlayAttempt()\n    if (!isPlaying()) {"
+       "from": "    const hadPendingPlay = hasStartUnderway()\n    invalidatePlayAttempt()\n",
+       "to": "    const hadPendingPlay = playAttemptPhase !== undefined\n    invalidatePlayAttempt()\n"
       }
      ],
      "bounded": false,
@@ -65291,8 +65289,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": " || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress\n",
-       "to": " || (pendingStart !== undefined && !pendingPreview)\n"
+       "from": "(hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))\n",
+       "to": "(playAttemptPhase !== undefined || (pendingStart !== undefined && !pendingPreview))\n"
       }
      ],
      "bounded": false,
@@ -65498,8 +65496,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    const hadPendingPlay = playAttempt !== undefined || rebuildInProgress\n    invalidatePlayAttempt()\n    if (!isPlaying()) {",
-       "to": "    const hadPendingPlay = playAttempt !== undefined\n    invalidatePlayAttempt()\n    if (!isPlaying()) {"
+       "from": "    const hadPendingPlay = hasStartUnderway()\n    invalidatePlayAttempt()\n",
+       "to": "    const hadPendingPlay = playAttemptPhase !== undefined\n    invalidatePlayAttempt()\n"
       }
      ],
      "bounded": false,
@@ -65635,7 +65633,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -65702,7 +65700,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 251,
+      "pass": 253,
       "skip": 1,
       "fail": 19
      },
@@ -65783,7 +65781,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 253,
+      "pass": 255,
       "skip": 1,
       "fail": 17
      },
@@ -65862,7 +65860,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -65929,7 +65927,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -65999,7 +65997,7 @@
      "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -66066,7 +66064,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -66136,7 +66134,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -66205,7 +66203,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 253,
+      "pass": 255,
       "skip": 1,
       "fail": 17
      },
@@ -66284,7 +66282,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 253,
+      "pass": 255,
       "skip": 1,
       "fail": 17
      },
@@ -66369,7 +66367,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 267,
+      "pass": 269,
       "skip": 1,
       "fail": 3
      },
@@ -66440,7 +66438,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -66509,7 +66507,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -66578,7 +66576,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -66634,8 +66632,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": " || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress\n",
-       "to": " || (pendingStart !== undefined && !pendingPreview)\n"
+       "from": "(hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))\n",
+       "to": "(playAttemptPhase !== undefined || (pendingStart !== undefined && !pendingPreview))\n"
       }
      ],
      "bounded": false,
@@ -66644,16 +66642,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 269,
+      "pass": 272,
       "skip": 1,
-      "fail": 1
+      "fail": 0
      },
-     "fails": [
-      "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -66716,7 +66712,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -66786,7 +66782,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -66842,8 +66838,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    const hadPendingPlay = playAttempt !== undefined || rebuildInProgress\n    invalidatePlayAttempt()\n    if (!isPlaying()) {",
-       "to": "    const hadPendingPlay = playAttempt !== undefined\n    invalidatePlayAttempt()\n    if (!isPlaying()) {"
+       "from": "    const hadPendingPlay = hasStartUnderway()\n    invalidatePlayAttempt()\n",
+       "to": "    const hadPendingPlay = playAttemptPhase !== undefined\n    invalidatePlayAttempt()\n"
       }
      ],
      "bounded": false,
@@ -66855,13 +66851,12 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 267,
+      "pass": 270,
       "skip": 1,
-      "fail": 3
+      "fail": 2
      },
      "fails": [
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
-      "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
       "does not resume a structural rebuild after stop wins"
      ],
      "fuzz": null,
@@ -66907,8 +66902,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    const hadPendingPlay = playAttempt !== undefined || rebuildInProgress\n    invalidatePlayAttempt()\n    if (!isPlaying()) {",
-       "to": "    const hadPendingPlay = playAttempt !== undefined\n    invalidatePlayAttempt()\n    if (!isPlaying()) {"
+       "from": "    const hadPendingPlay = hasStartUnderway()\n    invalidatePlayAttempt()\n",
+       "to": "    const hadPendingPlay = playAttemptPhase !== undefined\n    invalidatePlayAttempt()\n"
       }
      ],
      "bounded": false,
@@ -66920,13 +66915,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 271,
       "skip": 1,
-      "fail": 2
+      "fail": 1
      },
      "fails": [
-      "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
-      "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position"
+      "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate"
      ],
      "fuzz": null,
      "rejection": null,
@@ -66976,7 +66970,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
       "fail": 0
      },
@@ -67037,7 +67031,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 267,
+      "pass": 269,
       "skip": 1,
       "fail": 3
      },
@@ -67091,8 +67085,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": " || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress\n",
-       "to": " || (pendingStart !== undefined && !pendingPreview)\n"
+       "from": "(hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))\n",
+       "to": "(playAttemptPhase !== undefined || (pendingStart !== undefined && !pendingPreview))\n"
       }
      ],
      "bounded": false,
@@ -67101,16 +67095,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 22,
+      "pass": 25,
       "skip": 0,
-      "fail": 1
+      "fail": 0
      },
-     "fails": [
-      "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -67157,8 +67149,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": " || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress\n",
-       "to": " || (pendingStart !== undefined && !pendingPreview)\n"
+       "from": "(hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))\n",
+       "to": "(playAttemptPhase !== undefined || (pendingStart !== undefined && !pendingPreview))\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -67172,16 +67164,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 22,
+      "pass": 25,
       "skip": 0,
-      "fail": 1
+      "fail": 0
      },
-     "fails": [
-      "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -67240,7 +67230,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 23,
+      "pass": 25,
       "skip": 0,
       "fail": 0
      },
@@ -67291,8 +67281,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": " || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress\n",
-       "to": " || (pendingStart !== undefined && !pendingPreview)\n"
+       "from": "(hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))\n",
+       "to": "(playAttemptPhase !== undefined || (pendingStart !== undefined && !pendingPreview))\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -67306,16 +67296,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 22,
+      "pass": 25,
       "skip": 0,
-      "fail": 1
+      "fail": 0
      },
-     "fails": [
-      "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -67374,7 +67362,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 23,
+      "pass": 25,
       "skip": 0,
       "fail": 0
      },
@@ -67425,13 +67413,13 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": " || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress\n",
-       "to": " || (pendingStart !== undefined && !pendingPreview)\n"
+       "from": "(hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))\n",
+       "to": "(playAttemptPhase !== undefined || (pendingStart !== undefined && !pendingPreview))\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    const hadPendingPlay = playAttempt !== undefined || rebuildInProgress\n    invalidatePlayAttempt()\n    if (!isPlaying()) {",
-       "to": "    const hadPendingPlay = playAttempt !== undefined\n    invalidatePlayAttempt()\n    if (!isPlaying()) {"
+       "from": "    const hadPendingPlay = hasStartUnderway()\n    invalidatePlayAttempt()\n",
+       "to": "    const hadPendingPlay = playAttemptPhase !== undefined\n    invalidatePlayAttempt()\n"
       }
      ],
      "bounded": false,
@@ -67440,17 +67428,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 21,
+      "pass": 25,
       "skip": 0,
-      "fail": 2
+      "fail": 0
      },
-     "fails": [
-      "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
-      "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -67496,8 +67481,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    const hadPendingPlay = playAttempt !== undefined || rebuildInProgress\n    invalidatePlayAttempt()\n    if (!isPlaying()) {",
-       "to": "    const hadPendingPlay = playAttempt !== undefined\n    invalidatePlayAttempt()\n    if (!isPlaying()) {"
+       "from": "    const hadPendingPlay = hasStartUnderway()\n    invalidatePlayAttempt()\n",
+       "to": "    const hadPendingPlay = playAttemptPhase !== undefined\n    invalidatePlayAttempt()\n"
       }
      ],
      "bounded": false,
@@ -67509,7 +67494,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 23,
+      "pass": 25,
       "skip": 0,
       "fail": 0
      },
@@ -67557,8 +67542,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": " || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress\n",
-       "to": " || (pendingStart !== undefined && !pendingPreview)\n"
+       "from": "(hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))\n",
+       "to": "(playAttemptPhase !== undefined || (pendingStart !== undefined && !pendingPreview))\n"
       }
      ],
      "bounded": false,
@@ -67567,16 +67552,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 272,
       "skip": 1,
-      "fail": 1
+      "fail": 0
      },
-     "fails": [
-      "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -67621,8 +67604,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": " || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress\n",
-       "to": " || (pendingStart !== undefined && !pendingPreview)\n"
+       "from": "(hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))\n",
+       "to": "(playAttemptPhase !== undefined || (pendingStart !== undefined && !pendingPreview))\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -67639,12 +67622,11 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 267,
+      "pass": 270,
       "skip": 1,
-      "fail": 3
+      "fail": 2
      },
      "fails": [
-      "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
       "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start"
      ],
@@ -67704,7 +67686,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 270,
       "skip": 1,
       "fail": 2
      },
@@ -67756,8 +67738,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": " || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress\n",
-       "to": " || (pendingStart !== undefined && !pendingPreview)\n"
+       "from": "(hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))\n",
+       "to": "(playAttemptPhase !== undefined || (pendingStart !== undefined && !pendingPreview))\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
@@ -67774,12 +67756,11 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 268,
+      "pass": 271,
       "skip": 1,
-      "fail": 2
+      "fail": 1
      },
      "fails": [
-      "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d7 a locate during a Pause that cancels a cold Play (native audio optional) keeps the rebuild's paused start when the Play's cleanup joins the Pause's dispose"
      ],
      "fuzz": null,
@@ -67838,7 +67819,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 271,
       "skip": 1,
       "fail": 1
      },
@@ -67889,13 +67870,13 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": " || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress\n",
-       "to": " || (pendingStart !== undefined && !pendingPreview)\n"
+       "from": "(hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))\n",
+       "to": "(playAttemptPhase !== undefined || (pendingStart !== undefined && !pendingPreview))\n"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    const hadPendingPlay = playAttempt !== undefined || rebuildInProgress\n    invalidatePlayAttempt()\n    if (!isPlaying()) {",
-       "to": "    const hadPendingPlay = playAttempt !== undefined\n    invalidatePlayAttempt()\n    if (!isPlaying()) {"
+       "from": "    const hadPendingPlay = hasStartUnderway()\n    invalidatePlayAttempt()\n",
+       "to": "    const hadPendingPlay = playAttemptPhase !== undefined\n    invalidatePlayAttempt()\n"
       }
      ],
      "bounded": false,
@@ -67907,15 +67888,12 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 265,
+      "pass": 270,
       "skip": 1,
-      "fail": 5
+      "fail": 2
      },
      "fails": [
-      "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
-      "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
-      "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start"
      ],
      "fuzz": null,
@@ -67961,8 +67939,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    const hadPendingPlay = playAttempt !== undefined || rebuildInProgress\n    invalidatePlayAttempt()\n    if (!isPlaying()) {",
-       "to": "    const hadPendingPlay = playAttempt !== undefined\n    invalidatePlayAttempt()\n    if (!isPlaying()) {"
+       "from": "    const hadPendingPlay = hasStartUnderway()\n    invalidatePlayAttempt()\n",
+       "to": "    const hadPendingPlay = playAttemptPhase !== undefined\n    invalidatePlayAttempt()\n"
       }
      ],
      "bounded": false,
@@ -67974,13 +67952,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 271,
       "skip": 1,
-      "fail": 2
+      "fail": 1
      },
      "fails": [
-      "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
-      "B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position"
+      "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate"
      ],
      "fuzz": null,
      "rejection": null,

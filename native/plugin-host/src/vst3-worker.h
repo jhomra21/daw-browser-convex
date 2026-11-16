@@ -57,6 +57,7 @@ class Vst3Worker {
     std::uint32_t parameterId,
     std::uint64_t generation
   );
+  [[nodiscard]] bool FlushParameters(std::span<const WorkerTransportEvent> events);
   [[nodiscard]] std::optional<WorkerState> GetState();
   [[nodiscard]] bool SetState(const WorkerState& state);
   void RefreshLifecycleMetadata();

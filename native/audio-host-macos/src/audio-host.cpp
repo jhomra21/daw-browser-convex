@@ -4507,7 +4507,11 @@ std::optional<std::vector<std::uint8_t>> AudioHost::GetNativeVstState(const std:
   const auto attachment = impl_->native_vst_attachments.find(instance_id);
   if (attachment == impl_->native_vst_attachments.end()) return refused("no-attachment");
   if (!attachment->second->metadata.playback_enabled) return refused("playback-disabled");
-  const auto state = attachment->second->worker.GetState();
+  // The worker applies queued parameters on its next block, which a paused session never runs, so the read carries them.
+  std::array<daw::plugin_host::WorkerTransportEvent, daw::plugin_host::kMaximumWorkerEvents> pending{};
+  const auto pending_count = attachment->second->event_scheduler.PendingParameters(pending);
+  const auto state = attachment->second->worker.GetState(
+    std::span<const daw::plugin_host::WorkerTransportEvent>(pending.data(), pending_count));
   if (!state) return refused("worker-get-state");
   std::vector<std::uint8_t> result;
   result.reserve(4 + instance_id.size() + 8 + state->bytes.size() + state->sha256.size());

@@ -509,7 +509,8 @@ class WorkerRuntime {
   // until the host has quiesced callback ports and calls Stop().
   [[nodiscard]] bool TerminateForFault();
   [[nodiscard]] bool SetState(const WorkerState& state);
-  [[nodiscard]] std::optional<WorkerState> GetState();
+  // `pendingParameters` are applied to the plug-in before its state is read.
+  [[nodiscard]] std::optional<WorkerState> GetState(std::span<const WorkerTransportEvent> pendingParameters);
   [[nodiscard]] bool Restart();
   // Control-service-only lifecycle and command operations. The callback-facing
   // methods below never write the control pipe, allocate, or acquire a lock.

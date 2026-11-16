@@ -1147,6 +1147,27 @@ bool Vst3Worker::AckEditorParameterFeedback(
   return implementation_->context.AckEditorParameterFeedback(parameterId, generation);
 }
 
+// A process call with no samples and no buses only delivers parameter changes
+// (vst3sdk ivstaudioprocessor.h, AudioBusBuffers: "numChannels ... set to value '0' when the host wants to flush the parameters").
+bool Vst3Worker::FlushParameters(const std::span<const WorkerTransportEvent> events) {
+  if (!ready()) return false;
+  if (events.empty()) return true;
+  implementation_->parameters.clearQueue();
+  for (const auto& event : events) {
+    Steinberg::int32 queueIndex = 0;
+    auto* queue = implementation_->parameters.addParameterData(event.parameterId, queueIndex);
+    Steinberg::int32 point = 0;
+    if (!std::isfinite(event.parameterValue) || event.parameterValue < 0.0 || event.parameterValue > 1.0
+      || !queue || queue->addPoint(0, event.parameterValue, point) != Steinberg::kResultOk) return false;
+  }
+  ProcessData data{};
+  data.processMode = WorkerProcessModeToSteinberg(implementation_->setup.mode);
+  data.symbolicSampleSize = Steinberg::Vst::kSample32;
+  data.inputParameterChanges = &implementation_->parameters;
+  data.processContext = &implementation_->processContext;
+  return implementation_->processor->process(data) == Steinberg::kResultOk;
+}
+
 std::optional<WorkerState> Vst3Worker::GetState() {
   if (!ready()) return std::nullopt;
   BoundedStateStream stream;

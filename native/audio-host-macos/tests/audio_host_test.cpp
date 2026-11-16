@@ -6431,6 +6431,42 @@ void MeasureInserts() {
     loading_median, loading_max, binding_median, binding_max, loading_median + binding_median);
   rig.host.Stop();
 }
+// The plug-in's own state after `instance_id` is read, as the renderer's capture reads it.
+std::array<std::int32_t, 5> ReadState(daw::audio_host_macos::AudioHost& host, const std::string_view instance_id) {
+  std::vector<std::uint8_t> request;
+  AppendLeU32(request, static_cast<std::uint32_t>(instance_id.size()));
+  request.insert(request.end(), instance_id.begin(), instance_id.end());
+  const auto reply = host.GetNativeVstState(request);
+  assert(reply);
+  std::size_t offset = 4 + instance_id.size();
+  std::uint32_t bytes = 0;
+  std::memcpy(&bytes, reply->data() + offset, sizeof(bytes));
+  assert(bytes == sizeof(std::array<std::int32_t, 5>));
+  offset += 8;
+  std::array<std::int32_t, 5> values{};
+  std::memcpy(values.data(), reply->data() + offset, bytes);
+  return values;
+}
+
+// A parameter the control path queued is in the state read right after it, with no block between
+// (the worker applies queued events on its next block, and a paused session runs none).
+void TestStateReadReflectsQueuedParameter() {
+  Rig rig;
+  rig.Configure();
+  assert(rig.host.AttachNativeVst(Attachment(kFirst, 1)));
+  rig.Start({kBlock, 0});
+  assert(rig.Wait(kFirst, NativeVstWorkerHealth::kReady));
+  rig.Render(30);
+  for (const bool running : {true, false}) {
+    assert(rig.host.SetTransport(running ? 2 : 3, running, 0));
+    rig.Render(5);
+    for (const int step : {1, 2, 3, 0}) {
+      rig.Set(kFirst, kLatency, static_cast<double>(step) / 3.0);
+      assert(ReadState(rig.host, kFirst)[1] == step);
+    }
+  }
+  rig.host.Stop();
+}
 }  // namespace plugin
 
 int main() {
@@ -6443,6 +6479,7 @@ int main() {
     plugin::TestLatencySwitchPublishesWithoutStop();
     plugin::TestCrashMutesOnlyThatInstance();
     plugin::TestDelayedReadyAcrossAPublication();
+    plugin::TestStateReadReflectsQueuedParameter();
     return 0;
   }
   if (std::getenv("DAW_AE08_RETIRE_ONLY")) {

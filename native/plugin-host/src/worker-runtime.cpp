@@ -385,9 +385,10 @@ bool WorkerRuntime::SetState(const WorkerState& state) {
   return true;
 }
 
-std::optional<WorkerState> WorkerRuntime::GetState() {
+std::optional<WorkerState> WorkerRuntime::GetState(const std::span<const WorkerTransportEvent> pendingParameters) {
   if (!transport_ || responseReadDescriptor_ < 0
-    || !WriteWorkerControlCommand(controlWriteDescriptor_, WorkerControlCommand::kStateGet)) return std::nullopt;
+    || !WriteWorkerControlCommand(controlWriteDescriptor_, WorkerControlCommand::kStateGet)
+    || !WriteWorkerParameterEvents(controlWriteDescriptor_, pendingParameters)) return std::nullopt;
   return ReadWorkerState(responseReadDescriptor_);
 }
 

@@ -4,7 +4,9 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <utility>
+#include <vector>
 
 namespace daw::plugin_host {
 
@@ -49,6 +51,9 @@ struct WorkerControlRequest {
 [[nodiscard]] std::optional<WorkerEditorResponse> ReadWorkerEditorResponse(int fileDescriptor);
 [[nodiscard]] bool WriteWorkerState(int fileDescriptor, const WorkerState& state);
 [[nodiscard]] std::optional<WorkerState> ReadWorkerState(int fileDescriptor);
+// The parameter events a state read must apply first: queued by the host, not yet in a block.
+[[nodiscard]] bool WriteWorkerParameterEvents(int fileDescriptor, std::span<const WorkerTransportEvent> events);
+[[nodiscard]] std::optional<std::vector<WorkerTransportEvent>> ReadWorkerParameterEvents(int fileDescriptor);
 [[nodiscard]] bool WriteWorkerHello(int fileDescriptor, const WorkerHello& hello);
 [[nodiscard]] std::optional<WorkerHello> ReadWorkerHello(int fileDescriptor);
 

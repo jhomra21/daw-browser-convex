@@ -376,7 +376,12 @@ int main(const int argc, char* argv[]) {
         }
       }
       if (command->command == daw::plugin_host::WorkerControlCommand::kStateGet) {
-        const auto state = startup->noPluginTestMode
+        const auto pendingParameters = daw::plugin_host::ReadWorkerParameterEvents(controlFileDescriptor);
+        if (!pendingParameters) {
+          publishFault(WorkerFaultOrigin::kControlIoFailure);
+          return EXIT_FAILURE;
+        }
+        const auto state = startup->noPluginTestMode || !plugin.FlushParameters(*pendingParameters)
           ? std::optional<daw::plugin_host::WorkerState>{}
           : plugin.GetState();
         if (!state || !daw::plugin_host::WriteWorkerState(responseFileDescriptor, *state)) {

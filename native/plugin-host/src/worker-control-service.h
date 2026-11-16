@@ -115,7 +115,7 @@ class WorkerControlService {
   void Stop();
   [[nodiscard]] bool Restart();
   [[nodiscard]] bool SetState(const WorkerState& state);
-  [[nodiscard]] std::optional<WorkerState> GetState();
+  [[nodiscard]] std::optional<WorkerState> GetState(std::span<const WorkerTransportEvent> pendingParameters);
   [[nodiscard]] WorkerHealth health() const noexcept;
   [[nodiscard]] std::uint64_t workerGeneration() const noexcept;
   [[nodiscard]] int workerProcessGroupId() const noexcept;

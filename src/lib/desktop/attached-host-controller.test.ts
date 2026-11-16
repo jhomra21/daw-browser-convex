@@ -24,6 +24,7 @@ import {
   registerAttachedHostController,
 } from "~/lib/desktop/attached-host-controller"
 import { serializeNativeDiagnostics } from "~/lib/desktop/native-diagnostics-serialization"
+import { createNativeVstStateCapture } from "~/lib/desktop/native-vst-state-capture"
 import { createImportJobQueue, type ImportJobQueue } from "~/lib/desktop/import-job-queue"
 import type {
   PreparedTimelineExport,
@@ -134,6 +135,7 @@ const createController = (
   importQueue?: ImportJobQueue,
   audioEngine = new AudioEngine(),
   hasReflectableOverlays?: () => boolean,
+  overrides: Partial<Parameters<typeof createAttachedHostController>[0]> = {},
 ) => {
   const queue = createExportQueue()
   return {
@@ -180,6 +182,7 @@ const createController = (
       enqueueNativeVstParameter,
       reconcileMountedLocalTimeline,
       getMountedLocalProject,
+      ...overrides,
     }),
     dispose: () => queue.dispose(),
   }
@@ -1185,6 +1188,7 @@ test("delivers committed external VST3 parameters after durable local commit", a
     updatedAt: 1,
   })
   const events: Array<{ instanceId: string; id: number; value: number }> = []
+  const captures: string[] = []
   let releaseFirstDelivery: (() => void) | undefined
   let signalFirstDeliveryStarted: (() => void) | undefined
   const firstDeliveryStarted = new Promise<void>((resolve) => {
@@ -1204,6 +1208,11 @@ test("delivers committed external VST3 parameters after durable local commit", a
       }
       return true
     },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { requestNativeVstStateCapture: (captured) => captures.push(captured) },
   )
   const unregister = registerController(controller)
   const input = {
@@ -1229,10 +1238,13 @@ test("delivers committed external VST3 parameters after durable local commit", a
     { instanceId, id: 1, value: 0.75 },
     { instanceId, id: 2, value: 0.25 },
   ])
+  expect(captures).toEqual([])
   releaseFirstDelivery?.()
   expect((await pendingCommit).result).toMatchObject({ applied: true })
+  expect(captures).toEqual([instanceId])
   expect((await requestControl(controller, "control.commit", input, undefined, controlActor)).result).toMatchObject({ idempotencyReplay: true })
   expect(events).toHaveLength(2)
+  expect(captures).toEqual([instanceId])
 
   unregister()
   dispose()
@@ -1245,6 +1257,7 @@ test("does not fail a durable external parameter commit when native delivery fai
   const track = initial.tracks[0]
   if (!track) throw new Error("Expected default track.")
   const instanceId = "00000000-0000-4000-8000-000000000012"
+  const captures: string[] = []
   await setLocalExternalProcessor(project.id, {
     instanceId,
     targetId: track.id,
@@ -1294,6 +1307,11 @@ test("does not fail a durable external parameter commit when native delivery fai
     async () => {
       throw new Error("native host unavailable")
     },
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    { requestNativeVstStateCapture: (captured) => captures.push(captured) },
   )
   const unregister = registerController(controller)
   const result = await requestControl(controller, "control.commit", {
@@ -1308,11 +1326,106 @@ test("does not fail a durable external parameter commit when native delivery fai
     }],
   }, undefined, controlActor)
   expect(result.result).toMatchObject({ applied: true })
+  expect(captures).toEqual([])
   expect((await requestControl(controller, "control.snapshot", { projectId: project.id }, undefined, controlActor)).result).toMatchObject({
     processors: [expect.objectContaining({ processor: expect.objectContaining({ params: expect.objectContaining({ parameterOverrides: { "1": 0.75 } }) }) })],
   })
 
   unregister()
+  dispose()
+})
+
+const settleMicrotasks = async () => {
+  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve()
+}
+
+test("two requests during one in-flight state capture share a single follow-up capture", async () => {
+  const started: string[] = []
+  const gates: Array<() => void> = []
+  const request = createNativeVstStateCapture({
+    capture: async (instanceId) => {
+      started.push(instanceId)
+      await new Promise<void>((resolve) => gates.push(resolve))
+    },
+    report: () => { throw new Error("unexpected report") },
+  })
+  request("a")
+  request("b")
+  expect(started).toEqual(["a", "b"])
+  request("a")
+  request("a")
+  expect(started).toEqual(["a", "b"])
+  gates[0]?.()
+  await settleMicrotasks()
+  expect(started).toEqual(["a", "b", "a"])
+  gates[1]?.()
+  gates[2]?.()
+  await settleMicrotasks()
+  expect(started).toEqual(["a", "b", "a"])
+  request("a")
+  expect(started).toEqual(["a", "b", "a", "a"])
+})
+
+test("a refused state capture is reported and does not block the next request", async () => {
+  const reported: Array<{ instanceId: string; message: string }> = []
+  let refuse = true
+  const started: string[] = []
+  const request = createNativeVstStateCapture({
+    capture: async (instanceId) => {
+      started.push(instanceId)
+      if (refuse) throw new Error("vstStateGet refused")
+    },
+    report: (instanceId, error) => reported.push({ instanceId, message: error.message }),
+  })
+  request("a")
+  await settleMicrotasks()
+  expect(reported).toEqual([{ instanceId: "a", message: "vstStateGet refused" }])
+  refuse = false
+  request("a")
+  expect(started).toEqual(["a", "a"])
+})
+
+test("closing the window captures plug-in state before the transport stops", async () => {
+  installBridge([])
+  const events: string[] = []
+  const { controller, dispose } = createController(
+    () => "project-1",
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      captureNativeVstStates: async () => { events.push("capture") },
+      stop: async () => { events.push("stop") },
+    },
+  )
+  expect(await controller.prepareToClose()).toBe(true)
+  expect(events).toEqual(["capture", "stop"])
+  dispose()
+})
+
+test("a refused capture at close is reported by the close preparation failing", async () => {
+  installBridge([])
+  const events: string[] = []
+  const { controller, dispose } = createController(
+    () => "project-1",
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      captureNativeVstStates: async () => { throw new Error("vstStateGet refused") },
+      stop: async () => { events.push("stop") },
+    },
+  )
+  expect(await controller.prepareToClose()).toBe(false)
+  expect(events).toEqual([])
   dispose()
 })
 

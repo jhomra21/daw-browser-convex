@@ -145,6 +145,7 @@ import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapte
 import { applyCreatedTrackInsertion } from "~/lib/timeline-track-creation-rollback";
 import { createAttachedHostController, registerAttachedHostController } from "~/lib/desktop/attached-host-controller";
 import { createNativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
+import { createNativeVstStateCapture } from "~/lib/desktop/native-vst-state-capture";
 import { createVstParameterFeedbackController } from "~/lib/desktop/vst-parameter-feedback-controller";
 import { createExportQueue } from "~/lib/export/export-queue";
 import { createImportJobQueue } from "~/lib/desktop/import-job-queue";
@@ -2214,6 +2215,36 @@ const Timeline: Component<TimelineProps> = (props) => {
     clearClipBufferCaches: clipBuffers.clearClipBufferCaches,
   });
 
+  const captureNativeVstStates = async (capture?: { projectId: string; instanceIds: readonly string[] }) => {
+    const bridge = window.dawDesktop?.audioHost?.session
+    if (!bridge || (capture === undefined && !isNativePlaybackPrepared())) return
+    const capturedProjectId = capture?.projectId ?? projectId()
+    if (!isLocalId("project", capturedProjectId)) return
+    const processors = (await listLocalExternalProcessors(capturedProjectId))
+      .filter((processor) => !processor.bypassed && processor.manifest.supportsState)
+    const selected = capture === undefined
+      ? processors
+      : processors.filter((processor) => capture.instanceIds.includes(processor.instanceId))
+    for (const processor of selected) {
+      const capture = await bridge.captureVstState(processor.instanceId)
+      if (!capture.ok) {
+        throw new Error(`Native VST3 state capture failed for "${processor.instanceId}": ${capture.error}`)
+      }
+      await persistLocalExternalProcessorState(
+        capturedProjectId,
+        processor.instanceId,
+        capture,
+        localVstStateOwnerId(capturedProjectId, userId()),
+      )
+    }
+  }
+  // Only a live playback session can hold a parameter change the plug-in's saved state has not seen.
+  const requestNativeVstStateCapture = createNativeVstStateCapture({
+    capture: async (instanceId) => {
+      if (isNativePlaybackPrepared()) await captureNativeVstStates({ projectId: projectId(), instanceIds: [instanceId] })
+    },
+    report: (_instanceId, error) => notify("Plug-in state not saved", error.message),
+  })
   if (window.dawDesktop) {
     const unsubscribeCapturedEditorState = window.dawDesktop.audioHost?.onVstEditorCapturedState(async (payload) => {
       const persisted = await persistLocalExternalProcessorState(
@@ -2247,29 +2278,8 @@ const Timeline: Component<TimelineProps> = (props) => {
         if (isRecording()) await stopRecording();
       },
       refuseRecordingTargetChange: recordingTargetLock.refuseTransition,
-      captureNativeVstStates: async (capture) => {
-        const bridge = window.dawDesktop?.audioHost?.session
-        if (!bridge || (capture === undefined && !isNativePlaybackPrepared())) return
-        const capturedProjectId = capture?.projectId ?? projectId()
-        if (!isLocalId("project", capturedProjectId)) return
-        const processors = (await listLocalExternalProcessors(capturedProjectId))
-          .filter((processor) => !processor.bypassed && processor.manifest.supportsState)
-        const selected = capture === undefined
-          ? processors
-          : processors.filter((processor) => capture.instanceIds.includes(processor.instanceId))
-        for (const processor of selected) {
-          const capture = await bridge.captureVstState(processor.instanceId)
-          if (!capture.ok) {
-            throw new Error(`Native VST3 teardown state capture failed for "${processor.instanceId}": ${capture.error}`)
-          }
-          await persistLocalExternalProcessorState(
-            capturedProjectId,
-            processor.instanceId,
-            capture,
-            localVstStateOwnerId(capturedProjectId, userId()),
-          )
-        }
-      },
+      captureNativeVstStates,
+      requestNativeVstStateCapture,
       exportQueue,
       importQueue,
       exportService,
@@ -2554,6 +2564,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       },
       onPreviewNote: auditionNote,
       enqueueNativeVstParameter: nativeVstParameterQueue?.enqueue,
+      requestNativeVstStateCapture,
       onEffectInstanceParamsReplayChange: (
         replay: EffectsPanelAudioEffects["replayInstanceParams"] | undefined,
       ) => setReplayEffectInstanceParams(() => replay),

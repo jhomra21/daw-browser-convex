@@ -95,6 +95,7 @@ export type TimelinePanelsProps = {
     onSelectAutomationParameter?: (targetKey: Track['id'] | 'master', parameterId: string, effectInstanceId?: string) => void
     onManualAutomationOverride?: (targetKey: Track['id'] | 'master', parameterId: string, effectInstanceId?: string) => void
     enqueueNativeVstParameter?: NativeVstParameterQueue["enqueue"]
+    requestNativeVstStateCapture?: (instanceId: string) => void
   }
   sampleDetailPanel: {
     isOpen: boolean
@@ -240,6 +241,7 @@ const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
         onSelectAutomationParameter={panels().effectsPanel.onSelectAutomationParameter}
         onManualAutomationOverride={panels().effectsPanel.onManualAutomationOverride}
         enqueueNativeVstParameter={panels().effectsPanel.enqueueNativeVstParameter}
+        requestNativeVstStateCapture={panels().effectsPanel.requestNativeVstStateCapture}
       />
 
       <Show when={panels().sampleDetailPanel.isOpen && panels().sampleDetailPanel.selectedClip}>

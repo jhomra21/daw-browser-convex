@@ -28,6 +28,7 @@ type ExternalPluginParametersProps = {
   onSelectAutomationParameter?: (parameterId: string, effectInstanceId: string) => void;
   onManualAutomationOverride?: (parameterId: string, effectInstanceId: string) => void;
   onParameterChange: (parameterId: number, value: number) => void;
+  onParameterGestureEnd?: () => void;
 };
 
 const ExternalPluginParameters: Component<ExternalPluginParametersProps> = (props) => {
@@ -99,6 +100,7 @@ const ExternalPluginParameters: Component<ExternalPluginParametersProps> = (prop
                       disabled={!props.canWrite || parameter.readOnly}
                       class="accent-cyan-400 disabled:opacity-50"
                       onInput={(event) => updateParameter(parameter, Number(event.currentTarget.value))}
+                      onChange={() => props.onParameterGestureEnd?.()}
                     />
                     <button
                       type="button"
@@ -136,6 +138,7 @@ export type ExternalPluginCardProps = {
   onRemove: () => void;
   onBypassChange: (bypassed: boolean) => void;
   onParameterChange: (parameterId: number, value: number) => void;
+  onParameterGestureEnd?: () => void;
 };
 
 export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) => {
@@ -353,6 +356,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
           onSelectAutomationParameter={props.onSelectAutomationParameter}
           onManualAutomationOverride={props.onManualAutomationOverride}
           onParameterChange={props.onParameterChange}
+          onParameterGestureEnd={props.onParameterGestureEnd}
         />
         <div class="text-muted-foreground">
           {nativeEditorAvailabilityMessage({

@@ -146,6 +146,7 @@ type EffectsPanelProps = {
   captureStructuralPlaybackIntent?: () => TimelinePlaybackRebuildIntent;
   onMixedReorderCommitted?: (intent?: TimelinePlaybackRebuildIntent) => void;
   enqueueNativeVstParameter?: NativeVstParameterQueue["enqueue"];
+  requestNativeVstStateCapture?: (instanceId: string) => void;
   spectrumProvider?: (targetId: string, listener: (frame: SpectrumFrame | null) => void) => () => void;
   samplerBufferSync: ReturnType<typeof createSamplerBufferSync>;
   drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>;
@@ -424,6 +425,7 @@ type EffectsPanelEffectCardsProps = {
   onExternalProcessorAutoOpenHandled?: (instanceId: string) => void;
   onRemoveExternalProcessor: (instanceId: string) => void;
   onExternalParameterChange: (instanceId: string, parameterId: number, value: number) => void;
+  onExternalParameterGestureEnd?: (instanceId: string) => void;
   onExternalBypassChange: (instanceId: string, bypassed: boolean) => void;
   onMixedReorder: (order: readonly MixedEffectOrderItem[]) => void;
   deviceCollapse: ReturnType<typeof createEffectsPanelDeviceCollapse>;
@@ -838,6 +840,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                   onRemove={() => props.onRemoveExternalProcessor(processor().instanceId)}
                   onBypassChange={(bypassed) => props.onExternalBypassChange(processor().instanceId, bypassed)}
                   onParameterChange={(parameterId, value) => props.onExternalParameterChange(processor().instanceId, parameterId, value)}
+                  onParameterGestureEnd={() => props.onExternalParameterGestureEnd?.(processor().instanceId)}
                 />
               </div>
             </EffectsPanelDeviceBoundary>
@@ -914,6 +917,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                                 onRemove={() => props.onRemoveExternalProcessor(processor().instanceId)}
                                 onBypassChange={(bypassed) => props.onExternalBypassChange(processor().instanceId, bypassed)}
                                 onParameterChange={(parameterId, value) => props.onExternalParameterChange(processor().instanceId, parameterId, value)}
+                                onParameterGestureEnd={() => props.onExternalParameterGestureEnd?.(processor().instanceId)}
                               />
                             </EffectsPanelDeviceBoundary>
                           </div>
@@ -1354,6 +1358,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       onExternalProcessorAutoOpenHandled={props.onExternalProcessorAutoOpenHandled}
                       onRemoveExternalProcessor={removeExternalProcessor}
                       onExternalParameterChange={updateExternalProcessorParameter}
+                      onExternalParameterGestureEnd={props.requestNativeVstStateCapture}
                       onExternalBypassChange={updateExternalProcessorBypass}
                       onMixedReorder={reorderMixed}
                       deviceCollapse={deviceCollapse}

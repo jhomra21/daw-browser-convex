@@ -579,6 +579,7 @@ Object.defineProperty(window, 'dawDesktop', { value: { setRequestHandler: (next:
   getLifecycle: async () => ({ state: 'ready', powerGeneration: 0 }),
   onLifecycle: () => () => undefined,
   onVstEditorCapturedState: () => () => undefined,
+  onVstEditorState: () => () => undefined,
 } : host }, configurable: true })
 const faults: string[] = []
 const operations: Promise<unknown>[] = []

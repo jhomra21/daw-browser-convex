@@ -91,6 +91,7 @@ const managerFor = (input: {
   }) => Promise<
     { ok: true; attached: number } | { ok: false; code: "invalid-plan"; message: string }
   >
+  playbackOwns?: (instanceId: string) => boolean
   onEditorInteraction?: (input: { projectId: string; instanceId: string }) => void
   onEditorOpenState?: (input: { projectId: string; instanceId: string; open: boolean }) => void
   onCapturedState?: (input: { projectId: string; instanceId: string; state: { bytes: Uint8Array; sha256: string } }) => Promise<void> | void
@@ -114,6 +115,7 @@ const managerFor = (input: {
     coordinate: async ({ serializedPlan, capturedVstStates, requiredVstStateInstanceIds }) => input.coordinate
       ? input.coordinate({ serializedPlan, capturedVstStates, requiredVstStateInstanceIds })
       : { ok: true, attached: 1 },
+    playbackOwns: input.playbackOwns ?? (() => false),
     onEditorInteraction: input.onEditorInteraction,
     onEditorOpenState: input.onEditorOpenState,
     onCapturedState: input.onCapturedState,
@@ -410,6 +412,25 @@ test("captures editor state through the renderer callback before suspension tear
   expect(captured[0]?.projectId).toBe(projectId)
   expect(captured[0]?.instanceId).toBe(firstInstance)
   expect(calls.slice(-2)).toEqual(["get-state", "teardown"])
+})
+
+test("a playback-owned instance's own editor state is never read or persisted", async () => {
+  const calls: string[] = []
+  const captured: string[] = []
+  const manager = managerFor({
+    calls,
+    supervisors: [fakeSupervisor(calls)],
+    playbackOwns: (instanceId) => instanceId === firstInstance,
+    onCapturedState: ({ instanceId }) => { captured.push(instanceId) },
+  })
+  await manager.execute({ projectId, instanceId: firstInstance, command: "open", serializedPlan: "plan", captureState: true })
+
+  await manager.captureAll()
+  const status = await manager.execute({ projectId, instanceId: firstInstance, command: "close", captureState: true })
+
+  expect(captured).toEqual([])
+  expect(calls).not.toContain("get-state")
+  expect(status.capturedState).toBeUndefined()
 })
 
 test("captures all editor state before quit and still tears down after capture failure", async () => {

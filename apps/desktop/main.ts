@@ -2520,6 +2520,7 @@ else {
         workerPath: vst3WorkerPath,
         catalogStore: pluginCatalogStore,
         createSupervisor: () => createNativeAudioHostSupervisor(editorHostPath),
+        playbackOwns: (instanceId) => activeEditorProjectBindings.projectFor(instanceId) !== undefined,
         onEditorInteraction: () => {
           const target = window_
           if (!target || target.isDestroyed() || finishingQuit) return

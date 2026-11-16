@@ -27,6 +27,9 @@ type EditorSessionInput = {
   workerPath: string
   catalogStore: { load(): Promise<PluginCatalogData> }
   createSupervisor: () => EditorSessionSupervisor
+  // An instance a live playback session holds is owned by the playback worker. This session's own copy of it
+  // never saw the control-path commits, so its state is never read or persisted.
+  playbackOwns: (instanceId: string) => boolean
   coordinate?: typeof coordinateNativeVst3Attachments
   onEditorInteraction?: (input: { projectId: string; instanceId: string }) => void
   onEditorOpenState?: (input: { projectId: string; instanceId: string; open: boolean }) => void
@@ -113,6 +116,7 @@ export const createNativeVst3EditorSessionManager = (
   }
   const captureEntryState = async (instanceId: string, entry: EditorSessionEntry) => {
     if (!entry.supervisor || (!entry.requiresState && !entry.captureState) || !entry.supervisor.getVstState || !entry.projectId) return
+    if (input.playbackOwns(instanceId)) return
     if (entry.stateCaptured) return
     const state = await entry.supervisor.getVstState(instanceId)
     await input.onCapturedState?.({ projectId: entry.projectId, instanceId, state })
@@ -274,6 +278,7 @@ export const createNativeVst3EditorSessionManager = (
                 ...nativeCommand
               } = inputCommand
               const capturedState = (entry.requiresState || entry.captureState || inputCommand.captureState === true)
+                && !input.playbackOwns(inputCommand.instanceId)
                 && entry.supervisor.getVstState
                 ? await entry.supervisor.getVstState(inputCommand.instanceId)
                 : undefined

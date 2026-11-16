@@ -4491,9 +4491,10 @@ bool AudioHost::SetNativeVstState(const std::span<const std::uint8_t> payload) {
 std::optional<std::vector<std::uint8_t>> AudioHost::GetNativeVstState(const std::span<const std::uint8_t> payload) {
   std::size_t offset = 0;
   std::string instance_id;
-  if (!ReadNativeInstanceId(payload, offset, instance_id) || offset != payload.size()) return std::nullopt;
+  const bool well_formed = ReadNativeInstanceId(payload, offset, instance_id) && offset == payload.size();
   // The reply carries no reason, so a refused read names it here. GetState reports only that it failed, not why.
   // The id comes off the wire, so anything outside an id's characters is replaced to keep the evidence line valid JSON.
+  // A malformed request names no id (empty, or the one that was read before trailing bytes).
   const auto refused = [&](const char* reason) {
     std::string printable = instance_id;
     for (char& c : printable) if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-') c = '?';
@@ -4502,6 +4503,7 @@ std::optional<std::vector<std::uint8_t>> AudioHost::GetNativeVstState(const std:
     impl_->Evidence("vst-state-get-refused", reason, 0, detail);
     return std::nullopt;
   };
+  if (!well_formed) return refused("malformed");
   const auto attachment = impl_->native_vst_attachments.find(instance_id);
   if (attachment == impl_->native_vst_attachments.end()) return refused("no-attachment");
   if (!attachment->second->metadata.playback_enabled) return refused("playback-disabled");

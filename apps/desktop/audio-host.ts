@@ -465,6 +465,15 @@ const serializeVstDetach = (instanceId: string) => {
   return Buffer.concat([writeUnsigned32(value.byteLength), value])
 }
 
+// The host reads this request's instance id with a little-endian length (ReadNativeInstanceId), unlike vstDetach's big-endian string.
+const serializeVstStateGet = (instanceId: string) => {
+  const value = Buffer.from(instanceId, "utf8")
+  if (value.byteLength === 0 || value.byteLength > maximumVstStringBytes) return undefined
+  const length = Buffer.alloc(4)
+  length.writeUInt32LE(value.byteLength)
+  return Buffer.concat([length, value])
+}
+
 const serializeVstEditor = (input: {
   instanceId: string
   command: NativeVstEditorCommand
@@ -2851,7 +2860,7 @@ export const createNativeAudioHostSupervisor = (
       await attachVst(input, transactionToken)
     },
     async getVstState(instanceId, transactionToken, signal) {
-      const payload = serializeVstDetach(instanceId)
+      const payload = serializeVstStateGet(instanceId)
       if (!payload) throw new Error("The native VST state request is invalid.")
       signal?.throwIfAborted()
       await supervisor.start()

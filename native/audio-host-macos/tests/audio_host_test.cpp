@@ -2105,10 +2105,14 @@ void TestNativeVstRuntimeControlBounds() {
   assert(host.AttachNativeVst(attachment));
   std::vector<std::uint8_t> malformed_state_request{0};
   assert(!host.GetNativeVstState(malformed_state_request));
+  // The main process once sent the length big-endian; the reader takes it little-endian, so that request is malformed.
+  std::vector<std::uint8_t> big_endian_state_request{0, 0, 0, static_cast<std::uint8_t>(instance_id.size())};
+  big_endian_state_request.insert(big_endian_state_request.end(), instance_id.begin(), instance_id.end());
+  assert(!host.GetNativeVstState(big_endian_state_request));
   std::vector<std::uint8_t> unknown_state_request;
   AppendInstanceId(unknown_state_request, "c0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f2");
   assert(!host.GetNativeVstState(unknown_state_request));
-  // Each refusal says which of the three it was, with the instance asked for; a malformed request names no instance.
+  // Each refusal says which one it was, with the instance asked for; a malformed request names no instance.
   std::vector<std::uint8_t> not_ready_state_request;
   AppendInstanceId(not_ready_state_request, instance_id);
   assert(!host.GetNativeVstState(not_ready_state_request));
@@ -2121,15 +2125,17 @@ void TestNativeVstRuntimeControlBounds() {
   std::vector<std::uint8_t> disabled_state_request;
   AppendInstanceId(disabled_state_request, disabled_id);
   assert(!host.GetNativeVstState(disabled_state_request));
-  const auto refusals = log.Lines("vst-state-get-refused", 3);
-  assert(refusals.size() == 3);
+  const auto refusals = log.Lines("vst-state-get-refused", 5);
+  assert(refusals.size() == 5);
   const auto cause = [](const std::string& reason) { return "\"cause\":\"" + reason + "\""; };
-  assert(refusals[0].find(cause("no-attachment")) != std::string::npos);
-  assert(refusals[0].find("\"instanceId\":\"c0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f2\"") != std::string::npos);
-  assert(refusals[1].find(cause("worker-get-state")) != std::string::npos);
-  assert(refusals[1].find("\"instanceId\":\"" + std::string(instance_id) + "\"") != std::string::npos);
-  assert(refusals[2].find(cause("playback-disabled")) != std::string::npos);
-  assert(refusals[2].find("\"instanceId\":\"" + std::string(disabled_id) + "\"") != std::string::npos);
+  assert(refusals[0].find(cause("malformed")) != std::string::npos);
+  assert(refusals[1].find(cause("malformed")) != std::string::npos);
+  assert(refusals[2].find(cause("no-attachment")) != std::string::npos);
+  assert(refusals[2].find("\"instanceId\":\"c0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f2\"") != std::string::npos);
+  assert(refusals[3].find(cause("worker-get-state")) != std::string::npos);
+  assert(refusals[3].find("\"instanceId\":\"" + std::string(instance_id) + "\"") != std::string::npos);
+  assert(refusals[4].find(cause("playback-disabled")) != std::string::npos);
+  assert(refusals[4].find("\"instanceId\":\"" + std::string(disabled_id) + "\"") != std::string::npos);
   const auto ownedButNotReady = host.ExecuteNativeVstEditorCommand(
     instance_id,
     daw::audio_host_macos::NativeVstEditorCommand::kStatus

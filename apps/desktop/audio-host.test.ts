@@ -330,7 +330,10 @@ process.stdin.on("data", (chunk) => {
     } else if (type === 53 && process.env.MODE === "offline-stalled") {
       process.stdout.write(ack(type))
     } else if (type === 26) {
-      if (process.env.MODE === "state-rejected") process.stdout.write(ack(type, 0))
+      // The host's ReadNativeInstanceId: a little-endian length of 1..256 and nothing after the id.
+      const idLength = payload.length >= 4 ? payload.readUInt32LE(0) : 0
+      if (idLength === 0 || idLength > 256 || payload.length !== 4 + idLength) process.stdout.write(ack(type, 0))
+      else if (process.env.MODE === "state-rejected") process.stdout.write(ack(type, 0))
       else if (process.env.MODE === "state-malformed") process.stdout.write(frame(27, Buffer.from([1, 2, 3])))
       else if (process.env.MODE === "state-mismatch") process.stdout.write(vstState("22222222-2222-4222-8222-222222222222"))
       else process.stdout.write(vstState())

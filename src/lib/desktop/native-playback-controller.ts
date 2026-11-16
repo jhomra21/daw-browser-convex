@@ -458,6 +458,9 @@ const nativeSnapshotSupportError = (snapshot: LivePlaybackSnapshot): string | un
     return "The active VST3 attachment plan is unavailable."
 }
 
+// The host locks sample memory in whole pages.
+const pageRoundedBytes = (bytes: number) => Math.ceil(bytes / 16_384) * 16_384
+
 const validateInstrumentAssetBudget = (
   assets: readonly AudioCoreGraphSnapshot["assets"][number][],
   instruments: readonly NonNullable<AudioCoreGraphSnapshot["nodes"][number]["instrument"]>[],
@@ -583,10 +586,32 @@ export const createNativePlaybackController = (input: {
   let transportEpoch = 1
   let nextLiveProcessorSequence = 0
   let nextTransportTransitionId = 0n
+  // Every session asset the host holds, which Stop releases: the installed ones plus the retired instrument samples kept resident.
   let installedAssetIds: readonly number[] = []
   let installedAssets: readonly NativeSessionAsset[] = []
   let nextSessionAssetId = 1
   const sessionResourceIds = new Map<string, number>()
+  // Locked bytes of each instrument-region session asset on the host, installed or retired, oldest install first. A sample that
+  // returns while resident uploads nothing: the host keeps a published instrument mapping read-only and locked until released.
+  const instrumentAssetBytes = new Map<number, number>()
+  // Retired samples stay resident up to this share of the aggregate sample budget, so a swap's peak stays within what it was.
+  const residentInstrumentBytesCap = (input.bridge?.instrumentBudgetPolicy?.aggregateBytes ?? 0) / 8
+  const noteInstrumentAssets = (
+    projection: {
+      assets: readonly { asset: AudioCoreGraphSnapshot["assets"][number]; sourceAssetKey: string }[]
+      instrumentRegionSources?: readonly { sourceAssetKey: string }[]
+    },
+    mappings: ReadonlyMap<string, NativeSessionAsset>,
+  ) => {
+    const regionKeys = new Set(projection.instrumentRegionSources?.map(({ sourceAssetKey }) => sourceAssetKey))
+    for (const { asset, sourceAssetKey } of projection.assets) {
+      const mapping = mappings.get(asset.assetId)
+      if (!mapping || !regionKeys.has(sourceAssetKey)) continue
+      instrumentAssetBytes.delete(mapping.sessionAssetId)
+      instrumentAssetBytes.set(mapping.sessionAssetId,
+        pageRoundedBytes(asset.frameCount * asset.channelCount * Float32Array.BYTES_PER_ELEMENT))
+    }
+  }
   const bufferIdentities = new WeakMap<AudioBuffer, number>()
   let nextBufferIdentity = 1
   const resourceKey = (
@@ -632,7 +657,7 @@ export const createNativePlaybackController = (input: {
       })), true)
       for (const { sourceAssetKey, buffer } of sources) {
         const bytes = buffer.length * buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT
-        scope.set(`resident:${sourceAssetKey}`, Math.ceil(bytes / 16_384) * 16_384, () => undefined)
+        scope.set(`resident:${sourceAssetKey}`, pageRoundedBytes(bytes), () => undefined)
       }
       return scope
     } catch (error) {
@@ -2249,6 +2274,8 @@ export const createNativePlaybackController = (input: {
         const mapping = sessionAssetsById.get(asset.assetId)
         if (mapping) sessionResourceIds.set(resourceKey(asset, snapshotAssetsByKey.get(sourceAssetKey)), mapping.sessionAssetId)
       }
+      instrumentAssetBytes.clear()
+      noteInstrumentAssets(projection, sessionAssetsById)
       nextSessionAssetId = Math.max(nextSessionAssetId, ...assets.map((asset) => asset.sessionAssetId + 1))
       preparedStretchAssetsForSession = preparedStretchAssets
       preparedStretchLeaseSession = attemptedStretchLeaseDispose
@@ -3924,7 +3951,7 @@ export const createNativePlaybackController = (input: {
         const mappings = new Map(assets.map((mapping) => [mapping.asset.assetId, mapping]))
         const addedAssets = projection.assets.filter(({ asset }) => {
           const mapping = mappings.get(asset.assetId)
-          return mapping && !previousIds.has(mapping.sessionAssetId)
+          return mapping && !previousIds.has(mapping.sessionAssetId) && !instrumentAssetBytes.has(mapping.sessionAssetId)
         })
         const sourceKeys = new Map(projection.assets.map(({ asset, sourceAssetKey }) => {
           const mapping = mappings.get(asset.assetId)
@@ -4239,16 +4266,35 @@ export const createNativePlaybackController = (input: {
           preparedStretchAssetsForSession = candidate.stretchAssets
           preparedStretchLeaseSession = candidate.dispose
           pendingStretchCandidates.delete(candidate.dispose)
+          const heldAssetIds = [...instrumentAssetBytes.keys()]
+          noteInstrumentAssets(projection, mappings)
+          let residentBytes = 0
+          let residentCount = 0
+          for (const [id, bytes] of instrumentAssetBytes) {
+            if (nextIds.has(id)) continue
+            residentBytes += bytes
+            residentCount += 1
+          }
+          // The host table holds 64 assets; resident samples keep the installed ones within half of it.
+          for (const [id, bytes] of instrumentAssetBytes) {
+            if (residentBytes <= residentInstrumentBytesCap
+              && nextIds.size + residentCount <= nativeAudioHostMaximumInstalledAssets / 2) break
+            if (nextIds.has(id)) continue
+            instrumentAssetBytes.delete(id)
+            residentBytes -= bytes
+            residentCount -= 1
+          }
           installedAssets = assets
-          installedAssetIds = assets.map((mapping) => mapping.sessionAssetId)
+          installedAssetIds = [...new Set([...nextIds, ...instrumentAssetBytes.keys()])]
           installedAssetSourceKeys = sourceKeys
           nativePcmChunkDescriptorsForSession = projection.nativePcmChunkDescriptors
           resourcesPromoted = true
           advanceScheduleSettledEpoch()
           // Release ACK registers deferred collection, not reusable IDs or a
           // proof that queued sources/fading voices have finished reading.
-          for (const mapping of removedAssets) {
-            void session.releaseAsset(mapping.sessionAssetId).then((reply) => {
+          for (const sessionAssetId of new Set([...removedAssetIds, ...heldAssetIds])) {
+            if (nextIds.has(sessionAssetId) || instrumentAssetBytes.has(sessionAssetId)) continue
+            void session.releaseAsset(sessionAssetId).then((reply) => {
               if (!reply.ok) reportStopped(reply.error, { retainPlayback: true })
             }, () => reportStopped("Native deferred asset release failed.", { retainPlayback: true }))
           }

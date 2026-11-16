@@ -5766,8 +5766,29 @@ for (const kind of ['sampler', 'granular', 'drum-rack'] satisfies readonly ('sam
       return Array.from({ length: view.getUint32(44, true) }, (_, index) =>
         view.getUint32(72 + index * 48 + 32, true)).includes(1)
     })).toBe(true)
-    expect(fixture.releasedAssetIds).toEqual(originalAssets)
+    // The replaced sample stays resident on the host until Stop, so a swap back uploads nothing.
+    expect(fixture.releasedAssetIds).toEqual([])
     expect(fixture.calls.slice(before).filter((call) => ["graph", "stop", "teardown", "begin"].includes(call))).toEqual([])
+    await controller.dispose()
+    expect(fixture.releasedAssetIds).toEqual(expect.arrayContaining(originalAssets))
+  })
+
+  test(`releases a replaced ${kind} sample past the resident cap`, async () => {
+    const fixture = createBridge("runtime-revision-progress")
+    // The cap, 1/8 of 12 MiB, is below the 5 s sample's 1.83 MiB of locked bytes.
+    fixture.bridge.instrumentBudgetPolicy.aggregateBytes = 12 * 1024 ** 2
+    let desired = sampledNativeInput(kind, 5)
+    const controller = createObservedController({ bridge: fixture.bridge, getProjectId: () => "local_project",
+      compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ ...desired, transport }) })
+    expect(await controller.start(desired.transport)).toBe("started")
+    const originalAssets = fixture.installedAssets.map((asset) => asset.sessionAssetId)
+    desired = { ...sampledNativeInput(kind, 5), revision: 2 }
+    const candidateCompile = holdCompile(controller)
+    const candidateAdoption = controller.adoptSchedule(migrationIntent("migration-8"), true)
+    await candidateCompile.entered
+    acknowledgeStagedPublication(fixture)
+    expect(await (candidateCompile.release(), candidateAdoption)).toEqual({ status: "adopted" })
+    expect(fixture.releasedAssetIds).toEqual(originalAssets)
     await controller.dispose()
   })
 
@@ -9192,7 +9213,7 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
       expect(seekCompleted).toBe(true)
       expect(await seek).toBe("started")
       if (isScenario("sampled-remove-zone-seek-racing")) {
-        expect(releasedAssetIds).toEqual(originalSampleAssetIds)
+        expect(releasedAssetIds).toEqual([])
         expect(retainedAssetIds.every((id) => !releasedAssetIds.includes(id))).toBe(true)
         const callsBeforeReadd = fixture.calls.length
         const installedBeforeReadd = fixture.installedAssets.length
@@ -9215,8 +9236,8 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
           running: true, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
         })
         expect(await readd).toEqual({ status: "adopted" })
-        expect(fixture.installedAssets.slice(installedBeforeReadd).map(({ sessionAssetId }) => sessionAssetId))
-          .toEqual(originalSampleAssetIds)
+        // The removed sample stayed resident, so the swap back installs nothing.
+        expect(fixture.installedAssets.slice(installedBeforeReadd)).toEqual([])
         expect(fixture.calls.slice(callsBeforeReadd)).not.toContain("start")
         expect(fixture.calls.slice(callsBeforeReadd)).not.toContain("stop")
       }
@@ -9380,9 +9401,9 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
           expect(releasedAssetIds).toEqual(originalAssetIds)
         }
       }
-      if (scenario.startsWith("sampled-track-remove-")) expect(releasedAssetIds).toEqual(originalSampleAssetIds)
+      if (scenario.startsWith("sampled-track-remove-")) expect(releasedAssetIds).toEqual([])
       if (scenario.startsWith("sampled-remove-") || scenario.startsWith("sampled-replace-") || scenario.startsWith("sampled-change-")) {
-        expect(releasedAssetIds).toEqual(scenario === "sampled-remove-zone-seek-racing" ? [] : originalSampleAssetIds)
+        expect(releasedAssetIds).toEqual([])
         expect(retainedAssetIds.every((id) => !releasedAssetIds.includes(id))).toBe(true)
         const addedIds = fixture.installedAssets.map(({ sessionAssetId }) => sessionAssetId)
           .filter((id) => !originalAssetIds.includes(id))
@@ -9404,8 +9425,7 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
           frame = seam
           progress()
           expect(await readd).toEqual({ status: "adopted" })
-          expect(fixture.installedAssets.slice(installedBeforeReadd).map(({ sessionAssetId }) => sessionAssetId))
-            .toEqual(originalSampleAssetIds)
+          expect(fixture.installedAssets.slice(installedBeforeReadd)).toEqual([])
           expect(fixture.calls.slice(callsBeforeReadd)).not.toContain("start")
           expect(fixture.calls.slice(callsBeforeReadd)).not.toContain("stop")
         }

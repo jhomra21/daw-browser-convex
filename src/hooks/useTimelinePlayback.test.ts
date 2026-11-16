@@ -699,6 +699,11 @@ const createNativeHookBridge = (
           if (realisticProgress) queueMicrotask(emitScheduleProgress)
           return reply('schedule')()
         },
+        // The host answers a plug-in state read it cannot serve with a refusal ack, which the main process reports so.
+        captureVstState: async () => {
+          calls.push('vst-state-get')
+          return { ok: false as const, error: 'The native audio session rejected vstStateGet request 26.' }
+        },
         setTransport: async (transport: NativeHostTransport) => {
           currentEpoch = transport.epoch
           currentTransport = { ...transport, transitionId: transport.transitionId ?? 0n }
@@ -2558,7 +2563,11 @@ const withOutputDeviceSwitch = async (
     requested: Array<string | undefined>
     unavailable: Set<string>
     faults: string[]
-    mount: (options: { outputDeviceId: () => string; isRecording?: () => boolean }) => ReturnType<typeof useTimelinePlayback>
+    mount: (options: {
+      outputDeviceId: () => string
+      isRecording?: () => boolean
+      captureNativeVstStates?: () => Promise<void>
+    }) => ReturnType<typeof useTimelinePlayback>
   }) => Promise<void>,
 ) => {
   const previousWindow = globalThis.window
@@ -2660,6 +2669,38 @@ test.skipIf(isServer)('a saved output change moves a paused native session and k
     expect(playback.playheadSec()).toBe(2)
   })
 })
+
+// The plug-in state the move reads is refused by the host, as for a session whose worker cannot answer.
+const withRefusedVstStateMove = (resumePlayback: boolean) => withOutputDeviceSwitch(async ({ fixture, requested, faults, mount }) => {
+  const [outputId, setOutputId] = createSignal("coreaudio:A")
+  const playback = mount({
+    outputDeviceId: outputId,
+    captureNativeVstStates: async () => {
+      const reply = await fixture.audioHost.session.captureVstState()
+      if (!reply.ok) throw new Error(`Native VST3 state capture failed: ${reply.error}`)
+    },
+  })
+  playback.setPlayhead(2, [track])
+  await playback.handlePlay([track])
+  if (!resumePlayback) await playback.handlePause()
+  const beginsBefore = fixture.calls.filter((call) => call === "begin").length
+  const resolvedBefore = requested.length
+
+  setOutputId("coreaudio:B")
+  await settleRebuild()
+
+  expect(fixture.calls).toContain("vst-state-get")
+  expect(faults).toEqual(["Native VST3 state capture failed: The native audio session rejected vstStateGet request 26."])
+  expect(requested.slice(resolvedBefore)).toEqual(["coreaudio:B"])
+  expect(fixture.calls.filter((call) => call === "begin")).toHaveLength(beginsBefore + 1)
+  expect(playback.isNativePlaybackPrepared()).toBeTrue()
+  expect(playback.isPlaying()).toBe(resumePlayback)
+  expect(playback.playheadSec()).toBe(2)
+})
+
+test.skipIf(isServer)('a refused plug-in state read still moves a playing session, tells the user, and keeps it playing', () => withRefusedVstStateMove(true))
+
+test.skipIf(isServer)('a refused plug-in state read still moves a paused session, tells the user, and keeps it paused', () => withRefusedVstStateMove(false))
 
 test.skipIf(isServer)('a saved output change to a missing device reports it and starts nothing on another device', async () => {
   await withOutputDeviceSwitch(async ({ fixture, unavailable, faults, mount }) => {

@@ -26,6 +26,9 @@ type LoopOptions = {
   preflightPlayback?: () => Promise<boolean>
 }
 
+// The session a capture failed on is disposed anyway, so a caller can tell it from a failed rebuild.
+class NativeStateCaptureError extends Error {}
+
 type NativePlaybackOptions = {
   requiresNativeAudio?: boolean
   enabled?: Accessor<boolean>
@@ -372,7 +375,12 @@ export function useTimelinePlayback(
   const capturePreparedNativeVstStates = async () => {
     if (!nativePlayback.isPrepared()) return
     const capture = nativePlayback.preparedVstCapture()
-    if (capture) await nativeOptions?.captureNativeVstStates?.(capture)
+    if (!capture) return
+    try {
+      await nativeOptions?.captureNativeVstStates?.(capture)
+    } catch (cause) {
+      throw new NativeStateCaptureError(cause instanceof Error ? cause.message : "Native VST3 state capture failed.", { cause })
+    }
   }
   const disposeNativeAfterCapture = async () => {
     let captureError: unknown
@@ -2339,13 +2347,22 @@ export function useTimelinePlayback(
       if (!nativePlayback.isActive() && !nativePlayback.isPrepared() && nativePlayback.getPendingStart() === undefined) return
       // Not requestTimelineSchedule: an active native session adopts a request in place, and a device is bound only
       // when a session is configured.
-      void applyTimelineSchedule(loopOptions?.getTracks?.() ?? [], {
+      const move = {
         rebuildBackend: true,
         resumePlayback: isPlaying(),
         playheadSec: nativePlayback.currentPositionSec() ?? lastPublishedPlayheadSec,
         owner: 'native',
         projectId: nativeOptions?.projectId?.(),
         projectGeneration: nativeOptions?.projectGeneration?.(),
+      } satisfies TimelineScheduleOptions
+      const tracks = loopOptions?.getTracks?.() ?? []
+      const rebuild = () => applyTimelineSchedule(tracks, move)
+      void rebuild().catch((cause: unknown) => {
+        if (!(cause instanceof NativeStateCaptureError)) throw cause
+        // The refused capture still disposed the old session. Tell the user, then move without it: the new session
+        // starts from the last persisted plug-in state, at the transport the move was asked for.
+        reportNativeStateCaptureFailure(cause)
+        return untrack(rebuild)
       }).catch((cause: unknown) => {
         console.error('[native-playback] moving the session to the saved output device failed', cause)
       })

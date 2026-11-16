@@ -2572,7 +2572,20 @@ const withOutputDeviceSwitch = async (
     const reply = await resolveDefault()
     return id !== undefined && unavailable.has(id) ? { ok: true, device: { ...reply.device, available: false } } : reply
   }
-  Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+  // The packaged host offers revisions, so a playing session adopts edits in place: only a device move replaces it.
+  const reply = (status: "prepared" | "published" | "retired"): NativeRevisionReply => ({
+    ok: true, hostPid: 123, hostGeneration: 7,
+    revision: { status, continuity: "accepted", requestedRevision: 2, activeRevision: 2,
+      preparedRevision: 2, retiredRevision: 0, publicationFrame: 1024n, renderEpoch: 10n },
+  })
+  const revisions: NativeRevisionSession = {
+    prepare: async () => reply("prepared"), publish: async () => reply("published"), inspect: async () => reply("published"),
+    rollback: async () => reply("prepared"), retire: async () => reply("retired"),
+  }
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: {
+    ...fixture.audioHost, session: { ...fixture.audioHost.session, revisions,
+      configureInstrumentStates: async () => ({ ok: true }) },
+  } } } })
   try {
     await withFakeRaf(async () => {
       const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })

@@ -2329,7 +2329,9 @@ export function useTimelinePlayback(
     sessionOutputDeviceId = outputDeviceId
     untrack(() => {
       if (!nativePlayback.isActive() && !nativePlayback.isPrepared() && nativePlayback.getPendingStart() === undefined) return
-      void requestTimelineSchedule(loopOptions?.getTracks?.() ?? [], {
+      // Not requestTimelineSchedule: an active native session adopts a request in place, and a device is bound only
+      // when a session is configured.
+      void applyTimelineSchedule(loopOptions?.getTracks?.() ?? [], {
         rebuildBackend: true,
         resumePlayback: isPlaying(),
         playheadSec: nativePlayback.currentPositionSec() ?? lastPublishedPlayheadSec,

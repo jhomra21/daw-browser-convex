@@ -299,10 +299,11 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
   state = await snapshot()
   const changedTrack = state.tracks.find((track) => track.name === "Changed right")
   if (!changedTrack) throw new Error("Changed track missing")
-  await context.evaluate(`(()=>{
-    const button=[...document.querySelectorAll('button[aria-label]')].find(b=>b.getAttribute('aria-label')?.endsWith(': Changed right'));
-    if(!button)throw new Error("Changed track selector missing");button.click();return true;
+  const selectTrack = (name: string) => context.evaluate(`(()=>{
+    const button=[...document.querySelectorAll('button[aria-label]')].find(b=>b.getAttribute('aria-label')?.endsWith(': ${name}'));
+    if(!button)throw new Error("${name} track selector missing");button.click();return true;
   })()`)
+  await selectTrack("Changed right")
   let changedId: string | undefined
   if (row !== "add-paged-asset") {
     await runtime(["import", "--path", changedFile])
@@ -316,14 +317,18 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
   }
   // "held-swap" swaps the instrument's sample for another one: its clip sits on the muted Changed right track with the changed one. A
   // byte-identical copy is an import the app deduplicates (no clip), so the swap sample is the same signal 1 % louder: the note switches to it at
-  // the same playback position, and the step (under 1.2 % of the level) stays under the held judge's 2 % jump bound.
+  // the same playback position, and the step (under 1.2 % of the level) stays under the held judge's 2 % jump bound. An import lands on the
+  // selected track after its last clip, which on Changed right is past the visible timeline (its clips are not in the DOM), so the swap sample
+  // is imported onto the empty Track 1 (the retained clip is on Track 2) at the playhead and moved.
   if (row === "held-swap") {
     const swapFile = path.join(out, "swap.wav")
     await writePhase5Asset(swapFile, (contentSeconds ?? 24) + 6, true, 1.01)
+    await selectTrack("Track 1")
     await runtime(["import", "--path", swapFile])
     await waitImportedClip(context, "swap")
     const copy = required((await snapshot()).clips.find((item) => item.name.includes("swap")), "Swap fixture import")
     await mutate([{ kind: "clip.move", clip: ref(copy.id), track: ref(changedTrack.id), startSec: 0 }])
+    await selectTrack("Changed right")
   }
   // Phase 9 only: "raise-state" has the effect-state devices but never arms the track for monitoring, so the Spectral stays on the
   // master path and its declared latency moves reach it (the monitored effect-state row keeps its Spectral out of compensation).

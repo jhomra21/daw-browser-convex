@@ -958,7 +958,11 @@ int main() {
         continue;
       case daw::audio_host_macos::ControlType::kGraphRevisionStatus:
         if (!active_session || payload.size() != 4) return EXIT_FAILURE;
-        if (!WriteGraphRevisionStatus(active_session->InspectGraphRevision(ReadU32(payload.data())))) return EXIT_FAILURE;
+        {
+          // From the frame's decode to the reply written: the line's wall time less its duration is the receipt.
+          daw::acceptance::Step reply("graph-inspect-reply", "inspect-step");
+          if (!WriteGraphRevisionStatus(active_session->InspectGraphRevision(ReadU32(payload.data())))) return EXIT_FAILURE;
+        }
         continue;
       case daw::audio_host_macos::ControlType::kGraphRetire:
         if (!active_session || payload.size() != 4) return EXIT_FAILURE;

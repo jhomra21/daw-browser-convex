@@ -76,8 +76,9 @@ export const ae08RendererMarks = z.enum([
   "lane-admitted", "fence-open", "prepare-sent",
   // The renderer's side of the host's prepare: the reply received, and the first publish request that binds the seam sent.
   "prepare-reply-received", "bind-request-sent",
-  // The two host round trips between them: the instrument states reply (sent even with none added) and the bind's progress read.
-  "bind-states-configured", "bind-progress-read",
+  // The two host round trips between them: the instrument states reply (sent even with none added) and the bind's progress read,
+  // whose IPC reply is marked before the publication lane takes it back.
+  "bind-states-configured", "bind-progress-reply", "bind-progress-read",
   // Bind to armed Publish, the staging of the window the seam waits for: the cover's end, the staged bank returned, the prime's start and end.
   "armed-cover-end", "armed-stage-returned", "armed-prime-start", "armed-prime-end",
   // Asset hydration of one adoption, after the host prepared its graph: the mapped asset's create, each page write and range prepare

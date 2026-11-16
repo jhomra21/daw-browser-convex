@@ -3681,10 +3681,11 @@ export const createNativePlaybackController = (input: {
           evidence, reason)
         return { record }
       }
-      const inspect = async (request = binding, releaseLane = false) => {
+      const inspect = async (request = binding, releaseLane = false, replied?: () => void) => {
         if (!sessionAlive() || !request) return undefined
         try {
           const reply = revisions.inspect(request)
+          if (replied) void reply.then(replied, () => undefined)
           return await (releaseLane ? withoutLane(reply) : reply)
         } catch { return undefined }
       }
@@ -4255,7 +4256,7 @@ export const createNativePlaybackController = (input: {
         // than the provisional lead has native past the seam, which Inspect reports as rebase-required: that seam binds
         // later, to the same lead, instead of publishing at a seam that was already reached.
         for (let attempt = 0; attempt < 2; attempt++) {
-          const fresh = await inspect(binding, true)
+          const fresh = await inspect(binding, true, hydrationMark && (() => hydrationMark("bind-progress-reply")))
           hydrationMark?.("bind-progress-read")
           if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
           if (!fresh?.ok || (fresh.revision.status !== "prepared" && fresh.revision.status !== "rebase-required")

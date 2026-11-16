@@ -1398,10 +1398,13 @@ struct AudioHost::Impl {
   // later move cannot change what its event reports. A lower while playing leaves the budget where it was.
   std::atomic<std::uint32_t> acceptance_pinned_latency = 0;
   std::atomic<std::uint32_t> acceptance_graph_latency = 0;
+  // Spectral stages hold a latency move's completion, so the gate needs to know the published graph has them.
+  std::atomic<std::uint32_t> acceptance_spectral_predecessors = 0;
   void RecordPublicationLatency() {
     const auto core = active_core.load(std::memory_order_acquire);
     acceptance_pinned_latency.store(daw::audio_core::InspectLatencyTransition(core).budget, std::memory_order_relaxed);
     acceptance_graph_latency.store(daw::audio_core::PublishedGraphLatency(core), std::memory_order_relaxed);
+    acceptance_spectral_predecessors.store(daw::audio_core::PublishedGraphSpectralPredecessors(core), std::memory_order_relaxed);
   }
   std::uint64_t acceptance_observed_processor_sequence = 0;
   std::uint32_t acceptance_observed_epoch = UINT32_MAX;
@@ -1428,9 +1431,9 @@ struct AudioHost::Impl {
   }
   void PublicationEvidence(const char* cause) const {
     if (!daw::acceptance::Enabled()) return;
-    char detail[96];
-    std::snprintf(detail, sizeof(detail), ",\"pinnedLatencyFrames\":%u,\"graphLatencyFrames\":%u",
-      acceptance_pinned_latency.load(), acceptance_graph_latency.load());
+    char detail[128];
+    std::snprintf(detail, sizeof(detail), ",\"pinnedLatencyFrames\":%u,\"graphLatencyFrames\":%u,\"spectralPredecessors\":%u",
+      acceptance_pinned_latency.load(), acceptance_graph_latency.load(), acceptance_spectral_predecessors.load());
     Evidence("graph-publish", cause, 0, detail);
   }
   enum class RecordingCommand : std::uint32_t { kNone, kStop, kCancel };

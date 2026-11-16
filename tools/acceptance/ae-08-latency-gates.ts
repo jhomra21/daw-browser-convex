@@ -25,8 +25,8 @@
 //   (the first publication at or after the edit's wall time owns it) to `graph-publish`.
 // - completion: `latency-move-complete` frame - publication frame. Frames, not time, so no margin is added. Allowed:
 //   ceil((move + 2 * fade) / BLOCK) * BLOCK plus the capped blocks before the bind; see headMoveFrames for `move`. Evidence with no
-//   pinned/graph latency on its graph-publish lines keeps COMPLETE_BASE_FRAMES for the first term. The host logs nothing that
-//   tells a spectral raise (which holds completion for its stages, audio_core.cpp:9141-9145) from another, so none is told apart.
+//   pinned/graph latency on its graph-publish lines keeps COMPLETE_BASE_FRAMES for the first term, and so does a
+//   publication whose graph-publish line reports spectralPredecessors above 0 (their stages hold completion, audio_core.cpp:9141-9145).
 // - class: asset when the host logged an `asset-install` between prepare and publish; raise when the edits' net
 //   latency move is positive (merged when 2+ blocks pass between prepare and bind); else plain. A row can declare
 //   its class in latency-class.json; an unknown class is an input failure. vst-insert is decided per publication: it owns an edit
@@ -77,6 +77,7 @@ const hostEventSchema = z.object({
   frame: z.number().default(0), revision: z.number().default(0), requestedRevision: z.number().default(0),
   publicationFrame: z.number().default(0), transportEpoch: z.number().default(0), sampleRate: z.number().default(0),
   blockSize: z.number().default(0), pinnedLatencyFrames: z.number().optional(), graphLatencyFrames: z.number().optional(),
+  spectralPredecessors: z.number().optional(),
 })
 const editsSchema = z.object({ edits: z.array(z.object({
   name: z.string().optional(), index: z.number().optional(), wallMs: z.number(), fromLatencyFrames: z.number(), toLatencyFrames: z.number() })).default([]) })
@@ -104,8 +105,10 @@ const findLast = (events: readonly HostEvent[], before: number, match: (event: H
 
 // The host's graph-publish lines carry the pinned budget and the graph's own latency. A head's delay is their difference, so a
 // publication that does not grow the budget moves heads by max(previous delay, delay) when that delay changed (audio_core.cpp:7074-7081).
-// One that grows it moves none: its heads wait the 2 fades alone (:7000-7004).
+// One that grows it moves none: its heads wait the 2 fades alone (:7000-7004). A graph with spectral predecessors is not judged by
+// this: their stages hold the completion (:9141-9145), so it keeps COMPLETE_BASE_FRAMES.
 const headMoveFrames = (previous: HostEvent, current: HostEvent) => {
+  if ((current.spectralPredecessors ?? 0) > 0) return undefined
   if (previous.pinnedLatencyFrames === undefined || previous.graphLatencyFrames === undefined
     || current.pinnedLatencyFrames === undefined || current.graphLatencyFrames === undefined) return undefined
   const before = previous.pinnedLatencyFrames - previous.graphLatencyFrames
@@ -275,6 +278,8 @@ type Spec = {
   install?: boolean; resend?: boolean; completeFrames?: number | "none"
   // The pinned and graph latency the host logs on this publication's graph-publish line.
   latency?: { pinned: number; graph: number }
+  // The spectral predecessor count the host logs on that line; absent on evidence from before it did.
+  spectral?: number
   // A latency publication stages no schedule window against its revision. A row without `windowed` has no schedule-window line at
   // all, as in evidence from before the line existed.
   unbound?: boolean
@@ -311,7 +316,8 @@ const syntheticRow = (specs: readonly Spec[], options: RowOptions = {}) => {
       lines.push({ event: "ui-editor-open", wallMs: wall + (spec.totalMs ?? 30) - (spec.editMs ?? 75) - spec.precededByMs + 5, pid: 1, key: "k" })
     if (spec.uiMarkMs !== undefined) lines.push({ event: spec.uiMark ?? "ui-parameter-commit", wallMs: wall + (spec.totalMs ?? 30) - spec.uiMarkMs, pid: 1, key: "k" })
     lines.push({ ...base, event: "graph-publish", cause: "block-boundary", wallMs: wall + (spec.totalMs ?? 30), frame: publicationFrame, publicationFrame, revision, requestedRevision: 0,
-      pinnedLatencyFrames: spec.latency?.pinned, graphLatencyFrames: spec.latency?.graph })
+      pinnedLatencyFrames: spec.latency?.pinned, graphLatencyFrames: spec.latency?.graph,
+      spectralPredecessors: spec.spectral })
     if (spec.completeFrames !== "none")
       lines.push({ ...base, event: "latency-move-complete", wallMs: wall + 100, frame: publicationFrame + (spec.completeFrames ?? COMPLETE_BASE_FRAMES + BLOCK * blocksBeforeBind), revision, requestedRevision: 0 })
     const editWallMs = wall + (spec.totalMs ?? 30) - (spec.editMs ?? 75)
@@ -395,6 +401,15 @@ const selfTest = async (c1Runs: readonly string[]) => {
       rows: [["vst-latency-switch", [{ raise: true, latency: { pinned: 4608, graph: 4608 }, completeFrames: 5632 }], { startLatency: { pinned: 4608, graph: 512 } }]] },
     { name: "budget raise completing 1536 frames", status: "FAIL", fails: ["completion"],
       rows: [["vst-latency-switch", [{ raise: true, latency: { pinned: 4608, graph: 4608 }, completeFrames: 1536 }], { startLatency: { pinned: 512, graph: 512 } }]] },
+    // A spectral graph's stages hold completion (audio_core.cpp:9141-9145), so it keeps COMPLETE_BASE_FRAMES (2048) + bind slack.
+    { name: "spectral raise completing 2048 passes", status: "PASS", fails: [],
+      rows: [["spectral-raise", [{ raise: true, latency: { pinned: 4608, graph: 4608 }, spectral: 1, completeFrames: 2048 }], { startLatency: { pinned: 512, graph: 512 } }]] },
+    { name: "spectral raise completing past 2048 + the bind slack fails", status: "FAIL", fails: ["completion"],
+      rows: [["spectral-raise", [{ raise: true, latency: { pinned: 4608, graph: 4608 }, spectral: 1, completeFrames: 3072 }], { startLatency: { pinned: 512, graph: 512 } }]] },
+    { name: "the same raise with no spectral predecessors and 2048 completion fails the formula", status: "FAIL", fails: ["completion"],
+      rows: [["spectral-raise", [{ raise: true, latency: { pinned: 4608, graph: 4608 }, spectral: 0, completeFrames: 2048 }], { startLatency: { pinned: 512, graph: 512 } }]] },
+    { name: "old evidence with no latency or spectral fields keeps the 2048 allowance", status: "PASS", fails: [],
+      rows: [["old-evidence", [{ raise: true, completeFrames: 2048 }]]] },
   ]
   const root = await mkdtemp(join(tmpdir(), "ae08-latency-gates-"))
   let failed = 0

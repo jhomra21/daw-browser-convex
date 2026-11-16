@@ -3477,6 +3477,7 @@ void TestPublishEvidenceCarriesTheAppliedLatency() {
   };
   assert((latencies("graphLatencyFrames") == std::array<std::uint64_t, 3>{512, 4096, 512}));
   assert((latencies("pinnedLatencyFrames") == std::array<std::uint64_t, 3>{512, 4096, 4096}));
+  assert((latencies("spectralPredecessors") == std::array<std::uint64_t, 3>{0, 1, 1}));
 }
 
 void TestPausedPublicationReconcilesScheduledTargets() {

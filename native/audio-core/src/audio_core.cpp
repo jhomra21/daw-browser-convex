@@ -7250,6 +7250,11 @@ std::uint32_t daw::audio_core::PublishedGraphLatency(const daw_audio_core_handle
   return core == nullptr ? 0u : core->published_graph->minimum_latency;
 }
 
+std::uint32_t daw::audio_core::PublishedGraphSpectralPredecessors(const daw_audio_core_handle handle) noexcept {
+  const Core *core = to_core(handle);
+  return core == nullptr ? 0u : core->published_graph->spectral_predecessor_count;
+}
+
 void daw::audio_core::StopLatencyTransition(const daw_audio_core_handle handle) noexcept {
   Core *core = to_core(handle);
   if (core == nullptr) return;

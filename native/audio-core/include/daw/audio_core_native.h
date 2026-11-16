@@ -42,6 +42,8 @@ struct NativeLatencyTransition {
 // The published graph's own latency, not the pinned budget a lower leaves in place. The graph pointer is
 // swapped by publication, so call it only on the thread that publishes, right after the publish returns.
 [[nodiscard]] std::uint32_t PublishedGraphLatency(daw_audio_core_handle core) noexcept;
+// The published graph's spectral predecessor count, under the same threading rule as PublishedGraphLatency.
+[[nodiscard]] std::uint32_t PublishedGraphSpectralPredecessors(daw_audio_core_handle core) noexcept;
 // Device-stop boundary only, after the last callback has returned.
 void StopLatencyTransition(daw_audio_core_handle core) noexcept;
 

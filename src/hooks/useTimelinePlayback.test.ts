@@ -700,9 +700,9 @@ const createNativeHookBridge = (
           return reply('schedule')()
         },
         // The host answers a plug-in state read it cannot serve with a refusal ack, which the main process reports so.
-        captureVstState: async () => {
+        captureVstState: async (): Promise<{ ok: false; error: string }> => {
           calls.push('vst-state-get')
-          return { ok: false as const, error: 'The native audio session rejected vstStateGet request 26.' }
+          return { ok: false, error: 'The native audio session rejected vstStateGet request 26.' }
         },
         setTransport: async (transport: NativeHostTransport) => {
           currentEpoch = transport.epoch

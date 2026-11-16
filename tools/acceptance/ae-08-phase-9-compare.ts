@@ -119,6 +119,31 @@ export const compareSustained = (input: { output: Pcm; seams: readonly number[];
   }
 }
 
+// A held note on the edited (right) channel stays smooth. The second difference of content slower than a tenth of the sample rate (a 440 Hz sine
+// is 0.3 % of its level, the fixture's sample under 0.2 %) is a small fraction of its level, and a gain ramp adds less; a retrigger, a gap's edge
+// or a gain step is a jump, and its second difference is the jump itself.
+const SMOOTH_FRACTION = 0.02
+export const compareSmooth = (input: { output: Pcm; seams: readonly number[]; endFrame: number }): Compare => {
+  const { output, seams, endFrame } = input
+  const at = (frame: number) => output.samples[frame * output.channels + 1] ?? NaN
+  return (window) => {
+    const from = seams[window.index - 1], to = seams[window.index] ?? endFrame
+    if (from === undefined) return `no publication for edit ${window.index}`
+    let peak = 0
+    for (let frame = from; frame < to; frame++) peak = Math.max(peak, Math.abs(at(frame)))
+    for (let frame = from + 2; frame < to; frame++) {
+      const jump = Math.abs(at(frame) - 2 * at(frame - 1) + at(frame - 2))
+      if (!(jump <= SMOOTH_FRACTION * peak)) return `the held note jumps at frame ${frame} (second difference ${jump} against a peak of ${peak})`
+    }
+    return undefined
+  }
+}
+// The held-instrument rows: never silent, never a jump.
+export const compareHeld = (input: { output: Pcm; seams: readonly number[]; endFrame: number }): Compare => {
+  const sustained = compareSustained(input), smooth = compareSmooth(input)
+  return (window) => sustained(window) ?? smooth(window)
+}
+
 // Ruling item 3: the deleted clip is absent after its fade, measured on the capture itself against its own pre-delete window. The
 // right channel is the deleted clip's; the left channel (the retained source) must keep sounding, which is the one session carrying on.
 const PRESENT_LEVEL = 0.01
@@ -321,6 +346,7 @@ export const judgeRowCapture = async (input: { launchOut: string; directory: str
     const rowEnd = Math.max(...mine.filter((block) => block.wallMs <= input.captureEndWallMs).map((block) => block.transportFrame + block.frames))
     return judgeBurst(steps, input.captureEndWallMs, compareLatencyMoves({ output, edits, publications, startingPinned, endFrame: Math.min(captured, rowEnd) }))
   }
+  if (row.judge === "held") return judgeBurst(steps, input.captureEndWallMs, compareHeld({ output, seams, endFrame: captured }))
   if (row.judge === "sustained") return judgeBurst(steps, input.captureEndWallMs, compareSustained({ output, seams, endFrame: captured }))
   if (row.judge === "fault") return judgeBurst(steps, input.captureEndWallMs, compareFault({ events: hostEvents, output, seam: seams[0] ?? 0,
     editFrame: mine.find((block) => block.wallMs >= editWallMs(1))?.transportFrame ?? 0, endFrame: captured, editWallMs: editWallMs(1) }))
@@ -523,6 +549,25 @@ export const selfTest = () => {
   check(one(compareTrust(lines({ event: "graph-publish", wallMs: 500 }), 1000)).outcome === "pass", "nothing after the refusal passes")
   check(one(compareTrust(lines({ event: "graph-publish-request", wallMs: 1500 }), 1000)).outcome === "fail", "a graph request after the refusal fails")
   check(one(compareTrust(lines({ event: "worker-spawn", wallMs: 1500 }), 1000)).outcome === "fail", "a worker spawned after the refusal fails")
+  // The held-instrument rows judge the right channel: a 440 Hz sine and the fixture's sample (an offset, a sine and a chirp) are smooth, a gain
+  // ramp over the 6 ms fade is smooth, and a gap, a retrigger or a gain step is a jump.
+  const heldFrames = 12_000, heldSeam = 2000
+  const heldOutput = (right: (frame: number) => number): Pcm => {
+    const samples = new Float32Array(heldFrames * 2)
+    for (let frame = 0; frame < heldFrames; frame++) samples[frame * 2 + 1] = right(frame)
+    return { sampleRate, channels: 2, samples }
+  }
+  const heldVerdict = (right: (frame: number) => number) => compareHeld({ output: heldOutput(right), seams: [heldSeam], endFrame: heldFrames })({ index: 1, fromWallMs: 0, toWallMs: 0 })
+  const heldTone = (frame: number) => 0.1 * Math.sin(2 * Math.PI * 440 * frame / sampleRate)
+  const sample = (frame: number) => phase5AssetSample(frame, true)
+  check(heldVerdict(heldTone) === undefined, "a held 440 Hz sine passes")
+  check(heldVerdict(sample) === undefined, "the fixture's sample played straight passes")
+  check(heldVerdict((frame) => heldTone(frame) * (frame < 5000 ? 1 : frame > 5288 ? 0.5 : 1 - 0.5 * (frame - 5000) / 288)) === undefined, "a gain ramp over 6 ms passes")
+  check(/drops out/.test(heldVerdict((frame) => frame >= 5000 && frame < 5600 ? 0 : heldTone(frame)) ?? ""), "a gap fails as the note dropping out")
+  check(/jumps at frame 5000/.test(heldVerdict((frame) => frame < 5000 ? heldTone(frame) : heldTone(frame + 123)) ?? ""), "a retrigger that restarts the phase fails as a jump")
+  check(/jumps/.test(heldVerdict((frame) => sample(frame < 5000 ? frame : frame - 5000)) ?? ""), "a sample restarted from its start fails as a jump")
+  check(/jumps at frame 5000/.test(heldVerdict((frame) => heldTone(frame) * (frame < 5000 ? 1 : 0.5)) ?? ""), "a hard gain step fails as a jump")
+  check(/no publication for edit 2/.test(compareHeld({ output: heldOutput(heldTone), seams: [heldSeam], endFrame: heldFrames })({ index: 2, fromWallMs: 0, toWallMs: 0 }) ?? ""), "a window with no publication is refused")
   // The transport rows. Host loss: the host is reported exited, the transport stopped, native unavailable reported, and no session starts after.
   const observed = (edit: string, wallMs: number, fields: Partial<TransportObservation> = {}): TransportObservation =>
     ({ event: "transport-observed", wallMs, edit, pid: 7, cancelWallMs: wallMs - 100, state: "stopped", playheadSec: 0, failure: nativeUnavailableReported, ...fields })

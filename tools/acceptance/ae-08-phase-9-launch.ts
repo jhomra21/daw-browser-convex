@@ -5,8 +5,8 @@ import { z } from "zod"
 import type { ProjectSnapshotV2 } from "@daw-browser/control"
 import { createDefaultLimiterParams, createDefaultSpectralParams, getSpectralLatencyFrames } from "@daw-browser/shared"
 import { command } from "../performance/30-track/v3-import-workload"
-import { deleteTrackThroughUi, dragUtilityGainKnob, exportReference, pressHistoryKey, selectFftSize, setupPhase5Fixture, waitForUi, waitImportedClip,
-  waitNativeFrame, liveMidiTrack, type Phase5Context } from "./ae-08-phase-5-fixture"
+import { deleteTrackThroughUi, dragUtilityGainKnob, exportReference, heldInstrumentTrack, heldSynthTrack, insertTargetTrack, pressHistoryKey, reorderTargetTrack, required,
+  sampledInstrumentParams, selectFftSize, setupPhase5Fixture, sineSynthParams, waitForUi, waitImportedClip, waitNativeFrame, liveMidiTrack, type Phase5Context, type SampleAsset } from "./ae-08-phase-5-fixture"
 import { burstSchedule, judgeStored, MIN_WINDOW_MS, parseHostLines, repetitionsFor, runBurst, type Perform, type Timings } from "./ae-08-phase-9-matrix"
 import { phase9Matrix, type Row } from "./ae-08-phase-9-rows"
 import { nativeUnavailableReported, takeFile } from "./ae-08-phase-9-compare"
@@ -37,7 +37,7 @@ export type Phase9Launch =
 
 // The ids a performer needs from the project; `observe` reads them from a fresh snapshot, so a performer never holds a stale one.
 export type Observed = { spectralEffectId: string | undefined; limiterEffectId: string | undefined; externalEffectId: string | undefined; trackId: (name: string) => string | undefined; clipId: (name: string) => string | undefined
-  clipStartSec: (name: string) => number | undefined }
+  clipStartSec: (name: string) => number | undefined; effectId: (trackName: string, kind: string) => string | undefined; asset: (name: string) => SampleAsset | undefined }
 export const observeSnapshot = (state: ProjectSnapshotV2, changedTrackId: string): Observed => ({
   spectralEffectId: state.processors.find((entry) => "trackId" in entry.target && entry.target.trackId === changedTrackId && entry.processor.kind === "spectral")?.id,
   limiterEffectId: state.processors.find((entry) => "trackId" in entry.target && entry.target.trackId === changedTrackId && entry.processor.kind === "limiter")?.id,
@@ -45,6 +45,15 @@ export const observeSnapshot = (state: ProjectSnapshotV2, changedTrackId: string
   trackId: (name) => state.tracks.find((track) => track.name === name)?.id,
   clipId: (name) => state.clips.find((clip) => clip.name.includes(name))?.id,
   clipStartSec: (name) => state.clips.find((clip) => clip.name.includes(name))?.startSec,
+  effectId: (trackName, kind) => {
+    const trackId = state.tracks.find((track) => track.name === trackName)?.id
+    return state.processors.find((entry) => "trackId" in entry.target && entry.target.trackId === trackId && entry.processor.kind === kind)?.id
+  },
+  asset: (name) => {
+    const found = state.assets.find((entry) => entry.name.includes(name))
+    return found?.durationSec === undefined || found.sampleRate === undefined || found.channelCount === undefined ? undefined
+      : { id: found.id, name: found.name, durationSec: found.durationSec, sampleRate: found.sampleRate, channelCount: found.channelCount }
+  },
 })
 
 type Performers = {
@@ -56,10 +65,6 @@ type Performers = {
   kill: (pid: number) => void
   observe: () => Promise<Observed>
   setup: { changedTrackId: string; changedFile: string }
-}
-const required = <Value>(value: Value | undefined, what: string) => {
-  if (value === undefined) throw new Error(`${what} missing`)
-  return value
 }
 
 // The edit names of the built rows (ae-08-phase-9-matrix.ts) and what each does. Each returns the latency move it declares.
@@ -83,12 +88,26 @@ export const createPerformer = ({ context, runtime, transportStatus, hostPid, ki
       processor: ref(required((await observe()).externalEffectId, "Test plug-in processor")), changes: [{ parameterId: 1, normalizedValue }] }])
     return { ...move(from, to), wallMs }
   }
-  // The armed recording target cannot be deleted: the commit must be refused with the lock's reason, and a commit that goes through fails the row.
-  const refuseTargetDelete = async () => {
-    const refusal = await context.mutate([{ kind: "track.delete", track: ref(setup.changedTrackId) }]).then(() => undefined, (error) => String(error))
-    if (refusal === undefined) throw new Error("Deleting the armed recording target was committed")
-    if (!refusal.includes(recordingTargetLockedReason)) throw new Error(`Deleting the armed recording target was refused for another reason: ${refusal}`)
+  // The armed recording target can be neither deleted nor rerouted: the commit must be refused with the lock's reason, and a commit that goes
+  // through fails the row.
+  const refuseTargetChange = (change: string, action: { kind: string; track: ReturnType<typeof ref>; output?: null }) => async () => {
+    const refusal = await context.mutate([action]).then(() => undefined, (error) => String(error))
+    if (refusal === undefined) throw new Error(`${change} the armed recording target was committed`)
+    if (!refusal.includes(recordingTargetLockedReason)) throw new Error(`${change} the armed recording target was refused for another reason: ${refusal}`)
     return unmoved
+  }
+  // The held-instrument rows edit the instrument or an unrelated track under a note that holds on the right channel.
+  const trackNamed = async (name: string) => ({ kind: "track", track: ref(required((await observe()).trackId(name), name)) })
+  const instrumentEdit = (kind: "sampler" | "drum-rack" | "granular", assetName: string, change: { gain?: number; densityHz?: number }) => async () =>
+    commit([{ kind: "instrument.set", target: await trackNamed(heldInstrumentTrack), instrumentKind: kind,
+      params: sampledInstrumentParams(kind, required((await observe()).asset(assetName), `${assetName} asset`), change) }])
+  const polyphony = (voices: number) => async () => commit([{ kind: "instrument.set", target: await trackNamed(heldSynthTrack), instrumentKind: "synth", params: sineSynthParams(voices) }])
+  // The Utility then the Saturator on the target track, or the other way round.
+  const reorder = (saturatorFirst: boolean) => async () => {
+    const observed = await observe()
+    const [utility, saturator] = [required(observed.effectId(reorderTargetTrack, "utility"), "Utility device"), required(observed.effectId(reorderTargetTrack, "saturator"), "Saturator device")]
+    const order = [{ effect: ref(utility), kind: "utility" }, { effect: ref(saturator), kind: "saturator" }]
+    return commit([{ kind: "effect.reorder", target: await trackNamed(reorderTargetTrack), order: saturatorFirst ? order.toReversed() : order }])
   }
   const lookahead = (lookaheadMs: number) => async () => commit([{ kind: "effect.upsert", target, effectKind: "limiter",
     effect: ref(required((await observe()).limiterEffectId, "Limiter device")), params: { version: 1, state: { ...createDefaultLimiterParams(), lookaheadMs } } }])
@@ -106,7 +125,23 @@ export const createPerformer = ({ context, runtime, transportStatus, hostPid, ki
     return unmoved
   }
   const performers = new Map([
-    ["target-delete-refused", refuseTargetDelete],
+    ["target-delete-refused", refuseTargetChange("Deleting", { kind: "track.delete", track: ref(setup.changedTrackId) })],
+    ["target-reroute-refused", refuseTargetChange("Rerouting", { kind: "track.routing.set", track: ref(setup.changedTrackId), output: null })],
+    ["instrument-remove", async () => commit([{ kind: "instrument.remove", target: await trackNamed(insertTargetTrack) }])],
+    ["instrument-insert", async () => commit([{ kind: "instrument.set", target: await trackNamed(insertTargetTrack), instrumentKind: "synth", params: sineSynthParams() }])],
+    ["effects-reverse", reorder(true)],
+    ["effects-restore", reorder(false)],
+    ["polyphony-2", polyphony(2)],
+    ["polyphony-16", polyphony(16)],
+    ["sampler-gain-half", instrumentEdit("sampler", "changed", { gain: 0.5 })],
+    ["sampler-gain-full", instrumentEdit("sampler", "changed", {})],
+    ["drum-rack-gain-half", instrumentEdit("drum-rack", "changed", { gain: 0.5 })],
+    ["drum-rack-gain-full", instrumentEdit("drum-rack", "changed", {})],
+    ["granular-density-48", instrumentEdit("granular", "changed", { densityHz: 48 })],
+    ["granular-density-40", instrumentEdit("granular", "changed", {})],
+    // An identical copy of the sample: a swap that continues at the same playback position leaves the note unbroken.
+    ["sampler-swap-asset", instrumentEdit("sampler", "swap", {})],
+    ["sampler-swap-back", instrumentEdit("sampler", "changed", {})],
     // The user's Play press, the audio host killed by pid while the press is pending, and the app's own report of it.
     ["play-kill-host", async () => {
       const pid = await hostPid()
@@ -345,7 +380,9 @@ const check = (condition: boolean, message: string) => { if (!condition) throw n
 export const selfTest = async () => {
   const calls: string[] = []
   const transport = { state: "stopped", playheadSec: 0 }
-  const observed: Observed = { spectralEffectId: "spectral-1", limiterEffectId: "limiter-1", externalEffectId: "external-1", trackId: (name) => name === silentTrack ? "silent-1" : undefined, clipId: (name) => name === "changed" ? "clip-1" : undefined, clipStartSec: (name) => name === "changed" ? 2 : undefined }
+  const observed: Observed = { spectralEffectId: "spectral-1", limiterEffectId: "limiter-1", externalEffectId: "external-1", trackId: (name) => name === silentTrack ? "silent-1" : `track-of-${name}`, clipId: (name) => name === "changed" ? "clip-1" : undefined, clipStartSec: (name) => name === "changed" ? 2 : undefined,
+    effectId: (trackName, kind) => trackName === reorderTargetTrack ? `${kind}-1` : undefined,
+    asset: (name) => ({ id: `asset-${name}`, name: `${name}.wav`, durationSec: 30, sampleRate: 48000, channelCount: 2 }) }
   const perform = createPerformer({
     context: {
       mutate: async (actions) => { calls.push(`mutate ${JSON.stringify(actions)}`); return 4242 },
@@ -454,6 +491,22 @@ export const selfTest = async () => {
   transport.state = "playing"
   check((await run("session-pause")).calls.filter((call) => call === "runtime play").length === 0, "session-pause does not play again over a playing transport")
   check((await run("play-resume")).calls[0] === "runtime play", "play-resume plays")
+  // The held-instrument rows: the instrument under the note is edited through its own track, the unrelated tracks through theirs.
+  const target = (name: string) => ({ kind: "track", track: ref(`track-of-${name}`) })
+  const instrumentSet = (name: string, kind: string, params: ReturnType<typeof sineSynthParams> | ReturnType<typeof sampledInstrumentParams>) => `mutate ${JSON.stringify([{ kind: "instrument.set", target: target(name), instrumentKind: kind, params }])}`
+  const sampleAsset = (name: string) => ({ id: `asset-${name}`, name: `${name}.wav`, durationSec: 30, sampleRate: 48000, channelCount: 2 })
+  check((await run("sampler-gain-half")).calls[0] === instrumentSet(heldInstrumentTrack, "sampler", sampledInstrumentParams("sampler", sampleAsset("changed"), { gain: 0.5 })), "sampler-gain-half sets the zone gain to half")
+  check((await run("sampler-gain-full")).calls[0] === instrumentSet(heldInstrumentTrack, "sampler", sampledInstrumentParams("sampler", sampleAsset("changed"))), "sampler-gain-full restores it")
+  check((await run("drum-rack-gain-half")).calls[0] === instrumentSet(heldInstrumentTrack, "drum-rack", sampledInstrumentParams("drum-rack", sampleAsset("changed"), { gain: 0.5 })), "drum-rack-gain-half sets the pad gain to half")
+  check((await run("granular-density-48")).calls[0] === instrumentSet(heldInstrumentTrack, "granular", sampledInstrumentParams("granular", sampleAsset("changed"), { densityHz: 48 })), "granular-density-48 raises the grain density")
+  check((await run("sampler-swap-asset")).calls[0] === instrumentSet(heldInstrumentTrack, "sampler", sampledInstrumentParams("sampler", sampleAsset("swap"))), "sampler-swap-asset points the zone at the copy")
+  check((await run("sampler-swap-back")).calls[0] === instrumentSet(heldInstrumentTrack, "sampler", sampledInstrumentParams("sampler", sampleAsset("changed"))), "sampler-swap-back points it at the changed asset again")
+  check((await run("polyphony-2")).calls[0] === instrumentSet(heldSynthTrack, "synth", sineSynthParams(2)) && (await run("polyphony-16")).calls[0] === instrumentSet(heldSynthTrack, "synth", sineSynthParams(16)), "the polyphony edits set the held synth's voices to 2 and 16")
+  check((await run("instrument-insert")).calls[0] === instrumentSet(insertTargetTrack, "synth", sineSynthParams()), "instrument-insert sets a synth on the insert target")
+  check((await run("instrument-remove")).calls[0] === `mutate ${JSON.stringify([{ kind: "instrument.remove", target: target(insertTargetTrack) }])}`, "instrument-remove removes it")
+  const order = [{ effect: ref("utility-1"), kind: "utility" }, { effect: ref("saturator-1"), kind: "saturator" }]
+  check((await run("effects-restore")).calls[0] === `mutate ${JSON.stringify([{ kind: "effect.reorder", target: target(reorderTargetTrack), order }])}`, "effects-restore orders Utility then Saturator")
+  check((await run("effects-reverse")).calls[0] === `mutate ${JSON.stringify([{ kind: "effect.reorder", target: target(reorderTargetTrack), order: order.toReversed() }])}`, "effects-reverse orders Saturator then Utility")
   check((await run("clip-delete")).calls[0] === `mutate ${JSON.stringify([{ kind: "clip.delete", clip: ref("clip-1") }])}`, "clip-delete names the observed clip")
   // Prepare steps: the trust flow opens the plug-ins dashboard and acknowledges trust; an unknown step is refused.
   const prepared: string[] = []
@@ -479,6 +532,14 @@ export const selfTest = async () => {
     context: { mutate, evaluate: async () => undefined, interact: async () => undefined, read: async (_, schema) => schema.parse(0), reload: async () => undefined, mark: async () => undefined },
     runtime: async () => undefined, transportStatus: async () => ({ state: "paused", playheadSec: 0 }), hostPid: async () => 1, kill: () => undefined, observe: async () => observed, setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" } })("target-delete-refused")
   check((await guard(async () => { throw new Error(`validation: ${recordingTargetLockedReason}`) })).toLatencyFrames === 0, "a refusal carrying the lock's reason is the expected outcome")
+  const reroute = (mutate: (actions: unknown[]) => Promise<number>) => createPerformer({
+    context: { mutate, evaluate: async () => undefined, interact: async () => undefined, read: async (_, schema) => schema.parse(0), reload: async () => undefined, mark: async () => undefined },
+    runtime: async () => undefined, transportStatus: async () => ({ state: "paused", playheadSec: 0 }), hostPid: async () => 1, kill: () => undefined, observe: async () => observed,
+    setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" } })("target-reroute-refused")
+  let requested = ""
+  await reroute(async (actions) => { requested = JSON.stringify(actions); throw new Error(`validation: ${recordingTargetLockedReason}`) })
+  check(requested === JSON.stringify([{ kind: "track.routing.set", track: ref("track-1"), output: null }]), `the reroute row asks the armed target for no output: ${requested}`)
+  check(await reroute(async () => 1).then(() => "performed", (error) => error instanceof Error && /Rerouting the armed recording target was committed/.test(error.message) ? "committed" : "other") === "committed", "a reroute that is committed fails the row")
   check(await guard(async () => 1).then(() => "performed", (error) => error instanceof Error && /was committed/.test(error.message) ? "committed" : "other") === "committed", "a delete that is committed fails the row")
   check(await guard(async () => { throw new Error("validation: stale revision") }).then(() => "performed", (error) => error instanceof Error && /another reason/.test(error.message) ? "other reason" : "other") === "other reason", "a refusal for another reason fails the row")
   // The take as the page hands it over: the tone behind a silent lead is the tone; the same take with one sample changed is not.

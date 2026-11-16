@@ -3,7 +3,8 @@ import { watch } from "node:fs"
 import { writeFile } from "node:fs/promises"
 import { z } from "zod"
 import type { ProjectSnapshotV2 } from "@daw-browser/control"
-import { createDefaultLimiterParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultUtilityParams, getSpectralLatencyFrames } from "@daw-browser/shared"
+import { assignSampleToDrumRackPad, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultLimiterParams, createDefaultSamplerParams, createDefaultSaturatorParams, createDefaultSpectralParams,
+  createDefaultSynthParams, createDefaultUtilityParams, getSpectralLatencyFrames, type DrumRackPadSample } from "@daw-browser/shared"
 import { command } from "../performance/30-track/v3-import-workload"
 import { waitForAcceptanceEvent } from "../performance/30-track/native-acceptance-ui"
 import { browserCommandTimeoutMs } from "../performance/browser-harness"
@@ -27,9 +28,43 @@ export type Phase5Context = {
   contentSeconds?: number
 }
 export const liveMidiTrack = "Live MIDI"
+// The tracks of the held-instrument rows (phase 9): the instrument that sounds, and the silent tracks their edits land on.
+export const heldInstrumentTrack = "Held instrument"
+export const heldSynthTrack = "Held phase 5"
+export const insertTargetTrack = "Insert target"
+export const reorderTargetTrack = "Reorder target"
+export const heldInstrumentRows = ["held-sampler", "held-drum-rack", "held-granular", "held-swap"]
+// The 440 Hz sine synth of the held rows, held as it is by a clip, with the polyphony an edit changes.
+export const sineSynthParams = (polyphony = createDefaultSynthParams().polyphony) => {
+  const base = createDefaultSynthParams()
+  return { ...base, polyphony, oscillators: [
+    { ...base.oscillators[0], enabled: true, wave: "sine", level: 0.2 },
+    { ...base.oscillators[1], enabled: false },
+  ],
+  filter: { ...base.filter, enabled: false },
+  ampEnvelope: { attackSec: 0.005, decaySec: 0.01, sustain: 1, releaseSec: 0.05 } }
+}
+export type SampleAsset = { id: string; name: string; durationSec: number; sampleRate: number; channelCount: number }
+// One sample over the whole keyboard (the drum rack: its pad on note 36), played as a one-shot so a held note keeps sounding for the asset's length.
+// `gain` is the zone's (the pad's) and `densityHz` the granular's, the two values the rows edit under the note.
+export const sampledInstrumentParams = (kind: "sampler" | "drum-rack" | "granular", asset: SampleAsset, change: { gain?: number; densityHz?: number } = {}) => {
+  const sample: DrumRackPadSample = { assetKey: asset.id, url: `local-asset:${asset.id}`, name: asset.name, sourceKind: "upload",
+    source: { durationSec: asset.durationSec, sampleRate: asset.sampleRate, channelCount: asset.channelCount } }
+  const zone = { id: "held-zone", sample, keyLow: 0, keyHigh: 127, velocityLow: 1, velocityHigh: 127, rootNote: 60, tuneCents: 0, gain: change.gain ?? 1, pan: 0,
+    roundRobinGroup: 0, roundRobinIndex: 0, playbackMode: "one-shot", startSec: 0, endSec: asset.durationSec, crossfadeSec: 0, chokeGroup: 0 }
+  if (kind === "sampler") return { ...createDefaultSamplerParams(), zones: [zone] }
+  // Frozen at the middle of the sample and dense enough that the grains overlap: a gap between grains would read as the note dropping out.
+  if (kind === "granular") return { ...createDefaultGranularParams(), position: 0.5, spray: 0, reverseProbability: 0, freeze: true, densityHz: change.densityHz ?? 40, zone }
+  const rack = assignSampleToDrumRackPad(createDefaultDrumRackParams(), "pad-36", sample)
+  return { ...rack, pads: rack.pads.map((pad) => pad.id === "pad-36" ? { ...pad, startSec: 0, endSec: asset.durationSec, gain: change.gain ?? 1 } : pad) }
+}
 // What the UI helpers use of the context.
 type UiContext = Pick<Phase5Context, "evaluate" | "interact">
 const ref = (id: string) => ({ source: "persisted", id })
+export const required = <Value>(value: Value | undefined, what: string) => {
+  if (value === undefined) throw new Error(`${what} missing`)
+  return value
+}
 const record = z.record(z.string(), z.json())
 // browserCommand aborts an eval after browserCommandTimeoutMs; every page-side
 // deadline fires first, so the page's named error, not the abort, reports a stall.
@@ -279,6 +314,15 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
     await mutate([{ kind: "clip.move", clip: ref(clip.id), track: ref(changedTrack.id), startSec: 0 },
       { kind: "clip.timing.set", clip: ref(clip.id), duration: contentSeconds ?? 24 }])
   }
+  // "held-swap" swaps the instrument's sample for an identical copy: its clip sits on the muted Changed right track with the changed one.
+  if (row === "held-swap") {
+    const swapFile = path.join(out, "swap.wav")
+    await writePhase5Asset(swapFile, (contentSeconds ?? 24) + 6, true)
+    await runtime(["import", "--path", swapFile])
+    await waitImportedClip(context, "swap")
+    const copy = required((await snapshot()).clips.find((item) => item.name.includes("swap")), "Swap fixture import")
+    await mutate([{ kind: "clip.move", clip: ref(copy.id), track: ref(changedTrack.id), startSec: 0 }])
+  }
   // Phase 9 only: "raise-state" has the effect-state devices but never arms the track for monitoring, so the Spectral stays on the
   // master path and its declared latency moves reach it (the monitored effect-state row keeps its Spectral out of compensation).
   const spectralRow = row === "effect-state" || row === "raise-state"
@@ -298,15 +342,8 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
     await mutate([{ kind: "track.create", name, trackKind: "instrument" }])
     const synth = (await snapshot()).tracks.find((track) => track.name === name)
     if (!synth) throw new Error(`${name} missing`)
-    const base = createDefaultSynthParams()
     await mutate([
-      { kind: "instrument.set", target: { kind: "track", track: ref(synth.id) }, instrumentKind: "synth",
-        params: { ...base, oscillators: [
-          { ...base.oscillators[0], enabled: true, wave: "sine", level: 0.2 },
-          { ...base.oscillators[1], enabled: false },
-        ],
-          filter: { ...base.filter, enabled: false },
-          ampEnvelope: { attackSec: 0.005, decaySec: 0.01, sustain: 1, releaseSec: 0.05 } } },
+      { kind: "instrument.set", target: { kind: "track", track: ref(synth.id) }, instrumentKind: "synth", params: sineSynthParams() },
       { kind: "effect.upsert", target: { kind: "track", track: ref(synth.id) }, effectKind: "utility",
         params: { version: 1, state: { ...createDefaultUtilityParams(), balance: 1 } } },
     ])
@@ -316,6 +353,45 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
     const synth = await addSineSynthTrack("Held phase 5")
     await mutate([{ kind: "clip.midi.create", track: ref(synth.id), name: "Held finite note", startSec: 0, duration: contentSeconds ?? 16, wave: "sine", gain: 0.1,
       notes: [{ id: "phase5-held", beat: 0, length: contentSeconds === undefined ? 24 : contentSeconds * 2, pitch: 69, velocity: 0.4 }] }])
+  }
+  // Phase 9 only, the held-instrument rows: the Changed right track is muted, so the right channel is the instrument alone and the note's gaps and
+  // jumps are its own. "held-insert" and "held-reorder" hold the synth while an unrelated track is edited, "held-chord" holds three of its notes,
+  // and the sampled rows hold the changed asset through the instrument under test ("held-swap" adds an identical copy of it to swap to).
+  const heldRow = row === "held-insert" || row === "held-reorder" || row === "held-chord" || heldInstrumentRows.includes(row)
+  if (heldRow) await mutate([{ kind: "track.mix.set", track: ref(changedTrack.id), muted: true }])
+  if (row === "held-insert" || row === "held-reorder" || row === "held-chord") {
+    const synth = await addSineSynthTrack(heldSynthTrack)
+    const chord = row === "held-chord" ? [57, 61, 64] : [69]
+    await mutate([{ kind: "clip.midi.create", track: ref(synth.id), name: "Held finite note", startSec: 0, duration: contentSeconds ?? 16, wave: "sine", gain: 0.1,
+      notes: chord.map((pitch) => ({ id: `phase9-held-${pitch}`, beat: 0, length: contentSeconds === undefined ? 24 : contentSeconds * 2, pitch, velocity: 0.4 })) }])
+  }
+  if (row === "held-insert") {
+    await mutate([{ kind: "track.create", name: insertTargetTrack, trackKind: "instrument" }])
+    const target = (await snapshot()).tracks.find((track) => track.name === insertTargetTrack)
+    if (!target) throw new Error(`${insertTargetTrack} missing`)
+    await mutate([{ kind: "instrument.set", target: { kind: "track", track: ref(target.id) }, instrumentKind: "synth", params: sineSynthParams() }])
+  }
+  if (row === "held-reorder") {
+    await mutate([{ kind: "track.create", name: reorderTargetTrack, trackKind: "audio" }])
+    const target = { kind: "track", track: ref(required((await snapshot()).tracks.find((track) => track.name === reorderTargetTrack), reorderTargetTrack).id) }
+    await mutate([{ kind: "effect.upsert", target, effectKind: "utility", params: { version: 1, state: createDefaultUtilityParams() } },
+      { kind: "effect.upsert", target, effectKind: "saturator", params: { version: 1, state: createDefaultSaturatorParams() } }])
+  }
+  if (heldInstrumentRows.includes(row)) {
+    const assetOf = async (name: string): Promise<SampleAsset> => {
+      const asset = required((await snapshot()).assets.find((entry) => entry.name.includes(name)), `${name} asset`)
+      return { id: asset.id, name: asset.name, durationSec: required(asset.durationSec, `${name} duration`), sampleRate: required(asset.sampleRate, `${name} sample rate`),
+        channelCount: required(asset.channelCount, `${name} channel count`) }
+    }
+    await mutate([{ kind: "track.create", name: heldInstrumentTrack, trackKind: "instrument" }])
+    const held = required((await snapshot()).tracks.find((track) => track.name === heldInstrumentTrack), heldInstrumentTrack)
+    const kind = row === "held-drum-rack" ? "drum-rack" : row === "held-granular" ? "granular" : "sampler"
+    await mutate([
+      { kind: "instrument.set", target: { kind: "track", track: ref(held.id) }, instrumentKind: kind, params: sampledInstrumentParams(kind, await assetOf("changed")) },
+      { kind: "effect.upsert", target: { kind: "track", track: ref(held.id) }, effectKind: "utility", params: { version: 1, state: { ...createDefaultUtilityParams(), balance: 1 } } },
+      { kind: "clip.midi.create", track: ref(held.id), name: "Held sampled note", startSec: 0, duration: contentSeconds ?? 16, wave: "sine", gain: 0.1,
+        notes: [{ id: "phase9-held-sample", beat: 0, length: contentSeconds === undefined ? 24 : contentSeconds * 2, pitch: kind === "drum-rack" ? 36 : 60, velocity: 0.9 }] },
+    ])
   }
   // Phase 9 only: the same synth, played live from a MIDI input instead of from a clip.
   if (row === "live-midi") await addSineSynthTrack(liveMidiTrack)

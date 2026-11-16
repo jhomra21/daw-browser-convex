@@ -515,8 +515,8 @@ export const selfTest = async () => {
   const slowVst = { ...assumedTimings, vstStepSeconds: 60 }
   const dropped = chooseVstRepetitions(withVst, 20, 20, slowVst)
   check(dropped.vstRepetitions === FALLBACK_VST_REPETITIONS && /over 70 min/.test(dropped.why), `a 60 s VST edit drops to 10, got ${JSON.stringify(dropped)}`)
-  const fits = chooseVstRepetitions(withVst, 20, 20, { ...assumedTimings, vstStepSeconds: 0.5 })
-  check(fits.vstRepetitions === 20 && /fits 70 min/.test(fits.why), `a 0.5 s VST edit keeps 20, got ${JSON.stringify(fits)}`)
+  const fits = chooseVstRepetitions(launchesFor(phase9Matrix, 5), 5, 20, { ...assumedTimings, vstStepSeconds: 1 })
+  check(fits.vstRepetitions === 20 && /fits 70 min/.test(fits.why), `a 1 s VST edit with 5 repetitions keeps 20, got ${JSON.stringify(fits)}`)
   check(chooseVstRepetitions(mergeLaunches(built.filter((row) => row.repeat !== "vst-burst")), 20, 20, slowVst).vstRepetitions === 20, "no VST burst row selected, nothing to drop")
   check(chooseVstRepetitions(withVst, 20, 10, slowVst).vstRepetitions === 10, "a request at or under 10 is never raised or cut")
   check(wallSeconds(withVst, 20, 10, slowVst) < wallSeconds(withVst, 20, 20, slowVst), "fewer VST repetitions cost less wall time")

@@ -19,10 +19,12 @@ export type Step = { edits: string[]; state: string; entry?: "ghost" | "cut"; se
 // "latency" checks the host's reported latencies against the declared moves and the retained channel against its source shifted by
 // the published moves (a pinned lower leaves the shift, so no per-state export can stand for a raise row's later states),
 // and no check means the row is only settled and gated on host evidence.
+// "held" judges the rows that edit under a note that holds on the edited channel (the held-instrument fixtures): the note never drops out and
+// never jumps (a retrigger, a gap's edge or a gain step), and has no reference.
 // "editor", "fault" and "trust" judge the VST rows on host evidence (no restart, the editor stays open) and the capture.
 // "host-loss" and "cancelled-start" judge the rows whose edits drive the transport (PackagedRun.transport) on host evidence and the
 // transport state each edit observed; they have no capture to compare.
-export type Judge = "states" | "sustained" | "delete" | "latency" | "lane" | "take" | "editor" | "fault" | "trust" | "host-loss" | "cancelled-start"
+export type Judge = "states" | "sustained" | "delete" | "latency" | "lane" | "take" | "held" | "editor" | "fault" | "trust" | "host-loss" | "cancelled-start"
 export type PackagedRun = {
   // burst: --repetitions edits. vst-burst: --vst-repetitions edits. single: one pass of the cycle. launch: one edit per launch, repeated --repetitions times.
   repeat: "burst" | "vst-burst" | "single" | "launch"
@@ -113,6 +115,27 @@ export const burstRows: BurstRow[] = [
   // The bundle stays untrusted: its browser entry is refused with the trust reason and nothing restarts.
   { name: "trust-negative", latencyClass: "vst-insert", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-absent", prepare: ["vst-untrusted-browser"], judge: "trust",
     cycle: [{ edits: ["untrusted-insert"], state: "vst-rejected", settle: "refused" }] } },
+  // The phase 6 and 6i rows with a note held on the right channel (ae-08-phase-5-fixture.ts held-* rows, Changed right muted): the edit lands on an
+  // unrelated track (instrument insert and remove, effect reorder) or on the instrument that holds the note (polyphony down under a chord, a zone
+  // or pad gain, the grain density, a sample swapped for an identical copy), and the note must go on without a gap or a jump.
+  { name: "instrument-insert", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-insert", start: "instrument-present", judge: "held",
+    cycle: [{ edits: ["instrument-remove"], state: "instrument-absent" }, { edits: ["instrument-insert"], state: "instrument-present" }] } },
+  { name: "effect-reorder", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-reorder", start: "utility-first", judge: "held",
+    cycle: [{ edits: ["effects-reverse"], state: "saturator-first" }, { edits: ["effects-restore"], state: "utility-first" }] } },
+  { name: "polyphony-down-held-chord", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-chord", start: "polyphony-16", judge: "held",
+    cycle: [{ edits: ["polyphony-2"], state: "polyphony-2" }, { edits: ["polyphony-16"], state: "polyphony-16" }] } },
+  // The copy is installed by the first swap (its publication follows an asset-install); the swap back finds the original already installed.
+  { name: "asset-swap-held-note", latencyClass: "asset", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-swap", start: "asset-changed", judge: "held",
+    cycle: [{ edits: ["sampler-swap-asset"], state: "asset-copy", settle: "asset" }, { edits: ["sampler-swap-back"], state: "asset-changed" }] } },
+  { name: "held-note-sampler", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-sampler", start: "gain-full", judge: "held",
+    cycle: [{ edits: ["sampler-gain-half"], state: "gain-half" }, { edits: ["sampler-gain-full"], state: "gain-full" }] } },
+  { name: "held-note-drum-rack", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-drum-rack", start: "gain-full", judge: "held",
+    cycle: [{ edits: ["drum-rack-gain-half"], state: "gain-half" }, { edits: ["drum-rack-gain-full"], state: "gain-full" }] } },
+  { name: "held-note-granular", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-granular", start: "density-40", judge: "held",
+    cycle: [{ edits: ["granular-density-48"], state: "density-48" }, { edits: ["granular-density-40"], state: "density-40" }] } },
+  // Phase 7, the sibling of record-target-guard: the commit that reroutes the armed target is refused with the lock's reason and publishes nothing.
+  { name: "record-target-reroute", latencyClass: "plain", packaged: { repeat: "launch", periodSec: null, fixture: "phase5:raw-tempo", start: "armed", device: "blackhole",
+    prepare: recording, judge: "take", settle: "refused", cycle: [{ edits: ["target-reroute-refused"], state: "armed" }] } },
   // Ruling 3 a: the audio host is killed by pid while a Play of a project with the test plug-in (it needs native) is pending. The transport stays
   // stopped, the app reports native unavailable, and no session is started.
   { name: "host-failure-during-play", latencyClass: "plain", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "stopped", prepare: insertedTestPlugin,

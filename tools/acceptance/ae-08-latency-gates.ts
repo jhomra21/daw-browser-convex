@@ -30,8 +30,7 @@
 // - uploaded bytes: the `asset-page-write` lines of the publication's pid between prepare and publish, summed (`bytes` is the page's
 //   planar PCM). A first swap uploads its sample in that window, so an asset publication's prepare-to-publish limit is
 //   max(the asset class's limit, ASSET_UPLOAD.fixedMs + bytes / ASSET_UPLOAD.bytesPerMs). A resident swap writes none and keeps
-//   the class limit; evidence with no such line (older runs) does too. ASSET_UPLOAD is provisional until the parent freezes it:
-//   a row with an upload is INCOMPLETE (or FAIL) until then.
+//   the class limit; evidence with no such line (older runs) does too.
 // - class: asset when the host logged an `asset-install` between prepare and publish; raise when the edits' net
 //   latency move is positive (merged when 2+ blocks pass between prepare and bind); else plain. A row can declare
 //   its class in latency-class.json; an unknown class is an input failure. vst-insert is decided per publication: it owns an edit
@@ -60,9 +59,10 @@ const LIMITS = {
   // max 203 ms (250 is about 23% over the max); prepare to publish p50 37, max 43 ms (the plain 70).
   "vst-insert": { prepareToPublishMaxMs: 70, editToPublishMaxMs: 250 },
 }
-// Provisional, not frozen: a first swap's prepare-to-publish limit grows with the bytes it uploads, 400 MiB/s after a 55 ms fixed cost.
-// Only the parent sets `frozen` after calibrating against packaged runs.
-const ASSET_UPLOAD = { fixedMs: 55, bytesPerMs: 400 * 1024 * 1024 / 1000, frozen: false }
+// Frozen by parent ruling addendum 23 (PARENT-RULING-C2-FAIL-ITEMS.md) from PHASE8-ASSET-RECALIBRATION-ROUND.md: 60 packaged asset edits
+// (27, 100, 300 MiB, 20 each). T = 0.8 x the lowest throughput (409.1 MiB/s) rounded down = 320 MiB/s; F = 1.2 x the 27 MiB fixed
+// maximum (58 ms) rounded up = 70 ms. A first swap's prepare-to-publish limit is max(100, F + bytes / T).
+const ASSET_UPLOAD = { fixedMs: 70, bytesPerMs: 320 * 1024 * 1024 / 1000 }
 // Pooled over the plain and raise publications of the run.
 // Prep time is split by population (parent ruling, addendum 14 item 2): publications with spectralPredecessors = 0 hold 8 ms
 // (PARENT-RULING-LAT1-PREP-OVERHEAD.md); those with spectral predecessors hold their own frozen 12 ms (measured p50 9 to 10 ms).
@@ -284,8 +284,7 @@ const analyzeRun = async (run: string, phase: number): Promise<Analysis> => {
   ]
   const rowStatus = (row: { row: string; publications: Publication[] }): Status =>
     failures.some((failure) => failure.row === row.row) ? "FAIL"
-      : row.publications.some((publication) => LIMITS[publication.class].prepareToPublishMaxMs === undefined
-        || (publication.class === "asset" && publication.uploadedBytes > 0 && !ASSET_UPLOAD.frozen)) ? "INCOMPLETE" : "PASS"
+      : row.publications.some((publication) => LIMITS[publication.class].prepareToPublishMaxMs === undefined) ? "INCOMPLETE" : "PASS"
   const rowStatuses = rows.map((row) => ({ row: row.row, status: rowStatus(row) }))
   const status: Status = failures.length ? "FAIL" : rowStatuses.some((entry) => entry.status === "INCOMPLETE") ? "INCOMPLETE" : "PASS"
   return { publications, failures, rows: rowStatuses, status }
@@ -356,6 +355,8 @@ const syntheticRow = (specs: readonly Spec[], options: RowOptions = {}) => {
     continuity: delivered === undefined && !options.noAsset ? undefined : JSON.stringify(delivered === undefined ? {} : { assetPublicationFrame: delivered }) }
 }
 
+const SAMPLE_27_BYTES = 30_198_988
+
 const selfTest = async (c1Runs: readonly string[]) => {
   const raise: Spec = { raise: true, totalMs: 42, completeFrames: 2560 }
   const clean: readonly Spec[] = [{}, { totalMs: 36 }, raise, { raise: true, totalMs: 62, blocksBeforeBind: 3, completeFrames: 3584 }]
@@ -388,10 +389,15 @@ const selfTest = async (c1Runs: readonly string[]) => {
     { name: "asset add at 105 ms", status: "FAIL", fails: ["prepare-to-publish"], rows: [["two-tone", clean], ["add-paged-asset", [{ totalMs: 105, install: true }]]] },
     { name: "resident swap (no bytes uploaded) at 101 ms fails the asset floor", status: "FAIL", fails: ["prepare-to-publish"],
       rows: [["add-paged-asset", [{ totalMs: 101, install: true }]]] },
-    { name: "27 MiB first swap at 105 ms is inside its 122.5 ms limit, provisional so INCOMPLETE", status: "INCOMPLETE", fails: [],
-      rows: [["add-paged-asset", [{ totalMs: 105, install: true, uploadBytes: 27 * 1024 * 1024 }]]] },
-    { name: "27 MiB first swap at 122 ms is INCOMPLETE, at 123 ms fails", status: "FAIL", fails: ["prepare-to-publish"],
-      rows: [["asset-122", [{ totalMs: 122, install: true, uploadBytes: 27 * 1024 * 1024 }]], ["asset-123", [{ totalMs: 123, install: true, uploadBytes: 27 * 1024 * 1024 }]]] },
+    // 27 MiB sample: 30,198,988 bytes of planar PCM, so the limit is 70 + 90 = 160 ms.
+    { name: "old evidence with no asset-page-write line keeps the 100 ms floor at 100 ms", status: "PASS", fails: [],
+      rows: [["add-paged-asset", [{ totalMs: 100, install: true }]]] },
+    { name: "27 MiB first swap at 105 ms is inside its 160 ms limit", status: "PASS", fails: [],
+      rows: [["add-paged-asset", [{ totalMs: 105, install: true, uploadBytes: SAMPLE_27_BYTES }]]] },
+    { name: "27 MiB first swap at 159 ms passes", status: "PASS", fails: [],
+      rows: [["asset-159", [{ totalMs: 159, install: true, uploadBytes: SAMPLE_27_BYTES }]]] },
+    { name: "27 MiB first swap at 161 ms fails", status: "FAIL", fails: ["prepare-to-publish"],
+      rows: [["asset-161", [{ totalMs: 161, install: true, uploadBytes: SAMPLE_27_BYTES }]]] },
     { name: "edit to publish 160 ms", status: "FAIL", fails: ["edit-to-publish"], rows: [["two-tone", withClean({ editMs: 160 })]] },
     // A UI edit's step starts before the app commits it: with the mark the harness's own latency (here 85 ms) is not the product's.
     { name: "UI edit 160 ms from the step start but 75 ms from its ui mark", status: "PASS", fails: [], rows: [["two-tone", withClean({ editMs: 160, uiMarkMs: 75 })]] },

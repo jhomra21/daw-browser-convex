@@ -24438,7 +24438,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -24499,7 +24499,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 263,
       "skip": 1,
       "fail": 12
      },
@@ -24942,7 +24942,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -25003,7 +25003,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -25191,7 +25191,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -25258,7 +25258,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -25436,7 +25436,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -25497,7 +25497,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -26043,7 +26043,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -26104,7 +26104,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 267,
+      "pass": 270,
       "skip": 1,
       "fail": 5
      },
@@ -26792,7 +26792,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -26853,7 +26853,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 272,
       "skip": 1,
       "fail": 3
      },
@@ -27034,7 +27034,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -27095,7 +27095,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -27278,7 +27278,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -27339,7 +27339,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 267,
+      "pass": 270,
       "skip": 1,
       "fail": 5
      },
@@ -27672,7 +27672,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -27745,7 +27745,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 268,
+      "pass": 271,
       "skip": 1,
       "fail": 4
      },
@@ -27943,7 +27943,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -28016,7 +28016,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 264,
+      "pass": 267,
       "skip": 1,
       "fail": 8
      },
@@ -28202,7 +28202,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -28263,7 +28263,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -29543,7 +29543,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -29604,7 +29604,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -29908,7 +29908,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -29969,13 +29969,14 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 255,
+      "pass": 257,
       "skip": 1,
-      "fail": 17
+      "fail": 18
      },
      "fails": [
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
@@ -30162,7 +30163,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -30223,7 +30224,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 272,
       "skip": 1,
       "fail": 3
      },
@@ -30402,7 +30403,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -30463,7 +30464,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -31002,7 +31003,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -31063,7 +31064,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -31122,7 +31123,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 25,
+      "pass": 26,
       "skip": 0,
       "fail": 0
      },
@@ -31182,14 +31183,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 1,
      "counts": {
       "pass": 25,
       "skip": 0,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -31240,7 +31243,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -31298,14 +31301,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 272,
+      "pass": 274,
       "skip": 1,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -31481,7 +31486,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 29,
+      "pass": 30,
       "skip": 0,
       "fail": 0
      },
@@ -31544,7 +31549,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 27,
+      "pass": 28,
       "skip": 0,
       "fail": 2
      },
@@ -31602,7 +31607,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -31663,7 +31668,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -31845,7 +31850,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 29,
+      "pass": 30,
       "skip": 0,
       "fail": 0
      },
@@ -31908,7 +31913,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 28,
+      "pass": 29,
       "skip": 0,
       "fail": 1
      },
@@ -31965,7 +31970,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -32026,7 +32031,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -32327,7 +32332,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 33,
+      "pass": 34,
       "skip": 0,
       "fail": 0
      },
@@ -32390,7 +32395,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 32,
+      "pass": 33,
       "skip": 0,
       "fail": 1
      },
@@ -32447,7 +32452,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -32508,7 +32513,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -32673,7 +32678,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -32860,7 +32865,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 265,
+      "pass": 268,
       "skip": 1,
       "fail": 7
      },
@@ -33031,7 +33036,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -33215,7 +33220,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -34763,7 +34768,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -34948,7 +34953,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -35062,7 +35067,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 33,
+      "pass": 34,
       "skip": 0,
       "fail": 0
      },
@@ -35115,7 +35120,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -35239,7 +35244,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 32,
+      "pass": 33,
       "skip": 0,
       "fail": 1
      },
@@ -35300,7 +35305,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -35467,7 +35472,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -35657,7 +35662,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 257,
+      "pass": 260,
       "skip": 1,
       "fail": 15
      },
@@ -35838,7 +35843,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -36024,7 +36029,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -36192,7 +36197,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -36377,7 +36382,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -36545,7 +36550,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -36730,7 +36735,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 272,
       "skip": 1,
       "fail": 3
      },
@@ -36899,7 +36904,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -37084,7 +37089,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -37250,7 +37255,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -37437,7 +37442,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 271,
       "skip": 1,
       "fail": 4
      },
@@ -37554,7 +37559,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 33,
+      "pass": 34,
       "skip": 0,
       "fail": 0
      },
@@ -37607,7 +37612,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -37733,7 +37738,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 32,
+      "pass": 33,
       "skip": 0,
       "fail": 1
      },
@@ -37794,7 +37799,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -37962,7 +37967,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -38147,7 +38152,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -38314,7 +38319,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -38499,7 +38504,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -38666,7 +38671,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -38851,7 +38856,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -39018,7 +39023,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -39203,7 +39208,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -39370,7 +39375,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -39555,7 +39560,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -39777,7 +39782,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -40023,7 +40028,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 272,
       "skip": 1,
       "fail": 3
      },
@@ -40247,7 +40252,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -40495,7 +40500,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -40718,7 +40723,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -40964,7 +40969,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -41241,7 +41246,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -41549,7 +41554,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 271,
       "skip": 1,
       "fail": 4
      },
@@ -41829,7 +41834,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -42140,7 +42145,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 256,
+      "pass": 259,
       "skip": 1,
       "fail": 16
      },
@@ -42432,7 +42437,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -42739,7 +42744,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -43016,7 +43021,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -43323,7 +43328,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 256,
+      "pass": 259,
       "skip": 1,
       "fail": 16
      },
@@ -44661,7 +44666,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -44899,7 +44904,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 267,
+      "pass": 270,
       "skip": 1,
       "fail": 5
      },
@@ -45077,7 +45082,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -45300,7 +45305,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 271,
       "skip": 1,
       "fail": 4
      },
@@ -45477,7 +45482,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -45671,7 +45676,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -45845,7 +45850,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -46067,7 +46072,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -46242,7 +46247,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -46434,7 +46439,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -46608,7 +46613,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -46825,7 +46830,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 216,
+      "pass": 219,
       "skip": 1,
       "fail": 56
      },
@@ -47054,7 +47059,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -47264,7 +47269,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -47438,7 +47443,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -47694,7 +47699,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -47929,7 +47934,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -48130,7 +48135,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -48666,7 +48671,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -48861,7 +48866,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -49953,7 +49958,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -50139,7 +50144,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -50818,7 +50823,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -51004,7 +51009,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -51412,7 +51417,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -51598,7 +51603,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 271,
       "skip": 1,
       "fail": 4
      },
@@ -52807,7 +52812,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -52930,7 +52935,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 272,
       "skip": 1,
       "fail": 3
      },
@@ -53042,7 +53047,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -53164,7 +53169,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -53274,7 +53279,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -53394,7 +53399,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -53504,7 +53509,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -53682,7 +53687,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -53854,7 +53859,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -54032,7 +54037,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -54204,7 +54209,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -54382,7 +54387,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -54554,7 +54559,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -54732,7 +54737,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -54904,7 +54909,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -55026,7 +55031,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -65633,7 +65638,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -65700,15 +65705,16 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 253,
+      "pass": 255,
       "skip": 1,
-      "fail": 19
+      "fail": 20
      },
      "fails": [
       "B6d4 a Stop while the paused replacement is starting keeps a live graph at the start",
       "B6d5 a Stop after a locate during an uncommitted paused preview still returns it to the start",
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
@@ -65781,13 +65787,14 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 255,
+      "pass": 257,
       "skip": 1,
-      "fail": 17
+      "fail": 18
      },
      "fails": [
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
@@ -65860,7 +65867,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -65927,7 +65934,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -65997,7 +66004,7 @@
      "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -66064,7 +66071,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -66134,7 +66141,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -66203,13 +66210,14 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 255,
+      "pass": 257,
       "skip": 1,
-      "fail": 17
+      "fail": 18
      },
      "fails": [
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
@@ -66282,13 +66290,14 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 255,
+      "pass": 257,
       "skip": 1,
-      "fail": 17
+      "fail": 18
      },
      "fails": [
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
       "B6d6 a Stop while a resuming rebuild retires the playing graph at the teardown leaves nothing running and a live paused graph at the start",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
@@ -66367,7 +66376,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 269,
+      "pass": 272,
       "skip": 1,
       "fail": 3
      },
@@ -66438,7 +66447,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -66507,7 +66516,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -66576,7 +66585,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -66642,14 +66651,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 272,
+      "pass": 274,
       "skip": 1,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -66712,7 +66723,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -66782,7 +66793,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -66851,7 +66862,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -66915,7 +66926,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -66970,7 +66981,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 272,
+      "pass": 275,
       "skip": 1,
       "fail": 0
      },
@@ -67031,7 +67042,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 269,
+      "pass": 272,
       "skip": 1,
       "fail": 3
      },
@@ -67095,14 +67106,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 1,
      "counts": {
       "pass": 25,
       "skip": 0,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -67164,14 +67177,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 2,
      "counts": {
       "pass": 25,
       "skip": 0,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -67230,7 +67245,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 25,
+      "pass": 26,
       "skip": 0,
       "fail": 0
      },
@@ -67296,14 +67311,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 2,
      "counts": {
       "pass": 25,
       "skip": 0,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -67362,7 +67379,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 25,
+      "pass": 26,
       "skip": 0,
       "fail": 0
      },
@@ -67428,14 +67445,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 2,
      "counts": {
       "pass": 25,
       "skip": 0,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -67494,7 +67513,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 25,
+      "pass": 26,
       "skip": 0,
       "fail": 0
      },
@@ -67552,14 +67571,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 272,
+      "pass": 274,
       "skip": 1,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -67622,11 +67643,12 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
-      "fail": 2
+      "fail": 3
      },
      "fails": [
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing",
       "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
       "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start"
      ],
@@ -67686,7 +67708,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 270,
+      "pass": 273,
       "skip": 1,
       "fail": 2
      },
@@ -67756,11 +67778,12 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 271,
+      "pass": 273,
       "skip": 1,
-      "fail": 1
+      "fail": 2
      },
      "fails": [
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing",
       "B6d7 a locate during a Pause that cancels a cold Play (native audio optional) keeps the rebuild's paused start when the Play's cleanup joins the Pause's dispose"
      ],
      "fuzz": null,
@@ -67819,7 +67842,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },
@@ -67888,11 +67911,12 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 270,
+      "pass": 272,
       "skip": 1,
-      "fail": 2
+      "fail": 3
      },
      "fails": [
+      "B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing",
       "B6d8 a Pause while a paused rebuild is starting keeps a live paused graph at the locate",
       "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start"
      ],
@@ -67952,7 +67976,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 271,
+      "pass": 274,
       "skip": 1,
       "fail": 1
      },

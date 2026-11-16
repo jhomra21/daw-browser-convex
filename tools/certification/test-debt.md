@@ -84,7 +84,6 @@ The MISMATCH rows 382 and 434 keep their killing arms and have no survivor to re
 | `ledger:486:mutant:{b6f5,matrix,playback}` | ledger 486 | `src/hooks/useTimelinePlayback.ts`: `if (outcome === "rebuild") {` → `if (!portableBrowserPlayback.isRecording()) {` | the mutated branch was deleted by cd259c14 with the `rebuild` adopt result; recorded as survivors in rebase 29 (AE-08 phase 8 step 10) |
 | `ledger:481:mutant:matrix` | ledger 481 | `src/hooks/useTimelinePlayback.ts`: `rebuildStartingPlay \|\| pendingPlay?.token === playAttemptToken` → `rebuildStartingPlay` | the probe matrix counts rebuilds and no cell reaches a rebuild that lands on a pending Play; the b6f5 and playback arms kill it with `B6f5 481 …` (rebase 30, AE-08 phase 8 step 10b) |
 | `ledger:492:mutant:matrix`, `ledger:493:mutant:matrix` | ledger 492, 493 | `src/hooks/useTimelinePlayback.ts`: `tracks.map(({ id, kind, ...` → adds `name` to the fingerprint | the probe matrix counts rebuilds and a name in the fingerprint no longer causes one; the playback and step5b arms of both rows still kill it (AE-08 phase 8 step 10, rebase 29) |
-| `rc2:434:0:mutant`, `rc2:434:1:mutant` | rc2 434 | `src/hooks/useTimelinePlayback.ts`: `(hasStartUnderway() \|\| (pendingStart !== undefined && !pendingPreview))` → `(playAttemptPhase !== undefined \|\| (pendingStart !== undefined && !pendingPreview))` in `handleStop` | the rebuild term moved into `hasStartUnderway()` with the fix that keeps the graph under a Pause or Stop over a Play (record 53); the re-pointed mutation drops it from Stop only, and no test fails: the B6d6 witness that killed the old mutation (`B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture …`) now passes. Why no test fails (the term is redundant, or no test reaches it) was not investigated. Retired in record 53 |
 
 ## Retired controls
 
@@ -163,5 +162,3 @@ The MISMATCH rows 382 and 434 keep their killing arms and have no survivor to re
 - `ledger:508:control:matrix`
 - `c0:m513-control-proj`
 - `c0:m516-control-proj`
-- `rc2:434:0:control`
-- `rc2:434:1:control`

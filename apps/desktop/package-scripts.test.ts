@@ -1,9 +1,13 @@
 import { expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
+import { tmpdir } from "node:os"
+import path from "node:path"
 import {
   createReleasePreparation,
   type ReleaseCommand,
 } from "./scripts/run-release"
 import {
+  assertNoSelfReferentialNodeModules,
   createLocalPackageEnvironment,
   createLocalPackagePreparation,
   type LocalPackageCommand,
@@ -72,6 +76,18 @@ test("prepares local desktop start with native artifact paths", () => {
     DAW_AUDIO_HOST_PATH: artifactPaths.audioHostPath,
     DAW_NATIVE_ARTIFACT_MANIFEST_PATH: manifestPath,
   })
+})
+
+test("refuses a node_modules that links back to itself and accepts a plain one", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "daw-nm-"))
+  try {
+    mkdirSync(path.join(root, "node_modules"))
+    expect(() => assertNoSelfReferentialNodeModules(root)).not.toThrow()
+    symlinkSync(path.join(root, "node_modules"), path.join(root, "node_modules", "node_modules"))
+    expect(() => assertNoSelfReferentialNodeModules(root)).toThrow(/links back to/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test("assembles local package environment without signing or notarization", () => {

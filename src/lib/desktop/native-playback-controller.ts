@@ -4141,6 +4141,7 @@ export const createNativePlaybackController = (input: {
             requestedPublicationFrame: BigInt(seam),
           }))
         }
+        ae08AdoptionMarker(attempt?.intent.key)?.("prepare-reply-received")
         checked(ready)
         processorState.observeRetirement(ready)
         if (ready.revision.preparedRevision === ready.revision.requestedRevision) {
@@ -4259,6 +4260,7 @@ export const createNativePlaybackController = (input: {
           const bound = chooseFrame(fresh.revision.progressFrame, boundLeadBlocks())
           if (bound === seam) break
           const rebind = { ...binding, requestedPublicationFrame: BigInt(bound) }
+          hydrationMark?.("bind-request-sent")
           const rebound = await withoutLane(revisions.publish(rebind))
           if (!rebound.ok) classifyPublication(rebound)
           checked(rebound)
@@ -4449,6 +4451,7 @@ export const createNativePlaybackController = (input: {
             publishSent = true
             record.phase = "held"
             if (!sessionAlive()) throw new NativePlaybackAbortError("ownership-invalidated")
+            hydrationMark?.("bind-request-sent")
             // A lost IPC reply must not prevent progress-based reconciliation.
             publishCompletion = revisions.publish(request).then((reply) => {
               if (!sessionAlive()) return

@@ -1,0 +1,131 @@
+// Where the span from a revision's graph-prepare to its first graph-publish-request goes. Host evidence (run with DAW_AE08_EVIDENCE_DIR):
+//   host prepare   = vst-control + host-pre + core + host-post of the revision's `prepare-profile` line
+//   reply write    = the `prepare-step` line `graph-prepare-reply`, logged after the status reply is written
+//   host to renderer = graph-prepare to the renderer's `prepare-reply-received` mark, less the two above (the IPC hops and the
+//                    host's own wait before the reply, to wall-clock millisecond precision)
+//   renderer work  = `prepare-reply-received` to the first `bind-request-sent` mark (an asset publication hydrates in it)
+//   renderer to host = `bind-request-sent` to the host's graph-publish-request
+// The renderer marks carry the key of the adoption whose `prepare-sent` is the last before graph-prepare.
+//
+//   bun tools/acceptance/ae-08-prepare-split.ts --run <phaseDir>   (every row directory with a host.jsonl, split in the lo and hi modes)
+//   bun tools/acceptance/ae-08-prepare-split.ts --self-test
+import { readdir, readFile } from "node:fs/promises"
+import path from "node:path"
+import { z } from "zod"
+
+export type SplitEvent = { event: string; pid: number; wallMs: number; requestedRevision: number; key: string; stepsUs: string; step: string; durationMs: number }
+export type PrepareSplit = { hostPrepareMs: number; replyWriteMs: number; hostToRendererMs: number; rendererMs: number; rendererToHostMs: number; spectralWarmMs: number }
+
+const hostSteps = ["vst-control", "host-pre", "core", "host-post"]
+const stepMicroseconds = (stepsUs: string) => new Map(stepsUs.split(";").filter(Boolean).map((pair): [string, number] => {
+  const [name = "", value = ""] = pair.split("=")
+  return [name, Number(value)]
+}))
+
+export const prepareSplit = (events: readonly SplitEvent[], prepare: SplitEvent, request: SplitEvent): PrepareSplit | undefined => {
+  const earliestAfter = (match: (event: SplitEvent) => boolean, from = prepare.wallMs) =>
+    events.filter((event) => event.wallMs >= from && match(event)).reduce<SplitEvent | undefined>((first, event) => first && first.wallMs <= event.wallMs ? first : event, undefined)
+  const profile = earliestAfter((event) => event.event === "prepare-profile" && event.pid === prepare.pid && event.requestedRevision === prepare.requestedRevision)
+  const reply = earliestAfter((event) => event.event === "prepare-step" && event.pid === prepare.pid && event.step === "graph-prepare-reply")
+  const sent = events.findLast((event) => event.event === "prepare-sent" && event.wallMs <= prepare.wallMs)
+  const received = sent && earliestAfter((event) => event.event === "prepare-reply-received" && event.key === sent.key)
+  const bound = sent && received && earliestAfter((event) => event.event === "bind-request-sent" && event.key === sent.key && event.wallMs <= request.wallMs, received.wallMs)
+  if (!profile || !reply || !received || !bound) return undefined
+  const steps = stepMicroseconds(profile.stepsUs)
+  const hostPrepareMs = hostSteps.reduce((total, name) => total + (steps.get(name) ?? 0), 0) / 1000
+  return { hostPrepareMs, replyWriteMs: reply.durationMs, hostToRendererMs: received.wallMs - prepare.wallMs - hostPrepareMs - reply.durationMs,
+    rendererMs: bound.wallMs - received.wallMs, rendererToHostMs: request.wallMs - bound.wallMs, spectralWarmMs: (steps.get("spectral-warm") ?? 0) / 1000 }
+}
+
+const round = (value: number) => Math.round(value * 100) / 100
+export const splitLine = (split: PrepareSplit) => `host prepare ${round(split.hostPrepareMs)} ms, reply write ${round(split.replyWriteMs)} ms, host to renderer ${round(split.hostToRendererMs)} ms, `
+  + `renderer work ${round(split.rendererMs)} ms, renderer to host bind ${round(split.rendererToHostMs)} ms`
+
+const hostSchema = z.object({ event: z.string(), cause: z.string().default(""), pid: z.number().default(0), wallMs: z.number().default(0), revision: z.number().default(0),
+  requestedRevision: z.number().default(0), publicationFrame: z.number().default(0), key: z.string().default(""), stepsUs: z.string().default(""),
+  step: z.string().default(""), durationMs: z.number().default(0) })
+const editsSchema = z.object({ edits: z.array(z.object({ wallMs: z.number(), fromLatencyFrames: z.number(), toLatencyFrames: z.number() })).default([]) })
+const LO_HI_CUT_MS = 8.5
+
+const median = (values: readonly number[]) => {
+  const sorted = [...values].sort((a, b) => a - b)
+  const middle = (sorted.length - 1) / 2
+  return ((sorted[Math.floor(middle)] ?? 0) + (sorted[Math.ceil(middle)] ?? 0)) / 2
+}
+
+const directions = ["raise", "lower", "plain"]
+type Row = { publication: number; spanMs: number; direction: string; split: PrepareSplit }
+export const splitRow = (events: readonly z.infer<typeof hostSchema>[], edits: z.infer<typeof editsSchema>["edits"]): Row[] => {
+  const publications = events.flatMap((publish, index) => {
+    if (publish.event !== "graph-publish" || publish.cause !== "block-boundary" || publish.publicationFrame === 0) return []
+    const prepare = events.slice(0, index).findLast((event) => event.event === "graph-prepare" && event.pid === publish.pid && event.requestedRevision === publish.revision)
+    const request = prepare && events.slice(events.indexOf(prepare) + 1, index).find((event) => event.event === "graph-publish-request" && event.pid === publish.pid && event.requestedRevision === publish.revision)
+    const split = prepare && request && prepareSplit(events, prepare, request)
+    return prepare && request && split ? [{ publish, spanMs: request.wallMs - prepare.wallMs, split }] : []
+  })
+  // A publication carries every edit made since the previous one: the first publication at or after the edit's wall time.
+  const move = publications.map(() => 0)
+  for (const edit of edits) {
+    const owner = publications.findIndex(({ publish }) => publish.wallMs >= edit.wallMs)
+    if (owner >= 0) move[owner] = (move[owner] ?? 0) + edit.toLatencyFrames - edit.fromLatencyFrames
+  }
+  return publications.map(({ publish, spanMs, split }, at) => ({ publication: publish.revision, spanMs, split,
+    direction: (move[at] ?? 0) > 0 ? "raise" : (move[at] ?? 0) < 0 ? "lower" : "plain" }))
+}
+
+const modeLine = (label: string, mode: string, group: readonly Row[]) => {
+  if (group.length === 0) return []
+  const p50 = (pick: (row: Row) => number) => median(group.map(pick))
+  return [`${label} ${mode} (${group.length}): graph-prepare to bind p50 ${round(p50((row) => row.spanMs))} ms; medians: ${splitLine({ hostPrepareMs: p50((row) => row.split.hostPrepareMs),
+    replyWriteMs: p50((row) => row.split.replyWriteMs), hostToRendererMs: p50((row) => row.split.hostToRendererMs), rendererMs: p50((row) => row.split.rendererMs),
+    rendererToHostMs: p50((row) => row.split.rendererToHostMs), spectralWarmMs: 0 })}`]
+}
+export const modeLines = (label: string, rows: readonly Row[]) => [...modeLine(label, "lo", rows.filter((row) => row.spanMs < LO_HI_CUT_MS)),
+  ...modeLine(label, "hi", rows.filter((row) => row.spanMs >= LO_HI_CUT_MS))]
+
+const runRows = async (run: string) => Promise.all((await readdir(run, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map(async (entry) => {
+  const host = await readFile(path.join(run, entry.name, "host.jsonl"), "utf8").catch(() => undefined)
+  if (host === undefined) return []
+  const edits = await readFile(path.join(run, entry.name, "phase4-edits.json"), "utf8").then((text) => editsSchema.parse(JSON.parse(text)).edits, () => [])
+  return [{ name: entry.name, rows: splitRow(host.slice(0, host.lastIndexOf("\n") + 1).split("\n").filter(Boolean).map((line) => hostSchema.parse(JSON.parse(line))), edits) }]
+}))
+
+const selfTest = () => {
+  const line = (event: string, wallMs: number, fields: Partial<SplitEvent> = {}): SplitEvent => ({ event, wallMs, pid: 7, requestedRevision: 0, key: "", stepsUs: "", step: "", durationMs: 0, ...fields })
+  const prepare = line("graph-prepare", 1000, { requestedRevision: 5 })
+  const request = line("graph-publish-request", 1015, { requestedRevision: 5 })
+  const events = [line("prepare-sent", 800, { key: "old" }), line("prepare-reply-received", 810, { key: "old" }), line("prepare-sent", 990, { key: "k" }), prepare,
+    line("prepare-profile", 1004, { requestedRevision: 5, stepsUs: "vst-control=100;host-pre=200;core=3000;spectral-warm=500;host-post=700;" }),
+    line("prepare-step", 1005, { step: "graph-prepare-reply", durationMs: 0.5 }), line("prepare-reply-received", 1010, { key: "k" }),
+    line("bind-request-sent", 1013, { key: "k" }), line("bind-request-sent", 1300, { key: "k" }), line("bind-request-sent", 1013, { key: "other" }), request]
+  const split = prepareSplit(events, prepare, request)
+  const expected = { hostPrepareMs: 4, replyWriteMs: 0.5, hostToRendererMs: 5.5, rendererMs: 3, rendererToHostMs: 2, spectralWarmMs: 0.5 }
+  const failures = [
+    ...(split && Object.entries(expected).every(([name, value]) => Object.entries(split).some(([field, found]) => field === name && Math.abs(found - value) < 1e-9)) ? []
+      : [`split ${JSON.stringify(split)}, expected ${JSON.stringify(expected)}`]),
+    ...(prepareSplit(events.filter((event) => event.event !== "prepare-reply-received" || event.key === "old"), prepare, request) === undefined ? [] : ["a revision with no reply mark must have no split"]),
+    ...(prepareSplit(events.filter((event) => event.event !== "bind-request-sent"), prepare, request) === undefined ? [] : ["a revision with no bind mark must have no split"]),
+    ...(prepareSplit(events.filter((event) => event.event !== "prepare-profile"), prepare, request) === undefined ? [] : ["a revision with no prepare-profile line must have no split"]),
+    ...(modeLines("row", [{ publication: 5, spanMs: 15, direction: "plain", split: expected }]).join("").includes("row hi (1)") ? [] : ["a 15 ms span belongs to the hi mode"]),
+  ]
+  if (failures.length > 0) throw new Error(`prepare split self-test: ${failures.join("; ")}`)
+  console.log("ae-08 prepare split self-test: pass")
+}
+
+if (import.meta.main) {
+  const args = process.argv.slice(2)
+  if (args.includes("--self-test")) selfTest()
+  else {
+    const run = args[args.indexOf("--run") + 1]
+    if (args.indexOf("--run") < 0 || !run) throw new Error("usage: ae-08-prepare-split.ts --run <phaseDir> | --self-test")
+    const found = (await runRows(run)).flat()
+    for (const { name, rows } of found) {
+      for (const row of rows) console.log(`${name} revision ${row.publication} ${row.direction}: graph-prepare to bind ${row.spanMs} ms = ${splitLine(row.split)}, spectral-warm ${round(row.split.spectralWarmMs)} ms`)
+      for (const direction of directions) for (const summary of modeLines(`${name} ${direction}`, rows.filter((row) => row.direction === direction))) console.log(summary)
+    }
+    for (const direction of ["raise", "lower"]) {
+      const warm = found.flatMap(({ rows }) => rows.filter((row) => row.direction === direction).map((row) => row.split.spectralWarmMs))
+      console.log(`spectral-warm ${direction} (${warm.length}): p50 ${round(median(warm))} ms, max ${round(Math.max(0, ...warm))} ms`)
+    }
+  }
+}

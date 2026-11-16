@@ -6,6 +6,7 @@ import path from "node:path"
 import { z } from "zod"
 import { ae08ControlCommitReceived } from "../../apps/desktop/ae08-evidence"
 import { ae08RendererMarks } from "@daw-browser/desktop-protocol/ipc-channels"
+import { prepareSplit, splitLine, type PrepareSplit } from "./ae-08-prepare-split"
 import { phase9Matrix, phase9Rows, phase9RowsWithCalibration, type LatencyClass, type Row, type Settle } from "./ae-08-phase-9-rows"
 
 // AE-08 phase 9 matrix (plan §8 steps 1-2): one packaged launch per row class carries N alternating edits. This file owns
@@ -109,7 +110,7 @@ export const chooseVstRepetitions = (launches: readonly Row[][], repetitions: nu
 const hostEventSchema = z.object({ event: z.string(), cause: z.string().default(""), wallMs: z.number().default(0),
   revision: z.number().default(0), frame: z.number().default(0), publicationFrame: z.number().default(0), transportEpoch: z.number().default(0),
   idempotencyKey: z.string().default(""), key: z.string().default(""), open: z.boolean().optional(), pid: z.number().default(0), requestedRevision: z.number().default(0),
-  processorAutomationEvents: z.number().default(0) })
+  processorAutomationEvents: z.number().default(0), stepsUs: z.string().default(""), step: z.string().default(""), durationMs: z.number().default(0) })
 export type HostEvent = z.infer<typeof hostEventSchema>
 export class SetupFailure extends Error {}
 
@@ -346,11 +347,14 @@ export const judgeStored = async (directory: string) => Promise.all((await store
 const commitMarkNames = ae08RendererMarks.options.filter((name) => name.startsWith("control-"))
 // An asset publication hydrates between graph-prepare and graph-publish-request: its marks (asset-*) are logged under the adoption key, after prepare-sent.
 const hydrationMarkNames = ae08RendererMarks.options.filter((name) => name.startsWith("asset-"))
-const adoptionMarkNames = ae08RendererMarks.options.filter((name) => !name.startsWith("control-") && !name.startsWith("ui-") && !hydrationMarkNames.includes(name))
+// The reply and bind marks lie after graph-prepare: ae-08-prepare-split.ts reads them.
+const splitMarkNames = ["prepare-reply-received", "bind-request-sent"]
+const adoptionMarkNames = ae08RendererMarks.options.filter((name) => !name.startsWith("control-") && !name.startsWith("ui-") && !hydrationMarkNames.includes(name) && !splitMarkNames.includes(name))
 export type EditSpan = { from: string; to: string; ms: number }
 // `origin` is where the edit is timed from: the app's commit line, the UI mark it logged, or the step start. `hydration` runs from
 // graph-prepare through the asset marks to graph-publish-request, and is empty when the publication hydrated nothing.
-export type EditBreakdown = { index: number; name: string; origin: string; toPrepareMs: number; toRequestMs: number; toPublishMs: number; spans: EditSpan[]; hydration: EditSpan[] }
+// `split` divides graph-prepare to graph-publish-request into host, reply, hops and renderer work; it is absent when the evidence lacks a mark or host line it needs.
+export type EditBreakdown = { index: number; name: string; origin: string; toPrepareMs: number; toRequestMs: number; toPublishMs: number; spans: EditSpan[]; hydration: EditSpan[]; split: PrepareSplit | undefined }
 const spansBetween = (points: readonly { name: string; wallMs: number }[]): EditSpan[] =>
   points.slice(1).map((point, at) => ({ from: points[at]?.name ?? "", to: point.name, ms: point.wallMs - (points[at]?.wallMs ?? point.wallMs) }))
 export const editBreakdowns = (events: readonly HostEvent[], edits: readonly { index: number; name: string; wallMs: number }[]): (EditBreakdown | { index: number; name: string; missing: string })[] =>
@@ -380,7 +384,8 @@ export const editBreakdowns = (events: readonly HostEvent[], edits: readonly { i
     return { index: edit.index, name: edit.name, origin,
       toPrepareMs: prepare.wallMs - startMs, toRequestMs: request.wallMs - startMs, toPublishMs: publish.wallMs - startMs,
       spans: spansBetween(points),
-      hydration: hydrated.length ? spansBetween([{ name: "graph-prepare", wallMs: prepare.wallMs }, ...hydrated, { name: "graph-publish-request", wallMs: request.wallMs }]) : [] }
+      hydration: hydrated.length ? spansBetween([{ name: "graph-prepare", wallMs: prepare.wallMs }, ...hydrated, { name: "graph-publish-request", wallMs: request.wallMs }]) : [],
+      split: prepareSplit(events, prepare, request) }
   })
 
 const breakdownEdits = z.object({ edits: z.array(z.object({ index: z.number(), name: z.string(), wallMs: z.number() })) })
@@ -393,7 +398,7 @@ export const breakdownStored = async (directory: string) => Promise.all((await s
 }))
 export const breakdownLine = (entry: Awaited<ReturnType<typeof breakdownStored>>[number]) => entry.breakdowns === undefined ? [`${entry.row}: no host.jsonl (setup failure)`]
   : entry.breakdowns.map((found) => "missing" in found ? `${entry.row} edit ${found.index} ${found.name}: ${found.missing}`
-    : `${entry.row} edit ${found.index} ${found.name}: +${found.toPrepareMs} ms graph-prepare (${found.spans.length > 1 ? found.spans.map((span) => `${span.from} -> ${span.to} ${span.ms} ms`).join(", ") : "no renderer marks in host.jsonl"}), +${found.toRequestMs} ms graph-publish-request${found.hydration.length ? ` (asset hydration: ${found.hydration.map((span) => `${span.from} -> ${span.to} ${span.ms} ms`).join(", ")})` : ""}, +${found.toPublishMs} ms graph-publish${found.origin === "edit-start" ? " (counted from the step start: the edit has no control-commit-received line and no ui-* mark)" : ` (counted from ${found.origin})`}`)
+    : `${entry.row} edit ${found.index} ${found.name}: +${found.toPrepareMs} ms graph-prepare (${found.spans.length > 1 ? found.spans.map((span) => `${span.from} -> ${span.to} ${span.ms} ms`).join(", ") : "no renderer marks in host.jsonl"}), +${found.toRequestMs} ms graph-publish-request${found.hydration.length ? ` (asset hydration: ${found.hydration.map((span) => `${span.from} -> ${span.to} ${span.ms} ms`).join(", ")})` : ""}${found.split ? ` (prepare split: ${splitLine(found.split)})` : ""}, +${found.toPublishMs} ms graph-publish${found.origin === "edit-start" ? " (counted from the step start: the edit has no control-commit-received line and no ui-* mark)" : ` (counted from ${found.origin})`}`)
 
 // ---- Self-test ----
 const steps = (count: number, settled: (index: number) => number | undefined = (index) => index * 4000 + 1500) =>
@@ -685,6 +690,17 @@ export const selfTest = async () => {
     + "asset-range-request>asset-range-reply:2 asset-range-reply>asset-candidate-pages-end:1 asset-candidate-pages-end>graph-publish-request:64", `hydration spans: ${hydration.join(" ")}`)
   check(breakdownLine({ row: "r", breakdowns: assetPublication ? [assetPublication] : [] })[0]?.includes("asset-page-write-request -> asset-page-write-reply 12 ms") === true, "the report lists the hydration spans")
   check(spanned !== undefined && "hydration" in spanned && spanned.hydration.length === 0, "a publication with no asset marks has no hydration spans")
+  // The prepare split: the reply and bind marks of the adoption that sent the prepare (an earlier adoption's are ignored) join the host's
+  // prepare-profile and prepare-step lines. The reply and bind marks are not adoption spans before graph-prepare.
+  const splitting = host(mark("prepare-reply-received", 900, "old"), mark("prepare-sent", 1082, "new"), line("graph-prepare", 1090, { requestedRevision: 5 }),
+    line("prepare-profile", 1094, { requestedRevision: 5, stepsUs: "vst-control=100;host-pre=200;core=3000;host-post=700;" }), line("prepare-step", 1095, { step: "graph-prepare-reply", durationMs: 0.5 }),
+    mark("prepare-reply-received", 1100, "new"), mark("bind-request-sent", 1103, "new"), line("graph-publish-request", 1105, { requestedRevision: 5 }),
+    line("graph-publish", 1130, { cause: "block-boundary", revision: 5, publicationFrame: 96256 }))
+  const [splitPublication] = editBreakdowns(splitting, [{ index: 1, name: "swap", wallMs: 1000 }])
+  const splitText = splitPublication !== undefined && "split" in splitPublication && splitPublication.split ? splitLine(splitPublication.split) : ""
+  check(splitText === "host prepare 4 ms, reply write 0.5 ms, host to renderer 5.5 ms, renderer work 3 ms, renderer to host bind 2 ms", `prepare split: ${splitText}`)
+  check(splitPublication !== undefined && "spans" in splitPublication && !splitPublication.spans.some((span) => span.from.includes("reply") || span.to.includes("bind")), "the split marks are not spans before graph-prepare")
+  check(breakdownLine({ row: "r", breakdowns: splitPublication ? [splitPublication] : [] })[0]?.includes("(prepare split: host prepare 4 ms") === true, "the report prints the prepare split")
   console.log("ae-08 phase 9 matrix self-test: pass")
 }
 

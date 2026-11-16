@@ -216,13 +216,14 @@ export const compareHostLoss = (events: readonly HostEvent[], observations: read
 }
 
 // A Pause or a Stop over a Play that has not landed cancels it: nothing stops, tears down, begins or configures after the cancel, the transport
-// is paused where the prepared session was (at 0 after a Stop), and the next Play resumes without any of them. "session-pause" only prepares.
+// is paused where the prepared session was (a Stop reads stopped at 0: the transport reports not-playing at 0 as stopped), and the next Play
+// resumes without any of them. "session-pause" only prepares.
 export const compareCancelledStart = (input: { events: readonly HostEvent[]; observations: readonly TransportObservation[]; editName: (index: number) => string
   editWallMs: (index: number) => number }): Compare => (window) => {
   const name = input.editName(window.index), from = input.editWallMs(window.index)
   const seen = input.observations.find((observation) => observation.edit === name && observation.wallMs >= from && observation.wallMs <= window.fromWallMs)
   if (!seen) return `${name} observed no transport state`
-  const expected = name === "play-resume" ? "playing" : "paused"
+  const expected = name === "play-resume" ? "playing" : name === "play-then-stop" ? "stopped" : "paused"
   if (seen.state !== expected) return `the transport is ${seen.state}, not ${expected}, after ${name}`
   const prepared = input.observations.filter((observation) => observation.wallMs < from).at(-1)
   if (name === "play-then-stop" && seen.playheadSec !== 0) return `the transport stopped at ${seen.playheadSec} s, not 0`
@@ -587,7 +588,7 @@ export const selfTest = () => {
   const names = ["session-pause", "play-then-pause", "play-resume", "session-pause", "play-then-stop", "play-resume"]
   const cancelSteps = names.map((_, position) => ({ index: position + 1, editWallMs: (position + 1) * 1000, settledWallMs: (position + 1) * 1000 + 400 }))
   const resting = [{ state: "paused", playheadSec: 1.5 }, { state: "paused", playheadSec: 1.5 }, { state: "playing", playheadSec: 2 },
-    { state: "paused", playheadSec: 2.5 }, { state: "paused", playheadSec: 0 }, { state: "playing", playheadSec: 0.2 }]
+    { state: "paused", playheadSec: 2.5 }, { state: "stopped", playheadSec: 0 }, { state: "playing", playheadSec: 0.2 }]
   const honestSeen = names.map((name, position) => observed(name, (position + 1) * 1000 + 300, { failure: "", ...resting[position] }))
   const cancelled = (events: ReturnType<typeof lines>, observations = honestSeen) => judgeBurst(cancelSteps, 8000, compareCancelledStart({ events, observations,
     editName: (index) => names[index - 1] ?? "", editWallMs: (index) => index * 1000 }), 0)
@@ -603,6 +604,8 @@ export const selfTest = () => {
   check(cancelled(lines(), replaced(1, { state: "playing" })).editIndex === 2, "a Pause that leaves the transport playing fails")
   check(cancelled(lines(), replaced(1, { playheadSec: 1.6 })).editIndex === 2, "a cancelled Play that moves the paused position fails")
   check(cancelled(lines(), replaced(4, { playheadSec: 0.5 })).editIndex === 5, "a Stop that leaves the position off 0 fails")
+  check(cancelled(lines(), replaced(4, { state: "paused" })).editIndex === 5, "a Stop that reads paused fails")
+  check(cancelled(lines({ event: "structural-rebuild", wallMs: 5250 })).editIndex === 5, "a rebuild after a Stop's cancel fails although the Stop reads stopped at 0")
   check(cancelled(lines(), replaced(2, { state: "paused" })).editIndex === 3, "a Play that does not play fails")
   check(cancelled(lines(), honestSeen.filter((_, position) => position !== 1)).editIndex === 2, "a step with no observation fails")
   console.log("ae-08 phase 9 compare self-test: pass")

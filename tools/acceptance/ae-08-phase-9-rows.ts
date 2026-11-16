@@ -141,11 +141,11 @@ export const burstRows: BurstRow[] = [
   { name: "host-failure-during-play", latencyClass: "plain", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "stopped", prepare: insertedTestPlugin,
     judge: "host-loss", transport: "driven", settle: "returned", cycle: [{ edits: ["play-kill-host"], state: "stopped" }] } },
   // Ruling 3 b: a Pause and a Stop issued over a Play whose start has not landed cancel it without a stop, teardown, begin or configure, leave the
-  // transport paused (at 0 after a Stop), and the next Play resumes the same session.
+  // transport paused (stopped at 0 after a Stop), and the next Play resumes the same session.
   { name: "pause-stop-during-play-start", latencyClass: "plain", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "paused",
     judge: "cancelled-start", transport: "driven", settle: "returned",
     cycle: [{ edits: ["session-pause"], state: "paused" }, { edits: ["play-then-pause"], state: "paused" }, { edits: ["play-resume"], state: "playing" },
-      { edits: ["session-pause"], state: "paused" }, { edits: ["play-then-stop"], state: "paused" }, { edits: ["play-resume"], state: "playing" }] } },
+      { edits: ["session-pause"], state: "paused" }, { edits: ["play-then-stop"], state: "stopped" }, { edits: ["play-resume"], state: "playing" }] } },
   // The saved native output changes in Audio settings while playing, while paused, and during a take (BlackHole is the other output). It has no
   // judge: the steps mark the host's lifecycle lines they saw (ae-08-phase-9-output-device.ts) and the evidence is read per step.
   { name: "output-device-switch", latencyClass: "plain", packaged: { repeat: "single", periodSec: null, fixture: "phase5:raw-tempo", start: "stopped", device: "blackhole",

@@ -631,8 +631,12 @@ int main(int argc, char* argv[]) {
     daw::audio_host_macos::ControlType::kTransactionRollback, true));
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransactionBegin),
     daw::audio_host_macos::ControlType::kTransactionBegin, true));
+  // Every request that names an attachment carries its id with a little-endian length. A big-endian length is refused.
+  constexpr std::string_view kInstanceId = "b0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f1";
   std::vector<std::uint8_t> instance_id;
-  AppendString(instance_id, "b0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f1");
+  AppendLeString(instance_id, kInstanceId);
+  std::vector<std::uint8_t> big_endian_instance_id;
+  AppendString(big_endian_instance_id, kInstanceId);
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kVstDetach, instance_id),
     daw::audio_host_macos::ControlType::kVstDetach, false));
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransactionRollback),
@@ -651,9 +655,17 @@ int main(int argc, char* argv[]) {
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kTransactionCommit),
     daw::audio_host_macos::ControlType::kTransactionCommit, true));
   // With no transaction open, a detach reaches the committed host that holds the instance.
+  assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kVstDetach, big_endian_instance_id),
+    daw::audio_host_macos::ControlType::kVstDetach, false));
   assert(IsAck(RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kVstDetach, instance_id),
     daw::audio_host_macos::ControlType::kVstDetach, true));
   TestCheckpoint3AssetCapacityWire(to_host[1], from_host[0]);
+  // An editor status request reads its id after the 24 byte header, and answers an unknown instance with a status frame.
+  std::vector<std::uint8_t> editor_status{};
+  for (const std::uint32_t field : {5U, 0U, 0U, 0U, 0U, 0U}) AppendU32(editor_status, field);
+  AppendLeString(editor_status, kInstanceId);
+  const auto editor_reply = RoundTrip(to_host[1], from_host[0], daw::audio_host_macos::ControlType::kVstEditor, editor_status);
+  assert(editor_reply && editor_reply->type == daw::audio_host_macos::ControlType::kVstEditorStatus);
   const std::vector<std::uint8_t> malformed_state_request{0};
   assert(IsAck(RoundTrip(
     to_host[1],

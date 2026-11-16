@@ -159,6 +159,9 @@ struct ControlFrame {
 std::optional<ControlFrame> DecodeControlFrame(std::span<const std::uint8_t> bytes);
 std::vector<std::uint8_t> EncodeControlFrame(ControlType type, std::span<const std::uint8_t> payload);
 
+// Every request that names an existing VST3 attachment carries its id as a little-endian length and the bytes.
+bool ReadNativeInstanceId(std::span<const std::uint8_t> payload, std::size_t& offset, std::string& instance_id);
+
 std::string CoreAudioDeviceId(std::string_view uid);
 std::optional<std::string> CoreAudioDeviceUid(std::string_view device_id);
 

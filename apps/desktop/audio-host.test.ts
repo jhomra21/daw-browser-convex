@@ -33,7 +33,11 @@ import {
   nativeAudioHostControlTypes,
   nativeAudioHostProtocolVersion,
 } from "@daw-browser/desktop-protocol/native-audio-host"
-import type { NativeHostMappedAssetPage } from "@daw-browser/audio-engine/native-host-wire"
+import {
+  serializeNativeVstParameterEvents,
+  serializeNativeVstScheduleAutomationEnable,
+  type NativeHostMappedAssetPage,
+} from "@daw-browser/audio-engine/native-host-wire"
 
 const hostScript = `
 const u32 = (value) => {
@@ -191,6 +195,17 @@ const vstPlaybackFlag = (payload) => {
   const flagOffset = offset + 4 + 8 + 1 + 32 + 32 + 4 + 4 + 3
   return flagOffset < payload.length ? payload[flagOffset] : undefined
 }
+// Where each request that names an attachment carries its id. The host reads every one with ReadNativeInstanceId:
+// a little-endian length of 1..256 followed by that many bytes (detach 11, parameters 23, MIDI 24, state set 25,
+// state get 26, editor 41 after its 24 byte header, schedule automation enable 47).
+const instanceIdOffsets = { 11: 0, 23: 0, 24: 0, 25: 0, 26: 0, 41: 24, 47: 0 }
+const readsInstanceId = (type, payload) => {
+  const offset = instanceIdOffsets[type]
+  if (offset === undefined) return true
+  if (payload.length < offset + 4) return false
+  const length = payload.readUInt32LE(offset)
+  return length >= 1 && length <= 256 && offset + 4 + length <= payload.length
+}
 let bytes = Buffer.alloc(0)
 let rejectedAck = false
 let mappedFrames = 0
@@ -212,6 +227,10 @@ process.stdin.on("data", (chunk) => {
       if (process.env.MODE === "editor-interaction") process.stdout.write(editorInteractionNotification())
       if (process.env.MODE === "parameter-edit") process.stdout.write(parameterEditNotification())
       if (process.env.MODE === "loss") setTimeout(() => process.exit(1), 10)
+    } else if (!readsInstanceId(type, payload)) {
+      // The host answers a refused request with a refusal ack, and ends the process on a malformed editor request.
+      if (type === 41) process.exit(2)
+      process.stdout.write(ack(type, 0))
     } else if (type === 12 || (type === 36 && process.env.MODE === "device-loss")) {
       process.stdout.write(frame(12, Buffer.concat([
         u32(process.env.MODE === "device-loss" ? 3 : 0), u32(0), u32(0), u32(0), u32(0), u32(0), u32(0), u32(0), u64(0),
@@ -1742,6 +1761,27 @@ test("captures VST state and correlates the response identity", async () => {
       bytes: new Uint8Array([1, 2, 3]),
       sha256: "a".repeat(64),
     })
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
+
+test("every request that names an attachment encodes its instance id the way the host reads it", async () => {
+  const instanceId = "11111111-1111-4111-8111-111111111111"
+  const fixture = await fixtureSupervisor()
+  try {
+    await fixture.supervisor.start()
+    await expect(fixture.supervisor.detachVst(instanceId)).resolves.toBeUndefined()
+    await expect(fixture.supervisor.getVstState(instanceId)).resolves.toMatchObject({ sha256: "a".repeat(64) })
+    await expect(fixture.supervisor.executeVstEditorCommand({ instanceId, command: "open", width: 640, height: 480 }))
+      .resolves.toMatchObject({ success: true })
+    await expect(fixture.supervisor.queueVstParameterEvents(
+      serializeNativeVstParameterEvents(instanceId, [{ id: 48, value: 0.5, sampleOffset: 0 }]),
+    )).resolves.toBeUndefined()
+    await expect(fixture.supervisor.reenableVstScheduleAutomation(
+      serializeNativeVstScheduleAutomationEnable(instanceId, [48]),
+    )).resolves.toBeUndefined()
   } finally {
     await fixture.supervisor.teardown()
     await fixture.dispose()

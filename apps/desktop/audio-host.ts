@@ -463,14 +463,9 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
   ])
 }
 
-const serializeVstDetach = (instanceId: string) => {
-  const value = Buffer.from(instanceId, "utf8")
-  if (value.byteLength === 0 || value.byteLength > maximumVstStringBytes) return undefined
-  return Buffer.concat([writeUnsigned32(value.byteLength), value])
-}
-
-// The host reads this request's instance id with a little-endian length (ReadNativeInstanceId), unlike vstDetach's big-endian string.
-const serializeVstStateGet = (instanceId: string) => {
+// The host reads the id of every request that names an existing attachment with ReadNativeInstanceId: a little-endian length.
+// Only the attach record, whose fields are all big-endian, carries its own id big-endian.
+const serializeVstInstanceId = (instanceId: string) => {
   const value = Buffer.from(instanceId, "utf8")
   if (value.byteLength === 0 || value.byteLength > maximumVstStringBytes) return undefined
   const length = Buffer.alloc(4)
@@ -510,7 +505,7 @@ const serializeVstEditor = (input: {
   output.writeUInt32BE(hasAnchor, 12)
   output.writeInt32BE(anchor?.x ?? 0, 16)
   output.writeInt32BE(anchor?.y ?? 0, 20)
-  output.writeUInt32BE(instanceIdBytes.byteLength, 24)
+  output.writeUInt32LE(instanceIdBytes.byteLength, 24)
   return Buffer.concat([output, instanceIdBytes])
 }
 
@@ -2864,7 +2859,7 @@ export const createNativeAudioHostSupervisor = (
       await attachVst(input, transactionToken)
     },
     async getVstState(instanceId, transactionToken, signal) {
-      const payload = serializeVstStateGet(instanceId)
+      const payload = serializeVstInstanceId(instanceId)
       if (!payload) throw new Error("The native VST state request is invalid.")
       signal?.throwIfAborted()
       await supervisor.start()
@@ -2927,7 +2922,7 @@ export const createNativeAudioHostSupervisor = (
       })
     },
     async detachVst(instanceId, transactionToken) {
-      const payload = serializeVstDetach(instanceId)
+      const payload = serializeVstInstanceId(instanceId)
       if (!payload) throw new Error("The native VST attachment is invalid.")
       await request(vstDetachType, payload, transactionToken)
     },

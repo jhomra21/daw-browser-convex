@@ -271,16 +271,6 @@ bool CaptureTargetKept(const PlanRouting& published, const PlanRouting& proposed
   return PlanContainsNode(proposed, target) && DownstreamRoute(published, target) == DownstreamRoute(proposed, target);
 }
 
-bool ReadNativeInstanceId(const std::span<const std::uint8_t> payload, std::size_t& offset, std::string& instance_id) {
-  if (offset + 4 > payload.size()) return false;
-  const std::uint32_t length = ReadLeU32(payload.data() + offset);
-  offset += 4;
-  if (length == 0 || length > 256 || offset + length > payload.size()) return false;
-  instance_id.assign(reinterpret_cast<const char*>(payload.data() + offset), length);
-  offset += length;
-  return true;
-}
-
 void WriteU32(std::vector<std::uint8_t>& bytes, std::size_t offset, std::uint32_t value) {
   bytes[offset] = static_cast<std::uint8_t>(value >> 24U);
   bytes[offset + 1] = static_cast<std::uint8_t>(value >> 16U);
@@ -1220,6 +1210,16 @@ struct NativeTelemetryObserver {
 };
 
 }  // namespace
+
+bool ReadNativeInstanceId(const std::span<const std::uint8_t> payload, std::size_t& offset, std::string& instance_id) {
+  if (offset + 4 > payload.size()) return false;
+  const std::uint32_t length = ReadLeU32(payload.data() + offset);
+  offset += 4;
+  if (length == 0 || length > 256 || offset + length > payload.size()) return false;
+  instance_id.assign(reinterpret_cast<const char*>(payload.data() + offset), length);
+  offset += length;
+  return true;
+}
 
 bool WorkerNotificationQueue::Push(WorkerNotification notification) {
   for (auto& current : notifications_) {

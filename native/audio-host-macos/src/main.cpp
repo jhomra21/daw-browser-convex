@@ -1066,7 +1066,7 @@ int main() {
       case daw::audio_host_macos::ControlType::kVstDetach: {
         std::size_t offset = 0;
         std::string instanceId;
-        accepted = control_session && ReadString(payload, offset, instanceId) && offset == payload.size() && control_session->DetachVstReference(instanceId);
+        accepted = control_session && daw::audio_host_macos::ReadNativeInstanceId(payload, offset, instanceId) && offset == payload.size() && control_session->DetachVstReference(instanceId);
         break;
       }
       case daw::audio_host_macos::ControlType::kVstEditor: {
@@ -1079,7 +1079,7 @@ int main() {
           || (ReadU32(payload.data() + 12) == 1 && command != 1 && command != 3)) return EXIT_FAILURE;
         std::size_t offset = 24;
         std::string instanceId;
-        if (!ReadString(payload, offset, instanceId) || offset != payload.size()) return EXIT_FAILURE;
+        if (!daw::audio_host_macos::ReadNativeInstanceId(payload, offset, instanceId) || offset != payload.size()) return EXIT_FAILURE;
         const auto anchor = ReadU32(payload.data() + 12) == 1
           ? std::optional<daw::audio_host_macos::NativeVstEditorAnchor>(
             daw::audio_host_macos::NativeVstEditorAnchor{

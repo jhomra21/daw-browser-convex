@@ -14,7 +14,11 @@ import path from "node:path"
 import { z } from "zod"
 
 export type SplitEvent = { event: string; pid: number; wallMs: number; requestedRevision: number; key: string; stepsUs: string; step: string; durationMs: number }
-export type PrepareSplit = { hostPrepareMs: number; replyWriteMs: number; hostToRendererMs: number; rendererMs: number; rendererToHostMs: number; spectralWarmMs: number }
+// `rendererSteps` splits `rendererMs` at the two host round trips on the path: the reply to the instrument states reply, that to the
+// bind's progress read, and what is left up to the bind request. It is absent from evidence taken before those marks existed.
+export type RendererSteps = { statesMs: number; progressReadMs: number; restMs: number }
+export type PrepareSplit = { hostPrepareMs: number; replyWriteMs: number; hostToRendererMs: number; rendererMs: number; rendererToHostMs: number; spectralWarmMs: number
+  rendererSteps?: RendererSteps }
 
 const hostSteps = ["vst-control", "host-pre", "core", "host-post"]
 const stepMicroseconds = (stepsUs: string) => new Map(stepsUs.split(";").filter(Boolean).map((pair): [string, number] => {
@@ -31,15 +35,20 @@ export const prepareSplit = (events: readonly SplitEvent[], prepare: SplitEvent,
   const received = sent && earliestAfter((event) => event.event === "prepare-reply-received" && event.key === sent.key)
   const bound = sent && received && earliestAfter((event) => event.event === "bind-request-sent" && event.key === sent.key && event.wallMs <= request.wallMs, received.wallMs)
   if (!profile || !reply || !received || !bound) return undefined
+  const configured = earliestAfter((event) => event.event === "bind-states-configured" && event.key === sent.key, received.wallMs)
+  const progressRead = configured && earliestAfter((event) => event.event === "bind-progress-read" && event.key === sent.key, configured.wallMs)
   const steps = stepMicroseconds(profile.stepsUs)
   const hostPrepareMs = hostSteps.reduce((total, name) => total + (steps.get(name) ?? 0), 0) / 1000
   return { hostPrepareMs, replyWriteMs: reply.durationMs, hostToRendererMs: received.wallMs - prepare.wallMs - hostPrepareMs - reply.durationMs,
-    rendererMs: bound.wallMs - received.wallMs, rendererToHostMs: request.wallMs - bound.wallMs, spectralWarmMs: (steps.get("spectral-warm") ?? 0) / 1000 }
+    rendererMs: bound.wallMs - received.wallMs, rendererToHostMs: request.wallMs - bound.wallMs, spectralWarmMs: (steps.get("spectral-warm") ?? 0) / 1000,
+    rendererSteps: configured && progressRead ? { statesMs: configured.wallMs - received.wallMs, progressReadMs: progressRead.wallMs - configured.wallMs,
+      restMs: bound.wallMs - progressRead.wallMs } : undefined }
 }
 
 const round = (value: number) => Math.round(value * 100) / 100
 export const splitLine = (split: PrepareSplit) => `host prepare ${round(split.hostPrepareMs)} ms, reply write ${round(split.replyWriteMs)} ms, host to renderer ${round(split.hostToRendererMs)} ms, `
-  + `renderer work ${round(split.rendererMs)} ms, renderer to host bind ${round(split.rendererToHostMs)} ms`
+  + `renderer work ${round(split.rendererMs)} ms${split.rendererSteps ? ` (states reply ${round(split.rendererSteps.statesMs)} ms, progress read ${round(split.rendererSteps.progressReadMs)} ms, rest ${round(split.rendererSteps.restMs)} ms)` : ""}, `
+  + `renderer to host bind ${round(split.rendererToHostMs)} ms`
 
 const hostSchema = z.object({ event: z.string(), cause: z.string().default(""), pid: z.number().default(0), wallMs: z.number().default(0), revision: z.number().default(0),
   requestedRevision: z.number().default(0), publicationFrame: z.number().default(0), key: z.string().default(""), stepsUs: z.string().default(""),
@@ -76,9 +85,13 @@ export const splitRow = (events: readonly z.infer<typeof hostSchema>[], edits: z
 const modeLine = (label: string, mode: string, group: readonly Row[]) => {
   if (group.length === 0) return []
   const p50 = (pick: (row: Row) => number) => median(group.map(pick))
+  const stepped = group.flatMap((row) => row.split.rendererSteps ?? [])
+  const stepP50 = (pick: (steps: RendererSteps) => number) => median(stepped.map(pick))
   return [`${label} ${mode} (${group.length}): graph-prepare to bind p50 ${round(p50((row) => row.spanMs))} ms; medians: ${splitLine({ hostPrepareMs: p50((row) => row.split.hostPrepareMs),
     replyWriteMs: p50((row) => row.split.replyWriteMs), hostToRendererMs: p50((row) => row.split.hostToRendererMs), rendererMs: p50((row) => row.split.rendererMs),
-    rendererToHostMs: p50((row) => row.split.rendererToHostMs), spectralWarmMs: 0 })}`]
+    rendererToHostMs: p50((row) => row.split.rendererToHostMs), spectralWarmMs: 0,
+    rendererSteps: stepped.length === group.length ? { statesMs: stepP50((steps) => steps.statesMs), progressReadMs: stepP50((steps) => steps.progressReadMs),
+      restMs: stepP50((steps) => steps.restMs) } : undefined })}`]
 }
 export const modeLines = (label: string, rows: readonly Row[]) => [...modeLine(label, "lo", rows.filter((row) => row.spanMs < LO_HI_CUT_MS)),
   ...modeLine(label, "hi", rows.filter((row) => row.spanMs >= LO_HI_CUT_MS))]
@@ -97,12 +110,16 @@ const selfTest = () => {
   const events = [line("prepare-sent", 800, { key: "old" }), line("prepare-reply-received", 810, { key: "old" }), line("prepare-sent", 990, { key: "k" }), prepare,
     line("prepare-profile", 1004, { requestedRevision: 5, stepsUs: "vst-control=100;host-pre=200;core=3000;spectral-warm=500;host-post=700;" }),
     line("prepare-step", 1005, { step: "graph-prepare-reply", durationMs: 0.5 }), line("prepare-reply-received", 1010, { key: "k" }),
+    line("bind-states-configured", 1011, { key: "k" }), line("bind-progress-read", 1012, { key: "k" }), line("bind-states-configured", 1011, { key: "other" }),
     line("bind-request-sent", 1013, { key: "k" }), line("bind-request-sent", 1300, { key: "k" }), line("bind-request-sent", 1013, { key: "other" }), request]
   const split = prepareSplit(events, prepare, request)
   const expected = { hostPrepareMs: 4, replyWriteMs: 0.5, hostToRendererMs: 5.5, rendererMs: 3, rendererToHostMs: 2, spectralWarmMs: 0.5 }
+  const expectedSteps = { statesMs: 1, progressReadMs: 1, restMs: 1 }
   const failures = [
-    ...(split && Object.entries(expected).every(([name, value]) => Object.entries(split).some(([field, found]) => field === name && Math.abs(found - value) < 1e-9)) ? []
+    ...(split && Object.entries(expected).every(([name, value]) => Object.entries(split).some(([field, found]) => field === name && typeof found === "number" && Math.abs(found - value) < 1e-9)) ? []
       : [`split ${JSON.stringify(split)}, expected ${JSON.stringify(expected)}`]),
+    ...(JSON.stringify(split?.rendererSteps) === JSON.stringify(expectedSteps) ? [] : [`renderer steps ${JSON.stringify(split?.rendererSteps)}, expected ${JSON.stringify(expectedSteps)}`]),
+    ...(prepareSplit(events.filter((event) => event.event !== "bind-progress-read"), prepare, request)?.rendererSteps === undefined ? [] : ["a revision with no progress-read mark must have no renderer steps"]),
     ...(prepareSplit(events.filter((event) => event.event !== "prepare-reply-received" || event.key === "old"), prepare, request) === undefined ? [] : ["a revision with no reply mark must have no split"]),
     ...(prepareSplit(events.filter((event) => event.event !== "bind-request-sent"), prepare, request) === undefined ? [] : ["a revision with no bind mark must have no split"]),
     ...(prepareSplit(events.filter((event) => event.event !== "prepare-profile"), prepare, request) === undefined ? [] : ["a revision with no prepare-profile line must have no split"]),

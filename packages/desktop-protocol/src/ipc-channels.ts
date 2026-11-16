@@ -76,6 +76,8 @@ export const ae08RendererMarks = z.enum([
   "lane-admitted", "fence-open", "prepare-sent",
   // The renderer's side of the host's prepare: the reply received, and the first publish request that binds the seam sent.
   "prepare-reply-received", "bind-request-sent",
+  // The two host round trips between them: the instrument states reply (sent even with none added) and the bind's progress read.
+  "bind-states-configured", "bind-progress-read",
   // Asset hydration of one adoption, after the host prepared its graph: the mapped asset's create, each page write and range prepare
   // (a request when the renderer sends it, a reply when the host's answer is back), and the candidate paging around them.
   "asset-create-request", "asset-create-reply", "asset-page-write-request", "asset-page-write-reply",

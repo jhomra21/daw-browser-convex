@@ -4236,6 +4236,7 @@ export const createNativePlaybackController = (input: {
         }
         publicationAbort.signal.throwIfAborted()
         checked(await awaitPreparation(session.configureInstrumentStates(serializeNativeInstrumentStates(addedInstruments, assets))))
+        hydrationMark?.("bind-states-configured")
         if (addedAssets.length > 0) hydrationMark?.("asset-instrument-states-ready")
         // New timeline sources hydrate while a window is staged, which would spend the short bound lead. Page the
         // candidate first on a discarded coordinator, submitting nothing.
@@ -4253,6 +4254,7 @@ export const createNativePlaybackController = (input: {
         // later, to the same lead, instead of publishing at a seam that was already reached.
         for (let attempt = 0; attempt < 2; attempt++) {
           const fresh = await inspect(binding, true)
+          hydrationMark?.("bind-progress-read")
           if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
           if (!fresh?.ok || (fresh.revision.status !== "prepared" && fresh.revision.status !== "rebase-required")
             || fresh.revision.progressFrame === undefined || fresh.revision.requestedPublicationFrame !== BigInt(seam)) break

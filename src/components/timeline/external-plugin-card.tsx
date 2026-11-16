@@ -7,6 +7,7 @@ import type { Track } from "@daw-browser/timeline-core/types";
 import type { NativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
 import { externalProcessorStatusLabel } from "~/lib/external-plugin-ui";
 import { vstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
+import { ae08UiMark } from "~/lib/desktop/ae08-marks";
 import {
   nativeEditorAnchorFromElement,
   nativeEditorAvailabilityMessage,
@@ -310,7 +311,11 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
               type="button"
               class="border-r border-border px-2 text-xs text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!props.canWrite}
-              onClick={() => void editor("open")}
+              onClick={() => {
+                const { instanceId } = props.processor;
+                ae08UiMark("ui-editor-open", () => instanceId);
+                void editor("open");
+              }}
             >
               Open UI
             </button>

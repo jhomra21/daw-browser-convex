@@ -111,10 +111,10 @@ export const deleteTrackThroughUi = async (context: UiContext, name: string) => 
 // on a sine zero and makes a block shift observably wrong at every seam.
 export const phase5AssetSample = (frame: number, right: boolean) => 0.08 + 0.025 * Math.sin(frame * (right ? 0.039 : 0.027))
   + 0.015 * Math.sin(frame * frame * (right ? 1.7e-8 : 1e-8))
-export const writePhase5Asset = async (file: string, seconds: number, right: boolean) => {
+export const writePhase5Asset = async (file: string, seconds: number, right: boolean, scale = 1) => {
   const sampleRate = 48000
   const samples = new Float32Array(seconds * sampleRate * 2)
-  for (let frame = 0; frame < seconds * sampleRate; frame++) samples[frame * 2 + (right ? 1 : 0)] = phase5AssetSample(frame, right)
+  for (let frame = 0; frame < seconds * sampleRate; frame++) samples[frame * 2 + (right ? 1 : 0)] = scale * phase5AssetSample(frame, right)
   await writeWav(file, { sampleRate, channels: 2, samples })
 }
 
@@ -314,10 +314,12 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
     await mutate([{ kind: "clip.move", clip: ref(clip.id), track: ref(changedTrack.id), startSec: 0 },
       { kind: "clip.timing.set", clip: ref(clip.id), duration: contentSeconds ?? 24 }])
   }
-  // "held-swap" swaps the instrument's sample for an identical copy: its clip sits on the muted Changed right track with the changed one.
+  // "held-swap" swaps the instrument's sample for another one: its clip sits on the muted Changed right track with the changed one. A
+  // byte-identical copy is an import the app deduplicates (no clip), so the swap sample is the same signal 1 % louder: the note switches to it at
+  // the same playback position, and the step (under 1.2 % of the level) stays under the held judge's 2 % jump bound.
   if (row === "held-swap") {
     const swapFile = path.join(out, "swap.wav")
-    await writePhase5Asset(swapFile, (contentSeconds ?? 24) + 6, true)
+    await writePhase5Asset(swapFile, (contentSeconds ?? 24) + 6, true, 1.01)
     await runtime(["import", "--path", swapFile])
     await waitImportedClip(context, "swap")
     const copy = required((await snapshot()).clips.find((item) => item.name.includes("swap")), "Swap fixture import")
@@ -356,7 +358,7 @@ export const setupPhase5Fixture = async (context: Phase5Context) => {
   }
   // Phase 9 only, the held-instrument rows: the Changed right track is muted, so the right channel is the instrument alone and the note's gaps and
   // jumps are its own. "held-insert" and "held-reorder" hold the synth while an unrelated track is edited, "held-chord" holds three of its notes,
-  // and the sampled rows hold the changed asset through the instrument under test ("held-swap" adds an identical copy of it to swap to).
+  // and the sampled rows hold the changed asset through the instrument under test ("held-swap" adds a 1 % louder copy of it to swap to).
   const heldRow = row === "held-insert" || row === "held-reorder" || row === "held-chord" || heldInstrumentRows.includes(row)
   if (heldRow) await mutate([{ kind: "track.mix.set", track: ref(changedTrack.id), muted: true }])
   if (row === "held-insert" || row === "held-reorder" || row === "held-chord") {

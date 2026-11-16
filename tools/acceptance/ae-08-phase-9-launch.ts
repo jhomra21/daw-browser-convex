@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { z } from "zod"
 import type { ProjectSnapshotV2 } from "@daw-browser/control"
 import { createDefaultLimiterParams, createDefaultSpectralParams, getSpectralLatencyFrames } from "@daw-browser/shared"
+import { createAvailableDesktopHostClient } from "@daw-browser/desktop-protocol/client"
 import { command } from "../performance/30-track/v3-import-workload"
 import { deleteTrackThroughUi, dragUtilityGainKnob, exportReference, heldInstrumentTrack, heldSynthTrack, insertTargetTrack, pressHistoryKey, reorderTargetTrack, required,
   sampledInstrumentParams, selectFftSize, setupPhase5Fixture, sineSynthParams, waitForUi, waitImportedClip, waitNativeFrame, liveMidiTrack, type Phase5Context, type SampleAsset } from "./ae-08-phase-5-fixture"
@@ -60,6 +61,8 @@ export const observeSnapshot = (state: ProjectSnapshotV2, changedTrackId: string
 type Performers = {
   context: Pick<Phase5Context, "mutate" | "evaluate" | "interact" | "read" | "reload" | "mark">
   runtime: (args: string[]) => Promise<void>
+  // Play then Pause as two requests in order on one control connection; returns when the Pause was issued.
+  playThenPause: () => Promise<number>
   transportStatus: () => Promise<{ state: string; playheadSec: number }>
   // The audio host process the app spawned last, and a way to kill one (the host-loss row kills it by pid).
   hostPid: () => Promise<number>
@@ -69,7 +72,7 @@ type Performers = {
 }
 
 // The edit names of the built rows (ae-08-phase-9-matrix.ts) and what each does. Each returns the latency move it declares.
-export const createPerformer = ({ context, runtime, transportStatus, hostPid, kill, observe, setup }: Performers): Perform => {
+export const createPerformer = ({ context, runtime, playThenPause, transportStatus, hostPid, kill, observe, setup }: Performers): Perform => {
   // An edit through the control protocol is stamped when the app receives its commit.
   const commit = async (actions: Parameters<Performers["context"]["mutate"]>[0]) => ({ ...unmoved, wallMs: await context.mutate(actions) })
   const target = { kind: "track", track: ref(setup.changedTrackId) }
@@ -116,12 +119,27 @@ export const createPerformer = ({ context, runtime, transportStatus, hostPid, ki
   // (compareHostLoss, compareCancelledStart). `cancelWallMs` is when the command that cancels or kills was issued.
   const observeTransport = async (edit: string, cancelWallMs: number, status: { state: string; playheadSec: number }, failure = "") =>
     context.mark("transport-observed", { edit, pid: await hostPid(), cancelWallMs, state: status.state, playheadSec: status.playheadSec, failure })
-  // A Play whose start has not landed: the command is issued and not awaited, the cancelling command goes straight after it.
+  // A Play whose start has not landed. The Play button is aria-busy while its start is pending, stays "Play" until a start lands (then it
+  // reads "Pause"), and has no Pause to press meanwhile. A trail of its attribute changes shows the cancel arrived while the Play was
+  // pending: it went busy and the label never left "Play". A run without that trail fails as oracle, whatever the transport shows.
+  const watchPlayButton = () => context.evaluate(`(()=>{const b=document.querySelector('button[aria-label="Play"]');if(!b)throw new Error('Play unavailable')
+    window.ae08PlayWatch?.disconnect();const trail=[];window.ae08PlayTrail=trail
+    window.ae08PlayWatch=new MutationObserver(records=>{for(const r of records)trail.push(r.attributeName+':'+r.oldValue)})
+    window.ae08PlayWatch.observe(b,{attributes:true,attributeOldValue:true,attributeFilter:['aria-busy','aria-label']});return true})()`)
+  const provePendingCancel = async (cancel: string) => {
+    await waitForUi(context, `${cancel} never cleared the pending Play`, `document.querySelector('button[aria-label="Play"]')?.getAttribute('aria-busy')!=='true'`)
+    const trail = await context.read(`JSON.stringify(window.ae08PlayTrail)`, z.array(z.string()))
+    if (!trail.includes("aria-busy:true")) throw new Error(`Oracle: the Play was never pending when ${cancel} cancelled it`)
+    if (trail.includes("aria-label:Play")) throw new Error(`Oracle: the Play's start landed (the button read Pause) before ${cancel} cancelled it`)
+  }
+  // Stop is always pressable, so one renderer task presses Play and then Stop. Pause is not (the control protocol's pause is the only one a
+  // pending Play meets), so the two requests go in order down one control connection.
   const cancelledPlay = (cancel: "pause" | "stop") => async () => {
-    const started = runtime(["play"])
-    const cancelWallMs = Date.now()
-    await runtime([cancel])
-    await started.then(() => undefined, () => undefined)
+    await watchPlayButton()
+    const cancelWallMs = cancel === "pause" ? await playThenPause() : await context.read(`JSON.stringify((()=>{
+      const play=document.querySelector('button[aria-label="Play"]'),stop=document.querySelector('button[aria-label="Stop"]')
+      if(!play||!stop)throw new Error('Play or Stop unavailable');play.click();const at=Date.now();stop.click();return at})())`, z.number())
+    await provePendingCancel(cancel)
     await observeTransport(`play-then-${cancel}`, cancelWallMs, await transportStatus())
     return unmoved
   }
@@ -148,7 +166,7 @@ export const createPerformer = ({ context, runtime, transportStatus, hostPid, ki
     ["drum-rack-gain-full", instrumentEdit("drum-rack", "changed", {})],
     ["granular-density-48", instrumentEdit("granular", "changed", { densityHz: 48 })],
     ["granular-density-40", instrumentEdit("granular", "changed", {})],
-    // An identical copy of the sample: a swap that continues at the same playback position leaves the note unbroken.
+    // A 1 % louder copy of the sample: the note switches to it at the same playback position and stays unbroken.
     ["sampler-swap-asset", instrumentEdit("sampler", "swap", {})],
     ["sampler-swap-back", instrumentEdit("sampler", "changed", {})],
     // The user's Play press, the audio host killed by pid while the press is pending, and the app's own report of it.
@@ -295,7 +313,16 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
     await mark("native-input-device", listed)
   }
   const transportStatus = async () => transportStatusSchema.parse(await runtime(["transport-status"]))
-  const performEdit = createPerformer({ context, runtime: async (args) => { await runtime(args) }, transportStatus,
+  const playThenPause = async () => {
+    const client = await createAvailableDesktopHostClient({ userDataDirectory: profile, actorPath: path.join(profile, "host-actor-v1.json") })
+    try {
+      const play = client.request("transport.play", {})
+      const cancelWallMs = Date.now()
+      await Promise.allSettled([play, client.request("transport.pause", {})])
+      return cancelWallMs
+    } finally { client.close() }
+  }
+  const performEdit = createPerformer({ context, runtime: async (args) => { await runtime(args) }, playThenPause, transportStatus,
     hostPid: () => lastHostPid(out), kill: (pid) => process.kill(pid, "SIGKILL"),
     setup: { changedTrackId: setup.changedTrack.id, changedFile: setup.changedFile },
     observe: async () => observeSnapshot(await context.snapshot(), setup.changedTrack.id) })
@@ -399,6 +426,7 @@ const check = (condition: boolean, message: string) => { if (!condition) throw n
 
 export const selfTest = async () => {
   const calls: string[] = []
+  let trail = ["aria-busy:false", "aria-busy:true"]
   const transport = { state: "stopped", playheadSec: 0 }
   const observed: Observed = { spectralEffectId: "spectral-1", limiterEffectId: "limiter-1", externalEffectId: "external-1", trackId: (name) => name === silentTrack ? "silent-1" : `track-of-${name}`, clipId: (name) => name === "changed" ? "clip-1" : undefined, clipStartSec: (name) => name === "changed" ? 2 : undefined,
     effectId: (trackName, kind) => trackName === reorderTargetTrack ? `${kind}-1` : undefined,
@@ -408,11 +436,13 @@ export const selfTest = async () => {
       mutate: async (actions) => { calls.push(`mutate ${JSON.stringify(actions)}`); return 4242 },
       evaluate: async (script) => { calls.push(`evaluate ${script}`) },
       interact: async (args) => { calls.push(`interact ${args.join(" ")}`) },
-      read: async (script, schema) => { calls.push(`read ${script}`); return schema.parse(script.includes("getBoundingClientRect") ? { x: 300, y: 200 } : script.includes("Pause") ? true : 0) },
+      read: async (script, schema) => { calls.push(`read ${script}`); return schema.parse(script.includes("getBoundingClientRect") ? { x: 300, y: 200 } : script.includes("ae08PlayTrail") ? trail
+        : script.includes("play.click()") ? 4242 : script.includes("Pause") ? true : 0) },
       reload: async () => { calls.push("reload") },
       mark: async (event, fields) => { calls.push(`mark ${event} ${JSON.stringify(fields)}`) },
     },
     runtime: async (args) => { calls.push(`runtime ${args.join(" ")}`) },
+    playThenPause: async () => { calls.push("control play then pause"); return 4243 },
     transportStatus: async () => { calls.push("runtime transport-status"); return { state: transport.state, playheadSec: transport.playheadSec } },
     hostPid: async () => 4711,
     kill: (pid) => { calls.push(`kill ${pid}`) },
@@ -503,9 +533,21 @@ export const selfTest = async () => {
   transport.state = "paused"
   transport.playheadSec = 1.5
   const cancelled = await run("play-then-pause")
-  check(cancelled.calls.slice(0, 2).join("|") === "runtime play|runtime pause" && cancelled.calls.at(-1)?.includes(`"edit":"play-then-pause"`) === true
-    && cancelled.calls.at(-1)?.includes(`"state":"paused","playheadSec":1.5`) === true, `play-then-pause issues Play then Pause and marks the paused transport: ${cancelled.calls}`)
-  check((await run("play-then-stop")).calls.slice(0, 2).join("|") === "runtime play|runtime stop", "play-then-stop issues Play then Stop")
+  check(cancelled.calls.some((call) => call === "control play then pause") && cancelled.calls.at(-1)?.includes(`"edit":"play-then-pause"`) === true
+    && cancelled.calls.at(-1)?.includes(`"cancelWallMs":4243`) === true
+    && cancelled.calls.at(-1)?.includes(`"state":"paused","playheadSec":1.5`) === true, `play-then-pause issues Play then Pause in order and marks the paused transport: ${cancelled.calls}`)
+  const stopped = await run("play-then-stop")
+  check(stopped.calls.some((call) => call.includes("play.click()") && call.indexOf("play.click()") < call.indexOf("stop.click()")) && !stopped.calls.some((call) => call === "runtime play" || call === "runtime stop"),
+    `play-then-stop presses Play then Stop in one renderer task: ${stopped.calls}`)
+  check(stopped.calls.at(-1)?.includes(`"cancelWallMs":4242`) === true, "play-then-stop marks the time between the two presses")
+  // A cancel that was not over a pending Play fails as oracle, whatever the transport shows afterwards.
+  const badTrails: [string, string[]][] = [["never pending", ["aria-busy:false"]], ["start landed", ["aria-busy:true", "aria-label:Play"]]]
+  for (const [label, bad] of badTrails) {
+    trail = bad
+    const refused = await run("play-then-pause").then(() => "", (error) => String(error))
+    check(refused.includes("Oracle:"), `a cancel with a trail of ${label} fails as oracle: ${refused}`)
+  }
+  trail = ["aria-busy:false", "aria-busy:true"]
   const preparing = await run("session-pause")
   check(preparing.calls.slice(0, 3).join("|") === "runtime transport-status|runtime play|runtime pause", `session-pause plays a session that is not playing, then pauses it: ${preparing.calls}`)
   transport.state = "playing"
@@ -550,11 +592,11 @@ export const selfTest = async () => {
   // The armed target's delete must be refused with the lock's reason; a commit that goes through, or another refusal, fails the row.
   const guard = (mutate: () => Promise<number>) => createPerformer({
     context: { mutate, evaluate: async () => undefined, interact: async () => undefined, read: async (_, schema) => schema.parse(0), reload: async () => undefined, mark: async () => undefined },
-    runtime: async () => undefined, transportStatus: async () => ({ state: "paused", playheadSec: 0 }), hostPid: async () => 1, kill: () => undefined, observe: async () => observed, setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" } })("target-delete-refused")
+    runtime: async () => undefined, playThenPause: async () => 0, transportStatus: async () => ({ state: "paused", playheadSec: 0 }), hostPid: async () => 1, kill: () => undefined, observe: async () => observed, setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" } })("target-delete-refused")
   check((await guard(async () => { throw new Error(`validation: ${recordingTargetLockedReason}`) })).toLatencyFrames === 0, "a refusal carrying the lock's reason is the expected outcome")
   const reroute = (mutate: (actions: unknown[]) => Promise<number>) => createPerformer({
     context: { mutate, evaluate: async () => undefined, interact: async () => undefined, read: async (_, schema) => schema.parse("Return 4"), reload: async () => undefined, mark: async () => undefined },
-    runtime: async () => undefined, transportStatus: async () => ({ state: "paused", playheadSec: 0 }), hostPid: async () => 1, kill: () => undefined, observe: async () => observed,
+    runtime: async () => undefined, playThenPause: async () => 0, transportStatus: async () => ({ state: "paused", playheadSec: 0 }), hostPid: async () => 1, kill: () => undefined, observe: async () => observed,
     setup: { changedTrackId: "track-1", changedFile: "/tmp/changed.wav" } })("target-reroute-refused")
   let requested = ""
   await reroute(async (actions) => { requested = JSON.stringify(actions); throw new Error(`validation: ${recordingTargetLockedReason}`) })

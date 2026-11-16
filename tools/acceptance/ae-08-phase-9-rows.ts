@@ -117,7 +117,7 @@ export const burstRows: BurstRow[] = [
     cycle: [{ edits: ["untrusted-insert"], state: "vst-rejected", settle: "refused" }] } },
   // The phase 6 and 6i rows with a note held on the right channel (ae-08-phase-5-fixture.ts held-* rows, Changed right muted): the edit lands on an
   // unrelated track (instrument insert and remove, effect reorder) or on the instrument that holds the note (polyphony down under a chord, a zone
-  // or pad gain, the grain density, a sample swapped for an identical copy), and the note must go on without a gap or a jump.
+  // or pad gain, the grain density, a sample swapped for a 1 % louder copy), and the note must go on without a gap or a jump.
   { name: "instrument-insert", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-insert", start: "instrument-present", judge: "held",
     cycle: [{ edits: ["instrument-remove"], state: "instrument-absent" }, { edits: ["instrument-insert"], state: "instrument-present" }] } },
   { name: "effect-reorder", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-reorder", start: "utility-first", judge: "held",

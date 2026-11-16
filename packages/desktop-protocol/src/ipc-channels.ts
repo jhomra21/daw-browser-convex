@@ -70,7 +70,7 @@ export const ae08RendererMarkChannel = "daw:ae08:renderer-mark"
 // the UI commits an edit made in the app window) or an adoption key (the rest).
 export const ae08RendererMarks = z.enum([
   "control-handler-entry", "control-reload-before-done", "control-commit-done", "control-store-emitted",
-  "ui-parameter-commit", "ui-automation-override", "ui-automation-reenable", "ui-device-insert", "ui-device-remove", "ui-undo", "ui-redo",
+  "ui-parameter-commit", "ui-automation-override", "ui-automation-reenable", "ui-device-insert", "ui-device-remove", "ui-editor-open", "ui-undo", "ui-redo",
   "compile-start", "compile-instruments-ready", "compile-render-state-ready", "compile-processors-ready", "compile-end",
   "lane-admitted", "fence-open", "prepare-sent",
 ])

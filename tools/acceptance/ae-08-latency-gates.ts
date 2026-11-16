@@ -26,7 +26,8 @@
 // - completion: `latency-move-complete` frame - publication frame. Frames, not time, so no margin is added.
 // - class: asset when the host logged an `asset-install` between prepare and publish; raise when the edits' net
 //   latency move is positive (merged when 2+ blocks pass between prepare and bind); else plain. A row can declare
-//   its class in latency-class.json; an unknown class is an input failure.
+//   its class in latency-class.json; an unknown class is an input failure. vst-insert is decided per publication: it owns an edit
+//   named vst-insert or one with a ui-device-insert mark in its window, whatever the row declares.
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
@@ -44,7 +45,9 @@ const LIMITS = {
   raise: { prepareToPublishMaxMs: 70, editToPublishMaxMs: 150 },
   "raise-merged": { prepareToPublishMaxMs: 80, editToPublishMaxMs: 150 },
   asset: { prepareToPublishMaxMs: 100, editToPublishMaxMs: undefined },
-  "vst-insert": { prepareToPublishMaxMs: undefined, editToPublishMaxMs: undefined },
+  // Frozen by the parent ruling (addendum 7) from PHASE8-C2-GAPS-PACKAGED.md: 15 VST inserts measured edit to publish min 174, p50 176,
+  // max 203 ms (250 is about 23% over the max); prepare to publish p50 37, max 43 ms (the plain 70).
+  "vst-insert": { prepareToPublishMaxMs: 70, editToPublishMaxMs: 250 },
 }
 // Pooled over the plain and raise publications of the run.
 const POOLED = { prepareToPublishP99Ms: 60, prepP50Ms: 8, editToPublishP50Ms: 100 }
@@ -68,7 +71,7 @@ const hostEventSchema = z.object({
   blockSize: z.number().default(0),
 })
 const editsSchema = z.object({ edits: z.array(z.object({
-  wallMs: z.number(), fromLatencyFrames: z.number(), toLatencyFrames: z.number() })).default([]) })
+  name: z.string().optional(), wallMs: z.number(), fromLatencyFrames: z.number(), toLatencyFrames: z.number() })).default([]) })
 const classSchema = z.object({ class: z.enum(["plain", "raise", "asset", "vst-insert"]) })
 const continuitySchema = z.object({ assetPublicationFrame: z.number().optional() }).passthrough()
 type HostEvent = z.infer<typeof hostEventSchema>
@@ -91,8 +94,10 @@ const findLast = (events: readonly HostEvent[], before: number, match: (event: H
   return undefined
 }
 
-const classOf = (declared: Class | undefined, asset: boolean, raise: boolean, blocksBeforeBind: number): Class => {
-  const base = declared ?? (asset ? "asset" : raise ? "raise" : "plain")
+// vst-insert is decided per publication (insert), never by a row's declaration: the removes and undos of a VST row stay plain.
+const classOf = (declared: Class | undefined, insert: boolean, asset: boolean, raise: boolean, blocksBeforeBind: number): Class => {
+  if (insert) return "vst-insert"
+  const base = declared === undefined || declared === "vst-insert" ? (asset ? "asset" : raise ? "raise" : "plain") : declared
   return base === "raise" && blocksBeforeBind >= 2 ? "raise-merged" : base
 }
 
@@ -133,18 +138,22 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<ty
   })
   const netMove = drafts.map(() => 0)
   const firstEditMs: (number | undefined)[] = drafts.map(() => undefined)
+  const insertsVst = drafts.map(() => false)
   for (const edit of edits) {
     const owner = drafts.findIndex((draft) => draft.wallMs >= edit.wallMs)
     const draft = drafts[owner]
     if (!draft) continue
     const startMs = editStartMs(events, edit.wallMs, draft.wallMs)
+    // A VST insert is the row's declared insert step, or an edit the app marked with ui-device-insert before the publication.
+    if (edit.name === "vst-insert" || events.some((event) => event.event === "ui-device-insert" && event.wallMs >= edit.wallMs && event.wallMs <= draft.wallMs))
+      insertsVst[owner] = true
     netMove[owner] = (netMove[owner] ?? 0) + edit.toLatencyFrames - edit.fromLatencyFrames
     firstEditMs[owner] = Math.min(firstEditMs[owner] ?? startMs, startMs)
   }
   const publications = drafts.map(({ wallMs, ...draft }, index): Publication => {
     const raise = (netMove[index] ?? 0) > 0
     const editMs = firstEditMs[index]
-    return { ...draft, raise, editToPublishMs: editMs === undefined ? undefined : wallMs - editMs, class: classOf(declared, draft.asset, raise, draft.blocksBeforeBind) }
+    return { ...draft, raise, editToPublishMs: editMs === undefined ? undefined : wallMs - editMs, class: classOf(declared, insertsVst[index] === true, draft.asset, raise, draft.blocksBeforeBind) }
   })
   return { failures, publications }
 }
@@ -240,6 +249,8 @@ type Spec = {
   unbound?: boolean
   // The app logged a ui-* mark this many ms before the publication; the step start is `editMs` before it.
   uiMarkMs?: number
+  // The mark's name (default ui-parameter-commit), and the name of the harness step that made the edit.
+  uiMark?: string; editName?: string
 }
 // `delivers` writes the continuity analysis.json naming the publication at that index as the asset's; `noAsset` writes one naming none.
 type RowOptions = { sampleRate?: number; declare?: string; delivers?: number; noAsset?: true; windowed?: true }
@@ -260,11 +271,11 @@ const syntheticRow = (specs: readonly Spec[], options: RowOptions = {}) => {
     lines.push(request(bindFrame + BLOCK, wall + (spec.prepMs ?? 4)))
     if (spec.resend) lines.push(request(publicationFrame - BLOCK, wall + 18))
     if (options.windowed && !spec.unbound) lines.push({ event: "schedule-window", wallMs: wall + 3, revision })
-    if (spec.uiMarkMs !== undefined) lines.push({ event: "ui-parameter-commit", wallMs: wall + (spec.totalMs ?? 30) - spec.uiMarkMs, pid: 1, key: "k" })
+    if (spec.uiMarkMs !== undefined) lines.push({ event: spec.uiMark ?? "ui-parameter-commit", wallMs: wall + (spec.totalMs ?? 30) - spec.uiMarkMs, pid: 1, key: "k" })
     lines.push({ ...base, event: "graph-publish", cause: "block-boundary", wallMs: wall + (spec.totalMs ?? 30), frame: publicationFrame, publicationFrame, revision, requestedRevision: 0 })
     if (spec.completeFrames !== "none")
       lines.push({ ...base, event: "latency-move-complete", wallMs: wall + 100, frame: publicationFrame + (spec.completeFrames ?? COMPLETE_BASE_FRAMES + BLOCK * blocksBeforeBind), revision, requestedRevision: 0 })
-    edits.push({ wallMs: wall + (spec.totalMs ?? 30) - (spec.editMs ?? 75), fromLatencyFrames: 512, toLatencyFrames: spec.raise ? 4096 : 512 })
+    edits.push({ name: spec.editName, wallMs: wall + (spec.totalMs ?? 30) - (spec.editMs ?? 75), fromLatencyFrames: 512, toLatencyFrames: spec.raise ? 4096 : 512 })
   })
   // An index past the last publication names frame 1, which no publication has.
   const delivered = options.delivers === undefined ? undefined : frames[options.delivers] ?? 1
@@ -314,10 +325,18 @@ const selfTest = async (c1Runs: readonly string[]) => {
     { name: "seam-bound publication of a row with schedule windows still fails a lead of 1", status: "FAIL", fails: ["lead"],
       rows: [["open-editor", withClean({ leadBlocks: 1 }), { windowed: true }]] },
     { name: "a row with no schedule-window line judges lead 0", status: "FAIL", fails: ["lead"], rows: [["open-editor", withClean({ leadBlocks: 0 })]] },
-    { name: "vst-insert row with in-range lead has no frozen limit: INCOMPLETE", status: "INCOMPLETE", fails: [],
-      rows: [["two-tone", clean], ["vst-insert", [{ totalMs: 400 }], { declare: JSON.stringify({ class: "vst-insert" }) }]] },
-    { name: "vst-insert row still fails the lead gate", status: "FAIL", fails: ["lead", "rebase"],
-      rows: [["vst-insert", [{ totalMs: 400, leadBlocks: 16 }], { declare: JSON.stringify({ class: "vst-insert" }) }]] },
+    { name: "VST insert 200 ms from its ui-device-insert mark, prepare 60 ms", status: "PASS", fails: [],
+      rows: [["vst-remove-undo", withClean({ totalMs: 60, editMs: 260, uiMark: "ui-device-insert", uiMarkMs: 200 })]] },
+    { name: "VST insert 260 ms from its mark", status: "FAIL", fails: ["edit-to-publish"],
+      rows: [["vst-remove-undo", withClean({ totalMs: 60, editMs: 300, uiMark: "ui-device-insert", uiMarkMs: 260 })]] },
+    { name: "VST insert prepare to publish 75 ms", status: "FAIL", fails: ["prepare-to-publish"],
+      rows: [["vst-remove-undo", withClean({ totalMs: 75, editMs: 80, uiMark: "ui-device-insert", uiMarkMs: 75 })]] },
+    { name: "the row's declared insert step is a VST insert at 160 ms", status: "PASS", fails: [],
+      rows: [["vst-insert", withClean({ totalMs: 60, editMs: 160, editName: "vst-insert" }), { declare: JSON.stringify({ class: "vst-insert" }) }]] },
+    { name: "a remove of a row declared vst-insert stays plain: 160 ms fails", status: "FAIL", fails: ["edit-to-publish"],
+      rows: [["vst-insert", withClean({ totalMs: 60, editMs: 160, editName: "vst-remove" }), { declare: JSON.stringify({ class: "vst-insert" }) }]] },
+    { name: "a VST insert still fails the lead gate", status: "FAIL", fails: ["lead", "rebase"],
+      rows: [["vst-insert", withClean({ totalMs: 60, leadBlocks: 16, editName: "vst-insert" }), { declare: JSON.stringify({ class: "vst-insert" }) }]] },
   ]
   const root = await mkdtemp(join(tmpdir(), "ae08-latency-gates-"))
   let failed = 0

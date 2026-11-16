@@ -270,6 +270,10 @@ export function useTimelinePlayback(
     playbackPreparationWaiters.clear()
   }
 
+  // A Play that has not yet reached a backend start (still in its waits on a Stop, a Pause, a dispose or the preflight)
+  // has begun nothing: invalidating it cancels all of it and the prepared graph needs no teardown.
+  const hasStartUnderway = () => playAttemptPhase !== undefined || rebuildInProgress
+
   const isCurrentPlayAttempt = (token: number) => (
     mounted
     && token === playAttemptToken
@@ -844,7 +848,10 @@ export function useTimelinePlayback(
         if (!isCurrentPlayAttempt(token)) {
           reportNativePlaySkip("Native playback start completed after the request was invalidated.")
           // A start that did not run left the session as its canceller wants it: an abandoned resume keeps it prepared.
-          if (nativeStart === 'started') await disposePreparedBackends(undefined, "play-attempt-superseded")
+          // A Pause or Stop (a newer transport intent) pauses the session this Play started and keeps it.
+          if (nativeStart === 'started' && requestedIntentToken === transportIntentToken) {
+            await disposePreparedBackends(undefined, "play-attempt-superseded")
+          }
           return
         }
         if (nativeStart === 'started') {
@@ -1052,9 +1059,10 @@ export function useTimelinePlayback(
       return
     }
     // A rebuild retires the graph it replaces and prepares none once superseded, so it is a start to cancel like a Play.
-    const hadPendingPlay = playAttempt !== undefined || rebuildInProgress
+    const hadPendingPlay = hasStartUnderway()
     invalidatePlayAttempt()
-    if (!isPlaying()) {
+    // A Play whose resume has run the transport but not yet committed is running: it pauses like one and keeps its graph.
+    if (!isPlaying() && !nativePlayback.isActive()) {
       if (hadPendingPlay) {
         // A rebuild retires its graph, so only a Play resuming this one can be abandoned.
         const resume = rebuildInProgress ? undefined : nativePlayback.abandonResume()
@@ -1127,7 +1135,7 @@ export function useTimelinePlayback(
       && pendingStart?.mode === "preview"
       ? pendingStart.promise
       : undefined
-    const hadPendingPlay = playAttempt !== undefined || (pendingStart !== undefined && !pendingPreview) || rebuildInProgress
+    const hadPendingPlay = !nativePlayback.isActive() && (hasStartUnderway() || (pendingStart !== undefined && !pendingPreview))
     invalidatePlayAttempt()
     if (pendingStop) return pendingStop
     const resume = rebuildInProgress ? undefined : nativePlayback.abandonResume()

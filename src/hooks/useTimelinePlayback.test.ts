@@ -5635,6 +5635,53 @@ for (const route of ['stop', 'pause'] as const) {
       Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
     }
   })
+
+  // The packaged order: a Play right after a Pause is cancelled a few ms later, wherever it has got to. Every point of
+  // the Play's progress, from its first wait to its running transport, must leave the prepared session alone.
+  test(`B6d5 a ${route === 'stop' ? 'Stop' : 'Pause'} over a Play at any point of its start keeps the prepared graph`, async () => {
+    const previousWindow = globalThis.window
+    const fixture = createNativeHookBridge()
+    const [tracks] = createSignal([track])
+    const faults: string[] = []
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+    try {
+      await withFakeRaf(async () => {
+        const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+        await createRoot(async (dispose) => {
+          const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
+            requiresNativeAudio: true,
+            enabled: () => true,
+            compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
+              renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
+            reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
+          })
+          for (let index = 0; index < 20; index += 1) await flushMicrotasks()
+          await playback.handlePlay(tracks())
+          expect(playback.isPlaying()).toBeTrue()
+          await playback.handlePause()
+          for (let turns = 0; turns < 60; turns += 1) {
+            const play = playback.handlePlay(tracks())
+            for (let turn = 0; turn < turns; turn += 1) await Promise.resolve()
+            const callsBefore = fixture.calls.length
+            const cancelled = route === 'stop' ? playback.handleStop() : playback.handlePause()
+            await Promise.all([play, cancelled])
+            for (let index = 0; index < 40; index += 1) await flushMicrotasks()
+            const afterCancel = fixture.calls.slice(callsBefore)
+            expect(faults).toEqual([])
+            expect(playback.isPlaying()).toBeFalse()
+            expect(playback.isNativePlaybackPrepared()).toBeTrue()
+            expect(fixture.transportStates.at(-1)).toBeFalse()
+            for (const rebuilt of ['stop', 'teardown', 'begin', 'configure']) {
+              if (afterCancel.includes(rebuilt)) throw new Error(`${rebuilt} after ${route} at turn ${turns}: ${afterCancel.join(',')}`)
+            }
+          }
+          dispose()
+        })
+      })
+    } finally {
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+    }
+  })
 }
 
 test('B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start', async () => {

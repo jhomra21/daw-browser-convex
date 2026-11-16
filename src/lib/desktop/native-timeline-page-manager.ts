@@ -315,9 +315,11 @@ export const createNativeTimelinePageManager = (input: {
           markUploaded(sourceAssetKey, startFrame)
           return
         }
+        const bytesPerPlane = (endFrame - startFrame) * Float32Array.BYTES_PER_ELEMENT
+        const planarPcm = new Uint8Array(source.channelCount * bytesPerPlane)
         const pagePlanes = Array.from(
           { length: source.channelCount },
-          () => new Float32Array(endFrame - startFrame),
+          (_, channel) => new Float32Array(planarPcm.buffer, channel * bytesPerPlane, endFrame - startFrame),
         )
         const written: { startFrame: number; endFrame: number }[] = []
         const descriptor = source.descriptor
@@ -358,16 +360,6 @@ export const createNativeTimelinePageManager = (input: {
           || covered[0]?.endFrame !== endFrame) {
           throw new Error(`Native audio asset "${sourceAssetKey}" did not decode the requested page.`)
         }
-        const planarPcm = new Uint8Array(
-          source.channelCount * (endFrame - startFrame) * Float32Array.BYTES_PER_ELEMENT,
-        )
-        const bytesPerPlane = (endFrame - startFrame) * Float32Array.BYTES_PER_ELEMENT
-        pagePlanes.forEach((plane, channel) => {
-          planarPcm.set(
-            new Uint8Array(plane.buffer, plane.byteOffset, plane.byteLength),
-            channel * bytesPerPlane,
-          )
-        })
         await markedRequest(mark, ['asset-page-write-request', 'asset-page-write-reply'], () => input.writePage({
           sessionAssetId: source.sessionAssetId,
           startFrame,

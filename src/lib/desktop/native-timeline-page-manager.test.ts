@@ -157,6 +157,33 @@ class WideEagerAudioBuffer implements AudioBuffer {
   }
 }
 
+class PatternAudioBuffer implements AudioBuffer {
+  readonly duration: number
+  readonly sampleRate = 48_000
+  private readonly channels: Float32Array<ArrayBuffer>[]
+
+  constructor(readonly numberOfChannels: number, readonly length: number) {
+    this.duration = length / this.sampleRate
+    this.channels = Array.from({ length: numberOfChannels }, (_, channel) => (
+      Float32Array.from({ length }, (_, frame) => channel * 1_000 + frame + 0.25)
+    ))
+  }
+
+  copyFromChannel(destination: Float32Array, channel: number, bufferOffset = 0) {
+    destination.set(this.getChannelData(channel).subarray(bufferOffset, bufferOffset + destination.length))
+  }
+
+  copyToChannel(source: Float32Array, channel: number, bufferOffset = 0) {
+    this.getChannelData(channel).set(source, bufferOffset)
+  }
+
+  getChannelData(channel: number) {
+    const source = this.channels[channel]
+    if (!source) throw new Error(`Missing channel ${channel}.`)
+    return source
+  }
+}
+
 const dataUrl = "data:audio/wav;base64," + btoa(String.fromCharCode(
   0x52, 0x49, 0x46, 0x46, 0x2e, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45,
   0x66, 0x6d, 0x74, 0x20, 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
@@ -374,6 +401,38 @@ test("copies bounded pages from an eager buffer without a source URL", async () 
   expect(eagerPageSamples[0]).toBeCloseTo(0.3, 5)
   expect(eagerPageSamples[1]).toBeCloseTo(0.4, 5)
   manager.dispose()
+})
+
+test("in-memory region pages are the channel planes back to back across channel counts, offsets and a partial last page", async () => {
+  for (const channelCount of [1, 2, 3]) {
+    const region = new PatternAudioBuffer(channelCount, 10)
+    const pages: NativeHostMappedAssetPage[] = []
+    const manager = createNativeTimelinePageManager({
+      pageFrames: 4,
+      sources: [{
+        sourceAssetKey: "asset-a",
+        sessionAssetId: 7,
+        frameCount: region.length,
+        sampleRateHz: region.sampleRate,
+        channelCount,
+        descriptor: descriptorForBuffer(region),
+      }],
+      writePage: async (page) => { pages.push({ ...page, planarPcm: page.planarPcm.slice() }) },
+    })
+
+    await manager.ensureRanges([{ sourceAssetKey: "asset-a", startFrame: 5, endFrame: 10 }])
+
+    expect(pages.map((page) => [page.startFrame, page.frameCount])).toEqual([[4, 4], [8, 2]])
+    for (const page of pages) {
+      const expected = new Uint8Array(channelCount * page.frameCount * Float32Array.BYTES_PER_ELEMENT)
+      for (let channel = 0; channel < channelCount; channel += 1) {
+        const plane = region.getChannelData(channel).slice(page.startFrame, page.startFrame + page.frameCount)
+        expected.set(new Uint8Array(plane.buffer), channel * plane.byteLength)
+      }
+      expect(page.planarPcm).toEqual(expected)
+    }
+    manager.dispose()
+  }
 })
 
 test("bounds full instrument-region hydration to page and payload limits", async () => {

@@ -5944,6 +5944,57 @@ for (const hold of ['teardown', 'capture'] as const) {
     }
   })
 }
+test('B6d6 a Stop that lands as a Pause settles under a queued rebuild retires the graph that rebuild was replacing', async () => {
+  const previousWindow = globalThis.window
+  const pauseGate = Promise.withResolvers<{ ok: true }>()
+  const fixture = createNativeHookBridge(undefined, undefined, undefined, pauseGate.promise)
+  const [tracks] = createSignal([track])
+  const faults: string[] = []
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+  try {
+    await withFakeRaf(async () => {
+      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      await createRoot(async (dispose) => {
+        const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
+          requiresNativeAudio: true,
+          enabled: () => true,
+          compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
+            renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] }),
+          reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
+        })
+        await playback.handlePlay(tracks())
+        fixture.armTransportGate()
+        const pause = playback.handlePause()
+        await flushMicrotasks()
+        const rebuild = playback.restartTimelineSchedule(tracks(), { rebuildBackend: true, resumePlayback: false, playheadSec: 2 })
+        await flushMicrotasks()
+        expect(playback.isStructuralRebuildInProgress()).toBeTrue()
+        // The host has paused, but the Pause is still tracked: the Stop leaves the cancelling to itself.
+        pauseGate.resolve({ ok: true })
+        for (let turn = 0; turn < 400 && playback.isNativePlayback(); turn += 1) await Promise.resolve()
+        expect(playback.isStructuralRebuildInProgress()).toBeTrue()
+        const callsBefore = fixture.calls.length
+        const stop = playback.handleStop()
+        await pause
+        await rebuild
+        await stop
+        for (let turn = 0; turn < 400 && !playback.isNativePlaybackPrepared(); turn += 1) await Promise.resolve()
+        for (let index = 0; index < 40; index += 1) await flushMicrotasks()
+        expect(faults).toEqual([])
+        expect(playback.isPlaying()).toBeFalse()
+        expect(playback.isNativePlaybackPrepared()).toBeTrue()
+        expect(playback.playheadSec()).toBe(0)
+        expect(fixture.transportFrames.at(-1)).toBe(0)
+        // The superseded rebuild never replaced its graph: Stop's cancel retires it and prepares one from the current tracks.
+        expect(fixture.calls.slice(callsBefore)).toContain('teardown')
+        expect(fixture.calls.slice(callsBefore)).toContain('begin')
+        dispose()
+      })
+    })
+  } finally {
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
+  }
+})
 for (const release of ['begin', 'teardown'] as const) {
   test(`B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (${release} released first) and leaves nothing running and a live paused graph at the start`, async () => {
     const previousWindow = globalThis.window

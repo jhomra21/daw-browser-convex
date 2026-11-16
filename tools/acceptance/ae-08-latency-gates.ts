@@ -23,7 +23,10 @@
 //   same seam is not a rebase.
 // - prepare to publish: `graph-prepare` to `graph-publish`. Edit to publish: the first edit the publication carries
 //   (the first publication at or after the edit's wall time owns it) to `graph-publish`.
-// - completion: `latency-move-complete` frame - publication frame. Frames, not time, so no margin is added.
+// - completion: `latency-move-complete` frame - publication frame. Frames, not time, so no margin is added. Allowed:
+//   ceil((move + 2 * fade) / BLOCK) * BLOCK plus the capped blocks before the bind; see headMoveFrames for `move`. Evidence with no
+//   pinned/graph latency on its graph-publish lines keeps COMPLETE_BASE_FRAMES for the first term. The host logs nothing that
+//   tells a spectral raise (which holds completion for its stages, audio_core.cpp:9141-9145) from another, so none is told apart.
 // - class: asset when the host logged an `asset-install` between prepare and publish; raise when the edits' net
 //   latency move is positive (merged when 2+ blocks pass between prepare and bind); else plain. A row can declare
 //   its class in latency-class.json; an unknown class is an input failure. vst-insert is decided per publication: it owns an edit
@@ -37,8 +40,11 @@ const SAMPLE_RATE = 48000
 const BLOCK = 512
 const LEAD_MIN_BLOCKS = 2
 const LEAD_MAX_BLOCKS = 3
+// Allowance for evidence with no pinned/graph latency on its graph-publish lines (runs from before the host logged them).
 const COMPLETE_BASE_FRAMES = 2048
 const COMPLETE_MAX_BLOCKS_BEFORE_BIND = 3
+// native deletion_fade_frames (audio_core.cpp:7775-7777): (sampleRate * 5 + 500) / 1000.
+const FADE_FRAMES = Math.round(SAMPLE_RATE * 5 / 1000)
 // A class with no frozen prepare-to-publish limit makes its row INCOMPLETE until the parent freezes one here.
 const LIMITS = {
   plain: { prepareToPublishMaxMs: 70, editToPublishMaxMs: 150 },
@@ -59,6 +65,8 @@ type Status = "PASS" | "INCOMPLETE" | "FAIL"
 type Publication = {
   row: string; revision: number; publicationFrame: number; asset: boolean; class: Class; raise: boolean; leadBlocks: number; seamBound: boolean; prepareToPublishMs: number; prepMs: number
   editToPublishMs: number | undefined; completeFrames: number | undefined; blocksBeforeBind: number
+  // Largest read-head delay change of the publication (0 when the pinned budget grows); undefined without host latency evidence.
+  headMoveFrames: number | undefined
 }
 type Analysis = { publications: Publication[]; failures: Failure[]; rows: { row: string; status: Status }[]; status: Status }
 
@@ -68,7 +76,7 @@ const hostEventSchema = z.object({
   event: z.string(), cause: z.string().default(""), pid: z.number().default(0), wallMs: z.number().default(0),
   frame: z.number().default(0), revision: z.number().default(0), requestedRevision: z.number().default(0),
   publicationFrame: z.number().default(0), transportEpoch: z.number().default(0), sampleRate: z.number().default(0),
-  blockSize: z.number().default(0),
+  blockSize: z.number().default(0), pinnedLatencyFrames: z.number().optional(), graphLatencyFrames: z.number().optional(),
 })
 const editsSchema = z.object({ edits: z.array(z.object({
   name: z.string().optional(), index: z.number().optional(), wallMs: z.number(), fromLatencyFrames: z.number(), toLatencyFrames: z.number() })).default([]) })
@@ -92,6 +100,17 @@ const findLast = (events: readonly HostEvent[], before: number, match: (event: H
     if (event && match(event)) return { event, index }
   }
   return undefined
+}
+
+// The host's graph-publish lines carry the pinned budget and the graph's own latency. A head's delay is their difference, so a
+// publication that does not grow the budget moves heads by max(previous delay, delay) when that delay changed (audio_core.cpp:7074-7081).
+// One that grows it moves none: its heads wait the 2 fades alone (:7000-7004).
+const headMoveFrames = (previous: HostEvent, current: HostEvent) => {
+  if (previous.pinnedLatencyFrames === undefined || previous.graphLatencyFrames === undefined
+    || current.pinnedLatencyFrames === undefined || current.graphLatencyFrames === undefined) return undefined
+  const before = previous.pinnedLatencyFrames - previous.graphLatencyFrames
+  const after = current.pinnedLatencyFrames - current.graphLatencyFrames
+  return current.pinnedLatencyFrames > previous.pinnedLatencyFrames || before === after ? 0 : Math.max(before, after)
 }
 
 // vst-insert is decided per publication (insert), never by a row's declaration: the removes and undos of a VST row stay plain.
@@ -128,10 +147,12 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<ty
       && event.revision === revision && event.transportEpoch === publish.transportEpoch && event.frame >= publish.publicationFrame)
     const asset = events.some((event) => event.event === "asset-install" && event.pid === publish.pid
       && event.wallMs >= prepare.event.wallMs && event.wallMs <= publish.wallMs)
+    const previousPublish = findLast(events, index, (event) => event.event === "graph-publish" && event.pid === publish.pid)?.event
     const blocksBeforeBind = Math.max(1, Math.round((bind.frame - prepare.event.frame) / BLOCK))
     const seamBound = !windowed || events.slice(prepare.index + 1, index).some((event) => event.event === "schedule-window" && event.revision === revision)
     drafts.push({
       row, revision, publicationFrame: publish.publicationFrame, asset, blocksBeforeBind, seamBound, wallMs: publish.wallMs,
+      headMoveFrames: previousPublish && headMoveFrames(previousPublish, publish),
       leadBlocks: (publish.publicationFrame - bind.frame) / BLOCK, prepareToPublishMs: publish.wallMs - prepare.event.wallMs,
       prepMs: armed.wallMs - prepare.event.wallMs, completeFrames: complete ? complete.frame - publish.publicationFrame : undefined,
     })
@@ -179,7 +200,9 @@ const assetEvidenceFailures = (row: string, assetFrame: number | undefined, publ
 const judgePublication = (publication: Publication): Failure[] => {
   const { row, revision, leadBlocks } = publication
   const limits = LIMITS[publication.class]
-  const allowedComplete = COMPLETE_BASE_FRAMES + BLOCK * Math.min(publication.blocksBeforeBind, COMPLETE_MAX_BLOCKS_BEFORE_BIND)
+  const moveAllowance = publication.headMoveFrames === undefined ? COMPLETE_BASE_FRAMES
+    : Math.ceil((publication.headMoveFrames + 2 * FADE_FRAMES) / BLOCK) * BLOCK
+  const allowedComplete = moveAllowance + BLOCK * Math.min(publication.blocksBeforeBind, COMPLETE_MAX_BLOCKS_BEFORE_BIND)
   const fail = (gate: Gate, detail: string): Failure => ({ row, gate, detail: `rev ${revision} ${detail}` })
   return [
     ...(publication.seamBound && (!Number.isInteger(leadBlocks) || leadBlocks < LEAD_MIN_BLOCKS || leadBlocks > LEAD_MAX_BLOCKS)
@@ -250,6 +273,8 @@ const phaseOf = (run: string) => {
 type Spec = {
   leadBlocks?: number; prepMs?: number; totalMs?: number; editMs?: number; blocksBeforeBind?: number; raise?: boolean
   install?: boolean; resend?: boolean; completeFrames?: number | "none"
+  // The pinned and graph latency the host logs on this publication's graph-publish line.
+  latency?: { pinned: number; graph: number }
   // A latency publication stages no schedule window against its revision. A row without `windowed` has no schedule-window line at
   // all, as in evidence from before the line existed.
   unbound?: boolean
@@ -261,10 +286,13 @@ type Spec = {
   precededByMs?: number
 }
 // `delivers` writes the continuity analysis.json naming the publication at that index as the asset's; `noAsset` writes one naming none.
-type RowOptions = { sampleRate?: number; declare?: string; delivers?: number; noAsset?: true; windowed?: true }
+// `startLatency` is the latency of the session's first publication, before the first spec.
+type RowOptions = { sampleRate?: number; declare?: string; delivers?: number; noAsset?: true; windowed?: true; startLatency?: { pinned: number; graph: number } }
 const syntheticRow = (specs: readonly Spec[], options: RowOptions = {}) => {
   const base = { cause: "", pid: 1, transportEpoch: 5 }
   const lines: object[] = [{ event: "device-session", pid: 1, wallMs: 0, sampleRate: options.sampleRate ?? SAMPLE_RATE, blockSize: BLOCK }]
+  if (options.startLatency)
+    lines.push({ ...base, event: "graph-publish", cause: "configured-boundary", wallMs: 1, revision: 1, pinnedLatencyFrames: options.startLatency.pinned, graphLatencyFrames: options.startLatency.graph })
   const edits: object[] = []
   const frames: number[] = []
   specs.forEach((spec, index) => {
@@ -282,7 +310,8 @@ const syntheticRow = (specs: readonly Spec[], options: RowOptions = {}) => {
     if (spec.precededByMs !== undefined)
       lines.push({ event: "ui-editor-open", wallMs: wall + (spec.totalMs ?? 30) - (spec.editMs ?? 75) - spec.precededByMs + 5, pid: 1, key: "k" })
     if (spec.uiMarkMs !== undefined) lines.push({ event: spec.uiMark ?? "ui-parameter-commit", wallMs: wall + (spec.totalMs ?? 30) - spec.uiMarkMs, pid: 1, key: "k" })
-    lines.push({ ...base, event: "graph-publish", cause: "block-boundary", wallMs: wall + (spec.totalMs ?? 30), frame: publicationFrame, publicationFrame, revision, requestedRevision: 0 })
+    lines.push({ ...base, event: "graph-publish", cause: "block-boundary", wallMs: wall + (spec.totalMs ?? 30), frame: publicationFrame, publicationFrame, revision, requestedRevision: 0,
+      pinnedLatencyFrames: spec.latency?.pinned, graphLatencyFrames: spec.latency?.graph })
     if (spec.completeFrames !== "none")
       lines.push({ ...base, event: "latency-move-complete", wallMs: wall + 100, frame: publicationFrame + (spec.completeFrames ?? COMPLETE_BASE_FRAMES + BLOCK * blocksBeforeBind), revision, requestedRevision: 0 })
     const editWallMs = wall + (spec.totalMs ?? 30) - (spec.editMs ?? 75)
@@ -353,6 +382,19 @@ const selfTest = async (c1Runs: readonly string[]) => {
       rows: [["vst-insert", withClean({ totalMs: 60, editMs: 160, editName: "vst-remove" }), { declare: JSON.stringify({ class: "vst-insert" }) }]] },
     { name: "a VST insert still fails the lead gate", status: "FAIL", fails: ["lead", "rebase"],
       rows: [["vst-insert", withClean({ totalMs: 60, leadBlocks: 16, editName: "vst-insert" }), { declare: JSON.stringify({ class: "vst-insert" }) }]] },
+    // The vst-latency-switch shape: a budget raise 512 -> 4608 completes in 2 fades (512 observed); a lower and a raise inside the
+    // pinned budget move a head 4096 frames, so they complete in ceil((4096 + 480) / 512) = 9 blocks (4608 observed).
+    { name: "budget raise completing 512, then in-budget lower and raise completing 4608", status: "PASS", fails: [],
+      rows: [["vst-latency-switch", [{ raise: true, latency: { pinned: 4608, graph: 4608 }, completeFrames: 512 },
+        { latency: { pinned: 4608, graph: 512 }, completeFrames: 4608 }, { latency: { pinned: 4608, graph: 4608 }, completeFrames: 4608 }],
+        { startLatency: { pinned: 512, graph: 512 } }]] },
+    { name: "in-budget lower completing 4608 + 1024 frames", status: "FAIL", fails: ["completion"],
+      rows: [["vst-latency-switch", [{ raise: true, latency: { pinned: 4608, graph: 4608 }, completeFrames: 512 },
+        { latency: { pinned: 4608, graph: 512 }, completeFrames: 5632 }], { startLatency: { pinned: 512, graph: 512 } }]] },
+    { name: "in-budget raise completing late", status: "FAIL", fails: ["completion"],
+      rows: [["vst-latency-switch", [{ raise: true, latency: { pinned: 4608, graph: 4608 }, completeFrames: 5632 }], { startLatency: { pinned: 4608, graph: 512 } }]] },
+    { name: "budget raise completing 1536 frames", status: "FAIL", fails: ["completion"],
+      rows: [["vst-latency-switch", [{ raise: true, latency: { pinned: 4608, graph: 4608 }, completeFrames: 1536 }], { startLatency: { pinned: 512, graph: 512 } }]] },
   ]
   const root = await mkdtemp(join(tmpdir(), "ae08-latency-gates-"))
   let failed = 0

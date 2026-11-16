@@ -3,6 +3,7 @@ import { createEffect, createSignal, onCleanup, type Accessor } from 'solid-js'
 import type { convexApi, convexClient } from '~/lib/convex'
 import { loadLocalHistory, saveLocalHistory } from '~/lib/local-history'
 import { isLocalId } from '@daw-browser/shared'
+import { ae08UiMark } from '~/lib/desktop/ae08-marks'
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 import {
   buildOptimisticGrantScopeKey,
@@ -240,6 +241,7 @@ export function useTimelineHistory(
     if (!scope) return
     const context = getScopeContext(scope)
     const scopeKey = buildOptimisticGrantScopeKey(scope)
+    ae08UiMark(mode === 'undo' ? 'ui-undo' : 'ui-redo', () => scopeKey)
     const run = async () => {
       const manager = context.manager
       if (mode === 'undo' && !manager.canUndo()) return

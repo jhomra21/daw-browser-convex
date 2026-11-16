@@ -1,6 +1,7 @@
 import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Track } from "@daw-browser/timeline-core/types";
+import { ae08UiMark } from "~/lib/desktop/ae08-marks";
 import type { LiveProcessorControlResult } from "~/lib/live-processor-control";
 import {
   automationTargetKey,
@@ -428,6 +429,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     setOverriddenAutomationTargetKeys((current) => {
       const next = automationTargetKeysForManualOverride(current, targetKey);
       if (next.size === current.size) return current;
+      ae08UiMark("ui-automation-override", () => targetKey);
       options.audioEngine.cancelAutomationSchedules(new Set([targetKey]), automationEnvelopes());
       options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(automationEnvelopes(), next));
       return next;
@@ -436,6 +438,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   const reEnableAutomation = async () => {
     const current = overriddenAutomationTargetKeys();
     if (current.size === 0) return;
+    ae08UiMark("ui-automation-reenable", () => [...current].join(","));
     const reEnabledTargetKeys = new Set(current);
     const envelopes = automationEnvelopes().filter((envelope) => reEnabledTargetKeys.has(envelope.targetKey));
     const byProcessor = new Map<string, { instanceId: string; parameterIds: string[] }>();

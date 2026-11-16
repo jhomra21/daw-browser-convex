@@ -33,6 +33,7 @@ import {
 } from "~/lib/desktop/native-vst3-insertion";
 import type { ExternalProcessor } from "@daw-browser/external-plugins";
 import { hasVst3TrustAcknowledgement, vst3ScanHealthLabel } from "~/lib/external-plugin-ui";
+import { ae08UiMark } from "~/lib/desktop/ae08-marks";
 import { autoHealStaleVst3Catalog } from "~/lib/desktop/vst3-catalog-auto-heal";
 import type { TimelinePlaybackRebuildIntent } from "./useTimelinePlayback";
 
@@ -707,7 +708,10 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       const message = result.ok
         ? "Enabled · Preflight passed. Playback uses the native VST3 graph; browser playback remains unsupported."
         : result.message;
-      if (result.ok) options.enableNativePlayback?.();
+      if (result.ok) {
+        ae08UiMark("ui-device-insert", () => result.processor.instanceId);
+        options.enableNativePlayback?.();
+      }
       setExternalPluginStatusById((statuses) => ({ ...statuses, [itemId]: message }));
       if (!result.ok) {
         options.onExternalPluginInsertionResult?.("VST3 insertion failed", message);

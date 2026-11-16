@@ -81,6 +81,7 @@ import { reorderLocalMixedEffects } from "~/lib/local-effects";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import { selectExternalProcessorsForTarget } from "~/lib/external-plugin-ui";
 import { ExternalPluginCard, nativeEditorAnchorFromElement } from "~/components/timeline/external-plugin-card";
+import { ae08UiMark } from "~/lib/desktop/ae08-marks";
 import { instanceLimit } from "~/lib/desktop/vst-instance-failures";
 import type { NativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
 import type { MixedEffectOrderItem } from "~/lib/mixed-effect-order";
@@ -1200,7 +1201,10 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     if (!processor || processor.targetId !== props.selectedFXTarget) return;
     const playbackIntent = props.captureStructuralPlaybackIntent?.();
     void deleteLocalExternalProcessor(projectId, instanceId)
-      .then(() => untrack(() => props.onMixedReorderCommitted?.(playbackIntent)))
+      .then(() => {
+        ae08UiMark("ui-device-remove", () => instanceId);
+        untrack(() => props.onMixedReorderCommitted?.(playbackIntent));
+      })
       .catch(() => undefined);
   };
   const applyExternalProcessorCommit = (

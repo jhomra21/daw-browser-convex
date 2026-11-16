@@ -96,6 +96,13 @@ const classOf = (declared: Class | undefined, asset: boolean, raise: boolean, bl
   return base === "raise" && blocksBeforeBind >= 2 ? "raise-merged" : base
 }
 
+// An edit through the control protocol is stamped with the app's control-commit-received line. An edit made in the app window has
+// only its step start, so it is timed from the first ui-* mark the app logged (the moment its UI committed the edit) between the step
+// start and the publication that owns it. Evidence with no such mark (older runs) keeps the step start.
+const editStartMs = (events: readonly HostEvent[], stepWallMs: number, publishWallMs: number) =>
+  events.some((event) => event.event === "control-commit-received" && event.wallMs === stepWallMs) ? stepWallMs
+    : events.find((event) => event.event.startsWith("ui-") && event.wallMs >= stepWallMs && event.wallMs <= publishWallMs)?.wallMs ?? stepWallMs
+
 const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<typeof editsSchema>["edits"], declared: Class | undefined) => {
   const drafts: (Omit<Publication, "class" | "raise" | "editToPublishMs"> & { wallMs: number })[] = []
   const failures: Failure[] = []
@@ -128,9 +135,11 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<ty
   const firstEditMs: (number | undefined)[] = drafts.map(() => undefined)
   for (const edit of edits) {
     const owner = drafts.findIndex((draft) => draft.wallMs >= edit.wallMs)
-    if (owner < 0) continue
+    const draft = drafts[owner]
+    if (!draft) continue
+    const startMs = editStartMs(events, edit.wallMs, draft.wallMs)
     netMove[owner] = (netMove[owner] ?? 0) + edit.toLatencyFrames - edit.fromLatencyFrames
-    firstEditMs[owner] = Math.min(firstEditMs[owner] ?? edit.wallMs, edit.wallMs)
+    firstEditMs[owner] = Math.min(firstEditMs[owner] ?? startMs, startMs)
   }
   const publications = drafts.map(({ wallMs, ...draft }, index): Publication => {
     const raise = (netMove[index] ?? 0) > 0
@@ -229,6 +238,8 @@ type Spec = {
   // A latency publication stages no schedule window against its revision. A row without `windowed` has no schedule-window line at
   // all, as in evidence from before the line existed.
   unbound?: boolean
+  // The app logged a ui-* mark this many ms before the publication; the step start is `editMs` before it.
+  uiMarkMs?: number
 }
 // `delivers` writes the continuity analysis.json naming the publication at that index as the asset's; `noAsset` writes one naming none.
 type RowOptions = { sampleRate?: number; declare?: string; delivers?: number; noAsset?: true; windowed?: true }
@@ -249,6 +260,7 @@ const syntheticRow = (specs: readonly Spec[], options: RowOptions = {}) => {
     lines.push(request(bindFrame + BLOCK, wall + (spec.prepMs ?? 4)))
     if (spec.resend) lines.push(request(publicationFrame - BLOCK, wall + 18))
     if (options.windowed && !spec.unbound) lines.push({ event: "schedule-window", wallMs: wall + 3, revision })
+    if (spec.uiMarkMs !== undefined) lines.push({ event: "ui-parameter-commit", wallMs: wall + (spec.totalMs ?? 30) - spec.uiMarkMs, pid: 1, key: "k" })
     lines.push({ ...base, event: "graph-publish", cause: "block-boundary", wallMs: wall + (spec.totalMs ?? 30), frame: publicationFrame, publicationFrame, revision, requestedRevision: 0 })
     if (spec.completeFrames !== "none")
       lines.push({ ...base, event: "latency-move-complete", wallMs: wall + 100, frame: publicationFrame + (spec.completeFrames ?? COMPLETE_BASE_FRAMES + BLOCK * blocksBeforeBind), revision, requestedRevision: 0 })
@@ -291,6 +303,9 @@ const selfTest = async (c1Runs: readonly string[]) => {
       rows: [["two-tone", withClean({ raise: true, totalMs: 85, blocksBeforeBind: 2, completeFrames: 3072 })]] },
     { name: "asset add at 105 ms", status: "FAIL", fails: ["prepare-to-publish"], rows: [["two-tone", clean], ["add-paged-asset", [{ totalMs: 105, install: true }]]] },
     { name: "edit to publish 160 ms", status: "FAIL", fails: ["edit-to-publish"], rows: [["two-tone", withClean({ editMs: 160 })]] },
+    // A UI edit's step starts before the app commits it: with the mark the harness's own latency (here 85 ms) is not the product's.
+    { name: "UI edit 160 ms from the step start but 75 ms from its ui mark", status: "PASS", fails: [], rows: [["two-tone", withClean({ editMs: 160, uiMarkMs: 75 })]] },
+    { name: "UI edit 160 ms from its ui mark", status: "FAIL", fails: ["edit-to-publish"], rows: [["two-tone", withClean({ editMs: 170, uiMarkMs: 160 })]] },
     { name: "prep time p50 9 ms", status: "FAIL", fails: ["prep-time"], rows: [["two-tone", [{ prepMs: 9 }, { prepMs: 9 }, { prepMs: 9 }]]] },
     { name: "session at 44.1 kHz is an input failure", status: "FAIL", fails: ["inputs"], rows: [["two-tone", clean, { sampleRate: 44100 }]] },
     { name: "unknown declared class is an input failure", status: "FAIL", fails: ["inputs"], rows: [["two-tone", clean, { declare: JSON.stringify({ class: "mystery" }) }]] },

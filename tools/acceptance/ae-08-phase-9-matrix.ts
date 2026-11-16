@@ -337,10 +337,13 @@ export const judgeStored = async (directory: string) => Promise.all((await store
 // commit to graph-prepare is split by the renderer marks (packages/desktop-protocol ae08RendererMarks), logged when the app runs with
 // DAW_AE08_EVIDENCE_DIR: the control handler's marks carry the commit's idempotency key, the compile and lane marks the key of the
 // adoption whose prepare-sent is the last before that graph-prepare. A mark the evidence lacks is skipped, so its span is merged.
+// An edit made in the app window has no commit line: it is timed from the first ui-* mark the app logged between the step start and the
+// publication (ae-08-latency-gates.ts does the same), and from the step start only when the evidence has no such mark.
 const commitMarkNames = ae08RendererMarks.options.filter((name) => name.startsWith("control-"))
-const adoptionMarkNames = ae08RendererMarks.options.filter((name) => !name.startsWith("control-"))
+const adoptionMarkNames = ae08RendererMarks.options.filter((name) => !name.startsWith("control-") && !name.startsWith("ui-"))
 export type EditSpan = { from: string; to: string; ms: number }
-export type EditBreakdown = { index: number; name: string; fromCommit: boolean; toPrepareMs: number; toRequestMs: number; toPublishMs: number; spans: EditSpan[] }
+// `origin` is where the edit is timed from: the app's commit line, the UI mark it logged, or the step start.
+export type EditBreakdown = { index: number; name: string; origin: string; toPrepareMs: number; toRequestMs: number; toPublishMs: number; spans: EditSpan[] }
 export const editBreakdowns = (events: readonly HostEvent[], edits: readonly { index: number; name: string; wallMs: number }[]): (EditBreakdown | { index: number; name: string; missing: string })[] =>
   edits.map((edit) => {
     const publishAt = events.findIndex((event) => event.event === "graph-publish" && event.cause === "block-boundary" && event.publicationFrame > 0 && event.wallMs >= edit.wallMs)
@@ -351,17 +354,20 @@ export const editBreakdowns = (events: readonly HostEvent[], edits: readonly { i
       .find((event) => event.event === "graph-publish-request" && event.pid === publish.pid && event.requestedRevision === publish.revision)
     if (!prepare || !request) return { index: edit.index, name: edit.name, missing: `revision ${publish.revision} has no ${prepare ? "graph-publish-request" : "graph-prepare"} before its publication` }
     const received = events.find((event) => event.event === "control-commit-received" && event.wallMs === edit.wallMs)
+    const ui = received ? undefined : events.find((event) => event.event.startsWith("ui-") && event.wallMs >= edit.wallMs && event.wallMs <= publish.wallMs)
     const sent = events.findLast((event) => event.event === "prepare-sent" && event.wallMs >= edit.wallMs && event.wallMs <= prepare.wallMs)
+    const startMs = ui?.wallMs ?? edit.wallMs
+    const origin = received ? "commit-received" : ui?.event ?? "edit-start"
     const points = [
-      { name: received ? "commit-received" : "edit-start", wallMs: edit.wallMs },
+      { name: origin, wallMs: startMs },
       ...(received ? commitMarkNames.flatMap((name) => events.find((event) => event.event === name && event.key === received.idempotencyKey) ?? []) : [])
         .map((event) => ({ name: event.event, wallMs: event.wallMs })),
       ...(sent ? adoptionMarkNames.flatMap((name) => events.findLast((event) => event.event === name && event.key === sent.key && event.wallMs <= sent.wallMs) ?? []) : [])
         .map((event) => ({ name: event.event, wallMs: event.wallMs })),
       { name: "graph-prepare", wallMs: prepare.wallMs },
     ]
-    return { index: edit.index, name: edit.name, fromCommit: received !== undefined,
-      toPrepareMs: prepare.wallMs - edit.wallMs, toRequestMs: request.wallMs - edit.wallMs, toPublishMs: publish.wallMs - edit.wallMs,
+    return { index: edit.index, name: edit.name, origin,
+      toPrepareMs: prepare.wallMs - startMs, toRequestMs: request.wallMs - startMs, toPublishMs: publish.wallMs - startMs,
       spans: points.slice(1).map((point, at) => ({ from: points[at]?.name ?? "", to: point.name, ms: point.wallMs - (points[at]?.wallMs ?? point.wallMs) })) }
   })
 
@@ -375,7 +381,7 @@ export const breakdownStored = async (directory: string) => Promise.all((await s
 }))
 export const breakdownLine = (entry: Awaited<ReturnType<typeof breakdownStored>>[number]) => entry.breakdowns === undefined ? [`${entry.row}: no host.jsonl (setup failure)`]
   : entry.breakdowns.map((found) => "missing" in found ? `${entry.row} edit ${found.index} ${found.name}: ${found.missing}`
-    : `${entry.row} edit ${found.index} ${found.name}: +${found.toPrepareMs} ms graph-prepare (${found.spans.length > 1 ? found.spans.map((span) => `${span.from} -> ${span.to} ${span.ms} ms`).join(", ") : "no renderer marks in host.jsonl"}), +${found.toRequestMs} ms graph-publish-request, +${found.toPublishMs} ms graph-publish${found.fromCommit ? "" : " (counted from the step start: a UI edit has no control-commit-received line)"}`)
+    : `${entry.row} edit ${found.index} ${found.name}: +${found.toPrepareMs} ms graph-prepare (${found.spans.length > 1 ? found.spans.map((span) => `${span.from} -> ${span.to} ${span.ms} ms`).join(", ") : "no renderer marks in host.jsonl"}), +${found.toRequestMs} ms graph-publish-request, +${found.toPublishMs} ms graph-publish${found.origin === "edit-start" ? " (counted from the step start: the edit has no control-commit-received line and no ui-* mark)" : ` (counted from ${found.origin})`}`)
 
 // ---- Self-test ----
 const steps = (count: number, settled: (index: number) => number | undefined = (index) => index * 4000 + 1500) =>
@@ -596,7 +602,18 @@ export const selfTest = async () => {
     line("graph-publish", 1100, { cause: "block-boundary", revision: 5, publicationFrame: 96256 }),
     line("graph-publish", 3100, { cause: "block-boundary", revision: 6, publicationFrame: 192256 }))
   const [timed, unprepared, unpublished] = editBreakdowns(lines, [{ index: 1, name: "tempo-137", wallMs: 1000 }, { index: 2, name: "tempo-120", wallMs: 3000 }, { index: 3, name: "tempo-137", wallMs: 4000 }])
-  check(timed !== undefined && "toPublishMs" in timed && timed.toPrepareMs === 40 && timed.toRequestMs === 60 && timed.toPublishMs === 100 && timed.fromCommit, `breakdown stages: ${JSON.stringify(timed)}`)
+  check(timed !== undefined && "toPublishMs" in timed && timed.toPrepareMs === 40 && timed.toRequestMs === 60 && timed.toPublishMs === 100 && timed.origin === "commit-received", `breakdown stages: ${JSON.stringify(timed)}`)
+  // A UI edit has no commit line: it is timed from its ui-* mark (here 60 ms after the step start), and from the step start when the
+  // evidence has no mark. A control commit ignores a ui-* mark inside its window.
+  const uiLines = (...extra: object[]) => host(...extra, line("graph-prepare", 1090, { requestedRevision: 5 }), line("graph-publish-request", 1100, { requestedRevision: 5 }),
+    line("graph-publish", 1130, { cause: "block-boundary", revision: 5, publicationFrame: 96256 }))
+  const uiEdit = [{ index: 1, name: "undo", wallMs: 1000 }]
+  const [markedUi] = editBreakdowns(uiLines(line("ui-undo", 1060, { key: "scope" })), uiEdit)
+  check(markedUi !== undefined && "origin" in markedUi && markedUi.origin === "ui-undo" && markedUi.toPublishMs === 70 && markedUi.toPrepareMs === 30, `a UI edit is timed from its ui mark: ${JSON.stringify(markedUi)}`)
+  const [unmarkedUi] = editBreakdowns(uiLines(), uiEdit)
+  check(unmarkedUi !== undefined && "origin" in unmarkedUi && unmarkedUi.origin === "edit-start" && unmarkedUi.toPublishMs === 130, `evidence with no ui mark falls back to the step start: ${JSON.stringify(unmarkedUi)}`)
+  const [controlUi] = editBreakdowns(uiLines(line("control-commit-received", 1000, { idempotencyKey: "c" }), line("ui-undo", 1060, { key: "scope" })), uiEdit)
+  check(controlUi !== undefined && "origin" in controlUi && controlUi.origin === "commit-received" && controlUi.toPublishMs === 130, `a control commit is not re-timed by a ui mark: ${JSON.stringify(controlUi)}`)
   check(unprepared !== undefined && "missing" in unprepared && /no graph-prepare/.test(unprepared.missing), `a publication with no prepare line is reported: ${JSON.stringify(unprepared)}`)
   check(unpublished !== undefined && "missing" in unpublished && /no graph-publish/.test(unpublished.missing), `an edit with no publication is reported: ${JSON.stringify(unpublished)}`)
   check(timed !== undefined && "spans" in timed && timed.spans.length === 1 && timed.spans[0]?.from === "commit-received" && timed.spans[0].to === "graph-prepare" && timed.spans[0].ms === 40, `without marks the one span is commit to prepare: ${JSON.stringify(timed)}`)

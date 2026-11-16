@@ -2039,7 +2039,41 @@ void TestMappedAssetWrittenRangeLedgerIsBounded() {
   assert(host.ReleaseAsset(1));
 }
 
+// Acceptance evidence for one test: the host appends JSON lines to a private directory.
+struct EvidenceLog {
+  std::filesystem::path directory = std::filesystem::temp_directory_path()
+    / ("ae08-evidence-" + std::to_string(getpid()));
+  EvidenceLog() {
+    std::filesystem::create_directory(directory);
+    setenv("DAW_AE08_EVIDENCE_DIR", directory.c_str(), 1);
+  }
+  ~EvidenceLog() {
+    unsetenv("DAW_AE08_EVIDENCE_DIR");
+    std::filesystem::remove_all(directory);
+  }
+  // Lines of one event. The bridge thread writes after the callback returns, so wait for `count`.
+  std::vector<std::string> Lines(const std::string& event, const std::size_t count) const {
+    const auto marker = "\"event\":\"" + event + "\"";
+    std::vector<std::string> found;
+    for (const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);;) {
+      found.clear();
+      std::ifstream file(directory / ("native-" + std::to_string(getpid()) + ".jsonl"));
+      for (std::string line; std::getline(file, line);)
+        if (line.find(marker) != std::string::npos) found.push_back(line);
+      if (found.size() >= count || std::chrono::steady_clock::now() > deadline) return found;
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+  }
+  static std::optional<std::uint64_t> Field(const std::string& line, const std::string& key) {
+    const auto at = line.find("\"" + key + "\":");
+    if (at == std::string::npos) return std::nullopt;
+    const char* value = line.c_str() + at + key.size() + 3;
+    return std::strtoull(*value == '"' ? value + 1 : value, nullptr, 10);
+  }
+};
+
 void TestNativeVstRuntimeControlBounds() {
+  EvidenceLog log;
   daw::audio_host_macos::AudioHost host;
   assert(host.Configure({
     .device_uid = "diagnostic",
@@ -2074,6 +2108,28 @@ void TestNativeVstRuntimeControlBounds() {
   std::vector<std::uint8_t> unknown_state_request;
   AppendInstanceId(unknown_state_request, "c0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f2");
   assert(!host.GetNativeVstState(unknown_state_request));
+  // Each refusal says which of the three it was, with the instance asked for; a malformed request names no instance.
+  std::vector<std::uint8_t> not_ready_state_request;
+  AppendInstanceId(not_ready_state_request, instance_id);
+  assert(!host.GetNativeVstState(not_ready_state_request));
+  constexpr std::string_view disabled_id = "d0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f3";
+  auto disabled = attachment;
+  disabled.graph_node_id = 18;
+  disabled.instance_id = std::string(disabled_id);
+  disabled.playback_enabled = false;
+  assert(host.AttachNativeVst(disabled));
+  std::vector<std::uint8_t> disabled_state_request;
+  AppendInstanceId(disabled_state_request, disabled_id);
+  assert(!host.GetNativeVstState(disabled_state_request));
+  const auto refusals = log.Lines("vst-state-get-refused", 3);
+  assert(refusals.size() == 3);
+  const auto cause = [](const std::string& reason) { return "\"cause\":\"" + reason + "\""; };
+  assert(refusals[0].find(cause("no-attachment")) != std::string::npos);
+  assert(refusals[0].find("\"instanceId\":\"c0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f2\"") != std::string::npos);
+  assert(refusals[1].find(cause("worker-get-state")) != std::string::npos);
+  assert(refusals[1].find("\"instanceId\":\"" + std::string(instance_id) + "\"") != std::string::npos);
+  assert(refusals[2].find(cause("playback-disabled")) != std::string::npos);
+  assert(refusals[2].find("\"instanceId\":\"" + std::string(disabled_id) + "\"") != std::string::npos);
   const auto ownedButNotReady = host.ExecuteNativeVstEditorCommand(
     instance_id,
     daw::audio_host_macos::NativeVstEditorCommand::kStatus
@@ -3403,39 +3459,6 @@ void TestLatencyMoveCompletionQueuesTheNextRevision() {
   assert(host.InspectGraphRevision(3).code == GraphRevisionStatusCode::kPublished);
   host.Stop();
 }
-
-// Acceptance evidence for one test: the host appends JSON lines to a private directory.
-struct EvidenceLog {
-  std::filesystem::path directory = std::filesystem::temp_directory_path()
-    / ("ae08-evidence-" + std::to_string(getpid()));
-  EvidenceLog() {
-    std::filesystem::create_directory(directory);
-    setenv("DAW_AE08_EVIDENCE_DIR", directory.c_str(), 1);
-  }
-  ~EvidenceLog() {
-    unsetenv("DAW_AE08_EVIDENCE_DIR");
-    std::filesystem::remove_all(directory);
-  }
-  // Lines of one event. The bridge thread writes after the callback returns, so wait for `count`.
-  std::vector<std::string> Lines(const std::string& event, const std::size_t count) const {
-    const auto marker = "\"event\":\"" + event + "\"";
-    std::vector<std::string> found;
-    for (const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);;) {
-      found.clear();
-      std::ifstream file(directory / ("native-" + std::to_string(getpid()) + ".jsonl"));
-      for (std::string line; std::getline(file, line);)
-        if (line.find(marker) != std::string::npos) found.push_back(line);
-      if (found.size() >= count || std::chrono::steady_clock::now() > deadline) return found;
-      std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-  }
-  static std::optional<std::uint64_t> Field(const std::string& line, const std::string& key) {
-    const auto at = line.find("\"" + key + "\":");
-    if (at == std::string::npos) return std::nullopt;
-    const char* value = line.c_str() + at + key.size() + 3;
-    return std::strtoull(*value == '"' ? value + 1 : value, nullptr, 10);
-  }
-};
 
 // A raise publishes the larger latency. A lower while playing publishes the graph's own smaller latency but keeps
 // the pinned budget until the transport stops, so only the graph latency shows that the lower was applied.

@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -4491,10 +4492,21 @@ std::optional<std::vector<std::uint8_t>> AudioHost::GetNativeVstState(const std:
   std::size_t offset = 0;
   std::string instance_id;
   if (!ReadNativeInstanceId(payload, offset, instance_id) || offset != payload.size()) return std::nullopt;
+  // The reply carries no reason, so a refused read names it here. GetState reports only that it failed, not why.
+  // The id comes off the wire, so anything outside an id's characters is replaced to keep the evidence line valid JSON.
+  const auto refused = [&](const char* reason) {
+    std::string printable = instance_id;
+    for (char& c : printable) if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-') c = '?';
+    char detail[384];
+    std::snprintf(detail, sizeof(detail), ",\"instanceId\":\"%s\"", printable.c_str());
+    impl_->Evidence("vst-state-get-refused", reason, 0, detail);
+    return std::nullopt;
+  };
   const auto attachment = impl_->native_vst_attachments.find(instance_id);
-  if (attachment == impl_->native_vst_attachments.end() || !attachment->second->metadata.playback_enabled) return std::nullopt;
+  if (attachment == impl_->native_vst_attachments.end()) return refused("no-attachment");
+  if (!attachment->second->metadata.playback_enabled) return refused("playback-disabled");
   const auto state = attachment->second->worker.GetState();
-  if (!state) return std::nullopt;
+  if (!state) return refused("worker-get-state");
   std::vector<std::uint8_t> result;
   result.reserve(4 + instance_id.size() + 8 + state->bytes.size() + state->sha256.size());
   const auto append_le = [&result](const std::uint32_t value) {

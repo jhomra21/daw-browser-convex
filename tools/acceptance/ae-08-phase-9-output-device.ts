@@ -67,8 +67,10 @@ export const createOutputDeviceSteps = (input: { context: Context; out: string; 
   const observe = async (step: string, before: Record<string, number>, extra: Record<string, string | number | boolean> = {}) => {
     const status = await transportStatus()
     const after = JSON.stringify(await countsOf(out))
+    // A refused plug-in state read names its reason in the host's `cause`; the marks keep them in order, over the whole row.
+    const stateReadRefusals = JSON.stringify((await nativeEvents(out)).filter((event) => event.event === "vst-state-get-refused").map((event) => event.cause))
     const saved = await context.read(savedOutputScript, z.string())
-    await context.mark("device-switch-observed", { step, before: JSON.stringify(before), after, state: status.state, playheadSec: status.playheadSec, saved,
+    await context.mark("device-switch-observed", { step, before: JSON.stringify(before), after, stateReadRefusals, state: status.state, playheadSec: status.playheadSec, saved,
       blackhole: status.state === "playing" ? JSON.stringify(await blackholeLevels()) : "not captured",
       consoleErrors: JSON.stringify(await context.read(`JSON.stringify(window.ae08ConsoleErrors??[])`, z.array(z.string()))),
       notices: JSON.stringify(await context.read(`JSON.stringify([...document.querySelectorAll('[role="status"],[role="alert"],[data-sonner-toast]')].map(node=>node.textContent))`, z.array(z.string().nullable()))),

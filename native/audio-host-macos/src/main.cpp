@@ -2,6 +2,7 @@
 #include "worker-supervisor.h"
 #include "processor_contract_generated.h"
 #include "offline-failure-message.h"
+#include "../../acceptance-evidence.h"
 
 #include <array>
 #include <atomic>
@@ -943,10 +944,13 @@ int main() {
       case daw::audio_host_macos::ControlType::kGraphPrepare:
         if (!active_session || payload.size() <= 8 + daw::audio_host_macos::kNativeGraphFrameHeaderBytes
           || ReadU64(payload.data() + 8) > std::numeric_limits<std::uint32_t>::max()) return EXIT_FAILURE;
-        if (!WriteGraphRevisionStatus(active_session->PrepareGraphRevision(
-          static_cast<std::uint32_t>(ReadU64(payload.data() + 8)),
-          std::span(payload).subspan(8), ReadU64(payload.data())
-        ))) return EXIT_FAILURE;
+        {
+          const auto prepared = active_session->PrepareGraphRevision(
+            static_cast<std::uint32_t>(ReadU64(payload.data() + 8)),
+            std::span(payload).subspan(8), ReadU64(payload.data()));
+          daw::acceptance::Step reply("graph-prepare-reply", "prepare-step");
+          if (!WriteGraphRevisionStatus(prepared)) return EXIT_FAILURE;
+        }
         continue;
       case daw::audio_host_macos::ControlType::kGraphPublish:
         if (!active_session || payload.size() != 12) return EXIT_FAILURE;

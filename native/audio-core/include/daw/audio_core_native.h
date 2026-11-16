@@ -7,6 +7,7 @@
 #include "daw/audio_core.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <span>
 
@@ -44,6 +45,18 @@ struct NativeLatencyTransition {
 [[nodiscard]] std::uint32_t PublishedGraphLatency(daw_audio_core_handle core) noexcept;
 // The published graph's spectral predecessor count, under the same threading rule as PublishedGraphLatency.
 [[nodiscard]] std::uint32_t PublishedGraphSpectralPredecessors(daw_audio_core_handle core) noexcept;
+// Acceptance evidence only: times the sub-steps of the control-side graph prepare. A prepare through
+// daw_audio_core_prepare_graph_bytes restarts the list; each step adds its time in the order it first ran, and a step
+// nested in another is counted in both. Off, the core reads no clock.
+struct PrepareStepTime {
+  const char* step = nullptr;
+  std::uint64_t nanoseconds = 0;
+};
+constexpr std::size_t kMaximumPrepareSteps = 16;
+void SetPrepareProfiling(daw_audio_core_handle core, bool enabled) noexcept;
+// Control thread only, after the prepare returned.
+[[nodiscard]] std::span<const PrepareStepTime> LastPrepareProfile(daw_audio_core_handle core) noexcept;
+
 // Device-stop boundary only, after the last callback has returned.
 void StopLatencyTransition(daw_audio_core_handle core) noexcept;
 

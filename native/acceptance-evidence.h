@@ -35,7 +35,7 @@ inline void Event(const char* event, const char* fields = "") {
 
 class Step {
  public:
-  explicit Step(const char* name) : name_(name),
+  explicit Step(const char* name, const char* event = "vst-startup-step") : name_(name), event_(event),
     started_(Enabled() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{}) {}
   ~Step() { Finish(); }
   void Finish() {
@@ -45,10 +45,11 @@ class Step {
       std::chrono::steady_clock::now() - started_).count();
     char fields[256];
     std::snprintf(fields, sizeof(fields), ",\"step\":\"%s\",\"durationMs\":%.6f", name_, elapsed);
-    Event("vst-startup-step", fields);
+    Event(event_, fields);
   }
  private:
   const char* name_;
+  const char* event_;
   std::chrono::steady_clock::time_point started_;
   bool finished_ = false;
 };

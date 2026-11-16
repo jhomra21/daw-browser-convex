@@ -3,6 +3,8 @@
 #include "daw/audio_core.h"
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
 #include "daw/audio_core_native.h"
+#include <chrono>
+#include <string_view>
 #endif
 
 #include <algorithm>
@@ -732,6 +734,9 @@ struct Core {
   std::array<NativeGraphHooks, 2> native_hook_banks{};
   NativeGraphHooks *prepared_native_hooks = &native_hook_banks[0];
   NativeGraphHooks *published_native_hooks = &native_hook_banks[1];
+  bool prepare_profiling = false;
+  std::array<daw::audio_core::PrepareStepTime, daw::audio_core::kMaximumPrepareSteps> prepare_steps{};
+  std::size_t prepare_step_count = 0;
 #endif
   std::unique_ptr<float[]> graph_stage_buffers{};
   // A history is shared by every edge reading the same pre-gain source tap.
@@ -6825,6 +6830,47 @@ extern "C" void daw_audio_core_destroy(daw_audio_core_handle core) {
   delete to_core(core);
 }
 
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+// Adds the time of its scope to a prepare step (audio_core_native.h). Profiling off, it never reads the clock.
+class PrepareScope {
+ public:
+  PrepareScope(Core &core, const char *step) : core_(core.prepare_profiling ? &core : nullptr), step_(step) {
+    if (core_ != nullptr) started_ = std::chrono::steady_clock::now();
+  }
+  PrepareScope(const PrepareScope &) = delete;
+  PrepareScope &operator=(const PrepareScope &) = delete;
+  ~PrepareScope() { Finish(); }
+  void Finish() {
+    if (core_ == nullptr) return;
+    const auto elapsed = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - started_).count());
+    auto &steps = core_->prepare_steps;
+    const auto end = steps.begin() + static_cast<std::ptrdiff_t>(core_->prepare_step_count);
+    const auto found = std::find_if(steps.begin(), end, [this](const auto &entry) {
+      return std::string_view(entry.step) == step_;
+    });
+    if (found != end) found->nanoseconds += elapsed;
+    else if (core_->prepare_step_count < steps.size()) steps[core_->prepare_step_count++] = {step_, elapsed};
+    core_ = nullptr;
+  }
+ private:
+  Core *core_;
+  const char *step_;
+  std::chrono::steady_clock::time_point started_{};
+};
+#else
+struct PrepareScope {
+  PrepareScope(Core &, const char *) {}
+  void Finish() {}
+};
+#endif
+
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+void begin_prepare_profile(Core &core) { core.prepare_step_count = 0; }
+#else
+void begin_prepare_profile(Core &) {}
+#endif
+
 void reclaim_retired_slots(Core &core);
 void release_prepared_runtime(Core &core);
 daw_audio_core_result prepare_runtime_ownership(Core &core);
@@ -7096,7 +7142,9 @@ daw_audio_core_result prepare_latency_heads(Core &core, GraphRevision &next, boo
     const auto end = next.latency_end;
     const auto origin = next.latency_origin;
     const auto heads = next.read_heads;
+    PrepareScope stopped_scope(core, "latency-heads-stopped");
     const auto result = prepare_latency_heads(core, next, true);
+    stopped_scope.Finish();
     if (result != DAW_AUDIO_CORE_OK) return result;
     for (uint32_t edge = 0; edge < next.edge_count; ++edge) delays[edge] = next.read_heads[edge].stopped_delay;
     const auto raw_minimum = next.minimum_latency;
@@ -7135,24 +7183,36 @@ extern "C" daw_audio_core_result daw_audio_core_prepare_graph(
     }
   }
   GraphRevision *prepared = &core->graph_prepare_scratch[0];
+  PrepareScope validate_scope(*core, "validate");
   const daw_audio_core_result result = prepare_graph_revision(*core, *request, prepared);
+  validate_scope.Finish();
   if (result != DAW_AUDIO_CORE_OK) return result;
-  // A new prepare replaces any unpublished plan: its fresh slots go back first.
-  release_prepared_runtime(*core);
-  core->prepared_revision = 0;
-  reclaim_retired_slots(*core);
-  (*core->prepared_graph) = *prepared;
+  {
+    PrepareScope scope(*core, "copy");
+    // A new prepare replaces any unpublished plan: its fresh slots go back first.
+    release_prepared_runtime(*core);
+    core->prepared_revision = 0;
+    reclaim_retired_slots(*core);
+    (*core->prepared_graph) = *prepared;
+  }
+  PrepareScope ownership_scope(*core, "ownership");
   const daw_audio_core_result ownership = prepare_runtime_ownership(*core);
+  ownership_scope.Finish();
   if (ownership != DAW_AUDIO_CORE_OK) {
     release_prepared_runtime(*core);
     return ownership;
   }
+  PrepareScope latency_scope(*core, "latency-heads");
   const auto latency = prepare_latency_heads(*core, *core->prepared_graph);
+  latency_scope.Finish();
   if (latency != DAW_AUDIO_CORE_OK) {
     release_prepared_runtime(*core);
     return latency;
   }
-  if (!prepare_tap_histories(*core, *core->prepared_graph)) {
+  PrepareScope taps_scope(*core, "tap-histories");
+  const bool tapped = prepare_tap_histories(*core, *core->prepared_graph);
+  taps_scope.Finish();
+  if (!tapped) {
     release_prepared_runtime(*core);
     return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
   }
@@ -7163,6 +7223,7 @@ extern "C" daw_audio_core_result daw_audio_core_prepare_graph(
   }
 #endif
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  PrepareScope hooks_scope(*core, "native-stages");
   std::destroy_at(core->prepared_native_hooks);
   std::construct_at(core->prepared_native_hooks);
   if (!initialize_native_graph_stages(*core->prepared_native_hooks, *core->prepared_graph)) {
@@ -7253,6 +7314,17 @@ std::uint32_t daw::audio_core::PublishedGraphLatency(const daw_audio_core_handle
 std::uint32_t daw::audio_core::PublishedGraphSpectralPredecessors(const daw_audio_core_handle handle) noexcept {
   const Core *core = to_core(handle);
   return core == nullptr ? 0u : core->published_graph->spectral_predecessor_count;
+}
+
+void daw::audio_core::SetPrepareProfiling(const daw_audio_core_handle handle, const bool enabled) noexcept {
+  if (Core *core = to_core(handle); core != nullptr) core->prepare_profiling = enabled;
+}
+
+std::span<const daw::audio_core::PrepareStepTime> daw::audio_core::LastPrepareProfile(
+  const daw_audio_core_handle handle) noexcept {
+  const Core *core = to_core(handle);
+  return core == nullptr ? std::span<const PrepareStepTime>{}
+    : std::span<const PrepareStepTime>(core->prepare_steps.data(), core->prepare_step_count);
 }
 
 void daw::audio_core::StopLatencyTransition(const daw_audio_core_handle handle) noexcept {
@@ -7445,6 +7517,8 @@ extern "C" daw_audio_core_result daw_audio_core_prepare_graph_bytes(
   Core *core = to_core(core_handle);
   if (core == nullptr) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
   core->graph_validation_diagnostic = {};
+  begin_prepare_profile(*core);
+  PrepareScope parse_scope(*core, "parse");
   std::array<daw_audio_graph_node_descriptor, kMaximumLiveNodes> nodes{};
   std::array<daw_audio_graph_edge_descriptor, kMaximumLiveEdges> edges{};
   std::array<daw_audio_processor_descriptor, kMaximumLiveProcessors> processors{};
@@ -7461,6 +7535,7 @@ extern "C" daw_audio_core_result daw_audio_core_prepare_graph_bytes(
     &targets,
     &states
   )) return DAW_AUDIO_CORE_INVALID_ARGUMENT;
+  parse_scope.Finish();
   return daw_audio_core_prepare_graph(core_handle, &request);
 }
 
@@ -8617,7 +8692,9 @@ daw_audio_core_result prepare_runtime_ownership(Core &core) {
       && configuration.synth.version == 0) configuration.synth = default_synth_state();
   }
   next.fade_frames = deletion_fade_frames(core.config.sample_rate_hz);
+  PrepareScope continuity_scope(core, "continuity");
   const auto processors = has_current ? build_processor_continuity_map(current, next) : ProcessorContinuityMap{};
+  continuity_scope.Finish();
   core.prepared_continuity = ContinuityPreparationResult::kAccepted;
   next.node_reordered.fill(false);
   next.processor_remap.fill(-1);
@@ -8675,15 +8752,19 @@ daw_audio_core_result prepare_runtime_ownership(Core &core) {
       std::destroy_at(&core.reverb_histories[owned]);
       std::construct_at(&core.reverb_histories[owned]);
     } else if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) {
+      PrepareScope setup_scope(core, "spectral-setup");
       const int32_t owned = acquire_history_owner(core.spectral_slot_owners, processor.history_slot);
       if (owned < 0) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
       processor.spectral_slot = static_cast<uint32_t>(owned);
-      std::destroy_at(&core.spectral_histories[owned]);
-      std::construct_at(&core.spectral_histories[owned]);
-      reset_spectral_history(core.spectral_histories[owned], processor.spectral);
-      std::destroy_at(&core.spectral_inputs[owned]);
-      std::construct_at(&core.spectral_inputs[owned]);
-      core.spectral_inputs[owned].initialize_samples();
+      {
+        PrepareScope reset_scope(core, "spectral-reset");
+        std::destroy_at(&core.spectral_histories[owned]);
+        std::construct_at(&core.spectral_histories[owned]);
+        reset_spectral_history(core.spectral_histories[owned], processor.spectral);
+        std::destroy_at(&core.spectral_inputs[owned]);
+        std::construct_at(&core.spectral_inputs[owned]);
+        core.spectral_inputs[owned].initialize_samples();
+      }
       if (previous >= 0 && current.processors[previous].kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) {
         if (next.spectral_predecessor_count == kMaximumSpectralProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
         processor.spectral_predecessor = static_cast<int32_t>(next.spectral_predecessor_count++);
@@ -8714,13 +8795,16 @@ daw_audio_core_result prepare_runtime_ownership(Core &core) {
           spectral_warm_frames(processor.spectral) + processor.spectral_compensation);
         const uint32_t parameters = processor.parameter_count;
         processor.parameter_count = 0;
-        for (uint64_t cursor = begin; cursor < end; ++cursor) {
-          const uint32_t at = cursor & (kSpectralInputFrames - 1u);
-          float left = 0.0F, right = 0.0F;
-          render_spectral_processor(core, processor, 0,
-            input.sample(0, at), input.sample(1, at),
-            input.sample(2, at), input.sample(3, at),
-            &left, &right);
+        {
+          PrepareScope warm_scope(core, "spectral-warm");
+          for (uint64_t cursor = begin; cursor < end; ++cursor) {
+            const uint32_t at = cursor & (kSpectralInputFrames - 1u);
+            float left = 0.0F, right = 0.0F;
+            render_spectral_processor(core, processor, 0,
+              input.sample(0, at), input.sample(1, at),
+              input.sample(2, at), input.sample(3, at),
+              &left, &right);
+          }
         }
         processor.parameter_count = parameters;
         if (valid_snapshot)

@@ -1437,6 +1437,33 @@ struct AudioHost::Impl {
       acceptance_pinned_latency.load(), acceptance_graph_latency.load(), acceptance_spectral_predecessors.load());
     Evidence("graph-publish", cause, 0, detail);
   }
+  // One line per prepared revision: the host's own stages and the core's sub-steps, in microseconds. `core` holds the
+  // sub-steps that follow it, and a sub-step nested in another is counted in both (audio_core_native.h).
+  struct PrepareMarks {
+    std::chrono::steady_clock::time_point entered, controlled, before_core, after_core;
+  };
+  void PrepareProfileEvidence(const std::uint32_t revision, const daw_audio_core_handle core, const PrepareMarks& marks) const {
+    if (!daw::acceptance::Enabled()) return;
+    const auto done = std::chrono::steady_clock::now();
+    char detail[512] = ",\"stepsUs\":\"";
+    std::size_t used = std::strlen(detail);
+    const auto add = [&](const char* step, const std::uint64_t microseconds) {
+      if (used + 48 >= sizeof(detail)) return;
+      used += static_cast<std::size_t>(std::snprintf(detail + used, sizeof(detail) - used, "%s=%llu;",
+        step, static_cast<unsigned long long>(microseconds)));
+    };
+    const auto between = [](const auto from, const auto to) {
+      return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(to - from).count());
+    };
+    add("vst-control", between(marks.entered, marks.controlled));
+    add("host-pre", between(marks.controlled, marks.before_core));
+    add("core", between(marks.before_core, marks.after_core));
+    for (const auto& step : daw::audio_core::LastPrepareProfile(core)) add(step.step, step.nanoseconds / 1000);
+    add("host-post", between(marks.after_core, done));
+    detail[used] = '"';
+    detail[used + 1] = '\0';
+    Evidence("prepare-profile", "", revision, detail);
+  }
   enum class RecordingCommand : std::uint32_t { kNone, kStop, kCancel };
   enum class QueuedControlKind : std::uint8_t { kUrgent, kProcessor, kInstrument, kSource };
   struct QueuedControlEvent {
@@ -2928,9 +2955,14 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
   const auto status = [this, revision](const GraphRevisionStatusCode code) {
     return impl_->GraphStatus(code, revision);
   };
+  const auto now = [] {
+    return daw::acceptance::Enabled() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+  };
+  Impl::PrepareMarks marks{.entered = now()};
   // The renderer prepares as soon as it hears a worker's latency report, which can be before the control loop has
   // read it; the graph's latency and the attachment bindings must agree.
   ProcessNativeVstControl();
+  marks.controlled = now();
   if (impl_->active_core.load(std::memory_order_acquire) == 0 || revision == 0
     || snapshot.size() <= kNativeGraphFrameHeaderBytes || snapshot.size() > kMaximumControlPayloadBytes) {
     return status(GraphRevisionStatusCode::kInvalidRevision);
@@ -3008,8 +3040,11 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
     }
   }
   const daw_audio_core_handle prepared_core = impl_->active_core.load(std::memory_order_acquire);
+  daw::audio_core::SetPrepareProfiling(prepared_core, daw::acceptance::Enabled());
+  marks.before_core = now();
   const auto prepare_result = daw_audio_core_prepare_graph_bytes(
     prepared_core, payload.data(), static_cast<std::uint32_t>(payload.size()));
+  marks.after_core = now();
   if (prepare_result == DAW_AUDIO_CORE_LATENCY_MOVE_PENDING)
     return status(GraphRevisionStatusCode::kPublishPending);
   if (prepare_result != DAW_AUDIO_CORE_OK || daw_audio_core_prepared_graph_continuity(prepared_core) == 0) {
@@ -3071,6 +3106,7 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
   impl_->prepared_core = prepared_core;
   impl_->prepared_revision.store(revision, std::memory_order_release);
   impl_->prepared_routing = std::move(routing);
+  impl_->PrepareProfileEvidence(revision, prepared_core, marks);
   return status(GraphRevisionStatusCode::kPrepared);
 }
 

@@ -71,7 +71,7 @@ const hostEventSchema = z.object({
   blockSize: z.number().default(0),
 })
 const editsSchema = z.object({ edits: z.array(z.object({
-  name: z.string().optional(), wallMs: z.number(), fromLatencyFrames: z.number(), toLatencyFrames: z.number() })).default([]) })
+  name: z.string().optional(), index: z.number().optional(), wallMs: z.number(), fromLatencyFrames: z.number(), toLatencyFrames: z.number() })).default([]) })
 const classSchema = z.object({ class: z.enum(["plain", "raise", "asset", "vst-insert"]) })
 const continuitySchema = z.object({ assetPublicationFrame: z.number().optional() }).passthrough()
 type HostEvent = z.infer<typeof hostEventSchema>
@@ -139,8 +139,14 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<ty
   const netMove = drafts.map(() => 0)
   const firstEditMs: (number | undefined)[] = drafts.map(() => undefined)
   const insertsVst = drafts.map(() => false)
+  // A step settles before the next one starts, so a publication after the next step's start is not this edit's: a step that publishes
+  // nothing (the editor opening) owns none instead of being charged the publication of the edit after it.
+  const stepStartMs = new Map<number, number>()
+  for (const edit of edits) if (edit.index !== undefined) stepStartMs.set(edit.index, Math.min(stepStartMs.get(edit.index) ?? edit.wallMs, edit.wallMs))
+  const nextStepMs = (index: number | undefined) => index === undefined ? Infinity : Math.min(...[...stepStartMs].flatMap(([step, wallMs]) => step > index ? wallMs : []))
   for (const edit of edits) {
-    const owner = drafts.findIndex((draft) => draft.wallMs >= edit.wallMs)
+    const stepEndMs = nextStepMs(edit.index)
+    const owner = drafts.findIndex((draft) => draft.wallMs >= edit.wallMs && draft.wallMs < stepEndMs)
     const draft = drafts[owner]
     if (!draft) continue
     const startMs = editStartMs(events, edit.wallMs, draft.wallMs)
@@ -251,6 +257,8 @@ type Spec = {
   uiMarkMs?: number
   // The mark's name (default ui-parameter-commit), and the name of the harness step that made the edit.
   uiMark?: string; editName?: string
+  // An earlier step this many ms before the edit that publishes nothing (the editor opening), with a ui-editor-open mark at its start.
+  precededByMs?: number
 }
 // `delivers` writes the continuity analysis.json naming the publication at that index as the asset's; `noAsset` writes one naming none.
 type RowOptions = { sampleRate?: number; declare?: string; delivers?: number; noAsset?: true; windowed?: true }
@@ -271,11 +279,15 @@ const syntheticRow = (specs: readonly Spec[], options: RowOptions = {}) => {
     lines.push(request(bindFrame + BLOCK, wall + (spec.prepMs ?? 4)))
     if (spec.resend) lines.push(request(publicationFrame - BLOCK, wall + 18))
     if (options.windowed && !spec.unbound) lines.push({ event: "schedule-window", wallMs: wall + 3, revision })
+    if (spec.precededByMs !== undefined)
+      lines.push({ event: "ui-editor-open", wallMs: wall + (spec.totalMs ?? 30) - (spec.editMs ?? 75) - spec.precededByMs + 5, pid: 1, key: "k" })
     if (spec.uiMarkMs !== undefined) lines.push({ event: spec.uiMark ?? "ui-parameter-commit", wallMs: wall + (spec.totalMs ?? 30) - spec.uiMarkMs, pid: 1, key: "k" })
     lines.push({ ...base, event: "graph-publish", cause: "block-boundary", wallMs: wall + (spec.totalMs ?? 30), frame: publicationFrame, publicationFrame, revision, requestedRevision: 0 })
     if (spec.completeFrames !== "none")
       lines.push({ ...base, event: "latency-move-complete", wallMs: wall + 100, frame: publicationFrame + (spec.completeFrames ?? COMPLETE_BASE_FRAMES + BLOCK * blocksBeforeBind), revision, requestedRevision: 0 })
-    edits.push({ name: spec.editName, wallMs: wall + (spec.totalMs ?? 30) - (spec.editMs ?? 75), fromLatencyFrames: 512, toLatencyFrames: spec.raise ? 4096 : 512 })
+    const editWallMs = wall + (spec.totalMs ?? 30) - (spec.editMs ?? 75)
+    if (spec.precededByMs !== undefined) edits.push({ name: "editor-open", index: 2 * index + 1, wallMs: editWallMs - spec.precededByMs, fromLatencyFrames: 0, toLatencyFrames: 0 })
+    edits.push({ name: spec.editName, index: 2 * index + 2, wallMs: editWallMs, fromLatencyFrames: 512, toLatencyFrames: spec.raise ? 4096 : 512 })
   })
   // An index past the last publication names frame 1, which no publication has.
   const delivered = options.delivers === undefined ? undefined : frames[options.delivers] ?? 1
@@ -325,6 +337,10 @@ const selfTest = async (c1Runs: readonly string[]) => {
     { name: "seam-bound publication of a row with schedule windows still fails a lead of 1", status: "FAIL", fails: ["lead"],
       rows: [["open-editor", withClean({ leadBlocks: 1 }), { windowed: true }]] },
     { name: "a row with no schedule-window line judges lead 0", status: "FAIL", fails: ["lead"], rows: [["open-editor", withClean({ leadBlocks: 0 })]] },
+    { name: "an editor step that publishes nothing owns no publication (edit 2 is 48 ms, the editor opened 1.7 s before)", status: "PASS", fails: [],
+      rows: [["open-editor", withClean({ totalMs: 60, editMs: 48, precededByMs: 1700 })]] },
+    { name: "the edit after the editor step still fails at 160 ms", status: "FAIL", fails: ["edit-to-publish"],
+      rows: [["open-editor", withClean({ totalMs: 60, editMs: 160, precededByMs: 1700 })]] },
     { name: "VST insert 200 ms from its ui-device-insert mark, prepare 60 ms", status: "PASS", fails: [],
       rows: [["vst-remove-undo", withClean({ totalMs: 60, editMs: 260, uiMark: "ui-device-insert", uiMarkMs: 200 })]] },
     { name: "VST insert 260 ms from its mark", status: "FAIL", fails: ["edit-to-publish"],

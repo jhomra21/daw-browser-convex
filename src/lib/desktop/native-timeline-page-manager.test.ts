@@ -5,6 +5,7 @@ import {
 } from "./native-timeline-page-manager"
 import {
   nativeAudioHostFrameHeaderBytes,
+  nativeAudioHostMaximumMappedAssetPageFramesForChannels,
   nativeAudioHostMaximumPayloadBytes,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeHostMappedAssetPage } from "@daw-browser/audio-engine/native-host-wire"
@@ -406,11 +407,45 @@ test("bounds full instrument-region hydration to page and payload limits", async
   await manager.dispose()
 })
 
+test("uploads a whole immutable instrument in few wire-sized pages and prepares it only after full coverage", async () => {
+  const frameCount = 210 * 16_384
+  const region = new LongEagerAudioBuffer(frameCount)
+  const pages: NativeHostMappedAssetPage[] = []
+  const covered: { startFrame: number; endFrame: number }[] = []
+  let prepared: { startFrame: number; frameCount: number } | undefined
+  const manager = createNativeTimelinePageManager({
+    sources: [{
+      sourceAssetKey: "instrument", sessionAssetId: 9, frameCount,
+      sampleRateHz: region.sampleRate, channelCount: region.numberOfChannels,
+      descriptor: descriptorForBuffer(region), immutableAfterPreparation: true,
+    }],
+    writePage: async (page) => {
+      pages.push(page)
+      covered.push({ startFrame: page.startFrame, endFrame: page.startFrame + page.frameCount })
+    },
+    prepareRange: async (_id, startFrame, count) => {
+      const written = covered.toSorted((left, right) => left.startFrame - right.startFrame)
+      expect(written.every((range, index) => range.startFrame === (written[index - 1]?.endFrame ?? 0))).toBe(true)
+      expect(written.at(-1)?.endFrame).toBe(frameCount)
+      prepared = { startFrame, frameCount: count }
+    },
+  })
+  await manager.ensureRanges([{ sourceAssetKey: "instrument", startFrame: 0, endFrame: frameCount }])
+
+  const pageFrames = nativeAudioHostMaximumMappedAssetPageFramesForChannels(region.numberOfChannels)
+  expect(pages.length).toBe(Math.ceil(frameCount / pageFrames))
+  expect(pages.length).toBeLessThanOrEqual(27)
+  expect(pages.every((page) => page.planarPcm.byteLength + nativeAudioHostFrameHeaderBytes <= nativeAudioHostMaximumPayloadBytes)).toBe(true)
+  expect(prepared).toEqual({ startFrame: 0, frameCount })
+  await manager.dispose()
+})
+
 test("never rewrites a fully prepared immutable instrument after upload hints are evicted", async () => {
   const frameCount = 130 * 16_384
   const region = new LongEagerAudioBuffer(frameCount)
   let writes = 0
   const manager = createNativeTimelinePageManager({
+    pageFrames: 16_384,
     sources: [{
       sourceAssetKey: "instrument", sessionAssetId: 9, frameCount,
       sampleRateHz: region.sampleRate, channelCount: region.numberOfChannels,

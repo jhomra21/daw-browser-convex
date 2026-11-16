@@ -3,6 +3,7 @@ import type { NativeHostMappedAssetPage } from '@daw-browser/audio-engine/native
 import {
   nativeAudioHostMaximumAssetChannels,
   nativeAudioHostMaximumMappedAssetPageFramesForChannels,
+  nativeAudioHostMaximumPayloadBytes,
 } from '@daw-browser/desktop-protocol/native-audio-host'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import type { PreparedStretchArtifactRepository } from '@daw-browser/audio-engine/prepared-stretch-store'
@@ -63,6 +64,8 @@ const markedRequest = async (
 const maximumDecoders = 2
 const maximumDecodedPageFrames = 16_384
 export const nativeTimelineMaximumUploadedPages = 128
+/** Two concurrent pages, each a plane copy plus its planar wire payload, at the largest page the wire allows. */
+export const nativeTimelinePageStagingBytes = maximumDecoders * 2 * nativeAudioHostMaximumPayloadBytes
 
 const validateSource = (source: NativeTimelineSource) => {
   if (!Number.isSafeInteger(source.frameCount) || source.frameCount <= 0
@@ -111,18 +114,20 @@ export const createNativeTimelinePageManager = (input: {
   const abortController = new AbortController()
   let disposePromise: Promise<void> | undefined
   let accessSequence = 0
-  const requestedPageFrames = input.pageFrames ?? maximumDecodedPageFrames
-  if (!Number.isSafeInteger(requestedPageFrames) || requestedPageFrames <= 0) {
+  const requestedPageFrames = input.pageFrames ?? Number.POSITIVE_INFINITY
+  if (!(requestedPageFrames > 0) || (input.pageFrames !== undefined && !Number.isSafeInteger(requestedPageFrames))) {
     throw new Error('Native timeline page size must be a positive integer.')
   }
-  const boundedRequestedPageFrames = Math.min(requestedPageFrames, maximumDecodedPageFrames)
   for (const source of input.sources) validateSource(source)
   const pageFramesForSource = (source: NativeTimelineSource) => {
     const payloadFrames = nativeAudioHostMaximumMappedAssetPageFramesForChannels(source.channelCount)
     if (payloadFrames <= 0) {
       throw new Error(`Native audio asset "${source.sourceAssetKey}" has too many channels for mapped pages.`)
     }
-    return Math.min(boundedRequestedPageFrames, payloadFrames)
+    // The host publishes an instrument only once its whole mapping is uploaded, and refuses writes after that.
+    // Those pages are in-memory regions, not windowed decodes, so only the wire payload bounds them.
+    const decodedFrames = source.immutableAfterPreparation ? Number.POSITIVE_INFINITY : maximumDecodedPageFrames
+    return Math.min(requestedPageFrames, decodedFrames, payloadFrames)
   }
   const invalidateSourceRange = (
     source: NativeTimelineSource,

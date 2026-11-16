@@ -5,6 +5,7 @@ import { createPreparedStretchArtifactRepository } from '@daw-browser/audio-engi
 import type { NativeHostMeterBatch, NativeHostSpectrumFrame, NativeHostTransport, NativeScheduleProgress } from '@daw-browser/audio-engine/native-host-wire'
 import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-protocol'
 import type { NativeGraphRevisionStatus, NativeRevisionReply, NativeRevisionSession } from '@daw-browser/desktop-protocol/native-revision'
+import { nativeAudioHostMappedAssetPageHeaderBytes } from '@daw-browser/desktop-protocol/native-audio-host'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { createNativePlaybackController, nativePlaybackFaultText } from './native-playback-controller'
 import { createEffectsPanelController } from '~/components/timeline/create-effects-panel-controller'
@@ -347,7 +348,7 @@ const host = {
     },
     writeMappedAssetPage: async (page: { planarPcm: Uint8Array }): Promise<Reply> => {
       pageWrites += 1
-      maximumPagePayload = Math.max(maximumPagePayload, 24 + page.planarPcm.byteLength)
+      maximumPagePayload = Math.max(maximumPagePayload, nativeAudioHostMappedAssetPageHeaderBytes + page.planarPcm.byteLength)
       record('mapped.write')
       if (holdPage) {
         holdPage = false

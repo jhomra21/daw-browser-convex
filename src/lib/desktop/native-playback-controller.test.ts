@@ -10,6 +10,7 @@ import { classifyNativeVst3PlaybackFault, nativeVst3LaunchAuthorizationRequiredM
 import { createNativeProcessorStateOwner } from "./native-processor-state-owner"
 import { clearInstanceLimits, instanceLimit, vstInstanceFailed } from "./vst-instance-failures"
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
+import { nativeAudioHostMappedAssetPageHeaderBytes, nativeAudioHostMaximumPayloadBytes } from "@daw-browser/desktop-protocol/native-audio-host"
 import { compileDesiredNativeProcessorState, compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot"
 import { audioCoreContractVersion, encodeUtilityProcessorState, type AudioAssetRef } from "@daw-browser/audio-core-contract"
 import { createProcessorEditRegistry } from "~/components/timeline/create-processor-edit-registry"
@@ -5788,7 +5789,8 @@ for (const kind of ['sampler', 'granular', 'drum-rack'] satisfies readonly ('sam
     expect(fixture.mappedAssetCreateCount).toBe(1)
     expect(fixture.preparedRanges).toContainEqual({ startFrame: 0, frameCount: 384_000 })
     expect(fixture.mappedPages.reduce((total, page) => total + page.frameCount, 0)).toBe(384_000)
-    expect(fixture.mappedPages.every((page) => page.planarPcm.byteLength + 24 <= 1024 ** 2)).toBe(true)
+    expect(fixture.mappedPages.length).toBeLessThanOrEqual(Math.ceil(384_000 / 65_535))
+    expect(fixture.mappedPages.every((page) => page.planarPcm.byteLength + nativeAudioHostMappedAssetPageHeaderBytes <= nativeAudioHostMaximumPayloadBytes)).toBe(true)
     expect(fixture.calls.indexOf('instrument-state')).toBeLessThan(fixture.calls.indexOf('commit'))
     await controller.destroy()
   })
@@ -5934,7 +5936,7 @@ test('prepares the full three-minute 48 kHz granular region under the native pol
   expect(await controller.ensureLivePreview(0)).toBe('started')
   expect(fixture.preparedRanges).toContainEqual({ startFrame: 0, frameCount: 8_640_000 })
   expect(fixture.legacyInstallCount).toBe(0)
-  expect(fixture.mappedPages.every((page) => page.planarPcm.byteLength + 24 <= 1024 ** 2)).toBe(true)
+  expect(fixture.mappedPages.every((page) => page.planarPcm.byteLength + nativeAudioHostMappedAssetPageHeaderBytes <= nativeAudioHostMaximumPayloadBytes)).toBe(true)
   await controller.destroy()
 })
 

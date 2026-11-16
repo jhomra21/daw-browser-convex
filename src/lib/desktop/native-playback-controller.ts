@@ -105,7 +105,7 @@ import {
   type RetirementObligation,
   receiptHandle,
 } from "./native-processor-state-owner"
-import { createNativeTimelinePageManager, type NativeTimelinePageManager, type NativeTimelineSource } from "./native-timeline-page-manager"
+import { createNativeTimelinePageManager, nativeTimelinePageStagingBytes, type NativeTimelinePageManager, type NativeTimelineSource } from "./native-timeline-page-manager"
 import { createSampledInstrumentRegionBudget, type SampledInstrumentRegionBudget, type SampledInstrumentRegionBudgetScope } from "~/lib/sampled-instrument-region-budget"
 import type { NativeInstrumentPreparation } from "./native-instrument-budget-policy"
 
@@ -2039,7 +2039,7 @@ export const createNativePlaybackController = (input: {
           "Instrument sample memory budget exceeded (1 GiB per device). Shorten the region or remove samples and retry.")
         if (!scope) throw new Error("Native sample memory policy is unavailable.")
         attemptedInstrumentScope = scope
-        releasePageStaging = scope.reserve("page-staging", 2 * 1024 ** 2).release
+        releasePageStaging = scope.reserve("page-staging", nativeTimelinePageStagingBytes).release
       }
       installedAssetSourceKeys = new Map(
         projection.assets.map(({ asset, sourceAssetKey }) => [asset.assetId, sourceAssetKey]),
@@ -4116,7 +4116,7 @@ export const createNativePlaybackController = (input: {
               addedInstruments.map(({ state }) => state), policy.deviceDecodedBytes,
               `native-stage:${crypto.randomUUID()}`)
             if (!stagedMemoryScope) throw new Error("Native sample memory policy is unavailable.")
-            stagedMemoryScope.set("page-staging", 2 * 1024 ** 2, () => undefined)
+            stagedMemoryScope.set("page-staging", nativeTimelinePageStagingBytes, () => undefined)
           }
           for (const { asset, pcm, sourceAssetKey, preparedStretchArtifactId } of addedAssets) {
             publicationAbort.signal.throwIfAborted()

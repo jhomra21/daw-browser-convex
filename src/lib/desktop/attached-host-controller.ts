@@ -45,6 +45,7 @@ import { createLocalControlHandlers } from "~/lib/local-control/local-control-ha
 import { LocalControlServiceError } from "~/lib/local-control/local-control-service"
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
 import { serializeNativeDiagnostics } from "~/lib/desktop/native-diagnostics-serialization"
+import type { NativeVstParameterQueueResult } from "~/lib/desktop/native-vst-parameter-queue"
 import type { ExportQueue } from "~/lib/export/export-queue"
 import { createImportJobQueue, type ImportJobQueue } from "~/lib/desktop/import-job-queue"
 import type { ImportProjectBinding, ImportSummary } from "~/hooks/useTimelineClipImport"
@@ -370,7 +371,9 @@ export const createAttachedHostController = (input: {
   importQueue?: ImportJobQueue
   importFiles: (files: readonly File[], signal?: AbortSignal, binding?: ImportProjectBinding) => Promise<ImportSummary>
   setPlayhead: (seconds: number) => void
-  enqueueNativeVstParameter?: (event: { instanceId: string; id: number; value: number }) => Promise<boolean>
+  enqueueNativeVstParameter?: (event: { instanceId: string; id: number; value: number }) => Promise<NativeVstParameterQueueResult>
+  // The host refused a committed parameter (or its delivery failed). The value is saved and replays on the next prepare.
+  reportUndeliveredNativeVstParameters?: () => void
   requestNativeVstStateCapture?: (instanceId: string) => void
   hasReflectableOverlays?: () => boolean
   reconcileMountedLocalTimeline?: (guard: {
@@ -518,7 +521,7 @@ export const createAttachedHostController = (input: {
               const postCommitSnapshot = projectSnapshotSchemaV2.parse(await invoker.invoke("control.snapshot", { projectId: mountedProjectId }))
               const processorsById = new Map(postCommitSnapshot.processors.map((processor) => [processor.id, processor]))
               if (await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
-                const deliveries: Promise<{ instanceId: string; delivered: boolean }>[] = []
+                const deliveries: Promise<{ instanceId: string; delivery: NativeVstParameterQueueResult }>[] = []
                 for (const [actionIndex, action] of commitRequest.actions.entries()) {
                   if (action.kind !== "external-plugin.parameters.set" || !changedActionIndexes.has(actionIndex)) continue
                   const processor = processorsById.get(action.processor.id)
@@ -530,18 +533,21 @@ export const createAttachedHostController = (input: {
                         instanceId,
                         id: change.parameterId,
                         value: change.normalizedValue,
-                      }).then((delivered) => ({ instanceId, delivered })))
+                      }).then((delivery) => ({ instanceId, delivery })))
                     } catch (error) {
                       deliveries.push(Promise.reject(error))
                     }
                   }
                 }
                 // Native refuses a parameter event it cannot queue (no attachment, playback off, queue full) and the
-                // commit still succeeds: the mark tells a refused delivery from one that never ran.
+                // commit still succeeds: the mark tells a refused delivery from one that never ran, and the refusal
+                // is reported. A superseded delivery was replaced by a newer value for the same parameter.
                 const results = await Promise.all(deliveries)
-                ae08Mark(results.every((result) => result.delivered) ? "control-parameters-delivered" : "control-parameters-undelivered", commitKey)
+                const refused = results.some((result) => result.delivery === "rejected")
+                ae08Mark(refused ? "control-parameters-undelivered" : "control-parameters-delivered", commitKey)
+                if (refused) input.reportUndeliveredNativeVstParameters?.()
                 // The plug-in's live state moved; persist it like any other committed edit.
-                for (const instanceId of new Set(results.filter((result) => result.delivered).map((result) => result.instanceId))) {
+                for (const instanceId of new Set(results.filter((result) => result.delivery === "delivered").map((result) => result.instanceId))) {
                   input.requestNativeVstStateCapture?.(instanceId)
                 }
               }
@@ -549,6 +555,7 @@ export const createAttachedHostController = (input: {
           }
         } catch {
           ae08Mark("control-parameters-undelivered", commitKey)
+          input.reportUndeliveredNativeVstParameters?.()
         }
       }
       if (request_.operation === "control.commit" && input.reconcileMountedLocalTimeline) {

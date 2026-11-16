@@ -2290,9 +2290,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       importQueue,
       exportService,
       importFiles,
-      enqueueNativeVstParameter: nativeVstParameterQueue
-        ? (event) => nativeVstParameterQueue.enqueue(event).then((result) => result === "delivered")
-        : undefined,
+      enqueueNativeVstParameter: nativeVstParameterQueue?.enqueue,
+      // Without a prepared session nothing sounds, and the saved value replays when one is prepared.
+      reportUndeliveredNativeVstParameters: () => {
+        if (isNativePlaybackPrepared()) notify("Plug-in parameter not applied", "The host refused a plug-in parameter change. It is saved and applies the next time playback is prepared.");
+      },
       hasReflectableOverlays: projection.hasReflectableOverlays,
       reconcileMountedLocalTimeline,
       ensureMountedLocalMedia,

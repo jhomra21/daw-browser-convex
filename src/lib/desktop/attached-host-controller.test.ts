@@ -25,6 +25,7 @@ import {
 } from "~/lib/desktop/attached-host-controller"
 import { serializeNativeDiagnostics } from "~/lib/desktop/native-diagnostics-serialization"
 import { createNativeVstStateCapture } from "~/lib/desktop/native-vst-state-capture"
+import type { NativeVstParameterQueueResult } from "~/lib/desktop/native-vst-parameter-queue"
 import { createImportJobQueue, type ImportJobQueue } from "~/lib/desktop/import-job-queue"
 import type {
   PreparedTimelineExport,
@@ -126,7 +127,7 @@ const createController = (
   projectId: () => string,
   getMountedLocalProject?: typeof getLocalProject,
   mountedProjectGeneration: () => number = () => 0,
-  enqueueNativeVstParameter?: (event: { instanceId: string; id: number; value: number }) => Promise<boolean>,
+  enqueueNativeVstParameter?: (event: { instanceId: string; id: number; value: number }) => Promise<NativeVstParameterQueueResult>,
   reconcileMountedLocalTimeline?: (guard: {
     projectId: string;
     mountedProjectGeneration: number;
@@ -1099,7 +1100,7 @@ test("suppresses reconciliation when native delivery changes the mounted generat
     async () => {
       generation += 1
       deliveries += 1
-      return true
+      return "delivered"
     },
     async () => {
       reconciliations += 1
@@ -1189,6 +1190,7 @@ test("delivers committed external VST3 parameters after durable local commit", a
   })
   const events: Array<{ instanceId: string; id: number; value: number }> = []
   const captures: string[] = []
+  let reports = 0
   let releaseFirstDelivery: (() => void) | undefined
   let signalFirstDeliveryStarted: (() => void) | undefined
   const firstDeliveryStarted = new Promise<void>((resolve) => {
@@ -1206,13 +1208,13 @@ test("delivers committed external VST3 parameters after durable local commit", a
           releaseFirstDelivery = resolve
         })
       }
-      return true
+      return "delivered"
     },
     undefined,
     undefined,
     undefined,
     undefined,
-    { requestNativeVstStateCapture: (captured) => captures.push(captured) },
+    { requestNativeVstStateCapture: (captured) => captures.push(captured), reportUndeliveredNativeVstParameters: () => { reports += 1 } },
   )
   const unregister = registerController(controller)
   const input = {
@@ -1242,6 +1244,7 @@ test("delivers committed external VST3 parameters after durable local commit", a
   releaseFirstDelivery?.()
   expect((await pendingCommit).result).toMatchObject({ applied: true })
   expect(captures).toEqual([instanceId])
+  expect(reports).toBe(0)
   expect((await requestControl(controller, "control.commit", input, undefined, controlActor)).result).toMatchObject({ idempotencyReplay: true })
   expect(events).toHaveLength(2)
   expect(captures).toEqual([instanceId])
@@ -1250,90 +1253,98 @@ test("delivers committed external VST3 parameters after durable local commit", a
   dispose()
 })
 
-test("does not fail a durable external parameter commit when native delivery fails", async () => {
-  installBridge([])
-  const project = await createLocalProject(`External control failure ${crypto.randomUUID()}`)
-  const initial = await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id })
-  const track = initial.tracks[0]
-  if (!track) throw new Error("Expected default track.")
-  const instanceId = "00000000-0000-4000-8000-000000000012"
-  const captures: string[] = []
-  await setLocalExternalProcessor(project.id, {
-    instanceId,
-    targetId: track.id,
-    index: 0,
-    manifest: {
-      identity: {
-        format: "vst3",
-        classId: "class-1",
-        vendor: "Vendor",
-        name: "Fixture",
-        version: "1",
-        architecture: "arm64",
-        binaryFingerprint: "a".repeat(64),
+// A refused delivery and a failed one are reported; one a newer value replaced is not.
+const deliveryCases: [string, () => Promise<NativeVstParameterQueueResult>, number][] = [
+  ["reported when the host fails the delivery", async () => { throw new Error("native host unavailable") }, 1],
+  ["reported when the host refuses the delivery", async () => "rejected", 1],
+  ["not reported when a newer value replaces the delivery", async () => "superseded", 0],
+]
+for (const [outcome, deliver, reported] of deliveryCases) {
+  test(`keeps a durable external parameter commit applied and ${outcome}`, async () => {
+    installBridge([])
+    const project = await createLocalProject(`External control failure ${crypto.randomUUID()}`)
+    const initial = await createLocalControlService({ actor: { subject: controlActor } }).snapshot({ projectId: project.id })
+    const track = initial.tracks[0]
+    if (!track) throw new Error("Expected default track.")
+    const instanceId = "00000000-0000-4000-8000-000000000012"
+    const captures: string[] = []
+    let reports = 0
+    await setLocalExternalProcessor(project.id, {
+      instanceId,
+      targetId: track.id,
+      index: 0,
+      manifest: {
+        identity: {
+          format: "vst3",
+          classId: "class-1",
+          vendor: "Vendor",
+          name: "Fixture",
+          version: "1",
+          architecture: "arm64",
+          binaryFingerprint: "a".repeat(64),
+        },
+        role: "effect",
+        audioInputs: [{ name: "Input", channels: 2, enabled: true }],
+        audioOutputs: [{ name: "Output", channels: 2, enabled: true }],
+        sidechainInputs: [],
+        parameters: [{
+          id: 1,
+          title: "Gain",
+          unit: "",
+          minimum: 0,
+          maximum: 1,
+          defaultValue: 0.5,
+          stepCount: 100,
+          readOnly: false,
+          hidden: false,
+        }],
+        latencyFrames: 0,
+        tailFrames: 0,
+        supportsBypass: true,
+        supportsEditor: false,
+        supportsState: true,
       },
-      role: "effect",
-      audioInputs: [{ name: "Input", channels: 2, enabled: true }],
-      audioOutputs: [{ name: "Output", channels: 2, enabled: true }],
-      sidechainInputs: [],
-      parameters: [{
-        id: 1,
-        title: "Gain",
-        unit: "",
-        minimum: 0,
-        maximum: 1,
-        defaultValue: 0.5,
-        stepCount: 100,
-        readOnly: false,
-        hidden: false,
-      }],
+      parameterOverrides: { "1": 0.25 },
       latencyFrames: 0,
       tailFrames: 0,
-      supportsBypass: true,
-      supportsEditor: false,
-      supportsState: true,
-    },
-    parameterOverrides: { "1": 0.25 },
-    latencyFrames: 0,
-    tailFrames: 0,
-    bypassed: false,
-    health: { state: "ready", updatedAt: 1 },
-    updatedAt: 1,
-  })
-  const { controller, dispose } = createController(
-    () => project.id,
-    undefined,
-    () => 0,
-    async () => {
-      throw new Error("native host unavailable")
-    },
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    { requestNativeVstStateCapture: (captured) => captures.push(captured) },
-  )
-  const unregister = registerController(controller)
-  const result = await requestControl(controller, "control.commit", {
-    version: "v1",
-    projectId: project.id,
-    idempotencyKey: "external-parameters-failure",
-    actions: [{
-      kind: "external-plugin.parameters.set" as const,
-      target: { kind: "track" as const, track: { source: "persisted" as const, id: track.id } },
-      processor: { source: "persisted" as const, id: `external-plugin:${instanceId}` },
-      changes: [{ parameterId: 1, normalizedValue: 0.75 }],
-    }],
-  }, undefined, controlActor)
-  expect(result.result).toMatchObject({ applied: true })
-  expect(captures).toEqual([])
-  expect((await requestControl(controller, "control.snapshot", { projectId: project.id }, undefined, controlActor)).result).toMatchObject({
-    processors: [expect.objectContaining({ processor: expect.objectContaining({ params: expect.objectContaining({ parameterOverrides: { "1": 0.75 } }) }) })],
-  })
+      bypassed: false,
+      health: { state: "ready", updatedAt: 1 },
+      updatedAt: 1,
+    })
+    const { controller, dispose } = createController(
+      () => project.id,
+      undefined,
+      () => 0,
+      deliver,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { requestNativeVstStateCapture: (captured) => captures.push(captured), reportUndeliveredNativeVstParameters: () => { reports += 1 } },
+    )
+    const unregister = registerController(controller)
+    const result = await requestControl(controller, "control.commit", {
+      version: "v1",
+      projectId: project.id,
+      idempotencyKey: "external-parameters-failure",
+      actions: [{
+        kind: "external-plugin.parameters.set" as const,
+        target: { kind: "track" as const, track: { source: "persisted" as const, id: track.id } },
+        processor: { source: "persisted" as const, id: `external-plugin:${instanceId}` },
+        changes: [{ parameterId: 1, normalizedValue: 0.75 }],
+      }],
+    }, undefined, controlActor)
+    expect(result.result).toMatchObject({ applied: true })
+    expect(captures).toEqual([])
+    expect(reports).toBe(reported)
+    expect((await requestControl(controller, "control.snapshot", { projectId: project.id }, undefined, controlActor)).result).toMatchObject({
+      processors: [expect.objectContaining({ processor: expect.objectContaining({ params: expect.objectContaining({ parameterOverrides: { "1": 0.75 } }) }) })],
+    })
 
-  unregister()
-  dispose()
-})
+    unregister()
+    dispose()
+  })
+}
 
 const settleMicrotasks = async () => {
   for (let turn = 0; turn < 10; turn += 1) await Promise.resolve()

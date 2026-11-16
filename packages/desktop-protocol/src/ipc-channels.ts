@@ -78,6 +78,9 @@ export const ae08RendererMarks = z.enum([
   // (a request when the renderer sends it, a reply when the host's answer is back), and the candidate paging around them.
   "asset-create-request", "asset-create-reply", "asset-page-write-request", "asset-page-write-reply",
   "asset-range-request", "asset-range-reply", "asset-candidate-pages-start", "asset-candidate-pages-end",
+  // The two steps between the create and the candidate paging: the added sources' own pages (the full-range uploads of an
+  // instrument's regional sources) and the instrument states upload. What is left after them is building the candidate coordinator.
+  "asset-sources-ready", "asset-instrument-states-ready",
 ])
 export const benchmarkHeartbeatChannel = "daw:benchmark:heartbeat"
 export const benchmarkRendererPingChannel = "daw:benchmark:renderer-ping"

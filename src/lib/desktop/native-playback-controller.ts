@@ -1016,13 +1016,13 @@ export const createNativePlaybackController = (input: {
     create: () => Promise<void>
   }[], pageManager: ReturnType<typeof createNativeTimelinePageManager>,
   fullRegionRanges: readonly { sourceAssetKey: string; startFrame: number; endFrame: number }[],
-  signal?: AbortSignal, registerSources = true) => {
+  signal?: AbortSignal, registerSources = true, mark?: (name: Ae08RendererMark) => void) => {
     for (const resource of resources) {
       signal?.throwIfAborted()
       await resource.create()
     }
     if (registerSources && resources.length > 0) pageManager.addSources(resources.map(({ source }) => source))
-    await pageManager.ensureRanges(fullRegionRanges, signal)
+    await pageManager.ensureRanges(fullRegionRanges, signal, mark)
   }
   const createMappedAsset = async (
     session: NativePlaybackBridge["session"],
@@ -4156,11 +4156,13 @@ export const createNativePlaybackController = (input: {
           addedTimelineSources = sources.length > 0
           await prepareMappedResources(mappedResources, pageManager, sources.filter((source) => source.immutableAfterPreparation)
             .map((source) => ({ sourceAssetKey: source.sourceAssetKey, startFrame: 0, endFrame: source.frameCount })),
-          publicationAbort.signal, false)
+          publicationAbort.signal, false, hydrationMark)
           stagedMemoryScope?.set("page-staging", 0, () => undefined)
+          hydrationMark?.("asset-sources-ready")
         }
         publicationAbort.signal.throwIfAborted()
         checked(await awaitPreparation(session.configureInstrumentStates(serializeNativeInstrumentStates(addedInstruments, assets))))
+        if (addedAssets.length > 0) hydrationMark?.("asset-instrument-states-ready")
         // New timeline sources hydrate while a window is staged, which would spend the short bound lead. Page the
         // candidate first on a discarded coordinator, submitting nothing.
         if (addedTimelineSources && !paused) {

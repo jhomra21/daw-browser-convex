@@ -3834,6 +3834,40 @@ void TestCheckpoint2FuturePublication() {
   host.Stop();
 }
 
+// A prepare that adds no instrument settles the instrument flags itself: an earlier refusal does not leak into it, and
+// the publication arms and publishes with no ConfigureInstrumentStates call.
+void TestPrepareSettlesInstrumentFlagsWithoutStatesCall() {
+  using daw::audio_host_macos::GraphRevisionStatusCode;
+  daw::audio_host_macos::AudioHost host;
+  assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48000,
+    .max_frames_per_block = 128, .channel_count = 2, .revision = 1}));
+  assert(host.PrepareAndPublishGraph(1, GraphSnapshot(1, 1.F, 0, true)));
+  assert(host.SetTransport(1, false, 0));
+  assert(host.StartDiagnosticMode());
+  assert(host.SetTransport(1, true, 0));
+  assert(!host.ConfigureInstrumentStates(std::array<std::uint8_t, 2>{}));
+  assert(!host.instrumentPreparationError().empty());
+  assert(host.PrepareGraphRevision(2, GraphSnapshot(2, 1.F, 0, true), 256).code == GraphRevisionStatusCode::kPrepared);
+  assert(host.instrumentPreparationError().empty());
+  assert(host.PublishGraphRevision(2).code == GraphRevisionStatusCode::kPublishPending);
+  std::array<float, 128> signal{}, left{}, right{};
+  signal.fill(1.F);
+  const std::array<const float*, 2> input{signal.data(), signal.data()};
+  const std::array<float*, 2> output{left.data(), right.data()};
+  assert(host.ProcessPlanar(input, output, 128));
+  assert(host.QueueScheduleWindow(ScheduleWindow(1, 1, 1, 0, 256, 0, 1, false)));
+  auto next = ScheduleProcessorSetWindow(2, 1, 1, 256, 512, 77,
+    DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB, 256, -12.F);
+  WriteLeU32(next, 60, 2);
+  WriteLeU32(next, 64, 256);
+  assert(host.QueueScheduleWindow(next));
+  assert(host.PublishGraphRevision(2).code == GraphRevisionStatusCode::kPublishPending);
+  assert(host.ProcessPlanar(input, output, 128));
+  assert(host.ProcessPlanar(input, output, 128));
+  assert(host.InspectGraphRevision(2).code == GraphRevisionStatusCode::kPublished);
+  host.Stop();
+}
+
 void TestCheckpoint2LateFrame() {
   using daw::audio_host_macos::GraphRevisionStatusCode;
   daw::audio_host_macos::AudioHost host;
@@ -6580,6 +6614,7 @@ int main() {
   TestCheckpoint2LateFrame();
   TestCheckpoint2SeekCancelsUnpublished();
   TestCheckpoint2FuturePublication();
+  TestPrepareSettlesInstrumentFlagsWithoutStatesCall();
   TestCheckpoint2StagedBank();
   TestActiveScheduleRefillsDuringGraphPreparation();
   TestPrepareAutoRetiresCompletedRevision();

@@ -4019,7 +4019,7 @@ describe("DV01 instrument truth", () => {
       console.log("STEP6-R1-RETAINED", JSON.stringify({ answer: follower.value, sends: f.fixture.instrumentPayloads.length - before,
         configurations: configured.map(bytes => new DataView(bytes.buffer).getUint32(0, true)),
         events: events.map(event => ({ ...event, nodeId: event.nodeId.toString() })) }))
-      expect(configured.map(bytes => new DataView(bytes.buffer).getUint32(0, true))).toEqual([0])
+      expect(configured).toEqual([])
       expect(events.length).toBeGreaterThan(0)
       expect(follower.value).toEqual({ state: "applied" })
     } finally { await f.controller.dispose() }
@@ -5816,6 +5816,26 @@ for (const kind of ['sampler', 'granular', 'drum-rack'] satisfies readonly ('sam
       expect(await controller.adoptSchedule(migrationIntent(`zone-edit-${kind}`), true)).toEqual({ status: "adopted" })
       expect(configurations).toBe(1)
       expect(fixture.calls.slice(before).filter((call) => ["graph", "stop", "teardown", "begin"].includes(call))).toEqual([])
+    } finally { await controller.dispose() }
+  })
+
+  test(`a ${kind} publication that adds no instrument sends no instrument-state configuration`, async () => {
+    const fixture = createBridge("runtime-revision-progress")
+    const base = sampledNativeInput(kind, 0.1)
+    let desired = base
+    const controller = createObservedController({ bridge: fixture.bridge, getProjectId: () => "local_project",
+      compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ ...desired, transport }) })
+    try {
+      expect(await controller.start(desired.transport)).toBe("started")
+      desired = { ...base, revision: 2, renderState: { ...base.renderState, fx: { ...base.renderState.fx, masterVolume: 0.5 } } }
+      let configurations = 0
+      const configure = fixture.bridge.session.configureInstrumentStates
+      fixture.bridge.session.configureInstrumentStates = async (bytes) => { configurations++; return configure(bytes) }
+      const before = fixture.calls.length
+      acknowledgeStagedPublication(fixture)
+      expect(await controller.adoptSchedule(migrationIntent(`master-edit-${kind}`), true)).toEqual({ status: "adopted" })
+      expect(fixture.calls.slice(before)).toContain("stage-prepare")
+      expect(configurations).toBe(0)
     } finally { await controller.dispose() }
   })
 
@@ -9281,7 +9301,7 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
       snapshotInput = { ...sampledNativeInput(kind, 0.1), revision: 2,
         tracks: [longSourceTrack(), instrumentTrack] }
     }
-    if (scenario === "sampled-remove-zone") {
+    if (scenario === "sampled-remove-zone" || isScenario("sampled-remove-zone-rollback")) {
       const entry = snapshotInput.renderState.fx.trackFx!.instrument!
       const instrument = entry.instrument
       if (!instrument || instrument.kind !== "sampler") throw new Error("Expected sampler fixture.")

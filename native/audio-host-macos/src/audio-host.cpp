@@ -1852,6 +1852,13 @@ struct AudioHost::Impl {
   std::uint32_t prepared_transport_epoch = 0;
   bool prepared_instruments_ready = true;
   std::unordered_map<std::uint64_t, daw_audio_instrument_state_descriptor> prepared_instrument_targets;
+  // A prepared graph is ready once every instrument target holds retained states; the prepare itself
+  // answers that for a graph that adds no instrument, so the renderer sends no empty states call.
+  void SettlePreparedInstruments() {
+    instrument_preparation_error = {};
+    prepared_instruments_ready = std::all_of(prepared_instrument_targets.begin(), prepared_instrument_targets.end(),
+      [this](const auto& target) { return prepared_instrument_assets.contains(target.first); });
+  }
   bool ValidPreparedInstrumentEvent(const daw_audio_instrument_event& event) const {
     const auto found = prepared_instrument_targets.find(event.node_id);
     if (found == prepared_instrument_targets.end()) return false;
@@ -3106,6 +3113,7 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
   impl_->prepared_core = prepared_core;
   impl_->prepared_revision.store(revision, std::memory_order_release);
   impl_->prepared_routing = std::move(routing);
+  impl_->SettlePreparedInstruments();
   impl_->PrepareProfileEvidence(revision, prepared_core, marks);
   return status(GraphRevisionStatusCode::kPrepared);
 }
@@ -3127,11 +3135,7 @@ bool AudioHost::ConfigureInstrumentStates(const std::span<const std::uint8_t> pa
   const std::uint32_t count = ReadLeU32(payload.data());
   if (count > 64) return false;
   if (count == 0 && payload.size() == 4) {
-    impl_->instrument_preparation_error = {};
-    impl_->prepared_instruments_ready = std::all_of(impl_->prepared_instrument_targets.begin(),
-      impl_->prepared_instrument_targets.end(), [this](auto node) {
-        return impl_->prepared_instrument_assets.contains(node.first);
-      });
+    impl_->SettlePreparedInstruments();
     return true;
   }
 #if defined(DAW_AUDIO_HOST_TEST_MEMORY_LOCK)
@@ -3327,11 +3331,7 @@ bool AudioHost::ConfigureInstrumentStates(const std::span<const std::uint8_t> pa
   for (auto* asset : candidates) if (asset->mapped) asset->mapped->instrument_published = true;
   auto& retained = impl_->prepared_core != 0 ? impl_->prepared_instrument_assets : impl_->published_instrument_assets;
   for (auto& [node, assets] : configured_assets) retained[node] = std::move(assets);
-  impl_->instrument_preparation_error = {};
-  impl_->prepared_instruments_ready = std::all_of(impl_->prepared_instrument_targets.begin(),
-    impl_->prepared_instrument_targets.end(), [this](auto node) {
-      return impl_->prepared_instrument_assets.contains(node.first);
-    });
+  impl_->SettlePreparedInstruments();
   return true;
 }
 

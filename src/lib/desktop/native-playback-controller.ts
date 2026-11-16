@@ -4235,7 +4235,9 @@ export const createNativePlaybackController = (input: {
           hydrationMark?.("asset-sources-ready")
         }
         publicationAbort.signal.throwIfAborted()
-        checked(await awaitPreparation(session.configureInstrumentStates(serializeNativeInstrumentStates(addedInstruments, assets))))
+        // The host's prepare settles the instrument flags itself, so a graph that adds none needs no round trip.
+        if (addedInstruments.length > 0)
+          checked(await awaitPreparation(session.configureInstrumentStates(serializeNativeInstrumentStates(addedInstruments, assets))))
         hydrationMark?.("bind-states-configured")
         if (addedAssets.length > 0) hydrationMark?.("asset-instrument-states-ready")
         // New timeline sources hydrate while a window is staged, which would spend the short bound lead. Page the

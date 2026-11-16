@@ -620,8 +620,10 @@ export default function createFuzzHost(record: <Value>(event: Value) => void, pl
           const rewritten = bytes.slice()
           viewOf(rewritten).setBigUint64(0, BigInt(revision))
           viewOf(rewritten).setUint32(16, revision, true)
-          prepared = decodeGraph(rewritten); submittedGraphs.set(prepared.revision, rewritten); seam = requestedPublicationFrame; instrumentsReady = false; rebaseRequired = false
+          prepared = decodeGraph(rewritten); submittedGraphs.set(prepared.revision, rewritten); seam = requestedPublicationFrame; rebaseRequired = false
           preparedConfigs = new Map(publishedConfigs)
+          // Prepare settles the flag itself (audio-host.cpp SettlePreparedInstruments): ready when every instrument node holds a retained configuration.
+          instrumentsReady = [...prepared.nodes].every(([id, kind]) => kind !== 2 || preparedConfigs.has(id))
           preparedBank = { revision, epoch, through: seam, window: 0n, complete: false, seam, sources: new Map(), sourceHistory: new Map(), events: new Map() }
           record({ event: "prepared", revision, content: fields(prepared), seam })
           record({ event: "adoption-prepared", revision })

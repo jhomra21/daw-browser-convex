@@ -116,7 +116,7 @@ const selfTest = () => {
   const expected = { hostPrepareMs: 4, replyWriteMs: 0.5, hostToRendererMs: 5.5, rendererMs: 3, rendererToHostMs: 2, spectralWarmMs: 0.5 }
   const expectedSteps = { statesMs: 1, progressReadMs: 1, restMs: 1 }
   const failures = [
-    ...(split && Object.entries(expected).every(([name, value]) => Object.entries(split).some(([field, found]) => field === name && typeof found === "number" && Math.abs(found - value) < 1e-9)) ? []
+    ...(split && Object.entries(expected).every(([name, value]) => Math.abs(Number(Object.entries(split).find(([field]) => field === name)?.[1]) - value) < 1e-9) ? []
       : [`split ${JSON.stringify(split)}, expected ${JSON.stringify(expected)}`]),
     ...(JSON.stringify(split?.rendererSteps) === JSON.stringify(expectedSteps) ? [] : [`renderer steps ${JSON.stringify(split?.rendererSteps)}, expected ${JSON.stringify(expectedSteps)}`]),
     ...(prepareSplit(events.filter((event) => event.event !== "bind-progress-read"), prepare, request)?.rendererSteps === undefined ? [] : ["a revision with no progress-read mark must have no renderer steps"]),

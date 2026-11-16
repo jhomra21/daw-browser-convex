@@ -1200,11 +1200,9 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     const processor = externalProcessors().find((entry) => entry.instanceId === instanceId);
     if (!processor || processor.targetId !== props.selectedFXTarget) return;
     const playbackIntent = props.captureStructuralPlaybackIntent?.();
+    ae08UiMark("ui-device-remove", () => instanceId);
     void deleteLocalExternalProcessor(projectId, instanceId)
-      .then(() => {
-        ae08UiMark("ui-device-remove", () => instanceId);
-        untrack(() => props.onMixedReorderCommitted?.(playbackIntent));
-      })
+      .then(() => untrack(() => props.onMixedReorderCommitted?.(playbackIntent)))
       .catch(() => undefined);
   };
   const applyExternalProcessorCommit = (

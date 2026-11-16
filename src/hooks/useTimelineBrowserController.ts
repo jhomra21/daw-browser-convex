@@ -691,6 +691,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       options.onExternalPluginInsertionResult?.("VST3 insertion unavailable", availability.message);
       return;
     }
+    ae08UiMark("ui-device-insert", () => itemId);
     setInsertingExternalPluginId(itemId);
     try {
       const result = await insertNativeVst3Effect({
@@ -708,10 +709,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       const message = result.ok
         ? "Enabled · Preflight passed. Playback uses the native VST3 graph; browser playback remains unsupported."
         : result.message;
-      if (result.ok) {
-        ae08UiMark("ui-device-insert", () => result.processor.instanceId);
-        options.enableNativePlayback?.();
-      }
+      if (result.ok) options.enableNativePlayback?.();
       setExternalPluginStatusById((statuses) => ({ ...statuses, [itemId]: message }));
       if (!result.ok) {
         options.onExternalPluginInsertionResult?.("VST3 insertion failed", message);

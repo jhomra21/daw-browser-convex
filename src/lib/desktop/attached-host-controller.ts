@@ -534,11 +534,16 @@ export const createAttachedHostController = (input: {
                     }
                   }
                 }
-                await Promise.all(deliveries)
+                // Native refuses a parameter event it cannot queue (no attachment, playback off, queue full) and the
+                // commit still succeeds: the mark tells a refused delivery from one that never ran.
+                const delivered = await Promise.all(deliveries)
+                ae08Mark(delivered.every(Boolean) ? "control-parameters-delivered" : "control-parameters-undelivered", commitKey)
               }
             }
           }
-        } catch {}
+        } catch {
+          ae08Mark("control-parameters-undelivered", commitKey)
+        }
       }
       if (request_.operation === "control.commit" && input.reconcileMountedLocalTimeline) {
         const commitResult = controlCommitResultSchemaV1.safeParse(result)

@@ -4247,15 +4247,17 @@ export const createNativePlaybackController = (input: {
         }
         // Nothing the seam depends on is left to do: rebind it to fresh native progress, before any staging
         // (native resets the still-empty prepared bank). A refused bind keeps the provisional seam, which is safe. The bind
-        // spends no resubmit, so the rebase growth and budget start from zero; two attempts bound it.
+        // spends no resubmit, so the rebase growth and budget start from zero; two attempts bound it. A hydration longer
+        // than the provisional lead has native past the seam, which Inspect reports as rebase-required: that seam binds
+        // later, to the same lead, instead of publishing at a seam that was already reached.
         for (let attempt = 0; attempt < 2; attempt++) {
           const fresh = await inspect(binding, true)
           if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
-          if (!fresh?.ok || fresh.revision.status !== "prepared" || fresh.revision.progressFrame === undefined
-            || fresh.revision.requestedPublicationFrame !== BigInt(seam)) break
+          if (!fresh?.ok || (fresh.revision.status !== "prepared" && fresh.revision.status !== "rebase-required")
+            || fresh.revision.progressFrame === undefined || fresh.revision.requestedPublicationFrame !== BigInt(seam)) break
           if (fresh.revision.transportEpoch !== transportEpoch) throw new NativePlaybackAbortError("ownership-invalidated")
           const bound = chooseFrame(fresh.revision.progressFrame, boundLeadBlocks())
-          if (bound >= seam) break
+          if (bound === seam) break
           const rebind = { ...binding, requestedPublicationFrame: BigInt(bound) }
           const rebound = await withoutLane(revisions.publish(rebind))
           if (!rebound.ok) classifyPublication(rebound)

@@ -9046,7 +9046,7 @@ const reverbPlaybackInput = () => ({
   },
 })
 
-for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo", "audio-replace", "audio-combined", "audio-seek", "sampled-track-remove-sampler", "sampled-track-remove-granular", "sampled-track-remove-drum-rack", "instrument-config", "asset-add", "asset-add-late-bind", "asset-add-install-cancel", "asset-add-rebase", "asset-add-capacity", "asset-add-cancel", "asset-add-hydration-cancel", "clip-add-existing", "audio-track-remove", "audio-track-remove-bundled", "sampled-add-sampler", "sampled-add-granular", "sampled-add-drum-rack", "sampled-add-budget", "sampled-remove-zone", "sampled-replace-synth", "sampled-change-key", "sampled-remove-zone-rollback", "sampled-remove-zone-cancel", "sampled-remove-zone-seek-racing", "proof", "expired-prepare", "invalid-prepare", "prepared-conflict", "stale-epoch", "chunk-cancel", "hydration-cancel", "rebase", "exhaustion", "seek", "readiness", "credits", "seek-published", "seek-racing", "stop", "project-switch", "seek-queued", "keep-latency-race", "paged-granular", "paged-sampler", "paged-drum-rack", "paged-concurrent-refill"]) {
+for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo", "audio-replace", "audio-combined", "audio-seek", "sampled-track-remove-sampler", "sampled-track-remove-granular", "sampled-track-remove-drum-rack", "instrument-config", "asset-add", "asset-add-late-bind", "asset-add-slow-upload", "asset-add-install-cancel", "asset-add-rebase", "asset-add-capacity", "asset-add-cancel", "asset-add-hydration-cancel", "clip-add-existing", "audio-track-remove", "audio-track-remove-bundled", "sampled-add-sampler", "sampled-add-granular", "sampled-add-drum-rack", "sampled-add-budget", "sampled-remove-zone", "sampled-replace-synth", "sampled-change-key", "sampled-remove-zone-rollback", "sampled-remove-zone-cancel", "sampled-remove-zone-seek-racing", "proof", "expired-prepare", "invalid-prepare", "prepared-conflict", "stale-epoch", "chunk-cancel", "hydration-cancel", "rebase", "exhaustion", "seek", "readiness", "credits", "seek-published", "seek-racing", "stop", "project-switch", "seek-queued", "keep-latency-race", "paged-granular", "paged-sampler", "paged-drum-rack", "paged-concurrent-refill"]) {
   test(`staged schedule handoff ${scenario} retains active audio and epoch`, async () => {
     const fixture = createBridge("runtime-revision-progress")
     const isScenario = (name: string) => String(scenario) === name
@@ -9139,7 +9139,9 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
         expect(originalAssetIds).not.toContain(asset.sessionAssetId)
       if (scenario === "asset-add-capacity") return { ok: false, error: "asset-capacity-exceeded", kind: "refused" }
       const result = await createMappedAsset(asset)
-      if (scenario === "asset-add-install-cancel") { installEntered.resolve(); await installGate.promise }
+      if (scenario === "asset-add-install-cancel" || scenario === "asset-add-slow-upload") {
+        installEntered.resolve(); await installGate.promise
+      }
       return result
     }
     const originalWindows = fixture.schedulePayloads.slice()
@@ -9190,10 +9192,12 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
       }
       return reply()
     }
+    const publishRequests: { requested: bigint; progress: bigint }[] = []
     fixture.bridge.session.revisions.publish = async (request) => {
       if (scenario === "keep-latency-race" && request.requestedPublicationFrame === undefined)
         return defaultRevisionPublish(request)
       const requested = request.requestedPublicationFrame ?? 0n
+      publishRequests.push({ requested, progress: frame })
       if (requested !== seam) {
         assetsAtFirstSeamChange ??= fixture.installedAssets.length
         rangesAtFirstSeamChange ??= preparedRanges
@@ -9201,8 +9205,10 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
         seam = requested; status = "prepared"; return reply()
       }
       publishes++
+      // Native answers rebase-required to a Publish at a seam it has already reached (audio-host.cpp:3342-3348).
       if (scenario === "exhaustion" || ((scenario === "rebase" || scenario === "asset-add-rebase") && publishes === 1)
-        || (scenario === "paged-concurrent-refill" && publishes === 1)) {
+        || (scenario === "paged-concurrent-refill" && publishes === 1)
+        || (scenario === "asset-add-slow-upload" && seam <= frame)) {
         frame = seam + 128n
         status = "rebase-required"
       } else status = scenario === "readiness" && publishes === 1 ? "prepared" : "publish-pending"
@@ -9212,6 +9218,9 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
       if (scenario === "keep-latency-race" && request.requestedPublicationFrame === undefined)
         return defaultRevisionInspect(request)
       const inspection = reply()
+      // Inspect reports rebase-required once progress is past the requested seam (audio-host.cpp:3435-3439).
+      if (scenario === "asset-add-slow-upload" && status === "prepared" && frame > seam && inspection.ok)
+        return { ...inspection, revision: { ...inspection.revision, status: "rebase-required" } }
       if (scenario === "sampled-remove-zone-seek-racing" && transportAcknowledged && inspection.ok)
         return { ...inspection, revision: { ...inspection.revision, status: "published",
           activeRevision: stagedRevision, preparedRevision: 0, transportEpoch: fixture.transports.at(-1)?.epoch ?? epoch } }
@@ -9305,6 +9314,12 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
     }
     let settled = false
     const update = controller.adoptSchedule(migrationIntent("public-migration-1"), true).then((result) => { settled = true; return result })
+    if (scenario === "asset-add-slow-upload") {
+      await installEntered.promise
+      // The upload outlasts the 16-block provisional seam: native has played two blocks past it when the upload returns.
+      frame = seam + 2n * 512n
+      installGate.resolve()
+    }
     if (scenario === "asset-add-install-cancel") {
       await installEntered.promise
       let paused = false
@@ -9516,6 +9531,12 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
           expect(bindings.at(-1)?.getBigUint64(16, true)).toBe(seam)
         }
       }
+      if (scenario === "asset-add-slow-upload") {
+        // The seam binds after the upload, 3 blocks (25 ms) past the progress native had then, and one Publish arms it.
+        expect(publishRequests[0] && Number(publishRequests[0].requested - publishRequests[0].progress) / 512).toBe(3)
+        expect(new Set(publishRequests.map(({ requested }) => requested)).size).toBe(1)
+        expect(publishes).toBe(1)
+      }
       status = "published"
       activeRevision = stagedRevision
       fixture.setRuntimeRevision(activeRevision)
@@ -9586,7 +9607,7 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
       }
       // A publication that adds no timeline source has no new pages to make resident before the seam binds.
       if (scenario === "clip-add-existing") expect(rangesAtFirstSeamChange).toBe(0)
-      if (scenario === "asset-add-late-bind") {
+      if (scenario === "asset-add-late-bind" || scenario === "asset-add-slow-upload") {
         // The seam binds after hydration, and the pages are primed from the bound seam.
         expect(assetsAtFirstSeamChange).toBe(originalAssetIds.length + 1)
         // The new source's first pages are resident before the short bind spends its lead.

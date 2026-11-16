@@ -74,6 +74,10 @@ export const ae08RendererMarks = z.enum([
   "ui-parameter-commit", "ui-automation-override", "ui-automation-reenable", "ui-device-insert", "ui-device-remove", "ui-editor-open", "ui-undo", "ui-redo",
   "compile-start", "compile-instruments-ready", "compile-render-state-ready", "compile-processors-ready", "compile-end",
   "lane-admitted", "fence-open", "prepare-sent",
+  // Asset hydration of one adoption, after the host prepared its graph: the mapped asset's create, each page write and range prepare
+  // (a request when the renderer sends it, a reply when the host's answer is back), and the candidate paging around them.
+  "asset-create-request", "asset-create-reply", "asset-page-write-request", "asset-page-write-reply",
+  "asset-range-request", "asset-range-reply", "asset-candidate-pages-start", "asset-candidate-pages-end",
 ])
 export const benchmarkHeartbeatChannel = "daw:benchmark:heartbeat"
 export const benchmarkRendererPingChannel = "daw:benchmark:renderer-ping"

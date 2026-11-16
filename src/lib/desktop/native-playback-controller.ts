@@ -1,7 +1,7 @@
 import { compileLiveNativeProjection, resolveMixerTiming, type LiveNativeProjection } from "@daw-browser/audio-engine/live-native-projection"
 import { effectiveLoopForStart } from "@daw-browser/audio-engine/loop-frame-schedule"
 import { NativePlaybackAbortError } from "./native-playback-abort"
-import { ae08AdoptionMarker } from "./ae08-marks"
+import { ae08AdoptionMarker, type Ae08RendererMark } from "./ae08-marks"
 import { nativeExternalLatencyFrames as nativeOfflineExternalLatencyFrames } from "~/lib/export/native-offline-render-plan"
 import {
   nativeAudioHostMaximumInstalledAssets,
@@ -1030,12 +1030,15 @@ export const createNativePlaybackController = (input: {
     mapping: { sessionAssetId: number },
     preparedStretchArtifactId: string | undefined,
     transactionToken?: string,
+    mark?: (name: Ae08RendererMark) => void,
   ) => {
     if (!session.createMappedAsset) throw new Error("Native mapped asset hydration is unavailable.")
+    mark?.("asset-create-request")
     const reply = await session.createMappedAsset({
       sessionAssetId: mapping.sessionAssetId, frameCount: asset.frameCount,
       sampleRateHz: asset.sampleRateHz, channelCount: asset.channelCount, preparedStretchArtifactId,
     }, transactionToken)
+    mark?.("asset-create-reply")
     if (!reply.ok) throw new PublicationFailure(reply.error,
       "kind" in reply && (reply.kind === "refused" || reply.kind === "unconfirmed" || reply.kind === "unavailable")
         ? reply.kind : "refused")
@@ -4092,6 +4095,7 @@ export const createNativePlaybackController = (input: {
             transportEpoch, true, 0, nextTransportTransitionId))))
         }
         let addedTimelineSources = false
+        const hydrationMark = ae08AdoptionMarker(attempt?.intent.key)
         if (addedAssets.length > 0) {
           if (!pageManager || !session.createMappedAsset) throw new Error("Native mapped asset hydration is unavailable.")
           const regionalSources = new Map(projection.instrumentRegionSources?.map((source) => [source.sourceAssetKey, source.buffer]))
@@ -4134,7 +4138,7 @@ export const createNativePlaybackController = (input: {
               }
               sources.push(source)
               mappedResources.push({ source, create: async () => awaitPreparation(
-                createMappedAsset(session, asset, mapping, preparedStretchArtifactId)) })
+                createMappedAsset(session, asset, mapping, preparedStretchArtifactId, undefined, hydrationMark)) })
               continue
             }
             const regionalBuffer = regionalSources.get(sourceAssetKey)
@@ -4145,7 +4149,7 @@ export const createNativePlaybackController = (input: {
               immutableAfterPreparation: regionalBuffer !== undefined }
             sources.push(source)
             mappedResources.push({ source, create: async () => awaitPreparation(
-              createMappedAsset(session, asset, mapping, preparedStretchArtifactId)) })
+              createMappedAsset(session, asset, mapping, preparedStretchArtifactId, undefined, hydrationMark)) })
           }
           publicationAbort.signal.throwIfAborted()
           discardAddedSources = pageManager.addSources(sources)
@@ -4164,7 +4168,7 @@ export const createNativePlaybackController = (input: {
           await awaitPreparation(coordinator.prepareCandidatePages({ ...snapshot, revision: candidateRevision },
             { ...graph, revision: candidateRevision }, coordinator.currentFrame(), seam, { assets, assetSourceKeys: sourceKeys,
               nativePcmChunkDescriptors: projection.nativePcmChunkDescriptors, preparedStretchAssets: candidate.stretchAssets },
-            publicationAbort.signal))
+            publicationAbort.signal, hydrationMark))
         }
         // Nothing the seam depends on is left to do: rebind it to fresh native progress, before any staging
         // (native resets the still-empty prepared bank). A refused bind keeps the provisional seam, which is safe. The bind

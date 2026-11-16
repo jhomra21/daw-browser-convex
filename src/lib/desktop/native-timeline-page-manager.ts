@@ -6,6 +6,7 @@ import {
 } from '@daw-browser/desktop-protocol/native-audio-host'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import type { PreparedStretchArtifactRepository } from '@daw-browser/audio-engine/prepared-stretch-store'
+import type { Ae08RendererMark } from './ae08-marks'
 import { NativePlaybackAbortError } from './native-playback-abort'
 
 export type NativeTimelineSource = {
@@ -23,9 +24,11 @@ export type NativeTimelineSource = {
 export type NativeTimelinePageManager = {
   addSources: (sources: readonly NativeTimelineSource[]) => () => Promise<void>
   removeSources: (sessionAssetIds: readonly number[]) => Promise<void>
+  /** `mark` logs the page writes and range prepares this call starts (opt-in acceptance evidence). */
   ensureRanges: (
     ranges: readonly { sourceAssetKey: string; startFrame: number; endFrame: number }[],
     signal?: AbortSignal,
+    mark?: (name: Ae08RendererMark) => void,
   ) => Promise<void>
   readPage: (
     sourceAssetKey: string,
@@ -47,6 +50,16 @@ type RangePreparer = (
   frameCount: number,
   signal?: AbortSignal,
 ) => Promise<void>
+type Mark = (name: Ae08RendererMark) => void
+const markedRequest = async (
+  mark: Mark | undefined,
+  names: readonly [request: Ae08RendererMark, reply: Ae08RendererMark],
+  send: () => Promise<void>,
+) => {
+  mark?.(names[0])
+  await send()
+  mark?.(names[1])
+}
 const maximumDecoders = 2
 const maximumDecodedPageFrames = 16_384
 export const nativeTimelineMaximumUploadedPages = 128
@@ -265,6 +278,7 @@ export const createNativeTimelinePageManager = (input: {
     sourceAssetKey: string,
     startFrame: number,
     signal?: AbortSignal,
+    mark?: Mark,
   ) => {
     const source = sources.get(sourceAssetKey)
     if (!source) throw new Error(`Native audio asset "${sourceAssetKey}" is not registered.`)
@@ -292,7 +306,7 @@ export const createNativeTimelinePageManager = (input: {
             endFrame - startFrame,
             operationSignal,
           )
-          await input.writePage(page, operationSignal)
+          await markedRequest(mark, ['asset-page-write-request', 'asset-page-write-reply'], () => input.writePage(page, operationSignal))
           markUploaded(sourceAssetKey, startFrame)
           return
         }
@@ -349,12 +363,12 @@ export const createNativeTimelinePageManager = (input: {
             channel * bytesPerPlane,
           )
         })
-        await input.writePage({
+        await markedRequest(mark, ['asset-page-write-request', 'asset-page-write-reply'], () => input.writePage({
           sessionAssetId: source.sessionAssetId,
           startFrame,
           frameCount: endFrame - startFrame,
           planarPcm,
-        }, operationSignal)
+        }, operationSignal))
         markUploaded(sourceAssetKey, startFrame)
       } finally {
         if (slotAcquired) {
@@ -459,7 +473,7 @@ export const createNativeTimelinePageManager = (input: {
       for (const source of added) sources.set(source.sourceAssetKey, source)
       return () => removeSources(added.map((source) => source.sessionAssetId))
     },
-    ensureRanges: async (ranges, signal) => {
+    ensureRanges: async (ranges, signal, mark) => {
       signal?.throwIfAborted()
       const merged = new Map<string, { sourceAssetKey: string; startFrame: number; endFrame: number }[]>()
       for (const range of ranges) {
@@ -504,11 +518,13 @@ export const createNativeTimelinePageManager = (input: {
         hydrationJobs.push(...[...pageStarts].map((pageStart) => ({ sourceAssetKey, pageStart })))
       }
       await runWithConcurrency(hydrationJobs, maximumDecoders, async ({ sourceAssetKey, pageStart }) => {
-        await hydratePage(sourceAssetKey, pageStart, signal)
+        await hydratePage(sourceAssetKey, pageStart, signal, mark)
       })
+      const prepareRange = (job: (typeof prepareJobs)[number]) => markedRequest(mark, ['asset-range-request', 'asset-range-reply'],
+        async () => { await input.prepareRange?.(job.source.sessionAssetId, job.startFrame, job.frameCount, signal) })
       for (const job of prepareJobs) {
         try {
-          await input.prepareRange?.(job.source.sessionAssetId, job.startFrame, job.frameCount, signal)
+          await prepareRange(job)
         } catch {
           // Published instrument mappings cannot be rewritten, even when the
           // ordinary timeline coverage hints have been evicted.
@@ -528,9 +544,9 @@ export const createNativeTimelinePageManager = (input: {
             retryPages.push({ sourceAssetKey: job.source.sourceAssetKey, pageStart })
           }
           await runWithConcurrency(retryPages, maximumDecoders, async ({ sourceAssetKey, pageStart }) => {
-            await hydratePage(sourceAssetKey, pageStart, signal)
+            await hydratePage(sourceAssetKey, pageStart, signal, mark)
           })
-          await input.prepareRange?.(job.source.sessionAssetId, job.startFrame, job.frameCount, signal)
+          await prepareRange(job)
         }
         if (job.source.immutableAfterPreparation
           && job.startFrame === 0 && job.frameCount === job.source.frameCount) {

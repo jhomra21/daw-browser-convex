@@ -29,6 +29,7 @@ import { parseExternalAutomationParameterId, valueAtAutomationTime } from "@daw-
 import type { LivePlaybackSnapshot } from "~/lib/live-playback-snapshot"
 import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 import { maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
+import type { Ae08RendererMark } from "./ae08-marks"
 import type { NativeTimelinePageManager } from "./native-timeline-page-manager"
 import { NativePlaybackAbortError } from "./native-playback-abort"
 import { nativeMappedSourceCoverage } from "~/lib/native-source-coverage"
@@ -79,7 +80,7 @@ export type NativeScheduleCoordinator = {
    * Aborting `signal` detaches from the preparation at once; page decodes already running stay shared with the page manager.
    */
   prepareCandidatePages: (snapshot: LivePlaybackSnapshot, graph: AudioCoreGraphSnapshot, fromFrame: number, seamFrame: number,
-    resources: NativeCandidateResources, signal: AbortSignal) => Promise<void>
+    resources: NativeCandidateResources, signal: AbortSignal, mark?: (name: Ae08RendererMark) => void) => Promise<void>
   prime: (frame: number, transactionToken?: string) => Promise<void>
   onProgress: (progress: NativeScheduleProgress) => void
   waitForAccepted: (minimumFrame: number) => Promise<void>
@@ -352,7 +353,7 @@ export const scheduleEndFrameFor = (
 const capacityError = (message: string) => new Error(`Native schedule capacity exceeded: ${message}`)
 
 type PagePreparingCoordinator = NativeScheduleCoordinator & {
-  preparePages: (fromFrame: number, seamFrame: number) => Promise<void>
+  preparePages: (fromFrame: number, seamFrame: number, mark?: (name: Ae08RendererMark) => void) => Promise<void>
 }
 
 const buildNativeScheduleCoordinator = (input: {
@@ -1272,16 +1273,16 @@ const buildNativeScheduleCoordinator = (input: {
       ))
       nextSequence = Math.max(nextSequence, events.length + 1)
     },
-    async preparePages(fromFrame, seamFrame) {
+    async preparePages(fromFrame, seamFrame, mark) {
       const end = Math.min(ownedScheduleEndFrame, seamFrame + Math.max(
         input.capacity.maximumFramesPerBlock,
         Math.round(input.sampleRateHz * nativeScheduleLookaheadSec),
       ))
       const ranges = hydrationRangesFor(fromFrame, compileWindow(fromFrame, end))
       if (input.pageManager && ranges.length > 0)
-        await awaitPreparation(input.pageManager.ensureRanges(ranges, hydrationAbortController.signal))
+        await awaitPreparation(input.pageManager.ensureRanges(ranges, hydrationAbortController.signal, mark))
     },
-    async prepareCandidatePages(snapshot, graph, fromFrame, seamFrame, resources, signal) {
+    async prepareCandidatePages(snapshot, graph, fromFrame, seamFrame, resources, signal, mark) {
       // Compiled on private, empty ledgers: every audible source is declared from `fromFrame`, as a published bank would.
       const candidate = buildNativeScheduleCoordinator({
         ...input, ...resources, snapshot, graph, startFrame: fromFrame, preparedPublicationFrame: fromFrame,
@@ -1292,7 +1293,9 @@ const buildNativeScheduleCoordinator = (input: {
       signal.addEventListener("abort", abort, { once: true })
       try {
         if (signal.aborted) abort()
-        await candidate.preparePages(fromFrame, seamFrame)
+        mark?.("asset-candidate-pages-start")
+        await candidate.preparePages(fromFrame, seamFrame, mark)
+        mark?.("asset-candidate-pages-end")
       } finally {
         signal.removeEventListener("abort", abort)
         candidate.dispose()

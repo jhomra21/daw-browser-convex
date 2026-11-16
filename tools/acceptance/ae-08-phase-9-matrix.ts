@@ -343,10 +343,15 @@ export const judgeStored = async (directory: string) => Promise.all((await store
 // An edit made in the app window has no commit line: it is timed from the first ui-* mark the app logged between the step start and the
 // publication (ae-08-latency-gates.ts does the same), and from the step start only when the evidence has no such mark.
 const commitMarkNames = ae08RendererMarks.options.filter((name) => name.startsWith("control-"))
-const adoptionMarkNames = ae08RendererMarks.options.filter((name) => !name.startsWith("control-") && !name.startsWith("ui-"))
+// An asset publication hydrates between graph-prepare and graph-publish-request: its marks (asset-*) are logged under the adoption key, after prepare-sent.
+const hydrationMarkNames = ae08RendererMarks.options.filter((name) => name.startsWith("asset-"))
+const adoptionMarkNames = ae08RendererMarks.options.filter((name) => !name.startsWith("control-") && !name.startsWith("ui-") && !hydrationMarkNames.includes(name))
 export type EditSpan = { from: string; to: string; ms: number }
-// `origin` is where the edit is timed from: the app's commit line, the UI mark it logged, or the step start.
-export type EditBreakdown = { index: number; name: string; origin: string; toPrepareMs: number; toRequestMs: number; toPublishMs: number; spans: EditSpan[] }
+// `origin` is where the edit is timed from: the app's commit line, the UI mark it logged, or the step start. `hydration` runs from
+// graph-prepare through the asset marks to graph-publish-request, and is empty when the publication hydrated nothing.
+export type EditBreakdown = { index: number; name: string; origin: string; toPrepareMs: number; toRequestMs: number; toPublishMs: number; spans: EditSpan[]; hydration: EditSpan[] }
+const spansBetween = (points: readonly { name: string; wallMs: number }[]): EditSpan[] =>
+  points.slice(1).map((point, at) => ({ from: points[at]?.name ?? "", to: point.name, ms: point.wallMs - (points[at]?.wallMs ?? point.wallMs) }))
 export const editBreakdowns = (events: readonly HostEvent[], edits: readonly { index: number; name: string; wallMs: number }[]): (EditBreakdown | { index: number; name: string; missing: string })[] =>
   edits.map((edit) => {
     const publishAt = events.findIndex((event) => event.event === "graph-publish" && event.cause === "block-boundary" && event.publicationFrame > 0 && event.wallMs >= edit.wallMs)
@@ -369,9 +374,12 @@ export const editBreakdowns = (events: readonly HostEvent[], edits: readonly { i
         .map((event) => ({ name: event.event, wallMs: event.wallMs })),
       { name: "graph-prepare", wallMs: prepare.wallMs },
     ]
+    const hydrated = sent ? events.filter((event) => hydrationMarkNames.some((name) => name === event.event) && event.key === sent.key
+      && event.wallMs >= prepare.wallMs && event.wallMs <= request.wallMs).map((event) => ({ name: event.event, wallMs: event.wallMs })) : []
     return { index: edit.index, name: edit.name, origin,
       toPrepareMs: prepare.wallMs - startMs, toRequestMs: request.wallMs - startMs, toPublishMs: publish.wallMs - startMs,
-      spans: points.slice(1).map((point, at) => ({ from: points[at]?.name ?? "", to: point.name, ms: point.wallMs - (points[at]?.wallMs ?? point.wallMs) })) }
+      spans: spansBetween(points),
+      hydration: hydrated.length ? spansBetween([{ name: "graph-prepare", wallMs: prepare.wallMs }, ...hydrated, { name: "graph-publish-request", wallMs: request.wallMs }]) : [] }
   })
 
 const breakdownEdits = z.object({ edits: z.array(z.object({ index: z.number(), name: z.string(), wallMs: z.number() })) })
@@ -384,7 +392,7 @@ export const breakdownStored = async (directory: string) => Promise.all((await s
 }))
 export const breakdownLine = (entry: Awaited<ReturnType<typeof breakdownStored>>[number]) => entry.breakdowns === undefined ? [`${entry.row}: no host.jsonl (setup failure)`]
   : entry.breakdowns.map((found) => "missing" in found ? `${entry.row} edit ${found.index} ${found.name}: ${found.missing}`
-    : `${entry.row} edit ${found.index} ${found.name}: +${found.toPrepareMs} ms graph-prepare (${found.spans.length > 1 ? found.spans.map((span) => `${span.from} -> ${span.to} ${span.ms} ms`).join(", ") : "no renderer marks in host.jsonl"}), +${found.toRequestMs} ms graph-publish-request, +${found.toPublishMs} ms graph-publish${found.origin === "edit-start" ? " (counted from the step start: the edit has no control-commit-received line and no ui-* mark)" : ` (counted from ${found.origin})`}`)
+    : `${entry.row} edit ${found.index} ${found.name}: +${found.toPrepareMs} ms graph-prepare (${found.spans.length > 1 ? found.spans.map((span) => `${span.from} -> ${span.to} ${span.ms} ms`).join(", ") : "no renderer marks in host.jsonl"}), +${found.toRequestMs} ms graph-publish-request${found.hydration.length ? ` (asset hydration: ${found.hydration.map((span) => `${span.from} -> ${span.to} ${span.ms} ms`).join(", ")})` : ""}, +${found.toPublishMs} ms graph-publish${found.origin === "edit-start" ? " (counted from the step start: the edit has no control-commit-received line and no ui-* mark)" : ` (counted from ${found.origin})`}`)
 
 // ---- Self-test ----
 const steps = (count: number, settled: (index: number) => number | undefined = (index) => index * 4000 + 1500) =>
@@ -652,6 +660,19 @@ export const selfTest = async () => {
     + "control-commit-done>control-store-emitted:25 control-store-emitted>compile-start:1 compile-start>compile-instruments-ready:4 compile-instruments-ready>compile-render-state-ready:5 "
     + "compile-render-state-ready>compile-processors-ready:2 compile-processors-ready>compile-end:1 compile-end>lane-admitted:7 lane-admitted>fence-open:1 fence-open>prepare-sent:1 prepare-sent>graph-prepare:8", `marked spans: ${names.join(" ")}`)
   check(breakdownLine({ row: "r", breakdowns: spanned ? [spanned] : [] })[0]?.includes("compile-end -> lane-admitted 7 ms") === true, "the report lists every span")
+  // An asset publication hydrates between graph-prepare and graph-publish-request; only the marks of the adoption that sent the prepare count.
+  const hydrating = host(mark("prepare-sent", 1082, "new"), mark("asset-create-request", 1000, "old"), line("graph-prepare", 1090, { requestedRevision: 5 }),
+    mark("asset-create-request", 1091, "new"), mark("asset-create-reply", 1093, "new"), mark("asset-candidate-pages-start", 1094, "new"),
+    mark("asset-page-write-request", 1095, "new"), mark("asset-page-write-reply", 1107, "new"), mark("asset-range-request", 1108, "new"), mark("asset-range-reply", 1110, "new"),
+    mark("asset-candidate-pages-end", 1111, "new"), line("graph-publish-request", 1175, { requestedRevision: 5 }),
+    line("graph-publish", 1210, { cause: "block-boundary", revision: 5, publicationFrame: 96256 }))
+  const [assetPublication] = editBreakdowns(hydrating, [{ index: 1, name: "swap", wallMs: 1000 }])
+  const hydration = assetPublication !== undefined && "hydration" in assetPublication ? assetPublication.hydration.map((span) => `${span.from}>${span.to}:${span.ms}`) : []
+  check(hydration.join(" ") === "graph-prepare>asset-create-request:1 asset-create-request>asset-create-reply:2 asset-create-reply>asset-candidate-pages-start:1 "
+    + "asset-candidate-pages-start>asset-page-write-request:1 asset-page-write-request>asset-page-write-reply:12 asset-page-write-reply>asset-range-request:1 "
+    + "asset-range-request>asset-range-reply:2 asset-range-reply>asset-candidate-pages-end:1 asset-candidate-pages-end>graph-publish-request:64", `hydration spans: ${hydration.join(" ")}`)
+  check(breakdownLine({ row: "r", breakdowns: assetPublication ? [assetPublication] : [] })[0]?.includes("asset-page-write-request -> asset-page-write-reply 12 ms") === true, "the report lists the hydration spans")
+  check(spanned !== undefined && "hydration" in spanned && spanned.hydration.length === 0, "a publication with no asset marks has no hydration spans")
   console.log("ae-08 phase 9 matrix self-test: pass")
 }
 

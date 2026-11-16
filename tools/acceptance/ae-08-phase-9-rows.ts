@@ -124,9 +124,10 @@ export const burstRows: BurstRow[] = [
     cycle: [{ edits: ["effects-reverse"], state: "saturator-first" }, { edits: ["effects-restore"], state: "utility-first" }] } },
   { name: "polyphony-down-held-chord", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-chord", start: "polyphony-16", judge: "held",
     cycle: [{ edits: ["polyphony-2"], state: "polyphony-2" }, { edits: ["polyphony-16"], state: "polyphony-16" }] } },
-  // The copy is installed by the first swap (its publication follows an asset-install); the swap back finds the original already installed.
+  // The copy is installed by the first swap (its publication follows an asset-install and its page writes); the swap back and every
+  // later swap find both samples resident and log no asset line, so no step waits for one: each settles on its first publication.
   { name: "asset-swap-held-note", latencyClass: "asset", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-swap", start: "asset-changed", judge: "held",
-    cycle: [{ edits: ["sampler-swap-asset"], state: "asset-copy", settle: "asset" }, { edits: ["sampler-swap-back"], state: "asset-changed" }] } },
+    cycle: [{ edits: ["sampler-swap-asset"], state: "asset-copy" }, { edits: ["sampler-swap-back"], state: "asset-changed" }] } },
   { name: "held-note-sampler", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-sampler", start: "gain-full", judge: "held",
     cycle: [{ edits: ["sampler-gain-half"], state: "gain-half" }, { edits: ["sampler-gain-full"], state: "gain-full" }] } },
   { name: "held-note-drum-rack", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-drum-rack", start: "gain-full", judge: "held",

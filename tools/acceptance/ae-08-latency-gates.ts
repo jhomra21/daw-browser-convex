@@ -27,6 +27,11 @@
 //   ceil((move + 2 * fade) / BLOCK) * BLOCK plus the capped blocks before the bind; see headMoveFrames for `move`. Evidence with no
 //   pinned/graph latency on its graph-publish lines keeps COMPLETE_BASE_FRAMES for the first term, and so does a
 //   publication whose graph-publish line reports spectralPredecessors above 0 (their stages hold completion, audio_core.cpp:9141-9145).
+// - uploaded bytes: the `asset-page-write` lines of the publication's pid between prepare and publish, summed (`bytes` is the page's
+//   planar PCM). A first swap uploads its sample in that window, so an asset publication's prepare-to-publish limit is
+//   max(the asset class's limit, ASSET_UPLOAD.fixedMs + bytes / ASSET_UPLOAD.bytesPerMs). A resident swap writes none and keeps
+//   the class limit; evidence with no such line (older runs) does too. ASSET_UPLOAD is provisional until the parent freezes it:
+//   a row with an upload is INCOMPLETE (or FAIL) until then.
 // - class: asset when the host logged an `asset-install` between prepare and publish; raise when the edits' net
 //   latency move is positive (merged when 2+ blocks pass between prepare and bind); else plain. A row can declare
 //   its class in latency-class.json; an unknown class is an input failure. vst-insert is decided per publication: it owns an edit
@@ -55,6 +60,9 @@ const LIMITS = {
   // max 203 ms (250 is about 23% over the max); prepare to publish p50 37, max 43 ms (the plain 70).
   "vst-insert": { prepareToPublishMaxMs: 70, editToPublishMaxMs: 250 },
 }
+// Provisional, not frozen: a first swap's prepare-to-publish limit grows with the bytes it uploads, 400 MiB/s after a 55 ms fixed cost.
+// Only the parent sets `frozen` after calibrating against packaged runs.
+const ASSET_UPLOAD = { fixedMs: 55, bytesPerMs: 400 * 1024 * 1024 / 1000, frozen: false }
 // Pooled over the plain and raise publications of the run.
 // Prep time is split by population (parent ruling, addendum 14 item 2): publications with spectralPredecessors = 0 hold 8 ms
 // (PARENT-RULING-LAT1-PREP-OVERHEAD.md); those with spectral predecessors hold their own frozen 12 ms (measured p50 9 to 10 ms).
@@ -66,7 +74,7 @@ type Gate = "inputs" | "lead" | "rebase" | "prepare-to-publish" | "prep-time" | 
 type Failure = { row: string; gate: Gate; detail: string }
 type Status = "PASS" | "INCOMPLETE" | "FAIL"
 type Publication = {
-  row: string; revision: number; publicationFrame: number; asset: boolean; class: Class; raise: boolean; leadBlocks: number; seamBound: boolean; prepareToPublishMs: number; prepMs: number
+  row: string; revision: number; publicationFrame: number; asset: boolean; uploadedBytes: number; class: Class; raise: boolean; leadBlocks: number; seamBound: boolean; prepareToPublishMs: number; prepMs: number
   // The graph-publish line's spectral predecessor count; undefined on evidence from before the field.
   spectralPredecessors: number | undefined
   editToPublishMs: number | undefined; completeFrames: number | undefined; blocksBeforeBind: number
@@ -82,7 +90,7 @@ const hostEventSchema = z.object({
   frame: z.number().default(0), revision: z.number().default(0), requestedRevision: z.number().default(0),
   publicationFrame: z.number().default(0), transportEpoch: z.number().default(0), sampleRate: z.number().default(0),
   blockSize: z.number().default(0), pinnedLatencyFrames: z.number().optional(), graphLatencyFrames: z.number().optional(),
-  spectralPredecessors: z.number().optional(),
+  spectralPredecessors: z.number().optional(), bytes: z.number().default(0),
 })
 const editsSchema = z.object({ edits: z.array(z.object({
   name: z.string().optional(), index: z.number().optional(), wallMs: z.number(), fromLatencyFrames: z.number(), toLatencyFrames: z.number() })).default([]) })
@@ -155,11 +163,13 @@ const analyzeRow = (row: string, events: readonly HostEvent[], edits: z.infer<ty
       && event.revision === revision && event.transportEpoch === publish.transportEpoch && event.frame >= publish.publicationFrame)
     const asset = events.some((event) => event.event === "asset-install" && event.pid === publish.pid
       && event.wallMs >= prepare.event.wallMs && event.wallMs <= publish.wallMs)
+    const uploadedBytes = events.filter((event) => event.event === "asset-page-write" && event.pid === publish.pid
+      && event.wallMs >= prepare.event.wallMs && event.wallMs <= publish.wallMs).reduce((sum, event) => sum + event.bytes, 0)
     const previousPublish = findLast(events, index, (event) => event.event === "graph-publish" && event.pid === publish.pid)?.event
     const blocksBeforeBind = Math.max(1, Math.round((bind.frame - prepare.event.frame) / BLOCK))
     const seamBound = !windowed || events.slice(prepare.index + 1, index).some((event) => event.event === "schedule-window" && event.revision === revision)
     drafts.push({
-      row, revision, publicationFrame: publish.publicationFrame, asset, blocksBeforeBind, seamBound, wallMs: publish.wallMs,
+      row, revision, publicationFrame: publish.publicationFrame, asset, uploadedBytes, blocksBeforeBind, seamBound, wallMs: publish.wallMs,
       spectralPredecessors: publish.spectralPredecessors,
       headMoveFrames: previousPublish && headMoveFrames(previousPublish, publish),
       leadBlocks: (publish.publicationFrame - bind.frame) / BLOCK, prepareToPublishMs: publish.wallMs - prepare.event.wallMs,
@@ -208,7 +218,11 @@ const assetEvidenceFailures = (row: string, assetFrame: number | undefined, publ
 
 const judgePublication = (publication: Publication): Failure[] => {
   const { row, revision, leadBlocks } = publication
-  const limits = LIMITS[publication.class]
+  const classLimits = LIMITS[publication.class]
+  const prepareMaxMs = publication.class === "asset" && classLimits.prepareToPublishMaxMs !== undefined
+    ? Math.max(classLimits.prepareToPublishMaxMs, ASSET_UPLOAD.fixedMs + publication.uploadedBytes / ASSET_UPLOAD.bytesPerMs)
+    : classLimits.prepareToPublishMaxMs
+  const limits = { ...classLimits, prepareToPublishMaxMs: prepareMaxMs }
   const moveAllowance = publication.headMoveFrames === undefined ? COMPLETE_BASE_FRAMES
     : Math.ceil((publication.headMoveFrames + 2 * FADE_FRAMES) / BLOCK) * BLOCK
   const allowedComplete = moveAllowance + BLOCK * Math.min(publication.blocksBeforeBind, COMPLETE_MAX_BLOCKS_BEFORE_BIND)
@@ -218,7 +232,7 @@ const judgePublication = (publication: Publication): Failure[] => {
       ? [fail("lead", `lead ${leadBlocks} blocks, want ${LEAD_MIN_BLOCKS}..${LEAD_MAX_BLOCKS}`)] : []),
     ...(publication.seamBound && leadBlocks > LEAD_MAX_BLOCKS ? [fail("rebase", "publication frame moved past the bound seam")] : []),
     ...(limits.prepareToPublishMaxMs !== undefined && publication.prepareToPublishMs > limits.prepareToPublishMaxMs
-      ? [fail("prepare-to-publish", `${publication.prepareToPublishMs} > ${limits.prepareToPublishMaxMs} ms (${publication.class})`)] : []),
+      ? [fail("prepare-to-publish", `${publication.prepareToPublishMs} > ${limits.prepareToPublishMaxMs} ms (${publication.class}, ${publication.uploadedBytes} bytes uploaded)`)] : []),
     ...(limits.editToPublishMaxMs !== undefined && (publication.editToPublishMs ?? 0) > limits.editToPublishMaxMs
       ? [fail("edit-to-publish", `${publication.editToPublishMs} > ${limits.editToPublishMaxMs} ms (${publication.class})`)] : []),
     ...((publication.raise && publication.completeFrames === undefined) || (publication.completeFrames ?? 0) > allowedComplete
@@ -270,7 +284,8 @@ const analyzeRun = async (run: string, phase: number): Promise<Analysis> => {
   ]
   const rowStatus = (row: { row: string; publications: Publication[] }): Status =>
     failures.some((failure) => failure.row === row.row) ? "FAIL"
-      : row.publications.some((publication) => LIMITS[publication.class].prepareToPublishMaxMs === undefined) ? "INCOMPLETE" : "PASS"
+      : row.publications.some((publication) => LIMITS[publication.class].prepareToPublishMaxMs === undefined
+        || (publication.class === "asset" && publication.uploadedBytes > 0 && !ASSET_UPLOAD.frozen)) ? "INCOMPLETE" : "PASS"
   const rowStatuses = rows.map((row) => ({ row: row.row, status: rowStatus(row) }))
   const status: Status = failures.length ? "FAIL" : rowStatuses.some((entry) => entry.status === "INCOMPLETE") ? "INCOMPLETE" : "PASS"
   return { publications, failures, rows: rowStatuses, status }
@@ -285,7 +300,7 @@ const phaseOf = (run: string) => {
 // Per revision: prepare at `wall`, the bind at +1 ms, the armed Publish (last request) at +prepMs, the publication at +totalMs.
 type Spec = {
   leadBlocks?: number; prepMs?: number; totalMs?: number; editMs?: number; blocksBeforeBind?: number; raise?: boolean
-  install?: boolean; resend?: boolean; completeFrames?: number | "none"
+  install?: boolean; uploadBytes?: number; resend?: boolean; completeFrames?: number | "none"
   // The pinned and graph latency the host logs on this publication's graph-publish line.
   latency?: { pinned: number; graph: number }
   // The spectral predecessor count the host logs on that line; absent on evidence from before it did.
@@ -319,6 +334,7 @@ const syntheticRow = (specs: readonly Spec[], options: RowOptions = {}) => {
     const request = (frame: number, wallMs: number) => ({ ...base, event: "graph-publish-request", wallMs, frame, revision: revision - 1, requestedRevision: revision })
     lines.push({ ...base, event: "graph-prepare", wallMs: wall, frame: prepareFrame, revision: revision - 1, requestedRevision: revision }, request(bindFrame, wall + 1))
     if (spec.install) lines.push({ ...base, event: "asset-install", wallMs: wall + 5 })
+    if (spec.uploadBytes !== undefined) lines.push({ ...base, event: "asset-page-write", wallMs: wall + 6, bytes: spec.uploadBytes })
     lines.push(request(bindFrame + BLOCK, wall + (spec.prepMs ?? 4)))
     if (spec.resend) lines.push(request(publicationFrame - BLOCK, wall + 18))
     if (options.windowed && !spec.unbound) lines.push({ event: "schedule-window", wallMs: wall + 3, revision })
@@ -370,6 +386,12 @@ const selfTest = async (c1Runs: readonly string[]) => {
     { name: "merged raise at 85 ms", status: "FAIL", fails: ["prepare-to-publish"],
       rows: [["two-tone", withClean({ raise: true, totalMs: 85, blocksBeforeBind: 2, completeFrames: 3072 })]] },
     { name: "asset add at 105 ms", status: "FAIL", fails: ["prepare-to-publish"], rows: [["two-tone", clean], ["add-paged-asset", [{ totalMs: 105, install: true }]]] },
+    { name: "resident swap (no bytes uploaded) at 101 ms fails the asset floor", status: "FAIL", fails: ["prepare-to-publish"],
+      rows: [["add-paged-asset", [{ totalMs: 101, install: true }]]] },
+    { name: "27 MiB first swap at 105 ms is inside its 122.5 ms limit, provisional so INCOMPLETE", status: "INCOMPLETE", fails: [],
+      rows: [["add-paged-asset", [{ totalMs: 105, install: true, uploadBytes: 27 * 1024 * 1024 }]]] },
+    { name: "27 MiB first swap at 122 ms is INCOMPLETE, at 123 ms fails", status: "FAIL", fails: ["prepare-to-publish"],
+      rows: [["asset-122", [{ totalMs: 122, install: true, uploadBytes: 27 * 1024 * 1024 }]], ["asset-123", [{ totalMs: 123, install: true, uploadBytes: 27 * 1024 * 1024 }]]] },
     { name: "edit to publish 160 ms", status: "FAIL", fails: ["edit-to-publish"], rows: [["two-tone", withClean({ editMs: 160 })]] },
     // A UI edit's step starts before the app commits it: with the mark the harness's own latency (here 85 ms) is not the product's.
     { name: "UI edit 160 ms from the step start but 75 ms from its ui mark", status: "PASS", fails: [], rows: [["two-tone", withClean({ editMs: 160, uiMarkMs: 75 })]] },

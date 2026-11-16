@@ -2969,6 +2969,7 @@ export const createNativeAudioHostSupervisor = (
       payload.writeBigUInt64BE(BigInt(input.startFrame), 4)
       payload.writeUInt32BE(input.frameCount, 12)
       payload.set(input.planarPcm, 16)
+      ae08Evidence("asset-page-write", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId, bytes: input.planarPcm.byteLength })
       await request(mappedAssetWritePageType, payload, transactionToken)
     },
     async prepareMappedAssetRange(sessionAssetId, startFrame, frameCount, transactionToken) {

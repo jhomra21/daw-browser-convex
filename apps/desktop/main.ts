@@ -1658,6 +1658,9 @@ const registerIpc = () => {
       // independent from playback whenever the isolated manager is available.
       if (manager) {
         const status = await manager.execute(command)
+        // The editor session does not read an instance playback owns, so a close of one reaches the renderer as
+        // the closed event, which captures from the playback worker.
+        if (command.command === "close") sendRendererMessage(vstEditorStateChannel, { projectId, instanceId: command.instanceId, open: false })
         return { ok: true as const, status }
       }
       if (activeHostCandidate) {
@@ -2510,6 +2513,7 @@ else {
     const hostEvents = createNativeVst3HostEventHandlers({
       sendInstanceEvent: (event) => { sendRendererMessage(vstInstanceEventChannel, event) },
       sendParameterEdit: (input) => sendVstParameterEdit({ ...input, source: "active-playback" }),
+      sendEditorState: (input) => { sendRendererMessage(vstEditorStateChannel, input) },
       projectFor: (instanceId) => activeEditorProjectBindings.projectFor(instanceId),
       endSession: (error) => publishNativeSessionLoss(sanitizeNativeVst3DiagnosticError(error)),
     })

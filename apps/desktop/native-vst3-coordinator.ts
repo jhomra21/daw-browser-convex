@@ -491,7 +491,9 @@ export const nativeVst3InstanceEvent = (
 type NativeVst3HostEventOutputs = {
   sendInstanceEvent: (event: DesktopVstInstanceEvent) => void
   sendParameterEdit: (input: { projectId: string; instanceId: string; parameterId: number; normalizedValue: number }) => void
-  // The project that owns an active instance, if any: a parameter edit of an unowned one is dropped.
+  // An editor the playback worker hosts opened or closed, by the window or by a command.
+  sendEditorState: (input: { projectId: string; instanceId: string; open: boolean }) => void
+  // The project that owns an active instance, if any: a parameter edit or editor state of an unowned one is dropped.
   projectFor: (instanceId: string) => string | undefined
   // Only a lost host ends the native session; one plug-in's fault never does.
   endSession: (error: Error) => void
@@ -517,9 +519,13 @@ export const createNativeVst3HostEventHandlers = (outputs: NativeVst3HostEventOu
     if (notification.kind === "fault" || notification.kind === "miss" || notification.kind === "restart") logWorkerIncident(notification)
     const instanceEvent = nativeVst3InstanceEvent(notification, outputs.reportDefect)
     if (instanceEvent) outputs.sendInstanceEvent(instanceEvent)
-    if (notification.kind !== "parameter-edit") return
     const projectId = outputs.projectFor(notification.instanceId)
     if (!projectId) return
+    if (notification.kind === "editor-state") {
+      outputs.sendEditorState({ projectId, instanceId: notification.instanceId, open: notification.value === 1 })
+      return
+    }
+    if (notification.kind !== "parameter-edit") return
     outputs.sendParameterEdit({
       projectId,
       instanceId: notification.instanceId,

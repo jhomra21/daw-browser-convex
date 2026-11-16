@@ -1333,19 +1333,35 @@ test("a refused worker launch record is its own event, not a plug-in failure and
 const hostEventFixture = () => {
   const sent: DesktopVstInstanceEvent[] = []
   const edits: unknown[] = []
+  const editorStates: unknown[] = []
   const ended: Error[] = []
   const defects: NativeVst3Defect[] = []
   const handlers = createNativeVst3HostEventHandlers({
     sendInstanceEvent: (event) => { sent.push(event) },
     sendParameterEdit: (input) => { edits.push(input) },
+    sendEditorState: (input) => { editorStates.push(input) },
     projectFor: (instanceId) => instanceId === first.instanceId ? "project-1" : undefined,
     endSession: (error) => { ended.push(error) },
     reportDefect: (defect) => { defects.push(defect) },
   })
   const notify = (kind: "latency" | "fault" | "miss" | "restart", value: number, instanceId = first.instanceId) =>
     handlers.onNotification({ kind, value, graphRevision: 10, graphNodeId: 1n, instanceId })
-  return { sent, edits, ended, defects, handlers, notify }
+  return { sent, edits, editorStates, ended, defects, handlers, notify }
 }
+
+test("main host events: an editor the playback worker hosts reports open and close for an instance a project owns", () => {
+  const { editorStates, handlers } = hostEventFixture()
+  const editorState = (instanceId: string, value: number) => handlers.onNotification({
+    kind: "editor-state", graphRevision: 10, graphNodeId: 1n, instanceId, value,
+  })
+  editorState(first.instanceId, 1)
+  editorState(first.instanceId, 0)
+  editorState("unowned", 0)
+  expect(editorStates).toEqual([
+    { projectId: "project-1", instanceId: first.instanceId, open: true },
+    { projectId: "project-1", instanceId: first.instanceId, open: false },
+  ])
+})
 
 test("main host events: a latency notification reaches the renderer channel with the instance and value", () => {
   const { sent, ended, notify } = hostEventFixture()

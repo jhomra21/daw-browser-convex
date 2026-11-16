@@ -2263,6 +2263,12 @@ const Timeline: Component<TimelineProps> = (props) => {
       if (!persisted) throw new Error(`The captured native VST editor processor "${payload.instanceId}" no longer exists.`);
     });
     if (unsubscribeCapturedEditorState) onCleanup(unsubscribeCapturedEditorState);
+    // The playback worker owns a plug-in's state while a session is prepared, and an editor closing is a
+    // persistence point (the editor session never reads such an instance).
+    const unsubscribeEditorState = window.dawDesktop.audioHost?.onVstEditorState((payload) => {
+      if (!payload.open && payload.projectId === projectId()) requestNativeVstStateCapture(payload.instanceId);
+    });
+    if (unsubscribeEditorState) onCleanup(unsubscribeEditorState);
     const unregisterHostController = registerAttachedHostController(createAttachedHostController({
       projectId,
       mountedProjectGeneration,

@@ -18448,7 +18448,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 688,
+      "pass": 689,
       "skip": 1,
       "fail": 0
      },
@@ -18509,7 +18509,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 687,
+      "pass": 688,
       "skip": 1,
       "fail": 1
      },
@@ -19772,7 +19772,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 771,
+      "pass": 772,
       "skip": 1,
       "fail": 0
      },
@@ -19839,7 +19839,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 769,
+      "pass": 770,
       "skip": 1,
       "fail": 2
      },
@@ -20178,7 +20178,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 771,
+      "pass": 772,
       "skip": 1,
       "fail": 0
      },
@@ -20245,7 +20245,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 770,
+      "pass": 771,
       "skip": 1,
       "fail": 1
      },
@@ -20583,7 +20583,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 771,
+      "pass": 772,
       "skip": 1,
       "fail": 0
      },
@@ -20650,7 +20650,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 770,
+      "pass": 771,
       "skip": 1,
       "fail": 1
      },
@@ -20973,7 +20973,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 771,
+      "pass": 772,
       "skip": 1,
       "fail": 0
      },
@@ -21040,7 +21040,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 770,
+      "pass": 771,
       "skip": 1,
       "fail": 1
      },
@@ -24438,7 +24438,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -24499,7 +24499,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 251,
+      "pass": 258,
       "skip": 1,
       "fail": 12
      },
@@ -24695,7 +24695,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 771,
+      "pass": 772,
       "skip": 1,
       "fail": 0
      },
@@ -24762,7 +24762,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 770,
+      "pass": 771,
       "skip": 1,
       "fail": 1
      },
@@ -24942,7 +24942,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -25003,7 +25003,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -25191,7 +25191,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -25258,7 +25258,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -25433,17 +25433,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 227,
+      "pass": 270,
       "skip": 1,
-      "fail": 2
+      "fail": 0
      },
-     "fails": [
-      "failed lifecycle transition cancels delayed native startup",
-      "preserves an explicitly captured native owner across queued generation rebuilds"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -25500,7 +25497,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 265,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -26046,7 +26043,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -26107,7 +26104,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 258,
+      "pass": 265,
       "skip": 1,
       "fail": 5
      },
@@ -26296,7 +26293,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 771,
+      "pass": 772,
       "skip": 1,
       "fail": 0
      },
@@ -26363,7 +26360,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 770,
+      "pass": 771,
       "skip": 1,
       "fail": 1
      },
@@ -26548,7 +26545,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 771,
+      "pass": 772,
       "skip": 1,
       "fail": 0
      },
@@ -26615,7 +26612,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 770,
+      "pass": 771,
       "skip": 1,
       "fail": 1
      },
@@ -26795,7 +26792,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -26856,7 +26853,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 267,
       "skip": 1,
       "fail": 3
      },
@@ -27037,7 +27034,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -27098,7 +27095,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -27281,7 +27278,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -27342,7 +27339,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 258,
+      "pass": 265,
       "skip": 1,
       "fail": 5
      },
@@ -27675,7 +27672,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -27748,13 +27745,14 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 261,
+      "pass": 267,
       "skip": 1,
-      "fail": 2
+      "fail": 3
      },
      "fails": [
       "B6d5 a Stop that cancels a pending Play keeps the prepared graph at the start",
-      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start"
+      "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+      "a locate that cancels a Play resuming behind a delayed Pause, after a second Pause, leaves no Play pending"
      ],
      "fuzz": null,
      "rejection": null,
@@ -27944,7 +27942,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -28017,9 +28015,9 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 257,
+      "pass": 263,
       "skip": 1,
-      "fail": 6
+      "fail": 7
      },
      "fails": [
       "B6d4 a Stop issued after a locate superseded a waiting Play still stops",
@@ -28027,7 +28025,8 @@
       "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
       "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
       "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
-      "B6d7 a locate during a Pause that cancels a pending Play keeps its paused rebuild and reports no fault"
+      "B6d7 a locate during a Pause that cancels a pending Play keeps its paused rebuild and reports no fault",
+      "a locate that cancels a Play resuming behind a delayed Pause, after a second Pause, leaves no Play pending"
      ],
      "fuzz": null,
      "rejection": null,
@@ -28201,7 +28200,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -28262,7 +28261,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -29295,7 +29294,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 771,
+      "pass": 772,
       "skip": 1,
       "fail": 0
      },
@@ -29362,7 +29361,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 770,
+      "pass": 771,
       "skip": 1,
       "fail": 1
      },
@@ -29542,7 +29541,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -29603,7 +29602,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -29907,7 +29906,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -29968,7 +29967,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 246,
+      "pass": 253,
       "skip": 1,
       "fail": 17
      },
@@ -30161,7 +30160,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -30222,7 +30221,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 267,
       "skip": 1,
       "fail": 3
      },
@@ -30401,7 +30400,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -30462,7 +30461,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -30998,17 +30997,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 227,
+      "pass": 270,
       "skip": 1,
-      "fail": 2
+      "fail": 0
      },
-     "fails": [
-      "failed lifecycle transition cancels delayed native startup",
-      "preserves an explicitly captured native owner across queued generation rebuilds"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -31065,7 +31061,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 265,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -31244,7 +31240,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -31305,7 +31301,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -31608,7 +31604,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -31669,7 +31665,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -31971,7 +31967,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -32032,7 +32028,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -32455,7 +32451,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -32516,7 +32512,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -32682,7 +32678,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -32868,7 +32864,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 258,
+      "pass": 265,
       "skip": 1,
       "fail": 5
      },
@@ -33037,7 +33033,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -33221,7 +33217,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -34769,7 +34765,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -34954,7 +34950,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -35121,7 +35117,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -35306,7 +35302,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -35473,7 +35469,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -35663,7 +35659,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 248,
+      "pass": 255,
       "skip": 1,
       "fail": 15
      },
@@ -35844,7 +35840,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -36030,7 +36026,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -36198,7 +36194,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -36383,7 +36379,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -36551,7 +36547,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -36736,7 +36732,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 267,
       "skip": 1,
       "fail": 3
      },
@@ -36905,7 +36901,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -37090,7 +37086,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -37256,7 +37252,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -37443,7 +37439,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 259,
+      "pass": 266,
       "skip": 1,
       "fail": 4
      },
@@ -37613,7 +37609,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -37800,7 +37796,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -37968,7 +37964,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -38153,7 +38149,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -38320,7 +38316,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -38505,7 +38501,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -38672,7 +38668,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -38857,7 +38853,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -39024,7 +39020,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -39209,7 +39205,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -39376,7 +39372,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -39561,7 +39557,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -39783,7 +39779,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -40029,7 +40025,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 267,
       "skip": 1,
       "fail": 3
      },
@@ -40253,7 +40249,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -40501,7 +40497,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -40724,7 +40720,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -40970,7 +40966,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -41247,7 +41243,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -41555,7 +41551,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 259,
+      "pass": 266,
       "skip": 1,
       "fail": 4
      },
@@ -41835,7 +41831,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -42146,7 +42142,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 247,
+      "pass": 254,
       "skip": 1,
       "fail": 16
      },
@@ -42438,7 +42434,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -42745,7 +42741,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -43022,7 +43018,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -43329,7 +43325,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 247,
+      "pass": 254,
       "skip": 1,
       "fail": 16
      },
@@ -44667,7 +44663,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -44905,7 +44901,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 258,
+      "pass": 265,
       "skip": 1,
       "fail": 5
      },
@@ -45083,7 +45079,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -45306,7 +45302,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 259,
+      "pass": 266,
       "skip": 1,
       "fail": 4
      },
@@ -45483,7 +45479,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -45677,7 +45673,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -45851,7 +45847,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -46073,7 +46069,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -46248,7 +46244,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -46440,7 +46436,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -46614,7 +46610,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -46831,7 +46827,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 207,
+      "pass": 214,
       "skip": 1,
       "fail": 56
      },
@@ -47060,7 +47056,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -47270,7 +47266,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -47444,7 +47440,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -47700,7 +47696,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -47935,7 +47931,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -48136,7 +48132,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -48669,17 +48665,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 227,
+      "pass": 270,
       "skip": 1,
-      "fail": 2
+      "fail": 0
      },
-     "fails": [
-      "failed lifecycle transition cancels delayed native startup",
-      "preserves an explicitly captured native owner across queued generation rebuilds"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -48870,7 +48863,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 265,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -49962,7 +49955,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -50148,7 +50141,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -50827,7 +50820,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -51013,7 +51006,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -51421,7 +51414,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -51607,7 +51600,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 259,
+      "pass": 266,
       "skip": 1,
       "fail": 4
      },
@@ -52816,7 +52809,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -52939,7 +52932,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 267,
       "skip": 1,
       "fail": 3
      },
@@ -53051,7 +53044,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -53173,7 +53166,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -53283,7 +53276,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -53403,7 +53396,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -53513,7 +53506,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -53691,7 +53684,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -53863,7 +53856,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -54041,7 +54034,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -54213,7 +54206,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -54391,7 +54384,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -54563,7 +54556,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -54741,7 +54734,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -54913,7 +54906,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -55035,7 +55028,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -65642,7 +65635,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -65709,7 +65702,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 244,
+      "pass": 251,
       "skip": 1,
       "fail": 19
      },
@@ -65790,7 +65783,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 246,
+      "pass": 253,
       "skip": 1,
       "fail": 17
      },
@@ -65869,7 +65862,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -65936,7 +65929,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -66006,7 +65999,7 @@
      "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -66073,7 +66066,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -66143,7 +66136,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -66212,7 +66205,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 246,
+      "pass": 253,
       "skip": 1,
       "fail": 17
      },
@@ -66291,7 +66284,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 246,
+      "pass": 253,
       "skip": 1,
       "fail": 17
      },
@@ -66376,7 +66369,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 260,
+      "pass": 267,
       "skip": 1,
       "fail": 3
      },
@@ -66447,7 +66440,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -66516,7 +66509,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -66582,14 +66575,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 263,
+      "pass": 269,
       "skip": 1,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "a locate that cancels a Play resuming behind a delayed Pause, after a second Pause, leaves no Play pending"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -66652,7 +66647,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -66721,7 +66716,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -66791,7 +66786,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -66860,7 +66855,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 260,
+      "pass": 267,
       "skip": 1,
       "fail": 3
      },
@@ -66925,7 +66920,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -66981,7 +66976,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 263,
+      "pass": 270,
       "skip": 1,
       "fail": 0
      },
@@ -67042,7 +67037,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 267,
       "skip": 1,
       "fail": 3
      },
@@ -67575,7 +67570,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -67644,7 +67639,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 260,
+      "pass": 267,
       "skip": 1,
       "fail": 3
      },
@@ -67709,7 +67704,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -67779,7 +67774,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },
@@ -67843,7 +67838,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 269,
       "skip": 1,
       "fail": 1
      },
@@ -67912,7 +67907,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 258,
+      "pass": 265,
       "skip": 1,
       "fail": 5
      },
@@ -67979,7 +67974,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 268,
       "skip": 1,
       "fail": 2
      },

@@ -3983,16 +3983,18 @@ export const createNativePlaybackController = (input: {
         }
         // A first swap that does not fit in the sample budget gives up the oldest retired sample first, or waits for the
         // acknowledgement of releases already sent, which credit the budget.
-        const evictResident = async () => {
-          const sessionAssetId = [...instrumentAssets.keys()].find((id) => !previousIds.has(id) && !nextIds.has(id))
-          if (sessionAssetId === undefined) {
-            const pending = [...instrumentReleaseAcks]
-            await Promise.allSettled(pending)
-            return pending.length > 0
-          }
+        const retiredResidentIds = () => [...instrumentAssets.keys()].filter((id) => !previousIds.has(id) && !nextIds.has(id))
+        const releaseResident = async (sessionAssetId: number) => {
           const hold = instrumentAssets.get(sessionAssetId)
           instrumentAssets.delete(sessionAssetId)
           return (await releaseSessionAsset(sessionAssetId, hold)).ok
+        }
+        const evictResident = async () => {
+          const [oldest] = retiredResidentIds()
+          if (oldest !== undefined) return releaseResident(oldest)
+          const pending = [...instrumentReleaseAcks]
+          await Promise.allSettled(pending)
+          return pending.length > 0
         }
         const oldInstruments = new Map(previousGraph.nodes.map((node) => [node.id, node.instrument]))
         const addedInstruments = graph.nodes.flatMap((node) => {
@@ -4048,6 +4050,21 @@ export const createNativePlaybackController = (input: {
             staging = await stage()
           }
           checked(staging)
+        }
+        // The host table holds 64 assets, the installed ones, this graph's and the residents. It reclaims a release only
+        // while no bank is prepared and after one more render epoch, which a progress report announces and an inspect
+        // acts on: the residents that would crowd this graph out are released and reclaimed before the prepare.
+        const hostIdentity = preparedHostIdentity
+        const crowded = new Set([...previousIds, ...nextIds, ...instrumentAssets.keys()]).size - nativeAudioHostMaximumInstalledAssets
+        const crowding = retiredResidentIds().slice(0, Math.max(0, crowded))
+        if (crowding.length > 0 && hostIdentity) {
+          const capacity = nativeAdmissionCapacityGeneration
+          let reported = sequence
+          const acknowledged = await Promise.all(crowding.map(releaseResident))
+          for (; acknowledged.every(Boolean) && nativeAdmissionCapacityGeneration === capacity; reported = sequence) {
+            await waitForOpportunity(reported)
+            await inspect({ projectId, revision: previousGraph.revision, hostGeneration: hostIdentity.generation }, true)
+          }
         }
         // A published bank refuses the active window a refill would send; a stopped transport needs no refill.
         if (paused) await coordinator.suspendGraphPublication()

@@ -5121,6 +5121,43 @@ void TestCheckpoint3StagedInstrumentAssets() {
   host.Stop();
 }
 
+// The timing a renderer that frees host slots before its prepare relies on: a release is reclaimed only while no bank is
+// prepared, at the first inspect after one more completed render epoch, and the reclaim is the admission capacity
+// generation it waits for.
+void TestReleasedAssetReclaimsAfterOneEpochWithNoPreparedBank() {
+  using namespace daw::audio_host_macos;
+  AudioHost host;
+  assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48000,
+    .max_frames_per_block = 128, .channel_count = 2, .revision = 1}));
+  assert(host.PrepareAndPublishGraph(1, GraphSnapshot(1, 1.F)));
+  assert(host.SetTransport(1, false, 0));
+  assert(host.StartDiagnosticMode());
+  assert(host.SetTransport(1, true, 0));
+  const std::array<float, 8> samples{};
+  assert(host.InstallAsset(1, 4, 48000, 2, 0, samples));
+  std::array<float, 128> silence{}, left{}, right{};
+  const std::array<const float*, 2> input{silence.data(), silence.data()};
+  const std::array<float*, 2> output{left.data(), right.data()};
+  const auto render = [&] { assert(host.ProcessPlanar(input, output, 128)); };
+  render();
+  assert(host.PrepareGraphRevision(2, GraphSnapshot(2, 1.F)).code == GraphRevisionStatusCode::kPrepared);
+  assert(host.ReleaseAsset(1));
+  for (unsigned block = 0; block < 4; ++block) render();
+  host.InspectGraphRevision(2);
+  assert(host.diagnostics().installed_assets == 1);
+  assert(host.RollbackGraphRevision(2).code == GraphRevisionStatusCode::kRolledBack);
+  host.InspectGraphRevision(1);
+  assert(host.diagnostics().installed_assets == 1);
+  const auto before = host.DrainScheduleProgress();
+  assert(before && before->admission_capacity_generation == 0);
+  render();
+  host.InspectGraphRevision(1);
+  assert(host.diagnostics().installed_assets == 0);
+  const auto reclaimed = host.DrainScheduleProgress();
+  assert(reclaimed && reclaimed->admission_capacity_generation == 1);
+  host.Stop();
+}
+
 namespace daw::audio_host_macos {
 // Defined by this target's private copy of the host (DAW_AUDIO_HOST_TEST_PATCH_CLAIM=1).
 void SetTestPatchClaimHook(void (*hook)());
@@ -6528,6 +6565,7 @@ int main() {
   }
   for (const char failure : {'a', 'b', 'c', 'd', 'e', 'f'}) TestCheckpoint3Assets(failure);
   TestCheckpoint3StagedInstrumentAssets();
+  TestReleasedAssetReclaimsAfterOneEpochWithNoPreparedBank();
   TestCheckpoint2SaturatedNoteOffSeam();
   TestCheckpoint2SaturatedNoteOffSeam(true);
   TestCheckpoint2SaturatedRebaseProgress();

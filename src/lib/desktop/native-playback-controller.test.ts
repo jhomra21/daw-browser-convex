@@ -5717,6 +5717,88 @@ const editedSampledInput = (kind: 'sampler' | 'granular' | 'drum-rack'): LivePla
   return { ...base, revision: 2, renderState: { ...base.renderState, fx: { ...base.renderState.fx, trackFx: { instrument: { ...entry, instrument: edited } } } } }
 }
 
+// One sampler track per entry, with that many one-key zones, each over its own buffer: one session asset per zone, fresh
+// on every call. A sampler holds at most 32 zones.
+const multiZoneSamplerInput = (zoneCounts: readonly number[]): LivePlaybackSnapshotInput => {
+  const samplers = zoneCounts.map((count, track) => {
+    const zones = Array.from({ length: count }, (_, index): SamplerZone => ({ id: `zone-${index}`,
+      sample: { assetKey: `instrument-${track}-${index}`, url: `/sample-${track}-${index}.wav`, sourceKind: 'upload',
+        source: { durationSec: 0.01, sampleRate: 48_000, channelCount: 2 } },
+      keyLow: index, keyHigh: index, velocityLow: 1, velocityHigh: 127, rootNote: index, tuneCents: 0, gain: 1, pan: 0,
+      roundRobinGroup: 0, roundRobinIndex: 0, playbackMode: 'one-shot', startSec: 0, endSec: 0.01, crossfadeSec: 0, chokeGroup: 0 }))
+    const instrument: TrackInstrumentParams = { kind: 'sampler', instanceId: `sampled-${track}`,
+      params: { ...createDefaultSamplerParams(), zones } }
+    const samplerBuffers = new Map(zones.map(({ id }) => [id, { sourceStartFrame: 0,
+      buffer: new TestAudioBuffer([new Float32Array(480).fill(0.25), new Float32Array(480).fill(-0.5)]) }]))
+    return { track: { ...instrumentTrack, id: `instrument-${track}`,
+      clips: instrumentTrack.clips.map((clip) => ({ ...clip, id: `${clip.id}-${track}` })) },
+    fx: { instances: [], instrument, samplerBuffers } }
+  })
+  return {
+    ...input(),
+    tracks: samplers.map(({ track }) => track),
+    renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: Object.fromEntries(
+      samplers.map(({ track, fx }) => [track.id, fx])) }, automationEnvelopes: [] },
+  }
+}
+
+test("an edit whose graph and residents overfill the 64-slot host table reclaims residents before the prepare", async () => {
+  const fixture = createBridge("runtime-revision-progress")
+  let desired = multiZoneSamplerInput([20])
+  const controller = createObservedController({ bridge: fixture.bridge, getProjectId: () => "local_project",
+    compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ ...desired, transport }) })
+  expect(await controller.start(desired.transport)).toBe("started")
+  // The host reclaims a release at the first inspect after a render epoch, which a progress report announces, and
+  // reports the reclaim as a new admission capacity generation.
+  let unreclaimed = 0
+  let capacity = 0n
+  let sequence = 100_000n
+  const report = (admissionCapacityGeneration?: bigint) => fixture.emitScheduleProgress({
+    revision: 1, epoch: fixture.transportContexts.at(-1)?.epoch ?? 1, progressSequence: sequence++, renderedThroughFrame: 0n,
+    acceptedThroughFrame: 48000n, lastAcceptedWindowId: 1n, appliedTransportTransitionId: 1n,
+    appliedUrgentSequence: 0n, appliedProcessorSequence: 0n, running: true,
+    scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256, admissionCapacityGeneration,
+  })
+  const release = fixture.bridge.session.releaseAsset
+  fixture.bridge.session.releaseAsset = async (sessionAssetId) => {
+    const reply = await release(sessionAssetId)
+    unreclaimed++
+    queueMicrotask(() => report())
+    return reply
+  }
+  const swap = async (zoneCounts: readonly number[], revision: number) => {
+    desired = { ...multiZoneSamplerInput(zoneCounts), revision }
+    const candidateCompile = holdCompile(controller)
+    const candidateAdoption = controller.adoptSchedule(migrationIntent(`swap-${revision}`), true)
+    await candidateCompile.entered
+    acknowledgeStagedPublication(fixture, revision)
+    const inspect = fixture.bridge.session.revisions.inspect
+    fixture.bridge.session.revisions.inspect = async (request) => {
+      if (unreclaimed > 0) { unreclaimed = 0; report(++capacity) }
+      return inspect(request)
+    }
+    const prepare = fixture.bridge.session.revisions.prepare
+    let capacityAtPrepare = -1n
+    fixture.bridge.session.revisions.prepare = async (request) => {
+      capacityAtPrepare = capacity
+      return prepare(request)
+    }
+    expect(await (candidateCompile.release(), candidateAdoption)).toEqual({ status: "adopted" })
+    return capacityAtPrepare
+  }
+  // The retired 20 stay resident down to 12, the host table's half share beside the 20 installed.
+  await swap([20], 2)
+  const before = fixture.calls.length
+  const capacityBefore = capacity
+  // 33 new assets, 20 still installed and 12 resident: 65 slots.
+  const capacityAtPrepare = await swap([32, 1], 3)
+  const calls = fixture.calls.slice(before)
+  expect(calls.indexOf("release")).toBeGreaterThanOrEqual(0)
+  expect(calls.indexOf("release")).toBeLessThan(calls.indexOf("stage-prepare"))
+  expect(capacityAtPrepare).toBeGreaterThan(capacityBefore)
+  await controller.dispose()
+})
+
 for (const kind of ['sampler', 'granular', 'drum-rack'] satisfies readonly ('sampler' | 'granular' | 'drum-rack')[]) {
   test(`a ${kind} zone edit while playing is adopted through the instrument-state configuration, with no new session`, async () => {
     const fixture = createBridge("runtime-revision-progress")

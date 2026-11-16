@@ -17640,7 +17640,7 @@
         "detail": "Old incarnation leaked into fresh decoded bytes or runtime",
         "class": "retained-override",
         "domain": "live",
-        "step": 124
+        "step": 120
        }
       ]
      },
@@ -18448,7 +18448,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 706,
+      "pass": 709,
       "skip": 1,
       "fail": 0
      },
@@ -18509,7 +18509,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 705,
+      "pass": 708,
       "skip": 1,
       "fail": 1
      },
@@ -19095,7 +19095,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 789,
+      "pass": 792,
       "skip": 1,
       "fail": 0
      },
@@ -19162,7 +19162,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 788,
+      "pass": 791,
       "skip": 1,
       "fail": 1
      },
@@ -19225,7 +19225,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 789,
+      "pass": 792,
       "skip": 1,
       "fail": 0
      },
@@ -19292,7 +19292,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 788,
+      "pass": 791,
       "skip": 1,
       "fail": 1
      },
@@ -19772,7 +19772,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 789,
+      "pass": 792,
       "skip": 1,
       "fail": 0
      },
@@ -19839,7 +19839,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 787,
+      "pass": 790,
       "skip": 1,
       "fail": 2
      },
@@ -20178,7 +20178,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 789,
+      "pass": 792,
       "skip": 1,
       "fail": 0
      },
@@ -20245,7 +20245,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 788,
+      "pass": 791,
       "skip": 1,
       "fail": 1
      },
@@ -20504,29 +20504,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": null,
      "fails": null,
      "fuzz": {
       "seed": 570,
-      "status": "fail",
-      "failures": [
-       {
-        "invariant": "I1",
-        "detail": "Native differs from desired",
-        "class": "retained-override",
-        "domain": "live",
-        "step": null
-       },
-       {
-        "invariant": "I4",
-        "detail": "Unsettled controller request at logical drain bound",
-        "class": "latency-starvation",
-        "domain": "live",
-        "step": null
-       }
-      ]
+      "status": "pass",
+      "failures": []
      },
      "rejection": null,
      "tsErrors": null,
@@ -20583,7 +20568,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 789,
+      "pass": 792,
       "skip": 1,
       "fail": 0
      },
@@ -20650,7 +20635,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 788,
+      "pass": 791,
       "skip": 1,
       "fail": 1
      },
@@ -20973,7 +20958,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 789,
+      "pass": 792,
       "skip": 1,
       "fail": 0
      },
@@ -21040,7 +21025,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 788,
+      "pass": 791,
       "skip": 1,
       "fail": 1
      },
@@ -22613,15 +22598,15 @@
      "rejection": [
       [
        206,
-       205
+       203
       ],
       [
        206,
-       209
+       207
       ],
       [
        206,
-       214
+       212
       ]
      ],
      "tsErrors": null,
@@ -24695,7 +24680,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 789,
+      "pass": 792,
       "skip": 1,
       "fail": 0
      },
@@ -24762,7 +24747,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 788,
+      "pass": 791,
       "skip": 1,
       "fail": 1
      },
@@ -26293,7 +26278,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 789,
+      "pass": 792,
       "skip": 1,
       "fail": 0
      },
@@ -26360,7 +26345,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 788,
+      "pass": 791,
       "skip": 1,
       "fail": 1
      },
@@ -26545,7 +26530,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 789,
+      "pass": 792,
       "skip": 1,
       "fail": 0
      },
@@ -26612,7 +26597,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 788,
+      "pass": 791,
       "skip": 1,
       "fail": 1
      },
@@ -29296,7 +29281,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 789,
+      "pass": 792,
       "skip": 1,
       "fail": 0
      },
@@ -29363,7 +29348,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 788,
+      "pass": 791,
       "skip": 1,
       "fail": 1
      },
@@ -61075,14 +61060,22 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 2,
      "counts": null,
      "fails": null,
      "fuzz": {
       "seed": 498,
-      "status": "pass",
-      "failures": []
+      "status": "fail",
+      "failures": [
+       {
+        "invariant": "I1",
+        "detail": "Refused latency edit never reached native: native fft 2048, desired 512",
+        "class": "latency-before-publish-lost-edit",
+        "domain": "live",
+        "step": null
+       }
+      ]
      },
      "rejection": null,
      "tsErrors": null,
@@ -61855,14 +61848,22 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 2,
      "counts": null,
      "fails": null,
      "fuzz": {
       "seed": 498,
-      "status": "pass",
-      "failures": []
+      "status": "fail",
+      "failures": [
+       {
+        "invariant": "I1",
+        "detail": "Refused latency edit never reached native: native fft 2048, desired 512",
+        "class": "latency-before-publish-lost-edit",
+        "domain": "live",
+        "step": null
+       }
+      ]
      },
      "rejection": null,
      "tsErrors": null,

@@ -12,6 +12,7 @@ The MISMATCH rows 382 and 434 keep their killing arms and have no survivor to re
 | `rc2:279:2:mutant` | rc2 279 | `src/lib/desktop/native-processor-state-owner.ts`: ` for (const execution of target.inflight.values()) if (!execution.sent) execution.epoch = ` → `` | the fuzz seed 1 still passes; row disposition "survives (diagnostic)" |
 | `rc2:388:1:mutant` | rc2 388 | `src/lib/desktop/native-processor-state-owner.ts`: ` if (evidence !== "cancelled" \|\| (target.queuedPatch && execution !== target.queuedPatch` → ` if (true) settle(execution, "cancelled", false)` | the fuzz seed 989 still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
 | `rc2:389:1:mutant` | rc2 389 | `src/lib/desktop/native-playback-controller.ts`: ` \|\| refreshed.snapshot.assets.some((asset) => !installedSources.has(asset.assetId)) ` → `` | the fuzz seed 107 still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
+| `rc2:384:1:mutant` | rc2 384 | `src/lib/desktop/native-processor-state-owner.ts`: `(newer === undefined || newer === value)` → `(newer === undefined || (execution.order < 0 && newer === value))` | the fuzz seed 570 passes since the instrument states call is skipped (the fake host's call sequence moved); row 384 stays killed by `384:0` and `384:2`. Retired as a surviving arm |
 | `rc2:392:1:mutant` | rc2 392 | `src/lib/desktop/native-processor-state-owner.ts`: ` for (const execution of target.inflight.values()) if (execution.sent && execution.values.` → `` | the fuzz seed 949 still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
 | `rc2:393:1:mutant` | rc2 393 | `src/lib/desktop/native-processor-state-owner.ts`: ` else { execution.values = carried resends.push(execution) }` → ` else { resends.push(execution) }` | the fuzz seed 620 still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
 | `rc2:398:0:mutant` | rc2 398 | `src/lib/desktop/native-processor-state-owner.ts`: ` if (execution.sent && execution.values.has(id) && execution.values.get(id) !== value) ret` → ` if (execution.values.has(id) && execution.values.get(id) !== value) return true` | its test command (20 pass) still passes; row disposition "survives (diagnostic)" |
@@ -98,6 +99,7 @@ The MISMATCH rows 382 and 434 keep their killing arms and have no survivor to re
 - `rc2:279:2:control`
 - `rc2:388:1:control`
 - `rc2:389:1:control`
+- `rc2:384:1:control`
 - `rc2:392:1:control`
 - `rc2:393:1:control`
 - `rc2:398:0:control`

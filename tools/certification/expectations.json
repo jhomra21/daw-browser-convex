@@ -20403,7 +20403,7 @@
       "--fixture",
       "hook",
       "--seed",
-      "570",
+      "35",
       "--seeds",
       "1",
       "--steps",
@@ -20437,7 +20437,7 @@
      "counts": null,
      "fails": null,
      "fuzz": {
-      "seed": 570,
+      "seed": 35,
       "status": "pass",
       "failures": []
      },
@@ -20469,7 +20469,7 @@
       "--fixture",
       "hook",
       "--seed",
-      "570",
+      "35",
       "--seeds",
       "1",
       "--steps",
@@ -20504,14 +20504,29 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 1,
      "counts": null,
      "fails": null,
      "fuzz": {
-      "seed": 570,
-      "status": "pass",
-      "failures": []
+      "seed": 35,
+      "status": "fail",
+      "failures": [
+       {
+        "invariant": "I1",
+        "detail": "Native differs from desired",
+        "class": "retained-override",
+        "domain": "live",
+        "step": null
+       },
+       {
+        "invariant": "I4",
+        "detail": "Unsettled controller request at logical drain bound",
+        "class": "latency-starvation",
+        "domain": "live",
+        "step": null
+       }
+      ]
      },
      "rejection": null,
      "tsErrors": null,

@@ -40,12 +40,16 @@ type WorkletMessage = {
   version?: number
   abiVersion?: number
   wasmModule?: object
+  snapshot?: { version: number; revision: number; nodes: object[]; edges: object[] }
+  envelope?: Uint8Array
   requestId?: number
   revision?: number
   epoch?: number
   sequence?: number
   result?: string
+  requireContinuity?: boolean
   events?: object[]
+  schedule?: { revision: number; transportEpoch: number; events: object[] }
 }
 type AudioBlocks = Float32Array[][]
 type RegisteredHost = {
@@ -239,24 +243,51 @@ test('both hosts keep live instrument merging and acknowledgement allocation-fre
 })
 
 test('B6f5 the portable worklet stages schedules, refuses discontinuous adoptions and leaves encoding off its thread', async () => {
-  const source = await Bun.file(new URL('audio-worklets/daw-portable-audio-core-host-v2.js', publicRoot)).text()
-  const publishStart = source.indexOf("if (message.type === 'publish-graph'")
-  const prepareStart = source.indexOf("if (message.type === 'prepare-graph')")
-  const publishBody = source.slice(publishStart, source.indexOf("if (message.type === 'prepare-graph')", publishStart))
-  const prepareBody = source.slice(prepareStart, source.indexOf("if (message.type === 'utility-state'", prepareStart))
-  // R1: the main thread encodes the envelope; prepare hashes and copies nothing for diagnostics.
-  expect(prepareBody).toContain('let envelope = message.envelope')
-  expect(prepareBody).toContain('if (!(envelope instanceof Uint8Array))')
-  expect(prepareBody).not.toContain('byteHash(')
-  expect(prepareBody).not.toContain('Array.from(')
-  expect(prepareBody).not.toContain('.reduce(')
-  // An adoption is refused before any instrument of the playing graph is reconfigured, and swaps its staged schedule in.
-  expect(publishBody).toContain('message.requireContinuity === true')
-  expect(publishBody.indexOf('const refused')).toBeLessThan(publishBody.indexOf('this.publishPrepared('))
-  expect(publishBody).not.toContain('this.configureInstruments(')
-  expect(source).toContain('this.commitSchedule(staged, true, seam)')
-  expect(source).toContain('if (staged) this.stagedSchedule = built')
-  // The source-bus counters left unused when portable sources stopped reading live buses.
-  expect(source).not.toContain('liveInputBusCount')
-  expect(source).not.toContain('preparedInputBusCount')
+  const { host, messages } = await readyPortableHost(2)
+  host.revision = 1
+  const preparedBytes: number[][] = []
+  let continuityResult = 1
+  Object.assign(host, {
+    graphPrepare: (allocation: number, byteLength: number) => {
+      preparedBytes.push([...new Uint8Array(host.memory.buffer, allocation, byteLength)])
+      return 0
+    },
+    graphPublish: () => 0,
+    graphContinuity: () => continuityResult,
+    configureInstruments: () => true,
+    coreProcess: () => {
+      host.leftOutput.fill(0.25)
+      host.rightOutput.fill(-0.25)
+      return 0
+    },
+  })
+  const firstSnapshot = { version: 1, revision: 2, nodes: [], edges: [] }
+  const firstEnvelope = new Uint8Array([3, 0, 0, 0])
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: firstSnapshot, envelope: firstEnvelope })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 2, schedule: { revision: 2, transportEpoch: 1, events: [] } })
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 3, revision: 2 })
+
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-published', requestId: 3, result: 'published' }))
+  expect(host.publishedSnapshot).toBe(firstSnapshot)
+  expect(host.schedule?.revision).toBe(2)
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'schedule-installed', requestId: 2, result: 'installed' }))
+
+  const nextSnapshot = { version: 1, revision: 3, nodes: [], edges: [] }
+  const nextEnvelope = new Uint8Array([3, 0, 0, 0])
+  host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 4, snapshot: nextSnapshot, envelope: nextEnvelope })
+  host.handleMessage({ version: 2, type: 'install-schedule', requestId: 5, schedule: { revision: 3, transportEpoch: 1, events: [] } })
+  continuityResult = 0
+  host.handleMessage({ version: 2, type: 'publish-graph', requestId: 6, revision: 3, requireContinuity: true })
+
+  expect(preparedBytes).toEqual([[3, 0, 0, 0], [3, 0, 0, 0]])
+  expect(host.revision).toBe(2)
+  expect(host.publishedSnapshot).toBe(firstSnapshot)
+  expect(host.schedule?.revision).toBe(2)
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-published', requestId: 6, result: 'rejected' }))
+  expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-continuity', revision: 3, result: 'fallback' }))
+
+  const output = [[new Float32Array(128), new Float32Array(128)]]
+  expect(host.process([], output)).toBe(true)
+  expect(output[0]?.[0]?.[0]).toBe(0.25)
+  expect(output[0]?.[1]?.[0]).toBe(-0.25)
 })

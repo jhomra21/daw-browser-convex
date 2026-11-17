@@ -6441,6 +6441,7 @@
     "control": null,
     "targets": [
      "src/lib/desktop/native-playback-controller.ts",
+     "src/lib/desktop/native-schedule-publication.ts",
      "src/lib/desktop/native-processor-state-owner.ts",
      "src/hooks/useTimelinePlayback.ts",
      "tools/acceptance/ae-08-processor-state-fuzz.ts",
@@ -6476,6 +6477,7 @@
       "-n",
       "advanceScheduleSettledEpoch|nativeLatencyCompletionGeneration|latencyCompletionGeneration",
       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-playback-controller.ts",
+      "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-schedule-publication.ts",
       "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-processor-state-owner.ts",
       "/Users/juan/Documents/daw-browser-convex/src/hooks/useTimelinePlayback.ts",
       "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz.ts",
@@ -6521,7 +6523,7 @@
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
-     "matches": 23,
+     "matches": 27,
      "oracle": null
     }
    },

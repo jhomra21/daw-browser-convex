@@ -432,6 +432,8 @@ test("a mapped page reaches the host as the same frame bytes as a joined header 
 test("carries the bounded Stop reason on protocol and control diagnostics", async () => {
   const fixture = await fixtureSupervisor("stop-reason")
   const info = spyOn(console, "info").mockImplementation(() => undefined)
+  const previousEvidenceDir = process.env.DAW_AE08_EVIDENCE_DIR
+  process.env.DAW_AE08_EVIDENCE_DIR = tmpdir()
   try {
     await fixture.supervisor.stopAudio("project-switch")
     const stopLogs = info.mock.calls
@@ -444,6 +446,8 @@ test("carries the bounded Stop reason on protocol and control diagnostics", asyn
     await expect(fixture.supervisor.stopAudio("bad reason")).rejects.toThrow("stop reason is invalid")
     await expect(fixture.supervisor.stopAudio("bad\nreason")).rejects.toThrow("stop reason is invalid")
   } finally {
+    if (previousEvidenceDir === undefined) delete process.env.DAW_AE08_EVIDENCE_DIR
+    else process.env.DAW_AE08_EVIDENCE_DIR = previousEvidenceDir
     info.mockRestore()
     await fixture.supervisor.teardown()
     await fixture.dispose()
@@ -2700,6 +2704,8 @@ const recordingFinishFixture = async (blocked?: "patch" | "graph", refused = fal
   }, { rootPath: directory, rootDevice: 1n, rootInode: 2n, token: "a".repeat(64) })
   await supervisor.startRecording()
   const timers = spyOn(globalThis, "setTimeout")
+  const previousEvidenceDir = process.env.DAW_AE08_EVIDENCE_DIR
+  process.env.DAW_AE08_EVIDENCE_DIR = directory
   const logs = spyOn(console, "info").mockImplementation((prefix, line) => {
     if (prefix === "[native-audio-host-control]" && String(line).includes('"request":"recordingStop"')
       && String(line).includes('"phase":"enqueue"')) stopEnqueued.resolve()
@@ -2729,6 +2735,8 @@ const recordingFinishFixture = async (blocked?: "patch" | "graph", refused = fal
     dispose: async () => {
       timers.mockRestore()
       logs.mockRestore()
+      if (previousEvidenceDir === undefined) delete process.env.DAW_AE08_EVIDENCE_DIR
+      else process.env.DAW_AE08_EVIDENCE_DIR = previousEvidenceDir
       child?.kill("SIGKILL")
       await supervisor.teardown()
       await rm(directory, { recursive: true, force: true })

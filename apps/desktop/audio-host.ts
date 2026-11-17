@@ -1444,13 +1444,15 @@ export const createNativeAudioHostSupervisor = (
     || type === transportType
     || type === vstScheduleAutomationEnableType
   )
+  // Per-request control lines are acceptance evidence: they fire for every inspect, prepare, publish and page write, so
+  // production writes none of them.
   const logControlEnqueue = (
     type: NativeHostRequestType,
     requestId: number,
     enqueuedAt: number,
     reason?: string,
   ) => {
-    if (isHotControlRequest(type)) return
+    if (!process.env.DAW_AE08_EVIDENCE_DIR || isHotControlRequest(type)) return
     console.info("[native-audio-host-control]", JSON.stringify({
       phase: "enqueue",
       requestId,
@@ -1463,6 +1465,7 @@ export const createNativeAudioHostSupervisor = (
     }))
   }
   const logControlAck = (control: PendingControl, accepted = true) => {
+    if (!process.env.DAW_AE08_EVIDENCE_DIR) return
     const elapsedMs = performance.now() - control.dispatchedAt
     // Hot-path acknowledgements are logged only when slow to avoid playback log and main-thread overhead.
     if (isHotControlRequest(control.requestType) && elapsedMs < slowHotControlAckThresholdMs) return
@@ -1480,15 +1483,15 @@ export const createNativeAudioHostSupervisor = (
   }
   const logControlWrite = (
     control: PendingControl,
-    process: ChildProcessWithoutNullStreams,
+    host: ChildProcessWithoutNullStreams,
     stdinBackpressure: boolean,
   ) => {
-    if (isHotControlRequest(control.requestType)) return
+    if (!process.env.DAW_AE08_EVIDENCE_DIR || isHotControlRequest(control.requestType)) return
     console.info("[native-audio-host-control]", JSON.stringify({
       phase: "write",
       requestId: control.requestId,
       request: nativeAudioHostRequestName(control.requestType),
-      pid: process.pid ?? null,
+      pid: host.pid ?? null,
       generation: lifecycleGeneration,
       reason: control.reason ?? null,
       enqueuedAt: control.enqueuedAt,
@@ -1496,7 +1499,7 @@ export const createNativeAudioHostSupervisor = (
       queueWaitMs: Math.max(0, Date.now() - control.enqueuedAt),
       queueDepth: urgentSends.length + normalSends.length + refillSends.length,
       stdinBackpressure,
-      stdinWritableLength: process.stdin.writableLength,
+      stdinWritableLength: host.stdin.writableLength,
     }))
   }
   type QueuedSend = {

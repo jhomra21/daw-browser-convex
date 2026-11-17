@@ -45,7 +45,7 @@ await writeFile(path.join(output, "build-before.json"), JSON.stringify({
 }, null, 2))
 const app = spawn(executable, ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0", `--user-data-dir=${profile}`], {
   cwd: root, detached: true,
-  env: { ...process.env, DAW_DESKTOP_USER_DATA: profile },
+  env: { ...process.env, DAW_DESKTOP_USER_DATA: profile, DAW_AE08_EVIDENCE_DIR: output },
   stdio: ["ignore", "pipe", "pipe"],
 })
 const pid = app.pid

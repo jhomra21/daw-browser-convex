@@ -263,6 +263,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   const [effectDataReady, setEffectDataReady] = createSignal(false);
   const [automationDataReady, setAutomationDataReady] = createSignal(false);
   const [overriddenAutomationTargetKeys, setOverriddenAutomationTargetKeys] = createSignal<Set<string>>(new Set());
+  let reEnableOperation = 0;
   const seededAutomationTargetKeys = new Set<string>();
   let seededProjectId: string | undefined;
   const visibleAutomationTracks = useProjectPersistedState<Record<string, boolean>>({
@@ -439,6 +440,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   const reEnableAutomation = async () => {
     const current = overriddenAutomationTargetKeys();
     if (current.size === 0) return;
+    const operation = ++reEnableOperation;
     options.acceptance?.ui("ui-automation-reenable", () => [...current].join(","));
     const reEnabledTargetKeys = new Set(current);
     const envelopes = automationEnvelopes().filter((envelope) => reEnabledTargetKeys.has(envelope.targetKey));
@@ -461,9 +463,10 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
           reenableProcessorAutomation(processor.instanceId, processor.parameterIds)
         )),
       );
+      if (operation !== reEnableOperation) return;
       const playbackControlAttempted = results.some((result) => result.accepted || result.reason !== "unavailable");
       if (playbackControlAttempted && results.some((result) => !result.accepted)) {
-        setOverriddenAutomationTargetKeys(current);
+        setOverriddenAutomationTargetKeys((latest) => new Set([...latest, ...reEnabledTargetKeys]));
         return;
       }
     }

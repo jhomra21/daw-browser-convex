@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import { describe, expect, onTestFinished, test } from 'bun:test'
 import { createRoot, createSignal } from 'solid-js'
 import { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import type { AutomationEnvelope } from '@daw-browser/shared'
+import { automationTargetKey, type AutomationEnvelope } from '@daw-browser/shared'
 import { useTimelineAutomationController } from '~/hooks/useTimelineAutomationController'
 import { createPersistedAutomationState } from './create-persisted-automation-state'
 
@@ -312,6 +312,50 @@ describe('createPersistedAutomationState', () => {
 type RemoteEffect = NonNullable<ReturnType<Parameters<typeof useTimelineAutomationController>[0]['remoteEffects']>>[number]
 
 describe('useTimelineAutomationController', () => {
+  test('a refused re-enable preserves overrides added while publication is pending', async () => {
+    const previousLocalStorage = globalThis.localStorage
+    Reflect.set(globalThis, 'localStorage', { getItem: () => null, setItem: () => {} })
+    onTestFinished(() => Reflect.set(globalThis, 'localStorage', previousLocalStorage))
+    const targetA = automationTargetKey({ kind: 'track', trackId: 'track-1', effectInstanceId: 'processor-1' }, 'gain')
+    const targetB = automationTargetKey({ kind: 'track', trackId: 'track-2' }, 'volume')
+    let refuse: ((result: { accepted: false; reason: 'bridge-error' }) => void) | undefined
+    const pending = new Promise<{ accepted: false; reason: 'bridge-error' }>((resolve) => { refuse = resolve })
+    const controller = createRoot((dispose) => {
+      onTestFinished(dispose)
+      return useTimelineAutomationController({
+        projectId: () => 'shared-project',
+        userId: () => 'user-1',
+        tracks: () => [],
+        masterVolume: () => 1,
+        masterReady: () => false,
+        remoteRows: () => [
+          { _id: 'a', projectId: 'shared-project', targetKind: 'track', trackId: 'track-1', effectInstanceId: 'processor-1', targetKey: targetA, parameterId: 'gain', enabled: true, points: [], updatedAt: 1 },
+          { _id: 'b', projectId: 'shared-project', targetKind: 'track', trackId: 'track-2', targetKey: targetB, parameterId: 'volume', enabled: true, points: [], updatedAt: 1 },
+        ],
+        remoteEffects: () => [],
+        audioEngine: (() => {
+          const audioEngine = new AudioEngine()
+          Reflect.set(audioEngine, 'cancelAutomationSchedules', () => {})
+          Reflect.set(audioEngine, 'setAutomationEnvelopes', () => {})
+          return audioEngine
+        })(),
+        reenableProcessorAutomation: () => pending,
+        isPlaying: () => false,
+        playheadSec: () => 0,
+        selectedTrackId: () => '',
+        pushHistory: () => {},
+      })
+    })
+
+    controller.overrideTarget(targetA)
+    const reenable = controller.reEnable()
+    controller.overrideTarget(targetB)
+    refuse?.({ accepted: false, reason: 'bridge-error' })
+    await reenable
+
+    expect(controller.overrideCount()).toBe(2)
+  })
+
   test('reloading unchanged effect data keeps the lanes workspace', () => {
     const previousLocalStorage = globalThis.localStorage
     Reflect.set(globalThis, 'localStorage', { getItem: () => null, setItem: () => {} })

@@ -33948,7 +33948,7 @@
     "role": "control",
     "control": null,
     "targets": [
-     "src/components/Timeline.tsx"
+     "src/components/timeline/timeline-playback-wiring.ts"
     ],
     "witnesses": [
      "src/lib/portable-browser-playback-controller.test.ts"
@@ -33978,23 +33978,13 @@
      "id": "444-control",
      "changes": [
       {
-       "file": "src/components/Timeline.tsx",
-       "contentsFile": "{{DIR}}/Timeline.control.tsx"
-      },
-      {
-       "file": "src/lib/portable-browser-playback-controller.test.ts",
-       "from": "  const source = await readFile(new URL(\"../components/Timeline.tsx\", import.meta.url), \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n",
-       "to": "  const source = await readFile(\"{{DIR}}/Timeline.control.tsx\", \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n"
+       "file": "src/components/timeline/timeline-playback-wiring.ts",
+       "from": "  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
+       "to": "  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n"
       }
      ]
     },
-    "materialize": [
-     {
-      "file": "Timeline.control.tsx",
-      "source": "src/components/Timeline.tsx",
-      "edits": []
-     }
-    ],
+    "materialize": [],
     "rejectionGate": false,
     "expect": {
      "exit": 0,
@@ -34019,7 +34009,7 @@
     "role": "control",
     "control": null,
     "targets": [
-     "src/components/Timeline.tsx"
+     "src/components/timeline/timeline-playback-wiring.ts"
     ],
     "witnesses": [
      "src/hooks/useEffectsPanelAudioSync.test.ts"
@@ -34049,23 +34039,13 @@
      "id": "444-control",
      "changes": [
       {
-       "file": "src/components/Timeline.tsx",
-       "contentsFile": "{{DIR}}/Timeline.control.tsx"
-      },
-      {
-       "file": "src/lib/portable-browser-playback-controller.test.ts",
-       "from": "  const source = await readFile(new URL(\"../components/Timeline.tsx\", import.meta.url), \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n",
-       "to": "  const source = await readFile(\"{{DIR}}/Timeline.control.tsx\", \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n"
+       "file": "src/components/timeline/timeline-playback-wiring.ts",
+       "from": "  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
+       "to": "  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n"
       }
      ]
     },
-    "materialize": [
-     {
-      "file": "Timeline.control.tsx",
-      "source": "src/components/Timeline.tsx",
-      "edits": []
-     }
-    ],
+    "materialize": [],
     "rejectionGate": false,
     "expect": {
      "exit": 0,
@@ -34090,7 +34070,7 @@
     "role": "mutant",
     "control": "ledger:444:control:p1-controller",
     "targets": [
-     "src/components/Timeline.tsx"
+     "src/components/timeline/timeline-playback-wiring.ts"
     ],
     "witnesses": [
      "src/lib/portable-browser-playback-controller.test.ts"
@@ -34120,32 +34100,13 @@
      "id": "444-mutant",
      "changes": [
       {
-       "file": "src/components/Timeline.tsx",
-       "contentsFile": "{{DIR}}/Timeline.mutant.tsx"
-      },
-      {
-       "file": "src/lib/portable-browser-playback-controller.test.ts",
-       "from": "  const source = await readFile(new URL(\"../components/Timeline.tsx\", import.meta.url), \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n",
-       "to": "  const source = await readFile(\"{{DIR}}/Timeline.mutant.tsx\", \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n"
+       "file": "src/components/timeline/timeline-playback-wiring.ts",
+       "from": "  if (result.accepted) return \"applied\";\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");\n  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
+       "to": "  if (result.accepted) return \"applied\";\n  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");\n"
       }
      ]
     },
-    "materialize": [
-     {
-      "file": "Timeline.mutant.tsx",
-      "source": "src/components/Timeline.tsx",
-      "edits": [
-       {
-        "from": "        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n        // a Synth edit is carried by the release announce.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
-        "to": ""
-       },
-       {
-        "from": "        if (result.accepted) return \"applied\";\n",
-        "to": "        if (result.accepted) return \"applied\";\n        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n        // a Synth edit is carried by the release announce.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n"
-       }
-      ]
-     }
-    ],
+    "materialize": [],
     "rejectionGate": false,
     "expect": {
      "exit": 1,
@@ -34172,7 +34133,7 @@
     "role": "mutant",
     "control": "ledger:444:control:p1-audiosync",
     "targets": [
-     "src/components/Timeline.tsx"
+     "src/components/timeline/timeline-playback-wiring.ts"
     ],
     "witnesses": [
      "src/hooks/useEffectsPanelAudioSync.test.ts"
@@ -34202,32 +34163,13 @@
      "id": "444-mutant",
      "changes": [
       {
-       "file": "src/components/Timeline.tsx",
-       "contentsFile": "{{DIR}}/Timeline.mutant.tsx"
-      },
-      {
-       "file": "src/lib/portable-browser-playback-controller.test.ts",
-       "from": "  const source = await readFile(new URL(\"../components/Timeline.tsx\", import.meta.url), \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n",
-       "to": "  const source = await readFile(\"{{DIR}}/Timeline.mutant.tsx\", \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n"
+       "file": "src/components/timeline/timeline-playback-wiring.ts",
+       "from": "  if (result.accepted) return \"applied\";\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");\n  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
+       "to": "  if (result.accepted) return \"applied\";\n  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");\n"
       }
      ]
     },
-    "materialize": [
-     {
-      "file": "Timeline.mutant.tsx",
-      "source": "src/components/Timeline.tsx",
-      "edits": [
-       {
-        "from": "        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam\n        // and rebuilds what it cannot carry; a Synth edit is carried by the release announce. A preview must never rebuild.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
-        "to": ""
-       },
-       {
-        "from": "        if (result.accepted) return \"applied\";\n",
-        "to": "        if (result.accepted) return \"applied\";\n        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam\n        // and rebuilds what it cannot carry; a Synth edit is carried by the release announce. A preview must never rebuild.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n"
-       }
-      ]
-     }
-    ],
+    "materialize": [],
     "rejectionGate": false,
     "expect": {
      "exit": 0,

@@ -1,0 +1,281 @@
+{
+ "name": "pr62-p47-portable-guard-arms",
+ "sequence": 76,
+ "createdAt": "2026-11-17T22:33:38.705Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:control:p1-controller",
+    "targets"
+   ],
+   "old": [
+    "src/components/Timeline.tsx"
+   ],
+   "new": [
+    "src/components/timeline/timeline-playback-wiring.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:control:p1-controller",
+    "spec"
+   ],
+   "old": {
+    "id": "444-control",
+    "changes": [
+     {
+      "file": "src/components/Timeline.tsx",
+      "contentsFile": "{{DIR}}/Timeline.control.tsx"
+     },
+     {
+      "file": "src/lib/portable-browser-playback-controller.test.ts",
+      "from": "  const source = await readFile(new URL(\"../components/Timeline.tsx\", import.meta.url), \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n",
+      "to": "  const source = await readFile(\"{{DIR}}/Timeline.control.tsx\", \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n"
+     }
+    ]
+   },
+   "new": {
+    "id": "444-control",
+    "changes": [
+     {
+      "file": "src/components/timeline/timeline-playback-wiring.ts",
+      "from": "  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
+      "to": "  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n"
+     }
+    ]
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:control:p1-controller",
+    "materialize"
+   ],
+   "old": [
+    {
+     "file": "Timeline.control.tsx",
+     "source": "src/components/Timeline.tsx",
+     "edits": []
+    }
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:control:p1-audiosync",
+    "targets"
+   ],
+   "old": [
+    "src/components/Timeline.tsx"
+   ],
+   "new": [
+    "src/components/timeline/timeline-playback-wiring.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:control:p1-audiosync",
+    "spec"
+   ],
+   "old": {
+    "id": "444-control",
+    "changes": [
+     {
+      "file": "src/components/Timeline.tsx",
+      "contentsFile": "{{DIR}}/Timeline.control.tsx"
+     },
+     {
+      "file": "src/lib/portable-browser-playback-controller.test.ts",
+      "from": "  const source = await readFile(new URL(\"../components/Timeline.tsx\", import.meta.url), \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n",
+      "to": "  const source = await readFile(\"{{DIR}}/Timeline.control.tsx\", \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n"
+     }
+    ]
+   },
+   "new": {
+    "id": "444-control",
+    "changes": [
+     {
+      "file": "src/components/timeline/timeline-playback-wiring.ts",
+      "from": "  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
+      "to": "  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n"
+     }
+    ]
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:control:p1-audiosync",
+    "materialize"
+   ],
+   "old": [
+    {
+     "file": "Timeline.control.tsx",
+     "source": "src/components/Timeline.tsx",
+     "edits": []
+    }
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:mutant:p1-controller",
+    "targets"
+   ],
+   "old": [
+    "src/components/Timeline.tsx"
+   ],
+   "new": [
+    "src/components/timeline/timeline-playback-wiring.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:mutant:p1-controller",
+    "spec"
+   ],
+   "old": {
+    "id": "444-mutant",
+    "changes": [
+     {
+      "file": "src/components/Timeline.tsx",
+      "contentsFile": "{{DIR}}/Timeline.mutant.tsx"
+     },
+     {
+      "file": "src/lib/portable-browser-playback-controller.test.ts",
+      "from": "  const source = await readFile(new URL(\"../components/Timeline.tsx\", import.meta.url), \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n",
+      "to": "  const source = await readFile(\"{{DIR}}/Timeline.mutant.tsx\", \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n"
+     }
+    ]
+   },
+   "new": {
+    "id": "444-mutant",
+    "changes": [
+     {
+      "file": "src/components/timeline/timeline-playback-wiring.ts",
+      "from": "  if (result.accepted) return \"applied\";\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");\n  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
+      "to": "  if (result.accepted) return \"applied\";\n  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");\n"
+     }
+    ]
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:mutant:p1-controller",
+    "materialize"
+   ],
+   "old": [
+    {
+     "file": "Timeline.mutant.tsx",
+     "source": "src/components/Timeline.tsx",
+     "edits": [
+      {
+       "from": "        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n        // a Synth edit is carried by the release announce.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
+       "to": ""
+      },
+      {
+       "from": "        if (result.accepted) return \"applied\";\n",
+       "to": "        if (result.accepted) return \"applied\";\n        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n        // a Synth edit is carried by the release announce.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n"
+      }
+     ]
+    }
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:mutant:p1-audiosync",
+    "targets"
+   ],
+   "old": [
+    "src/components/Timeline.tsx"
+   ],
+   "new": [
+    "src/components/timeline/timeline-playback-wiring.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:mutant:p1-audiosync",
+    "spec"
+   ],
+   "old": {
+    "id": "444-mutant",
+    "changes": [
+     {
+      "file": "src/components/Timeline.tsx",
+      "contentsFile": "{{DIR}}/Timeline.mutant.tsx"
+     },
+     {
+      "file": "src/lib/portable-browser-playback-controller.test.ts",
+      "from": "  const source = await readFile(new URL(\"../components/Timeline.tsx\", import.meta.url), \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n",
+      "to": "  const source = await readFile(\"{{DIR}}/Timeline.mutant.tsx\", \"utf8\")\n  const { portable, structural } = extractTimelineBindings(source)\n"
+     }
+    ]
+   },
+   "new": {
+    "id": "444-mutant",
+    "changes": [
+     {
+      "file": "src/components/timeline/timeline-playback-wiring.ts",
+      "from": "  if (result.accepted) return \"applied\";\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");\n  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
+      "to": "  if (result.accepted) return \"applied\";\n  // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;\n  // a Synth edit is carried by the release announce.\n  if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n  if (result.reason === \"cancelled\" || result.reason === \"stale\") return \"superseded\";\n  if (result.reason === \"unavailable\" || result.reason === \"unprepared\") return \"dropped\";\n  if (result.reason !== \"unsupported\") throw new Error(result.error ?? \"The portable processor update failed.\");\n"
+     }
+    ]
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:444:mutant:p1-audiosync",
+    "materialize"
+   ],
+   "old": [
+    {
+     "file": "Timeline.mutant.tsx",
+     "source": "src/components/Timeline.tsx",
+     "edits": [
+      {
+       "from": "        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam\n        // and rebuilds what it cannot carry; a Synth edit is carried by the release announce. A preview must never rebuild.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n",
+       "to": ""
+      },
+      {
+       "from": "        if (result.accepted) return \"applied\";\n",
+       "to": "        if (result.accepted) return \"applied\";\n        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam\n        // and rebuilds what it cannot carry; a Synth edit is carried by the release announce. A preview must never rebuild.\n        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;\n"
+      }
+     ]
+    }
+   ],
+   "new": []
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "P47 (pr62-cleanup pick of fc82ad7f; hand record, no --bless). The Timeline playback callbacks the portable controller test used to slice out of Timeline.tsx source (extractTimelineBindings, new Function) moved verbatim into src/components/timeline/timeline-playback-wiring.ts, which Timeline.tsx and the tests import. The four ledger:444 arms materialized a whole Timeline.tsx copy and rewrote the test's readFile of it; that test text no longer exists. Each arm now carries one in-memory change on timeline-playback-wiring.ts: the mutant moves the prepared-browser/Synth guard from after the unsupported check to right after the accepted return (the same reordering the old materialize edits made in Timeline.tsx); the control replaces the guard with itself. materialize is emptied and targets name the wiring module. Measured with the rc5 dv01-p1-impl overlay against the P47 tree and again on main: every arm's exit, applied, counts and fails equal the recorded expectation (mutant p1-controller still fails \"P1 a Synth portable bridge error is still reported and never rebuilds\"; the p1-audiosync arms still apply nothing and pass 3).",
+  "expectationsSha256": "b70911fc32715876a048b52f36bd6885a8aee9e81c442e2070fb499e03dce361"
+ }
+}

@@ -4,18 +4,21 @@ import { beginRecordingDeliveryTrace, finishRecordingDeliveryTrace, recordRecord
 import { createRecordingDeliveryTrace } from "../../src/lib/recording/recording-delivery-trace"
 import { createBenchmarkRecordingTelemetry } from "./benchmark-runtime"
 
-test("terminal benchmark evidence is returned beside status without mutating it", () => {
+test("terminal benchmark evidence is logged once without mutating the status", () => {
   const log = spyOn(console, "error").mockImplementation(() => undefined)
   try {
     const telemetry = createBenchmarkRecordingTelemetry(true)
     const active = { generation: 1, sessionId: 1n, timelineFrame: 0, capturedFrames: 2048, droppedFrames: 0, droppedBlocks: 0, availableBlocks: 32, queuedBlocks: 0, rms: 0, peak: 0, fatal: false, active: true, configured: true }
     telemetry.recordStatus(active)
     const stopped = { ...active, active: false }
-    const evidence = telemetry.recordStatus(stopped)
-    expect(evidence?.status).toMatchObject({ generation: 1, sessionId: "1", active: false })
-    expect(evidence?.delivery.capacity).toBe(512)
-    expect(stopped).not.toHaveProperty("benchmarkRecordingDelivery")
-    expect(telemetry.recordStatus({ ...active, active: false })).toBeUndefined()
+    telemetry.recordStatus(stopped)
+    expect(log).toHaveBeenCalledTimes(1)
+    const evidence = JSON.parse(String(log.mock.calls[0]?.[0]).replace("[quiet-recording-ipc] ", ""))
+    expect(evidence.status).toMatchObject({ generation: 1, sessionId: "1", active: false })
+    expect(evidence.delivery.capacity).toBe(512)
+    expect(stopped).toEqual({ ...active, active: false })
+    telemetry.recordStatus({ ...active, active: false })
+    expect(log).toHaveBeenCalledTimes(1)
   } finally { log.mockRestore() }
 })
 
@@ -51,8 +54,8 @@ test("main benchmark opt-out produces no evidence", () => {
   const log = spyOn(console, "error").mockImplementation(() => undefined)
   try {
     const telemetry = createBenchmarkRecordingTelemetry(false)
-    expect(telemetry.recordStatus({ generation: 1, sessionId: 1n, timelineFrame: 0, capturedFrames: 0, droppedFrames: 0,
-      droppedBlocks: 0, availableBlocks: 32, queuedBlocks: 0, rms: 0, peak: 0, fatal: false, active: false, configured: true })).toBeUndefined()
+    telemetry.recordStatus({ generation: 1, sessionId: 1n, timelineFrame: 0, capturedFrames: 0, droppedFrames: 0,
+      droppedBlocks: 0, availableBlocks: 32, queuedBlocks: 0, rms: 0, peak: 0, fatal: false, active: false, configured: true })
     expect(log).not.toHaveBeenCalled()
   } finally { log.mockRestore() }
 })

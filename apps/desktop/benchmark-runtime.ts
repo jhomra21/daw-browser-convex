@@ -177,7 +177,7 @@ export const createBenchmarkRecordingTelemetry = (
   }
   return {
     recordStatus(status: NativeHostRecordingStatus) {
-      if (!enabled) return undefined
+      if (!enabled) return
       observeSession(status.generation, status.sessionId)
       traffic?.record("recording-status", 96)
       lastStatus = status
@@ -185,11 +185,7 @@ export const createBenchmarkRecordingTelemetry = (
       observedCapture ||= status.active || status.fatal
       delivery?.status(now, status.queuedBlocks, status.active, status.fatal, status.capturedFrames)
       if (status.fatal) delivery?.transition("native-fatal", now)
-      if (observedCapture && !status.active && status.queuedBlocks === 0) {
-        const dump = emit(now)
-        if (dump) return { status: reportStatus(), delivery: dump }
-      }
-      return undefined
+      if (observedCapture && !status.active && status.queuedBlocks === 0) emit(now)
     },
     recordTraffic(channel: string, estimatedBytes: number) {
       traffic?.record(channel, estimatedBytes)

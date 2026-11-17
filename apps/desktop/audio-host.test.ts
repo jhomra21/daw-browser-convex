@@ -28,6 +28,7 @@ import {
   type ResolvedVst3Attachment,
 } from "./audio-host"
 import { createOfflinePcmAckTracker, deliverOfflinePcmChunk } from "./offline-pcm-ack"
+import { createAe08Evidence } from "./ae08-evidence"
 import {
   nativeAudioHostArtifactId,
   nativeAudioHostControlTypes,
@@ -430,10 +431,10 @@ test("a mapped page reaches the host as the same frame bytes as a joined header 
 })
 
 test("carries the bounded Stop reason on protocol and control diagnostics", async () => {
-  const fixture = await fixtureSupervisor("stop-reason")
-  const info = spyOn(console, "info").mockImplementation(() => undefined)
   const previousEvidenceDir = process.env.DAW_AE08_EVIDENCE_DIR
   process.env.DAW_AE08_EVIDENCE_DIR = tmpdir()
+  const fixture = await fixtureSupervisor("stop-reason")
+  const info = spyOn(console, "info").mockImplementation(() => undefined)
   try {
     await fixture.supervisor.stopAudio("project-switch")
     const stopLogs = info.mock.calls
@@ -1195,7 +1196,13 @@ const fixtureSupervisor = async (
       )
       onChild?.(child)
       return child
-    }, supervisorOptions),
+    }, {
+      ...supervisorOptions,
+      evidence: supervisorOptions?.evidence ?? createAe08Evidence(process.env.DAW_AE08_EVIDENCE_DIR),
+      hostEnvironment: supervisorOptions?.hostEnvironment ?? (process.env.DAW_AE08_EVIDENCE_DIR
+        ? { DAW_AE08_EVIDENCE_DIR: process.env.DAW_AE08_EVIDENCE_DIR }
+        : undefined),
+    }),
     dispose: () => rm(directory, { recursive: true, force: true }),
   }
 }
@@ -2697,6 +2704,9 @@ const recordingFinishFixture = async (blocked?: "patch" | "graph", refused = fal
       return write(chunk)
     })
     return spawned
+  }, {
+    evidence: createAe08Evidence(directory),
+    hostEnvironment: { DAW_AE08_EVIDENCE_DIR: directory },
   })
   await supervisor.configureRecording({
     deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
@@ -2704,8 +2714,6 @@ const recordingFinishFixture = async (blocked?: "patch" | "graph", refused = fal
   }, { rootPath: directory, rootDevice: 1n, rootInode: 2n, token: "a".repeat(64) })
   await supervisor.startRecording()
   const timers = spyOn(globalThis, "setTimeout")
-  const previousEvidenceDir = process.env.DAW_AE08_EVIDENCE_DIR
-  process.env.DAW_AE08_EVIDENCE_DIR = directory
   const logs = spyOn(console, "info").mockImplementation((prefix, line) => {
     if (prefix === "[native-audio-host-control]" && String(line).includes('"request":"recordingStop"')
       && String(line).includes('"phase":"enqueue"')) stopEnqueued.resolve()
@@ -2735,8 +2743,6 @@ const recordingFinishFixture = async (blocked?: "patch" | "graph", refused = fal
     dispose: async () => {
       timers.mockRestore()
       logs.mockRestore()
-      if (previousEvidenceDir === undefined) delete process.env.DAW_AE08_EVIDENCE_DIR
-      else process.env.DAW_AE08_EVIDENCE_DIR = previousEvidenceDir
       child?.kill("SIGKILL")
       await supervisor.teardown()
       await rm(directory, { recursive: true, force: true })

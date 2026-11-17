@@ -4,8 +4,8 @@ import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "no
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { z } from "zod"
-import { ae08ControlCommitReceived } from "../../apps/desktop/ae08-evidence"
-import { ae08RendererMarks } from "@daw-browser/desktop-protocol/ipc-channels"
+import { ae08ControlCommitReceived, createAe08Evidence } from "../../apps/desktop/ae08-evidence"
+import { ae08RendererMarks } from "@daw-browser/desktop-protocol/acceptance-marks"
 import { prepareSplit, splitLine, type PrepareSplit } from "./ae-08-prepare-split"
 import { phase9Presets, phase9Rows, presetNamed, type Preset, type Row, type Settle } from "./ae-08-phase-9-rows"
 
@@ -588,9 +588,10 @@ export const selfTest = async () => {
   try {
     process.env.DAW_AE08_EVIDENCE_DIR = evidence
     const before = Date.now()
-    ae08ControlCommitReceived({ operation: "control.preview", input: { idempotencyKey: "preview-key" } })
-    ae08ControlCommitReceived({ operation: "control.commit", input: { version: "v1" } })
-    ae08ControlCommitReceived({ operation: "control.commit", input: { idempotencyKey: "commit-key" } })
+    const evidenceObserver = createAe08Evidence(evidence)
+    ae08ControlCommitReceived(evidenceObserver, { operation: "control.preview", input: { idempotencyKey: "preview-key" } })
+    ae08ControlCommitReceived(evidenceObserver, { operation: "control.commit", input: { version: "v1" } })
+    ae08ControlCommitReceived(evidenceObserver, { operation: "control.commit", input: { idempotencyKey: "commit-key" } })
     const received = await commitReceivedWallMs(evidence, "commit-key")
     check(received >= before && received <= Date.now(), "the runner reads the wall time the app logged for its commit")
     check(parseHostLines(await readFile(path.join(evidence, "host.jsonl"), "utf8")).length === 1, "only a commit that carries a key is stamped")

@@ -7,6 +7,7 @@ import type { PluginCatalogData } from "./plugin-catalog"
 import { resolveVst3Attachment } from "./vst3-attachment"
 import { preflightNativeVst3Worker } from "./vst3-preflight"
 import type { ResolvedVst3Attachment } from "./audio-host"
+import type { HostEvidence } from "./ae08-evidence"
 
 const effectWorkerTransport = {
   slotCount: 2,
@@ -41,6 +42,8 @@ export const preflightVst3Insertion = async (input: {
     result: Extract<NativeVst3PreflightResult, { status: "available" }>,
   ) => void
   preflight?: typeof preflightNativeVst3Worker
+  evidence?: HostEvidence
+  workerEnvironment?: NodeJS.ProcessEnv
 }): Promise<NativeVst3InsertionPreflightResult> => {
   const classIsCataloged = input.catalog.entries.some((entry) => (
     entry.classes.some((candidate) => (
@@ -80,6 +83,8 @@ export const preflightVst3Insertion = async (input: {
     workerPath: input.workerPath,
     sampleRateHz: input.sampleRateHz,
     attachment,
+    evidence: input.evidence,
+    workerEnvironment: input.workerEnvironment,
   })
   if (result.status === "unavailable") return failure(result.code, result.message)
   if (

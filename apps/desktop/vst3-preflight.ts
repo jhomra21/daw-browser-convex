@@ -14,7 +14,7 @@ import {
   type NativeVst3PreflightResult,
 } from "@daw-browser/plugin-host-protocol"
 import type { ResolvedVst3Attachment } from "./audio-host"
-import { ae08Evidence } from "./ae08-evidence"
+import type { HostEvidence } from "./ae08-evidence"
 
 const maximumWorkerHelloBytes = 16 * 1024
 const defaultPreflightDeadlineMs = 5_000
@@ -53,6 +53,8 @@ export const preflightNativeVst3Worker = async (input: {
   signal?: AbortSignal
   spawnWorker?: SpawnWorker
   accessWorker?: typeof access
+  evidence?: HostEvidence
+  workerEnvironment?: NodeJS.ProcessEnv
 }): Promise<NativeVst3PreflightResult> => {
   const requestId = randomUUID()
   const unavailable = (
@@ -95,8 +97,7 @@ export const preflightNativeVst3Worker = async (input: {
   ]
   return new Promise((resolve, reject) => {
     const started = performance.now()
-    const environment: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin" }
-    if (process.env.DAW_AE08_EVIDENCE_DIR) environment.DAW_AE08_EVIDENCE_DIR = process.env.DAW_AE08_EVIDENCE_DIR
+    const environment: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin", ...input.workerEnvironment }
     const launch = input.spawnWorker ?? ((workerPath, workerArguments) => spawn(workerPath, [...workerArguments], {
       env: environment,
       stdio: ["pipe", "pipe", "pipe"],
@@ -104,7 +105,7 @@ export const preflightNativeVst3Worker = async (input: {
     let child: ChildProcessWithoutNullStreams
     try {
       child = launch(input.workerPath, arguments_)
-      ae08Evidence("vst-preflight-spawn", { pid: child.pid ?? null, instanceId: attachment.instanceId })
+      input.evidence?.("vst-preflight-spawn", { pid: child.pid ?? null, instanceId: attachment.instanceId })
     } catch {
       resolve(unavailable("worker-unavailable", "The native VST3 worker could not start."))
       return
@@ -118,7 +119,7 @@ export const preflightNativeVst3Worker = async (input: {
     const finish = (result: NativeVst3PreflightResult) => {
       if (settled) return
       settled = true
-      ae08Evidence("vst-preflight-complete", { pid: child.pid ?? null, instanceId: attachment.instanceId,
+      input.evidence?.("vst-preflight-complete", { pid: child.pid ?? null, instanceId: attachment.instanceId,
         durationMs: performance.now() - started, status: result.status })
       if (timer !== undefined) clearTimeout(timer)
       input.signal?.removeEventListener("abort", abort)

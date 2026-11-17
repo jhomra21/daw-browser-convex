@@ -35,7 +35,6 @@ import {
 } from "@daw-browser/desktop-protocol"
 import type { DesktopApplicationMenuMessage } from "@daw-browser/desktop-protocol/application-menu"
 import {
-  ae08RendererMarkChannel,
   applicationMenuCommandChannel,
   diagnosticsChannel,
   diagnosticsV2TraceChannel,
@@ -186,7 +185,8 @@ import {
 import { packagedRendererRoot, rendererAssetPath } from "./renderer-path"
 import { createNativeVstProjectBindings } from "./native-vst-project-bindings"
 import { createApplicationMenuController } from "./application-menu"
-import { ae08AttachRendererProfile, ae08ControlCommitReceived, ae08Evidence, ae08RendererMarkSchema, ae08StartTrace, ae08StopTrace } from "./ae08-evidence"
+import { createAe08Evidence, ae08ControlCommitReceived, ae08StartTrace, ae08StopTrace } from "./ae08-evidence"
+import { ae08RendererMarkChannel, ae08RendererMarkSchema } from "@daw-browser/desktop-protocol/acceptance-marks"
 import { deliverToRenderer } from "./renderer-delivery"
 import { createRendererLifecycleOwner } from "./renderer-lifecycle"
 import { createOfflinePcmAckTracker } from "./offline-pcm-ack"
@@ -380,10 +380,13 @@ const pendingEditorStateAcks = new Map<string, {
   resolve: () => void
   reject: (error: Error) => void
 }>()
-// Renderer-bound messages so far, read only by the AE-08 `inspect-handler-return` evidence: how much traffic shared the IPC with a reply.
-let rendererSendCount = 0
+const evidenceDirectory = process.env.DAW_AE08_EVIDENCE_DIR
+const ae08Evidence = createAe08Evidence(evidenceDirectory)
+const ae08WorkerEnvironment: NodeJS.ProcessEnv = evidenceDirectory
+  ? { DAW_AE08_EVIDENCE_DIR: evidenceDirectory }
+  : {}
 const sendRendererMessage = (channel: string, ...args: unknown[]) => {
-  rendererSendCount += 1
+  ae08Evidence?.rendererSend()
   return deliverToRenderer({
     getTarget: () => window_?.webContents,
     channel,
@@ -884,7 +887,7 @@ const handleSocket = (socket: Socket) => {
       return
     }
     const rendererId = correlation.create(frame.id)
-    ae08ControlCommitReceived(frame)
+    ae08ControlCommitReceived(ae08Evidence, frame)
     if (diagnosticsTraceEnabled && frame.operation === "diagnostics.snapshot.v2") {
       const start = diagnosticsTrace.start()
       diagnosticsStarts.set(rendererId, start)
@@ -1129,7 +1132,7 @@ const registerIpc = () => {
     && event.senderFrame !== null
     && sameAppOrigin(event.senderFrame.url)
   )
-  if (process.env.DAW_AE08_EVIDENCE_DIR) ipcMain.on(ae08RendererMarkChannel, (event, message) => {
+  if (ae08Evidence) ipcMain.on(ae08RendererMarkChannel, (event, message) => {
     const mark = ae08RendererMarkSchema.safeParse(message)
     if (mark.success && audioHostAllowed(event)) ae08Evidence(mark.data[0], { key: mark.data[1] })
   })
@@ -1736,6 +1739,8 @@ const registerIpc = () => {
           (sessionValue.capturedVstStates ?? []).map((state) => [state.instanceId, state]),
         ),
         requiredVstStateInstanceIds: new Set(sessionValue.requiredVstStateInstanceIds ?? []),
+        evidence: ae08Evidence,
+        workerEnvironment: ae08WorkerEnvironment,
       })
     } catch (error) {
       activeEditorProjectBindings.rollback(envelope.data.transactionToken)
@@ -1807,8 +1812,8 @@ const registerIpc = () => {
       if (!supervisor || !parsed.success || !ownsRevisionProject(event, parsed.data.projectId)
         || supervisor.transactionOpen() || !supervisor.status().running) return nativeSessionFailure()
       const owner = supervisor.status(), rendererGeneration = generation
-      if (operation === "inspect") ae08Evidence("inspect-handler-entry", { pid: owner.pid ?? null })
-      const sendsAtEntry = rendererSendCount
+      if (operation === "inspect") ae08Evidence?.("inspect-handler-entry", { pid: owner.pid ?? null })
+      const sendsAtEntry = ae08Evidence?.rendererSendCount() ?? 0
       try {
         let result
         if ("bytes" in parsed.data) {
@@ -1816,7 +1821,7 @@ const registerIpc = () => {
           const bytes = Buffer.from(parsed.data.bytes)
           bytes.writeBigUInt64BE(BigInt(revision), 0)
           bytes.writeUInt32LE(revision, 16)
-          ae08Evidence("revision-allocate", { pid: owner.pid ?? null, lifecycleGeneration: owner.generation,
+          ae08Evidence?.("revision-allocate", { pid: owner.pid ?? null, lifecycleGeneration: owner.generation,
             runtimeRevision: revision, projectRevision: parsed.data.projectRevision })
           result = await supervisor.prepareGraphRevision(bytes, parsed.data.requestedPublicationFrame ?? 0n)
         } else {
@@ -1838,7 +1843,8 @@ const registerIpc = () => {
           // The command ran, but this renderer no longer owns its result: it may have been taken.
           return nativeSessionFailure(new Error("The native audio session changed owner during the request."))
         }
-        if (operation === "inspect") ae08Evidence("inspect-handler-return", { pid: current.pid ?? null, rendererSends: rendererSendCount - sendsAtEntry })
+        if (operation === "inspect") ae08Evidence?.("inspect-handler-return", { pid: current.pid ?? null,
+          rendererSends: (ae08Evidence?.rendererSendCount() ?? 0) - sendsAtEntry })
         return { ok: true, revision: result, hostGeneration: current.generation, hostPid: current.pid }
       } catch (error) { return nativeSessionFailure(error) }
     })
@@ -2120,6 +2126,8 @@ const registerIpc = () => {
         workerPath,
         sampleRateHz: device.nominalSampleRateHz,
         maximumFramesPerBlock: Math.min(device.maximumFramesPerBlock, maxVst3WorkerFrames),
+        evidence: ae08Evidence,
+        workerEnvironment: ae08WorkerEnvironment,
         rememberVerdict: (attachment, result) => {
           attachmentLedger.rememberVerdict(attachment, device.nominalSampleRateHz, result)
         },
@@ -2169,7 +2177,6 @@ const createWindow = () => {
   // Maximize before the first paint; the minimum-size frame stays as the restore size.
   window_.maximize()
   window_.show()
-  ae08AttachRendererProfile(window_.webContents)
   installBenchmarkWindowTelemetry({
     app,
     window: window_,
@@ -2277,7 +2284,7 @@ const prepareQuit = async () => {
   await nativeVst3EditorSessionManager?.teardownAll()
   await closeSocket()
   await fileCapabilities.revokeAll()
-  await ae08StopTrace()
+  await ae08StopTrace().catch(() => console.error("[ae08] trace could not be saved"))
   quitCleanupPrepared = true
 }
 const finishQuit = async () => {
@@ -2313,7 +2320,7 @@ else {
     window_?.focus()
   })
   app.whenReady().then(async () => {
-    await ae08StartTrace(contentTracing)
+    await ae08StartTrace(contentTracing).catch(() => console.error("[ae08] trace could not start"))
     const stage = createBenchmarkStartupReporter()
     stage("before-native-helper")
     nativeMediaAvailable = await nativeFileCapabilityHelper.selfTest()
@@ -2371,7 +2378,10 @@ else {
     recordingSessionOwner.attachRegistry(recordingStartup.registry)
     if (recordingStartup.registry) recordingOrderEvidence?.ready()
     if (recordingStartup.error) console.error("[recording-spool] recording storage unavailable; DAW startup continues", recordingStartup.error)
-    audioHostSupervisor = audioHostPath ? createNativeAudioHostSupervisor(audioHostPath) : undefined
+    audioHostSupervisor = audioHostPath ? createNativeAudioHostSupervisor(audioHostPath, undefined, {
+      evidence: ae08Evidence,
+      hostEnvironment: ae08WorkerEnvironment,
+    }) : undefined
     // Only a lost host ends the native session. One plug-in's fault, miss or restart is that instance's business.
     const publishNativeSessionLoss = (error: string) => {
       activeEditorProjectBindings.clear()
@@ -2399,7 +2409,10 @@ else {
       ? createNativeVst3EditorSessionManager({
         workerPath: vst3WorkerPath,
         catalogStore: pluginCatalogStore,
-        createSupervisor: () => createNativeAudioHostSupervisor(editorHostPath),
+        createSupervisor: () => createNativeAudioHostSupervisor(editorHostPath, undefined, {
+          evidence: ae08Evidence,
+          hostEnvironment: ae08WorkerEnvironment,
+        }),
         playbackOwns: (instanceId) => activeEditorProjectBindings.projectFor(instanceId) !== undefined,
         onEditorInteraction: () => {
           const target = window_

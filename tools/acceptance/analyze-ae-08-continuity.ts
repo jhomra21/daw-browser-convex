@@ -3,7 +3,7 @@ import path from "node:path"
 import { appendFile, readFile, writeFile } from "node:fs/promises"
 import { createHash } from "node:crypto"
 import { z } from "zod"
-import { ae08RendererMarks } from "@daw-browser/desktop-protocol/ipc-channels"
+import { ae08RendererMarks } from "@daw-browser/desktop-protocol/acceptance-marks"
 import { readWav, type Pcm } from "./ae08-wav"
 import { phase5Rows } from "./ae-08-phase-5-fixture"
 

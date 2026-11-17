@@ -16,6 +16,7 @@ import {
 import type { PluginCatalogData } from "./plugin-catalog"
 import { resolveVst3Attachment } from "./vst3-attachment"
 import { preflightNativeVst3Worker } from "./vst3-preflight"
+import type { HostEvidence } from "./ae08-evidence"
 
 type Attachment = NativeExternalAttachmentPlan["attachments"][number]
 export type PreflightAttachment = ResolvedVst3Attachment & { stateRevision: number }
@@ -366,6 +367,8 @@ type CoordinationInput = {
   capturedVstStates?: ReadonlyMap<string, CapturedVst3State>
   requiredVstStateInstanceIds?: ReadonlySet<string>
   preflight?: typeof preflightNativeVst3Worker
+  evidence?: HostEvidence
+  workerEnvironment?: NodeJS.ProcessEnv
   reportDefect?: (defect: NativeVst3Defect) => void
 }
 
@@ -435,6 +438,8 @@ const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3Coor
         workerPath: input.workerPath,
         attachment: candidate.native,
         sampleRateHz: input.sampleRateHz,
+        evidence: input.evidence,
+        workerEnvironment: input.workerEnvironment,
       })
     if (result.status === "unavailable") {
       return {

@@ -1,4 +1,4 @@
-import type { ae08RendererMarks } from "@daw-browser/desktop-protocol/ipc-channels"
+import type { ae08RendererMarks } from "@daw-browser/desktop-protocol/acceptance-marks"
 import type { DesktopBridge } from "~/types/desktop-bridge"
 
 type AcceptanceMark = (typeof ae08RendererMarks.options)[number]

@@ -1,4 +1,3 @@
-import { z } from "zod"
 
 export const hostRequestChannel = "daw:host-request"
 export const hostResponseChannel = "daw:host-response"
@@ -65,32 +64,6 @@ export const vstEditorCapturedStateAckChannel = "daw:audio-host:vst-editor-captu
 export const vstEditorStateChannel = "daw:audio-host:vst-editor-state"
 export const vstParameterEditChannel = "daw:audio-host:vst-parameter-edit"
 export const vstInstanceEventChannel = "daw:audio-host:vst-instance-event"
-export const ae08RendererMarkChannel = "daw:ae08:renderer-mark"
-// Renderer marks of the edit-to-publish path. Each carries a commit key (control-*), the hash of the edited target (ui-*, the moment
-// the UI commits an edit made in the app window) or an adoption key (the rest).
-export const ae08RendererMarks = z.enum([
-  "control-handler-entry", "control-reload-before-done", "control-commit-done", "control-store-emitted",
-  "control-parameters-delivered", "control-parameters-undelivered",
-  "ui-parameter-commit", "ui-automation-override", "ui-automation-reenable", "ui-device-insert", "ui-device-remove", "ui-editor-open", "ui-undo", "ui-redo",
-  "compile-start", "compile-instruments-ready", "compile-render-state-ready", "compile-processors-ready", "compile-end",
-  "lane-admitted", "fence-open", "prepare-sent",
-  // The renderer's side of the host's prepare: the reply received, and the first publish request that binds the seam sent.
-  "prepare-reply-received", "bind-request-sent",
-  // The two host round trips between them: the instrument states reply (sent even with none added) and the bind's progress read,
-  // whose IPC reply is marked before the publication lane takes it back.
-  "bind-states-configured", "bind-progress-reply", "bind-progress-read",
-  // Bind to armed Publish, the staging of the window the seam waits for: the cover's end, the staged bank returned, the prime's start and end.
-  "armed-cover-end", "armed-stage-returned", "armed-prime-start", "armed-prime-end",
-  // Asset hydration of one adoption, after the host prepared its graph: the mapped asset's create, each page write and range prepare
-  // (a request when the renderer sends it, a reply when the host's answer is back), and the candidate paging around them.
-  "asset-create-request", "asset-create-reply", "asset-page-write-request", "asset-page-write-reply",
-  "asset-range-request", "asset-range-reply", "asset-candidate-pages-start", "asset-candidate-pages-end",
-  // The two steps between the create and the candidate paging: the added sources' own pages (the full-range uploads of an
-  // instrument's regional sources) and the instrument states upload. What is left after them is building the candidate coordinator.
-  "asset-sources-ready", "asset-instrument-states-ready",
-  // One schedule-window (refill) compile on the renderer main thread, keyed by its frame range: the work a reply to the renderer can queue behind.
-  "refill-compile-start", "refill-compile-end",
-])
 export const benchmarkHeartbeatChannel = "daw:benchmark:heartbeat"
 export const benchmarkRendererPingChannel = "daw:benchmark:renderer-ping"
 export const benchmarkRendererPongChannel = "daw:benchmark:renderer-pong"

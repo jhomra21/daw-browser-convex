@@ -13,6 +13,7 @@ import {
   type DesktopVstInstanceEvent,
   type DesktopVstParameterEditPayload,
 } from "@daw-browser/desktop-protocol"
+import { ae08RendererMarkChannel } from "@daw-browser/desktop-protocol/acceptance-marks"
 import {
   desktopApplicationMenuMessageSchema,
   desktopApplicationMenuStateSchema,
@@ -20,7 +21,6 @@ import {
   type DesktopApplicationMenuState,
 } from "@daw-browser/desktop-protocol/application-menu"
 import {
-  ae08RendererMarkChannel,
   applicationMenuCommandChannel,
   applicationMenuStateChannel,
   benchmarkHeartbeatChannel,

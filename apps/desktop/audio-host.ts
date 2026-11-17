@@ -3,7 +3,7 @@ import { access } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
 import path from "node:path"
 import { readDiagnosticInstanceId } from "./diagnostic-instance-id"
-import { ae08Evidence } from "./ae08-evidence"
+import type { HostEvidence } from "./ae08-evidence"
 import { audioCoreWasmAbiVersion } from "@daw-browser/audio-core-wasm"
 import { defaultDecodedAudioPageFrames } from "@daw-browser/audio-engine/media-pages"
 import {
@@ -1321,6 +1321,8 @@ export const nativeProcessorPatchReply = (status: NativeProcessorPatchStatus) =>
 type SpawnHost = (hostPath: string) => ChildProcessWithoutNullStreams
 
 export type NativeAudioHostSupervisorOptions = {
+  evidence?: HostEvidence
+  hostEnvironment?: NodeJS.ProcessEnv
   gracefulTerminationMs?: number
   sigtermTerminationMs?: number
   sigkillObservationMs?: number
@@ -1396,13 +1398,21 @@ export type NativeAudioHostSupervisor = {
 
 export const createNativeAudioHostSupervisor = (
   hostPath: string,
-  spawnHost: SpawnHost = (executable) => {
-    const environment: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin" }
-    if (process.env.DAW_AE08_EVIDENCE_DIR) environment.DAW_AE08_EVIDENCE_DIR = process.env.DAW_AE08_EVIDENCE_DIR
-    return spawn(executable, [], { env: environment, stdio: ["pipe", "pipe", "pipe"] })
-  },
+  spawnHost: SpawnHost | undefined = undefined,
   options: NativeAudioHostSupervisorOptions = {},
 ): NativeAudioHostSupervisor => {
+  const evidence = options.evidence
+  const observeEvidence: HostEvidence = (event, fields) => {
+    try {
+      evidence?.(event, fields)
+    } catch {
+      return
+    }
+  }
+  const defaultSpawnHost: SpawnHost = (executable) => spawn(executable, [], {
+    env: { PATH: "/usr/bin:/bin", ...options.hostEnvironment },
+    stdio: ["pipe", "pipe", "pipe"],
+  })
   let child: ChildProcessWithoutNullStreams | undefined
   let hello: AudioHostHello | undefined
   let buffer = Buffer.alloc(0)
@@ -1458,7 +1468,7 @@ export const createNativeAudioHostSupervisor = (
     enqueuedAt: number,
     reason?: string,
   ) => {
-    if (!process.env.DAW_AE08_EVIDENCE_DIR || isHotControlRequest(type)) return
+    if (!evidence || isHotControlRequest(type)) return
     console.info("[native-audio-host-control]", JSON.stringify({
       phase: "enqueue",
       requestId,
@@ -1476,7 +1486,7 @@ export const createNativeAudioHostSupervisor = (
     // Every other ack needs the evidence switch.
     const shouldLog = isHotControlRequest(control.requestType)
       ? elapsedMs >= slowHotControlAckThresholdMs
-      : Boolean(process.env.DAW_AE08_EVIDENCE_DIR)
+      : Boolean(evidence)
     if (!shouldLog) return
     console.info("[native-audio-host-control]", JSON.stringify({
       phase: "ack",
@@ -1495,7 +1505,7 @@ export const createNativeAudioHostSupervisor = (
     host: ChildProcessWithoutNullStreams,
     stdinBackpressure: boolean,
   ) => {
-    if (!process.env.DAW_AE08_EVIDENCE_DIR || isHotControlRequest(control.requestType)) return
+    if (!evidence || isHotControlRequest(control.requestType)) return
     console.info("[native-audio-host-control]", JSON.stringify({
       phase: "write",
       requestId: control.requestId,
@@ -2203,12 +2213,12 @@ export const createNativeAudioHostSupervisor = (
         const status = decodeGraphRevisionStatus(frame)
         if (!status) return lost("The native audio host returned an invalid graph revision status.")
         if (status.requestedRevision !== pending.graphRequestedRevision) continue
-        if (current.requestType === graphRevisionStatusType) ae08Evidence("inspect-reply-received", { pid: child?.pid ?? null, revision: status.requestedRevision })
         logControlAck(current)
         clearTimeout(pending.deadline)
         pending = undefined
         dispatchNext()
         resolve(status)
+        if (current.requestType === graphRevisionStatusType) observeEvidence("inspect-reply-received", { pid: child?.pid ?? null, revision: status.requestedRevision })
       } else if (frame.readUInt32BE(8) === graphRevisionStatusType) {
         // A timed-out revision can reply after reconciliation was requested or
         // completed. It cannot settle another command or prove process loss.
@@ -2415,7 +2425,7 @@ export const createNativeAudioHostSupervisor = (
     if (pending) logControlWrite(pending, current, stdinBackpressure)
     // Main's account of an inspect's wait: what it queued behind (`queuedMs`, 0 when the control slot was free) and what is still queued.
     if (next.type === graphRevisionStatusType && next.graphRequestedRevision !== undefined) {
-      ae08Evidence("inspect-dispatch", { pid: current.pid ?? null, revision: next.graphRequestedRevision, queuedMs: Date.now() - next.enqueuedAt,
+      observeEvidence("inspect-dispatch", { pid: current.pid ?? null, revision: next.graphRequestedRevision, queuedMs: Date.now() - next.enqueuedAt,
         queueDepth: urgentSends.length + refillSends.length + normalSends.length })
     }
   }
@@ -2614,10 +2624,10 @@ export const createNativeAudioHostSupervisor = (
         if (generation !== lifecycleGeneration || teardownPromise) {
           throw new Error("The native audio host startup was cancelled.")
         }
-        spawned = spawnHost(hostPath)
+        spawned = (spawnHost ?? defaultSpawnHost)(hostPath)
         runtimeRevision = 0
         child = spawned
-        ae08Evidence("host-spawn", { pid: spawned.pid ?? null, lifecycleGeneration: generation, cause: "supervisor-start" })
+        observeEvidence("host-spawn", { pid: spawned.pid ?? null, lifecycleGeneration: generation, cause: "supervisor-start" })
         console.error("[native-vst3] native audio host spawned", JSON.stringify({
           lifecycleGeneration,
           pid: spawned.pid ?? null,
@@ -2631,7 +2641,7 @@ export const createNativeAudioHostSupervisor = (
           lost("The native audio host could not start.", spawned)
         })
         spawned.once("close", (code, signal) => {
-          ae08Evidence("host-exit", { pid: spawned?.pid ?? null, lifecycleGeneration: generation,
+          observeEvidence("host-exit", { pid: spawned?.pid ?? null, lifecycleGeneration: generation,
             code, signal, cause: spawned ? evidenceTerminationCauses.get(spawned) ?? "crash" : "spawn-failure" })
           const requestType = pending?.requestType
           const pendingRequest = requestType === undefined
@@ -2676,7 +2686,7 @@ export const createNativeAudioHostSupervisor = (
         })
         await send(hostHelloType)
         if (child !== spawned || !hello) throw new Error("The native audio host did not complete its handshake.")
-        ae08Evidence("hostHello", { pid: spawned.pid ?? null, lifecycleGeneration: generation })
+        observeEvidence("hostHello", { pid: spawned.pid ?? null, lifecycleGeneration: generation })
         return hello
       })()
       startPromise = attempt
@@ -2726,7 +2736,7 @@ export const createNativeAudioHostSupervisor = (
       })
     },
     async configure(input, transactionToken) {
-      ae08Evidence("structural-rebuild", { pid: child?.pid ?? null, lifecycleGeneration, cause: "device-configure" })
+      observeEvidence("structural-rebuild", { pid: child?.pid ?? null, lifecycleGeneration, cause: "device-configure" })
       const payload = serializeDeviceConfiguration(input)
       if (!payload) throw new Error("The native audio host configuration is invalid.")
       await request(deviceConfigureType, payload, transactionToken)
@@ -2905,7 +2915,7 @@ export const createNativeAudioHostSupervisor = (
         }
         normalSends.push(queued)
       logControlEnqueue(vstStateGetType, queued.requestId, queued.enqueuedAt)
-        ae08Evidence("vst-state-get", { pid: current.pid ?? null })
+        observeEvidence("vst-state-get", { pid: current.pid ?? null })
         dispatchNext()
       })
       if (!signal) return requestPromise
@@ -2960,7 +2970,7 @@ export const createNativeAudioHostSupervisor = (
     async installAsset(input, transactionToken) {
       const payload = serializeAssetInstall(input)
       if (!payload) throw new Error("The native audio host asset is invalid.")
-      ae08Evidence("asset-install", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId })
+      observeEvidence("asset-install", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId })
       await request(assetInstallType, payload, transactionToken)
     },
     async createMappedAsset(input, transactionToken) {
@@ -2978,7 +2988,7 @@ export const createNativeAudioHostSupervisor = (
       payload.writeUInt32BE(input.sampleRateHz, 12)
       payload.writeUInt32BE(input.channelCount, 16)
       payload.writeBigUInt64BE(hash, 20)
-      ae08Evidence("asset-install", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId })
+      observeEvidence("asset-install", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId })
       await request(mappedAssetCreateType, payload, transactionToken)
     },
     async writeMappedAssetPage(input, transactionToken) {
@@ -2994,7 +3004,7 @@ export const createNativeAudioHostSupervisor = (
       pageHeader.writeUInt32BE(input.sessionAssetId, 0)
       pageHeader.writeBigUInt64BE(BigInt(input.startFrame), 4)
       pageHeader.writeUInt32BE(input.frameCount, 12)
-      ae08Evidence("asset-page-write", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId, bytes: input.planarPcm.byteLength })
+      observeEvidence("asset-page-write", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId, bytes: input.planarPcm.byteLength })
       await request(mappedAssetWritePageType, [pageHeader, input.planarPcm], transactionToken)
     },
     async prepareMappedAssetRange(sessionAssetId, startFrame, frameCount, transactionToken) {
@@ -3093,7 +3103,7 @@ export const createNativeAudioHostSupervisor = (
       const payload = nativeBinaryPayload(bytes, 56)
       if (!payload) throw new Error("The native schedule window payload is invalid.")
       // Header offsets 0 and 56 of serializeNativeScheduleWindow: the revision and the processor automation (lane) event count.
-      ae08Evidence("schedule-window", { revision: payload.readUInt32LE(0), processorAutomationEvents: payload.readUInt32LE(56) })
+      observeEvidence("schedule-window", { revision: payload.readUInt32LE(0), processorAutomationEvents: payload.readUInt32LE(56) })
       await request(scheduleWindowType, payload, transactionToken)
     },
     async reenableVstScheduleAutomation(bytes, transactionToken) {
@@ -3340,7 +3350,7 @@ export const createNativeAudioHostSupervisor = (
     recordingAdmissionAvailable: () => !recordingAdmitted && !recordingFinish?.pending,
     recordingFinalizationPending: () => recordingFinish?.pending === true,
     teardown() {
-      ae08Evidence("host-teardown-request", { pid: child?.pid ?? null, lifecycleGeneration, cause: "application-shutdown" })
+      observeEvidence("host-teardown-request", { pid: child?.pid ?? null, lifecycleGeneration, cause: "application-shutdown" })
       if (teardownPromise) return teardownPromise
       lifecycleGeneration += 1
       lifecycleIntentVersion += 1
@@ -3391,8 +3401,8 @@ export const createNativeAudioHostSupervisor = (
       return stopping
     },
     suspend() {
-      ae08Evidence("host-suspend-request", { pid: child?.pid ?? null, lifecycleGeneration, cause: "quit-or-suspend" })
-      if (child && process.env.DAW_AE08_EVIDENCE_DIR) evidenceTerminationCauses.set(child, "quit")
+      observeEvidence("host-suspend-request", { pid: child?.pid ?? null, lifecycleGeneration, cause: "quit-or-suspend" })
+      if (child && evidence) evidenceTerminationCauses.set(child, "quit")
       if (recordingSuspendPromise) return recordingSuspendPromise
       if (recordingFinish?.pending) {
         const finishing = supervisor.waitForRecordingFinish().then(() => {

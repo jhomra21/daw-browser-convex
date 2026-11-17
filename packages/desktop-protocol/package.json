@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./acceptance-marks": "./src/acceptance-marks.ts",
     "./application-menu": "./src/application-menu.ts",
     "./ipc-channels": "./src/ipc-channels.ts",
     "./socket": "./src/socket.ts",

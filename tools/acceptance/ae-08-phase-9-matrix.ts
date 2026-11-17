@@ -584,9 +584,7 @@ export const selfTest = async () => {
   } finally { await rm(burstDirectory, { recursive: true }) }
   // The app's own commit stamp, written by the product helper and read back by the runner.
   const evidence = await mkdtemp(path.join(tmpdir(), "ae08-phase9-stamp-"))
-  const previousEvidenceDir = process.env.DAW_AE08_EVIDENCE_DIR
   try {
-    process.env.DAW_AE08_EVIDENCE_DIR = evidence
     const before = Date.now()
     const evidenceObserver = createAe08Evidence(evidence)
     ae08ControlCommitReceived(evidenceObserver, { operation: "control.preview", input: { idempotencyKey: "preview-key" } })
@@ -598,8 +596,6 @@ export const selfTest = async () => {
     const absent = await commitReceivedWallMs(evidence, "other-key").then(() => "read", (error) => error instanceof SetupFailure ? "setup" : "other")
     check(absent === "setup", `a commit the app never logged is a setup failure, got ${absent}`)
   } finally {
-    if (previousEvidenceDir === undefined) delete process.env.DAW_AE08_EVIDENCE_DIR
-    else process.env.DAW_AE08_EVIDENCE_DIR = previousEvidenceDir
     await rm(evidence, { recursive: true })
   }
   // The live wait: a line appended later resolves it; no line is a SetupFailure when the deadline passes, never a pass.

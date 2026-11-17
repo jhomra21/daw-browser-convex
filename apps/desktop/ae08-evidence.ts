@@ -5,34 +5,29 @@ import { z } from "zod"
 import type { DesktopRequestV2 } from "@daw-browser/desktop-protocol"
 
 export type HostEvidence = (event: string, fields?: Record<string, string | number | boolean | null>) => void
+type AppEvidence = HostEvidence & { rendererSend(): void; rendererSendCount(): number }
 
-export const createAe08Evidence = (directory: string | undefined): (HostEvidence & {
-  rendererSend(): number
-  rendererSendCount(): number
-  writeFailures(): number
-}) | undefined => {
+// Private, opt-in acceptance evidence. Never serialize native payloads or state. A write that fails is dropped, so evidence
+// never throws into the control path it observes.
+export const createAe08Evidence = (directory: string | undefined): AppEvidence | undefined => {
   if (!directory) return undefined
-  let failures = 0
   let rendererSends = 0
-  const evidence: HostEvidence & { rendererSend(): number; rendererSendCount(): number; writeFailures(): number } = Object.assign(
+  return Object.assign(
     (event: string, fields: Record<string, string | number | boolean | null> = {}) => {
       try {
         appendFileSync(path.join(directory, "host.jsonl"), `${JSON.stringify({
           event, wallMs: Date.now(), monotonicNs: process.hrtime.bigint().toString(), ...fields,
         })}\n`, { mode: 0o600 })
       } catch {
-        failures += 1
+        return
       }
     },
     {
-      rendererSend: () => ++rendererSends,
+      rendererSend: () => { rendererSends += 1 },
       rendererSendCount: () => rendererSends,
-      writeFailures: () => failures,
     },
   )
-  return evidence
 }
-
 // Opt-in Chromium trace of every process (DAW_AE08_TRACE=1 beside the evidence directory), written to trace.json at quit. Names the
 // main-thread tasks that overlap a stalled window. Tracing slows the app, so latency gate runs must not carry it.
 // The tracer is passed in, because the module is also loaded outside Electron, where a value import of it fails.

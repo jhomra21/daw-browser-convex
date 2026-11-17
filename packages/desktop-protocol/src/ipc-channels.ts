@@ -1,4 +1,3 @@
-
 export const hostRequestChannel = "daw:host-request"
 export const hostResponseChannel = "daw:host-response"
 export const offlinePcmAckChannel = "daw:audio-host:offline-pcm-ack"

@@ -1,0 +1,279 @@
+{
+ "name": "ae08-progress-age",
+ "sequence": 60,
+ "createdAt": "2026-11-17T03:17:53.880Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 792,
+   "new": 796
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 790,
+   "new": 794
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 792,
+   "new": 796
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 791,
+   "new": 795
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 792,
+   "new": 796
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 791,
+   "new": 795
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 792,
+   "new": 796
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 791,
+   "new": 795
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 792,
+   "new": 796
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 791,
+   "new": 795
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:0:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 792,
+   "new": 796
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:0:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 791,
+   "new": 795
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 792,
+   "new": 796
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 791,
+   "new": 795
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 792,
+   "new": 796
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 791,
+   "new": 795
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 792,
+   "new": 796
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 791,
+   "new": 795
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:275:0:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 709,
+   "new": 713
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:275:0:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 708,
+   "new": 712
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 792,
+   "new": 796
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 791,
+   "new": 795
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "The controller test file gains the three progress-age witnesses (LAT1 4 twice, LAT1 2 once): the controller count 710 to 713, and the desktop-family counts 793 to 796. The 11 control arms the judged run noted (counts above RC7) and their mutants move with them; the mutants keep the control delta. No mutant kill moved, so no arm was re-seeded; the 793 and 710 the bind-from-prepare round observed were still noted against 792 and 709, so this record carries the whole move (+4).",
+  "expectationsSha256": "dd937173e731b381761debd3e6502ae876254b95c95035a3500ff8a1ec7c5db2"
+ }
+}

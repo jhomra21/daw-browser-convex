@@ -144,7 +144,16 @@
    "tools/acceptance/ae-08-processor-state-fuzz-classes.ts": "9e5ad044ef9fa3326fb6ac8494285593662d2cf8c2c15f5ccab8706c342441b6",
    "tools/acceptance/ae-08-processor-state-fuzz-edit.ts": "781b5bff0fc34645b34144be0b7fe1d5287c50d323e3741ef9f57583c4f04452",
    "src/lib/desktop/native-publication-transaction.ts": "8db74b542bfbe8377fdfadcedebc2e17c54552fcf6236e4f58a64840361733f2",
-   "src/lib/desktop/native-schedule-publication.ts": "dd2d49f630ff87ecee803d47f374b22be6a5cfd2cfb44bb47715d290f2c068ee"
+   "src/lib/desktop/native-schedule-publication.ts": "dd2d49f630ff87ecee803d47f374b22be6a5cfd2cfb44bb47715d290f2c068ee",
+   "src/lib/desktop/native-observation.ts": "c597fbf0ad9eb5fec2c6620f30b31220cb78a8c4f9fc487ae0d5f314d7b602a1",
+   "src/lib/desktop/native-recording-session.ts": "524b6b0177fc0d7fac634134ac24c49ee8c3f49958354fa70c6564ffcac97adf",
+   "src/lib/desktop/native-live-midi.ts": "2cb2e3211c16f0446acabed09917afeaad6a572641c827f8c455ee2575b4595b",
+   "src/lib/desktop/native-state-patches.ts": "0c29a514246416c6332788f6bb01910f4e6de33df337a0336ced5c165cae3afd",
+   "src/lib/desktop/native-graph-targets.ts": "032dea1cfca1da5b69b0e3367d5179d66158213280e061cfe919141d156bc8a5",
+   "src/lib/desktop/native-snapshot-support.ts": "3380d9389286f0e06ae58d7749e0dd7d329093a479bcbbf14054295d88a46b6a",
+   "src/lib/desktop/native-host-connection-loss.ts": "50e0feaea25c8237c9527180fcfd1245a712d9d66ae0ec48ec7921f5145a7026",
+   "src/lib/desktop/native-retirement.ts": "ebc0078b313567ffd7d8b48234825dcfe1ccff8dede80dbb32249e31ba1cdf3d",
+   "src/lib/desktop/native-parameter-events.ts": "6e968a429b26e266be323a513c24a9efbf98908bd43c80f92730c786d27736e5"
   },
   "hook": {
    "src/hooks/useTimelinePlayback.ts": "4e1e1bdae209a4cb6cc41ad8040322871e0364af7e7a6bd4c9504ab55f7d33dd",
@@ -179,7 +188,16 @@
    "tools/acceptance/ae-08-processor-state-fuzz-edit.ts": "781b5bff0fc34645b34144be0b7fe1d5287c50d323e3741ef9f57583c4f04452",
    "tools/acceptance/ae-08-processor-state-fuzz-witness.ts": "569424058f9ebfa0d98b7b2ec9ab1e12c533ba606dde44d170359d8a18c1658b",
    "src/lib/desktop/native-publication-transaction.ts": "8db74b542bfbe8377fdfadcedebc2e17c54552fcf6236e4f58a64840361733f2",
-   "src/lib/desktop/native-schedule-publication.ts": "dd2d49f630ff87ecee803d47f374b22be6a5cfd2cfb44bb47715d290f2c068ee"
+   "src/lib/desktop/native-schedule-publication.ts": "dd2d49f630ff87ecee803d47f374b22be6a5cfd2cfb44bb47715d290f2c068ee",
+   "src/lib/desktop/native-observation.ts": "c597fbf0ad9eb5fec2c6620f30b31220cb78a8c4f9fc487ae0d5f314d7b602a1",
+   "src/lib/desktop/native-recording-session.ts": "524b6b0177fc0d7fac634134ac24c49ee8c3f49958354fa70c6564ffcac97adf",
+   "src/lib/desktop/native-live-midi.ts": "2cb2e3211c16f0446acabed09917afeaad6a572641c827f8c455ee2575b4595b",
+   "src/lib/desktop/native-state-patches.ts": "0c29a514246416c6332788f6bb01910f4e6de33df337a0336ced5c165cae3afd",
+   "src/lib/desktop/native-graph-targets.ts": "032dea1cfca1da5b69b0e3367d5179d66158213280e061cfe919141d156bc8a5",
+   "src/lib/desktop/native-snapshot-support.ts": "3380d9389286f0e06ae58d7749e0dd7d329093a479bcbbf14054295d88a46b6a",
+   "src/lib/desktop/native-host-connection-loss.ts": "50e0feaea25c8237c9527180fcfd1245a712d9d66ae0ec48ec7921f5145a7026",
+   "src/lib/desktop/native-retirement.ts": "ebc0078b313567ffd7d8b48234825dcfe1ccff8dede80dbb32249e31ba1cdf3d",
+   "src/lib/desktop/native-parameter-events.ts": "6e968a429b26e266be323a513c24a9efbf98908bd43c80f92730c786d27736e5"
   }
  },
  "gitStatus": [
@@ -7368,8 +7386,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      preparedKeepLatencyNodeIds = serializedKeepLatencyNodeIds\n      nativeMeterRevision = runtimeRevision",
-       "to": "      preparedKeepLatencyNodeIds = new Set(desiredKeepLatencyNodeIds)\n      nativeMeterRevision = runtimeRevision"
+       "from": "      preparedKeepLatencyNodeIds = serializedKeepLatencyNodeIds",
+       "to": "      preparedKeepLatencyNodeIds = new Set(desiredKeepLatencyNodeIds)"
       }
      ],
      "bounded": false,
@@ -9629,7 +9647,7 @@
     "role": "mutant",
     "control": "rc2:112:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-retirement.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -9659,9 +9677,9 @@
      "id": "112-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      opportunity: 0, attempted: -1, running: false, uncertain: false, readerPassed: false, waitingControl: false })\n    dispatchRetirement()",
-       "to": "      opportunity: 0, attempted: -1, running: false, uncertain: false, readerPassed: false, waitingControl: false })\n    void release()\n    dispatchRetirement()"
+       "file": "/src/lib/desktop/native-retirement.ts",
+       "from": "        opportunity: 0, attempted: -1, running: false, uncertain: false, readerPassed: false, waitingControl: false })\n      dispatchRetirement()",
+       "to": "        opportunity: 0, attempted: -1, running: false, uncertain: false, readerPassed: false, waitingControl: false })\n      void release()\n      dispatchRetirement()"
       }
      ],
      "bounded": false,
@@ -9747,7 +9765,7 @@
     "role": "mutant",
     "control": "rc2:113:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-retirement.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -9777,7 +9795,7 @@
      "id": "113-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
+       "file": "/src/lib/desktop/native-retirement.ts",
        "from": "        if (retirementAlive(held) && held.attempted !== held.opportunity) dispatchRetirement()",
        "to": "        if (retirementAlive(held)) {\n          held.opportunity++\n          dispatchRetirement()\n        }"
       }
@@ -9986,7 +10004,7 @@
     "role": "mutant",
     "control": "rc2:168:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-retirement.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -10016,7 +10034,7 @@
      "id": "168-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
+       "file": "/src/lib/desktop/native-retirement.ts",
        "from": "if (reply.ok && reply.revision.status === \"retirement-not-safe\"\n            && reply.revision.progressFrame !== undefined)",
        "to": "if (reply.ok && reply.revision.status === \"retirement-not-safe\"\n            && !held.readerPoint && reply.revision.progressFrame !== undefined)"
       }
@@ -10338,7 +10356,7 @@
     "role": "mutant",
     "control": "rc2:171:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-retirement.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -10368,7 +10386,7 @@
      "id": "171-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
+       "file": "/src/lib/desktop/native-retirement.ts",
        "from": "held.readerPassed = crossed",
        "to": "held.readerPassed = reply.revision.renderEpoch > renderEpoch"
       }
@@ -10456,7 +10474,7 @@
     "role": "mutant",
     "control": "rc2:172:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-retirement.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -10486,7 +10504,7 @@
      "id": "172-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
+       "file": "/src/lib/desktop/native-retirement.ts",
        "from": "held.readerPassed = crossed",
        "to": "held.readerPassed = false"
       }
@@ -12539,8 +12557,7 @@
     "role": "mutant",
     "control": "rc2:historical-75:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts",
-     "src/lib/desktop/native-playback-controller.ts",
+     "src/lib/desktop/native-state-patches.ts",
      "src/lib/desktop/native-playback-controller.ts",
      "src/lib/desktop/native-processor-state-owner.ts"
     ],
@@ -12572,14 +12589,14 @@
      "id": "historical-75-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "nextPatch((desired) => {\n      if (processorState.publication()) return undefined",
-       "to": "nextPatch((desired) => {\n      if (processorState.publication()?.phase === \"held\") return undefined"
+       "file": "/src/lib/desktop/native-state-patches.ts",
+       "from": "      if (processorState.publication()) return undefined",
+       "to": "      if (processorState.publication()?.phase === \"held\") return undefined"
       },
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "const pending = processorState.compiling() || processorState.adoptionRunning()",
-       "to": "const pending = processorState.compiling()"
+       "file": "/src/lib/desktop/native-state-patches.ts",
+       "from": "      const pending = processorState.compiling() || processorState.adoptionRunning()",
+       "to": "      const pending = processorState.compiling()"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
@@ -14790,8 +14807,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      executeReconcile(processorState.reoffer())\n      void drainStatePatches()",
-       "to": "      void drainStatePatches()"
+       "from": "      executeReconcile(processorState.reoffer())",
+       "to": ""
       }
      ],
      "bounded": true,
@@ -16189,7 +16206,8 @@
     "role": "control",
     "control": null,
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-playback-controller.ts",
+     "src/lib/desktop/native-state-patches.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -16246,7 +16264,8 @@
     "role": "mutant",
     "control": "rc2:257:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-playback-controller.ts",
+     "src/lib/desktop/native-state-patches.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -16277,8 +16296,13 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "    executeReconcile(processorState.patchReplied(execution, patchReplyOf(reply)))",
-       "to": "    structuralGraphGeneration++\n    executeReconcile(processorState.patchReplied(execution, patchReplyOf(reply)))"
+       "from": "    executeReconcile: (reconcile) => executeReconcile(reconcile),",
+       "to": "    executeReconcile: (reconcile) => executeReconcile(reconcile),\n    beforePatchReply: () => { structuralGraphGeneration++ },"
+      },
+      {
+       "file": "/src/lib/desktop/native-state-patches.ts",
+       "from": "    host.executeReconcile(processorState.patchReplied(execution, patchReplyOf(reply)))",
+       "to": "    host.beforePatchReply?.()\n    host.executeReconcile(processorState.patchReplied(execution, patchReplyOf(reply)))"
       }
      ],
      "bounded": false,
@@ -16288,7 +16312,7 @@
     "rejectionGate": false,
     "expect": {
      "exit": 1,
-     "applied": 1,
+     "applied": 2,
      "counts": {
       "pass": 4,
       "skip": 0,
@@ -23788,7 +23812,7 @@
     "role": "control",
     "control": null,
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-state-patches.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -23845,7 +23869,7 @@
     "role": "mutant",
     "control": "rc2:400:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-state-patches.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -23875,7 +23899,7 @@
      "id": "400-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
+       "file": "/src/lib/desktop/native-state-patches.ts",
        "from": "if (!result.handled && execution.attempt === attempt && execution.state",
        "to": "if (!result.handled && execution.state"
       }
@@ -23908,7 +23932,7 @@
     "role": "control",
     "control": null,
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-state-patches.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts",
@@ -23969,7 +23993,7 @@
     "role": "mutant",
     "control": "rc2:400:1:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-state-patches.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts",
@@ -24003,7 +24027,7 @@
      "id": "400-1-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
+       "file": "/src/lib/desktop/native-state-patches.ts",
        "from": "if (!result.handled && execution.attempt === attempt && execution.state",
        "to": "if (!result.handled && execution.state"
       }
@@ -24036,7 +24060,7 @@
     "role": "control",
     "control": null,
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-state-patches.ts"
     ],
     "witnesses": [
      "tools/acceptance/ae-08-processor-state-fuzz.ts"
@@ -24102,7 +24126,7 @@
     "role": "mutant",
     "control": "rc2:400:2:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-state-patches.ts"
     ],
     "witnesses": [
      "tools/acceptance/ae-08-processor-state-fuzz.ts"
@@ -24141,7 +24165,7 @@
      "id": "400-2-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
+       "file": "/src/lib/desktop/native-state-patches.ts",
        "from": "if (!result.handled && execution.attempt === attempt && execution.state",
        "to": "if (!result.handled && execution.state"
       }
@@ -57935,7 +57959,7 @@
     "control": null,
     "targets": [
      "tools/acceptance/ae-08-processor-state-fuzz-host.ts",
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-state-patches.ts"
     ],
     "witnesses": [
      "tools/acceptance/ae-08-processor-state-fuzz.ts"
@@ -57979,7 +58003,7 @@
        "to": "    const asset = assetCapacity === undefined ? undefined : assets.get(id)\n    if (asset) {"
       },
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
+       "file": "/src/lib/desktop/native-state-patches.ts",
        "from": "if (!result.handled && execution.attempt === attempt && execution.state",
        "to": "if (!result.handled && execution.state"
       }
@@ -61911,7 +61935,7 @@
     "control": null,
     "targets": [
      "src/lib/desktop/native-playback-controller.ts",
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-state-patches.ts"
     ],
     "witnesses": [
      "tools/acceptance/ae-08-processor-state-fuzz.ts"
@@ -61955,7 +61979,7 @@
        "to": ""
       },
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
+       "file": "/src/lib/desktop/native-state-patches.ts",
        "from": "if (!result.handled && execution.attempt === attempt && execution.state",
        "to": "if (!result.handled && execution.state"
       }

@@ -1619,7 +1619,7 @@ export function useTimelinePlayback(
     // state the session has when it commits, never the ones its intent captured. Only a lifecycle rebuild, which names
     // rebuildBackend, replaces the session.
     if (!((nativePlayback.isActive() || (nativePlayback.isPrepared() && !options?.rebuildBackend))
-      && audioHostBridge?.session.revisions && audioHostBridge.session.configureInstrumentStates
+      && nativePlayback.canAdoptInPlace()
       && (!options?.rebuildBackend || !options.owner || options.owner === "native")
       && (options?.projectId === undefined || options.projectId === nativeOptions?.projectId?.())
       && (options?.projectGeneration === undefined || options.projectGeneration === nativeOptions?.projectGeneration?.()))) {
@@ -2290,8 +2290,7 @@ export function useTimelinePlayback(
     if (projectionChanged && nativePreviewRequested && (playAttempt === undefined || !portableBrowserOptions)) {
       // The kept native preview adopts the edit in place, tails included, once the clips it adds are hydrated: the
       // effect runs again when they are. One still preparing finishes first and adopts it after (the effect's tail).
-      if (nativePlayback.isPrepared()
-        && audioHostBridge?.session.revisions && audioHostBridge.session.configureInstrumentStates) {
+      if (nativePlayback.isPrepared() && nativePlayback.canAdoptInPlace()) {
         if (!pendingAudioHydration) adoptPortableEdits()
         return
       }

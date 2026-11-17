@@ -129,6 +129,19 @@ const persistManifest = async (root: PrivateRoot, name: string, value: Recording
     onSync?.("receipt-directory-synced")
   } finally { await directory.close() }
 }
+// A crash between persistManifest's link and unlink leaves the published manifest with a second
+// link under this module's own temporary name; only that exact state is repaired.
+const removeInterruptedPublicationLinks = async (root: PrivateRoot) => {
+  const names: string[] = []
+  for await (const entry of await opendir(root.rootPath)) if (/^\.[a-f0-9]{32}\.tmp$/.test(entry.name)) names.push(entry.name)
+  for (const name of names) {
+    await verifyRoot(root)
+    const temporary = path.join(root.rootPath, name)
+    const status = await statusAt(temporary)
+    if (status && status.isFile() && status.nlink === 2n && status.uid === BigInt(process.getuid?.() ?? -1)
+      && (status.mode & 0o7777n) === 0o600n) await unlink(temporary)
+  }
+}
 const privateRoot = async (input: Pick<RecordingIntent, "userData" | "verifyDirectory">): Promise<PrivateRoot> => {
   const intended = path.join(input.userData, "recording-spool")
   await mkdir(intended, { mode: 0o700 }).catch(async (error) => { if (!await lstat(intended).catch(() => undefined)) throw error })
@@ -298,6 +311,7 @@ export const createRecordingSpoolRegistry = (input: Pick<RecordingIntent, "userD
   }
   const discover = async () => {
     const root = await privateRoot(input)
+    await removeInterruptedPublicationLinks(root)
     const directory = await opendir(root.rootPath)
     for await (const entry of directory) {
       if (!/^[a-f0-9]{64}\.json$/.test(entry.name)) continue

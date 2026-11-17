@@ -1,5 +1,5 @@
 import { expect, spyOn, test } from "bun:test"
-import { chmod, lstat, mkdtemp, open, readFile, rm, symlink, rename, mkdir, readdir, writeFile, type FileHandle } from "node:fs/promises"
+import { chmod, link, lstat, mkdtemp, open, readFile, rm, symlink, rename, mkdir, readdir, writeFile, type FileHandle } from "node:fs/promises"
 import path from "node:path"
 import { createRecordingSpoolRegistry, prepareRecordingSpool, type RecordingSpoolReleaseEvent } from "./recording-spool"
 
@@ -223,6 +223,27 @@ test("startup refuses recovery while a writer may exist and recovers only durabl
     const newScope = { ...scope, rendererGeneration: 4 }
     await recovered.release(newScope, takes[0]!.takeId, { reason: "discard" })
   } finally { await rm(f.userData, { recursive: true, force: true }) }
+})
+
+test("recovery removes the publication link a crash left beside a manifest but never a foreign second link", async () => {
+  for (const owned of [true, false]) {
+    const root = await mkdtemp("/private/tmp/daw-spool-crash-link-")
+    try {
+      const take = await prepareRecordingSpool({
+        userData: root, projectId: "local:crash", rendererGeneration: 3,
+        hostGeneration: 1, generation: 1, sessionId: 1n, channelCount: 1,
+      })
+      const leftover = path.join(take.rootPath, owned ? `.${"ab".repeat(16)}.tmp` : "foreign-link")
+      await link(take.manifestPath, leftover)
+      expect((await lstat(take.manifestPath)).nlink).toBe(2)
+      const recovered = createRecordingSpoolRegistry({ userData: root })
+      recovered.bind({ projectId: "local:crash", projectGeneration: 1, rendererGeneration: 3 })
+      await recovered.discover()
+      const listed = await recovered.list({ projectId: "local:crash", projectGeneration: 1, rendererGeneration: 3 })
+      expect(listed.takes).toHaveLength(owned ? 1 : 0)
+      expect((await lstat(take.manifestPath)).nlink).toBe(owned ? 1 : 2)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  }
 })
 
 test("unproven published sources and partials are discoverable but never guessed or age deleted", async () => {

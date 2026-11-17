@@ -96,6 +96,9 @@ type RetainedCancelledClip = {
 
 const recordingUnlockResultSchema = z.object({ ok: z.boolean().optional() })
 const cancelledClipRemovalFailedNotice = 'Empty MIDI recording could not be removed from this project.'
+type CancelledClipCleanupResult =
+  | { ok: true }
+  | { ok: false; stage: 'remove-clip' | 'unlock-track' | 'confirm-cleanup'; reason: unknown }
 
 export const createMidiTrackRecordingController = (
   rawOptions: MidiTrackRecordingControllerOptions,
@@ -121,7 +124,7 @@ export const createMidiTrackRecordingController = (
   let startPromise: Promise<boolean> | null = null
   let settlingPromise: Promise<void> | null = null
   let retainedCancelledClip: RetainedCancelledClip | null = null
-  let cancelledCleanupPromise: Promise<boolean> | null = null
+  let cancelledCleanupPromise: Promise<CancelledClipCleanupResult> | null = null
   const [isStarting, setIsStarting] = createSignal(false)
   const [isSettling, setIsSettling] = createSignal(false)
   const [hasPendingCleanup, setHasPendingCleanup] = createSignal(false)
@@ -172,10 +175,10 @@ export const createMidiTrackRecordingController = (
     }
   }
 
-  const retryCancelledClipCleanup = (): Promise<boolean> => {
+  const retryCancelledClipCleanup = (): Promise<CancelledClipCleanupResult> => {
     if (cancelledCleanupPromise) return cancelledCleanupPromise
     const retained = retainedCancelledClip
-    if (!retained) return Promise.resolve(true)
+    if (!retained) return Promise.resolve({ ok: true })
     const cleanup = (async () => {
       try {
         if (retained.local) {
@@ -183,8 +186,8 @@ export const createMidiTrackRecordingController = (
         } else {
           await deleteCloudClip(retained.projectId, retained.userId, retained.clipId)
         }
-      } catch {
-        return false
+      } catch (reason) {
+        return { ok: false, stage: 'remove-clip', reason }
       }
       if (retained.lockAcquired && !retained.local) {
         try {
@@ -192,18 +195,22 @@ export const createMidiTrackRecordingController = (
             kind: 'tracks.unlock',
             payload: { trackId: retained.trackId },
           })
-          if (recordingUnlockResultSchema.safeParse(response).data?.ok !== true) return false
+          if (recordingUnlockResultSchema.safeParse(response).data?.ok !== true) {
+            return { ok: false, stage: 'unlock-track', reason: response }
+          }
           options.setTrackLock(retained.trackId, null)
-        } catch {
-          return false
+        } catch (reason) {
+          return { ok: false, stage: 'unlock-track', reason }
         }
       }
-      if (retainedCancelledClip !== retained) return false
+      if (retainedCancelledClip !== retained) {
+        return { ok: false, stage: 'confirm-cleanup', reason: new Error('The retained MIDI clip changed during cleanup.') }
+      }
       if (options.projectId() === retained.projectId) options.removeLocalClips([retained.clipId])
       options.setProvisionalClipId(null)
       retainedCancelledClip = null
       setHasPendingCleanup(false)
-      return true
+      return { ok: true }
     })()
     cancelledCleanupPromise = cleanup
     void cleanup.finally(() => {
@@ -314,10 +321,10 @@ export const createMidiTrackRecordingController = (
     startGeneration += 1
   }
 
-  const retryRetainedCleanup = (): Promise<void> => retryCancelledClipCleanup().then((removed) => {
-    if (!removed) {
+  const retryRetainedCleanup = (): Promise<void> => retryCancelledClipCleanup().then((result) => {
+    if (!result.ok) {
       options.notify(cancelledClipRemovalFailedNotice)
-      throw new Error('MIDI recording remains protected until its cancelled clip can be removed.')
+      throw new Error(`MIDI recording cleanup failed during ${result.stage}.`, { cause: result.reason })
     }
   })
 
@@ -532,8 +539,8 @@ export const createMidiTrackRecordingController = (
           }
           setHasPendingCleanup(true)
           const cleanupDeferred = settlingPromise !== null
-          const removed = cleanupDeferred ? false : await retryCancelledClipCleanup()
-          if (!removed && !cleanupDeferred) options.notify(cancelledClipRemovalFailedNotice)
+          const cleanup = cleanupDeferred ? undefined : await retryCancelledClipCleanup()
+          if (cleanup && !cleanup.ok) options.notify(cancelledClipRemovalFailedNotice)
         } else if (!local) await releaseTrackRecordingLock({
           projectId, trackId: track.id, locker: userId,
           setTrackLock: options.setTrackLock, clearTrackLock: options.clearTrackLock,
@@ -621,8 +628,9 @@ export const createMidiTrackRecordingController = (
         }
         setHasPendingCleanup(true)
         const cleanupDeferred = settlingPromise !== null
-        clipWasRemoved = cleanupDeferred ? false : await retryCancelledClipCleanup()
-        if (!clipWasRemoved && !cleanupDeferred) options.notify(cancelledClipRemovalFailedNotice)
+        const cleanup = cleanupDeferred ? undefined : await retryCancelledClipCleanup()
+        clipWasRemoved = cleanup?.ok ?? false
+        if (cleanup && !cleanup.ok) options.notify(cancelledClipRemovalFailedNotice)
       }
       if (!local && !clipId) await releaseTrackRecordingLock({ projectId, trackId: track.id, locker: userId, setTrackLock: options.setTrackLock, clearTrackLock: options.clearTrackLock })
       options.setIsRecording(false)

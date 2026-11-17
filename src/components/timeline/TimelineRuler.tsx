@@ -69,11 +69,11 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
 
   const detachPointerListeners = () => {
     if (!listenersAttached) return
-    try { window.removeEventListener('pointermove', onPointerMove) } catch {}
-    try { window.removeEventListener('pointerup', onPointerUp) } catch {}
-    try { window.removeEventListener('pointercancel', onPointerCancel) } catch {}
-    try { window.removeEventListener('keydown', onKeyDown, true) } catch {}
-    try { window.removeEventListener('blur', onBlur) } catch {}
+    window.removeEventListener('pointermove', onPointerMove)
+    window.removeEventListener('pointerup', onPointerUp)
+    window.removeEventListener('pointercancel', onPointerCancel)
+    window.removeEventListener('keydown', onKeyDown, true)
+    window.removeEventListener('blur', onBlur)
     listenersAttached = false
   }
 
@@ -101,11 +101,11 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
 
   const attachPointerListeners = () => {
     if (listenersAttached) return
-    try { window.addEventListener('pointermove', onPointerMove) } catch {}
-    try { window.addEventListener('pointerup', onPointerUp) } catch {}
-    try { window.addEventListener('pointercancel', onPointerCancel) } catch {}
-    try { window.addEventListener('keydown', onKeyDown, true) } catch {}
-    try { window.addEventListener('blur', onBlur) } catch {}
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    window.addEventListener('pointercancel', onPointerCancel)
+    window.addEventListener('keydown', onKeyDown, true)
+    window.addEventListener('blur', onBlur)
     listenersAttached = true
   }
 

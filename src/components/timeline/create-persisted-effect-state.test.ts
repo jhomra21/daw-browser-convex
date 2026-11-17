@@ -306,6 +306,33 @@ test("H6 thrown apply leaves no installation knowledge for the previous value", 
   } finally { dispose(); }
 });
 
+test("reports a failed repair separately from the original parameter apply failure", async () => {
+  const errors: Array<{ stage: string; cause: unknown }> = [];
+  let dispose = () => {};
+  const owner = createRoot(end => {
+    dispose = end;
+    return createParameterGestureOwner<string, number>({
+      key: target => target, scope: () => ({ projectId: "p", generation: 0 }),
+      exists: () => true, canWrite: () => true, equal: (_target, a, b) => a === b,
+      initial: () => 1, committed: () => 1, rowsReachEngine: () => true,
+      apply: (_target, value) => {
+        if (value === 2 || value === 1) throw new Error(`apply ${value} failed`);
+        return "applied";
+      },
+      persist: async () => ({ kind: "committed-unordered" }),
+      history: () => {}, allocateEdit: () => undefined,
+      onError: (stage, cause) => { errors.push({ stage, cause }); },
+    });
+  });
+  try {
+    owner.set("t", 2);
+    await owner.flushPending().catch(() => {});
+
+    expect(errors.map(error => error.stage)).toEqual(["apply", "repair"]);
+    expect(errors[1]?.cause).toEqual(new Error("apply 1 failed"));
+  } finally { dispose(); }
+});
+
 test("3B1 r2 preserves a settlement wake during a pending durable read", async () => {
   const projectId = `wake-during-read-${crypto.randomUUID()}`, userId = "user";
   const originalFetch = globalThis.fetch;

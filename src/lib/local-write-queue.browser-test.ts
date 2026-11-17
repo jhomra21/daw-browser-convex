@@ -2,7 +2,16 @@ import 'fake-indexeddb/auto'
 import { expect, test } from 'bun:test'
 
 import { createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
-import { LocalEntityWriteQueue } from '~/lib/local-write-queue'
+import { getLocalEntityWriteQueue, LocalEntityWriteQueue } from '~/lib/local-write-queue'
+
+test('disposing a project queue unregisters it so later access creates a fresh queue', () => {
+  const projectId = `project:disposed-write-queue-${crypto.randomUUID()}`
+  const queue = getLocalEntityWriteQueue(projectId)
+
+  queue.dispose()
+
+  expect(getLocalEntityWriteQueue(projectId)).not.toBe(queue)
+})
 
 test('local entity queue reports saving, failed, then saved after durable flush', async () => {
   const projectId = `project:write-queue-${crypto.randomUUID()}`

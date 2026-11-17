@@ -46,7 +46,7 @@ export type ReleaseRecord<Target, Params> = {
   readonly edit: LiveProcessorEditIdentity | undefined;
   readonly gesture?: ProcessorDelivery["gesture"];
   status: ReleaseStatus;
-  failure?: { stage: "apply" | "persist"; cause: unknown };
+  failure?: { stage: "apply" | "persist" | "repair"; cause: unknown };
 };
 type ParameterGestureAdapter<Target, Params> = {
   acceptance?: PlaybackAcceptanceObserver;
@@ -68,7 +68,7 @@ type ParameterGestureAdapter<Target, Params> = {
   retired?: (key: string) => void;
   announce?: (record: ReleaseRecord<Target, Params>) => void | Promise<void>;
   allocateEdit: (target: Target, from: Params | undefined, to: Params) => LiveProcessorEditIdentity | undefined;
-  onError: (stage: "apply" | "persist", cause: unknown, record: ReleaseRecord<Target, Params> | undefined) => void;
+  onError: (stage: "apply" | "persist" | "repair", cause: unknown, record: ReleaseRecord<Target, Params> | undefined) => void;
 };
 export type ParameterGestureHandle = {
   open: (holder: ParameterGestureHolder) => void;
@@ -301,7 +301,11 @@ export function createParameterGestureOwner<Target, Params>(adapter: ParameterGe
         try {
           await deliver(record.target, effective(record.target) ?? destination, restoreEdit, record.latest, "preview",
             holding ? { token: holding.token, holds: true } : record.gesture, record.lifetime);
-        } catch { /* The original release failure is already reported; a later logical delivery still reaches the boundary. */ }
+        } catch (repairCause) {
+          record.failure = { stage: "repair", cause: repairCause };
+          failures.push({ key: record.key, projectId: record.lifetime.projectId, stage: "repair", cause: repairCause });
+          adapter.onError("repair", repairCause, record);
+        }
       }
     } else adapter.onError(stage, cause, record);
   };

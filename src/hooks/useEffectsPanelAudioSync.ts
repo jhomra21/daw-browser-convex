@@ -5,8 +5,6 @@ import {
   type TrackInstrumentParams,
   type JsonValue,
   isLocalId,
-  arpeggiatorParamsSchema,
-  normalizeArpeggiatorParams,
 } from "@daw-browser/shared";
 import type { AudioEngine, EngineDisposition, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import type { convexApi } from "~/lib/convex";
@@ -16,7 +14,7 @@ import type {
   LocalEffectsViewSource,
 } from "~/components/timeline/create-local-effects-view";
 import type { ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
-import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
+import { indexInstrumentEffectRows } from "~/lib/effect-row-index";
 import type { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
 import type { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
 
@@ -392,43 +390,15 @@ export function useEffectsPanelAudioSync(
 
     if (!projectId) return;
 
-    const instrumentByTrackId = new Map<string, TrackInstrumentParams>();
-    const arpByTrackId = new Map<string, ArpeggiatorParams>();
-
-    for (const row of effects) {
-      if ("effect" in row) {
-        if (row.effect === "instrument" || (row.effect === "synth" && !instrumentByTrackId.has(row.targetId))) {
-          const instrument = readInstrumentParamsFromEffectRow(row);
-          if (instrument) instrumentByTrackId.set(row.targetId, instrument);
-          continue;
+    if (isLocalId("project", projectId)) {
+      const { instruments, arpeggiators } = indexInstrumentEffectRows(effects);
+      untrack(() => {
+        const through = localEffectsView.view()?.through ?? 0;
+        for (const track of tracks) {
+          options.syncInstrumentForTarget?.(track.id, track.kind === "instrument" ? instruments.get(track.id)?.params : undefined, through);
+          options.syncArpeggiatorForTarget?.(track.id, track.kind === "instrument" ? arpeggiators.get(track.id)?.params : undefined, through);
         }
-        if (row.effect === "arp") {
-          const parsed = arpeggiatorParamsSchema.safeParse(row.params);
-          if (parsed.success) {
-            arpByTrackId.set(row.targetId, normalizeArpeggiatorParams(parsed.data));
-          }
-          continue;
-        }
-        continue;
-      }
-      const trackId = row.trackId;
-      if (!trackId) continue;
-      if (row.type === "instrument" || (row.type === "synth" && !instrumentByTrackId.has(trackId))) {
-        const instrument = readInstrumentParamsFromEffectRow(row);
-        if (instrument) instrumentByTrackId.set(trackId, instrument);
-      }
-      if (row.type === "arpeggiator" && row.params) {
-        arpByTrackId.set(trackId, normalizeArpeggiatorParams(row.params));
-      }
-    }
-
-    for (const track of tracks) {
-      if (isLocalId("project", projectId)) {
-        untrack(() => {
-          options.syncInstrumentForTarget?.(track.id, track.kind === "instrument" ? instrumentByTrackId.get(track.id) : undefined, localEffectsView.view()?.through ?? 0);
-          options.syncArpeggiatorForTarget?.(track.id, track.kind === "instrument" ? arpByTrackId.get(track.id) : undefined, localEffectsView.view()?.through ?? 0);
-        });
-      }
+      });
     }
 
     const staleTrackIds = new Set<Track["id"]>();

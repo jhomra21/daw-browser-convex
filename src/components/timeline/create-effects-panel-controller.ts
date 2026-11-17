@@ -1,11 +1,11 @@
 import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery, PublicationJoin } from "~/lib/live-processor-control";
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import { createEffect, createMemo, onCleanup, untrack, type Accessor } from "solid-js";
-import { isLocalId, type ArpeggiatorParams, type AudioEffectKind, type TrackInstrumentParams } from "@daw-browser/shared";
+import { isLocalId, type AudioEffectKind, type TrackInstrumentParams } from "@daw-browser/shared";
 import type { AudioEngine, EngineDisposition, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import type { Clip, ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { createEffectsPanelAudioDevice } from "~/components/timeline/create-effects-panel-audio-effects-state";
-import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
+import { indexInstrumentEffectRows } from "~/lib/effect-row-index";
 import { createEffectsPanelInstrumentDevice } from "~/components/timeline/create-effects-panel-state";
 import type { AddMidiClipOptions, TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
 import { createLocalEffectsView } from "~/components/timeline/create-local-effects-view";
@@ -244,18 +244,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
   createEffect(() => {
     const effects = roomEffectsQuery.data;
     if (effects === undefined) return;
-    const instrumentByTrackId = new Map<string, { params: TrackInstrumentParams; through: number }>();
-    const arpByTrackId = new Map<string, { params: ArpeggiatorParams; through: number }>();
-    for (const row of effects) {
-      if (row?.targetType !== "track" || !row.trackId) continue;
-      if (row.type === "instrument" || (row.type === "synth" && !instrumentByTrackId.has(row.trackId))) {
-        const instrumentParams = readInstrumentParamsFromEffectRow(row);
-        if (instrumentParams) instrumentByTrackId.set(row.trackId, { params: instrumentParams, through: row.revision ?? 0 });
-      }
-      if (row.type === "arpeggiator" && row.params) {
-        arpByTrackId.set(row.trackId, { params: row.params, through: row.revision ?? 0 });
-      }
-    }
+    const { instruments, arpeggiators } = indexInstrumentEffectRows(effects);
     const tracks = options.tracks();
     const currentTrackIds = new Set(tracks.map(track => track.id));
     untrack(() => {
@@ -266,8 +255,8 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
     });
     observedCloudTrackIds = currentTrackIds;
     for (const track of tracks) {
-      const instrumentParams = track.kind === "instrument" ? instrumentByTrackId.get(track.id) : undefined;
-      const arpParams = track.kind === "instrument" ? arpByTrackId.get(track.id) : undefined;
+      const instrumentParams = track.kind === "instrument" ? instruments.get(track.id) : undefined;
+      const arpParams = track.kind === "instrument" ? arpeggiators.get(track.id) : undefined;
       // Cloud query rows remain the remote owners' source of truth.
       untrack(() => {
         instrument.syncRemoteInstrumentForTarget(track.id, instrumentParams?.params, instrumentParams?.through);

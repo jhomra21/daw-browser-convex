@@ -1323,27 +1323,46 @@ test.skipIf(isServer)('pending save hydration still reports real host loss and h
 })
 
 test('fingerprints all playback-relevant audio clip compiler fields for paused preview', async () => {
-  const source = await readFile(new URL("./playback-session-reconciliation.ts", import.meta.url), "utf8")
-  const compiler = await readFile(new URL("../lib/live-playback-snapshot.ts", import.meta.url), "utf8")
-  const fingerprint = source.slice(
-    source.indexOf("const readNativePreviewTrackFingerprint"),
-    source.indexOf("  // The caller's memo may hand out", source.indexOf("const readNativePreviewTrackFingerprint")),
-  )
-  const clipFingerprint = compiler.slice(
-    compiler.indexOf("export const playbackClipFingerprint"),
-    compiler.indexOf("type PlaybackSourceMetadata", compiler.indexOf("export const playbackClipFingerprint")),
-  )
-  // B6f5 step 5b: the track fields are the union of those the native and portable compiles read; a name or colour is not.
-  const trackFields = fingerprint.match(/tracks\.map\(\(\{ ([^}]+) \}\) => \(\{/)?.[1]?.split(", ")
-  expect(trackFields).toEqual(["id", "kind", "channelRole", "groupId", "volume", "muted", "soloed", "sends", "outputTargetId", "clips"])
-  expect(trackFields?.filter((field) => field === "name" || field === "color")).toEqual([])
-  expect(fingerprint).toContain("clips.map((clip)")
-  expect(fingerprint).toContain("buffer: readBufferFingerprint(buffer)")
-  expect(fingerprint).not.toContain("clip.id")
-  // The compiles read an absent offset as 0 (`?? 0`), and a persisted row carries 0 where a live create carries none: the
-  // two compile alike, so they fingerprint alike, or a commit's first store emission republishes an unchanged graph.
-  expect(fingerprint).toContain("...playbackClipFingerprint(clip)")
-  for (const field of ["leftPadSec", "bufferOffsetSec", "midiOffsetBeats"]) expect(clipFingerprint).toContain(`${field}: clip.${field} ?? 0`)
+  const previousWindow = globalThis.window
+  const [tracks, setTracks] = createSignal([audioTrack(new TestAudioBuffer())])
+  const fixture = createNativeHookBridge(undefined, undefined, undefined, undefined, "failed", true)
+  let compiles = 0
+  const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]["transport"]) => {
+    compiles += 1
+    return compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
+      renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
+  }
+  Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
+  try {
+    let dispose = () => {}
+    createRoot((cleanup) => {
+      dispose = cleanup
+      return useTimelinePlayback(createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine, { getTracks: () => tracks() }, {
+        requiresNativeAudio: true, enabled: () => true, projectId: () => "project", compileSnapshot,
+      })
+    })
+    await flushMicrotasks()
+    for (let turn = 0; turn < 2_000; turn += 1) await Promise.resolve()
+    const recompiledBy = async (edit: Partial<Track<AudioBuffer>["clips"][number]>) => {
+      const before = compiles
+      setTracks((current) => current.map((entry) => ({ ...entry, clips: entry.clips.map((clip) => ({ ...clip, ...edit })) })))
+      for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
+      return compiles > before
+    }
+    // The compiles read an absent offset as 0, and a persisted row carries 0 where a live create carries none: the two
+    // compile alike, so a commit's first store emission does not republish an unchanged graph.
+    expect({
+      renamed: await recompiledBy({ name: "Renamed", color: "#123456" }),
+      zeroOffsets: await recompiledBy({ leftPadSec: 0, bufferOffsetSec: 0 }),
+      moved: await recompiledBy({ startSec: 0.25 }),
+      gain: await recompiledBy({ gain: 0.5 }),
+      leftPad: await recompiledBy({ leftPadSec: 0.5 }),
+      bufferOffset: await recompiledBy({ bufferOffsetSec: 0.25 }),
+    }).toEqual({ renamed: false, zeroOffsets: false, moved: true, gain: true, leftPad: true, bufferOffset: true })
+    dispose()
+  } finally {
+    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
+  }
 })
 
 test('waits for audio clip hydration before native paused preview and retries after hydration', async () => {

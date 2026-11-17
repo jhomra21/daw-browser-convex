@@ -13,26 +13,20 @@ import {
   type NativeVst3PreflightRequest,
   type NativeVst3PreflightResult,
 } from "@daw-browser/plugin-host-protocol"
-import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
-import { portableGraphContractHash } from "@daw-browser/audio-core-contract/generated"
 import { NativeAudioHostCommandError } from "./audio-host"
 import { parsePluginCatalogData, type PluginCatalogData } from "./plugin-catalog"
 import { preflightVst3Insertion } from "./vst3-insertion-preflight"
 import {
   coordinateNativeVst3Attachments,
   createNativeVst3AttachmentLedger,
-  createNativeVst3HostEventHandlers,
-  createNativeVst3RevisionCoordinator,
   createNativeVst3SessionLedger,
-  nativeVst3PlaybackDefaultStatus,
   resolveNativeVst3AttachmentPlan,
   nativeVst3CoordinationFailureReply,
   nativeVst3CoordinatorFailureOrigin,
   nativeVst3InstanceEvent,
   type NativeVst3Defect,
-  type NativeVst3RevisionHost,
-  type NativeVst3WorkerRevisionNotification,
 } from "./native-vst3-coordinator"
+import { createNativeVst3HostEventHandlers } from "./native-vst3-host-events"
 
 const requirements: NativeVst3PreflightRequest["requirements"] = {
   artifact: { id: nativeVst3WorkerArtifactId, version: nativeVst3WorkerArtifactVersion },
@@ -456,439 +450,6 @@ test("does not begin attachment when any worker preflight times out or crashes",
   }
 })
 
-const nativeGraph = (): AudioCoreGraphSnapshot => ({
-  version: 1,
-  revision: 10,
-  contractHash: portableGraphContractHash,
-  nodes: [
-    {
-      id: first.graphNodeId,
-      kind: "source",
-      inputLayout: "stereo",
-      outputLayout: "stereo",
-      processorOrder: [],
-      externalLatencyFrames: 544,
-      latencyFrames: 0,
-    },
-    {
-      id: second.graphNodeId,
-      kind: "source",
-      inputLayout: "stereo",
-      outputLayout: "stereo",
-      processorOrder: [],
-      externalLatencyFrames: 544,
-      latencyFrames: 0,
-    },
-    {
-      id: "master",
-      kind: "master",
-      inputLayout: "stereo",
-      outputLayout: "stereo",
-      processorOrder: [],
-      latencyFrames: 0,
-    },
-  ],
-  edges: [
-    {
-      version: 1,
-      id: "track-a:master",
-      fromNodeId: first.graphNodeId,
-      toNodeId: "master",
-      gain: 1,
-      kind: "output",
-      tap: "post-fader",
-      sidechain: false,
-      pdcDelayFrames: 0,
-    },
-    {
-      version: 1,
-      id: "track-b:master",
-      fromNodeId: second.graphNodeId,
-      toNodeId: "master",
-      gain: 1,
-      kind: "output",
-      tap: "post-fader",
-      sidechain: false,
-      pdcDelayFrames: 0,
-    },
-  ],
-  masterNodeId: "master",
-  assets: [],
-})
-
-const revisionHost = (input: {
-  calls: string[]
-  prepared: Array<Parameters<NativeVst3RevisionHost["prepareRevision"]>[0]>
-  fail?: "prepare" | "publish" | "retire" | "stop"
-}): NativeVst3RevisionHost => ({
-  async prepareRevision(value) {
-    input.calls.push(`prepare:${value.snapshot.revision}`)
-    input.prepared.push(value)
-    if (input.fail === "prepare") throw new Error("prepare failed")
-  },
-  async publishRevision(revision) {
-    input.calls.push(`publish:${revision}`)
-    if (input.fail === "publish") throw new Error("publish failed")
-  },
-  async rollbackRevision(revision) {
-    input.calls.push(`rollback:${revision}`)
-  },
-  async retireRevision(revision) {
-    input.calls.push(`retire:${revision}`)
-    if (input.fail === "retire") throw new Error("retire failed")
-  },
-  async stopAudio(reason) {
-    input.calls.push(`stop:${reason}`)
-    if (input.fail === "stop") throw new Error("stop failed")
-  },
-})
-
-const revisionCoordinator = (input: {
-  calls: string[]
-  prepared: Array<Parameters<NativeVst3RevisionHost["prepareRevision"]>[0]>
-  fail?: "prepare" | "publish" | "retire" | "stop"
-  defects?: NativeVst3Defect[]
-}) => createNativeVst3RevisionCoordinator({
-  reportDefect: (defect) => { input.defects?.push(defect) },
-  snapshot: nativeGraph(),
-  attachments: [first, second],
-  attachmentHandshakeAcknowledged: true,
-  graphRevisionAcknowledged: true,
-  browserPlaybackActive: false,
-  host: revisionHost(input),
-})
-
-test("activates production native VST playback after graph and attachment acknowledgement", () => {
-  expect(nativeVst3PlaybackDefaultStatus(10)).toEqual({
-    active: false,
-    revision: 10,
-    reason: "deterministic-vst3-fixture-unavailable",
-  })
-  expect(createNativeVst3RevisionCoordinator({
-    snapshot: nativeGraph(),
-    attachments: [first, second],
-    attachmentHandshakeAcknowledged: true,
-    graphRevisionAcknowledged: true,
-    browserPlaybackActive: false,
-    host: revisionHost({ calls: [], prepared: [] }),
-  })).toMatchObject({ ok: true, coordinator: { status: expect.any(Function) } })
-})
-
-test("accepts serial attachments that share one native graph node", () => {
-  const chained = {
-    ...second,
-    instanceId: "33333333-3333-4333-8333-333333333333",
-    graphNodeId: first.graphNodeId,
-    nativeGraphNodeId: first.nativeGraphNodeId,
-    stageIndex: 1,
-  }
-  const snapshot = nativeGraph()
-  const chainedSnapshot = {
-    ...snapshot,
-    nodes: snapshot.nodes.map((node) => node.id === first.graphNodeId
-      ? {
-        ...node,
-        externalLatencyFrames: first.declaredLatencyFrames + first.workerTransport.maximumFrames
-          + chained.declaredLatencyFrames + chained.workerTransport.maximumFrames,
-      }
-      : node),
-  }
-  expect(createNativeVst3RevisionCoordinator({
-    snapshot: chainedSnapshot,
-    attachments: [first, chained, second],
-    attachmentHandshakeAcknowledged: true,
-    graphRevisionAcknowledged: true,
-    browserPlaybackActive: false,
-    host: revisionHost({ calls: [], prepared: [] }),
-  })).toMatchObject({ ok: true, coordinator: { status: expect.any(Function) } })
-})
-
-test("accounts for an instrument source and effect stages once in node latency", () => {
-  const instrument = {
-    ...first,
-    instanceId: "33333333-3333-4333-8333-333333333333",
-    role: "instrument" as const,
-    inputBuses: [],
-    sourceIndex: 0,
-    workerTransport: {
-      ...first.workerTransport,
-      inputChannels: 0,
-    },
-  }
-  const effect = {
-    ...second,
-    instanceId: "44444444-4444-4444-8444-444444444444",
-    graphNodeId: first.graphNodeId,
-    nativeGraphNodeId: first.nativeGraphNodeId,
-    stageIndex: 0,
-  }
-  const snapshot = nativeGraph()
-  const mixedSnapshot = {
-    ...snapshot,
-    nodes: snapshot.nodes.map((node) => node.id === first.graphNodeId
-      ? {
-        ...node,
-        kind: "instrument" as const,
-        externalLatencyFrames: (
-          instrument.declaredLatencyFrames + instrument.workerTransport.maximumFrames
-          + effect.declaredLatencyFrames + effect.workerTransport.maximumFrames
-        ),
-      }
-      : node),
-  }
-  expect(createNativeVst3RevisionCoordinator({
-    snapshot: mixedSnapshot,
-    attachments: [instrument, effect, second],
-    attachmentHandshakeAcknowledged: true,
-    graphRevisionAcknowledged: true,
-    browserPlaybackActive: false,
-    host: revisionHost({ calls: [], prepared: [] }),
-  })).toMatchObject({ ok: true, coordinator: { status: expect.any(Function) } })
-})
-
-test("accepts sparse external stage indexes for validation by the mixed native compiler", () => {
-  const sparse = {
-    ...second,
-    instanceId: "33333333-3333-4333-8333-333333333333",
-    graphNodeId: first.graphNodeId,
-    nativeGraphNodeId: first.nativeGraphNodeId,
-    stageIndex: 2,
-  }
-  const snapshot = nativeGraph()
-  const sparseSnapshot = {
-    ...snapshot,
-    nodes: snapshot.nodes.map((node) => node.id === first.graphNodeId
-      ? {
-        ...node,
-        externalLatencyFrames: first.declaredLatencyFrames + first.workerTransport.maximumFrames
-          + sparse.declaredLatencyFrames + sparse.workerTransport.maximumFrames,
-      }
-      : node),
-  }
-  expect(createNativeVst3RevisionCoordinator({
-    snapshot: sparseSnapshot,
-    attachments: [first, sparse, second],
-    attachmentHandshakeAcknowledged: true,
-    graphRevisionAcknowledged: true,
-    browserPlaybackActive: false,
-    host: revisionHost({ calls: [], prepared: [] }),
-  })).toMatchObject({ ok: true, coordinator: { status: expect.any(Function) } })
-})
-
-test("production coordinator validates exact subset and acknowledgement gates", () => {
-  const browserActive = createNativeVst3RevisionCoordinator({
-    snapshot: nativeGraph(),
-    attachments: [first, second],
-    attachmentHandshakeAcknowledged: true,
-    graphRevisionAcknowledged: true,
-    browserPlaybackActive: true,
-    host: revisionHost({ calls: [], prepared: [] }),
-  })
-  expect(browserActive).toEqual({
-    ok: false,
-    status: { active: false, revision: 10, reason: "browser-playback-active" },
-  })
-  const unacknowledged = createNativeVst3RevisionCoordinator({
-    snapshot: nativeGraph(),
-    attachments: [first, second],
-    attachmentHandshakeAcknowledged: true,
-    graphRevisionAcknowledged: false,
-    browserPlaybackActive: false,
-    host: revisionHost({ calls: [], prepared: [] }),
-  })
-  expect(unacknowledged).toEqual({
-    ok: false,
-    status: { active: false, revision: 10, reason: "graph-revision-unacknowledged" },
-  })
-  const invalidRevision = createNativeVst3RevisionCoordinator({
-    snapshot: { ...nativeGraph(), revision: 0 },
-    attachments: [first, second],
-    attachmentHandshakeAcknowledged: true,
-    graphRevisionAcknowledged: true,
-    browserPlaybackActive: false,
-    host: revisionHost({ calls: [], prepared: [] }),
-  })
-  expect(invalidRevision).toEqual({
-    ok: false,
-    status: { active: false, revision: 0, reason: "graph-revision-invalid" },
-  })
-  const duplicateSubset = createNativeVst3RevisionCoordinator({
-    snapshot: nativeGraph(),
-    attachments: [first, { ...second, graphNodeId: first.graphNodeId }],
-    attachmentHandshakeAcknowledged: true,
-    graphRevisionAcknowledged: true,
-    browserPlaybackActive: false,
-    host: revisionHost({ calls: [], prepared: [] }),
-  })
-  expect(duplicateSubset).toEqual({
-    ok: false,
-    status: { active: false, revision: 10, reason: "attachment-subset-unproven" },
-  })
-})
-
-test("publishes latency changes as revision plus one with recomputed PDC metadata", async () => {
-  const calls: string[] = []
-  const prepared: Array<Parameters<NativeVst3RevisionHost["prepareRevision"]>[0]> = []
-  const creation = revisionCoordinator({ calls, prepared })
-  if (!creation.ok) throw new Error(creation.status.reason)
-  await expect(creation.coordinator.handleNotification({
-    kind: "latency",
-    instanceId: first.instanceId,
-    revision: 10,
-    frames: 64,
-  })).resolves.toEqual({ ok: true, status: "published", revision: 11 })
-  expect(calls).toEqual(["prepare:11", "publish:11", "retire:10"])
-  expect(prepared).toHaveLength(1)
-  expect(prepared[0]?.snapshot.nodes.find((node) => node.id === first.graphNodeId)?.externalLatencyFrames).toBe(576)
-  expect(prepared[0]?.snapshot.nodes.find((node) => node.id === first.graphNodeId)?.latencyFrames).toBe(0)
-  expect(prepared[0]?.snapshot.edges).toEqual([
-    expect.objectContaining({ id: "track-a:master", pdcDelayFrames: 0 }),
-    expect.objectContaining({ id: "track-b:master", pdcDelayFrames: 32 }),
-  ])
-  expect(prepared[0]?.attachments.find((candidate) => candidate.instanceId === first.instanceId)?.declaredLatencyFrames).toBe(64)
-  const preparedRevision = prepared[0]
-  if (!preparedRevision) throw new Error("missing prepared revision")
-  expect(new DataView(preparedRevision.serializedGraph.buffer).getBigUint64(0, false)).toBe(11n)
-  expect(creation.coordinator.status()).toEqual({ active: true, revision: 11 })
-})
-
-test("applies tail metadata changes without publishing a graph revision", async () => {
-  const calls: string[] = []
-  const creation = revisionCoordinator({ calls, prepared: [] })
-  if (!creation.ok) throw new Error(creation.status.reason)
-  await expect(creation.coordinator.handleNotification({
-    kind: "tail",
-    instanceId: first.instanceId,
-    revision: 10,
-    frames: 1024,
-  })).resolves.toEqual({ ok: true, status: "unchanged", revision: 10 })
-  expect(calls).toEqual([])
-  expect(creation.coordinator.status()).toEqual({ active: true, revision: 10 })
-})
-
-test("ignores stale worker notifications without touching the active graph", async () => {
-  const calls: string[] = []
-  const creation = revisionCoordinator({ calls, prepared: [] })
-  if (!creation.ok) throw new Error(creation.status.reason)
-  await expect(creation.coordinator.handleNotification({
-    kind: "latency",
-    instanceId: first.instanceId,
-    revision: 9,
-    frames: 64,
-  })).resolves.toEqual({ ok: true, status: "stale", revision: 10 })
-  expect(calls).toEqual([])
-  expect(creation.coordinator.status()).toEqual({ active: true, revision: 10 })
-})
-
-test("safely stops bus changes", async () => {
-  const unchangedCalls: string[] = []
-  const unchanged = revisionCoordinator({ calls: unchangedCalls, prepared: [] })
-  if (!unchanged.ok) throw new Error(unchanged.status.reason)
-  await expect(unchanged.coordinator.handleNotification({
-    kind: "buses",
-    instanceId: first.instanceId,
-    revision: 10,
-  })).resolves.toMatchObject({
-    ok: false,
-    reason: "dynamic-bus-layout-unsupported",
-    revision: 10,
-  })
-  expect(unchangedCalls).toEqual(["stop:dynamic-bus-layout-unsupported"])
-
-  const notifications: NativeVst3WorkerRevisionNotification[] = [
-    {
-      kind: "buses",
-      instanceId: first.instanceId,
-      revision: 10,
-    },
-  ]
-  for (const notification of notifications) {
-    const calls: string[] = []
-    const creation = revisionCoordinator({ calls, prepared: [] })
-    if (!creation.ok) throw new Error(creation.status.reason)
-    const result = await creation.coordinator.handleNotification(notification)
-    expect(result).toMatchObject({
-      ok: false,
-      reason: "dynamic-bus-layout-unsupported",
-      revision: 10,
-      instanceId: first.instanceId,
-    })
-    expect(calls).toEqual([`stop:${result.ok ? "" : result.reason}`])
-    expect(creation.coordinator.status()).toMatchObject({ active: false, revision: 10 })
-  }
-})
-
-test("fails closed if the native stop operation fails", async () => {
-  const calls: string[] = []
-  const creation = revisionCoordinator({ calls, prepared: [], fail: "stop" })
-  if (!creation.ok) throw new Error(creation.status.reason)
-  await expect(creation.coordinator.handleNotification({
-    kind: "buses",
-    instanceId: first.instanceId,
-    revision: 10,
-  })).resolves.toEqual({
-    ok: false,
-    reason: "safe-stop-failed",
-    revision: 10,
-    instanceId: first.instanceId,
-  })
-  expect(calls).toEqual(["stop:dynamic-bus-layout-unsupported"])
-  expect(creation.coordinator.status()).toEqual({
-    active: false,
-    revision: 10,
-    reason: "safe-stop-failed",
-  })
-})
-
-test("rolls back failed revisions, stops playback, and never advances the acknowledged snapshot", async () => {
-  const failures: Array<"prepare" | "publish"> = ["prepare", "publish"]
-  for (const fail of failures) {
-    const calls: string[] = []
-    const creation = revisionCoordinator({ calls, prepared: [], fail })
-    if (!creation.ok) throw new Error(creation.status.reason)
-    const result = await creation.coordinator.handleNotification({
-      kind: "latency",
-      instanceId: first.instanceId,
-      revision: 10,
-      frames: 64,
-    })
-    expect(result).toMatchObject({
-      ok: false,
-      reason: fail === "prepare" ? "revision-prepare-failed" : "revision-publish-failed",
-      revision: 10,
-    })
-    expect(calls).toEqual(fail === "prepare"
-      ? ["prepare:11", "stop:revision-prepare-failed", "rollback:11"]
-      : ["prepare:11", "publish:11", "stop:revision-publish-failed", "rollback:11"])
-    expect(creation.coordinator.snapshot().revision).toBe(10)
-    expect(creation.coordinator.status()).toMatchObject({ active: false, revision: 10 })
-  }
-})
-
-test("stops on retirement failure after retaining the newly published revision", async () => {
-  const calls: string[] = []
-  const creation = revisionCoordinator({ calls, prepared: [], fail: "retire" })
-  if (!creation.ok) throw new Error(creation.status.reason)
-  await expect(creation.coordinator.handleNotification({
-    kind: "latency",
-    instanceId: first.instanceId,
-    revision: 10,
-    frames: 64,
-  })).resolves.toEqual({
-    ok: false,
-    reason: "revision-retire-failed",
-    revision: 11,
-    instanceId: first.instanceId,
-  })
-  expect(calls).toEqual([
-    "prepare:11",
-    "publish:11",
-    "retire:10",
-    "stop:revision-retire-failed",
-  ])
-  expect(creation.coordinator.snapshot().revision).toBe(11)
-})
-
 const ledgerHarness = (
   stateful: boolean,
   clock = { now: 0 },
@@ -1236,67 +797,6 @@ const faultOrigin = {
   controlIoFailure: 15,
 } as const
 
-const failureOf = async (notification: NativeVst3WorkerRevisionNotification) => {
-  const calls: string[] = []
-  const defects: NativeVst3Defect[] = []
-  const creation = revisionCoordinator({ calls, prepared: [], defects })
-  if (!creation.ok) throw new Error(creation.status.reason)
-  const result = await creation.coordinator.handleNotification(notification)
-  return { result, calls, defects, coordinator: creation.coordinator }
-}
-
-test("a plug-in's own crash or API error marks only that instance failed and never stops audio", async () => {
-  for (const origin of [
-    faultOrigin.childSignal,
-    faultOrigin.childExit,
-    faultOrigin.configureFailure,
-    faultOrigin.processException,
-    faultOrigin.workerNotification,
-  ]) {
-    const { result, calls, defects, coordinator } = await failureOf({
-      kind: "fault", instanceId: first.instanceId, revision: 10, value: origin | (9 << 8),
-    })
-    expect(result).toEqual({ ok: true, status: "plugin-failed", revision: 10, instanceId: first.instanceId })
-    expect(calls).toEqual([])
-    expect(defects).toEqual([])
-    expect(coordinator.failedInstances()).toEqual(new Set([first.instanceId]))
-    expect(coordinator.status()).toEqual({ active: true, revision: 10 })
-  }
-})
-
-test("our own IPC, timeout and lifecycle faults are logged as defects and never shown as a plug-in failure", async () => {
-  for (const origin of [
-    faultOrigin.transportFault,
-    faultOrigin.dispatchFailure,
-    faultOrigin.callbackMissTermination,
-    faultOrigin.startupFailure,
-    faultOrigin.unknownWorkerNotification,
-    faultOrigin.controlIoFailure,
-  ]) {
-    const { result, calls, defects, coordinator } = await failureOf({
-      kind: "fault", instanceId: first.instanceId, revision: 10, value: origin,
-    })
-    expect(result).toEqual({ ok: true, status: "host-defect", revision: 10, instanceId: first.instanceId })
-    expect(calls).toEqual([])
-    expect(defects).toHaveLength(1)
-    expect(defects[0]).toMatchObject({ source: "worker-fault", instanceId: first.instanceId })
-    expect(coordinator.failedInstances()).toEqual(new Set())
-    expect(coordinator.status()).toEqual({ active: true, revision: 10 })
-  }
-  const miss = await failureOf({ kind: "miss", instanceId: first.instanceId, revision: 10 })
-  expect(miss.result).toMatchObject({ ok: true, status: "host-defect" })
-  expect(miss.defects).toHaveLength(1)
-  expect(miss.coordinator.failedInstances()).toEqual(new Set())
-  expect(miss.calls).toEqual([])
-})
-
-test("a component restart never stops audio", async () => {
-  const { result, calls, defects } = await failureOf({ kind: "restart", instanceId: first.instanceId, revision: 10 })
-  expect(result).toEqual({ ok: true, status: "unchanged", revision: 10 })
-  expect(calls).toEqual([])
-  expect(defects).toEqual([])
-})
-
 test("only a crashed plug-in preflight is a plug-in failure; timeouts and staging errors are ours", async () => {
   expect(nativeVst3CoordinatorFailureOrigin("worker-crashed")).toBe("plugin")
   for (const code of [
@@ -1458,13 +958,27 @@ test("main host events: a lost host ends the session", () => {
   expect(ended).toEqual([lost])
 })
 
-test("the session ledger starts per transaction, continues across live coordinations and tolerates a revision before any plan", async () => {
+test("the session ledger reuses attachments across plans and starts clean for a new transaction", async () => {
   const session = createNativeVst3SessionLedger()
-  const host = { detachVst: async () => undefined }
+  const calls: string[] = []
+  const coordinate = () => coordinateNativeVst3Attachments({
+    serializedPlan: plan([first]),
+    sampleRateHz: 48_000,
+    workerPath: "/Resources/daw-vst3-worker",
+    catalogStore: { load: async () => catalog() },
+    audioHost: host(calls),
+    ledger: session.forHost({ detachVst: async () => undefined }),
+    capturedVstStates: new Map(),
+    requiredVstStateInstanceIds: new Set(),
+    preflight: async () => available(first),
+  })
+  expect(await coordinate()).toEqual({ ok: true, attached: 1 })
   session.published()
-  session.rolledBack()
-  const live = session.forHost(host)
-  expect(session.forHost(host)).toBe(live)
+  calls.length = 0
+  expect(await coordinate()).toEqual({ ok: true, attached: 0 })
+  expect(calls).toEqual([])
   session.begin()
-  expect(session.forHost(host)).not.toBe(live)
+  calls.length = 0
+  expect(await coordinate()).toEqual({ ok: true, attached: 1 })
+  expect(calls).toEqual([`attach:${first.instanceId}`])
 })

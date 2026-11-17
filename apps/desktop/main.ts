@@ -128,11 +128,11 @@ import { preflightVst3Insertion } from "./vst3-insertion-preflight"
 import { packagedVst3WorkerPath } from "./vst3-preflight"
 import {
   coordinateNativeVst3Attachments,
-  createNativeVst3HostEventHandlers,
   createNativeVst3SessionLedger,
   nativeVst3CoordinationFailureReply,
   resolveNativeVst3AttachmentPlan,
 } from "./native-vst3-coordinator"
+import { createNativeVst3HostEventHandlers } from "./native-vst3-host-events"
 import {
   nativeHostConfigurationIdentityFor,
   createNativeAudioHostSupervisor,

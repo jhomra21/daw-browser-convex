@@ -1,5 +1,7 @@
 #pragma once
 
+#include "plugin-host-contract-generated.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <array>
@@ -26,13 +28,7 @@ constexpr std::size_t kMaximumWorkerRestarts = 3;
 constexpr std::size_t kMaximumWorkerStateBytes = 512U * 1024U;
 constexpr std::uint32_t kMaximumWorkerTailFrames = 100'000'000U;
 constexpr std::uint32_t kInfiniteTailFrames = std::numeric_limits<std::uint32_t>::max();
-constexpr std::uint32_t kWorkerTransportAbiVersion = 7;
 constexpr std::size_t kWorkerProcessingHistogramBuckets = 32;
-constexpr std::uint32_t kWorkerManifestVersion = 1;
-constexpr std::uint32_t kWorkerStartupProtocolVersion = 1;
-constexpr std::uint32_t kWorkerControlProtocolVersion = 2;
-constexpr std::string_view kWorkerArtifactId = "daw-vst3-worker";
-constexpr std::string_view kWorkerArtifactVersion = "3";
 
 [[nodiscard]] constexpr bool IsInfiniteTailFrames(const std::uint64_t tailFrames) noexcept {
   return tailFrames == kInfiniteTailFrames;
@@ -324,29 +320,6 @@ constexpr RestartEffects DecodeRestartFlags(const std::uint32_t flags) noexcept 
   };
 }
 
-// Fault-only value semantics; other diagnostic values retain their contracts.
-// Bits 0..7: origin, 8..15: waitid si_code, 16..23: si_status, 24..31: reserved.
-enum class WorkerFaultOrigin : std::uint32_t {
-  kUnknown = 0,
-  kChildExit = 1,
-  kChildSignal = 2,
-  kTransportFault = 3,
-  kDispatchFailure = 4,
-  kCallbackMissTermination = 5,
-  kStartupFailure = 6,
-  kStartupException = 7,
-  kConfigureFailure = 8,
-  kConfigureException = 9,
-  kProcessFailure = 10,
-  kProcessException = 11,
-  kWorkerNotification = 12,
-  kUnknownWorkerNotification = 13,
-  kOfflineCompletionFailure = 14,
-  kControlIoFailure = 15,
-  // The worker refused the launch record: our trust gate said no, whatever the plug-in is.
-  kLaunchNotTrusted = 16,
-};
-
 constexpr std::uint32_t EncodeWorkerFault(
   const WorkerFaultOrigin origin,
   const std::uint32_t childCode = 0,
@@ -359,26 +332,7 @@ constexpr std::uint32_t EncodeWorkerFault(
 // A fault notification raised inside the worker names its own origin in `value`; one that names none came from the
 // plug-in's component callbacks.
 constexpr std::uint32_t EncodeFaultNotification(const std::uint32_t value) noexcept {
-  return value != 0 ? value : EncodeWorkerFault(WorkerFaultOrigin::kWorkerNotification);
-}
-
-// Only the plug-in's own process or API is the plug-in's fault: the child exiting or being killed,
-// setup or processing failing, and a failed component restart. Transport, dispatch, callback-miss,
-// startup, control IO and unknown-notification origins are ours. The TypeScript coordinator keeps the
-// same set (apps/desktop/native-vst3-coordinator.ts, pluginFaultOrigins).
-constexpr bool IsPluginFaultOrigin(const std::uint32_t faultValue) noexcept {
-  switch (static_cast<WorkerFaultOrigin>(faultValue & 0xffU)) {
-    case WorkerFaultOrigin::kChildExit:
-    case WorkerFaultOrigin::kChildSignal:
-    case WorkerFaultOrigin::kConfigureFailure:
-    case WorkerFaultOrigin::kConfigureException:
-    case WorkerFaultOrigin::kProcessFailure:
-    case WorkerFaultOrigin::kProcessException:
-    case WorkerFaultOrigin::kWorkerNotification:
-      return true;
-    default:
-      return false;
-  }
+  return value != 0 ? value : EncodeWorkerFault(kZeroDiagnosticFaultOrigin);
 }
 
 struct WorkerDiagnostic {

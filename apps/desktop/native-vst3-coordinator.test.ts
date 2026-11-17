@@ -9,6 +9,7 @@ import {
   nativeVst3WorkerControlProtocolVersion,
   nativeVst3WorkerStartupProtocolVersion,
   nativeVst3WorkerTransportAbiVersion,
+  nativeVst3WorkerFaultOrigins,
   type NativeExternalAttachmentPlan,
   type NativeVst3PreflightRequest,
   type NativeVst3PreflightResult,
@@ -807,26 +808,7 @@ test("a plug-in whose trust was revoked is unresolved even when its verdict was 
   expect(calls).toEqual([])
 })
 
-// native/plugin-host/src/worker-supervisor.h WorkerFaultOrigin, in bits 0..7 of a fault value.
-const faultOrigin = {
-  unknown: 0,
-  childExit: 1,
-  childSignal: 2,
-  transportFault: 3,
-  dispatchFailure: 4,
-  callbackMissTermination: 5,
-  startupFailure: 6,
-  startupException: 7,
-  configureFailure: 8,
-  configureException: 9,
-  processFailure: 10,
-  processException: 11,
-  workerNotification: 12,
-  unknownWorkerNotification: 13,
-  offlineCompletionFailure: 14,
-  controlIoFailure: 15,
-  launchNotTrusted: 16,
-} as const
+const faultOrigin = nativeVst3WorkerFaultOrigins
 
 test("only a crashed plug-in preflight is a plug-in failure; timeouts and staging errors are ours", async () => {
   expect(nativeVst3CoordinatorFailureOrigin("worker-crashed")).toBe("plugin")

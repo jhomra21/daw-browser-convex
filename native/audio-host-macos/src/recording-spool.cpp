@@ -1,4 +1,5 @@
 #include "recording-spool.h"
+#include "daw/recording_spool_contract_generated.h"
 
 #include <array>
 #include <bit>
@@ -78,16 +79,18 @@ bool ValidRequest(const SpoolRequest& request) {
     && request.capture.channel_count <= DAW_AUDIO_RECORDING_CAPTURE_MAX_CHANNELS;
 }
 
-void EncodeWord(std::span<unsigned char, 4> bytes, std::uint32_t value) {
+static_assert(DAW_AUDIO_RECORDING_CAPTURE_BLOCK_FRAMES == DAW_RECORDING_SPOOL_MAX_BLOCK_FRAMES);
+
+void EncodeWord(std::span<unsigned char, DAW_RECORDING_SPOOL_BLOCK_HEADER_BYTES> bytes, std::uint32_t value) {
   for (std::size_t index = 0; index < bytes.size(); ++index) bytes[index] = value >> (index * 8);
 }
 
 std::optional<std::uint64_t> ExpectedBytes(
   std::uint64_t frames, std::uint64_t blocks, std::uint32_t channels) {
   const auto maximum = std::numeric_limits<std::uint64_t>::max();
-  const std::uint64_t bytes_per_frame = std::uint64_t(channels) * 4;
-  if (blocks > maximum / 4) return std::nullopt;
-  const auto header_bytes = blocks * 4;
+  const std::uint64_t bytes_per_frame = std::uint64_t(channels) * DAW_RECORDING_SPOOL_SAMPLE_BYTES;
+  if (blocks > maximum / DAW_RECORDING_SPOOL_BLOCK_HEADER_BYTES) return std::nullopt;
+  const auto header_bytes = blocks * DAW_RECORDING_SPOOL_BLOCK_HEADER_BYTES;
   if (frames > (maximum - header_bytes) / bytes_per_frame) return std::nullopt;
   const auto bytes = header_bytes + frames * bytes_per_frame;
   if (bytes > std::uint64_t(std::numeric_limits<off_t>::max())) return std::nullopt;
@@ -225,28 +228,30 @@ bool RecordingSpoolFile::Append(
   if (file.Cancelled(cancelled)) return false;
   if (block.generation != file.request.capture.generation || block.session_id != file.request.capture.session_id
     || block.sequence != file.written.blocks || block.frame_count == 0
-    || block.frame_count > DAW_AUDIO_RECORDING_CAPTURE_BLOCK_FRAMES
+    || block.frame_count > DAW_RECORDING_SPOOL_MAX_BLOCK_FRAMES
     || block.channel_count != file.request.capture.channel_count) return file.Fail(SpoolError::kLayout);
   for (std::uint32_t channel = 0; channel < block.channel_count; ++channel) {
     if (block.planes[channel] == nullptr) return file.Fail(SpoolError::kLayout);
   }
-  const std::uint64_t block_bytes = 4 + std::uint64_t(block.frame_count) * block.channel_count * 4;
+  const std::uint64_t block_bytes = DAW_RECORDING_SPOOL_BLOCK_HEADER_BYTES
+    + std::uint64_t(block.frame_count) * block.channel_count * DAW_RECORDING_SPOOL_SAMPLE_BYTES;
   if (file.written.bytes > std::uint64_t(std::numeric_limits<off_t>::max()) - block_bytes
     || file.written.frames > std::numeric_limits<std::uint64_t>::max() - block.frame_count
     || file.written.blocks == std::numeric_limits<std::uint64_t>::max()) return file.Fail(SpoolError::kTotals, EOVERFLOW);
-  std::array<unsigned char, 4> header{};
+  std::array<unsigned char, DAW_RECORDING_SPOOL_BLOCK_HEADER_BYTES> header{};
   EncodeWord(header, block.frame_count);
   if (!file.WriteAll(header, cancelled)) return false;
   // Only fixed encoding scratch, not a second block queue. Core retains the
   // sole transport-owned slot through every synchronous write of its planes.
-  std::array<unsigned char, DAW_AUDIO_RECORDING_CAPTURE_BLOCK_FRAMES * 4> plane{};
-  static_assert(sizeof(float) == 4 && std::numeric_limits<float>::is_iec559);
+  std::array<unsigned char, DAW_RECORDING_SPOOL_MAX_BLOCK_FRAMES * DAW_RECORDING_SPOOL_SAMPLE_BYTES> plane{};
+  static_assert(sizeof(float) == DAW_RECORDING_SPOOL_SAMPLE_BYTES && std::numeric_limits<float>::is_iec559);
   for (std::uint32_t channel = 0; channel < block.channel_count; ++channel) {
     for (std::uint32_t frame = 0; frame < block.frame_count; ++frame) {
-      EncodeWord(std::span<unsigned char, 4>(plane.data() + frame * 4, 4),
+      EncodeWord(std::span<unsigned char, DAW_RECORDING_SPOOL_SAMPLE_BYTES>(
+        plane.data() + frame * DAW_RECORDING_SPOOL_SAMPLE_BYTES, DAW_RECORDING_SPOOL_SAMPLE_BYTES),
         std::bit_cast<std::uint32_t>(block.planes[channel][frame]));
     }
-    if (!file.WriteAll(std::span(plane).first(block.frame_count * 4), cancelled)) return false;
+    if (!file.WriteAll(std::span(plane).first(block.frame_count * DAW_RECORDING_SPOOL_SAMPLE_BYTES), cancelled)) return false;
   }
   file.written.frames += block.frame_count;
   ++file.written.blocks;

@@ -1,4 +1,5 @@
 #include "../src/recording-spool.h"
+#include "daw/recording_spool_contract_generated.h"
 
 #include <array>
 #include <atomic>
@@ -207,7 +208,10 @@ void FinishCore(const std::shared_ptr<RecordingSpoolSession>& session, std::uint
 }
 
 void ExactFormat() {
-  static_assert(DAW_AUDIO_RECORDING_CAPTURE_BLOCK_FRAMES == 2048u);
+  static_assert(DAW_RECORDING_SPOOL_BLOCK_HEADER_BYTES == 4u);
+  static_assert(DAW_RECORDING_SPOOL_SAMPLE_BYTES == 4u);
+  static_assert(DAW_AUDIO_RECORDING_CAPTURE_BLOCK_FRAMES == DAW_RECORDING_SPOOL_MAX_BLOCK_FRAMES);
+  static_assert(DAW_RECORDING_SPOOL_MAX_BLOCK_FRAMES == 2048u);
   Fixture fixture;
   auto io = std::make_shared<InjectedIo>();
   io->fault = InjectedIo::Fault::kShortEintr;

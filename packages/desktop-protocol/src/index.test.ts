@@ -26,6 +26,9 @@ import {
   desktopRequestSchemaV1,
   desktopRequestSchemaV2,
   maxDesktopFrameBytes,
+  maximumRecordingSpoolBlockFrames,
+  recordingSpoolBlockHeaderBytes,
+  recordingSpoolSampleBytes,
   parseDesktopReplyError,
   parseDesktopResult,
 } from "./index"
@@ -39,6 +42,14 @@ const vstParameterEditPayload = {
   parameterId: 42,
   normalizedValue: 0.625,
 }
+
+test("recording spool wire dimensions stay compatible with captured files", () => {
+  expect([
+    recordingSpoolBlockHeaderBytes,
+    recordingSpoolSampleBytes,
+    maximumRecordingSpoolBlockFrames,
+  ]).toEqual([4, 4, 2048])
+})
 const controlAction = { kind: "project.rename", name: "Project" }
 const controlRequestInputs = [
   ["control.capabilities", {}],

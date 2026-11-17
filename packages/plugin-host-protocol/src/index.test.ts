@@ -17,6 +17,10 @@ import {
   nativeVst3WorkerManifestVersion,
   nativeVst3WorkerStartupProtocolVersion,
   nativeVst3WorkerTransportAbiVersion,
+  nativeVst3WorkerFaultOrigins,
+  nativeVst3ZeroDiagnosticFaultOrigin,
+  nativeVst3LaunchNotTrustedFaultOrigin,
+  nativeVst3PluginFaultOrigins,
   nativeVst3PreflightProtocolVersion,
   type NativeExternalAttachmentPlan,
   type NativeVst3PreflightRequest,
@@ -31,6 +35,13 @@ import {
 } from './index'
 
 describe('plugin host control protocol', () => {
+  test('defines every native fault origin and classification in one contract', () => {
+    expect(Object.values(nativeVst3WorkerFaultOrigins).map(Number)).toEqual(Array.from({ length: 17 }, (_, index) => index))
+    expect([...nativeVst3PluginFaultOrigins]).toEqual([1, 2, 8, 9, 10, 11, 12])
+    expect(nativeVst3ZeroDiagnosticFaultOrigin).toBe(12)
+    expect(nativeVst3LaunchNotTrustedFaultOrigin).toBe(16)
+  })
+
   test('accepts the complete unsigned VST3 ParamID range and rejects overflow', () => {
     for (const id of [0, 0x7fff_ffff, 0x8000_0000, 0xffff_ffff]) {
       expect(pluginParameterDescriptorSchema.safeParse({
@@ -475,22 +486,13 @@ test('rejects paths, invalid fingerprints, and out-of-bounds attachment dimensio
   }))).toThrow()
 })
 
-test('worker contract versions match the native plugin-host header', async () => {
-  const header = await Bun.file(new URL('../../../native/plugin-host/src/worker-supervisor.h', import.meta.url)).text()
-  const nativeConstant = (name: string) => header.match(new RegExp(`\\b${name} = "?([^";]+)"?;`))?.[1]
-  expect({
-    transportAbi: nativeConstant('kWorkerTransportAbiVersion'),
-    manifest: nativeConstant('kWorkerManifestVersion'),
-    startupProtocol: nativeConstant('kWorkerStartupProtocolVersion'),
-    controlProtocol: nativeConstant('kWorkerControlProtocolVersion'),
-    artifactId: nativeConstant('kWorkerArtifactId'),
-    artifactVersion: nativeConstant('kWorkerArtifactVersion'),
-  }).toEqual({
-    transportAbi: `${nativeVst3WorkerTransportAbiVersion}`,
-    manifest: `${nativeVst3WorkerManifestVersion}`,
-    startupProtocol: `${nativeVst3WorkerStartupProtocolVersion}`,
-    controlProtocol: `${nativeVst3WorkerControlProtocolVersion}`,
-    artifactId: nativeVst3WorkerArtifactId,
-    artifactVersion: nativeVst3WorkerArtifactVersion,
-  })
+test('worker protocol versions retain the deployed compatibility values', () => {
+  expect([
+    nativeVst3WorkerTransportAbiVersion,
+    nativeVst3WorkerManifestVersion,
+    nativeVst3WorkerStartupProtocolVersion,
+    nativeVst3WorkerControlProtocolVersion,
+    nativeVst3WorkerArtifactId,
+    nativeVst3WorkerArtifactVersion,
+  ]).toEqual([7, 1, 1, 2, 'daw-vst3-worker', '3'])
 })

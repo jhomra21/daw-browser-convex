@@ -33,6 +33,9 @@ export const maxDesktopReplyChunks = Math.ceil(maxDesktopReplyBytes / maxDesktop
 export const maxCorrelationIdLength = 96
 export const maxDeadlineMs = 60_000
 export const desktopCapabilityMaximumChunkBytes = 1024 * 1024
+export const recordingSpoolBlockHeaderBytes = 4
+export const recordingSpoolSampleBytes = 4
+export const maximumRecordingSpoolBlockFrames = 2048
 
 export type DesktopJsonValue =
   | null

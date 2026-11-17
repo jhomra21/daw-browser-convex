@@ -3,6 +3,11 @@ import { constants, type BigIntStats } from "node:fs"
 import { link, lstat, mkdir, open, opendir, realpath, unlink } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
+import {
+  maximumRecordingSpoolBlockFrames,
+  recordingSpoolBlockHeaderBytes,
+  recordingSpoolSampleBytes,
+} from "@daw-browser/desktop-protocol"
 import type { NativeMainRecordingStatus } from "./audio-host"
 import type { NativeRecordingTake, NativeRecordingRelease } from "../../src/types/desktop-bridge"
 
@@ -70,10 +75,11 @@ const privateFile = (status: BigIntStats) => status.isFile() && status.nlink ===
   && status.uid === BigInt(process.getuid?.() ?? -1) && (status.mode & 0o7777n) === 0o600n
 const sameIdentity = (a: BigIntStats, b: BigIntStats) => a.dev === b.dev && a.ino === b.ino
 const assertTotals = (proof: CompleteProof) => {
-  const bytes = 4 * proof.blocks + 4 * proof.frames * proof.channelCount
+  const bytes = recordingSpoolBlockHeaderBytes * proof.blocks
+    + recordingSpoolSampleBytes * proof.frames * proof.channelCount
   if (!Number.isSafeInteger(bytes) || bytes !== proof.bytes
     || (proof.frames === 0 ? proof.blocks !== 0 : proof.blocks < 1 || proof.blocks > proof.frames)
-    || proof.frames > proof.blocks * 2048 || BigInt(proof.fileInode) === 0n)
+    || proof.frames > proof.blocks * maximumRecordingSpoolBlockFrames || BigInt(proof.fileInode) === 0n)
     throw new Error("Recording Complete totals mismatch.")
 }
 const verifyRoot = async (root: PrivateRoot) => {

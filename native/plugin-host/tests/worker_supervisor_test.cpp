@@ -389,25 +389,6 @@ int main(int argc, char* argv[]) {
       == (2U | (static_cast<std::uint32_t>(CLD_KILLED) << 8U) | (SIGTERM << 16U))
     && EncodeWorkerFault(WorkerFaultOrigin::kChildExit, 0x101, 0x1ff) == 0x00ff'0101U,
     "fault origin encoding changed ABI, enum values, or byte bounds")) return EXIT_FAILURE;
-  if (!Check(
-    static_cast<std::uint32_t>(WorkerFaultOrigin::kUnknown) == 0
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kChildExit) == 1
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kChildSignal) == 2
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kTransportFault) == 3
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kDispatchFailure) == 4
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kCallbackMissTermination) == 5
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kStartupFailure) == 6
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kStartupException) == 7
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kConfigureFailure) == 8
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kConfigureException) == 9
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kProcessFailure) == 10
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kProcessException) == 11
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kWorkerNotification) == 12
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kUnknownWorkerNotification) == 13
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kOfflineCompletionFailure) == 14
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kControlIoFailure) == 15
-      && static_cast<std::uint32_t>(WorkerFaultOrigin::kLaunchNotTrusted) == 16,
-    "native fault-origin values changed")) return EXIT_FAILURE;
   {
     auto faultTransport = WorkerTransport::Create(*CreateWorkerTransportLayout(Request()));
     if (!Check(faultTransport.has_value(), "fault transport fixture failed")) return EXIT_FAILURE;

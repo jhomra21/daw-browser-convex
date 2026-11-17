@@ -436,7 +436,6 @@ export const createRecordingSpoolRegistry = (input: Pick<RecordingIntent, "userD
       const previous = cursor ? lookup(scope, cursor) : undefined
       const ids = projectTakes.get(scope.projectId) ?? []
       const result: NativeRecordingTake[] = []
-      // Project-local cursor offsets prevent rescanning every earlier page.
       for (let index = previous ? (previous.projectIndex ?? -1) + 1 : 0; index < ids.length; index += 1) {
         const take = takes.get(ids[index] ?? "")
         if (!take || take.state === "released" || take.state === "resolved") continue

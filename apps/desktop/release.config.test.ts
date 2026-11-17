@@ -12,6 +12,7 @@ import {
   type NativeReleaseArtifactPaths,
 } from "./release.config"
 import {
+  getPackagedNativeReleaseArtifacts,
   nativeAudioHostArtifactName,
   nativeVst3ScannerArtifactName,
 } from "./native-release-artifacts"
@@ -83,11 +84,8 @@ test("never builds or packages the AE-08 failure-injection test plug-in", () => 
   expect(calls.filter((call) => /ae08|AE08/.test(call))).toEqual([])
   const productionCmake = readFileSync(new URL("../../native/plugin-host/CMakeLists.txt", import.meta.url), "utf8")
   expect(productionCmake).toMatch(/option\(DAW_BUILD_AE08_TEST_PLUGIN "[^"]*" OFF\)/)
-  const packagedSources = [
-    readFileSync(new URL("./release.config.ts", import.meta.url), "utf8"),
-    readFileSync(new URL("./native-release-artifacts.ts", import.meta.url), "utf8"),
-  ]
-  expect(packagedSources.filter((source) => /ae08-test-effect|dev\.daw\.ae08/.test(source))).toEqual([])
+  expect(getPackagedNativeReleaseArtifacts("/resources").map(({ name }) => name))
+    .toEqual([nativeVst3ScannerArtifactName, nativeVst3WorkerArtifactId, nativeAudioHostArtifactName])
 })
 
 test("rebuilds every native artifact used by desktop packaging", () => {

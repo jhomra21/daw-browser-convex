@@ -141,8 +141,6 @@ test("refuses the production component-walk identity mismatch before manifest cr
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-// Registry failures are specified before its implementation. All sources live in
-// disposable private roots; no test scavenges production storage.
 import type { NativeRecordingRelease } from "../../src/types/desktop-bridge"
 
 const scope = { projectId: "local:registry", projectGeneration: 7, rendererGeneration: 3 }

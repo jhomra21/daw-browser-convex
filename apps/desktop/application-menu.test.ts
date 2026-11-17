@@ -5,6 +5,8 @@ import {
   createApplicationMenuTemplate,
   type ApplicationMenuTemplate,
 } from "./application-menu"
+import { registerApplicationMenuIpc } from "./ipc/application-menu-ipc"
+import { applicationMenuStateChannel } from "@daw-browser/desktop-protocol/ipc-channels"
 import {
   desktopApplicationMenuCommands,
   type DesktopApplicationMenuState,
@@ -265,19 +267,46 @@ describe("native application menu", () => {
     expect(fake.items.get(applicationMenuItemIds.logout)?.visible).toBe(false)
   })
 
+  test("applies a renderer menu state only from an allowed sender and only when it parses", () => {
+    type RendererMessage = Partial<Record<keyof DesktopApplicationMenuState, string | number | boolean>>
+    const handlers = new Map<string, (event: Electron.IpcMainEvent, message: RendererMessage) => void>()
+    const applied: DesktopApplicationMenuState[] = []
+    let allowed = true
+    const event: Electron.IpcMainEvent = Object.create(null)
+    registerApplicationMenuIpc({
+      ipcMain: {
+        on(channel: string, listener: (event: Electron.IpcMainEvent, ...args: unknown[]) => void) {
+          handlers.set(channel, listener)
+          return this
+        },
+      },
+      applicationMenuStateAllowed: () => allowed,
+      applicationMenuController: { setState: (state) => { applied.push(state) } },
+    })
+    const state: DesktopApplicationMenuState = {
+      ready: true, canExportArchive: false, canUndo: false, canRedo: false, canCut: false, canCopy: false,
+      canPaste: false, canSelectAll: false, canDuplicateSelection: false, canDeleteSelection: false,
+      editableFocused: false, signedIn: false, metronomeEnabled: false, loopEnabled: false, gridEnabled: false,
+      followEnabled: false, syncMix: false, gridDenominator: 4,
+    }
+    const send = handlers.get(applicationMenuStateChannel)
+    if (!send) throw new Error("the menu state channel has no handler")
+    send(event, { ...state, ready: "yes" })
+    send(event, {})
+    expect(applied).toEqual([])
+    send(event, state)
+    expect(applied).toEqual([state])
+    allowed = false
+    send(event, state)
+    expect(applied).toHaveLength(1)
+  })
+
   test("keeps IPC and renderer integration constrained", async () => {
     const read = async (relativePath: string) => Bun.file(new URL(relativePath, import.meta.url)).text()
-    const mainSource = await read("./main.ts")
-    const ipcSource = await read("./ipc/application-menu-ipc.ts")
     const preloadSource = await read("./preload.ts")
     const rendererSource = await read("../../src/hooks/useDesktopApplicationMenu.ts")
     const transportSource = await read("../../src/components/timeline/TransportControls.tsx")
 
-    expect(mainSource).toContain("event.senderFrame === event.sender.mainFrame")
-    expect(mainSource).toContain("sameAppOrigin(event.senderFrame.url)")
-    expect(ipcSource).toContain("desktopApplicationMenuStateSchema.safeParse(value)")
-    expect(mainSource.match(/applicationMenuController\.reset\(\)/g)?.length).toBe(1)
-    expect(mainSource).toContain("invalidateRendererGeneration")
     expect(preloadSource).toContain("desktopApplicationMenuMessageSchema.safeParse(value)")
     expect(preloadSource).toContain("desktopApplicationMenuStateSchema.safeParse(state)")
     expect(preloadSource).toContain("removeListener(applicationMenuCommandChannel, notify)")

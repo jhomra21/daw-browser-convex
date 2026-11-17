@@ -4,7 +4,7 @@ import type { IpcMain } from "electron";
 import type { z } from "zod";
 
 export const registerApplicationMenuIpc = (dependencies: {
-  ipcMain: IpcMain;
+  ipcMain: Pick<IpcMain, "on">;
   applicationMenuStateAllowed: (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => boolean;
   applicationMenuController: {
     setState: (state: z.infer<typeof desktopApplicationMenuStateSchema>) => void;

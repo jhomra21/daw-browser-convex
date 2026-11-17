@@ -25,7 +25,12 @@ import {
   type NativeAudioHostSupervisorOptions,
   type ResolvedVst3Attachment,
 } from "./audio-host"
-import { encodeNativeAudioHostControlFrame, NativeAudioHostNotSentError } from "./native-request-broker"
+import {
+  encodeNativeAudioHostControlFrame,
+  NativeAudioHostNotSentError,
+  nativeAudioHostControlWatchdogMs,
+  nativeAudioHostStackCaptureDeadlineMs,
+} from "./native-request-broker"
 import { createOfflinePcmAckTracker, deliverOfflinePcmChunk } from "./offline-pcm-ack"
 import { createAe08Evidence } from "./ae08-evidence"
 import {
@@ -2670,7 +2675,6 @@ test("M2 failed Finish outcome does not permanently veto playback stop or teardo
   }
 })
 
-// Extend the framed process fixture locally; existing fixture modes and expectations stay unchanged.
 const recordingFinishFixture = async (blocked?: "patch" | "graph", refused = false) => {
   const directory = await mkdtemp(path.join(tmpdir(), "daw-recording-finish-"))
   const executable = path.join(directory, "host.mjs")
@@ -2730,8 +2734,7 @@ const recordingFinishFixture = async (blocked?: "patch" | "graph", refused = fal
       && String(line).includes('"phase":"enqueue"')) stopEnqueued.resolve()
   })
   const completeStackCapture = () => {
-    // Complete the existing bounded capture deadline, not a new persistence timer.
-    const sample = timers.mock.calls.findLast(([, delay]) => delay === 1_500)
+    const sample = timers.mock.calls.findLast(([, delay]) => delay === nativeAudioHostStackCaptureDeadlineMs)
     sample?.[0]()
   }
   return {
@@ -2746,7 +2749,7 @@ const recordingFinishFixture = async (blocked?: "patch" | "graph", refused = fal
     releasePatch: () => child?.kill("SIGURG"),
     completeStackCapture,
     fireDeadline: (completeCapture = true) => {
-      const timer = timers.mock.calls.findLast(([, delay]) => delay === 2_000)
+      const timer = timers.mock.calls.findLast(([, delay]) => delay === nativeAudioHostControlWatchdogMs)
       if (!timer) throw new Error("Missing dispatched control deadline")
       timer[0]()
       if (completeCapture) completeStackCapture()

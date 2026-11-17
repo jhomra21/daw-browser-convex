@@ -53,7 +53,8 @@ export type NativeVstEditorStatus = {
   teardownError?: string
 }
 
-const nativeAudioHostControlWatchdogMs = 2_000
+export const nativeAudioHostControlWatchdogMs = 2_000
+export const nativeAudioHostStackCaptureDeadlineMs = 1_500
 const slowHotControlAckThresholdMs = 250
 
 const nativeAudioHostRequestNames = new Map<number, string>(
@@ -262,7 +263,7 @@ export const createNativeRequestBroker = (host: NativeRequestBrokerHost) => {
     const deadline = setTimeout(() => {
       sampler.kill("SIGTERM")
       finish()
-    }, 1_500)
+    }, nativeAudioHostStackCaptureDeadlineMs)
     sampler.once("error", (error) => {
       console.error("[native-audio-host-stack-capture]", JSON.stringify({ pid, requestId, outputPath, error: error.message }))
       finish()

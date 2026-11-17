@@ -16,9 +16,16 @@ import {
   sessionSetSpectrumNodeChannel,
   sessionStopRecordingChannel,
 } from "@daw-browser/desktop-protocol/ipc-channels"
-import type { NativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
+import { nativeAudioHostControlTypes, type NativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeHostPcmAsset, NativeHostRecordingConfiguration } from "@daw-browser/audio-engine/native-host-wire"
 import type { DesktopBridge } from "../../src/types/desktop-bridge"
+import {
+  NativeAudioHostCommandError,
+  nativeHostConfigurationIdentityFor,
+  nativeProcessorPatchReply,
+  nativeSessionFailure,
+} from "./audio-host"
+import { NativeAudioHostNotSentError } from "./native-request-broker"
 import { nativeEditorCommand } from "../../src/components/timeline/external-plugin-editor"
 import { nativeEditorCommandSchema } from "./native-session-schemas"
 
@@ -162,35 +169,34 @@ test("gates the native session IPC to the macOS arm64 app origin", async () => {
   expect(main).toContain('catalogViewForRenderer')
 })
 
-test("preserves bounded native request diagnostics through session IPC", async () => {
-  const [main, audioHost] = await Promise.all([
-    readFile(mainPath, "utf8"),
-    readFile(new URL("./audio-host.ts", import.meta.url), "utf8"),
-  ])
-
-  expect(audioHost).toContain("requestName")
-  expect(main).toContain("error.requestName")
-  expect(main).toContain("error.detail === undefined")
-  expect(main).toContain("thrown instanceof NativeAudioHostCommandError ? thrown : undefined")
-  expect(main).toContain("kind: nativeDeliveryFailureKind(thrown)")
+test("a failed native request keeps its bounded diagnostic only when its request allows one", () => {
+  const rejected = new NativeAudioHostCommandError(nativeAudioHostControlTypes.instrumentStates, "x".repeat(300))
+  expect(nativeSessionFailure(rejected)).toEqual({
+    ok: false,
+    kind: "refused",
+    error: `The native audio session rejected instrumentStates request ${nativeAudioHostControlTypes.instrumentStates}. ${"x".repeat(256)}`,
+  })
+  expect(nativeSessionFailure(new NativeAudioHostCommandError(nativeAudioHostControlTypes.deviceConfigure, "private native text"))).toEqual({
+    ok: false,
+    kind: "refused",
+    error: `The native audio session rejected deviceConfigure request ${nativeAudioHostControlTypes.deviceConfigure}.`,
+  })
 })
 
-test("classifies a failed revision command by its type, never dropping the thrown error", async () => {
-  const main = await readFile(mainPath, "utf8")
-  const handler = main.slice(main.indexOf("for (const [operation, channel] of Object.entries(revisionChannels))"))
-  const revisionHandler = handler.slice(0, handler.indexOf("registerNativeSessionBytes(sessionPublishGraphChannel"))
-
-  // A refused, unavailable or lost reply keeps its kind: the renderer classifies the publication from it.
-  expect(revisionHandler).toContain("} catch (error) { return nativeSessionFailure(error) }")
-  expect(revisionHandler).not.toContain("catch { return nativeSessionFailure() }")
-  // The command ran, but this renderer no longer owns the result: it may have been taken.
-  expect(revisionHandler).toContain("return nativeSessionFailure(new Error(")
+test("classifies a failed revision command by its type, never dropping the thrown error", () => {
+  const unavailable = "The native audio session is unavailable."
+  // Nothing was sent, native said nothing could be done, or the reply never came: each keeps its own kind.
+  expect(nativeSessionFailure()).toEqual({ ok: false, kind: "unavailable", error: unavailable })
+  expect(nativeSessionFailure(new NativeAudioHostNotSentError("not sent"))).toEqual({ ok: false, kind: "unavailable", error: unavailable })
+  expect(nativeSessionFailure(new Error("lost reply"))).toEqual({ ok: false, kind: "unconfirmed", error: unavailable })
+  expect(nativeSessionFailure(new NativeAudioHostCommandError(nativeAudioHostControlTypes.deviceConfigure, undefined, "unavailable")).kind)
+    .toBe("unavailable")
 })
 
-test("carries the processor patch status and its decimal token to the renderer unchanged", async () => {
-  const main = await readFile(mainPath, "utf8")
-
-  expect(main).toContain("nativeProcessorPatchReply(await supervisor.queueProcessorStatePatch(")
+test("carries the processor patch status and its decimal token to the renderer unchanged", () => {
+  expect(nativeProcessorPatchReply({ outcome: "claimed", token: 9007199254740993n }))
+    .toEqual({ ok: true, outcome: "claimed", token: "9007199254740993" })
+  expect(nativeProcessorPatchReply({ outcome: "applied" })).toEqual({ ok: true, outcome: "applied" })
 })
 
 test("validates the spectrum selection envelope in the main process", async () => {
@@ -233,10 +239,14 @@ test("preserves renderer transport transition IDs through native IPC mapping", a
   expect(main).toContain("transitionId: value.transitionId")
 })
 
-test("scopes configuration identity to each native host process generation", async () => {
-  const main = await readFile(mainPath, "utf8")
-  expect(main).toContain("const configurationGeneration = currentGeneration + 1")
-  expect(main).toContain("configuredHost = nativeHostConfigurationIdentityFor(configuredHost, host)")
+test("scopes configuration identity to each native host process generation", () => {
+  const first = nativeHostConfigurationIdentityFor(undefined, { pid: 10, generation: 1 })
+  expect(first).toEqual({ pid: 10, generation: 1, configurationGeneration: 0 })
+  const advanced = { ...first, configurationGeneration: 4 }
+  expect(nativeHostConfigurationIdentityFor(advanced, { pid: 10, generation: 1 })).toBe(advanced)
+  expect(nativeHostConfigurationIdentityFor(advanced, { pid: 10, generation: 2 })).toEqual({ pid: 10, generation: 2, configurationGeneration: 0 })
+  expect(nativeHostConfigurationIdentityFor(advanced, { pid: 11, generation: 1 })).toEqual({ pid: 11, generation: 1, configurationGeneration: 0 })
+  expect(nativeHostConfigurationIdentityFor(advanced, { generation: 1 })).toBeUndefined()
 })
 
 test("routes editor commands through the isolated session before the playback host", async () => {

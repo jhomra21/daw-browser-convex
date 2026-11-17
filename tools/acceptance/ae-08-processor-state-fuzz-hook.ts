@@ -12,7 +12,7 @@ import { mapNativeBuiltInParameterCommit } from "../../src/lib/desktop/native-bu
 import type { NativeBuiltInParameterPayload } from "../../src/lib/processor-edit-semantics"
 import type { LiveProcessorEditIdentity, ProcessorDelivery } from "../../src/lib/live-processor-control"
 import { setLocalEffectInstance, deleteLocalEffectInstance } from "../../src/lib/local-effects"
-import { resolveDesiredPlaybackFx } from "../../src/lib/export/run-export-job"
+import { resolveDesiredPlaybackFx } from "../../src/lib/desired-playback-state"
 import { pickNativePlaybackInputs } from "../../src/components/timeline/native-playback-inputs"
 import { fixtureEdit, utilityGainPayload } from "./ae-08-processor-state-fuzz-edit"
 import a2cChecks, { type Mark } from "./ae-08-processor-state-fuzz-hook-checks"

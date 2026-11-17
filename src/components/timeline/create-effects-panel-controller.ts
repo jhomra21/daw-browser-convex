@@ -18,7 +18,7 @@ import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import type { EffectParamsByEffect, EffectParamsCommitOptions, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
 import type { AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
 import { withInstrumentOverride, type ExportEffectsProjection } from "~/lib/export/export-effect-rows";
-import type { ExportRenderStateSnapshot } from "~/lib/export/run-export-job";
+import type { ExportRenderStateSnapshot } from "~/lib/desired-playback-state";
 import type { NativeBuiltInParameterPayload } from "~/lib/processor-edit-semantics";
 import { SampledInstrumentSyncSupersededError } from "~/lib/sampled-instrument-sync-error";
 

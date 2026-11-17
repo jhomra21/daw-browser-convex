@@ -46,7 +46,7 @@ import { createLocalProject } from "~/lib/local-project-db";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { convexApi, convexClient } from "~/lib/convex";
 import { mountStep5Playback, settleStep5Playback } from "../../tools/acceptance/b5c-playback-witness-support";
-import { resolveDesiredPlaybackFx } from "~/lib/export/run-export-job";
+import { resolveDesiredPlaybackFx } from "~/lib/desired-playback-state";
 
 // Cloud rows and canonical commits use deterministic in-process transports.
 // The module's eager fixture socket must not inject unrelated fatal replies.

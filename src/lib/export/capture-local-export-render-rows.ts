@@ -1,7 +1,6 @@
 import { normalizeLocalAutomationEnvelopes } from "~/lib/local-automation"
 import { isLocalEffectRow, type LocalEffectRow } from "~/lib/local-effects"
 import { openLocalProjectDb } from "~/lib/local-project-db"
-import { flushLocalProjectPendingWrites } from "~/lib/local-project-pending-writes"
 import type { JsonValue } from "@daw-browser/shared"
 
 type LocalExportRenderRowsSnapshot = {
@@ -11,9 +10,7 @@ type LocalExportRenderRowsSnapshot = {
 
 export const captureLocalExportRenderRowsSnapshot = async (
   projectId: string,
-  options?: Parameters<typeof flushLocalProjectPendingWrites>[1] & { skipFlush?: boolean },
 ): Promise<LocalExportRenderRowsSnapshot> => {
-  if (!options?.skipFlush) await flushLocalProjectPendingWrites(projectId, options)
   const db = await openLocalProjectDb(projectId)
   const tx = db.transaction("entities", "readonly")
   const index = tx.store.index("by-kind")

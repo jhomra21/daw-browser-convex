@@ -26,7 +26,7 @@ import { createProcessorEditRegistry } from "~/components/timeline/create-proces
 import { pickNativePlaybackInputs } from "~/components/timeline/native-playback-inputs";
 import type { NativeProcessorPatchReply } from "~/types/desktop-bridge";
 import { mountStep5Playback, settleStep5Playback } from "./b5c-playback-witness-support";
-import { resolveDesiredPlaybackFx } from "~/lib/export/run-export-job";
+import { resolveDesiredPlaybackFx } from "~/lib/desired-playback-state";
 import { createParameterGestureOwner } from "~/components/timeline/parameter-gesture-owner";
 import { effectAdmission } from "~/components/timeline/effect-publication-result";
 

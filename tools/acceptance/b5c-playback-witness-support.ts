@@ -7,7 +7,7 @@ import type { NativeRevisionReply, NativeRevisionSession } from "@daw-browser/de
 import type { NativeProcessorPatchReply } from "~/types/desktop-bridge";
 import { compileDesiredNativeProcessorState, compileLivePlaybackSnapshot, type LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot";
 import { nativePlaybackFaultText, type NativePlaybackFault } from "~/lib/desktop/native-playback-controller";
-import type { ExportAutomationPatch, ExportRenderStateSnapshot } from "~/lib/export/run-export-job";
+import type { ExportAutomationPatch, ExportRenderStateSnapshot } from "~/lib/desired-playback-state";
 import { createProcessorEditRegistry } from "~/components/timeline/create-processor-edit-registry";
 import { observeCalls } from "./device-control-cost-spy";
 import { createSampledInstrumentRegionBudget } from "~/lib/sampled-instrument-region-budget";

@@ -1,5 +1,5 @@
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types";
-import type { ExportAutomationPatch } from "~/lib/export/run-export-job";
+import type { ExportAutomationPatch } from "~/lib/desired-playback-state";
 import type { LivePlaybackTimeSignature } from "~/lib/live-playback-snapshot";
 
 type NativePlaybackInputs = {

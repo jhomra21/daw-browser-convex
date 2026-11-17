@@ -7,7 +7,7 @@ import { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import { createDefaultArpeggiatorParams, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams, createDefaultSynthParams, createDefaultUtilityParams, normalizeTrackInstrumentParams, type ArpeggiatorParams, type DecodedAudioPage, type DrumRackParams, type GranularParams, type SamplerParams, type TrackInstrumentParams } from "@daw-browser/shared";
 import { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
 import { DRUM_RACK_MAX_DECODED_BYTES } from "@daw-browser/audio-engine/drum-rack-runtime";
-import type { ExportRenderStateSnapshot } from "~/lib/export/run-export-job";
+import type { ExportRenderStateSnapshot } from "~/lib/desired-playback-state";
 import { createEffectsPanelController, hydrateInstrumentBuffers, type EffectsPanelController, type EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller";
 import { deleteLocalEffect, getLocalEffect, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects";
 import { ParameterGestureHolder } from "~/components/timeline/parameter-gesture-owner";
@@ -36,7 +36,8 @@ import type { HistoryEntry } from "~/lib/undo/types";
 import { createLocalProject, openLocalProjectDb } from "~/lib/local-project-db";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import { convexApi, convexClient } from "~/lib/convex";
-import { createExportRenderStateSnapshot, resolveDesiredPlaybackFx } from "~/lib/export/run-export-job";
+import { createExportRenderStateSnapshot } from "~/lib/export/run-export-job";
+import { resolveDesiredPlaybackFx } from "~/lib/desired-playback-state";
 import { mountStep5Playback, settleStep5Playback } from "../../tools/acceptance/b5c-playback-witness-support";
 
 class TestAudioBuffer implements AudioBuffer {

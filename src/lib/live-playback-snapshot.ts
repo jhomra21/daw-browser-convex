@@ -1,6 +1,6 @@
 import { resolveLiveMixerGraph } from "@daw-browser/audio-engine/live-mixer-runtime"
 import type { ExternalProcessor } from "@daw-browser/external-plugins"
-import { resolveDesiredPlaybackFx, type ExportCloudRenderRowsSnapshot, type ExportRenderStateSnapshot } from "~/lib/export/run-export-job"
+import { resolveDesiredPlaybackFx, type ExportCloudRenderRowsSnapshot, type ExportRenderStateSnapshot } from "~/lib/desired-playback-state"
 import type { ExportEffectsProjection } from "~/lib/export/export-effect-rows"
 import { nativeInstrumentContentKey, type DesiredInstrument } from "~/lib/live-processor-control"
 import { createPortableGraphSnapshot } from "@daw-browser/audio-engine/mixer/graph-contract"

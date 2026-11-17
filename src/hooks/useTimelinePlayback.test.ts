@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
 import { createProcessorEditRegistry } from "~/components/timeline/create-processor-edit-registry";
 import { mountStep5Playback, settleStep5Playback } from "../../tools/acceptance/b5c-playback-witness-support";
-import { resolveDesiredPlaybackFx } from "~/lib/export/run-export-job";
+import { resolveDesiredPlaybackFx } from "~/lib/desired-playback-state";
 import type { ExportEffectsProjection } from "~/lib/export/export-effect-rows";
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'

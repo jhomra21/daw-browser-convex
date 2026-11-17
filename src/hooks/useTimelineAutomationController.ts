@@ -29,7 +29,7 @@ import {
 } from "@daw-browser/shared";
 import { createPersistedAutomationState } from "~/components/timeline/create-persisted-automation-state";
 import { createAutomationSeedEnvelope } from "~/components/timeline/automation-seed-envelope";
-import type { ExportAutomationPatch } from "~/lib/export/run-export-job";
+import type { ExportAutomationPatch } from "~/lib/desired-playback-state";
 import { clampAutomationLaneHeight, DEFAULT_AUTOMATION_LANE_HEIGHT } from "~/lib/timeline-utils";
 import { sameData } from "~/lib/reuse-equal";
 import { loadLocalAutomationEnvelopes, setLocalAutomationEnvelope, deleteLocalAutomationEnvelope } from "~/lib/local-automation";

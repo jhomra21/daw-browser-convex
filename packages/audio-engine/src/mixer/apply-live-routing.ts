@@ -215,15 +215,11 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
           disconnectEdge(edge)
           options.edgeRuntimes.delete(edgeId)
         }
-        try {
-          retirementSource.start(options.currentTime)
-          retirementSource.stop(edge.fadeEndTime)
-        } catch (error) {
-          cancelEdgeRetirement(edge)
-          throw error
-        }
+        retirementSource.start(options.currentTime)
+        retirementSource.stop(edge.fadeEndTime)
       }
-      if (edge.retirementSource || options.currentTime < edge.fadeEndTime) continue
+      // A routing pass after the fade retires the edge even if `ended` has not been delivered yet.
+      if (options.currentTime < edge.fadeEndTime) continue
     }
     disconnectEdge(edge)
     options.edgeRuntimes.delete(edgeId)

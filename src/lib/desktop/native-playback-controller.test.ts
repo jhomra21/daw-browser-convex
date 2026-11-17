@@ -1,4 +1,4 @@
-import { describe, expect, spyOn, test } from "bun:test"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
 import "fake-indexeddb/auto"
 import { z } from "zod"
 import { convexTest } from "convex-test"
@@ -16740,6 +16740,10 @@ describe("LAT1 late seam binding", () => {
   type Lat1Native = { progress: bigint; seam: bigint; status: NativeGraphRevisionStatus["status"]; epoch: number
     progressAt: (seam: bigint) => bigint; misses: number; advanceOnBind: bigint; refuseBinds: number; passSeamAfterBind: boolean; confirmSeam: boolean }
   type Lat1Event = { kind: "prepare" | "inspect" | "publish"; frame?: bigint; armed?: boolean; progress: bigint; windows: number }
+  // The controller bounds a prepare reply's age with performance.now(): the fake host moves this clock by `prepareMs` per prepare.
+  const lat1Time = { now: 0, prepareMs: 1 }
+  let restoreClock = () => {}
+  afterEach(() => restoreClock())
   // A fake native that applies the rebase and seam rules of audio-host.cpp PublishGraphRevision.
   const lat1Host = (f: Lat1Fixture, blockFrames: bigint) => {
     const events: Lat1Event[] = []
@@ -16762,6 +16766,7 @@ describe("LAT1 late seam binding", () => {
       }
       note("prepare", request.requestedPublicationFrame)
       await prepare(request)
+      lat1Time.now += lat1Time.prepareMs
       native.status = "prepared"
       return reply()
     }
@@ -16792,6 +16797,9 @@ describe("LAT1 late seam binding", () => {
   const lat1Run = async (blockFrames = 512, sampleRateHz = 48_000) => {
     const f = await step7LatencyFixture(false, sampleRateHz, blockFrames)
     const host = lat1Host(f, BigInt(blockFrames))
+    lat1Time.prepareMs = 1
+    const clock = spyOn(performance, "now").mockImplementation(() => lat1Time.now)
+    restoreClock = () => clock.mockRestore()
     await f.controller.start(input().transport)
     host.events.length = 0
     return { f, ...host }
@@ -16869,6 +16877,31 @@ describe("LAT1 late seam binding", () => {
       await step7Turns()
       expect(h.events.map(event => event.kind).slice(0, 3)).toEqual(["prepare", "inspect", "publish"])
       expect(h.publishes()[0]?.frame).toBe((h.events[0]?.progress ?? 0n) + 3n * 512n)
+    } finally { await h.f.close() }
+  })
+
+  // A block is 10.67 ms here: a reply under it is read as it is, one that took longer inspects for fresher progress first.
+  const lat1Ages: [number, ("prepare" | "inspect" | "publish")[]][] = [[10, ["prepare", "publish"]], [11, ["prepare", "inspect", "publish"]]]
+  for (const [ageMs, kinds] of lat1Ages)
+    test(`LAT1 4: a prepare reply ${ageMs} ms old ${kinds.includes("inspect") ? "is" : "is not"} checked by an inspect before the bind`, async () => {
+      const h = await lat1Run()
+      lat1Time.prepareMs = ageMs
+      step7Watch(h.f.controller.adoptSchedule(migrationIntent(`LAT1-4-age-${ageMs}`)))
+      try {
+        await step7Turns()
+        expect(h.events.map(event => event.kind).slice(0, kinds.length)).toEqual(kinds)
+        expect(h.publishes()[0]?.frame).toBe((h.events[0]?.progress ?? 0n) + 3n * 512n)
+      } finally { await h.f.close() }
+    })
+
+  test("LAT1 2: a refused bind after a long reply age still inspects before its second attempt", async () => {
+    const h = await lat1Run()
+    lat1Time.prepareMs = 11
+    h.native.refuseBinds = 1
+    step7Watch(h.f.controller.adoptSchedule(migrationIntent("LAT1-2-age")))
+    try {
+      await step7Turns()
+      expect(h.events.map(event => event.kind).slice(0, 5)).toEqual(["prepare", "inspect", "publish", "inspect", "publish"])
     } finally { await h.f.close() }
   })
 

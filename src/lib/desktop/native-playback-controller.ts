@@ -3631,6 +3631,15 @@ export const createNativePlaybackController = (input: {
         if ("error" in settled) throw settled.error
         return settled.value
       }
+      // The renderer's bound on how old a prepare reply's progress is: the request's send to the reply's receipt. It also spans the
+      // host's work before it sampled that progress, so it never understates the age.
+      let prepareAgeMs = 0
+      const prepareRevision = async (request: Parameters<typeof revisions.prepare>[0]) => {
+        const sentAt = performance.now()
+        const reply = await withoutLane(revisions.prepare(request))
+        prepareAgeMs = performance.now() - sentAt
+        return reply
+      }
       const quietPublicationLane = async () => {
         while (processorState.fence().kind === "uncertain" && await runNextStatePatch()) continue
         if (processorState.fence().kind === "claimed") {
@@ -4073,10 +4082,10 @@ export const createNativePlaybackController = (input: {
         let seam = chooseFrame(BigInt(coordinator.currentFrame()), 16)
         let observed = sequence
         ae08AdoptionMarker(attempt?.intent.key)?.("prepare-sent")
-        let ready = await withoutLane(revisions.prepare({
+        let ready = await prepareRevision({
           projectId, projectRevision: snapshot.revision, bytes: serializeNativeGraph(graph, serializedKeepLatencyNodeIds),
           requestedPublicationFrame: BigInt(seam),
-        }))
+        })
         while (ready.ok && (ready.revision.status === "publish-pending" || ready.revision.status === "invalid-revision")) {
           if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
           let progress = ready.revision.progressFrame ?? BigInt(coordinator.currentFrame())
@@ -4137,10 +4146,10 @@ export const createNativePlaybackController = (input: {
           observed = sequence
           if (!workerWait) retry()
           seam = chooseFrame(progress, 16 * (record.resubmits + 1))
-          ready = await withoutLane(revisions.prepare({
+          ready = await prepareRevision({
             projectId, projectRevision: snapshot.revision, bytes: serializeNativeGraph(graph, serializedKeepLatencyNodeIds),
             requestedPublicationFrame: BigInt(seam),
-          }))
+          })
         }
         ae08AdoptionMarker(attempt?.intent.key)?.("prepare-reply-received")
         checked(ready)
@@ -4257,8 +4266,10 @@ export const createNativePlaybackController = (input: {
         // than the provisional lead has native past the seam, which Inspect reports as rebase-required: that seam binds
         // later, to the same lead, instead of publishing at a seam that was already reached.
         // With no await since the prepare reply (the transport restatement, the asset hydration and the states call are the
-        // awaits), an inspect would read no fresher progress than that reply carries: the first attempt reads the reply.
+        // awaits), an inspect would read no fresher progress than that reply carries: the first attempt reads the reply. That holds
+        // while the reply is under a block old: the lead then absorbs the age, and a slower reply inspects for fresher progress.
         const replyIsLatest = !transportRestated && addedAssets.length === 0 && addedInstruments.length === 0
+          && prepareAgeMs * sampleRate < 1000 * maximumFramesPerBlock
         for (let attempt = 0; attempt < 2; attempt++) {
           const fresh = attempt === 0 && replyIsLatest ? ready
             : await inspect(binding, true, hydrationMark && (() => hydrationMark("bind-progress-reply")))

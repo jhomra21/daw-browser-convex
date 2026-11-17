@@ -1,5 +1,4 @@
 import { expect, mock, test } from "bun:test"
-import { readFile } from "node:fs/promises"
 import {
   listDevicesChannel,
   resolveOutputDeviceChannel,
@@ -14,6 +13,8 @@ import {
   sessionRetireGraphRevisionChannel,
   sessionRollbackGraphRevisionChannel,
   sessionSetSpectrumNodeChannel,
+  sessionSetTransportChannel,
+  sessionStartRecordingChannel,
   sessionStopRecordingChannel,
 } from "@daw-browser/desktop-protocol/ipc-channels"
 import { nativeAudioHostControlTypes, type NativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
@@ -28,8 +29,14 @@ import {
 import { NativeAudioHostNotSentError } from "./native-request-broker"
 import { nativeEditorCommand } from "../../src/components/timeline/external-plugin-editor"
 import { nativeEditorCommandSchema } from "./native-session-schemas"
-
-const mainPath = new URL("./main.ts", import.meta.url)
+import { createRendererLifecycleOwner } from "./renderer-lifecycle"
+import { registerNativeSessionTransportIpc } from "./ipc/native-session-transport-ipc"
+import { registerNativeSessionRecordingIpc } from "./ipc/native-session-recording-ipc"
+import type { RecordingSessionOwner } from "./ipc/native-session-recording-ipc"
+import { registerRendererNavigationCommit } from "./ipc/renderer-navigation-commit"
+import { executeNativeEditorRoute } from "./ipc/native-editor-routing"
+import { nativeSessionRequestAllowed } from "./ipc/native-session-access"
+import type { NativeSessionEvent, NativeSessionIpcHandler } from "./ipc/native-session-access"
 
 type IpcEnvelope = { value?: object | bigint | number | string | null; transactionToken?: string }
 type Invocation = { channel: string; args: Array<string | IpcEnvelope> }
@@ -159,14 +166,42 @@ test("routes recording configure and stop through native session envelopes", asy
   }
 })
 
-test("gates the native session IPC to the macOS arm64 app origin", async () => {
-  const main = await readFile(mainPath, "utf8")
+test("gates registered native session IPC to the macOS arm64 app origin", async () => {
+  const handlers = new Map<string, NativeSessionIpcHandler>()
+  const spectrumCalls: Array<bigint | null> = []
+  let platform = "darwin"
+  let architecture = "arm64"
+  registerNativeSessionTransportIpc({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    allowed: (event) => nativeSessionRequestAllowed({
+      platform,
+      architecture,
+      rendererId: 7,
+      acceptsPrivilegedRequests: true,
+      event,
+      sameAppOrigin: (url) => url.startsWith("daw://app/"),
+    }),
+    supervisor: () => ({ setSpectrumNode: async (nodeId) => { spectrumCalls.push(nodeId) }, setTransport: async () => undefined }),
+    fail: nativeSessionFailure,
+  })
 
-  expect(main).toContain('process.platform === "darwin"')
-  expect(main).toContain('process.arch === "arm64"')
-  expect(main).toContain('sameAppOrigin(event.senderFrame.url)')
-  expect(main).toContain('sendRendererMessage(lossChannel, error)')
-  expect(main).toContain('catalogViewForRenderer')
+  const handler = handlers.get(sessionSetSpectrumNodeChannel)
+  if (!handler) throw new Error("Spectrum handler was not registered")
+  const mainFrame = { url: "daw://app/index.html" }
+  const validEvent = { sender: { id: 7, mainFrame }, senderFrame: mainFrame }
+  expect(await handler(validEvent, { value: 9n, transactionToken: undefined })).toEqual({ ok: true })
+  expect(await handler({ sender: { id: 7, mainFrame }, senderFrame: { url: "https://example.test" } }, { value: 10n, transactionToken: undefined }))
+    .toEqual(nativeSessionFailure())
+  expect(await handler({ sender: { id: 8, mainFrame }, senderFrame: validEvent.senderFrame }, { value: 11n, transactionToken: undefined }))
+    .toEqual(nativeSessionFailure())
+  expect(await handler({ sender: { id: 7, mainFrame }, senderFrame: { url: "daw://app/frame" } }, { value: 14n, transactionToken: undefined }))
+    .toEqual({ ok: true })
+  platform = "linux"
+  expect(await handler(validEvent, { value: 12n, transactionToken: undefined })).toEqual(nativeSessionFailure())
+  platform = "darwin"
+  architecture = "x64"
+  expect(await handler(validEvent, { value: 13n, transactionToken: undefined })).toEqual(nativeSessionFailure())
+  expect(spectrumCalls).toEqual([9n, 14n])
 })
 
 test("a failed native request keeps its bounded diagnostic only when its request allows one", () => {
@@ -199,44 +234,110 @@ test("carries the processor patch status and its decimal token to the renderer u
   expect(nativeProcessorPatchReply({ outcome: "applied" })).toEqual({ ok: true, outcome: "applied" })
 })
 
-test("validates the spectrum selection envelope in the main process", async () => {
-  const main = await readFile(mainPath, "utf8")
+test("validates spectrum selection through the registered native session handler", async () => {
+  const handlers = new Map<string, NativeSessionIpcHandler>()
+  const calls: Array<bigint | null> = []
+  registerNativeSessionTransportIpc({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    allowed: () => true,
+    supervisor: () => ({ setSpectrumNode: async (nodeId) => { calls.push(nodeId) }, setTransport: async () => undefined }),
+    fail: nativeSessionFailure,
+  })
+  const handler = handlers.get(sessionSetSpectrumNodeChannel)
+  if (!handler) throw new Error("Spectrum handler was not registered")
+  const mainFrame = { url: "daw://app/index.html" }
+  const event = { sender: { id: 1, mainFrame }, senderFrame: mainFrame }
 
-  expect(main).toContain('const envelope = nativeSpectrumNodeEnvelopeSchema.safeParse(value)')
-  expect(main).toContain('envelope.data.transactionToken !== undefined')
-  expect(main).toContain('await supervisor.setSpectrumNode(envelope.data.value)')
-  expect(main).not.toContain('[native-spectrum]')
+  expect(await handler(event, { value: 42n, transactionToken: undefined })).toEqual({ ok: true })
+  expect(await handler(event, { value: 42n, transactionToken: "A".repeat(43) })).toEqual(nativeSessionFailure())
+  expect(await handler(event, { value: "42", transactionToken: undefined })).toEqual(nativeSessionFailure())
+  expect(calls).toEqual([42n])
 })
 
-test("validates recording IPC through production native session envelopes in the main process", async () => {
-  const main = await readFile(mainPath, "utf8")
-
-  const configureStart = main.indexOf('ipcMain.handle(sessionConfigureRecordingChannel')
-  const stopStart = main.indexOf('ipcMain.handle(sessionStopRecordingChannel')
-  const controlStart = main.indexOf("  const registerNativeSessionControl", stopStart)
-  const configureHandler = main.slice(configureStart, stopStart)
-  const stopHandler = main.slice(stopStart, controlStart)
-
-  expect(configureHandler).toContain("nativeSessionEnvelopeSchema(nativeSessionRecordingConfigurationSchema).safeParse(value)")
-  expect(configureHandler).toContain("envelope.data.transactionToken === undefined")
-  expect(configureHandler).toContain("nativeSessionRecordingConfiguration(envelope.data.value)")
-  expect(configureHandler).toContain("recordingSessionOwner.configure(")
-  expect(await readFile(new URL("./recording-session-owner.ts", import.meta.url), "utf8"))
-    .toContain("await supervisor.configureRecording(configuration, { rootPath: take.rootPath")
-  expect(configureHandler).not.toContain("nativeSessionRecordingConfigurationSchema.safeParse(value)")
-
-  expect(stopHandler).toContain("nativeSessionEnvelopeSchema(z.number().int().safe().min(0).optional()).safeParse(value)")
-  expect(stopHandler).toContain("envelope.data.transactionToken === undefined")
-  expect(stopHandler).toContain("{ endFrame: envelope.data.value }")
-  expect(stopHandler).toContain("recordingSessionOwner.stop(")
-  expect(stopHandler).not.toContain("const endFrame = z.number().int().safe().min(0).optional().safeParse(value)")
+test("validates recording envelopes through the registered production handlers", async () => {
+  const handlers = new Map<string, NativeSessionIpcHandler>()
+  const calls: Array<{ kind: string; input: unknown }> = []
+  const owner: RecordingSessionOwner = {
+    configure: async (_context, _supervisor, request) => {
+      calls.push({ kind: "configure", input: request })
+      return request === undefined ? nativeSessionFailure() : { ok: true, takeId: "123e4567-e89b-12d3-a456-426614174000", sampleRateHz: 48_000, channelCount: 2 }
+    },
+    start: async (_context, _supervisor, request) => {
+      calls.push({ kind: "start", input: request })
+      return request === undefined ? nativeSessionFailure() : { ok: true }
+    },
+    stop: async (_context, _supervisor, request) => {
+      calls.push({ kind: "stop", input: request })
+      return request === undefined ? nativeSessionFailure() : { ok: true }
+    },
+  }
+  registerNativeSessionRecordingIpc({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    allowed: () => true,
+    supervisor: () => ({
+      configureRecording: async () => { throw new Error("not called") },
+      startRecording: async () => { throw new Error("not called") },
+      stopRecording: async () => { throw new Error("not called") },
+      waitForRecordingOutcome: async () => { throw new Error("not called") },
+      recordingAdmissionAvailable: () => true,
+    }),
+    owner,
+    rendererGeneration: () => 3,
+    hostGeneration: () => 4,
+    fail: nativeSessionFailure,
+  })
+  const configure = handlers.get(sessionConfigureRecordingChannel)
+  const start = handlers.get(sessionStartRecordingChannel)
+  const stop = handlers.get(sessionStopRecordingChannel)
+  if (!configure || !start || !stop) throw new Error("Recording handlers were not registered")
+  const mainFrame = { url: "daw://app/index.html" }
+  const event: NativeSessionEvent = { sender: { id: 1, mainFrame }, senderFrame: mainFrame }
+  const configuration: NativeHostRecordingConfiguration & { spoolImportVersion: NativeRecordingSpoolImportVersion } = {
+    projectId: "project", projectGeneration: 2, deviceUid: "device", generation: 3, sessionId: 4n,
+    channelCount: 2, inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0,
+    punchEndFrame: null, monitoring: false, targetNodeId: 1n, spoolImportVersion: 1,
+  }
+  expect(await configure(event, { value: configuration, transactionToken: undefined })).toEqual({
+    ok: true, takeId: "123e4567-e89b-12d3-a456-426614174000", sampleRateHz: 48_000, channelCount: 2,
+  })
+  expect(await configure(event, { value: configuration, transactionToken: "A".repeat(43) })).toEqual(nativeSessionFailure())
+  expect(await start(event, { value: { projectId: "project", projectGeneration: 2, generation: 3, sessionId: 4n }, transactionToken: undefined }))
+    .toEqual({ ok: true })
+  expect(await stop(event, { value: 12, transactionToken: undefined })).toEqual({ ok: true })
+  expect(await stop(event, { value: 12, transactionToken: "A".repeat(43) })).toEqual(nativeSessionFailure())
+  expect(calls).toEqual([
+    { kind: "configure", input: { configuration: { projectId: "project", projectGeneration: 2, deviceUid: "device", generation: 3,
+      sessionId: 4n, channelCount: 2, inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0,
+      punchEndFrame: null, monitoring: false, targetNodeId: 1n }, projectId: "project", projectGeneration: 2, spoolImportVersion: 1 } },
+    { kind: "configure", input: undefined },
+    { kind: "start", input: { projectId: "project", projectGeneration: 2, generation: 3, sessionId: 4n } },
+    { kind: "stop", input: { endFrame: 12 } },
+    { kind: "stop", input: undefined },
+  ])
 })
 
-test("preserves renderer transport transition IDs through native IPC mapping", async () => {
-  const main = await readFile(mainPath, "utf8")
-
-  expect(main).toContain("transitionId: z.bigint().positive().max(0xffff_ffff_ffff_ffffn).optional()")
-  expect(main).toContain("transitionId: value.transitionId")
+test("maps registered native transport handlers with transition IDs intact", async () => {
+  const handlers = new Map<string, NativeSessionIpcHandler>()
+  const calls: unknown[] = []
+  registerNativeSessionTransportIpc({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    allowed: () => true,
+    supervisor: () => ({
+      setSpectrumNode: async () => undefined,
+      setTransport: async (transport, token) => { calls.push({ transport, token }) },
+    }),
+    fail: nativeSessionFailure,
+  })
+  const handler = handlers.get(sessionSetTransportChannel)
+  if (!handler) throw new Error("Transport handler was not registered")
+  const transitionId = 9_007_199_254_740_993n
+  const transport = { epoch: 1, running: true, frame: 10, transitionId }
+  const mainFrame = { url: "daw://app/index.html" }
+  expect(await handler({ sender: { id: 1, mainFrame }, senderFrame: mainFrame }, {
+    value: transport, transactionToken: undefined,
+  })).toEqual({ ok: true })
+  expect(calls).toEqual([{ transport: { ...transport, bpm: undefined, timeSignatureNumerator: undefined,
+    timeSignatureDenominator: undefined, cycleActive: undefined, cycleStartSec: undefined, cycleEndSec: undefined }, token: undefined }])
 })
 
 test("scopes configuration identity to each native host process generation", () => {
@@ -249,24 +350,57 @@ test("scopes configuration identity to each native host process generation", () 
   expect(nativeHostConfigurationIdentityFor(advanced, { generation: 1 })).toBeUndefined()
 })
 
-test("routes editor commands through the isolated session before the playback host", async () => {
-  const main = await readFile(mainPath, "utf8")
-  const isolatedRoute = main.indexOf("if (manager) {")
-  const playbackRoute = main.indexOf("if (activeHostCandidate) {")
-
-  expect(isolatedRoute).toBeGreaterThanOrEqual(0)
-  expect(playbackRoute).toBeGreaterThan(isolatedRoute)
+test("prefers the isolated editor route over the playback host", async () => {
+  const calls: string[] = []
+  const result = await executeNativeEditorRoute({
+    isolated: async () => { calls.push("isolated"); return "isolated-result" },
+    playback: async () => { calls.push("playback"); return "playback-result" },
+  })
+  expect(result).toBe("isolated-result")
+  expect(calls).toEqual(["isolated"])
+  const fallback = await executeNativeEditorRoute({
+    isolated: undefined,
+    playback: async () => { calls.push("playback"); return "playback-result" },
+  })
+  expect(fallback).toBe("playback-result")
+  expect(calls).toEqual(["isolated", "playback"])
 })
 
-test("commits renderer navigation before native transaction registration", async () => {
-  const main = await readFile(mainPath, "utf8")
-  const didNavigate = main.indexOf('window_.webContents.on("did-navigate"')
-  const didFailLoad = main.indexOf('window_.webContents.on("did-fail-load"', didNavigate)
-  const navigationHandler = main.slice(didNavigate, didFailLoad)
-  expect(didNavigate).toBeGreaterThanOrEqual(0)
-  expect(navigationHandler).toContain("rendererLifecycle.commitMainFrameNavigation(url)")
-  expect(navigationHandler).not.toContain("activateInitialCommittedDocument")
-  expect(main).toContain('ipcMain.handle(sessionBeginTransactionChannel')
+test("navigation commit activates the privileged native session IPC", async () => {
+  let didNavigate: ((event: { preventDefault: () => void; readonly defaultPrevented: boolean }, url: string) => void) | undefined
+  const rendererLifecycle = createRendererLifecycleOwner()
+  const mainFrame = { url: "daw://app/project" }
+  const handlers = new Map<string, NativeSessionIpcHandler>()
+  const spectrumCalls: Array<bigint | null> = []
+  registerNativeSessionTransportIpc({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    allowed: (event) => nativeSessionRequestAllowed({
+      platform: "darwin",
+      architecture: "arm64",
+      rendererId: 4,
+      acceptsPrivilegedRequests: rendererLifecycle.acceptsPrivilegedRequests(),
+      event,
+      sameAppOrigin: (url) => url.startsWith("daw://app/"),
+    }),
+    supervisor: () => ({ setSpectrumNode: async (nodeId) => { spectrumCalls.push(nodeId) }, setTransport: async () => undefined }),
+    fail: nativeSessionFailure,
+  })
+  registerRendererNavigationCommit({
+    on: (event, listener) => {
+      if (event === "did-navigate") didNavigate = listener
+    },
+  }, rendererLifecycle.commitMainFrameNavigation)
+  const listener = didNavigate
+  if (!listener) throw new Error("Navigation commit handler was not registered")
+  const spectrumHandler = handlers.get(sessionSetSpectrumNodeChannel)
+  if (!spectrumHandler) throw new Error("Spectrum handler was not registered")
+  const event: NativeSessionEvent = { sender: { id: 4, mainFrame }, senderFrame: mainFrame }
+  const value = { value: 17n, transactionToken: undefined }
+  expect(await spectrumHandler(event, value)).toEqual(nativeSessionFailure())
+  rendererLifecycle.beginMainFrameNavigation(mainFrame.url)
+  listener({ preventDefault: () => undefined, defaultPrevented: false }, mainFrame.url)
+  expect(await spectrumHandler(event, value)).toEqual({ ok: true })
+  expect(spectrumCalls).toEqual([17n])
 })
 
 test("the plug-in card's close command parses with main's editor command schema", () => {

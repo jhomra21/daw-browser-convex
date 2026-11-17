@@ -7,7 +7,7 @@ import { z } from 'zod'
 import { createDefaultSpectralParams } from '@daw-browser/shared'
 
 const root = new URL('../../../', import.meta.url).pathname.replace(/\/$/u, '')
-const evidence = process.env.DAW_INSTRUMENT_EVIDENCE ?? `${root}/acceptance-reports/native-running-seek-${crypto.randomUUID()}`
+const evidence = process.env.DAW_INSTRUMENT_EVIDENCE ?? `/tmp/daw-native-lifecycle-evidence-${crypto.randomUUID()}`
 const runtime = `${root}/src/lib/desktop/native-playback-lifecycle.browser-runtime.ts`
 const stateSchema = z.object({
   isPlaying: z.boolean(), prepared: z.boolean(), preparing: z.boolean(), active: z.boolean(),
@@ -25,7 +25,6 @@ const stateSchema = z.object({
 })
 
 const fixtureHtml = async () => {
-  const beforeFix = process.env.DAW_LATE_COMMIT_BASELINE === '1'
   const graphEnvelopeUrl = `data:text/javascript;base64,${Buffer.from(await Bun.file(`${root}/public/audio-worklets/daw-portable-graph-envelope-v3.js`).text()).toString('base64')}`
   const portableHost = (await Bun.file(`${root}/public/audio-worklets/daw-portable-audio-core-host-v2.js`).text())
     .replace('export class DawPortableAudioCoreHost', 'window.FixturePortableHost = class DawPortableAudioCoreHost')
@@ -45,88 +44,8 @@ const fixtureHtml = async () => {
             ? '\0observed-panel-controller'
           : undefined,
       load: async (id) => {
-        if (process.env.DAW_INSTRUMENT_R22_REFRESH_BASELINE === '1'
-          && id === `${root}/src/lib/portable-browser-playback-controller.ts`) {
-          return Bun.file(`${root}/acceptance-reports/daw-experience-packaged-r22-2026-10-16/initial-portable-controller.ts.txt`).text()
-        }
-        if (process.env.DAW_INSTRUMENT_R21_REFRESH_BASELINE === '1'
-          && id === `${root}/src/lib/portable-browser-playback-controller.ts`) {
-          // Replay the reviewed stale replacement without touching source files.
-          return (await Bun.file(id).text())
-            .replace('if (parameterSnapshot) {', 'if (false && parameterSnapshot) {')
-            .replace('if (parameterGeneration !== instrumentParameterGeneration) {', 'if (false) {')
-        }
-        if (id === `${root}/src/hooks/useEffectsPanelAudioSync.ts`) {
-          // The fixture has no authenticated room. Once synthetic subscription
-          // rows arrive, don't let its local storage mirror act as a second
-          // remote authority.
-          return (await Bun.file(id).text()).replace(
-            'if (isLocalId("project", projectId) && track.kind === "instrument")',
-            'if (options.roomEffects() === undefined && isLocalId("project", projectId) && track.kind === "instrument")',
-          )
-        }
-        if (process.env.DAW_INSTRUMENT_R20_BASELINE === '1' || process.env.DAW_INSTRUMENT_NO_IDENTITY_GUARD === '1') {
-          if (id === `${root}/src/lib/desktop/native-built-in-parameter-mapper.ts`) {
-            return (await Bun.file(id).text()).replace(
-              "case 'instrument':\n      values = mapInstrument(payload)\n      break",
-              "case 'instrument': if (Reflect.get(globalThis, 'instrumentKnobBaseline')) return undefined; values = mapInstrument(payload); break",
-            )
-          }
-          if (id === `${root}/src/components/timeline/create-effects-panel-state.ts`) {
-            return (await Bun.file(id).text()).replaceAll(
-              'context.onStructuralPlaybackChange?.(targetId, next);',
-              'if (next) context.onStructuralPlaybackChange?.(targetId, next);',
-            )
-          }
-          if (id === `${root}/src/components/Timeline.tsx`) {
-            return (await Bun.file(id).text()).replace(
-              /onStructuralPlaybackChange: \(targetId: Track\["id"\], instrument: TrackInstrumentParams \| undefined\) => \{[\s\S]*?\n      usesLegacyAudioEngine,/u,
-              `onStructuralPlaybackChange: (targetId, instrument) => {
-                const previous = preparedInstrument(targetId);
-                if (${process.env.DAW_INSTRUMENT_NO_IDENTITY_GUARD === '1' ? "!Reflect.get(globalThis, 'instrumentKnobBaseline') && " : ""}previous && previous.kind === instrument.kind && previous.instanceId === instrument.instanceId) return;
-                if (!isPlaying() && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared() && !isStructuralRebuildInProgress() && !isPreparingPlayback()) return;
-                void rebuildPlaybackBackend(renderTracks(), undefined, { targetId, instrument });
-              },
-      usesLegacyAudioEngine,`,
-            )
-          }
-        }
         if (id === '\0observed-panel-controller') {
           return `export { observePanelController as createEffectsPanelController } from ${JSON.stringify(runtime)}`
-        }
-        if (process.env.DAW_LOOP_REGRESSION === 'stop-ordering' && id === `${root}/src/hooks/useTimelinePlayback.ts`) {
-          return (await Bun.file(id).text())
-            .replace('publishPlayhead(0)', '')
-            .replace('if (stopSeekSequence === nativeSeekSequence)', 'if (true)')
-            .replace(
-              'if (!requiresNativeAudio && stopSeekSequence === nativeSeekSequence)',
-              'publishPlayhead(0)\n      if (!requiresNativeAudio)',
-            )
-        }
-        // Replay each reviewed regression without changing the working tree.
-        if (process.env.DAW_LOOP_REGRESSION === 'button' && id === `${root}/src/components/Timeline.tsx`) {
-          return (await Bun.file(id).text()).replace('else if (isPlaying() && !isNativePlaybackPrepared())', 'else if (isPlaying())')
-        }
-        if (process.env.DAW_LOOP_REGRESSION === 'settings' && id === `${root}/src/hooks/useTimelinePreferences.ts`) {
-          return (await Bun.file(id).text()).replaceAll('subscribeToChanges: subscribeToLocalProjectChanges,', '')
-        }
-        if (process.env.DAW_LOOP_REGRESSION === 'cold' && id === `${root}/src/lib/desktop/native-playback-controller.ts`) {
-          return (await Bun.file(id).text()).replace(
-            'const runtimeSnapshot = { ...configuredSnapshot, transport: effectiveTransport }',
-            'const runtimeSnapshot = configuredSnapshot',
-          )
-        }
-        if (process.env.DAW_LOOP_REGRESSION === 'drag' && id === `${root}/src/components/timeline/TimelineRuler.tsx`) {
-          return (await Bun.file(id).text()).replace(
-            'setLoopPreview({ startSec: nextStart, endSec: curEnd })',
-            'props.onSetLoopRegion(nextStart, curEnd)',
-          )
-        }
-        if (process.env.DAW_LOOP_REGRESSION === 'portable' && id === `${root}/src/lib/portable-browser-playback-controller.ts`) {
-          return (await Bun.file(id).text()).replace(
-            /const transport = effectiveLoopForStart\(\s*configuredTransport,\s*Math\.round\(configuredTransport\.playheadSec \* context\.sampleRate\),\s*context\.sampleRate,\s*\)/u,
-            'const transport = configuredTransport',
-          )
         }
         if (id === `${root}/src/lib/auth-client.ts`) return `export const authClient = { getSession: async () => ({ data: null }), signOut: async () => undefined };`
         // This journey is local-only. Keep cloud I/O disconnected.
@@ -144,9 +63,6 @@ const fixtureHtml = async () => {
         }
         if (id === '\0observed-timeline-playback') {
           return `export { observePlayback as useTimelinePlayback } from ${JSON.stringify(runtime)}`
-        }
-        if (beforeFix && id === `${root}/src/lib/desktop/native-playback-controller.ts`) {
-          return Bun.file(`${root}/acceptance-reports/daw-experience-late-commit-stop-2026-10-13/controller-before.ts.txt`).text()
         }
         return undefined
       },
@@ -736,11 +652,9 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     expect(portable.cold).toBe(0.8)
     expect(portable.resumed).toBe(0.8)
     expect(portable.beforeLoopWrap).toBeCloseTo(0.3, 4)
-    if (process.env.DAW_INSTRUMENT_R20_BASELINE !== '1') {
-      expect(portable.liveResult.accepted).toBe(true)
-      expect(portable.liveValues.some((event: { target: number; value: number }) => event.target === 3 && event.value === 913)).toBe(true)
-      expect(portable.publicationsAfter).toBe(portable.publicationsBefore)
-    }
+    expect(portable.liveResult.accepted).toBe(true)
+    expect(portable.liveValues.some((event: { target: number; value: number }) => event.target === 3 && event.value === 913)).toBe(true)
+    expect(portable.publicationsAfter).toBe(portable.publicationsBefore)
     await Bun.write(`${evidence}/19-portable-loop-parity.json`, JSON.stringify(portable, null, 2))
     const refresh = JSON.parse(JSON.parse(await browser('eval', '(async () => JSON.stringify(await timelineJourney.portableRefreshProbe()))()')))
     await Bun.write(`${evidence}/19-portable-refresh-flush.json`, JSON.stringify(refresh, null, 2))
@@ -862,30 +776,26 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     const knobBefore = await uiState()
     const knobTrackId = JSON.parse(await browser('eval', 'timelineJourney.instrumentTrackId'))
     const knobBeforeBoundary = JSON.parse(JSON.parse(await browser('eval', `JSON.stringify(timelineJourney.instrumentEvidence("${knobTrackId}"))`)))
-    await browser('eval', 'Reflect.set(globalThis, "instrumentKnobBaseline", true); timelineJourney.changeSynthCutoff(913)')
+    await browser('eval', 'timelineJourney.changeSynthCutoff(913)')
     await browser('eval', 'timelineJourney.flushInstrument()')
     await browser('wait', '500')
     const knobAfter = await uiState()
     const knobBoundary = JSON.parse(JSON.parse(await browser('eval', `JSON.stringify(timelineJourney.instrumentEvidence("${knobTrackId}"))`)))
     await Bun.write(`${evidence}/25-knob-native-boundary.json`, JSON.stringify({ knobBefore, knobBeforeBoundary, knobAfter, knobBoundary }, null, 2))
-    if (process.env.DAW_INSTRUMENT_R20_BASELINE !== '1') {
-      expect(knobBoundary.nativeParameters.filter((event: { target: number }) => event.target === 3).at(-1)?.value).toBe(913)
-      expect(knobBoundary.instrument.params.filter.frequencyHz).toBe(913)
-      expect(knobBoundary.nativeStates.length).toBe(knobBeforeBoundary.nativeStates.length)
-    }
+    expect(knobBoundary.nativeParameters.filter((event: { target: number }) => event.target === 3).at(-1)?.value).toBe(913)
+    expect(knobBoundary.instrument.params.filter.frequencyHz).toBe(913)
+    expect(knobBoundary.nativeStates.length).toBe(knobBeforeBoundary.nativeStates.length)
     expect(knobAfter.starts).toBe(knobBefore.starts)
     expect(knobAfter.stops).toBe(knobBefore.stops)
     expect(knobAfter.teardowns).toBe(knobBefore.teardowns)
-    if (process.env.DAW_INSTRUMENT_R20_BASELINE !== '1') {
-      for (const [shiftKey, cutoff] of [[false, 12000], [true, 913]]) {
-        await browser('eval', `document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,shiftKey:${shiftKey},bubbles:true,cancelable:true}))`)
-        await browser('wait', '--fn', `timelineJourney.instrumentEvidence("${knobTrackId}").nativeParameters.filter(event=>event.target===3).at(-1)?.value === ${cutoff}`)
-        const replay = JSON.parse(JSON.parse(await browser('eval', `JSON.stringify({state:timelineJourney.snapshot(),boundary:timelineJourney.instrumentEvidence("${knobTrackId}")})`)))
-        await Bun.write(`${evidence}/25-knob-${shiftKey ? 'redo' : 'undo'}.json`, JSON.stringify(replay, null, 2))
-        expect(replay.boundary.instrument.params.filter.frequencyHz).toBe(cutoff)
-        expect(replay.state.starts).toBe(knobBefore.starts)
-        expect(replay.state.stops).toBe(knobBefore.stops)
-      }
+    for (const [shiftKey, cutoff] of [[false, 12000], [true, 913]]) {
+      await browser('eval', `document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,shiftKey:${shiftKey},bubbles:true,cancelable:true}))`)
+      await browser('wait', '--fn', `timelineJourney.instrumentEvidence("${knobTrackId}").nativeParameters.filter(event=>event.target===3).at(-1)?.value === ${cutoff}`)
+      const replay = JSON.parse(JSON.parse(await browser('eval', `JSON.stringify({state:timelineJourney.snapshot(),boundary:timelineJourney.instrumentEvidence("${knobTrackId}")})`)))
+      await Bun.write(`${evidence}/25-knob-${shiftKey ? 'redo' : 'undo'}.json`, JSON.stringify(replay, null, 2))
+      expect(replay.boundary.instrument.params.filter.frequencyHz).toBe(cutoff)
+      expect(replay.state.starts).toBe(knobBefore.starts)
+      expect(replay.state.stops).toBe(knobBefore.stops)
     }
     const immediateGeometry = JSON.parse(JSON.parse(await browser('eval', `(() => {
       document.querySelector('[aria-label="Stop"]').click();
@@ -911,26 +821,22 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     await browser('wait', '--fn', `timelineJourney.preparedInstrumentIdentity("${localStoreTrackId}")?.instanceId === "local-store:first"`)
     const localStoreBefore = await uiState()
     await browser('eval', `timelineJourney.setLocalStoreInstrument("${localStoreTrackId}", "local-store:first", 372)`)
-    if (process.env.DAW_INSTRUMENT_R20_BASELINE !== '1') {
-      await browser('wait', '--fn', `timelineJourney.instrumentEvidence("${localStoreTrackId}").instrument?.params.filter.frequencyHz === 372`)
-    } else await browser('wait', '300')
+    await browser('wait', '--fn', `timelineJourney.instrumentEvidence("${localStoreTrackId}").instrument?.params.filter.frequencyHz === 372`)
     const localStoreAfter = JSON.parse(JSON.parse(await browser('eval', `JSON.stringify({state:timelineJourney.snapshot(),boundary:timelineJourney.instrumentEvidence("${localStoreTrackId}")})`)))
     await Bun.write(`${evidence}/24b-unselected-local-store-update.json`, JSON.stringify({ localStoreBefore, localStoreAfter }, null, 2))
-    if (process.env.DAW_INSTRUMENT_R20_BASELINE !== '1') {
-      expect(localStoreAfter.boundary.nativeParameters.filter((event: {target: number}) => event.target === 3).at(-1)?.value).toBe(372)
-      expect(localStoreAfter.state.starts).toBe(localStoreBefore.starts)
-      expect(localStoreAfter.state.stops).toBe(localStoreBefore.stops)
-      await browser('eval', `timelineJourney.setPanelInstrument("${localStoreTrackId}", "local-store:replacement", 531); timelineJourney.flushInstrument()`)
-      await browser('wait', '--fn', `timelineJourney.preparedInstrumentIdentity("${localStoreTrackId}")?.instanceId === "local-store:replacement"`)
-      for (const [shiftKey, instanceId, cutoff] of [[false, 'local-store:first', 372], [true, 'local-store:replacement', 531], [false, 'local-store:first', 372]]) {
-        await browser('eval', `document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,shiftKey:${shiftKey},bubbles:true,cancelable:true}))`)
-        await browser('wait', '--fn', `timelineJourney.preparedInstrumentIdentity("${localStoreTrackId}")?.instanceId === "${instanceId}"`)
-        const replay = JSON.parse(JSON.parse(await browser('eval', `JSON.stringify({state:timelineJourney.snapshot(),boundary:timelineJourney.instrumentEvidence("${localStoreTrackId}")})`)))
-        await Bun.write(`${evidence}/24b-topology-${shiftKey ? 'redo' : 'undo'}.json`, JSON.stringify(replay, null, 2))
-        expect(replay.boundary.instrument.params.filter.frequencyHz).toBe(cutoff)
-        expect(replay.boundary.nativeStates.at(-1).cutoff).toBe(cutoff)
-        expect(replay.state.playing).toBe(true)
-      }
+    expect(localStoreAfter.boundary.nativeParameters.filter((event: {target: number}) => event.target === 3).at(-1)?.value).toBe(372)
+    expect(localStoreAfter.state.starts).toBe(localStoreBefore.starts)
+    expect(localStoreAfter.state.stops).toBe(localStoreBefore.stops)
+    await browser('eval', `timelineJourney.setPanelInstrument("${localStoreTrackId}", "local-store:replacement", 531); timelineJourney.flushInstrument()`)
+    await browser('wait', '--fn', `timelineJourney.preparedInstrumentIdentity("${localStoreTrackId}")?.instanceId === "local-store:replacement"`)
+    for (const [shiftKey, instanceId, cutoff] of [[false, 'local-store:first', 372], [true, 'local-store:replacement', 531], [false, 'local-store:first', 372]]) {
+      await browser('eval', `document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown',{key:'z',ctrlKey:true,shiftKey:${shiftKey},bubbles:true,cancelable:true}))`)
+      await browser('wait', '--fn', `timelineJourney.preparedInstrumentIdentity("${localStoreTrackId}")?.instanceId === "${instanceId}"`)
+      const replay = JSON.parse(JSON.parse(await browser('eval', `JSON.stringify({state:timelineJourney.snapshot(),boundary:timelineJourney.instrumentEvidence("${localStoreTrackId}")})`)))
+      await Bun.write(`${evidence}/24b-topology-${shiftKey ? 'redo' : 'undo'}.json`, JSON.stringify(replay, null, 2))
+      expect(replay.boundary.instrument.params.filter.frequencyHz).toBe(cutoff)
+      expect(replay.boundary.nativeStates.at(-1).cutoff).toBe(cutoff)
+      expect(replay.state.playing).toBe(true)
     }
     const remoteTrackId = JSON.parse(await browser('eval', 'timelineJourney.remoteTrackId'))
     const remoteBefore = await uiState()
@@ -957,11 +863,10 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     expect(coalescedAfter.boundary.instrument.params.filter.frequencyHz).toBe(740)
     expect(coalescedAfter.boundary.nativeStates.at(-1).cutoff).toBe(740)
     await browser('eval', `window.setFixtureRoomEffects(timelineJourney.roomRows().filter(row=>row.trackId!=="${remoteTrackId}")); timelineJourney.removeInstrument("${remoteTrackId}")`)
-    if (process.env.DAW_INSTRUMENT_R20_BASELINE !== '1') await browser('wait', '--fn', `timelineJourney.preparedInstrumentIdentity("${remoteTrackId}") === null`)
-    else await browser('wait', '300')
+    await browser('wait', '--fn', `timelineJourney.preparedInstrumentIdentity("${remoteTrackId}") === null`)
     const removed = JSON.parse(JSON.parse(await browser('eval', `JSON.stringify({state:timelineJourney.snapshot(),boundary:timelineJourney.instrumentEvidence("${remoteTrackId}")})`)))
     await Bun.write(`${evidence}/28-instrument-removal.json`, JSON.stringify(removed, null, 2))
-    if (process.env.DAW_INSTRUMENT_R20_BASELINE !== '1') expect(removed.boundary.instrument).toBeNull()
+    expect(removed.boundary.instrument).toBeNull()
     // Hold B's adoption at its compile, then queue A through panel-local apply.
     // The adoption queue keeps A behind B, while its draft is visible immediately.
     await browser('eval', 'dv01Timeline.holdCapture()')
@@ -970,8 +875,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
     await browser('eval', `timelineJourney.setPanelInstrument("${coalescedTrackId}", "${coalescedInstanceId}", 740)`)
     await browser('wait', '--fn', `timelineJourney.instrumentEvidence("${coalescedTrackId}").desiredInstrument?.instanceId === "${coalescedInstanceId}" && timelineJourney.instrumentEvidence("${coalescedTrackId}").desiredInstrument?.params.filter.frequencyHz === 740`)
     await browser('eval', 'dv01Timeline.releaseCapture()')
-    if (process.env.DAW_INSTRUMENT_R20_BASELINE !== '1') await browser('wait', '--fn', `timelineJourney.preparedInstrumentIdentity("${coalescedTrackId}")?.instanceId === "${coalescedInstanceId}"`)
-    else await browser('wait', '500')
+    await browser('wait', '--fn', `timelineJourney.preparedInstrumentIdentity("${coalescedTrackId}")?.instanceId === "${coalescedInstanceId}"`)
     await browser('eval', 'timelineJourney.flushInstrument()')
     const raceAfter = JSON.parse(JSON.parse(await browser('eval', `JSON.stringify({state:timelineJourney.snapshot(),boundary:timelineJourney.instrumentEvidence("${coalescedTrackId}")})`)))
     await Bun.write(`${evidence}/29-rebuild-race-A-B-A.json`, JSON.stringify(raceAfter, null, 2))

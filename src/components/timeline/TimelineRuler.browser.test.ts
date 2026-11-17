@@ -56,6 +56,17 @@ test('loop gestures restore their baseline on cancellation', async () => {
       errors: z.string().optional(),
     }).parse(JSON.parse(JSON.parse(resultOutput)))
     expect(results.errors).toBeUndefined()
+    const gestures = ['pointercancel-create', 'escape-create', 'blur-create', 'pointercancel-resize-start',
+      'escape-resize-start', 'blur-resize-start', 'pointerup-create', 'pointerup-resize-start',
+      'pointerup-resize-end', 'pointerup-move']
+    const expectedScenarios = [
+      ...gestures.flatMap((gesture) => [gesture, `${gesture}-preview-only`, `${gesture}-commit-count`]),
+      'pointerup-create-dialog-escape', 'pointerup-create-menu-escape',
+      'dialog-escape-not-consumed', 'menu-escape-not-consumed',
+      'subsequent-gesture-after-escape', 'unmount-cancel', 'nested-group-output',
+      'expanded-group-not-aggregated', 'mounted-collapsed-group-updates',
+    ]
+    expect(Object.keys(results.result).sort()).toEqual(expectedScenarios.sort())
     expect(Object.entries(results.result).filter(([, passed]) => !passed)).toEqual([])
   } finally {
     await browser('close').catch(() => undefined)

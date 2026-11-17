@@ -68,7 +68,6 @@ import {
   createSyncPlaybackBackend,
 } from "~/components/timeline/timeline-playback-wiring";
 import { desktopAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
-import { instanceLimit, vstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
 import { useTimelineMidiOverlay } from "~/hooks/useTimelineMidiOverlay";
@@ -118,6 +117,11 @@ import {
   vst3TrustDisclosure,
 } from "~/lib/external-plugin-ui";
 import {
+  createCapturedEditorStatePersister,
+  createExternalProcessorEditorRequests,
+} from "~/components/timeline/external-processor-editor-requests";
+import {
+  type CapturedLocalExternalProcessorState,
   createLocalExternalProcessorCache,
   getLocalExternalProcessor,
   listLocalExternalProcessors,
@@ -252,16 +256,6 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
   const [followPaused, setFollowPaused] = createSignal(false);
-  type ExternalProcessorEditorRequest = {
-    instanceId: string;
-    projectId: string | undefined;
-    projectGeneration: number;
-    requestToken: number;
-    ready: boolean;
-  };
-  const [pendingExternalProcessorEditorRequest, setPendingExternalProcessorEditorRequest] =
-    createSignal<ExternalProcessorEditorRequest>();
-  let externalProcessorEditorRequestToken = 0;
   // Audio engine
   const audioEngine = getAudioEngine();
   const appPreferences = useAppPreferences();
@@ -2078,6 +2072,22 @@ const Timeline: Component<TimelineProps> = (props) => {
       openEffectsForTarget(track.id);
     }
   };
+  const persistVstState = (
+    ownerProjectId: string,
+    instanceId: string,
+    state: CapturedLocalExternalProcessorState,
+  ) => persistLocalExternalProcessorState(ownerProjectId, instanceId, state, localVstStateOwnerId(ownerProjectId, userId()));
+  const externalEditorRequests = createExternalProcessorEditorRequests({
+    projectId,
+    mountedProjectGeneration,
+    openEffectsForTarget,
+    captureStructuralPlaybackIntent,
+    syncPlaybackBackend,
+    renderTracks,
+    nativePlaybackEnabled: () => appPreferences.audio.preferences().nativePlaybackEnabled,
+    captureVstState: async (instanceId) => window.dawDesktop?.audioHost?.session.captureVstState(instanceId),
+    persistState: persistVstState,
+  });
   const timelineBrowser = useTimelineBrowserController({
     acceptance,
     projectId,
@@ -2100,95 +2110,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     onDeviceDrop: handleBrowserDeviceDrop,
     captureStructuralPlaybackIntent,
     onExternalPluginInsertionResult: (title, message) => notify(title, message),
-    onExternalPluginInserted: async (processor, playbackIntent) => {
-      openEffectsForTarget(processor.targetId);
-      const intent = playbackIntent ?? captureStructuralPlaybackIntent();
-      const insertedProjectId = intent.projectId ?? projectId();
-      // The drop's project guards the insertion; the transport is read now, because a trust prompt or a plug-in scan
-      // can outlast a Play or a Pause, and a session adopts only the transport state it is in.
-      const insertionIntent: TimelinePlaybackRebuildIntent = {
-        ...captureStructuralPlaybackIntent(),
-        projectId: intent.projectId,
-        projectGeneration: intent.projectGeneration,
-        externalProcessor: {
-          projectId: insertedProjectId,
-          processor,
-        },
-      };
-      const request: ExternalProcessorEditorRequest = {
-        instanceId: processor.instanceId,
-        projectId: intent.projectId ?? projectId(),
-        projectGeneration: intent.projectGeneration ?? mountedProjectGeneration(),
-        requestToken: ++externalProcessorEditorRequestToken,
-        ready: false,
-      };
-      setPendingExternalProcessorEditorRequest(request);
-      const nativePlaybackEnabled =
-        appPreferences.audio.preferences().nativePlaybackEnabled;
-      console.info("[native-vst3] external plugin inserted", {
-        instanceId: processor.instanceId,
-        targetId: processor.targetId,
-        isPlaying: insertionIntent.resumePlayback,
-        nativePlaybackEnabled,
-      });
-      try {
-        await syncPlaybackBackend(renderTracks(), insertionIntent);
-        // A plug-in that crashed while staged is shown failed on its device; there is no instance to read or edit.
-        if (vstInstanceFailed(processor.instanceId)) throw new Error("The plug-in failed while it was staged.");
-        // A browser session holds no instance of the plug-in, so there is no state to read and no editor to open.
-        if (instanceLimit(processor.instanceId)) {
-          if (pendingExternalProcessorEditorRequest()?.requestToken === request.requestToken) {
-            setPendingExternalProcessorEditorRequest();
-          }
-          return;
-        }
-        if (processor.manifest.supportsState) {
-          const capture = await window.dawDesktop?.audioHost?.session.captureVstState(processor.instanceId);
-          if (!capture?.ok) {
-            throw new Error(`Native VST3 baseline state capture failed${capture?.error ? `: ${capture.error}` : "."}`);
-          }
-          await persistLocalExternalProcessorState(
-            insertedProjectId,
-            processor.instanceId,
-            capture,
-            localVstStateOwnerId(insertedProjectId, userId()),
-          );
-        }
-        console.info("[native-vst3] insertion reached playback", {
-          instanceId: processor.instanceId,
-          targetId: processor.targetId,
-          isPlaying: insertionIntent.resumePlayback,
-          nativePlaybackEnabled,
-        });
-      } catch (error) {
-        // The insertion stays in the project and the playing graph is unchanged; the next adoption retries it.
-        console.error("[native-vst3] live insertion did not reach playback", {
-          instanceId: processor.instanceId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        if (pendingExternalProcessorEditorRequest()?.requestToken === request.requestToken) {
-          setPendingExternalProcessorEditorRequest();
-        }
-        return;
-      }
-      const currentRequest = pendingExternalProcessorEditorRequest();
-      if (
-        currentRequest?.requestToken === request.requestToken
-        && currentRequest.projectId === projectId()
-        && currentRequest.projectGeneration === mountedProjectGeneration()
-      ) {
-        setPendingExternalProcessorEditorRequest({ ...currentRequest, ready: true });
-      }
-    },
-  });
-  createEffect(() => {
-    const request = pendingExternalProcessorEditorRequest();
-    if (
-      request
-      && (request.projectId !== projectId() || request.projectGeneration !== mountedProjectGeneration())
-    ) {
-      setPendingExternalProcessorEditorRequest();
-    }
+    onExternalPluginInserted: externalEditorRequests.inserted,
   });
   const browserDropTargetLane = createMemo(() => {
     const target = timelineBrowser().devices.dragSession()?.target;
@@ -2243,22 +2165,9 @@ const Timeline: Component<TimelineProps> = (props) => {
     report: (_instanceId, error) => notify("Plug-in state not saved", error.message),
   })
   if (window.dawDesktop) {
-    const unsubscribeCapturedEditorState = window.dawDesktop.audioHost?.onVstEditorCapturedState(async (payload) => {
-      const persisted = await persistLocalExternalProcessorState(
-        payload.projectId,
-        payload.instanceId,
-        payload.state,
-        localVstStateOwnerId(payload.projectId, userId()),
-      ).catch((error) => {
-        console.error("[native-vst3] editor teardown state persistence failed", {
-          projectId: payload.projectId,
-          instanceId: payload.instanceId,
-          error: error instanceof Error ? error.message : "unknown error",
-        });
-        throw error;
-      });
-      if (!persisted) throw new Error(`The captured native VST editor processor "${payload.instanceId}" no longer exists.`);
-    });
+    const unsubscribeCapturedEditorState = window.dawDesktop.audioHost?.onVstEditorCapturedState(
+      createCapturedEditorStatePersister(persistVstState),
+    );
     if (unsubscribeCapturedEditorState) onCleanup(unsubscribeCapturedEditorState);
     // The playback worker owns a plug-in's state while a session is prepared, and an editor closing is a
     // persistence point (the editor session never reads such an instance).
@@ -2546,20 +2455,8 @@ const Timeline: Component<TimelineProps> = (props) => {
       onEffectError: notify,
       onDeviceInsertActionsChange: setDeviceInsertActions,
       onExportSnapshotChange: setEffectsExportSnapshot,
-      autoOpenExternalProcessorId: (() => {
-        const request = pendingExternalProcessorEditorRequest();
-        return request?.ready
-          && request.projectId === projectId()
-          && request.projectGeneration === mountedProjectGeneration()
-          ? request.instanceId
-          : undefined;
-      })(),
-      onExternalProcessorAutoOpenHandled: (instanceId: string) => {
-        const request = pendingExternalProcessorEditorRequest();
-        if (request?.ready && request.instanceId === instanceId) {
-          setPendingExternalProcessorEditorRequest();
-        }
-      },
+      autoOpenExternalProcessorId: externalEditorRequests.autoOpenInstanceId(),
+      onExternalProcessorAutoOpenHandled: externalEditorRequests.autoOpenHandled,
       captureStructuralPlaybackIntent,
       onExternalProcessorUpdated: (
         processor: ExternalProcessor,

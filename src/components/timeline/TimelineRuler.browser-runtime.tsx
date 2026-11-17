@@ -6,6 +6,11 @@ import type { Track } from '@daw-browser/timeline-core/types'
 import TimelineRuler from './TimelineRuler'
 
 const scenarios: Record<string, boolean> = {}
+const rulerOf = (host: Element) => {
+  const ruler = host.firstElementChild
+  if (!(ruler instanceof HTMLElement)) throw new Error('The ruler did not render an element.')
+  return ruler
+}
 const runGesture = (
   endType: 'pointercancel' | 'escape' | 'blur' | 'pointerup',
   mode: 'create' | 'resize-start' | 'resize-end' | 'move',
@@ -41,8 +46,7 @@ const runGesture = (
         onSetLoopRegion={(startSec, endSec) => { commits += 1; setLoop({ startSec, endSec }) }}
       />
     ), host)
-    const ruler = host.firstElementChild
-    if (!(ruler instanceof HTMLElement)) return
+    const ruler = rulerOf(host)
     const x = mode === 'create' ? 500
       : mode === 'resize-start' ? 100
       : mode === 'resize-end' ? 300
@@ -150,8 +154,7 @@ const runUnmountCancellation = () => {
         onSetLoopRegion={(startSec, endSec) => setLoop({ startSec, endSec })}
       />
     ), host)
-    const ruler = host.firstElementChild
-    if (!(ruler instanceof HTMLElement)) return
+    const ruler = rulerOf(host)
     ruler.dispatchEvent(new PointerEvent('pointerdown', {
       bubbles: true,
       cancelable: true,

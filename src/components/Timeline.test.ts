@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
 import "fake-indexeddb/auto";
-import { createRoot } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 import { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import { createDefaultSynthParams, createDefaultUtilityParams, type TrackInstrumentParams } from "@daw-browser/shared";
 import type { Track } from "@daw-browser/timeline-core/types";
@@ -12,6 +11,12 @@ import { createEffectsPanelAudioDevice } from "./timeline/create-effects-panel-a
 import { createLocalEffectsView } from "./timeline/create-local-effects-view";
 import createTimelineEffectCommit from "./timeline/create-timeline-effect-commit";
 import { createInstrumentPlaybackChange } from "./timeline/timeline-playback-wiring";
+import {
+  createCapturedEditorStatePersister,
+  createExternalProcessorEditorRequests,
+} from "./timeline/external-processor-editor-requests";
+import { addInstanceLimit, clearInstanceLimits, clearVstInstanceFailures, markVstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
+import type { TimelinePlaybackRebuildIntent } from "~/hooks/timeline-playback-types";
 
 // Failure-first B6 seam inventory: stale/missing project history, captured
 // tracks, incorrect merge key/window, no-merge ignored, native refusal vetoing
@@ -128,68 +133,158 @@ test("scopes effect history to the committed project and keeps patch failures si
   expect(pushed.map(entry => entry.projectId)).toEqual(["project:b", "project:b"]);
 });
 
-test("persists captured editor state using its bound project after navigation", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const start = source.indexOf("const unsubscribeCapturedEditorState");
-  const end = source.indexOf("\n    });", start);
-  if (start < 0 || end < 0) throw new Error("Expected the captured editor state handler.");
-  const handler = source.slice(start, end);
-  expect(handler).toContain("persistLocalExternalProcessorState(");
-  expect(handler).toContain("payload.projectId");
-  expect(handler).toContain("localVstStateOwnerId(payload.projectId, userId())");
-  expect(handler).toContain("if (!persisted) throw new Error");
-  expect(handler).not.toContain("payload.projectId !== projectId()");
+const externalProcessor = (instanceId: string, supportsState: boolean) => ({
+  instanceId,
+  targetId: "track",
+  index: 0,
+  manifest: {
+    identity: { format: "vst3" as const, classId: "class", vendor: "vendor", name: "effect", version: "1",
+      architecture: "arm64" as const, binaryFingerprint: "a".repeat(64) },
+    role: "effect" as const,
+    audioInputs: [{ name: "Input", channels: 2, enabled: true }],
+    audioOutputs: [{ name: "Output", channels: 2, enabled: true }],
+    sidechainInputs: [],
+    parameters: [],
+    latencyFrames: 0,
+    tailFrames: 0,
+    supportsBypass: true,
+    supportsEditor: true,
+    supportsState,
+  },
+  parameterOverrides: {},
+  latencyFrames: 0,
+  tailFrames: 0,
+  bypassed: false,
+  health: { state: "ready" as const, updatedAt: 1 },
+  updatedAt: 1,
 });
 
-test("opens an inserted VST editor only after the matching playback rebuild", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const start = source.indexOf("onExternalPluginInserted: async");
-  const end = source.indexOf("\n    },\n  });", start);
-  if (start < 0 || end < 0) throw new Error("Expected the external plugin insertion handler.");
-  const handler = source.slice(start, end);
+const quietConsole = () => {
+  const { info, error } = console;
+  console.info = () => {};
+  console.error = () => {};
+  return () => { console.info = info; console.error = error; };
+};
 
-  expect(handler).toContain("instanceId: processor.instanceId");
-  expect(handler).toContain("projectId: intent.projectId ?? projectId()");
-  expect(handler).toContain("projectGeneration: intent.projectGeneration ?? mountedProjectGeneration()");
-  expect(handler).toContain("requestToken: ++externalProcessorEditorRequestToken");
-  expect(handler).toContain("ready: false");
-  expect(handler.indexOf("setPendingExternalProcessorEditorRequest(request)"))
-    .toBeLessThan(handler.indexOf("await syncPlaybackBackend(renderTracks(), insertionIntent)"));
-  // A prepared native session, playing or paused, joins the plug-in in place: the insertion never names a rebuild.
-  expect(handler).not.toContain("rebuildPlaybackBackend");
-  // A plug-in that failed while staged never opens its editor as ready.
-  expect(handler.indexOf("vstInstanceFailed(processor.instanceId)"))
-    .toBeGreaterThan(handler.indexOf("await syncPlaybackBackend(renderTracks(), insertionIntent)"));
-  expect(handler.indexOf("vstInstanceFailed(processor.instanceId)"))
-    .toBeLessThan(handler.indexOf("setPendingExternalProcessorEditorRequest({ ...currentRequest, ready: true })"));
-  expect(handler).toContain("pendingExternalProcessorEditorRequest()?.requestToken === request.requestToken");
-  expect(handler).toContain("currentRequest?.requestToken === request.requestToken");
-  expect(handler).toContain("setPendingExternalProcessorEditorRequest();");
-  expect(handler).toContain("currentRequest.projectId === projectId()");
-  expect(handler).toContain("currentRequest.projectGeneration === mountedProjectGeneration()");
-  expect(handler).toContain("{ ...currentRequest, ready: true }");
-  expect(handler.indexOf("await syncPlaybackBackend(renderTracks(), insertionIntent)"))
-    .toBeLessThan(handler.indexOf("setPendingExternalProcessorEditorRequest({ ...currentRequest, ready: true })"));
+const mountEditorRequests = (options: { captureOk?: boolean } = {}) => {
+  const [projectId, setProjectId] = createSignal("project:a");
+  const [generation, setGeneration] = createSignal(1);
+  const sync = Promise.withResolvers<void>();
+  const log: string[] = [];
+  const intents: TimelinePlaybackRebuildIntent[] = [];
+  let dispose = () => {};
+  const requests = createRoot(end => {
+    dispose = end;
+    return createExternalProcessorEditorRequests({
+      projectId, mountedProjectGeneration: generation,
+      openEffectsForTarget: targetId => { log.push(`open:${targetId}`); },
+      captureStructuralPlaybackIntent: () => ({ resumePlayback: true, playheadSec: 2 }),
+      syncPlaybackBackend: async (_tracks, intent) => { log.push("sync"); intents.push(intent); await sync.promise; },
+      renderTracks: () => [],
+      nativePlaybackEnabled: () => true,
+      captureVstState: async instanceId => {
+        log.push(`capture:${instanceId}`);
+        return options.captureOk === false
+          ? { ok: false as const, error: "worker gone" }
+          : { ok: true as const, bytes: new Uint8Array([1]), sha256: "hash" };
+      },
+      persistState: async (project, instanceId) => { log.push(`persist:${project}:${instanceId}`); return externalProcessor(instanceId, true); },
+    });
+  });
+  return { requests, sync, log, intents, setProjectId, setGeneration, dispose };
+};
 
-  const exposureStart = source.indexOf("autoOpenExternalProcessorId:");
-  const exposureEnd = source.indexOf("\n      onExternalProcessorAutoOpenHandled:", exposureStart);
-  if (exposureStart < 0 || exposureEnd < 0) throw new Error("Expected the external editor exposure.");
-  const exposure = source.slice(exposureStart, exposureEnd);
-  expect(exposure).toContain("request?.ready");
-  expect(exposure).toContain("request.projectId === projectId()");
-  expect(exposure).toContain("request.projectGeneration === mountedProjectGeneration()");
-  const handledEnd = source.indexOf("\n      captureStructuralPlaybackIntent", exposureEnd);
-  if (handledEnd < 0) throw new Error("Expected the external editor handled callback boundary.");
-  const handled = source.slice(exposureEnd, handledEnd);
-  expect(handled).toContain("request?.ready && request.instanceId === instanceId");
-  expect(handled).toContain("setPendingExternalProcessorEditorRequest();");
+test("opens an inserted VST editor only after the matching playback rebuild and baseline state capture", async () => {
+  const restore = quietConsole();
+  const mounted = mountEditorRequests();
+  try {
+    const processor = externalProcessor("vst:ready", true);
+    const inserted = mounted.requests.inserted(processor);
+    expect(mounted.requests.autoOpenInstanceId()).toBeUndefined();
+    expect(mounted.intents[0]).toMatchObject({ projectId: undefined, externalProcessor: { projectId: "project:a", processor } });
+    mounted.sync.resolve();
+    await inserted;
+    expect(mounted.log).toEqual(["open:track", "sync", "capture:vst:ready", "persist:project:a:vst:ready"]);
+    expect(mounted.requests.autoOpenInstanceId()).toBe("vst:ready");
+    mounted.requests.autoOpenHandled("vst:other");
+    expect(mounted.requests.autoOpenInstanceId()).toBe("vst:ready");
+    mounted.requests.autoOpenHandled("vst:ready");
+    expect(mounted.requests.autoOpenInstanceId()).toBeUndefined();
+  } finally { mounted.dispose(); restore(); }
 });
 
-test("keeps arrangement and clip selection clicks from seeking during playback", async () => {
-  const timeline = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const selection = await readFile(new URL("../hooks/useTimelineSelection.ts", import.meta.url), "utf8");
+test("a plug-in without saved state opens its editor without a capture", async () => {
+  const restore = quietConsole();
+  const mounted = mountEditorRequests();
+  try {
+    mounted.sync.resolve();
+    await mounted.requests.inserted(externalProcessor("vst:stateless", false));
+    expect(mounted.log).toEqual(["open:track", "sync"]);
+    expect(mounted.requests.autoOpenInstanceId()).toBe("vst:stateless");
+  } finally { mounted.dispose(); restore(); }
+});
 
-  expect(timeline).toContain("isPlaying,\n    startScrub,");
-  expect(selection).toContain("if (!options.isPlaying()) startScrub(event.clientX, { listen: false });");
-  expect(selection).toContain("if (!options.isPlaying()) moveScrub(event.clientX);");
+test("never opens the editor of a plug-in that failed while staged, was refused by the browser engine, or lost its capture", async () => {
+  const restore = quietConsole();
+  try {
+    const failed = mountEditorRequests();
+    markVstInstanceFailed("vst:failed");
+    failed.sync.resolve();
+    await failed.requests.inserted(externalProcessor("vst:failed", true));
+    expect(failed.log).toEqual(["open:track", "sync"]);
+    expect(failed.requests.autoOpenInstanceId()).toBeUndefined();
+    failed.dispose();
+
+    const limited = mountEditorRequests();
+    addInstanceLimit("vst:limited", "The browser engine does not host VST3 plug-ins yet.");
+    limited.sync.resolve();
+    await limited.requests.inserted(externalProcessor("vst:limited", true));
+    expect(limited.log).toEqual(["open:track", "sync"]);
+    expect(limited.requests.autoOpenInstanceId()).toBeUndefined();
+    limited.dispose();
+
+    const uncaptured = mountEditorRequests({ captureOk: false });
+    uncaptured.sync.resolve();
+    await uncaptured.requests.inserted(externalProcessor("vst:uncaptured", true));
+    expect(uncaptured.log).toEqual(["open:track", "sync", "capture:vst:uncaptured"]);
+    expect(uncaptured.requests.autoOpenInstanceId()).toBeUndefined();
+    uncaptured.dispose();
+  } finally { clearVstInstanceFailures(); clearInstanceLimits(); restore(); }
+});
+
+test("drops the editor request when the project or generation changes during the rebuild, and persists to the drop's project", async () => {
+  const restore = quietConsole();
+  try {
+    for (const navigate of [
+      (mounted: ReturnType<typeof mountEditorRequests>) => mounted.setProjectId("project:b"),
+      (mounted: ReturnType<typeof mountEditorRequests>) => mounted.setGeneration(2),
+    ]) {
+      const mounted = mountEditorRequests();
+      const inserted = mounted.requests.inserted(externalProcessor("vst:navigated", true));
+      navigate(mounted);
+      mounted.sync.resolve();
+      await inserted;
+      expect(mounted.log).toContain("persist:project:a:vst:navigated");
+      expect(mounted.requests.autoOpenInstanceId()).toBeUndefined();
+      mounted.dispose();
+    }
+  } finally { restore(); }
+});
+
+test("persists a captured editor state to the project it names, even after navigation", async () => {
+  const restore = quietConsole();
+  try {
+    const persisted: string[] = [];
+    const state = { bytes: new Uint8Array([1]), sha256: "hash" };
+    const persist = createCapturedEditorStatePersister(async (projectId, instanceId) => {
+      persisted.push(`${projectId}:${instanceId}`);
+      return instanceId === "vst:deleted" ? undefined : externalProcessor(instanceId, true);
+    });
+    await persist({ projectId: "project:old", instanceId: "vst:one", state });
+    expect(persisted).toEqual(["project:old:vst:one"]);
+    await expect(persist({ projectId: "project:old", instanceId: "vst:deleted", state }))
+      .rejects.toThrow('The captured native VST editor processor "vst:deleted" no longer exists.');
+    const failing = createCapturedEditorStatePersister(async () => { throw new Error("disk full"); });
+    await expect(failing({ projectId: "project:old", instanceId: "vst:one", state })).rejects.toThrow("disk full");
+  } finally { restore(); }
 });

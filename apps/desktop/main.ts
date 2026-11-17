@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, net as electronNet, powerMonitor, protocol, screen, session, shell } from "electron"
+import { app, BrowserWindow, contentTracing, dialog, ipcMain, Menu, net as electronNet, powerMonitor, protocol, screen, session, shell } from "electron"
 import { createServer, type Socket } from "node:net"
 import { totalmem } from "node:os"
 import { chmod, mkdir, rm, writeFile } from "node:fs/promises"
@@ -184,7 +184,7 @@ import {
 import { packagedRendererRoot, rendererAssetPath } from "./renderer-path"
 import { createNativeVstProjectBindings } from "./native-vst-project-bindings"
 import { createApplicationMenuController } from "./application-menu"
-import { ae08AttachRendererProfile, ae08ControlCommitReceived, ae08Evidence, ae08RendererMarkSchema } from "./ae08-evidence"
+import { ae08AttachRendererProfile, ae08ControlCommitReceived, ae08Evidence, ae08RendererMarkSchema, ae08StartTrace, ae08StopTrace } from "./ae08-evidence"
 import { deliverToRenderer } from "./renderer-delivery"
 import { createRendererLifecycleOwner } from "./renderer-lifecycle"
 import { createOfflinePcmAckTracker } from "./offline-pcm-ack"
@@ -2379,6 +2379,7 @@ const prepareQuit = async () => {
   await nativeVst3EditorSessionManager?.teardownAll()
   await closeSocket()
   await fileCapabilities.revokeAll()
+  await ae08StopTrace()
   quitCleanupPrepared = true
 }
 const finishQuit = async () => {
@@ -2414,6 +2415,7 @@ else {
     window_?.focus()
   })
   app.whenReady().then(async () => {
+    await ae08StartTrace(contentTracing)
     const stage = createBenchmarkStartupReporter()
     stage("before-native-helper")
     nativeMediaAvailable = await nativeFileCapabilityHelper.selfTest()

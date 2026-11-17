@@ -1,7 +1,7 @@
 import { appendFileSync } from "node:fs"
 import { writeFile } from "node:fs/promises"
 import path from "node:path"
-import type { Debugger, WebContents } from "electron"
+import type { ContentTracing, Debugger, WebContents } from "electron"
 import { z } from "zod"
 import type { DesktopRequestV2 } from "@daw-browser/desktop-protocol"
 import { ae08RendererMarks } from "@daw-browser/desktop-protocol/ipc-channels"
@@ -44,6 +44,31 @@ const ae08ProfileCommit = (key: string) => {
     state.open = key
     await state.session.sendCommand("Profiler.start")
   }).catch((error) => console.error("[ae08] renderer profile failed", error))
+}
+
+// Opt-in Chromium trace of every process (DAW_AE08_TRACE=1 beside the evidence directory), written to trace.json at quit. Names the
+// main-thread tasks that overlap a stalled window. Tracing slows the app, so latency gate runs must not carry it.
+// The tracer is passed in, because the module is also loaded outside Electron, where a value import of it fails.
+let tracing: ContentTracing | undefined
+
+export const ae08StartTrace = async (contentTracing: ContentTracing) => {
+  if (!process.env.DAW_AE08_EVIDENCE_DIR || process.env.DAW_AE08_TRACE !== "1") return
+  tracing = contentTracing
+  await contentTracing.startRecording({
+    included_categories: ["devtools.timeline", "disabled-by-default-devtools.timeline", "v8", "v8.execute", "blink", "toplevel", "ipc",
+      "disabled-by-default-v8.gc", "cc"],
+    recording_mode: "record-continuously",
+    trace_buffer_size_in_events: 50_000_000,
+  })
+}
+
+// Runs before the renderer is destroyed, because a renderer that has exited cannot flush its buffered events.
+export const ae08StopTrace = async () => {
+  const directory = process.env.DAW_AE08_EVIDENCE_DIR
+  const tracer = tracing
+  if (!directory || !tracer) return
+  tracing = undefined
+  await tracer.stopRecording(path.join(directory, "trace.json"))
 }
 
 const commitKey = z.object({ idempotencyKey: z.string() })

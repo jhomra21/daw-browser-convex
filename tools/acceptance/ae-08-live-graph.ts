@@ -659,7 +659,7 @@ const assemble = async (directory: string, prefix = ""): Promise<Pcm> => {
   return { sampleRate, channels, samples }
 }
 
-const usage = "Usage: ae-08-live-graph.ts --phase 1|2|3|4|5|6|6i|7|8|9 [--out /absolute/dir] [--rows a,b,…] [--matrix [cert|extended|full]] [--repetitions N] [--vst-repetitions N] [--judge-only /absolute/dir [--breakdown]] [--timings /absolute/phase9-timings.json]"
+const usage = "Usage: ae-08-live-graph.ts --phase 1|2|3|4|5|6|6i|7|8|9 [--out /absolute/dir] [--rows a,b,…] [--matrix [cert|extended|full]] [--repetitions N] [--vst-repetitions N] [--judge-only /absolute/dir [--breakdown]] [--timings /absolute/phase9-timings.json] [--trace]"
 const knownPhases = ["1", "2", "3", "4", "5", "6", "6i", "7", "8", "9"]
 const positiveInteger = (flag: string, value: string) => {
   const number = Number(value)
@@ -674,8 +674,13 @@ export const parseRunnerArgs = (args: string[]) => {
   const values = new Map<string, string>()
   let matrix: Preset | undefined
   let breakdown = false
+  let trace = false
   for (let index = 0; index < args.length; index++) {
     const key = args[index]
+    if (key === "--trace") {
+      trace = true
+      continue
+    }
     if (key === "--matrix") {
       const named = presetNamed.get(args[index + 1] ?? "")
       matrix = named ?? "cert"
@@ -715,7 +720,7 @@ export const parseRunnerArgs = (args: string[]) => {
   if (timings !== undefined && (phase !== "9" || !path.isAbsolute(timings))) throw new Error("--timings /absolute/phase9-timings.json applies to phase 9")
   if (breakdown && judgeOnly === undefined) throw new Error("--breakdown reports the stored evidence named by --judge-only")
   if (phase === "9" && !matrix && !rows && judgeOnly === undefined) throw new Error("--phase 9 needs --matrix, --rows or --judge-only")
-  return { phase, out, rows, matrix, repetitions, vstRepetitions, judgeOnly, timings, breakdown }
+  return { phase, out, rows, matrix, repetitions, vstRepetitions, judgeOnly, timings, breakdown, trace }
 }
 // Only a complete pass over every row can certify: the campaign analysis needs all rows (analyze-ae-08-continuity.ts). Phase 5 certifies
 // a single pass; phase 9 repeats each row by design.
@@ -764,6 +769,7 @@ const selfTest = () => {
   const phase8 = parseRunnerArgs(["--phase", "8", "--out", "/tmp/x", "--rows", "paused-structural"])
   if (phase8.rows?.join() !== "paused-structural" || nonCertifyingReason(phase8) !== "filtered") throw new Error("Phase 8 filtered parse failed")
   if (nonCertifyingReason(parseRunnerArgs(["--phase", "8", "--out", "/tmp/x"]))) throw new Error("A full phase 8 pass must certify")
+  if (!parseRunnerArgs(["--phase", "4", "--out", "/tmp/x", "--trace"]).trace || parseRunnerArgs(["--phase", "4", "--out", "/tmp/x"]).trace) throw new Error("--trace parse failed")
   refused(["--phase", "5", "--out", "relative"], /Usage/)
   refused(["--phase", "5", "--bogus", "1"], /Usage/)
   console.log("ae-08-live-graph argument self-test: pass")
@@ -786,6 +792,8 @@ const main = async () => {
     return
   }
   if (["6", "6i", "7"].includes(parsed.phase)) throw new Error(`Phase ${parsed.phase} is not implemented yet`)
+  // Every launch spreads process.env into the app's environment, so this is how --trace reaches the app.
+  if (parsed.trace) process.env.DAW_AE08_TRACE = "1"
   const processes = await Bun.$`ps -axo command=`.text()
   if (processes.split("\n").some((line) => line.trim().startsWith(`${executable} `)))
     throw new Error("Another packaged acceptance/app is active; wait for its normal quit")

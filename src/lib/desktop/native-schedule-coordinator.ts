@@ -29,7 +29,7 @@ import { parseExternalAutomationParameterId, valueAtAutomationTime } from "@daw-
 import type { LivePlaybackSnapshot } from "~/lib/live-playback-snapshot"
 import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 import { maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
-import type { Ae08RendererMark } from "./ae08-marks"
+import { ae08Mark, type Ae08RendererMark } from "./ae08-marks"
 import type { NativeTimelinePageManager } from "./native-timeline-page-manager"
 import { NativePlaybackAbortError } from "./native-playback-abort"
 import { nativeMappedSourceCoverage } from "~/lib/native-source-coverage"
@@ -1020,7 +1020,7 @@ const buildNativeScheduleCoordinator = (input: {
     scheduleComplete = !acceptsLiveMidi && endFrame >= scheduleEndFrame
   }
 
-  const compileRefillWindow = (start: number, end: number) => {
+  const compileDiagnosedWindow = (start: number, end: number) => {
     if (!input.onRefillDiagnostics) return compileWindow(start, end)
     const started = performance.now()
     try {
@@ -1030,6 +1030,16 @@ const buildNativeScheduleCoordinator = (input: {
       compileCount += 1
       compileTotalMs += elapsed
       compileMaxMs = Math.max(compileMaxMs, elapsed)
+    }
+  }
+
+  const compileRefillWindow = (start: number, end: number) => {
+    const key = () => `${start}-${end}`
+    ae08Mark("refill-compile-start", key)
+    try {
+      return compileDiagnosedWindow(start, end)
+    } finally {
+      ae08Mark("refill-compile-end", key)
     }
   }
 

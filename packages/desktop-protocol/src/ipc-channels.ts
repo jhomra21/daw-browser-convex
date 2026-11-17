@@ -88,6 +88,8 @@ export const ae08RendererMarks = z.enum([
   // The two steps between the create and the candidate paging: the added sources' own pages (the full-range uploads of an
   // instrument's regional sources) and the instrument states upload. What is left after them is building the candidate coordinator.
   "asset-sources-ready", "asset-instrument-states-ready",
+  // One schedule-window (refill) compile on the renderer main thread, keyed by its frame range: the work a reply to the renderer can queue behind.
+  "refill-compile-start", "refill-compile-end",
 ])
 export const benchmarkHeartbeatChannel = "daw:benchmark:heartbeat"
 export const benchmarkRendererPingChannel = "daw:benchmark:renderer-ping"

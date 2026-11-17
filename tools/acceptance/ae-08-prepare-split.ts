@@ -37,8 +37,14 @@ export type RendererSteps = { statesMs: number; progressReadMs: number; restMs: 
 // host `asset-page-write` in it (0 with none), post-page time from there to the armed request. `marks` are the renderer's staging marks
 // after the bind, in ms from it. It is absent when the revision sent no second publish request (no late bind).
 export type ArmedSplit = { totalMs: number; pageMs: number; postPageMs: number; pages: number; marks: { name: string; ms: number }[] }
+// `refill` is how much of a hop the renderer spent compiling a schedule window (`refill-compile-start` to `-end`, summed over the compiles that
+// intersect the hop), and the longest such compile's duration: the prepare reply's hop (the host's reply write to `prepare-reply-received`) and
+// the progress read's IPC and renderer part (`inspect-handler-return` to `bind-progress-reply`, absent without the return line). It is absent
+// when the evidence has no refill compile mark.
+export type RefillOverlap = { overlapMs: number; compileMs: number }
 export type PrepareSplit = { hostPrepareMs: number; replyWriteMs: number; hostToRendererMs: number; rendererMs: number; rendererToHostMs: number; spectralWarmMs: number
-  rendererSteps?: RendererSteps; armed?: ArmedSplit }
+  rendererSteps?: RendererSteps; armed?: ArmedSplit; refill?: { prepareReply: RefillOverlap; progressReply?: RefillOverlap } }
+export type RefillSpan = { startMs: number; endMs: number }
 
 const hostSteps = ["vst-control", "host-pre", "core", "host-post"]
 const armedMarks = ["armed-cover-end", "armed-stage-returned", "armed-prime-start", "armed-prime-end"]
@@ -62,7 +68,20 @@ const armedSplit = (events: readonly SplitEvent[], prepare: SplitEvent, request:
     }) }
 }
 
-export const prepareSplit = (events: readonly SplitEvent[], prepare: SplitEvent, request: SplitEvent): PrepareSplit | undefined => {
+export const refillSpans = (events: readonly SplitEvent[]): RefillSpan[] => {
+  const ends = events.filter((event) => event.event === "refill-compile-end")
+  return events.filter((event) => event.event === "refill-compile-start").flatMap((start) => {
+    const end = ends.reduce<SplitEvent | undefined>((first, event) => event.key === start.key && event.wallMs >= start.wallMs && (!first || event.wallMs < first.wallMs) ? event : first, undefined)
+    return end ? [{ startMs: start.wallMs, endMs: end.wallMs }] : []
+  })
+}
+
+const refillOverlap = (spans: readonly RefillSpan[], fromMs: number, toMs: number): RefillOverlap => spans.reduce((total, span) => {
+  const ms = Math.min(span.endMs, toMs) - Math.max(span.startMs, fromMs)
+  return ms > 0 ? { overlapMs: total.overlapMs + ms, compileMs: Math.max(total.compileMs, span.endMs - span.startMs) } : total
+}, { overlapMs: 0, compileMs: 0 })
+
+export const prepareSplit = (events: readonly SplitEvent[], prepare: SplitEvent, request: SplitEvent, spans = refillSpans(events)): PrepareSplit | undefined => {
   const earliestAfter = (match: (event: SplitEvent) => boolean, from = prepare.wallMs) => earliestFrom(events, from, match)
   const profile = earliestAfter((event) => event.event === "prepare-profile" && event.pid === prepare.pid && event.requestedRevision === prepare.requestedRevision)
   const reply = earliestAfter((event) => event.event === "prepare-step" && event.pid === prepare.pid && event.step === "graph-prepare-reply")
@@ -88,7 +107,9 @@ export const prepareSplit = (events: readonly SplitEvent[], prepare: SplitEvent,
   return { hostPrepareMs, replyWriteMs: reply.durationMs, hostToRendererMs: received.wallMs - prepare.wallMs - hostPrepareMs - reply.durationMs,
     rendererMs: bound.wallMs - received.wallMs, rendererToHostMs: request.wallMs - bound.wallMs, spectralWarmMs: (steps.get("spectral-warm") ?? 0) / 1000,
     rendererSteps: configured && progressRead ? { statesMs: configured.wallMs - received.wallMs, progressReadMs: progressRead.wallMs - configured.wallMs,
-      restMs: bound.wallMs - progressRead.wallMs, progress } : undefined, armed: armedSplit(events, prepare, request, sent.key) }
+      restMs: bound.wallMs - progressRead.wallMs, progress } : undefined, armed: armedSplit(events, prepare, request, sent.key),
+    refill: spans.length === 0 ? undefined : { prepareReply: refillOverlap(spans, prepare.wallMs + hostPrepareMs + reply.durationMs, received.wallMs),
+      progressReply: replied && returned ? refillOverlap(spans, returned.wallMs, replied.wallMs) : undefined } }
 }
 
 const round = (value: number) => Math.round(value * 100) / 100
@@ -97,9 +118,12 @@ const progressLine = ({ requestMs, hostMs, replyMs, laneMs, main }: ProgressSpli
   + ` + host ${round(hostMs)} + reply ${round(replyMs)}${main ? ` (from host ${round(main.fromHostMs)} + to renderer ${round(main.toRendererMs)}${main.back ? ` = main continuation ${round(main.back.continuationMs)} + IPC and renderer ${round(main.back.ipcRendererMs)}; ${round(main.back.sends)} renderer sends in the handler` : ""})` : ""} + lane ${round(laneMs)}`
 const armedLine = (armed: ArmedSplit) => `; bind to armed ${armed.totalMs} ms = page time ${armed.pageMs} ms (${armed.pages} pages) + post-page ${armed.postPageMs} ms`
   + (armed.marks.length ? ` [after bind: ${armed.marks.map((mark) => `${mark.name} ${mark.ms}`).join(", ")}]` : "")
+const overlapText = ({ overlapMs, compileMs }: RefillOverlap) => overlapMs > 0 ? `yes ${round(overlapMs)} ms (compile ${round(compileMs)} ms)` : "no"
+const refillLine = ({ prepareReply, progressReply }: NonNullable<PrepareSplit["refill"]>) =>
+  `; refill compile overlap: prepare reply ${overlapText(prepareReply)}, progress reply ${progressReply ? overlapText(progressReply) : "n/a"}`
 export const splitLine = (split: PrepareSplit) => `host prepare ${round(split.hostPrepareMs)} ms, reply write ${round(split.replyWriteMs)} ms, host to renderer ${round(split.hostToRendererMs)} ms, `
   + `renderer work ${round(split.rendererMs)} ms${split.rendererSteps ? ` (states reply ${round(split.rendererSteps.statesMs)} ms, progress read ${round(split.rendererSteps.progressReadMs)} ms${split.rendererSteps.progress ? progressLine(split.rendererSteps.progress) : ""}, rest ${round(split.rendererSteps.restMs)} ms)` : ""}, `
-  + `renderer to host bind ${round(split.rendererToHostMs)} ms${split.armed ? armedLine(split.armed) : ""}`
+  + `renderer to host bind ${round(split.rendererToHostMs)} ms${split.armed ? armedLine(split.armed) : ""}${split.refill ? refillLine(split.refill) : ""}`
 
 const hostSchema = z.object({ event: z.string(), cause: z.string().default(""), pid: z.number().default(0), wallMs: z.number().default(0), revision: z.number().default(0),
   requestedRevision: z.number().default(0), publicationFrame: z.number().default(0), key: z.string().default(""), stepsUs: z.string().default(""),
@@ -107,20 +131,23 @@ const hostSchema = z.object({ event: z.string(), cause: z.string().default(""), 
 const editsSchema = z.object({ edits: z.array(z.object({ wallMs: z.number(), fromLatencyFrames: z.number(), toLatencyFrames: z.number() })).default([]) })
 const LO_HI_CUT_MS = 8.5
 
-const median = (values: readonly number[]) => {
+const quantile = (values: readonly number[], q: number) => {
   const sorted = [...values].sort((a, b) => a - b)
-  const middle = (sorted.length - 1) / 2
-  return ((sorted[Math.floor(middle)] ?? 0) + (sorted[Math.ceil(middle)] ?? 0)) / 2
+  const at = (sorted.length - 1) * q
+  const low = sorted[Math.floor(at)] ?? 0
+  return low + ((sorted[Math.ceil(at)] ?? 0) - low) * (at - Math.floor(at))
 }
+const median = (values: readonly number[]) => quantile(values, 0.5)
 
 const directions = ["raise", "lower", "plain"]
 type Row = { publication: number; spanMs: number; direction: string; split: PrepareSplit }
 export const splitRow = (events: readonly z.infer<typeof hostSchema>[], edits: z.infer<typeof editsSchema>["edits"]): Row[] => {
+  const spans = refillSpans(events)
   const publications = events.flatMap((publish, index) => {
     if (publish.event !== "graph-publish" || publish.cause !== "block-boundary" || publish.publicationFrame === 0) return []
     const prepare = events.slice(0, index).findLast((event) => event.event === "graph-prepare" && event.pid === publish.pid && event.requestedRevision === publish.revision)
     const request = prepare && events.slice(events.indexOf(prepare) + 1, index).find((event) => event.event === "graph-publish-request" && event.pid === publish.pid && event.requestedRevision === publish.revision)
-    const split = prepare && request && prepareSplit(events, prepare, request)
+    const split = prepare && request && prepareSplit(events, prepare, request, spans)
     return prepare && request && split ? [{ publish, spanMs: request.wallMs - prepare.wallMs, split }] : []
   })
   // A publication carries every edit made since the previous one: the first publication at or after the edit's wall time.
@@ -162,7 +189,8 @@ const runRows = async (run: string) => Promise.all((await readdir(run, { withFil
   const host = await readFile(path.join(run, entry.name, "host.jsonl"), "utf8").catch(() => undefined)
   if (host === undefined) return []
   const edits = await readFile(path.join(run, entry.name, "phase4-edits.json"), "utf8").then((text) => editsSchema.parse(JSON.parse(text)).edits, () => [])
-  return [{ name: entry.name, rows: splitRow(host.slice(0, host.lastIndexOf("\n") + 1).split("\n").filter(Boolean).map((line) => hostSchema.parse(JSON.parse(line))), edits) }]
+  const events = host.slice(0, host.lastIndexOf("\n") + 1).split("\n").filter(Boolean).map((line) => hostSchema.parse(JSON.parse(line)))
+  return [{ name: entry.name, rows: splitRow(events, edits), spans: refillSpans(events) }]
 }))
 
 const selfTest = () => {
@@ -182,7 +210,12 @@ const selfTest = () => {
     line("asset-page-write", 1010), line("asset-page-write", 1017), line("asset-page-write", 1022), line("asset-page-write", 1022, { pid: 8 }), line("asset-page-write", 1100),
     line("armed-cover-end", 1019, { key: "k" }), line("armed-stage-returned", 1030, { key: "k" }), line("armed-prime-start", 1031, { key: "k" }),
     line("armed-prime-end", 1036, { key: "k" }), line("armed-prime-end", 1020, { key: "other" }), line("graph-publish-request", 1040, { requestedRevision: 5 }),
-    line("graph-publish-request", 1090, { requestedRevision: 5 })]
+    line("graph-publish-request", 1090, { requestedRevision: 5 }),
+    line("refill-compile-start", 1006, { key: "w1" }), line("refill-compile-end", 1008, { key: "w1" }), line("refill-compile-end", 1050, { key: "w1" }),
+    line("refill-compile-start", 1100, { key: "w2" }), line("refill-compile-end", 1120, { key: "w2" }), line("refill-compile-start", 1014, { key: "w4" })]
+  const slowReply = [...events.filter((event) => event.event !== "bind-progress-read" && event.event !== "bind-progress-reply"),
+    line("bind-progress-read", 1020, { key: "k" }), line("bind-progress-reply", 1019, { key: "k" }),
+    line("refill-compile-start", 1015, { key: "w3" }), line("refill-compile-end", 1017, { key: "w3" })]
   const expectedArmed = { totalMs: 25, pageMs: 7, postPageMs: 18, pages: 2, marks: [{ name: "armed-cover-end", ms: 4 }, { name: "armed-stage-returned", ms: 15 },
     { name: "armed-prime-start", ms: 16 }, { name: "armed-prime-end", ms: 21 }] }
   const split = prepareSplit(events, prepare, request)
@@ -208,6 +241,12 @@ const selfTest = () => {
       const main = prepareSplit(events.filter((event) => event.event !== "inspect-handler-return"), prepare, request)?.rendererSteps?.progress?.main
       return main && main.back === undefined && main.toRendererMs === 0 ? [] : ["a progress read with no inspect-handler-return must keep the main split and have no reply split"]
     })(),
+    ...(JSON.stringify(split?.refill) === JSON.stringify({ prepareReply: { overlapMs: 2, compileMs: 2 }, progressReply: { overlapMs: 0, compileMs: 0 } }) ? []
+      : [`refill ${JSON.stringify(split?.refill)}, expected 2 ms in the prepare reply hop only (a compile without an end, one after the hop and a later end of the same key are not counted)`]),
+    ...(JSON.stringify(prepareSplit(slowReply, prepare, request)?.refill?.progressReply) === JSON.stringify({ overlapMs: 2, compileMs: 2 }) ? []
+      : ["a compile inside the IPC and renderer part of the progress read must overlap it by its length"]),
+    ...(prepareSplit(events.filter((event) => !event.event.startsWith("refill-compile")), prepare, request)?.refill === undefined ? [] : ["evidence with no refill compile mark must have no refill overlap"]),
+    ...(prepareSplit(events.filter((event) => event.event !== "inspect-handler-return"), prepare, request)?.refill?.progressReply === undefined ? [] : ["a progress read with no inspect-handler-return must have no progress reply overlap"]),
     ...(prepareSplit(events.filter((event) => event.event !== "bind-progress-read"), prepare, request)?.rendererSteps === undefined ? [] : ["a revision with no progress-read mark must have no renderer steps"]),
     ...(prepareSplit(events.filter((event) => event.event !== "prepare-reply-received" || event.key === "old"), prepare, request) === undefined ? [] : ["a revision with no reply mark must have no split"]),
     ...(prepareSplit(events.filter((event) => event.event !== "bind-request-sent"), prepare, request) === undefined ? [] : ["a revision with no bind mark must have no split"]),
@@ -233,5 +272,7 @@ if (import.meta.main) {
       const warm = found.flatMap(({ rows }) => rows.filter((row) => row.direction === direction).map((row) => row.split.spectralWarmMs))
       console.log(`spectral-warm ${direction} (${warm.length}): p50 ${round(median(warm))} ms, max ${round(Math.max(0, ...warm))} ms`)
     }
+    const compiles = found.flatMap(({ spans }) => spans.map((span) => span.endMs - span.startMs))
+    if (compiles.length > 0) console.log(`refill compile (${compiles.length}): p50 ${round(median(compiles))} ms, p90 ${round(quantile(compiles, 0.9))} ms, max ${round(Math.max(...compiles))} ms`)
   }
 }

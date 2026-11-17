@@ -348,9 +348,9 @@ export const judgeStored = async (directory: string) => Promise.all((await store
 const commitMarkNames = ae08RendererMarks.options.filter((name) => name.startsWith("control-"))
 // An asset publication hydrates between graph-prepare and graph-publish-request: its marks (asset-*) are logged under the adoption key, after prepare-sent.
 const hydrationMarkNames = ae08RendererMarks.options.filter((name) => name.startsWith("asset-"))
-// The reply and bind marks lie after graph-prepare: ae-08-prepare-split.ts reads them.
+// The reply and bind marks lie after graph-prepare, and the refill compile marks carry a window key, not an adoption key: ae-08-prepare-split.ts reads them.
 const splitMarkNames = ["prepare-reply-received", "bind-states-configured", "bind-progress-reply", "bind-progress-read", "bind-request-sent",
-  "armed-cover-end", "armed-stage-returned", "armed-prime-start", "armed-prime-end"]
+  "armed-cover-end", "armed-stage-returned", "armed-prime-start", "armed-prime-end", "refill-compile-start", "refill-compile-end"]
 const adoptionMarkNames = ae08RendererMarks.options.filter((name) => !name.startsWith("control-") && !name.startsWith("ui-") && !hydrationMarkNames.includes(name) && !splitMarkNames.includes(name))
 export type EditSpan = { from: string; to: string; ms: number }
 // `origin` is where the edit is timed from: the app's commit line, the UI mark it logged, or the step start. `hydration` runs from

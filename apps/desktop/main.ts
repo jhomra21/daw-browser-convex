@@ -2051,7 +2051,7 @@ const registerIpc = () => {
         timestamp: Date.now(),
         generation: supervisor.status().generation,
       }))
-      await supervisor.teardownSession(envelope.data.value)
+      await supervisor.teardownSession()
       activeEditorProjectBindings.clear()
       return { ok: true as const }
     } catch (error) {

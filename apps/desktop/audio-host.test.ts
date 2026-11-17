@@ -2012,7 +2012,7 @@ test("acknowledges diagnostics and tears down the session without stopping its p
       lastRejectedInstrumentEventCount: 0,
       lastRejectedGraphRevision: 0,
     })
-    await fixture.supervisor.teardownSession("test-session-reset")
+    await fixture.supervisor.teardownSession()
     expect(fixture.supervisor.status().running).toBeTrue()
     expect(losses).toEqual([])
     await fixture.supervisor.teardown()
@@ -2529,14 +2529,10 @@ test("resolves the host default recording input and sends bounded recording cont
       punchEndFrame: null,
       monitoring: false, targetNodeId: 1n,
     }, { rootPath: "/private/fixture", rootDevice: 1n, rootInode: 2n, token: "a".repeat(64) })
-    let blocks = 0
-    const remove = fixture.supervisor.onRecordingBlock(() => { blocks += 1 })
     const status = new Promise((resolve) => fixture.supervisor.onRecordingStatus(resolve))
     await fixture.supervisor.startRecording()
     await expect(status).resolves.toMatchObject({ generation: 1, sessionId: 1n,
       active: true, configured: true, spool: { state: 1, sampleRateHz: 48000, channelCount: 2 } })
-    expect(blocks).toBe(0)
-    remove()
     await expect(fixture.supervisor.configureRecording({
       deviceUid: "coreaudio:fixture-input", generation: 1, sessionId: 1n, channelCount: 2,
       inputChannels: [0, 1], gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n,

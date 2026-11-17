@@ -55,7 +55,6 @@ import type { NativeAudioHostParkingLimits } from "@daw-browser/desktop-protocol
 import type {
   NativeHostDeviceConfiguration,
   NativeHostDiagnostics,
-  NativeHostRecordingBlock,
   NativeHostRecordingConfiguration,
   NativeHostRecordingStatus,
   NativeHostMeterBatch,
@@ -1268,7 +1267,7 @@ export type NativeAudioHostSupervisor = {
   startRecording(): Promise<void>
   stopRecording(stopFrame?: number): Promise<void>
   cancelRecording(): Promise<void>
-  teardownSession(reason: string): Promise<void>
+  teardownSession(): Promise<void>
   waitForRecordingFinish(): Promise<void>
   waitForRecordingOutcome(): Promise<void>
   recordingAdmissionAvailable(): boolean
@@ -1277,7 +1276,6 @@ export type NativeAudioHostSupervisor = {
   status(): { running: boolean; hello?: AudioHostHello; generation: number; pid?: number }
   transactionOpen(): boolean
   onLoss(listener: (error: Error) => void): () => void
-  onRecordingBlock(listener: (block: NativeHostRecordingBlock) => void): () => void
   onRecordingStatus(listener: (status: NativeMainRecordingStatus) => void): () => void
   onMeterBatch(listener: (batch: NativeHostMeterBatch) => void): () => void
   setSpectrumNode(nodeId: bigint | null): Promise<void>
@@ -1328,7 +1326,6 @@ export const createNativeAudioHostSupervisor = (
   let manualInvalidationPromise: Promise<void> | undefined
   let nextTransportTransitionId = 0n
   const lossListeners = new Set<(error: Error) => void>()
-  const recordingBlockListeners = new Set<(block: NativeHostRecordingBlock) => void>()
   const recordingStatusListeners = new Set<(status: NativeMainRecordingStatus) => void>()
   let recordingConfiguration: NativeHostRecordingConfiguration | undefined
   let recordingAdmitted = false
@@ -2747,8 +2744,7 @@ export const createNativeAudioHostSupervisor = (
       if (recordingFinish?.pending) throw new Error("Accepted recording Finish cannot be cancelled.")
       await request(recordingCancelType)
     },
-    async teardownSession(reason: string) {
-      if (reason.length === 0 || reason.length > 120) throw new Error("The native audio teardown reason is invalid.")
+    async teardownSession() {
       if (!child && !startPromise) return
       if (!hello) await supervisor.start()
       await request(teardownType)
@@ -2890,10 +2886,6 @@ export const createNativeAudioHostSupervisor = (
     onLoss(listener) {
       lossListeners.add(listener)
       return () => lossListeners.delete(listener)
-    },
-    onRecordingBlock(listener) {
-      recordingBlockListeners.add(listener)
-      return () => recordingBlockListeners.delete(listener)
     },
     onRecordingStatus(listener) {
       recordingStatusListeners.add(listener)

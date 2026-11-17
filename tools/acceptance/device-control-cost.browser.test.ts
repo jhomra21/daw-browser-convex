@@ -377,7 +377,6 @@ const createFakeHost = () => {
     configureInstrumentStates: async () => { calls.push("configureInstrumentStates"); return accepted; },
     revisions,
     onLoss: () => () => undefined,
-    onRecordingBlock: () => () => undefined,
     onRecordingStatus: () => () => undefined,
     onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
       progressListeners.add(listener);

@@ -747,7 +747,6 @@ const createNativeHookBridge = (
           lossListeners.add(listener)
           return () => { lossListeners.delete(listener) }
         },
-        onRecordingBlock: () => () => {},
         onRecordingStatus: () => () => {},
         onScheduleProgress: (listener: (progress: NativeScheduleProgress) => void) => {
           if (!realisticProgress) progressListeners.clear()

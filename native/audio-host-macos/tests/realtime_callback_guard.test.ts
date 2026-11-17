@@ -131,7 +131,8 @@ test('CoreAudio callback paths contain no scheduler wake, wait, or lock operatio
   const callback = host.slice(host.indexOf('bool AudioHost::ProcessPlanar('),
     host.indexOf('bool AudioHost::ProcessRecordingPlanar('))
   expect(callback.length).toBeGreaterThan(0)
-  for (const token of ['ResetPreparedSchedule(', '.Reset(', 'schedule_banks =', 'std::move(', 'delete ']) {
+  // The attachment map belongs to the control thread; the callback reads per-bank published totals instead.
+  for (const token of ['ResetPreparedSchedule(', '.Reset(', 'schedule_banks =', 'std::move(', 'delete ', 'native_vst_attachments', 'PublishAutomationCredits(']) {
     expect(callback).not.toContain(token)
   }
   expect(callback).toContain('active_schedule_bank.store(')

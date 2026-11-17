@@ -1916,6 +1916,7 @@ struct AudioHost::Impl {
       attachment->automation_banks[bank].buffer_counts = {};
       attachment->automation_banks[bank].epoch.store(epoch, std::memory_order_release);
     }
+    PublishAutomationCredits();
   }
   RealtimeProcessScratch realtime_process_scratch{};
   bool graph_prepared = false;
@@ -2019,7 +2020,7 @@ struct AudioHost::Impl {
       [](const auto& entry) { return entry.second.release_requested; }), std::memory_order_release);
   }
   std::unordered_map<std::string, std::unique_ptr<NativeVstWorkerAttachment>> native_vst_attachments;
-  std::atomic<std::uint32_t> automation_credit_total{0};
+  std::array<std::atomic<std::uint32_t>, 2> automation_credit_totals{};
   // Set while the workers run, so an instance added to a live graph starts at once.
   std::optional<daw::plugin_host::WorkerProcessSetup::Mode> native_worker_mode;
   static constexpr std::size_t kMaximumParkedNativeVsts = 4;
@@ -2469,19 +2470,21 @@ struct AudioHost::Impl {
     }
     PublishAutomationCredits();
   }
-  // The schedule thread reads this total instead of walking the attachment map, which only the
-  // control thread may touch. Called by the control thread after anything that changes the map,
-  // an attachment's used segment count, or the active bank.
+  // The schedule thread reads the total of the active bank instead of walking the attachment
+  // map, which only the control thread may touch. Both banks are kept current so the realtime
+  // bank flip publishes nothing. Called by the control thread after anything that changes the
+  // map or an attachment's used segment count.
   void PublishAutomationCredits() {
-    std::uint32_t credits = 0;
-    const auto bank = active_schedule_bank.load(std::memory_order_acquire);
-    for (const auto& [instance_id, attachment] : native_vst_attachments) {
-      static_cast<void>(instance_id);
-      const auto& automation = attachment->automation_banks[bank];
-      const auto capacity = static_cast<std::uint32_t>(automation.segments[0].size());
-      credits += capacity - std::min(automation.count.load(std::memory_order_acquire), capacity);
+    for (std::uint32_t bank = 0; bank < automation_credit_totals.size(); ++bank) {
+      std::uint32_t credits = 0;
+      for (const auto& [instance_id, attachment] : native_vst_attachments) {
+        static_cast<void>(instance_id);
+        const auto& automation = attachment->automation_banks[bank];
+        const auto capacity = static_cast<std::uint32_t>(automation.segments[0].size());
+        credits += capacity - std::min(automation.count.load(std::memory_order_acquire), capacity);
+      }
+      automation_credit_totals[bank].store(credits, std::memory_order_release);
     }
-    automation_credit_total.store(credits, std::memory_order_release);
   }
   // The prepared revision became the active plan: staged instances it bound are now
   // active, and a staged instance it could not bind (not ready) is retired.
@@ -5449,7 +5452,8 @@ std::optional<ScheduleProgress> AudioHost::DrainScheduleProgress() {
       Impl::kSourceQueueCapacity,
       source_write - source_read
     ),
-    .automation_credits = impl_->automation_credit_total.load(std::memory_order_acquire),
+    .automation_credits = impl_->automation_credit_totals[impl_->active_schedule_bank.load(std::memory_order_acquire)]
+      .load(std::memory_order_acquire),
     .processor_patch_resolved_token = impl_->last_reported_patch.token,
     .processor_patch_resolved_result = impl_->last_reported_patch.result,
   };
@@ -5878,7 +5882,6 @@ bool AudioHost::ProcessPlanar(
         if (requested_frame != 0) {
           impl_->active_schedule_bank.store(
             1U - impl_->active_schedule_bank.load(std::memory_order_relaxed), std::memory_order_release);
-          impl_->PublishAutomationCredits();
         }
         impl_->acceptance_publication_frame.store(impl_->applied_transport_frame.load(std::memory_order_relaxed));
         impl_->acceptance_publication_epoch.store(impl_->completed_render_epoch.load(std::memory_order_relaxed));

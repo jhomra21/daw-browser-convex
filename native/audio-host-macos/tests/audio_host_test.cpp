@@ -6135,8 +6135,9 @@ void TestParkingIsBoundedByCountAndAge() {
   host.Stop();
 }
 
-// The schedule thread drains progress while the command thread attaches, supersedes and reclaims instances; the
-// drain must not read the attachment map the command thread is editing (a ThreadSanitizer build reports it).
+// The schedule thread drains progress and the callback thread flips the schedule bank while the command thread
+// attaches, supersedes and reclaims instances; neither may read the attachment map the command thread is editing
+// (a ThreadSanitizer build reports it). Each round publishes a revision at a frame, which flips the bank.
 void TestScheduleProgressDrainsWhileAttachmentsChange() {
   const NoPluginWorkers no_plugin;
   daw::audio_host_macos::AudioHost host;
@@ -6148,12 +6149,61 @@ void TestScheduleProgressDrainsWhileAttachmentsChange() {
       if (host.DrainScheduleProgress()) drained.fetch_add(1, std::memory_order_relaxed);
     }
   });
+  // The callback thread renders only the blocks the command thread asks for, so a publication lands on its exact frame.
+  constexpr unsigned kStopRendering = std::numeric_limits<unsigned>::max();
+  std::atomic<unsigned> blocks_due{0};
+  std::atomic<unsigned> blocks_rendered{0};
+  std::thread callback_thread([&] {
+    unsigned rendered = 0;
+    for (;;) {
+      blocks_due.wait(rendered);
+      const auto due = blocks_due.load();
+      if (due == kStopRendering) return;
+      for (; rendered < due; ++rendered) RenderBlock(host);
+      blocks_rendered.store(rendered);
+      blocks_rendered.notify_one();
+    }
+  });
+  unsigned requested = 0;
+  const auto request_blocks = [&](const unsigned count) {
+    requested += count;
+    blocks_due.store(requested);
+    blocks_due.notify_one();
+  };
+  const auto wait_for_blocks = [&] {
+    for (auto seen = blocks_rendered.load(); seen != requested; seen = blocks_rendered.load()) blocks_rendered.wait(seen);
+  };
+  std::uint64_t scheduled_through = 0;
   for (unsigned round = 0; round < 300; ++round) {
+    const auto revision = 3 + round;
+    const auto progress = host.InspectGraphRevision(revision - 1).progress_frame;
+    const auto frame = progress + 8;
+    assert(host.PrepareGraphRevision(revision, GraphSnapshot(revision, 1.0F, 0), frame).code
+      == GraphRevisionStatusCode::kPrepared);
+    // Publication needs the active bank scheduled up to the seam and the prepared bank one block past it.
+    assert(host.QueueScheduleWindow(ScheduleWindow(revision - 1, 1, 2 * round + 1, scheduled_through, frame, 0, 1, false)));
+    auto prepared_window = ScheduleWindow(revision, 1, 2 * round + 2, frame, frame + 8, 0, 1, false);
+    WriteLeU32(prepared_window, 60, revision);
+    WriteLeU32(prepared_window, 64, static_cast<std::uint32_t>(frame));
+    assert(host.QueueScheduleWindow(prepared_window));
+    const std::array<std::uint8_t, 4> empty{};
+    assert(host.ConfigureInstrumentStates(empty));
+    assert(host.PublishGraphRevision(revision, frame).code == GraphRevisionStatusCode::kPublishPending);
+    request_blocks(3);
     const auto id = "b0c4db1e-bd48-46d4-a4bc-" + std::to_string(100000000000ULL + round);
     assert(host.AttachNativeVst(PlaybackVstAttachment(id, 2)));
     assert(host.DetachVstReference(id));
-    RenderBlock(host);
+    wait_for_blocks();
+    assert(host.InspectGraphRevision(revision).code == GraphRevisionStatusCode::kPublished);
+    while (host.RetireGraphRevision(revision - 1).code != GraphRevisionStatusCode::kRetired) {
+      request_blocks(1);
+      wait_for_blocks();
+    }
+    scheduled_through = frame + 8;
   }
+  blocks_due.store(kStopRendering);
+  blocks_due.notify_one();
+  callback_thread.join();
   stop.store(true, std::memory_order_release);
   schedule_thread.join();
   assert(drained.load() > 0);
@@ -6623,7 +6673,6 @@ int main() {
     TestParkingIsBoundedByCountAndAge();
     return 0;
   }
-  if (std::getenv("DAW_AE08_CREDIT_RACE_ONLY")) { TestScheduleProgressDrainsWhileAttachmentsChange(); return 0; }
   if (const auto* mode = std::getenv("DAW_AE08_OBSERVATION_ONLY")) {
     TestCheckpoint4ObservationHandoff(*mode); return 0;
   }
@@ -6659,7 +6708,6 @@ int main() {
   for (const char failure : {'a', 'b', 'c', 'd', 'e', 'f'}) TestCheckpoint3Assets(failure);
   TestCheckpoint3StagedInstrumentAssets();
   TestReleasedAssetReclaimsAfterOneEpochWithNoPreparedBank();
-  if (std::getenv("DAW_AE08_REJECTED_BATCH_ONLY")) { TestRejectedInstrumentBatchKeepsPendingAssetRetirement(); return 0; }
   TestRejectedInstrumentBatchKeepsPendingAssetRetirement();
   TestCheckpoint2SaturatedNoteOffSeam();
   TestCheckpoint2SaturatedNoteOffSeam(true);

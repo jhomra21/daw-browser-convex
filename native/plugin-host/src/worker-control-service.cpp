@@ -141,10 +141,15 @@ bool WorkerControlService::SetState(const WorkerState& state) {
   return running_.load(std::memory_order_acquire) && runtime_.SetState(state);
 }
 
-std::optional<WorkerState> WorkerControlService::GetState(const std::span<const WorkerTransportEvent> pendingParameters) {
+bool WorkerControlService::FlushParameters(const std::span<const WorkerTransportEvent> events) {
+  std::lock_guard lock(control_mutex_);
+  return running_.load(std::memory_order_acquire) && runtime_.FlushParameters(events);
+}
+
+std::optional<WorkerState> WorkerControlService::GetState() {
   std::lock_guard lock(control_mutex_);
   if (!running_.load(std::memory_order_acquire)) return std::nullopt;
-  return runtime_.GetState(pendingParameters);
+  return runtime_.GetState();
 }
 
 WorkerHealth WorkerControlService::health() const noexcept {

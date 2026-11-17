@@ -384,10 +384,17 @@ bool WorkerRuntime::SetState(const WorkerState& state) {
   return true;
 }
 
-std::optional<WorkerState> WorkerRuntime::GetState(const std::span<const WorkerTransportEvent> pendingParameters) {
+bool WorkerRuntime::FlushParameters(const std::span<const WorkerTransportEvent> events) {
   if (!transport_ || responseReadDescriptor_ < 0
-    || !WriteWorkerControlCommand(controlWriteDescriptor_, WorkerControlCommand::kStateGet)
-    || !WriteWorkerParameterEvents(controlWriteDescriptor_, pendingParameters)) return std::nullopt;
+    || !WriteWorkerControlCommand(controlWriteDescriptor_, WorkerControlCommand::kParametersFlush)
+    || !WriteWorkerParameterEvents(controlWriteDescriptor_, events)) return false;
+  const auto response = ReadWorkerEditorResponse(responseReadDescriptor_);
+  return response && response->success;
+}
+
+std::optional<WorkerState> WorkerRuntime::GetState() {
+  if (!transport_ || responseReadDescriptor_ < 0
+    || !WriteWorkerControlCommand(controlWriteDescriptor_, WorkerControlCommand::kStateGet)) return std::nullopt;
   return ReadWorkerState(responseReadDescriptor_);
 }
 

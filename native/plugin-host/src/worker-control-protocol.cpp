@@ -346,7 +346,7 @@ std::optional<WorkerControlRequest> ReadWorkerControlCommand(const int fileDescr
   CommandFrame frame{};
   if (fileDescriptor < 0 || !ReadExactly(fileDescriptor, &frame, sizeof(frame))) return std::nullopt;
   if (frame.command >= static_cast<std::uint32_t>(WorkerControlCommand::kProcess)
-    && frame.command <= static_cast<std::uint32_t>(WorkerControlCommand::kStateGet)
+    && frame.command <= static_cast<std::uint32_t>(WorkerControlCommand::kParametersFlush)
     && frame.hasAnchor <= 1) {
     return WorkerControlRequest{
       .command = static_cast<WorkerControlCommand>(frame.command),

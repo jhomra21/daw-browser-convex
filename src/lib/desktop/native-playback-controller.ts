@@ -10,9 +10,7 @@ import {
 import {
   mapNativeSessionAssets,
   serializeNativeGraph,
-  serializeNativeProcessorStatePatch,
   nativeProcessorLatencyForState,
-  nativeProcessorLayoutsForState,
   nativeProcessorOutputLayoutForState,
   serializeNativeInstrumentStates,
   serializeNativeInstrumentEvents,
@@ -56,7 +54,7 @@ import type {
 } from "~/lib/live-playback-snapshot"
 import type { importNativeRecordingSpool } from "~/lib/recording/native-spool-importer"
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
-import type { DesktopBridge, NativeDeliveryReply, NativeProcessorPatchReply } from "~/types/desktop-bridge"
+import type { DesktopBridge, NativeDeliveryReply } from "~/types/desktop-bridge"
 import { clearInstanceLimits, clearVstInstanceFailures, markVstInstanceFailed, setInstanceLimits } from "./vst-instance-failures"
 import { nativeVst3LaunchAuthorizationRequiredMessage } from "~/lib/external-plugin-ui"
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
@@ -92,8 +90,6 @@ import {
   type DispatchExecution,
   type ExecutionRetention,
   type InstalledContent,
-  type PatchExecution,
-  type PatchReply,
   type ProcessorReconcile,
   type ProcessorDesired,
   type Receipt,
@@ -117,6 +113,7 @@ import {
   type ScheduleRevisionCandidate,
   type ScheduleSession,
 } from "./native-schedule-publication"
+import { createNativeStatePatches } from "./native-state-patches"
 import { createNativeLiveMidi } from "./native-live-midi"
 import { createNativeObservation } from "./native-observation"
 import { createNativeRecording } from "./native-recording-session"
@@ -633,7 +630,7 @@ export const createNativePlaybackController = (input: {
   const processorState = createNativeProcessorStateOwner<ScheduleRevisionCandidate>({
     onTerminal: () => {
       executeReconcile(processorState.reoffer())
-      void drainStatePatches()
+      void statePatches.drain()
     },
     // One notice per incident: later failures join it, and a new one notifies only after it closed.
     reportIncident: (category, targets) => reportFault(
@@ -653,6 +650,17 @@ export const createNativePlaybackController = (input: {
       || live?.kindId !== edit.target.kindId
       || live.incarnation !== edit.target.incarnation
   }
+  const statePatches = createNativeStatePatches({
+    bridge: input.bridge,
+    processorState,
+    session: () => ({ prepared, sampleRate, graph: preparedGraph, snapshot: preparedSnapshot }),
+    setPreparedGraph: (graph) => { preparedGraph = graph },
+    isRetiredTarget,
+    executeReconcile: (reconcile) => executeReconcile(reconcile),
+    outstandingOperation: () => outstandingOperation(),
+    requestLatencyPublication: () => requestLatencyPublication(),
+    queueTransition: (task) => queuePreparedTransportTransition(task),
+  })
   const isScheduleCandidateValid = (candidate: ScheduleRevisionCandidate) =>
     candidate.previous === preparedSnapshot
   // The ledger is the only source of desired content: the host's effective
@@ -825,7 +833,6 @@ export const createNativePlaybackController = (input: {
   let preparedTransportTransitionGeneration = 0
   let loopUpdateSequence = 0
   let pendingLoopUpdates = 0
-  let drainingStatePatches = false
   const liveMidi = createNativeLiveMidi({
     bridge: input.bridge,
     state: () => ({
@@ -1068,7 +1075,7 @@ export const createNativePlaybackController = (input: {
     // lane send again and every target that waited for it be reconciled.
     const resolved = progress.processorPatchResolved
     if (resolved) executeReconcile(processorState.resolution(BigInt(resolved.token), resolved.result))
-    if (processorState.hasQueuedPatch()) void drainStatePatches()
+    if (processorState.hasQueuedPatch()) void statePatches.drain()
     const held = processorState.retirement()
     if (progress.epoch === transportEpoch && held) {
       const point = held.readerPoint
@@ -2694,7 +2701,7 @@ export const createNativePlaybackController = (input: {
       const kind = failure.kind === "unconfirmed" ? "uncertain" : outstandingOperation() ? "transient" : "definite"
       const action = processorState.refuse(execution, kind)
       if (action === "retry") void sendExecution({ ...resendRequest(execution), resent: execution }, true)
-      else if (action === "ladder") void drainStatePatches()
+      else if (action === "ladder") void statePatches.drain()
       executeReconcile(processorState.settledReconciles())
       return
     }
@@ -2805,7 +2812,7 @@ export const createNativePlaybackController = (input: {
       instrument: content.instrument, preparedInstrument: content.preparedInstrument,
     })
     let sent: Promise<number | undefined> = Promise.resolve(undefined)
-    if (plan.carrier === "patch") void drainStatePatches()
+    if (plan.carrier === "patch") void statePatches.drain()
     else if (plan.carrier === "parameters" || plan.carrier === "urgent") {
       if (plan.values.size === 0) processorState.answer(receipt, { state: "refused", reason: "unsupported" })
       else sent = sendExecution({
@@ -2849,7 +2856,7 @@ export const createNativePlaybackController = (input: {
   // adoption or settlement.
   const executeReconcile = (reconcile: readonly ProcessorReconcile[]) => {
     for (const item of reconcile) {
-      if ("patch" in item) void drainStatePatches()
+      if ("patch" in item) void statePatches.drain()
       else if ("resend" in item) void sendExecution({ ...resendRequest(item.resend), resent: item.resend }, true)
       else {
         const { desired: processor, values } = item
@@ -3360,7 +3367,7 @@ export const createNativePlaybackController = (input: {
         owned: () => generation === lifecycleGeneration && prepared && !hasNativeHostConnectionLoss()
           && preparedProjectId === projectId,
         transportEpoch: () => transportEpoch,
-        runNextStatePatch,
+        runNextStatePatch: statePatches.runNext,
         queueTransition: queuePreparedTransportTransition,
         releaseInstrumentScope,
         logFailedAdoption,
@@ -3497,7 +3504,7 @@ export const createNativePlaybackController = (input: {
       disposeKept(start.dispose)
       const { outcome, content } = await runAdoption(start.attempt)
       processorState.settleAdoption(start.attempt, outcome, content)
-      void drainStatePatches()
+      void statePatches.drain()
       // An edit adopted while no transport runs has no window for its bank: the priming its publication started
       // settles before the next adoption.
       if (outcome.status === "adopted") await pausedPriming
@@ -3609,117 +3616,6 @@ export const createNativePlaybackController = (input: {
       }
     })()
   }
-  // The typed reply of one patch send. The answer decides nothing here: the ledger's fence and policy do.
-  const patchReplyOf = (reply: NativeProcessorPatchReply): PatchReply => {
-    if (!reply.ok) return reply.kind === "refused" ? { kind: "refused", refusal: "native-refused", transient: false } : { kind: reply.kind }
-    switch (reply.outcome) {
-      case "applied": return { kind: "applied" }
-      case "claimed": return { kind: "claimed", token: BigInt(reply.token) }
-      case "refused": {
-        if (reply.refusal === "unavailable") return { kind: "unavailable" }
-        // A refusal over a prepare, a publication or a transition this controller has outstanding is offered again at
-        // that operation's end; with none outstanding it is definite.
-        const transient = (reply.refusal === "preparing" || reply.refusal === "stale-revision") && outstandingOperation()
-        return { kind: "refused", refusal: reply.refusal, transient, ...(reply.token !== undefined && { token: BigInt(reply.token) }) }
-      }
-    }
-  }
-  const runBuiltInStatePatch = async ({ execution, desired: materialized }: { execution: PatchExecution; desired: ProcessorDesired }) => {
-    // A patch that was never sent: its requests are answered and the ledger takes its desired back.
-    const unsent = (outcome?: ProcessorDeliveryOutcome) => executeReconcile(processorState.abandon(execution, outcome))
-    const bridge = input.bridge
-    if (!bridge || !prepared || !preparedGraph || !preparedSnapshot) return unsent()
-    const queueProcessorStatePatch = bridge.session.queueProcessorStatePatch
-    const { instanceId } = materialized.target
-    if (isRetiredTarget(execution.edit, instanceId)) return executeReconcile(processorState.cancel(execution, true))
-    const graph = preparedGraph
-    const match = resolveGraphProcessor(graph, instanceId)
-    if (!match) return unsent()
-    const { state } = materialized.content
-    const layouts = nativeProcessorLayoutsForState(match.node, instanceId, state)
-    if (!layouts || materialized.bypassed !== match.processor.bypassed
-      || layouts.output !== nativeProcessorLayoutsForState(match.node, instanceId, match.processor.state)?.output) {
-      return unsent({ state: "refused", reason: "unsupported" })
-    }
-    if (nativeProcessorLatencyForState(match.processor, state) !== match.processor.latencyFrames) {
-      // The publication folds the ledger, which holds this patch's newest content, and settles its record. A transport
-      // that cancels it requeues the record, which can be dispatched again before this answer: only this dispatch acts.
-      const { attempt } = execution
-      void requestLatencyPublication().then(result => {
-        if (!result.handled && execution.attempt === attempt && execution.state !== "cancelled" && execution.state !== "applied")
-          executeReconcile(result.reason === "unprepared"
-            ? processorState.abandon(execution)
-            : processorState.patchReplied(execution, { kind: "refused", refusal: "stage-failed", transient: false }))
-      })
-      return
-    }
-    if (!queueProcessorStatePatch) return unsent()
-    const patch = serializeNativeProcessorStatePatch({
-      graphRevision: graph.revision,
-      nodeId: match.node.id,
-      instanceId: match.processor.instanceId,
-      kindId: match.processor.kindId,
-      stateVersion: match.processor.stateVersion,
-      state,
-      bypassed: match.processor.bypassed,
-      inputLayout: layouts.input,
-      outputLayout: layouts.output,
-      parameterTargets: [...match.parameterTargets.values()],
-      latencyFrames: match.processor.latencyFrames,
-      tailFrames: materialized.tailFrames,
-    })
-    const reply = await queueProcessorStatePatch(patch).catch((error): NativeProcessorPatchReply => ({
-      ok: false,
-      kind: "unconfirmed",
-      error: error instanceof Error ? error.message : "Native built-in processor state patch failed.",
-    }))
-    if (reply.ok && reply.outcome === "applied" && preparedGraph) {
-      preparedGraph = {
-        ...preparedGraph,
-        nodes: preparedGraph.nodes.map((node) => ({
-          ...node,
-          processorOrder: node.processorOrder.map((processor) => {
-            if (processor.id !== instanceId) return processor
-            const { tailKind: _tailKind, ...withoutTailKind } = processor
-            return { ...withoutTailKind, state: state.slice(), tailFrames: materialized.tailFrames,
-              ...(materialized.tailKind && { tailKind: materialized.tailKind }) }
-          }),
-        })),
-      }
-    }
-    executeReconcile(processorState.patchReplied(execution, patchReplyOf(reply)))
-  }
-
-  // Native refuses a patch while a core is prepared (audio-host.cpp:3150). The lane serializes this controller's own
-  // prepare, publish and adoption with patches, so the one prepared core a patch can meet is a rolled-back
-  // publication native still holds as publish-pending; every patch waits for its owner's terminal. One
-  // that changes latency also waits while an adoption attempt runs: it folds the latest desired content into its own
-  // seam, and the lane would otherwise publish a revision against it. A retained candidate left by a refusal holds nothing.
-  const runNextStatePatch = async () => {
-    const next = processorState.nextPatch((desired) => {
-      if (processorState.publication()) return undefined
-      const match = preparedGraph && resolveGraphProcessor(preparedGraph, desired.target.instanceId)
-      const pending = processorState.compiling() || processorState.adoptionRunning()
-      if (pending && !!match
-        && nativeProcessorLatencyForState(match.processor, desired.content.state) !== match.processor.latencyFrames) return undefined
-      // Its parameters give the enabled flag and tail at the tempo now, not those of the edit it was queued for.
-      return preparedSnapshot ? timedProcessorDesired(desired, sampleRate, preparedSnapshot.bpm) : desired
-    })
-    if (!next) {
-      drainingStatePatches = false
-      return false
-    }
-    await runBuiltInStatePatch(next)
-    return true
-  }
-  // `nextPatch` runs in the lane task that sends what it returns: nothing is sent between the content it picks and
-  // the send. The flag is cleared in the task that finds nothing, so a patch queued after it starts a new drain.
-  const drainStatePatches = async () => {
-    if (drainingStatePatches) return
-    drainingStatePatches = true
-    while (await queuePreparedTransportTransition(runNextStatePatch)) continue
-  }
-
   const currentPositionSec = () => {
     if (sampleRate <= 0) return undefined
     const loop = preparedSnapshot && loopAppliesAtTransportPosition

@@ -1,4 +1,3 @@
-import type { ParameterSaveResult } from "./parameter-gesture-owner";
 const fixtureApply = <Params,>(apply: (target: string, params: Params) => void | EngineDisposition | Promise<void | EngineDisposition>) =>
   async (target: string, params: Params): Promise<EngineDisposition> => (await apply(target, params)) ?? "applied";
 const fixtureSave = <Params,>(save: (target: string, params: Params, context: { projectId?: string; userId?: string; projectGeneration?: number }) => void | ParameterSaveResult | Promise<void | ParameterSaveResult>) =>
@@ -10,6 +9,7 @@ import { createDefaultUtilityParams } from "@daw-browser/shared";
 import * as outbox from "~/lib/shared-outbox";
 import { batch, createRoot, createSignal } from "solid-js";
 import { createPersistedEffectState } from "./create-persisted-effect-state";
+import { effectAdmission, type ParameterSaveResult } from "./effect-publication-result";
 import { flushRegisteredLocalProjectWrites } from "~/lib/local-project-write-flushers";
 import { createParameterGestureOwner, ParameterGestureHolder, ParameterReleaseFailedError } from "./parameter-gesture-owner";
 import { SampledInstrumentSyncSupersededError } from "~/lib/sampled-instrument-sync-error";
@@ -55,6 +55,7 @@ test("H5 reinstall-before-row acknowledges already-installed observation", async
   const owner = createRoot(end => {
     dispose = end;
     return createParameterGestureOwner<string, number>({
+      admission: effectAdmission,
       key: target => target, scope: () => ({ projectId: "p", generation: 0 }),
       exists: () => true, canWrite: () => true, equal: (_target, a, b) => a === b,
       initial: () => 1, committed: () => 1, rowsReachEngine: () => true,
@@ -82,6 +83,7 @@ test("an equal repeated initial row observation does not cancel its queued insta
   const owner = createRoot(end => {
     dispose = end;
     return createParameterGestureOwner<string, number>({
+      admission: effectAdmission,
       key: target => target, scope: () => ({ projectId: "p", generation: 0 }),
       exists: () => true, canWrite: () => true, equal: (_target, a, b) => a === b,
       initial: () => 1, committed: () => 1, rowsReachEngine: () => true,
@@ -111,6 +113,7 @@ const createRowOwner = (hooks: {
   const owner = createRoot(end => {
     dispose = end;
     return createParameterGestureOwner<string, number>({
+      admission: effectAdmission,
       key: target => target, scope: hooks.scope ?? (() => ({ projectId: "p", generation: 0 })),
       exists: () => true, canWrite: () => true, equal: (_target, a, b) => a === b,
       initial: () => 1, committed: () => 1, rowsReachEngine: () => true,
@@ -214,6 +217,7 @@ test("H5 control preview cancel and reinstall restores committed content", async
   const owner = createRoot(end => {
     dispose = end;
     return createParameterGestureOwner<string, number>({
+      admission: effectAdmission,
       key: target => target, scope: () => ({ projectId: "p", generation: 0 }),
       exists: () => true, canWrite: () => true, equal: (_target, a, b) => a === b,
       initial: () => 1, committed: () => 1, rowsReachEngine: () => true,
@@ -280,6 +284,7 @@ test("H6 thrown apply leaves no installation knowledge for the previous value", 
   const owner = createRoot(end => {
     dispose = end;
     return createParameterGestureOwner<string, number>({
+      admission: effectAdmission,
       key: target => target, scope: () => ({ projectId: "p", generation: 0 }),
       exists: () => true, canWrite: () => true, equal: (_target, a, b) => a === b,
       initial: () => 1, committed: () => 1, rowsReachEngine: () => true,
@@ -312,6 +317,7 @@ test("a failed repair reaches the next flush without a second user notice", asyn
   const owner = createRoot(end => {
     dispose = end;
     return createParameterGestureOwner<string, number>({
+      admission: effectAdmission,
       key: target => target, scope: () => ({ projectId: "p", generation: 0 }),
       exists: () => true, canWrite: () => true, equal: (_target, a, b) => a === b,
       initial: () => 1, committed: () => 1, rowsReachEngine: () => true,
@@ -370,6 +376,7 @@ test("3B1 r2 preserves a settlement wake during a pending durable read", async (
     const owner = createRoot(end => {
       dispose = end;
       return createParameterGestureOwner<string, number>({
+        admission: effectAdmission,
         key: value => value, scope: () => ({ projectId, userId, generation: 0 }),
         exists: () => true, canWrite: () => true, equal: (_target, a, b) => a === b,
         initial: () => 0, committed: () => 0, apply: () => "applied",
@@ -386,7 +393,7 @@ test("3B1 r2 preserves a settlement wake during a pending durable read", async (
     held.resolve();
     const report = await owner.flushPending();
     expect({ admitted: report.admitted.length, history }).toEqual({ admitted: 0, history: [1] });
-    expect(await read(projectId, userId, admission.entryId)).toEqual({ status: "missing" });
+    expect(await read(projectId, userId, admission.entryId)).toMatchObject({ status: "applied" });
     expect(reader.mock.calls.length).toBeGreaterThanOrEqual(2);
   } finally {
     held.resolve();

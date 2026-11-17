@@ -54,14 +54,9 @@ import type { NativeBuiltInParameterPayload } from "~/lib/desktop/native-built-i
 import { isAbortError } from "~/lib/dom-errors";
 import { createAudioEffectParameterPayload } from "~/components/timeline/audio-effect-parameter-payload";
 import { createAudioEffectInstanceIdentityCache } from "~/components/timeline/create-effects-panel-instance-identity-cache";
-import { createParameterGestureOwner, parameterSaveResult, type ParameterDrain, type ParameterGestureHandle, type ParameterSaveResult } from "~/components/timeline/parameter-gesture-owner";
+import { createParameterGestureOwner, type ParameterDrain, type ParameterGestureHandle } from "~/components/timeline/parameter-gesture-owner";
+import { effectAdmission, parameterSaveResult, type ParameterSaveResult } from "~/components/timeline/effect-publication-result";
 import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery } from "~/lib/live-processor-control";
-
-export const publishEffectOperation = async (
-  projectId: string,
-  userId: string,
-  operation: SharedTimelineOperation,
-) => await publishDurableEffectsOperation({ projectId, userId, operation });
 
 export const registerAudioEffectCardInteractionCleanup = (input: {
   audioEffects: Accessor<{ interruptGesture: (instanceId: string, targetId?: string) => void }>;
@@ -206,7 +201,7 @@ export function createEffectsPanelAudioDevice(
     userId: string,
     operation: SharedTimelineOperation,
   ) => {
-    const publication = await publishEffectOperation(projectId, userId, operation);
+    const publication = await publishDurableEffectsOperation({ projectId, userId, operation });
     if (publication.kind === "rejected") throw new Error(publication.reason);
     return publication;
   };
@@ -789,6 +784,7 @@ export function createEffectsPanelAudioDevice(
     apply: (target, params, edit) => (context.usesLegacyAudioEngine?.() ?? true) ? applyToEngine(target, params) : edit ? context.applyPortableProcessor?.(edit) : undefined,
     registerDelivery: (_target, _params, edit, gesture) => !(context.usesLegacyAudioEngine?.() ?? true) && edit ? context.deliverProcessor?.(edit, gesture) : undefined,
     persist: (record) => persistInstanceParams(record.lifetime.projectId, record.lifetime.userId, record.target.targetId, record.target.instanceId, record.target.kind, record.latest),
+    admission: effectAdmission,
     history: (record) => {
       const { targetId, instanceId, kind } = record.target;
       // The owner history callback is synchronous; completion reports through the existing error boundary.

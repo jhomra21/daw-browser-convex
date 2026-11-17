@@ -1,37 +1,13 @@
 import { batch, createEffect, createMemo, createSignal, getListener, on, onCleanup, untrack, type Accessor } from "solid-js";
 import type { EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery } from "~/lib/live-processor-control";
-import { consumeSharedOutboxCompletion, readSharedOutboxOperation, subscribeToSharedOutboxSettlements, type DurableEffectsPublication } from "~/lib/shared-outbox";
-import { decodeEffectsOperationResult } from "~/lib/shared-timeline-operations-api";
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
-import { z } from "zod";
-
-const decodedEffectsResult = z.object({
-  status: z.literal("applied"), effectId: z.string(),
-  revision: z.union([z.object({ kind: z.literal("committed-unordered") }), z.object({ kind: z.literal("ordered"), revision: z.number().int().positive() })]),
-});
+import type { EffectAdmission, ParameterSaveResult } from "~/components/timeline/effect-publication-result";
 
 export class ParameterGestureHolder {}
 export type GestureScope = { projectId: string | undefined; generation: number; userId?: string };
 export type GestureLifetime = GestureScope & { incarnation: number };
 export type ApplyPhase = "preview" | "final" | "row";
-export type ParameterSaveResult =
-  | { kind: "committed"; through: number }
-  | { kind: "committed-unordered" }
-  | { kind: "admitted"; entryId: string }
-  | { kind: "rejected"; reason: string };
-
-export const parameterSaveResult = (result: DurableEffectsPublication | { row: object; sequence: number }): ParameterSaveResult => {
-  if ("sequence" in result) return { kind: "committed", through: result.sequence };
-  if (result.kind !== "applied") return result;
-  const alreadyDecoded = decodedEffectsResult.safeParse(result.result);
-  const decoded = alreadyDecoded.success ? alreadyDecoded.data : decodeEffectsOperationResult(result.result);
-  if (decoded.status === "invalid") return { kind: "rejected", reason: "The effect target no longer exists." };
-  return decoded.revision.kind === "ordered"
-    ? { kind: "committed", through: decoded.revision.revision }
-    : { kind: "committed-unordered" };
-};
-
 export type ParameterDrain<Target> = {
   unanswered: Array<{ target: Target; receipt: DeliveryRegistration["receipt"] }>;
   admitted: Array<{ target: Target; entryId: string }>;
@@ -64,6 +40,7 @@ type ParameterGestureAdapter<Target, Params> = {
   rowRemoved?: (target: Target) => void | Promise<void>;
   clear?: (target: Target) => void | Promise<void>;
   persist: (record: ReleaseRecord<Target, Params>) => Promise<ParameterSaveResult>;
+  admission: EffectAdmission;
   history: (record: ReleaseRecord<Target, Params>) => void;
   retired?: (key: string) => void;
   announce?: (record: ReleaseRecord<Target, Params>) => void | Promise<void>;
@@ -325,30 +302,24 @@ export function createParameterGestureOwner<Target, Params>(adapter: ParameterGe
         // read. Quiesce without polling, and keep one reader for this echo.
         while (true) {
           pending.woken = false;
-          const result = await readSharedOutboxOperation(projectId, userId, write.entryId);
+          const result = await adapter.admission.read(projectId, userId, write.entryId);
           if (!live(record.key, record.lifetime) || echo.write !== write) return;
-          if (result.status === "pending") {
+          if (result === undefined) {
             if (pending.woken) continue;
             return;
           }
-          if (result.status === "rejected") {
+          if (result.kind === "rejected") {
             forgetEcho(record.key, echo);
-            await repairFailure(record, "persist", new Error(result.lastError ?? "The effect could not be saved."));
+            await repairFailure(record, "persist", new Error(result.reason));
             reconcileObservation(record.key);
             return;
           }
-          if (result.status === "applied") echo.write = parameterSaveResult({ kind: "applied", entryId: write.entryId, result: result.result });
-          else echo.write = { kind: "committed-unordered" };
+          echo.write = result;
           subscriptions.get(echo)?.();
           subscriptions.delete(echo);
-          if (echo.write.kind === "rejected") {
-            forgetEcho(record.key, echo);
-            await repairFailure(record, "persist", new Error(echo.write.reason));
-          } else {
-            reconcileObservation(record.key);
-            await historyAndAnnounce(echo);
-            if (result.status === "applied" && live(record.key, record.lifetime)) await consumeSharedOutboxCompletion(projectId, userId, write.entryId);
-          }
+          reconcileObservation(record.key);
+          await historyAndAnnounce(echo);
+          if (live(record.key, record.lifetime)) await adapter.admission.consume(projectId, userId, write.entryId);
           return;
         }
       } catch (cause) {
@@ -393,7 +364,7 @@ export function createParameterGestureOwner<Target, Params>(adapter: ParameterGe
     if (echo.write.kind === "admitted") {
       const { projectId, userId } = record.lifetime;
       if (!projectId || !userId) throw new Error("An admitted effect write requires its captured project and user.");
-      subscriptions.set(echo, subscribeToSharedOutboxSettlements(projectId, userId, () => { void readAdmission(echo); }));
+      subscriptions.set(echo, adapter.admission.subscribe(projectId, userId, () => { void readAdmission(echo); }));
       await readAdmission(echo);
     } else {
       reconcileObservation(record.key);

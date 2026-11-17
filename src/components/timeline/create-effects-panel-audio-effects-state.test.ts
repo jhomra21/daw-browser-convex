@@ -10,7 +10,6 @@ import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-a
 import {
   createEffectsPanelAudioDevice,
   indexFirstAudioEffectRowsByKind,
-  publishEffectOperation,
   registerAudioEffectCardInteractionCleanup,
 } from "./create-effects-panel-audio-effects-state";
 import { createAudioEffectInstanceIdentityCache } from "./create-effects-panel-instance-identity-cache";
@@ -1054,23 +1053,17 @@ test("effects publication preserves applied, admitted, and rejected outcomes", a
   };
   try {
     publication(200, { status: "applied", effectId: "effect-1", revision: 3 });
-    for (const publish of [
-      (projectId: string) => publishEffectOperation(projectId, "user-1", operation),
-      (projectId: string) => publishEffects(projectId, "user-1", operation),
-    ]) {
-      publication(200, { status: "applied", effectId: "effect-1", revision: 3 });
-      expect(await publish(`publisher-applied-${crypto.randomUUID()}`))
-        .toMatchObject({
-          kind: "applied",
-          result: { status: "applied", effectId: "effect-1", revision: { kind: "ordered", revision: 3 } },
-        });
+    expect(await publishEffects(`publisher-applied-${crypto.randomUUID()}`, "user-1", operation))
+      .toMatchObject({
+        kind: "applied",
+        result: { status: "applied", effectId: "effect-1", revision: { kind: "ordered", revision: 3 } },
+      });
 
-      publication(503, { status: "unavailable" });
-      expect(await publish(`publisher-admitted-${crypto.randomUUID()}`)).toMatchObject({ kind: "admitted" });
+    publication(503, { status: "unavailable" });
+    expect(await publishEffects(`publisher-admitted-${crypto.randomUUID()}`, "user-1", operation)).toMatchObject({ kind: "admitted" });
 
-      publication(403, { status: "forbidden" });
-      expect(await publish(`publisher-rejected-${crypto.randomUUID()}`)).toMatchObject({ kind: "rejected" });
-    }
+    publication(403, { status: "forbidden" });
+    expect(await publishEffects(`publisher-rejected-${crypto.randomUUID()}`, "user-1", operation)).toMatchObject({ kind: "rejected" });
   } finally {
     globalThis.fetch = originalFetch;
   }

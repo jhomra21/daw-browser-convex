@@ -10,6 +10,7 @@ import { isServer } from 'solid-js/web'
 
 import { useTimelinePlayback } from './useTimelinePlayback'
 import { createParameterGestureOwner } from '../components/timeline/parameter-gesture-owner'
+import { effectAdmission } from '../components/timeline/effect-publication-result'
 import { createPendingWorkOwner } from './useEffectsPanelAudioSync'
 import { createSamplerBufferSync } from '~/lib/sampler-buffer-sync'
 import { extractTimelineBindings } from '~/lib/timeline-source-test-support'
@@ -319,6 +320,7 @@ test.each(["announce", "unsupported", "announce+sample"])("3B1 r2 actual playbac
         })
         if (!edit) throw new Error("Missing structural edit")
         const owner = createParameterGestureOwner<string, number>({
+          admission: effectAdmission,
           key: value => value, scope: () => ({ projectId: "project", generation: 0 }),
           exists: () => true, canWrite: () => true, equal: (_target, a, b) => a === b,
           initial: () => 0, committed: () => 0,

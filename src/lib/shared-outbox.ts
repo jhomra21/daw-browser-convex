@@ -52,6 +52,8 @@ type SharedOutboxEntry = {
   userId: string
   payload: LocalProjectStoredValue
   completion?: SharedOutboxCompletion
+  // The publisher reads this entry's result after admission, so a result another drain records waits for it.
+  ownerAwaitsCompletion?: true
   status: SharedOutboxStatus
   attempts: number
   nextAttemptAt: number
@@ -510,6 +512,7 @@ const sharedOutboxEntrySchema = z.object({
   userId: z.string(),
   payload: z.union([z.json(), uploadedAudioClipPayloadSchema]),
   completion: sharedOutboxCompletionSchema.optional(),
+  ownerAwaitsCompletion: z.literal(true).optional(),
   status: z.enum(['pending', 'failed', 'dead-letter', 'completed']),
   attempts: z.number(),
   nextAttemptAt: z.number(),
@@ -537,6 +540,7 @@ const readEntry = (value: LocalProjectStoredValue): SharedOutboxEntry | null => 
     userId: entry.userId,
     payload: entry.payload,
     completion: entry.completion,
+    ownerAwaitsCompletion: entry.ownerAwaitsCompletion,
     status: entry.status,
     attempts: entry.attempts,
     nextAttemptAt: entry.nextAttemptAt,
@@ -729,6 +733,7 @@ const enqueueSharedOutboxOperation = async (
     payload: LocalProjectStoredValue
     error?: unknown
     completion?: SharedOutboxCompletion
+    ownerAwaitsCompletion?: true
   },
 ) => {
   const timestamp = now()
@@ -770,6 +775,7 @@ const enqueueSharedOutboxOperation = async (
     userId: input.userId,
     payload: input.payload,
     completion: input.completion,
+    ownerAwaitsCompletion: input.ownerAwaitsCompletion,
     status: permanent ? 'dead-letter' : 'pending',
     attempts: 0,
     nextAttemptAt: timestamp,
@@ -898,12 +904,14 @@ export const publishDurableEffectsOperation = async (
     userId: input.userId,
     kind: input.operation.kind,
     payload: serializeDurableOperationPayload(input.operation.payload),
+    ownerAwaitsCompletion: true,
   })
   try {
-    const flushed = await flushSharedOutboxOperation(input.projectId, input.userId, entry.id)
-    return flushed.status === 'applied'
-      ? { kind: 'applied', result: flushed.result, entryId: entry.id }
-      : { kind: 'admitted', entryId: entry.id }
+    const flushed = await flushSharedOutboxOperation(input.projectId, input.userId, entry.id, { completionOwner: 'caller' })
+    if (flushed.status !== 'applied') return { kind: 'admitted', entryId: entry.id }
+    // Another drain recorded the result before this flush ran; returning it here is the owner's read.
+    if (flushed.completionOwner === 'background') await consumeSharedOutboxCompletion(input.projectId, input.userId, entry.id)
+    return { kind: 'applied', result: flushed.result, entryId: entry.id }
   } catch (error) {
     if (error instanceof SharedOutboxRejectedError) return { kind: 'rejected', entryId: entry.id, reason: error.message }
     throw error
@@ -958,6 +966,7 @@ type SharedOutboxCompletionResult = {
   result: JsonValue
   createdAt: number
   completionOwner: 'background' | 'caller'
+  consumed: boolean
 }
 
 type SharedOutboxOperationResult =
@@ -973,6 +982,7 @@ const sharedOutboxCompletionResultSchema = z.object({
   result: z.json(),
   createdAt: z.number(),
   completionOwner: z.enum(['background', 'caller']).optional(),
+  consumed: z.boolean().optional(),
 })
 
 const readCompletionResult = (value: LocalProjectStoredValue): SharedOutboxCompletionResult | null => {
@@ -982,6 +992,7 @@ const readCompletionResult = (value: LocalProjectStoredValue): SharedOutboxCompl
     result: parsed.data.result,
     createdAt: parsed.data.createdAt,
     completionOwner: parsed.data.completionOwner === 'caller' ? 'caller' : 'background',
+    consumed: parsed.data.consumed !== false,
   }
 }
 
@@ -1089,7 +1100,8 @@ const completeClaimedEntry = async (
   let completed = false
   if (current?.claimToken === entry.claimToken && current.claimOwner === outboxOwner) {
     const timestamp = now()
-    // The count cap is the only collector: a stored result stays the answer until its owner consumes it.
+    // The count cap collects consumed history only: a result its awaiting owner has not read stays the answer.
+    const consumed = !(current.ownerAwaitsCompletion && completionOwner === 'background')
     const completions = await store.getAll(outboxCompletionKeyRange(projectId, entry.userId))
     const stored: { key: string; completion: SharedOutboxCompletionResult }[] = []
     for (const row of completions) {
@@ -1097,13 +1109,15 @@ const completeClaimedEntry = async (
       if (completion) stored.push({ key: row.key, completion })
       else store.delete(row.key)
     }
-    stored.sort((left, right) => left.completion.createdAt - right.completion.createdAt)
-    for (const row of stored.slice(0, Math.max(0, stored.length + 1 - MAX_OUTBOX_COMPLETIONS_PER_USER))) {
+    const history = stored
+      .filter((row) => row.completion.consumed)
+      .sort((left, right) => left.completion.createdAt - right.completion.createdAt)
+    for (const row of history.slice(0, Math.max(0, history.length + (consumed ? 1 : 0) - MAX_OUTBOX_COMPLETIONS_PER_USER))) {
       store.delete(row.key)
     }
     store.put({
       key: completionKeyFor(projectId, entry.userId, entry.id),
-      value: { result, createdAt: timestamp, completionOwner },
+      value: { result, createdAt: timestamp, completionOwner, consumed },
       updatedAt: timestamp,
     })
     if (entry.kind === 'clips.createUploadedAudio') {
@@ -1365,14 +1379,19 @@ export const readSharedOutboxOperation = async (
   return { status: 'pending' }
 }
 
-// The admitting owner deletes a result once it has bound it. A dead-letter row is the user's recovery item and is never touched here.
+// The awaiting owner marks a result read once it has bound it; the next completion's cap may then collect it.
+// A dead-letter row is the user's recovery item and is never touched here.
 export const consumeSharedOutboxCompletion = async (
   projectId: string,
   userId: string,
   operationId: string,
 ) => {
   const db = await openLocalProjectDb(projectId)
-  await db.delete('syncState', completionKeyFor(projectId, userId, operationId))
+  const tx = db.transaction('syncState', 'readwrite')
+  const key = completionKeyFor(projectId, userId, operationId)
+  const completion = readCompletionResult((await tx.store.get(key))?.value)
+  if (completion && !completion.consumed) tx.store.put({ key, value: { ...completion, consumed: true }, updatedAt: now() })
+  await tx.done
 }
 
 export const flushSharedOutboxOperation = async (

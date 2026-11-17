@@ -8,7 +8,8 @@ import path from "node:path"
 import "fake-indexeddb/auto"
 import { batch, createComputed, createRoot, createSignal } from "solid-js"
 import { createPersistedEffectState } from "../../src/components/timeline/create-persisted-effect-state"
-import { createParameterGestureOwner, ParameterGestureHolder, parameterSaveResult, type ParameterSaveResult } from "../../src/components/timeline/parameter-gesture-owner"
+import { createParameterGestureOwner, ParameterGestureHolder } from "../../src/components/timeline/parameter-gesture-owner"
+import { effectAdmission, parameterSaveResult, type ParameterSaveResult } from "../../src/components/timeline/effect-publication-result"
 import type { DeliveryRegistration, ProcessorDeliveryOutcome } from "../../src/lib/live-processor-control"
 import { publishSharedTimelineOperation, decodeEffectsOperationResult } from "../../src/lib/shared-timeline-operations-api"
 import { setLocalEffect, setLocalEffectInstance, listLocalEffects } from "../../src/lib/local-effects"
@@ -1036,6 +1037,7 @@ const runStep3B0Witnesses = async (): Promise<Step3Result[]> => {
     "expected 0; received 1", "Allocate restore before publication and close by gesture token, not replaceEdit", async () => createRoot(async dispose => {
       let order = 0, allocatedValue: number | undefined, publicationBeforeAllocation = false
       const owner = createParameterGestureOwner<string, number>({
+        admission: effectAdmission,
         key: target => target, scope: () => ({ projectId: "project:tokens", generation: 0 }),
         exists: () => true, canWrite: () => true, equal: (_target, a, b) => a === b,
         initial: () => 0, committed: () => 0, apply: () => Promise.resolve("applied"),
@@ -1109,6 +1111,7 @@ const runStep3B0Witnesses = async (): Promise<Step3Result[]> => {
     "Retire the lane once observations and work settle; retain no delivered cache", async () => createRoot(async dispose => {
       let value = 0
       const owner = createParameterGestureOwner<string, number>({
+        admission: effectAdmission,
         key: target => target, scope: () => ({ projectId: "project:retire", generation: 0 }),
         exists: () => true, canWrite: () => true, equal: (_target, a, b) => a === b,
         initial: () => 0, committed: () => value, rowsReachEngine: () => true,
@@ -1401,9 +1404,12 @@ const runStep3B0Witnesses = async (): Promise<Step3Result[]> => {
           const after = await readSharedOutboxOperation(projectId, userId, entry.entryId)
           if (rejects && after.status !== "rejected") throw new Error(`Expected actual durable rejection, got ${after.status}`)
           if (wakes === 0) throw new Error("Real outbox produced no settlement wake")
+          // Consumed results stay as capped history; the stored flag, not absence, shows the owner consumed it once.
+          const stored = (await (await openLocalProjectDb(projectId)).get("syncState", `shared-outbox-completion:${projectId}:${userId}:${entry.entryId}`))?.value
+          const completion = stored === undefined ? "missing" : z.object({ consumed: z.literal(true) }).safeParse(stored).success ? "consumed" : "held"
           await checkpoint()
           return rejects ? sameEvidence([f.histories, f.state.params()], [[], 0])
-            : sameEvidence([f.histories, after.status], [["0->1"], "missing"])
+            : sameEvidence([f.histories, completion], [["0->1"], scenario === "missing-completion" ? "missing" : "consumed"])
         } finally { unsubscribe(); f.dispose(); globalThis.fetch = originalFetch }
       }, scenario.startsWith("foreign-") ? "A second real drain runs after admission; durable read/wake are real, adapter still has no admitted binding contract" : null)
   }

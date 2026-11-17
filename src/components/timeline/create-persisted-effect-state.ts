@@ -5,11 +5,11 @@ import { isAbortError } from '~/lib/dom-errors'
 import type { AudioEngine, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
 import { SampledInstrumentSyncSupersededError } from '~/lib/sampled-instrument-sync-error'
 import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery } from '~/lib/live-processor-control'
+import { effectAdmission, type ParameterSaveResult } from '~/components/timeline/effect-publication-result'
 import {
   createParameterGestureOwner,
   type GestureLifetime,
   type ParameterDrain,
-  type ParameterSaveResult,
   type ParameterGestureHandle,
 } from '~/components/timeline/parameter-gesture-owner'
 
@@ -135,6 +135,7 @@ export function createPersistedEffectState<TRow, TParams>(
     clear: (targetId) => options.clearFromEngine?.(targetId),
     rowRemoved: (targetId) => options.announceRemoved?.(targetId),
     persist: async (record) => options.persistParams(record.target, record.latest, persistContext(record.lifetime)),
+    admission: effectAdmission,
     history: (record) => options.history?.(record.target, record.baseline, record.latest, record.edit, persistContext(record.lifetime)),
     announce: (record) => options.announce?.(record.target, record.latest, record.edit),
     allocateEdit: (targetId, from, to) => {

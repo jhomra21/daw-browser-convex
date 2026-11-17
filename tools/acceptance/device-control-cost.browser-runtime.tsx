@@ -10,7 +10,8 @@ import { ColorModeProvider } from "@kobalte/core";
 import { AudioEngine, type EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { createEffectsPanelAudioDevice } from "~/components/timeline/create-effects-panel-audio-effects-state";
-import { ParameterGestureHolder, parameterSaveResult } from "~/components/timeline/parameter-gesture-owner";
+import { ParameterGestureHolder } from "~/components/timeline/parameter-gesture-owner";
+import { parameterSaveResult } from "~/components/timeline/effect-publication-result";
 import { createNativePlaybackController } from "~/lib/desktop/native-playback-controller";
 import type { DeliveryRegistration } from "~/lib/live-processor-control";
 import {

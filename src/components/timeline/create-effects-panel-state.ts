@@ -7,13 +7,13 @@ import {
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import type { ParameterGestureHandle } from "~/components/timeline/parameter-gesture-owner";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
+import { parameterSaveResult } from "~/components/timeline/effect-publication-result";
 import { createLocalEffectsView } from "~/components/timeline/create-local-effects-view";
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
 import type { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
 import type { NativeInstrumentPreparation } from "~/lib/desktop/native-instrument-budget-policy";
 import type { NativeBuiltInParameterPayload } from "~/lib/desktop/native-built-in-parameter-mapper";
 import { nativeInstrumentContentKey, type DeliveryRegistration, type LiveProcessorEditIdentity, type ProcessorDelivery, type PublicationJoin } from "~/lib/live-processor-control";
-import { parameterSaveResult } from "~/components/timeline/parameter-gesture-owner";
 import { compileLiveNativeInstrumentConfigurations } from "@daw-browser/audio-engine/live-native-projection";
 import { localizeInstrumentFx } from "@daw-browser/audio-engine/portable-export-snapshot";
 import { validateInstrumentBuffers } from "~/lib/live-playback-snapshot";

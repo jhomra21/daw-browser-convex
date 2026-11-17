@@ -28,6 +28,7 @@ import type { NativeProcessorPatchReply } from "~/types/desktop-bridge";
 import { mountStep5Playback, settleStep5Playback } from "./b5c-playback-witness-support";
 import { resolveDesiredPlaybackFx } from "~/lib/export/run-export-job";
 import { createParameterGestureOwner } from "~/components/timeline/parameter-gesture-owner";
+import { effectAdmission } from "~/components/timeline/effect-publication-result";
 
 const root = resolve(import.meta.dir, "../..");
 // Runs only through tools/acceptance/device-control-cost.ts, which sets the raw directory; plain `bun test` skips it.
@@ -741,6 +742,7 @@ for (const spec of step5LiveSpecs) {
     const owner = createRoot(dispose => {
       disposeOwner = dispose;
       return createParameterGestureOwner<string, DelayParams>({
+        admission: effectAdmission,
         key: target => target, scope: () => ({ projectId: `step5-${spec.id}`, generation: 0 }),
         exists: () => true, canWrite: () => true,
         equal: (_target, a, b) => JSON.stringify(a) === JSON.stringify(b),

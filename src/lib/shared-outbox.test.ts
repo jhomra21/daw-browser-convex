@@ -23,6 +23,7 @@ const parseRequestBody = (init: RequestInit | undefined): JsonValue => (
 const volumeOperationSchema = z.object({
   payload: z.object({ volume: z.number() }),
 })
+
 const midiOperationSchema = z.object({
   payload: z.object({
     midi: z.object({
@@ -1179,7 +1180,7 @@ const settleInAnotherTab = async (
   await tx.done
 }
 
-test('an effects publication returns its typed result and keeps it until the owner consumes it', async () => {
+test('an effects publication returns its typed result and its record stays readable as history', async () => {
   const projectId = `outbox-effects-direct-${crypto.randomUUID()}`
   const userId = 'user-1'
   const fetchStub = stubFetch(() => new Response(JSON.stringify(typedResult(4)), { status: 200 }))
@@ -1191,14 +1192,14 @@ test('an effects publication returns its typed result and keeps it until the own
     const duplicate = {
       status: 'applied',
       result: decodedTypedResult(4),
-      completionOwner: 'background',
+      completionOwner: 'caller',
     } satisfies Awaited<ReturnType<typeof outbox.readSharedOutboxOperation>>
     expect(await outbox.readSharedOutboxOperation(projectId, userId, published.entryId)).toEqual(duplicate)
     expect(await outbox.readSharedOutboxOperation(projectId, userId, published.entryId)).toEqual(duplicate)
-    // Binding the result consumes it; consuming twice is harmless.
+    // The publisher already had its result; consuming it again is harmless.
     await outbox.consumeSharedOutboxCompletion(projectId, userId, published.entryId)
     await outbox.consumeSharedOutboxCompletion(projectId, userId, published.entryId)
-    expect(await outbox.readSharedOutboxOperation(projectId, userId, published.entryId)).toEqual({ status: 'missing' })
+    expect(await outbox.readSharedOutboxOperation(projectId, userId, published.entryId)).toEqual(duplicate)
   } finally {
     fetchStub.restore()
   }
@@ -1450,6 +1451,42 @@ test('the count cap is the only collector: an old legacy-dated completion surviv
     expect(await outbox.readSharedOutboxOperation(projectId, userId, 'old-1')).toEqual({ status: 'missing' })
     expect(await outbox.readSharedOutboxOperation(projectId, userId, 'old-2')).toMatchObject({ status: 'applied' })
     expect(await outbox.readSharedOutboxOperation(projectId, userId, 'old-64')).toMatchObject({ status: 'applied' })
+  } finally {
+    fetchStub.restore()
+  }
+})
+
+test('an admitted effects result another drain records is kept past the history cap until its owner consumes it', async () => {
+  const projectId = `outbox-effects-unconsumed-${crypto.randomUUID()}`
+  const userId = 'user-1'
+  let online = false
+  const fetchStub = stubFetch(() => online
+    ? new Response(JSON.stringify(typedResult(7)), { status: 200 })
+    : new Response('unavailable', { status: 503 }))
+  try {
+    const admitted: string[] = []
+    for (let index = 0; index < 65; index += 1) {
+      const published = await outbox.publishDurableEffectsOperation({ projectId, userId, operation: utilityOperation(`utility-${index}`) })
+      if (published.kind !== 'admitted') throw new Error('Expected admission while offline.')
+      admitted.push(published.entryId)
+    }
+    online = true
+    await outbox.flushSharedOutbox(projectId, userId, { retryFailed: true })
+    // Background history past the cap collects consumed rows only.
+    for (let index = 0; index < 65; index += 1) {
+      await outbox.publishDurableSharedTimelineOperation({ projectId, userId, operation: utilityOperation(`history-${index}`) })
+    }
+    const first = admitted[0]
+    if (!first) throw new Error('Expected an admitted write.')
+    const awaited = { status: 'applied', result: decodedTypedResult(7), completionOwner: 'background' } satisfies Awaited<ReturnType<typeof outbox.readSharedOutboxOperation>>
+    expect(await outbox.readSharedOutboxOperation(projectId, userId, first)).toEqual(awaited)
+    await outbox.consumeSharedOutboxCompletion(projectId, userId, first)
+    expect(await outbox.readSharedOutboxOperation(projectId, userId, first)).toEqual(awaited)
+    for (let index = 0; index < 65; index += 1) {
+      await outbox.publishDurableSharedTimelineOperation({ projectId, userId, operation: utilityOperation(`later-${index}`) })
+    }
+    expect(await outbox.readSharedOutboxOperation(projectId, userId, first)).toEqual({ status: 'missing' })
+    expect(await outbox.readSharedOutboxOperation(projectId, userId, admitted[64] ?? '')).toEqual(awaited)
   } finally {
     fetchStub.restore()
   }

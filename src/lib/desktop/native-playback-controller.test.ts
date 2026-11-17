@@ -43,9 +43,10 @@ import { createSampledInstrumentRegionBudget } from "~/lib/sampled-instrument-re
 import { createSamplerBufferSync } from "~/lib/sampler-buffer-sync"
 import { compilePortableSynthState } from "@daw-browser/audio-engine/mixer/graph-contract"
 import { nativeInstrumentContentKey, type LiveProcessorControlRequest, type LiveProcessorEditIdentity, type ProcessorDeliveryOutcome, type ProcessorDelivery } from "~/lib/live-processor-control"
-import type { ParameterSaveResult } from "~/components/timeline/parameter-gesture-owner"
+import type { ParameterSaveResult } from "~/components/timeline/effect-publication-result"
 import type { NativeRevisionSession, NativeRevisionReply, NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 import { publishDurableEffectsOperation, flushSharedOutbox, readSharedOutboxOperation } from "~/lib/shared-outbox"
+import { openLocalProjectDb } from "~/lib/local-project-db"
 import createControllerFixture from "../../../tools/acceptance/ae-08-processor-state-fuzz-fixture"
 import { decodeGraph, fields } from "../../../tools/acceptance/ae-08-processor-state-fuzz-oracle"
 import createFuzzHost from "../../../tools/acceptance/ae-08-processor-state-fuzz-host"
@@ -14477,7 +14478,8 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
       expect(f.patches).toEqual([-3])
       expect(f.panel.readProvisionalForTarget("track")).toBeUndefined()
       expect(f.histories).toEqual(["0->-3"])
-      expect(await readSharedOutboxOperation(projectId, userId, entryId)).toEqual({ status: "missing" })
+      const completion = await (await openLocalProjectDb(projectId)).get("syncState", `shared-outbox-completion:${projectId}:${userId}:${entryId}`)
+      expect(completion?.value).toMatchObject({ consumed: true })
       f.fixture.emitPatchResolution("77", 0)
       await turns()
       expect(await f.panel.flushPending()).toEqual({ admitted: [], unanswered: [] })
@@ -14486,7 +14488,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
       await flushSharedOutbox(projectId, userId, { retryFailed: true })
       expect(f.histories).toEqual(["0->-3"])
       promoted("R3-6 unanswered-receipt retention/drain", { queuedBeforeApply: true, admittedAndUnanswered: [admitted.admitted.length, admitted.unanswered.length],
-        pendingAfterCommit: onlyReceipt.unanswered.length, consumed: "missing", finalDrain: await f.panel.flushPending(), finalGain: f.heard(), histories: f.histories })
+        pendingAfterCommit: onlyReceipt.unanswered.length, consumed: true, finalDrain: await f.panel.flushPending(), finalGain: f.heard(), histories: f.histories })
     } finally { globalThis.fetch = originalFetch; await f.dispose() }
   })
 
@@ -14513,13 +14515,15 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
       writes.push({ value, projectId: context.projectId, userId: context.userId, entryId: result.entryId })
       return result
     }, true, new Set(), undefined, { get projectId() { return projectId() }, get userId() { return projectId() === a ? "user-a" : "user-b" } })
-    const originalDelete = IDBObjectStore.prototype.delete
+    const originalPut = IDBObjectStore.prototype.put
     const consumed: string[] = []
-    IDBObjectStore.prototype.delete = function(key) {
-      if (this.name === "syncState") for (const write of writes) {
-        if (key === `shared-outbox-completion:${write.projectId}:${write.userId}:${write.entryId}`) consumed.push(write.entryId)
+    const consumedRow = z.object({ key: z.string(), value: z.object({ consumed: z.literal(true) }) })
+    IDBObjectStore.prototype.put = function(value, key) {
+      const row = consumedRow.safeParse(value)
+      if (this.name === "syncState" && row.success) for (const write of writes) {
+        if (row.data.key === `shared-outbox-completion:${write.projectId}:${write.userId}:${write.entryId}`) consumed.push(write.entryId)
       }
-      return originalDelete.call(this, key)
+      return originalPut.call(this, value, key)
     }
     try {
       f.panel.setForTarget("track", -1)
@@ -14566,7 +14570,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
       expect(await f.panel.flushPending()).toEqual({ unanswered: [], admitted: [] })
       promoted("P admitted old-project/remove-readd binding and exact consume-once", { writes: writes.map(write => ({ value: write.value, scope: write.projectId === a ? "A" : "B", user: write.userId })),
         endedCompletionsConsumed: 0, currentCompletionsConsumed: consumed.length, finalHistory: f.histories, finalGain: f.heard() })
-    } finally { IDBObjectStore.prototype.delete = originalDelete; globalThis.fetch = originalFetch; await f.dispose() }
+    } finally { IDBObjectStore.prototype.put = originalPut; globalThis.fetch = originalFetch; await f.dispose() }
   })
 
   test("3B1 real audio adapter carries each key revision and consumes a positive equal stamp", async () => {

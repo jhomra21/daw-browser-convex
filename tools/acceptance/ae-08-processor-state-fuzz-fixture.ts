@@ -11,9 +11,10 @@ import attachmentPlan, { attachmentInstanceId, workerTransportFrames } from "./a
 import { fixtureEdit, utilityGainPayload } from "./ae-08-processor-state-fuzz-edit"
 import { createProcessorEditRegistry } from "../../src/components/timeline/create-processor-edit-registry"
 import { createPreparedStretchArtifactRepository } from "@daw-browser/audio-engine/prepared-stretch-store"
-import { SYNTH_KIND_ID } from "../../src/lib/live-processor-control"
+import { SYNTH_KIND_ID } from "../../src/lib/processor-edit-semantics"
 import type { LiveProcessorControlRequest, LiveProcessorEditIdentity } from "../../src/lib/live-processor-control"
-import { captureNativeBuiltInParameterValues, captureNativeBuiltInStateCommit, nativeBuiltInPatchTiming, type NativeBuiltInParameterPayload } from "../../src/lib/desktop/native-built-in-parameter-mapper"
+import { captureNativeBuiltInParameterValues, captureNativeBuiltInStateCommit, nativeBuiltInPatchTiming } from "../../src/lib/desktop/native-built-in-parameter-mapper"
+import type { NativeBuiltInParameterPayload } from "../../src/lib/processor-edit-semantics"
 import createFuzzHost, { type Action } from "./ae-08-processor-state-fuzz-host"
 import { expectedTopology, ownershipFailures, settlementFailure, quiescenceFailure, endingDomainFailure, rebuildResultFailure, decodeGraph, fields, masterGainOf, coverageFailure, rebuildFailure, convergenceFailure, topologyFailure, staleFailure, receiptFailure, rejectionClassification, recordBatches, proofDeadlineFailure, endingRejectionClass, initialContent, reduceDesired, type Content, type Defect, type Failure } from "./ae-08-processor-state-fuzz-oracle"
 

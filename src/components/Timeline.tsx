@@ -46,7 +46,7 @@ import {
   createAutomationTarget,
   type TrackInstrumentParams,
 } from "@daw-browser/shared";
-import { createAudioEffectParameterPayload } from "~/components/timeline/audio-effect-parameter-payload";
+import { createAudioEffectParameterPayload } from "~/lib/audio-effect-parameter-payload";
 import { useTimelineResolvedModel } from "~/hooks/useTimelineResolvedModel";
 import { useTimelineActions } from "~/hooks/useTimelineActions";
 import { useTimelineSidebarResize } from "~/hooks/useTimelineSidebarResize";
@@ -57,7 +57,8 @@ import { useMidiTrackRecording } from "~/hooks/useMidiTrackRecording";
 import { buildClipFadesHistoryEntry, buildClipMidiNotesHistoryEntry } from "~/lib/undo/builders";
 import type { MidiEditorNote } from "~/lib/midi-editor-grid";
 import createTimelineEffectCommit from "~/components/timeline/create-timeline-effect-commit";
-import { SYNTH_KIND_ID, type LiveProcessorEditIdentity } from "~/lib/live-processor-control";
+import type { LiveProcessorEditIdentity } from "~/lib/live-processor-control";
+import { SYNTH_KIND_ID } from "~/lib/processor-edit-semantics";
 import { createProcessorEditRegistry } from "~/components/timeline/create-processor-edit-registry";
 import { pickNativePlaybackInputs } from "~/components/timeline/native-playback-inputs";
 import { desktopAcceptanceObserver } from "~/lib/desktop/acceptance-observer";

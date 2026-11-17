@@ -1,6 +1,6 @@
 import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
 import type { LivePlaybackSnapshot } from "~/lib/live-playback-snapshot"
-import { SYNTH_KIND_ID } from "~/lib/live-processor-control"
+import { SYNTH_KIND_ID } from "~/lib/processor-edit-semantics"
 import type { ExecutionRetention } from "./native-processor-state-owner"
 
 // The track node of every synth instance of a snapshot: owner targets for a

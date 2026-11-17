@@ -46,10 +46,11 @@ import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver"
 import { isLiveEventOnlyInstrumentChange, isLiveParameterChange, nativeBuiltInLiveStateCovered } from "~/lib/desktop/native-built-in-parameter-mapper"
 import {
   mergeSynthParams, normalizeTrackInstrumentParams, parseJsonValue,
-  type AudioPcmSourceDescriptor, type DecodedAudioPage, type SynthParamsUpdate, type TrackInstrumentParams,
+  type AudioPcmSourceDescriptor, type DecodedAudioPage, type TrackInstrumentParams,
 } from "@daw-browser/shared"
 import type { AudioEffectRuntimeInstance } from "@daw-browser/audio-engine/audio-engine"
-import { createAudioEffectParameterPayload } from "~/components/timeline/audio-effect-parameter-payload"
+import { createAudioEffectParameterPayload } from "~/lib/audio-effect-parameter-payload"
+import { movedSynthLiveFields } from "~/lib/processor-edit-semantics"
 
 type PortableStartResult = "started" | "unavailable"
 // A locate the session cannot take without having failed (nothing was touched) is the caller's to rebuild.
@@ -347,22 +348,7 @@ const withAcceptedLiveSynthValues = (
     const compiled = entry.instrument
     if (now?.kind !== "synth" || before?.kind !== "synth" || compiled?.kind !== "synth"
       || now.instanceId !== before.instanceId || now.instanceId !== compiled.instanceId) return [id, entry]
-    const moved = (from: number, to: number) => !Object.is(from, to)
-    const a = now.params, b = before.params
-    const update: SynthParamsUpdate = {
-      ...(moved(a.gain, b.gain) && { gain: a.gain }),
-      ...(moved(a.pan, b.pan) && { pan: a.pan }),
-      filter: {
-        ...(moved(a.filter.frequencyHz, b.filter.frequencyHz) && { frequencyHz: a.filter.frequencyHz }),
-        ...(moved(a.filter.q, b.filter.q) && { q: a.filter.q }),
-      },
-      ampEnvelope: {
-        ...(moved(a.ampEnvelope.attackSec, b.ampEnvelope.attackSec) && { attackSec: a.ampEnvelope.attackSec }),
-        ...(moved(a.ampEnvelope.decaySec, b.ampEnvelope.decaySec) && { decaySec: a.ampEnvelope.decaySec }),
-        ...(moved(a.ampEnvelope.sustain, b.ampEnvelope.sustain) && { sustain: a.ampEnvelope.sustain }),
-        ...(moved(a.ampEnvelope.releaseSec, b.ampEnvelope.releaseSec) && { releaseSec: a.ampEnvelope.releaseSec }),
-      },
-    }
+    const update = movedSynthLiveFields(before.params, now.params)
     return [id, { ...entry, instrument: { ...compiled, params: mergeSynthParams(compiled.params, update) } }]
   }))
   return { ...snapshot, mixer: { ...snapshot.mixer, fx: { ...fx, trackFx } } }

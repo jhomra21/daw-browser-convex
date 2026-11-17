@@ -1,5 +1,6 @@
 import { createDefaultUtilityParams } from "@daw-browser/shared"
-import { captureNativeBuiltInParameterValues, encodeNativeBuiltInStateCommit, nativeBuiltInPatchTiming, type NativeBuiltInParameterPayload } from "../../src/lib/desktop/native-built-in-parameter-mapper"
+import { captureNativeBuiltInParameterValues, encodeNativeBuiltInStateCommit, nativeBuiltInPatchTiming } from "../../src/lib/desktop/native-built-in-parameter-mapper"
+import type { NativeBuiltInParameterPayload } from "../../src/lib/processor-edit-semantics"
 import type { LiveProcessorEditIdentity } from "../../src/lib/live-processor-control"
 
 const kindIds = { utility: 1, spectral: 15 }

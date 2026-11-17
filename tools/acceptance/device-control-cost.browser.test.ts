@@ -11,7 +11,7 @@ import { createComputed, createMemo, createRoot, createSignal, untrack } from "s
 import { isServer } from "solid-js/web";
 import { z } from "zod";
 import { automationTargetKey, createDefaultDelayParams, createDefaultEqParams, createDefaultGateParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultDrumRackParams, createDefaultSamplerParams, createDefaultGranularParams, createDefaultCompressorParams, type AutomationEnvelope, type DelayParams, type TrackInstrumentParams } from "@daw-browser/shared";
-import type { NativeBuiltInParameterPayload } from "~/lib/desktop/native-built-in-parameter-mapper";
+import type { NativeBuiltInParameterPayload } from "~/lib/processor-edit-semantics";
 import { getEffectTiming } from "@daw-browser/audio-engine/effects/timing";
 import { replaceEqualDeep } from "@tanstack/solid-query";
 import type { LivePlaybackSnapshotInput } from "~/lib/live-playback-snapshot";

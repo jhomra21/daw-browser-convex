@@ -6,7 +6,8 @@ import { extractTimelineBindings } from '~/lib/timeline-source-test-support'
 import { createProcessorEditRegistry } from '~/components/timeline/create-processor-edit-registry'
 import type { AudioEffectRuntimeInstance, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
 import type { AudioCoreGraphSnapshot } from '@daw-browser/audio-core-contract'
-import { SYNTH_KIND_ID, nativeSynthStructureKey, type LiveProcessorEditIdentity } from '~/lib/live-processor-control'
+import { nativeSynthStructureKey, type LiveProcessorEditIdentity } from '~/lib/live-processor-control'
+import { SYNTH_KIND_ID } from '~/lib/processor-edit-semantics'
 import {
   createDefaultCompressorParams,
   createDefaultDelayParams,

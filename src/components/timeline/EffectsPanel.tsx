@@ -42,7 +42,7 @@ import type { OptimisticGrantWrite } from "~/lib/optimistic-grant-scope";
 import type { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
 import type { createSamplerBufferSync, NativeInstrumentRetryIdentity } from "~/lib/sampler-buffer-sync";
 import type { EffectParamsCommitOptions, EffectParamsCommitPayload, EffectType } from "~/lib/undo/types";
-import type { NativeBuiltInParameterPayload } from "~/lib/desktop/native-built-in-parameter-mapper";
+import type { NativeBuiltInParameterPayload } from "~/lib/processor-edit-semantics";
 import TimelineBottomPanelShell, { type TimelineBottomPanelShellControls } from "~/components/timeline/TimelineBottomPanelShell";
 import TimelineBottomPanelFooter from "~/components/timeline/TimelineBottomPanelFooter";
 import type { Clip, ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";

@@ -50,9 +50,9 @@ import type { EffectParamsByEffect, EffectParamsCommitOptions, EffectParamsCommi
 import type { AudioEffectChainPresetStep } from "~/lib/audio-effect-chain-presets";
 import { createLocalTimelineRepository } from "~/lib/timeline-repository/local-timeline-repository";
 import type { ExportEffectRow, ExportEffectsProjection } from "~/lib/export/export-effect-rows";
-import type { NativeBuiltInParameterPayload } from "~/lib/desktop/native-built-in-parameter-mapper";
+import type { NativeBuiltInParameterPayload } from "~/lib/processor-edit-semantics";
 import { isAbortError } from "~/lib/dom-errors";
-import { createAudioEffectParameterPayload } from "~/components/timeline/audio-effect-parameter-payload";
+import { createAudioEffectParameterPayload } from "~/lib/audio-effect-parameter-payload";
 import { createAudioEffectInstanceIdentityCache } from "~/components/timeline/create-effects-panel-instance-identity-cache";
 import { createParameterGestureOwner, type ParameterDrain, type ParameterGestureHandle } from "~/components/timeline/parameter-gesture-owner";
 import { effectAdmission, parameterSaveResult, type ParameterSaveResult } from "~/components/timeline/effect-publication-result";

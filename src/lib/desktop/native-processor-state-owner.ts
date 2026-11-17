@@ -5,7 +5,8 @@ import type { LivePlaybackCompileContext, LivePlaybackTransport } from "~/lib/li
 import type {
   LiveProcessorEditIdentity, ProcessorDeliveryOutcome, ProcessorRefusal, ProcessorTiming, ReceiptHandle,
 } from "~/lib/live-processor-control"
-import { SYNTH_KIND_ID, nativeInstrumentContentKey, nativeSynthStructureKey, nativeSynthValues } from "~/lib/live-processor-control"
+import { SYNTH_KIND_ID } from "~/lib/processor-edit-semantics"
+import { nativeInstrumentContentKey, nativeSynthStructureKey, nativeSynthValues } from "~/lib/live-processor-control"
 import { NativePlaybackAbortError } from "./native-playback-abort"
 import { nativeBuiltInLiveStateCovered } from "./native-built-in-parameter-mapper"
 import type { NativeRevisionReply, NativeRevisionRequest } from "@daw-browser/desktop-protocol/native-revision"

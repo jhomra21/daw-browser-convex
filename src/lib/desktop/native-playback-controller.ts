@@ -20,7 +20,7 @@ import { compilePortableSynthState } from "@daw-browser/audio-engine/mixer/graph
 import { resolveLiveMixerGraph } from "@daw-browser/audio-engine/live-mixer-runtime"
 import type { NativeRevisionReply, NativeRevisionSession } from "@daw-browser/desktop-protocol/native-revision"
 import { type AudioPcmSourceDescriptor, type TrackInstrumentParams, parseExternalAutomationParameterId, parseJsonValue } from "@daw-browser/shared"
-import { createAudioEffectParameterPayload } from "~/components/timeline/audio-effect-parameter-payload"
+import { createAudioEffectParameterPayload } from "~/lib/audio-effect-parameter-payload"
 import { captureNativeBuiltInParameterValues, encodeNativeBuiltInStateCommit, nativeBuiltInPatchTiming } from "./native-built-in-parameter-mapper"
 import {
   prepareNativeStretchArtifacts,
@@ -54,8 +54,8 @@ import type { DesktopBridge } from "~/types/desktop-bridge"
 import { clearInstanceLimits, clearVstInstanceFailures, markVstInstanceFailed, setInstanceLimits } from "./vst-instance-failures"
 import { nativeVst3LaunchAuthorizationRequiredMessage } from "~/lib/external-plugin-ui"
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
+import { SYNTH_KIND_ID } from "~/lib/processor-edit-semantics"
 import {
-  SYNTH_KIND_ID,
   nativeInstrumentContentKey,
   nativeSynthValues,
   type DeliveryRegistration,

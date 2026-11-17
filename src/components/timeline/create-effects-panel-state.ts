@@ -12,7 +12,7 @@ import { createLocalEffectsView } from "~/components/timeline/create-local-effec
 import { readInstrumentParamsFromEffectRow } from "~/lib/effect-row-instrument-params";
 import type { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
 import type { NativeInstrumentPreparation } from "~/lib/desktop/native-instrument-budget-policy";
-import type { NativeBuiltInParameterPayload } from "~/lib/desktop/native-built-in-parameter-mapper";
+import type { NativeBuiltInParameterPayload } from "~/lib/processor-edit-semantics";
 import { nativeInstrumentContentKey, type DeliveryRegistration, type LiveProcessorEditIdentity, type ProcessorDelivery, type PublicationJoin } from "~/lib/live-processor-control";
 import { compileLiveNativeInstrumentConfigurations } from "@daw-browser/audio-engine/live-native-projection";
 import { localizeInstrumentFx } from "@daw-browser/audio-engine/portable-export-snapshot";

@@ -15,7 +15,7 @@ import TimelineBottomPanelShell, { type TimelineBottomPanelShellControls } from 
 import ExportDialog from '~/components/timeline/ExportDialog'
 import type { OptimisticGrantWrite } from '~/lib/optimistic-grant-scope'
 import type { EffectParamsCommitOptions, EffectParamsCommitPayload, EffectType } from '~/lib/undo/types'
-import type { NativeBuiltInParameterPayload } from '~/lib/desktop/native-built-in-parameter-mapper'
+import type { NativeBuiltInParameterPayload } from '~/lib/processor-edit-semantics'
 import type { BpmDetectionService } from '~/lib/bpm-detection-service'
 import type { Clip, ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import type { ExternalProcessor } from '@daw-browser/external-plugins'

@@ -1,40 +1,16 @@
 import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown";
 import { createSignal } from "solid-js";
 import { normalizeTrackInstrumentParams, parseJsonValue } from "@daw-browser/shared";
+import { processorEditKindId, SYNTH_KIND_ID, type NativeBuiltInParameterPayload } from "~/lib/processor-edit-semantics";
 import {
   captureNativeBuiltInParameterValues,
   encodeNativeBuiltInStateCommit,
   nativeBuiltInPatchTiming,
   isLiveEventOnlyInstrumentChange,
   isLiveParameterChange,
-  type NativeBuiltInParameterPayload,
 } from "~/lib/desktop/native-built-in-parameter-mapper";
-import { SYNTH_KIND_ID, type LiveProcessorEditIdentity } from "~/lib/live-processor-control";
-import { createAudioEffectParameterPayload } from "~/components/timeline/audio-effect-parameter-payload";
-
-const processorKindId = (effect: NativeBuiltInParameterPayload["effect"]) => {
-  switch (effect.replace(/^master-/, "")) {
-    case "utility": return 1;
-    case "saturator": return 2;
-    case "eq": return 3;
-    case "chorus": return 4;
-    case "flanger": return 5;
-    case "phaser": return 6;
-    case "tremolo": return 7;
-    case "autopan": return 8;
-    case "ensemble": return 9;
-    case "gate": return 10;
-    case "compressor": return 11;
-    case "limiter": return 12;
-    case "delay": return 13;
-    case "reverb": return 14;
-    case "spectral": return 15;
-    case "autofilter": return 16;
-    case "lofi": return 17;
-    case "instrument": return SYNTH_KIND_ID;
-    default: return undefined;
-  }
-};
+import type { LiveProcessorEditIdentity } from "~/lib/live-processor-control";
+import { createAudioEffectParameterPayload } from "~/lib/audio-effect-parameter-payload";
 
 type Member = {
   kindId: number;
@@ -49,7 +25,7 @@ const targetOf = (payload: NativeBuiltInParameterPayload) => {
   if (payload.effect === "instrument") {
     return payload.to.kind === "synth" ? { instanceId: payload.to.instanceId, kindId: SYNTH_KIND_ID } : undefined;
   }
-  const kindId = processorKindId(payload.effect);
+  const kindId = processorEditKindId(payload.effect);
   return payload.instanceId && kindId !== undefined ? { instanceId: payload.instanceId, kindId } : undefined;
 };
 

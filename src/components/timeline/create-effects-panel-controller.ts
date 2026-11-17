@@ -19,7 +19,7 @@ import type { EffectParamsByEffect, EffectParamsCommitOptions, EffectParamsCommi
 import type { AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
 import { withInstrumentOverride, type ExportEffectsProjection } from "~/lib/export/export-effect-rows";
 import type { ExportRenderStateSnapshot } from "~/lib/export/run-export-job";
-import type { NativeBuiltInParameterPayload } from "~/lib/desktop/native-built-in-parameter-mapper";
+import type { NativeBuiltInParameterPayload } from "~/lib/processor-edit-semantics";
 import { SampledInstrumentSyncSupersededError } from "~/lib/sampled-instrument-sync-error";
 
 export type EffectsPanelExportSnapshot = {

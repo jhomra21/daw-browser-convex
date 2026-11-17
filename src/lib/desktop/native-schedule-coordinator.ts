@@ -29,6 +29,7 @@ import { parseExternalAutomationParameterId, valueAtAutomationTime } from "@daw-
 import type { LivePlaybackSnapshot } from "~/lib/live-playback-snapshot"
 import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 import { maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
+import { SYNTH_LIVE_FIELDS } from "~/lib/processor-edit-semantics"
 import type { PlaybackAcceptanceObserver } from "./acceptance-observer"
 import type { NativeTimelinePageManager } from "./native-timeline-page-manager"
 import { NativePlaybackAbortError } from "./native-playback-abort"
@@ -126,16 +127,7 @@ const synthStateEvents = (snapshot: LivePlaybackSnapshot, frame: number): Native
       const instrument = snapshot.mixer.fx.trackFx?.[track.id]?.instrument
       if (!instrument || instrument.kind !== "synth") return []
       const params = instrument.params
-      const values = [
-        params.gain,
-        params.pan,
-        params.filter.frequencyHz,
-        params.filter.q,
-        params.ampEnvelope.attackSec * 1000,
-        params.ampEnvelope.decaySec * 1000,
-        params.ampEnvelope.sustain,
-        params.ampEnvelope.releaseSec * 1000,
-      ]
+      const values = SYNTH_LIVE_FIELDS.map((field) => field.read(params) * field.nativeScale)
       return values.map((value, target) => ({
         nodeId: track.id,
         noteId: 1,

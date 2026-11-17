@@ -1,5 +1,5 @@
 import { createEqBandParameterId, normalizeDelayParams, normalizeReverbParams, parseJsonValue, type EqParams, type TrackInstrumentParams } from '@daw-browser/shared'
-import { createAudioEffectParameterPayload } from '~/components/timeline/audio-effect-parameter-payload'
+import { createAudioEffectChange } from '~/lib/audio-effect-parameter-payload'
 import type { EffectTimingInput } from '@daw-browser/audio-engine/effects/timing'
 import type { EffectParamsCommitPayload } from '~/lib/undo/types'
 import type { LiveProcessorEditIdentity, ProcessorTiming } from '~/lib/live-processor-control'
@@ -23,6 +23,7 @@ import {
   encodeUtilityProcessorState,
 } from '@daw-browser/audio-core-contract'
 import { resolvePortableDelayMs, compilePortableSynthState } from '@daw-browser/audio-engine/mixer/graph-contract'
+import { SYNTH_LIVE_FIELDS, type EffectChange, type NativeBuiltInParameterPayload } from '~/lib/processor-edit-semantics'
 
 export type NativeBuiltInParameterValue = {
   parameterId: string
@@ -32,12 +33,6 @@ export type NativeBuiltInParameterValue = {
 export type NativeBuiltInParameterCommit = {
   instanceId: string
   values: NativeBuiltInParameterValue[]
-  edit?: LiveProcessorEditIdentity
-}
-
-// Dispatches can explicitly re-send touched fields even when from/to are equal.
-export type NativeBuiltInParameterPayload = EffectParamsCommitPayload & {
-  parameterIds?: ReadonlySet<string>
   edit?: LiveProcessorEditIdentity
 }
 
@@ -164,32 +159,21 @@ export const isLiveEventOnlyInstrumentChange = (from: TrackInstrumentParams, to:
   && from.params.retrigger === to.params.retrigger
   && JSON.stringify(splitSynthLiveFields(from.params).state) === JSON.stringify(splitSynthLiveFields(to.params).state)
 
-const mapInstrument = (payload: EffectParamsCommitPayload<'instrument'>) => {
+const mapInstrument = (payload: EffectChange<'instrument'>) => {
   if (payload.from.kind !== payload.to.kind || payload.from.instanceId !== payload.to.instanceId) return undefined
   // Only the eight synth fields below have live event targets. Every other change to the same instrument travels in
   // the published configuration: the core slews continuous values and replaces the slot, seeded, for discrete ones.
   if (payload.from.kind !== 'synth' || payload.to.kind !== 'synth') return []
-  const {
-    outputGain: fromGain, outputPan: fromPan, filterCutoffHz: fromCutoff, filterResonance: fromResonance,
-    ampAttackMs: fromAttack, ampDecayMs: fromDecay, ampSustain: fromSustain, ampReleaseMs: fromRelease,
-  } = splitSynthLiveFields(payload.from.params).live
-  const {
-    outputGain: toGain, outputPan: toPan, filterCutoffHz: toCutoff, filterResonance: toResonance,
-    ampAttackMs: toAttack, ampDecayMs: toDecay, ampSustain: toSustain, ampReleaseMs: toRelease,
-  } = splitSynthLiveFields(payload.to.params).live
-  return [
-    { parameterId: 'synth.outputGain', from: fromGain ?? 1, to: toGain ?? 1 },
-    { parameterId: 'synth.outputPan', from: fromPan ?? 0, to: toPan ?? 0 },
-    { parameterId: 'synth.filterCutoffHz', from: fromCutoff ?? 20_000, to: toCutoff ?? 20_000 },
-    { parameterId: 'synth.filterResonance', from: fromResonance ?? 0.7, to: toResonance ?? 0.7 },
-    { parameterId: 'synth.ampAttackMs', from: fromAttack ?? 0, to: toAttack ?? 0 },
-    { parameterId: 'synth.ampDecayMs', from: fromDecay ?? 0, to: toDecay ?? 0 },
-    { parameterId: 'synth.ampSustain', from: fromSustain ?? 1, to: toSustain ?? 1 },
-    { parameterId: 'synth.ampReleaseMs', from: fromRelease ?? 0, to: toRelease ?? 0 },
-  ]
+  const from = splitSynthLiveFields(payload.from.params).live
+  const to = splitSynthLiveFields(payload.to.params).live
+  return SYNTH_LIVE_FIELDS.map((field) => ({
+    parameterId: field.parameterId,
+    from: from[field.nativeField] ?? field.nativeDefault,
+    to: to[field.nativeField] ?? field.nativeDefault,
+  }))
 }
 
-const mapUtility = (payload: EffectParamsCommitPayload<'utility'> | EffectParamsCommitPayload<'master-utility'>) => {
+const mapUtility = (payload: EffectChange<'utility' | 'master-utility'>) => {
   const from = payload.from.state
   const to = payload.to.state
   return mapFields(
@@ -210,7 +194,7 @@ const mapUtility = (payload: EffectParamsCommitPayload<'utility'> | EffectParams
   )
 }
 
-const mapAutoFilter = (payload: EffectParamsCommitPayload<'autofilter'> | EffectParamsCommitPayload<'master-autofilter'>) => {
+const mapAutoFilter = (payload: EffectChange<'autofilter' | 'master-autofilter'>) => {
   const from = payload.from.state
   const to = payload.to.state
   return mapFields(
@@ -236,7 +220,7 @@ const mapAutoFilter = (payload: EffectParamsCommitPayload<'autofilter'> | Effect
   )
 }
 
-const mapLoFi = (payload: EffectParamsCommitPayload<'lofi'> | EffectParamsCommitPayload<'master-lofi'>) => {
+const mapLoFi = (payload: EffectChange<'lofi' | 'master-lofi'>) => {
   const from = payload.from.state
   const to = payload.to.state
   return mapFields(
@@ -256,15 +240,17 @@ const mapLoFi = (payload: EffectParamsCommitPayload<'lofi'> | EffectParamsCommit
   )
 }
 
+// Without a tempo only the field ids can be asked of the mapping: a tempo-synced time has no value to give.
 const mapDelay = (
-  payload: EffectParamsCommitPayload<'delay'> | EffectParamsCommitPayload<'master-delay'>,
-  bpm: number,
+  payload: EffectChange<'delay' | 'master-delay'>,
+  bpm: number | undefined,
 ) => {
   const from = normalizeDelayParams(payload.from)
   const to = normalizeDelayParams(payload.to)
+  const timeMs = (params: typeof from) => bpm === undefined ? Number.NaN : resolvePortableDelayMs(params, bpm)
   return mapFields(
     [
-      { parameterId: 'delay.timeMs', from: resolvePortableDelayMs(from, bpm), to: resolvePortableDelayMs(to, bpm) },
+      { parameterId: 'delay.timeMs', from: timeMs(from), to: timeMs(to) },
       { parameterId: 'delay.feedback', from: from.feedback, to: to.feedback },
       { parameterId: 'delay.dryWet', from: from.dryWet, to: to.dryWet },
       { parameterId: 'delay.lowCutHz', from: from.lowCutHz, to: to.lowCutHz },
@@ -278,7 +264,7 @@ const mapDelay = (
   )
 }
 
-const mapReverb = (payload: EffectParamsCommitPayload<'reverb'> | EffectParamsCommitPayload<'master-reverb'>) => {
+const mapReverb = (payload: EffectChange<'reverb' | 'master-reverb'>) => {
   const from = payload.from
   const to = payload.to
   return mapFields(
@@ -307,7 +293,7 @@ const mapReverb = (payload: EffectParamsCommitPayload<'reverb'> | EffectParamsCo
   )
 }
 
-const mapSaturator = (payload: EffectParamsCommitPayload<'saturator'> | EffectParamsCommitPayload<'master-saturator'>) => {
+const mapSaturator = (payload: EffectChange<'saturator' | 'master-saturator'>) => {
   const from = payload.from
   const to = payload.to
   return mapFields(
@@ -327,8 +313,7 @@ const mapSaturator = (payload: EffectParamsCommitPayload<'saturator'> | EffectPa
 }
 
 const mapModulation = (
-  payload: EffectParamsCommitPayload<'chorus'> | EffectParamsCommitPayload<'master-chorus'>
-    | EffectParamsCommitPayload<'flanger'> | EffectParamsCommitPayload<'master-flanger'>,
+  payload: EffectChange<'chorus' | 'master-chorus' | 'flanger' | 'master-flanger'>,
   prefix: 'chorus' | 'flanger',
 ) => {
   const from = payload.from.state
@@ -346,7 +331,7 @@ const mapModulation = (
   )
 }
 
-const mapPhaser = (payload: EffectParamsCommitPayload<'phaser'> | EffectParamsCommitPayload<'master-phaser'>) => {
+const mapPhaser = (payload: EffectChange<'phaser' | 'master-phaser'>) => {
   const from = payload.from.state
   const to = payload.to.state
   return mapFields(
@@ -363,8 +348,7 @@ const mapPhaser = (payload: EffectParamsCommitPayload<'phaser'> | EffectParamsCo
 }
 
 const mapAmplitudeModulation = (
-  payload: EffectParamsCommitPayload<'tremolo'> | EffectParamsCommitPayload<'master-tremolo'>
-    | EffectParamsCommitPayload<'autopan'> | EffectParamsCommitPayload<'master-autopan'>,
+  payload: EffectChange<'tremolo' | 'master-tremolo' | 'autopan' | 'master-autopan'>,
   prefix: 'tremolo' | 'autopan',
 ) => {
   const from = payload.from.state
@@ -380,7 +364,7 @@ const mapAmplitudeModulation = (
   )
 }
 
-const mapEnsemble = (payload: EffectParamsCommitPayload<'ensemble'> | EffectParamsCommitPayload<'master-ensemble'>) => {
+const mapEnsemble = (payload: EffectChange<'ensemble' | 'master-ensemble'>) => {
   const from = payload.from.state
   const to = payload.to.state
   return mapFields(
@@ -395,7 +379,7 @@ const mapEnsemble = (payload: EffectParamsCommitPayload<'ensemble'> | EffectPara
   )
 }
 
-const mapGate = (payload: EffectParamsCommitPayload<'gate'> | EffectParamsCommitPayload<'master-gate'>) => {
+const mapGate = (payload: EffectChange<'gate' | 'master-gate'>) => {
   const from = payload.from.state
   const to = payload.to.state
   return mapFields(
@@ -422,7 +406,7 @@ const mapGate = (payload: EffectParamsCommitPayload<'gate'> | EffectParamsCommit
   )
 }
 
-const mapCompressor = (payload: EffectParamsCommitPayload<'compressor'> | EffectParamsCommitPayload<'master-compressor'>) => {
+const mapCompressor = (payload: EffectChange<'compressor' | 'master-compressor'>) => {
   const from = payload.from
   const to = payload.to
   return mapFields(
@@ -451,7 +435,7 @@ const mapCompressor = (payload: EffectParamsCommitPayload<'compressor'> | Effect
   )
 }
 
-const mapLimiter = (payload: EffectParamsCommitPayload<'limiter'> | EffectParamsCommitPayload<'master-limiter'>) => {
+const mapLimiter = (payload: EffectChange<'limiter' | 'master-limiter'>) => {
   const from = payload.from.state
   const to = payload.to.state
   return mapFields(
@@ -465,7 +449,7 @@ const mapLimiter = (payload: EffectParamsCommitPayload<'limiter'> | EffectParams
   )
 }
 
-const mapEq = (payload: EffectParamsCommitPayload<'eq'> | EffectParamsCommitPayload<'master-eq'>) => {
+const mapEq = (payload: EffectChange<'eq' | 'master-eq'>) => {
   const from: EqParams = payload.from
   const to: EqParams = payload.to
   if (from.enabled !== to.enabled || from.channelMode !== to.channelMode || from.bands.length !== to.bands.length) return undefined
@@ -493,7 +477,7 @@ const mapEq = (payload: EffectParamsCommitPayload<'eq'> | EffectParamsCommitPayl
   return values
 }
 
-const mapSpectral = (payload: EffectParamsCommitPayload<'spectral'> | EffectParamsCommitPayload<'master-spectral'>) => {
+const mapSpectral = (payload: EffectChange<'spectral' | 'master-spectral'>) => {
   const from = payload.from.state
   const to = payload.to.state
   return mapFields(
@@ -520,8 +504,8 @@ const mapSpectral = (payload: EffectParamsCommitPayload<'spectral'> | EffectPara
 }
 
 const mapParameterFields = (
-  payload: NativeBuiltInParameterPayload,
-  bpm: number,
+  payload: EffectChange,
+  bpm: number | undefined,
 ): readonly ParameterField[] | undefined => {
   let values: readonly ParameterField[] | undefined
   switch (payload.effect) {
@@ -614,8 +598,7 @@ export const nativeBuiltInLiveStateFields = (from: ProcessorTiming, to: Processo
   const previous = parseJsonValue(from.input.params)
   const next = parseJsonValue(to.input.params)
   if (previous === undefined || next === undefined) return undefined
-  const payload = createAudioEffectParameterPayload({ targetId: "", instanceId: "", kind: to.input.kind }, previous, next)
-  return mapParameterFields(payload, 120)?.map(field => field.parameterId)
+  return mapParameterFields(createAudioEffectChange(to.input.kind, previous, next), undefined)?.map(field => field.parameterId)
 }
 
 export const nativeBuiltInLiveStateCovered = (

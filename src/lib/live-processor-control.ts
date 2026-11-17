@@ -1,16 +1,11 @@
 import type { EffectTimingInput } from "@daw-browser/audio-engine/effects/timing"
 import type { AudioCoreInstrumentState, AudioCoreSynthState } from "@daw-browser/audio-core-contract"
+import { SYNTH_LIVE_FIELDS } from "~/lib/processor-edit-semantics"
 
 export type LiveProcessorParameterValue = {
   parameterId: string
   value: number
 }
-
-// A renderer-local discriminator that keeps a synth target distinct from the
-// built-in processor kinds (1-17). It is not a native processor kind: native
-// synths are instrument nodes, dispatched by instrument events. A synth is
-// identified everywhere (edits, requests, owner targets) by its instanceId.
-export const SYNTH_KIND_ID = 18
 
 // What a built-in processor's state patch reads of its parameters at the tempo it is sent at: whether the effect is
 // enabled and the input its tail is derived from.
@@ -85,12 +80,8 @@ export type DesiredInstrument = {
 export const nativeInstrumentContentKey = (state: AudioCoreInstrumentState): string => JSON.stringify(
   Object.fromEntries(Object.entries(state).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)))
 
-export const nativeSynthValues = (state: AudioCoreSynthState) => ({
-  "synth.outputGain": state.outputGain ?? 1, "synth.outputPan": state.outputPan ?? 0,
-  "synth.filterCutoffHz": state.filterCutoffHz ?? 20_000, "synth.filterResonance": state.filterResonance ?? 0.7,
-  "synth.ampAttackMs": state.ampAttackMs ?? 0, "synth.ampDecayMs": state.ampDecayMs ?? 0,
-  "synth.ampSustain": state.ampSustain ?? 1, "synth.ampReleaseMs": state.ampReleaseMs ?? 0,
-})
+export const nativeSynthValues = (state: AudioCoreSynthState): Record<string, number> => Object.fromEntries(
+  SYNTH_LIVE_FIELDS.map((field) => [field.parameterId, state[field.nativeField] ?? field.nativeDefault]))
 
 export const nativeSynthStructureKey = (state: AudioCoreSynthState): string => nativeInstrumentContentKey({
   ...state, outputGain: 0, outputPan: 0, filterCutoffHz: 0, filterResonance: 0,

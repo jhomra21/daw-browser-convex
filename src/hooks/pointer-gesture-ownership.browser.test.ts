@@ -1264,7 +1264,7 @@ test('EQ knob cancellation dispatches cancel rather than commit', async () => {
 
 const builtInEffectGestureFixture = `
 import { createProcessorEditRegistry } from '~/components/timeline/create-processor-edit-registry'
-import { createAudioEffectParameterPayload } from '~/components/timeline/audio-effect-parameter-payload'
+import { createAudioEffectParameterPayload } from '~/lib/audio-effect-parameter-payload'
 import { captureNativeBuiltInParameterValues } from '~/lib/desktop/native-built-in-parameter-mapper'
 import { createComponent } from 'solid-js'
 import { render } from 'solid-js/web'
@@ -1954,7 +1954,7 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
 // handleEffectParamsCommitted's history-only behavior.
 const effectCommitContractFixture = `
 import { createProcessorEditRegistry } from '~/components/timeline/create-processor-edit-registry'
-import { createAudioEffectParameterPayload } from '~/components/timeline/audio-effect-parameter-payload'
+import { createAudioEffectParameterPayload } from '~/lib/audio-effect-parameter-payload'
 import { createComponent } from 'solid-js'
 import { render } from 'solid-js/web'
 import { AUDIO_EFFECT_CONTRACTS } from '@daw-browser/shared'

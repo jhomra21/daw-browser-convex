@@ -1,5 +1,5 @@
 import { normalizeUtilityParamsEnvelope } from "@daw-browser/shared"
-import type { NativeBuiltInParameterPayload } from "../../src/lib/desktop/native-built-in-parameter-mapper"
+import type { NativeBuiltInParameterPayload } from "../../src/lib/processor-edit-semantics"
 import { createProcessorEditRegistry } from "../../src/components/timeline/create-processor-edit-registry"
 import type { TraceEvent } from "./ae-08-processor-state-fuzz-hook-checks"
 

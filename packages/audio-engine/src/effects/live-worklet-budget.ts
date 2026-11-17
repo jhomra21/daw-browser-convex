@@ -75,3 +75,8 @@ export function createLiveWorkletBudget(limit: number = PROCESSOR_RESOURCE_LIMIT
     pendingCount,
   }
 }
+
+export type LiveWorkletBudget = Pick<
+  ReturnType<typeof createLiveWorkletBudget>,
+  'begin' | 'commit' | 'isCurrent' | 'rollback' | 'releaseOwner'
+>

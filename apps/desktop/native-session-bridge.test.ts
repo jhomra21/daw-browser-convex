@@ -4,10 +4,15 @@ import {
   listDevicesChannel,
   resolveOutputDeviceChannel,
   sessionConfigureRecordingChannel,
+  sessionInspectGraphRevisionChannel,
   sessionInstallAssetChannel,
+  sessionPrepareGraphRevisionChannel,
+  sessionPublishGraphRevisionChannel,
   sessionQueueInstrumentEventsChannel,
   sessionQueueParameterEventsChannel,
   sessionQueueProcessorStatePatchChannel,
+  sessionRetireGraphRevisionChannel,
+  sessionRollbackGraphRevisionChannel,
   sessionSetSpectrumNodeChannel,
   sessionStopRecordingChannel,
 } from "@daw-browser/desktop-protocol/ipc-channels"
@@ -101,6 +106,24 @@ test("sends each native session call as a channel envelope with its transaction 
     invocations.length = 0
     expect(await call()).toBe(ipcReply)
     expect(invocations).toEqual([{ channel, args: [{ value, transactionToken: token }] }])
+  }
+})
+
+test("sends each revision call to its own channel with the input unchanged", async () => {
+  const { session } = await darwinAudioHost()
+  const request = { projectId: "project", revision: 3, hostGeneration: 2 }
+  const prepare = { projectId: "project", bytes: new Uint8Array([1]), projectRevision: 4 }
+  const calls: Array<[() => Promise<object>, string, object]> = [
+    [() => session.revisions.prepare(prepare), sessionPrepareGraphRevisionChannel, prepare],
+    [() => session.revisions.publish(request), sessionPublishGraphRevisionChannel, request],
+    [() => session.revisions.inspect(request), sessionInspectGraphRevisionChannel, request],
+    [() => session.revisions.rollback(request), sessionRollbackGraphRevisionChannel, request],
+    [() => session.revisions.retire(request), sessionRetireGraphRevisionChannel, request],
+  ]
+  for (const [call, channel, input] of calls) {
+    invocations.length = 0
+    expect(await call()).toBe(ipcReply)
+    expect(invocations).toEqual([{ channel, args: [input] }])
   }
 })
 

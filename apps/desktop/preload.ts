@@ -202,7 +202,6 @@ type PluginCatalogReply = Awaited<ReturnType<NonNullable<DesktopBridge["pluginCa
 const invokePluginCatalog = (channel: string, value?: { directory: string }): Promise<PluginCatalogReply> =>
   ipcRenderer.invoke(channel, value)
 
-import { createNativeRevisionSession } from "../../src/lib/desktop/native-revision-session"
 
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
 type NativeConfigureReply =
@@ -393,11 +392,13 @@ const desktopBridge = {
       resolveInputDevice: invokeNativeInputDevice,
       listDevices: invokeNativeDeviceList,
       session: {
-        revisions: createNativeRevisionSession((operation, input) => ipcRenderer.invoke({
-          prepare: sessionPrepareGraphRevisionChannel, publish: sessionPublishGraphRevisionChannel,
-          inspect: sessionInspectGraphRevisionChannel, rollback: sessionRollbackGraphRevisionChannel,
-          retire: sessionRetireGraphRevisionChannel,
-        }[operation], input)),
+        revisions: {
+          prepare: (input) => ipcRenderer.invoke(sessionPrepareGraphRevisionChannel, input),
+          publish: (input) => ipcRenderer.invoke(sessionPublishGraphRevisionChannel, input),
+          inspect: (input) => ipcRenderer.invoke(sessionInspectGraphRevisionChannel, input),
+          rollback: (input) => ipcRenderer.invoke(sessionRollbackGraphRevisionChannel, input),
+          retire: (input) => ipcRenderer.invoke(sessionRetireGraphRevisionChannel, input),
+        },
         configure: (input: NativeHostDeviceConfiguration, transactionToken?: string): Promise<NativeConfigureReply> =>
           ipcRenderer.invoke(sessionConfigureChannel, { value: input, transactionToken }),
         beginTransaction: invokeNativeTransaction,

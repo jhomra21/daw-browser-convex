@@ -142,7 +142,9 @@
    "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "b735161b21b836e516a20f296252fa413af63296167ccfc26af58485eb15810a",
    "tools/acceptance/ae-08-processor-state-fuzz-trace.ts": "3746a8cfcc27bfb2c092dcc5ff01a8e31e771c09776150490a05c9a44794916a",
    "tools/acceptance/ae-08-processor-state-fuzz-classes.ts": "9e5ad044ef9fa3326fb6ac8494285593662d2cf8c2c15f5ccab8706c342441b6",
-   "tools/acceptance/ae-08-processor-state-fuzz-edit.ts": "781b5bff0fc34645b34144be0b7fe1d5287c50d323e3741ef9f57583c4f04452"
+   "tools/acceptance/ae-08-processor-state-fuzz-edit.ts": "781b5bff0fc34645b34144be0b7fe1d5287c50d323e3741ef9f57583c4f04452",
+   "src/lib/desktop/native-publication-transaction.ts": "8db74b542bfbe8377fdfadcedebc2e17c54552fcf6236e4f58a64840361733f2",
+   "src/lib/desktop/native-schedule-publication.ts": "dd2d49f630ff87ecee803d47f374b22be6a5cfd2cfb44bb47715d290f2c068ee"
   },
   "hook": {
    "src/hooks/useTimelinePlayback.ts": "4e1e1bdae209a4cb6cc41ad8040322871e0364af7e7a6bd4c9504ab55f7d33dd",
@@ -175,7 +177,9 @@
    "tools/acceptance/ae-08-processor-state-fuzz-hook-bank-checks.ts": "737bc4c9789b828e56a603334fcb232d8d9ffe633b86890badce4d470da871f8",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-buffer.ts": "4269810567eb6b579ef0ebdcc1295a677aea1cfbb4e30ea1fda57a8865c2dc4a",
    "tools/acceptance/ae-08-processor-state-fuzz-edit.ts": "781b5bff0fc34645b34144be0b7fe1d5287c50d323e3741ef9f57583c4f04452",
-   "tools/acceptance/ae-08-processor-state-fuzz-witness.ts": "569424058f9ebfa0d98b7b2ec9ab1e12c533ba606dde44d170359d8a18c1658b"
+   "tools/acceptance/ae-08-processor-state-fuzz-witness.ts": "569424058f9ebfa0d98b7b2ec9ab1e12c533ba606dde44d170359d8a18c1658b",
+   "src/lib/desktop/native-publication-transaction.ts": "8db74b542bfbe8377fdfadcedebc2e17c54552fcf6236e4f58a64840361733f2",
+   "src/lib/desktop/native-schedule-publication.ts": "dd2d49f630ff87ecee803d47f374b22be6a5cfd2cfb44bb47715d290f2c068ee"
   }
  },
  "gitStatus": [
@@ -11793,7 +11797,7 @@
     "role": "mutant",
     "control": "rc2:historical-69:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -11823,9 +11827,14 @@
      "id": "historical-69-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      } catch (error) {\n        if (!sessionAlive()) { await disposePublication(); return { record } }\n        if (error instanceof PublicationFailure) {",
-       "to": "      } catch (error) {\n        if (!sessionAlive()) {\n          if (binding) await revisions.rollback(binding)\n          await disposePublication(); return { record }\n        }\n        if (error instanceof PublicationFailure) {"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "  } catch (error) {\n    if (!tx.sessionAlive()) { await tx.disposePublication(); return { record } }\n",
+       "to": "  } catch (error) {\n    if (!tx.sessionAlive()) {\n      await tx.rollbackLost()\n      await tx.disposePublication(); return { record }\n    }\n"
+      },
+      {
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    disposePublication,\n    finish,\n",
+       "to": "    disposePublication,\n    rollbackLost: async () => { if (tx.binding) await revisions.rollback(tx.binding) },\n    finish,\n"
       }
      ],
      "bounded": true,
@@ -11835,7 +11844,7 @@
     "rejectionGate": false,
     "expect": {
      "exit": 1,
-     "applied": 1,
+     "applied": 2,
      "counts": {
       "pass": 0,
       "skip": 0,
@@ -14254,7 +14263,8 @@
     "role": "mutant",
     "control": "rc2:historical-89:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-schedule-publication.ts",
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -14284,9 +14294,14 @@
      "id": "historical-89-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "if (!resourcesPromoted) {\n          await discardAddedSources?.()",
-       "to": "if (resourcesPromoted) for (const mapping of installedAssets) await session.releaseAsset(mapping.sessionAssetId)\n        if (!resourcesPromoted) {\n          await discardAddedSources?.()"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    if (!tx.resourcesPromoted) {\n      await tx.discardAddedSources?.()\n",
+       "to": "    if (tx.resourcesPromoted) await tx.releaseInstalledAssets?.()\n    if (!tx.resourcesPromoted) {\n      await tx.discardAddedSources?.()\n"
+      },
+      {
+       "file": "/src/lib/desktop/native-schedule-publication.ts",
+       "from": "        tx.resourcesPromoted = true\n",
+       "to": "        tx.resourcesPromoted = true\n        tx.releaseInstalledAssets = async () => { for (const mapping of host.installedAssets) await session.releaseAsset(mapping.sessionAssetId) }\n"
       }
      ],
      "bounded": true,
@@ -14296,7 +14311,7 @@
     "rejectionGate": false,
     "expect": {
      "exit": 1,
-     "applied": 1,
+     "applied": 2,
      "counts": {
       "pass": 0,
       "skip": 0,

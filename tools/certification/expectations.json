@@ -6857,7 +6857,7 @@
     "role": "mutant",
     "control": "rc2:105:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -6887,9 +6887,9 @@
      "id": "105-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "        const proof = await inspect(binding, releaseLane)",
-       "to": "        if (record.kind === \"latency\" && record.cancelled && publishSent) { await finish({ status: \"superseded\" }, \"cancelled\"); return false }\n        const proof = await inspect(binding, releaseLane)"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    const proof = await inspect(tx.binding, releaseLane)",
+       "to": "    if (record.kind === \"latency\" && record.cancelled && tx.publishSent) { await finish({ status: \"superseded\" }, \"cancelled\"); return false }\n    const proof = await inspect(tx.binding, releaseLane)"
       }
      ],
      "bounded": false,
@@ -7095,7 +7095,7 @@
     "role": "mutant",
     "control": "rc2:107:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -7125,9 +7125,9 @@
      "id": "107-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "        } catch (error) { return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) } }\n      }\n      const inspect = (",
-       "to": "        } catch (error) {\n          if (record.kind === \"latency\") { binding = undefined; await finish({ status: \"failed\", reason: \"Lost Inspect\" }, \"failed\") }\n          return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) }\n        }\n      }\n      const inspect = ("
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    } catch (error) { return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) } }\n  }\n  const inspect = (",
+       "to": "    } catch (error) {\n      if (record.kind === \"latency\") { tx.binding = undefined; await finish({ status: \"failed\", reason: \"Lost Inspect\" }, \"failed\") }\n      return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) }\n    }\n  }\n  const inspect = ("
       }
      ],
      "bounded": false,
@@ -7362,8 +7362,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          preparedKeepLatencyNodeIds = serializedKeepLatencyNodeIds\n          nativeMeterRevision = runtimeRevision",
-       "to": "          preparedKeepLatencyNodeIds = new Set(desiredKeepLatencyNodeIds)\n          nativeMeterRevision = runtimeRevision"
+       "from": "      preparedKeepLatencyNodeIds = serializedKeepLatencyNodeIds\n      nativeMeterRevision = runtimeRevision",
+       "to": "      preparedKeepLatencyNodeIds = new Set(desiredKeepLatencyNodeIds)\n      nativeMeterRevision = runtimeRevision"
       }
      ],
      "bounded": false,
@@ -7481,8 +7481,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          runtimeRevision = binding.revision\n          resumeSafe = true",
-       "to": "          const latestCapture = captureLatencyInputs()\n          snapshot = latestCapture.snapshot\n          graph = latestCapture.graph\n          runtimeRevision = binding.revision\n          resumeSafe = true"
+       "from": "      runtimeRevision = tx.binding.revision\n      resumeSafe = true",
+       "to": "      const latestCapture = captureLatencyInputs()\n      snapshot = latestCapture.snapshot\n      graph = latestCapture.graph\n      runtimeRevision = tx.binding.revision\n      resumeSafe = true"
       }
      ],
      "bounded": false,
@@ -7807,7 +7807,7 @@
     "role": "mutant",
     "control": "rc2:118:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -7837,9 +7837,9 @@
      "id": "118-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "        progressVersion++\n        notify()",
-       "to": "        progressVersion++\n        record.resubmits = 0\n        notify()"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    tx.progressVersion++\n    notify()",
+       "to": "    tx.progressVersion++\n    record.resubmits = 0\n    notify()"
       }
      ],
      "bounded": false,
@@ -7930,7 +7930,7 @@
     "role": "mutant",
     "control": "rc2:119:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -7960,9 +7960,9 @@
      "id": "119-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "        const proof = await inspect(binding, releaseLane)",
-       "to": "        const proof = await inspect(binding, releaseLane)\n        if (proof?.ok && proof.revision.status === \"published\" && binding) await revisions.rollback(binding)"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    const proof = await inspect(tx.binding, releaseLane)",
+       "to": "    const proof = await inspect(tx.binding, releaseLane)\n    if (proof?.ok && proof.revision.status === \"published\" && tx.binding) await revisions.rollback(tx.binding)"
       }
      ],
      "bounded": false,
@@ -8079,8 +8079,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          if (acknowledgedEpoch === undefined) coordinator.resumeGraphPublication(runtimeRevision)",
-       "to": "          if (acknowledgedEpoch === undefined && proof.revision.retiredRevision === 0) coordinator.resumeGraphPublication(runtimeRevision)"
+       "from": "      if (acknowledgedEpoch === undefined) coordinator.resumeGraphPublication(runtimeRevision)",
+       "to": "      if (acknowledgedEpoch === undefined && proof.revision.retiredRevision === 0) coordinator.resumeGraphPublication(runtimeRevision)"
       }
      ],
      "bounded": false,
@@ -8759,7 +8759,7 @@
     "role": "mutant",
     "control": "rc2:125:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -8789,9 +8789,9 @@
      "id": "125-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          if (status.revision.status === \"published\") {\n            if (!adoptPublication(status))",
-       "to": "          if (failure) return await finish(failure.outcome, \"failed\", failure.reason)\n          if (status.revision.status === \"published\") {\n            if (!adoptPublication(status))"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "      if (status.ok && status.revision.status === \"published\") {\n        if (!tx.adoptPublication?.(status)) throw",
+       "to": "      if (record.kind === \"schedule\" && status.ok && tx.failure) return await tx.finish(tx.failure.outcome, \"failed\", tx.failure.reason)\n      if (status.ok && status.revision.status === \"published\") {\n        if (!tx.adoptPublication?.(status)) throw"
       }
      ],
      "bounded": false,
@@ -8878,7 +8878,7 @@
     "role": "mutant",
     "control": "rc2:126:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -8908,9 +8908,9 @@
      "id": "126-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "        if (processorState.fence().kind === \"claimed\") {",
-       "to": "        if (false) {"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    if (processorState.fence().kind === \"claimed\") {",
+       "to": "    if (false) {"
       }
      ],
      "bounded": false,
@@ -9263,7 +9263,7 @@
     "role": "mutant",
     "control": "rc2:109:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-schedule-publication.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -9293,9 +9293,9 @@
      "id": "109-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          holdRetirement(proof, projectId, async () => {\n            await pageManager?.removeSources(removedAssetIds)\n            await predecessorStretchLease?.()\n          })",
-       "to": "          void (async () => {\n            await pageManager?.removeSources(removedAssetIds)\n            await predecessorStretchLease?.()\n          })()"
+       "file": "/src/lib/desktop/native-schedule-publication.ts",
+       "from": "        host.holdRetirement(proof, projectId, async () => {\n          await pageManager?.removeSources(removedAssetIds)\n          await predecessorStretchLease?.()\n        })",
+       "to": "        void (async () => {\n          await pageManager?.removeSources(removedAssetIds)\n          await predecessorStretchLease?.()\n        })()"
       }
      ],
      "bounded": false,
@@ -9382,7 +9382,7 @@
     "role": "mutant",
     "control": "rc2:110:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -9412,9 +9412,9 @@
      "id": "110-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "        await disposePublication()\n        if (outcome.status === \"failed\" && record.kind === \"schedule\") logFailedAdoption(outcome.reason)",
-       "to": "        if (record.kind === \"latency\" && outcome.status === \"adopted\") {\n          const held = processorState.retirement()\n          if (held) {\n            const cleanup = await revisions.retire(held.binding)\n            if (!cleanup.ok) throw new Error(cleanup.error)\n          }\n        }\n        await disposePublication()\n        if (outcome.status === \"failed\" && record.kind === \"schedule\") logFailedAdoption(outcome.reason)"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    await disposePublication()\n    if (outcome.status === \"failed\" && record.kind === \"schedule\") session.logFailedAdoption(outcome.reason)",
+       "to": "    if (record.kind === \"latency\" && outcome.status === \"adopted\") {\n      const held = processorState.retirement()\n      if (held) {\n        const cleanup = await revisions.retire(held.binding)\n        if (!cleanup.ok) throw new Error(cleanup.error)\n      }\n    }\n    await disposePublication()\n    if (outcome.status === \"failed\" && record.kind === \"schedule\") session.logFailedAdoption(outcome.reason)"
       }
      ],
      "bounded": false,
@@ -10572,7 +10572,7 @@
     "role": "mutant",
     "control": "rc2:historical-59:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -10602,9 +10602,9 @@
      "id": "historical-59-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "detached = record.phase !== \"ended\"\n          return { record }",
-       "to": "detached = record.phase !== \"ended\"\n          await record.terminal\n          return { record }"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "      if (tx.detached) strategy.onDetached?.()\n      return { record }",
+       "to": "      if (tx.detached) strategy.onDetached?.()\n      if (record.kind === \"schedule\") await record.terminal\n      return { record }"
       }
      ],
      "bounded": true,
@@ -10694,7 +10694,7 @@
     "role": "mutant",
     "control": "rc2:historical-60:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -10724,9 +10724,9 @@
      "id": "historical-60-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "else if (record.cancelled) record.awaitingTransport()\n        else record.resolving()",
-       "to": "else await finish({ status: \"superseded\" }, \"cancelled\")"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    else if (record.cancelled) record.awaitingTransport()\n    else record.resolving()",
+       "to": "    else await finish({ status: \"superseded\" }, \"cancelled\")"
       }
      ],
      "bounded": true,
@@ -10816,7 +10816,7 @@
     "role": "mutant",
     "control": "rc2:historical-61:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-schedule-publication.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -10846,9 +10846,9 @@
      "id": "historical-61-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "publishCompletion = revisions.publish(request).then((reply) => {",
-       "to": "publishCompletion = revisions.publish(request).then((reply) => {\n              if (!reply.ok) { void finish({ status: \"failed\", reason: reply.error }, \"failed\"); return }"
+       "file": "/src/lib/desktop/native-schedule-publication.ts",
+       "from": "          tx.publishCompletion = revisions.publish(binding).then((reply) => {",
+       "to": "          tx.publishCompletion = revisions.publish(binding).then((reply) => {\n            if (!reply.ok) { void finish({ status: \"failed\", reason: reply.error }, \"failed\"); return }"
       }
      ],
      "bounded": true,
@@ -10938,7 +10938,7 @@
     "role": "mutant",
     "control": "rc2:historical-62:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -10968,9 +10968,9 @@
      "id": "historical-62-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n          const resolved = await inspect(binding, releaseLane)",
-       "to": "if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n          await notTaken(); return false\n          const resolved = await inspect(binding, releaseLane)"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n      const resolved = await inspect(tx.binding, releaseLane)",
+       "to": "    if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n      await notTaken(); return false\n      const resolved = await inspect(tx.binding, releaseLane)"
       }
      ],
      "bounded": true,
@@ -11060,7 +11060,7 @@
     "role": "mutant",
     "control": "rc2:historical-63:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -11090,9 +11090,9 @@
      "id": "historical-63-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "else if (record.cancelled) record.awaitingTransport()\n        else record.resolving()",
-       "to": "else if (!rolledBack?.ok) await finish({ status: \"superseded\" }, \"cancelled\")\n        else if (record.cancelled) record.awaitingTransport()\n        else record.resolving()"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    else if (record.cancelled) record.awaitingTransport()\n    else record.resolving()",
+       "to": "    else if (!rolledBack?.ok) await finish({ status: \"superseded\" }, \"cancelled\")\n    else if (record.cancelled) record.awaitingTransport()\n    else record.resolving()"
       }
      ],
      "bounded": true,
@@ -11182,7 +11182,7 @@
     "role": "mutant",
     "control": "rc2:historical-64:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -11212,9 +11212,9 @@
      "id": "historical-64-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "if (acknowledgedEpoch !== undefined) {\n          if (proof?.ok) await notTaken()",
-       "to": "if (acknowledgedEpoch !== undefined) {\n          if (proof?.ok && proof.revision.status === \"stale-revision\") return false\n          if (proof?.ok) await notTaken()"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    if (acknowledgedEpoch !== undefined) {\n      if (proof?.ok) await notTaken()",
+       "to": "    if (acknowledgedEpoch !== undefined) {\n      if (proof?.ok && proof.revision.status === \"stale-revision\") return false\n      if (proof?.ok) await notTaken()"
       }
      ],
      "bounded": true,
@@ -11304,7 +11304,7 @@
     "role": "mutant",
     "control": "rc2:historical-65:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -11334,9 +11334,9 @@
      "id": "historical-65-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n          const resolved = await inspect(binding, releaseLane)",
-       "to": "if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n          await revisions.rollback(binding)\n          const resolved = await inspect(binding, releaseLane)"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n      const resolved = await inspect(tx.binding, releaseLane)",
+       "to": "    if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n      await revisions.rollback(tx.binding)\n      const resolved = await inspect(tx.binding, releaseLane)"
       }
      ],
      "bounded": true,
@@ -11426,7 +11426,7 @@
     "role": "mutant",
     "control": "rc2:historical-66:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -11456,9 +11456,9 @@
      "id": "historical-66-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "if (acknowledgedEpoch !== undefined) {\n          if (proof?.ok) await notTaken()",
-       "to": "if (acknowledgedEpoch !== undefined) {\n          if (proof?.ok && proof.revision.status === \"publish-pending\") return false\n          if (proof?.ok) await notTaken()"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    if (acknowledgedEpoch !== undefined) {\n      if (proof?.ok) await notTaken()",
+       "to": "    if (acknowledgedEpoch !== undefined) {\n      if (proof?.ok && proof.revision.status === \"publish-pending\") return false\n      if (proof?.ok) await notTaken()"
       }
      ],
      "bounded": true,
@@ -11915,7 +11915,7 @@
     "role": "mutant",
     "control": "rc2:historical-70:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -11945,9 +11945,9 @@
      "id": "historical-70-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "const sessionAlive = () => generation === lifecycleGeneration && prepared && !hasNativeHostConnectionLoss()",
-       "to": "const sessionAlive = () => current() && generation === lifecycleGeneration && prepared && !hasNativeHostConnectionLoss()"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "  const sessionAlive = () => session.owned() && record.phase !== \"ended\"",
+       "to": "  const sessionAlive = () => session.current() && session.owned() && record.phase !== \"ended\""
       }
      ],
      "bounded": true,
@@ -12037,7 +12037,7 @@
     "role": "mutant",
     "control": "rc2:historical-71:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -12067,9 +12067,9 @@
      "id": "historical-71-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "const notTaken = () => finish(failure?.outcome ?? (record.cancelled",
-       "to": "const notTaken = () => finish(record.phase === \"resolving\" ? { status: \"superseded\" } : failure?.outcome ?? (record.cancelled"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "  const notTaken = () => finish(tx.failure?.outcome ?? (record.cancelled",
+       "to": "  const notTaken = () => finish(record.phase === \"resolving\" ? { status: \"superseded\" } : tx.failure?.outcome ?? (record.cancelled"
       }
      ],
      "bounded": true,
@@ -12159,7 +12159,7 @@
     "role": "mutant",
     "control": "rc2:historical-72:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-schedule-publication.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -12189,9 +12189,9 @@
      "id": "historical-72-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "publishCompletion = revisions.publish(request).then((reply) => {\n              if (!sessionAlive()) return\n              publishReply = reply\n              notify()\n            }, () => { if (sessionAlive()) notify() })",
-       "to": "publishCompletion = revisions.publish(request).then((reply) => {\n              if (!sessionAlive()) return\n              publishReply = reply\n              notify()\n            }, () => { if (sessionAlive()) void finish({ status: \"failed\", reason: \"Publish reply lost\" }, \"failed\") })"
+       "file": "/src/lib/desktop/native-schedule-publication.ts",
+       "from": "          tx.publishCompletion = revisions.publish(binding).then((reply) => {\n            if (!sessionAlive()) return\n            tx.publishReply = reply\n            notify()\n          }, () => { if (sessionAlive()) notify() })",
+       "to": "          tx.publishCompletion = revisions.publish(binding).then((reply) => {\n            if (!sessionAlive()) return\n            tx.publishReply = reply\n            notify()\n          }, () => { if (sessionAlive()) void finish({ status: \"failed\", reason: \"Publish reply lost\" }, \"failed\") })"
       }
      ],
      "bounded": true,
@@ -14132,7 +14132,7 @@
     "role": "mutant",
     "control": "rc2:historical-88:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-schedule-publication.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -14162,9 +14162,9 @@
      "id": "historical-88-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "if (!proof.ok || !binding || !sessionAlive() || proof.hostGeneration !== ready.hostGeneration\n            || proof.hostPid !== ready.hostPid",
-       "to": "if (!proof.ok || !binding || !sessionAlive()"
+       "file": "/src/lib/desktop/native-schedule-publication.ts",
+       "from": "        if (!proof.ok || !tx.binding || !sessionAlive() || proof.hostGeneration !== ready.hostGeneration\n          || proof.hostPid !== ready.hostPid",
+       "to": "        if (!proof.ok || !tx.binding || !sessionAlive()"
       }
      ],
      "bounded": true,
@@ -14986,7 +14986,7 @@
     "role": "mutant",
     "control": "rc2:historical-95:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-schedule-publication.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -15016,9 +15016,9 @@
      "id": "historical-95-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          failure = { outcome: { status: takeLocked ? \"blocked\" : \"failed\", reason }, reason: \"native-refused\" }\n          throw new Error(reason)",
-       "to": "          throw new Error(reason)"
+       "file": "/src/lib/desktop/native-schedule-publication.ts",
+       "from": "        tx.failure = { outcome: { status: takeLocked ? \"blocked\" : \"failed\", reason }, reason: \"native-refused\" }\n        throw new Error(reason)",
+       "to": "        throw new Error(reason)"
       }
      ],
      "bounded": true,
@@ -15109,8 +15109,8 @@
     "role": "mutant",
     "control": "rc2:historical-96:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts",
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-schedule-publication.ts",
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -15140,14 +15140,14 @@
      "id": "historical-96-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          if (publishReply && !publishReply.ok) checked(publishReply)",
-       "to": "          // Mutant discards typed negative Publish replies."
+       "file": "/src/lib/desktop/native-schedule-publication.ts",
+       "from": "        if (tx.publishReply && !tx.publishReply.ok) tx.checked(tx.publishReply)",
+       "to": "        // Mutant discards typed negative Publish replies."
       },
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "if (reply.kind === \"refused\") failure = {",
-       "to": "if (false && reply.kind === \"refused\") failure = {"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "      if (reply.kind === \"refused\") tx.failure = {",
+       "to": "      if (false && reply.kind === \"refused\") tx.failure = {"
       }
      ],
      "bounded": true,
@@ -15237,7 +15237,7 @@
     "role": "mutant",
     "control": "rc2:historical-97:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-schedule-publication.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -15267,9 +15267,9 @@
      "id": "historical-97-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "              const inspection = await inspect()\n              if (!inspection?.ok || inspection.revision.status !== \"rebase-required\") throw error",
-       "to": "              const inspection = await revisions.inspect(binding)\n              if (!inspection?.ok || inspection.revision.status !== \"rebase-required\") throw error"
+       "file": "/src/lib/desktop/native-schedule-publication.ts",
+       "from": "            const inspection = await inspect()\n            if (!inspection?.ok || inspection.revision.status !== \"rebase-required\") throw error",
+       "to": "            const inspection = await revisions.inspect(tx.binding)\n            if (!inspection?.ok || inspection.revision.status !== \"rebase-required\") throw error"
       }
      ],
      "bounded": true,
@@ -15483,8 +15483,8 @@
     "role": "mutant",
     "control": "rc2:historical-99:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts",
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts",
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -15514,14 +15514,14 @@
      "id": "historical-99-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          classifyPublication(publishReply)\n          if (status.ok)",
-       "to": "          if (status.ok)"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "      tx.classifyPublication(tx.publishReply)\n      if (prepared.hostChanged?.(status)) return { record }",
+       "to": "      if (record.kind === \"latency\") tx.classifyPublication(tx.publishReply)\n      if (prepared.hostChanged?.(status)) return { record }"
       },
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "await publishCompletion\n          classifyPublication(publishReply)",
-       "to": "await publishCompletion"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "      await (strategy.releasesLane ? tx.withoutLane(tx.publishCompletion) : tx.publishCompletion)\n      tx.classifyPublication(tx.publishReply)",
+       "to": "      await (strategy.releasesLane ? tx.withoutLane(tx.publishCompletion) : tx.publishCompletion)\n      if (record.kind === \"latency\") tx.classifyPublication(tx.publishReply)"
       }
      ],
      "bounded": true,
@@ -15611,7 +15611,7 @@
     "role": "mutant",
     "control": "rc2:historical-100:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-schedule-publication.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -15641,9 +15641,9 @@
      "id": "historical-100-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "            classifyPublication(published)\n            checked(published)",
-       "to": "            checked(published)"
+       "file": "/src/lib/desktop/native-schedule-publication.ts",
+       "from": "          classifyPublication(published)\n          tx.checked(published)",
+       "to": "          tx.checked(published)"
       }
      ],
      "bounded": true,
@@ -15733,7 +15733,7 @@
     "role": "mutant",
     "control": "rc2:historical-101:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-publication-transaction.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -15763,9 +15763,9 @@
      "id": "historical-101-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "        if (!binding || !sessionAlive()) return false",
-       "to": "        if (failure) { await notTaken(); return false }\n        if (!binding || !sessionAlive()) return false"
+       "file": "/src/lib/desktop/native-publication-transaction.ts",
+       "from": "    if (!tx.binding || !sessionAlive()) return false",
+       "to": "    if (tx.failure) { await notTaken(); return false }\n    if (!tx.binding || !sessionAlive()) return false"
       }
      ],
      "bounded": true,
@@ -15979,8 +15979,8 @@
     "role": "mutant",
     "control": "rc2:historical-103:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts",
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-schedule-publication.ts",
+     "src/lib/desktop/native-schedule-publication.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -16010,14 +16010,14 @@
      "id": "historical-103-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          if (failure && \"reason\" in failure.outcome) throw new Error(failure.outcome.reason)\n          if (fill)",
-       "to": "          if (fill)"
+       "file": "/src/lib/desktop/native-schedule-publication.ts",
+       "from": "        if (tx.failure && \"reason\" in tx.failure.outcome) throw new Error(tx.failure.outcome.reason)\n        const binding = tx.binding",
+       "to": "        const binding = tx.binding"
       },
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          if (publishReply && !publishReply.ok) checked(publishReply)",
-       "to": "          if (failure && \"reason\" in failure.outcome) throw new Error(failure.outcome.reason)\n          if (publishReply && !publishReply.ok) checked(publishReply)"
+       "file": "/src/lib/desktop/native-schedule-publication.ts",
+       "from": "        if (tx.publishReply && !tx.publishReply.ok) tx.checked(tx.publishReply)",
+       "to": "        if (tx.failure && \"reason\" in tx.failure.outcome) throw new Error(tx.failure.outcome.reason)\n        if (tx.publishReply && !tx.publishReply.ok) tx.checked(tx.publishReply)"
       }
      ],
      "bounded": true,
@@ -16107,7 +16107,7 @@
     "role": "mutant",
     "control": "rc2:historical-144:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-schedule-publication.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -16137,9 +16137,9 @@
      "id": "historical-144-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          if (ready.revision.status === \"publish-pending\"\n            && (ready.revision.retiredRevision !== 0 || ready.revision.preparedRevision !== 0)) {\n            // Prepare's pending reply owns no bank. Resolve admission before\n            // spending a retry, then wait on completion/terminal/control facts,\n            // not ordinary frames while a latency transition is still running.\n            prepareAdmissionWake = notify\n            try {\n              let admission: NativeRevisionReply | undefined\n              let inspected = false\n              let completion = nativeLatencyCompletionGeneration\n              let settled = scheduleSettledEpoch\n              let applied = latestScheduleProgress\n              do {\n                await waitForOpportunity(observed)\n                observed = sequence\n                if (inspected && completion === nativeLatencyCompletionGeneration && settled === scheduleSettledEpoch\n                  && applied?.appliedProcessorSequence === latestScheduleProgress?.appliedProcessorSequence\n                  && applied?.appliedUrgentSequence === latestScheduleProgress?.appliedUrgentSequence\n                  && applied?.appliedTransportTransitionId === latestScheduleProgress?.appliedTransportTransitionId) continue\n                completion = nativeLatencyCompletionGeneration\n                settled = scheduleSettledEpoch\n                applied = latestScheduleProgress\n                inspected = true\n                admission = await inspect({ projectId, revision: ready.revision.requestedRevision,\n                  hostGeneration: ready.hostGeneration })\n                if (admission?.ok && (admission.hostPid !== ready.hostPid || admission.hostGeneration !== ready.hostGeneration))\n                  throw new NativePlaybackAbortError(\"ownership-invalidated\")\n              } while (!admission?.ok || admission.revision.status === \"publish-pending\")\n              checked(admission)\n            } finally { prepareAdmissionWake = undefined }\n            progress = BigInt(coordinator.currentFrame())\n          } else if (ready.revision.status === \"publish-pending\") {\n            // With no retained/prepared publication, the pending admission is\n            // the ordinary queued-control opportunity, not a latency wait.\n            await waitForOpportunity(observed)\n            progress = BigInt(coordinator.currentFrame())\n          }\n",
-       "to": "          if (ready.revision.status === \"publish-pending\") {\n            await waitForOpportunity(observed)\n            progress = BigInt(coordinator.currentFrame())\n          }\n"
+       "file": "/src/lib/desktop/native-schedule-publication.ts",
+       "from": "        if (ready.revision.status === \"publish-pending\"\n          && (ready.revision.retiredRevision !== 0 || ready.revision.preparedRevision !== 0)) {\n          // Prepare's pending reply owns no bank. Resolve admission before\n          // spending a retry, then wait on completion/terminal/control facts,\n          // not ordinary frames while a latency transition is still running.\n          host.prepareAdmissionWake = notify\n          try {\n            let admission: NativeRevisionReply | undefined\n            let inspected = false\n            let completion = host.nativeLatencyCompletionGeneration\n            let settled = host.scheduleSettledEpoch\n            let applied = host.latestScheduleProgress\n            do {\n              await waitForOpportunity(observed)\n              observed = tx.sequence\n              if (inspected && completion === host.nativeLatencyCompletionGeneration && settled === host.scheduleSettledEpoch\n                && applied?.appliedProcessorSequence === host.latestScheduleProgress?.appliedProcessorSequence\n                && applied?.appliedUrgentSequence === host.latestScheduleProgress?.appliedUrgentSequence\n                && applied?.appliedTransportTransitionId === host.latestScheduleProgress?.appliedTransportTransitionId) continue\n              completion = host.nativeLatencyCompletionGeneration\n              settled = host.scheduleSettledEpoch\n              applied = host.latestScheduleProgress\n              inspected = true\n              admission = await inspect({ projectId, revision: ready.revision.requestedRevision,\n                hostGeneration: ready.hostGeneration })\n              if (admission?.ok && (admission.hostPid !== ready.hostPid || admission.hostGeneration !== ready.hostGeneration))\n                throw new NativePlaybackAbortError(\"ownership-invalidated\")\n            } while (!admission?.ok || admission.revision.status === \"publish-pending\")\n            tx.checked(admission)\n          } finally { host.prepareAdmissionWake = undefined }\n          progress = BigInt(coordinator.currentFrame())\n        } else if (ready.revision.status === \"publish-pending\") {\n          // With no retained/prepared publication, the pending admission is\n          // the ordinary queued-control opportunity, not a latency wait.\n          await waitForOpportunity(observed)\n          progress = BigInt(coordinator.currentFrame())\n        }\n",
+       "to": "        if (ready.revision.status === \"publish-pending\") {\n          await waitForOpportunity(observed)\n          progress = BigInt(coordinator.currentFrame())\n        }\n"
       }
      ],
      "bounded": true,
@@ -16382,8 +16382,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          processorState.published(runtimeRevision)",
-       "to": "          structuralGraphGeneration++\n          processorState.published(runtimeRevision)"
+       "from": "      processorState.published(runtimeRevision)",
+       "to": "      structuralGraphGeneration++\n      processorState.published(runtimeRevision)"
       }
      ],
      "bounded": false,
@@ -16473,7 +16473,7 @@
     "role": "mutant",
     "control": "rc2:260:0:control",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-schedule-publication.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -16503,9 +16503,9 @@
      "id": "260-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          preparedGraph = { ...graph, revision: binding.revision }\n          structuralGraphGeneration++",
-       "to": "          preparedGraph = { ...graph, revision: binding.revision }"
+       "file": "/src/lib/desktop/native-schedule-publication.ts",
+       "from": "        host.preparedGraph = { ...graph, revision: tx.binding.revision }\n        host.structuralGraphGeneration++",
+       "to": "        host.preparedGraph = { ...graph, revision: tx.binding.revision }"
       }
      ],
      "bounded": false,
@@ -18250,8 +18250,8 @@
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "          resourcesPromoted = true\n          binding = undefined\n",
-       "to": "          resourcesPromoted = true\n          binding = undefined\n          Object.assign(record, { nativeResult: { handled: true } })\n"
+       "from": "      tx.resourcesPromoted = true\n      tx.binding = undefined\n",
+       "to": "      tx.resourcesPromoted = true\n      tx.binding = undefined\n      Object.assign(record, { nativeResult: { handled: true } })\n"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
@@ -55108,7 +55108,7 @@
     "role": "mutant",
     "control": "c0:m511-control-ct",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-schedule-publication.ts"
     ],
     "witnesses": [
      "src/lib/desktop/native-playback-controller.test.ts"
@@ -55138,9 +55138,9 @@
      "id": "511-mutant",
      "changes": [
       {
-       "file": "src/lib/desktop/native-playback-controller.ts",
-       "from": "          preparedSnapshot = snapshot\n          preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)",
-       "to": "          preparedSnapshot = { ...snapshot, revision: binding.revision }\n          preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)"
+       "file": "src/lib/desktop/native-schedule-publication.ts",
+       "from": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)",
+       "to": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)"
       }
      ]
     },
@@ -55226,7 +55226,7 @@
     "role": "mutant",
     "control": "c0:m511-control-ht",
     "targets": [
-     "src/lib/desktop/native-playback-controller.ts"
+     "src/lib/desktop/native-schedule-publication.ts"
     ],
     "witnesses": [
      "src/hooks/useTimelinePlayback.test.ts"
@@ -55256,9 +55256,9 @@
      "id": "511-mutant",
      "changes": [
       {
-       "file": "src/lib/desktop/native-playback-controller.ts",
-       "from": "          preparedSnapshot = snapshot\n          preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)",
-       "to": "          preparedSnapshot = { ...snapshot, revision: binding.revision }\n          preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)"
+       "file": "src/lib/desktop/native-schedule-publication.ts",
+       "from": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)",
+       "to": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)"
       }
      ]
     },

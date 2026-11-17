@@ -9,10 +9,10 @@ import {
   sampledInstrumentRegion,
   sampledInstrumentRegionBytes,
   sampledInstrumentRegionIdentity,
-  sampledInstrumentRetainedBytes,
   validateSampledInstrumentBuffer,
   type SampledInstrumentBuffer,
 } from '@daw-browser/audio-engine/sampled-instrument-region'
+import { DRUM_RACK_MAX_DECODED_BYTES } from '@daw-browser/audio-engine/drum-rack-runtime'
 import { saveLocalExportMetadataBatch, type LocalExportMetadataInput } from '~/lib/local-export-metadata'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
@@ -56,7 +56,11 @@ import {
 } from '@daw-browser/audio-engine/media-pages'
 import type { AudioStretchRuntimeClip } from '@daw-browser/audio-engine/audio-stretch-rendering'
 import type { SampledInstrumentRegionBudgetScope } from '~/lib/sampled-instrument-region-budget'
-import { nativeInstrumentDeviceDecodedBytes } from '~/lib/desktop/native-instrument-budget-policy'
+import {
+  nativeInstrumentExportMemory,
+  portableInstrumentExportMemory,
+  type InstrumentExportMemoryPolicy,
+} from '~/lib/export/instrument-export-memory'
 import { flushLocalProjectPendingWrites } from '~/lib/local-project-pending-writes'
 import {
   createNativeTimelinePageManager,
@@ -295,7 +299,7 @@ export async function loadInstrumentExportBuffers(
   allowedTrackIds?: ReadonlySet<string>,
   projectId?: string,
   sampledInstrumentRegionScope?: SampledInstrumentRegionBudgetScope,
-  nativeExport = false,
+  memory: InstrumentExportMemoryPolicy = portableInstrumentExportMemory,
 ): Promise<void> {
   const trackFx = fx.trackFx
   if (!trackFx) return
@@ -372,7 +376,7 @@ export async function loadInstrumentExportBuffers(
             input: sample,
             bounds: region,
             decodedBytes: sampledInstrumentRegionBytes(region, sample.source.channelCount),
-            maxDecodedBytes: nativeExport ? nativeInstrumentDeviceDecodedBytes : 64 * 1024 * 1024,
+            maxDecodedBytes: memory.decodedLimit(DRUM_RACK_MAX_DECODED_BYTES),
             current: matchesRegion(buffers.get(pad.id), sample, region) ? buffers.get(pad.id) : undefined,
             install: (buffer) => buffers.set(pad.id, buffer),
           })
@@ -385,7 +389,7 @@ export async function loadInstrumentExportBuffers(
         localRegions.set(sampledInstrumentRegionIdentity(pad.sample, region), sampledInstrumentRegionBytes(region, pad.sample.source.channelCount))
       }
       const localBytes = [...localRegions.values()].reduce((total, bytes) => total + bytes, 0)
-      const limit = nativeExport ? nativeInstrumentDeviceDecodedBytes : 64 * 1024 * 1024
+      const limit = memory.decodedLimit(DRUM_RACK_MAX_DECODED_BYTES)
       if (localBytes > limit) throw new Error(`Drum Rack regions exceed the ${limit} byte limit.`)
     }
     if (entry.instrument?.kind === 'sampler') {
@@ -401,13 +405,13 @@ export async function loadInstrumentExportBuffers(
           input: zone.sample,
           bounds: region,
           decodedBytes: bytes,
-          maxDecodedBytes: nativeExport ? nativeInstrumentDeviceDecodedBytes : entry.instrument.params.maxDecodedBytes,
+          maxDecodedBytes: memory.decodedLimit(entry.instrument.params.maxDecodedBytes),
           current: matchesRegion(buffers.get(zone.id), zone.sample, region) ? buffers.get(zone.id) : undefined,
           install: (buffer) => buffers.set(zone.id, buffer),
         })
       }
       const localBytes = [...localRegions.values()].reduce((total, bytes) => total + bytes, 0)
-      const limit = nativeExport ? nativeInstrumentDeviceDecodedBytes : entry.instrument.params.maxDecodedBytes
+      const limit = memory.decodedLimit(entry.instrument.params.maxDecodedBytes)
       if (localBytes > limit) {
         throw new Error(`Sampler regions exceed the ${limit} byte limit.`)
       }
@@ -421,11 +425,12 @@ export async function loadInstrumentExportBuffers(
         const existing = entry.granularBuffer
         const currentIdentity = sampledInstrumentRegionIdentity(zone.sample, region)
         const decodedBytes = sampledInstrumentRegionBytes(region, zone.sample.source.channelCount)
-        addConsumer(currentIdentity, nativeExport ? decodedBytes : sampledInstrumentRetainedBytes(decodedBytes, 2), {
+        const limit = memory.decodedLimit(entry.instrument.params.maxDecodedBytes)
+        addConsumer(currentIdentity, memory.granularRetainedBytes(decodedBytes), {
           input: zone.sample,
           bounds: region,
           decodedBytes,
-          maxDecodedBytes: nativeExport ? nativeInstrumentDeviceDecodedBytes : entry.instrument.params.maxDecodedBytes,
+          maxDecodedBytes: limit,
           current: existing?.assetKey === currentIdentity && matchesRegion(existing, zone.sample, region) ? existing : undefined,
           install: (buffer) => {
             entry.granularBuffer = {
@@ -436,7 +441,6 @@ export async function loadInstrumentExportBuffers(
             }
           },
         })
-        const limit = nativeExport ? nativeInstrumentDeviceDecodedBytes : entry.instrument.params.maxDecodedBytes
         if (decodedBytes > limit) {
           throw new Error(`Granular regions exceed the ${limit} byte limit.`)
         }
@@ -445,23 +449,7 @@ export async function loadInstrumentExportBuffers(
   }
   const jobs = [...jobsByIdentity.values()]
   if (jobs.length === 0) return
-  if (nativeExport) {
-    if (!budget) throw new Error('Native export sample memory accounting is unavailable. Restart desktop audio and retry.')
-    try {
-      budget.lease(jobs.flatMap((job) => job.existing ? [{
-        key: job.key, buffer: job.existing.buffer, bytes: job.bytes,
-      }] : []), true)
-      // Separate child-host mappings from physical renderer PCM. Offline does
-      // not lock memory; conservatively charge the same 16 KiB mapping pages.
-      budget.set('native-export-page-staging', 2 * 1024 ** 2, () => undefined)
-      for (const job of jobs) {
-        budget.set(`native-export-mapping:${job.key}`, Math.ceil(job.bytes / 16_384) * 16_384, () => undefined)
-      }
-      budget.ensureCapacityFor(new Map(jobs.filter((job) => !job.existing).map((job) => [job.key, job.bytes])))
-    } catch {
-      throw new Error('Not enough sample memory to export. Shorten sample regions or remove unused samples, then retry. No export was completed.')
-    }
-  }
+  memory.admit(budget, jobs)
   const leasedExisting = (job: RegionJob) => (
     job.existing !== undefined
     && budget?.isLeased(job.existing.buffer) === true
@@ -505,7 +493,7 @@ export async function loadInstrumentExportBuffers(
         const reservation = reservations.get(job.key)
         reservation?.commit()
         budget?.set(job.key, job.bytes, () => undefined, buffer.buffer)
-        if (nativeExport) budget?.lease([{ key: job.key, buffer: buffer.buffer, bytes: job.bytes }], true)
+        if (memory.leaseRegions) budget?.lease([{ key: job.key, buffer: buffer.buffer, bytes: job.bytes }], true)
         for (const consumer of job.consumers) consumer.install(buffer)
       } catch (error) {
         if (!loading.signal.aborted) {
@@ -683,7 +671,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
         undefined,
         localProjectId,
         input.sampledInstrumentRegionScope,
-        input.nativeRendererRequired,
+        input.nativeRendererRequired ? nativeInstrumentExportMemory : portableInstrumentExportMemory,
       ),
     ])
     for (const result of preparation) if (result.status === 'rejected') throw result.reason

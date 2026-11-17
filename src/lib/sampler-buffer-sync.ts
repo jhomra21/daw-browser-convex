@@ -15,7 +15,11 @@ import {
   type SampledInstrumentRegionBudget,
   type SampledInstrumentRegionPin,
 } from '~/lib/sampled-instrument-region-budget'
-import { SampledInstrumentSyncSupersededError } from '~/lib/sampled-instrument-sync-error'
+import {
+  replaceSampledInstrumentSync,
+  SampledInstrumentSyncSupersededError,
+  untilNotSuperseded,
+} from '~/lib/sampled-instrument-sync-error'
 import { nativeInstrumentDeviceDecodedBytes, type NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
 
 export const DEFAULT_SAMPLED_INSTRUMENT_AGGREGATE_BYTES = 256 * 1024 * 1024
@@ -621,23 +625,19 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
       if (!held.applied) return held.promise.then((disposition): EngineDisposition => disposition === 'applied' ? 'joined' : disposition)
       if (engine.getTrackInstrumentKind(trackId) === 'sampler' && !samplerHasFailure(trackId)) return Promise.resolve('skipped')
     }
-    const previousController = abortControllers.get(trackId)
-    let startReplacement = () => {}
-    const replacement = new Promise<EngineDisposition>((resolve, reject) => {
-      startReplacement = () => {
-        void runSyncTrack(engine, trackId, params, instanceId).then(resolve, reject)
-      }
-    })
-    const entry = { key, applied: false, promise: replacement }
-    samplerSyncs.set(trackId, entry)
-    void replacement.then((disposition) => {
-      if (samplerSyncs.get(trackId) === entry) entry.applied = disposition === 'applied'
-    }, () => {
-      if (samplerSyncs.get(trackId) === entry) samplerSyncs.delete(trackId)
-    })
-    previousController?.abort(new SampledInstrumentSyncSupersededError(replacement))
-    startReplacement()
-    return replacement
+    return replaceSampledInstrumentSync(
+      abortControllers.get(trackId),
+      () => runSyncTrack(engine, trackId, params, instanceId),
+      (replacement) => {
+        const entry = { key, applied: false, promise: replacement }
+        samplerSyncs.set(trackId, entry)
+        void replacement.then((disposition) => {
+          if (samplerSyncs.get(trackId) === entry) entry.applied = disposition === 'applied'
+        }, () => {
+          if (samplerSyncs.get(trackId) === entry) samplerSyncs.delete(trackId)
+        })
+      },
+    )
   }
 
   const runSyncGranularTrack = async (
@@ -768,16 +768,10 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     instanceId?: string,
     force = false,
   ): Promise<EngineDisposition> => {
-    const previousController = abortControllers.get(trackId)
-    let startReplacement = () => {}
-    const replacement = new Promise<EngineDisposition>((resolve, reject) => {
-      startReplacement = () => {
-        void runSyncGranularTrack(engine, trackId, params, instanceId, force).then(resolve, reject)
-      }
-    })
-    previousController?.abort(new SampledInstrumentSyncSupersededError(replacement))
-    startReplacement()
-    return replacement
+    return replaceSampledInstrumentSync(
+      abortControllers.get(trackId),
+      () => runSyncGranularTrack(engine, trackId, params, instanceId, force),
+    )
   }
 
   const matchesSampler = (trackId: string, instrument: Extract<TrackInstrumentParams, { kind: 'sampler' }>) => {
@@ -807,7 +801,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
         : instrument.params.zone ? [instrument.params.zone] : [])
         .map(zone => [zone.id, regionForZone(zone).key]),
     }),
-    loadBuffers: async (trackId: Track['id'], instrument: Extract<TrackInstrumentParams, { kind: 'sampler' | 'granular' }>) => {
+    loadBuffers: (trackId: Track['id'], instrument: Extract<TrackInstrumentParams, { kind: 'sampler' | 'granular' }>) => untilNotSuperseded(async () => {
       if (!abortControllers.get(trackId) || abortControllers.get(trackId)?.signal.aborted) {
         abortControllers.set(trackId, new AbortController())
       }
@@ -851,7 +845,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
           release,
         }
       } catch (cause) { release(); throw cause }
-    },
+    }),
     snapshotSamplerBuffers: (trackId: Track['id'], instrument: Extract<TrackInstrumentParams, { kind: 'sampler' }>) => {
       if (!matchesSampler(trackId, instrument)) return undefined
       const cache = samplerCaches.get(trackId)

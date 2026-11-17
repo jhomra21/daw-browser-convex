@@ -17,7 +17,6 @@ import { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
 import { compileLiveNativeInstrumentConfigurations, compileLiveNativeProjection } from "@daw-browser/audio-engine/live-native-projection";
 import { localizeInstrumentFx } from "@daw-browser/audio-engine/portable-export-snapshot";
 import { nativeInstrumentContentKey, type PublicationJoin } from "~/lib/live-processor-control";
-import { SampledInstrumentSyncSupersededError } from "~/lib/sampled-instrument-sync-error";
 import { createSampledInstrumentRegionBudget } from "~/lib/sampled-instrument-region-budget";
 import { sampledInstrumentRegion, sampledInstrumentRegionIdentity, type SampledInstrumentBuffer } from "@daw-browser/audio-engine/sampled-instrument-region";
 import { createGranularRuntime, type GranularWorkletControlMessage } from "../../packages/audio-engine/src/granular-runtime";
@@ -2969,7 +2968,7 @@ test("releases a retired Drum Rack generation through the ending hit token", asy
   sync.dispose();
 });
 
-test("retries a Drum Rack region after the first request is aborted", async () => {
+test("a superseded Drum Rack sync settles after its replacement", async () => {
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
   let calls = 0;
@@ -3004,12 +3003,8 @@ test("retries a Drum Rack region after the first request is aborted", async () =
   const first = sync.syncTrack(engine, "drum-retry", params, "drum-instance");
   await firstStarted;
   const second = sync.syncTrack(engine, "drum-retry", params, "drum-instance");
-  const firstFailure = await first.then(() => undefined, (cause: unknown) => cause);
-  expect(firstFailure).toBeInstanceOf(SampledInstrumentSyncSupersededError);
-  await second;
-  if (firstFailure instanceof SampledInstrumentSyncSupersededError) {
-    await expect(firstFailure.replacement).resolves.toBe("applied");
-  }
+  await expect(first).resolves.toBe("superseded");
+  await expect(second).resolves.toBe("applied");
   expect(calls).toBe(2);
   expect(sync.snapshotBuffers("drum-retry", {
     kind: "drum-rack",
@@ -3053,7 +3048,7 @@ test("clearing a Drum Rack track uses ordinary cancellation", async () => {
   sync.dispose();
 });
 
-test("retries a Sampler region after the first request is aborted", async () => {
+test("a superseded Sampler sync settles after its replacement", async () => {
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
   let calls = 0;
@@ -3087,15 +3082,8 @@ test("retries a Sampler region after the first request is aborted", async () => 
   // An equal request would join the load in flight, so only a changed one supersedes and retries it.
   const changed = { ...params, polyphony: params.polyphony - 1 };
   const second = sync.syncTrack(engine, "sampler-retry", changed, "sampler-instance");
-  const firstFailure = await first.then(() => undefined, (cause: unknown) => cause);
-  expect(firstFailure).toBeInstanceOf(SampledInstrumentSyncSupersededError);
-  if (firstFailure instanceof SampledInstrumentSyncSupersededError) {
-    expect(firstFailure.replacement).toBe(second);
-  }
+  await expect(first).resolves.toBe("superseded");
   await expect(second).resolves.toBe("applied");
-  if (firstFailure instanceof SampledInstrumentSyncSupersededError) {
-    await expect(firstFailure.replacement).resolves.toBe("applied");
-  }
   expect(calls).toBe(2);
   expect(sync.snapshotSamplerBuffers("sampler-retry", {
     kind: "sampler",
@@ -3105,7 +3093,7 @@ test("retries a Sampler region after the first request is aborted", async () => 
   sync.dispose();
 });
 
-test("retries a Granular region after the first request is aborted", async () => {
+test("a superseded Granular sync settles after its replacement", async () => {
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
   let calls = 0;
@@ -3137,12 +3125,8 @@ test("retries a Granular region after the first request is aborted", async () =>
   const first = sync.syncGranularTrack(engine, "granular-retry", params, "granular-instance");
   await firstStarted;
   const second = sync.syncGranularTrack(engine, "granular-retry", params, "granular-instance");
-  const firstFailure = await first.then(() => undefined, (cause: unknown) => cause);
-  expect(firstFailure).toBeInstanceOf(SampledInstrumentSyncSupersededError);
-  if (firstFailure instanceof SampledInstrumentSyncSupersededError) {
-    expect(firstFailure.replacement).toBe(second);
-  }
-  await second;
+  await expect(first).resolves.toBe("superseded");
+  await expect(second).resolves.toBe("applied");
   expect(calls).toBe(2);
   expect(sync.snapshotGranularBuffer("granular-retry", {
     kind: "granular",
@@ -4316,7 +4300,7 @@ test("an equal sampler sync joins a failing load and the next equal sync loads a
   expect(engine.samplerBufferIds("sampler-failure-join")).toEqual(["zone-runtime"]);
 });
 
-test("a joined sampler sync is superseded together with the load it joined", async () => {
+test("joined sampler syncs settle superseded when a replacement loads", async () => {
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
   const sync = createSamplerBufferSync({ decodePages: decodeTestPages, createBuffer: () => buffer });
@@ -4326,12 +4310,8 @@ test("a joined sampler sync is superseded together with the load it joined", asy
   const second = sync.syncTrack(engine, "sampler-join-superseded", { ...params }, "sampler-instance");
   const third = sync.syncTrack(engine, "sampler-join-superseded", { ...params, polyphony: params.polyphony - 1 }, "sampler-instance");
 
-  const [firstResult, secondResult] = await Promise.allSettled([first, second]);
-  expect(firstResult.status).toBe("rejected");
-  expect(secondResult.status).toBe("rejected");
-  for (const result of [firstResult, secondResult]) {
-    if (result.status === "rejected") expect(result.reason).toBeInstanceOf(SampledInstrumentSyncSupersededError);
-  }
+  await expect(first).resolves.toBe("superseded");
+  await expect(second).resolves.toBe("superseded");
   expect(await third).toBe("applied");
 });
 

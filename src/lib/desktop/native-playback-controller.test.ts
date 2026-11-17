@@ -24,7 +24,6 @@ import { useEffectsPanelAudioSync } from "~/hooks/useEffectsPanelAudioSync"
 import { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync"
 import { captureNativeBuiltInParameterValues, captureNativeBuiltInStateCommit, nativeBuiltInPatchTiming } from "./native-built-in-parameter-mapper"
 import type { NativeBuiltInParameterPayload } from "~/lib/processor-edit-semantics"
-import { SampledInstrumentSyncSupersededError } from "~/lib/sampled-instrument-sync-error"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import { createAudioPcmSourceDescriptor } from "@daw-browser/audio-engine/media-pages"
 import { createAudioStretchCache } from "@daw-browser/audio-engine/audio-stretch-cache"
@@ -34,7 +33,7 @@ import { getEffectTiming } from "@daw-browser/audio-engine/effects/timing"
 import { automationTargetKey, createDefaultDelayParams, normalizeDelayParams, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams, createDefaultReverbParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultUtilityParams, mergeSynthParams, AUDIO_EFFECT_CONTRACTS, externalAutomationParameterId, type AutomationEnvelope, type AudioPcmSourceDescriptor, type TrackInstrumentParams, type SamplerZone, type SynthParamsUpdate } from "@daw-browser/shared"
 import { nativeGraphNodeId, serializeNativeGraph, serializeNativeInstrumentStates, serializeNativeProcessorEvents, type NativeHostMappedAsset, type NativeHostMappedAssetPage, type NativeHostMeterBatch, type NativeHostPcmAsset, type NativeHostRecordingStatus, type NativeHostSpectrumFrame, type NativeHostTransport, type NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
 import { listLocalEffects, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects"
-import { AudioEngine, type AudioEffectRuntimeInstance, type SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
+import { AudioEngine, type AudioEffectRuntimeInstance, type EngineDisposition, type SpectrumFrame } from "@daw-browser/audio-engine/audio-engine"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
 import { externalProcessorSchema, type ExternalProcessor } from "@daw-browser/external-plugins"
 import type { NativeRecordingTake, NativeRecordingFailure, NativeDeliveryReply, NativeProcessorPatchReply } from "~/types/desktop-bridge"
@@ -6742,7 +6741,7 @@ test("one play request waits for superseding sampled-instrument buffers before c
       createInitialParams: () => undefined,
       serializeParams: (params) => params,
       applyToEngine: (_targetId, params) => {
-        if (params === "superseded") return firstApply.promise.then(() => "applied")
+        if (params === "superseded") return firstApply.promise.then((): EngineDisposition => "superseded")
         replacementBuffers = params
         return "applied";
       },
@@ -6768,7 +6767,7 @@ test("one play request waits for superseding sampled-instrument buffers before c
 
     const play = controller.start(snapshotInput.transport)
     state.setForTarget("track-1", "replacement")
-    firstApply.reject(new SampledInstrumentSyncSupersededError(Promise.resolve("applied")))
+    firstApply.resolve()
     await expect(play).resolves.toBe("started")
 
     expect(replacementBuffers).toBe("replacement")
@@ -6794,7 +6793,9 @@ test("reports a genuine sampled-instrument replacement failure during playback c
       createInitialParams: () => undefined,
       serializeParams: (params) => params,
       applyToEngine: (_targetId, params) => {
-        if (params === "superseded") return firstApply.promise.then(() => "applied")
+        if (params === "superseded") {
+          return firstApply.promise.then(() => replacementSync.promise).then((): EngineDisposition => "superseded")
+        }
         throw new Error("Replacement buffer decode failed.")
       },
       persistParams: () => ({ kind: "committed-unordered" }),
@@ -6814,7 +6815,7 @@ test("reports a genuine sampled-instrument replacement failure during playback c
 
     const play = controller.start(snapshotInput.transport)
     state.setForTarget("track-1", "replacement")
-    firstApply.reject(new SampledInstrumentSyncSupersededError(replacementSync.promise.then(() => "applied")))
+    firstApply.resolve()
     replacementSync.reject(new Error("Replacement buffer decode failed."))
     await expect(play).resolves.toBe("unavailable")
 

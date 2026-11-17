@@ -15,7 +15,11 @@ import {
   type SampledInstrumentRegionLoaderOptions,
 } from '~/lib/sampled-instrument-region-loader'
 import { DEFAULT_SAMPLED_INSTRUMENT_AGGREGATE_BYTES } from '~/lib/sampler-buffer-sync'
-import { SampledInstrumentSyncSupersededError } from '~/lib/sampled-instrument-sync-error'
+import {
+  replaceSampledInstrumentSync,
+  SampledInstrumentSyncSupersededError,
+  untilNotSuperseded,
+} from '~/lib/sampled-instrument-sync-error'
 import {
   createSampledInstrumentRegionBudget,
   type SampledInstrumentRegionBudget,
@@ -444,16 +448,10 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
   }
   const syncTrack = (engine: AudioEngine, trackId: Track['id'], params: DrumRackParams, instanceId?: string): Promise<EngineDisposition> => {
     if (disposed || options.isCurrentProject?.() === false) return Promise.resolve('dropped')
-    const previousController = abortControllers.get(trackId)
-    let startReplacement = () => {}
-    const replacement = new Promise<EngineDisposition>((resolve, reject) => {
-      startReplacement = () => {
-        void runSyncTrack(engine, trackId, params, instanceId).then(resolve, reject)
-      }
-    })
-    previousController?.abort(new SampledInstrumentSyncSupersededError(replacement))
-    startReplacement()
-    return replacement
+    return replaceSampledInstrumentSync(
+      abortControllers.get(trackId),
+      () => runSyncTrack(engine, trackId, params, instanceId),
+    )
   }
   return {
     retryTrack: async (
@@ -535,7 +533,7 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
         pad.id, pad.sample ? regionForSample(pad.sample, pad.startSec, pad.endSec).key : undefined,
       ]),
     }),
-    loadBuffers: async (trackId: Track['id'], instrument: Extract<TrackInstrumentParams, { kind: 'drum-rack' }>) => {
+    loadBuffers: (trackId: Track['id'], instrument: Extract<TrackInstrumentParams, { kind: 'drum-rack' }>) => untilNotSuperseded(async () => {
       if (!abortControllers.get(trackId) || abortControllers.get(trackId)?.signal.aborted) {
         abortControllers.set(trackId, new AbortController())
       }
@@ -572,7 +570,7 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
         }
         return { drumRackBuffers: buffers, unavailableSampleAssetKeys: [...unavailableSampleAssetKeys], release }
       } catch (cause) { release(); throw cause }
-    },
+    }),
     snapshotBuffers: (trackId: Track['id'], instrument: Extract<TrackInstrumentParams, { kind: 'drum-rack' }>) => {
       const entry = cache.get(trackId)
       if (entry?.projectId !== projectId()) return undefined

@@ -3,7 +3,6 @@ import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observ
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 import { isAbortError } from '~/lib/dom-errors'
 import type { AudioEngine, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
-import { SampledInstrumentSyncSupersededError } from '~/lib/sampled-instrument-sync-error'
 import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery } from '~/lib/live-processor-control'
 import { effectAdmission, type ParameterSaveResult } from '~/components/timeline/effect-publication-result'
 import {
@@ -94,24 +93,13 @@ export function createPersistedEffectState<TRow, TParams>(
     registeredFlushers.set(projectId, registerPendingLocalProjectWriteFlusher('effects', projectId, async () => { await owner.flushPending(projectId) }))
   }
 
-  // Resolves with what the engine answered for the value. A replacement is waited for (it may still fail), but it installed
-  // other params: the value itself was superseded. An aborted apply installed nothing.
+  // Resolves with what the engine answered for the value. An aborted apply installed nothing.
   const applyToEngine = async (targetId: string, params: TParams, edit: LiveProcessorEditIdentity | undefined): Promise<EngineDisposition> => {
-    let apply = Promise.resolve().then(() => options.applyToEngine(targetId, params, edit))
-    let replaced = false
-    for (;;) {
-      try {
-        const result = await apply
-        return replaced ? 'superseded' : result
-      } catch (cause) {
-        if (cause instanceof SampledInstrumentSyncSupersededError) {
-          apply = cause.replacement
-          replaced = true
-          continue
-        }
-        if (isAbortError(cause)) return 'dropped'
-        throw cause
-      }
+    try {
+      return await Promise.resolve().then(() => options.applyToEngine(targetId, params, edit))
+    } catch (cause) {
+      if (isAbortError(cause)) return 'dropped'
+      throw cause
     }
   }
 

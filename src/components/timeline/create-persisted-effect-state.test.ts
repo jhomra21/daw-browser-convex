@@ -12,7 +12,6 @@ import { createPersistedEffectState } from "./create-persisted-effect-state";
 import { effectAdmission, type ParameterSaveResult } from "./effect-publication-result";
 import { flushRegisteredLocalProjectWrites } from "~/lib/local-project-write-flushers";
 import { createParameterGestureOwner, ParameterGestureHolder, ParameterReleaseFailedError } from "./parameter-gesture-owner";
-import { SampledInstrumentSyncSupersededError } from "~/lib/sampled-instrument-sync-error";
 import type { EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import { createLiveMixerRuntime } from "@daw-browser/audio-engine/live-mixer-runtime";
@@ -879,7 +878,7 @@ test("flushPending follows a superseded apply registered after the flush starts"
       serializeParams: String,
       applyToEngine: fixtureApply((targetId, value) => {
         if (targetId === "track-b") return otherTarget.promise;
-        return value === 1 ? firstApply.promise : replacement.promise;
+        return value === 1 ? firstApply.promise.then(() => supersededBy(replacement.promise)) : replacement.promise;
       }),
       persistParams: fixtureSave(() => {}),
     });
@@ -888,7 +887,7 @@ test("flushPending follows a superseded apply registered after the flush starts"
     state.setForTarget("track-b", 1);
     const flush = state.flushPending();
     state.setForTarget("track-a", 2);
-    firstApply.reject(new SampledInstrumentSyncSupersededError(replacement.promise.then(() => "applied")));
+    firstApply.resolve();
     await drain();
     replacement.resolve();
     otherTarget.resolve();
@@ -907,13 +906,13 @@ test("flushPending follows a sampler replacement started outside persisted apply
       readQueryParams: () => undefined,
       createInitialParams: () => undefined,
       serializeParams: String,
-      applyToEngine: fixtureApply(() => compileApply.promise),
+      applyToEngine: fixtureApply(() => compileApply.promise.then(() => supersededBy(externalSync.promise))),
       persistParams: fixtureSave(() => {}),
     });
 
     state.setForTarget("track-a", 1);
     const flush = state.flushPending();
-    compileApply.reject(new SampledInstrumentSyncSupersededError(externalSync.promise.then(() => "applied")));
+    compileApply.resolve();
     externalSync.resolve();
     await flush;
     dispose();
@@ -930,14 +929,14 @@ test("flushPending reports failure from an undo-started Drum Rack replacement", 
       readQueryParams: () => undefined,
       createInitialParams: () => undefined,
       serializeParams: String,
-      applyToEngine: fixtureApply(() => compileApply.promise),
+      applyToEngine: fixtureApply(() => compileApply.promise.then(() => supersededBy(undoSync.promise))),
       persistParams: fixtureSave(() => {}),
     });
 
     state.setForTarget("track-a", 1);
     const flush = state.flushPending();
     const failure = new Error("Undo Drum Rack buffer sync failed.");
-    compileApply.reject(new SampledInstrumentSyncSupersededError(undoSync.promise.then(() => "applied")));
+    compileApply.resolve();
     undoSync.reject(failure);
     expect(await causeOf(flush)).toBe(failure);
     dispose();
@@ -954,7 +953,9 @@ test("flushPending rejects when a superseding apply fails", async () => {
       readQueryParams: () => undefined,
       createInitialParams: () => undefined,
       serializeParams: String,
-      applyToEngine: fixtureApply((_targetId, value) => value === 1 ? firstApply.promise : replacement.promise),
+      applyToEngine: fixtureApply((_targetId, value) => value === 1
+        ? firstApply.promise.then(() => supersededBy(replacement.promise))
+        : replacement.promise),
       persistParams: fixtureSave(() => {}),
     });
 
@@ -962,7 +963,7 @@ test("flushPending rejects when a superseding apply fails", async () => {
     const flush = state.flushPending();
     state.setForTarget("track-a", 2);
     const failure = new Error("replacement failed");
-    firstApply.reject(new SampledInstrumentSyncSupersededError(replacement.promise.then(() => "applied")));
+    firstApply.resolve();
     await drain();
     replacement.reject(failure);
     expect(await causeOf(flush)).toBe(failure);
@@ -980,7 +981,9 @@ test("concurrent flushes both reject when a superseding apply fails", async () =
       readQueryParams: () => undefined,
       createInitialParams: () => undefined,
       serializeParams: String,
-      applyToEngine: fixtureApply((_targetId, value) => value === 1 ? firstApply.promise : replacement.promise),
+      applyToEngine: fixtureApply((_targetId, value) => value === 1
+        ? firstApply.promise.then(() => supersededBy(replacement.promise))
+        : replacement.promise),
       persistParams: fixtureSave(() => {}),
     });
 
@@ -991,7 +994,7 @@ test("concurrent flushes both reject when a superseding apply fails", async () =
     const failure = new Error("replacement failed");
     const firstOutcome = causeOf(firstFlush);
     const secondOutcome = causeOf(secondFlush);
-    firstApply.reject(new SampledInstrumentSyncSupersededError(replacement.promise.then(() => "applied")));
+    firstApply.resolve();
     await drain();
     replacement.reject(failure);
 
@@ -1010,17 +1013,22 @@ test("flushPending follows chained supersessions to the latest apply", async () 
       readQueryParams: () => undefined,
       createInitialParams: () => undefined,
       serializeParams: String,
-      applyToEngine: fixtureApply((_targetId, value) => applies[value - 1]?.promise),
+      applyToEngine: fixtureApply((_targetId, value) => settle(value - 1)),
       persistParams: fixtureSave(() => {}),
     });
+    // Apply n settles after apply n + 1 does, the way a replaced sync follows its replacement.
+    const settle = (index: number): Promise<EngineDisposition | undefined> => {
+      const applied = applies[index]?.promise ?? Promise.resolve();
+      return index < applies.length - 1 ? applied.then(() => supersededBy(settle(index + 1))) : applied.then(() => undefined);
+    };
 
     state.setForTarget("track-a", 1);
     const flush = state.flushPending();
     state.setForTarget("track-a", 2);
     state.setForTarget("track-a", 3);
-    applies[0]?.reject(new SampledInstrumentSyncSupersededError((applies[1]?.promise ?? Promise.resolve()).then(() => "applied")));
+    applies[0]?.resolve();
     await drain();
-    applies[1]?.reject(new SampledInstrumentSyncSupersededError((applies[2]?.promise ?? Promise.resolve()).then(() => "applied")));
+    applies[1]?.resolve();
     await drain();
     applies[2]?.resolve();
 
@@ -1077,6 +1085,10 @@ const causeOf = (flush: Promise<unknown>) => flush.then(
 const drain = async () => {
   for (let i = 0; i < 20; i++) await Promise.resolve();
 };
+
+// What a synchronizer answers for a value its replacement overtook: 'superseded', once the replacement settles.
+const supersededBy = (replacement: Promise<unknown>): Promise<EngineDisposition> =>
+  replacement.then((): EngineDisposition => "superseded");
 
 const deferred = () => {
   let resolve = () => {};
@@ -1188,7 +1200,7 @@ const releaseWithApply = async (applyToEngine: (targetId: string, value: number)
 };
 
 test("a release whose apply was replaced by another request is not described as installed, even when the replacement installs", async () => {
-  const written = await releaseWithApply(() => Promise.reject(new SampledInstrumentSyncSupersededError(Promise.resolve("applied"))));
+  const written = await releaseWithApply(() => supersededBy(Promise.resolve("applied")));
   expect(written).toEqual({ persisted: [1], history: [], announced: [] });
 });
 

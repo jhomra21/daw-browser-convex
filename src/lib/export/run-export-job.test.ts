@@ -26,6 +26,7 @@ import { sampledInstrumentRegion, sampledInstrumentRegionBytes, sampledInstrumen
 import { createLocalProject, deleteLocalProject } from "~/lib/local-project-db"
 import { createLocalAsset, deleteLocalAsset } from "~/lib/local-assets"
 import { loadInstrumentExportBuffers, runStemExport, runTimelineExport } from "~/lib/export/run-export-job"
+import { nativeInstrumentExportMemory } from "~/lib/export/instrument-export-memory"
 import { NativeOfflineRenderError } from "~/lib/export/desktop-native-offline-pcm-renderer"
 import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
 import type { ExportEncodingSettings, ExportRenderSettings } from "~/lib/export/export-settings"
@@ -1114,7 +1115,7 @@ test("native export accounts shared live PCM plus distinct offline mappings and 
     let failure: unknown
     let held: number | undefined
     try {
-      await loadInstrumentExportBuffers(fx, new AbortController().signal, undefined, undefined, recordingScope, true)
+      await loadInstrumentExportBuffers(fx, new AbortController().signal, undefined, undefined, recordingScope, nativeInstrumentExportMemory)
       held = budget.totalBytes()
     } catch (error) {
       failure = error

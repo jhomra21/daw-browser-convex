@@ -20,7 +20,6 @@ import type { AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";
 import { withInstrumentOverride, type ExportEffectsProjection } from "~/lib/export/export-effect-rows";
 import type { ExportRenderStateSnapshot } from "~/lib/desired-playback-state";
 import type { NativeBuiltInParameterPayload } from "~/lib/processor-edit-semantics";
-import { SampledInstrumentSyncSupersededError } from "~/lib/sampled-instrument-sync-error";
 
 export type EffectsPanelExportSnapshot = {
   flushPending: () => Promise<void>
@@ -328,8 +327,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
           };
         } catch (cause) {
           release();
-          if (cause instanceof SampledInstrumentSyncSupersededError
-            || projectId !== options.projectId() || hydrationKey(readProjection()) !== key) continue;
+          if (projectId !== options.projectId() || hydrationKey(readProjection()) !== key) continue;
           throw cause;
         }
       }

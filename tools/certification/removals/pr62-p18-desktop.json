@@ -1,0 +1,10 @@
+{
+ "ruling": "acceptance-reports/pr62-cleanup/PARENT-RULING-PR62-TEST-CLEANUP.md",
+ "removed": [
+  { "file": "apps/desktop/recording-ipc-diagnostics.test.ts", "test": "terminal status forwards the main ring exactly once without PCM" },
+  { "file": "apps/desktop/recording-ipc-diagnostics.test.ts", "test": "main benchmark opt-out forwards unchanged and produces no evidence" },
+  { "file": "apps/desktop/recording-ipc-diagnostics.test.ts", "test": "delivery evidence copies only scalar metadata, never PCM, paths or errors" },
+  { "file": "apps/desktop/recording-start-diagnostic.test.ts", "test": "diagnostic mode blocks native start before the supplied command can run" },
+  { "file": "apps/desktop/recording-start-diagnostic.test.ts", "test": "normal mode forwards native start unchanged" }
+ ]
+}

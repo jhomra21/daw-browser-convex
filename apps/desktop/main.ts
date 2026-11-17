@@ -384,13 +384,18 @@ const pendingEditorStateAcks = new Map<string, {
   resolve: () => void
   reject: (error: Error) => void
 }>()
-const sendRendererMessage = (channel: string, ...args: unknown[]) => deliverToRenderer({
-  getTarget: () => window_?.webContents,
-  channel,
-  args,
-  sameOrigin: sameAppOrigin,
-  isFinishingQuit: () => finishingQuit,
-})
+// Renderer-bound messages so far, read only by the AE-08 `inspect-handler-return` evidence: how much traffic shared the IPC with a reply.
+let rendererSendCount = 0
+const sendRendererMessage = (channel: string, ...args: unknown[]) => {
+  rendererSendCount += 1
+  return deliverToRenderer({
+    getTarget: () => window_?.webContents,
+    channel,
+    args,
+    sameOrigin: sameAppOrigin,
+    isFinishingQuit: () => finishingQuit,
+  })
+}
 const applicationMenuController = createApplicationMenuController<Menu>({
   platform: process.platform === "darwin"
     ? "darwin"
@@ -1794,6 +1799,7 @@ const registerIpc = () => {
         || supervisor.transactionOpen() || !supervisor.status().running) return nativeSessionFailure()
       const owner = supervisor.status(), rendererGeneration = generation
       if (operation === "inspect") ae08Evidence("inspect-handler-entry", { pid: owner.pid ?? null })
+      const sendsAtEntry = rendererSendCount
       try {
         let result
         if ("bytes" in parsed.data) {
@@ -1823,6 +1829,7 @@ const registerIpc = () => {
           // The command ran, but this renderer no longer owns its result: it may have been taken.
           return nativeSessionFailure(new Error("The native audio session changed owner during the request."))
         }
+        if (operation === "inspect") ae08Evidence("inspect-handler-return", { pid: current.pid ?? null, rendererSends: rendererSendCount - sendsAtEntry })
         return { ok: true, revision: result, hostGeneration: current.generation, hostPid: current.pid }
       } catch (error) { return nativeSessionFailure(error) }
     })

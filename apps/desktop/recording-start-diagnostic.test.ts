@@ -50,7 +50,7 @@ test("diagnostic events retain only safe allowlisted scalars", () => {
   expect(JSON.stringify(events)).not.toMatch(/private|token|path/)
 })
 
-test("diagnostic event count and values are bounded", () => {
+test("diagnostic event count is bounded", () => {
   const events: RecordingStartDiagnosticEvent[] = []
   const diagnostic = createRecordingStartDiagnostic(true, (event) => events.push(event))
 
@@ -58,6 +58,12 @@ test("diagnostic event count and values are bounded", () => {
   diagnostic.observeCaptureBlocked()
   expect(events).toHaveLength(64)
   expect(events.at(-1)).toEqual({ kind: "native-start-blocked" })
+})
+
+test("an unrecognized backend value is reported as unknown, never verbatim", () => {
+  const events: RecordingStartDiagnosticEvent[] = []
+  const diagnostic = createRecordingStartDiagnostic(true, (event) => events.push(event))
+
   expect(() => diagnostic.observe({ kind: "backend", backend: "raw-device-name" })).not.toThrow()
-  expect(JSON.stringify(events)).not.toContain("raw-device-name")
+  expect(events).toEqual([{ kind: "backend", backend: "unknown" }])
 })

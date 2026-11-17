@@ -13,8 +13,6 @@ import {
   nativeProcessorLatencyForState,
   nativeProcessorOutputLayoutForState,
   serializeNativeInstrumentStates,
-  serializeNativeInstrumentEvents,
-  serializeNativeProcessorEvents,
   serializeNativeVstParameterEvents,
 } from "@daw-browser/audio-engine/native-host-wire"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
@@ -39,7 +37,6 @@ import {
 } from "@daw-browser/audio-engine/media-pages"
 import type {
   NativeHostDeviceConfiguration,
-  NativeInstrumentEvent,
   NativeSessionAsset,
   NativeScheduleProgress,
 } from "@daw-browser/audio-engine/native-host-wire"
@@ -53,7 +50,7 @@ import type {
 } from "~/lib/live-playback-snapshot"
 import type { importNativeRecordingSpool } from "~/lib/recording/native-spool-importer"
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
-import type { DesktopBridge, NativeDeliveryReply } from "~/types/desktop-bridge"
+import type { DesktopBridge } from "~/types/desktop-bridge"
 import { clearInstanceLimits, clearVstInstanceFailures, markVstInstanceFailed, setInstanceLimits } from "./vst-instance-failures"
 import { nativeVst3LaunchAuthorizationRequiredMessage } from "~/lib/external-plugin-ui"
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
@@ -136,6 +133,7 @@ import {
   indicatesNativeHostConnectionLoss,
   sanitizeNativeVst3DiagnosticError,
 } from "./native-host-connection-loss"
+import { createNativeParameterEvents, type ParameterReply } from "./native-parameter-events"
 import { createNativeRetirement } from "./native-retirement"
 import { createNativeStatePatches } from "./native-state-patches"
 import { createNativeLiveMidi } from "./native-live-midi"
@@ -209,10 +207,6 @@ type NativePlaybackBridge = Pick<
 }
 
 type NativeStartResult = "started" | "unavailable" | "blocked"
-// Admission is bridge evidence, never an application receipt. Validation can also stop a send locally.
-type ParameterReply = NativeDeliveryReply
-  | { ok: false; kind: "not-sent"; reason: "unavailable" | "unsupported" | "stale" }
-
 type NativePublicationResult =
   | { handled: true }
   | { handled: false; reason: "unprepared" | "unavailable" | "bridge-error" | "unconfirmed" | "latency-unsupported"; error?: string }
@@ -650,6 +644,15 @@ export const createNativePlaybackController = (input: {
     }),
   })
   let latestScheduleProgress: NativeScheduleProgress | undefined
+  const queueBuiltInParameterEvents = createNativeParameterEvents({
+    bridge: input.bridge,
+    processorState,
+    state: () => ({ prepared, graph: preparedGraph, snapshot: preparedSnapshot, transportEpoch }),
+    observeControl: (operation) => retirement.observeControl(operation),
+    nextEventSequence: () => liveMidi.nextEventSequence(),
+    lastEventSequence: () => liveMidi.lastEventSequence(),
+    observer: input.observer,
+  })
   const retirement = createNativeRetirement({
     processorState,
     revisions: input.bridge?.session.revisions,
@@ -2241,84 +2244,6 @@ export const createNativePlaybackController = (input: {
   }
 
   const epochApplied = (epoch: number | undefined) => epoch === undefined || (latestScheduleProgress?.epoch ?? 0) >= epoch
-
-  const queueBuiltInParameterEvents = async (request: {
-    instanceId: string
-    values: readonly { parameterId: string; value: number }[]
-    revision?: number
-    epoch?: number
-    sequence?: number
-    // The registered record of this send. Its sequences are allocated, and it becomes provable, only when
-    // the batch is handed to the bridge.
-    execution?: DispatchExecution
-  }): Promise<ParameterReply> => {
-    const bridge = input.bridge
-    if (!bridge) return { ok: false, kind: "not-sent", reason: "unavailable" }
-    if (!prepared || !preparedGraph) return { ok: false, kind: "not-sent", reason: "unavailable" }
-    const instrumentEntry = Object.entries(preparedSnapshot?.mixer.fx.trackFx ?? {})
-      .find(([, fx]) => fx.instrument?.instanceId === request.instanceId)
-    if (instrumentEntry) {
-      const node = preparedGraph.nodes.find((entry) => entry.id === instrumentEntry[0])
-      if (node?.instrument?.kind !== "synth") return { ok: false, kind: "not-sent", reason: "unsupported" }
-      const targets = new Map(node.instrument.parameterTargets.map((entry) => [entry.id, entry.target]))
-      const parameters: { target: number; value: number }[] = []
-      for (const value of request.values) {
-        const target = targets.get(value.parameterId)
-        if (target === undefined || !Number.isFinite(value.value)) return { ok: false, kind: "not-sent", reason: "unsupported" }
-        parameters.push({ target, value: value.value })
-      }
-      try {
-        if (parameters.length === 0) return { ok: true }
-        const events: NativeInstrumentEvent[] = parameters.map(({ target, value }) => ({
-          nodeId: node.id, type: "parameter", noteId: 1, sequence: liveMidi.nextEventSequence(), frameOffset: 0, channel: 0, note: target, value,
-        }))
-        if (request.execution && !processorState.send(request.execution, request.execution.sequence, liveMidi.lastEventSequence()))
-          return { ok: false, kind: "not-sent", reason: "stale" }
-        return await retirement.observeControl(bridge.session.queueInstrumentEvents(serializeNativeInstrumentEvents(transportEpoch, events)))
-      } catch (error) {
-        return { ok: false, kind: "unconfirmed", error: String(error) }
-      }
-    }
-    const processor = resolveGraphProcessor(preparedGraph, request.instanceId)
-    if (!processor) return { ok: false, kind: "not-sent", reason: "unsupported" }
-    const events = []
-    for (const value of request.values) {
-      const parameterTarget = processor.parameterTargets.get(value.parameterId)
-      if (parameterTarget === undefined || !Number.isFinite(value.value)) {
-        return { ok: false, kind: "not-sent", reason: "unsupported" }
-      }
-      events.push({
-        processorInstanceId: processor.processor.instanceId,
-        parameterTarget,
-        frameOffset: 0,
-        value: value.value,
-      })
-    }
-    if (events.length === 0) return { ok: true }
-    try {
-      const { sequence } = request
-      if (request.execution && sequence !== undefined && !processorState.send(request.execution, sequence)) return { ok: false, kind: "not-sent", reason: "stale" }
-      const batch = request.revision === undefined || request.epoch === undefined || sequence === undefined
-        ? undefined
-        : {
-            revision: request.revision,
-            epoch: request.epoch,
-            sequence,
-          }
-      if (request.execution && batch) {
-        const { key, editId, attempt } = request.execution
-        input.observer?.processorDispatch?.({ key, editId, attempt, sequence: BigInt(batch.sequence) })
-      }
-      return await retirement.observeControl(bridge.session.queueParameterEvents(serializeNativeProcessorEvents(events, batch)))
-    } catch (error) {
-      // A thrown or lost reply says nothing about whether native took the batch.
-      return {
-        ok: false,
-        kind: "unconfirmed",
-        error: error instanceof Error ? error.message : "Native built-in parameter queue failed.",
-      }
-    }
-  }
 
   // The instrument edit's params are typed at the registry as `object`.
   const isInstrumentParams = (params: LiveProcessorEditIdentity["content"]["params"] | undefined): params is TrackInstrumentParams =>

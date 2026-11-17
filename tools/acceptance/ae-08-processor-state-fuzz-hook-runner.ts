@@ -42,6 +42,7 @@ export default async function runHookCampaign(argv = process.argv) {
     "src/lib/desktop/native-snapshot-support.ts",
     "src/lib/desktop/native-host-connection-loss.ts",
     "src/lib/desktop/native-retirement.ts",
+    "src/lib/desktop/native-parameter-events.ts",
     "src/lib/desktop/native-processor-state-owner.ts", "src/lib/desktop/native-built-in-parameter-mapper.ts",
     "src/lib/live-processor-control.ts", "src/components/timeline/create-processor-edit-registry.ts",
     "src/components/timeline/create-timeline-effect-commit.ts",

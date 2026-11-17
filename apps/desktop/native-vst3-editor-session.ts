@@ -1,10 +1,10 @@
 import type {
   NativeVstEditorAnchor,
   NativeVstEditorCommand,
-  NativeVstEditorStatus,
   NativeAudioHostSupervisor,
   NativeWorkerNotification,
 } from "./audio-host"
+import type { NativeVstEditorStatus } from "./native-request-broker"
 import { coordinateNativeVst3Attachments } from "./native-vst3-coordinator"
 import type { PluginCatalogData } from "./plugin-catalog"
 

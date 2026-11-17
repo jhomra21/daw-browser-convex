@@ -1,9 +1,21 @@
-import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process"
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { access } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
 import path from "node:path"
 import { readDiagnosticInstanceId } from "./diagnostic-instance-id"
 import type { HostEvidence } from "./ae08-evidence"
+import {
+  NativeAudioHostNotSentError,
+  createNativeRequestBroker,
+  encodeNativeAudioHostControlFrame,
+  nativeAudioHostRequestName,
+  type NativeControlPayload,
+  type NativeHostRequestType,
+  type NativeVstEditorStatus,
+  type QueuedRequest,
+} from "./native-request-broker"
+
+export { NativeAudioHostNotSentError, encodeNativeAudioHostControlFrame, nativeAudioHostRequestName }
 import { audioCoreWasmAbiVersion } from "@daw-browser/audio-core-wasm"
 import { defaultDecodedAudioPageFrames } from "@daw-browser/audio-engine/media-pages"
 import {
@@ -101,8 +113,6 @@ const {
   transactionCommit: transactionCommitType,
   transactionRollback: transactionRollbackType,
   vstParameterEvents: vstParameterEventsType,
-  vstMidiEvents: vstMidiEventsType,
-  vstStateSet: vstStateSetType,
   vstStateGet: vstStateGetType,
   vstState: vstStateType,
   recordingConfigure: recordingConfigureType,
@@ -139,8 +149,6 @@ const {
   instrumentStates: instrumentStatesType,
 } = nativeAudioHostControlTypes
 const requiredHostCapabilities = 0x000003ff
-const nativeAudioHostControlWatchdogMs = 2_000
-const slowHotControlAckThresholdMs = 250
 const maximumOfflineStderrBytes = 16 * 1024
 const maximumOfflineQueuedFrames = 4
 const nativeOfflineStageTimeoutMs = 10_000
@@ -166,21 +174,6 @@ const readinessReason = (value: number): AudioHostHello["readinessReason"] | und
   if (value === 2) return "graph-not-prepared"
   if (value === 3) return "transport-not-prepared"
   return undefined
-}
-
-// A payload given as parts is joined into the frame in one copy, so a large page need not be assembled first.
-type NativeControlPayload = Uint8Array | readonly Uint8Array[]
-
-export const encodeNativeAudioHostControlFrame = (type: number, payload: NativeControlPayload = new Uint8Array()) => {
-  const parts = payload instanceof Uint8Array ? [payload] : payload
-  const payloadBytes = parts.reduce((total, part) => total + part.byteLength, 0)
-  if (payloadBytes > maximumPayloadBytes) return undefined
-  const header = Buffer.allocUnsafe(headerBytes)
-  header.writeUInt32BE(magic, 0)
-  header.writeUInt32BE(protocolVersion, 4)
-  header.writeUInt32BE(type, 8)
-  header.writeUInt32BE(payloadBytes, 12)
-  return Buffer.concat([header, ...parts], headerBytes + payloadBytes)
 }
 
 const unsigned32 = (value: number) => Number.isSafeInteger(value) && value >= 0 && value <= 0xffff_ffff
@@ -557,87 +550,12 @@ export const nativeVstEditorOwnershipProbe = (instanceId: string): NativeVstEdit
   instanceId,
   command: "status",
 })
-export type NativeVstEditorStatus = {
-  success: boolean
-  owned: boolean
-  supported: boolean
-  open: boolean
-  width: number
-  height: number
-  capturedState?: { bytes: Uint8Array; sha256: string }
-  closeError?: string
-  teardownError?: string
-}
-
-type NativeHostRequestType =
-  | typeof hostHelloType
-  | typeof deviceConfigureType
-  | typeof assetInstallType
-  | typeof assetReleaseType
-  | typeof mappedAssetCreateType
-  | typeof mappedAssetWritePageType
-  | typeof mappedAssetPrepareRangeType
-  | typeof mappedAssetReleaseType
-  | typeof startType
-  | typeof stopType
-  | typeof teardownType
-  | typeof graphSnapshotType
-  | typeof transportType
-  | typeof parameterEventsType
-  | typeof processorStatePatchType
-  | typeof midiEventsType
-  | typeof sourceEventsType
-  | typeof deviceListType
-  | typeof transactionBeginType
-  | typeof transactionCommitType
-  | typeof transactionRollbackType
-  | typeof vstParameterEventsType
-  | typeof vstMidiEventsType
-  | typeof vstStateSetType
-  | typeof vstStateGetType
-  | typeof vstStateType
-  | typeof recordingConfigureType
-  | typeof recordingStartType
-  | typeof recordingStopType
-  | typeof recordingCancelType
-  | typeof recordingDeviceQueryType
-  | typeof deviceInventoryQueryType
-  | typeof graphPrepareType
-  | typeof graphPublishType
-  | typeof graphRetireType
-  | typeof graphRollbackType
-  | typeof graphRevisionStatusType
-  | typeof vstAttachType
-  | typeof vstDetachType
-  | typeof vstEditorType
-  | typeof diagnosticStartType
-  | typeof diagnosticsType
-  | typeof scheduleWindowType
-  | typeof vstScheduleAutomationEnableType
-  | typeof instrumentStatesType
-  | typeof spectrumSelectionType
-
-const nativeAudioHostRequestNames = new Map<number, string>(
-  Object.entries(nativeAudioHostControlTypes).map(([name, type]) => [type, name]),
-)
-
-export const nativeAudioHostRequestName = (type: number) =>
-  nativeAudioHostRequestNames.get(type) ?? "unknown"
-
 const coreAudioDeviceId = (value: string): value is `coreaudio:${string}` => (
   value.startsWith("coreaudio:") && value.length > "coreaudio:".length
 )
 const nativeVstInstanceId = (value: string): boolean => (
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
 )
-
-/** The request was refused locally; no byte of it reached the host. */
-export class NativeAudioHostNotSentError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = "NativeAudioHostNotSentError"
-  }
-}
 
 export class NativeAudioHostCommandError extends Error {
   readonly requestType: number
@@ -1253,29 +1171,6 @@ export const runAudioHostDiagnostic = async (hostPath: string): Promise<{ ok: tr
   })
 }
 
-type Reply =
-  | { kind: "ack"; expectedAckType: NativeHostRequestType; resolve: () => void }
-  | { kind: "diagnostics"; resolve: (value: NativeHostDiagnostics) => void }
-  | { kind: "outputDevice"; resolve: (value: NativeOutputDevice | null) => void }
-  | { kind: "inputDevice"; resolve: (value: NativeInputDevice | null) => void }
-  | { kind: "deviceInventory"; resolve: (value: NativeAudioDevice[]) => void }
-  | { kind: "graphRevision"; requestedRevision: number; resolve: (value: NativeGraphRevisionStatus) => void }
-  | { kind: "vstState"; instanceId: string; resolve: (value: { bytes: Uint8Array; sha256: string }) => void; cancelled: boolean }
-  | { kind: "editor"; resolve: (value: NativeVstEditorStatus) => void }
-  | { kind: "patchStatus"; resolve: (value: NativeProcessorPatchStatus) => void }
-
-type PendingControl = {
-  reject: (error: Error) => void
-  deadline: ReturnType<typeof setTimeout>
-  requestType: NativeHostRequestType
-  requestId: number
-  enqueuedAt: number
-  dispatchedAt: number
-  reason?: string
-  stdinBackpressure?: boolean
-  reply: Reply
-}
-
 const patchRefusals: readonly (NativeProcessorPatchRefusal | undefined)[] = [
   undefined, "unavailable", "preparing", "claim-pending", "invalid",
   "stale-revision", "stage-failed", "not-claimed", "apply-failed",
@@ -1408,7 +1303,6 @@ export const createNativeAudioHostSupervisor = (
   let child: ChildProcessWithoutNullStreams | undefined
   let hello: AudioHostHello | undefined
   let buffer = Buffer.alloc(0)
-  let pending: PendingControl | undefined
   let startPromise: Promise<AudioHostHello> | undefined
   let teardownPromise: Promise<void> | undefined
   let childTerminationPromise: Promise<void> | undefined
@@ -1433,7 +1327,6 @@ export const createNativeAudioHostSupervisor = (
   let manualTransactionInvalidationVersion = 0
   let manualInvalidationPromise: Promise<void> | undefined
   let nextTransportTransitionId = 0n
-  let nextControlRequestId = 0
   const lossListeners = new Set<(error: Error) => void>()
   const recordingBlockListeners = new Set<(block: NativeHostRecordingBlock) => void>()
   const recordingStatusListeners = new Set<(status: NativeMainRecordingStatus) => void>()
@@ -1446,97 +1339,17 @@ export const createNativeAudioHostSupervisor = (
   const spectrumFrameListeners = new Set<(frame: NativeHostSpectrumFrame) => void>()
   const scheduleProgressListeners = new Set<(progress: NativeScheduleProgress) => void>()
   const workerNotificationListeners = new Set<(notification: NativeWorkerNotification) => void>()
-  const isHotControlRequest = (type: NativeHostRequestType) => (
-    type === scheduleWindowType
-    || type === midiEventsType
-    || type === transportType
-    || type === vstScheduleAutomationEnableType
-  )
-  // Per-request control lines are acceptance evidence: they fire for every inspect, prepare, publish and page write, so
-  // production writes none of them.
-  const logControlEnqueue = (
-    type: NativeHostRequestType,
-    requestId: number,
-    enqueuedAt: number,
-    reason?: string,
-  ) => {
-    if (!evidence || isHotControlRequest(type)) return
-    console.info("[native-audio-host-control]", JSON.stringify({
-      phase: "enqueue",
-      requestId,
-      request: nativeAudioHostRequestName(type),
-      pid: child?.pid ?? null,
-      generation: lifecycleGeneration,
-      reason: reason ?? null,
-      enqueuedAt,
-      queueDepth: urgentSends.length + normalSends.length + refillSends.length,
-    }))
-  }
-  const logControlAck = (control: PendingControl, accepted = true) => {
-    const elapsedMs = performance.now() - control.dispatchedAt
-    // Hot acks are logged only when slow (a rare anomaly, always logged) to avoid playback log and main-thread overhead.
-    // Every other ack needs the evidence switch.
-    const shouldLog = isHotControlRequest(control.requestType)
-      ? elapsedMs >= slowHotControlAckThresholdMs
-      : Boolean(evidence)
-    if (!shouldLog) return
-    console.info("[native-audio-host-control]", JSON.stringify({
-      phase: "ack",
-      requestId: control.requestId,
-      request: nativeAudioHostRequestName(control.requestType),
-      pid: child?.pid ?? null,
-      generation: lifecycleGeneration,
-      reason: control.reason ?? null,
-      ackAt: Date.now(),
-      elapsedMs,
-      accepted,
-    }))
-  }
-  const logControlWrite = (
-    control: PendingControl,
-    host: ChildProcessWithoutNullStreams,
-    stdinBackpressure: boolean,
-  ) => {
-    if (!evidence || isHotControlRequest(control.requestType)) return
-    console.info("[native-audio-host-control]", JSON.stringify({
-      phase: "write",
-      requestId: control.requestId,
-      request: nativeAudioHostRequestName(control.requestType),
-      pid: host.pid ?? null,
-      generation: lifecycleGeneration,
-      reason: control.reason ?? null,
-      enqueuedAt: control.enqueuedAt,
-      dispatchedAt: Date.now(),
-      queueWaitMs: Math.max(0, Date.now() - control.enqueuedAt),
-      queueDepth: urgentSends.length + normalSends.length + refillSends.length,
-      stdinBackpressure,
-      stdinWritableLength: host.stdin.writableLength,
-    }))
-  }
-  type QueuedSend = {
-    type: NativeHostRequestType
-    payload?: NativeControlPayload
-    owner?: symbol
-    allowDuringTeardown: boolean
-    requestId: number
-    enqueuedAt: number
-    reason?: string
-    reject: (error: Error) => void
-    reply: Reply
-  }
-  const urgentSends: QueuedSend[] = []
-  const normalSends: QueuedSend[] = []
-  const refillSends: QueuedSend[] = []
-  let dispatchNext: () => void = () => {}
-  const rejectPending = (error: Error, dispatch = true) => {
-    const current = pending
-    pending = undefined
-    if (current) {
-      clearTimeout(current.deadline)
-      current.reject(error)
-    }
-    if (dispatch) dispatchNext()
-  }
+  const broker = createNativeRequestBroker({
+    get child() { return child },
+    get generation() { return lifecycleGeneration },
+    get suspended() { return suspended },
+    get tearingDown() { return teardownPromise !== undefined },
+    get transactionOwner() { return transactionOwner },
+    get recordingFinishDispatched() { return recordingFinish?.pending === true && recordingFinish.dispatched },
+    evidence,
+    markRecordingFinishDispatched: () => { if (recordingFinish) recordingFinish.dispatched = true },
+    lost: (message, source) => lost(message, source),
+  })
   const lost = (message: string, source = child) => {
     if (!source || child !== source) return
     console.error("[native-audio-host-termination-request]", JSON.stringify({
@@ -1546,9 +1359,7 @@ export const createNativeAudioHostSupervisor = (
       lifecycleGeneration,
       pid: source.pid ?? null,
       signal: "SIGTERM",
-      pendingRequest: pending?.requestType === undefined
-        ? null
-        : nativeAudioHostRequestName(pending.requestType),
+      pendingRequest: broker.pendingRequestName(),
       message: message.replace(/[\r\n\t]+/g, " ").slice(0, 256),
     }))
     console.error("[native-vst3] native audio host lost", JSON.stringify({
@@ -1560,7 +1371,7 @@ export const createNativeAudioHostSupervisor = (
     recordingAdmitted = false
     recordingReady?.reject(error)
     if (recordingFinish) { recordingFinish.pending = false; recordingFinish.reject(error) }
-    rejectPending(error, false)
+    broker.rejectPending(error, false)
     child = undefined
     hello = undefined
     lifecycleGeneration += 1
@@ -1573,81 +1384,8 @@ export const createNativeAudioHostSupervisor = (
     const currentChild = source
     evidenceTerminationCauses.set(currentChild, `supervisor-terminated: ${message.replace(/[\r\n\t]+/g, " ").slice(0, 256)}`)
     currentChild?.kill()
-    for (const queue of [urgentSends, normalSends, refillSends]) {
-      while (queue.length > 0) queue.shift()?.reject(error)
-    }
+    broker.rejectQueued(error)
     for (const listener of lossListeners) listener(error)
-  }
-  const captureHostStack = (
-    source: ChildProcessWithoutNullStreams | undefined,
-    requestId: number,
-    done: () => void,
-  ) => {
-    const pid = source?.pid
-    if (!pid) {
-      done()
-      return
-    }
-    const outputPath = path.join("/tmp", `daw-native-audio-host-stack-${pid}-${requestId}.txt`)
-    let sampler: ChildProcess
-    try {
-      sampler = spawn("/usr/bin/sample", [String(pid), "1", "-file", outputPath], { stdio: "ignore" })
-    } catch (error) {
-      console.error("[native-audio-host-stack-capture]", JSON.stringify({
-        pid, requestId, outputPath, error: error instanceof Error ? error.message : "spawn-failed",
-      }))
-      done()
-      return
-    }
-    // The sample delays termination by at most 1.5 s, deliberately capturing a stuck host's stacks before SIGTERM.
-    let finished = false
-    const finish = () => {
-      if (finished) return
-      finished = true
-      clearTimeout(deadline)
-      done()
-    }
-    const deadline = setTimeout(() => {
-      sampler.kill("SIGTERM")
-      finish()
-    }, 1_500)
-    sampler.once("error", (error) => {
-      console.error("[native-audio-host-stack-capture]", JSON.stringify({ pid, requestId, outputPath, error: error.message }))
-      finish()
-    })
-    sampler.once("close", (code, signal) => {
-      console.error("[native-audio-host-stack-capture]", JSON.stringify({ pid, requestId, outputPath, code, signal }))
-      finish()
-    })
-    console.error("[native-audio-host-stack-capture]", JSON.stringify({ pid, requestId, outputPath, status: "started" }))
-  }
-  const controlTimedOut = (message: string, source = child) => {
-    // Only a dispatched Finish can be draining persistence behind a blocked
-    // Stop ACK. A queued Stop must not hide the preceding command's stall.
-    if (!(recordingFinish?.pending && recordingFinish.dispatched)) {
-      const current = pending
-      if (current) {
-        console.error("[native-audio-host-control-timeout]", JSON.stringify({
-          requestId: current.requestId,
-          request: nativeAudioHostRequestName(current.requestType),
-          pid: source?.pid ?? null,
-          generation: lifecycleGeneration,
-          reason: current.reason ?? null,
-          enqueuedAt: current.enqueuedAt,
-          dispatchedAt: current.dispatchedAt,
-          timedOutAt: Date.now(),
-          eventLoopDelayMs: Math.max(0, performance.now() - current.dispatchedAt - nativeAudioHostControlWatchdogMs),
-          stdinBackpressure: current.stdinBackpressure ?? null,
-          queueDepth: urgentSends.length + normalSends.length + refillSends.length,
-        }))
-        captureHostStack(source, current.requestId, () => {
-          // A late reply can release this slot and dispatch a persistence-draining Stop.
-          if (pending === current) lost(message, source)
-        })
-        return
-      }
-      lost(message, source)
-    }
   }
   const decodeDiagnostics = (frame: Buffer): NativeHostDiagnostics | undefined => {
     if (frame.byteLength < headerBytes + 256 || frame.byteLength > headerBytes + 512) return undefined
@@ -1742,9 +1480,7 @@ export const createNativeAudioHostSupervisor = (
         lifecycleGeneration,
         pid: current.pid ?? null,
         signal,
-        pendingRequest: pending?.requestType === undefined
-          ? null
-          : nativeAudioHostRequestName(pending.requestType),
+        pendingRequest: broker.pendingRequestName(),
       }))
       try {
         return options.kill?.(current, signal) ?? current.kill(signal)
@@ -2093,6 +1829,7 @@ export const createNativeAudioHostSupervisor = (
       if (payloadBytes > maximumPayloadBytes || buffer.byteLength < headerBytes + payloadBytes) return
       const frame = buffer.subarray(0, headerBytes + payloadBytes)
       buffer = buffer.subarray(headerBytes + payloadBytes)
+      const pending = broker.pending()
       if (frame.readUInt32BE(0) !== magic || frame.readUInt32BE(4) !== protocolVersion) return lost("The native audio host returned an invalid control frame.")
       if (frame.readUInt32BE(8) === recordingBlockType) {
         return lost("Reserved recording PCM frame is not valid in native host v23.")
@@ -2142,24 +1879,18 @@ export const createNativeAudioHostSupervisor = (
           return lost("The native audio host returned an incompatible protocol response.")
         }
         hello = parsed
-        if (pending?.reply.kind === "ack") {
-          logControlAck(pending)
-          clearTimeout(pending.deadline)
-          pending.reply.resolve()
+        if (pending) {
+          broker.settle(pending)
+          if (pending.reply.kind === "ack") pending.reply.resolve()
         }
-        pending = undefined
-        dispatchNext()
       } else if (frame.readUInt32BE(8) === diagnosticsType && pending?.reply.kind === "diagnostics") {
         const current = pending
         const reply = pending.reply
         const diagnostic = decodeDiagnostics(frame)
         if (!diagnostic) {
-          rejectPending(new Error("The native audio host returned an invalid diagnostics response."))
+          broker.rejectPending(new Error("The native audio host returned an invalid diagnostics response."))
         } else {
-          logControlAck(current)
-          clearTimeout(pending.deadline)
-          pending = undefined
-          dispatchNext()
+          broker.settle(current)
           reply.resolve(diagnostic)
         }
       } else if (frame.readUInt32BE(8) === deviceListType && pending?.reply.kind === "outputDevice") {
@@ -2167,30 +1898,21 @@ export const createNativeAudioHostSupervisor = (
         const reply = pending.reply
         const device = decodeOutputDevice(frame)
         if (device === undefined) return lost("The native audio host returned an invalid device response.")
-        logControlAck(current)
-        clearTimeout(pending.deadline)
-        pending = undefined
-        dispatchNext()
+        broker.settle(current)
         reply.resolve(device)
       } else if (frame.readUInt32BE(8) === recordingDeviceListType && pending?.reply.kind === "inputDevice") {
         const current = pending
         const reply = pending.reply
         const device = decodeInputDevice(frame)
         if (device === undefined) return lost("The native audio host returned an invalid input device response.")
-        logControlAck(current)
-        clearTimeout(pending.deadline)
-        pending = undefined
-        dispatchNext()
+        broker.settle(current)
         reply.resolve(device)
       } else if (frame.readUInt32BE(8) === deviceInventoryType && pending?.reply.kind === "deviceInventory") {
         const current = pending
         const reply = pending.reply
         const devices = decodeDeviceInventory(frame)
         if (devices === undefined) return lost("The native audio host returned an invalid device inventory response.")
-        logControlAck(current)
-        clearTimeout(pending.deadline)
-        pending = undefined
-        dispatchNext()
+        broker.settle(current)
         reply.resolve(devices)
       } else if (frame.readUInt32BE(8) === graphRevisionStatusType && pending?.reply.kind === "graphRevision") {
         const current = pending
@@ -2199,10 +1921,7 @@ export const createNativeAudioHostSupervisor = (
         if (!status) return lost("The native audio host returned an invalid graph revision status.")
         if (status.requestedRevision !== reply.requestedRevision) continue
         if (current.requestType === graphRevisionStatusType) evidence?.("inspect-reply-received", { pid: child?.pid ?? null, revision: status.requestedRevision })
-        logControlAck(current)
-        clearTimeout(pending.deadline)
-        pending = undefined
-        dispatchNext()
+        broker.settle(current)
         reply.resolve(status)
       } else if (frame.readUInt32BE(8) === graphRevisionStatusType) {
         // A timed-out revision can reply after reconciliation was requested or
@@ -2213,10 +1932,7 @@ export const createNativeAudioHostSupervisor = (
         const reply = pending.reply
         const payload = frame.subarray(headerBytes)
         const rejectState = (message: string) => {
-          clearTimeout(current.deadline)
-          pending = undefined
-          dispatchNext()
-          current.reject(new NativeAudioHostCommandError(vstStateGetType, message))
+          broker.rejectPending(new NativeAudioHostCommandError(vstStateGetType, message))
         }
         if (payload.byteLength < 4) {
           rejectState("The native audio host returned an invalid VST state response.")
@@ -2244,30 +1960,21 @@ export const createNativeAudioHostSupervisor = (
           continue
         }
         const bytes = Uint8Array.from(payload.subarray(start, start + stateBytes))
-        logControlAck(current)
-        clearTimeout(pending.deadline)
-        pending = undefined
-        dispatchNext()
+        broker.settle(current)
         if (!reply.cancelled) reply.resolve({ bytes, sha256 })
       } else if (frame.readUInt32BE(8) === vstEditorStatusType && pending?.reply.kind === "editor") {
         const current = pending
         const reply = pending.reply
         const status = decodeVstEditorStatus(frame)
         if (!status) return lost("The native audio host returned an invalid VST editor response.")
-        logControlAck(current)
-        clearTimeout(pending.deadline)
-        pending = undefined
-        dispatchNext()
+        broker.settle(current)
         reply.resolve(status)
       } else if (frame.readUInt32BE(8) === processorStatePatchStatusType && pending?.reply.kind === "patchStatus") {
         const current = pending
         const reply = pending.reply
         const status = decodeNativeProcessorPatchStatus(frame.subarray(headerBytes))
         if (!status) return lost("The native audio host returned an invalid processor patch status.")
-        logControlAck(current)
-        clearTimeout(current.deadline)
-        pending = undefined
-        dispatchNext()
+        broker.settle(current)
         reply.resolve(status)
       } else if (frame.readUInt32BE(8) === ackType && pending?.reply.kind === "patchStatus") {
         // A patch is answered by a status frame; an ACK is never proof the patch was taken.
@@ -2290,10 +1997,7 @@ export const createNativeAudioHostSupervisor = (
           && status !== nativeAudioHostAckStatus.unavailable
         ) return lost("The native audio host returned an invalid control acknowledgement.")
         const accepted = status === nativeAudioHostAckStatus.accepted
-        logControlAck(current, accepted)
-        clearTimeout(current.deadline)
-        pending = undefined
-        dispatchNext()
+        broker.settle(current, accepted)
         if (accepted) {
           if (current.reply.kind === "ack") current.reply.resolve()
         } else {
@@ -2310,60 +2014,6 @@ export const createNativeAudioHostSupervisor = (
           ))
         }
       } else return lost("The native audio host rejected a control request.")
-    }
-  }
-  dispatchNext = () => {
-    if (suspended || pending || !child) return
-    const next = urgentSends.shift() ?? refillSends.shift() ?? normalSends.shift()
-    if (!next) return
-    if ((teardownPromise && !next.allowDuringTeardown)
-      || (transactionOwner !== undefined && transactionOwner !== next.owner)) {
-      next.reject(new NativeAudioHostNotSentError("The native audio host is unavailable."))
-      dispatchNext()
-      return
-    }
-    const frame = encodeNativeAudioHostControlFrame(next.type, next.payload)
-    if (!frame) {
-      next.reject(new NativeAudioHostNotSentError("The native audio host protocol is unavailable."))
-      dispatchNext()
-      return
-    }
-    const current = child
-    const dispatchedAt = performance.now()
-    // Control liveness is not a recording drain deadline. Stdout may block a
-    // Stop ACK while the process-owned writer safely completes persistence.
-    // Keep the parser and child until a terminal or actual process-loss event.
-    // A missing publication reply is not host loss. Keep the child and allow
-    // explicit status reconciliation; never restart or roll back active work.
-    // Native transition admission replies pending immediately. This deadline
-    // covers a missing control reply, never the duration of rendered warmup,
-    // and starts at dispatch, not at enqueue.
-    const deadline = next.reply.kind === "graphRevision"
-      ? setTimeout(() => {
-        rejectPending(new Error("Native graph revision reply timed out; inspect revision status."))
-      }, 2_000)
-      : setTimeout(
-        () => controlTimedOut("The native audio host control request timed out.", current),
-        nativeAudioHostControlWatchdogMs,
-      )
-    pending = {
-      reject: next.reject,
-      deadline,
-      requestType: next.type,
-      requestId: next.requestId,
-      enqueuedAt: next.enqueuedAt,
-      dispatchedAt,
-      reason: next.reason,
-      reply: next.reply,
-    }
-    const stdinBackpressure = !current.stdin.write(frame)
-    if (next.type === recordingStopType && recordingFinish) recordingFinish.dispatched = true
-    if (pending) pending.stdinBackpressure = stdinBackpressure
-    if (pending) logControlWrite(pending, current, stdinBackpressure)
-    // Main's account of an inspect's wait: what it queued behind (`queuedMs`, 0 when the control slot was free) and what is still queued.
-    if (next.reply.kind === "graphRevision") {
-      evidence?.("inspect-dispatch", { pid: current.pid ?? null, revision: next.reply.requestedRevision, queuedMs: Date.now() - next.enqueuedAt,
-        queueDepth: urgentSends.length + refillSends.length + normalSends.length })
     }
   }
   const ownerForToken = (token: string | undefined) => (
@@ -2391,40 +2041,15 @@ export const createNativeAudioHostSupervisor = (
     allowDuringTeardown = false,
     reason?: string,
   ) => new Promise<void>((resolve, reject) => {
-    if (suspended || !child || (teardownPromise && !allowDuringTeardown)
-      || (transactionOwner !== undefined && transactionOwner !== owner)) {
+    if (!broker.admits(owner, allowDuringTeardown)) {
       reject(new NativeAudioHostNotSentError("The native audio host is unavailable."))
       return
     }
-    const queued: QueuedSend = {
-      type, payload, owner, allowDuringTeardown, reject,
-      requestId: ++nextControlRequestId,
-      enqueuedAt: Date.now(),
-      reason,
+    const queued = broker.submit({
+      type, payload, owner, allowDuringTeardown, reject, reason,
       reply: { kind: "ack", expectedAckType: type, resolve },
-    }
-    if (type === transportType || type === midiEventsType || type === stopType || type === teardownType
-      || type === vstScheduleAutomationEnableType) {
-      if (urgentSends.length >= 64) {
-        reject(new NativeAudioHostNotSentError("The native audio host urgent request queue is full."))
-        return
-      }
-      urgentSends.push(queued)
-    } else if (type === scheduleWindowType) {
-      if (refillSends.length >= 8) {
-        reject(new NativeAudioHostNotSentError("The native audio host schedule queue is full."))
-        return
-      }
-      refillSends.push(queued)
-    } else {
-      if (normalSends.length >= 32) {
-        reject(new NativeAudioHostNotSentError("The native audio host request queue is full."))
-        return
-      }
-      normalSends.push(queued)
-    }
-    logControlEnqueue(type, queued.requestId, queued.enqueuedAt, reason)
-    dispatchNext()
+    })
+    if (!queued) reject(new NativeAudioHostNotSentError(broker.queueFullMessage(type)))
   })
   const enqueueTransaction = <T>(operation: () => Promise<T>) => {
     const result = transactionTail.then(operation)
@@ -2456,54 +2081,25 @@ export const createNativeAudioHostSupervisor = (
   ): Promise<NativeVstEditorStatus> => {
     await supervisor.start()
     return new Promise((resolve, reject) => {
-      if (suspended || !child || teardownPromise
-        || (transactionOwner !== undefined && transactionOwner !== owner)) {
+      if (!broker.admits(owner, false)) {
         reject(new Error("The native audio host is unavailable."))
         return
       }
-      if (normalSends.length >= 32) {
-        reject(new Error("The native host request queue is full."))
-        return
-      }
-      const queued: QueuedSend = {
-        type: vstEditorType,
-        payload,
-        owner,
-        allowDuringTeardown: false,
-        requestId: ++nextControlRequestId,
-        enqueuedAt: Date.now(),
-        reject,
-        reply: { kind: "editor", resolve },
-      }
-      normalSends.push(queued)
-      logControlEnqueue(vstEditorType, queued.requestId, queued.enqueuedAt)
-      dispatchNext()
+      const queued = broker.submit({ type: vstEditorType, payload, owner, reject, reply: { kind: "editor", resolve } })
+      if (!queued) reject(new Error("The native host request queue is full."))
     })
   }
   const requestPatchStatus = async (payload: Buffer, token?: string): Promise<NativeProcessorPatchStatus> => {
     const owner = await admit(token)
     return new Promise((resolve, reject) => {
-      if (suspended || !child || teardownPromise || (transactionOwner !== undefined && transactionOwner !== owner)) {
+      if (!broker.admits(owner, false)) {
         reject(new NativeAudioHostNotSentError("The native audio host is unavailable."))
         return
       }
-      if (normalSends.length >= 32) {
-        reject(new NativeAudioHostNotSentError("The native audio host request queue is full."))
-        return
-      }
-      const queued: QueuedSend = {
-        type: processorStatePatchType,
-        payload,
-        owner,
-        allowDuringTeardown: false,
-        requestId: ++nextControlRequestId,
-        enqueuedAt: Date.now(),
-        reject,
-        reply: { kind: "patchStatus", resolve },
-      }
-      normalSends.push(queued)
-      logControlEnqueue(processorStatePatchType, queued.requestId, queued.enqueuedAt)
-      dispatchNext()
+      const queued = broker.submit({
+        type: processorStatePatchType, payload, owner, reject, reply: { kind: "patchStatus", resolve },
+      })
+      if (!queued) reject(new NativeAudioHostNotSentError("The native audio host request queue is full."))
     })
   }
   const requestGraphRevision = (type: NativeHostRequestType, payload: Buffer, token?: string) =>
@@ -2511,19 +2107,13 @@ export const createNativeAudioHostSupervisor = (
       // Nothing is sent here: these are `unavailable`, never an unconfirmed request.
       // A busy control slot queues the request like a processor patch.
       const owner = admitStarted(token)
-      if (!child || !hello || teardownPromise || suspended) {
+      if (!hello || !broker.admits(owner, false)) {
         throw new NativeAudioHostNotSentError("The native audio host is unavailable.")
       }
-      if (normalSends.length >= 32) {
-        throw new NativeAudioHostNotSentError("The native audio host request queue is full.")
-      }
-      const queued: QueuedSend = {
+      const queued = broker.submit({
         type,
         payload,
         owner,
-        allowDuringTeardown: false,
-        requestId: ++nextControlRequestId,
-        enqueuedAt: Date.now(),
         reject,
         reply: {
           kind: "graphRevision",
@@ -2532,10 +2122,8 @@ export const createNativeAudioHostSupervisor = (
             ? Number(payload.readBigUInt64BE(8))
             : payload.readUInt32BE(0),
         },
-      }
-      normalSends.push(queued)
-      logControlEnqueue(type, queued.requestId, queued.enqueuedAt)
-      dispatchNext()
+      })
+      if (!queued) throw new NativeAudioHostNotSentError("The native audio host request queue is full.")
     })
   const attachVst = async (input: ResolvedVst3Attachment, token?: string, owner?: symbol) => {
     const payload = serializeVstAttachment(input)
@@ -2581,7 +2169,7 @@ export const createNativeAudioHostSupervisor = (
         spawned.once("close", (code, signal) => {
           evidence?.("host-exit", { pid: spawned?.pid ?? null, lifecycleGeneration: generation,
             code, signal, cause: spawned ? evidenceTerminationCauses.get(spawned) ?? "crash" : "spawn-failure" })
-          const requestType = pending?.requestType
+          const requestType = broker.pending()?.requestType
           const pendingRequest = requestType === undefined
             ? undefined
             : `${nativeAudioHostRequestName(requestType)} request ${requestType}`
@@ -2601,12 +2189,7 @@ export const createNativeAudioHostSupervisor = (
             // shutdown boundary even if its final ACK never reaches the pipe.
             // Only settle teardown here; pending Finish/other operation failures
             // continue through the real loss path and remain observable.
-            if (pending?.requestType === teardownType) {
-              const closing = pending
-              pending = undefined
-              clearTimeout(closing.deadline)
-              if (closing.reply.kind === "ack") closing.reply.resolve()
-            }
+            broker.resolveTeardownOnExit()
             return
           }
           lost(
@@ -2829,47 +2412,25 @@ export const createNativeAudioHostSupervisor = (
       if (!payload) throw new Error("The native VST state request is invalid.")
       signal?.throwIfAborted()
       await supervisor.start()
-      const current = child
-      if (!current) throw new Error("The native audio host is unavailable.")
+      if (!child) throw new Error("The native audio host is unavailable.")
       signal?.throwIfAborted()
       const owner = assertTransactionAccess(transactionToken)
       if (owner) throw new Error("The native audio host transaction token is invalid.")
-      let queued: QueuedSend | undefined
+      let queued: QueuedRequest | undefined
       const requestPromise = new Promise<{ bytes: Uint8Array; sha256: string }>((resolve, reject) => {
-        if (normalSends.length >= 32) {
-          reject(new Error("The native host request queue is full."))
-          return
-        }
-        queued = {
+        queued = broker.submit({
           type: vstStateGetType,
           payload,
-          allowDuringTeardown: false,
-          requestId: ++nextControlRequestId,
-          enqueuedAt: Date.now(),
           reject,
           reply: { kind: "vstState", resolve, instanceId, cancelled: false },
-        }
-        normalSends.push(queued)
-      logControlEnqueue(vstStateGetType, queued.requestId, queued.enqueuedAt)
-        evidence?.("vst-state-get", { pid: current.pid ?? null })
-        dispatchNext()
+        })
+        if (!queued) reject(new Error("The native host request queue is full."))
       })
       if (!signal) return requestPromise
       return new Promise((resolve, reject) => {
         const abort = () => {
           const abortError = new DOMException("Native VST state capture canceled.", "AbortError")
-          const queuedIndex = queued ? normalSends.indexOf(queued) : -1
-          if (queuedIndex >= 0) {
-            normalSends.splice(queuedIndex, 1)
-            queued?.reject(abortError)
-            dispatchNext()
-            reject(abortError)
-            return
-          }
-          if (pending?.reply.kind === "vstState" && pending.reply.instanceId === instanceId) {
-            pending.reply.cancelled = true
-            pending.reject(abortError)
-          }
+          if (!queued || !broker.cancelQueued(queued, abortError)) broker.cancelPendingVstState(instanceId, abortError)
           reject(abortError)
         }
         signal.addEventListener("abort", abort, { once: true })
@@ -3063,72 +2624,30 @@ export const createNativeAudioHostSupervisor = (
       assertTransactionAccess(undefined)
       await supervisor.start()
       const current = child
-      if (!current || pending || (preferredDeviceId !== undefined && !coreAudioDeviceId(preferredDeviceId))) {
+      if (!current || broker.pending() || (preferredDeviceId !== undefined && !coreAudioDeviceId(preferredDeviceId))) {
         throw new Error("The native audio host device request is invalid.")
       }
       const payload = preferredDeviceId === undefined ? undefined : Buffer.from(preferredDeviceId, "utf8")
       const frame = encodeNativeAudioHostControlFrame(deviceListType, payload)
       if (!frame) throw new Error("The native audio host protocol is unavailable.")
       return new Promise<NativeOutputDevice | null>((resolve, reject) => {
-        const deadline = setTimeout(
-          () => controlTimedOut("The native audio host device request timed out."),
-          nativeAudioHostControlWatchdogMs,
-        )
-        const requestId = ++nextControlRequestId
-        const enqueuedAt = Date.now()
-        const dispatchedAt = performance.now()
-        pending = {
-          deadline,
-          reject,
-          requestType: deviceListType,
-          requestId,
-          enqueuedAt,
-          dispatchedAt,
-          reply: { kind: "outputDevice", resolve },
-        }
-        const currentPending = pending
-        logControlEnqueue(deviceListType, requestId, enqueuedAt)
-        const stdinBackpressure = !current.stdin.write(frame)
-        if (currentPending) {
-          currentPending.stdinBackpressure = stdinBackpressure
-          logControlWrite(currentPending, current, stdinBackpressure)
-        }
+        broker.startDirect(current, deviceListType, frame, { kind: "outputDevice", resolve }, reject,
+          "The native audio host device request timed out.")
       })
     },
     async resolveInputDevice(preferredDeviceId) {
       assertTransactionAccess(undefined)
       await supervisor.start()
       const current = child
-      if (!current || pending || (preferredDeviceId !== undefined && !coreAudioDeviceId(preferredDeviceId))) {
+      if (!current || broker.pending() || (preferredDeviceId !== undefined && !coreAudioDeviceId(preferredDeviceId))) {
         throw new Error("The native audio host input device request is invalid.")
       }
       const payload = preferredDeviceId === undefined ? undefined : Buffer.from(preferredDeviceId, "utf8")
       const frame = encodeNativeAudioHostControlFrame(recordingDeviceQueryType, payload)
       if (!frame) throw new Error("The native audio host protocol is unavailable.")
       return new Promise<NativeInputDevice | null>((resolve, reject) => {
-        const deadline = setTimeout(
-          () => controlTimedOut("The native audio host input device request timed out."),
-          nativeAudioHostControlWatchdogMs,
-        )
-        const requestId = ++nextControlRequestId
-        const enqueuedAt = Date.now()
-        const dispatchedAt = performance.now()
-        pending = {
-          deadline,
-          reject,
-          requestType: recordingDeviceQueryType,
-          requestId,
-          enqueuedAt,
-          dispatchedAt,
-          reply: { kind: "inputDevice", resolve },
-        }
-        const currentPending = pending
-        logControlEnqueue(recordingDeviceQueryType, requestId, enqueuedAt)
-        const stdinBackpressure = !current.stdin.write(frame)
-        if (currentPending) {
-          currentPending.stdinBackpressure = stdinBackpressure
-          logControlWrite(currentPending, current, stdinBackpressure)
-        }
+        broker.startDirect(current, recordingDeviceQueryType, frame, { kind: "inputDevice", resolve }, reject,
+          "The native audio host input device request timed out.")
       })
     },
     async listDevices() {
@@ -3136,31 +2655,10 @@ export const createNativeAudioHostSupervisor = (
       await supervisor.start()
       const current = child
       const frame = encodeNativeAudioHostControlFrame(deviceInventoryQueryType)
-      if (!current || pending || !frame) throw new Error("The native audio host device inventory request is invalid.")
+      if (!current || broker.pending() || !frame) throw new Error("The native audio host device inventory request is invalid.")
       return new Promise<NativeAudioDevice[]>((resolve, reject) => {
-        const deadline = setTimeout(
-          () => controlTimedOut("The native audio host device inventory request timed out."),
-          nativeAudioHostControlWatchdogMs,
-        )
-        const requestId = ++nextControlRequestId
-        const enqueuedAt = Date.now()
-        const dispatchedAt = performance.now()
-        pending = {
-          deadline,
-          reject,
-          requestType: deviceInventoryQueryType,
-          requestId,
-          enqueuedAt,
-          dispatchedAt,
-          reply: { kind: "deviceInventory", resolve },
-        }
-        const currentPending = pending
-        logControlEnqueue(deviceInventoryQueryType, requestId, enqueuedAt)
-        const stdinBackpressure = !current.stdin.write(frame)
-        if (currentPending) {
-          currentPending.stdinBackpressure = stdinBackpressure
-          logControlWrite(currentPending, current, stdinBackpressure)
-        }
+        broker.startDirect(current, deviceInventoryQueryType, frame, { kind: "deviceInventory", resolve }, reject,
+          "The native audio host device inventory request timed out.")
       })
     },
     async startAudio() {
@@ -3185,33 +2683,12 @@ export const createNativeAudioHostSupervisor = (
       assertTransactionAccess(undefined)
       await supervisor.start()
       const current = child
-      if (!current || pending) throw new Error("The native audio host is unavailable.")
+      if (!current || broker.pending()) throw new Error("The native audio host is unavailable.")
       const frame = encodeNativeAudioHostControlFrame(diagnosticsType)
       if (!frame) throw new Error("The native audio host protocol is unavailable.")
       return new Promise<NativeHostDiagnostics>((resolve, reject) => {
-        const deadline = setTimeout(
-          () => controlTimedOut("The native audio host diagnostics timed out."),
-          nativeAudioHostControlWatchdogMs,
-        )
-        const requestId = ++nextControlRequestId
-        const enqueuedAt = Date.now()
-        const dispatchedAt = performance.now()
-        pending = {
-          deadline,
-          reject,
-          requestType: diagnosticsType,
-          requestId,
-          enqueuedAt,
-          dispatchedAt,
-          reply: { kind: "diagnostics", resolve },
-        }
-        const currentPending = pending
-        logControlEnqueue(diagnosticsType, requestId, enqueuedAt)
-        const stdinBackpressure = !current.stdin.write(frame)
-        if (currentPending) {
-          currentPending.stdinBackpressure = stdinBackpressure
-          logControlWrite(currentPending, current, stdinBackpressure)
-        }
+        broker.startDirect(current, diagnosticsType, frame, { kind: "diagnostics", resolve }, reject,
+          "The native audio host diagnostics timed out.")
       })
     },
     async configureRecording(input, spool) {
@@ -3288,10 +2765,8 @@ export const createNativeAudioHostSupervisor = (
       lifecycleIntentVersion += 1
       const current = child
       if (current) evidenceTerminationCauses.set(current, "application-shutdown")
-      const hadPending = pending !== undefined
-      const pendingRequestName = pending?.requestType === undefined
-        ? null
-        : nativeAudioHostRequestName(pending.requestType)
+      const hadPending = broker.pending() !== undefined
+      const pendingRequestName = broker.pendingRequestName()
       const termination = childTerminationPromise
       const stopping = (async () => {
         // No unconditional microtask while cancelling an ordinary handshake:
@@ -3299,10 +2774,10 @@ export const createNativeAudioHostSupervisor = (
         if (recordingFinish?.pending) await supervisor.waitForRecordingFinish()
         try {
           if (termination) await termination
-          else if (hadPending) rejectPending(new Error("The native audio host is tearing down."))
+          else if (hadPending) broker.rejectPending(new Error("The native audio host is tearing down."))
           else if (current && hello && !transactionOwner) await send(teardownType, undefined, undefined, true)
         } finally {
-          rejectPending(new Error("The native audio host is tearing down."))
+          broker.rejectPending(new Error("The native audio host is tearing down."))
           transactionOwner = undefined
           manualTransactionToken = undefined
           manualTransactionGeneration = -1
@@ -3364,10 +2839,8 @@ export const createNativeAudioHostSupervisor = (
       manualTransactionGeneration = -1
       nextTransportTransitionId = 0n
       buffer = Buffer.alloc(0)
-      rejectPending(error, false)
-      for (const queue of [urgentSends, normalSends, refillSends]) {
-        while (queue.length > 0) queue.shift()?.reject(error)
-      }
+      broker.rejectPending(error, false)
+      broker.rejectQueued(error)
       if (current) {
         try {
           const frame = encodeNativeAudioHostControlFrame(teardownType)

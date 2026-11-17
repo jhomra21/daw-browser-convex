@@ -683,6 +683,57 @@ void test_native_source_admission_commits_only_what_it_admitted() {
   daw_audio_core_destroy(accepted.core);
 }
 
+// The view is the core's own decode: it reads the node and edge fields a prepare reads for each accepted envelope
+// version, and refuses what a prepare refuses.
+void test_native_graph_view_decodes_what_a_prepare_parses() {
+  const auto envelope = [](const uint32_t version, const bool instrument) {
+    std::vector<uint8_t> bytes;
+    const auto u32 = [&](const uint32_t value) { for (uint32_t shift = 0; shift < 32; shift += 8) bytes.push_back(static_cast<uint8_t>(value >> shift)); };
+    const auto u64 = [&](const uint64_t value) { u32(static_cast<uint32_t>(value)); u32(static_cast<uint32_t>(value >> 32)); };
+    u32(version); u32(7); u32(2); u32(1); u32(0); u32(0);
+    for (const uint32_t id : {1u, 2u}) {
+      u64(id); u32(id == 1 ? (instrument ? 2u : 1u) : 6u); u32(DAW_AUDIO_GRAPH_LAYOUT_STEREO); u32(DAW_AUDIO_GRAPH_LAYOUT_STEREO);
+      u32(0); u32(0);
+      if (version >= DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY) u32(0);
+      if (version == DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY) u32(1);
+      const bool carries = id == 1 && instrument;
+      u32(carries ? DAW_AUDIO_INSTRUMENT_KIND_SYNTH : 0); u32(carries ? 1 : 0); u32(carries ? 8 : 0); u32(carries ? 2 : 0);
+      for (uint32_t target = 0; target < DAW_AUDIO_CORE_MAX_INSTRUMENT_PARAMETERS; ++target)
+        u32(carries && target < 2 ? DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN + target : 0);
+      u64(0); u32(0); u32(0); u32(0); u32(0);
+    }
+    u64(9); u64(1); u64(2); u64(0); u32(0x3f800000); u32(DAW_AUDIO_GRAPH_EDGE_POST_FADER); u32(0); u32(0);
+    return bytes;
+  };
+  for (const uint32_t version : {DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION,
+    DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY, DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY}) {
+    const auto bytes = envelope(version, true);
+    const auto view = daw::audio_core::DecodeGraphView(bytes);
+    assert(view && view->version == version && view->node_count == 2 && view->edge_count == 1);
+    assert(view->nodes[0].id == 1 && view->nodes[0].kind == DAW_AUDIO_GRAPH_NODE_INSTRUMENT
+      && view->nodes[1].id == 2 && view->nodes[1].kind == DAW_AUDIO_GRAPH_NODE_MASTER);
+    const auto &instrument = view->nodes[0].instrument;
+    assert(instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH && instrument.voice_capacity == 8
+      && instrument.parameter_count == 2 && instrument.parameter_targets[1] == DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN + 1);
+    assert(view->edges[0].id == 9 && view->edges[0].from_node_id == 1 && view->edges[0].to_node_id == 2
+      && view->edges[0].tap == DAW_AUDIO_GRAPH_EDGE_POST_FADER);
+    auto truncated = bytes;
+    truncated.pop_back();
+    assert(!daw::audio_core::DecodeGraphView(truncated));
+    auto trailing = bytes;
+    trailing.push_back(0);
+    assert(!daw::audio_core::DecodeGraphView(trailing));
+    const auto prepared = envelope(version, false);
+    daw_audio_core_handle core = create_core(4, 2, 1);
+    expect(daw_audio_core_prepare_graph_bytes(core, prepared.data(), static_cast<uint32_t>(prepared.size())), DAW_AUDIO_CORE_OK);
+    assert(daw::audio_core::DecodeGraphView(prepared));
+    daw_audio_core_destroy(core);
+  }
+  auto unknown = envelope(DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY + 1, false);
+  assert(!daw::audio_core::DecodeGraphView(unknown));
+  assert(!daw::audio_core::DecodeGraphView({}));
+}
+
 void test_native_mixed_stage_interleave_is_noncommutative_and_fader_is_last() {
   const auto run = [](const std::uint32_t hook_stage) {
     daw_audio_core_handle core = create_core(4, 2, 1);
@@ -10921,6 +10972,7 @@ int main(int argc, char **argv) {
   test_source_input_bus_is_bounded_by_bus_capacity();
   test_native_graph_hook_binds_prepared_nodes_before_publish();
   test_native_source_admission_commits_only_what_it_admitted();
+  test_native_graph_view_decodes_what_a_prepare_parses();
   test_native_mixed_stage_interleave_is_noncommutative_and_fader_is_last();
   test_native_instrument_hook_is_a_source_stage();
   test_native_hook_runs_before_builtin_processor();

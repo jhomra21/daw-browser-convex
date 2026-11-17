@@ -221,26 +221,12 @@ struct PlanRouting {
   std::vector<RouteEdge> edges;
 };
 
-// Bytes one node takes in a graph envelope of this version.
-std::size_t GraphNodeBytes(const std::uint32_t version) {
-  return version == DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY ? 140U
-    : version >= DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY ? 136U : 132U;
-}
-
-std::optional<PlanRouting> ParsePlanRouting(const std::span<const std::uint8_t> payload) {
-  if (payload.size() < 24) return std::nullopt;
-  const std::size_t node_bytes = GraphNodeBytes(ReadLeU32(payload.data()));
-  const std::size_t node_count = ReadLeU32(payload.data() + 8);
-  const std::size_t edge_count = ReadLeU32(payload.data() + 12);
-  const std::size_t edges_at = 24 + node_count * node_bytes;
-  if (node_count > 64 || payload.size() < edges_at || (payload.size() - edges_at) / 48 < edge_count) return std::nullopt;
+PlanRouting ReadPlanRouting(const daw::audio_core::GraphView& graph) {
   PlanRouting plan;
-  for (std::size_t index = 0; index < node_count; ++index)
-    plan.nodes.push_back(ReadLeU64(payload.data() + 24 + index * node_bytes));
-  for (std::size_t index = 0; index < edge_count; ++index) {
-    const auto* edge = payload.data() + edges_at + index * 48;
-    plan.edges.push_back({ReadLeU64(edge + 8), ReadLeU64(edge + 16), ReadLeU64(edge + 24),
-      ReadLeU32(edge + 36), ReadLeU32(edge + 40)});
+  for (std::uint32_t index = 0; index < graph.node_count; ++index) plan.nodes.push_back(graph.nodes[index].id);
+  for (std::uint32_t index = 0; index < graph.edge_count; ++index) {
+    const auto& edge = graph.edges[index];
+    plan.edges.push_back({edge.from_node_id, edge.to_node_id, edge.target_processor_id, edge.tap, edge.sidechain});
   }
   return plan;
 }
@@ -3014,7 +3000,8 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
   const auto payload = snapshot.subspan(kNativeGraphFrameHeaderBytes);
   // The last invariant of capture-bound routing, checked before anything is prepared or reclaimed: a take bound to
   // node X records X's signal through its output, group and send chain, so no revision may remove or reroute it.
-  auto routing = ParsePlanRouting(payload);
+  const auto graph = daw::audio_core::DecodeGraphView(payload);
+  auto routing = graph ? std::optional{ReadPlanRouting(*graph)} : std::nullopt;
   if (const auto target = impl_->CaptureTarget();
     target && (!impl_->published_routing || !routing || !CaptureTargetKept(*impl_->published_routing, *routing, *target))) {
     return status(GraphRevisionStatusCode::kCaptureTargetLocked);
@@ -3029,23 +3016,18 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
   impl_->prepared_instrument_assets = impl_->published_instrument_assets;
   // Graph envelopes have already been validated below before publication.
   // Drop removed nodes from the next bank without releasing their resident data.
-  if (payload.size() >= 24) {
+  if (graph) {
     std::unordered_set<std::uint64_t> nodes;
-    const auto node_bytes = GraphNodeBytes(ReadLeU32(payload.data()));
-    const auto node_count = ReadLeU32(payload.data() + 8);
-    if (node_count <= 64 && payload.size() >= 24 + static_cast<std::size_t>(node_count) * node_bytes) {
-      for (unsigned index = 0; index < node_count; ++index) {
-        const auto* node = payload.data() + 24 + index * node_bytes;
-        if (ReadLeU32(node + 8) != 2) continue;
-        const auto id = ReadLeU64(node);
-        nodes.insert(id);
-        if (ReadLeU32(node + node_bytes - 104) == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
-          const auto found = impl_->prepared_instrument_assets.find(id);
-          if (found != impl_->prepared_instrument_assets.end()) found->second.clear();
-        }
+    for (std::uint32_t index = 0; index < graph->node_count; ++index) {
+      const auto& node = graph->nodes[index];
+      if (node.kind != DAW_AUDIO_GRAPH_NODE_INSTRUMENT) continue;
+      nodes.insert(node.id);
+      if (node.instrument.kind == DAW_AUDIO_INSTRUMENT_KIND_SYNTH) {
+        const auto found = impl_->prepared_instrument_assets.find(node.id);
+        if (found != impl_->prepared_instrument_assets.end()) found->second.clear();
       }
-      std::erase_if(impl_->prepared_instrument_assets, [&](const auto& entry) { return !nodes.contains(entry.first); });
     }
+    std::erase_if(impl_->prepared_instrument_assets, [&](const auto& entry) { return !nodes.contains(entry.first); });
   }
   const daw_audio_core_handle prepared_core = impl_->active_core.load(std::memory_order_acquire);
   daw::audio_core::SetPrepareProfiling(prepared_core, impl_->observer != nullptr);
@@ -3081,29 +3063,14 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
     1U - impl_->active_observation_lookup.load(std::memory_order_acquire)];
   candidate_lookup = {};
   impl_->prepared_instrument_targets.clear();
-  if (payload.size() >= 24) {
-    const auto envelope_version = ReadLeU32(payload.data());
-    const auto node_count = ReadLeU32(payload.data() + 8);
-    const auto node_bytes = GraphNodeBytes(envelope_version);
-    if ((envelope_version == DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION
-      || envelope_version == DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY
-      || envelope_version == DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY)
-      && node_count <= 64
-      && payload.size() >= 24 + static_cast<std::size_t>(node_count) * node_bytes) {
-      candidate_lookup.node_count = node_count;
-      for (std::uint32_t index = 0; index < node_count; ++index) {
-        candidate_lookup.node_ids[index] = ReadLeU64(payload.data() + 24 + static_cast<std::size_t>(index) * node_bytes);
-        const auto* node = payload.data() + 24 + static_cast<std::size_t>(index) * node_bytes;
-        if (ReadLeU32(node + 8) == 2) {  // Graph-envelope instrument tag, not C ABI enum.
-          const auto* instrument = node + node_bytes - 104;
-          daw_audio_instrument_state_descriptor descriptor{.kind = ReadLeU32(instrument),
-            .version = ReadLeU32(instrument + 4), .voice_capacity = ReadLeU32(instrument + 8),
-            .parameter_count = ReadLeU32(instrument + 12)};
-          for (std::size_t parameter = 0; parameter < descriptor.parameter_count; ++parameter)
-            descriptor.parameter_targets[parameter] = ReadLeU32(instrument + 16 + parameter * 4);
-          impl_->prepared_instrument_targets.emplace(candidate_lookup.node_ids[index], descriptor);
-        }
-      }
+  if (graph && (graph->version == DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION
+    || graph->version == DAW_AUDIO_CORE_WASM_GRAPH_ENVELOPE_VERSION_EXTERNAL_LATENCY
+    || graph->version == DAW_AUDIO_CORE_NATIVE_GRAPH_ENVELOPE_VERSION_KEEP_LATENCY)) {
+    candidate_lookup.node_count = graph->node_count;
+    for (std::uint32_t index = 0; index < graph->node_count; ++index) {
+      const auto& node = graph->nodes[index];
+      candidate_lookup.node_ids[index] = node.id;
+      if (node.kind == DAW_AUDIO_GRAPH_NODE_INSTRUMENT) impl_->prepared_instrument_targets.emplace(node.id, node.instrument);
     }
   }
   if (!impl_->RegisterPreparedGraphHooks(prepared_core, revision)) {

@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 
@@ -33,6 +34,19 @@ struct SourceReconciliation {
 [[nodiscard]] std::optional<SourceReconciliation> AdmitSampleSources(daw_audio_core_handle core,
   std::span<const daw_audio_sample_source_event> sources, std::int64_t frame) noexcept;
 void CommitSampleSources(daw_audio_core_handle core, const SourceReconciliation& admitted) noexcept;
+
+// Read-only decode of a graph envelope, by the same decoder a prepare uses, so a payload it accepts is exactly one
+// a prepare would parse. Control thread only: it allocates.
+inline constexpr std::size_t kMaximumGraphViewNodes = 64;
+inline constexpr std::size_t kMaximumGraphViewEdges = 256;
+struct GraphView {
+  std::uint32_t version = 0;
+  std::uint32_t node_count = 0;
+  std::uint32_t edge_count = 0;
+  std::array<daw_audio_graph_node_descriptor, kMaximumGraphViewNodes> nodes{};
+  std::array<daw_audio_graph_edge_descriptor, kMaximumGraphViewEdges> edges{};
+};
+[[nodiscard]] std::unique_ptr<const GraphView> DecodeGraphView(std::span<const std::uint8_t> envelope) noexcept;
 
 // Host closes queue/configuration admission before requesting reclamation.
 // The callback acknowledges only after its last source/voice/page reader ends.

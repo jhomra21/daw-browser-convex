@@ -10654,6 +10654,29 @@ extern "C" daw_audio_core_result daw_audio_core_release_asset(
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
 // DAW_REALTIME_CALLBACK_HELPER_BEGIN native-source-seam-declarations
 static_assert(kMaximumSampleSources == daw::audio_core::kMaximumSourceDeclarations);
+static_assert(kMaximumLiveNodes == daw::audio_core::kMaximumGraphViewNodes
+  && kMaximumLiveEdges == daw::audio_core::kMaximumGraphViewEdges);
+
+std::unique_ptr<const daw::audio_core::GraphView> daw::audio_core::DecodeGraphView(
+  const std::span<const uint8_t> envelope) noexcept {
+  struct Scratch {
+    std::array<daw_audio_processor_descriptor, kMaximumLiveProcessors> processors{};
+    std::array<std::array<uint32_t, DAW_AUDIO_CORE_MAX_PROCESSOR_PARAMETERS>, kMaximumLiveProcessors> targets{};
+    std::array<std::array<uint8_t, DAW_AUDIO_CORE_MAX_PROCESSOR_STATE_BYTES>, kMaximumLiveProcessors> states{};
+  };
+  const std::unique_ptr<Scratch> scratch{new (std::nothrow) Scratch{}};
+  std::unique_ptr<GraphView> view{new (std::nothrow) GraphView{}};
+  if (scratch == nullptr || view == nullptr || envelope.size() > UINT32_MAX) return nullptr;
+  daw_audio_graph_prepare_request request{};
+  const auto size = static_cast<uint32_t>(envelope.size());
+  if (!wasm_parse_graph(envelope.data(), size, &request, &view->nodes, &view->edges, &scratch->processors,
+    &scratch->targets, &scratch->states)) return nullptr;
+  uint32_t offset = 0;
+  static_cast<void>(wasm_read_u32(envelope.data(), size, &offset, &view->version));
+  view->node_count = request.node_count;
+  view->edge_count = request.edge_count;
+  return view;
+}
 
 std::optional<daw::audio_core::SourceReconciliation> daw::audio_core::AdmitSampleSources(daw_audio_core_handle handle,
   std::span<const daw_audio_sample_source_event> events, int64_t frame) noexcept {

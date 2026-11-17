@@ -4539,6 +4539,22 @@ describe("DV01 instrument truth", () => {
     expect(notices).toEqual(["refused"])
   })
 
+  test("a failed retirement release is reported as an incident, a settled one is not", async () => {
+    const hold = (release: () => Promise<void>) => {
+      const notices: string[] = []
+      const owner = createNativeProcessorStateOwner({ reportIncident: category => { notices.push(category) } })
+      owner.holdRetirement({ binding: { projectId: "project", revision: 3, hostGeneration: 1 }, hostPid: 1, sessionGeneration: 1,
+        release, opportunity: 0, attempted: -1, running: false, uncertain: false, readerPassed: false, waitingControl: false })
+      owner.clear()
+      return notices
+    }
+    const failed = hold(() => Promise.reject(new Error("release failed")))
+    const settled = hold(async () => {})
+    await turns()
+    expect(failed).toEqual(["unconfirmed"])
+    expect(settled).toEqual([])
+  })
+
   test("W23 loss answers receipt unavailable while lifecycle is superseded", async () => {
     const f = setup({ kind: "granular", instanceId: "sampled", params: createDefaultGranularParams() })
     try {

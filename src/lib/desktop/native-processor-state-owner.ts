@@ -403,7 +403,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
   const finishRetirement = (held: RetirementObligation) => {
     if (retirement !== held) return
     retirement = undefined
-    void held.release().catch(() => undefined)
+    void held.release().catch(() => options.reportIncident?.("unconfirmed", 1))
   }
   // Execution state outlives entries: publication adoption deletes an entry
   // once its desired content is included. A registry delivery may also exist without a projected desired entry.

@@ -13,6 +13,20 @@ import type {
 export type NativeSessionReply = { ok: true } | { ok: false; error: string }
 export type InstrumentAssetHold = { bytes: number; scope: SampledInstrumentRegionBudgetScope }
 
+// A publication step native answered, did not take, or lost. The status decides what the folded patches were told; the
+// message is for people. Anything thrown without one may have been taken, so it is unconfirmed.
+export class PublicationFailure extends Error {
+  readonly kind: Extract<NativeRevisionReply, { ok: false }>["kind"]
+  constructor(message: string, kind: Extract<NativeRevisionReply, { ok: false }>["kind"]) {
+    super(message)
+    this.kind = kind
+  }
+}
+
+export const assertReply: <T extends NativeSessionReply>(reply: T) => asserts reply is Extract<T, { ok: true }> = (reply) => {
+  if (!reply.ok) throw new Error(reply.error)
+}
+
 type ProcessorStateOwner = Pick<ReturnType<typeof createNativeProcessorStateOwner>, "fence" | "released" | "finishPublication" | "unprepared">
 type RevisionBinding = Parameters<NativeRevisionSession["publish"]>[0]
 type PublicationEvidence = Parameters<ProcessorStateOwner["finishPublication"]>[2]

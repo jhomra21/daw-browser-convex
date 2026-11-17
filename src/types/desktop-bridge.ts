@@ -61,7 +61,8 @@ export type NativeProcessorPatchReply =
 export type NativeRecordingScope = { projectId: string; projectGeneration: number }
 export type NativeRecordingTake = {
   takeId: string
-  state: "pending" | "interrupted" | "complete"
+  state: "pending" | "interrupted" | "complete" | "damaged"
+  damagedReason?: "receipt" | "resolved-manifest"
   sampleRateHz: number | null
   channelCount: number
   frames: number | null

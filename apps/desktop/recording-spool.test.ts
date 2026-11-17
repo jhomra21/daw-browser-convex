@@ -29,6 +29,52 @@ test("persists private staged intent before admission and verified rate before s
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
+test("failed manifest writes never publish a partial final file", async () => {
+  for (const failure of ["crash-after-open", "short-write", "disk-full"]) {
+    const root = await mkdtemp("/private/tmp/daw-spool-atomic-write-")
+    const sample = await open(path.join(root, "probe"), "w")
+    const prototype: { write: FileHandle["write"] } = Object.getPrototypeOf(sample)
+    await sample.close()
+    const intercepted = spyOn(prototype, "write").mockImplementation(async function(this: FileHandle) {
+      throw failure === "disk-full" ? Object.assign(new Error("disk full"), { code: "ENOSPC" })
+        : new Error(failure === "short-write" ? "short write made no progress" : "crash after open")
+    })
+    try {
+      await expect(prepareRecordingSpool({
+        userData: root, projectId: "local:atomic", rendererGeneration: 1,
+        hostGeneration: 1, generation: 1, sessionId: 1n, channelCount: 1,
+      })).rejects.toThrow()
+      const names = await readdir(path.join(root, "recording-spool"))
+      expect(names.some((name) => /^[a-f0-9]{64}\.json$/.test(name))).toBeFalse()
+    } finally {
+      intercepted.mockRestore()
+      await rm(root, { recursive: true, force: true })
+    }
+  }
+})
+
+test("manifest publication never replaces an existing file or follows a symlink target", async () => {
+  const root = await mkdtemp("/private/tmp/daw-spool-atomic-target-")
+  try {
+    const take = await prepareRecordingSpool({
+      userData: root, projectId: "local:atomic", rendererGeneration: 1,
+      hostGeneration: 1, generation: 1, sessionId: 1n, channelCount: 1,
+    })
+    const readyName = `${take.token}.ready.json`
+    const readyPath = path.join(take.rootPath, readyName)
+    const existing = Buffer.from("keep existing")
+    await writeFile(readyPath, existing, { mode: 0o600 })
+    await expect(take.confirmReady({ generation: 1, sessionId: 1n, channelCount: 1, sampleRateHz: 48000 })).rejects.toThrow()
+    expect(await readFile(readyPath)).toEqual(existing)
+    await rm(readyPath)
+    const outside = path.join(root, "outside")
+    await writeFile(outside, "outside", { mode: 0o600 })
+    await symlink(outside, readyPath)
+    await expect(take.confirmReady({ generation: 1, sessionId: 1n, channelCount: 1, sampleRateHz: 48000 })).rejects.toThrow()
+    expect(await readFile(outside, "utf8")).toBe("outside")
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 test("does not realpath away the intended spool symlink", async () => {
   const root = await mkdtemp("/private/tmp/daw-spool-symlink-")
   const target = await mkdtemp("/private/tmp/daw-spool-target-")
@@ -194,6 +240,23 @@ test("unproven published sources and partials are discoverable but never guessed
     expect(await readFile(f.source)).toEqual(f.bytes)
     expect(await readdir(f.take.rootPath)).toHaveLength(3)
   } finally { await rm(f.userData, { recursive: true, force: true }) }
+})
+
+test("a malformed per-take receipt or resolved manifest is retained as damaged without disabling discovery", async () => {
+  for (const damagedFile of ["released", "resolved"]) {
+    const f = await registryFixture()
+    try {
+      await f.registry.complete(f.takeId, f.complete)
+      await writeFile(path.join(f.take.rootPath, `${f.take.token}.${damagedFile}.json`), "{", { mode: 0o600 })
+      const recovered = createRecordingSpoolRegistry({ userData: f.userData })
+      recovered.bind(scope)
+      await expect(recovered.discover()).resolves.toBeUndefined()
+      expect((await recovered.list(scope)).takes).toMatchObject([
+        { state: "damaged", damagedReason: damagedFile === "released" ? "receipt" : "resolved-manifest" },
+      ])
+      expect(await readFile(f.source)).toEqual(f.bytes)
+    } finally { await rm(f.userData, { recursive: true, force: true }) }
+  }
 })
 
 test("Complete refuses wrong formula, negotiated rate, scope and native identity", async () => {

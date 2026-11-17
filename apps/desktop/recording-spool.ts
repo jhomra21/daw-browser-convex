@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto"
 import { constants, type BigIntStats } from "node:fs"
-import { lstat, mkdir, open, opendir, realpath, unlink } from "node:fs/promises"
+import { link, lstat, mkdir, open, opendir, realpath, unlink } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
 import type { NativeMainRecordingStatus } from "./audio-host"
@@ -110,7 +110,8 @@ const persistManifest = async (root: PrivateRoot, name: string, value: Recording
   if (bytes.length > 4096) throw new Error("Recording manifest exceeds its bounded size.")
   await verifyRoot(root)
   const target = path.join(root.rootPath, name)
-  const handle = await open(target, constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_CREAT | constants.O_EXCL, 0o600)
+  const temporary = path.join(root.rootPath, `.${randomBytes(16).toString("hex")}.tmp`)
+  const handle = await open(temporary, constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_CREAT | constants.O_EXCL, 0o600)
   try {
     if (!privateFile(await handle.stat({ bigint: true }))) throw new Error("Recording manifest must be private.")
     let offset = 0
@@ -122,11 +123,19 @@ const persistManifest = async (root: PrivateRoot, name: string, value: Recording
     await handle.sync()
     onSync?.("receipt-file-synced")
     const opened = await handle.stat({ bigint: true })
-    const named = await lstat(target, { bigint: true })
+    const named = await lstat(temporary, { bigint: true })
     if (!privateFile(opened) || !privateFile(named) || !sameIdentity(opened, named) || opened.size !== BigInt(bytes.length))
       throw new Error("Recording manifest identity changed.")
   } finally { await handle.close() }
   await verifyRoot(root)
+  const named = await lstat(temporary, { bigint: true })
+  if (!privateFile(named)) throw new Error("Recording manifest must be private.")
+  await link(temporary, target)
+  const published = await lstat(target, { bigint: true })
+  if (!published.isFile() || published.uid !== BigInt(process.getuid?.() ?? -1)
+    || (published.mode & 0o7777n) !== 0o600n || !sameIdentity(named, published))
+    throw new Error("Recording manifest identity changed.")
+  await unlink(temporary)
   const directory = await open(root.rootPath, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
   try {
     const status = await directory.stat({ bigint: true })
@@ -187,7 +196,8 @@ export const prepareRecordingSpool = async (intent: RecordingIntent) => {
 }
 
 type RetainedTake = { projectIndex?: number; takeId: string; token: string; manifest: IntentManifest; root: PrivateRoot;
-  state: "pending" | "interrupted" | "complete" | "released" | "resolved"; proof?: CompleteProof;
+  state: "pending" | "interrupted" | "complete" | "released" | "resolved" | "damaged";
+  damagedReason?: "receipt" | "resolved-manifest"; proof?: CompleteProof;
   completion?: Promise<void>; release?: Promise<void>; acknowledgment?: NativeRecordingRelease }
 const readManifest = async <Manifest>(root: PrivateRoot, name: string, schema: z.ZodType<Manifest>): Promise<Manifest> => {
   await verifyRoot(root)
@@ -315,12 +325,22 @@ export const createRecordingSpoolRegistry = (input: Pick<RecordingIntent, "userD
       const take: RetainedTake = { takeId: randomUUID(), token, manifest, root, state: "pending" }
       const resolvedPath = path.join(root.rootPath, `${token}.resolved.json`)
       if (await statusAt(resolvedPath)) {
-        const resolved = await readManifest(root, `${token}.resolved.json`, resolvedSchema)
-        if (JSON.stringify(resolved.manifest) !== JSON.stringify(manifest)
-          || BigInt(resolved.rootDevice) !== root.root.device || BigInt(resolved.rootInode) !== root.root.inode)
-          throw new Error("Recording resolved receipt scope mismatch.")
-        await assertAbsentSources(take)
-        tokens.add(token)
+        let validResolved = false
+        try {
+          const resolved = await readManifest(root, `${token}.resolved.json`, resolvedSchema)
+          if (JSON.stringify(resolved.manifest) !== JSON.stringify(manifest)
+            || BigInt(resolved.rootDevice) !== root.root.device || BigInt(resolved.rootInode) !== root.root.inode)
+            throw new Error("Recording resolved receipt scope mismatch.")
+          validResolved = true
+        } catch {
+          take.state = "damaged"
+          take.damagedReason = "resolved-manifest"
+          register(take)
+        }
+        if (validResolved) {
+          await assertAbsentSources(take)
+          tokens.add(token)
+        }
         continue
       }
       const completed = await readManifest(root, `${token}.complete.json`, proofSchema).catch(() => undefined)
@@ -340,20 +360,27 @@ export const createRecordingSpoolRegistry = (input: Pick<RecordingIntent, "userD
       }
       const receiptPath = path.join(root.rootPath, `${token}.released.json`)
       if (await statusAt(receiptPath)) {
-        // Validate proof independently of source presence: receipt-first crashes
-        // must converge both matching-file and already-absent-file cases.
-        if (!completed) throw new Error("Recording receipt has no Complete identity proof.")
-        const ready = await readyFor(take)
-        assertTotals(completed)
-        if (completed.generation !== manifest.generation || completed.sessionId !== manifest.sessionId
-          || completed.sampleRateHz !== ready.sampleRateHz || completed.channelCount !== ready.channelCount
-          || BigInt(completed.rootDevice) !== root.root.device || BigInt(completed.rootInode) !== root.root.inode)
-          throw new Error("Recording receipt identity mismatch.")
-        take.proof = completed
-        take.state = "complete"
-        const receipt = await readManifest(root, `${token}.released.json`, receiptSchema)
-        validateReceipt(take, receipt)
-        take.acknowledgment = receipt.acknowledgment
+        try {
+          // Validate proof independently of source presence: receipt-first crashes
+          // must converge both matching-file and already-absent-file cases.
+          if (!completed) throw new Error("Recording receipt has no Complete identity proof.")
+          const ready = await readyFor(take)
+          assertTotals(completed)
+          if (completed.generation !== manifest.generation || completed.sessionId !== manifest.sessionId
+            || completed.sampleRateHz !== ready.sampleRateHz || completed.channelCount !== ready.channelCount
+            || BigInt(completed.rootDevice) !== root.root.device || BigInt(completed.rootInode) !== root.root.inode)
+            throw new Error("Recording receipt identity mismatch.")
+          take.proof = completed
+          take.state = "complete"
+          const receipt = await readManifest(root, `${token}.released.json`, receiptSchema)
+          validateReceipt(take, receipt)
+          take.acknowledgment = receipt.acknowledgment
+        } catch {
+          take.state = "damaged"
+          take.damagedReason = "receipt"
+          register(take)
+        }
+        if (take.state === "damaged") continue
         await finishRelease(take)
         tokens.add(token)
         continue
@@ -438,7 +465,8 @@ export const createRecordingSpoolRegistry = (input: Pick<RecordingIntent, "userD
         if (!take || take.state === "released" || take.state === "resolved") continue
         if (result.length === 100) return { takes: result, nextCursor: result.at(-1)?.takeId ?? null }
         const proof = take.proof
-        result.push({ takeId: take.takeId, state: take.state, sampleRateHz: proof?.sampleRateHz ?? null,
+        result.push({ takeId: take.takeId, state: take.state === "damaged" ? "damaged" : take.state, damagedReason: take.damagedReason,
+          sampleRateHz: proof?.sampleRateHz ?? null,
           channelCount: take.manifest.channelCount, frames: proof?.frames ?? null, bytes: proof?.bytes ?? null, blocks: proof?.blocks ?? null })
       }
       return { takes: result, nextCursor: null }

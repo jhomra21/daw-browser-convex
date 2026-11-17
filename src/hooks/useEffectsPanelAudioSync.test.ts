@@ -1786,11 +1786,8 @@ const createStructuralReviewFixture = async (local: boolean, master: boolean, pe
   return { audio, publish, runtime, calls, promises, errors, localErrors, history, targetId, projectId, setProjectId, setGeneration, selected, setSelected, setLegacy, setEngine, engine, settle, close, setUiNoise };
 };
 
-// Known-red contract, not fixed here: overlapping releases must each be
-// undoable. Strict witness runs expose the raw red; the ordinary suite checks
-// its exact known residual instead of accepting arbitrary failures.
 for (const master of [false, true]) {
-  test(`B5c3 known-red simultaneous release, local track=${!master}, closed and unselected`, async () => {
+  test(`B5c3 simultaneous releases are each undoable, local track=${!master}, closed and unselected`, async () => {
     const f = await createStructuralReviewFixture(true, master);
     try {
       const a = f.audio.gestureOwner("a", "compressor", f.targetId);
@@ -1806,8 +1803,7 @@ for (const master of [false, true]) {
       console.log("B5c3 release history", JSON.stringify({ master, entries: f.history.length, history: f.history,
         calls: f.calls }));
       expect(f.errors).toEqual([]);
-      expect(f.history).toHaveLength(1);
-      if (process.env.DV01_B5_STRICT_HISTORY === "1") expect(f.history).toHaveLength(2);
+      expect(f.history).toHaveLength(2);
     } finally { f.close(); }
   });
 }

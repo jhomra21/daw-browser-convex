@@ -766,10 +766,13 @@ export function createEffectsPanelAudioDevice(
       : applyInstancesToEngine(target.targetId, currentOrderForTarget(target.targetId))));
     const current = recordStructuralApplication(target.targetId, structural.signature, engine, applied);
     // Preserve a settled replacement's own result; only still-pending obsolete work joins its successor.
-    return Promise.race([applied, current.pending.then(
+    const settled = await Promise.race([applied, current.pending.then(
       result => result === "applied" || result === "joined" || result === "skipped" ? result : applied,
       () => applied,
     )]);
+    // The engine builds every replacement from the chain last requested, so the request that supersedes this one
+    // carries its content: this release is installed exactly when that successor is.
+    return settled === "superseded" ? current.pending.catch(() => settled) : settled;
   };
   const owner = createParameterGestureOwner<EffectTarget, AudioEffectParams>({
     acceptance: context.acceptance,

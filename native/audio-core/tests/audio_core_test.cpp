@@ -7247,7 +7247,7 @@ void test_phase4_spectral_frozen_tone(bool lower, float mix) {
 }
 
 #if defined(DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS)
-void test_phase4_spectral_transfer_late() {
+void test_phase4_spectral_transfer_late_allocation_free() {
   Phase3Rig rig;
   const auto build = [&](uint32_t fft, bool learn) {
     rig.clear(); rig.add_node(1, DAW_AUDIO_GRAPH_NODE_SOURCE);
@@ -7278,7 +7278,9 @@ void test_phase4_spectral_transfer_late() {
   assert(!bank.read(tagged, wrong) && tagged.state_serial == 0);
   assert(bank.read(tagged, correct) && tagged.state_serial == 42 && tagged.noise_profile[0][0] == 7);
   const auto source = core.spectral_histories[core.published_graph->processors[0].spectral_slot].noise_profile[0];
+  const auto allocations_before_refresh = allocation_count;
   rig.publish(2); rig.render(1);
+  assert(allocation_count == allocations_before_refresh);
   const auto &destination = core.spectral_histories[core.published_graph->processors[0].spectral_slot].noise_profile[0];
   double worst = 0;
   for (uint32_t k = 0; k <= 2048; ++k) {
@@ -10362,7 +10364,7 @@ int main(int argc, char **argv) {
     } else if (std::strcmp(argv[2], "spectral-transfer-cost") == 0) {
       test_phase4_spectral_transfer_cost();
     } else if (std::strcmp(argv[2], "spectral-transfer-late") == 0) {
-      test_phase4_spectral_transfer_late();
+      test_phase4_spectral_transfer_late_allocation_free();
     } else if (std::strcmp(argv[2], "spectral-transfer-flat") == 0) {
       test_phase4_spectral_transfer_shape(false);
     } else if (std::strcmp(argv[2], "spectral-transfer-pink") == 0) {

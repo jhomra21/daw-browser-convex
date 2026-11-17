@@ -3001,7 +3001,7 @@ void TestKeepLatencyDiagnosticReply() {
   assert(host.PrepareGraphRevision(2, initial).diagnostic_code == 0);
 }
 
-void TestRollbackSafeGraphRevisionLifecycle() {
+void TestPublicationOwnershipSurvivesRollbackAndCommit() {
   const auto progress_wire = daw::audio_host_macos::EncodeScheduleProgress({
     .admission_capacity_generation = 0x0102030405060708ULL,
     .latency_completion_generation = 0x1112131415161718ULL, .revision = 9, .epoch = 1,
@@ -5071,7 +5071,7 @@ void TestCheckpoint3Assets(const char failure) {
   std::fprintf(stderr, "checkpoint3 failure=%c PASS\n", failure);
 }
 
-void TestCheckpoint3CompletedAssetEpoch() {
+void TestReaderCompletionControlsAssetReclamation() {
   daw_audio_core_handle core = 0;
   const daw_audio_core_config config{.abi_version = DAW_AUDIO_CORE_ABI_VERSION,
     .max_frames_per_block = 4, .max_channels = 2, .max_assets = 1, .sample_rate_hz = 48000};
@@ -6699,9 +6699,9 @@ int main() {
     for (const unsigned cancellation : {1U, 2U}) TestCheckpoint3SourceSeam(failure, cancellation);
   TestCheckpoint3SourceSeamCapacity();
   TestCheckpoint3FractionalSourceSeam();
-  if (std::getenv("DAW_AE08_ASSET_EPOCH_ONLY")) { TestCheckpoint3CompletedAssetEpoch(); return 0; }
+  if (std::getenv("DAW_AE08_ASSET_EPOCH_ONLY")) { TestReaderCompletionControlsAssetReclamation(); return 0; }
   if (std::getenv("DAW_AE08_ASSET_INSTRUMENT_ONLY")) { TestCheckpoint3StagedInstrumentAssets(); return 0; }
-  TestCheckpoint3CompletedAssetEpoch();
+  TestReaderCompletionControlsAssetReclamation();
   if (const auto* failure = std::getenv("DAW_AE08_ASSET_ONLY")) {
     TestCheckpoint3Assets(*failure); return 0;
   }
@@ -6872,7 +6872,7 @@ int main() {
   TestNoActiveDeviceFailsGracefully();
   TestRejectedBlockDiagnosticsIdentifyLifecycleRejection();
   TestCoreAudioDeviceLossRoutesBySessionRole();
-  TestRollbackSafeGraphRevisionLifecycle();
+  TestPublicationOwnershipSurvivesRollbackAndCommit();
   TestTransitionExhaustionFailsWithoutColdCore();
   TestUnorderableEditFailsWithoutColdCore();
   TestFallbackPublishesConfiguredInstrumentState();

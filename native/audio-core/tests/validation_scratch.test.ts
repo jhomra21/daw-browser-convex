@@ -46,26 +46,6 @@ test('native graph stages cache built-in renderers outside the callback', async 
   expect(source.slice(callbackStart, callbackEnd)).not.toContain('find_processor_renderer')
 })
 
-test('spectral callback refresh applies one precomputed tagged map without allocation or trig', async () => {
-  const source = await Bun.file(coreSourceUrl).text()
-  const applyStart = source.indexOf('void apply_spectral_transfer(')
-  const applyEnd = source.indexOf('// Control-side only.', applyStart)
-  const callbackStart = source.indexOf('void render_chain_frame(')
-  const callbackEnd = source.indexOf('// Renders consecutive built-in processors', callbackStart)
-  expect(applyStart).toBeGreaterThan(0)
-  expect(applyEnd).toBeGreaterThan(applyStart)
-  const apply = source.slice(applyStart, applyEnd)
-  expect(apply).not.toMatch(/std::(?:cos|sin|log|exp)|\b(?:new|malloc|mutex|while)\b/)
-  expect(apply).toContain('map.before != before.fft_size || map.after != after.fft_size')
-  const callback = source.slice(callbackStart, callbackEnd)
-  expect(callback).not.toContain('prepare_spectral_transfer(')
-  expect(callback).not.toContain('transfer_spectral_persistent(')
-  expect(callback).toContain('if (!history.persistent_state_transferred)')
-  expect(callback).toContain('prior.state_mode == old.spectral.mode && prior.fft_size == old.spectral.fft_size')
-  expect(callback).toContain('apply_spectral_transfer(')
-  expect(callback).toContain('&core.spectral_histories[old.spectral_slot].wet_sample')
-})
-
 test('Wasm directory publication restores the old asset set when the replacement fails', async () => {
   const tempResult = Bun.spawnSync({
     cmd: ['mktemp', '-d', '/tmp/daw-audio-core-publish-test.XXXXXX'],

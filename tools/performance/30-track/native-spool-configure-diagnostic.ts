@@ -40,12 +40,10 @@ const nested = (text: string): z.infer<ReturnType<typeof z.json>> => {
 }
 const verifyPackagedInhibitor = () => {
   const source = extractFile(path.join(executable, "../../Resources/app.asar"), ".vite/build/main.js").toString()
-  // Verify the executable guard structure, not merely diagnostic string presence.
-  const factory = source.match(/(\w+) = \((\w+), \w+\) => \{\s*let \w+ = 0;\s*const \w+ = \(\w+\) => \{[\s\S]*?start\((\w+)\) \{\s*return (\w+) \? \(\w+\(\{ kind: "native-start-blocked" \}\), Promise.resolve\(\{ ok: !1, error: "diagnostic-capture-blocked" \}\)\) : (\w+)\(\);/)
-  const binding = source.match(/const (\w+) = (\w+)\(\s*process.env.DAW_RECORDING_START_DIAGNOSTIC === "1",/)
-  const guardedCall = source.match(/return await (\w+)\.start\(async \(\) => \(await \w+\.startRecording\(\), \{ ok: !0 \}\)\)/)
-  if (!factory || !binding || !guardedCall || factory[2] !== factory[4]
-    || factory[3] !== factory[5] || factory[1] !== binding[2] || binding[1] !== guardedCall[1]
+  const binding = source.match(/const (\w+) = process\.env\.DAW_RECORDING_START_DIAGNOSTIC === "1"/)
+  const guard = source.match(/if \((\w+)\) \{\s*\w+\.observeCaptureBlocked\(\);\s*return \{ ok: !1, error: "diagnostic-capture-blocked" \};/)
+  const diagnostic = source.match(/(\w+)\.observeStart\(result\)/)
+  if (!binding || !guard || !diagnostic || binding[1] !== guard[1]
     || (source.match(/await \w+\.startRecording\(\)/g) ?? []).length !== 1)
     throw new Error("Packaged native-start inhibitor could not be verified.")
 }

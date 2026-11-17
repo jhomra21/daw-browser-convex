@@ -1,23 +1,21 @@
 import { expect, spyOn, test } from "bun:test"
 import { createRecordingIpcDiagnostics, createRendererTrafficDiagnostics } from "./recording-ipc-diagnostics"
-import { beginRecordingDeliveryTrace, createRecordingDeliveryTrace, finishRecordingDeliveryTrace, recordRecordingTermination, resetRecordingDiagnostics } from "../../src/lib/recording/recording-diagnostics"
+import { beginRecordingDeliveryTrace, finishRecordingDeliveryTrace, recordRecordingTermination, resetRecordingDiagnostics } from "../../src/lib/recording/recording-diagnostics"
+import { createRecordingDeliveryTrace } from "../../src/lib/recording/recording-delivery-trace"
 import { createBenchmarkRecordingTelemetry } from "./benchmark-runtime"
-import type { NativeHostRecordingBlock } from "@daw-browser/audio-engine/native-host-wire"
 
-test("terminal status forwards the main ring exactly once without PCM", () => {
+test("terminal benchmark evidence is returned beside status without mutating it", () => {
   const log = spyOn(console, "error").mockImplementation(() => undefined)
   try {
     const telemetry = createBenchmarkRecordingTelemetry(true)
-    const status = { generation: 1, sessionId: 1n, timelineFrame: 0, capturedFrames: 2048, droppedFrames: 0, droppedBlocks: 0, availableBlocks: 32, queuedBlocks: 0, rms: 0, peak: 0, fatal: false, active: true, configured: true }
-    telemetry.recordStatus(status)
-    const block: NativeHostRecordingBlock = { generation: 1, sessionId: 1n, sequence: 0, frameCount: 2048, channelCount: 1, rms: 0, peak: 0, planarPcm: new Uint8Array(8192) }
-    telemetry.sendBlock(block, () => { expect(block).toHaveProperty("benchmarkMainArrivalEpochMs") })
-    const stopped = { ...status, active: false }
-    telemetry.recordStatus(stopped)
-    expect(stopped).toHaveProperty("benchmarkRecordingDelivery.capacity", 512)
-    const repeat = { ...status, active: false }
-    telemetry.recordStatus(repeat)
-    expect(repeat).not.toHaveProperty("benchmarkRecordingDelivery")
+    const active = { generation: 1, sessionId: 1n, timelineFrame: 0, capturedFrames: 2048, droppedFrames: 0, droppedBlocks: 0, availableBlocks: 32, queuedBlocks: 0, rms: 0, peak: 0, fatal: false, active: true, configured: true }
+    telemetry.recordStatus(active)
+    const stopped = { ...active, active: false }
+    const evidence = telemetry.recordStatus(stopped)
+    expect(evidence?.status).toMatchObject({ generation: 1, sessionId: "1", active: false })
+    expect(evidence?.delivery.capacity).toBe(512)
+    expect(stopped).not.toHaveProperty("benchmarkRecordingDelivery")
+    expect(telemetry.recordStatus({ ...active, active: false })).toBeUndefined()
   } finally { log.mockRestore() }
 })
 
@@ -49,13 +47,12 @@ test("renderer opt-out allocates no live trace and reset preserves the completed
   }
 })
 
-test("main benchmark opt-out forwards unchanged and produces no evidence", () => {
+test("main benchmark opt-out produces no evidence", () => {
   const log = spyOn(console, "error").mockImplementation(() => undefined)
   try {
     const telemetry = createBenchmarkRecordingTelemetry(false)
-    let sends = 0
-    telemetry.sendBlock({ generation: 1, sessionId: 1n, sequence: 0, frameCount: 42, channelCount: 1, rms: 0, peak: 0, planarPcm: new Uint8Array(168) }, () => { sends++ })
-    expect(sends).toBe(1)
+    expect(telemetry.recordStatus({ generation: 1, sessionId: 1n, timelineFrame: 0, capturedFrames: 0, droppedFrames: 0,
+      droppedBlocks: 0, availableBlocks: 32, queuedBlocks: 0, rms: 0, peak: 0, fatal: false, active: false, configured: true })).toBeUndefined()
     expect(log).not.toHaveBeenCalled()
   } finally { log.mockRestore() }
 })
@@ -69,11 +66,10 @@ test("main benchmark waits for capture then dumps once per session with scalar m
     telemetry.recordStatus(status)
     expect(logs).toHaveLength(0)
     telemetry.recordStatus({ ...status, active: true, queuedBlocks: 11 })
-    telemetry.sendBlock({ generation: 1, sessionId: 1n, sequence: 0, frameCount: 42, channelCount: 1, rms: 0, peak: 0, planarPcm: new Uint8Array(168) }, () => undefined)
     telemetry.recordStatus({ ...status, fatal: true })
     telemetry.recordStatus(status)
     expect(logs).toHaveLength(1)
-    expect(logs[0]).toContain('"frameCount":42')
+    expect(logs[0]).toContain('"observedFrames":0')
     expect(logs[0]).toContain('"nativeQueuedBlocks":11')
     expect(logs[0]).not.toContain("planarPcm")
     const next = { ...status, generation: 2, sessionId: 2n }
@@ -122,17 +118,14 @@ test("new delivery sessions reset counts and retain first fatal through cleanup 
   expect(next.dump(537)).toMatchObject({ generation: 2, sessionId: "2", observedFrames: 0, overwritten: 0, firstTermination: null })
 })
 
-test("delivery evidence copies only scalar metadata, never PCM, paths or errors", () => {
-  const payload = { sequence: 0, frameCount: 42, planarPcm: new Uint8Array([123]), path: "/private/take.wav", secret: "token" }
+test("delivery trace exposes only its bounded numeric event fields", () => {
   const trace = createRecordingDeliveryTrace(true, 1, 1n, 0)
-  trace.block(payload.sequence, payload.frameCount, 10, 3)
+  trace.block(0, 42, 10, 3)
   trace.writer(11, 8, 2, 5, 7, 9, 4)
-  const encoded = JSON.stringify(trace.dump(12))
-  expect(encoded).not.toContain("planarPcm")
-  expect(encoded).not.toContain("/private")
-  expect(encoded).not.toContain("token")
-  expect(encoded).toContain('"outstanding":8')
-  expect(encoded).toContain('"deliveryMs":7')
+  expect(trace.dump(12)).toMatchObject({ observedFrames: 42, events: [
+    { kind: "block", sequence: 0, frameCount: 42 },
+    { kind: "writer", outstanding: 8, deliveryMs: 7 },
+  ] })
 })
 
 test("reports bounded recording rate, payload and send percentiles", () => {

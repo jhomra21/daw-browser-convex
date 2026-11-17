@@ -1,27 +1,19 @@
 import { expect, test } from "bun:test"
 import { createRecordingStartDiagnostic, type RecordingStartDiagnosticEvent } from "./recording-start-diagnostic"
 
-test("diagnostic mode blocks native start before the supplied command can run", async () => {
+test("diagnostic observation never decides whether native capture starts", () => {
   const events: RecordingStartDiagnosticEvent[] = []
   const diagnostic = createRecordingStartDiagnostic(true, (event) => events.push(event))
-  let nativeStarts = 0
-
-  const result = await diagnostic.start(() => {
-    nativeStarts += 1
-    return Promise.resolve({ ok: true })
-  })
-
-  expect(result).toEqual({ ok: false, error: "diagnostic-capture-blocked" })
-  expect(nativeStarts).toBe(0)
-  expect(events).toEqual([{ kind: "native-start-blocked" }])
+  diagnostic.observeStart({ ok: true })
+  expect(events).toEqual([{ kind: "native-start-result", outcome: "succeeded" }])
 })
 
-test("normal mode forwards native start unchanged", async () => {
+test("disabled diagnostics do not alter a native start result", () => {
   const events: RecordingStartDiagnosticEvent[] = []
   const diagnostic = createRecordingStartDiagnostic(false, (event) => events.push(event))
-  const result = await diagnostic.start(() => Promise.resolve({ ok: true }))
-
-  expect(result).toEqual({ ok: true })
+  const result = { ok: false, error: "native-start-failed" }
+  diagnostic.observeStart(result)
+  expect(result).toEqual({ ok: false, error: "native-start-failed" })
   expect(events).toEqual([])
 })
 
@@ -58,15 +50,13 @@ test("diagnostic events retain only safe allowlisted scalars", () => {
   expect(JSON.stringify(events)).not.toMatch(/private|token|path/)
 })
 
-test("diagnostic event count and values are bounded", async () => {
+test("diagnostic event count and values are bounded", () => {
   const events: RecordingStartDiagnosticEvent[] = []
   const diagnostic = createRecordingStartDiagnostic(true, (event) => events.push(event))
 
   for (let index = 0; index < 100; index += 1) diagnostic.observe({ kind: "backend", backend: "native" })
-  const blocked = diagnostic.start(() => Promise.resolve({ ok: true }))
-
+  diagnostic.observeCaptureBlocked()
   expect(events).toHaveLength(64)
-  await expect(blocked).resolves.toEqual({ ok: false, error: "diagnostic-capture-blocked" })
   expect(events.at(-1)).toEqual({ kind: "native-start-blocked" })
   expect(() => diagnostic.observe({ kind: "backend", backend: "raw-device-name" })).not.toThrow()
   expect(JSON.stringify(events)).not.toContain("raw-device-name")

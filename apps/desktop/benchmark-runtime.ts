@@ -5,7 +5,7 @@ import type {
   IpcMainEvent,
   IpcMainInvokeEvent,
 } from "electron"
-import type { NativeHostRecordingBlock, NativeHostRecordingStatus } from "@daw-browser/audio-engine/native-host-wire"
+import type { NativeHostRecordingStatus } from "@daw-browser/audio-engine/native-host-wire"
 import {
   benchmarkHeartbeatChannel,
   benchmarkRendererPingChannel,
@@ -17,7 +17,7 @@ import {
   createRecordingIpcDiagnostics,
   createRendererTrafficDiagnostics,
 } from "./recording-ipc-diagnostics"
-import { createRecordingDeliveryTrace } from "../../src/lib/recording/recording-diagnostics"
+import { createRecordingDeliveryTrace } from "../../src/lib/recording/recording-delivery-trace"
 
 type AllowedBenchmarkEvent = (event: IpcMainEvent | IpcMainInvokeEvent) => boolean
 
@@ -176,33 +176,8 @@ export const createBenchmarkRecordingTelemetry = (
     return dump
   }
   return {
-    sendBlock(block: NativeHostRecordingBlock & { benchmarkMainArrivalEpochMs?: number }, send: () => void) {
-      if (!enabled) {
-        send()
-        return
-      }
-      observeSession(block.generation, block.sessionId)
-      observedCapture = true
-      const startedAt = performance.now()
-      const arrivalEpochMs = performance.timeOrigin + startedAt
-      // Benchmark-only scalar carried by the existing block IPC. The preload
-      // forwards this envelope unchanged; PCM ownership and send behavior stay
-      // unchanged. This is main listener arrival, NOT native production time.
-      block.benchmarkMainArrivalEpochMs = arrivalEpochMs
-      recording?.recordBlock({
-        frameCount: block.frameCount,
-        channelCount: block.channelCount,
-        payloadBytes: block.planarPcm.byteLength,
-      })
-      try { send() } finally {
-        const sendMs = performance.now() - startedAt
-        delivery?.block(block.sequence, block.frameCount, arrivalEpochMs, sendMs)
-        traffic?.record("recording-block", block.planarPcm.byteLength + 64)
-        recording?.recordSend(sendMs)
-      }
-    },
-    recordStatus(status: NativeHostRecordingStatus & { benchmarkRecordingDelivery?: ReturnType<ReturnType<typeof createRecordingDeliveryTrace>["dump"]> }) {
-      if (!enabled) return
+    recordStatus(status: NativeHostRecordingStatus) {
+      if (!enabled) return undefined
       observeSession(status.generation, status.sessionId)
       traffic?.record("recording-status", 96)
       lastStatus = status
@@ -210,14 +185,11 @@ export const createBenchmarkRecordingTelemetry = (
       observedCapture ||= status.active || status.fatal
       delivery?.status(now, status.queuedBlocks, status.active, status.fatal, status.capturedFrames)
       if (status.fatal) delivery?.transition("native-fatal", now)
-      // Do not dump the configured-but-not-started status or lose fatal/drain
-      // transitions by dumping before native final drain completes.
       if (observedCapture && !status.active && status.queuedBlocks === 0) {
         const dump = emit(now)
-        // Reuse the already-forwarded terminal status, once per session. This
-        // avoids dependence on run.ts's truncated app-output/console tails.
-        if (dump) status.benchmarkRecordingDelivery = dump
+        if (dump) return { status: reportStatus(), delivery: dump }
       }
+      return undefined
     },
     recordTraffic(channel: string, estimatedBytes: number) {
       traffic?.record(channel, estimatedBytes)

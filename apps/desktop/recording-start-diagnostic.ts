@@ -46,7 +46,6 @@ const safeInteger = (value: number | undefined, minimum = 0, maximum = 1_000_000
 export const createRecordingStartDiagnostic = (
   enabled: boolean,
   write: (event: RecordingStartDiagnosticEvent) => void,
-  inhibitCapture = enabled,
 ) => {
   let count = 0
   const emit = (event: DiagnosticEvent) => {
@@ -96,19 +95,11 @@ export const createRecordingStartDiagnostic = (
         })
       }
     },
-    async start<T>(nativeStart: () => Promise<T>): Promise<T | { readonly ok: false; readonly error: "diagnostic-capture-blocked" }> {
-      if (inhibitCapture) {
-        emit({ kind: "native-start-blocked" })
-        return Promise.resolve({ ok: false, error: "diagnostic-capture-blocked" })
-      }
-      try {
-        const result = await nativeStart()
-        emit({ kind: "native-start-result", outcome: "succeeded" })
-        return result
-      } catch (error) {
-        emit({ kind: "native-start-result", outcome: "rejected" })
-        throw error
-      }
+    observeStart(result: { ok: boolean }) {
+      emit({ kind: "native-start-result", outcome: result.ok ? "succeeded" : "rejected" })
+    },
+    observeCaptureBlocked() {
+      emit({ kind: "native-start-blocked" })
     },
   }
 }

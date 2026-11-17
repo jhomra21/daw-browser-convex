@@ -109,7 +109,8 @@ import {
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
 import { serializeDesktopReply } from "@daw-browser/desktop-protocol/reply-chunks"
 import { createCloseHandler } from "./close-flow"
-import { createRecordingSpoolOrderEvidence, type createRecordingSpoolRegistry, initializeRecordingSpoolRegistry, prepareRecordingSpool } from "./recording-spool"
+import { type createRecordingSpoolRegistry, initializeRecordingSpoolRegistry, prepareRecordingSpool, recordingSpoolReleaseSchema } from "./recording-spool"
+import { createRecordingSpoolOrderEvidence } from "./recording-spool-evidence"
 import { createFileCapabilityManager } from "./file-capabilities"
 import { registerFileCapabilitiesIpc } from "./ipc/file-capabilities-ipc"
 import { registerApplicationMenuIpc } from "./ipc/application-menu-ipc"
@@ -204,10 +205,10 @@ protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: t
 let recordingRegistryFailure: Error | undefined
 let recordingAdmissionPending = false
 let recordingSpoolRegistry: ReturnType<typeof createRecordingSpoolRegistry> | undefined
+const captureInhibited = process.env.DAW_RECORDING_START_DIAGNOSTIC === "1"
 const recordingStartDiagnostic = createRecordingStartDiagnostic(
   process.env.DAW_RECORDING_START_DIAGNOSTIC === "1" || process.env.DAW_RECORDING_START_EVIDENCE === "1",
   (event) => console.log("[recording-start-diagnostic]", JSON.stringify(event)),
-  process.env.DAW_RECORDING_START_DIAGNOSTIC === "1",
 )
 let recordingBinding: { take: Awaited<ReturnType<typeof prepareRecordingSpool>>; takeId: string;
   rendererGeneration: number; projectId: string; projectGeneration: number;
@@ -1977,13 +1978,20 @@ const registerIpc = () => {
       || binding.data.value.generation !== recordingBinding.captureGeneration
       || binding.data.value.sessionId !== recordingBinding.sessionId
       || event.senderFrame !== event.sender.mainFrame) return nativeSessionFailure()
-    try {
-      return await recordingStartDiagnostic.start(async () => {
-        await supervisor.startRecording()
-        return { ok: true }
-      })
+    if (captureInhibited) {
+      recordingStartDiagnostic.observeCaptureBlocked()
+      return { ok: false, error: "diagnostic-capture-blocked" }
     }
-    catch { return nativeSessionFailure() }
+    try {
+      await supervisor.startRecording()
+      const result = { ok: true }
+      recordingStartDiagnostic.observeStart(result)
+      return result
+    } catch {
+      const result = nativeSessionFailure()
+      recordingStartDiagnostic.observeStart(result)
+      return result
+    }
   })
   ipcMain.handle(sessionStopRecordingChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
@@ -2004,15 +2012,6 @@ const registerIpc = () => {
   })
   const spoolScopeSchema = z.object({ projectId: projectIdSchemaV1, projectGeneration: unsigned32Schema }).strict()
   const spoolTakeIdSchema = z.string().uuid()
-  const spoolReleaseSchema = z.discriminatedUnion("reason", [
-    z.object({ reason: z.literal("discard") }).strict(),
-    z.object({ reason: z.literal("imported"), sessionId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/),
-      frames: z.number().int().nonnegative().safe(), bytes: z.number().int().nonnegative().safe(),
-      blocks: z.number().int().nonnegative().safe(), sampleRateHz: z.number().int().min(8000).max(384000),
-      channelCount: z.union([z.literal(1), z.literal(2)]), finalized: z.literal(true),
-      savedClip: z.object({ clipId: z.string().min(1).max(256), sourceAssetKey: z.string().min(1).max(256) }).strict().optional(),
-    }).strict().refine((receipt) => receipt.frames === 0 || receipt.savedClip !== undefined),
-  ])
   const spoolFor = (event: Electron.IpcMainInvokeEvent) => {
     if (!audioHostAllowed(event) || event.senderFrame !== event.sender.mainFrame || !recordingSpoolRegistry)
       throw new Error("Recording spool is unavailable.")
@@ -2033,7 +2032,7 @@ const registerIpc = () => {
     return spoolFor(event).read({ ...request.scope, rendererGeneration: generation }, request.takeId, request.offset, request.length)
   })
   ipcMain.handle(recordingSpoolReleaseChannel, async (event, value) => {
-    const request = z.object({ scope: spoolScopeSchema, takeId: spoolTakeIdSchema, acknowledgment: spoolReleaseSchema }).strict().parse(value)
+    const request = z.object({ scope: spoolScopeSchema, takeId: spoolTakeIdSchema, acknowledgment: recordingSpoolReleaseSchema }).strict().parse(value)
     await spoolFor(event).release({ ...request.scope, rendererGeneration: generation }, request.takeId, request.acknowledgment)
   })
   const registerNativeSessionControl = (

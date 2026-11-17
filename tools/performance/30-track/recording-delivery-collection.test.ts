@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { createRecordingDeliveryTrace } from "../../../src/lib/recording/recording-diagnostics"
+import { createRecordingDeliveryTrace } from "../../../src/lib/recording/recording-delivery-trace"
 import { compareRecordingDeliveryClocks, parseRecordingDeliveryEvidence } from "./tier-three"
 
 // Kept with the tools so desktop's package typecheck does not pull in the

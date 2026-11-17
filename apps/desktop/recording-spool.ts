@@ -34,28 +34,6 @@ export type RecordingSpoolReleaseEvent = {
   channelCount: 1 | 2
 }
 
-// One main startup consumer owns this opt-in writer for the process lifetime.
-// Output loss/capping is missing acceptance evidence, never a release gate.
-export const createRecordingSpoolOrderEvidence = (flag: string | undefined, writeLine: (line: string) => void) => {
-  if (flag !== "1") return undefined
-  let events = 0
-  let ready = false
-  const write = (line: string) => {
-    try { writeLine(line) } catch { /* Diagnostic output cannot veto I/O or startup. */ }
-  }
-  return {
-    ready() {
-      if (ready) return
-      ready = true
-      write('[recording-spool-order] {"version":1,"kind":"observer-ready"}\n')
-    },
-    observeRelease(event: RecordingSpoolReleaseEvent) {
-      if (!ready || events === 16) return
-      events++
-      write(`[recording-spool-order] ${JSON.stringify(event)}\n`)
-    },
-  }
-}
 const integer = z.number().int().nonnegative().safe()
 const decimal = z.string().regex(/^(0|[1-9][0-9]*)$/)
 const intentSchema = z.object({
@@ -72,7 +50,7 @@ const proofSchema = z.object({
   sampleRateHz: integer.min(8000).max(384000), frames: integer, bytes: integer, blocks: integer,
   fileDevice: decimal, fileInode: decimal, rootDevice: decimal, rootInode: decimal,
 }).strict()
-const releaseSchema = z.discriminatedUnion("reason", [
+export const recordingSpoolReleaseSchema = z.discriminatedUnion("reason", [
   z.object({ reason: z.literal("discard") }).strict(),
   z.object({ reason: z.literal("imported"), sessionId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/),
     frames: integer, bytes: integer, blocks: integer, sampleRateHz: integer.min(8000).max(384000),
@@ -80,7 +58,7 @@ const releaseSchema = z.discriminatedUnion("reason", [
     savedClip: z.object({ clipId: z.string().min(1).max(256), sourceAssetKey: z.string().min(1).max(256) }).strict().optional(),
   }).strict().refine((receipt) => receipt.frames === 0 || receipt.savedClip !== undefined),
 ])
-const receiptSchema = z.object({ manifest: intentSchema, proof: proofSchema, acknowledgment: releaseSchema }).strict()
+const receiptSchema = z.object({ manifest: intentSchema, proof: proofSchema, acknowledgment: recordingSpoolReleaseSchema }).strict()
 const resolvedSchema = z.object({ manifest: intentSchema, rootDevice: decimal, rootInode: decimal,
   state: z.union([z.literal(3), z.literal(4)]), error: integer.max(13), systemError: integer }).strict()
 type IntentManifest = z.infer<typeof intentSchema>
@@ -286,7 +264,6 @@ const finishRelease = async (take: RetainedTake,
 }
 
 export const createRecordingSpoolRegistry = (input: Pick<RecordingIntent, "userData" | "verifyDirectory"> & {
-  beforeReleaseUnlink?: () => Promise<void>
   observeRelease?: (event: RecordingSpoolReleaseEvent) => void
 }) => {
   let releaseOrdinal = 0
@@ -487,7 +464,7 @@ export const createRecordingSpoolRegistry = (input: Pick<RecordingIntent, "userD
     },
     async release(scope: RecordingScope, takeId: string, acknowledgment: NativeRecordingRelease) {
       const take = lookup(scope, takeId)
-      const receipt = releaseSchema.parse(acknowledgment)
+      const receipt = recordingSpoolReleaseSchema.parse(acknowledgment)
       const proof = take.proof
       if (!proof) throw new Error("Recording ownership is unresolved; source retained.")
       if (receipt.reason === "imported" && (receipt.frames !== proof.frames || receipt.bytes !== proof.bytes || receipt.blocks !== proof.blocks
@@ -519,7 +496,6 @@ export const createRecordingSpoolRegistry = (input: Pick<RecordingIntent, "userD
           assertScope(scope, take)
           await persistManifest(take.root, `${take.token}.released.json`, { manifest: take.manifest, proof, acknowledgment: receipt }, emit)
         }
-        await input.beforeReleaseUnlink?.()
         assertScope(scope, take)
         await finishRelease(take, emit)
       })()

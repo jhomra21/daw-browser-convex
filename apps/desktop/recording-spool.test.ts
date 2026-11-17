@@ -335,14 +335,15 @@ test("M6 receipt precedes unlink and restart converges only matching identity", 
     try {
       await f.registry.complete(f.takeId, f.complete)
       const receiptPath = path.join(f.take.rootPath, `${f.take.token}.released.json`)
-      // Deliberately refuse root ownership after the durable receipt seam.
-      const registry = createRecordingSpoolRegistry({ userData: f.userData,
-        beforeReleaseUnlink: async () => { expect(await lstat(receiptPath)).toBeDefined(); await chmod(f.take.rootPath, 0o500) } })
+      const registry = createRecordingSpoolRegistry({ userData: f.userData, observeRelease: (event) => {
+        if (event.kind === "receipt-directory-synced") registry.bind({ ...scope, projectGeneration: 8 })
+      } })
       registry.bind(scope); await registry.discover()
       const takeId = (await registry.list(scope)).takes[0]!.takeId
-      await expect(registry.release(scope, takeId, { reason: "discard" })).rejects.toThrow()
+      await expect(registry.release(scope, takeId, { reason: "discard" })).rejects.toThrow("scope changed")
+      expect(await lstat(receiptPath)).toBeDefined()
       expect(await readFile(f.source)).toEqual(f.bytes)
-      await chmod(f.take.rootPath, 0o700)
+      registry.bind(scope)
       if (replace) { await rename(f.source, `${f.source}.saved`); await writeFile(f.source, f.bytes, { mode: 0o600 }) }
       const restart = createRecordingSpoolRegistry({ userData: f.userData }); restart.bind(scope)
       if (replace) {
@@ -359,20 +360,25 @@ test("M6 receipt precedes unlink and restart converges only matching identity", 
 
 test("M6 conflicting concurrent acknowledgments never join another release", async () => {
   const f = await registryFixture()
+  await f.registry.complete(f.takeId, f.complete)
   const entered = Promise.withResolvers<void>(); const gate = Promise.withResolvers<void>()
+  const sample = await open(f.source, "r")
+  const prototype: { sync: FileHandle["sync"] } = Object.getPrototypeOf(sample)
+  const originalSync = prototype.sync
+  await sample.close()
+  const intercepted = spyOn(prototype, "sync").mockImplementation(async function(this: FileHandle) {
+    entered.resolve()
+    await gate.promise
+    return originalSync.call(this)
+  })
   try {
-    await f.registry.complete(f.takeId, f.complete)
-    const registry = createRecordingSpoolRegistry({ userData: f.userData,
-      beforeReleaseUnlink: async () => { entered.resolve(); await gate.promise } })
-    registry.bind(scope); await registry.discover()
-    const takeId = (await registry.list(scope)).takes[0]!.takeId
-    const first = registry.release(scope, takeId, { reason: "discard" })
+    const first = f.registry.release(scope, f.takeId, { reason: "discard" })
     await entered.promise
-    await expect(registry.release(scope, takeId, { reason: "imported", sessionId: "opfs", frames: 3, bytes: 28,
+    await expect(f.registry.release(scope, f.takeId, { reason: "imported", sessionId: "opfs", frames: 3, bytes: 28,
       blocks: 1, channelCount: 2, sampleRateHz: 48000, finalized: true,
       savedClip: { clipId: "local:clip", sourceAssetKey: "local:asset" } })).rejects.toThrow("changed")
     gate.resolve(); await first
-  } finally { gate.resolve(); await rm(f.userData, { recursive: true, force: true }) }
+  } finally { gate.resolve(); intercepted.mockRestore(); await rm(f.userData, { recursive: true, force: true }) }
 })
 
 test("M7 component helper is admission-only, never spawned for bounded reads", async () => {
@@ -485,14 +491,21 @@ test("throwing synchronous release observer cannot veto saved release or later e
 test("existing receipt retry reports only actual unlink IO and recovery manufactures no observations", async () => {
   for (const branch of ["retry-present", "retry-absent", "recovery"]) {
     const events: RecordingSpoolReleaseEvent[] = []
-    let interrupted = true
+    let registry: ReturnType<typeof createRecordingSpoolRegistry> | undefined
+    let changedScope = false
     const f = await registryFixture({
-      observeRelease: (event) => events.push(event),
-      beforeReleaseUnlink: async () => { if (interrupted) throw new Error("stop after actual receipt sync") },
+      observeRelease: (event) => {
+        events.push(event)
+        if (!changedScope && event.kind === "receipt-directory-synced") {
+          changedScope = true
+          registry?.bind({ ...scope, projectGeneration: 8 })
+        }
+      },
     })
     try {
+      registry = f.registry
       await f.registry.complete(f.takeId, f.complete)
-      await expect(f.registry.release(scope, f.takeId, { reason: "discard" })).rejects.toThrow("stop after")
+      await expect(f.registry.release(scope, f.takeId, { reason: "discard" })).rejects.toThrow("scope changed")
       expect(events).toEqual(expectedReleaseEvents(1).slice(0, 2))
       expect(await readFile(f.source)).toEqual(f.bytes)
       events.length = 0
@@ -502,7 +515,7 @@ test("existing receipt retry reports only actual unlink IO and recovery manufact
         expect(events).toEqual([])
         expect((await restart.list(scope)).takes).toEqual([])
       } else {
-        interrupted = false
+        f.registry.bind(scope)
         if (branch === "retry-absent") await rm(f.source)
         await f.registry.release(scope, f.takeId, { reason: "discard" })
         expect(events).toEqual(expectedReleaseEvents(2).slice(branch === "retry-absent" ? 4 : 2)
@@ -514,7 +527,7 @@ test("existing receipt retry reports only actual unlink IO and recovery manufact
 })
 
 test("stdout order evidence is opt-in with exact readiness and bounded lines; cap never gates release", async () => {
-  const { createRecordingSpoolOrderEvidence } = await import("./recording-spool")
+  const { createRecordingSpoolOrderEvidence } = await import("./recording-spool-evidence")
   const lines: string[] = []
   for (const flag of [undefined, "", "0", "true", "2"]) {
     expect(createRecordingSpoolOrderEvidence(flag, (line) => lines.push(line))).toBeUndefined()
@@ -545,7 +558,7 @@ test("stdout order evidence is opt-in with exact readiness and bounded lines; ca
 })
 
 test("stdout order evidence emits readiness once and only then accepts bounded release events", async () => {
-  const { createRecordingSpoolOrderEvidence } = await import("./recording-spool")
+  const { createRecordingSpoolOrderEvidence } = await import("./recording-spool-evidence")
   const lines: string[] = []
   const evidence = createRecordingSpoolOrderEvidence("1", (line) => lines.push(line))
   if (!evidence) throw new Error("Expected enabled ordering evidence")
@@ -561,7 +574,8 @@ test("stdout order evidence emits readiness once and only then accepts bounded r
 })
 
 test("disabled ordering evidence makes no writes; stdout errors are isolated for readiness and release", async () => {
-  const { createRecordingSpoolOrderEvidence, initializeRecordingSpoolRegistry } = await import("./recording-spool")
+  const { createRecordingSpoolOrderEvidence } = await import("./recording-spool-evidence")
+  const { initializeRecordingSpoolRegistry } = await import("./recording-spool")
   let writes = 0
   const writer = () => { writes++; throw new Error("stdout failed") }
   const disabled = createRecordingSpoolOrderEvidence(undefined, writer)

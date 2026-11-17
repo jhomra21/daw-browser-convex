@@ -2473,6 +2473,19 @@ test("round-trips the native device inventory with both channel directions", asy
     await fixture.dispose()
   }
 })
+test("queues the device inventory behind a control request that is awaiting its reply", async () => {
+  const fixture = await fixtureSupervisor()
+  try {
+    await fixture.supervisor.start()
+    const diagnostics = fixture.supervisor.diagnostics()
+    const inventory = fixture.supervisor.listDevices()
+    await expect(diagnostics).resolves.toBeDefined()
+    expect((await inventory).map((device) => device.deviceId)).toEqual(["coreaudio:fixture-input", "coreaudio:fixture"])
+  } finally {
+    await fixture.supervisor.teardown()
+    await fixture.dispose()
+  }
+})
 test("probes an output device through an isolated native host", async () => {
   const fixture = await fixtureSupervisor()
   let probe: ReturnType<typeof createNativeAudioHostSupervisor> | undefined

@@ -2653,12 +2653,13 @@ export const createNativeAudioHostSupervisor = (
     async listDevices() {
       assertTransactionAccess(undefined)
       await supervisor.start()
-      const current = child
-      const frame = encodeNativeAudioHostControlFrame(deviceInventoryQueryType)
-      if (!current || broker.pending() || !frame) throw new Error("The native audio host device inventory request is invalid.")
       return new Promise<NativeAudioDevice[]>((resolve, reject) => {
-        broker.startDirect(current, deviceInventoryQueryType, frame, { kind: "deviceInventory", resolve }, reject,
-          "The native audio host device inventory request timed out.")
+        if (!broker.admits(undefined)) {
+          reject(new NativeAudioHostNotSentError("The native audio host is unavailable."))
+          return
+        }
+        const queued = broker.submit({ type: deviceInventoryQueryType, reject, reply: { kind: "deviceInventory", resolve } })
+        if (!queued) reject(new NativeAudioHostNotSentError(broker.queueFullMessage(deviceInventoryQueryType)))
       })
     },
     async startAudio() {

@@ -985,7 +985,7 @@
   "/tmp/dv01-b6/rc7/compare-b6-traces.ts": "fdbee58812f5e6b17dfe5fc145f8db47634b8134a19c635e6d4bcab934a8ad4b",
   "/tmp/dv01-b6/rc7/mut/overlay.ts": "7510013de06156f89b4f83dc54064230dee1b5d4ef850688bfd9ad75bb069d09",
   "/tmp/dv01-b6/rc7/mut/rejection-gate.ts": "2af6b827d28bdbe35e9e93961faa6ca2aecbf624a21886fbdd9c0b0236c6d730",
-  "/tmp/dv01-b6/rc7/ts-513.ts": "2d3a8e30cb69f41e58ae0875423d56527f1650f262df2b55de0c717a28b06759"
+  "/tmp/dv01-b6/rc7/ts-513.ts": "ce7a0564bce29c2fadffe5cde698414833e828fafeaace8c1eae665ad9570410"
  },
  "gates": [
   {
@@ -52733,7 +52733,7 @@
     "role": "control",
     "control": null,
     "targets": [
-     "src/hooks/useTimelinePlayback.ts"
+     "src/lib/live-playback-snapshot.ts"
     ],
     "witnesses": [
      "src/hooks/useTimelinePlayback.test.ts"
@@ -52788,7 +52788,7 @@
     "role": "control",
     "control": null,
     "targets": [
-     "src/hooks/useTimelinePlayback.ts"
+     "src/lib/live-playback-snapshot.ts"
     ],
     "witnesses": [
      "src/hooks/useTimelinePlayback.test.ts"
@@ -52841,7 +52841,7 @@
     "role": "mutant",
     "control": "ledger:502:control:b6f5c",
     "targets": [
-     "src/hooks/useTimelinePlayback.ts"
+     "src/lib/live-playback-snapshot.ts"
     ],
     "witnesses": [
      "src/hooks/useTimelinePlayback.test.ts"
@@ -52871,9 +52871,9 @@
      "id": "502-mutant",
      "changes": [
       {
-       "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        return { id, historyRef, mediaStatus, startSec,",
-       "to": "        return { color: clip.color, id, historyRef, mediaStatus, startSec,"
+       "file": "src/lib/live-playback-snapshot.ts",
+       "from": "export const playbackClipFingerprint = (clip: RuntimeClip) => ({\n  id: clip.id,",
+       "to": "export const playbackClipFingerprint = (clip: RuntimeClip) => ({\n  color: clip.color,\n  id: clip.id,"
       }
      ]
     },
@@ -52905,7 +52905,7 @@
     "role": "mutant",
     "control": "ledger:502:control:playback",
     "targets": [
-     "src/hooks/useTimelinePlayback.ts"
+     "src/lib/live-playback-snapshot.ts"
     ],
     "witnesses": [
      "src/hooks/useTimelinePlayback.test.ts"
@@ -52933,9 +52933,9 @@
      "id": "502-mutant",
      "changes": [
       {
-       "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        return { id, historyRef, mediaStatus, startSec,",
-       "to": "        return { color: clip.color, id, historyRef, mediaStatus, startSec,"
+       "file": "src/lib/live-playback-snapshot.ts",
+       "from": "export const playbackClipFingerprint = (clip: RuntimeClip) => ({\n  id: clip.id,",
+       "to": "export const playbackClipFingerprint = (clip: RuntimeClip) => ({\n  color: clip.color,\n  id: clip.id,"
       }
      ]
     },
@@ -54830,7 +54830,7 @@
     "role": "control",
     "control": null,
     "targets": [
-     "src/hooks/useTimelinePlayback.ts"
+     "src/lib/live-playback-snapshot.ts"
     ],
     "witnesses": [
      "src/hooks/useTimelinePlayback.test.ts"
@@ -54885,7 +54885,7 @@
     "role": "control",
     "control": null,
     "targets": [
-     "src/hooks/useTimelinePlayback.ts"
+     "src/lib/live-playback-snapshot.ts"
     ],
     "witnesses": [
      "src/hooks/useTimelinePlayback.test.ts"
@@ -54938,7 +54938,7 @@
     "role": "mutant",
     "control": "ledger:509:control:b6f5c",
     "targets": [
-     "src/hooks/useTimelinePlayback.ts"
+     "src/lib/live-playback-snapshot.ts"
     ],
     "witnesses": [
      "src/hooks/useTimelinePlayback.test.ts"
@@ -54968,9 +54968,9 @@
      "id": "509-mutant",
      "changes": [
       {
-       "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        return { id, historyRef, mediaStatus, startSec,",
-       "to": "        return { name: clip.name, id, historyRef, mediaStatus, startSec,"
+       "file": "src/lib/live-playback-snapshot.ts",
+       "from": "export const playbackClipFingerprint = (clip: RuntimeClip) => ({\n  id: clip.id,",
+       "to": "export const playbackClipFingerprint = (clip: RuntimeClip) => ({\n  name: clip.name,\n  id: clip.id,"
       }
      ]
     },
@@ -55001,7 +55001,7 @@
     "role": "mutant",
     "control": "ledger:509:control:playback",
     "targets": [
-     "src/hooks/useTimelinePlayback.ts"
+     "src/lib/live-playback-snapshot.ts"
     ],
     "witnesses": [
      "src/hooks/useTimelinePlayback.test.ts"
@@ -55029,9 +55029,9 @@
      "id": "509-mutant",
      "changes": [
       {
-       "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        return { id, historyRef, mediaStatus, startSec,",
-       "to": "        return { name: clip.name, id, historyRef, mediaStatus, startSec,"
+       "file": "src/lib/live-playback-snapshot.ts",
+       "from": "export const playbackClipFingerprint = (clip: RuntimeClip) => ({\n  id: clip.id,",
+       "to": "export const playbackClipFingerprint = (clip: RuntimeClip) => ({\n  name: clip.name,\n  id: clip.id,"
       }
      ]
     },
@@ -55986,7 +55986,7 @@
     "role": "control",
     "control": null,
     "targets": [
-     "src/hooks/useTimelinePlayback.ts"
+     "src/lib/live-playback-snapshot.ts"
     ],
     "witnesses": [
      "src/hooks/useTimelinePlayback.test.ts"
@@ -56041,7 +56041,7 @@
     "role": "mutant",
     "control": "c0:m516-control-ht5c",
     "targets": [
-     "src/hooks/useTimelinePlayback.ts"
+     "src/lib/live-playback-snapshot.ts"
     ],
     "witnesses": [
      "src/hooks/useTimelinePlayback.test.ts"
@@ -56071,9 +56071,9 @@
      "id": "516-mutant",
      "changes": [
       {
-       "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        return { id, historyRef, mediaStatus, startSec,",
-       "to": "        return { ...clip, name: undefined, color: undefined, waveformAssetKey: undefined, id, historyRef, mediaStatus, startSec,"
+       "file": "src/lib/live-playback-snapshot.ts",
+       "from": "export const playbackClipFingerprint = (clip: RuntimeClip) => ({\n  id: clip.id,",
+       "to": "export const playbackClipFingerprint = (clip: RuntimeClip) => ({\n  ...clip, name: undefined, color: undefined, waveformAssetKey: undefined,\n  id: clip.id,"
       }
      ]
     },
@@ -56331,7 +56331,7 @@
     "role": "control",
     "control": null,
     "targets": [
-     "src/hooks/useTimelinePlayback.ts"
+     "src/lib/live-playback-snapshot.ts"
     ],
     "witnesses": [
      "src/hooks/useTimelinePlayback.test.ts"
@@ -56386,7 +56386,7 @@
     "role": "mutant",
     "control": "c0:m513-control-ht5c",
     "targets": [
-     "src/hooks/useTimelinePlayback.ts"
+     "src/lib/live-playback-snapshot.ts"
     ],
     "witnesses": [
      "src/hooks/useTimelinePlayback.test.ts"
@@ -56416,9 +56416,9 @@
      "id": "m513-mutant-ht5c",
      "changes": [
       {
-       "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        return { id, historyRef, mediaStatus, startSec,",
-       "to": "        return { waveformAssetKey: clip.waveformAssetKey, id, historyRef, mediaStatus, startSec,"
+       "file": "src/lib/live-playback-snapshot.ts",
+       "from": "export const playbackClipFingerprint = (clip: RuntimeClip) => ({\n  id: clip.id,",
+       "to": "export const playbackClipFingerprint = (clip: RuntimeClip) => ({\n  waveformAssetKey: clip.waveformAssetKey,\n  id: clip.id,"
       }
      ]
     },
@@ -56449,7 +56449,7 @@
     "role": "control",
     "control": null,
     "targets": [
-     "src/hooks/useTimelinePlayback.ts"
+     "src/lib/live-playback-snapshot.ts"
     ],
     "witnesses": [],
     "command": {
@@ -56491,7 +56491,7 @@
     "role": "mutant",
     "control": "c0:ts513-control",
     "targets": [
-     "src/hooks/useTimelinePlayback.ts"
+     "src/lib/live-playback-snapshot.ts"
     ],
     "witnesses": [],
     "command": {
@@ -56512,9 +56512,9 @@
      "id": "ts513-mutant",
      "changes": [
       {
-       "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        return { id, historyRef, mediaStatus, startSec,",
-       "to": "        return { waveformAssetKey: clip.waveformAssetKey, id, historyRef, mediaStatus, startSec,"
+       "file": "src/lib/live-playback-snapshot.ts",
+       "from": "export const playbackClipFingerprint = (clip: RuntimeClip) => ({\n  id: clip.id,",
+       "to": "export const playbackClipFingerprint = (clip: RuntimeClip) => ({\n  waveformAssetKey: clip.waveformAssetKey,\n  id: clip.id,"
       }
      ]
     },

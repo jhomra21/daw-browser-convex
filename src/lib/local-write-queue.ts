@@ -54,12 +54,6 @@ export class LocalEntityWriteQueue {
 
   public constructor(private projectId: string) {}
 
-  public dispose(): void {
-    this.cancelScheduledFlush()
-    if (queuesByProject.get(this.projectId) === this) queuesByProject.delete(this.projectId)
-    this.listeners.clear()
-  }
-
   public getStatus(): LocalEntityWriteStatus {
     return this.statusState.status()
   }

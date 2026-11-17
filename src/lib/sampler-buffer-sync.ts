@@ -61,6 +61,20 @@ export type NativeInstrumentRetryIdentity = {
   instanceId?: string
 }
 
+// Publishes native preparation only while the retry still targets what the synchronizer currently holds.
+export const completeNativeRetry = async (
+  requested: NativeInstrumentRetryIdentity,
+  current: NativeInstrumentRetryIdentity | undefined,
+  retryNativePreparation: ((identity: NativeInstrumentRetryIdentity) => Promise<void>) | undefined,
+) => {
+  if (!current
+    || current.trackId !== requested.trackId
+    || current.projectId !== requested.projectId
+    || current.version !== requested.version
+    || current.instanceId !== requested.instanceId) return
+  await retryNativePreparation?.(requested)
+}
+
 type RegionSpec = {
   key: string
   zone: SamplerZone
@@ -266,6 +280,11 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
   }
   const loaderOptions = options
   const currentProjectId = () => options.projectId?.() ?? ''
+  const currentRetryIdentity = (trackId: Track['id'], live: SamplerConfig | GranularConfig | undefined): NativeInstrumentRetryIdentity | undefined => (
+    live && live.projectId === currentProjectId()
+      ? { trackId, projectId: live.projectId, version: versions.get(trackId) ?? 0, instanceId: live.instanceId }
+      : undefined
+  )
   const clearMissingSamples = (trackId: Track['id']) => {
     missingSampleErrors.delete(trackId)
     missingSampleAssetKeys.delete(trackId)
@@ -939,13 +958,9 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
             setState(trackId, zoneId, 'error')
           }
           installSamplerBuffers(trackId)
-          if (result.status === 'ready' && options.nativeAudio?.()
-            && versions.get(trackId) === version
-            && configs.get(trackId)?.params === config.params
-            && configs.get(trackId)?.instanceId === config.instanceId
-            && configs.get(trackId)?.projectId === projectId
-            && currentProjectId() === projectId) {
-            await retryNativePreparation?.(retryIdentity)
+          if (result.status === 'ready' && options.nativeAudio?.()) {
+            const live = configs.get(trackId)
+            await completeNativeRetry(retryIdentity, live?.params === config.params ? currentRetryIdentity(trackId, live) : undefined, retryNativePreparation)
           }
         })
         .catch((cause) => {
@@ -979,14 +994,9 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
         const retryIdentity = { trackId, projectId, version: version ?? 0, instanceId: config.instanceId }
         return request
           .then(async () => {
-            if (options.nativeAudio?.()
-              && granularStates.get(trackId) === 'ready'
-              && versions.get(trackId) === version
-              && granularConfigs.get(trackId)?.params === config.params
-              && granularConfigs.get(trackId)?.instanceId === config.instanceId
-              && granularConfigs.get(trackId)?.projectId === projectId
-              && currentProjectId() === projectId) {
-              await retryNativePreparation?.(retryIdentity)
+            if (options.nativeAudio?.() && granularStates.get(trackId) === 'ready') {
+              const live = granularConfigs.get(trackId)
+              await completeNativeRetry(retryIdentity, live?.params === config.params ? currentRetryIdentity(trackId, live) : undefined, retryNativePreparation)
             }
           })
           .catch(() => undefined)

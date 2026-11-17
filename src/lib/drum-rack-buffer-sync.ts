@@ -14,7 +14,11 @@ import {
   type SampledInstrumentRegionLoadResult,
   type SampledInstrumentRegionLoaderOptions,
 } from '~/lib/sampled-instrument-region-loader'
-import { DEFAULT_SAMPLED_INSTRUMENT_AGGREGATE_BYTES } from '~/lib/sampler-buffer-sync'
+import {
+  completeNativeRetry,
+  DEFAULT_SAMPLED_INSTRUMENT_AGGREGATE_BYTES,
+  type NativeInstrumentRetryIdentity,
+} from '~/lib/sampler-buffer-sync'
 import {
   replaceSampledInstrumentSync,
   SampledInstrumentSyncSupersededError,
@@ -27,7 +31,6 @@ import {
 } from '~/lib/sampled-instrument-region-budget'
 import { createSamplerBufferCache } from '@daw-browser/audio-engine/audio-engine'
 import { nativeInstrumentDeviceDecodedBytes, type NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
-import type { NativeInstrumentRetryIdentity } from '~/lib/sampler-buffer-sync'
 
 export type DrumRackBufferSyncOptions = SampledInstrumentRegionLoaderOptions & {
   isCurrentProject?: () => boolean
@@ -469,10 +472,12 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
       const version = versions.get(trackId)
       try {
         await request
-        if (disposed || versions.get(trackId) !== version || projectId() !== projectKey
-          || paramsByTrack.get(trackId) !== params) return
         if (nativePreparation.get(trackId)?.state === 'error') return
-        await retryNativePreparation?.({ trackId, projectId: projectKey, version: version ?? 0, instanceId })
+        const requested = { trackId, projectId: projectKey, version: version ?? 0, instanceId }
+        const current = !disposed && paramsByTrack.get(trackId) === params
+          ? { ...requested, projectId: projectId(), version: versions.get(trackId) ?? 0 }
+          : undefined
+        await completeNativeRetry(requested, current, retryNativePreparation)
       } catch (cause) {
         if (!disposed && versions.get(trackId) === version && projectId() === projectKey) {
           nativePreparation.set(trackId, {

@@ -127,11 +127,13 @@ window.timelineFailureResults = async () => {
   ]
   const original = clips.map(clip => ({ ...clip }))
   const planned = clips.map((clip, index) => ({ clipId: clip.id, trackId: 'track:two', startSec: clip.startSec + 10 + index }))
-  const committed = []
+  const committed = planned.map(move => ({ ...move }))
   const cloudWrites = []
   const notifications = []
   const history = []
   let failedOnce = true
+  let compensationFailed = true
+  const cleanedTracks = []
   await commitMovedClipDrag({
     projectId: 'cloud-project',
     userId: 'user',
@@ -139,12 +141,15 @@ window.timelineFailureResults = async () => {
     previousMoves: original.map(clip => ({ clipId: clip.id, trackId: clip.trackId, startSec: clip.startSec })),
     previousPositions: new Map(original.map(clip => [clip.id, { trackId: clip.trackId, startSec: clip.startSec }])),
     selectionAfterCommit: { trackId: 'track:two', clipId: 'clip:one' },
-    addedTrackId: null,
+    addedTrackId: 'track:two',
     trackSnapshotForHistory: [],
     commitClipMoves: moves => {
-      committed.splice(0, committed.length, ...moves)
+      for (const move of moves) {
+        const index = committed.findIndex(current => current.clipId === move.clipId)
+        if (index !== -1) committed[index] = move
+      }
     },
-    cleanupUnusedAddedTrack: () => {},
+    cleanupUnusedAddedTrack: trackId => cleanedTracks.push(trackId),
     moveLocalClips: async () => {},
     moveCloudClip: async move => {
       cloudWrites.push(move)
@@ -152,18 +157,26 @@ window.timelineFailureResults = async () => {
         if (notifications.length === 0) notifications.push('Clip move could not be saved.')
         return false
       }
+      if (move.clipId === 'clip:one' && move.trackId === 'track:one' && compensationFailed) return false
       return true
     },
     selection: { selectPrimaryClip: () => {} },
     historyPush: entry => history.push(entry),
     onCommitMoves: () => {},
   })
-  results['cloud-move:complete-rollback'] = committed.length === 2
-    && committed.every((move, index) => move.trackId === original[index]?.trackId && move.startSec === original[index]?.startSec)
+  results['cloud-move:failed-compensation-remains-moved-and-undoable'] = committed.length === 2
+    && committed.find(move => move.clipId === 'clip:one')?.trackId === 'track:two'
+    && committed.find(move => move.clipId === 'clip:one')?.startSec === planned[0]?.startSec
+    && committed.find(move => move.clipId === 'clip:two')?.trackId === 'track:one'
+    && history.length === 1
+    && history[0]?.data?.moves?.length === 1
+    && history[0]?.data?.moves?.[0]?.to?.startSec === planned[0]?.startSec
     && cloudWrites.some(move => move.clipId === 'clip:one' && move.trackId === 'track:one' && move.startSec === 0)
+    && cleanedTracks.length === 0
   results['cloud-move:one-notification'] = notifications.length === 1
-  results['cloud-move:no-history'] = history.length === 0
+  results['cloud-move:partial-history'] = history.length === 1
   failedOnce = false
+  compensationFailed = false
   committed.length = 0
   history.length = 0
   await commitMovedClipDrag({

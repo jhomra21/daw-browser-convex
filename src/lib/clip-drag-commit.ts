@@ -151,19 +151,35 @@ export const commitMovedClipDrag = async (input: MoveCommitInput) => {
     return;
   }
 
-  // A multi-clip move is all-or-nothing: revert the clips whose cloud write landed so the
-  // arrangement matches the restored projection, and record no history for the rejected move.
-  input.commitClipMoves(input.previousMoves);
-  await Promise.all(input.plannedMoves.flatMap((move, index) => {
+  const compensations = await Promise.all(input.plannedMoves.flatMap((move, index) => {
     const previous = input.previousPositions.get(move.clipId);
     if (!moveApplied[index] || !previous) return [];
-    return [input.moveCloudClip({ clipId: move.clipId, ...previous }).catch(() => false)];
+    return [{
+      move,
+      result: input.moveCloudClip({ clipId: move.clipId, ...previous }).catch(() => false),
+    }];
   }));
-  if (input.addedTrackId) input.cleanupUnusedAddedTrack(input.addedTrackId);
+  const compensationResults = await Promise.all(compensations.map(async ({ move, result }) => ({
+    move,
+    compensated: await result,
+  })));
+  const remainingMoves = compensationResults
+    .filter(({ compensated }) => !compensated)
+    .map(({ move }) => move);
+  input.commitClipMoves([
+    ...input.previousMoves,
+    ...remainingMoves,
+  ]);
+  pushMoveHistory(input, remainingMoves);
+  if (input.addedTrackId && !remainingMoves.some((move) => move.trackId === input.addedTrackId)) {
+    input.cleanupUnusedAddedTrack(input.addedTrackId);
+  }
+  const selectedMove = remainingMoves.find((move) => move.clipId === input.selectionAfterCommit.clipId);
   const rollbackAnchor = input.previousMoves.find((move) => move.clipId === input.selectionAfterCommit.clipId);
-  if (rollbackAnchor) {
+  const selectedClip = selectedMove ?? rollbackAnchor;
+  if (selectedClip) {
     input.selection.selectPrimaryClip(
-      { trackId: rollbackAnchor.trackId, clipId: rollbackAnchor.clipId },
+      { trackId: selectedClip.trackId, clipId: selectedClip.clipId },
       input.selectionAfterCommit.preserveClipIds ? { preserveClipIds: true } : undefined,
     );
   }

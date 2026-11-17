@@ -29,6 +29,7 @@ enum ParameterId : ParamID {
   kStartupDelay = 3,
   kRequestRestart = 4,
   kParameterOnlyRestart = 5,
+  kRequestIoChange = 6,
 };
 
 enum FaultMode : int { kFaultOff = 0, kFaultCrash = 1, kFaultHang = 2, kFaultErrorOnSetActive = 3 };
@@ -111,6 +112,22 @@ class Ae08TestEffect final : public SingleComponentEffect {
   // The controller half is this same object, so the component state it is offered is already applied.
   tresult PLUGIN_API setComponentState(IBStream*) override { return kResultOk; }
 
+  tresult PLUGIN_API getBusInfo(MediaType type, BusDirection direction, int32 index, BusInfo& info) override {
+    const auto result = SingleComponentEffect::getBusInfo(type, direction, index, info);
+    if (result == kResultOk && ioChanged_.load() && type == kAudio && direction == kOutput && index == 0) {
+      info.channelCount = SpeakerArr::getChannelCount(SpeakerArr::k51);
+    }
+    return result;
+  }
+
+  tresult PLUGIN_API getBusArrangement(BusDirection direction, int32 index, SpeakerArrangement& arrangement) override {
+    if (ioChanged_.load() && direction == kOutput && index == 0) {
+      arrangement = SpeakerArr::k51;
+      return kResultOk;
+    }
+    return SingleComponentEffect::getBusArrangement(direction, index, arrangement);
+  }
+
   tresult PLUGIN_API getState(IBStream* stream) override {
     const int values[5]{kStateVersion, latency_.load(), fault_.load(), startupDelay_.load(), 0};
     int32 written = 0;
@@ -172,6 +189,12 @@ class Ae08TestEffect final : public SingleComponentEffect {
       case kParameterOnlyRestart:
         if (value > 0.5 && componentHandler) componentHandler->restartComponent(kParamValuesChanged);
         break;
+      case kRequestIoChange:
+        if (value > 0.5 && componentHandler) {
+          ioChanged_ = true;
+          componentHandler->restartComponent(kIoChanged);
+        }
+        break;
       default: break;
     }
   }
@@ -179,6 +202,7 @@ class Ae08TestEffect final : public SingleComponentEffect {
   std::atomic<int> latency_{0};
   std::atomic<int> fault_{kFaultOff};
   std::atomic<int> startupDelay_{0};
+  std::atomic<bool> ioChanged_{false};
   std::vector<float> delay_;
   std::size_t write_ = 0;
 };

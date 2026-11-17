@@ -80,7 +80,7 @@ class Vst3Worker {
  private:
   class Implementation;
   [[nodiscard]] bool ApplyState(const WorkerState& state);
-  [[nodiscard]] bool ReactivateComponent(const WorkerState* state);
+  [[nodiscard]] bool ReactivateComponent(const WorkerState* state, bool ioChanged = false);
   Implementation* implementation_;
 };
 

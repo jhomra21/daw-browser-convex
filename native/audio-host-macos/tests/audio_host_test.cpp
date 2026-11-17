@@ -6271,7 +6271,7 @@ constexpr std::string_view kSecond = "c0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f2";
 constexpr std::uint32_t kBlock = 128;
 constexpr std::uint32_t kRate = 48000;
 // Parameter ids of the plug-in (ae08-test-effect.cpp) and the normalized value of step 1 of 3.
-constexpr std::uint32_t kLatency = 1, kFault = 2, kRequestRestart = 4;
+constexpr std::uint32_t kLatency = 1, kFault = 2, kRequestRestart = 4, kRequestIoChange = 6;
 constexpr double kStepOne = 1.0 / 3.0, kStepThree = 1.0;
 
 std::string Env(const char* name) {
@@ -6489,6 +6489,21 @@ void TestComponentRestartResetsUpTheWorker() {
   rig.host.Stop();
 }
 
+void TestIoChangedRestartFaultsWhenBusesNoLongerFit() {
+  Rig rig;
+  rig.Configure();
+  assert(rig.host.AttachNativeVst(Attachment(kFirst, 1)));
+  rig.Start({kBlock, 0});
+  assert(rig.Wait(kFirst, NativeVstWorkerHealth::kReady));
+  rig.Set(kFirst, kRequestIoChange, kStepThree);
+  const auto fault = rig.Notification(WorkerNotificationKind::kFault);
+  assert(fault && fault->instance_id == kFirst);
+  rig.Render(5);
+  assert(rig.host.NativeVstHealth(kFirst) == NativeVstWorkerHealth::kFaulted);
+  assert(rig.Running());
+  rig.host.Stop();
+}
+
 // A new latency from the plug-in is published as a revision while the host keeps running.
 void TestLatencySwitchPublishesWithoutStop() {
   Rig rig;
@@ -6654,6 +6669,7 @@ int main() {
     return 0;
   }
   if (std::getenv("DAW_AE08_TEST_PLUGIN_BUNDLE")) {
+    plugin::TestIoChangedRestartFaultsWhenBusesNoLongerFit();
     plugin::TestComponentRestartResetsUpTheWorker();
     plugin::TestLatencySwitchPublishesWithoutStop();
     plugin::TestCrashMutesOnlyThatInstance();

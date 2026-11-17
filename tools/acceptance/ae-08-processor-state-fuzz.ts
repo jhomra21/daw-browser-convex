@@ -103,6 +103,7 @@ const sourceFiles = [
   "src/lib/desktop/native-observation.ts", "src/lib/desktop/native-recording-session.ts",
   "src/lib/desktop/native-live-midi.ts",
   "src/lib/desktop/native-state-patches.ts",
+  "src/lib/desktop/native-graph-targets.ts",
   "src/lib/desktop/native-processor-state-owner.ts", "src/lib/desktop/native-built-in-parameter-mapper.ts",
   "src/lib/live-processor-control.ts", "src/components/timeline/create-processor-edit-registry.ts",
   "src/lib/live-playback-snapshot.ts", "packages/audio-engine/src/native-host-wire.ts",

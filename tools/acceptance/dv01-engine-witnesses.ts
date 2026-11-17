@@ -32,7 +32,7 @@ const fixtureHtml = async () => {
     plugins: [solidPlugin(), {
       name: "dv01-engine-cloud-stubs",
       enforce: "pre",
-      resolveId: (id, importer) => importer?.endsWith("/live-mixer-runtime.ts") && id === "./effects/compressor-chain-state"
+      resolveId: (id, importer) => importer?.endsWith("/effect-chain-transaction.ts") && id === "./effects/compressor-chain-state"
         ? "\0dv01-observed-compressor" : undefined,
       load(id) {
         if (id === "\0dv01-observed-compressor") return `export { observeCompressorChainState as createCompressorChainState } from ${JSON.stringify(`${root}/tools/acceptance/dv01-engine-witnesses.browser-runtime.ts`)}`;

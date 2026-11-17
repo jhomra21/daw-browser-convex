@@ -151,25 +151,15 @@ export const commitMovedClipDrag = async (input: MoveCommitInput) => {
     return;
   }
 
-  const compensations = await Promise.all(input.plannedMoves.flatMap((move, index) => {
+  // A rejected multi-clip move reverts at once. A clip whose compensating cloud write fails
+  // stays where the cloud has it and gets its own undo entry.
+  input.commitClipMoves(input.previousMoves);
+  const remainingMoves = (await Promise.all(input.plannedMoves.flatMap((move, index) => {
     const previous = input.previousPositions.get(move.clipId);
     if (!moveApplied[index] || !previous) return [];
-    return [{
-      move,
-      result: input.moveCloudClip({ clipId: move.clipId, ...previous }).catch(() => false),
-    }];
-  }));
-  const compensationResults = await Promise.all(compensations.map(async ({ move, result }) => ({
-    move,
-    compensated: await result,
-  })));
-  const remainingMoves = compensationResults
-    .filter(({ compensated }) => !compensated)
-    .map(({ move }) => move);
-  input.commitClipMoves([
-    ...input.previousMoves,
-    ...remainingMoves,
-  ]);
+    return [input.moveCloudClip({ clipId: move.clipId, ...previous }).catch(() => false).then((compensated) => compensated ? [] : [move])];
+  }))).flat();
+  if (remainingMoves.length > 0) input.commitClipMoves(remainingMoves);
   pushMoveHistory(input, remainingMoves);
   if (input.addedTrackId && !remainingMoves.some((move) => move.trackId === input.addedTrackId)) {
     input.cleanupUnusedAddedTrack(input.addedTrackId);

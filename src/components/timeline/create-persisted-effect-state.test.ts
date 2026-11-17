@@ -306,7 +306,7 @@ test("H6 thrown apply leaves no installation knowledge for the previous value", 
   } finally { dispose(); }
 });
 
-test("reports a failed repair separately from the original parameter apply failure", async () => {
+test("a failed repair reaches the next flush without a second user notice", async () => {
   const errors: Array<{ stage: string; cause: unknown }> = [];
   let dispose = () => {};
   const owner = createRoot(end => {
@@ -326,10 +326,14 @@ test("reports a failed repair separately from the original parameter apply failu
   });
   try {
     owner.set("t", 2);
-    await owner.flushPending().catch(() => {});
+    let failure;
+    try { await owner.flushPending(); } catch (error) { failure = error; }
 
-    expect(errors.map(error => error.stage)).toEqual(["apply", "repair"]);
-    expect(errors[1]?.cause).toEqual(new Error("apply 1 failed"));
+    expect(errors.map(error => error.stage)).toEqual(["apply"]);
+    expect(failure).toBeInstanceOf(ParameterReleaseFailedError);
+    if (!(failure instanceof ParameterReleaseFailedError)) return;
+    expect(failure.records.map(record => [record.stage, record.cause])).toEqual([
+      ["apply", new Error("apply 2 failed")], ["repair", new Error("apply 1 failed")]]);
   } finally { dispose(); }
 });
 

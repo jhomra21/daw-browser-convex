@@ -2425,7 +2425,7 @@ for(const master of [false,true]) {
       expect(String(failure)).toContain("shared module load failed");
       expect(f.errors).toEqual(["shared module load failed"]);
       expect(f.calls.slice(beforeRelease).some(c=>c.type==="instance"&&c.chain.some(i=>i.id==="a"&&i.kind==="compressor"&&i.params.thresholdDb===-31))).toBe(true);
-      expect(f.localErrors).toEqual(["shared module load failed", "shared module load failed"]);
+      expect(f.localErrors).toEqual(["shared module load failed"]);
     }finally{module.resolve();f.close();}
   });
 }

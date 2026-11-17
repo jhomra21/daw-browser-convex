@@ -105,7 +105,7 @@ export const createNativeRetirement = (host: NativeRetirementHost) => {
       release: () => Promise<void> = async () => {}) => {
       processorState.observeRetirement(proof)
       const revision = proof.revision.retiredRevision
-      if (!revision) { void release().catch(() => undefined); return }
+      if (!revision) { processorState.releaseRetirementResources(release); return }
       processorState.holdRetirement({ binding: { projectId, revision, hostGeneration: proof.hostGeneration },
         hostPid: proof.hostPid, sessionGeneration: host.state().lifecycleGeneration, release,
         opportunity: 0, attempted: -1, running: false, uncertain: false, readerPassed: false, waitingControl: false })

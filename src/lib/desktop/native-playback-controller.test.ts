@@ -8,6 +8,7 @@ import { createRenderEffect, createRoot, createSignal, untrack } from "solid-js"
 import { createNativePlaybackController, nativePlaybackFaultText, type NativePlaybackFault } from "./native-playback-controller"
 import { classifyNativeVst3PlaybackFault, nativeVst3LaunchAuthorizationRequiredMessage } from "~/lib/external-plugin-ui"
 import { createNativeProcessorStateOwner } from "./native-processor-state-owner"
+import { createNativeRetirement } from "./native-retirement"
 import { nativeTimelinePageStagingBytes } from "./native-timeline-page-manager"
 import { clearInstanceLimits, instanceLimit, vstInstanceFailed } from "./vst-instance-failures"
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
@@ -4554,6 +4555,29 @@ describe("DV01 instrument truth", () => {
     await turns()
     expect(failed).toEqual(["unconfirmed"])
     expect(settled).toEqual([])
+  })
+
+  test("a no-revision release failure is reported as an incident", async () => {
+    const fixture = createBridge()
+    const notices: string[] = []
+    const processorState = createNativeProcessorStateOwner({ reportIncident: category => { notices.push(category) } })
+    const retirement = createNativeRetirement({
+      processorState,
+      revisions: undefined,
+      state: () => ({
+        lifecycleGeneration: 1,
+        prepared: true,
+        hostLost: false,
+        preparedProjectId: "project",
+        transportEpoch: 1,
+        latestScheduleProgress: undefined,
+      }),
+    })
+    retirement.hold(fixture.revisionReply("prepared"), "project", async () => {
+      throw new Error("release failed")
+    })
+    await turns()
+    expect(notices).toEqual(["unconfirmed"])
   })
 
   test("W23 loss answers receipt unavailable while lifecycle is superseded", async () => {

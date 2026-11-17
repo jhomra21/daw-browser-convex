@@ -435,10 +435,13 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
   const entries = new Map<string, ProcessorEntry>()
   // Cleanup outlives the publication's caller, but never the native session.
   let retirement: RetirementObligation | undefined
+  const releaseRetirementResources = (release: () => Promise<void>) => {
+    void release().catch(() => options.reportIncident?.("unconfirmed", 1))
+  }
   const finishRetirement = (held: RetirementObligation) => {
     if (retirement !== held) return
     retirement = undefined
-    void held.release().catch(() => options.reportIncident?.("unconfirmed", 1))
+    releaseRetirementResources(held.release)
   }
   // Execution state outlives entries: publication adoption deletes an entry
   // once its desired content is included. A registry delivery may also exist without a projected desired entry.
@@ -1268,6 +1271,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
       publication?.progress?.(progress)
     },
     retirement: () => retirement,
+    releaseRetirementResources,
     holdRetirement: (held: RetirementObligation) => { retirement = held },
     observeRetirement: (reply: NativeRevisionReply) => {
       const held = retirement

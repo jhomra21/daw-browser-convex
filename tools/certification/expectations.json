@@ -3792,11 +3792,11 @@
    "judge": {
     "kind": "stdout",
     "exit": 0,
-    "value": "2a54ddbf231b352905d5c70277ee452a53606e26df582a8b862c834fb1d34c0e",
+    "value": "2621ce39130906e1dca3be686f3fe1ec98f0d3c3c85c19875e2ab924a066770e",
     "files": {
-     "public/audio-core/daw-audio-core.wasm": "2e8d468ac9528fbe4ffd832c4b061f0f51d92bb46298248712109770bd2aba69",
-     "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm": "2e8d468ac9528fbe4ffd832c4b061f0f51d92bb46298248712109770bd2aba69",
-     "public/audio-core/daw-audio-core.manifest.json": "f9d19f3509784104875182b3734117e0a96ac982ed9e07a5effe7686eae129d2"
+     "public/audio-core/daw-audio-core.wasm": "860d5056e615a5433a8a2fcea7882a7f6a74fe70b554a61f6580729e1b55a0bc",
+     "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm": "860d5056e615a5433a8a2fcea7882a7f6a74fe70b554a61f6580729e1b55a0bc",
+     "public/audio-core/daw-audio-core.manifest.json": "e4bc872ae20cccf570e12717baa64c9f3d38a42cdbe9d32990d00690a3783373"
     }
    }
   },

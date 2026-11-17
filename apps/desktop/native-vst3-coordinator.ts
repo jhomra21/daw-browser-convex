@@ -718,7 +718,13 @@ const maximumParkedInstances = 4
 const parkedAgeMs = 60_000
 
 type AvailablePreflight = Extract<NativeVst3PreflightResult, { status: "available" }>
-type LedgerEntry = { plugin: string; binding: string; load: string }
+type LedgerEntry = {
+  plugin: string
+  binding: string
+  load: string
+  baseLoad: string
+  stateSha256: string | undefined
+}
 
 // What the host compares to take a parked instance back, so a match here means the host reuses it.
 const loadKey = (native: PreflightAttachment, stateSha256: string | undefined) => JSON.stringify([
@@ -742,6 +748,8 @@ const ledgerEntry = (attachment: Attachment, native: PreflightAttachment, stateS
   ]),
   binding: JSON.stringify([attachment.nativeGraphNodeId, attachment.stageIndex, attachment.sourceIndex ?? 0, attachment.bypassed]),
   load: loadKey(native, stateSha256),
+  baseLoad: loadKey(native, undefined),
+  stateSha256,
 })
 
 // The attachments one native session holds, so a plan reaches the host as a delta. Latency, tail
@@ -754,6 +762,7 @@ export const createNativeVst3AttachmentLedger = (
   const active = new Map<string, LedgerEntry>()
   const staged = new Map<string, LedgerEntry>()
   const parked = new Map<string, { load: string; at: number }>()
+  const liveCaptures = new Map<string, string>()
   const parkedLoad = (instanceId: string) => {
     const entry = parked.get(instanceId)
     return entry !== undefined && now() - entry.at < parkedAgeMs ? entry.load : undefined
@@ -766,7 +775,15 @@ export const createNativeVst3AttachmentLedger = (
       for (const [instanceId, entry] of entries) {
         const current = staged.get(instanceId) ?? active.get(instanceId)
         if (current === undefined) attach.push(instanceId)
-        else if (current.plugin !== entry.plugin || current.binding !== entry.binding) replace.push(instanceId)
+        else if (
+          current.plugin !== entry.plugin
+          || current.binding !== entry.binding
+          || (current.load !== entry.load && !(
+            current.baseLoad === entry.baseLoad
+            && current.stateSha256 !== entry.stateSha256
+            && liveCaptures.get(instanceId) === entry.stateSha256
+          ))
+        ) replace.push(instanceId)
       }
       const removed = [...active.keys()].filter((instanceId) => !entries.has(instanceId))
       const dropped = [...staged.keys()].filter((instanceId) => !entries.has(instanceId))
@@ -775,11 +792,14 @@ export const createNativeVst3AttachmentLedger = (
     parkedMatches: (instanceId: string, load: string) => parkedLoad(instanceId) === load,
     verdict: (key: string) => verdicts.get(key),
     rememberVerdict: (key: string, result: AvailablePreflight) => { verdicts.set(key, result) },
+    capturedFromLive: (instanceId: string, stateSha256: string) => { liveCaptures.set(instanceId, stateSha256) },
     stage: (instanceId: string, entry: LedgerEntry) => { staged.set(instanceId, entry) },
     // A staged instance is forgotten only once the host let go of it: a plan refused before that still finds it staged.
     detach: async (instanceId: string, transactionToken?: string) => {
       await host.detachVst(instanceId, transactionToken)
       staged.delete(instanceId)
+      active.delete(instanceId)
+      liveCaptures.delete(instanceId)
     },
     // The host parks a removed instance before the revision that drops it is prepared, because it binds every instance it
     // still holds into a prepared graph. The live graph keeps rendering it until that revision publishes. A rolled back
@@ -795,9 +815,11 @@ export const createNativeVst3AttachmentLedger = (
       } catch (error) {
         if (!(error instanceof NativeAudioHostCommandError) || error.reason !== "refused") throw error
         active.delete(instanceId)
+        liveCaptures.delete(instanceId)
         return
       }
       active.delete(instanceId)
+      liveCaptures.delete(instanceId)
       parked.delete(instanceId)
       parked.set(instanceId, { load: entry.load, at: now() })
       for (const oldest of [...parked.keys()].slice(0, Math.max(0, parked.size - maximumParkedInstances))) parked.delete(oldest)
@@ -832,6 +854,7 @@ export const createNativeVst3SessionLedger = () => {
     rememberVerdict: (attachment: PreflightAttachment, sampleRateHz: number, result: AvailablePreflight) => {
       verdicts.set(verdictKey(attachment, sampleRateHz), result)
     },
+    capturedFromLive: (instanceId: string, stateSha256: string) => ledger?.capturedFromLive(instanceId, stateSha256),
     published: () => ledger?.published(),
     rolledBack: () => ledger?.rolledBack(),
   }

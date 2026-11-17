@@ -906,7 +906,7 @@ const ledgerHarness = (
   const state = { bytes: stateBytes, sha256: createHash("sha256").update(stateBytes).digest("hex") }
   const run = (
     attachments: NativeExternalAttachmentPlan["attachments"],
-    options: { sampleRateHz?: number; catalog?: PluginCatalogData } = {},
+    options: { sampleRateHz?: number; catalog?: PluginCatalogData; state?: { bytes: Uint8Array; sha256: string } } = {},
   ) => coordinateNativeVst3Attachments({
     serializedPlan: plan(attachments),
     sampleRateHz: options.sampleRateHz ?? 48_000,
@@ -914,7 +914,7 @@ const ledgerHarness = (
     catalogStore: { load: async () => options.catalog ?? catalog() },
     audioHost: host(calls),
     ledger,
-    capturedVstStates: new Map(stateful ? attachments.map((entry) => [entry.instanceId, state]) : []),
+    capturedVstStates: new Map(stateful ? attachments.map((entry) => [entry.instanceId, options.state ?? state]) : []),
     requiredVstStateInstanceIds: new Set(),
     preflight: async ({ attachment: input }) => {
       calls.push(`preflight:${input.instanceId}`)
@@ -972,6 +972,53 @@ test("a changed instance is detached before it is attached and a removed one bef
   ])
   calls.length = 0
   ledger.published()
+  expect(calls).toEqual([])
+})
+
+test("a replaced instance that rolls back is attached again when its original binding returns", async () => {
+  const { calls, ledger, run } = ledgerHarness(true)
+  await run([first, second])
+  ledger.published()
+  calls.length = 0
+
+  await run([{ ...first, stageIndex: 1 }, second])
+  ledger.rolledBack()
+  calls.length = 0
+
+  await run([first, second])
+  expect(calls).toEqual([`attach:${first.instanceId}`])
+})
+
+test("an undo state change replaces the running VST instance", async () => {
+  const { calls, ledger, run } = ledgerHarness(true)
+  await run([first])
+  ledger.published()
+  calls.length = 0
+  const restoredBytes = new Uint8Array([4, 5, 6])
+  const restoredState = {
+    bytes: restoredBytes,
+    sha256: createHash("sha256").update(restoredBytes).digest("hex"),
+  }
+
+  await run([first], { state: restoredState })
+
+  expect(calls).toEqual([`detach:${first.instanceId}`, `attach:${first.instanceId}`])
+})
+
+test("a state just captured from the running instance does not replace it", async () => {
+  const { calls, ledger, run } = ledgerHarness(true)
+  await run([first])
+  ledger.published()
+  calls.length = 0
+  const capturedBytes = new Uint8Array([7, 8, 9])
+  const capturedState = {
+    bytes: capturedBytes,
+    sha256: createHash("sha256").update(capturedBytes).digest("hex"),
+  }
+  ledger.capturedFromLive(first.instanceId, capturedState.sha256)
+
+  await run([first], { state: capturedState })
+
   expect(calls).toEqual([])
 })
 

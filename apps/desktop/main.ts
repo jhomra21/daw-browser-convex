@@ -1592,6 +1592,7 @@ const registerIpc = () => {
         || !/^[a-f0-9]{64}$/.test(state.sha256)
         || createHash("sha256").update(state.bytes).digest("hex") !== state.sha256
       ) return { ok: false as const, error: "The native VST state response is invalid." }
+      attachmentLedger.capturedFromLive(instanceId.data, state.sha256)
       return { ok: true as const, bytes: state.bytes, sha256: state.sha256 }
     } catch (error) {
       return nativeSessionFailure(error)

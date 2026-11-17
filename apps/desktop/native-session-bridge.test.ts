@@ -1,5 +1,7 @@
 import { expect, mock, test } from "bun:test"
 import {
+  applicationMenuCommandChannel,
+  applicationMenuStateChannel,
   listDevicesChannel,
   resolveOutputDeviceChannel,
   sessionConfigureRecordingChannel,
@@ -19,6 +21,8 @@ import {
 } from "@daw-browser/desktop-protocol/ipc-channels"
 import { nativeAudioHostControlTypes, type NativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeHostPcmAsset, NativeHostRecordingConfiguration } from "@daw-browser/audio-engine/native-host-wire"
+import type { IpcRenderer, IpcRendererEvent } from "electron"
+import type { DesktopApplicationMenuMessage, DesktopApplicationMenuState } from "@daw-browser/desktop-protocol/application-menu"
 import type { DesktopBridge } from "../../src/types/desktop-bridge"
 import {
   NativeAudioHostCommandError,
@@ -41,6 +45,8 @@ type Invocation = { channel: string; args: Array<string | IpcEnvelope> }
 const invocations: Invocation[] = []
 const exposed = new Map<string, DesktopBridge>()
 const ipcReply = { ok: true, marker: "from-main" }
+const sentToMain: Array<Parameters<IpcRenderer["send"]>> = []
+const rendererListeners = new Map<string, Parameters<IpcRenderer["on"]>[1]>()
 mock.module("electron", () => ({
   contextBridge: { exposeInMainWorld: (name: string, api: DesktopBridge) => exposed.set(name, api) },
   ipcRenderer: {
@@ -48,9 +54,11 @@ mock.module("electron", () => ({
       invocations.push({ channel, args })
       return Promise.resolve(ipcReply)
     },
-    send: () => undefined,
-    on: () => undefined,
-    removeListener: () => undefined,
+    send: (...args: Parameters<IpcRenderer["send"]>) => { sentToMain.push(args) },
+    on: (channel: string, listener: Parameters<IpcRenderer["on"]>[1]) => { rendererListeners.set(channel, listener) },
+    removeListener: (channel: string, listener: Parameters<IpcRenderer["on"]>[1]) => {
+      if (rendererListeners.get(channel) === listener) rendererListeners.delete(channel)
+    },
   },
 }))
 
@@ -101,6 +109,34 @@ test("exposes only the macOS arm64 typed PCM asset session surface to renderers"
   for (const [platform, arch] of [["linux", "arm64"], ["darwin", "x64"], ["win32", "x64"]]) {
     expect((await loadPreload(platform, arch)).audioHost).toBeUndefined()
   }
+})
+
+test("the preload forwards only schema-valid application menu messages and state, and unsubscribes its listener", async () => {
+  const { applicationMenu } = await loadPreload("darwin", "arm64")
+  if (!applicationMenu) throw new Error("preload did not expose applicationMenu")
+  const state: DesktopApplicationMenuState = {
+    ready: true, canExportArchive: false, canUndo: false, canRedo: false, canCut: false, canCopy: false,
+    canPaste: false, canSelectAll: false, canDuplicateSelection: false, canDeleteSelection: false,
+    editableFocused: false, signedIn: false, metronomeEnabled: false, loopEnabled: false, gridEnabled: false,
+    followEnabled: false, syncMix: false, gridDenominator: 4,
+  }
+  const event: IpcRendererEvent = Object.create(null)
+
+  sentToMain.length = 0
+  applicationMenu.setState(JSON.parse(JSON.stringify({ ...state, ready: "yes" })))
+  expect(sentToMain).toEqual([])
+  applicationMenu.setState(state)
+  expect(sentToMain).toEqual([[applicationMenuStateChannel, state]])
+
+  const received: DesktopApplicationMenuMessage[] = []
+  const unsubscribe = applicationMenu.onCommand((command) => received.push(command))
+  const deliver = rendererListeners.get(applicationMenuCommandChannel)
+  if (!deliver) throw new Error("onCommand did not subscribe to the menu command channel")
+  deliver(event, "not-a-command")
+  deliver(event, "undo")
+  expect(received).toEqual(["undo"])
+  unsubscribe()
+  expect(rendererListeners.has(applicationMenuCommandChannel)).toBe(false)
 })
 
 test("sends each native session call as a channel envelope with its transaction token and returns the main reply", async () => {

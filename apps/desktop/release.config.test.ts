@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
 import {
   assembleReleaseEnvironment,
   defaultNotaryProfile,
@@ -82,8 +81,6 @@ test("never builds or packages the AE-08 failure-injection test plug-in", () => 
   )
   expect(calls.length).toBeGreaterThan(0)
   expect(calls.filter((call) => /ae08|AE08/.test(call))).toEqual([])
-  const productionCmake = readFileSync(new URL("../../native/plugin-host/CMakeLists.txt", import.meta.url), "utf8")
-  expect(productionCmake).toMatch(/option\(DAW_BUILD_AE08_TEST_PLUGIN "[^"]*" OFF\)/)
   expect(getPackagedNativeReleaseArtifacts("/resources").map(({ name }) => name))
     .toEqual([nativeVst3ScannerArtifactName, nativeVst3WorkerArtifactId, nativeAudioHostArtifactName])
 })

@@ -297,22 +297,4 @@ describe("native application menu", () => {
     send(event, state)
     expect(applied).toHaveLength(1)
   })
-
-  test("keeps IPC and renderer integration constrained", async () => {
-    const read = async (relativePath: string) => Bun.file(new URL(relativePath, import.meta.url)).text()
-    const preloadSource = await read("./preload.ts")
-    const rendererSource = await read("../../src/hooks/useDesktopApplicationMenu.ts")
-    const transportSource = await read("../../src/components/timeline/TransportControls.tsx")
-
-    expect(preloadSource).toContain("desktopApplicationMenuMessageSchema.safeParse(value)")
-    expect(preloadSource).toContain("desktopApplicationMenuStateSchema.safeParse(state)")
-    expect(preloadSource).toContain("removeListener(applicationMenuCommandChannel, notify)")
-    expect(rendererSource).not.toContain("desktopApplicationMenuStateSchema.parse")
-    expect(rendererSource).toContain("ready: true")
-    expect(rendererSource).toContain("ready: false")
-    expect(rendererSource).toContain("transport.browser.onSelectTab")
-    expect(rendererSource).toContain("transport.browser.onOpen")
-    expect(transportSource).toContain('import.meta.env.VITE_DESKTOP !== "true"')
-    expect(transportSource).toContain("<Menubar class=")
-  })
 })

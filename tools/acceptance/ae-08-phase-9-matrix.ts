@@ -110,7 +110,8 @@ export const chooseVstRepetitions = (launches: readonly Row[][], repetitions: nu
 const hostEventSchema = z.object({ event: z.string(), cause: z.string().default(""), wallMs: z.number().default(0),
   revision: z.number().default(0), frame: z.number().default(0), publicationFrame: z.number().default(0), transportEpoch: z.number().default(0),
   idempotencyKey: z.string().default(""), key: z.string().default(""), open: z.boolean().optional(), pid: z.number().default(0), requestedRevision: z.number().default(0),
-  processorAutomationEvents: z.number().default(0), stepsUs: z.string().default(""), step: z.string().default(""), durationMs: z.number().default(0) })
+  processorAutomationEvents: z.number().default(0), stepsUs: z.string().default(""), step: z.string().default(""), durationMs: z.number().default(0),
+  queueDepth: z.number().default(0), queuedMs: z.number().default(0) })
 export type HostEvent = z.infer<typeof hostEventSchema>
 export class SetupFailure extends Error {}
 

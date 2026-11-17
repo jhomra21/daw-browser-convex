@@ -2191,6 +2191,7 @@ export const createNativeAudioHostSupervisor = (
         const status = decodeGraphRevisionStatus(frame)
         if (!status) return lost("The native audio host returned an invalid graph revision status.")
         if (status.requestedRevision !== pending.graphRequestedRevision) continue
+        if (current.requestType === graphRevisionStatusType) ae08Evidence("inspect-reply-received", { pid: child?.pid ?? null, revision: status.requestedRevision })
         logControlAck(current)
         clearTimeout(pending.deadline)
         pending = undefined
@@ -2400,6 +2401,11 @@ export const createNativeAudioHostSupervisor = (
     if (next.type === recordingStopType && recordingFinish) recordingFinish.dispatched = true
     if (pending) pending.stdinBackpressure = stdinBackpressure
     if (pending) logControlWrite(pending, current, stdinBackpressure)
+    // Main's account of an inspect's wait: what it queued behind (`queuedMs`, 0 when the control slot was free) and what is still queued.
+    if (next.type === graphRevisionStatusType && next.graphRequestedRevision !== undefined) {
+      ae08Evidence("inspect-dispatch", { pid: current.pid ?? null, revision: next.graphRequestedRevision, queuedMs: Date.now() - next.enqueuedAt,
+        queueDepth: urgentSends.length + refillSends.length + normalSends.length })
+    }
   }
   const ownerForToken = (token: string | undefined) => (
     token !== undefined

@@ -1793,6 +1793,7 @@ const registerIpc = () => {
       if (!supervisor || !parsed.success || !ownsRevisionProject(event, parsed.data.projectId)
         || supervisor.transactionOpen() || !supervisor.status().running) return nativeSessionFailure()
       const owner = supervisor.status(), rendererGeneration = generation
+      if (operation === "inspect") ae08Evidence("inspect-handler-entry", { pid: owner.pid ?? null })
       try {
         let result
         if ("bytes" in parsed.data) {

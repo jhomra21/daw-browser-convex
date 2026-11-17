@@ -15,13 +15,19 @@ import { readdir, readFile } from "node:fs/promises"
 import path from "node:path"
 import { z } from "zod"
 
-export type SplitEvent = { event: string; pid: number; wallMs: number; requestedRevision: number; key: string; stepsUs: string; step: string; durationMs: number }
+export type SplitEvent = { event: string; pid: number; wallMs: number; requestedRevision: number; key: string; stepsUs: string; step: string; durationMs: number
+  queueDepth: number; queuedMs: number }
 // `rendererSteps` splits `rendererMs` at the two host round trips on the path: the reply to the instrument states reply, that to the
 // bind's progress read, and what is left up to the bind request. It is absent from evidence taken before those marks existed.
 // `progress` splits the progress read at the host's `inspect-step` line (its wall time less its duration is the receipt) and the renderer's
 // `bind-progress-reply` mark: the request's trip to the host, the host's own handling, the reply's trip back, and the wait to take the
 // publication lane again. It is absent when the evidence lacks either.
-export type ProgressSplit = { requestMs: number; hostMs: number; replyMs: number; laneMs: number }
+// `main` splits the request into the IPC to main (`bind-states-configured` to main's `inspect-handler-entry`), main's handling and queue wait
+// (to `inspect-dispatch`, the write to the host), and the pipe to the host; and the reply into the pipe back (the host line to main's
+// `inspect-reply-received`) and the IPC to the renderer. `queueDepth` and `queuedMs` are main's own account at the write. It is absent
+// when main logged no such lines.
+export type ProgressMain = { toMainMs: number; queueMs: number; toHostMs: number; fromHostMs: number; toRendererMs: number; queueDepth: number; queuedMs: number }
+export type ProgressSplit = { requestMs: number; hostMs: number; replyMs: number; laneMs: number; main?: ProgressMain }
 export type RendererSteps = { statesMs: number; progressReadMs: number; restMs: number; progress?: ProgressSplit }
 // The span from the bind request to the armed Publish, where the staging spends the seam's lead. Page time runs from the bind to the last
 // host `asset-page-write` in it (0 with none), post-page time from there to the armed request. `marks` are the renderer's staging marks
@@ -65,8 +71,13 @@ export const prepareSplit = (events: readonly SplitEvent[], prepare: SplitEvent,
   const hostInspect = configured && progressRead && earliestAfter((event) => event.event === "inspect-step" && event.pid === prepare.pid && event.step === "graph-inspect-reply"
     && event.wallMs <= progressRead.wallMs, configured.wallMs)
   const replied = configured && progressRead && earliestAfter((event) => event.event === "bind-progress-reply" && event.key === sent.key && event.wallMs <= progressRead.wallMs, configured.wallMs)
+  const mainEvent = (name: string) => configured && progressRead && earliestAfter((event) => event.event === name && event.pid === prepare.pid && event.wallMs <= progressRead.wallMs, configured.wallMs)
+  const entry = mainEvent("inspect-handler-entry"), dispatch = mainEvent("inspect-dispatch"), mainReply = mainEvent("inspect-reply-received")
+  const main = configured && hostInspect && replied && entry && dispatch && mainReply ? { toMainMs: entry.wallMs - configured.wallMs, queueMs: dispatch.wallMs - entry.wallMs,
+    toHostMs: hostInspect.wallMs - hostInspect.durationMs - dispatch.wallMs, fromHostMs: mainReply.wallMs - hostInspect.wallMs, toRendererMs: replied.wallMs - mainReply.wallMs,
+    queueDepth: dispatch.queueDepth, queuedMs: dispatch.queuedMs } : undefined
   const progress = configured && progressRead && hostInspect && replied ? { requestMs: hostInspect.wallMs - hostInspect.durationMs - configured.wallMs,
-    hostMs: hostInspect.durationMs, replyMs: replied.wallMs - hostInspect.wallMs, laneMs: progressRead.wallMs - replied.wallMs } : undefined
+    hostMs: hostInspect.durationMs, replyMs: replied.wallMs - hostInspect.wallMs, laneMs: progressRead.wallMs - replied.wallMs, main } : undefined
   const steps = stepMicroseconds(profile.stepsUs)
   const hostPrepareMs = hostSteps.reduce((total, name) => total + (steps.get(name) ?? 0), 0) / 1000
   return { hostPrepareMs, replyWriteMs: reply.durationMs, hostToRendererMs: received.wallMs - prepare.wallMs - hostPrepareMs - reply.durationMs,
@@ -76,7 +87,9 @@ export const prepareSplit = (events: readonly SplitEvent[], prepare: SplitEvent,
 }
 
 const round = (value: number) => Math.round(value * 100) / 100
-const progressLine = (progress: ProgressSplit) => ` = request ${round(progress.requestMs)} + host ${round(progress.hostMs)} + reply ${round(progress.replyMs)} + lane ${round(progress.laneMs)}`
+const progressLine = ({ requestMs, hostMs, replyMs, laneMs, main }: ProgressSplit) =>
+  ` = request ${round(requestMs)}${main ? ` (to main ${round(main.toMainMs)} + main ${round(main.queueMs)} + to host ${round(main.toHostMs)}; queue depth ${round(main.queueDepth)}, queued ${round(main.queuedMs)} ms)` : ""}`
+  + ` + host ${round(hostMs)} + reply ${round(replyMs)}${main ? ` (from host ${round(main.fromHostMs)} + to renderer ${round(main.toRendererMs)})` : ""} + lane ${round(laneMs)}`
 const armedLine = (armed: ArmedSplit) => `; bind to armed ${armed.totalMs} ms = page time ${armed.pageMs} ms (${armed.pages} pages) + post-page ${armed.postPageMs} ms`
   + (armed.marks.length ? ` [after bind: ${armed.marks.map((mark) => `${mark.name} ${mark.ms}`).join(", ")}]` : "")
 export const splitLine = (split: PrepareSplit) => `host prepare ${round(split.hostPrepareMs)} ms, reply write ${round(split.replyWriteMs)} ms, host to renderer ${round(split.hostToRendererMs)} ms, `
@@ -85,7 +98,7 @@ export const splitLine = (split: PrepareSplit) => `host prepare ${round(split.ho
 
 const hostSchema = z.object({ event: z.string(), cause: z.string().default(""), pid: z.number().default(0), wallMs: z.number().default(0), revision: z.number().default(0),
   requestedRevision: z.number().default(0), publicationFrame: z.number().default(0), key: z.string().default(""), stepsUs: z.string().default(""),
-  step: z.string().default(""), durationMs: z.number().default(0) })
+  step: z.string().default(""), durationMs: z.number().default(0), queueDepth: z.number().default(0), queuedMs: z.number().default(0) })
 const editsSchema = z.object({ edits: z.array(z.object({ wallMs: z.number(), fromLatencyFrames: z.number(), toLatencyFrames: z.number() })).default([]) })
 const LO_HI_CUT_MS = 8.5
 
@@ -122,12 +135,17 @@ const modeLine = (label: string, mode: string, group: readonly Row[]) => {
   const stepP50 = (pick: (steps: RendererSteps) => number) => median(stepped.map(pick))
   const progressed = stepped.flatMap((steps) => steps.progress ?? [])
   const progressP50 = (pick: (progress: ProgressSplit) => number) => median(progressed.map(pick))
+  const mains = progressed.flatMap((progress) => progress.main ?? [])
+  const mainP50 = mains.length > 0 && mains.length === progressed.length ? { toMainMs: median(mains.map((main) => main.toMainMs)), queueMs: median(mains.map((main) => main.queueMs)),
+    toHostMs: median(mains.map((main) => main.toHostMs)), fromHostMs: median(mains.map((main) => main.fromHostMs)), toRendererMs: median(mains.map((main) => main.toRendererMs)),
+    queueDepth: median(mains.map((main) => main.queueDepth)), queuedMs: median(mains.map((main) => main.queuedMs)) } : undefined
   return [`${label} ${mode} (${group.length}): graph-prepare to bind p50 ${round(p50((row) => row.spanMs))} ms; medians: ${splitLine({ hostPrepareMs: p50((row) => row.split.hostPrepareMs),
     replyWriteMs: p50((row) => row.split.replyWriteMs), hostToRendererMs: p50((row) => row.split.hostToRendererMs), rendererMs: p50((row) => row.split.rendererMs),
     rendererToHostMs: p50((row) => row.split.rendererToHostMs), spectralWarmMs: 0,
     rendererSteps: stepped.length === group.length ? { statesMs: stepP50((steps) => steps.statesMs), progressReadMs: stepP50((steps) => steps.progressReadMs),
       restMs: stepP50((steps) => steps.restMs), progress: progressed.length === group.length ? { requestMs: progressP50((progress) => progress.requestMs),
-        hostMs: progressP50((progress) => progress.hostMs), replyMs: progressP50((progress) => progress.replyMs), laneMs: progressP50((progress) => progress.laneMs) } : undefined } : undefined })}`]
+        hostMs: progressP50((progress) => progress.hostMs), replyMs: progressP50((progress) => progress.replyMs), laneMs: progressP50((progress) => progress.laneMs),
+        main: mainP50 } : undefined } : undefined })}`]
 }
 export const modeLines = (label: string, rows: readonly Row[]) => [...modeLine(label, "lo", rows.filter((row) => row.spanMs < LO_HI_CUT_MS)),
   ...modeLine(label, "hi", rows.filter((row) => row.spanMs >= LO_HI_CUT_MS))]
@@ -140,7 +158,7 @@ const runRows = async (run: string) => Promise.all((await readdir(run, { withFil
 }))
 
 const selfTest = () => {
-  const line = (event: string, wallMs: number, fields: Partial<SplitEvent> = {}): SplitEvent => ({ event, wallMs, pid: 7, requestedRevision: 0, key: "", stepsUs: "", step: "", durationMs: 0, ...fields })
+  const line = (event: string, wallMs: number, fields: Partial<SplitEvent> = {}): SplitEvent => ({ event, wallMs, pid: 7, requestedRevision: 0, key: "", stepsUs: "", step: "", durationMs: 0, queueDepth: 0, queuedMs: 0, ...fields })
   const prepare = line("graph-prepare", 1000, { requestedRevision: 5 })
   const request = line("graph-publish-request", 1015, { requestedRevision: 5 })
   const events = [line("prepare-sent", 800, { key: "old" }), line("prepare-reply-received", 810, { key: "old" }), line("prepare-sent", 990, { key: "k" }), prepare,
@@ -149,6 +167,8 @@ const selfTest = () => {
     line("bind-states-configured", 1011, { key: "k" }), line("bind-progress-read", 1012, { key: "k" }), line("bind-states-configured", 1011, { key: "other" }),
     line("inspect-step", 1009, { step: "graph-inspect-reply", durationMs: 0.1 }), line("inspect-step", 1012, { step: "graph-inspect-reply", durationMs: 0.5 }),
     line("inspect-step", 1011, { step: "graph-inspect-reply", durationMs: 0.1, pid: 8 }), line("bind-progress-reply", 1012, { key: "k" }),
+    line("inspect-handler-entry", 1010), line("inspect-handler-entry", 1011), line("inspect-dispatch", 1011, { queueDepth: 2, queuedMs: 1 }),
+    line("inspect-dispatch", 1011, { queueDepth: 9, queuedMs: 9, pid: 8 }), line("inspect-reply-received", 1012),
     line("bind-request-sent", 1013, { key: "k" }), line("bind-request-sent", 1300, { key: "k" }), line("bind-request-sent", 1013, { key: "other" }), request,
     line("asset-page-write", 1010), line("asset-page-write", 1017), line("asset-page-write", 1022), line("asset-page-write", 1022, { pid: 8 }), line("asset-page-write", 1100),
     line("armed-cover-end", 1019, { key: "k" }), line("armed-stage-returned", 1030, { key: "k" }), line("armed-prime-start", 1031, { key: "k" }),
@@ -158,7 +178,8 @@ const selfTest = () => {
     { name: "armed-prime-start", ms: 16 }, { name: "armed-prime-end", ms: 21 }] }
   const split = prepareSplit(events, prepare, request)
   const expected = { hostPrepareMs: 4, replyWriteMs: 0.5, hostToRendererMs: 5.5, rendererMs: 3, rendererToHostMs: 2, spectralWarmMs: 0.5 }
-  const expectedSteps = { statesMs: 1, progressReadMs: 1, restMs: 1, progress: { requestMs: 0.5, hostMs: 0.5, replyMs: 0, laneMs: 0 } }
+  const expectedSteps = { statesMs: 1, progressReadMs: 1, restMs: 1, progress: { requestMs: 0.5, hostMs: 0.5, replyMs: 0, laneMs: 0,
+    main: { toMainMs: 0, queueMs: 0, toHostMs: 0.5, fromHostMs: 0, toRendererMs: 0, queueDepth: 2, queuedMs: 1 } } }
   const failures = [
     ...(split && Object.entries(expected).every(([name, value]) => Math.abs(Number(Object.entries(split).find(([field]) => field === name)?.[1]) - value) < 1e-9) ? []
       : [`split ${JSON.stringify(split)}, expected ${JSON.stringify(expected)}`]),
@@ -168,6 +189,10 @@ const selfTest = () => {
     ...["inspect-step", "bind-progress-reply"].flatMap((name) => {
       const steps = prepareSplit(events.filter((event) => event.event !== name), prepare, request)?.rendererSteps
       return steps && steps.progress === undefined && steps.progressReadMs === 1 ? [] : [`a progress read with no ${name} must keep its renderer steps and have no progress split`]
+    }),
+    ...["inspect-handler-entry", "inspect-dispatch", "inspect-reply-received"].flatMap((name) => {
+      const progress = prepareSplit(events.filter((event) => event.event !== name), prepare, request)?.rendererSteps?.progress
+      return progress && progress.main === undefined && progress.hostMs === 0.5 ? [] : [`a progress read with no ${name} must keep the progress split and have no main split`]
     }),
     ...(prepareSplit(events.filter((event) => event.event !== "bind-progress-read"), prepare, request)?.rendererSteps === undefined ? [] : ["a revision with no progress-read mark must have no renderer steps"]),
     ...(prepareSplit(events.filter((event) => event.event !== "prepare-reply-received" || event.key === "old"), prepare, request) === undefined ? [] : ["a revision with no reply mark must have no split"]),

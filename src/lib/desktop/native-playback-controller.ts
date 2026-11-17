@@ -41,12 +41,9 @@ import type { NativePcmChunkDescriptor } from "@daw-browser/audio-engine/native-
 import {
   createAudioPcmSourceDescriptor,
 } from "@daw-browser/audio-engine/media-pages"
-import type { SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch } from "@daw-browser/audio-engine/audio-engine"
 import type {
   NativeHostDeviceConfiguration,
   NativeHostTransport,
-  NativeHostMeterBatch,
-  NativeHostSpectrumFrame,
   NativeHostRecordingStatus,
   NativeInstrumentEvent,
   NativeSessionAsset,
@@ -124,6 +121,7 @@ import {
   type ScheduleRevisionCandidate,
   type ScheduleSession,
 } from "./native-schedule-publication"
+import { createNativeObservation } from "./native-observation"
 import { createNativeTimelinePageManager, nativeTimelinePageStagingBytes, type NativeTimelinePageManager, type NativeTimelineSource } from "./native-timeline-page-manager"
 import { createSampledInstrumentRegionBudget, type SampledInstrumentRegionBudget, type SampledInstrumentRegionBudgetScope } from "~/lib/sampled-instrument-region-budget"
 import type { NativeInstrumentPreparation } from "./native-instrument-budget-policy"
@@ -862,7 +860,6 @@ export const createNativePlaybackController = (input: {
     wakeReopenedAdoption()
   }
   let stagedTransportIntent = 0
-  let unsubscribeMeters: (() => void) | undefined
   let unsubscribeVstInstanceEvents: (() => void) | undefined
   let recording: NativeRecordingSession | undefined
   let sampleRate = 0
@@ -884,21 +881,19 @@ export const createNativePlaybackController = (input: {
   let liveMidiTailOwned = false
   let scheduleCoordinator: NativeScheduleCoordinator | undefined
   const nativeLiveMidiResetListeners = new Set<() => void>()
-  const nativeMeterListeners = new Set<(levels: TrackStereoLevelsBatch) => void>()
-  const nativeMasterMeterListeners = new Set<(levels: TrackStereoLevels) => void>()
-  const nativeSpectrumListeners = new Set<(frame: SpectrumFrame | null) => void>()
-  let nativeMeterNodeIds = new Map<bigint, string>()
-  let nativeMeterRevision = 0
-  let latestMeterSequence = 0n
-  let nativeLevels: TrackStereoLevelsBatch = new Map()
-  let nativeMasterLevels: TrackStereoLevels = { left: 0, right: 0 }
-  let nativeSpectrumNodeIds = new Map<string, bigint>()
-  let nativeSpectrumTarget: string | undefined
-  let nativeSpectrumDesiredNodeId: bigint | null | undefined
-  let nativeSpectrumSelectedNodeId: bigint | null | undefined
-  let nativeSpectrumSelectionGeneration = 0
-  let nativeSpectrumSelectionRequest: { generation: number; nodeId: bigint | null } | undefined
-  let latestSpectrumSequence = 0n
+  const observation = createNativeObservation({
+    session: input.bridge?.session,
+    transportEpoch: () => transportEpoch,
+    state: () => ({
+      sessionStarted: nativeSessionStarted,
+      sessionGeneration: nativeSessionGeneration,
+      prepared,
+      preparedProjectId,
+      preparedProjectGeneration,
+      projectId: input.getProjectId?.(),
+      projectGeneration: resolveProjectGeneration(),
+    }),
+  })
   let latestScheduleProgress: NativeScheduleProgress | undefined
   const retirementAlive = (held: RetirementObligation) =>
     processorState.retirement() === held && held.sessionGeneration === lifecycleGeneration
@@ -1067,206 +1062,10 @@ export const createNativePlaybackController = (input: {
   }
   const safePreparedProjectGeneration = (projectGeneration: number) =>
     Number.isSafeInteger(projectGeneration) && projectGeneration > 0 ? projectGeneration : 1
-  let unsubscribeSpectrum: (() => void) | undefined
-
-  const resetNativeMeters = () => {
-    const levels = new Map<string, TrackStereoLevels>()
-    for (const nodeId of nativeMeterNodeIds.values()) {
-      if (nodeId !== "master") levels.set(nodeId, { left: 0, right: 0 })
-    }
-    nativeLevels = levels
-    nativeMasterLevels = { left: 0, right: 0 }
-    for (const listener of nativeMeterListeners) listener(levels)
-    for (const listener of nativeMasterMeterListeners) listener(nativeMasterLevels)
-  }
-
-  const configureNativeMeters = (revision: number, tracks: readonly { id: string }[]) => {
-    nativeMeterRevision = revision
-    latestMeterSequence = 0n
-    nativeMeterNodeIds = new Map([
-      ...tracks.map((track) => [nativeGraphNodeId(track.id), track.id] as const),
-      [nativeGraphNodeId("master"), "master"],
-    ])
-    resetNativeMeters()
-  }
-
-  const clearNativeMeters = () => {
-    unsubscribeMeters?.()
-    unsubscribeMeters = undefined
-    resetNativeMeters()
-    nativeMeterNodeIds = new Map()
-    nativeMeterRevision = 0
-    latestMeterSequence = 0n
-  }
 
   const clearVstInstanceEvents = () => {
     unsubscribeVstInstanceEvents?.()
     unsubscribeVstInstanceEvents = undefined
-  }
-
-  const clearNativeSpectrum = () => {
-    unsubscribeSpectrum?.()
-    unsubscribeSpectrum = undefined
-    nativeSpectrumNodeIds = new Map()
-    latestSpectrumSequence = 0n
-    nativeSpectrumSelectionGeneration += 1
-    nativeSpectrumDesiredNodeId = undefined
-    nativeSpectrumSelectedNodeId = undefined
-    nativeSpectrumSelectionRequest = undefined
-    for (const listener of nativeSpectrumListeners) listener(null)
-  }
-
-  const configureNativeSpectrum = (tracks: readonly { id: string }[]) => {
-    nativeSpectrumNodeIds = new Map([
-      ...tracks.map((track) => [track.id, nativeGraphNodeId(track.id)] as const),
-      ["master", nativeGraphNodeId("master")] as const,
-    ])
-    latestSpectrumSequence = 0n
-    for (const listener of nativeSpectrumListeners) listener(null)
-  }
-
-  const reconcileNativeSpectrumSelection = (ownershipReleased = false) => {
-    if (!nativeSessionStarted) return
-    const target = nativeSpectrumTarget
-    nativeSpectrumDesiredNodeId = target === undefined ? null : nativeSpectrumNodeIds.get(target)
-    // A target absent from the active map may be a candidate-only node. Keep
-    // the request pending until publication promotes its observation map.
-    const nodeId = nativeSpectrumDesiredNodeId
-    if (nodeId === undefined) return
-    const supersedesRequest = nativeSpectrumSelectionRequest !== undefined
-      && nativeSpectrumSelectionRequest.nodeId !== nodeId
-    if (nodeId === nativeSpectrumSelectedNodeId && !supersedesRequest) return
-    if (!ownershipReleased && nativeSpectrumSelectionRequest?.nodeId === nodeId) return
-    const bridge = input.bridge
-    const sessionGeneration = nativeSessionGeneration
-    const projectId = input.getProjectId?.()
-    const projectGeneration = resolveProjectGeneration()
-    const selectionGeneration = ++nativeSpectrumSelectionGeneration
-    nativeSpectrumSelectionRequest = { generation: selectionGeneration, nodeId }
-    const finish = (reply: NativeSessionReply | undefined) => {
-      if (nativeSpectrumSelectionRequest?.generation !== selectionGeneration) {
-        // A stale successful command still changed the host. Reassert the
-        // desired target after that reply, not merely the renderer cache.
-        if (reply?.ok && sessionGeneration === nativeSessionGeneration
-          && nodeId !== nativeSpectrumDesiredNodeId) {
-          nativeSpectrumSelectedNodeId = undefined
-          reconcileNativeSpectrumSelection(true)
-        }
-        return
-      }
-      nativeSpectrumSelectionRequest = undefined
-      if (!reply?.ok || selectionGeneration !== nativeSpectrumSelectionGeneration
-        || sessionGeneration !== nativeSessionGeneration || !prepared || !nativeSessionStarted
-        || preparedProjectId !== projectId || preparedProjectGeneration !== projectGeneration
-        || projectId !== input.getProjectId?.() || projectGeneration !== resolveProjectGeneration()) return
-      nativeSpectrumSelectedNodeId = nodeId
-    }
-    void bridge?.session.setSpectrumNode?.(nodeId).then(finish, () => finish(undefined))
-  }
-
-  const nativeObservationMaps = (tracks: readonly { id: string }[]) => ({
-    meters: new Map<bigint, string>([
-      ...tracks.map((track) => [nativeGraphNodeId(track.id), track.id] as const),
-      [nativeGraphNodeId("master"), "master"],
-    ]),
-    spectrum: new Map<string, bigint>([
-      ...tracks.map((track) => [track.id, nativeGraphNodeId(track.id)] as const),
-      ["master", nativeGraphNodeId("master")] as const,
-    ]),
-  })
-
-  const promoteNativeObservationMaps = (
-    revision: number,
-    candidate: ReturnType<typeof nativeObservationMaps>,
-  ) => {
-    const previousTracks = new Set([...nativeMeterNodeIds.values()].filter((id) => id !== "master"))
-    const nextTracks = new Set([...candidate.meters.values()].filter((id) => id !== "master"))
-    const changed = new Map<string, TrackStereoLevels>()
-    const levels = new Map(nativeLevels)
-    for (const id of previousTracks) {
-      if (nextTracks.has(id)) continue
-      levels.delete(id)
-      changed.set(id, { left: 0, right: 0 })
-    }
-    for (const id of nextTracks) {
-      if (previousTracks.has(id)) continue
-      levels.set(id, { left: 0, right: 0 })
-      changed.set(id, { left: 0, right: 0 })
-    }
-    const target = nativeSpectrumTarget
-    const wasSelected = target !== undefined && nativeSpectrumNodeIds.has(target)
-    const nextNodeId = target === undefined ? undefined : candidate.spectrum.get(target)
-    nativeMeterRevision = revision
-    nativeMeterNodeIds = candidate.meters
-    nativeSpectrumNodeIds = candidate.spectrum
-    if (target !== undefined && candidate.spectrum.has(target)) {
-      nativeSpectrumDesiredNodeId = candidate.spectrum.get(target)
-      reconcileNativeSpectrumSelection(true)
-    }
-    nativeLevels = levels
-    if (changed.size > 0) {
-      for (const listener of nativeMeterListeners) listener(changed)
-    }
-
-    if (target === undefined) return
-    if (nextNodeId !== undefined) return
-    if (!wasSelected) return
-    nativeSpectrumTarget = undefined
-    nativeSpectrumDesiredNodeId = null
-    latestSpectrumSequence = 0n
-    for (const listener of nativeSpectrumListeners) listener(null)
-    if (nativeSessionStarted) reconcileNativeSpectrumSelection(true)
-  }
-
-  const handleNativeSpectrumFrame = (frame: NativeHostSpectrumFrame) => {
-    const nodeId = nativeSpectrumNodeIds.get(nativeSpectrumTarget ?? "")
-    if (
-      !nodeId || frame.graphRevision !== nativeMeterRevision
-      || frame.transportEpoch !== transportEpoch || frame.nodeId !== nodeId
-      || frame.sequence <= latestSpectrumSequence
-    ) return
-    latestSpectrumSequence = frame.sequence
-    const next: SpectrumFrame = {
-      data: frame.data,
-      sampleRate: frame.sampleRateHz,
-      graphRevision: frame.graphRevision,
-      transportEpoch: frame.transportEpoch,
-      sequence: frame.sequence,
-      nodeId: frame.nodeId,
-      fftSize: frame.fftSize,
-      binCount: frame.binCount,
-    }
-    for (const listener of nativeSpectrumListeners) listener(next)
-  }
-  const clearNativeSpectrumFrame = () => {
-    latestSpectrumSequence = 0n
-    for (const listener of nativeSpectrumListeners) listener(null)
-  }
-
-  const handleNativeMeterBatch = (batch: NativeHostMeterBatch) => {
-    if (batch.graphRevision !== nativeMeterRevision || batch.transportEpoch !== transportEpoch
-      || batch.sequence <= latestMeterSequence) return
-    latestMeterSequence = batch.sequence
-    const levels = new Map<string, TrackStereoLevels>()
-    let master: TrackStereoLevels | undefined
-    for (const entry of batch.entries) {
-      const nodeId = nativeMeterNodeIds.get(entry.nodeId)
-      if (!nodeId) continue
-      const next = {
-        left: Math.min(1, Math.max(0, entry.leftRms)),
-        right: Math.min(1, Math.max(0, entry.rightRms)),
-      }
-      if (nodeId === "master") master = next
-      else levels.set(nodeId, next)
-    }
-    if (levels.size > 0) {
-      nativeLevels = new Map([...nativeLevels, ...levels])
-      for (const listener of nativeMeterListeners) listener(levels)
-    }
-    if (master) {
-      nativeMasterLevels = master
-      for (const listener of nativeMasterMeterListeners) listener(master)
-    }
   }
 
   const reportFault = (fault: NativePlaybackFault, options?: { retainPlayback: true }) => {
@@ -1500,8 +1299,7 @@ export const createNativePlaybackController = (input: {
     liveMidiTailOwned = false
     scheduleCoordinator?.dispose()
     scheduleCoordinator = undefined
-    clearNativeMeters()
-    clearNativeSpectrum()
+    observation.clear()
     clearVstInstanceEvents()
     preparedProjectGeneration = undefined
     preparedProjectId = undefined
@@ -1808,7 +1606,7 @@ export const createNativePlaybackController = (input: {
           if (preparedGraph) nextCoordinator.preflight(preparedGraph)
           transportEpoch += 1
           disposeKept(processorState.endDomain(transportEpoch))
-          clearNativeSpectrumFrame()
+          observation.clearSpectrumFrame()
           previousCoordinator?.dispose()
           nextCoordinator.install()
           scheduleCoordinator = nextCoordinator
@@ -1881,8 +1679,7 @@ export const createNativePlaybackController = (input: {
       disposeKept(processorState.clear())
       scheduleCoordinator?.dispose()
       scheduleCoordinator = undefined
-      clearNativeMeters()
-      clearNativeSpectrum()
+      observation.clear()
       clearVstInstanceEvents()
       active = false
       prepared = false
@@ -2298,16 +2095,12 @@ export const createNativePlaybackController = (input: {
       preparedInstrumentTrackIds = instrumentTrackIds
       preparedProjectId = preparedProjectIdForAttempt
       preparedProjectGeneration = projectGeneration
-      configureNativeMeters(snapshot.revision, snapshot.tracks)
-      configureNativeSpectrum(snapshot.tracks)
-      unsubscribeMeters?.()
-      unsubscribeMeters = bridge.session.onMeterBatch?.(handleNativeMeterBatch)
-      unsubscribeSpectrum?.()
-      unsubscribeSpectrum = bridge.session.onSpectrumFrame?.(handleNativeSpectrumFrame)
+      observation.configure(snapshot.revision, snapshot.tracks)
+      observation.attach()
       clearVstInstanceEvents()
       clearVstInstanceFailures()
       unsubscribeVstInstanceEvents = bridge.session.onVstInstanceEvent?.(handleVstInstanceEvent)
-      nativeSpectrumSelectedNodeId = undefined
+      observation.forgetSpectrumSelection()
       startStage = "start-session"
       assertReply(await bridge.session.start())
       if (cancelled()) {
@@ -2315,7 +2108,7 @@ export const createNativePlaybackController = (input: {
         return "unavailable"
       }
       nativeSessionStarted = true
-      reconcileNativeSpectrumSelection(true)
+      observation.reconcileSpectrumSelection(true)
       await nextCoordinator.waitForTransition(nextTransportTransitionId, false)
       // VST workers are started only after the graph transaction is committed.
       // Prime the bounded owned schedule before either paused preview or playback.
@@ -2619,7 +2412,7 @@ export const createNativePlaybackController = (input: {
     const transitionGeneration = preparedTransportTransitionGeneration
     transportEpoch += 1
     disposeKept(processorState.endDomain(transportEpoch))
-    clearNativeSpectrumFrame()
+    observation.clearSpectrumFrame()
     let nextSnapshot = preparedSnapshot && loop
       ? { ...preparedSnapshot, transport: { ...preparedSnapshot.transport, ...loop } }
       : preparedSnapshot
@@ -2765,7 +2558,7 @@ export const createNativePlaybackController = (input: {
     active = resumePlayback
     preparedSnapshot = nextSnapshot
     loopAppliesAtTransportPosition = transitionSnapshot.transport.loopEnabled
-    reconcileNativeSpectrumSelection(true)
+    observation.reconcileSpectrumSelection(true)
     return true
   }
 
@@ -3586,7 +3379,7 @@ export const createNativePlaybackController = (input: {
       if (JSON.stringify(snapshot.nativeExternalAttachmentPlan) !== JSON.stringify(previous.nativeExternalAttachmentPlan))
         preparedSnapshot = { ...snapshot, revision: preparedSnapshot?.revision ?? snapshot.revision }
       preparedKeepLatencyNodeIds = serializedKeepLatencyNodeIds
-      nativeMeterRevision = runtimeRevision
+      observation.setMeterRevision(runtimeRevision)
       const previousStates = new Map(previousGraph.nodes.flatMap(node => node.processorOrder.map(processor => [processor.id, processor])))
       const restated = new Set(graph.nodes.flatMap(node => node.processorOrder.flatMap(processor =>
         sameBytes(previousStates.get(processor.id)?.state ?? new Uint8Array(), processor.state) ? [] : [processor.id])))
@@ -3749,8 +3542,8 @@ export const createNativePlaybackController = (input: {
     holdInstrumentAssets,
     resolveTimelineDescriptor,
     prepareMappedResources,
-    nativeObservationMaps,
-    promoteNativeObservationMaps,
+    nativeObservationMaps: observation.maps,
+    promoteNativeObservationMaps: observation.promote,
     holdRetirement,
     reportStopped,
     executeReconcile,
@@ -4279,32 +4072,6 @@ export const createNativePlaybackController = (input: {
     return () => nativeLiveMidiResetListeners.delete(listener)
   }
 
-  const subscribeTrackMeters = (listener: (levels: TrackStereoLevelsBatch) => void) => {
-    nativeMeterListeners.add(listener)
-    if (nativeLevels.size > 0) listener(new Map(nativeLevels))
-    return () => nativeMeterListeners.delete(listener)
-  }
-
-  const subscribeMasterMeter = (listener: (levels: TrackStereoLevels) => void) => {
-    nativeMasterMeterListeners.add(listener)
-    listener(nativeMasterLevels)
-    return () => nativeMasterMeterListeners.delete(listener)
-  }
-
-  const subscribeSpectrum = (targetId: string, listener: (frame: SpectrumFrame | null) => void) => {
-    nativeSpectrumListeners.add(listener)
-    nativeSpectrumTarget = targetId
-    if (prepared) reconcileNativeSpectrumSelection()
-    listener(null)
-    return () => {
-      nativeSpectrumListeners.delete(listener)
-      if (nativeSpectrumListeners.size === 0) {
-        nativeSpectrumTarget = undefined
-        reconcileNativeSpectrumSelection(true)
-      }
-    }
-  }
-
   const currentPositionSec = () => {
     if (sampleRate <= 0) return undefined
     const loop = preparedSnapshot && loopAppliesAtTransportPosition
@@ -4377,8 +4144,8 @@ export const createNativePlaybackController = (input: {
     startLiveMidiNote,
     releaseLiveMidiNote,
     subscribeNativeLiveMidiReset,
-    subscribeTrackMeters,
-    subscribeMasterMeter,
-    subscribeSpectrum,
+    subscribeTrackMeters: observation.subscribeTrackMeters,
+    subscribeMasterMeter: observation.subscribeMasterMeter,
+    subscribeSpectrum: observation.subscribeSpectrum,
   }
 }

@@ -91,7 +91,6 @@ import {
   type ProcessorReconcile,
   type ProcessorDesired,
   type Receipt,
-  type RetirementObligation,
   receiptHandle,
 } from "./native-processor-state-owner"
 import {
@@ -137,6 +136,7 @@ import {
   indicatesNativeHostConnectionLoss,
   sanitizeNativeVst3DiagnosticError,
 } from "./native-host-connection-loss"
+import { createNativeRetirement } from "./native-retirement"
 import { createNativeStatePatches } from "./native-state-patches"
 import { createNativeLiveMidi } from "./native-live-midi"
 import { createNativeObservation } from "./native-observation"
@@ -620,7 +620,7 @@ export const createNativePlaybackController = (input: {
       preparedTracks: preparedSnapshot?.tracks,
       preparedNodes: preparedGraph?.nodes,
     }),
-    observeControl: (operation) => observeRetirementControl(operation),
+    observeControl: (operation) => retirement.observeControl(operation),
     reportStopped: (message) => reportStopped(message),
     ensureLivePreview: (playheadSec) => ensureLivePreview(playheadSec),
   })
@@ -650,89 +650,18 @@ export const createNativePlaybackController = (input: {
     }),
   })
   let latestScheduleProgress: NativeScheduleProgress | undefined
-  const retirementAlive = (held: RetirementObligation) =>
-    processorState.retirement() === held && held.sessionGeneration === lifecycleGeneration
-      && prepared && !hostLoss.isLost() && held.binding.projectId === preparedProjectId
-  const dispatchRetirement = () => {
-    const held = processorState.retirement()
-    const revisions = input.bridge?.session.revisions
-    if (!held || !revisions || !retirementAlive(held) || held.running || held.attempted === held.opportunity) return
-    held.attempted = held.opportunity
-    held.running = true
-    void (async () => {
-      try {
-        if (held.uncertain) {
-          const proof = await revisions.inspect(held.binding)
-          if (!retirementAlive(held)) return
-          processorState.observeRetirement(proof)
-          if (!retirementAlive(held) || !proof.ok || proof.hostPid !== held.hostPid
-            || proof.hostGeneration !== held.binding.hostGeneration || proof.revision.status === "publish-pending") return
-          held.uncertain = false
-        }
-        if (!retirementAlive(held)) return
-        const reply = await revisions.retire(held.binding)
-        if (retirementAlive(held)) {
-          held.uncertain = !reply.ok && reply.kind === "unconfirmed"
-          held.waitingControl = !reply.ok && reply.kind === "unavailable"
-          // Native samples the reader check and reply epoch separately
-          // (audio-host.cpp:3174, 3194). The first crossing needs one more
-          // frame-driven proof: only a serialized Retire dispatched after that
-          // observation cannot be reader-blocked by the monotonic counter.
-          // Then not-safe means latency pending; later transport epochs still wake.
-          if (reply.ok && reply.revision.status === "retirement-not-safe"
-            && reply.revision.progressFrame !== undefined) {
-            const epoch = reply.revision.transportEpoch ?? transportEpoch
-            const progress = latestScheduleProgress
-            const newerProgress = progress && (progress.epoch > epoch
-              || (progress.epoch === epoch && progress.renderedThroughFrame > reply.revision.progressFrame))
-            const renderEpoch = held.readerPoint?.renderEpoch ?? reply.revision.renderEpoch
-            const crossed = held.readerPoint?.crossed ?? false
-            held.readerPoint = { epoch: newerProgress ? progress.epoch : epoch,
-              frame: newerProgress ? progress.renderedThroughFrame : reply.revision.progressFrame,
-              renderEpoch, crossed: crossed || reply.revision.renderEpoch > renderEpoch }
-            held.readerPassed = crossed
-          }
-          processorState.observeRetirement(reply)
-        }
-      } catch {
-        held.uncertain = true
-        // Lost/unavailable cleanup is still owed. Only an external opportunity
-        // can retry it; the retirement reply itself never supplies one.
-      } finally {
-        held.running = false
-        // Only an external event received during this request can leave a
-        // newer opportunity. Our own reply never increments the counter.
-        if (retirementAlive(held) && held.attempted !== held.opportunity) dispatchRetirement()
-      }
-    })()
-  }
-  const retirementOpportunity = () => {
-    const held = processorState.retirement()
-    if (!held) return
-    held.opportunity++
-    dispatchRetirement()
-  }
-  const observeRetirementControl = <T>(operation: Promise<T>) => {
-    const generation = lifecycleGeneration
-    const completed = () => {
-      const held = processorState.retirement()
-      if (generation !== lifecycleGeneration || !held || !held.waitingControl || !retirementAlive(held)) return
-      held.waitingControl = false
-      retirementOpportunity()
-    }
-    void operation.then(completed, completed)
-    return operation
-  }
-  const holdRetirement = (proof: Extract<NativeRevisionReply, { ok: true }>, projectId: string,
-    release: () => Promise<void> = async () => {}) => {
-    processorState.observeRetirement(proof)
-    const revision = proof.revision.retiredRevision
-    if (!revision) { void release().catch(() => undefined); return }
-    processorState.holdRetirement({ binding: { projectId, revision, hostGeneration: proof.hostGeneration },
-      hostPid: proof.hostPid, sessionGeneration: lifecycleGeneration, release,
-      opportunity: 0, attempted: -1, running: false, uncertain: false, readerPassed: false, waitingControl: false })
-    dispatchRetirement()
-  }
+  const retirement = createNativeRetirement({
+    processorState,
+    revisions: input.bridge?.session.revisions,
+    state: () => ({
+      lifecycleGeneration,
+      prepared,
+      hostLost: hostLoss.isLost(),
+      preparedProjectId,
+      transportEpoch,
+      latestScheduleProgress,
+    }),
+  })
   let stretchPreparationAbortController: AbortController | undefined
   let startAbortController: AbortController | undefined
   let preparedStretchRepository: PreparedStretchArtifactRepository | undefined
@@ -862,7 +791,7 @@ export const createNativePlaybackController = (input: {
         held.readerPassed = true
         held.readerPoint = { ...point, epoch: progress.epoch, frame: progress.renderedThroughFrame }
       }
-      if (readerPassed || retirementChanged) retirementOpportunity()
+      if (readerPassed || retirementChanged) retirement.opportunity()
     }
   }
 
@@ -882,8 +811,8 @@ export const createNativePlaybackController = (input: {
     const sessionGeneration = ++nativeSessionGeneration
     return createNativeScheduleCoordinator({
       bridge: {
-        queueScheduleWindow: (...args) => observeRetirementControl(bridge.session.queueScheduleWindow(...args)),
-        queueInstrumentEvents: (...args) => observeRetirementControl(bridge.session.queueInstrumentEvents(...args)),
+        queueScheduleWindow: (...args) => retirement.observeControl(bridge.session.queueScheduleWindow(...args)),
+        queueInstrumentEvents: (...args) => retirement.observeControl(bridge.session.queueInstrumentEvents(...args)),
         reenableVstScheduleAutomation: bridge.session.reenableVstScheduleAutomation,
         onScheduleProgress: (listener) => bridge.session.onScheduleProgress((progress) => {
           if (sessionGeneration !== nativeSessionGeneration) return
@@ -2345,7 +2274,7 @@ export const createNativePlaybackController = (input: {
         }))
         if (request.execution && !processorState.send(request.execution, request.execution.sequence, liveMidi.lastEventSequence()))
           return { ok: false, kind: "not-sent", reason: "stale" }
-        return await observeRetirementControl(bridge.session.queueInstrumentEvents(serializeNativeInstrumentEvents(transportEpoch, events)))
+        return await retirement.observeControl(bridge.session.queueInstrumentEvents(serializeNativeInstrumentEvents(transportEpoch, events)))
       } catch (error) {
         return { ok: false, kind: "unconfirmed", error: String(error) }
       }
@@ -2380,7 +2309,7 @@ export const createNativePlaybackController = (input: {
         const { key, editId, attempt } = request.execution
         input.observer?.processorDispatch?.({ key, editId, attempt, sequence: BigInt(batch.sequence) })
       }
-      return await observeRetirementControl(bridge.session.queueParameterEvents(serializeNativeProcessorEvents(events, batch)))
+      return await retirement.observeControl(bridge.session.queueParameterEvents(serializeNativeProcessorEvents(events, batch)))
     } catch (error) {
       // A thrown or lost reply says nothing about whether native took the batch.
       return {
@@ -2858,7 +2787,7 @@ export const createNativePlaybackController = (input: {
         includedOrder, desired => statePatchMatchesCurrentProcessor(desired.target.instanceId, desired.content.state), record.content)
       if (acknowledgedEpoch === undefined) coordinator.resumeGraphPublication(runtimeRevision)
       advanceScheduleSettledEpoch()
-      holdRetirement(proof, projectId)
+      retirement.hold(proof, projectId)
       tx.resourcesPromoted = true
       tx.binding = undefined
       executeReconcile(reconciles)
@@ -3015,7 +2944,7 @@ export const createNativePlaybackController = (input: {
     prepareMappedResources,
     nativeObservationMaps: observation.maps,
     promoteNativeObservationMaps: observation.promote,
-    holdRetirement,
+    holdRetirement: retirement.hold,
     reportStopped,
     executeReconcile,
     reprimePausedAdoption: () => reprimePausedAdoption(),

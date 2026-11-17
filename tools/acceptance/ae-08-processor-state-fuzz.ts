@@ -106,6 +106,7 @@ const sourceFiles = [
   "src/lib/desktop/native-graph-targets.ts",
   "src/lib/desktop/native-snapshot-support.ts",
   "src/lib/desktop/native-host-connection-loss.ts",
+  "src/lib/desktop/native-retirement.ts",
   "src/lib/desktop/native-processor-state-owner.ts", "src/lib/desktop/native-built-in-parameter-mapper.ts",
   "src/lib/live-processor-control.ts", "src/components/timeline/create-processor-edit-registry.ts",
   "src/lib/live-playback-snapshot.ts", "packages/audio-engine/src/native-host-wire.ts",

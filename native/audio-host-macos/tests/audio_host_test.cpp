@@ -5192,6 +5192,39 @@ void TestReleasedAssetReclaimsAfterOneEpochWithNoPreparedBank() {
   host.Stop();
 }
 
+// A batch whose first record is valid and second is not is rejected without side effects: the retirement the first
+// record's asset already has pending (reclaimed one epoch after its release) is not cancelled.
+void TestRejectedInstrumentBatchKeepsPendingAssetRetirement() {
+  using namespace daw::audio_host_macos;
+  AudioHost host;
+  assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48000,
+    .max_frames_per_block = 128, .channel_count = 2, .revision = 1}));
+  assert(host.PrepareAndPublishGraph(1, GraphSnapshot(1, 1.F)));
+  assert(host.SetTransport(1, false, 0));
+  assert(host.StartDiagnosticMode());
+  assert(host.SetTransport(1, true, 0));
+  std::array<float, 128> silence{}, left{}, right{};
+  const std::array<const float*, 2> input{silence.data(), silence.data()};
+  const std::array<float*, 2> output{left.data(), right.data()};
+  const auto render = [&] { assert(host.ProcessPlanar(input, output, 128)); };
+  UploadInstrument(host, 1, SampleInstrumentPcm());
+  render();
+  assert(host.ReleaseAsset(1));
+  host.ProcessNativeVstControl();  // The retirement is now pending, one render epoch from completing.
+  assert(host.PrepareGraphRevision(2, SampleInstrumentGraph(2, DAW_AUDIO_INSTRUMENT_KIND_SAMPLER)).code
+    == GraphRevisionStatusCode::kPrepared);
+  auto batch = SampleInstrumentPayload(DAW_AUDIO_INSTRUMENT_KIND_SAMPLER);
+  WriteLeU32(batch, 0, 2);
+  const auto invalid = SampleInstrumentPayload(DAW_AUDIO_INSTRUMENT_KIND_SAMPLER, 63);
+  batch.insert(batch.end(), invalid.begin() + 4, invalid.end());
+  assert(!host.ConfigureInstrumentStates(batch));
+  assert(host.RollbackGraphRevision(2).code == GraphRevisionStatusCode::kRolledBack);
+  render();
+  host.ProcessNativeVstControl();
+  assert(host.diagnostics().installed_assets == 0);
+  host.Stop();
+}
+
 namespace daw::audio_host_macos {
 // Defined by this target's private copy of the host (DAW_AUDIO_HOST_TEST_PATCH_CLAIM=1).
 void SetTestPatchClaimHook(void (*hook)());
@@ -6626,6 +6659,8 @@ int main() {
   for (const char failure : {'a', 'b', 'c', 'd', 'e', 'f'}) TestCheckpoint3Assets(failure);
   TestCheckpoint3StagedInstrumentAssets();
   TestReleasedAssetReclaimsAfterOneEpochWithNoPreparedBank();
+  if (std::getenv("DAW_AE08_REJECTED_BATCH_ONLY")) { TestRejectedInstrumentBatchKeepsPendingAssetRetirement(); return 0; }
+  TestRejectedInstrumentBatchKeepsPendingAssetRetirement();
   TestCheckpoint2SaturatedNoteOffSeam();
   TestCheckpoint2SaturatedNoteOffSeam(true);
   TestCheckpoint2SaturatedRebaseProgress();

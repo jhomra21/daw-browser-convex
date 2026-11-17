@@ -3160,10 +3160,28 @@ bool AudioHost::ConfigureInstrumentStates(const std::span<const std::uint8_t> pa
 #endif
   std::unordered_set<Impl::InstalledAsset*> candidates;
   Impl::InstrumentAssets configured_assets;
-  const auto configure = [&](const daw_audio_core_handle core, const bool validate) {
+  // One decoded, validated record. Building it changes nothing; only the commit below does.
+  struct InstrumentCandidate {
+    std::uint64_t node_id = 0;
+    std::uint32_t kind = 0;
+    daw_audio_synth_state synth{};
+    daw_audio_sampler_state sampler{};
+    std::array<daw_audio_sample_zone, DAW_AUDIO_CORE_MAX_SAMPLE_ZONES> zones{};
+    daw_audio_granular_state granular{};
+    std::unordered_set<Impl::InstalledAsset*> assets;
+  };
+  std::vector<InstrumentCandidate> batch;
+  batch.reserve(count);
+  const auto record_core_failure = [&](const daw_audio_core_result result) {
+    impl_->instrument_preparation_error = result == DAW_AUDIO_CORE_CAPACITY_EXCEEDED
+      ? "instrument replacement capacity exceeded; let audio transitions finish, then prepare and retry"
+      : "instrument parameters, sample zone bounds, or graph target are invalid";
+  };
+  const auto validate_batch = [&](const daw_audio_core_handle core) {
     std::size_t offset = 4;
     for (std::uint32_t index = 0; index < count; ++index) {
-      std::unordered_set<Impl::InstalledAsset*> device_assets;
+      auto& candidate = batch.emplace_back();
+      auto& device_assets = candidate.assets;
       std::uint64_t device_bytes = 0;
       const auto admit = [&](daw_audio_asset_handle& handle) {
         if (handle == 0) return true;
@@ -3179,10 +3197,8 @@ bool AudioHost::ConfigureInstrumentStates(const std::span<const std::uint8_t> pa
         if (!impl_->AssetVisible(*asset, impl_->prepared_core != 0
           ? impl_->prepared_revision.load(std::memory_order_acquire)
           : impl_->active_revision.load(std::memory_order_acquire))) return false;
-        impl_->RetainAsset(*asset);
         const auto prepared = impl_->prepared_asset_handles.find(id);
         handle = prepared == impl_->prepared_asset_handles.end() ? asset->handle : prepared->second;
-        if (!validate) return true;
         if (device_assets.insert(asset).second) {
           device_bytes += asset->frame_count * asset->channel_count * sizeof(float);
           if (device_bytes > kInstrumentDeviceBytes) {
@@ -3212,19 +3228,20 @@ bool AudioHost::ConfigureInstrumentStates(const std::span<const std::uint8_t> pa
       offset += state_size;
       const auto* zones_bytes = payload.data() + offset;
       offset += zones_size;
+      candidate.node_id = node_id;
+      candidate.kind = kind;
       daw_audio_core_result result = DAW_AUDIO_CORE_INVALID_ARGUMENT;
       if (kind == 1 && zones_size == 0) {
-        daw_audio_synth_state state{};
+        auto& state = candidate.synth;
         if (daw::audio_core_wire::DecodeSynthState(
           std::span<const std::uint8_t>(state_bytes, state_size), &state)) {
-          result = validate
-            ? (daw::audio_core::ValidateInstrumentState(core, node_id, state)
-              ? DAW_AUDIO_CORE_OK : DAW_AUDIO_CORE_INVALID_ARGUMENT)
-            : daw_audio_core_configure_synth(core, node_id, &state);
+          result = daw::audio_core::ValidateInstrumentState(core, node_id, state)
+            ? DAW_AUDIO_CORE_OK : DAW_AUDIO_CORE_INVALID_ARGUMENT;
         }
       } else if ((kind == 2 || kind == 3)
         && zones_size <= kMaximumControlPayloadBytes) {
-        daw_audio_sampler_state state{};
+        auto& state = candidate.sampler;
+        auto& zones = candidate.zones;
         if (!daw::audio_core_wire::DecodeSamplerState(
           std::span<const std::uint8_t>(state_bytes, state_size), &state)
           || state.zone_count > DAW_AUDIO_CORE_MAX_SAMPLE_ZONES
@@ -3232,7 +3249,6 @@ bool AudioHost::ConfigureInstrumentStates(const std::span<const std::uint8_t> pa
             * daw::audio_core_wire::kSampleZoneBytes) {
           return false;
         }
-        std::array<daw_audio_sample_zone, DAW_AUDIO_CORE_MAX_SAMPLE_ZONES> zones{};
         bool decoded = true;
         for (std::uint32_t zone = 0; zone < state.zone_count; ++zone) {
           decoded = daw::audio_core_wire::DecodeSampleZone(
@@ -3246,15 +3262,12 @@ bool AudioHost::ConfigureInstrumentStates(const std::span<const std::uint8_t> pa
           if (!admit(zones[zone].asset)) return false;
         }
         if (decoded) {
-          result = validate
-            ? (daw::audio_core::ValidateInstrumentState(core, node_id, kind, state,
-                std::span(zones).first(state.zone_count))
-              ? DAW_AUDIO_CORE_OK : DAW_AUDIO_CORE_INVALID_ARGUMENT)
-            : daw_audio_core_configure_sampler(
-                core, node_id, &state, state.zone_count == 0 ? nullptr : zones.data());
+          result = daw::audio_core::ValidateInstrumentState(core, node_id, kind, state,
+            std::span(zones).first(state.zone_count))
+            ? DAW_AUDIO_CORE_OK : DAW_AUDIO_CORE_INVALID_ARGUMENT;
         }
       } else if (kind == 4 && state_size == kGranularStateWireBytes && zones_size == 0) {
-        daw_audio_granular_state state{};
+        auto& state = candidate.granular;
         state.version = ReadLeU32(state_bytes);
         state.asset = ReadLeU64(state_bytes + 4);
         state.seed = ReadLeU32(state_bytes + 12);
@@ -3269,25 +3282,20 @@ bool AudioHost::ConfigureInstrumentStates(const std::span<const std::uint8_t> pa
         state.reverse_probability = ReadLeFloat(state_bytes + 48);
         state.stereo_spread = ReadLeFloat(state_bytes + 52);
         if (!admit(state.asset)) return false;
-        result = validate
-          ? (daw::audio_core::ValidateInstrumentState(core, node_id, state)
-            ? DAW_AUDIO_CORE_OK : DAW_AUDIO_CORE_INVALID_ARGUMENT)
-          : daw_audio_core_configure_granular(core, node_id, &state);
+        result = daw::audio_core::ValidateInstrumentState(core, node_id, state)
+          ? DAW_AUDIO_CORE_OK : DAW_AUDIO_CORE_INVALID_ARGUMENT;
       }
       if (result != DAW_AUDIO_CORE_OK) {
-        if (result == DAW_AUDIO_CORE_CAPACITY_EXCEEDED)
-          impl_->instrument_preparation_error = "instrument replacement capacity exceeded; let audio transitions finish, then prepare and retry";
-        else
-          impl_->instrument_preparation_error = "instrument parameters, sample zone bounds, or graph target are invalid";
+        record_core_failure(result);
         return false;
       }
-      if (validate) configured_assets[node_id] = std::move(device_assets);
+      configured_assets[node_id] = device_assets;
     }
     return offset == payload.size();
   };
   // Validate the entire candidate batch with the core's authoritative validators
   // before locking memory or changing any live/prepared instrument configuration.
-  if (!configure(target_core, true)) return false;
+  if (!validate_batch(target_core)) return false;
 #if defined(DAW_AUDIO_HOST_TEST_MEMORY_LOCK)
   daw_audio_host_test_validation_memory(false);
 #endif
@@ -3327,7 +3335,22 @@ bool AudioHost::ConfigureInstrumentStates(const std::span<const std::uint8_t> pa
       newly_locked.push_back(&mapped);
     }
   }
-  if (!configure(target_core, false)) {
+  const auto configure_candidate = [&](const InstrumentCandidate& candidate) {
+    for (auto* asset : candidate.assets) impl_->RetainAsset(*asset);
+    switch (candidate.kind) {
+      case 1: return daw_audio_core_configure_synth(target_core, candidate.node_id, &candidate.synth);
+      case 4: return daw_audio_core_configure_granular(target_core, candidate.node_id, &candidate.granular);
+      default: return daw_audio_core_configure_sampler(target_core, candidate.node_id, &candidate.sampler,
+        candidate.sampler.zone_count == 0 ? nullptr : candidate.zones.data());
+    }
+  };
+  daw_audio_core_result committed = DAW_AUDIO_CORE_OK;
+  for (const auto& candidate : batch) {
+    committed = configure_candidate(candidate);
+    if (committed != DAW_AUDIO_CORE_OK) break;
+  }
+  if (committed != DAW_AUDIO_CORE_OK) {
+    record_core_failure(committed);
     // Valid states can still exhaust prepared runtime/blend capacity. Cancel the
     // entire unpublished bank before unlocking newly acquired sample memory.
     if (impl_->prepared_core != 0) {

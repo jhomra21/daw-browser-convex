@@ -140,7 +140,7 @@ export const receiptHandle = (receipt: Receipt): ReceiptHandle => ({ key: receip
 // is sent again from the completion of its refusal, then at an event (an adoption, a domain end). A state patch is
 // the same record with no native sequence: it settles by its status, by its claim's resolution, by a publication that
 // carries it, or by a newer one.
-export type Execution = {
+type ExecutionBase = {
   // Processor or synth instance id.
   key: string
   editId: string
@@ -158,8 +158,6 @@ export type Execution = {
   // Which dispatch of the record this is: new at each register, rebind and patch dispatch, so a caller can tell
   // whether the record was dispatched again while it waited, even on an unchanged revision.
   attempt: number
-  // The urgent lane's proof sequence is the last event's, allocated when the events are sent.
-  strategy: { kind: "parameters" } | { kind: "urgent"; sequence: number } | { kind: "patch" }
   // False until the controller hands the batch to the bridge. Nothing native reports can be about a batch
   // that was never sent: a later note or batch may already have lifted the lane's floor past its sequence.
   sent: boolean
@@ -175,18 +173,26 @@ export type Execution = {
   retried?: true
   uncertain?: true
   laddered?: true
-  // Patch only: the submitted desired, and the newest content `nextPatch` found for it, which is what is sent.
-  desired?: ProcessorDesired
-  materialized?: ProcessorDesired
-  // Patch only: native claimed it and its resolution has not been reported.
-  claimed?: true
   // A refused batch a state install satisfied: its values are in force, but no parameter batch proved them.
   installed?: true
-  // Patch only: native refused it for an operation this controller has outstanding; that operation's end offers it again.
-  held?: true
-  // Patch only: the registry edit it was queued for, which says whether the target was retired before it was sent.
+}
+
+// A batch of parameter values. The urgent lane's proof sequence is the last event's, allocated when the events are sent.
+export type DispatchExecution = ExecutionBase & { strategy: { kind: "parameters" } | { kind: "urgent"; sequence: number } }
+
+export type PatchExecution = ExecutionBase & {
+  strategy: { kind: "patch" }
+  // The submitted desired, and the newest content `nextPatch` found for it, which is what is sent.
+  desired: ProcessorDesired
+  materialized?: ProcessorDesired
+  // "claimed": native claimed it and its resolution has not been reported. "held": native refused it for an operation
+  // this controller has outstanding; that operation's end offers it again.
+  claim: "none" | "claimed" | "held"
+  // The registry edit it was queued for, which says whether the target was retired before it was sent.
   edit?: LiveProcessorEditIdentity
 }
+
+export type Execution = DispatchExecution | PatchExecution
 
 // Executions of one target. It lives from its first dispatch until a
 // publication no longer carries the instance with the same kind, or `clear()`:
@@ -201,16 +207,16 @@ type TargetExecutions = {
   installedIncarnation?: number
   instrument?: AudioCoreSynthState
   kindId?: number
-  latest?: Execution
+  latest?: DispatchExecution
   // The latest dispatch carrying each parameter. A gesture's previews each send only the fields they
   // changed, so the flush that ends it covers fields an earlier preview's dispatch carried.
-  carriers: Map<string, Execution>
-  inflight: Map<number, Execution>
+  carriers: Map<string, DispatchExecution>
+  inflight: Map<number, DispatchExecution>
   // Refused batches: kept for the next recovery offer (an adoption, a domain end, a newer delivery).
-  refused: Set<Execution>
+  refused: Set<DispatchExecution>
   // The patch last dispatched (sent, claimed or refused) and the one waiting behind it.
-  patch?: Execution
-  queuedPatch?: Execution
+  patch?: PatchExecution
+  queuedPatch?: PatchExecution
   // The gesture that owns native for this target until its closing delivery.
   gesture?: string
   gestureIncarnation?: number
@@ -252,13 +258,13 @@ export type InstalledContent = {
 export type ExecutionRetention = (key: string, parameterIds: Iterable<string>) => boolean
 
 // Desired content to dispatch, a dispatch to repeat on the current publication, or a patch the ledger queued.
-export type ProcessorReconcile = { desired: ProcessorDesired; values: ReadonlyMap<string, number> } | { resend: Execution } | { patch: Execution }
+export type ProcessorReconcile = { desired: ProcessorDesired; values: ReadonlyMap<string, number> } | { resend: DispatchExecution } | { patch: PatchExecution }
 
 // The host-wide fence on the patch lane (design 2.4.6). Native holds at most one claim, and a patch or a prepare sent
 // meanwhile is refused, so nothing is sent for any target until the claim's resolution is reported.
 export type PatchFence =
   | { kind: "open" }
-  | { kind: "claimed"; token: bigint; carrier?: Execution }
+  | { kind: "claimed"; token: bigint; carrier?: PatchExecution }
   | { kind: "uncertain"; target: string; resends: 0 | 1 }
 
 // The typed answer to one patch send. `transient`: the refusal names an operation the controller has outstanding
@@ -292,7 +298,7 @@ export type DeliverInput = {
 export type DeliveryPlan =
   | { carrier: "none" | "publication" }
   | { carrier: "parameters" | "urgent"; values: ReadonlyMap<string, number> }
-  | { carrier: "patch"; execution: Execution }
+  | { carrier: "patch"; execution: PatchExecution }
 export type Delivery = { receipt: Receipt; plan: DeliveryPlan }
 
 // What an incident reports once: the category of its first failure and how many targets it holds then.
@@ -369,11 +375,22 @@ const sameContext = (left: AdoptionIntent, right: AdoptionIntent) => left.contex
   && left.context.externalProcessor === right.context.externalProcessor
 const sameIntent = (left: AdoptionIntent, right: AdoptionIntent) => left.key === right.key && sameContext(left, right)
 
+// A patch whose content a publication carries, but whose overrides native still holds differently, continues as a
+// parameter batch. It stays the same record: its requests and the controller's reference follow it, and it keeps its
+// patch content.
+const demoteToParameters = (execution: PatchExecution): DispatchExecution => {
+  const strategy: DispatchExecution["strategy"] = { kind: "parameters" }
+  return Object.assign(execution, { strategy })
+}
+
+const isDispatch = (execution: Execution): execution is DispatchExecution => execution.strategy.kind !== "patch"
+
 const inFlight = (execution: Execution) => execution.state === "queued" || execution.state === "admitted"
 const unsettled = (execution: Execution) => inFlight(execution) || execution.state === "refused"
 // An applied patch stands at the order of the content it installed, which may be a newer edit's than the one it was
 // queued for; the record keeps its own order for identity.
-const appliedOrder = (execution: Execution) => execution.materialized?.order ?? execution.order
+// A patch demoted to a parameter batch keeps its materialized content, so the key test is `in`, not the strategy.
+const appliedOrder = (execution: Execution) => ("materialized" in execution ? execution.materialized?.order : undefined) ?? execution.order
 
 // Execution intent, keyed by processor or synth instance. A processor's desired
 // ends with its incarnation: nothing older than the current one can write or survive.
@@ -563,7 +580,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     const target = targets.get(execution.key)
     if (target) {
       const flying = target.inflight.get(execution.sequence) === execution
-      const held = flying || target.refused.delete(execution) || target.patch === execution || target.queuedPatch === execution
+      const held = flying || isDispatch(execution) && target.refused.delete(execution) || target.patch === execution || target.queuedPatch === execution
       if (flying) {
         leaveFlight(target, execution)
         if (state === "applied") {
@@ -587,7 +604,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
   }
   // A batch a publication dropped or an attempt that is not one (a transient refusal): it stays desired and is sent
   // again at the next recovery offer, with its attempts untouched.
-  const keep = (target: TargetExecutions, execution: Execution) => {
+  const keep = (target: TargetExecutions, execution: DispatchExecution) => {
     leaveFlight(target, execution)
     execution.state = "refused"
     target.refused.add(execution)
@@ -602,7 +619,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     }))
   }
   // A refused batch is sent again for what it still carries; none left, it is superseded.
-  const resendable = (target: TargetExecutions, execution: Execution): ProcessorReconcile[] => {
+  const resendable = (target: TargetExecutions, execution: DispatchExecution): ProcessorReconcile[] => {
     const carried = carriedValues(target, execution)
     if (carried.size === 0) {
       settle(execution, "cancelled")
@@ -612,7 +629,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     return [{ resend: execution }]
   }
   const recoverFollowers = (target: TargetExecutions) => {
-    const recovered: Execution[] = []
+    const recovered: DispatchExecution[] = []
     target.deferredFollowers = undefined
     for (const receipt of target.receipts) {
       const desired = entries.get(receipt.key)?.desired
@@ -628,7 +645,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
       const order = receipt.edit ? Math.max(receipt.order, desired?.order ?? -1, delivered.get(receipt.key)?.order ?? -1) : -1
       const edit = receipt.edit && (desired?.order === order ? desired : delivered.get(receipt.key)?.edit ?? receipt.edit)
       const content = edit?.content.params ? { ...edit.content, params: edit.content.params } : undefined
-      const execution: Execution = { key: receipt.key, editId: edit?.id ?? receipt.key, order,
+      const execution: DispatchExecution = { key: receipt.key, editId: edit?.id ?? receipt.key, order,
         kindId: SYNTH_KIND_ID, epoch: 0, revision: 0, sequence: 0, attempt: ++attempts, sent: false,
         strategy: { kind: "urgent", sequence: 0 }, values: new Map(Object.entries(spec.values)),
         state: "refused", spec, contentKey: contentKeyOf(spec),
@@ -645,7 +662,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
   // native refused over: a stale stamp, a prepared core). Each refused batch is offered once per such event.
   const reoffer = () => [...targets.values()].flatMap((target) => {
     target.exhausted = undefined
-    if (target.queuedPatch) target.queuedPatch.held = undefined
+    if (target.queuedPatch?.claim === "held") target.queuedPatch.claim = "none"
     recoverFollowers(target)
     return [...target.refused].flatMap((execution) => resendable(target, execution))
   })
@@ -782,7 +799,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
 
   // A patch of this desired, queued behind the one in flight. Requests for the same content are attempts of one
   // record; older content it replaces keeps its requests unanswered until this one is dispatched or proven.
-  const queuePatch = (desired: ProcessorDesired, receipts: readonly Receipt[], edit?: LiveProcessorEditIdentity): Execution => {
+  const queuePatch = (desired: ProcessorDesired, receipts: readonly Receipt[], edit?: LiveProcessorEditIdentity): PatchExecution => {
     const key = desired.target.instanceId
     const target = targetFor(key, desired.target.kindId)
     const spec = processorContentSpec(desired.content)
@@ -790,9 +807,9 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     const replaced = target.queuedPatch
     const linked = [...new Set([...receipts, ...replaced?.contentKey === contentKey ? replaced.receipts : []])]
     if (replaced) settle(replaced, "cancelled")
-    const execution: Execution = { key, editId: desired.id, order: desired.order, kindId: desired.target.kindId,
+    const execution: PatchExecution = { key, editId: desired.id, order: desired.order, kindId: desired.target.kindId,
       epoch: 0, revision: 0, sequence: 0, attempt: ++attempts, strategy: { kind: "patch" }, sent: false,
-      values: new Map(Object.entries(desired.content.values ?? {})), state: "queued", desired, spec, contentKey, receipts: linked,
+      values: new Map(Object.entries(desired.content.values ?? {})), state: "queued", desired, claim: "none", spec, contentKey, receipts: linked,
       ...(edit && { edit }) }
     target.queuedPatch = execution
     for (const receipt of linked) receipt.carrier = execution
@@ -895,8 +912,8 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     includedOrder: number,
     matchesPublished: (desired: ProcessorDesired) => boolean,
     outcome: "applied" | "refused" | "unconfirmed" | "unavailable" = "applied",
-  ): Execution[] => {
-    const settled: Execution[] = []
+  ): PatchExecution[] => {
+    const settled: PatchExecution[] = []
     for (const target of targets.values()) for (const execution of [target.queuedPatch, target.patch]) {
       const desired = execution?.desired
       if (!execution || !desired || !unsettled(execution) || !(desired.order < includedOrder
@@ -920,7 +937,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
           target.queuedPatch = undefined
           target.patch = execution
         }
-        delete execution.claimed
+        if (execution.claim === "claimed") execution.claim = "none"
         if (outcome === "unavailable") {
           settle(execution, "cancelled", false)
           for (const receipt of execution.receipts) answerReceipt(receipt, { state: "unavailable" })
@@ -944,13 +961,11 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
   // Values the installed state carries are in force. Carriers of older edits that held different ones are gone
   // with the overrides the install zeroed; a newer dispatch lands after the install and keeps its own.
   // A refused batch whose every value the install carries is in force with it, so it needs no further offer.
-  const installed = (target: TargetExecutions, execution: Execution) => {
+  const installed = (target: TargetExecutions, execution: PatchExecution) => {
     const order = appliedOrder(execution)
     const state = execution.materialized ?? execution.desired
-    if (state) {
-      target.state = bytesText(state.content.state)
-      target.installedTiming = state.content.timing
-    }
+    target.state = bytesText(state.content.state)
+    target.installedTiming = state.content.timing
     target.installedValues = new Map(execution.values)
     // The install zeroed every override of an older edit, whether or not it names the field.
     for (const id of target.live.keys()) if ((target.liveOrder.get(id) ?? -1) <= order) {
@@ -990,7 +1005,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     for (const target of targets.values()) target.exhausted = undefined
     const target = carrier && targets.get(carrier.key)
     if (carrier && target && target.patch === carrier && unsettled(carrier)) {
-      delete carrier.claimed
+      if (carrier.claim === "claimed") carrier.claim = "none"
       if (result === 0) {
         installed(target, carrier)
         settle(carrier, "applied")
@@ -1311,14 +1326,14 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     // Must run in the turn that sends it. `prepare` returns the content to send, timed for now, or undefined to leave
     // the target's patch queued. While a claim is unresolved nothing is sent; after a lost reply, only the target's
     // one recovery resend.
-    nextPatch: (prepare: (desired: ProcessorDesired) => ProcessorDesired | undefined): { execution: Execution; desired: ProcessorDesired } | undefined => {
+    nextPatch: (prepare: (desired: ProcessorDesired) => ProcessorDesired | undefined): { execution: PatchExecution; desired: ProcessorDesired } | undefined => {
       for (const [key, target] of targets) {
         const execution = target.queuedPatch
         const submitted = execution?.desired
         // Native applies a staged patch before draining queued parameter batches in the callback.
         // An earlier admitted batch could therefore overwrite this newer state. Its progress/refusal
         // is the event that permits this target's patch; an ACK alone cannot release it.
-        if (!execution || !submitted || execution.held || !fenceAllows(key) || target.inflight.size > 0) continue
+        if (!execution || !submitted || execution.claim === "held" || !fenceAllows(key) || target.inflight.size > 0) continue
         const ledger = entries.get(key)?.desired
         const latest = target.latest
         if (ledger && !sameIncarnation(ledger.target, submitted.target)) {
@@ -1360,7 +1375,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     },
     // The typed reply to a dispatched patch (design 2.4.6). Only a reply for the carrier the ledger still holds moves
     // the fence: after `clear` a late reply for a disposed carrier changes nothing.
-    patchReplied: (execution: Execution, reply: PatchReply): ProcessorReconcile[] => {
+    patchReplied: (execution: PatchExecution, reply: PatchReply): ProcessorReconcile[] => {
       const target = targets.get(execution.key)
       if (!target || target.patch !== execution || !unsettled(execution)) return []
       const resend = fence.kind === "uncertain" && fence.target === execution.key
@@ -1377,7 +1392,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
         prove(execution)
         if (resend) setFence({ kind: "open" })
       } else if (reply.kind === "claimed") {
-        execution.claimed = true
+        execution.claim = "claimed"
         for (const id of execution.values.keys()) target.live.set(id, undefined)
         setFence({ kind: "claimed", token: reply.token, carrier: execution })
         opened = resolveClaim()
@@ -1388,7 +1403,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
         opened = resolveClaim()
       } else if (reply.kind === "refused" && reply.transient) {
         requeue(resend ? { kind: "uncertain", target: execution.key, resends: 0 } : fence)
-        execution.held = true
+        execution.claim = "held"
       } else if (reply.kind === "refused" && reply.refusal === "not-claimed" && !execution.retried) {
         execution.retried = true
         finishAttempt(execution, "definite-refusal")
@@ -1444,7 +1459,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
       : Promise.resolve(),
     // A patch that was never sent returns its desired to the applied baseline, unless a newer submission already
     // replaced it.
-    abandon: (execution: Execution, outcome: ProcessorDeliveryOutcome = { state: "unavailable" }): ProcessorReconcile[] => {
+    abandon: (execution: PatchExecution, outcome: ProcessorDeliveryOutcome = { state: "unavailable" }): ProcessorReconcile[] => {
       const desired = execution.desired
       const entry = desired && entries.get(desired.target.instanceId)
       if (entry && entry.desired === desired) {
@@ -1487,12 +1502,12 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     settledReconciles,
     // Registered when the sequence is allocated, before the bridge call.
     register: (
-      input: Pick<Execution, "key" | "editId" | "order" | "kindId" | "sequence" | "strategy" | "values" | "content"> & Partial<Pick<Execution, "spec" | "receipts">>,
-      binding: Pick<Execution, "epoch" | "revision">,
-    ): Execution => {
+      input: Pick<DispatchExecution, "key" | "editId" | "order" | "kindId" | "sequence" | "strategy" | "values" | "content"> & Partial<Pick<DispatchExecution, "spec" | "receipts">>,
+      binding: Pick<DispatchExecution, "epoch" | "revision">,
+    ): DispatchExecution => {
       const target = targetFor(input.key, input.kindId)
       const spec = input.spec ?? processorContentSpec({ values: Object.fromEntries(input.values) })
-      const execution: Execution = { ...input, ...binding, attempt: ++attempts, sent: false, state: "queued", spec,
+      const execution: DispatchExecution = { ...input, ...binding, attempt: ++attempts, sent: false, state: "queued", spec,
         contentKey: contentKeyOf(spec), receipts: input.receipts ? [...input.receipts] : [...target.receipts].filter((receipt) => receipt.contentKey === contentKeyOf(spec)) }
       target.inflight.set(execution.sequence, execution)
       target.latest = execution
@@ -1502,7 +1517,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     },
     // A batch sent before a publication is dispatched again on its successor: a new sequence and binding, the
     // same record, so whoever waits for it follows it.
-    rebind: (execution: Execution, binding: Pick<Execution, "epoch" | "revision">, sequence: number) => {
+    rebind: (execution: DispatchExecution, binding: Pick<DispatchExecution, "epoch" | "revision">, sequence: number) => {
       const target = targets.get(execution.key)
       if (target?.inflight.get(execution.sequence) === execution) target.inflight.delete(execution.sequence)
       target?.refused.delete(execution)
@@ -1513,7 +1528,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     // The controller is about to hand the batch to the bridge, in this synchronous turn: from here native
     // progress can prove it. Its sequences are allocated in send order, so a floor reached by anything sent
     // earlier is below them. False if the record was settled while the send waited.
-    send: (execution: Execution, sequence: number, urgentSequence?: number) => {
+    send: (execution: DispatchExecution, sequence: number, urgentSequence?: number) => {
       if (!inFlight(execution)) return false
       const target = targets.get(execution.key)
       if (target?.inflight.get(execution.sequence) === execution && execution.sequence !== sequence) {
@@ -1531,7 +1546,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
       return true
     },
     // The queue ACK. Native may already have applied it: a progress frame can precede the reply.
-    admit: (execution: Execution) => {
+    admit: (execution: DispatchExecution) => {
       if (execution.state === "queued") execution.state = "admitted"
     },
     // The controller learned the batch never reached native: nothing was delivered, so nothing is owed.
@@ -1562,7 +1577,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
       if (progress.progressSequence < lastProgress) return []
       lastProgress = progress.progressSequence
       decide(progress.revision)
-      const redispatch: Execution[] = []
+      const redispatch: DispatchExecution[] = []
       const proven: Execution[] = []
       for (const key of active) for (const execution of targets.get(key)?.inflight.values() ?? []) {
         const parameters = execution.strategy.kind === "parameters"
@@ -1595,7 +1610,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
       for (const target of targets.values()) {
         recoverFollowers(target)
         target.exhausted = undefined
-        if (target.queuedPatch) target.queuedPatch.held = undefined
+        if (target.queuedPatch?.claim === "held") target.queuedPatch.claim = "none"
         for (const execution of target.inflight.values()) if (!execution.sent) execution.epoch = epoch
         for (const execution of target.refused) {
           target.refused.delete(execution)
@@ -1728,7 +1743,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
         const desired = entries.get(key)?.desired
         return order >= 0 && (order < includedOrder || (order === includedOrder && desired?.order === order && matchesPublished(desired)))
       }
-      const resends: Execution[] = []
+      const resends: DispatchExecution[] = []
       for (const [key, target] of targets) {
         const kindId = kinds.get(key)
         const pendingJoin = [...target.receipts].some((receipt) => receipt.join && receipt.answered === undefined)
@@ -1767,15 +1782,15 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
       // Graph bytes do not erase a retained native override. A captured patch
       // whose live values differ still owes an absolute successor dispatch.
       for (const target of targets.values()) for (const execution of [target.patch, target.queuedPatch]) {
-        if (!execution?.desired || !unsettled(execution) || !matchesPublished(execution.desired)
+        if (!execution || !unsettled(execution) || !matchesPublished(execution.desired)
           || ![...execution.values].some(([id, value]) => target.live.has(id) && target.live.get(id) !== value)) continue
         if (target.patch === execution) target.patch = undefined
         if (target.queuedPatch === execution) target.queuedPatch = undefined
-        execution.strategy = { kind: "parameters" }
-        execution.state = "refused"
-        target.refused.add(execution)
-        target.latest = execution
-        for (const id of execution.values.keys()) target.carriers.set(id, execution)
+        const batch = demoteToParameters(execution)
+        batch.state = "refused"
+        target.refused.add(batch)
+        target.latest = batch
+        for (const id of batch.values.keys()) target.carriers.set(id, batch)
       }
       const replays = resends.map((execution): ProcessorReconcile => {
         const target = targets.get(execution.key)

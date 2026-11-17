@@ -96,9 +96,10 @@ import {
   type AdoptionIntent,
   type AdoptionOutcome,
   type AdoptionStart,
-  type Execution,
+  type DispatchExecution,
   type ExecutionRetention,
   type InstalledContent,
+  type PatchExecution,
   type PatchReply,
   type ProcessorReconcile,
   type ProcessorDesired,
@@ -3068,7 +3069,7 @@ export const createNativePlaybackController = (input: {
     sequence?: number
     // The registered record of this send. Its sequences are allocated, and it becomes provable, only when
     // the batch is handed to the bridge.
-    execution?: Execution
+    execution?: DispatchExecution
   }): Promise<ParameterReply> => {
     const bridge = input.bridge
     if (!bridge) return { ok: false, kind: "not-sent", reason: "unavailable" }
@@ -3145,12 +3146,12 @@ export const createNativePlaybackController = (input: {
   // A prepare, a publication or a staged candidate this controller has outstanding names the event that offers a send
   // native refused over it again; with none, the refusal is definite.
   const outstandingOperation = () => processorState.compiling() || processorState.adoptionRunning()
-  const resendRequest = (execution: Execution): LiveProcessorControlRequest => ({
+  const resendRequest = (execution: DispatchExecution): LiveProcessorControlRequest => ({
     instanceId: execution.key,
     values: [...execution.values].map(([parameterId, value]) => ({ parameterId, value })),
   })
   // The completion of a refused send acts on the ledger's answer in the same turn (design 1.6): no timer, no frame.
-  const parameterFailed = (execution: Execution, failure: ParameterFailure, reconciling: boolean) => {
+  const parameterFailed = (execution: DispatchExecution, failure: ParameterFailure, reconciling: boolean) => {
     if (failure.kind === "refused" || failure.kind === "unconfirmed") {
       const kind = failure.kind === "unconfirmed" ? "uncertain" : outstandingOperation() ? "transient" : "definite"
       const action = processorState.refuse(execution, kind)
@@ -3170,7 +3171,7 @@ export const createNativePlaybackController = (input: {
   // The requests it answers are the record's receipts, never this function's result.
   const sendExecution = async (
     request: LiveProcessorControlRequest & { receipt?: Receipt } & (
-      { edit: LiveProcessorEditIdentity; resent?: never } | { resent: Execution }
+      { edit: LiveProcessorEditIdentity; resent?: never } | { resent: DispatchExecution }
     ),
     reconciling = false,
   ): Promise<number | undefined> => {
@@ -3187,7 +3188,7 @@ export const createNativePlaybackController = (input: {
     // An instrument's events take consecutive urgent sequences when they are built.
     const urgent = synthNodes(preparedSnapshot).has(request.instanceId)
     const binding = { epoch, revision }
-    let execution: Execution | undefined
+    let execution: DispatchExecution | undefined
     if (request.resent) {
       execution = request.resent
       processorState.rebind(execution, binding, sequence)
@@ -4770,7 +4771,7 @@ export const createNativePlaybackController = (input: {
       }
     }
   }
-  const runBuiltInStatePatch = async ({ execution, desired: materialized }: { execution: Execution; desired: ProcessorDesired }) => {
+  const runBuiltInStatePatch = async ({ execution, desired: materialized }: { execution: PatchExecution; desired: ProcessorDesired }) => {
     // A patch that was never sent: its requests are answered and the ledger takes its desired back.
     const unsent = (outcome?: ProcessorDeliveryOutcome) => executeReconcile(processorState.abandon(execution, outcome))
     const bridge = input.bridge

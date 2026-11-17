@@ -28,7 +28,7 @@ import {
 import {
   createNativeProcessorStateOwner,
   type Delivery,
-  type Execution,
+  type DispatchExecution,
   type PatchReply,
   type ProcessorDesired,
 } from "../../src/lib/desktop/native-processor-state-owner"
@@ -96,7 +96,7 @@ const deliverValue = (ledger: Owner, key: string, id: string, order: number, val
     ...(desired && { desired: { ...desiredFor(key, id, order, value), content: { state: bytes(0), params: { gain: value }, values: { [gain]: value } } } }),
   })
 // What the controller does with a parameters/urgent plan: register the record, then hand it to the bridge.
-const dispatch = (ledger: Owner, delivery: Delivery, sequence: number, urgent = false): Execution => {
+const dispatch = (ledger: Owner, delivery: Delivery, sequence: number, urgent = false): DispatchExecution => {
   const { plan, receipt } = delivery
   if (plan.carrier !== "parameters" && plan.carrier !== "urgent") throw new Error(`plan was ${plan.carrier}`)
   const execution = ledger.register({
@@ -107,7 +107,7 @@ const dispatch = (ledger: Owner, delivery: Delivery, sequence: number, urgent = 
   ledger.admit(execution)
   return execution
 }
-const redispatch = (ledger: Owner, execution: Execution, sequence: number, urgent = false) => {
+const redispatch = (ledger: Owner, execution: DispatchExecution, sequence: number, urgent = false) => {
   ledger.rebind(execution, { epoch: 1, revision: 1 }, sequence)
   ledger.send(execution, sequence, urgent ? sequence : undefined)
   ledger.admit(execution)

@@ -1,5 +1,5 @@
 import { createNativePlaybackController } from "../../src/lib/desktop/native-playback-controller"
-import { createNativeProcessorStateOwner, projectedProcessorDesired, timedProcessorDesired, type AdoptionIntent, type Execution, type ProcessorDesired } from "../../src/lib/desktop/native-processor-state-owner"
+import { createNativeProcessorStateOwner, projectedProcessorDesired, timedProcessorDesired, type AdoptionIntent, type Execution, type PatchExecution, type ProcessorDesired } from "../../src/lib/desktop/native-processor-state-owner"
 import { getEffectTiming } from "@daw-browser/audio-engine/effects/timing"
 import { compileLivePlaybackSnapshot, type LivePlaybackSnapshotInput } from "../../src/lib/live-playback-snapshot"
 import { compileLiveNativeProjection } from "@daw-browser/audio-engine/live-native-projection"
@@ -32,7 +32,7 @@ const ownerPatch = (owner: ReturnType<typeof createNativeProcessorStateOwner>, d
     state: desired.content.state, values: desired.content.values ?? {}, desired })
   return plan.carrier === "patch" ? plan.execution : { superseded: true as const }
 }
-const ownerPatchReplied = (owner: ReturnType<typeof createNativeProcessorStateOwner>, execution: Execution, outcome: "applied" | "claimed") =>
+const ownerPatchReplied = (owner: ReturnType<typeof createNativeProcessorStateOwner>, execution: PatchExecution, outcome: "applied" | "claimed") =>
   owner.patchReplied(execution, outcome === "applied" ? { kind: "applied" } : { kind: "claimed", token: 1n })
 const synthInstanceId = "synth:1"
 // Cutoff is the synth parameter the instrument-urgent witness edits (synthParameterRegistry target 3).

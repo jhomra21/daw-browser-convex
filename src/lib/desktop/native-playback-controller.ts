@@ -24,7 +24,7 @@ import {
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
 import { compilePortableSynthState } from "@daw-browser/audio-engine/mixer/graph-contract"
 import { resolveLiveMixerGraph } from "@daw-browser/audio-engine/live-mixer-runtime"
-import type { NativeRevisionReply, NativeRevisionSession } from "@daw-browser/desktop-protocol/native-revision"
+import type { NativeRevisionReply } from "@daw-browser/desktop-protocol/native-revision"
 import { type AudioPcmSourceDescriptor, type TrackInstrumentParams, parseExternalAutomationParameterId, parseJsonValue } from "@daw-browser/shared"
 import { createAudioEffectParameterPayload } from "~/components/timeline/audio-effect-parameter-payload"
 import { captureNativeBuiltInParameterValues, encodeNativeBuiltInStateCommit, nativeBuiltInPatchTiming } from "./native-built-in-parameter-mapper"
@@ -95,7 +95,6 @@ import {
   type AdoptionFields,
   type AdoptionIntent,
   type AdoptionOutcome,
-  type Inspection,
   type AdoptionStart,
   type DispatchExecution,
   type ExecutionRetention,
@@ -108,11 +107,16 @@ import {
   type RetirementObligation,
   receiptHandle,
 } from "./native-processor-state-owner"
+import {
+  createPublicationTransaction,
+  type InstrumentAssetHold,
+  type NativeSessionReply,
+  type PublicationTransaction,
+} from "./native-publication-transaction"
 import { createNativeTimelinePageManager, nativeTimelinePageStagingBytes, type NativeTimelinePageManager, type NativeTimelineSource } from "./native-timeline-page-manager"
 import { createSampledInstrumentRegionBudget, type SampledInstrumentRegionBudget, type SampledInstrumentRegionBudgetScope } from "~/lib/sampled-instrument-region-budget"
 import type { NativeInstrumentPreparation } from "./native-instrument-budget-policy"
 
-type NativeSessionReply = { ok: true } | { ok: false; error: string }
 type NativePreviewAttempt = { orphanedAssetIds?: readonly number[] }
 
 export type NativeLiveMidiNoteHandle = {
@@ -463,7 +467,6 @@ const nativeSnapshotSupportError = (snapshot: LivePlaybackSnapshot): string | un
 
 // The host locks sample memory in whole pages.
 const pageRoundedBytes = (bytes: number) => Math.ceil(bytes / 16_384) * 16_384
-type InstrumentAssetHold = { bytes: number; scope: SampledInstrumentRegionBudgetScope }
 
 const validateInstrumentAssetBudget = (
   assets: readonly AudioCoreGraphSnapshot["assets"][number][],
@@ -3555,23 +3558,8 @@ export const createNativePlaybackController = (input: {
       const generation = lifecycleGeneration
       const projectGeneration = resolveProjectGeneration()
       const publicationEpoch = transportEpoch
-      let staged: NativeScheduleCoordinator | undefined
-      let adoptPublication: ((reply: NativeRevisionReply, acknowledgedEpoch?: number) => boolean) | undefined
-      let discardAddedSources: (() => Promise<void>) | undefined
-      let stagedMemoryScope: SampledInstrumentRegionBudgetScope | undefined
-      let stagedHolds = new Map<number, InstrumentAssetHold>()
-      let resourcesPromoted = false
-      let retainCandidate = false
-      let preparedRevision: number | undefined
       const pageManager = nativeTimelinePageManager
       let removedAssetIds: readonly number[] = []
-      let binding: Parameters<NativeRevisionSession["publish"]>[0] | undefined
-      let sequence = 0
-      let progressVersion = 0
-      let lastProgressSequence = -1n
-      let wake: (() => void) | undefined
-      let detached = false
-      let resolving = false
       const merged = candidate ? rebaseScheduleCandidate(candidate) : captureLatencyInputs()
       let snapshot = candidate?.snapshot ?? previous
       let graph = structuredClone(merged.graph)
@@ -3579,62 +3567,23 @@ export const createNativePlaybackController = (input: {
       let capturedInputVersion = latencyInputVersion
       const record = processorState.capturePublication(attempt,
         publicationContent(graph, snapshot, merged.ledger, candidate?.instrumentIncarnations))
-      const retry = () => record.resubmitted()
-      const notify = () => {
-        sequence++; wake?.(); wake = undefined
-        record.wakeTransport()
-        if (detached && record.phase !== "ended" && !resolving) {
-          resolving = true
-          void queuePreparedTransportTransition(async () => {
-            try { await resolvePublication() } finally { resolving = false }
-          })
-        }
-      }
-      const publicationAbort = new AbortController()
-      const cancel = () => {
-        record.cancel()
-        publicationAbort.abort(new NativePlaybackAbortError("ownership-invalidated"))
-        staged?.abortPreparation()
-        notify()
-      }
-      record.onWake(() => { if (record.cancelled) cancel(); else notify() })
-      let publishSent = false
-      let publishReply: NativeRevisionReply | undefined
-      let publishCompletion: Promise<void> = Promise.resolve()
-      const cancelUnclaimed = () => {
-        if (publishSent) return false
-        cancel()
-        return true
-      }
-      if (attempt) attempt.withdrawPublication = cancelUnclaimed
-      const current = () => generation === lifecycleGeneration && projectGeneration === resolveProjectGeneration()
-        && projectId === input.getProjectId?.() && coordinator === scheduleCoordinator && prepared
-      // Epoch coordinators increment nativeSessionGeneration. Only lifecycle invalidation
-      // ends this session; renderer generation changes still owe proof for a sent bank.
-      const sessionAlive = () => generation === lifecycleGeneration && prepared && !hasNativeHostConnectionLoss()
-        && preparedProjectId === projectId && record.phase !== "ended"
-      record.onProgress((progress) => {
-        if (progress.epoch !== transportEpoch || progress.progressSequence <= lastProgressSequence) return
-        lastProgressSequence = progress.progressSequence
-        progressVersion++
-        notify()
-      })
-      const waitForOpportunity = async (observed: number) => {
-        if (sequence === observed && sessionAlive() && current() && !record.cancelled)
-          await relinquish(record, resume => { wake = resume })
-        if (!current() || record.cancelled || !sessionAlive()) throw new NativePlaybackAbortError("ownership-invalidated")
-      }
-      const withoutLane = async <Value>(operation: Promise<Value>): Promise<Value> => {
-        let settled: { value: Value } | { error: Error } | undefined
-        const result = operation.then(value => { settled = { value } }, error => {
-          settled = { error: error instanceof Error ? error : new Error(String(error)) }
-        })
-        await Promise.resolve()
-        if (!settled) await relinquish(record, resume => { void result.then(resume) })
-        if (!settled) throw new Error("Publication reply resumed before it settled.")
-        if ("error" in settled) throw settled.error
-        return settled.value
-      }
+      const tx: PublicationTransaction = createPublicationTransaction({
+        record, attempt, candidate, revisions, coordinator, previousRevision: previousGraph.revision, paused, processorState,
+        current: () => generation === lifecycleGeneration && projectGeneration === resolveProjectGeneration()
+          && projectId === input.getProjectId?.() && coordinator === scheduleCoordinator && prepared,
+        // Epoch coordinators increment nativeSessionGeneration. Only lifecycle invalidation
+        // ends this session; renderer generation changes still owe proof for a sent bank.
+        owned: () => generation === lifecycleGeneration && prepared && !hasNativeHostConnectionLoss()
+          && preparedProjectId === projectId,
+        transportEpoch: () => transportEpoch,
+        runNextStatePatch,
+        queueTransition: queuePreparedTransportTransition,
+        releaseInstrumentScope,
+        logFailedAdoption,
+      }, relinquish)
+      const { current, sessionAlive, retry, notify, waitForOpportunity, withoutLane, quietPublicationLane, disposePublication,
+        finish, inspect, classifyPublication, resolvePublication } = tx
+      const publicationAbort = tx.abort
       // The renderer's bound on how old a prepare reply's progress is: the request's send to the reply's receipt. It also spans the
       // host's work before it sampled that progress, so it never understates the age.
       let prepareAgeMs = 0
@@ -3643,14 +3592,6 @@ export const createNativePlaybackController = (input: {
         const reply = await withoutLane(revisions.prepare(request))
         prepareAgeMs = performance.now() - sentAt
         return reply
-      }
-      const quietPublicationLane = async () => {
-        while (processorState.fence().kind === "uncertain" && await runNextStatePatch()) continue
-        if (processorState.fence().kind === "claimed") {
-          const released = processorState.released()
-          await relinquish(record, resume => { void released.then(resume); wake = resume })
-        }
-        if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
       }
       const awaitPreparation = async <Value>(operation: Promise<Value>): Promise<Value> => {
         const signal = publicationAbort.signal
@@ -3671,120 +3612,6 @@ export const createNativePlaybackController = (input: {
         if (!Number.isSafeInteger(frame)) throw new Error("Native publication frame exceeds renderer precision.")
         return frame
       }
-      let disposition: Promise<void> | undefined
-      const disposePublication = () => disposition ??= (async () => {
-        // A published paused edit has already disposed the coordinator, so this only revives one native never replaced.
-        if (paused) coordinator.resumeGraphPublication(previousGraph.revision)
-        staged?.dispose()
-        if (!resourcesPromoted) {
-          await discardAddedSources?.()
-          releaseInstrumentScope(stagedMemoryScope)
-          for (const { scope } of stagedHolds.values()) releaseInstrumentScope(scope)
-          if (!retainCandidate) await candidate?.dispose()
-          if (preparedRevision !== undefined) processorState.unprepared(preparedRevision)
-        }
-      })()
-      const finish = async (outcome: AdoptionOutcome, evidence: Parameters<typeof processorState.finishPublication>[2],
-        reason?: Parameters<typeof processorState.finishPublication>[3]) => {
-        await disposePublication()
-        if (outcome.status === "failed" && record.kind === "schedule") logFailedAdoption(outcome.reason)
-        processorState.finishPublication(record,
-          record.kind === "latency" && outcome.status === "failed" && !outcome.failureKind
-            ? { ...outcome, failureKind: { kind: evidence === "failed" ? "refused" : "unconfirmed" } } : outcome,
-          evidence, reason)
-        return { record }
-      }
-      const inspectRevision = async (request = binding, releaseLane = false, replied?: () => void): Promise<Inspection> => {
-        if (!sessionAlive() || !request) return { status: "unavailable" }
-        try {
-          const reply = revisions.inspect(request)
-          if (replied) void reply.then(replied, () => undefined)
-          return { status: "reply", reply: await (releaseLane ? withoutLane(reply) : reply) }
-        } catch (error) { return { status: "failed", error: error instanceof Error ? error : new Error(String(error)) } }
-      }
-      const inspect = (request = binding, releaseLane = false, replied?: () => void) =>
-        inspectRevision(request, releaseLane, replied).then(inspection => inspection.status === "reply" ? inspection.reply : undefined)
-      record.onInspect(() => inspectRevision())
-      let failure: { outcome: AdoptionOutcome; reason: Parameters<typeof processorState.finishPublication>[3] } | undefined
-      let invalidProof = false
-      let uncertainPreparation = false
-      function checked(reply: NativeSessionReply): asserts reply is Extract<NativeSessionReply, { ok: true }> {
-        if (!reply.ok) {
-          uncertainPreparation = "kind" in reply && reply.kind === "unconfirmed"
-          const capacity = reply.error === "asset-capacity-exceeded" || reply.error === "asset-page-capacity-exceeded"
-            || reply.error === "asset-publication-pending"
-          if ("kind" in reply && reply.kind === "refused") {
-            retainCandidate = capacity
-            failure = { outcome: { status: capacity ? "blocked" : "failed", reason: reply.error }, reason: "native-refused" }
-          }
-          throw new Error(reply.error)
-        }
-      }
-      const classifyPublication = (reply: NativeRevisionReply | undefined) => {
-        if (!reply) return
-        if (!reply.ok) {
-          if (reply.kind === "refused") failure = {
-            outcome: { status: "failed", reason: reply.error }, reason: "native-refused",
-          }
-          return
-        }
-        const status = reply.revision.status
-        if (status === "publish-failed" || status === "stale-revision" || status === "invalid-revision")
-          failure = { outcome: { status: "failed", reason: `Native live publication was ${status}.` },
-            reason: status === "publish-failed" ? "apply-failed" : status === "stale-revision" ? "stale-revision" : "invalid" }
-      }
-      const notTaken = () => finish(failure?.outcome ?? (record.cancelled
-        ? { status: "superseded" } : { status: "failed", reason: "Native live publication was not taken." }),
-      invalidProof ? "uncertain" : failure ? "failed" : record.cancelled ? "cancelled" : "failed", failure?.reason)
-      const resolvePublication = async (acknowledgedEpoch?: number, releaseLane = false): Promise<boolean> => {
-        if (!sessionAlive()) { await disposePublication(); return false }
-        if (acknowledgedEpoch === undefined) record.resolving()
-        else record.awaitingTransport()
-        const proof = await inspect(binding, releaseLane)
-        if (!sessionAlive()) { await disposePublication(); return false }
-        if (proof?.ok && proof.revision.status === "publish-failed") failure = {
-          outcome: { status: "failed", reason: "Native live publication was publish-failed." }, reason: "apply-failed",
-        }
-          if (proof?.ok && proof.revision.status === "published") {
-          if (adoptPublication?.(proof, acknowledgedEpoch)) {
-            await finish({ status: "adopted" }, "promoted")
-            return true
-          }
-          // A mismatching proof cannot promote our resources or answer its cohort.
-          // Rollback still reconciles the bank this session actually owns.
-          invalidProof = true
-        }
-        if (acknowledgedEpoch !== undefined) {
-          if (proof?.ok) await notTaken()
-          return false
-        }
-        if (proof?.ok && proof.revision.status === "stale-revision") { await notTaken(); return false }
-        if (proof?.ok && proof.revision.status === "publish-pending" && !record.cancelled && !failure) return false
-        if (!binding || !sessionAlive()) return false
-        const rollback = revisions.rollback(binding)
-        const rolledBack = await (releaseLane ? withoutLane(rollback) : rollback).catch(() => undefined)
-        if (!sessionAlive()) { await disposePublication(); return false }
-        if (rolledBack?.ok && rolledBack.revision.status === "stale-revision") {
-          const resolved = await inspect(binding, releaseLane)
-          if (!sessionAlive()) { await disposePublication(); return false }
-          if (resolved?.ok && resolved.revision.status === "published") {
-            if (adoptPublication?.(resolved)) {
-              await finish({ status: "adopted" }, "promoted")
-              return true
-            }
-          } else if (resolved?.ok) await notTaken()
-        } else if (rolledBack?.ok && rolledBack.revision.status === "rolled-back") await notTaken()
-        else if (record.cancelled) record.awaitingTransport()
-        else record.resolving()
-        return false
-      }
-      let acknowledged: number | undefined
-      record.onAcknowledge(async epoch => {
-        if (acknowledged === epoch) return record.outcome?.status === "adopted"
-        acknowledged = epoch
-        detached = false
-        try { return await resolvePublication(epoch) } finally { detached = record.phase !== "ended" }
-      })
       if (!candidate) {
         let runtimeRevision = previousGraph.revision
         let resumeSafe = true
@@ -3818,18 +3645,18 @@ export const createNativePlaybackController = (input: {
           const reply = await withoutLane(revisions.prepare({ projectId, projectRevision: graph.revision,
             bytes: serializeNativeGraph(graph, serializedKeepLatencyNodeIds) }))
           if (reply.ok && reply.revision.status === "prepared" && reply.revision.preparedRevision === reply.revision.requestedRevision) {
-            binding = { projectId, revision: reply.revision.requestedRevision, hostGeneration: reply.hostGeneration }
-            preparedRevision = binding.revision
+            tx.binding = { projectId, revision: reply.revision.requestedRevision, hostGeneration: reply.hostGeneration }
+            tx.preparedRevision = tx.binding.revision
           }
           return reply
         }
-        adoptPublication = (proof, acknowledgedEpoch) => {
-          if (!proof.ok || !ready?.ok || !binding || !sessionAlive() || capturedGeneration !== lifecycleGeneration
+        tx.adoptPublication = (proof, acknowledgedEpoch) => {
+          if (!proof.ok || !ready?.ok || !tx.binding || !sessionAlive() || capturedGeneration !== lifecycleGeneration
             || proof.hostPid !== ready.hostPid || proof.hostGeneration !== ready.hostGeneration
-            || proof.revision.activeRevision !== binding.revision
+            || proof.revision.activeRevision !== tx.binding.revision
             || (proof.revision.transportEpoch !== undefined
               && proof.revision.transportEpoch !== (acknowledgedEpoch ?? publicationEpoch))) return false
-          runtimeRevision = binding.revision
+          runtimeRevision = tx.binding.revision
           resumeSafe = true
           preparedGraph = { ...graph, revision: runtimeRevision }
           processorState.published(runtimeRevision)
@@ -3845,18 +3672,18 @@ export const createNativePlaybackController = (input: {
           if (acknowledgedEpoch === undefined) coordinator.resumeGraphPublication(runtimeRevision)
           advanceScheduleSettledEpoch()
           holdRetirement(proof, projectId)
-          resourcesPromoted = true
-          binding = undefined
+          tx.resourcesPromoted = true
+          tx.binding = undefined
           executeReconcile(reconciles)
           return true
         }
         try {
           ready = await prepare()
-          let observed = sequence
-          while (ready.ok && ready.revision.status === "publish-pending" && !binding) {
+          let observed = tx.sequence
+          while (ready.ok && ready.revision.status === "publish-pending" && !tx.binding) {
             resume()
             await waitForOpportunity(observed)
-            observed = sequence
+            observed = tx.sequence
             const admission = await inspect({ projectId, revision: ready.revision.requestedRevision, hostGeneration: ready.hostGeneration })
             if (admission?.ok && (admission.hostPid !== ready.hostPid || admission.hostGeneration !== ready.hostGeneration)) {
               invalidateNativeOwnership(true, true)
@@ -3874,68 +3701,68 @@ export const createNativePlaybackController = (input: {
               throw new NativeLatencyUnsupportedError("Keep Latency can't be used here: this bus mixes monitored and other tracks, then splits to outputs with different latency. Route them through separate buses.")
             throw new PublicationFailure(`Native latency prepare was ${ready.revision.status}/${ready.revision.continuity}.`, "refused")
           }
-          if (!binding) throw new Error("Native latency prepare did not create the requested bank.")
+          if (!tx.binding) throw new Error("Native latency prepare did not create the requested bank.")
           resumeSafe = false
-          processorState.prepared(binding.revision, scheduledRetention(previousGraph, graph,
+          processorState.prepared(tx.binding.revision, scheduledRetention(previousGraph, graph,
             { before: previous, after: snapshot }, new Set()))
           let submittedProgress = -1
           let status: NativeRevisionReply = ready
           for (;;) {
             if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
-            observed = sequence
-            classifyPublication(publishReply)
+            observed = tx.sequence
+            classifyPublication(tx.publishReply)
             if (status.ok && ready.ok && (status.hostPid !== ready.hostPid || status.hostGeneration !== ready.hostGeneration)) {
               invalidateNativeOwnership(true, true)
               return { record }
             }
             if (status.ok && status.revision.status === "published") {
-              if (!adoptPublication(status)) throw new Error("Native latency publication proof does not match its capture.")
+              if (!tx.adoptPublication(status)) throw new Error("Native latency publication proof does not match its capture.")
               return await finish({ status: "adopted" }, "promoted")
             }
             classifyPublication(status)
-            if (failure) throw new Error("Native latency publication failed.")
-            if (status.ok && status.revision.status === "prepared" && progressVersion !== submittedProgress) {
-              if (publishSent) {
+            if (tx.failure) throw new Error("Native latency publication failed.")
+            if (status.ok && status.revision.status === "prepared" && tx.progressVersion !== submittedProgress) {
+              if (tx.publishSent) {
                 retry()
                 const changed = processorState.hasQueuedPatch()
                   || serializedKeepLatencyNodeIds.size !== desiredKeepLatencyNodeIds.size
                   || [...serializedKeepLatencyNodeIds].some(id => !desiredKeepLatencyNodeIds.has(id))
                   || latencyInputVersion !== capturedInputVersion
                 if (changed) {
-                  const rollback = await withoutLane(revisions.rollback(binding)).catch(() => undefined)
+                  const rollback = await withoutLane(revisions.rollback(tx.binding)).catch(() => undefined)
                   if (!rollback?.ok || rollback.revision.status !== "rolled-back") {
-                    detached = true
+                    tx.detached = true
                     return { record }
                   }
-                  processorState.unprepared(binding.revision)
-                  binding = undefined
+                  processorState.unprepared(tx.binding.revision)
+                  tx.binding = undefined
                   resumeSafe = true
                   resume()
                   includedOrder = capture()
                   capturedInputVersion = latencyInputVersion
                   ready = await prepare()
-                  checked(ready)
-                  if (!binding || ready.revision.status !== "prepared") throw new Error("Native latency recapture was not prepared.")
+                  tx.checked(ready)
+                  if (!tx.binding || ready.revision.status !== "prepared") throw new Error("Native latency recapture was not prepared.")
                   status = ready
                   resumeSafe = false
                 }
               }
-              submittedProgress = progressVersion
-              publishSent = true
+              submittedProgress = tx.progressVersion
+              tx.publishSent = true
               record.held()
-              const request = binding
+              const request = tx.binding
               if (!request) throw new Error("Missing latency binding.")
-              publishCompletion = revisions.publish(request).then(reply => {
+              tx.publishCompletion = revisions.publish(request).then(reply => {
                 if (!sessionAlive()) return
-                publishReply = reply
+                tx.publishReply = reply
                 notify()
               }, () => { if (sessionAlive()) notify() })
             }
-            if (failure && status.ok && status.revision.status !== "publish-pending" && status.revision.status !== "prepared")
+            if (tx.failure && status.ok && status.revision.status !== "publish-pending" && status.revision.status !== "prepared")
               throw new Error("Native latency publication failed.")
             await waitForOpportunity(observed)
-            status = publishReply?.ok && publishReply.revision.status === "published"
-              ? publishReply : await inspect(binding, true) ?? { ok: false, kind: "unconfirmed", error: "Publication status unavailable." }
+            status = tx.publishReply?.ok && tx.publishReply.revision.status === "published"
+              ? tx.publishReply : await inspect(tx.binding, true) ?? { ok: false, kind: "unconfirmed", error: "Publication status unavailable." }
           }
         } catch (error) {
           if (!sessionAlive()) { await disposePublication(); return { record } }
@@ -3946,17 +3773,17 @@ export const createNativePlaybackController = (input: {
               : error instanceof NativeLatencyUnsupportedError ? { failureKind: { kind: "latency-unsupported", message: error.message } } : {}),
           }
           if (error instanceof PublicationFailure && error.kind === "refused")
-            failure = { outcome, reason: "stage-failed" }
-          if (binding) {
-            await withoutLane(publishCompletion)
-            classifyPublication(publishReply)
+            tx.failure = { outcome, reason: "stage-failed" }
+          if (tx.binding) {
+            await withoutLane(tx.publishCompletion)
+            classifyPublication(tx.publishReply)
             await resolvePublication(undefined, true)
-            detached = record.phase !== "ended"
-            if (detached) resumeSafe = false
+            tx.detached = record.phase !== "ended"
+            if (tx.detached) resumeSafe = false
             return { record }
           }
           return await finish(outcome,
-            record.cancelled ? "cancelled" : error instanceof PublicationFailure && error.kind === "unavailable" ? "lost" : failure ? "failed" : "uncertain", failure?.reason)
+            record.cancelled ? "cancelled" : error instanceof PublicationFailure && error.kind === "unavailable" ? "lost" : tx.failure ? "failed" : "uncertain", tx.failure?.reason)
         } finally { resume() }
       }
       const { projection } = candidate
@@ -4060,13 +3887,13 @@ export const createNativePlaybackController = (input: {
               break
             }
             console.warn(`[native-live-edit] VST staging refused; resubmit ${stagingResubmits + 1} of 8 at a later block boundary`, { reason: staging.error })
-            const resumeAt = progressVersion + Math.min(2 ** stagingResubmits, 16 * (stagingResubmits + 1))
+            const resumeAt = tx.progressVersion + Math.min(2 ** stagingResubmits, 16 * (stagingResubmits + 1))
             stagingResubmits++
-            while (progressVersion < resumeAt) await waitForOpportunity(sequence)
+            while (tx.progressVersion < resumeAt) await waitForOpportunity(tx.sequence)
             await quietPublicationLane()
             staging = await stage()
           }
-          checked(staging)
+          tx.checked(staging)
         }
         // The host table holds 64 assets, the installed ones, this graph's and the residents. It reclaims a release only
         // while no bank is prepared and after one more render epoch, which a progress report announces and an inspect
@@ -4076,9 +3903,9 @@ export const createNativePlaybackController = (input: {
         const crowding = retiredResidentIds().slice(0, Math.max(0, crowded))
         if (crowding.length > 0 && hostIdentity) {
           const capacity = nativeAdmissionCapacityGeneration
-          let reported = sequence
+          let reported = tx.sequence
           const acknowledged = await Promise.all(crowding.map(releaseResident))
-          for (; acknowledged.every(Boolean) && nativeAdmissionCapacityGeneration === capacity; reported = sequence) {
+          for (; acknowledged.every(Boolean) && nativeAdmissionCapacityGeneration === capacity; reported = tx.sequence) {
             await waitForOpportunity(reported)
             await inspect({ projectId, revision: previousGraph.revision, hostGeneration: hostIdentity.generation }, true)
           }
@@ -4087,7 +3914,7 @@ export const createNativePlaybackController = (input: {
         if (paused) await coordinator.suspendGraphPublication()
         // Provisional: long enough for the prepare and hydration below. The seam binds late, after them.
         let seam = chooseFrame(BigInt(coordinator.currentFrame()), 16)
-        let observed = sequence
+        let observed = tx.sequence
         input.observer?.adoption?.(attempt?.intent.key)?.("prepare-sent")
         let ready = await prepareRevision({
           projectId, projectRevision: snapshot.revision, bytes: serializeNativeGraph(graph, serializedKeepLatencyNodeIds),
@@ -4125,7 +3952,7 @@ export const createNativePlaybackController = (input: {
               let applied = latestScheduleProgress
               do {
                 await waitForOpportunity(observed)
-                observed = sequence
+                observed = tx.sequence
                 if (inspected && completion === nativeLatencyCompletionGeneration && settled === scheduleSettledEpoch
                   && applied?.appliedProcessorSequence === latestScheduleProgress?.appliedProcessorSequence
                   && applied?.appliedUrgentSequence === latestScheduleProgress?.appliedUrgentSequence
@@ -4139,7 +3966,7 @@ export const createNativePlaybackController = (input: {
                 if (admission?.ok && (admission.hostPid !== ready.hostPid || admission.hostGeneration !== ready.hostGeneration))
                   throw new NativePlaybackAbortError("ownership-invalidated")
               } while (!admission?.ok || admission.revision.status === "publish-pending")
-              checked(admission)
+              tx.checked(admission)
             } finally { prepareAdmissionWake = undefined }
             progress = BigInt(coordinator.currentFrame())
           } else if (ready.revision.status === "publish-pending") {
@@ -4150,7 +3977,7 @@ export const createNativePlaybackController = (input: {
           }
           await quietPublicationLane()
           if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
-          observed = sequence
+          observed = tx.sequence
           if (!workerWait) retry()
           seam = chooseFrame(progress, 16 * (record.resubmits + 1))
           ready = await prepareRevision({
@@ -4159,10 +3986,10 @@ export const createNativePlaybackController = (input: {
           })
         }
         input.observer?.adoption?.(attempt?.intent.key)?.("prepare-reply-received")
-        checked(ready)
+        tx.checked(ready)
         processorState.observeRetirement(ready)
         if (ready.revision.preparedRevision === ready.revision.requestedRevision) {
-          binding = { projectId, revision: ready.revision.requestedRevision, hostGeneration: ready.hostGeneration,
+          tx.binding = { projectId, revision: ready.revision.requestedRevision, hostGeneration: ready.hostGeneration,
             requestedPublicationFrame: BigInt(seam) }
         }
         if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
@@ -4170,12 +3997,12 @@ export const createNativePlaybackController = (input: {
           const reason = `Native live prepare was ${ready.revision.status}/${ready.revision.continuity}.`
           // A take bound to a node on the route keeps its routing: that is an expected refusal, not a defect to log.
           const takeLocked = ready.revision.status === "capture-target-locked"
-          failure = { outcome: { status: takeLocked ? "blocked" : "failed", reason }, reason: "native-refused" }
+          tx.failure = { outcome: { status: takeLocked ? "blocked" : "failed", reason }, reason: "native-refused" }
           throw new Error(reason)
         }
-        if (!binding) throw new Error("Native live prepare did not create the requested bank.")
-        preparedRevision = binding.revision
-        processorState.prepared(binding.revision,
+        if (!tx.binding) throw new Error("Native live prepare did not create the requested bank.")
+        tx.preparedRevision = tx.binding.revision
+        processorState.prepared(tx.binding.revision,
           scheduledRetention(previousGraph, graph, { before: previous, after: snapshot },
             new Set(addedInstruments.map(({ nodeId }) => nodeId))))
         // A paused edit takes its tempo from the transport command that re-primes the schedule.
@@ -4206,16 +4033,16 @@ export const createNativePlaybackController = (input: {
             if (!instrumentBudget || !policy) throw new Error("Native sample memory policy is unavailable.")
             validateInstrumentAssetBudget(projection.graph.assets, addedInstruments.map(({ state }) => state),
               policy.deviceDecodedBytes)
-            stagedMemoryScope = createInstrumentScope(`native-stage:${crypto.randomUUID()}`)
-            stagedMemoryScope.set("page-staging", nativeTimelinePageStagingBytes, () => undefined)
-            stagedHolds = await holdInstrumentAssets(addedAssets, instrumentSources, mappings, evictResident)
+            tx.stagedMemoryScope = createInstrumentScope(`native-stage:${crypto.randomUUID()}`)
+            tx.stagedMemoryScope.set("page-staging", nativeTimelinePageStagingBytes, () => undefined)
+            tx.stagedHolds = await holdInstrumentAssets(addedAssets, instrumentSources, mappings, evictResident)
           }
           for (const { asset, pcm, sourceAssetKey, preparedStretchArtifactId } of addedAssets) {
             publicationAbort.signal.throwIfAborted()
             const mapping = mappings.get(asset.assetId)
             if (!mapping) throw new Error("Native session asset mapping is incomplete.")
             if (pcm) {
-              checked(await awaitPreparation(session.installAsset({ sessionAssetId: mapping.sessionAssetId,
+              tx.checked(await awaitPreparation(session.installAsset({ sessionAssetId: mapping.sessionAssetId,
                 frameCount: asset.frameCount, sampleRateHz: asset.sampleRateHz, channelCount: asset.channelCount,
                 planarPcm: planarBytes(pcm.planes) })))
               continue
@@ -4244,18 +4071,18 @@ export const createNativePlaybackController = (input: {
               createMappedAsset(session, asset, mapping, preparedStretchArtifactId, undefined, hydrationMark)) })
           }
           publicationAbort.signal.throwIfAborted()
-          discardAddedSources = pageManager.addSources(sources)
+          tx.discardAddedSources = pageManager.addSources(sources)
           addedTimelineSources = sources.length > 0
           await prepareMappedResources(mappedResources, pageManager, sources.filter((source) => source.immutableAfterPreparation)
             .map((source) => ({ sourceAssetKey: source.sourceAssetKey, startFrame: 0, endFrame: source.frameCount })),
           publicationAbort.signal, false, hydrationMark)
-          releaseInstrumentScope(stagedMemoryScope)
+          releaseInstrumentScope(tx.stagedMemoryScope)
           hydrationMark?.("asset-sources-ready")
         }
         publicationAbort.signal.throwIfAborted()
         // The host's prepare settles the instrument flags itself, so a graph that adds none needs no round trip.
         if (addedInstruments.length > 0)
-          checked(await awaitPreparation(session.configureInstrumentStates(serializeNativeInstrumentStates(addedInstruments, assets))))
+          tx.checked(await awaitPreparation(session.configureInstrumentStates(serializeNativeInstrumentStates(addedInstruments, assets))))
         hydrationMark?.("bind-states-configured")
         if (addedAssets.length > 0) hydrationMark?.("asset-instrument-states-ready")
         // New timeline sources hydrate while a window is staged, which would spend the short bound lead. Page the
@@ -4279,7 +4106,7 @@ export const createNativePlaybackController = (input: {
           && prepareAgeMs * sampleRate < 1000 * maximumFramesPerBlock
         for (let attempt = 0; attempt < 2; attempt++) {
           const fresh = attempt === 0 && replyIsLatest ? ready
-            : await inspect(binding, true, hydrationMark && (() => hydrationMark("bind-progress-reply")))
+            : await inspect(tx.binding, true, hydrationMark && (() => hydrationMark("bind-progress-reply")))
           hydrationMark?.("bind-progress-read")
           if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
           if (!fresh?.ok || (fresh.revision.status !== "prepared" && fresh.revision.status !== "rebase-required")
@@ -4287,33 +4114,33 @@ export const createNativePlaybackController = (input: {
           if (fresh.revision.transportEpoch !== transportEpoch) throw new NativePlaybackAbortError("ownership-invalidated")
           const bound = chooseFrame(fresh.revision.progressFrame, boundLeadBlocks())
           if (bound === seam) break
-          const rebind = { ...binding, requestedPublicationFrame: BigInt(bound) }
+          const rebind = { ...tx.binding, requestedPublicationFrame: BigInt(bound) }
           hydrationMark?.("bind-request-sent")
           const rebound = await withoutLane(revisions.publish(rebind))
           if (!rebound.ok) classifyPublication(rebound)
-          checked(rebound)
-          if (rebound.revision.status === "prepared") { seam = bound; binding = rebind; break }
+          tx.checked(rebound)
+          if (rebound.revision.status === "prepared") { seam = bound; tx.binding = rebind; break }
         }
         let status: NativeRevisionReply = ready
         let fill = !paused
         let submittedProgress = -1
-        adoptPublication = (proof, acknowledgedEpoch) => {
+        tx.adoptPublication = (proof, acknowledgedEpoch) => {
           const afterTransport = acknowledgedEpoch !== undefined
-          if (!proof.ok || !binding || !sessionAlive() || proof.hostGeneration !== ready.hostGeneration
+          if (!proof.ok || !tx.binding || !sessionAlive() || proof.hostGeneration !== ready.hostGeneration
             || proof.hostPid !== ready.hostPid
             || proof.revision.transportEpoch !== (acknowledgedEpoch ?? publicationEpoch)
-            || (!paused && !staged?.activateRevision(proof.revision))) return false
+            || (!paused && !tx.staged?.activateRevision(proof.revision))) return false
           if (paused) coordinator.dispose()
-          else if (afterTransport) staged?.dispose()
+          else if (afterTransport) tx.staged?.dispose()
           else {
             coordinator.dispose()
-            scheduleCoordinator = staged
-            staged?.install()
+            scheduleCoordinator = tx.staged
+            tx.staged?.install()
           }
-          staged = undefined
-          preparedGraph = { ...graph, revision: binding.revision }
+          tx.staged = undefined
+          preparedGraph = { ...graph, revision: tx.binding.revision }
           structuralGraphGeneration++
-          processorState.published(binding.revision)
+          processorState.published(tx.binding.revision)
           scheduleCandidates.delete(candidate)
           const synthInstances = new Map([...synthNodes(snapshot)].map(([instanceId, nodeId]) => [nodeId, instanceId]))
           // A configured-again instrument starts its synth from the graph's values. Its processors keep their
@@ -4344,7 +4171,7 @@ export const createNativePlaybackController = (input: {
           preparedStretchAssetsForSession = candidate.stretchAssets
           preparedStretchLeaseSession = candidate.dispose
           pendingStretchCandidates.delete(candidate.dispose)
-          for (const [id, hold] of stagedHolds) instrumentAssets.set(id, hold)
+          for (const [id, hold] of tx.stagedHolds) instrumentAssets.set(id, hold)
           // The installed samples are the newest, a returning resident among them.
           for (const id of nextIds) {
             const hold = instrumentAssets.get(id)
@@ -4377,7 +4204,7 @@ export const createNativePlaybackController = (input: {
           installedAssetIds = [...new Set([...nextIds, ...instrumentAssets.keys()])]
           installedAssetSourceKeys = sourceKeys
           nativePcmChunkDescriptorsForSession = projection.nativePcmChunkDescriptors
-          resourcesPromoted = true
+          tx.resourcesPromoted = true
           advanceScheduleSettledEpoch()
           // Release ACK registers deferred collection, not reusable IDs or a
           // proof that queued sources/fading voices have finished reading.
@@ -4387,12 +4214,12 @@ export const createNativePlaybackController = (input: {
             }, () => reportStopped("Native deferred asset release failed.", { retainPlayback: true }))
           }
           preparedKeepLatencyNodeIds = serializedKeepLatencyNodeIds
-          promoteNativeObservationMaps(binding.revision, candidateObservations)
+          promoteNativeObservationMaps(tx.binding.revision, candidateObservations)
           holdRetirement(proof, projectId, async () => {
             await pageManager?.removeSources(removedAssetIds)
             await predecessorStretchLease?.()
           })
-          binding = undefined
+          tx.binding = undefined
           executeReconcile(reconcile)
           input.onInstrumentPreparation?.(preparedInstrumentTrackIds, { state: "ready" })
           // The published bank has no window, and its coordinator was disposed above. A Play that waited for this
@@ -4402,30 +4229,30 @@ export const createNativePlaybackController = (input: {
         }
         for (;;) {
           if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
-          observed = sequence
-          classifyPublication(publishReply)
+          observed = tx.sequence
+          classifyPublication(tx.publishReply)
           if (status.ok) classifyPublication(status)
           if (!status.ok) {
             throw new Error(status.error)
           }
           if (status.revision.status === "published") {
-            if (!adoptPublication(status))
+            if (!tx.adoptPublication(status))
               throw new Error("Native live publication proof does not match the staged bank.")
             return await finish({ status: "adopted" }, "promoted")
           }
-          if (failure && "reason" in failure.outcome) throw new Error(failure.outcome.reason)
+          if (tx.failure && "reason" in tx.failure.outcome) throw new Error(tx.failure.outcome.reason)
           if (fill) {
-            staged?.dispose()
+            tx.staged?.dispose()
             try {
               // Cancel only this publication's wait. The active refill remains
               // owned by its coordinator until the transport transition.
               await awaitPreparation(coordinator.coverThrough(seam + maximumFramesPerBlock))
               hydrationMark?.("armed-cover-end")
               publicationAbort.signal.throwIfAborted()
-              staged = coordinator.stageRevision({ ...snapshot, revision: binding.revision },
-                { ...graph, revision: binding.revision }, seam, async () => {
-                  if (!binding) throw new NativePlaybackAbortError("ownership-invalidated")
-                  const rejectedAt = sequence
+              tx.staged = coordinator.stageRevision({ ...snapshot, revision: tx.binding.revision },
+                { ...graph, revision: tx.binding.revision }, seam, async () => {
+                  if (!tx.binding) throw new NativePlaybackAbortError("ownership-invalidated")
+                  const rejectedAt = tx.sequence
                   const inspection = await inspect()
                   if (!inspection?.ok || inspection.revision.status !== "prepared")
                     throw new Error("Native staged window needs publication reconciliation.")
@@ -4433,9 +4260,9 @@ export const createNativePlaybackController = (input: {
                 }, { assets, assetSourceKeys: sourceKeys, nativePcmChunkDescriptors: projection.nativePcmChunkDescriptors,
                   preparedStretchAssets: candidate.stretchAssets })
               hydrationMark?.("armed-stage-returned")
-              staged.preflight({ ...graph, revision: binding.revision })
+              tx.staged.preflight({ ...graph, revision: tx.binding.revision })
               hydrationMark?.("armed-prime-start")
-              await staged.prime(seam)
+              await tx.staged.prime(seam)
               hydrationMark?.("armed-prime-end")
             } catch (error) {
               const inspection = await inspect()
@@ -4453,7 +4280,7 @@ export const createNativePlaybackController = (input: {
             await waitForOpportunity(observed)
             const inspection = await inspect()
             if (!inspection) throw new Error("Publication status unavailable.")
-            checked(inspection)
+            tx.checked(inspection)
             status = inspection
             if (status.revision.status === "published") continue
             if (status.revision.transportEpoch !== transportEpoch)
@@ -4461,65 +4288,65 @@ export const createNativePlaybackController = (input: {
             retry()
             seam = chooseFrame(status.revision.progressFrame ?? BigInt(coordinator.currentFrame()),
               Math.min(boundLeadBlocks() * 2 ** record.resubmits, 16 * (record.resubmits + 1)))
-            binding = { ...binding, requestedPublicationFrame: BigInt(seam) }
-            publishSent = true
+            tx.binding = { ...tx.binding, requestedPublicationFrame: BigInt(seam) }
+            tx.publishSent = true
             record.held()
             if (!sessionAlive()) throw new NativePlaybackAbortError("ownership-invalidated")
-            const published = await withoutLane(revisions.publish(binding))
+            const published = await withoutLane(revisions.publish(tx.binding))
             classifyPublication(published)
-            checked(published)
+            tx.checked(published)
             status = published
             if (status.revision.status !== "prepared") throw new Error(`Native rebase was ${status.revision.status}.`)
             fill = true
             continue
           }
-          if (publishReply && !publishReply.ok) checked(publishReply)
+          if (tx.publishReply && !tx.publishReply.ok) tx.checked(tx.publishReply)
           if (status.revision.status !== "prepared" && status.revision.status !== "publish-pending")
             throw new Error(`Native live publication was ${status.revision.status}.`)
-          if (status.revision.status === "prepared" && progressVersion !== submittedProgress) {
-            if (publishSent) retry()
-            submittedProgress = progressVersion
-            const request = binding
-            publishSent = true
+          if (status.revision.status === "prepared" && tx.progressVersion !== submittedProgress) {
+            if (tx.publishSent) retry()
+            submittedProgress = tx.progressVersion
+            const request = tx.binding
+            tx.publishSent = true
             record.held()
             if (!sessionAlive()) throw new NativePlaybackAbortError("ownership-invalidated")
             hydrationMark?.("bind-request-sent")
             // A lost IPC reply must not prevent progress-based reconciliation.
-            publishCompletion = revisions.publish(request).then((reply) => {
+            tx.publishCompletion = revisions.publish(request).then((reply) => {
               if (!sessionAlive()) return
-              publishReply = reply
+              tx.publishReply = reply
               notify()
             }, () => { if (sessionAlive()) notify() })
           }
           await waitForOpportunity(observed)
-          status = await inspect(binding, true) ?? { ok: false, error: "Publication status unavailable.", kind: "unconfirmed" }
+          status = await inspect(tx.binding, true) ?? { ok: false, error: "Publication status unavailable.", kind: "unconfirmed" }
         }
       } catch (error) {
         if (!sessionAlive()) { await disposePublication(); return { record } }
         if (error instanceof PublicationFailure) {
           const capacity = error.kind === "refused" && (error.message === "asset-capacity-exceeded"
             || error.message === "asset-page-capacity-exceeded" || error.message === "asset-publication-pending")
-          retainCandidate = capacity
-          if (error.kind === "refused") failure = {
+          tx.retainCandidate = capacity
+          if (error.kind === "refused") tx.failure = {
             outcome: { status: capacity ? "blocked" : "failed", reason: error.message }, reason: "stage-failed",
           }
-          else uncertainPreparation = error.kind === "unconfirmed"
+          else tx.uncertainPreparation = error.kind === "unconfirmed"
         }
         if (!current() || error instanceof NativePlaybackAbortError) record.cancel()
-        if (binding) {
+        if (tx.binding) {
           // A revision deadline proves nothing about publication. Reconcile from
           // that reply/deadline event before releasing the lane.
-          await publishCompletion
-          classifyPublication(publishReply)
+          await tx.publishCompletion
+          classifyPublication(tx.publishReply)
           await resolvePublication()
           // The lane is free for transport. The caller still follows this owner's terminal.
-          detached = record.phase !== "ended"
+          tx.detached = record.phase !== "ended"
           return { record }
         }
         const reason = error instanceof Error ? error.message : "Native live publication failed."
         if (record.cancelled) return await finish({ status: "superseded" }, "cancelled")
-        return await finish(failure?.outcome ?? { status: "failed", reason },
-          failure ? "failed" : uncertainPreparation || !publishSent ? "uncertain" : "failed", failure?.reason)
+        return await finish(tx.failure?.outcome ?? { status: "failed", reason },
+          tx.failure ? "failed" : tx.uncertainPreparation || !tx.publishSent ? "uncertain" : "failed", tx.failure?.reason)
       } finally {
         if (!sessionAlive()) await disposePublication()
       }

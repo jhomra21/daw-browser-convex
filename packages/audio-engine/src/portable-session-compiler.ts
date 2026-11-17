@@ -20,6 +20,7 @@ import {
   type GranularParams,
   type SamplerParams,
   type SynthParamsInput,
+  type TrackInstrumentParams,
 } from '@daw-browser/shared'
 import type { AudioAssetHandle } from './audio-asset-types'
 import {
@@ -387,6 +388,19 @@ export const compilePortableSynthConfiguration = (
   }
 }
 
+export const legacySynthFallback = (
+  nodeId: string,
+  instrument: TrackInstrumentParams | undefined,
+  synth: SynthParamsInput | undefined,
+): PortableSynthConfiguration | undefined => {
+  if (instrument?.kind === 'synth') {
+    return compilePortableSynthConfiguration(nodeId, instrument.instanceId, instrument.params)
+  }
+  return synth === undefined
+    ? undefined
+    : compilePortableSynthConfiguration(nodeId, `legacy-synth:${nodeId}`, synth)
+}
+
 type PortableSampledConfiguration =
   | PortableSamplerConfiguration
   | PortableDrumRackConfiguration
@@ -443,9 +457,8 @@ export const compilePortableSessionInput = (input: PortableSessionCompilerInput)
       `mixer:${entry.channel.id}`, entry.gain, entry.channel.muted,
     )),
     synths: Object.entries(input.fx.trackFx ?? {}).flatMap(([trackId, fx]) => {
-      const instrument = fx.instrument
-      if (instrument?.kind === 'synth') return [compilePortableSynthConfiguration(trackId, instrument.instanceId, instrument.params)]
-      return fx.synth === undefined ? [] : [compilePortableSynthConfiguration(trackId, `legacy-synth:${trackId}`, fx.synth)]
+      const configuration = legacySynthFallback(trackId, fx.instrument, fx.synth)
+      return configuration === undefined ? [] : [configuration]
     }),
     samplers: sampledConfigurations.flatMap((configuration) => configuration.state.kind === 'sampler' ? [configuration] : []),
     drumRacks: sampledConfigurations.flatMap((configuration) => configuration.state.kind === 'drum-rack' ? [configuration] : []),

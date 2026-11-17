@@ -9,7 +9,7 @@ import {
 import { resolveLiveMixerGraph } from './live-mixer-runtime'
 import { createPortableGraphSnapshot } from './mixer/graph-contract'
 import {
-  compilePortableSynthConfiguration,
+  legacySynthFallback,
   compilePortableSamplerConfiguration,
   compilePortableDrumRackConfiguration,
   compilePortableGranularConfiguration,
@@ -233,9 +233,8 @@ export const compileLiveNativeInstrumentConfigurations = (
         decoded: { sampleRateHz: buffer.sampleRate, channelCount: buffer.numberOfChannels, frameCount: buffer.length },
       })),
     }
-    // Preserve the portable compiler's legacy synth fallback, including FX entries with sampled instruments.
-    if (instrument?.kind === 'synth') configurations.push(compilePortableSynthConfiguration(nodeId, instrument.instanceId, instrument.params))
-    else if (entry.synth !== undefined) configurations.push(compilePortableSynthConfiguration(nodeId, `legacy-synth:${nodeId}`, entry.synth))
+    const synthConfiguration = legacySynthFallback(nodeId, instrument, entry.synth)
+    if (synthConfiguration) configurations.push(synthConfiguration)
     if (failures.length > 0) {
       reasons.push(...failures)
       continue

@@ -1,5 +1,7 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import {
+  requirePcmRange,
+  validateAudioPcmSourceMetadata,
   createAudioBufferPcmSourceDescriptor,
   defaultDecodedAudioPageFrames,
   getAudioBufferSessionIdentity,
@@ -104,17 +106,6 @@ export const createRemoteMediaOperation = (
   }
 }
 
-const validateDescriptorMetadata = (metadata: Pick<AudioPcmSourceDescriptor, 'durationSec' | 'frameCount' | 'sampleRate' | 'channelCount'>) => {
-  if (!Number.isFinite(metadata.durationSec) || metadata.durationSec < 0) throw new Error('Audio source duration is invalid.')
-  if (!Number.isSafeInteger(metadata.frameCount) || metadata.frameCount < 0) throw new Error('Audio source frame count is invalid.')
-  if (!Number.isFinite(metadata.sampleRate) || metadata.sampleRate <= 0) throw new Error('Audio source sample rate is invalid.')
-  if (!Number.isSafeInteger(metadata.channelCount) || metadata.channelCount <= 0) throw new Error('Audio source channel count is invalid.')
-  const expectedDuration = metadata.frameCount / metadata.sampleRate
-  if (Math.abs(metadata.durationSec - expectedDuration) > 0.5 / metadata.sampleRate) {
-    throw new Error('Audio source duration does not match its frame metadata.')
-  }
-}
-
 const validatePage = (
   page: DecodedAudioPage,
   metadata: Pick<AudioPcmSourceDescriptor, 'sampleRate' | 'channelCount'>,
@@ -150,7 +141,11 @@ export const createAudioPcmSourceDescriptor = (input: {
   pageFrames?: number
   fetchFn?: typeof fetch
 }): AudioPcmSourceDescriptor => {
-  validateDescriptorMetadata(input)
+  validateAudioPcmSourceMetadata(input)
+  const pageFrames = input.pageFrames ?? defaultDecodedAudioPageFrames
+  if (!validPageFrames(pageFrames) || pageFrames > defaultDecodedAudioPageFrames) {
+    throw new Error(`Audio source page size must be at most ${defaultDecodedAudioPageFrames} frames.`)
+  }
   if (isAudioBufferSource(input.source)) {
     const buffer = input.source
     if (
@@ -166,16 +161,13 @@ export const createAudioPcmSourceDescriptor = (input: {
       length: buffer.length,
       sampleRate: buffer.sampleRate,
       numberOfChannels: buffer.numberOfChannels,
+      pageFrames,
       copyFromChannel: (destination, channelNumber, bufferOffset) => (
         buffer.copyFromChannel(destination, channelNumber, bufferOffset)
       ),
     })
   }
   const source = input.source
-  const pageFrames = input.pageFrames ?? defaultDecodedAudioPageFrames
-  if (!validPageFrames(pageFrames) || pageFrames > defaultDecodedAudioPageFrames) {
-    throw new Error(`Audio source page size must be at most ${defaultDecodedAudioPageFrames} frames.`)
-  }
   const contentHashVerified = source instanceof Blob && input.contentHashVerified === true
   return {
     identity: input.identity,
@@ -187,22 +179,20 @@ export const createAudioPcmSourceDescriptor = (input: {
     sampleRate: input.sampleRate,
     channelCount: input.channelCount,
     readPages: async function* (options = {}) {
-      const startFrame = options.startFrame ?? (options.startSec === undefined
+      const requestedStartFrame = options.startFrame ?? (options.startSec === undefined
         ? 0
         : Math.ceil(options.startSec * input.sampleRate))
-      const endFrame = options.endFrame ?? (options.endSec === undefined
+      const requestedEndFrame = options.endFrame ?? (options.endSec === undefined
         ? input.frameCount
         : Math.ceil(options.endSec * input.sampleRate))
-      if (!validFrameBound(startFrame) || !validFrameBound(endFrame) || endFrame < startFrame || endFrame > input.frameCount) {
-        throw new Error('Audio source frame range is invalid.')
-      }
-      let expectedStartFrame = startFrame
+      const range = requirePcmRange(requestedStartFrame, requestedEndFrame, input.frameCount)
+      let expectedStartFrame = range.startFrame
       for await (const page of decodeAudioPages(source, {
         ...options,
-        startSec: startFrame / input.sampleRate,
-        endSec: endFrame / input.sampleRate,
-        startFrame,
-        endFrame,
+        startSec: range.startFrame / input.sampleRate,
+        endSec: range.endFrame / input.sampleRate,
+        startFrame: range.startFrame,
+        endFrame: range.endFrame,
         pageFrames,
         fetchFn: input.fetchFn,
         remoteOperation: options.remoteOperation,
@@ -211,7 +201,7 @@ export const createAudioPcmSourceDescriptor = (input: {
         expectedStartFrame += page.frameCount
         yield page
       }
-      if (expectedStartFrame !== endFrame) throw new Error('Decoded audio pages do not cover the requested range exactly.')
+      if (expectedStartFrame !== range.endFrame) throw new Error('Decoded audio pages do not cover the requested range exactly.')
     },
   }
 }

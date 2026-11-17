@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { decodeAudioPages, decodedSampleStartFrame } from './media-pages'
+import { createAudioPcmSourceDescriptor, decodeAudioPages, decodedSampleStartFrame } from './media-pages'
 import type { DecodedAudioPage } from '@daw-browser/shared'
 
 const writeAscii = (bytes: Uint8Array, offset: number, value: string) => {
@@ -141,6 +141,45 @@ test('honors cancellation before media decoding starts', async () => {
     pageFrames: 2,
     signal: controller.signal,
   })).rejects.toBeDefined()
+})
+
+test('applies and validates page size for AudioBuffer sources', async () => {
+  const buffer: AudioBuffer = {
+    duration: 1,
+    length: 4,
+    numberOfChannels: 1,
+    sampleRate: 4,
+    getChannelData: () => new Float32Array(4),
+    copyFromChannel: (destination, _channelNumber, bufferOffset = 0) => {
+      destination.set([0, 1, 2, 3].slice(bufferOffset, bufferOffset + destination.length))
+    },
+    copyToChannel: () => undefined,
+  }
+  const descriptor = createAudioPcmSourceDescriptor({
+    identity: 'audio-buffer',
+    durationSec: 1,
+    frameCount: 4,
+    sampleRate: 4,
+    channelCount: 1,
+    source: buffer,
+    pageFrames: 2,
+  })
+  const pages = []
+  for await (const page of descriptor.readPages()) pages.push(page)
+
+  expect(pageSummary(pages)).toEqual([
+    { startFrame: 0, frameCount: 2, sampleRate: 4, channelCount: 1 },
+    { startFrame: 2, frameCount: 2, sampleRate: 4, channelCount: 1 },
+  ])
+  await expect(Promise.resolve().then(() => createAudioPcmSourceDescriptor({
+    identity: 'audio-buffer',
+    durationSec: 1,
+    frameCount: 4,
+    sampleRate: 4,
+    channelCount: 1,
+    source: buffer,
+    pageFrames: 0,
+  }))).rejects.toThrow('Audio source page size')
 })
 
 test('bounds a stalled remote request without weakening explicit cancellation', async () => {

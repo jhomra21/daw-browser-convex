@@ -2,6 +2,7 @@ import { z } from "zod"
 import { projectIdSchemaV1 } from "@daw-browser/desktop-protocol"
 
 export const unsigned32Schema = z.number().int().min(0).max(0xffff_ffff)
+export const transactionTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/)
 export const uuidSchema = z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
 
 const nativeEditorAnchorSchema = z.object({

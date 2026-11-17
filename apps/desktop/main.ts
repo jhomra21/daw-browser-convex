@@ -7,7 +7,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { z } from "zod"
-import { nativeEditorCommandSchema, unsigned32Schema, uuidSchema } from "./native-session-schemas"
+import { nativeEditorCommandSchema, transactionTokenSchema, unsigned32Schema, uuidSchema } from "./native-session-schemas"
 import {
   desktopFrameSchemaV1,
   desktopHelloSchemaV1,
@@ -70,7 +70,6 @@ import {
   sessionCommitTransactionChannel,
   sessionConfigureChannel,
   sessionConfigureInstrumentStatesChannel,
-  sessionConfigureRecordingChannel,
   sessionCoordinateVstAttachmentsChannel,
   sessionCreateMappedAssetChannel,
   sessionDetachVstChannel,
@@ -91,12 +90,8 @@ import {
   sessionReleaseAssetChannel,
   sessionReleaseMappedAssetChannel,
   sessionRollbackTransactionChannel,
-  sessionSetSpectrumNodeChannel,
-  sessionSetTransportChannel,
   sessionStartChannel,
-  sessionStartRecordingChannel,
   sessionStopChannel,
-  sessionStopRecordingChannel,
   sessionTeardownChannel,
   sessionWriteMappedAssetPageChannel,
   spectrumFrameChannel,
@@ -115,6 +110,11 @@ import { createFileCapabilityManager } from "./file-capabilities"
 import { registerFileCapabilitiesIpc } from "./ipc/file-capabilities-ipc"
 import { registerApplicationMenuIpc } from "./ipc/application-menu-ipc"
 import { registerVstEditorStateAckIpc } from "./ipc/vst-editor-state-ack-ipc"
+import { registerNativeSessionTransportIpc } from "./ipc/native-session-transport-ipc"
+import { registerNativeSessionRecordingIpc } from "./ipc/native-session-recording-ipc"
+import { registerRendererNavigationCommit } from "./ipc/renderer-navigation-commit"
+import { executeNativeEditorRoute } from "./ipc/native-editor-routing"
+import { nativeSessionRequestAllowed, type NativeSessionEvent } from "./ipc/native-session-access"
 import { createNativeFileCapabilityHelper } from "./native-file-capability-helper"
 import { createRequestCorrelation } from "./request-correlation"
 import { createPreparationRegistry } from "./preparation-registry"
@@ -159,8 +159,6 @@ import type {
   NativeHostDeviceConfiguration,
   NativeHostPcmAsset,
   NativeHostMappedAssetPage,
-  NativeHostRecordingConfiguration,
-  NativeHostTransport,
   NativeHostMeterBatch,
   NativeScheduleProgress,
   NativeOfflineRenderPlan,
@@ -174,7 +172,6 @@ import {
 import {
   nativeAudioHostMappedAssetPageHeaderBytes,
   nativeAudioHostMaximumPayloadBytes,
-  nativeRecordingSpoolImportVersion,
   nativeAudioHostScheduleProgressBytes,
   nativeOfflineRenderPlanSchema,
 } from "@daw-browser/desktop-protocol/native-audio-host"
@@ -211,7 +208,6 @@ const recordingStartDiagnostic = createRecordingStartDiagnostic(
 )
 
 const positiveUnsigned32Schema = unsigned32Schema.min(1)
-const transactionTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/)
 const requestIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/)
 const recoveryCompletionSchema = z.object({
   powerGeneration: z.number().int().safe(),
@@ -247,51 +243,6 @@ const nativeSessionConfigurationSchema = z.object({
   channelCount: unsigned32Schema,
   revision: unsigned32Schema,
 }).passthrough()
-const nativeSessionTransportSchema = z.object({
-  epoch: unsigned32Schema,
-  running: z.boolean(),
-  frame: z.number().int().safe(),
-  bpm: z.number().finite().positive().optional(),
-  timeSignatureNumerator: z.number().int().positive().optional(),
-  timeSignatureDenominator: z.number().int().positive().optional(),
-  cycleActive: z.boolean().optional(),
-  cycleStartSec: z.number().finite().min(0).optional(),
-  cycleEndSec: z.number().finite().min(0).optional(),
-  transitionId: z.bigint().positive().max(0xffff_ffff_ffff_ffffn).optional(),
-}).passthrough().refine((value) => (
-  (value.cycleStartSec === undefined && value.cycleEndSec === undefined)
-  || (
-    value.cycleStartSec !== undefined
-    && value.cycleEndSec !== undefined
-    && value.cycleEndSec > value.cycleStartSec
-  )
-)).refine((value) => (
-  (!Object.hasOwn(value, "bpm") || value.bpm !== undefined)
-  && (!Object.hasOwn(value, "timeSignatureNumerator") || value.timeSignatureNumerator !== undefined)
-  && (!Object.hasOwn(value, "timeSignatureDenominator") || value.timeSignatureDenominator !== undefined)
-  && (!Object.hasOwn(value, "cycleActive") || value.cycleActive !== undefined)
-  && (!Object.hasOwn(value, "cycleStartSec") || value.cycleStartSec !== undefined)
-  && (!Object.hasOwn(value, "cycleEndSec") || value.cycleEndSec !== undefined)
-))
-const nativeSessionRecordingConfigurationSchema = z.object({
-  projectId: projectIdSchemaV1,
-  projectGeneration: unsigned32Schema,
-  spoolImportVersion: z.literal(nativeRecordingSpoolImportVersion).optional(),
-  deviceUid: z.string(),
-  generation: positiveUnsigned32Schema,
-  sessionId: z.bigint().positive(),
-  channelCount: z.union([z.literal(1), z.literal(2)]),
-  inputChannels: z.array(unsigned32Schema),
-  gain: z.number().finite().min(0),
-  polarity: z.union([z.literal(1), z.literal(-1)]),
-  punchStartFrame: z.number().int().safe().min(0),
-  punchEndFrame: z.number().int().safe().min(0).nullable(),
-  monitoring: z.boolean(),
-  targetNodeId: z.bigint().positive().max(0xffff_ffff_ffff_ffffn),
-}).strict().refine((value) => (
-  value.inputChannels.length === value.channelCount
-  && (value.punchEndFrame === null || value.punchEndFrame >= value.punchStartFrame)
-))
 const nativeSessionAssetSchema = z.object({
   sessionAssetId: unsigned32Schema,
   frameCount: unsigned32Schema,
@@ -321,7 +272,6 @@ const nativeSessionEnvelopeSchema = <Schema extends z.ZodType>(valueSchema: Sche
 )
 const nativeBytesEnvelopeSchema = nativeSessionEnvelopeSchema(z.instanceof(Uint8Array))
 const nativeUndefinedEnvelopeSchema = nativeSessionEnvelopeSchema(z.undefined())
-const nativeSpectrumNodeEnvelopeSchema = nativeSessionEnvelopeSchema(z.bigint().positive().nullable())
 const nativeEditorEnvelopeSchema = nativeSessionEnvelopeSchema(nativeEditorCommandSchema)
 const nativeAttachmentEnvelopeSchema = nativeSessionEnvelopeSchema(nativeAttachmentCoordinationSchema)
 const nativeConfigurationEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSessionConfigurationSchema)
@@ -342,7 +292,6 @@ const nativeMappedAssetPageEnvelopeSchema = nativeSessionEnvelopeSchema(z.object
   planarPcm: z.instanceof(Uint8Array).refine((value) => value.byteLength > 0 && value.byteLength <= 1_048_560),
 }).strict())
 const nativeInstanceEnvelopeSchema = nativeSessionEnvelopeSchema(uuidSchema)
-const nativeTransportEnvelopeSchema = nativeSessionEnvelopeSchema(nativeSessionTransportSchema)
 const pluginDirectorySchema = z.object({ directory: z.string() }).passthrough()
 const closePreparationResultSchema = z.object({ flushed: z.literal(true) }).passthrough()
 
@@ -1128,14 +1077,15 @@ const registerIpc = () => {
   const catalogStoreFor = (event: Electron.IpcMainInvokeEvent) => (
     catalogAllowed(event) ? pluginCatalogStore : undefined
   )
-  const audioHostAllowed = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => (
-    process.platform === "darwin"
-    && process.arch === "arm64"
-    && window_ !== undefined
-    && rendererLifecycle.acceptsPrivilegedRequests()
-    && event.sender.id === window_.webContents.id
-    && event.senderFrame !== null
-    && sameAppOrigin(event.senderFrame.url)
+  const audioHostAllowed = (event: NativeSessionEvent) => (
+    window_ !== undefined && nativeSessionRequestAllowed({
+      platform: process.platform,
+      architecture: process.arch,
+      rendererId: window_.webContents.id,
+      acceptsPrivilegedRequests: rendererLifecycle.acceptsPrivilegedRequests(),
+      event,
+      sameAppOrigin,
+    })
   )
   if (ae08Evidence) ipcMain.on(ae08RendererMarkChannel, (event, message) => {
     const mark = ae08RendererMarkSchema.safeParse(message)
@@ -1400,41 +1350,6 @@ const registerIpc = () => {
       revision: value.revision,
     }
   }
-  const nativeSessionTransport = (
-    value: z.infer<typeof nativeSessionTransportSchema>,
-  ): NativeHostTransport => {
-    return {
-      epoch: value.epoch,
-      running: value.running,
-      frame: value.frame,
-      bpm: value.bpm,
-      timeSignatureNumerator: value.timeSignatureNumerator,
-      timeSignatureDenominator: value.timeSignatureDenominator,
-      cycleActive: value.cycleActive,
-      cycleStartSec: value.cycleStartSec,
-      cycleEndSec: value.cycleEndSec,
-      transitionId: value.transitionId,
-    }
-  }
-  const nativeSessionRecordingConfiguration = (
-    value: z.infer<typeof nativeSessionRecordingConfigurationSchema>,
-  ): NativeHostRecordingConfiguration => {
-    return {
-      projectId: value.projectId,
-      projectGeneration: value.projectGeneration,
-      deviceUid: value.deviceUid,
-      generation: value.generation,
-      sessionId: value.sessionId,
-      channelCount: value.channelCount,
-      inputChannels: value.inputChannels,
-      gain: value.gain,
-      polarity: value.polarity,
-      punchStartFrame: value.punchStartFrame,
-      punchEndFrame: value.punchEndFrame,
-      monitoring: value.monitoring,
-      targetNodeId: value.targetNodeId,
-    }
-  }
   const nativeSessionAsset = (
     value: z.infer<typeof nativeSessionAssetSchema>,
   ): NativeHostPcmAsset => {
@@ -1631,68 +1546,69 @@ const registerIpc = () => {
         height: value.height,
         anchor,
       }
-      // Prefer the isolated editor host. A plug-in editor can allocate UI or
-      // runtime state outside the realtime graph, so its failure should remain
-      // independent from playback whenever the isolated manager is available.
-      if (manager) {
-        const status = await manager.execute(command)
-        // The editor session does not read an instance playback owns, so a close of one reaches the renderer as
-        // the closed event, which captures from the playback worker.
-        if (command.command === "close") sendRendererMessage(vstEditorStateChannel, { projectId, instanceId: command.instanceId, open: false })
-        return { ok: true as const, status }
-      }
-      if (activeHostCandidate) {
-        try {
-          if (activeHostCandidate.transactionOpen() && !envelope.data.transactionToken) {
-            throw new Error("The native audio host transaction token is required.")
+      const unavailable = { ok: false as const, error: "The native VST editor session is unavailable." }
+      // Plug-in editor UI and runtime state stay outside the realtime playback graph.
+      return await executeNativeEditorRoute({
+        isolated: manager ? async () => {
+          const status = await manager.execute(command)
+          if (command.command === "close") {
+            sendRendererMessage(vstEditorStateChannel, { projectId, instanceId: command.instanceId, open: false })
           }
-          const boundProjectId = activeEditorProjectBindings.projectFor(command.instanceId)
-          if (boundProjectId !== undefined && boundProjectId !== projectId) {
-            throw new Error("The active native VST editor project binding changed.")
-          }
-          if (boundProjectId === undefined) throw new Error("The active native VST editor is not owned by a committed project binding.")
-          const ownership = await activeHostCandidate.executeVstEditorCommand(
-            nativeVstEditorOwnershipProbe(command.instanceId),
-            envelope.data.transactionToken,
-          )
-          if (!ownership.owned) throw new Error("The active native VST editor is not owned by the committed project binding.")
-          const {
-            projectId: _projectId,
-            initialState: _initialState,
-            requiresState: _requiresState,
-            captureState: _captureState,
-            ...nativeCommand
-          } = command
-          const capturedState = command.command === "close"
-            ? await activeHostCandidate.getVstState(command.instanceId)
-            : undefined
-          let status = command.command === "status"
-            ? ownership
-            : undefined
-          if (status === undefined) {
-            try {
-              status = await activeHostCandidate.executeVstEditorCommand(nativeCommand, envelope.data.transactionToken)
-            } catch (error) {
-              if (command.command !== "close") throw error
-              status = {
-                ...ownership,
-                success: false,
-                open: false,
-                closeError: error instanceof Error ? error.message : "The native editor close command failed.",
+          return { ok: true as const, status }
+        } : undefined,
+        playback: activeHostCandidate ? async () => {
+          try {
+            if (activeHostCandidate.transactionOpen() && !envelope.data.transactionToken) {
+              throw new Error("The native audio host transaction token is required.")
+            }
+            const boundProjectId = activeEditorProjectBindings.projectFor(command.instanceId)
+            if (boundProjectId !== undefined && boundProjectId !== projectId) {
+              throw new Error("The active native VST editor project binding changed.")
+            }
+            if (boundProjectId === undefined) throw new Error("The active native VST editor is not owned by a committed project binding.")
+            const ownership = await activeHostCandidate.executeVstEditorCommand(
+              nativeVstEditorOwnershipProbe(command.instanceId),
+              envelope.data.transactionToken,
+            )
+            if (!ownership.owned) throw new Error("The active native VST editor is not owned by the committed project binding.")
+            const {
+              projectId: _projectId,
+              initialState: _initialState,
+              requiresState: _requiresState,
+              captureState: _captureState,
+              ...nativeCommand
+            } = command
+            const capturedState = command.command === "close"
+              ? await activeHostCandidate.getVstState(command.instanceId)
+              : undefined
+            let status = command.command === "status"
+              ? ownership
+              : undefined
+            if (status === undefined) {
+              try {
+                status = await activeHostCandidate.executeVstEditorCommand(nativeCommand, envelope.data.transactionToken)
+              } catch (error) {
+                if (command.command !== "close") throw error
+                status = {
+                  ...ownership,
+                  success: false,
+                  open: false,
+                  closeError: error instanceof Error ? error.message : "The native editor close command failed.",
+                }
               }
             }
+            if (command.command !== "close") return { ok: true as const, status }
+            return { ok: true as const, status: { ...status, capturedState } }
+          } catch (error) {
+            console.error("[native-vst3] editor active route failed", {
+              error: sanitizeNativeVst3DiagnosticError(error instanceof Error ? error : undefined),
+            })
+            const diagnostics = await activeHostCandidate.diagnostics().catch(() => undefined)
+            if (diagnostics?.state === "running" || !manager) throw error
+            return unavailable
           }
-          if (command.command !== "close") return { ok: true as const, status }
-          return { ok: true as const, status: { ...status, capturedState } }
-        } catch (error) {
-          console.error("[native-vst3] editor active route failed", {
-            error: sanitizeNativeVst3DiagnosticError(error instanceof Error ? error : undefined),
-          })
-          const diagnostics = await activeHostCandidate.diagnostics().catch(() => undefined)
-          if (diagnostics?.state === "running" || !manager) throw error
-        }
-      }
-      return { ok: false as const, error: "The native VST editor session is unavailable." }
+        } : undefined,
+      }) ?? unavailable
     } catch (error) {
       console.error("[native-vst3] editor command failed", {
         error: sanitizeNativeVst3DiagnosticError(error instanceof Error ? error : undefined),
@@ -1857,52 +1773,20 @@ const registerIpc = () => {
   registerNativeSessionBytes(sessionQueueScheduleWindowChannel, (supervisor, bytes, transactionToken) => supervisor.queueScheduleWindow(bytes, transactionToken))
   registerNativeSessionBytes(sessionReenableVstScheduleAutomationChannel, (supervisor, bytes, transactionToken) => supervisor.reenableVstScheduleAutomation(bytes, transactionToken))
   registerNativeSessionBytes(sessionQueueSourceEventsChannel, (supervisor, bytes, transactionToken) => supervisor.queueSourceEvents(bytes, transactionToken))
-  ipcMain.handle(sessionSetSpectrumNodeChannel, async (event, value) => {
-    const supervisor = sessionSupervisorFor(event)
-    const envelope = nativeSpectrumNodeEnvelopeSchema.safeParse(value)
-    if (!supervisor || !envelope.success || envelope.data.transactionToken !== undefined) return nativeSessionFailure()
-    try {
-      await supervisor.setSpectrumNode(envelope.data.value)
-      return { ok: true as const }
-    } catch (error) {
-      return nativeSessionFailure(error)
-    }
+  registerNativeSessionTransportIpc({
+    ipcMain,
+    allowed: audioHostAllowed,
+    supervisor: () => audioHostSupervisor,
+    fail: nativeSessionFailure,
   })
-  ipcMain.handle(sessionSetTransportChannel, async (event, value) => {
-    const supervisor = sessionSupervisorFor(event)
-    const envelope = nativeTransportEnvelopeSchema.safeParse(value)
-    if (!supervisor || !envelope.success) return nativeSessionFailure()
-    const transport = nativeSessionTransport(envelope.data.value)
-    try {
-      await supervisor.setTransport(transport, envelope.data.transactionToken)
-      return { ok: true as const }
-    } catch (error) {
-      return nativeSessionFailure(error)
-    }
-  })
-  ipcMain.handle(sessionConfigureRecordingChannel, async (event, value) => {
-    const supervisor = sessionSupervisorFor(event)
-    const envelope = nativeSessionEnvelopeSchema(nativeSessionRecordingConfigurationSchema).safeParse(value)
-    const request = envelope.success && envelope.data.transactionToken === undefined && event.senderFrame === event.sender.mainFrame
-      ? { configuration: nativeSessionRecordingConfiguration(envelope.data.value), projectId: envelope.data.value.projectId,
-        projectGeneration: envelope.data.value.projectGeneration, spoolImportVersion: envelope.data.value.spoolImportVersion }
-      : undefined
-    return recordingSessionOwner.configure({ rendererGeneration: generation, hostGeneration: audioLifecycle.powerGeneration,
-      senderAllowed: () => audioHostAllowed(event), fail: nativeSessionFailure }, supervisor, request)
-  })
-  ipcMain.handle(sessionStartRecordingChannel, async (event, value) => {
-    const supervisor = sessionSupervisorFor(event)
-    const binding = nativeSessionEnvelopeSchema(z.object({ projectId: projectIdSchemaV1,
-      projectGeneration: unsigned32Schema, generation: unsigned32Schema, sessionId: z.bigint().positive() }).strict()).safeParse(value)
-    const request = binding.success && binding.data.transactionToken === undefined && event.senderFrame === event.sender.mainFrame
-      ? binding.data.value : undefined
-    return recordingSessionOwner.start({ rendererGeneration: generation, fail: nativeSessionFailure }, supervisor, request)
-  })
-  ipcMain.handle(sessionStopRecordingChannel, async (event, value) => {
-    const supervisor = sessionSupervisorFor(event)
-    const envelope = nativeSessionEnvelopeSchema(z.number().int().safe().min(0).optional()).safeParse(value)
-    const request = envelope.success && envelope.data.transactionToken === undefined ? { endFrame: envelope.data.value } : undefined
-    return recordingSessionOwner.stop({ fail: nativeSessionFailure }, supervisor, request)
+  registerNativeSessionRecordingIpc({
+    ipcMain,
+    allowed: audioHostAllowed,
+    supervisor: () => audioHostSupervisor,
+    owner: recordingSessionOwner,
+    rendererGeneration: () => generation,
+    hostGeneration: () => audioLifecycle.powerGeneration,
+    fail: nativeSessionFailure,
   })
   const spoolScopeSchema = z.object({ projectId: projectIdSchemaV1, projectGeneration: unsigned32Schema }).strict()
   const spoolTakeIdSchema = z.string().uuid()
@@ -2183,9 +2067,7 @@ const createWindow = () => {
       if (invalidation) applyRendererInvalidation(invalidation, "Renderer reloaded.")
     }
   })
-  window_.webContents.on("did-navigate", (_event, url) => {
-    rendererLifecycle.commitMainFrameNavigation(url)
-  })
+  registerRendererNavigationCommit(window_.webContents, rendererLifecycle.commitMainFrameNavigation)
   window_.webContents.on("did-fail-load", (_event, _errorCode, _errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame) return
     rendererLifecycle.failMainFrameNavigation(validatedURL)

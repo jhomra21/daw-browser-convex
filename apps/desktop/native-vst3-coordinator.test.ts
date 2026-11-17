@@ -1018,8 +1018,11 @@ test("a state just captured from the running instance does not replace it", asyn
   ledger.capturedFromLive(first.instanceId, capturedState.sha256)
 
   await run([first], { state: capturedState })
-
   expect(calls).toEqual([])
+
+  // The running instance now holds the captured state, so an undo back to the earlier state reloads it.
+  await run([first])
+  expect(calls).toEqual([`detach:${first.instanceId}`, `attach:${first.instanceId}`])
 })
 
 test("a removal whose revision was rolled back is neither detached twice nor lost when the plug-in comes back", async () => {

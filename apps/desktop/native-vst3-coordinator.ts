@@ -773,17 +773,15 @@ export const createNativeVst3AttachmentLedger = (
       const attach: string[] = []
       const replace: string[] = []
       for (const [instanceId, entry] of entries) {
-        const current = staged.get(instanceId) ?? active.get(instanceId)
+        const holder = staged.has(instanceId) ? staged : active
+        const current = holder.get(instanceId)
         if (current === undefined) attach.push(instanceId)
-        else if (
-          current.plugin !== entry.plugin
-          || current.binding !== entry.binding
-          || (current.load !== entry.load && !(
-            current.baseLoad === entry.baseLoad
-            && current.stateSha256 !== entry.stateSha256
-            && liveCaptures.get(instanceId) === entry.stateSha256
-          ))
-        ) replace.push(instanceId)
+        else if (current.plugin !== entry.plugin || current.binding !== entry.binding) replace.push(instanceId)
+        else if (current.load !== entry.load) {
+          // A state captured from the running instance is what it already holds: record it instead of reloading.
+          if (current.baseLoad === entry.baseLoad && liveCaptures.get(instanceId) === entry.stateSha256) holder.set(instanceId, entry)
+          else replace.push(instanceId)
+        }
       }
       const removed = [...active.keys()].filter((instanceId) => !entries.has(instanceId))
       const dropped = [...staged.keys()].filter((instanceId) => !entries.has(instanceId))

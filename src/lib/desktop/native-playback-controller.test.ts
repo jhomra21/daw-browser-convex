@@ -1112,7 +1112,7 @@ const step7LatencyFixture = async (attachment = false, sampleRateHz = 48_000, ma
     revision: 2, epoch: 1, progressSequence: BigInt(sequence),
     renderedThroughFrame: frame, acceptedThroughFrame: frame + 96000n, lastAcceptedWindowId: 1n,
     appliedTransportTransitionId: 1n, appliedUrgentSequence: 0n, appliedProcessorSequence: 0n,
-    running: true, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+    running: true, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, automationCredits: 256,
     latencyCompletionGeneration: completion,
   })
   const addInstrument = () => {
@@ -2493,7 +2493,7 @@ describe("DV01 STEP6 public publication witnesses", () => {
       fixture.emitScheduleProgress({ revision: 1, epoch: 1, progressSequence: 100n, renderedThroughFrame: 2048n,
         acceptedThroughFrame: 4096n, lastAcceptedWindowId: 1n, appliedTransportTransitionId: 1n,
         appliedUrgentSequence: 0n, appliedProcessorSequence: 0n, running: true, scheduleComplete: false,
-        instrumentCredits: 256, sourceCredits: 256, automationCredits: 256 })
+        instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256 })
       expect(await rolledBack.promise).toBe(true)
       console.log("STEP6-W27-LATENCY-ROLLBACK", JSON.stringify({ retainedAtRollback: true,
         nativeCallbackModeled: false, occupancyAdmissionModeled: false }))
@@ -2802,7 +2802,7 @@ describe("DV01 step5 repair", () => {
     renderedThroughFrame: 0n, acceptedThroughFrame: 96000n, lastAcceptedWindowId: 1n,
     appliedTransportTransitionId: 0n, appliedUrgentSequence: 0n,
     appliedProcessorSequence: BigInt(sequence), running: false, scheduleComplete: false,
-    instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+    instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
   })
   for (const state of ["sent", "admitted", "applied-unobserved", "dropped"]) {
     test(`5-R1 rollback across earlier epoch ${state}`, () => {
@@ -4292,7 +4292,7 @@ describe("DV01 instrument truth", () => {
         f.fixture.emitScheduleProgress({ revision: 1, epoch: 1, progressSequence: 999n,
           renderedThroughFrame: 128n, acceptedThroughFrame: 96000n, lastAcceptedWindowId: 1n,
           appliedTransportTransitionId: 1n, appliedUrgentSequence: 0n, appliedProcessorSequence: 0n,
-          running: true, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256 })
+          running: true, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256 })
         const outcome = await adoption
         await turns()
         expect(outcome.status).toBe("failed")
@@ -5285,7 +5285,7 @@ const createBridge = (
       scheduleComplete: currentWindows.some((payload) => new DataView(payload.buffer).getUint32(40, true) === 1),
       instrumentCredits: 256,
       sourceCredits: 256,
-      automationCredits: 256,
+      admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
       processorPatchResolved: resolvedPatch,
     })
   }
@@ -5546,7 +5546,7 @@ const createBridge = (
                 scheduleComplete: currentWindows.some((payload) => new DataView(payload.buffer).getUint32(40, true) === 1),
                 instrumentCredits: 256,
                 sourceCredits: 256,
-                automationCredits: 256,
+                admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
               } satisfies NativeScheduleProgress),
             })
           })
@@ -5776,11 +5776,11 @@ test("an edit whose graph and residents overfill the 64-slot host table reclaims
   let unreclaimed = 0
   let capacity = 0n
   let sequence = 100_000n
-  const report = (admissionCapacityGeneration?: bigint) => fixture.emitScheduleProgress({
+  const report = (admissionCapacityGeneration = 0n) => fixture.emitScheduleProgress({
     revision: 1, epoch: fixture.transportContexts.at(-1)?.epoch ?? 1, progressSequence: sequence++, renderedThroughFrame: 0n,
     acceptedThroughFrame: 48000n, lastAcceptedWindowId: 1n, appliedTransportTransitionId: 1n,
     appliedUrgentSequence: 0n, appliedProcessorSequence: 0n, running: true,
-    scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256, admissionCapacityGeneration,
+    scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, latencyCompletionGeneration: 0n, automationCredits: 256, admissionCapacityGeneration,
   })
   const release = fixture.bridge.session.releaseAsset
   fixture.bridge.session.releaseAsset = async (sessionAssetId) => {
@@ -7909,7 +7909,7 @@ const b6dProgress = (revision: number, epoch: number, sequence: number, appliedP
   revision, epoch, progressSequence: BigInt(sequence), renderedThroughFrame: 512n, acceptedThroughFrame: 96_512n,
   lastAcceptedWindowId: 1n, appliedTransportTransitionId: BigInt(epoch), appliedUrgentSequence: 0n,
   appliedProcessorSequence: BigInt(appliedProcessorSequence), running: true, scheduleComplete: false,
-  instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+  instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
 })
 const b6dInstalled = (gainDb: number) => ({ kindId: 1, state: new Uint8Array([0]), values: { gainDb } })
 const b6dDeliver = (owner: B6dOwner, key: string, order: number, gainDb: number, epoch: number) => owner.deliver({
@@ -8602,11 +8602,11 @@ test("only increasing native capacity generations grant admission opportunities"
   const epoch = fixture.transportContexts.at(-1)?.epoch
   if (epoch === undefined) throw new Error("Missing transport epoch")
   let sequence = 100n
-  const emit = (admissionCapacityGeneration?: bigint) => fixture.emitScheduleProgress({
+  const emit = (admissionCapacityGeneration = 0n) => fixture.emitScheduleProgress({
     revision: 1, epoch, progressSequence: sequence++, renderedThroughFrame: 0n,
     acceptedThroughFrame: 48000n, lastAcceptedWindowId: 1n, appliedTransportTransitionId: 1n,
     appliedUrgentSequence: 0n, appliedProcessorSequence: 0n, running: true,
-    scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+    scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, latencyCompletionGeneration: 0n, automationCredits: 256,
     admissionCapacityGeneration,
   })
   emit()
@@ -9283,7 +9283,7 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
       revision: activeRevision, epoch, progressSequence: ++progressSequence,
       renderedThroughFrame: frame, acceptedThroughFrame: 96_000n, lastAcceptedWindowId: 1n,
       appliedTransportTransitionId: 1n, appliedUrgentSequence: 0n, appliedProcessorSequence: 0n,
-      running: true, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+      running: true, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
     })
     const initialSnapshotInput = snapshotInput
     snapshotInput = { ...snapshotInput, revision: 2 }
@@ -9437,7 +9437,7 @@ for (const scenario of ["audio-delete", "audio-move", "audio-trim", "audio-tempo
           revision: activeRevision, epoch: seekEpoch, progressSequence: ++progressSequence,
           renderedThroughFrame: frame, acceptedThroughFrame: 96_000n, lastAcceptedWindowId: 1n,
           appliedTransportTransitionId: 1n, appliedUrgentSequence: 0n, appliedProcessorSequence: 0n,
-          running: true, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+          running: true, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
         })
         expect(await readd).toEqual({ status: "adopted" })
         // The removed sample stayed resident, so the swap back installs nothing.
@@ -10262,7 +10262,7 @@ for (const transport of ["seek", "pause"]) {
       fixture.emitScheduleProgress({ revision: 1, epoch, progressSequence: 100n,
         renderedThroughFrame: 96_000n, acceptedThroughFrame: 96_000n, lastAcceptedWindowId: 1n,
         appliedTransportTransitionId: 1n, appliedUrgentSequence: 0n, appliedProcessorSequence: 0n,
-        running: true, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256 })
+        running: true, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256 })
       await entered.promise
       const update = controller.adoptSchedule(migrationIntent("public-migration-8"), true)
       for (let turn = 0; turn < 150; turn++) await Promise.resolve()
@@ -10394,7 +10394,7 @@ for (const scenario of ["lost reply", "lost reply and failed inspection", "pendi
         revision: 2, epoch, progressSequence: 100n, renderedThroughFrame: 2048n,
         acceptedThroughFrame: 4096n, lastAcceptedWindowId: 1n, appliedTransportTransitionId: 1n,
         appliedUrgentSequence: 0n, appliedProcessorSequence: 0n, running: false,
-        scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+        scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
       })
     }
     expect(await update).toEqual({ handled: true })
@@ -10403,7 +10403,7 @@ for (const scenario of ["lost reply", "lost reply and failed inspection", "pendi
       revision: 2, epoch, progressSequence: 101n, renderedThroughFrame: 72000n,
       acceptedThroughFrame: 96000n, lastAcceptedWindowId: 1n, appliedTransportTransitionId: 1n,
       appliedUrgentSequence: 0n, appliedProcessorSequence: 0n, running: true,
-      scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+      scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
     })
     await Bun.sleep(0)
     const resumedWindows = fixture.schedulePayloads.slice(windowsBeforeProgress)
@@ -10463,7 +10463,7 @@ for (const phase of ["prepare", "publish", "retire"]) {
       revision: 1, epoch: 1, progressSequence: 100n, renderedThroughFrame: phase === "retire" ? 0n : 2048n,
       acceptedThroughFrame: 4096n, lastAcceptedWindowId: 1n, appliedTransportTransitionId: 1n,
       appliedUrgentSequence: 0n, appliedProcessorSequence: 0n, running: false,
-      scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+      scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
     }
     fixture.emitScheduleProgress(progress)
     await Bun.sleep(0)
@@ -10527,7 +10527,7 @@ for (const stamps of ["increasing", "equal"]) for (const phase of ["prepare", "p
     revision: 1, epoch: 1, progressSequence: 100n, renderedThroughFrame: 2048n,
     acceptedThroughFrame: 4096n, lastAcceptedWindowId: 1n, appliedTransportTransitionId: 1n,
     appliedUrgentSequence: 0n, appliedProcessorSequence: 0n, running: false,
-    scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+    scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
   })
   expect(await Promise.all([first, second, newest])).toEqual([{ state: "superseded", by: stamps === "equal" ? 11 : 13 }, { state: "applied" }, { state: "applied" }])
   expect(fixture.calls.filter((call) => call === "revision-publish")).toHaveLength(1)
@@ -10605,7 +10605,7 @@ test("latency coalescing rejects a processor patch below the published sequence 
     revision: 1, epoch: 1, progressSequence: 100n, renderedThroughFrame: 2048n,
     acceptedThroughFrame: 4096n, lastAcceptedWindowId: 1n, appliedTransportTransitionId: 1n,
     appliedUrgentSequence: 0n, appliedProcessorSequence: 0n, running: false,
-    scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+    scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
   })
   await expect(Promise.all([latencyEdit, staleEdit])).resolves.toEqual([{ state: "applied" }, { state: "superseded", by: 10 }])
   if (!submitted) throw new Error("Missing latency graph")
@@ -10715,7 +10715,7 @@ test("drops pending latency work when inspection reports a different host genera
     revision: 1, epoch: 1, progressSequence: 100n, renderedThroughFrame: 2048n,
     acceptedThroughFrame: 4096n, lastAcceptedWindowId: 1n, appliedTransportTransitionId: 1n,
     appliedUrgentSequence: 0n, appliedProcessorSequence: 0n, running: false,
-    scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+    scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
   })
   await Bun.sleep(0)
   const settledBeforeDispose = settled
@@ -13517,7 +13517,7 @@ test("invalidates native ownership before reporting a terminal refill fault", as
       scheduleComplete: false,
       instrumentCredits: 256,
       sourceCredits: 256,
-      automationCredits: 256,
+      admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
     })
     await Bun.sleep(0)
   }
@@ -15871,7 +15871,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
     fixture.emitScheduleProgress({
       revision: 1, epoch: 1, progressSequence: 900n, renderedThroughFrame: 0n, acceptedThroughFrame: 0n, lastAcceptedWindowId: 0n,
       appliedTransportTransitionId: 0n, appliedUrgentSequence: 0n, appliedProcessorSequence: 1n, running: false, scheduleComplete: false,
-      instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+      instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
     })
     await controller.deliverProcessor(fixtureParameterEdit(gainRequest(12, -4)), fixtureGesture(gainRequest(12, -4), false)).settled
     await turns()
@@ -16272,7 +16272,7 @@ test("seek resends once after a claimed publication retires", async () => {
       revision: 2, epoch: fixture.transportContexts.at(-1)?.epoch ?? 2, progressSequence: 100n,
       renderedThroughFrame: 0n, acceptedThroughFrame: 0n, lastAcceptedWindowId: 0n,
       appliedTransportTransitionId: 0n, appliedUrgentSequence: 0n, appliedProcessorSequence: 0n,
-      running: false, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+      running: false, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
     })
     await expect(seek).resolves.toBe("started")
     await publication
@@ -16459,7 +16459,7 @@ for (const latencyPending of [false, true]) test(`STEP7B4 reader-check/reply rac
       progressSequence: 100n, renderedThroughFrame: 512n,
       acceptedThroughFrame: 8192n, lastAcceptedWindowId: 1n, appliedTransportTransitionId: 1n,
       appliedUrgentSequence: 0n, appliedProcessorSequence: 0n, running: true,
-      scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+      scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
     }
     fixture.emitScheduleProgress(progress)
     await step7Turns()
@@ -16514,7 +16514,7 @@ test("STEP7B3 not-safe retirement re-arms a passed reader boundary", async () =>
       revision: 2, epoch: 1, progressSequence: 100n, renderedThroughFrame: 2048n,
       acceptedThroughFrame: 8192n, lastAcceptedWindowId: 1n, appliedTransportTransitionId: 1n,
       appliedUrgentSequence: 0n, appliedProcessorSequence: 0n, running: false,
-      scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+      scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
     }
     fixture.emitScheduleProgress(progress)
     await step7Turns()

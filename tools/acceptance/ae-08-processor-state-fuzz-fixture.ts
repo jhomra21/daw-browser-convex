@@ -1331,7 +1331,7 @@ export default function createControllerFixture(
       const adoption = owner.adopted(new Map([[target.instanceId, 1]]), new Set(), new Set(), 2, () => true)
       const settlement = owner.observe({ revision: 2, epoch: 1, progressSequence: 1n, renderedThroughFrame: 512n, acceptedThroughFrame: 4096n,
         lastAcceptedWindowId: 1n, appliedTransportTransitionId: 0n, appliedUrgentSequence: 0n, appliedProcessorSequence: 1n, running: true,
-        scheduleComplete: false, instrumentCredits: 1, sourceCredits: 1, automationCredits: 1 })
+        scheduleComplete: false, instrumentCredits: 1, sourceCredits: 1, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 1 })
       checked("I1")
       if (first.state !== "applied" || adoption.length + settlement.length === 0)
         fail("I1", `Desired change with no gesture never reached native: ${JSON.stringify({ execution: first.state, adoption: adoption.length, settlement: settlement.length })}`, undefined, "graph-only-desired-change")
@@ -1367,7 +1367,7 @@ export default function createControllerFixture(
         strategy: { kind: "urgent", sequence: 0 }, values: new Map([["synth.cutoff", 4000]]) }, { revision: 1, epoch: 2 })
       const progress = (progressSequence: bigint, applied: bigint) => ({ revision: 1, epoch: 2, progressSequence, renderedThroughFrame: 512n, acceptedThroughFrame: 4096n,
         lastAcceptedWindowId: 1n, appliedTransportTransitionId: 0n, appliedUrgentSequence: applied, appliedProcessorSequence: applied, running: true,
-        scheduleComplete: false, instrumentCredits: 1, sourceCredits: 1, automationCredits: 1 })
+        scheduleComplete: false, instrumentCredits: 1, sourceCredits: 1, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 1 })
       owner.observe(progress(1n, 9n))
       const whileHeld = held.state
       owner.send(held, 5, 12)
@@ -1391,7 +1391,7 @@ export default function createControllerFixture(
         content: { state: new Uint8Array([11]), values: { "utility.gainDb": 0 } }, bypassed: false, tailFrames: 0 }
       const frame = (applied: bigint) => ({ revision: 1, epoch: 1, progressSequence: applied, renderedThroughFrame: 512n, acceptedThroughFrame: 4096n,
         lastAcceptedWindowId: 1n, appliedTransportTransitionId: 0n, appliedUrgentSequence: 0n, appliedProcessorSequence: applied, running: true,
-        scheduleComplete: false, instrumentCredits: 1, sourceCredits: 1, automationCredits: 1 })
+        scheduleComplete: false, instrumentCredits: 1, sourceCredits: 1, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 1 })
       // `newer`: an edit registered after the patch was queued is what the lane sends, so the install carries its order.
       // `gain`: what the gesture proved live. A claimed patch carrying that same value still leaves it unknown.
       const replay = (outcome: "applied" | "claimed", newer = false, gain = -9) => {

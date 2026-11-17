@@ -66,7 +66,7 @@ const frame = (sequence: number, processorSequence = 0, urgentSequence = 0): Nat
   revision: 1, epoch: 1, progressSequence: BigInt(sequence), renderedThroughFrame: 0n, acceptedThroughFrame: 0n,
   lastAcceptedWindowId: 0n, appliedTransportTransitionId: 0n, appliedUrgentSequence: BigInt(urgentSequence),
   appliedProcessorSequence: BigInt(processorSequence), running: true, scheduleComplete: false,
-  instrumentCredits: 0, sourceCredits: 0, automationCredits: 0,
+  instrumentCredits: 0, sourceCredits: 0, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 0,
 })
 const kinds = new Map([["A", 1], ["B", 1]])
 const turns = async () => { for (let turn = 0; turn < 8; turn += 1) await Promise.resolve() }

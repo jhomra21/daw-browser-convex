@@ -289,7 +289,7 @@ const createFakeHost = () => {
         revision: runtimeRevision, epoch: transport.epoch, progressSequence, renderedThroughFrame: BigInt(transport.frame),
         acceptedThroughFrame: acceptedFrames.get(transport.epoch) ?? BigInt(transport.frame + 1), lastAcceptedWindowId: 1n,
         appliedTransportTransitionId: transport.transitionId, appliedUrgentSequence: 0n, appliedProcessorSequence,
-        running: transport.running, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+        running: transport.running, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
       });
     }
   };
@@ -362,7 +362,7 @@ const createFakeHost = () => {
             revision: runtimeRevision, epoch: next.epoch, progressSequence, renderedThroughFrame: BigInt(next.frame),
             acceptedThroughFrame: acceptedFrames.get(next.epoch) ?? BigInt(next.frame + 1), lastAcceptedWindowId: 1n,
             appliedTransportTransitionId: next.transitionId ?? progressSequence, appliedUrgentSequence: 0n, appliedProcessorSequence,
-            running: next.running, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
+            running: next.running, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
           });
         }
       });

@@ -196,7 +196,7 @@ const progressFor = (progressSequence: bigint, scheduleComplete = false): Native
   scheduleComplete,
   instrumentCredits: 256,
   sourceCredits: 256,
-  automationCredits: 256,
+  admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
 })
 
 const bridgeFor = (options: { failureCount?: number; onAccept?: (attempt: number) => void } = {}) => {
@@ -1198,7 +1198,7 @@ test("keeps an active arranged note across repeated schedule windows", async () 
     scheduleComplete: false,
     instrumentCredits: 256,
     sourceCredits: 256,
-    automationCredits: 256,
+    admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
   })
   await Bun.sleep(0)
   await Bun.sleep(0)
@@ -1234,7 +1234,7 @@ test("moves a note-off at a window boundary into the following window", async ()
     scheduleComplete: false,
     instrumentCredits: 256,
     sourceCredits: 256,
-    automationCredits: 256,
+    admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
   })
   await Bun.sleep(0)
   await Bun.sleep(0)
@@ -1281,7 +1281,7 @@ test("extends the final schedule window so the final note-off is accepted", asyn
     scheduleComplete: false,
     instrumentCredits: 256,
     sourceCredits: 256,
-    automationCredits: 256,
+    admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
   })
   await Bun.sleep(0)
   await Bun.sleep(0)

@@ -632,12 +632,12 @@ const createNativeHookBridge = (
   const lossListeners = new Set<() => void>()
   let progressSequence = 0n
   let currentTransport = { epoch: 1, frame: 0, running: false, transitionId: 0n }
-  let admissionCapacityGeneration: bigint | undefined
+  let admissionCapacityGeneration = 0n
   const emitScheduleProgress = (capacityGeneration?: bigint) => {
     if (capacityGeneration !== undefined) admissionCapacityGeneration = capacityGeneration
     progressSequence++
     for (const listener of progressListeners) listener({ revision: runtimeRevision, epoch: currentTransport.epoch,
-      progressSequence, admissionCapacityGeneration, renderedThroughFrame: BigInt(currentTransport.frame),
+      progressSequence, admissionCapacityGeneration, latencyCompletionGeneration: 0n, renderedThroughFrame: BigInt(currentTransport.frame),
       acceptedThroughFrame: acceptedFrames.get(currentTransport.epoch) ?? BigInt(currentTransport.frame + 1),
       lastAcceptedWindowId: 1n, appliedTransportTransitionId: currentTransport.transitionId,
       appliedUrgentSequence: 0n, appliedProcessorSequence: 0n, running: currentTransport.running,
@@ -734,7 +734,7 @@ const createNativeHookBridge = (
             scheduleComplete,
             instrumentCredits: 256,
             sourceCredits: 256,
-            automationCredits: 256,
+            admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
           }) })
           return { ok: true as const }
         },
@@ -4910,7 +4910,7 @@ test('uses the committed native backend without scheduling Web Audio', async () 
                 scheduleComplete: true,
                 instrumentCredits: 256,
                 sourceCredits: 256,
-                automationCredits: 256,
+                admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
               }))
               return { ok: true as const }
             },
@@ -6552,7 +6552,7 @@ test('rebuilds a prepared native backend while paused', async () => {
                 scheduleComplete: true,
                 instrumentCredits: 256,
                 sourceCredits: 256,
-                automationCredits: 256,
+                admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
               }))
               return { ok: true as const }
             },

@@ -766,14 +766,14 @@ export const createNativePlaybackController = (input: {
 
   const handleNativeScheduleProgress = (progress: NativeScheduleProgress) => {
     const retirementChanged = progress.epoch === transportEpoch
-      && (progress.latencyCompletionGeneration ?? 0n) > nativeLatencyCompletionGeneration
+      && progress.latencyCompletionGeneration > nativeLatencyCompletionGeneration
     const capacity = progress.admissionCapacityGeneration
-    if (progress.epoch === transportEpoch && capacity !== undefined && capacity > nativeAdmissionCapacityGeneration) {
+    if (progress.epoch === transportEpoch && capacity > nativeAdmissionCapacityGeneration) {
       nativeAdmissionCapacityGeneration = capacity
       advanceScheduleCapacityEpoch()
     }
     const completions = progress.latencyCompletionGeneration
-    if (progress.epoch === transportEpoch && completions !== undefined && completions > nativeLatencyCompletionGeneration) {
+    if (progress.epoch === transportEpoch && completions > nativeLatencyCompletionGeneration) {
       nativeLatencyCompletionGeneration = completions
       prepareAdmissionWake?.()
     }

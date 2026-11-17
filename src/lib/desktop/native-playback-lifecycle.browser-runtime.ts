@@ -272,7 +272,7 @@ const emitProgress = (advance = 0) => {
     scheduleComplete: false,
     instrumentCredits: 256,
     sourceCredits: 256,
-    automationCredits: 256,
+    admissionCapacityGeneration: 0n, latencyCompletionGeneration: 0n, automationCredits: 256,
   }
   for (const listener of progressListeners) listener(progress)
 }

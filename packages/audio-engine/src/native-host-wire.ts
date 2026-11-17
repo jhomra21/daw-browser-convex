@@ -698,9 +698,9 @@ export type NativeProcessorPatchStatus =
 
 export type NativeScheduleProgress = {
   /** Native reclaims only, never an admission opportunity. */
-  admissionCapacityGeneration?: bigint
+  admissionCapacityGeneration: bigint
   /** Completed latency transitions. */
-  latencyCompletionGeneration?: bigint
+  latencyCompletionGeneration: bigint
   /**
    * The last claimed processor patch whose resolution native has reported. Absent when no
    * claim has resolved. `token` is a decimal u64: it may exceed

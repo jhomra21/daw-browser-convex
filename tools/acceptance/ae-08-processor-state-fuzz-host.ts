@@ -39,17 +39,16 @@ const progressFrame = (snapshot: NativeScheduleProgress, legacy: boolean) => {
 const decodeProgress = (bytes: Uint8Array): NativeScheduleProgress => {
   if (bytes.length !== 80 && bytes.length !== 88 && bytes.length !== 96 && bytes.length !== 112) throw new Error("Invalid typed progress frame length")
   const view = viewOf(bytes)
-  const result: NativeScheduleProgress = {
+  return {
     revision: view.getUint32(0), epoch: view.getUint32(4), progressSequence: view.getBigUint64(8),
     renderedThroughFrame: view.getBigUint64(16), acceptedThroughFrame: view.getBigUint64(24),
     lastAcceptedWindowId: view.getBigUint64(32), appliedTransportTransitionId: view.getBigUint64(40),
     appliedUrgentSequence: view.getBigUint64(48), appliedProcessorSequence: view.getBigUint64(56),
     running: (view.getUint32(64) & 1) !== 0, scheduleComplete: (view.getUint32(64) & 2) !== 0,
     instrumentCredits: view.getUint32(68), sourceCredits: view.getUint32(72), automationCredits: view.getUint32(76),
+    admissionCapacityGeneration: bytes.length >= 88 ? view.getBigUint64(80) : 0n,
+    latencyCompletionGeneration: bytes.length >= 96 ? view.getBigUint64(88) : 0n,
   }
-  if (bytes.length >= 88) result.admissionCapacityGeneration = view.getBigUint64(80)
-  if (bytes.length >= 96) result.latencyCompletionGeneration = view.getBigUint64(88)
-  return result
 }
 export default function createFuzzHost(record: <Value>(event: Value) => void, plant: Defect | undefined, unfairHost: boolean, fail: (invariant: string, detail: string) => void, checkOwnership: () => void, hookLifetime = false) {
   let nextId = 0

@@ -32,6 +32,13 @@ export const applyRoutingPatches = (tracks: readonly ClosureTrack[], patches: re
   })
 }
 
+// The entries a history entry applies, in execution order: undo runs a section's children last to first.
+// Undo execution and the recording guard's projection both follow it.
+export const planStructuralTransition = (entry: HistoryEntry, direction: Direction): readonly HistoryEntry[] => {
+  if (entry.type !== 'section-edit') return [entry]
+  return direction === 'undo' ? [...entry.data.entries].reverse() : entry.data.entries
+}
+
 // The track list a history entry leaves behind, limited to what a take binds: existence, group, output and sends.
 // It mirrors what `exec.ts` applies for each structural entry. Ids a replay would mint are stood in for by their history ref.
 export const projectTrackStructure = (
@@ -45,10 +52,9 @@ export const projectTrackStructure = (
   const undo = direction === 'undo'
 
   switch (entry.type) {
-    case 'section-edit': {
-      const children = undo ? [...entry.data.entries].reverse() : entry.data.entries
-      return children.reduce<readonly ClosureTrack[]>((current, child) => projectTrackStructure(child, direction, current), tracks)
-    }
+    case 'section-edit':
+      return planStructuralTransition(entry, direction)
+        .reduce<readonly ClosureTrack[]>((current, child) => projectTrackStructure(child, direction, current), tracks)
     case 'track-create':
       return undo ? without(resolve(entry.data.trackRef) ?? entry.data.currentTrackId) : tracks
     case 'track-clip-create':

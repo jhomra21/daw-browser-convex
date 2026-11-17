@@ -20,6 +20,7 @@ import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { createLocalTrack } from '~/lib/tracks'
 import type { Track, TrackRouting } from '@daw-browser/timeline-core/types'
 import { applyTrackClipCreateEntry, applyTrackDeleteEntry } from './track-entry-executors'
+import { planStructuralTransition } from './project-track-structure'
 import { flushSharedOutboxOperation, readQueuedClipDeletionRecoveryIds } from '~/lib/shared-outbox'
 
 import { buildHistoryRefIndex, resolveClipId, resolveStoredTrackId, resolveTrackId, resolveTrackRoutingSnapshot } from './refs'
@@ -766,7 +767,7 @@ async function execHistoryEntry(entry: HistoryEntry, deps: Deps, direction: Hist
 
   switch (entry.type) {
     case 'section-edit': {
-      const entries = direction === 'undo' ? [...entry.data.entries].reverse() : entry.data.entries
+      const entries = planStructuralTransition(entry, direction)
       const trackDeleteContext = direction === 'redo'
         ? { refIndex: buildRefIndex(deps), deletedTrackIds: new Set<Track['id']>() }
         : null

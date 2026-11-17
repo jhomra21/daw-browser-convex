@@ -24,7 +24,7 @@ import {
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
 import { compilePortableSynthState } from "@daw-browser/audio-engine/mixer/graph-contract"
 import { resolveLiveMixerGraph } from "@daw-browser/audio-engine/live-mixer-runtime"
-import type { NativeRevisionReply } from "@daw-browser/desktop-protocol/native-revision"
+import type { NativeRevisionReply, NativeRevisionSession } from "@daw-browser/desktop-protocol/native-revision"
 import { type AudioPcmSourceDescriptor, type TrackInstrumentParams, parseExternalAutomationParameterId, parseJsonValue } from "@daw-browser/shared"
 import { createAudioEffectParameterPayload } from "~/components/timeline/audio-effect-parameter-payload"
 import { captureNativeBuiltInParameterValues, encodeNativeBuiltInStateCommit, nativeBuiltInPatchTiming } from "./native-built-in-parameter-mapper"
@@ -109,8 +109,11 @@ import {
 } from "./native-processor-state-owner"
 import {
   createPublicationTransaction,
+  runPublication,
   type InstrumentAssetHold,
   type NativeSessionReply,
+  type PublicationPass,
+  type PublicationStrategy,
   type PublicationTransaction,
 } from "./native-publication-transaction"
 import { createNativeTimelinePageManager, nativeTimelinePageStagingBytes, type NativeTimelinePageManager, type NativeTimelineSource } from "./native-timeline-page-manager"
@@ -3530,264 +3533,242 @@ export const createNativePlaybackController = (input: {
     }
   }
 
-  const executePublication = async (payload: PublicationPayload,
-    relinquish: (record: NonNullable<ReturnType<typeof processorState.publication>>, register: (resume: () => void) => void) => Promise<void>,
-  ) => {
-      const candidate = payload.kind === "schedule" ? payload.candidate : undefined
-      const attempt = payload.kind === "schedule" ? payload.attempt : undefined
-      input.observer?.adoption?.(attempt?.intent.key)?.("lane-admitted")
-      const intent = payload.kind === "schedule" ? payload.intent : stagedTransportIntent
-      const abandonCandidate = async () => {
-        await candidate?.dispose()
-        return { outcome: { status: "superseded" } } satisfies { outcome: AdoptionOutcome }
+  // What executePublication captured of the prepared session, which both kinds of publication start from.
+  type PublicationFacts = {
+    previous: NonNullable<typeof preparedSnapshot>
+    previousGraph: NonNullable<typeof preparedGraph>
+    projectId: string
+    coordinator: NativeScheduleCoordinator
+    revisions: NativeRevisionSession
+    publicationEpoch: number
+    snapshot: NonNullable<typeof preparedSnapshot>
+    graph: NonNullable<typeof preparedGraph>
+    keep: Set<string>
+    inputVersion: number
+  }
+  type NativeBridgeSession = NonNullable<NonNullable<typeof input.bridge>["session"]>
+  type InstrumentStagingSession = NativeBridgeSession & Required<Pick<NativeBridgeSession, "configureInstrumentStates">>
+  const stagesInstruments = (session: NativeBridgeSession): session is InstrumentStagingSession => session.configureInstrumentStates !== undefined
+  type ScheduleFacts = PublicationFacts & {
+    candidate: ScheduleRevisionCandidate
+    attempt: AdoptionAttempt | undefined
+    session: InstrumentStagingSession
+    merged: ReturnType<typeof rebaseScheduleCandidate>
+    paused: boolean
+  }
+
+  const createLatencyPublication = (tx: PublicationTransaction, facts: PublicationFacts): PublicationStrategy => {
+    const { record, current, sessionAlive, retry, notify, waitForOpportunity, withoutLane, quietPublicationLane, finish, inspect, classifyPublication } = tx
+    const { previous, previousGraph, projectId, coordinator, revisions, publicationEpoch } = facts
+    let { graph, snapshot, keep: serializedKeepLatencyNodeIds, inputVersion: capturedInputVersion } = facts
+    let runtimeRevision = previousGraph.revision
+    let resumeSafe = true
+    let ready: NativeRevisionReply | undefined
+    const capturedGeneration = lifecycleGeneration
+    const capture = () => {
+      const frozen = captureLatencyInputs()
+      graph = frozen.graph
+      snapshot = frozen.snapshot
+      serializedKeepLatencyNodeIds = frozen.keep
+      record.refresh(publicationContent(graph, snapshot, frozen.ledger, captureInstrumentIncarnations(snapshot)))
+      return frozen.sequence
+    }
+    let includedOrder = capture()
+    let initialPreparation = true
+    const resume = () => {
+      if (sessionAlive() && resumeSafe && coordinator === scheduleCoordinator)
+        coordinator.resumeGraphPublication(runtimeRevision)
+    }
+    const prepareBank = async () => {
+      await quietPublicationLane()
+      if (initialPreparation) {
+        includedOrder = capture()
+        capturedInputVersion = latencyInputVersion
+        initialPreparation = false
       }
-      // A candidate compiled against a session that has since moved takes no receipts: the adoption compiles again.
-      if (intent !== stagedTransportIntent || (candidate && !isScheduleCandidateValid(candidate))) return abandonCandidate()
-      if (!candidate && latencyInputsApplied()) return { outcome: { status: "unchanged" } } satisfies { outcome: AdoptionOutcome }
-      const session = input.bridge?.session
-      const revisions = session?.revisions
-      const coordinator = scheduleCoordinator
-      const previous = preparedSnapshot
-      const previousGraph = preparedGraph
-      const projectId = preparedProjectId
-      if (!prepared || !coordinator || !previous || !previousGraph || !projectId) return abandonCandidate()
-      if (!session || !revisions || !session.configureInstrumentStates) return abandonCandidate()
-      // A stopped transport never reaches a seam frame, so a paused edit publishes with seam 0, which native applies at
-      // its next callback block. No window can be staged for an unpublished bank, so the schedule is primed afterwards.
-      const paused = candidate !== undefined && !active
-      const generation = lifecycleGeneration
-      const projectGeneration = resolveProjectGeneration()
-      const publicationEpoch = transportEpoch
-      const pageManager = nativeTimelinePageManager
-      let removedAssetIds: readonly number[] = []
-      const merged = candidate ? rebaseScheduleCandidate(candidate) : captureLatencyInputs()
-      let snapshot = candidate?.snapshot ?? previous
-      let graph = structuredClone(merged.graph)
-      let serializedKeepLatencyNodeIds = new Set(desiredKeepLatencyNodeIds)
-      let capturedInputVersion = latencyInputVersion
-      const record = processorState.capturePublication(attempt,
-        publicationContent(graph, snapshot, merged.ledger, candidate?.instrumentIncarnations))
-      const tx: PublicationTransaction = createPublicationTransaction({
-        record, attempt, candidate, revisions, coordinator, previousRevision: previousGraph.revision, paused, processorState,
-        current: () => generation === lifecycleGeneration && projectGeneration === resolveProjectGeneration()
-          && projectId === input.getProjectId?.() && coordinator === scheduleCoordinator && prepared,
-        // Epoch coordinators increment nativeSessionGeneration. Only lifecycle invalidation
-        // ends this session; renderer generation changes still owe proof for a sent bank.
-        owned: () => generation === lifecycleGeneration && prepared && !hasNativeHostConnectionLoss()
-          && preparedProjectId === projectId,
-        transportEpoch: () => transportEpoch,
-        runNextStatePatch,
-        queueTransition: queuePreparedTransportTransition,
-        releaseInstrumentScope,
-        logFailedAdoption,
-      }, relinquish)
-      const { current, sessionAlive, retry, notify, waitForOpportunity, withoutLane, quietPublicationLane, disposePublication,
-        finish, inspect, classifyPublication, resolvePublication } = tx
-      const publicationAbort = tx.abort
-      // The renderer's bound on how old a prepare reply's progress is: the request's send to the reply's receipt. It also spans the
-      // host's work before it sampled that progress, so it never understates the age.
-      let prepareAgeMs = 0
-      const prepareRevision = async (request: Parameters<typeof revisions.prepare>[0]) => {
-        const sentAt = performance.now()
-        const reply = await withoutLane(revisions.prepare(request))
-        prepareAgeMs = performance.now() - sentAt
-        return reply
+      if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
+      await coordinator.coverThrough(coordinator.currentFrame() + maximumFramesPerBlock * 16)
+      await coordinator.suspendGraphPublication()
+      if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
+      const reply = await withoutLane(revisions.prepare({ projectId, projectRevision: graph.revision,
+        bytes: serializeNativeGraph(graph, serializedKeepLatencyNodeIds) }))
+      if (reply.ok && reply.revision.status === "prepared" && reply.revision.preparedRevision === reply.revision.requestedRevision) {
+        tx.binding = { projectId, revision: reply.revision.requestedRevision, hostGeneration: reply.hostGeneration }
+        tx.preparedRevision = tx.binding.revision
       }
-      const awaitPreparation = async <Value>(operation: Promise<Value>): Promise<Value> => {
-        const signal = publicationAbort.signal
-        signal.throwIfAborted()
-        let onAbort = () => {}
-        try {
-          return await Promise.race([operation, new Promise<never>((_, reject) => {
-            onAbort = () => reject(new NativePlaybackAbortError("ownership-invalidated"))
-            signal.addEventListener("abort", onAbort, { once: true })
-          })])
-        } finally { signal.removeEventListener("abort", onAbort) }
-      }
-      // 25 ms of blocks (at least two): what staging and one Publish round trip need after the seam is bound.
-      const boundLeadBlocks = () => Math.max(2, Math.ceil(0.025 * sampleRate / maximumFramesPerBlock))
-      const chooseFrame = (progress: bigint, blocks: number) => {
-        if (paused) return 0
-        const frame = Number(progress) + maximumFramesPerBlock * blocks
-        if (!Number.isSafeInteger(frame)) throw new Error("Native publication frame exceeds renderer precision.")
-        return frame
-      }
-      if (!candidate) {
-        let runtimeRevision = previousGraph.revision
-        let resumeSafe = true
-        let ready: NativeRevisionReply | undefined
-        const capturedGeneration = lifecycleGeneration
-        const capture = () => {
-          const frozen = captureLatencyInputs()
-          graph = frozen.graph
-          snapshot = frozen.snapshot
-          serializedKeepLatencyNodeIds = frozen.keep
-          record.refresh(publicationContent(graph, snapshot, frozen.ledger, captureInstrumentIncarnations(snapshot)))
-          return frozen.sequence
-        }
-        let includedOrder = capture()
-        let initialPreparation = true
-        const resume = () => {
-          if (sessionAlive() && resumeSafe && coordinator === scheduleCoordinator)
-            coordinator.resumeGraphPublication(runtimeRevision)
-        }
-        const prepare = async () => {
-          await quietPublicationLane()
-          if (initialPreparation) {
-            includedOrder = capture()
-            capturedInputVersion = latencyInputVersion
-            initialPreparation = false
-          }
-          if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
-          await coordinator.coverThrough(coordinator.currentFrame() + maximumFramesPerBlock * 16)
-          await coordinator.suspendGraphPublication()
-          if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
-          const reply = await withoutLane(revisions.prepare({ projectId, projectRevision: graph.revision,
-            bytes: serializeNativeGraph(graph, serializedKeepLatencyNodeIds) }))
-          if (reply.ok && reply.revision.status === "prepared" && reply.revision.preparedRevision === reply.revision.requestedRevision) {
-            tx.binding = { projectId, revision: reply.revision.requestedRevision, hostGeneration: reply.hostGeneration }
-            tx.preparedRevision = tx.binding.revision
-          }
-          return reply
-        }
-        tx.adoptPublication = (proof, acknowledgedEpoch) => {
-          if (!proof.ok || !ready?.ok || !tx.binding || !sessionAlive() || capturedGeneration !== lifecycleGeneration
-            || proof.hostPid !== ready.hostPid || proof.hostGeneration !== ready.hostGeneration
-            || proof.revision.activeRevision !== tx.binding.revision
-            || (proof.revision.transportEpoch !== undefined
-              && proof.revision.transportEpoch !== (acknowledgedEpoch ?? publicationEpoch))) return false
-          runtimeRevision = tx.binding.revision
-          resumeSafe = true
-          preparedGraph = { ...graph, revision: runtimeRevision }
-          processorState.published(runtimeRevision)
-          if (JSON.stringify(snapshot.nativeExternalAttachmentPlan) !== JSON.stringify(previous.nativeExternalAttachmentPlan))
-            preparedSnapshot = { ...snapshot, revision: preparedSnapshot?.revision ?? snapshot.revision }
-          preparedKeepLatencyNodeIds = serializedKeepLatencyNodeIds
-          nativeMeterRevision = runtimeRevision
-          const previousStates = new Map(previousGraph.nodes.flatMap(node => node.processorOrder.map(processor => [processor.id, processor])))
-          const restated = new Set(graph.nodes.flatMap(node => node.processorOrder.flatMap(processor =>
-            sameBytes(previousStates.get(processor.id)?.state ?? new Uint8Array(), processor.state) ? [] : [processor.id])))
-          const reconciles = processorState.adopted(targetKinds(graph, snapshot), new Set(), restated,
-            includedOrder, desired => statePatchMatchesCurrentProcessor(desired.target.instanceId, desired.content.state), record.content)
-          if (acknowledgedEpoch === undefined) coordinator.resumeGraphPublication(runtimeRevision)
-          advanceScheduleSettledEpoch()
-          holdRetirement(proof, projectId)
-          tx.resourcesPromoted = true
-          tx.binding = undefined
-          executeReconcile(reconciles)
-          return true
-        }
-        try {
-          ready = await prepare()
-          let observed = tx.sequence
-          while (ready.ok && ready.revision.status === "publish-pending" && !tx.binding) {
-            resume()
-            await waitForOpportunity(observed)
-            observed = tx.sequence
-            const admission = await inspect({ projectId, revision: ready.revision.requestedRevision, hostGeneration: ready.hostGeneration })
-            if (admission?.ok && (admission.hostPid !== ready.hostPid || admission.hostGeneration !== ready.hostGeneration)) {
-              invalidateNativeOwnership(true, true)
-              return { record }
-            }
-            if (!admission?.ok || admission.revision.status === "publish-pending") continue
-            retry()
-            includedOrder = capture()
-            ready = await prepare()
-          }
-          if (!ready.ok) throw new PublicationFailure(ready.error, ready.kind)
-          processorState.observeRetirement(ready)
-          if (ready.revision.status !== "prepared" || ready.revision.continuity !== "accepted") {
-            if (ready.revision.diagnosticCode === nativeKeepLatencyDivergentMixedBusDiagnostic)
-              throw new NativeLatencyUnsupportedError("Keep Latency can't be used here: this bus mixes monitored and other tracks, then splits to outputs with different latency. Route them through separate buses.")
-            throw new PublicationFailure(`Native latency prepare was ${ready.revision.status}/${ready.revision.continuity}.`, "refused")
-          }
-          if (!tx.binding) throw new Error("Native latency prepare did not create the requested bank.")
-          resumeSafe = false
-          processorState.prepared(tx.binding.revision, scheduledRetention(previousGraph, graph,
-            { before: previous, after: snapshot }, new Set()))
-          let submittedProgress = -1
-          let status: NativeRevisionReply = ready
-          for (;;) {
-            if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
-            observed = tx.sequence
-            classifyPublication(tx.publishReply)
-            if (status.ok && ready.ok && (status.hostPid !== ready.hostPid || status.hostGeneration !== ready.hostGeneration)) {
-              invalidateNativeOwnership(true, true)
-              return { record }
-            }
-            if (status.ok && status.revision.status === "published") {
-              if (!tx.adoptPublication(status)) throw new Error("Native latency publication proof does not match its capture.")
-              return await finish({ status: "adopted" }, "promoted")
-            }
-            classifyPublication(status)
-            if (tx.failure) throw new Error("Native latency publication failed.")
-            if (status.ok && status.revision.status === "prepared" && tx.progressVersion !== submittedProgress) {
-              if (tx.publishSent) {
-                retry()
-                const changed = processorState.hasQueuedPatch()
-                  || serializedKeepLatencyNodeIds.size !== desiredKeepLatencyNodeIds.size
-                  || [...serializedKeepLatencyNodeIds].some(id => !desiredKeepLatencyNodeIds.has(id))
-                  || latencyInputVersion !== capturedInputVersion
-                if (changed) {
-                  const rollback = await withoutLane(revisions.rollback(tx.binding)).catch(() => undefined)
-                  if (!rollback?.ok || rollback.revision.status !== "rolled-back") {
-                    tx.detached = true
-                    return { record }
-                  }
-                  processorState.unprepared(tx.binding.revision)
-                  tx.binding = undefined
-                  resumeSafe = true
-                  resume()
-                  includedOrder = capture()
-                  capturedInputVersion = latencyInputVersion
-                  ready = await prepare()
-                  tx.checked(ready)
-                  if (!tx.binding || ready.revision.status !== "prepared") throw new Error("Native latency recapture was not prepared.")
-                  status = ready
-                  resumeSafe = false
-                }
-              }
-              submittedProgress = tx.progressVersion
-              tx.publishSent = true
-              record.held()
-              const request = tx.binding
-              if (!request) throw new Error("Missing latency binding.")
-              tx.publishCompletion = revisions.publish(request).then(reply => {
-                if (!sessionAlive()) return
-                tx.publishReply = reply
-                notify()
-              }, () => { if (sessionAlive()) notify() })
-            }
-            if (tx.failure && status.ok && status.revision.status !== "publish-pending" && status.revision.status !== "prepared")
-              throw new Error("Native latency publication failed.")
-            await waitForOpportunity(observed)
-            status = tx.publishReply?.ok && tx.publishReply.revision.status === "published"
-              ? tx.publishReply : await inspect(tx.binding, true) ?? { ok: false, kind: "unconfirmed", error: "Publication status unavailable." }
-          }
-        } catch (error) {
-          if (!sessionAlive()) { await disposePublication(); return { record } }
-          if (!current() || error instanceof NativePlaybackAbortError) record.cancel()
-          const outcome: AdoptionOutcome = {
-            status: "failed", reason: error instanceof Error ? error.message : "Native latency publication failed.",
-            ...(error instanceof PublicationFailure ? { failureKind: { kind: error.kind, message: error.message } }
-              : error instanceof NativeLatencyUnsupportedError ? { failureKind: { kind: "latency-unsupported", message: error.message } } : {}),
-          }
-          if (error instanceof PublicationFailure && error.kind === "refused")
-            tx.failure = { outcome, reason: "stage-failed" }
-          if (tx.binding) {
-            await withoutLane(tx.publishCompletion)
-            classifyPublication(tx.publishReply)
-            await resolvePublication(undefined, true)
-            tx.detached = record.phase !== "ended"
-            if (tx.detached) resumeSafe = false
+      return reply
+    }
+    tx.adoptPublication = (proof, acknowledgedEpoch) => {
+      if (!proof.ok || !ready?.ok || !tx.binding || !sessionAlive() || capturedGeneration !== lifecycleGeneration
+        || proof.hostPid !== ready.hostPid || proof.hostGeneration !== ready.hostGeneration
+        || proof.revision.activeRevision !== tx.binding.revision
+        || (proof.revision.transportEpoch !== undefined
+          && proof.revision.transportEpoch !== (acknowledgedEpoch ?? publicationEpoch))) return false
+      runtimeRevision = tx.binding.revision
+      resumeSafe = true
+      preparedGraph = { ...graph, revision: runtimeRevision }
+      processorState.published(runtimeRevision)
+      if (JSON.stringify(snapshot.nativeExternalAttachmentPlan) !== JSON.stringify(previous.nativeExternalAttachmentPlan))
+        preparedSnapshot = { ...snapshot, revision: preparedSnapshot?.revision ?? snapshot.revision }
+      preparedKeepLatencyNodeIds = serializedKeepLatencyNodeIds
+      nativeMeterRevision = runtimeRevision
+      const previousStates = new Map(previousGraph.nodes.flatMap(node => node.processorOrder.map(processor => [processor.id, processor])))
+      const restated = new Set(graph.nodes.flatMap(node => node.processorOrder.flatMap(processor =>
+        sameBytes(previousStates.get(processor.id)?.state ?? new Uint8Array(), processor.state) ? [] : [processor.id])))
+      const reconciles = processorState.adopted(targetKinds(graph, snapshot), new Set(), restated,
+        includedOrder, desired => statePatchMatchesCurrentProcessor(desired.target.instanceId, desired.content.state), record.content)
+      if (acknowledgedEpoch === undefined) coordinator.resumeGraphPublication(runtimeRevision)
+      advanceScheduleSettledEpoch()
+      holdRetirement(proof, projectId)
+      tx.resourcesPromoted = true
+      tx.binding = undefined
+      executeReconcile(reconciles)
+      return true
+    }
+    return {
+      proofMismatch: "Native latency publication proof does not match its capture.",
+      releasesLane: true,
+      publishReplyProves: true,
+      prepare: async () => {
+        ready = await prepareBank()
+        let observed = tx.sequence
+        while (ready.ok && ready.revision.status === "publish-pending" && !tx.binding) {
+          resume()
+          await waitForOpportunity(observed)
+          observed = tx.sequence
+          const admission = await inspect({ projectId, revision: ready.revision.requestedRevision, hostGeneration: ready.hostGeneration })
+          if (admission?.ok && (admission.hostPid !== ready.hostPid || admission.hostGeneration !== ready.hostGeneration)) {
+            invalidateNativeOwnership(true, true)
             return { record }
           }
-          return await finish(outcome,
-            record.cancelled ? "cancelled" : error instanceof PublicationFailure && error.kind === "unavailable" ? "lost" : tx.failure ? "failed" : "uncertain", tx.failure?.reason)
-        } finally { resume() }
-      }
-      const { projection } = candidate
+          if (!admission?.ok || admission.revision.status === "publish-pending") continue
+          retry()
+          includedOrder = capture()
+          ready = await prepareBank()
+        }
+        if (!ready.ok) throw new PublicationFailure(ready.error, ready.kind)
+        processorState.observeRetirement(ready)
+        if (ready.revision.status !== "prepared" || ready.revision.continuity !== "accepted") {
+          if (ready.revision.diagnosticCode === nativeKeepLatencyDivergentMixedBusDiagnostic)
+            throw new NativeLatencyUnsupportedError("Keep Latency can't be used here: this bus mixes monitored and other tracks, then splits to outputs with different latency. Route them through separate buses.")
+          throw new PublicationFailure(`Native latency prepare was ${ready.revision.status}/${ready.revision.continuity}.`, "refused")
+        }
+        if (!tx.binding) throw new Error("Native latency prepare did not create the requested bank.")
+        resumeSafe = false
+        processorState.prepared(tx.binding.revision, scheduledRetention(previousGraph, graph,
+          { before: previous, after: snapshot }, new Set()))
+        let submittedProgress = -1
+        const step = async (reply: NativeRevisionReply): Promise<PublicationPass> => {
+          let status = reply
+          classifyPublication(status)
+          if (tx.failure) throw new Error("Native latency publication failed.")
+          if (status.ok && status.revision.status === "prepared" && tx.progressVersion !== submittedProgress) {
+            if (tx.publishSent) {
+              retry()
+              const changed = processorState.hasQueuedPatch()
+                || serializedKeepLatencyNodeIds.size !== desiredKeepLatencyNodeIds.size
+                || [...serializedKeepLatencyNodeIds].some(id => !desiredKeepLatencyNodeIds.has(id))
+                || latencyInputVersion !== capturedInputVersion
+              if (changed) {
+                const bound = tx.binding
+                if (!bound) throw new Error("Missing latency binding.")
+                const rollback = await withoutLane(revisions.rollback(bound)).catch(() => undefined)
+                if (!rollback?.ok || rollback.revision.status !== "rolled-back") {
+                  tx.detached = true
+                  return { status, next: "ended" }
+                }
+                processorState.unprepared(bound.revision)
+                tx.binding = undefined
+                resumeSafe = true
+                resume()
+                includedOrder = capture()
+                capturedInputVersion = latencyInputVersion
+                ready = await prepareBank()
+                tx.checked(ready)
+                if (!tx.binding || ready.revision.status !== "prepared") throw new Error("Native latency recapture was not prepared.")
+                status = ready
+                resumeSafe = false
+              }
+            }
+            submittedProgress = tx.progressVersion
+            tx.publishSent = true
+            record.held()
+            const request = tx.binding
+            if (!request) throw new Error("Missing latency binding.")
+            tx.publishCompletion = revisions.publish(request).then(reply => {
+              if (!sessionAlive()) return
+              tx.publishReply = reply
+              notify()
+            }, () => { if (sessionAlive()) notify() })
+          }
+          if (tx.failure && status.ok && status.revision.status !== "publish-pending" && status.revision.status !== "prepared")
+            throw new Error("Native latency publication failed.")
+          return { status, next: "wait" }
+        }
+        const hostChanged = (status: NativeRevisionReply) => {
+          if (!(status.ok && ready?.ok && (status.hostPid !== ready.hostPid || status.hostGeneration !== ready.hostGeneration))) return false
+          invalidateNativeOwnership(true, true)
+          return true
+        }
+        return { status: ready, hostChanged, step }
+      },
+      fail: (error) => {
+        if (!current() || error instanceof NativePlaybackAbortError) record.cancel()
+        const outcome: AdoptionOutcome = {
+          status: "failed", reason: error instanceof Error ? error.message : "Native latency publication failed.",
+          ...(error instanceof PublicationFailure ? { failureKind: { kind: error.kind, message: error.message } }
+            : error instanceof NativeLatencyUnsupportedError ? { failureKind: { kind: "latency-unsupported", message: error.message } } : {}),
+        }
+        if (error instanceof PublicationFailure && error.kind === "refused")
+          tx.failure = { outcome, reason: "stage-failed" }
+        return () => finish(outcome,
+          record.cancelled ? "cancelled" : error instanceof PublicationFailure && error.kind === "unavailable" ? "lost" : tx.failure ? "failed" : "uncertain", tx.failure?.reason)
+      },
+      onDetached: () => { resumeSafe = false },
+      finalize: () => { resume(); return undefined },
+    }
+  }
+
+  const createSchedulePublication = (tx: PublicationTransaction, facts: ScheduleFacts): PublicationStrategy => {
+    const { record, current, sessionAlive, retry, notify, waitForOpportunity, withoutLane, quietPublicationLane, finish, inspect, classifyPublication, disposePublication } = tx
+    const { candidate, attempt, session, merged, previous, previousGraph, projectId, coordinator, revisions, publicationEpoch, paused, snapshot, graph, keep: serializedKeepLatencyNodeIds } = facts
+    const publicationAbort = tx.abort
+    const pageManager = nativeTimelinePageManager
+    let removedAssetIds: readonly number[] = []
+    // The renderer's bound on how old a prepare reply's progress is: the request's send to the reply's receipt. It also spans the
+    // host's work before it sampled that progress, so it never understates the age.
+    let prepareAgeMs = 0
+    const prepareRevision = async (request: Parameters<typeof revisions.prepare>[0]) => {
+      const sentAt = performance.now()
+      const reply = await withoutLane(revisions.prepare(request))
+      prepareAgeMs = performance.now() - sentAt
+      return reply
+    }
+    const awaitPreparation = async <Value>(operation: Promise<Value>): Promise<Value> => {
+      const signal = publicationAbort.signal
+      signal.throwIfAborted()
+      let onAbort = () => {}
       try {
+        return await Promise.race([operation, new Promise<never>((_, reject) => {
+          onAbort = () => reject(new NativePlaybackAbortError("ownership-invalidated"))
+          signal.addEventListener("abort", onAbort, { once: true })
+        })])
+      } finally { signal.removeEventListener("abort", onAbort) }
+    }
+    // 25 ms of blocks (at least two): what staging and one Publish round trip need after the seam is bound.
+    const boundLeadBlocks = () => Math.max(2, Math.ceil(0.025 * sampleRate / maximumFramesPerBlock))
+    const chooseFrame = (progress: bigint, blocks: number) => {
+      if (paused) return 0
+      const frame = Number(progress) + maximumFramesPerBlock * blocks
+      if (!Number.isSafeInteger(frame)) throw new Error("Native publication frame exceeds renderer precision.")
+      return frame
+    }
+    const { projection } = candidate
+    return {
+      proofMismatch: "Native live publication proof does not match the staged bank.",
+      releasesLane: false,
+      publishReplyProves: false,
+      prepare: async () => {
         if (!current() || record.cancelled || !isScheduleCandidateValid(candidate))
           return await finish({ status: "superseded" }, "cancelled")
         const candidateObservations = nativeObservationMaps(snapshot.tracks)
@@ -4121,7 +4102,6 @@ export const createNativePlaybackController = (input: {
           tx.checked(rebound)
           if (rebound.revision.status === "prepared") { seam = bound; tx.binding = rebind; break }
         }
-        let status: NativeRevisionReply = ready
         let fill = !paused
         let submittedProgress = -1
         tx.adoptPublication = (proof, acknowledgedEpoch) => {
@@ -4227,20 +4207,15 @@ export const createNativePlaybackController = (input: {
           if (paused && !active && publicationEpoch === transportEpoch) pausedPriming = reprimePausedAdoption()
           return true
         }
-        for (;;) {
-          if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
-          observed = tx.sequence
-          classifyPublication(tx.publishReply)
+        const step = async (reply: NativeRevisionReply, observed: number): Promise<PublicationPass> => {
+          let status = reply
           if (status.ok) classifyPublication(status)
           if (!status.ok) {
             throw new Error(status.error)
           }
-          if (status.revision.status === "published") {
-            if (!tx.adoptPublication(status))
-              throw new Error("Native live publication proof does not match the staged bank.")
-            return await finish({ status: "adopted" }, "promoted")
-          }
           if (tx.failure && "reason" in tx.failure.outcome) throw new Error(tx.failure.outcome.reason)
+          const binding = tx.binding
+          if (!binding) throw new NativePlaybackAbortError("ownership-invalidated")
           if (fill) {
             tx.staged?.dispose()
             try {
@@ -4249,8 +4224,8 @@ export const createNativePlaybackController = (input: {
               await awaitPreparation(coordinator.coverThrough(seam + maximumFramesPerBlock))
               hydrationMark?.("armed-cover-end")
               publicationAbort.signal.throwIfAborted()
-              tx.staged = coordinator.stageRevision({ ...snapshot, revision: tx.binding.revision },
-                { ...graph, revision: tx.binding.revision }, seam, async () => {
+              tx.staged = coordinator.stageRevision({ ...snapshot, revision: binding.revision },
+                { ...graph, revision: binding.revision }, seam, async () => {
                   if (!tx.binding) throw new NativePlaybackAbortError("ownership-invalidated")
                   const rejectedAt = tx.sequence
                   const inspection = await inspect()
@@ -4260,7 +4235,7 @@ export const createNativePlaybackController = (input: {
                 }, { assets, assetSourceKeys: sourceKeys, nativePcmChunkDescriptors: projection.nativePcmChunkDescriptors,
                   preparedStretchAssets: candidate.stretchAssets })
               hydrationMark?.("armed-stage-returned")
-              tx.staged.preflight({ ...graph, revision: tx.binding.revision })
+              tx.staged.preflight({ ...graph, revision: binding.revision })
               hydrationMark?.("armed-prime-start")
               await tx.staged.prime(seam)
               hydrationMark?.("armed-prime-end")
@@ -4282,23 +4257,24 @@ export const createNativePlaybackController = (input: {
             if (!inspection) throw new Error("Publication status unavailable.")
             tx.checked(inspection)
             status = inspection
-            if (status.revision.status === "published") continue
+            if (status.revision.status === "published") return { status, next: "again" }
             if (status.revision.transportEpoch !== transportEpoch)
               throw new NativePlaybackAbortError("ownership-invalidated")
             retry()
             seam = chooseFrame(status.revision.progressFrame ?? BigInt(coordinator.currentFrame()),
               Math.min(boundLeadBlocks() * 2 ** record.resubmits, 16 * (record.resubmits + 1)))
-            tx.binding = { ...tx.binding, requestedPublicationFrame: BigInt(seam) }
+            const rebound = { ...binding, requestedPublicationFrame: BigInt(seam) }
+            tx.binding = rebound
             tx.publishSent = true
             record.held()
             if (!sessionAlive()) throw new NativePlaybackAbortError("ownership-invalidated")
-            const published = await withoutLane(revisions.publish(tx.binding))
+            const published = await withoutLane(revisions.publish(rebound))
             classifyPublication(published)
             tx.checked(published)
             status = published
             if (status.revision.status !== "prepared") throw new Error(`Native rebase was ${status.revision.status}.`)
             fill = true
-            continue
+            return { status, next: "again" }
           }
           if (tx.publishReply && !tx.publishReply.ok) tx.checked(tx.publishReply)
           if (status.revision.status !== "prepared" && status.revision.status !== "publish-pending")
@@ -4306,23 +4282,22 @@ export const createNativePlaybackController = (input: {
           if (status.revision.status === "prepared" && tx.progressVersion !== submittedProgress) {
             if (tx.publishSent) retry()
             submittedProgress = tx.progressVersion
-            const request = tx.binding
             tx.publishSent = true
             record.held()
             if (!sessionAlive()) throw new NativePlaybackAbortError("ownership-invalidated")
             hydrationMark?.("bind-request-sent")
             // A lost IPC reply must not prevent progress-based reconciliation.
-            tx.publishCompletion = revisions.publish(request).then((reply) => {
+            tx.publishCompletion = revisions.publish(binding).then((reply) => {
               if (!sessionAlive()) return
               tx.publishReply = reply
               notify()
             }, () => { if (sessionAlive()) notify() })
           }
-          await waitForOpportunity(observed)
-          status = await inspect(tx.binding, true) ?? { ok: false, error: "Publication status unavailable.", kind: "unconfirmed" }
+          return { status, next: "wait" }
         }
-      } catch (error) {
-        if (!sessionAlive()) { await disposePublication(); return { record } }
+        return { status: ready, step }
+      },
+      fail: (error) => {
         if (error instanceof PublicationFailure) {
           const capacity = error.kind === "refused" && (error.message === "asset-capacity-exceeded"
             || error.message === "asset-page-capacity-exceeded" || error.message === "asset-publication-pending")
@@ -4333,23 +4308,67 @@ export const createNativePlaybackController = (input: {
           else tx.uncertainPreparation = error.kind === "unconfirmed"
         }
         if (!current() || error instanceof NativePlaybackAbortError) record.cancel()
-        if (tx.binding) {
-          // A revision deadline proves nothing about publication. Reconcile from
-          // that reply/deadline event before releasing the lane.
-          await tx.publishCompletion
-          classifyPublication(tx.publishReply)
-          await resolvePublication()
-          // The lane is free for transport. The caller still follows this owner's terminal.
-          tx.detached = record.phase !== "ended"
-          return { record }
-        }
         const reason = error instanceof Error ? error.message : "Native live publication failed."
-        if (record.cancelled) return await finish({ status: "superseded" }, "cancelled")
-        return await finish(tx.failure?.outcome ?? { status: "failed", reason },
-          tx.failure ? "failed" : tx.uncertainPreparation || !tx.publishSent ? "uncertain" : "failed", tx.failure?.reason)
-      } finally {
-        if (!sessionAlive()) await disposePublication()
+        return () => record.cancelled ? finish({ status: "superseded" }, "cancelled")
+          : finish(tx.failure?.outcome ?? { status: "failed", reason },
+            tx.failure ? "failed" : tx.uncertainPreparation || !tx.publishSent ? "uncertain" : "failed", tx.failure?.reason)
+      },
+      finalize: () => sessionAlive() ? undefined : disposePublication(),
+    }
+  }
+
+  const executePublication = async (payload: PublicationPayload,
+    relinquish: (record: NonNullable<ReturnType<typeof processorState.publication>>, register: (resume: () => void) => void) => Promise<void>,
+  ) => {
+      const candidate = payload.kind === "schedule" ? payload.candidate : undefined
+      const attempt = payload.kind === "schedule" ? payload.attempt : undefined
+      input.observer?.adoption?.(attempt?.intent.key)?.("lane-admitted")
+      const intent = payload.kind === "schedule" ? payload.intent : stagedTransportIntent
+      const abandonCandidate = async () => {
+        await candidate?.dispose()
+        return { outcome: { status: "superseded" } } satisfies { outcome: AdoptionOutcome }
       }
+      // A candidate compiled against a session that has since moved takes no receipts: the adoption compiles again.
+      if (intent !== stagedTransportIntent || (candidate && !isScheduleCandidateValid(candidate))) return abandonCandidate()
+      if (!candidate && latencyInputsApplied()) return { outcome: { status: "unchanged" } } satisfies { outcome: AdoptionOutcome }
+      const session = input.bridge?.session
+      const revisions = session?.revisions
+      const coordinator = scheduleCoordinator
+      const previous = preparedSnapshot
+      const previousGraph = preparedGraph
+      const projectId = preparedProjectId
+      if (!prepared || !coordinator || !previous || !previousGraph || !projectId) return abandonCandidate()
+      if (!session || !revisions || !stagesInstruments(session)) return abandonCandidate()
+      // A stopped transport never reaches a seam frame, so a paused edit publishes with seam 0, which native applies at
+      // its next callback block. No window can be staged for an unpublished bank, so the schedule is primed afterwards.
+      const paused = candidate !== undefined && !active
+      const generation = lifecycleGeneration
+      const projectGeneration = resolveProjectGeneration()
+      const publicationEpoch = transportEpoch
+      const merged = candidate ? rebaseScheduleCandidate(candidate) : captureLatencyInputs()
+      const snapshot = candidate?.snapshot ?? previous
+      const graph = structuredClone(merged.graph)
+      const keep = new Set(desiredKeepLatencyNodeIds)
+      const record = processorState.capturePublication(attempt,
+        publicationContent(graph, snapshot, merged.ledger, candidate?.instrumentIncarnations))
+      const tx: PublicationTransaction = createPublicationTransaction({
+        record, attempt, candidate, revisions, coordinator, previousRevision: previousGraph.revision, paused, processorState,
+        current: () => generation === lifecycleGeneration && projectGeneration === resolveProjectGeneration()
+          && projectId === input.getProjectId?.() && coordinator === scheduleCoordinator && prepared,
+        // Epoch coordinators increment nativeSessionGeneration. Only lifecycle invalidation
+        // ends this session; renderer generation changes still owe proof for a sent bank.
+        owned: () => generation === lifecycleGeneration && prepared && !hasNativeHostConnectionLoss()
+          && preparedProjectId === projectId,
+        transportEpoch: () => transportEpoch,
+        runNextStatePatch,
+        queueTransition: queuePreparedTransportTransition,
+        releaseInstrumentScope,
+        logFailedAdoption,
+      }, relinquish)
+      const facts = { previous, previousGraph, projectId, coordinator, revisions, publicationEpoch, snapshot, graph, keep, inputVersion: latencyInputVersion }
+      return runPublication(tx, candidate
+        ? createSchedulePublication(tx, { ...facts, candidate, attempt, session, merged, paused })
+        : createLatencyPublication(tx, facts))
   }
 
   type AdoptionRun = { outcome: AdoptionOutcome; content?: string; transport?: LivePlaybackTransport }

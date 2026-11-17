@@ -75,6 +75,32 @@ export type PublicationTransaction = {
   resolvePublication: (acknowledgedEpoch?: number, releaseLane?: boolean) => Promise<boolean>
 }
 
+export type PreparedPublication = {
+  status: NativeRevisionReply
+  // True once the host that prepared the bank is no longer the one answering: the strategy has dropped ownership, the record is left to its owner.
+  hostChanged?: (status: NativeRevisionReply) => boolean
+  // One pass over a status that is not yet published: classify it, then do what it asks (stage, rebase, publish).
+  step: (status: NativeRevisionReply, observed: number) => Promise<PublicationPass>
+}
+export type PublicationPass = { status: NativeRevisionReply; next: "wait" | "again" | "ended" }
+
+// What differs between publishing a latency change and a schedule revision. The runner owns the proof loop, the error
+// path and the order of both; a strategy owns what it prepares and sends.
+export type PublicationStrategy = {
+  // The message of the error raised when a published proof does not match what this strategy prepared.
+  proofMismatch: string
+  // Whether a reply the strategy waits on frees the transport lane, and whether a published reply to its own publish is proof enough.
+  releasesLane: boolean
+  publishReplyProves: boolean
+  // Stages and prepares the bank. Resolves to the first status the loop judges, or to the record when the publication is over.
+  prepare: () => Promise<PreparedPublication | { record: Publication }>
+  // Classifies what was thrown (undefined when it was not an Error) and returns how the publication ends if native holds no bank for it.
+  fail: (error: Error | undefined) => () => Promise<{ record: Publication }>
+  // A publication left to its owner with native still holding its bank.
+  onDetached?: () => void
+  finalize: () => Promise<void> | undefined
+}
+
 // `relinquish` hands the transport lane back while the publication waits on native, and returns once it is retaken.
 export const createPublicationTransaction = (
   session: PublicationSession,
@@ -286,4 +312,48 @@ export const createPublicationTransaction = (
     try { return await resolvePublication(epoch) } finally { tx.detached = record.phase !== "ended" }
   })
   return tx
+}
+
+export const runPublication = async (tx: PublicationTransaction, strategy: PublicationStrategy): Promise<{ record: Publication }> => {
+  const { record } = tx
+  try {
+    const prepared = await strategy.prepare()
+    if ("record" in prepared) return prepared
+    let status = prepared.status
+    for (;;) {
+      if (!tx.current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
+      const observed = tx.sequence
+      tx.classifyPublication(tx.publishReply)
+      if (prepared.hostChanged?.(status)) return { record }
+      if (status.ok && status.revision.status === "published") {
+        if (!tx.adoptPublication?.(status)) throw new Error(strategy.proofMismatch)
+        return await tx.finish({ status: "adopted" }, "promoted")
+      }
+      const pass = await prepared.step(status, observed)
+      if (pass.next === "ended") return { record }
+      status = pass.status
+      if (pass.next === "again") continue
+      await tx.waitForOpportunity(observed)
+      status = strategy.publishReplyProves && tx.publishReply?.ok && tx.publishReply.revision.status === "published"
+        ? tx.publishReply : await tx.inspect(tx.binding, true) ?? { ok: false, kind: "unconfirmed", error: "Publication status unavailable." }
+    }
+  } catch (error) {
+    if (!tx.sessionAlive()) { await tx.disposePublication(); return { record } }
+    const conclude = strategy.fail(error instanceof Error ? error : undefined)
+    if (tx.binding) {
+      // A revision deadline proves nothing about publication. Reconcile from
+      // that reply/deadline event before releasing the lane.
+      await (strategy.releasesLane ? tx.withoutLane(tx.publishCompletion) : tx.publishCompletion)
+      tx.classifyPublication(tx.publishReply)
+      await tx.resolvePublication(undefined, strategy.releasesLane)
+      // The lane is free for transport. The caller still follows this owner's terminal.
+      tx.detached = record.phase !== "ended"
+      if (tx.detached) strategy.onDetached?.()
+      return { record }
+    }
+    return await conclude()
+  } finally {
+    const settling = strategy.finalize()
+    if (settling) await settling
+  }
 }

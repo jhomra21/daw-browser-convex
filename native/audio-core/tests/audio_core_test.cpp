@@ -773,6 +773,92 @@ void test_native_hook_runs_before_builtin_processor() {
   daw_audio_core_destroy(core);
 }
 
+void test_spectral_compensation_cannot_exceed_tap_history_capacity() {
+  const auto core = create_core(256, 2, 1);
+  const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
+    {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0,
+      .external_latency_frames = 60000},
+    {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0, .latency_frames = 0},
+  }};
+  const daw_audio_graph_edge_descriptor edge{
+    .id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F,
+    .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0,
+  };
+  std::array<uint8_t, 60> state{};
+  const auto write_u32 = [&state](uint32_t offset, uint32_t value) {
+    state[offset] = static_cast<uint8_t>(value);
+    state[offset + 1] = static_cast<uint8_t>(value >> 8u);
+    state[offset + 2] = static_cast<uint8_t>(value >> 16u);
+    state[offset + 3] = static_cast<uint8_t>(value >> 24u);
+  };
+  const auto write_f32 = [&write_u32](uint32_t offset, float value) {
+    uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    write_u32(offset, bits);
+  };
+  write_u32(0, 1);
+  write_u32(8, 4);
+  write_u32(12, DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE);
+  write_f32(16, 0.0F);
+  write_f32(20, -60.0F);
+  write_f32(24, 1.0F);
+  write_f32(28, 20.0F);
+  write_f32(32, 1.0F);
+  write_f32(36, 2.0F);
+  write_f32(40, 0.5F);
+  write_f32(44, 0.25F);
+  write_f32(48, 0.5F);
+  write_f32(52, 1.0F);
+  write_f32(56, 1.0F);
+  const std::array<uint32_t, 11> targets{{15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25}};
+  auto prepare = [&](uint32_t revision, uint32_t fft_size, uint32_t external_latency) {
+    auto graph_nodes = nodes;
+    graph_nodes[0].latency_frames = fft_size;
+    graph_nodes[0].external_latency_frames = external_latency;
+    write_u32(4, fft_size);
+    const daw_audio_processor_descriptor processor{
+      .node_id = 1, .instance_id = 71, .kind = DAW_AUDIO_PROCESSOR_KIND_SPECTRAL, .state_version = 1,
+      .state_size = static_cast<uint32_t>(state.size()), .bypassed = 0,
+      .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .latency_frames = fft_size, .tail_frames = 0,
+      .parameter_count = static_cast<uint32_t>(targets.size()), .parameter_targets = targets.data(),
+      .state = state.data(),
+    };
+    const daw_audio_graph_prepare_request request{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = revision,
+      .node_count = static_cast<uint32_t>(graph_nodes.size()), .edge_count = 1,
+      .processor_count = 1, .nodes = graph_nodes.data(), .edges = &edge, .processors = &processor,
+    };
+    return daw_audio_core_prepare_graph(core, &request);
+  };
+  expect(prepare(1, 4096, 60000), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_publish(core, 1), DAW_AUDIO_CORE_OK);
+  const daw_audio_transport_state transport{
+    .epoch = 1, .running = 1, .frame = 0, .tempo_bpm = 120.0,
+    .time_signature_numerator = 4, .time_signature_denominator = 4,
+  };
+  expect(daw_audio_core_set_transport(core, &transport), DAW_AUDIO_CORE_OK);
+  expect(prepare(2, 512, 60000), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_publish(core, 2), DAW_AUDIO_CORE_OK);
+  expect(prepare(3, 512, 64000), DAW_AUDIO_CORE_CAPACITY_EXCEEDED);
+  assert(daw_audio_core_get_graph_validation_diagnostic(core).code
+    == DAW_AUDIO_CORE_GRAPH_VALIDATION_PATH_LATENCY_EXCEEDS_PRODUCT_MAXIMUM);
+  std::array<float, 256> left{};
+  std::array<float, 256> right{};
+  std::array<float, 256> output_left{};
+  std::array<float, 256> output_right{};
+  const float *inputs[]{left.data(), right.data()};
+  float *outputs[]{output_left.data(), output_right.data()};
+  const daw_audio_core_process_block block{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = 256, .channel_count = 2,
+    .input_bus_count = 1, .inputs = inputs, .outputs = outputs, .graph_revision = 2,
+  };
+  expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+  daw_audio_core_destroy(core);
+}
+
 void test_portable_graph_rejects_invalid_topology_and_capacity() {
   daw_audio_core_handle core = create_core(8, 2, 1);
   const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
@@ -10539,7 +10625,9 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (argc == 3 && std::strcmp(argv[1], "--phase-3-contract") == 0) {
-    if (std::strcmp(argv[2], "connected-topology") == 0)
+    if (std::strcmp(argv[2], "spectral-tap-capacity") == 0)
+      test_spectral_compensation_cannot_exceed_tap_history_capacity();
+    else if (std::strcmp(argv[2], "connected-topology") == 0)
       test_phase3_long_wet_tail_across_unrelated_edit(true);
     else if (std::strcmp(argv[2], "connected-removal") == 0)
       test_phase3_long_wet_tail_across_unrelated_edit(true, true);
@@ -10740,6 +10828,7 @@ int main(int argc, char **argv) {
   test_native_mixed_stage_interleave_is_noncommutative_and_fader_is_last();
   test_native_instrument_hook_is_a_source_stage();
   test_native_hook_runs_before_builtin_processor();
+  test_spectral_compensation_cannot_exceed_tap_history_capacity();
   test_portable_graph_rejects_invalid_topology_and_capacity();
   test_portable_graph_accepts_a_full_effect_chain();
   test_portable_graph_utility_node();

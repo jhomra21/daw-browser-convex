@@ -1468,6 +1468,18 @@ void build_graph_ranges(GraphRevision &graph) {
   }
 }
 
+daw_audio_core_result validate_graph_path_latency(
+  Core &core, uint32_t node_index, uint64_t path_latency) {
+  if (path_latency <= kMaximumGraphLatencyFrames) return DAW_AUDIO_CORE_OK;
+  core.graph_validation_diagnostic = {
+    .code = DAW_AUDIO_CORE_GRAPH_VALIDATION_PATH_LATENCY_EXCEEDS_PRODUCT_MAXIMUM,
+    .index = node_index,
+    .actual = static_cast<uint32_t>(std::min<uint64_t>(path_latency, UINT32_MAX)),
+    .limit = kMaximumGraphLatencyFrames,
+  };
+  return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+}
+
 daw_audio_core_result prepare_graph_revision(
   Core &core,
   const daw_audio_graph_prepare_request &request,
@@ -1651,15 +1663,8 @@ daw_audio_core_result prepare_graph_revision(
       return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
     }
     path_latency[node_index] = upstream_latency + node_latency;
-    if (path_latency[node_index] > kMaximumGraphLatencyFrames) {
-      core.graph_validation_diagnostic = {
-        .code = DAW_AUDIO_CORE_GRAPH_VALIDATION_PATH_LATENCY_EXCEEDS_PRODUCT_MAXIMUM,
-        .index = node_index,
-        .actual = path_latency[node_index],
-        .limit = kMaximumGraphLatencyFrames,
-      };
-      return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-    }
+    const auto latency_result = validate_graph_path_latency(core, node_index, path_latency[node_index]);
+    if (latency_result != DAW_AUDIO_CORE_OK) return latency_result;
     for (uint32_t edge_index = 0; edge_index < graph.edge_count; ++edge_index) {
       const daw_audio_graph_edge_descriptor &edge = graph.edges[edge_index];
       if (edge.sidechain != 0 || edge.to_node_id != graph.nodes[node_index].id) continue;
@@ -7039,7 +7044,11 @@ daw_audio_core_result prepare_latency_heads(Core &core, GraphRevision &next, boo
       inputs[node] = std::max(inputs[node], arrival);
     }
     if (next.nodes[node].keep_latency != 0) normal[node] = false;
-    paths[node] = inputs[node] + next.nodes[node].latency_frames + next.nodes[node].external_latency_frames + padding[node];
+    const uint64_t path_latency = static_cast<uint64_t>(inputs[node]) + next.nodes[node].latency_frames
+      + next.nodes[node].external_latency_frames + padding[node];
+    const auto latency_result = validate_graph_path_latency(core, node, path_latency);
+    if (latency_result != DAW_AUDIO_CORE_OK) return latency_result;
+    paths[node] = static_cast<uint32_t>(path_latency);
   }
   next.minimum_latency = normal[next.master_index] ? paths[next.master_index] : 0u;
   next.latency_budget = running ? std::max(old_budget, next.minimum_latency) : next.minimum_latency;
@@ -7102,6 +7111,10 @@ daw_audio_core_result prepare_latency_heads(Core &core, GraphRevision &next, boo
       head.delay = next.latency_budget > remaining + arrival ? next.latency_budget - remaining - arrival : 0u;
     } else if (!skip && target == next.master_index) head.delay += next.latency_budget - next.minimum_latency;
     head.previous_delay = head.delay;
+    const auto delay_result = validate_graph_path_latency(core, target, head.delay);
+    if (delay_result != DAW_AUDIO_CORE_OK) return delay_result;
+    const auto stopped_delay_result = validate_graph_path_latency(core, target, head.stopped_delay);
+    if (stopped_delay_result != DAW_AUDIO_CORE_OK) return stopped_delay_result;
     const auto &after = next.edges[edge];
     const auto old = std::lower_bound(old_edges.begin(), old_end, after.id, [&](uint16_t index, uint64_t id) {
       return current.edges[index].id < id;

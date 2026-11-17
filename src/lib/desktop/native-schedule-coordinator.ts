@@ -1294,7 +1294,6 @@ const buildNativeScheduleCoordinator = (input: {
         await awaitPreparation(input.pageManager.ensureRanges(ranges, hydrationAbortController.signal, mark))
     },
     async prepareCandidatePages(snapshot, graph, fromFrame, seamFrame, resources, signal, mark) {
-      // Compiled on private, empty ledgers: every audible source is declared from `fromFrame`, as a published bank would.
       const candidate = buildNativeScheduleCoordinator({
         ...input, ...resources, snapshot, graph, startFrame: fromFrame, preparedPublicationFrame: fromFrame,
         initialOwnership: { activeNoteIds: new Map(), emittedSources: new Map(), sourceOrigins: new Map() },

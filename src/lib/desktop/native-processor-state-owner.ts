@@ -1210,7 +1210,6 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     },
     includedOrder: () => includedThrough,
     hasQueuedPatch: () => [...targets.values()].some((target) => target.queuedPatch),
-    // Immutable view for materialization.
     capture: (): ReadonlyMap<string, ProcessorDesired> =>
       new Map([...entries].map(([instanceId, entry]) => [instanceId, entry.desired])),
 

@@ -11,7 +11,6 @@ type NativePlaybackInputs = {
   processorStructure: number;
 };
 
-// Explicit keys keep bookkeeping and mapper-live values out of schedule identity.
 // Tracks/BPM and loop already have their own fingerprint carriers in the hook.
 export const pickNativePlaybackInputs = (input: NativePlaybackInputs): NativePlaybackInputs => ({
   timeSignature: input.timeSignature,

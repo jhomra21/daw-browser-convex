@@ -6102,6 +6102,31 @@ void TestParkingIsBoundedByCountAndAge() {
   host.Stop();
 }
 
+// The schedule thread drains progress while the command thread attaches, supersedes and reclaims instances; the
+// drain must not read the attachment map the command thread is editing (a ThreadSanitizer build reports it).
+void TestScheduleProgressDrainsWhileAttachmentsChange() {
+  const NoPluginWorkers no_plugin;
+  daw::audio_host_macos::AudioHost host;
+  StartRunningHostWithGraph(host);
+  std::atomic<bool> stop{false};
+  std::atomic<unsigned> drained{0};
+  std::thread schedule_thread([&] {
+    while (!stop.load(std::memory_order_acquire)) {
+      if (host.DrainScheduleProgress()) drained.fetch_add(1, std::memory_order_relaxed);
+    }
+  });
+  for (unsigned round = 0; round < 300; ++round) {
+    const auto id = "b0c4db1e-bd48-46d4-a4bc-" + std::to_string(100000000000ULL + round);
+    assert(host.AttachNativeVst(PlaybackVstAttachment(id, 2)));
+    assert(host.DetachVstReference(id));
+    RenderBlock(host);
+  }
+  stop.store(true, std::memory_order_release);
+  schedule_thread.join();
+  assert(drained.load() > 0);
+  host.Stop();
+}
+
 // A child that ignores the stop request and SIGTERM needs about 500 ms before SIGKILL.
 void TestRetiringASlowWorkerDoesNotBlockTheCommandLoop() {
   const NeverReadyWorkers slow;
@@ -6565,6 +6590,7 @@ int main() {
     TestParkingIsBoundedByCountAndAge();
     return 0;
   }
+  if (std::getenv("DAW_AE08_CREDIT_RACE_ONLY")) { TestScheduleProgressDrainsWhileAttachmentsChange(); return 0; }
   if (const auto* mode = std::getenv("DAW_AE08_OBSERVATION_ONLY")) {
     TestCheckpoint4ObservationHandoff(*mode); return 0;
   }
@@ -6788,6 +6814,7 @@ int main() {
   TestParkedInstanceThatChangedIsLoadedAgain();
   TestRejoinInsideTheRetireWindowKeepsWhatTheCallbackReads();
   TestParkingIsBoundedByCountAndAge();
+  TestScheduleProgressDrainsWhileAttachmentsChange();
   TestRetireDuringPublicationKeepsTheWorkerTheCallbackReads();
   return 0;
 }

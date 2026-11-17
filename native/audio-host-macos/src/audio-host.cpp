@@ -2019,6 +2019,7 @@ struct AudioHost::Impl {
       [](const auto& entry) { return entry.second.release_requested; }), std::memory_order_release);
   }
   std::unordered_map<std::string, std::unique_ptr<NativeVstWorkerAttachment>> native_vst_attachments;
+  std::atomic<std::uint32_t> automation_credit_total{0};
   // Set while the workers run, so an instance added to a live graph starts at once.
   std::optional<daw::plugin_host::WorkerProcessSetup::Mode> native_worker_mode;
   static constexpr std::size_t kMaximumParkedNativeVsts = 4;
@@ -2466,6 +2467,21 @@ struct AudioHost::Impl {
       retired_attachment_reaper->Reap(std::move(entry->second));
       entry = native_vst_attachments.erase(entry);
     }
+    PublishAutomationCredits();
+  }
+  // The schedule thread reads this total instead of walking the attachment map, which only the
+  // control thread may touch. Called by the control thread after anything that changes the map,
+  // an attachment's used segment count, or the active bank.
+  void PublishAutomationCredits() {
+    std::uint32_t credits = 0;
+    const auto bank = active_schedule_bank.load(std::memory_order_acquire);
+    for (const auto& [instance_id, attachment] : native_vst_attachments) {
+      static_cast<void>(instance_id);
+      const auto& automation = attachment->automation_banks[bank];
+      const auto capacity = static_cast<std::uint32_t>(automation.segments[0].size());
+      credits += capacity - std::min(automation.count.load(std::memory_order_acquire), capacity);
+    }
+    automation_credit_total.store(credits, std::memory_order_release);
   }
   // The prepared revision became the active plan: staged instances it bound are now
   // active, and a staged instance it could not bind (not ready) is retired.
@@ -2876,6 +2892,7 @@ bool AudioHost::Configure(const HostConfig& config) {
   impl_->schedule_banks[0].Reset(0, 0, 0);
   impl_->schedule_banks[1].Reset(0, 0, 0);
   impl_->active_schedule_bank.store(0, std::memory_order_release);
+  impl_->PublishAutomationCredits();
   impl_->requested_publication_frame.store(0, std::memory_order_release);
   impl_->schedule_owner.store(0, std::memory_order_release);
   impl_->transport_queue.read.store(0, std::memory_order_release);
@@ -4385,6 +4402,7 @@ bool AudioHost::QueueScheduleWindow(const std::span<const std::uint8_t> payload)
     publication.bank->epoch.store(epoch, std::memory_order_release);
     publication.bank->buffer.store(publication.buffer, std::memory_order_release);
   }
+  impl_->PublishAutomationCredits();
   bank.published_schedule_window_id.store(window_id, std::memory_order_release);
   bank.accepted_schedule_epoch.store(epoch, std::memory_order_release);
   bank.accepted_schedule_through_frame.store(end_frame, std::memory_order_release);
@@ -5386,17 +5404,6 @@ std::optional<ScheduleProgress> AudioHost::DrainScheduleProgress() {
   const auto instrument_read = impl_->instrument_queue.read.load(std::memory_order_acquire);
   const auto source_write = impl_->ActiveSchedule().source_queue.write.load(std::memory_order_acquire);
   const auto source_read = impl_->ActiveSchedule().source_queue.read.load(std::memory_order_acquire);
-  std::uint32_t automation_credits = 0;
-  for (const auto& [instance_id, attachment] : impl_->native_vst_attachments) {
-    const auto& automation = attachment->automation_banks[impl_->active_schedule_bank.load(std::memory_order_acquire)];
-    const auto used = automation.count.load(std::memory_order_acquire);
-    automation_credits += static_cast<std::uint32_t>(
-      automation.segments[0].size() - std::min<std::uint32_t>(
-        used,
-        static_cast<std::uint32_t>(automation.segments[0].size())
-      )
-    );
-  }
   return ScheduleProgress{
     .admission_capacity_generation = impl_->admission_capacity_generation.load(std::memory_order_acquire),
     .latency_completion_generation = impl_->latency_completion_generation.load(std::memory_order_acquire),
@@ -5419,7 +5426,7 @@ std::optional<ScheduleProgress> AudioHost::DrainScheduleProgress() {
       Impl::kSourceQueueCapacity,
       source_write - source_read
     ),
-    .automation_credits = automation_credits,
+    .automation_credits = impl_->automation_credit_total.load(std::memory_order_acquire),
     .processor_patch_resolved_token = impl_->last_reported_patch.token,
     .processor_patch_resolved_result = impl_->last_reported_patch.result,
   };
@@ -5473,6 +5480,7 @@ bool AudioHost::AttachNativeVst(const NativeVstAttachment& attachment) {
   if (impl_->graph_prepared) worker_attachment->ownership = NativeVstWorkerAttachment::Ownership::kStaged;
   auto* const staged = worker_attachment.get();
   impl_->native_vst_attachments.emplace(normalized.instance_id, std::move(worker_attachment));
+  impl_->PublishAutomationCredits();
   if (impl_->native_worker_mode && staged->metadata.playback_enabled) {
     // A spawn failure leaves the instance not ready, so no revision binds it.
     if (const auto executable = WorkerExecutablePath()) {
@@ -5683,6 +5691,7 @@ void AudioHost::Teardown() {
   impl_->prepared_routing.reset();
   impl_->prepared_asset_handles.clear();
   impl_->native_vst_attachments.clear();
+  impl_->PublishAutomationCredits();
   impl_->active_revision.store(0, std::memory_order_release);
   impl_->prepared_revision.store(0, std::memory_order_release);
   impl_->retired_revision.store(0, std::memory_order_release);
@@ -5843,8 +5852,11 @@ bool AudioHost::ProcessPlanar(
           impl_->ReconcileSourceSeam(true, static_cast<std::int64_t>(requested_frame)));
         impl_->ReconcileScheduledTargets(impl_->active_core.load(std::memory_order_acquire),
           impl_->active_revision.load(std::memory_order_acquire), requested_revision, requested_frame == 0);
-        if (requested_frame != 0) impl_->active_schedule_bank.store(
-          1U - impl_->active_schedule_bank.load(std::memory_order_relaxed), std::memory_order_release);
+        if (requested_frame != 0) {
+          impl_->active_schedule_bank.store(
+            1U - impl_->active_schedule_bank.load(std::memory_order_relaxed), std::memory_order_release);
+          impl_->PublishAutomationCredits();
+        }
         impl_->acceptance_publication_frame.store(impl_->applied_transport_frame.load(std::memory_order_relaxed));
         impl_->acceptance_publication_epoch.store(impl_->completed_render_epoch.load(std::memory_order_relaxed));
         impl_->RecordPublicationLatency();

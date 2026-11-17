@@ -605,8 +605,26 @@ struct SpectralTransferMap {
   float level = 1;
 };
 
-struct SpectralHistory {
+// State of a spectral stage that replaces a predecessor of another FFT size or
+// mode. Prepared on the control side by prepare_spectral_replacement and advanced
+// once per sample by render_spectral_replacement_step.
+struct SpectralReplacement {
   SpectralTransferMap transfer_map{};
+  uint64_t warm_cursor = 0;
+  uint64_t freeze_source_deadline = 0;
+  uint32_t transition_elapsed = 0;
+  bool transition_started = false;
+  bool analysis_from_predecessor = false;
+  bool freeze_source_latched = false;
+  bool freeze_changed_after_latch = false;
+  bool persistent_state_transferred = false;
+  uint64_t prepared_state_serial = UINT64_MAX;
+  uint32_t prepared_state_mode = UINT32_MAX;
+  uint32_t prepared_state_fft_size = 0;
+};
+
+struct SpectralHistory {
+  SpectralReplacement replacement{};
   std::array<std::array<float, kMaximumSpectralFftSize * 2>, 2> rendered{};
   std::array<std::array<float, kMaximumSpectralFftSize>, 2> input{};
   std::array<std::array<float, kMaximumSpectralFftSize>, 2> sidechain{};
@@ -632,19 +650,8 @@ struct SpectralHistory {
   uint32_t write_index = 0;
   uint32_t samples_until_frame = 0;
   float bypass = 0.0F;
-  uint64_t warm_cursor = 0;
-  uint64_t freeze_source_deadline = 0;
-  uint32_t transition_elapsed = 0;
-  bool transition_started = false;
-  bool analysis_from_predecessor = false;
-  bool freeze_source_latched = false;
-  bool freeze_changed_after_latch = false;
-  bool persistent_state_transferred = false;
   uint64_t state_serial = 0;
   uint32_t state_mode = UINT32_MAX;
-  uint64_t prepared_state_serial = UINT64_MAX;
-  uint32_t prepared_state_mode = UINT32_MAX;
-  uint32_t prepared_state_fft_size = 0;
   uint32_t analysis_frames = 0;
 };
 
@@ -3425,8 +3432,8 @@ void transform_spectrum(
   auto &side_real = history.side_real[channel];
   auto &side_imaginary = history.side_imaginary[channel];
   const uint32_t bins = state.fft_size / 2 + 1;
-  const float freeze = history.freeze_source_latched
-    ? (history.analysis_from_predecessor ? 1.0F : 0.0F)
+  const float freeze = history.replacement.freeze_source_latched
+    ? (history.replacement.analysis_from_predecessor ? 1.0F : 0.0F)
     : spectral_transform_parameter(core, processor, 15, frame, state.freeze);
   const float threshold_db = spectral_transform_parameter(core, processor, 16, frame, state.gate_threshold_db);
   const float attack_ms = spectral_transform_parameter(core, processor, 17, frame, state.gate_attack_ms);
@@ -5105,9 +5112,178 @@ void apply_spectral_transfer(const SpectralHistory &prior, const daw_audio_spect
 // state changed after prepare; it never constructs weights or calls trig/log.
 void transfer_spectral_persistent(const SpectralHistory &prior, const daw_audio_spectral_state &before,
   SpectralHistory &history, const daw_audio_spectral_state &after) {
-  history.transfer_map = prepare_spectral_transfer(before.fft_size, after.fft_size);
-  apply_spectral_transfer(prior, before, history, after, history.transfer_map);
+  history.replacement.transfer_map = prepare_spectral_transfer(before.fft_size, after.fft_size);
+  apply_spectral_transfer(prior, before, history, after, history.replacement.transfer_map);
 }
+
+void record_spectral_input(Core &core, uint32_t slot, float left, float right, float sidechain_left, float sidechain_right) {
+  auto &input = core.spectral_inputs[slot];
+  const uint64_t end = input.end.load(std::memory_order_relaxed);
+  const uint32_t at = end & (kSpectralInputFrames - 1u);
+  input.store(0, at, left);
+  input.store(1, at, right);
+  input.store(2, at, sidechain_left);
+  input.store(3, at, sidechain_right);
+  input.end.store(end + 1u, std::memory_order_release);
+}
+
+// The replacement stage runs beside its predecessor until a 10 ms linear seam hands the output over.
+void render_spectral_replacement_step(Core &core, GraphRevision &graph, GraphRevision::Processor &processor,
+  GraphRevision::Processor &old, RuntimeSlot &slot, uint32_t frame, float left, float right,
+  float sidechain_left, float sidechain_right, float &processed_left, float &processed_right) {
+  auto &history = core.spectral_histories[processor.spectral_slot];
+  auto &input = core.spectral_inputs[old.spectral_slot];
+  const uint64_t end = input.end.load(std::memory_order_relaxed);
+  // The predecessor has no parameter-cache entry of its own. Freeze must
+  // nevertheless follow the replacement's resolved live control so it is
+  // the audible released reference while fresh live analysis fills.
+  const float freeze = spectral_transform_parameter(core, processor, 15, frame, processor.spectral.freeze);
+  const bool freeze_resize = old.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE
+    && processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE
+    && old.spectral.fft_size != processor.spectral.fft_size;
+  const bool latch_now = freeze_resize && !history.replacement.freeze_source_latched
+    && core.graph_write_frame + frame >= history.replacement.freeze_source_deadline;
+  const bool recapture = freeze_resize
+    && (history.replacement.freeze_source_latched ? history.replacement.analysis_from_predecessor : freeze > 0.0F);
+  if (history.replacement.freeze_source_latched && (freeze > 0.0F) != history.replacement.analysis_from_predecessor)
+    history.replacement.freeze_changed_after_latch = true;
+  if (old.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE
+    && processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE) old.spectral.freeze = freeze;
+  if (!history.replacement.persistent_state_transferred) {
+    history.replacement.persistent_state_transferred = true;
+    const auto &prior = core.spectral_histories[old.spectral_slot];
+    if ((history.replacement.prepared_state_serial != prior.state_serial
+      || history.replacement.prepared_state_mode != old.spectral.mode
+      || history.replacement.prepared_state_fft_size != old.spectral.fft_size)
+      && prior.state_mode == old.spectral.mode && prior.fft_size == old.spectral.fft_size)
+      apply_spectral_transfer(prior, old.spectral, history, processor.spectral, history.replacement.transfer_map);
+    if (recapture) {
+      // Only fresh predecessor wet samples may reach the existing capture
+      // step. Old prepared live-input OLA drains while the predecessor stays
+      // audible; no bulk reset or spectrum conversion runs on the callback.
+      history.freeze_captured.fill(false);
+      history.samples_until_frame = processor.spectral.fft_size;
+      history.analysis_frames = 0;
+      history.replacement.warm_cursor = end;
+      history.replacement.analysis_from_predecessor = true;
+    }
+    const bool same_mode = old.spectral.mode == processor.spectral.mode;
+    ++history.state_serial;
+    history.state_mode = processor.spectral.mode;
+    core.spectral_inputs[processor.spectral_slot].publish(history, processor.spectral.mode);
+    if (same_mode && (processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_GATE
+      || processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE
+      || (processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE && freeze > 0.0F))) {
+      history.replacement.warm_cursor = end - std::min<uint64_t>(end, spectral_warm_frames(processor.spectral));
+      // Current envelopes/profiles are not historical state. Replaying
+      // past samples would apply release or profile learning twice.
+      if (recapture || processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_GATE
+        || processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE) history.replacement.warm_cursor = end;
+      history.analysis_frames = 0;
+    }
+  }
+  if (!history.replacement.transition_started) {
+    history.replacement.warm_cursor = end - std::min<uint64_t>(end, spectral_warm_frames(processor.spectral));
+    history.replacement.transition_started = true;
+  }
+  if (!history.replacement.freeze_source_latched && history.replacement.analysis_from_predecessor != recapture) {
+    // Use the same resolved event/automation value as synthesis. A source
+    // change needs N fresh samples and the ordinary N+C OLA fill before
+    // fading; keep the released predecessor audible during that bounded
+    // warm-up. Never replay pre-gesture input with post-gesture parameters.
+    history.replacement.analysis_from_predecessor = recapture;
+    history.freeze_captured.fill(false);
+    history.samples_until_frame = processor.spectral.fft_size;
+    history.analysis_frames = 0;
+    history.replacement.warm_cursor = end;
+  }
+  // The publication-relative deadline never restarts. Freeze this final
+  // analysis source and replacement Freeze until the ready fade
+  // ends; further controls remain in the parameter cache for steady state.
+  if (latch_now) history.replacement.freeze_source_latched = true;
+  // A command delayed longer than its warm window restarts bounded
+  // catch-up from the newest complete warm window. The old stage continues
+  // at unity, and at least two FFTs replace any stale algorithm history
+  // before this replacement can become audible.
+  const uint32_t warm_frames = spectral_warm_frames(processor.spectral) + processor.spectral_compensation;
+  if (end - history.replacement.warm_cursor > warm_frames) {
+    history.replacement.warm_cursor = end - std::min<uint64_t>(end, warm_frames);
+    history.analysis_frames = 0;
+    history.replacement.transition_elapsed = 0;
+  }
+  record_spectral_input(core, old.spectral_slot, left, right, sidechain_left, sidechain_right);
+  float old_left = 0.0F, old_right = 0.0F;
+  render_spectral_processor(core, old, frame, left, right, sidechain_left, sidechain_right, &old_left, &old_right);
+  if (recapture) {
+    render_spectral_sample(core, processor, frame, left, right, sidechain_left, sidechain_right,
+      &processed_left, &processed_right, &core.spectral_histories[old.spectral_slot].wet_sample);
+    history.replacement.warm_cursor = end + 1u;
+  }
+  // At most two replacement samples per input sample: bounded catch-up
+  // from retained stage input, without a publish-time FFT burst or upstream
+  // rerender. Only these two stages run until the 10 ms linear seam ends.
+  for (uint32_t work = 0; !recapture && work < 2 && history.replacement.warm_cursor < end + 1u; ++work) {
+    const uint32_t at = history.replacement.warm_cursor++ & (kSpectralInputFrames - 1u);
+    render_spectral_processor(core, processor, frame,
+      input.sample(0, at), input.sample(1, at),
+      input.sample(2, at), input.sample(3, at),
+      &processed_left, &processed_right);
+  }
+  const uint32_t ola_frames = processor.spectral.overlap;
+  bool ready = history.analysis_frames >= ola_frames + 1u;
+  if (processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_HPSS)
+    ready = history.analysis_frames >= kSpectralHpssFrames + ola_frames;
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  const uint64_t absolute = core.graph_write_frame + frame;
+  const uint64_t raise_seam = graph.latency_origin + core.latency_publication_shift
+    + (graph.latency_raise != 0 ? graph.fade_frames : 0u);
+  const bool running = core.transport.running != 0 && core.latency_shrunk_revision != graph.revision
+    && graph.nodes[processor.node_index].keep_latency == 0;
+  const uint32_t common_latency = processor.spectral.fft_size + processor.spectral_compensation;
+  const uint32_t old_delay = !running ? 0u : absolute < raise_seam ? old.spectral_compensation
+    : common_latency - old.spectral.fft_size;
+  old_left = spectral_delayed_output(core.spectral_histories[old.spectral_slot], 0, old_delay);
+  old_right = spectral_delayed_output(core.spectral_histories[old.spectral_slot], 1, old_delay);
+  const uint32_t new_delay = running ? processor.spectral_compensation : 0u;
+  processed_left = spectral_delayed_output(history, 0, new_delay);
+  processed_right = spectral_delayed_output(history, 1, new_delay);
+  const uint32_t algorithm_frames = processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_HPSS
+    ? kSpectralHpssFrames + ola_frames : ola_frames + 1u;
+  ready = ready && absolute >= raise_seam
+    && history.analysis_frames >= algorithm_frames + (new_delay + history.hop_size - 1u) / history.hop_size;
+#endif
+  const bool advance_transition = ready && history.replacement.warm_cursor == end + 1u;
+  // A gesture can arrive after fading has begun. Hold the last coefficient
+  // during replacement-source fill instead of jumping back to predecessor-only.
+  const uint32_t fade_at = advance_transition ? history.replacement.transition_elapsed++
+    : history.replacement.transition_elapsed - std::min(history.replacement.transition_elapsed, 1u);
+  const float mix = std::min(1.0F, static_cast<float>(fade_at) / (graph.fade_frames * 2u));
+  processed_left = old_left * (1.0F - mix) + processed_left * mix;
+  processed_right = old_right * (1.0F - mix) + processed_right * mix;
+  if (mix == 1.0F) {
+    if (history.replacement.analysis_from_predecessor && history.replacement.freeze_changed_after_latch) {
+      // The existing dry delay retains exactly N live stage-input samples.
+      // Restore that analysis window at the seam so a deferred engage
+      // captures live input, not the predecessor's wet tail. This bounded
+      // 2N copy leaves the capture spectrum, OLA and aligned output intact.
+      const uint32_t size = processor.spectral.fft_size;
+      for (uint32_t channel = 0; channel < 2; ++channel)
+        for (uint32_t i = 0; i < size; ++i)
+          history.input[channel][(history.write_index - size + i) & (kMaximumSpectralFftSize - 1u)]
+            = history.dry[channel][(history.write_index + i) & (kMaximumSpectralFftSize * 2u - 1u)];
+    }
+    // Even release -> engage ending at the latched value needs a fresh
+    // normal capture. Clear only capture ownership, never the OLA tail.
+    if (history.replacement.freeze_changed_after_latch) {
+      history.freeze_captured.fill(false);
+      ++history.state_serial;
+      core.spectral_inputs[processor.spectral_slot].publish(history, processor.spectral.mode);
+    }
+    history.replacement.freeze_source_latched = false;
+    retire_runtime_slot(core, slot);
+  }
+}
+
 // One processor's sample. Its key is the signal routed to it, or its own input
 // when nothing is. A key from a deleted source fades with that source, and the
 // processor's own input takes over by the amount the keys have faded: once every
@@ -5142,172 +5318,14 @@ void render_chain_frame(
   }
   float processed_left = 0.0F;
   float processed_right = 0.0F;
-  const auto record_input = [&](uint32_t slot) {
-    auto &input = core.spectral_inputs[slot];
-    const uint64_t end = input.end.load(std::memory_order_relaxed);
-    const uint32_t at = end & (kSpectralInputFrames - 1u);
-    input.store(0, at, left);
-    input.store(1, at, right);
-    input.store(2, at, sidechain_left);
-    input.store(3, at, sidechain_right);
-    input.end.store(end + 1u, std::memory_order_release);
-  };
-  if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) record_input(processor.spectral_slot);
+  if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) record_spectral_input(core, processor.spectral_slot, left, right, sidechain_left, sidechain_right);
   if (processor.spectral_predecessor >= 0) {
     auto &old = graph.spectral_predecessors[processor.spectral_predecessor];
     auto &slot = core.processor_slots[old.history_slot];
     auto &history = core.spectral_histories[processor.spectral_slot];
     if (runtime_slot_renderable(core, slot, old.generation)) {
-      auto &input = core.spectral_inputs[old.spectral_slot];
-      const uint64_t end = input.end.load(std::memory_order_relaxed);
-      // The predecessor has no parameter-cache entry of its own. Freeze must
-      // nevertheless follow the replacement's resolved live control so it is
-      // the audible released reference while fresh live analysis fills.
-      const float freeze = spectral_transform_parameter(core, processor, 15, frame, processor.spectral.freeze);
-      const bool freeze_resize = old.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE
-        && processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE
-        && old.spectral.fft_size != processor.spectral.fft_size;
-      const bool latch_now = freeze_resize && !history.freeze_source_latched
-        && core.graph_write_frame + frame >= history.freeze_source_deadline;
-      const bool recapture = freeze_resize
-        && (history.freeze_source_latched ? history.analysis_from_predecessor : freeze > 0.0F);
-      if (history.freeze_source_latched && (freeze > 0.0F) != history.analysis_from_predecessor)
-        history.freeze_changed_after_latch = true;
-      if (old.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE
-        && processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE) old.spectral.freeze = freeze;
-      if (!history.persistent_state_transferred) {
-        history.persistent_state_transferred = true;
-        const auto &prior = core.spectral_histories[old.spectral_slot];
-        if ((history.prepared_state_serial != prior.state_serial
-          || history.prepared_state_mode != old.spectral.mode
-          || history.prepared_state_fft_size != old.spectral.fft_size)
-          && prior.state_mode == old.spectral.mode && prior.fft_size == old.spectral.fft_size)
-          apply_spectral_transfer(prior, old.spectral, history, processor.spectral, history.transfer_map);
-        if (recapture) {
-          // Only fresh predecessor wet samples may reach the existing capture
-          // step. Old prepared live-input OLA drains while the predecessor stays
-          // audible; no bulk reset or spectrum conversion runs on the callback.
-          history.freeze_captured.fill(false);
-          history.samples_until_frame = processor.spectral.fft_size;
-          history.analysis_frames = 0;
-          history.warm_cursor = end;
-          history.analysis_from_predecessor = true;
-        }
-        const bool same_mode = old.spectral.mode == processor.spectral.mode;
-        ++history.state_serial;
-        history.state_mode = processor.spectral.mode;
-        core.spectral_inputs[processor.spectral_slot].publish(history, processor.spectral.mode);
-        if (same_mode && (processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_GATE
-          || processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE
-          || (processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_FREEZE && freeze > 0.0F))) {
-          history.warm_cursor = end - std::min<uint64_t>(end, spectral_warm_frames(processor.spectral));
-          // Current envelopes/profiles are not historical state. Replaying
-          // past samples would apply release or profile learning twice.
-          if (recapture || processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_GATE
-            || processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_NOISE_REDUCE) history.warm_cursor = end;
-          history.analysis_frames = 0;
-        }
-      }
-      if (!history.transition_started) {
-        history.warm_cursor = end - std::min<uint64_t>(end, spectral_warm_frames(processor.spectral));
-        history.transition_started = true;
-      }
-      if (!history.freeze_source_latched && history.analysis_from_predecessor != recapture) {
-        // Use the same resolved event/automation value as synthesis. A source
-        // change needs N fresh samples and the ordinary N+C OLA fill before
-        // fading; keep the released predecessor audible during that bounded
-        // warm-up. Never replay pre-gesture input with post-gesture parameters.
-        history.analysis_from_predecessor = recapture;
-        history.freeze_captured.fill(false);
-        history.samples_until_frame = processor.spectral.fft_size;
-        history.analysis_frames = 0;
-        history.warm_cursor = end;
-      }
-      // The publication-relative deadline never restarts. Freeze this final
-      // analysis source and replacement Freeze until the ready fade
-      // ends; further controls remain in the parameter cache for steady state.
-      if (latch_now) history.freeze_source_latched = true;
-      // A command delayed longer than its warm window restarts bounded
-      // catch-up from the newest complete warm window. The old stage continues
-      // at unity, and at least two FFTs replace any stale algorithm history
-      // before this replacement can become audible.
-      const uint32_t warm_frames = spectral_warm_frames(processor.spectral) + processor.spectral_compensation;
-      if (end - history.warm_cursor > warm_frames) {
-        history.warm_cursor = end - std::min<uint64_t>(end, warm_frames);
-        history.analysis_frames = 0;
-        history.transition_elapsed = 0;
-      }
-      record_input(old.spectral_slot);
-      float old_left = 0.0F, old_right = 0.0F;
-      render_spectral_processor(core, old, frame, left, right, sidechain_left, sidechain_right, &old_left, &old_right);
-      if (recapture) {
-        render_spectral_sample(core, processor, frame, left, right, sidechain_left, sidechain_right,
-          &processed_left, &processed_right, &core.spectral_histories[old.spectral_slot].wet_sample);
-        history.warm_cursor = end + 1u;
-      }
-      // At most two replacement samples per input sample: bounded catch-up
-      // from retained stage input, without a publish-time FFT burst or upstream
-      // rerender. Only these two stages run until the 10 ms linear seam ends.
-      for (uint32_t work = 0; !recapture && work < 2 && history.warm_cursor < end + 1u; ++work) {
-        const uint32_t at = history.warm_cursor++ & (kSpectralInputFrames - 1u);
-        render_spectral_processor(core, processor, frame,
-          input.sample(0, at), input.sample(1, at),
-          input.sample(2, at), input.sample(3, at),
-          &processed_left, &processed_right);
-      }
-      const uint32_t ola_frames = processor.spectral.overlap;
-      bool ready = history.analysis_frames >= ola_frames + 1u;
-      if (processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_HPSS)
-        ready = history.analysis_frames >= kSpectralHpssFrames + ola_frames;
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-      const uint64_t absolute = core.graph_write_frame + frame;
-      const uint64_t raise_seam = graph.latency_origin + core.latency_publication_shift
-        + (graph.latency_raise != 0 ? graph.fade_frames : 0u);
-      const bool running = core.transport.running != 0 && core.latency_shrunk_revision != graph.revision
-        && graph.nodes[processor.node_index].keep_latency == 0;
-      const uint32_t common_latency = processor.spectral.fft_size + processor.spectral_compensation;
-      const uint32_t old_delay = !running ? 0u : absolute < raise_seam ? old.spectral_compensation
-        : common_latency - old.spectral.fft_size;
-      old_left = spectral_delayed_output(core.spectral_histories[old.spectral_slot], 0, old_delay);
-      old_right = spectral_delayed_output(core.spectral_histories[old.spectral_slot], 1, old_delay);
-      const uint32_t new_delay = running ? processor.spectral_compensation : 0u;
-      processed_left = spectral_delayed_output(history, 0, new_delay);
-      processed_right = spectral_delayed_output(history, 1, new_delay);
-      const uint32_t algorithm_frames = processor.spectral.mode == DAW_AUDIO_SPECTRAL_MODE_HPSS
-        ? kSpectralHpssFrames + ola_frames : ola_frames + 1u;
-      ready = ready && absolute >= raise_seam
-        && history.analysis_frames >= algorithm_frames + (new_delay + history.hop_size - 1u) / history.hop_size;
-#endif
-      const bool advance_transition = ready && history.warm_cursor == end + 1u;
-      // A gesture can arrive after fading has begun. Hold the last coefficient
-      // during replacement-source fill instead of jumping back to predecessor-only.
-      const uint32_t fade_at = advance_transition ? history.transition_elapsed++
-        : history.transition_elapsed - std::min(history.transition_elapsed, 1u);
-      const float mix = std::min(1.0F, static_cast<float>(fade_at) / (graph.fade_frames * 2u));
-      processed_left = old_left * (1.0F - mix) + processed_left * mix;
-      processed_right = old_right * (1.0F - mix) + processed_right * mix;
-      if (mix == 1.0F) {
-        if (history.analysis_from_predecessor && history.freeze_changed_after_latch) {
-          // The existing dry delay retains exactly N live stage-input samples.
-          // Restore that analysis window at the seam so a deferred engage
-          // captures live input, not the predecessor's wet tail. This bounded
-          // 2N copy leaves the capture spectrum, OLA and aligned output intact.
-          const uint32_t size = processor.spectral.fft_size;
-          for (uint32_t channel = 0; channel < 2; ++channel)
-            for (uint32_t i = 0; i < size; ++i)
-              history.input[channel][(history.write_index - size + i) & (kMaximumSpectralFftSize - 1u)]
-                = history.dry[channel][(history.write_index + i) & (kMaximumSpectralFftSize * 2u - 1u)];
-        }
-        // Even release -> engage ending at the latched value needs a fresh
-        // normal capture. Clear only capture ownership, never the OLA tail.
-        if (history.freeze_changed_after_latch) {
-          history.freeze_captured.fill(false);
-          ++history.state_serial;
-          core.spectral_inputs[processor.spectral_slot].publish(history, processor.spectral.mode);
-        }
-        history.freeze_source_latched = false;
-        retire_runtime_slot(core, slot);
-      }
+      render_spectral_replacement_step(core, graph, processor, old, slot, frame, left, right,
+        sidechain_left, sidechain_right, processed_left, processed_right);
     } else {
       item.render(core, processor, frame, left, right, sidechain_left, sidechain_right, &processed_left, &processed_right);
       if (processor.spectral_compensation != 0 && core.transport.running != 0
@@ -8705,6 +8723,72 @@ void begin_edge_ramps(Core &core, const GraphRevision &replaced, const GraphRevi
   core.edge_ramp_bank ^= 1u;
 }
 
+// Control side of a spectral stage replacing a predecessor of another FFT size or mode: the
+// predecessor keeps rendering beside it, and the stage is warmed from the predecessor's retained input.
+daw_audio_core_result prepare_spectral_replacement(Core &core, const GraphRevision &current, GraphRevision &next,
+  GraphRevision::Processor &processor, uint32_t previous, uint32_t owned) {
+  if (next.spectral_predecessor_count == kMaximumSpectralProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  processor.spectral_predecessor = static_cast<int32_t>(next.spectral_predecessor_count++);
+  next.spectral_predecessors[processor.spectral_predecessor] = current.processors[previous];
+#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
+  const auto &prior = current.processors[previous];
+  if (core.transport_running.load(std::memory_order_acquire)
+    && next.nodes[processor.node_index].keep_latency == 0) {
+    const uint32_t padding = core.latency_shrunk_revision.load(std::memory_order_acquire) == current.revision
+      ? 0u : prior.spectral_compensation;
+    processor.spectral_compensation = std::max(prior.spectral.fft_size + padding,
+      processor.spectral.fft_size) - processor.spectral.fft_size;
+  }
+#endif
+  next.spectral_predecessors[processor.spectral_predecessor].spectral_predecessor = -1;
+  // The old stage has no cache entry. render_chain_frame forwards the
+  // effective Freeze control; other controls retain this configuration.
+  next.spectral_predecessors[processor.spectral_predecessor].parameter_count = 0;
+  // Prepare the new algorithm from an atomic, retained stage-input
+  // window. This is control-side only; it never reads mutable FFT state
+  // or executes an upstream processor. Publication catches up only the
+  // samples that arrived while this immutable revision was in flight.
+  auto &input = core.spectral_inputs[current.processors[previous].spectral_slot];
+  auto &history = core.spectral_histories[owned];
+  const bool valid_snapshot = input.read(core.spectral_state_snapshot, current.processors[previous].spectral);
+  const uint64_t end = input.end.load(std::memory_order_acquire);
+  const uint64_t begin = end - std::min<uint64_t>(end,
+    spectral_warm_frames(processor.spectral) + processor.spectral_compensation);
+  const uint32_t parameters = processor.parameter_count;
+  processor.parameter_count = 0;
+  {
+    PrepareScope warm_scope(core, "spectral-warm");
+    for (uint64_t cursor = begin; cursor < end; ++cursor) {
+      const uint32_t at = cursor & (kSpectralInputFrames - 1u);
+      float left = 0.0F, right = 0.0F;
+      render_spectral_processor(core, processor, 0,
+        input.sample(0, at), input.sample(1, at),
+        input.sample(2, at), input.sample(3, at),
+        &left, &right);
+    }
+  }
+  processor.parameter_count = parameters;
+  if (valid_snapshot)
+    transfer_spectral_persistent(core.spectral_state_snapshot, current.processors[previous].spectral,
+      history, processor.spectral);
+  else history.replacement.transfer_map = prepare_spectral_transfer(current.processors[previous].spectral.fft_size,
+    processor.spectral.fft_size);
+  // Serial zero means no analysis frame has been published yet. In
+  // particular, an unobserved Gate starts at unity, not snapshot zeros.
+  history.replacement.prepared_state_serial = core.spectral_state_snapshot.state_serial == 0
+    ? UINT64_MAX : core.spectral_state_snapshot.state_serial;
+  history.replacement.prepared_state_mode = valid_snapshot ? current.processors[previous].spectral.mode : UINT32_MAX;
+  history.replacement.prepared_state_fft_size = valid_snapshot ? current.processors[previous].spectral.fft_size : 0;
+  // A preempted preparation may have lost its oldest samples. Do not
+  // expose that partial warmup or race an overwritten window: this is
+  // genuine bounded-history exhaustion, not a published transition.
+  const uint64_t completed = input.end.load(std::memory_order_acquire);
+  if (completed - begin >= kSpectralInputFrames) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+  history.replacement.warm_cursor = end;
+  history.replacement.transition_started = true;
+  return DAW_AUDIO_CORE_OK;
+}
+
 // Prepares the runtime of the plan just copied into the prepared slot: instrument
 // configuration, the topology verdict, deletion ghosts, and slot ownership. All of
 // it happens off the callback; on failure nothing the callback uses has changed.
@@ -8804,65 +8888,9 @@ daw_audio_core_result prepare_runtime_ownership(Core &core) {
         core.spectral_inputs[owned].initialize_samples();
       }
       if (previous >= 0 && current.processors[previous].kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) {
-        if (next.spectral_predecessor_count == kMaximumSpectralProcessors) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-        processor.spectral_predecessor = static_cast<int32_t>(next.spectral_predecessor_count++);
-        next.spectral_predecessors[processor.spectral_predecessor] = current.processors[previous];
-#if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-        const auto &prior = current.processors[previous];
-        if (core.transport_running.load(std::memory_order_acquire)
-          && next.nodes[processor.node_index].keep_latency == 0) {
-          const uint32_t padding = core.latency_shrunk_revision.load(std::memory_order_acquire) == current.revision
-            ? 0u : prior.spectral_compensation;
-          processor.spectral_compensation = std::max(prior.spectral.fft_size + padding,
-            processor.spectral.fft_size) - processor.spectral.fft_size;
-        }
-#endif
-        next.spectral_predecessors[processor.spectral_predecessor].spectral_predecessor = -1;
-        // The old stage has no cache entry. render_chain_frame forwards the
-        // effective Freeze control; other controls retain this configuration.
-        next.spectral_predecessors[processor.spectral_predecessor].parameter_count = 0;
-        // Prepare the new algorithm from an atomic, retained stage-input
-        // window. This is control-side only; it never reads mutable FFT state
-        // or executes an upstream processor. Publication catches up only the
-        // samples that arrived while this immutable revision was in flight.
-        auto &input = core.spectral_inputs[current.processors[previous].spectral_slot];
-        auto &history = core.spectral_histories[owned];
-        const bool valid_snapshot = input.read(core.spectral_state_snapshot, current.processors[previous].spectral);
-        const uint64_t end = input.end.load(std::memory_order_acquire);
-        const uint64_t begin = end - std::min<uint64_t>(end,
-          spectral_warm_frames(processor.spectral) + processor.spectral_compensation);
-        const uint32_t parameters = processor.parameter_count;
-        processor.parameter_count = 0;
-        {
-          PrepareScope warm_scope(core, "spectral-warm");
-          for (uint64_t cursor = begin; cursor < end; ++cursor) {
-            const uint32_t at = cursor & (kSpectralInputFrames - 1u);
-            float left = 0.0F, right = 0.0F;
-            render_spectral_processor(core, processor, 0,
-              input.sample(0, at), input.sample(1, at),
-              input.sample(2, at), input.sample(3, at),
-              &left, &right);
-          }
-        }
-        processor.parameter_count = parameters;
-        if (valid_snapshot)
-          transfer_spectral_persistent(core.spectral_state_snapshot, current.processors[previous].spectral,
-            history, processor.spectral);
-        else history.transfer_map = prepare_spectral_transfer(current.processors[previous].spectral.fft_size,
-          processor.spectral.fft_size);
-        // Serial zero means no analysis frame has been published yet. In
-        // particular, an unobserved Gate starts at unity, not snapshot zeros.
-        history.prepared_state_serial = core.spectral_state_snapshot.state_serial == 0
-          ? UINT64_MAX : core.spectral_state_snapshot.state_serial;
-        history.prepared_state_mode = valid_snapshot ? current.processors[previous].spectral.mode : UINT32_MAX;
-        history.prepared_state_fft_size = valid_snapshot ? current.processors[previous].spectral.fft_size : 0;
-        // A preempted preparation may have lost its oldest samples. Do not
-        // expose that partial warmup or race an overwritten window: this is
-        // genuine bounded-history exhaustion, not a published transition.
-        const uint64_t completed = input.end.load(std::memory_order_acquire);
-        if (completed - begin >= kSpectralInputFrames) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
-        history.warm_cursor = end;
-        history.transition_started = true;
+        const auto replaced = prepare_spectral_replacement(core, current, next, processor, static_cast<uint32_t>(previous),
+          static_cast<uint32_t>(owned));
+        if (replaced != DAW_AUDIO_CORE_OK) return replaced;
       }
     }
     seed_bypass(core, processor, has_current && previous < 0 && graph_node_index(current, processor.node_id) >= 0);
@@ -8952,11 +8980,11 @@ extern "C" daw_audio_core_result daw_audio_core_publish(
       const auto &processor = core->prepared_graph->processors[index];
       if (processor.spectral_predecessor < 0) continue;
       auto &history = core->spectral_histories[processor.spectral_slot];
-      history.freeze_source_deadline = core->graph_write_frame + 2u * processor.spectral.fft_size
+      history.replacement.freeze_source_deadline = core->graph_write_frame + 2u * processor.spectral.fft_size
         + processor.spectral_compensation + 2u * core->prepared_graph->fade_frames
         + core->config.max_frames_per_block;
-      history.freeze_source_latched = false;
-      history.freeze_changed_after_latch = false;
+      history.replacement.freeze_source_latched = false;
+      history.replacement.freeze_changed_after_latch = false;
     }
     // This is the same block-boundary/reader-epoch handoff as runtime slots.
     // Delayed ghosts keep their reserved histories; only fresh live owners reset.

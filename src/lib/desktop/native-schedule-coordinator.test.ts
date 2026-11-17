@@ -384,6 +384,24 @@ test("discarding a staged bank leaves active accepted windows and refills intact
   coordinator.dispose()
 })
 
+test("a bank re-staged at a later frame carries that frame as its publication seam", async () => {
+  const snapshot = snapshotFor(instrumentTrack)
+  const { fixture, coordinator } = coordinatorFor(snapshot, 0, bridgeFor(), undefined, true)
+  await coordinator.prime(0)
+  const next = { ...snapshot, revision: 2 }
+  const first = coordinator.stageRevision(next, nativeGraphFor(next), 48_128)
+  await first.prime(48_128)
+  const beforeRebase = fixture.payloads.length
+  first.dispose()
+  const rebased = coordinator.stageRevision(next, nativeGraphFor(next), 49_152)
+  await rebased.prime(49_152)
+  const resent = fixture.payloads.slice(beforeRebase)
+  expect(resent.length).toBeGreaterThan(0)
+  for (const bytes of resent) expect(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigUint64(64, true)).toBe(49_152n)
+  rebased.dispose()
+  coordinator.dispose()
+})
+
 test("disposing staged work during a chunk ACK cannot submit its remaining chunks", async () => {
   const track = { ...instrumentTrack, clips: instrumentTrack.clips.map((clip) => ({
     ...clip, midi: { ...clip.midi!, notes: Array.from({ length: 300 }, (_, index) => ({

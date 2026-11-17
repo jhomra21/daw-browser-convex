@@ -48,7 +48,7 @@ import TimelineBottomPanelFooter from "~/components/timeline/TimelineBottomPanel
 import type { Clip, ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { BOTTOM_PANEL_EDGE_PADDING_PX } from "~/lib/bottom-panel-layout";
 import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
-import type { TimelinePlaybackRebuildIntent } from "~/hooks/useTimelinePlayback";
+import type { TimelinePlaybackRebuildIntent } from "~/hooks/timeline-playback-types";
 import {
   createEffectsPanelController,
   type EffectsPanelAudioEffects,

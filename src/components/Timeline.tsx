@@ -31,7 +31,7 @@ import {
   openProjectFromDashboard as openDashboardProject,
 } from "~/hooks/useTimelineProjectRoute";
 import { usePlayheadControls } from "~/hooks/usePlayheadControls";
-import type { TimelinePlaybackRebuildIntent } from "~/hooks/useTimelinePlayback";
+import type { TimelinePlaybackRebuildIntent } from "~/hooks/timeline-playback-types";
 import type { NativeInstrumentRetryIdentity } from "~/lib/sampler-buffer-sync";
 import { useClipDrag } from "~/hooks/useClipDrag";
 import { useClipResize } from "~/hooks/useClipResize";

@@ -35,7 +35,7 @@ import type { ExternalProcessor } from "@daw-browser/external-plugins";
 import { hasVst3TrustAcknowledgement, vst3ScanHealthLabel } from "~/lib/external-plugin-ui";
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import { autoHealStaleVst3Catalog } from "~/lib/desktop/vst3-catalog-auto-heal";
-import type { TimelinePlaybackRebuildIntent } from "./useTimelinePlayback";
+import type { TimelinePlaybackRebuildIntent } from "./timeline-playback-types";
 
 type Options = {
   acceptance?: PlaybackAcceptanceObserver;

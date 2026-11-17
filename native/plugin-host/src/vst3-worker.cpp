@@ -506,20 +506,18 @@ bool ConfigureBusArrangement(
   Steinberg::Vst::IAudioProcessor& processor,
   const WorkerTransport& transport
 ) {
-  const auto inputArrangements = EnumerateBusArrangements(
+  auto inputArrangements = EnumerateBusArrangements(
     component, processor, Steinberg::Vst::kInput, transport.inputChannels()
   );
-  const auto outputArrangements = EnumerateBusArrangements(
+  auto outputArrangements = EnumerateBusArrangements(
     component, processor, Steinberg::Vst::kOutput, transport.outputChannels()
   );
   if (!inputArrangements || !outputArrangements) return false;
-  auto inputArrangementValues = *inputArrangements;
-  auto outputArrangementValues = *outputArrangements;
   const auto arrangementResult = processor.setBusArrangements(
-    inputArrangementValues.data(),
-    static_cast<Steinberg::int32>(inputArrangementValues.size()),
-    outputArrangementValues.data(),
-    static_cast<Steinberg::int32>(outputArrangementValues.size())
+    inputArrangements->data(),
+    static_cast<Steinberg::int32>(inputArrangements->size()),
+    outputArrangements->data(),
+    static_cast<Steinberg::int32>(outputArrangements->size())
   );
   return arrangementResult == Steinberg::kResultOk || arrangementResult == Steinberg::kResultTrue;
 }
@@ -566,6 +564,17 @@ bool PrepareBusBuffers(
   outputPointers.clear();
   return PrepareBusBuffers(component, Steinberg::Vst::kInput, transport.inputChannels(), inputs, inputPointers)
     && PrepareBusBuffers(component, Steinberg::Vst::kOutput, transport.outputChannels(), outputs, outputPointers);
+}
+
+bool SetupProcessing(Steinberg::Vst::IAudioProcessor& processor, const WorkerProcessSetup& setup, const char* const step) {
+  ProcessSetup processSetup{
+    WorkerProcessModeToSteinberg(setup.mode),
+    Steinberg::Vst::kSample32,
+    static_cast<Steinberg::int32>(setup.maximumBlockFrames),
+    setup.sampleRate,
+  };
+  daw::acceptance::Step timing(step);
+  return processor.setupProcessing(processSetup) == Steinberg::kResultOk;
 }
 
 }  // namespace
@@ -801,16 +810,7 @@ std::optional<WorkerManifest> Vst3Worker::PreflightManifest(
   const auto inputBuses = inspectBuses(Steinberg::Vst::kInput);
   const auto outputBuses = inspectBuses(Steinberg::Vst::kOutput);
   if (!inputBuses || !outputBuses || outputBuses->empty()) return std::nullopt;
-  ProcessSetup setup{
-    WorkerProcessModeToSteinberg(implementation_->setup.mode),
-    Steinberg::Vst::kSample32,
-    static_cast<Steinberg::int32>(implementation_->setup.maximumBlockFrames),
-    implementation_->setup.sampleRate,
-  };
-  {
-    daw::acceptance::Step timing("preflight-setupProcessing");
-    if (implementation_->processor->setupProcessing(setup) != Steinberg::kResultOk) return std::nullopt;
-  }
+  if (!SetupProcessing(*implementation_->processor, implementation_->setup, "preflight-setupProcessing")) return std::nullopt;
   implementation_->processContextRequirements =
     Steinberg::FUnknownPtr<IProcessContextRequirements>(implementation_->processor);
   implementation_->processContextRequirementsFlags = implementation_->processContextRequirements
@@ -889,16 +889,9 @@ bool Vst3Worker::ConfigureTransport(WorkerTransport& transport, const WorkerStat
     || transport.inputChannels() != implementation_->setup.inputChannels || transport.outputChannels() != implementation_->setup.outputChannels) {
     return false;
   }
-  if (!ConfigureBusArrangement(*implementation_->component, *implementation_->processor, transport)) return false;
-  ProcessSetup setup{
-    WorkerProcessModeToSteinberg(implementation_->setup.mode),
-    Steinberg::Vst::kSample32,
-    static_cast<Steinberg::int32>(implementation_->setup.maximumBlockFrames),
-    implementation_->setup.sampleRate
-  };
-  {
-    daw::acceptance::Step timing("setupProcessing");
-    if (implementation_->processor->setupProcessing(setup) != Steinberg::kResultOk) return false;
+  if (!ConfigureBusArrangement(*implementation_->component, *implementation_->processor, transport)
+    || !SetupProcessing(*implementation_->processor, implementation_->setup, "setupProcessing")) {
+    return false;
   }
   if (WorkerProcessModeUsesEditorRuntime(implementation_->setup.mode) && implementation_->controller) {
     // Some VST3 controllers only create their view before realtime processing
@@ -1264,16 +1257,7 @@ bool Vst3Worker::ReactivateComponent(const WorkerState* const state, const bool 
       || !ConfigureBusArrangement(*implementation_->component, *implementation_->processor, *implementation_->transport)) {
       return false;
     }
-    ProcessSetup setup{
-      WorkerProcessModeToSteinberg(implementation_->setup.mode),
-      Steinberg::Vst::kSample32,
-      static_cast<Steinberg::int32>(implementation_->setup.maximumBlockFrames),
-      implementation_->setup.sampleRate
-    };
-    {
-      daw::acceptance::Step timing("setupProcessing");
-      if (implementation_->processor->setupProcessing(setup) != Steinberg::kResultOk) return false;
-    }
+    if (!SetupProcessing(*implementation_->processor, implementation_->setup, "setupProcessing")) return false;
     if (!PrepareBusBuffers(
       *implementation_->component, *implementation_->transport, implementation_->inputs, implementation_->outputs,
       implementation_->inputPointers, implementation_->outputPointers

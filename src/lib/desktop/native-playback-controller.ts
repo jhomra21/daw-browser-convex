@@ -6,7 +6,6 @@ import { nativeExternalLatencyFrames as nativeOfflineExternalLatencyFrames } fro
 import {
   nativeAudioHostMaximumInstalledAssets,
   nativeKeepLatencyDivergentMixedBusDiagnostic,
-  nativeRecordingSpoolImportVersion,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import {
   mapNativeSessionAssets,
@@ -19,7 +18,6 @@ import {
   serializeNativeInstrumentEvents,
   serializeNativeProcessorEvents,
   serializeNativeVstParameterEvents,
-  nativeGraphNodeId,
 } from "@daw-browser/audio-engine/native-host-wire"
 import { resolveGraphProcessor } from "@daw-browser/audio-engine/mixer/resolve-graph-processor"
 import { compilePortableSynthState } from "@daw-browser/audio-engine/mixer/graph-contract"
@@ -44,7 +42,6 @@ import {
 import type {
   NativeHostDeviceConfiguration,
   NativeHostTransport,
-  NativeHostRecordingStatus,
   NativeInstrumentEvent,
   NativeSessionAsset,
   NativeScheduleProgress,
@@ -57,8 +54,7 @@ import type {
   LivePlaybackSnapshotCompilation,
   LivePlaybackTransport,
 } from "~/lib/live-playback-snapshot"
-import { importNativeRecordingSpool } from "~/lib/recording/native-spool-importer"
-import type { RecordingTerminationCause } from "~/lib/recording/recording-diagnostics"
+import type { importNativeRecordingSpool } from "~/lib/recording/native-spool-importer"
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
 import type { DesktopBridge, NativeDeliveryReply, NativeProcessorPatchReply } from "~/types/desktop-bridge"
 import { clearInstanceLimits, clearVstInstanceFailures, markVstInstanceFailed, setInstanceLimits } from "./vst-instance-failures"
@@ -122,6 +118,7 @@ import {
   type ScheduleSession,
 } from "./native-schedule-publication"
 import { createNativeObservation } from "./native-observation"
+import { createNativeRecording } from "./native-recording-session"
 import { createNativeTimelinePageManager, nativeTimelinePageStagingBytes, type NativeTimelinePageManager, type NativeTimelineSource } from "./native-timeline-page-manager"
 import { createSampledInstrumentRegionBudget, type SampledInstrumentRegionBudget, type SampledInstrumentRegionBudgetScope } from "~/lib/sampled-instrument-region-budget"
 import type { NativeInstrumentPreparation } from "./native-instrument-budget-policy"
@@ -358,32 +355,6 @@ export const nativePlaybackFaultText = (fault: NativePlaybackFault) => {
     case "session-stopped": return fault.message
   }
 }
-export type NativeRecordingDiagnostics = Pick<
-  NativeHostRecordingStatus,
-  "active" | "capturedFrames" | "droppedFrames" | "droppedBlocks" | "availableBlocks" | "queuedBlocks" | "rms" | "peak" | "fatal"
->
-
-type NativeRecordingSession = {
-  appSessionId: string
-  numericSessionId: bigint
-  generation: number
-  scope: { projectId: string; projectGeneration: number }
-  isCurrent: () => boolean
-  takeId?: string
-  sampleRate: number
-  channelCount: number
-  unsubscribeStatus: () => void
-  unsubscribeFailure: () => void
-  unsubscribeLoss: () => void
-  terminal: boolean
-  latestStatus?: NativeHostRecordingStatus
-  finish?: Promise<Awaited<ReturnType<typeof importNativeRecordingSpool>>>
-  waiters: Set<{ predicate: (status: NativeHostRecordingStatus) => boolean;
-    resolve: (status: NativeHostRecordingStatus) => void; reject: (error: Error) => void }>
-  onDiagnostics?: (diagnostics: NativeRecordingDiagnostics) => void
-  onFailure?: (error: Error, cause: RecordingTerminationCause) => void
-}
-
 type LiveNoteReadiness = {
   promise: Promise<void>
   released: boolean
@@ -861,11 +832,8 @@ export const createNativePlaybackController = (input: {
   }
   let stagedTransportIntent = 0
   let unsubscribeVstInstanceEvents: (() => void) | undefined
-  let recording: NativeRecordingSession | undefined
   let sampleRate = 0
   let maximumFramesPerBlock = 0
-  let nextRecordingSessionId = 1n
-  let recordingGeneration = 1
   let transportFrame = 0
   let loopAppliesAtTransportPosition = true
   let nextLiveNoteId = 1
@@ -881,6 +849,17 @@ export const createNativePlaybackController = (input: {
   let liveMidiTailOwned = false
   let scheduleCoordinator: NativeScheduleCoordinator | undefined
   const nativeLiveMidiResetListeners = new Set<() => void>()
+  const nativeRecording = createNativeRecording({
+    bridge: input.bridge,
+    importRecordingSpool: input.importRecordingSpool,
+    state: () => ({
+      active,
+      destroyed,
+      sampleRate,
+      projectId: input.getProjectId?.(),
+      projectGeneration: resolveProjectGeneration(),
+    }),
+  })
   const observation = createNativeObservation({
     session: input.bridge?.session,
     transportEpoch: () => transportEpoch,
@@ -1267,7 +1246,7 @@ export const createNativePlaybackController = (input: {
       || active
       || livePreviewActive
       || scheduleCoordinator !== undefined
-      || recording !== undefined
+      || nativeRecording.isRecording()
     if (hostLost) {
       for (const scope of instrumentMemoryScopes) scope.release()
       instrumentMemoryScopes.clear()
@@ -1277,18 +1256,7 @@ export const createNativePlaybackController = (input: {
       })
       preparedInstrumentTrackIds = []
     }
-    if (hostLost && recording && recording.latestStatus?.spool?.state !== 2) {
-      recording.terminal = true
-      recording.onFailure?.(new Error(nativeHostConnectionLossMessage()), "controller-cleanup")
-      const lostRecording = recording
-      const error = new Error(nativeHostConnectionLossMessage())
-      for (const waiter of lostRecording.waiters) waiter.reject(error)
-      lostRecording.waiters.clear()
-      lostRecording.unsubscribeStatus()
-      lostRecording.unsubscribeFailure()
-      lostRecording.unsubscribeLoss()
-      recording = undefined
-    }
+    if (hostLost) nativeRecording.loseHost(nativeHostConnectionLossMessage)
     active = false
     prepared = false
     loopAppliesAtTransportPosition = true
@@ -1394,7 +1362,7 @@ export const createNativePlaybackController = (input: {
           )
         })
         : stopPromise
-      await cancelRecording().catch(() => undefined)
+      await nativeRecording.cancel().catch(() => undefined)
       // Diagnostics uses the host's single control slot directly. Read the Stop
       // boundary before queuing releases, which would otherwise occupy that slot.
       if (options?.onStoppedPosition && readDiagnostics && stoppedSampleRate > 0) {
@@ -1452,7 +1420,7 @@ export const createNativePlaybackController = (input: {
       || active
       || livePreviewActive
       || scheduleCoordinator !== undefined
-      || recording !== undefined
+      || nativeRecording.isRecording()
     if (!ownsNativeSession) return
     const message = error ?? "Native playback host connection was lost."
     if (!markNativeHostConnectionLost(message)) return
@@ -2565,7 +2533,7 @@ export const createNativePlaybackController = (input: {
   const pause = async (playheadSec: number) => {
     const bridge = input.bridge
     if (!bridge || !active) return
-    if (recording) throw new Error("Native recording must stop before playback can pause.")
+    if (nativeRecording.isRecording()) throw new Error("Native recording must stop before playback can pause.")
     stagedTransportIntent++
     processorState.cancelPublication()
     try {
@@ -2584,7 +2552,7 @@ export const createNativePlaybackController = (input: {
   const seekPrepared = async (playheadSec: number): Promise<NativeStartResult> => {
     const bridge = input.bridge
     if (!bridge || !prepared) return "unavailable"
-    if (recording) throw new Error("Native recording must stop before playback can seek.")
+    if (nativeRecording.isRecording()) throw new Error("Native recording must stop before playback can seek.")
     stagedTransportIntent++
     processorState.cancelPublication()
     const sequence = ++preparedSeekSequence
@@ -2593,7 +2561,7 @@ export const createNativePlaybackController = (input: {
       return await queuePreparedTransportTransition(async () => {
         if (!prepared || generation !== preparedTransportTransitionGeneration) return "unavailable"
         if (sequence !== preparedSeekSequence) return "started"
-        if (recording) return "unavailable"
+        if (nativeRecording.isRecording()) return "unavailable"
         // Notes sounding before a running seek never receive their scheduled
         // note-off in the new epoch, so release them as pause does.
         const transitioned = await transitionPreparedTransport(playheadSec, active, active)
@@ -2638,178 +2606,6 @@ export const createNativePlaybackController = (input: {
       await disposeNativeSession(undefined, "native-loop-transition-failure")
       throw error
     } finally { pendingLoopUpdates-- }
-  }
-
-  const clearRecording = (session: NativeRecordingSession) => {
-    session.unsubscribeStatus()
-    session.unsubscribeFailure()
-    session.unsubscribeLoss()
-    for (const waiter of session.waiters) waiter.reject(new Error("Native recording session ended."))
-    session.waiters.clear()
-    if (recording === session) recording = undefined
-  }
-
-  const waitForStatus = (session: NativeRecordingSession, predicate: (status: NativeHostRecordingStatus) => boolean) => {
-    if (session.latestStatus && predicate(session.latestStatus)) return Promise.resolve(session.latestStatus)
-    if (session.terminal) return Promise.reject(new Error("Native recording was interrupted."))
-    return new Promise<NativeHostRecordingStatus>((resolve, reject) => {
-      session.waiters.add({ predicate, resolve, reject })
-    })
-  }
-
-  const startRecording = async (recordingInput: {
-    appSessionId: string
-    projectId?: string
-    projectGeneration?: number
-    isCurrent?: () => boolean
-    // The track the take records onto: native keeps its node and routing fixed while the take runs.
-    targetTrackId: string
-    // `coreaudio:<uid>` of the saved microphone; omitted records from the system default input.
-    inputDeviceId?: string
-    layout: "mono" | "stereo"
-    inputChannel: number
-    gain: number
-    polarity: 1 | -1
-    monitoring: boolean
-    punchStartFrame: number
-    punchEndFrame?: number
-    onDiagnostics?: (diagnostics: NativeRecordingDiagnostics) => void
-    onFailure?: (error: Error, cause: RecordingTerminationCause) => void
-  }) => {
-    const bridge = input.bridge
-    if (!active || !bridge || recording || sampleRate === 0) throw new Error("Native playback is not active for recording.")
-    const projectId = recordingInput.projectId ?? input.getProjectId?.()
-    if (!projectId) throw new Error("Native recording requires a declared project intent.")
-    const projectGeneration = resolveProjectGeneration()
-    const scope = { projectId, projectGeneration: recordingInput.projectGeneration ?? projectGeneration }
-    const channelCount = recordingInput.layout === "stereo" ? 2 : 1
-    const inputChannels = channelCount === 2
-      ? [recordingInput.inputChannel, recordingInput.inputChannel + 1] : [recordingInput.inputChannel]
-    const numericSessionId = nextRecordingSessionId++
-    const generation = recordingGeneration++
-    const session: NativeRecordingSession = {
-      appSessionId: recordingInput.appSessionId, numericSessionId, generation, scope,
-      sampleRate, channelCount, terminal: false, waiters: new Set(),
-      isCurrent: () => recording === session && !session.terminal && !destroyed && (recordingInput.isCurrent?.() ?? true)
-        && (input.getProjectId?.() ?? projectId) === projectId && resolveProjectGeneration() === projectGeneration,
-      unsubscribeStatus: () => undefined, unsubscribeFailure: () => undefined, unsubscribeLoss: () => undefined,
-      onDiagnostics: recordingInput.onDiagnostics, onFailure: recordingInput.onFailure,
-    }
-    const rejectSession = (error: Error, cause: RecordingTerminationCause, proofFailure = false) => {
-      if (session.terminal || (!proofFailure && session.latestStatus?.spool?.state === 2)) return
-      session.terminal = true
-      for (const waiter of session.waiters) waiter.reject(error)
-      session.waiters.clear()
-      // Main sends this only after native Complete. Auto-punch may have
-      // finished before renderer Stop, so retire the local session before its
-      // failure callback can request cleanup; never send Cancel to that owner.
-      if (proofFailure && !session.finish) clearRecording(session)
-      session.onFailure?.(error, cause)
-      // Never cancel an accepted Finish. Its native owner resolves truthfully;
-      // all published sources outlive this controller regardless of failure.
-      if (!session.finish && !proofFailure) void cancelRecording().catch(() => undefined)
-    }
-    session.unsubscribeStatus = bridge.session.onRecordingStatus((status) => {
-      if (status.generation !== generation || status.sessionId !== numericSessionId) return
-      session.latestStatus = status
-      session.onDiagnostics?.(status)
-      if (status.fatal || status.spool?.state === 3 || status.spool?.state === 4) {
-        rejectSession(new Error("Native recording was interrupted; retained sources remain available."), "native-fatal")
-        return
-      }
-      for (const waiter of session.waiters) {
-        if (!waiter.predicate(status)) continue
-        session.waiters.delete(waiter)
-        waiter.resolve(status)
-      }
-    })
-    session.unsubscribeFailure = bridge.session.onRecordingFailure?.((failure) => {
-      if (failure.generation !== generation || failure.sessionId !== numericSessionId) return
-      rejectSession(new Error(failure.message), "writer-failure", true)
-    }) ?? (() => undefined)
-    session.unsubscribeLoss = bridge.session.onLoss((message) => {
-      rejectSession(new Error(message ?? "Native recording host connection was lost."), "controller-cleanup")
-    })
-    recording = session
-    try {
-      const inputDeviceReply = await bridge.resolveInputDevice(recordingInput.inputDeviceId)
-      const inputDevice = inputDeviceReply.ok ? inputDeviceReply.device : null
-      if (recordingInput.inputDeviceId && inputDeviceReply.ok && !inputDevice?.available)
-        throw new Error("Saved microphone (unavailable)")
-      if (!inputDevice?.available || inputChannels.some((channel) => channel >= inputDevice.inputChannelCount))
-        throw new Error("No compatible native recording input device is available.")
-      if (!session.isCurrent()) throw new Error("Recording scope changed.")
-      const ready = await bridge.session.configureRecording({ ...scope, spoolImportVersion: nativeRecordingSpoolImportVersion,
-        deviceUid: inputDevice.deviceId, generation, sessionId: numericSessionId, channelCount, inputChannels,
-        gain: recordingInput.gain, polarity: recordingInput.polarity, punchStartFrame: recordingInput.punchStartFrame,
-        punchEndFrame: recordingInput.punchEndFrame ?? null, monitoring: recordingInput.monitoring,
-        targetNodeId: nativeGraphNodeId(recordingInput.targetTrackId) })
-      assertReply(ready)
-      if (!ready.takeId || ready.sampleRateHz !== sampleRate || ready.channelCount !== channelCount)
-        throw new Error("Native recording verified readiness or sample rate mismatch.")
-      session.takeId = ready.takeId
-      session.sampleRate = ready.sampleRateHz
-      if (!session.isCurrent()) throw new Error("Recording scope changed.")
-      const started = waitForStatus(session, (status) => status.active)
-      // Observe rejection immediately if Start itself rejects before the status.
-      void started.catch(() => undefined)
-      assertReply(await bridge.session.startRecording({ ...scope, generation, sessionId: numericSessionId }))
-      const status = await started
-      if (!session.isCurrent()) throw new Error("Recording scope changed.")
-      return { sampleRate: session.sampleRate, channelCount, startFrame: status.timelineFrame }
-    } catch (error) {
-      if (!session.terminal) await bridge.session.cancelRecording().catch(() => undefined)
-      clearRecording(session)
-      throw error
-    }
-  }
-
-  const stopRecording = () => {
-    const bridge = input.bridge
-    const session = recording
-    if (!bridge || !session) return Promise.reject(new Error("Native recording is not active."))
-    if (session.finish) return session.finish
-    if (session.terminal) return Promise.reject(new Error("Native recording was interrupted."))
-    // Install the promise before any asynchronous stop/control traffic. There is
-    // intentionally no drain deadline: slow fsync is not evidence of lost data.
-    session.finish = Promise.resolve().then(async () => {
-      try {
-        const complete = waitForStatus(session, (status) => status.spool?.state === 2)
-        void complete.catch(() => undefined)
-        assertReply(await bridge.session.stopRecording())
-        const status = await complete
-        if (!session.isCurrent()) throw new Error("Recording import scope changed; native source retained.")
-        if (!session.takeId || !status.spool) throw new Error("Native recording Complete proof is unavailable.")
-        let cursor: string | undefined
-        do {
-          const page = await bridge.recordingSpool.list(session.scope, cursor)
-          if (!session.isCurrent()) throw new Error("Recording import scope changed; native source retained.")
-          const take = page.takes.find((candidate) => candidate.takeId === session.takeId)
-          if (take) {
-            if (take.frames !== status.capturedFrames || take.frames !== status.spool.writtenFrames
-              || take.bytes !== status.spool.writtenBytes || take.blocks !== status.spool.writtenBlocks
-              || take.sampleRateHz !== session.sampleRate || take.channelCount !== session.channelCount)
-              throw new Error("Native recording registry and Complete proof disagree.")
-            return await (input.importRecordingSpool ?? importNativeRecordingSpool)({ bridge: bridge.recordingSpool,
-              scope: session.scope, take, sessionId: session.appSessionId,
-              expectedSampleRateHz: session.sampleRate, isCurrent: session.isCurrent })
-          }
-          cursor = page.nextCursor ?? undefined
-        } while (cursor)
-        throw new Error("Native recording retained take is unavailable.")
-      } finally { clearRecording(session) }
-    })
-    return session.finish
-  }
-
-  async function cancelRecording() {
-    const bridge = input.bridge
-    const session = recording
-    if (!bridge || !session) return
-    if (session.finish) { await session.finish.catch(() => undefined); return }
-    session.terminal = true
-    try { assertReply(await bridge.session.cancelRecording()) }
-    finally { clearRecording(session) }
   }
 
   const queueLiveInstrumentEvent = (event: NativeInstrumentEvent) => {
@@ -4116,10 +3912,10 @@ export const createNativePlaybackController = (input: {
         ? { projectId: preparedProjectId, instanceIds }
         : undefined
     },
-    startRecording,
-    stopRecording,
-    cancelRecording,
-    isRecording: () => recording !== undefined,
+    startRecording: nativeRecording.start,
+    stopRecording: nativeRecording.stop,
+    cancelRecording: nativeRecording.cancel,
+    isRecording: nativeRecording.isRecording,
     sampleRate: () => sampleRate,
     currentPositionSec,
     ensureLivePreview,

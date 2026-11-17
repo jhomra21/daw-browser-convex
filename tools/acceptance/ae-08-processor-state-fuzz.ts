@@ -100,7 +100,7 @@ const failureClass = (failure: Failure) => classifyFailure(failure).class ?? "un
 const sourceFiles = [
   "src/lib/desktop/native-playback-controller.ts", "src/lib/desktop/native-schedule-coordinator.ts",
   "src/lib/desktop/native-publication-transaction.ts", "src/lib/desktop/native-schedule-publication.ts",
-  "src/lib/desktop/native-observation.ts",
+  "src/lib/desktop/native-observation.ts", "src/lib/desktop/native-recording-session.ts",
   "src/lib/desktop/native-processor-state-owner.ts", "src/lib/desktop/native-built-in-parameter-mapper.ts",
   "src/lib/live-processor-control.ts", "src/components/timeline/create-processor-edit-registry.ts",
   "src/lib/live-playback-snapshot.ts", "packages/audio-engine/src/native-host-wire.ts",

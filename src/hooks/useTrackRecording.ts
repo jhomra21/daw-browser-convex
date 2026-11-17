@@ -59,7 +59,7 @@ import type { AudioPreferences, RecordingPreferences } from '~/lib/preferences/a
 import { buildRecordingConstraints } from '~/lib/audio-settings-core'
 import { resolveCalibrationPlatformIdentity, resolveRecordingOffsetFrames } from '~/lib/recording/recording-calibration'
 import type { PortableRecordingDiagnostics } from '~/lib/portable-browser-playback-controller'
-import type { NativeRecordingDiagnostics } from '~/lib/desktop/native-playback-controller'
+import type { NativeRecordingDiagnostics } from '~/lib/desktop/native-recording-session'
 
 import type { NativeRecordingImportedTake } from '~/types/desktop-bridge'
 import type { TimelineSelectionController } from './useTimelineSelectionState'

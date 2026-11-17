@@ -992,17 +992,10 @@ describe("local effects row sequence and lifetime-fenced view", () => {
     const projectId = `project:view-shared-${crypto.randomUUID()}`;
     let reads = 0;
     const harness = await createViewHarness(async (id) => { reads += 1; return await listLocalEffects(id); }, projectId);
-    const device: Promise<unknown>[] = [];
-    const sync: Promise<unknown>[] = [];
-    harness.owner.watchReloads((load) => device.push(load));
-    harness.owner.watchReloads((load) => sync.push(load));
     harness.switchProject(projectId);
     await harness.owner.reload();
     const written = await setLocalEffectInstance(projectId, "track-1", "utility", { value: 1 }, { instanceId: "utility:1", index: 0 });
     await harness.owner.reload();
-    await Promise.all([...device, ...sync]);
-    expect(device).toHaveLength(sync.length);
-    expect(device.length).toBeGreaterThan(0);
     expect(harness.publications.at(-1)?.ids).toEqual(["track-1:effect:utility:1"]);
     expect(harness.publications.at(-1)!.through).toBeGreaterThanOrEqual(written.sequence);
     const readsAfterLoad = reads;

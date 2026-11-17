@@ -25,7 +25,6 @@ import {
 import {
   createLocalEffectsView,
   createLocalEffectsViewOwner,
-  type LocalEffectsPublicationId,
   type LocalEffectsView,
   type LocalEffectsViewSource,
 } from "~/components/timeline/create-local-effects-view";
@@ -807,18 +806,30 @@ test("settles rejected sampled work without rejecting the flush", async () => {
   owner.dispose();
 });
 
-test("keeps a local flush pending until rows are processed and sampled work is drained", async () => {
-  const readiness = createEffectsPanelReadinessOwner({
-    loadLocalEffects: async () => [],
-    currentProjectId: () => "project:local",
+const cloudOnlyLocalReady = () => Promise.reject(new Error("cloud readiness never asks the local view"));
+
+// A readiness owner over a real view owner; the test is the view's consumer and acknowledges publications itself.
+const localReadiness = (projectId: () => string, list: () => Promise<LocalEffectRow<JsonValue>[]>) => {
+  const published: LocalEffectsView[] = [];
+  const view = createLocalEffectsViewOwner({
+    currentProjectId: projectId,
+    list,
+    publish: (next) => { if (next) published.push(next); },
+    fail: () => undefined,
   });
+  const readiness = createEffectsPanelReadinessOwner({ currentProjectId: projectId, localReady: view.ready });
+  return { view, readiness, published, stop: () => { view.dispose(); readiness.dispose(); } };
+};
+
+test("keeps a local flush pending until rows are processed and sampled work is drained", async () => {
+  const projectId = "project:local";
   let resolveRows: ((rows: never[]) => void) | undefined;
   const rowsLoaded = new Promise<never[]>((resolve) => {
     resolveRows = resolve;
   });
-  const publicationId: LocalEffectsPublicationId = {};
-  readiness.startLocalLoad("project:local", () => rowsLoaded, false, publicationId);
-  const flush = readiness.flushPending("project:local");
+  const { view, readiness, published, stop } = localReadiness(() => projectId, () => rowsLoaded);
+  view.sync();
+  const flush = readiness.flushPending(projectId);
   let settled = false;
   void flush.then(() => {
     settled = true;
@@ -827,89 +838,71 @@ test("keeps a local flush pending until rows are processed and sampled work is d
   expect(settled).toBe(false);
 
   resolveRows?.([]);
-  await Promise.resolve();
-  readiness.markRowsProcessed("project:local", publicationId);
+  await settleMicrotasks();
+  expect(settled).toBe(false);
+  view.acknowledge(published.at(-1)?.publicationId);
   await flush;
   expect(settled).toBe(true);
-  readiness.dispose();
-});
-
-test("marks local rows loaded before synchronous publication processing", async () => {
-  const projectId = "project:local";
-  const readiness = createEffectsPanelReadinessOwner({
-    loadLocalEffects: async () => [],
-    currentProjectId: () => projectId,
-  });
-
-  const publicationId: LocalEffectsPublicationId = {};
-  await readiness.startLocalLoad(projectId, async () => {
-    readiness.markRowsProcessed(projectId, publicationId);
-    return [];
-  }, false, publicationId);
-  const flush = readiness.flushPending(projectId);
-  try {
-    await expect(flush).resolves.toBeUndefined();
-  } finally {
-    readiness.dispose();
-  }
+  stop();
 });
 
 test("a local view publication can be processed before its load promise settles", async () => {
   const projectId = "project:published-before-settlement";
-  const readiness = createEffectsPanelReadinessOwner({
-    loadLocalEffects: async () => [],
+  const published: LocalEffectsView[] = [];
+  const view = createLocalEffectsViewOwner({
     currentProjectId: () => projectId,
+    list: async () => [],
+    publish: (next) => {
+      if (!next) return;
+      published.push(next);
+      view.acknowledge(next.publicationId);
+    },
+    fail: () => undefined,
   });
-  const publicationId: LocalEffectsPublicationId = {};
-  let published = false;
-  const viewLoad = async () => {
-    published = true;
-    readiness.markRowsProcessed(projectId, publicationId);
-    return [];
-  };
-  await readiness.startLocalLoad(projectId, viewLoad, false, publicationId);
-  expect(published).toBe(true);
+  const readiness = createEffectsPanelReadinessOwner({ currentProjectId: () => projectId, localReady: view.ready });
+  view.sync();
   const flushing = readiness.flushPending(projectId);
   let ready = false;
   void flushing.then(() => { ready = true; });
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  await settleMicrotasks();
   const readyBeforeDispose = ready;
+  view.dispose();
   readiness.dispose();
+  expect(published).toHaveLength(1);
   expect(readyBeforeDispose).toBe(true);
 });
 
 test("an old publication identity cannot satisfy a newer successful read", async () => {
   const projectId = "project:readiness-publication-identity";
-  const readiness = createEffectsPanelReadinessOwner({
-    loadLocalEffects: async () => [],
-    currentProjectId: () => projectId,
-  });
-  const oldPublication: LocalEffectsPublicationId = {};
-  await readiness.startLocalLoad(projectId, async () => [], false, oldPublication);
-  readiness.markRowsProcessed(projectId, oldPublication);
+  let releaseRead: (() => void) | undefined;
+  let hold = false;
+  const { view, readiness, published, stop } = localReadiness(() => projectId, () => hold
+    ? new Promise<LocalEffectRow<JsonValue>[]>((resolve) => { releaseRead = () => resolve([]); })
+    : Promise.resolve([]));
+  view.sync();
+  await view.reload();
+  const oldPublication = published.at(-1)?.publicationId;
+  view.acknowledge(oldPublication);
   await readiness.flushPending(projectId);
 
-  const newPublication: LocalEffectsPublicationId = {};
-  let releaseRead: (() => void) | undefined;
-  const heldRead = new Promise<LocalEffectRow<JsonValue>[]>((resolve) => {
-    releaseRead = () => resolve([]);
-  });
-  const read = readiness.startLocalLoad(projectId, () => heldRead, true, newPublication);
+  hold = true;
+  notifyLocalProjectChanged(projectId);
+  const read = view.reload();
   let ready = false;
   const flush = readiness.flushPending(projectId).then(() => {
     ready = true;
   });
-  readiness.markRowsProcessed(projectId, oldPublication);
+  view.acknowledge(oldPublication);
   releaseRead?.();
   await read;
-  for (let index = 0; index < 10; index += 1) await Promise.resolve();
+  await settleMicrotasks();
   expect(ready).toBe(false);
 
-  readiness.markRowsProcessed(projectId, newPublication);
+  const newPublication = published.at(-1)?.publicationId;
+  expect(newPublication).not.toBe(oldPublication);
+  view.acknowledge(newPublication);
   await flush;
-  readiness.dispose();
+  stop();
 });
 
 test("an old local publication cannot acknowledge a newer held read", async () => {
@@ -943,7 +936,7 @@ test("an old local publication cannot acknowledge a newer held read", async () =
       publish: setCurrentView,
       fail: () => undefined,
     });
-    const localView = { view: currentView, reload: owner.reload, watchReloads: owner.watchReloads };
+    const localView = { view: currentView, reload: owner.reload, acknowledge: owner.acknowledge, ready: owner.ready };
     view = localView;
     const panel = useEffectsPanelAudioSync({
       isOpen: () => false,
@@ -992,6 +985,131 @@ test("an old local publication cannot acknowledge a newer held read", async () =
   dispose();
 });
 
+// A panel hook over a real view owner, whose reads the test holds or fails by project.
+const mountLocalPanel = (initialProject: string, list: (projectId: string) => Promise<LocalEffectRow<JsonValue>[]>) => {
+  let setProject: (id: string) => void = () => undefined;
+  let flush: () => Promise<void> = async () => undefined;
+  let source: LocalEffectsViewSource | undefined;
+  let stop: () => void = () => undefined;
+  const published: string[] = [];
+  createRoot((dispose) => {
+    stop = dispose;
+    const [projectId, writeProject] = createSignal(initialProject);
+    setProject = writeProject;
+    const [view, setView] = createSignal<LocalEffectsView | undefined>();
+    const owner = createLocalEffectsViewOwner({
+      currentProjectId: projectId,
+      list,
+      publish: (next) => {
+        if (next) published.push(next.projectId);
+        setView(next);
+      },
+      fail: () => undefined,
+    });
+    createEffect(() => {
+      projectId();
+      untrack(owner.sync);
+    });
+    onCleanup(owner.dispose);
+    source = { view, reload: owner.reload, acknowledge: owner.acknowledge, ready: owner.ready };
+    const panel = useEffectsPanelAudioSync({
+      isOpen: () => false,
+      projectId,
+      currentTargetId: () => "track-a",
+      tracks: () => [],
+      sidechainRoutes: () => [],
+      audioEngine: () => new AudioEngine(),
+      usesLegacyAudioEngine: () => false,
+      roomEffects: () => undefined,
+      roomEffectsStatus: () => "pending",
+      roomEffectsError: () => undefined,
+      localEffectsView: source,
+      samplerBufferSync: createSamplerBufferSync(),
+      drumRackBufferSync: createDrumRackBufferSync(),
+    });
+    flush = () => panel.flushPending();
+  });
+  if (!source) throw new Error("The local panel was not created.");
+  return { source, flush: () => flush(), setProject: (id: string) => setProject(id), published, stop: () => stop() };
+};
+
+const settleMicrotasks = async () => {
+  for (let index = 0; index < 20; index += 1) await Promise.resolve();
+};
+
+test("a local flush rejects with the read error and recovers once a later read is processed", async () => {
+  const projectId = `project:flush-read-error-${crypto.randomUUID()}`;
+  let reads = 0;
+  const panel = mountLocalPanel(projectId, async () => {
+    reads += 1;
+    if (reads === 2) throw new Error("local read failed");
+    return [];
+  });
+  await panel.flush();
+
+  notifyLocalProjectChanged(projectId);
+  await expect(panel.source.reload()).rejects.toThrow("local read failed");
+  await expect(panel.flush()).rejects.toThrow(`Failed to load local effects for project "${projectId}": local read failed`);
+
+  notifyLocalProjectChanged(projectId);
+  await panel.source.reload();
+  await panel.flush();
+  panel.stop();
+});
+
+test("a local flush waiting on a held read rejects when the project changes, and a return re-waits for the new read", async () => {
+  const first = `project:flush-switch-a-${crypto.randomUUID()}`;
+  const second = `project:flush-switch-b-${crypto.randomUUID()}`;
+  const held: Array<(rows: LocalEffectRow<JsonValue>[]) => void> = [];
+  let hold = false;
+  const panel = mountLocalPanel(first, (id) => id === first && hold
+    ? new Promise((resolve) => held.push(resolve))
+    : Promise.resolve([]));
+  await panel.flush();
+
+  hold = true;
+  notifyLocalProjectChanged(first);
+  const pending = panel.flush();
+  panel.setProject(second);
+  await expect(pending).rejects.toThrow("Project changed while waiting for effects readiness");
+
+  panel.setProject(first);
+  let ready = false;
+  const returned = panel.flush().then(() => { ready = true; });
+  await settleMicrotasks();
+  expect(ready).toBe(false);
+  for (const release of held.splice(0)) release([]);
+  await returned;
+  expect(ready).toBe(true);
+  expect(panel.published.filter((id) => id === first).length).toBeGreaterThanOrEqual(2);
+  panel.stop();
+});
+
+test("a superseded read cannot make a local flush ready before the newer read is processed", async () => {
+  const projectId = `project:flush-superseded-${crypto.randomUUID()}`;
+  const held: Array<(rows: LocalEffectRow<JsonValue>[]) => void> = [];
+  let hold = false;
+  const panel = mountLocalPanel(projectId, () => hold
+    ? new Promise((resolve) => held.push(resolve))
+    : Promise.resolve([]));
+  await panel.flush();
+
+  hold = true;
+  notifyLocalProjectChanged(projectId);
+  notifyLocalProjectChanged(projectId);
+  await settleMicrotasks();
+  expect(held.length).toBeGreaterThanOrEqual(2);
+  let ready = false;
+  const flushing = panel.flush().then(() => { ready = true; });
+  held[0]?.([]);
+  await settleMicrotasks();
+  expect(ready).toBe(false);
+  for (const release of held.slice(1)) release([]);
+  await flushing;
+  expect(ready).toBe(true);
+  panel.stop();
+});
+
 test("readiness follows empty and populated view loads, reload errors, recovery, and project return", async () => {
   let projectId = "project:readiness-view-a";
   const populated: LocalEffectRow<JsonValue>[] = [{
@@ -1002,12 +1120,7 @@ test("readiness follows empty and populated view loads, reload errors, recovery,
     updatedAt: 1,
   }];
   let reads = 0;
-  const readiness = createEffectsPanelReadinessOwner({
-    loadLocalEffects: async () => [],
-    currentProjectId: () => projectId,
-  });
   const published: number[] = [];
-  const audioRows: number[] = [];
   const view = createLocalEffectsViewOwner({
     currentProjectId: () => projectId,
     list: async () => {
@@ -1018,26 +1131,19 @@ test("readiness follows empty and populated view loads, reload errors, recovery,
     publish: (next) => {
       if (!next) return;
       published.push(next.rows.length);
-      readiness.markRowsProcessed(next.projectId, next.publicationId);
+      view.acknowledge(next.publicationId);
     },
     fail: () => undefined,
   });
-  const stopReadiness = view.watchReloads((load, id, publicationId) => {
-    void readiness.startLocalLoad(id, () => load, true, publicationId);
-  });
-  const stopAudio = view.watchReloads((load) => {
-    void load.then((rows) => audioRows.push(rows.length), () => undefined);
-  });
+  const readiness = createEffectsPanelReadinessOwner({ currentProjectId: () => projectId, localReady: view.ready });
   view.sync();
   await readiness.flushPending(projectId);
   expect(published).toEqual([0]);
-  expect(audioRows).toEqual([0]);
 
   notifyLocalProjectChanged(projectId);
   await view.reload();
   await readiness.flushPending(projectId);
   expect(published).toEqual([0, 1]);
-  expect(audioRows).toEqual([0, 1]);
 
   notifyLocalProjectChanged(projectId);
   await expect(view.reload()).rejects.toThrow("local read failed");
@@ -1055,56 +1161,43 @@ test("readiness follows empty and populated view loads, reload errors, recovery,
   view.sync();
   await readiness.flushPending(projectId);
   expect(published).toEqual([0, 1, 1, 1]);
-  stopReadiness();
-  stopAudio();
   view.dispose();
   readiness.dispose();
 });
 
 test("resolves an empty local row load and rejects a failed local row load clearly", async () => {
-  const empty = createEffectsPanelReadinessOwner({
-    loadLocalEffects: async () => [],
-    currentProjectId: () => "project:empty",
-  });
-  const emptyPublication: LocalEffectsPublicationId = {};
-  await empty.startLocalLoad("project:empty", async () => [], false, emptyPublication);
-  empty.markRowsProcessed("project:empty", emptyPublication);
-  await expect(empty.flushPending("project:empty")).resolves.toBeUndefined();
-  empty.dispose();
+  const empty = localReadiness(() => "project:empty", async () => []);
+  empty.view.sync();
+  await empty.view.reload();
+  empty.view.acknowledge(empty.published.at(-1)?.publicationId);
+  await expect(empty.readiness.flushPending("project:empty")).resolves.toBeUndefined();
+  empty.stop();
 
-  const failed = createEffectsPanelReadinessOwner({
-    loadLocalEffects: async () => [],
-    currentProjectId: () => "project:failed",
-  });
-  await failed.startLocalLoad("project:failed", async () => {
+  const failed = localReadiness(() => "project:failed", async () => {
     throw new Error("database unavailable");
   });
-  await expect(failed.flushPending("project:failed")).rejects.toThrow(
+  failed.view.sync();
+  await expect(failed.view.reload()).rejects.toThrow("database unavailable");
+  await expect(failed.readiness.flushPending("project:failed")).rejects.toThrow(
     'Failed to load local effects for project "project:failed": database unavailable',
   );
-  failed.dispose();
+  failed.stop();
 });
 
 test("republishes local rows when returning to a project", async () => {
   let currentProject = "project:local-a";
   const published: string[] = [];
-  const readiness = createEffectsPanelReadinessOwner({
-    loadLocalEffects: async () => [],
-    currentProjectId: () => currentProject,
-  });
   const view = createLocalEffectsViewOwner({
     currentProjectId: () => currentProject,
     list: async () => [],
     publish: (next) => {
       if (!next) return;
       published.push(`${next.projectId}:${next.rows.length}`);
-      readiness.markRowsProcessed(next.projectId, next.publicationId);
+      view.acknowledge(next.publicationId);
     },
     fail: () => undefined,
   });
-  const stopWatching = view.watchReloads((load, projectId, publicationId) => {
-    void readiness.startLocalLoad(projectId, () => load, true, publicationId);
-  });
+  const readiness = createEffectsPanelReadinessOwner({ currentProjectId: () => currentProject, localReady: view.ready });
   view.sync();
   await readiness.flushPending("project:local-a");
 
@@ -1117,7 +1210,6 @@ test("republishes local rows when returning to a project", async () => {
   await readiness.flushPending("project:local-a");
 
   expect(published).toEqual(["project:local-a:0", "project:local-a:0"]);
-  stopWatching();
   view.dispose();
   readiness.dispose();
 });
@@ -1528,8 +1620,8 @@ test.each<["synth" | "effect", number, boolean]>([
 test("isolates project readiness and waits for remote query data", async () => {
   let currentProject = "cloud-project-a";
   const readiness = createEffectsPanelReadinessOwner({
-    loadLocalEffects: async () => [],
     currentProjectId: () => currentProject,
+    localReady: cloudOnlyLocalReady,
   });
   readiness.updateRemote("cloud-project-a", undefined, "pending", undefined);
   readiness.updateRemote("cloud-project-b", [], "success", undefined);
@@ -1560,8 +1652,8 @@ test("isolates project readiness and waits for remote query data", async () => {
 test("rejects a remote readiness flush when the current project changes", async () => {
   let currentProject = "cloud-project-a";
   const readiness = createEffectsPanelReadinessOwner({
-    loadLocalEffects: async () => [],
     currentProjectId: () => currentProject,
+    localReady: cloudOnlyLocalReady,
   });
   readiness.updateRemote("cloud-project-a", undefined, "pending", undefined);
   const pending = readiness.flushPending("cloud-project-a");
@@ -1573,21 +1665,17 @@ test("rejects a remote readiness flush when the current project changes", async 
 
 test("rejects a local readiness flush when the current project changes", async () => {
   let currentProject = "project:readiness-a";
-  const readiness = createEffectsPanelReadinessOwner({
-    loadLocalEffects: async () => [],
-    currentProjectId: () => currentProject,
-  });
   let resolveLoad: ((rows: never[]) => void) | undefined;
-  const load = new Promise<never[]>((resolve) => {
+  const { view, readiness, stop } = localReadiness(() => currentProject, () => new Promise<never[]>((resolve) => {
     resolveLoad = resolve;
-  });
-  readiness.startLocalLoad("project:readiness-a", () => load);
+  }));
+  view.sync();
   const pending = readiness.flushPending("project:readiness-a");
   currentProject = "project:readiness-b";
   readiness.projectChanged();
   await expect(pending).rejects.toThrow("Project changed while waiting for effects readiness");
   resolveLoad?.([]);
-  readiness.dispose();
+  stop();
 });
 
 
@@ -1679,7 +1767,7 @@ const createStructuralReviewFixture = async (local: boolean, master: boolean, pe
     return createEffectsPanelAudioDevice({
       audioEngine: engine, projectId: () => { uiNoise(); return projectId(); }, userId: () => undefined, projectGeneration: generation,
       roomEffects: rows, localEffectsView: {
-        view, reload: async () => view()?.rows ?? [], watchReloads: () => () => false,
+        view, reload: async () => view()?.rows ?? [], acknowledge: () => undefined, ready: async () => true,
       },
       usesLegacyAudioEngine: legacy, canWriteCurrentTargetEffects: () => true,
       onEffectError: (_title, message) => errors.push(message),

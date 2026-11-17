@@ -9,10 +9,7 @@ import {
 import type { AudioEngine, EngineDisposition, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import type { convexApi } from "~/lib/convex";
 import type { LocalEffectRow } from "~/lib/local-effects";
-import type {
-  LocalEffectsPublicationId,
-  LocalEffectsViewSource,
-} from "~/components/timeline/create-local-effects-view";
+import type { LocalEffectsViewSource } from "~/components/timeline/create-local-effects-view";
 import type { ExternalSidechainRoute, Track } from "@daw-browser/timeline-core/types";
 import { indexInstrumentEffectRows } from "~/lib/effect-row-index";
 import type { createDrumRackBufferSync } from "~/lib/drum-rack-buffer-sync";
@@ -98,20 +95,17 @@ export const createSpectrumSubscriptionOwner = (
 type PendingWork = Promise<void | EngineDisposition>;
 
 type EffectsPanelReadinessOptions = {
-  loadLocalEffects: (projectId: string) => Promise<LocalEffectRow<JsonValue>[]>;
   currentProjectId: Accessor<string | undefined>;
+  // Readiness of a local project's rows belongs to the local effects view.
+  localReady: LocalEffectsViewSource["ready"];
 };
 
 const toError = (cause: unknown) => cause instanceof Error ? cause : new Error(String(cause));
 const errorMessage = (error: Error | undefined) => error?.message ?? "Unknown effects readiness failure.";
 
+// Readiness of a cloud project's rows; a local project's is delegated to the local effects view.
 export const createEffectsPanelReadinessOwner = (options: EffectsPanelReadinessOptions) => {
   type ProjectState = {
-    generation: number;
-    localLoad?: Promise<void>;
-    localError?: Error;
-    localPublicationId?: LocalEffectsPublicationId;
-    localLoadSucceeded: boolean;
     rowsProcessed: boolean;
     remoteStatus: "pending" | "error" | "success";
     remoteDataDefined: boolean;
@@ -126,8 +120,6 @@ export const createEffectsPanelReadinessOwner = (options: EffectsPanelReadinessO
     const existing = states.get(projectId);
     if (existing) return existing;
     const state: ProjectState = {
-      generation: 0,
-      localLoadSucceeded: false,
       rowsProcessed: false,
       remoteStatus: "pending",
       remoteDataDefined: false,
@@ -145,44 +137,6 @@ export const createEffectsPanelReadinessOwner = (options: EffectsPanelReadinessO
     waiters.add(resolve);
   });
 
-  const ensureLocalLoad = (projectId: string) => {
-    const state = stateFor(projectId);
-    if (state.localLoad) return;
-    void startLocalLoad(projectId, () => options.loadLocalEffects(projectId));
-  };
-
-  const startLocalLoad = (
-    projectId: string,
-    load: () => Promise<LocalEffectRow<JsonValue>[]>,
-    force = false,
-    publicationId?: LocalEffectsPublicationId,
-  ) => {
-    const state = stateFor(projectId);
-    if (!force && state.localLoad) return state.localLoad;
-    state.generation += 1;
-    // The shared view publishes synchronously from its successful read, before this promise settles.
-    // Bind processing to this read's publication identity before its consumer can run.
-    state.localPublicationId = publicationId;
-    state.localLoadSucceeded = false;
-    state.localError = undefined;
-    state.rowsProcessed = false;
-    const generation = state.generation;
-    const loadPromise = load().then(() => {
-      if (state.generation !== generation) return;
-      state.localLoadSucceeded = true;
-      notify();
-    }).catch((cause: unknown) => {
-      if (state.generation !== generation) return;
-      state.localLoadSucceeded = false;
-      state.localError = toError(cause);
-      state.localPublicationId = undefined;
-      state.rowsProcessed = false;
-      notify();
-    });
-    state.localLoad = loadPromise;
-    return loadPromise;
-  };
-
   const updateRemote = (
     projectId: string,
     rows: SyncedEffectRow[] | undefined,
@@ -197,13 +151,9 @@ export const createEffectsPanelReadinessOwner = (options: EffectsPanelReadinessO
     notify();
   };
 
-  const markRowsProcessed = (projectId: string, publicationId?: LocalEffectsPublicationId) => {
+  const markRowsProcessed = (projectId: string) => {
     const state = stateFor(projectId);
-    if (isLocalId("project", projectId)) {
-      if (!publicationId || publicationId !== state.localPublicationId || state.localError) return;
-    } else if (state.remoteStatus !== "success" || !state.remoteDataDefined) {
-      return;
-    }
+    if (state.remoteStatus !== "success" || !state.remoteDataDefined) return;
     state.rowsProcessed = true;
     notify();
   };
@@ -216,35 +166,30 @@ export const createEffectsPanelReadinessOwner = (options: EffectsPanelReadinessO
       }
     };
     const state = stateFor(projectId);
-    if (isLocalId("project", projectId)) ensureLocalLoad(projectId);
     while (!disposed) {
       assertCurrentProject();
-      const generation = state.generation;
       if (isLocalId("project", projectId)) {
-        if (state.localLoad) await Promise.race([state.localLoad, waitForChange()]);
+        const localReady = options.localReady().catch((cause: unknown) => {
+          throw new Error(`Failed to load local effects for project "${projectId}": ${errorMessage(toError(cause))}`);
+        });
+        // A change can win the race; the read this pass waited on may still fail afterwards.
+        localReady.catch(() => undefined);
+        const ready = await Promise.race([localReady, waitForChange().then(() => false)]);
         assertCurrentProject();
-        if (state.generation !== generation) continue;
-        if (state.localError) {
-          throw new Error(`Failed to load local effects for project "${projectId}": ${errorMessage(state.localError)}`);
-        }
-        if (!state.localLoadSucceeded || !state.rowsProcessed) {
-          await waitForChange();
-          assertCurrentProject();
-          continue;
-        }
-      } else {
-        if (state.remoteStatus === "error") {
-          throw new Error(`Failed to load remote effects for project "${projectId}": ${errorMessage(state.remoteError)}`);
-        }
-        if (
-          state.remoteStatus !== "success"
-          || !state.remoteDataDefined
-          || !state.rowsProcessed
-        ) {
-          await waitForChange();
-          assertCurrentProject();
-          continue;
-        }
+        if (ready) return;
+        continue;
+      }
+      if (state.remoteStatus === "error") {
+        throw new Error(`Failed to load remote effects for project "${projectId}": ${errorMessage(state.remoteError)}`);
+      }
+      if (
+        state.remoteStatus !== "success"
+        || !state.remoteDataDefined
+        || !state.rowsProcessed
+      ) {
+        await waitForChange();
+        assertCurrentProject();
+        continue;
       }
       return;
     }
@@ -261,7 +206,6 @@ export const createEffectsPanelReadinessOwner = (options: EffectsPanelReadinessO
     flushPending,
     markRowsProcessed,
     projectChanged: notify,
-    startLocalLoad,
     updateRemote,
   };
 };
@@ -306,14 +250,10 @@ export function useEffectsPanelAudioSync(
 ): UseEffectsPanelAudioSyncReturn {
   const localEffectsView = options.localEffectsView;
   const readinessOwner = createEffectsPanelReadinessOwner({
-    loadLocalEffects: () => localEffectsView.reload(),
     currentProjectId: options.projectId,
+    localReady: localEffectsView.ready,
   });
   onCleanup(readinessOwner.dispose);
-  // The view owns the local read; each read it starts is the readiness load for its project.
-  onCleanup(localEffectsView.watchReloads((load, projectId, publicationId) => {
-    void readinessOwner.startLocalLoad(projectId, () => load, true, publicationId);
-  }));
 
   createEffect(on(options.projectId, () => readinessOwner.projectChanged()));
 
@@ -416,10 +356,15 @@ export function useEffectsPanelAudioSync(
       samplerBufferSync.clearTrack(trackId);
     }
 
+    const acknowledgeRows = () => {
+      if (isLocalId("project", projectId)) localEffectsView.acknowledge(localEffectsView.view()?.publicationId);
+      else readinessOwner.markRowsProcessed(projectId);
+    };
+
     if (!usesLegacyAudioEngine) {
       syncedTrackIds = new Set(currentTrackIds);
       syncedProjectId = projectId;
-      readinessOwner.markRowsProcessed(projectId, localEffectsView.view()?.publicationId);
+      acknowledgeRows();
       return;
     }
 
@@ -428,7 +373,7 @@ export function useEffectsPanelAudioSync(
 
     syncedTrackIds = new Set(currentTrackIds);
     syncedProjectId = projectId;
-    readinessOwner.markRowsProcessed(projectId, localEffectsView.view()?.publicationId);
+    acknowledgeRows();
   });
 
   const [spectrum, setSpectrum] = createSignal<SpectrumFrame | null>(null);

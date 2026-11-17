@@ -14671,7 +14671,7 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
     await owner.reload()
     const currentView = () => untrack(view)
     const oldThrough = currentView()?.through ?? 0
-    const source = { view, reload: owner.reload, watchReloads: owner.watchReloads }
+    const source = { view, reload: owner.reload, acknowledge: owner.acknowledge, ready: owner.ready }
     const engine = new AudioEngine(), sampler = createSamplerBufferSync(), drum = createDrumRackBufferSync()
     const track = { id: "instrument", name: "Sampler", kind: "instrument", volume: 1, clips: [] } satisfies RuntimeTrack
     const controller = createObservedController({ bridge: undefined, compileSnapshot: async () => ({ supported: false, reasons: ["No host in local row witness"] }) })

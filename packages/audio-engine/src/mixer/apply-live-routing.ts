@@ -18,7 +18,15 @@ export type LiveMixerEdgeRuntime = {
   delay: DelayNode
   gain?: GainNode
   fadeEndTime?: number
+  retirementSource?: EdgeRetirementSource
   releaseResources?: Array<() => void>
+}
+
+type EdgeRetirementSource = {
+  onended: ((event: Event) => void) | null
+  start: (when: number) => void
+  stop: (when?: number) => void
+  disconnect: () => void
 }
 
 type ApplyLiveMixerGraphOptions = {
@@ -30,6 +38,7 @@ type ApplyLiveMixerGraphOptions = {
   automatedVolumeTargets?: ReadonlySet<string>
   createGain: () => GainNode
   createDelay: () => DelayNode
+  createRetirementSource: () => EdgeRetirementSource
   observeEdgeResource?: (node: AudioNode) => () => void
   currentTime: number
   sampleRate: number
@@ -37,7 +46,17 @@ type ApplyLiveMixerGraphOptions = {
   reconnectTrackMeters: (trackId: string, output: GainNode) => void
 }
 
+const cancelEdgeRetirement = (edge: LiveMixerEdgeRuntime) => {
+  const source = edge.retirementSource
+  if (!source) return
+  edge.retirementSource = undefined
+  source.onended = null
+  source.stop()
+  source.disconnect()
+}
+
 const disconnectEdge = (edge: LiveMixerEdgeRuntime) => {
+  cancelEdgeRetirement(edge)
   try { edge.source.disconnect(edge.gain ?? edge.delay) } catch {}
   try { edge.gain?.disconnect(edge.delay) } catch {}
   try { edge.delay.disconnect(edge.target) } catch {}
@@ -151,6 +170,7 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
       const sendGainValue = resolvedChannel?.channel.muted ? 0 : send.amount
       const existing = options.edgeRuntimes.get(edgeId)
       if (existing) {
+        cancelEdgeRetirement(existing)
         delete existing.fadeEndTime
         const gain = assertDefined(existing.gain, `Missing live mixer send gain for edge ${edgeId}`)
         rampAudioParam(gain.gain, sendGainValue, options.currentTime)
@@ -184,10 +204,26 @@ export function applyLiveMixerGraph(options: ApplyLiveMixerGraphOptions) {
     if (edge.gain) {
       if (edge.fadeEndTime === undefined) {
         rampAudioParam(edge.gain.gain, 0, options.currentTime)
-        // Keep the edge connected through its scheduled fade, then clean it on the next routing pass.
         edge.fadeEndTime = options.currentTime + LIVE_GAIN_RAMP_SEC
+        const retirementSource = options.createRetirementSource()
+        edge.retirementSource = retirementSource
+        retirementSource.onended = (_event) => {
+          if (edge.retirementSource !== retirementSource) return
+          edge.retirementSource = undefined
+          retirementSource.disconnect()
+          if (options.edgeRuntimes.get(edgeId) !== edge) return
+          disconnectEdge(edge)
+          options.edgeRuntimes.delete(edgeId)
+        }
+        try {
+          retirementSource.start(options.currentTime)
+          retirementSource.stop(edge.fadeEndTime)
+        } catch (error) {
+          cancelEdgeRetirement(edge)
+          throw error
+        }
       }
-      if (options.currentTime < edge.fadeEndTime) continue
+      if (edge.retirementSource || options.currentTime < edge.fadeEndTime) continue
     }
     disconnectEdge(edge)
     options.edgeRuntimes.delete(edgeId)

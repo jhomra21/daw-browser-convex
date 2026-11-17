@@ -121,6 +121,7 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
             automatedVolumeTargets: automationOwnedTargets,
             createGain: () => context.createGain(),
             createDelay: () => context.createDelay(),
+            createRetirementSource: () => context.createConstantSource(),
             currentTime,
             sampleRate,
             reconnectTrackMeters: () => {},
@@ -189,13 +190,13 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
         const context = new OfflineAudioContext(1, sampleRate, sampleRate);
         const masterInput = context.createGain();
         masterInput.connect(context.destination);
-        let now = 0;
         const audioClock = {
-          get currentTime() { return now; },
+          get currentTime() { return context.currentTime; },
           sampleRate,
           destination: context.destination,
           createGain: () => context.createGain(),
           createDelay: () => context.createDelay(),
+          createConstantSource: () => context.createConstantSource(),
         };
         const acquired = new Set();
         const runtime = window.createLiveMixerRuntime({
@@ -244,6 +245,8 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
         tone.offset.value = 1;
         tone.connect(runtime.ensureTrackInput('source'));
         tone.start();
+        const renderedPromise = context.startRendering();
+        const firstSendFade = context.suspend(0.3);
         runtime.updateTrackGains(tracks());
         runtime.previewTrackVolume('source', 0.8, false);
         const ownedAutomation = {
@@ -275,18 +278,22 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
         runtime.updateTrackGains(tracks());
         const writesAfterOwnedRefresh = automationRefreshWrites;
         runtime.setAutomatedVolumeTargets([]);
-        now = 0.3;
+        await firstSendFade;
         runtime.updateTrackGains(tracks(true));
         const resourcesDuringSendFade = acquired.size;
-        now = 0.311;
+        await context.resume();
+        await context.suspend(0.311);
         runtime.updateTrackGains(tracks(true));
-        const resourcesAfterSendFadeCleanup = acquired.size;
-        now = 0.32;
+        await context.resume();
+        await context.suspend(0.32);
         runtime.updateTrackGains(tracks());
         const resourcesAfterSendRecreate = acquired.size;
-        now = 0.33;
+        await context.resume();
+        await context.suspend(0.33);
         runtime.updateTrackGains(tracks(true));
-        const rendered = await context.startRendering();
+        await context.resume();
+        const rendered = await renderedPromise;
+        const resourcesAfterSendFadeCleanup = acquired.size;
         runtime.updateTrackGains([]);
         const countAfterStripRemoval = acquired.size;
         runtime.clear();
@@ -382,6 +389,7 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
           edgeRuntimes,
           createGain: () => context.createGain(),
           createDelay: () => context.createDelay(),
+          createRetirementSource: () => context.createConstantSource(),
           currentTime,
           sampleRate,
           reconnectTrackMeters: () => {},
@@ -476,6 +484,7 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
             ]),
             createGain: () => context.createGain(),
             createDelay: () => context.createDelay(),
+            createRetirementSource: () => context.createConstantSource(),
             currentTime,
             sampleRate,
             reconnectTrackMeters: () => {},
@@ -540,6 +549,7 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
           }]]),
           createGain: () => context.createGain(),
           createDelay: () => context.createDelay(),
+          createRetirementSource: () => context.createConstantSource(),
           currentTime,
           sampleRate,
           reconnectTrackMeters: () => {},

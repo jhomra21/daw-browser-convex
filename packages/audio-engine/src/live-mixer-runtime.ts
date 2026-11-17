@@ -1048,6 +1048,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       automatedVolumeTargets,
       createGain: () => ctx.createGain(),
       createDelay: () => ctx.createDelay(),
+      createRetirementSource: () => ctx.createConstantSource(),
       observeEdgeResource: (node) => observeResource(options.resourceObserver, 'audio-nodes', node),
       currentTime: ctx.currentTime,
       sampleRate: ctx.sampleRate,

@@ -37,8 +37,5 @@ export function rampAudioParam(
 ) {
   if (lastWrittenValues.get(parameter) === value) return
   scheduleAudioParamRamp(parameter, value, currentTime, durationSec)
-  if (!('AudioParam' in globalThis) || !(parameter instanceof globalThis.AudioParam)) {
-    parameter.value = value
-  }
   lastWrittenValues.set(parameter, value)
 }

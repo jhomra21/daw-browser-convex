@@ -1,8 +1,8 @@
 import { AUDIO_EFFECT_CONTRACTS, type CompressorParams, type EqParams } from '@daw-browser/shared'
-import { createLiveWorkletBudget } from './effects/live-worklet-budget'
-import { createLiveMixerRuntime } from './live-mixer-runtime'
-import { createMasterFxRuntime } from './master-fx-runtime'
-import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
+import { createLiveWorkletBudget } from '../src/effects/live-worklet-budget'
+import { createLiveMixerRuntime } from '../src/live-mixer-runtime'
+import { createMasterFxRuntime } from '../src/master-fx-runtime'
+import type { AudioEffectRuntimeInstance } from '../src/effects/runtime-instance'
 
 // Fake audio objects for the live and master effect-runtime tests. A worklet port records what was posted to it, so a
 // test reads what the "node" holds instead of what the runtime believes it installed.
@@ -18,8 +18,6 @@ type FakeWorkletPort = {
 export const captureFxTransitions = () => {
   const originalSet = globalThis.setTimeout
   const originalClear = globalThis.clearTimeout
-  const setDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'setTimeout')
-  const clearDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'clearTimeout')
   const pending = new Map<ReturnType<typeof setTimeout>, () => void>()
   const all: Array<() => void> = []
   const scheduler = {
@@ -34,11 +32,6 @@ export const captureFxTransitions = () => {
       originalClear(handle)
     },
   }
-  const interceptGlobalTimers = process.env.DV01_CAPTURE_GLOBAL_TRANSITIONS === '1'
-  if (interceptGlobalTimers) {
-    Object.defineProperty(globalThis, 'setTimeout', { configurable: true, value: scheduler.schedule })
-    Object.defineProperty(globalThis, 'clearTimeout', { configurable: true, value: scheduler.clear })
-  }
   return {
     pending,
     all,
@@ -52,10 +45,6 @@ export const captureFxTransitions = () => {
     restore: () => {
       for (const handle of pending.keys()) originalClear(handle)
       pending.clear()
-      if (interceptGlobalTimers) {
-        if (setDescriptor) Object.defineProperty(globalThis, 'setTimeout', setDescriptor)
-        if (clearDescriptor) Object.defineProperty(globalThis, 'clearTimeout', clearDescriptor)
-      }
     },
     scheduler,
   }
@@ -65,15 +54,19 @@ let gainRampCount = 0
 let failNextConnection = false
 let failRampValue: number | undefined
 const createParam = (value = 0) => ({
-  value,
-  cancelScheduledValues: () => {},
-  setValueAtTime: () => {},
-  linearRampToValueAtTime: (target: number) => {
+  get value() { return value },
+  set value(next: number) { value = next },
+  cancelScheduledValues: (_time: number) => {},
+  setValueAtTime: (next: number, _time: number) => {
+    value = next
+  },
+  linearRampToValueAtTime: (target: number, _endTime: number) => {
     gainRampCount += 1
     if (failRampValue === target) {
       failRampValue = undefined
       throw new Error(`Audio ramp to ${target} failed.`)
     }
+    value = target
   },
   setTargetAtTime: () => {},
 })
@@ -320,13 +313,13 @@ export const reverbInstance = (enabled: boolean, wet: number, stereoWidth = 1, i
   params: { ...AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams(), enabled, wet, stereoWidth },
 })
 
-export const saturatorInstance = (driveDb: number, id = 'saturator-1'): AudioEffectRuntimeInstance => ({
+const saturatorInstance = (driveDb: number, id = 'saturator-1'): AudioEffectRuntimeInstance => ({
   id,
   kind: 'saturator',
   params: { ...AUDIO_EFFECT_CONTRACTS.saturator.createDefaultParams(), enabled: true, driveDb },
 })
 
-export const delayInstance = (timeMs: number, feedback: number, id = 'delay-1'): AudioEffectRuntimeInstance => ({
+const delayInstance = (timeMs: number, feedback: number, id = 'delay-1'): AudioEffectRuntimeInstance => ({
   id,
   kind: 'delay',
   params: { ...AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams(), enabled: true, mode: 'time', timeMs, feedback },

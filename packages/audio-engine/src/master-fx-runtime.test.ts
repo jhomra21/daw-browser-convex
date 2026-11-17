@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { AUDIO_EFFECT_CONTRACTS } from '@daw-browser/shared'
 import { createLiveWorkletBudget } from './effects/live-worklet-budget'
-import { captureFxTransitions, compressorInstance, createCountingBudget, createFxTestAudio, createFxTransitionHarness, eqInstance, heldEqGain, partialWriteCases, reverbInstance, staticGateInstance, syncedDelayInstance } from './fx-runtime-test-audio'
+import { captureFxTransitions, compressorInstance, createCountingBudget, createFxTestAudio, createFxTransitionHarness, eqInstance, heldEqGain, partialWriteCases, reverbInstance, staticGateInstance, syncedDelayInstance } from '../test-support/fx-runtime-test-audio'
 import { AudioEngine } from './audio-engine'
 import { createMasterFxRuntime } from './master-fx-runtime'
 

@@ -16,7 +16,7 @@ import { SampledInstrumentSyncSupersededError } from "~/lib/sampled-instrument-s
 import type { EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import { createLiveMixerRuntime } from "@daw-browser/audio-engine/live-mixer-runtime";
-import { compressorInstance, createCountingBudget, createFxTestAudio } from "../../../packages/audio-engine/src/fx-runtime-test-audio";
+import { compressorInstance, createCountingBudget, createFxTestAudio } from "../../../packages/audio-engine/test-support/fx-runtime-test-audio";
 import type { DeliveryRegistration, ProcessorDeliveryOutcome } from "~/lib/live-processor-control";
 
 test("INDEPENDENT native row reconcile and reinstall publish once", async () => {

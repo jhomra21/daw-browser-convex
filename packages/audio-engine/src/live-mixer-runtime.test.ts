@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { AUDIO_EFFECT_CONTRACTS } from '@daw-browser/shared'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { createLiveWorkletBudget } from './effects/live-worklet-budget'
-import { captureFxTransitions, compressorInstance, createCountingBudget, createFxTestAudio, createFxTransitionHarness, eqInstance, heldEqGain, partialWriteCases, reverbInstance, staticGateInstance, syncedDelayInstance } from './fx-runtime-test-audio'
+import { captureFxTransitions, compressorInstance, createCountingBudget, createFxTestAudio, createFxTransitionHarness, eqInstance, heldEqGain, partialWriteCases, reverbInstance, staticGateInstance, syncedDelayInstance } from '../test-support/fx-runtime-test-audio'
 import { createLiveMixerRuntime, findExternalSidechainTarget, sidechainRouteIdentity } from './live-mixer-runtime'
 
 const createTestAudio = () => {
@@ -21,8 +21,12 @@ const createTestAudio = () => {
         currentValue = nextValue
       },
       cancelScheduledValues: () => {},
-      setValueAtTime: () => {},
-      linearRampToValueAtTime: () => {},
+      setValueAtTime: (nextValue: number) => {
+        currentValue = nextValue
+      },
+      linearRampToValueAtTime: (nextValue: number) => {
+        currentValue = nextValue
+      },
     }
   }
   const createNode = () => {

@@ -27,7 +27,7 @@ import { createPendingWorkOwner } from "~/hooks/useEffectsPanelAudioSync";
 import { extractTimelineBindings } from "~/lib/timeline-source-test-support";
 import { createAudioPcmSourceDescriptor } from "@daw-browser/audio-engine/media-pages";
 import { createNativeTimelinePageManager } from "~/lib/desktop/native-timeline-page-manager";
-import { createFxTestAudio } from "../../packages/audio-engine/src/fx-runtime-test-audio";
+import { createFxTestAudio } from "../../packages/audio-engine/test-support/fx-runtime-test-audio";
 import { createInstrumentRuntime } from "../../packages/audio-engine/src/instrument-runtime";
 import { createSourceRegistry } from "../../packages/audio-engine/src/source-registry";
 import { b5AgentCommit, b5CloudDatabase, b5EffectsSubscription, b5HistoryDeps, b5HistoryTransport } from "~/lib/b5-coverage-test-support";

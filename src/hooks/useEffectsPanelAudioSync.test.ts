@@ -4,7 +4,7 @@ import { batch, createEffect, createRoot, createSignal, onCleanup, untrack } fro
 import { AudioEngine, type AudioEffectRuntimeInstance, type EngineDisposition, type SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
 import { convexTest } from "convex-test";
 import schema from "../../convex/schema";
-import { compressorInstance, staticGateInstance, createFxTransitionHarness } from "../../packages/audio-engine/src/fx-runtime-test-audio";
+import { compressorInstance, staticGateInstance, createFxTransitionHarness } from "../../packages/audio-engine/test-support/fx-runtime-test-audio";
 import {
   createDefaultArpeggiatorParams,
   createDefaultDrumRackParams,

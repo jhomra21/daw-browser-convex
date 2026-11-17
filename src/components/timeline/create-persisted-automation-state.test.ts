@@ -312,14 +312,22 @@ describe('createPersistedAutomationState', () => {
 type RemoteEffect = NonNullable<ReturnType<Parameters<typeof useTimelineAutomationController>[0]['remoteEffects']>>[number]
 
 describe('useTimelineAutomationController', () => {
-  test('a refused re-enable preserves overrides added while publication is pending', async () => {
+  type Reply = { accepted: true; sequence: number } | { accepted: false; reason: 'bridge-error' }
+  // Re-enabling the processor lane A is answered by the test; the track lane B has no processor and needs no reply.
+  const mountReEnable = () => {
     const previousLocalStorage = globalThis.localStorage
     Reflect.set(globalThis, 'localStorage', { getItem: () => null, setItem: () => {} })
     onTestFinished(() => Reflect.set(globalThis, 'localStorage', previousLocalStorage))
     const targetA = automationTargetKey({ kind: 'track', trackId: 'track-1', effectInstanceId: 'processor-1' }, 'gain')
     const targetB = automationTargetKey({ kind: 'track', trackId: 'track-2' }, 'volume')
-    let refuse: ((result: { accepted: false; reason: 'bridge-error' }) => void) | undefined
-    const pending = new Promise<{ accepted: false; reason: 'bridge-error' }>((resolve) => { refuse = resolve })
+    const replies: Array<(reply: Reply) => void> = []
+    const installed: string[][] = []
+    const audioEngine = new AudioEngine()
+    Reflect.set(audioEngine, 'cancelAutomationSchedules', () => {})
+    Reflect.set(audioEngine, 'applyAutomationAtTimelineSec', () => {})
+    Reflect.set(audioEngine, 'setAutomationEnvelopes', (envelopes: AutomationEnvelope[]) => {
+      installed.push(envelopes.map((installedEnvelope) => installedEnvelope.targetKey))
+    })
     const controller = createRoot((dispose) => {
       onTestFinished(dispose)
       return useTimelineAutomationController({
@@ -329,31 +337,54 @@ describe('useTimelineAutomationController', () => {
         masterVolume: () => 1,
         masterReady: () => false,
         remoteRows: () => [
-          { _id: 'a', projectId: 'shared-project', targetKind: 'track', trackId: 'track-1', effectInstanceId: 'processor-1', targetKey: targetA, parameterId: 'gain', enabled: true, points: [], updatedAt: 1 },
-          { _id: 'b', projectId: 'shared-project', targetKind: 'track', trackId: 'track-2', targetKey: targetB, parameterId: 'volume', enabled: true, points: [], updatedAt: 1 },
+          { _id: 'a', projectId: 'shared-project', targetKind: 'track', trackId: 'track-1', effectInstanceId: 'processor-1', targetKey: targetA, parameterId: 'gain', enabled: true, points: [{ id: 'a1', timeSec: 0, value: 0.5, interpolation: 'linear' }], updatedAt: 1 },
+          { _id: 'b', projectId: 'shared-project', targetKind: 'track', trackId: 'track-2', targetKey: targetB, parameterId: 'volume', enabled: true, points: [{ id: 'b1', timeSec: 0, value: 0.5, interpolation: 'linear' }], updatedAt: 1 },
         ],
         remoteEffects: () => [],
-        audioEngine: (() => {
-          const audioEngine = new AudioEngine()
-          Reflect.set(audioEngine, 'cancelAutomationSchedules', () => {})
-          Reflect.set(audioEngine, 'setAutomationEnvelopes', () => {})
-          return audioEngine
-        })(),
-        reenableProcessorAutomation: () => pending,
+        audioEngine,
+        reenableProcessorAutomation: () => new Promise<Reply>((resolve) => { replies.push(resolve) }),
         isPlaying: () => false,
         playheadSec: () => 0,
         selectedTrackId: () => '',
         pushHistory: () => {},
       })
     })
+    return { controller, targetA, targetB, replies, installed }
+  }
 
+  test('a refused re-enable preserves overrides added while publication is pending', async () => {
+    const { controller, targetA, targetB, replies } = mountReEnable()
     controller.overrideTarget(targetA)
     const reenable = controller.reEnable()
     controller.overrideTarget(targetB)
-    refuse?.({ accepted: false, reason: 'bridge-error' })
+    replies[0]?.({ accepted: false, reason: 'bridge-error' })
     await reenable
 
     expect(controller.overrideCount()).toBe(2)
+  })
+
+  test('an accepted re-enable does not schedule a lane overridden while publication was pending', async () => {
+    const { controller, targetA, targetB, replies, installed } = mountReEnable()
+    controller.overrideTarget(targetA)
+    const reenable = controller.reEnable()
+    controller.overrideTarget(targetB)
+    replies[0]?.({ accepted: true, sequence: 1 })
+    await reenable
+
+    expect(controller.overrideCount()).toBe(1)
+    expect(installed.at(-1)).toEqual([targetA])
+  })
+
+  test('a refused re-enable restores its own lanes after a later re-enable started', async () => {
+    const { controller, targetA, targetB, replies } = mountReEnable()
+    controller.overrideTarget(targetA)
+    const first = controller.reEnable()
+    controller.overrideTarget(targetB)
+    const second = controller.reEnable()
+    replies[0]?.({ accepted: false, reason: 'bridge-error' })
+    await Promise.all([first, second])
+
+    expect(controller.overrideCount()).toBe(1)
   })
 
   test('reloading unchanged effect data keeps the lanes workspace', () => {

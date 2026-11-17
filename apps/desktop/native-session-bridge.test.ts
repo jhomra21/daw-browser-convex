@@ -242,7 +242,7 @@ test("preserves renderer transport transition IDs through native IPC mapping", a
 test("scopes configuration identity to each native host process generation", () => {
   const first = nativeHostConfigurationIdentityFor(undefined, { pid: 10, generation: 1 })
   expect(first).toEqual({ pid: 10, generation: 1, configurationGeneration: 0 })
-  const advanced = { ...first, configurationGeneration: 4 }
+  const advanced = { pid: 10, generation: 1, configurationGeneration: 4 }
   expect(nativeHostConfigurationIdentityFor(advanced, { pid: 10, generation: 1 })).toBe(advanced)
   expect(nativeHostConfigurationIdentityFor(advanced, { pid: 10, generation: 2 })).toEqual({ pid: 10, generation: 2, configurationGeneration: 0 })
   expect(nativeHostConfigurationIdentityFor(advanced, { pid: 11, generation: 1 })).toEqual({ pid: 11, generation: 1, configurationGeneration: 0 })

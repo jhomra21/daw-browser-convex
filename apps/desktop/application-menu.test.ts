@@ -5,6 +5,7 @@ import {
   createApplicationMenuTemplate,
   type ApplicationMenuTemplate,
 } from "./application-menu"
+import type { IpcMain } from "electron"
 import { registerApplicationMenuIpc } from "./ipc/application-menu-ipc"
 import { applicationMenuStateChannel } from "@daw-browser/desktop-protocol/ipc-channels"
 import {
@@ -268,17 +269,13 @@ describe("native application menu", () => {
   })
 
   test("applies a renderer menu state only from an allowed sender and only when it parses", () => {
-    type RendererMessage = Partial<Record<keyof DesktopApplicationMenuState, string | number | boolean>>
-    const handlers = new Map<string, (event: Electron.IpcMainEvent, message: RendererMessage) => void>()
+    const handlers = new Map<string, Parameters<IpcMain["on"]>[1]>()
     const applied: DesktopApplicationMenuState[] = []
     let allowed = true
     const event: Electron.IpcMainEvent = Object.create(null)
     registerApplicationMenuIpc({
       ipcMain: {
-        on(channel: string, listener: (event: Electron.IpcMainEvent, ...args: unknown[]) => void) {
-          handlers.set(channel, listener)
-          return this
-        },
+        on: (channel, listener) => { handlers.set(channel, listener) },
       },
       applicationMenuStateAllowed: () => allowed,
       applicationMenuController: { setState: (state) => { applied.push(state) } },

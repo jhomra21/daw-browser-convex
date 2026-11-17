@@ -2477,7 +2477,6 @@ else {
       sendRendererMessage(spectrumFrameChannel, frame)
     })
     removeAudioHostScheduleProgressListener = audioHostSupervisor?.onScheduleProgress((progress: NativeScheduleProgress) => {
-      // The protocol-29 host always sends the full 112-byte frame; the older lengths are decode-only.
       recordingBenchmark.recordTraffic("schedule-progress", 16 + nativeAudioHostScheduleProgressBytes)
       sendRendererMessage(scheduleProgressChannel, progress)
     })

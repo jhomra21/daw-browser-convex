@@ -697,13 +697,13 @@ export type NativeProcessorPatchStatus =
   | { outcome: "refused"; refusal: NativeProcessorPatchRefusal; coreResult: number; token?: bigint }
 
 export type NativeScheduleProgress = {
-  /** Native reclaims only. Absent on legacy 80-byte progress, never an admission opportunity. */
+  /** Native reclaims only, never an admission opportunity. */
   admissionCapacityGeneration?: bigint
-  /** Completed latency transitions. Absent on 80- and 88-byte progress. */
+  /** Completed latency transitions. */
   latencyCompletionGeneration?: bigint
   /**
-   * The last claimed processor patch whose resolution native has reported. Absent below 112
-   * bytes and when no claim has resolved. `token` is a decimal u64: it may exceed
+   * The last claimed processor patch whose resolution native has reported. Absent when no
+   * claim has resolved. `token` is a decimal u64: it may exceed
    * `Number.MAX_SAFE_INTEGER` and travels as text, parsed with `BigInt` where it is compared.
    */
   processorPatchResolved?: { token: string; result: number }

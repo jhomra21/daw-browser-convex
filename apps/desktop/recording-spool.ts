@@ -465,7 +465,7 @@ export const createRecordingSpoolRegistry = (input: Pick<RecordingIntent, "userD
         if (!take || take.state === "released" || take.state === "resolved") continue
         if (result.length === 100) return { takes: result, nextCursor: result.at(-1)?.takeId ?? null }
         const proof = take.proof
-        result.push({ takeId: take.takeId, state: take.state === "damaged" ? "damaged" : take.state, damagedReason: take.damagedReason,
+        result.push({ takeId: take.takeId, state: take.state, damagedReason: take.damagedReason,
           sampleRateHz: proof?.sampleRateHz ?? null,
           channelCount: take.manifest.channelCount, frames: proof?.frames ?? null, bytes: proof?.bytes ?? null, blocks: proof?.blocks ?? null })
       }

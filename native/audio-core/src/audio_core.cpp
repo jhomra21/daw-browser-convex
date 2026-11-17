@@ -3857,13 +3857,25 @@ std::array<SampleSource, kSampleSourceSlots> &inactive_sample_source_table(Core 
 // Swaps the active table for `next` at `frame`. A source that matches one already sounding keeps its cursor. Every other
 // sounding source fades out over kSampleTerminationFadeMilliseconds in the upper half of the table, and the sources
 // that take its place on the same node fade in over that span. `next` is bound to the published graph and ordered by
-// the caller. False leaves the table intact, so `apply = false` probes capacity.
-bool reconcile_sample_sources(Core &core, std::span<const SampleSource> next, int64_t frame, bool apply) {
-  const int64_t duration = std::max<int64_t>(1,
-    static_cast<int64_t>(core.config.sample_rate_hz * kSampleTerminationFadeMilliseconds / 1000.F));
-  if (frame < 0 || frame > INT64_MAX - duration || next.size() > kMaximumSampleSources) return false;
+// the caller. Planning reads the table and reports whether the swap fits; applying the plan cannot fail.
+struct SourceReconciliationPlan {
+  int64_t duration = 0;
   std::array<int32_t, kMaximumSampleSources> matches{};
   std::array<bool, kMaximumSampleSources> retained{};
+  using NodeOwner = std::pair<uint32_t, uint32_t>;
+  std::array<NodeOwner, kSampleSourceSlots> fading_nodes{};
+  uint32_t fading_count = 0;
+};
+
+bool plan_sample_source_reconciliation(Core &core, std::span<const SampleSource> next, int64_t frame,
+  SourceReconciliationPlan &plan) {
+  plan.duration = std::max<int64_t>(1,
+    static_cast<int64_t>(core.config.sample_rate_hz * kSampleTerminationFadeMilliseconds / 1000.F));
+  if (frame < 0 || frame > INT64_MAX - plan.duration || next.size() > kMaximumSampleSources) return false;
+  auto &matches = plan.matches;
+  auto &retained = plan.retained;
+  auto &fading_nodes = plan.fading_nodes;
+  auto &fading_count = plan.fading_count;
   const auto signature = [](const SampleSource &source) {
     // The running cursor retains its accepted wire origin. Projected f32
     // positions can collide for distinct origins, so never use them as identity.
@@ -3904,9 +3916,7 @@ bool reconcile_sample_sources(Core &core, std::span<const SampleSource> next, in
     matches[next_sources[following++].second] = static_cast<int32_t>(slot);
     retained[slot] = true;
   }
-  uint32_t tails = 0, available = 0, fading_count = 0;
-  using NodeOwner = std::pair<uint32_t, uint32_t>;
-  std::array<NodeOwner, kSampleSourceSlots> fading_nodes{};
+  uint32_t tails = 0, available = 0;
   for (uint32_t slot = 0; slot < kSampleSourceSlots; ++slot) {
     const auto &source = (*core.active_sample_sources)[slot];
     const bool audible = source.active && sample_source_node_alive(core, source) && source.start_frame <= frame
@@ -3919,8 +3929,17 @@ bool reconcile_sample_sources(Core &core, std::span<const SampleSource> next, in
     } else if (audible) fading_nodes[fading_count++] = {source.node_runtime_slot, source.node_runtime_generation};
     else ++available;
   }
-  if (tails > available) return false;
-  if (!apply) return true;
+  return tails <= available;
+}
+
+void apply_sample_source_reconciliation(Core &core, std::span<const SampleSource> next, int64_t frame,
+  SourceReconciliationPlan &plan) {
+  const auto duration = plan.duration;
+  const auto &matches = plan.matches;
+  const auto &retained = plan.retained;
+  auto &fading_nodes = plan.fading_nodes;
+  const auto fading_count = plan.fading_count;
+  using NodeOwner = SourceReconciliationPlan::NodeOwner;
   std::sort(fading_nodes.begin(), fading_nodes.begin() + fading_count);
   uint32_t tail_slot = kMaximumSampleSources;
   for (uint32_t slot = 0; slot < kMaximumSampleSources; ++slot) {
@@ -3976,6 +3995,12 @@ bool reconcile_sample_sources(Core &core, std::span<const SampleSource> next, in
     source.entry_end = std::binary_search(fading_nodes.begin(), fading_nodes.begin() + fading_count,
       NodeOwner{source.node_runtime_slot, source.node_runtime_generation}) ? frame + duration : 0;
   }
+}
+
+bool reconcile_sample_sources(Core &core, std::span<const SampleSource> next, int64_t frame) {
+  SourceReconciliationPlan plan;
+  if (!plan_sample_source_reconciliation(core, next, frame, plan)) return false;
+  apply_sample_source_reconciliation(core, next, frame, plan);
   return true;
 }
 // DAW_REALTIME_CALLBACK_HELPER_END native-source-seam
@@ -9574,7 +9599,7 @@ extern "C" daw_audio_core_result daw_audio_core_replace_sample_sources(
   if (core->transport.running != 0) {
     // A running transport swaps at its own frame: sources that match keep their cursor and the rest fade over 6 ms
     // instead of cutting. A stopped one has nothing sounding, so the table is simply replaced.
-    if (!reconcile_sample_sources(*core, {staged->data(), event_count}, core->transport.frame, true)) {
+    if (!reconcile_sample_sources(*core, {staged->data(), event_count}, core->transport.frame)) {
       return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
     }
   } else {
@@ -10628,10 +10653,12 @@ extern "C" daw_audio_core_result daw_audio_core_release_asset(
 
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
 // DAW_REALTIME_CALLBACK_HELPER_BEGIN native-source-seam-declarations
-bool daw::audio_core::ReconcileSampleSources(daw_audio_core_handle handle,
-  std::span<const daw_audio_sample_source_event> events, int64_t frame, bool apply) noexcept {
+static_assert(kMaximumSampleSources == daw::audio_core::kMaximumSourceDeclarations);
+
+std::optional<daw::audio_core::SourceReconciliation> daw::audio_core::AdmitSampleSources(daw_audio_core_handle handle,
+  std::span<const daw_audio_sample_source_event> events, int64_t frame) noexcept {
   Core *core = to_core(handle);
-  if (core == nullptr || events.size() > kMaximumSampleSources) return false;
+  if (core == nullptr || events.size() > kMaximumSampleSources) return std::nullopt;
   uint64_t floor = core->last_event_sequence;
   const auto &graph = configuration_graph(*core);
   // Only a hard replace stages in the inactive table, and the host never calls it, so the callback may borrow it.
@@ -10639,19 +10666,32 @@ bool daw::audio_core::ReconcileSampleSources(daw_audio_core_handle handle,
   for (uint32_t index = 0; index < events.size(); ++index) {
     const auto &event = events[index];
     if (!valid_sample_source_event(event) || event.start_frame > frame || event.stop_frame <= frame
-      || event.epoch != core->transport.epoch || event.sequence <= floor) return false;
+      || event.epoch != core->transport.epoch || event.sequence <= floor) return std::nullopt;
     floor = event.sequence;
     const auto *asset = find_asset(core, event.asset);
     if (asset == nullptr || event.source_offset_frame >= asset->frame_count
-      || event.source_frame_count > asset->frame_count - event.source_offset_frame) return false;
+      || event.source_frame_count > asset->frame_count - event.source_offset_frame) return std::nullopt;
     const auto node = graph_node_index(graph, event.source_node_id);
-    if (node < 0 || graph.nodes[static_cast<uint32_t>(node)].kind != DAW_AUDIO_GRAPH_NODE_SOURCE) return false;
+    if (node < 0 || graph.nodes[static_cast<uint32_t>(node)].kind != DAW_AUDIO_GRAPH_NODE_SOURCE) return std::nullopt;
     declared[index] = make_sample_source(event);
     bind_sample_source_node(declared[index], graph);
   }
-  if (!reconcile_sample_sources(*core, {declared.data(), events.size()}, frame, apply)) return false;
-  if (apply) core->last_event_sequence = floor;
-  return true;
+  SourceReconciliationPlan plan;
+  if (!plan_sample_source_reconciliation(*core, {declared.data(), events.size()}, frame, plan)) return std::nullopt;
+  return SourceReconciliation{
+    .core = handle, .frame = frame, .count = static_cast<std::uint32_t>(events.size()), .sequence_floor = floor};
+}
+
+void daw::audio_core::CommitSampleSources(daw_audio_core_handle handle, const SourceReconciliation &admitted) noexcept {
+  Core *core = to_core(handle);
+  if (core == nullptr || admitted.core != handle || admitted.count > kMaximumSampleSources) return;
+  const std::span<const SampleSource> declared{inactive_sample_source_table(*core).data(), admitted.count};
+  SourceReconciliationPlan plan;
+  // Publication only retires nodes, which removes tails and frees slots, so the plan that fit at admission still fits.
+  // The check keeps the tail slots in bounds if that ever stops holding.
+  if (!plan_sample_source_reconciliation(*core, declared, admitted.frame, plan)) return;
+  apply_sample_source_reconciliation(*core, declared, admitted.frame, plan);
+  core->last_event_sequence = admitted.sequence_floor;
 }
 // DAW_REALTIME_CALLBACK_HELPER_END native-source-seam-declarations
 

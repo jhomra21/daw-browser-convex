@@ -588,6 +588,101 @@ void test_native_graph_hook_binds_prepared_nodes_before_publish() {
   daw_audio_core_destroy(core);
 }
 
+// Admission mutates nothing, a rejected one leaves the sources and the sequence floor untouched, and a token
+// commits only to the core that admitted it.
+void test_native_source_admission_commits_only_what_it_admitted() {
+  const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
+    {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_SOURCE, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0},
+    {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .input_bus = 0},
+  }};
+  const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
+    {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER},
+  }};
+  const std::array<float, 8> samples{0.5F, 0.5F, 0.5F, 0.5F, 0.5F, 0.5F, 0.5F, 0.5F};
+  const float *planes[]{samples.data(), samples.data()};
+  const daw_audio_asset_descriptor descriptor{
+    .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .revision = 1, .byte_length = 64, .frame_count = 8,
+    .sample_rate_hz = 48000, .channel_count = 2, .planes = planes,
+  };
+  const daw_audio_transport_state transport{.epoch = 1, .running = 1, .frame = 0};
+  struct Rig { daw_audio_core_handle core; daw_audio_asset_handle asset; };
+  const auto prepare_rig = [&] {
+    Rig rig{create_core(8, 2, 1), 0};
+    prepare_graph(rig.core, 1, nodes.data(), nodes.size(), edges.data(), edges.size());
+    expect(daw_audio_core_create_asset(rig.core, &descriptor, &rig.asset), DAW_AUDIO_CORE_OK);
+    expect(daw_audio_core_set_transport(rig.core, &transport), DAW_AUDIO_CORE_OK);
+    const daw_audio_graph_prepare_request next{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .graph_revision = 2, .node_count = 2, .edge_count = 1,
+      .nodes = nodes.data(), .edges = edges.data(),
+    };
+    expect(daw_audio_core_prepare_graph(rig.core, &next), DAW_AUDIO_CORE_OK);
+    return rig;
+  };
+  const auto declaration = [](const Rig &rig, const uint64_t sequence) {
+    return daw_audio_sample_source_event{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .epoch = 1, .sequence = sequence, .source_node_id = 1,
+      .asset = rig.asset, .start_frame = 0, .stop_frame = 8, .source_frame_count = 8, .gain = 1.0F,
+      .fade_out_start_frame = 8, .fade_out_end_frame = 8,
+    };
+  };
+  const auto first_sample = [](const daw_audio_core_handle core) {
+    std::array<float, 8> left{}, right{};
+    float *outputs[]{left.data(), right.data()};
+    const daw_audio_core_process_block block{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = 4, .channel_count = 2,
+      .input_bus_count = 0, .inputs = nullptr, .outputs = outputs,
+    };
+    expect(daw_audio_core_process(core, &block), DAW_AUDIO_CORE_OK);
+    return left[0];
+  };
+
+  // Every rejection leaves nothing behind: no source sounds and the floor still admits sequence 1.
+  const auto rejected = prepare_rig();
+  auto stale_epoch = declaration(rejected, 1);
+  stale_epoch.epoch = 2;
+  auto master_target = declaration(rejected, 1);
+  master_target.source_node_id = 2;
+  auto starts_later = declaration(rejected, 1);
+  starts_later.start_frame = 1;
+  auto past_asset = declaration(rejected, 1);
+  past_asset.source_offset_frame = 8;
+  std::array<daw_audio_sample_source_event, daw::audio_core::kMaximumSourceDeclarations + 1> too_many{};
+  too_many.fill(declaration(rejected, 1));
+  const std::array<daw_audio_sample_source_event, 2> repeated_sequence{declaration(rejected, 1), declaration(rejected, 1)};
+  for (const auto &events : {
+    std::span<const daw_audio_sample_source_event>{&stale_epoch, 1}, {&master_target, 1}, {&starts_later, 1},
+    {&past_asset, 1}, {too_many.data(), too_many.size()}, {repeated_sequence.data(), repeated_sequence.size()}}) {
+    assert(!daw::audio_core::AdmitSampleSources(rejected.core, events, 0));
+  }
+  expect(daw_audio_core_publish(rejected.core, 2), DAW_AUDIO_CORE_OK);
+  assert(first_sample(rejected.core) == 0.0F);
+  const auto one = declaration(rejected, 1);
+  assert(daw::audio_core::AdmitSampleSources(rejected.core, std::span{&one, 1}, 0));
+  daw_audio_core_destroy(rejected.core);
+
+  // An admission changes nothing until its commit, and the commit advances the floor.
+  const auto accepted = prepare_rig();
+  const auto event = declaration(accepted, 1);
+  const auto token = daw::audio_core::AdmitSampleSources(accepted.core, std::span{&event, 1}, 0);
+  assert(token && token->core == accepted.core && token->count == 1 && token->sequence_floor == 1);
+  assert(daw::audio_core::AdmitSampleSources(accepted.core, std::span{&event, 1}, 0));
+  expect(daw_audio_core_publish(accepted.core, 2), DAW_AUDIO_CORE_OK);
+  daw::audio_core::CommitSampleSources(accepted.core, *token);
+  assert(!daw::audio_core::AdmitSampleSources(accepted.core, std::span{&event, 1}, 0));
+  assert(first_sample(accepted.core) == 0.5F);
+
+  // A token from another core commits nothing.
+  const auto other = prepare_rig();
+  expect(daw_audio_core_publish(other.core, 2), DAW_AUDIO_CORE_OK);
+  daw::audio_core::CommitSampleSources(other.core, *token);
+  assert(first_sample(other.core) == 0.0F);
+  assert(daw::audio_core::AdmitSampleSources(other.core, std::span{&one, 1}, 0));
+  daw_audio_core_destroy(other.core);
+  daw_audio_core_destroy(accepted.core);
+}
+
 void test_native_mixed_stage_interleave_is_noncommutative_and_fader_is_last() {
   const auto run = [](const std::uint32_t hook_stage) {
     daw_audio_core_handle core = create_core(4, 2, 1);
@@ -10825,6 +10920,7 @@ int main(int argc, char **argv) {
   test_edge_publish_ramps_gain_mute_and_solo();
   test_source_input_bus_is_bounded_by_bus_capacity();
   test_native_graph_hook_binds_prepared_nodes_before_publish();
+  test_native_source_admission_commits_only_what_it_admitted();
   test_native_mixed_stage_interleave_is_noncommutative_and_fader_is_last();
   test_native_instrument_hook_is_a_source_stage();
   test_native_hook_runs_before_builtin_processor();

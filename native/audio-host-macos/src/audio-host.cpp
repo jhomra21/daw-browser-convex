@@ -2580,23 +2580,31 @@ struct AudioHost::Impl {
     return HasQueuedControl(urgent_queue) || HasQueuedControl(processor_queue);
   }
   // DAW_REALTIME_CALLBACK_HELPER_BEGIN reconcile-scheduled-targets
-  std::array<daw_audio_sample_source_event, 256> seam_sources{};
-  bool ReconcileSourceSeam(const bool apply, const std::int64_t frame) noexcept {
+  std::array<daw_audio_sample_source_event, daw::audio_core::kMaximumSourceDeclarations> seam_sources{};
+  struct SourceSeam {
+    daw::audio_core::SourceReconciliation admitted;
+    std::uint32_t cursor = 0;
+  };
+  // Freezes the prepared bank's declarations that start by `frame`; the lane is consumed only by the commit.
+  [[nodiscard]] std::optional<SourceSeam> AdmitSourceSeam(const std::int64_t frame) noexcept {
     auto& lane = PreparedSchedule().source_queue;
-    const auto read = lane.read.load(std::memory_order_relaxed);
     const auto write = lane.write.load(std::memory_order_acquire);
-    auto cursor = read;
+    auto cursor = lane.read.load(std::memory_order_relaxed);
     std::size_t count = 0;
     for (; cursor != write; ++cursor) {
       const auto& event = lane.events[cursor % kSourceQueueCapacity];
       if (event.source.start_frame > frame) break;
-      if (count == seam_sources.size()) return false;
+      if (count == seam_sources.size()) return std::nullopt;
       seam_sources[count++] = event.source;
     }
-    if (!daw::audio_core::ReconcileSampleSources(active_core.load(std::memory_order_acquire),
-      std::span<const daw_audio_sample_source_event>{seam_sources.data(), count}, frame, apply)) return false;
-    if (apply) lane.read.store(cursor, std::memory_order_release);
-    return true;
+    const auto admitted = daw::audio_core::AdmitSampleSources(active_core.load(std::memory_order_acquire),
+      std::span<const daw_audio_sample_source_event>{seam_sources.data(), count}, frame);
+    if (!admitted) return std::nullopt;
+    return SourceSeam{.admitted = *admitted, .cursor = cursor};
+  }
+  void CommitSourceSeam(const SourceSeam& seam) noexcept {
+    daw::audio_core::CommitSampleSources(active_core.load(std::memory_order_acquire), seam.admitted);
+    PreparedSchedule().source_queue.read.store(seam.cursor, std::memory_order_release);
   }
 
   void ReconcileScheduledTargets(const daw_audio_core_handle core,
@@ -5814,25 +5822,28 @@ bool AudioHost::ProcessPlanar(
     const bool schedule_claimed = requested_revision != 0 && impl_->schedule_owner.compare_exchange_strong(
       unowned_schedule, 2, std::memory_order_acq_rel);
     // Complete windows are sorted, so instrument/processor heads suffice.
+    // Automation segments are projected per block, not deferred in a queue.
+    const auto head_before_seam = [requested_frame]<std::size_t Capacity>(const Impl::ControlLane<Capacity>& lane) {
+      const auto read = lane.read.load(std::memory_order_relaxed);
+      return lane.write.load(std::memory_order_acquire) != read
+        && lane.events[read % Capacity].absolute_frame < requested_frame;
+    };
     // Legacy direct source commands share the source lane without ordering;
     // inspect its bounded capacity rather than let a future head hide work.
-    // Automation segments are projected per block, not deferred in a queue.
-    const auto has_pre_seam_event = [requested_frame]<std::size_t Capacity>(
-      const Impl::ControlLane<Capacity>& lane, const bool source) {
+    const auto direct_source_before_seam = [requested_frame]<std::size_t Capacity>(
+      const Impl::ControlLane<Capacity>& lane) {
       const auto read = lane.read.load(std::memory_order_relaxed);
-      const auto count = std::min<std::uint32_t>(lane.write.load(std::memory_order_acquire) - read,
-        source ? Capacity : 1);
+      const auto count = std::min<std::uint32_t>(lane.write.load(std::memory_order_acquire) - read, Capacity);
       for (std::uint32_t index = 0; index < count; ++index) {
-        const auto& event = lane.events[(read + index) % Capacity];
-        if ((source ? static_cast<std::uint64_t>(event.source.start_frame) : event.absolute_frame)
+        if (static_cast<std::uint64_t>(lane.events[(read + index) % Capacity].source.start_frame)
           < requested_frame) return true;
       }
       return false;
     };
     const bool old_bank_pending = schedule_claimed && requested_frame != 0
-      && (has_pre_seam_event(impl_->ActiveSchedule().instrument_queue, false)
-        || has_pre_seam_event(impl_->ActiveSchedule().scheduled_processor_queue, false)
-        || has_pre_seam_event(impl_->ActiveSchedule().source_queue, true));
+      && (head_before_seam(impl_->ActiveSchedule().instrument_queue)
+        || head_before_seam(impl_->ActiveSchedule().scheduled_processor_queue)
+        || direct_source_before_seam(impl_->ActiveSchedule().source_queue));
     if (old_bank_pending) impl_->ActiveSchedule().instrument_drain_priority = true;
     if (requested_revision != 0 && (!schedule_claimed
       || (requested_frame != 0 && current_frame != requested_frame) || old_bank_pending)) {
@@ -5842,8 +5853,10 @@ bool AudioHost::ProcessPlanar(
     } else if (requested_revision != 0
       && impl_->prepared_core != 0
       && impl_->prepared_revision.load(std::memory_order_acquire) == requested_revision) {
-      const bool sources_ready = requested_frame == 0
-        || impl_->ReconcileSourceSeam(false, static_cast<std::int64_t>(requested_frame));
+      // Frame zero publishes with no seam, so no source declarations are reconciled.
+      std::optional<Impl::SourceSeam> source_seam;
+      if (requested_frame != 0) source_seam = impl_->AdmitSourceSeam(static_cast<std::int64_t>(requested_frame));
+      const bool sources_ready = requested_frame == 0 || source_seam.has_value();
       if (!sources_ready) impl_->publication_rebase_required.store(true, std::memory_order_release);
       const auto result = sources_ready ? daw_audio_core_publish(
         impl_->active_core.load(std::memory_order_acquire), requested_revision)
@@ -5851,8 +5864,7 @@ bool AudioHost::ProcessPlanar(
       if (result == DAW_AUDIO_CORE_OK) {
         impl_->ApplyPreparedTransportContext();
         impl_->PromoteObservationLookup();
-        if (requested_frame != 0) static_cast<void>(
-          impl_->ReconcileSourceSeam(true, static_cast<std::int64_t>(requested_frame)));
+        if (source_seam) impl_->CommitSourceSeam(*source_seam);
         impl_->ReconcileScheduledTargets(impl_->active_core.load(std::memory_order_acquire),
           impl_->active_revision.load(std::memory_order_acquire), requested_revision, requested_frame == 0);
         if (requested_frame != 0) {

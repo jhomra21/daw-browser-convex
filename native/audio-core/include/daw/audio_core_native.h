@@ -9,17 +9,30 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 
 namespace daw::audio_core {
 
-// Callback seam only. Admission is read-only; apply follows successful graph
-// publication with the same frozen bank. False leaves all source state intact.
-// Spanning declarations preserve the accepted wire start/offset origin; frame
-// is the publication time, not necessarily the declaration's start time.
-[[nodiscard]] bool ReconcileSampleSources(daw_audio_core_handle core,
-  std::span<const daw_audio_sample_source_event> sources, std::int64_t frame,
-  bool apply) noexcept;
+// Most source declarations one admission may carry.
+inline constexpr std::size_t kMaximumSourceDeclarations = 256;
+
+// What an admission accepted. It names the core it was admitted against, and the declarations
+// stay in that core's staging table until the commit, so the commit takes no sources of its own.
+struct SourceReconciliation {
+  daw_audio_core_handle core = 0;
+  std::int64_t frame = 0;
+  std::uint32_t count = 0;
+  std::uint64_t sequence_floor = 0;
+};
+
+// Callback seam only. Admission changes no source state and rejects with nullopt; commit follows
+// successful graph publication and applies exactly what was admitted. Spanning declarations
+// preserve the accepted wire start/offset origin; frame is the publication time, not
+// necessarily the declaration's start time. A token commits only to the core that admitted it.
+[[nodiscard]] std::optional<SourceReconciliation> AdmitSampleSources(daw_audio_core_handle core,
+  std::span<const daw_audio_sample_source_event> sources, std::int64_t frame) noexcept;
+void CommitSampleSources(daw_audio_core_handle core, const SourceReconciliation& admitted) noexcept;
 
 // Host closes queue/configuration admission before requesting reclamation.
 // The callback acknowledges only after its last source/voice/page reader ends.

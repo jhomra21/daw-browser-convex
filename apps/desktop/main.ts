@@ -1389,7 +1389,7 @@ const registerIpc = () => {
       ok: false as const,
       kind: nativeDeliveryFailureKind(thrown),
       error: error
-        ? `The native audio session rejected ${error.requestName} request ${error.requestType}.${error.requestName === "instrumentStates" ? ` ${error.message.slice(0, 256)}` : ""}`
+        ? `The native audio session rejected ${error.requestName} request ${error.requestType}.${error.detail === undefined ? "" : ` ${error.detail}`}`
         : "The native audio session is unavailable.",
     }
   }

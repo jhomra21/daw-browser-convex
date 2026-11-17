@@ -147,7 +147,7 @@ test("preserves bounded native request diagnostics through session IPC", async (
 
   expect(audioHost).toContain("requestName")
   expect(main).toContain("error.requestName")
-  expect(main).toContain('error.requestName === "instrumentStates" ? ` ${error.message.slice(0, 256)}`')
+  expect(main).toContain("error.detail === undefined")
   expect(main).toContain("thrown instanceof NativeAudioHostCommandError ? thrown : undefined")
   expect(main).toContain("kind: nativeDeliveryFailureKind(thrown)")
 })

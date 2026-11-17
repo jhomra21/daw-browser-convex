@@ -1747,6 +1747,7 @@ test("keeps the host alive after a recoverable negative acknowledgement", async 
     await expect(rejection).rejects.toMatchObject({
       requestType: nativeAudioHostControlTypes.deviceConfigure,
       requestName: "deviceConfigure",
+      detail: undefined,
     })
     expect(fixture.supervisor.status().running).toBeTrue()
     expect(losses).toEqual([])
@@ -1806,6 +1807,7 @@ test("preserves live instrument preparation rejection text without losing the ho
     await expect(supervisor.configureInstrumentStates(new Uint8Array(4))).rejects.toMatchObject({
       requestName: "instrumentStates",
       message: "Instrument sample upload is incomplete. Reload samples and retry.",
+      detail: "Instrument sample upload is incomplete. Reload samples and retry.",
       recoverable: true,
     })
     await expect(supervisor.configure({

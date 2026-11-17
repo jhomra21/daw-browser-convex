@@ -562,6 +562,8 @@ export class NativeAudioHostCommandError extends Error {
   readonly recoverable = true
   /** From the ACK status word: `unavailable` means no audio session or core existed, not that native said no. */
   readonly reason: "refused" | "unavailable"
+  /** Bounded native text that may cross to the renderer; only requests whose text is written for users carry it. */
+  readonly detail: string | undefined
 
   constructor(
     requestType: number,
@@ -573,6 +575,7 @@ export class NativeAudioHostCommandError extends Error {
     this.reason = reason
     this.requestType = requestType
     this.requestName = nativeAudioHostRequestName(requestType)
+    this.detail = this.requestName === "instrumentStates" ? message.slice(0, 256) : undefined
   }
 }
 export class NativeRecordingConfigureError extends Error {

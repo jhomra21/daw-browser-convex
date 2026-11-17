@@ -6,6 +6,7 @@ import { nativeExternalLatencyFrames as nativeOfflineExternalLatencyFrames } fro
 import {
   nativeAudioHostMaximumInstalledAssets,
   nativeKeepLatencyDivergentMixedBusDiagnostic,
+  nativeRecordingSpoolImportVersion,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import {
   mapNativeSessionAssets,
@@ -2956,7 +2957,7 @@ export const createNativePlaybackController = (input: {
       if (!inputDevice?.available || inputChannels.some((channel) => channel >= inputDevice.inputChannelCount))
         throw new Error("No compatible native recording input device is available.")
       if (!session.isCurrent()) throw new Error("Recording scope changed.")
-      const ready = await bridge.session.configureRecording({ ...scope, spoolImportVersion: 1,
+      const ready = await bridge.session.configureRecording({ ...scope, spoolImportVersion: nativeRecordingSpoolImportVersion,
         deviceUid: inputDevice.deviceId, generation, sessionId: numericSessionId, channelCount, inputChannels,
         gain: recordingInput.gain, polarity: recordingInput.polarity, punchStartFrame: recordingInput.punchStartFrame,
         punchEndFrame: recordingInput.punchEndFrame ?? null, monitoring: recordingInput.monitoring,

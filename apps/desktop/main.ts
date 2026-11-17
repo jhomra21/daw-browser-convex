@@ -109,7 +109,8 @@ import {
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
 import { serializeDesktopReply } from "@daw-browser/desktop-protocol/reply-chunks"
 import { createCloseHandler } from "./close-flow"
-import { type createRecordingSpoolRegistry, initializeRecordingSpoolRegistry, prepareRecordingSpool, recordingSpoolReleaseSchema } from "./recording-spool"
+import { initializeRecordingSpoolRegistry, recordingSpoolReleaseSchema } from "./recording-spool"
+import { createRecordingSessionOwner } from "./recording-session-owner"
 import { createRecordingSpoolOrderEvidence } from "./recording-spool-evidence"
 import { createFileCapabilityManager } from "./file-capabilities"
 import { registerFileCapabilitiesIpc } from "./ipc/file-capabilities-ipc"
@@ -140,7 +141,6 @@ import {
   NativeAudioHostCommandError,
   nativeDeliveryFailureKind,
   nativeProcessorPatchReply,
-  NativeRecordingConfigureError,
   nativeVstEditorOwnershipProbe,
   packagedAudioHostPath,
   type NativeVstEditorAnchor,
@@ -174,6 +174,7 @@ import {
 import {
   nativeAudioHostMappedAssetPageHeaderBytes,
   nativeAudioHostMaximumPayloadBytes,
+  nativeRecordingSpoolImportVersion,
   nativeAudioHostScheduleProgressResolutionBytes,
   nativeOfflineRenderPlanSchema,
 } from "@daw-browser/desktop-protocol/native-audio-host"
@@ -202,17 +203,11 @@ import { createRecordingStartDiagnostic } from "./recording-start-diagnostic"
 
 protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
-let recordingRegistryFailure: Error | undefined
-let recordingAdmissionPending = false
-let recordingSpoolRegistry: ReturnType<typeof createRecordingSpoolRegistry> | undefined
 const captureInhibited = process.env.DAW_RECORDING_START_DIAGNOSTIC === "1"
 const recordingStartDiagnostic = createRecordingStartDiagnostic(
   process.env.DAW_RECORDING_START_DIAGNOSTIC === "1" || process.env.DAW_RECORDING_START_EVIDENCE === "1",
   (event) => console.log("[recording-start-diagnostic]", JSON.stringify(event)),
 )
-let recordingBinding: { take: Awaited<ReturnType<typeof prepareRecordingSpool>>; takeId: string;
-  rendererGeneration: number; projectId: string; projectGeneration: number;
-  captureGeneration: number; sessionId: bigint; ready: boolean; completion?: Promise<void> } | undefined
 
 const positiveUnsigned32Schema = unsigned32Schema.min(1)
 const transactionTokenSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/)
@@ -280,7 +275,7 @@ const nativeSessionTransportSchema = z.object({
 const nativeSessionRecordingConfigurationSchema = z.object({
   projectId: projectIdSchemaV1,
   projectGeneration: unsigned32Schema,
-  spoolImportVersion: z.literal(1).optional(),
+  spoolImportVersion: z.literal(nativeRecordingSpoolImportVersion).optional(),
   deviceUid: z.string(),
   generation: positiveUnsigned32Schema,
   sessionId: z.bigint().positive(),
@@ -478,6 +473,16 @@ const activeEditorProjectBindings = createNativeVstProjectBindings()
 const attachmentLedger = createNativeVst3SessionLedger()
 const activeRendererTransactions = new Map<string, { generation: number; senderId: number }>()
 const nativeFileCapabilityHelper = createNativeFileCapabilityHelper()
+const recordingSessionOwner = createRecordingSessionOwner({
+  diagnostic: recordingStartDiagnostic,
+  captureInhibited,
+  currentRendererGeneration: () => generation,
+  userData: () => app.getPath("userData"),
+  verifyDirectory: nativeFileCapabilityHelper.statDirectory,
+  sendToRenderer: (channel, value) => sendRendererMessage(channel, value),
+  statusChannel: recordingStatusChannel,
+  failureChannel: recordingFailureChannel,
+})
 const fileCapabilities = createFileCapabilityManager({
   dialog: {
     showOpenDialog: (options) => dialog.showOpenDialog(options),
@@ -587,7 +592,7 @@ const applyRendererInvalidation = (
 ) => {
   const previousGeneration = invalidation.previousGeneration
   generation = invalidation.generation
-  recordingSpoolRegistry?.invalidate()
+  recordingSessionOwner.invalidateRenderer()
   for (const scope of importScopes.values()) settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
   for (const scope of importCandidates.values()) settleCapabilityRevocation(fileCapabilities.revokeRequest(scope))
   importScopes.clear()
@@ -1880,142 +1885,33 @@ const registerIpc = () => {
   ipcMain.handle(sessionConfigureRecordingChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeSessionEnvelopeSchema(nativeSessionRecordingConfigurationSchema).safeParse(value)
-    const configureStartedAt = performance.now()
-    recordingStartDiagnostic.observe({ kind: "configure-request" })
-    if (!supervisor || !envelope.success || envelope.data.transactionToken !== undefined
-      || event.senderFrame !== event.sender.mainFrame) {
-      recordingStartDiagnostic.observe({ kind: "configure-result", outcome: "rejected", category: "admission-failed" })
-      return nativeSessionFailure()
-    }
-    recordingStartDiagnostic.observe({ kind: "backend", backend: "native" })
-    // Admission requires the real bounded OPFS importer, not legacy PCM delivery.
-    if (envelope.data.value.spoolImportVersion !== 1) {
-      recordingStartDiagnostic.observe({ kind: "configure-result", outcome: "rejected", category: "admission-failed" })
-      return { ok: false, error: "Native recording import is not ready." }
-    }
-    if (!recordingSpoolRegistry) {
-      recordingStartDiagnostic.observe({ kind: "configure-result", outcome: "rejected", category: "admission-failed" })
-      return { ok: false, error: "Native recording storage is unavailable. Sources remain retained; check the desktop log." }
-    }
-    if (recordingAdmissionPending || !supervisor.recordingAdmissionAvailable()) {
-      recordingStartDiagnostic.observe({ kind: "configure-result", outcome: "rejected", category: "admission-failed" })
-      return nativeSessionFailure()
-    }
-    recordingAdmissionPending = true
-    const configuration = nativeSessionRecordingConfiguration(envelope.data.value)
-    const rendererGeneration = generation
-    let diagnosticStage: "spool-admission" | "native-configure" | "confirm-ready" | "binding-ready" = "spool-admission"
-    try {
-      const take = await prepareRecordingSpool({ userData: app.getPath("userData"),
-        projectId: envelope.data.value.projectId, rendererGeneration,
-        projectGeneration: envelope.data.value.projectGeneration,
-        hostGeneration: audioLifecycle.powerGeneration, generation: configuration.generation,
-        sessionId: configuration.sessionId, channelCount: configuration.channelCount,
-        verifyDirectory: nativeFileCapabilityHelper.statDirectory })
-      if (generation !== rendererGeneration || !audioHostAllowed(event)) throw new Error("Recording renderer binding changed.")
-      const scope = { projectId: envelope.data.value.projectId,
-        projectGeneration: envelope.data.value.projectGeneration, rendererGeneration }
-      if (!recordingSpoolRegistry) throw new Error("Recording spool registry is unavailable.")
-      recordingSpoolRegistry.bind(scope)
-      const takeId = recordingSpoolRegistry.admit(take, scope)
-      const nextBinding = { take, takeId, rendererGeneration, projectId: envelope.data.value.projectId,
-        projectGeneration: envelope.data.value.projectGeneration, captureGeneration: configuration.generation,
-        sessionId: configuration.sessionId, ready: false }
-      recordingBinding = nextBinding
-      diagnosticStage = "native-configure"
-      const ready = await supervisor.configureRecording(configuration, { rootPath: take.rootPath,
-        rootDevice: take.root.device, rootInode: take.root.inode, token: take.token })
-      diagnosticStage = "confirm-ready"
-      recordingStartDiagnostic.observe({
-        kind: "readiness", configured: ready.configured, active: ready.active,
-        sampleRateHz: ready.spool?.sampleRateHz, channelCount: ready.spool?.channelCount, spool: ready.spool,
-      })
-      if (generation !== rendererGeneration || !audioHostAllowed(event) || !ready.spool)
-        throw new Error("Recording renderer binding changed.")
-      recordingStartDiagnostic.observe({
-        kind: "readiness", configured: true, active: ready.active,
-        sampleRateHz: ready.spool.sampleRateHz, channelCount: ready.spool.channelCount,
-        spool: { state: ready.spool.state, error: ready.spool.error, systemError: ready.spool.systemError },
-      })
-      await take.confirmReady({ generation: ready.generation, sessionId: ready.sessionId,
-        channelCount: ready.spool.channelCount, sampleRateHz: ready.spool.sampleRateHz })
-      diagnosticStage = "binding-ready"
-      if (generation !== rendererGeneration || recordingBinding?.take !== take) throw new Error("Recording binding changed.")
-      recordingBinding.ready = true
-      recordingStartDiagnostic.observe({
-        kind: "configure-result", outcome: "ready", category: "success",
-        sampleRateHz: ready.spool.sampleRateHz, channelCount: ready.spool.channelCount,
-        elapsedMs: Math.max(0, Math.round(performance.now() - configureStartedAt)),
-      })
-      return { ok: true, takeId, sampleRateHz: ready.spool.sampleRateHz, channelCount: ready.spool.channelCount }
-    } catch (error) {
-      const commandError = error instanceof NativeRecordingConfigureError ? error.cause : error
-      const phase = error instanceof NativeRecordingConfigureError ? error.phase : undefined
-      recordingStartDiagnostic.observe({
-        kind: "configure-result",
-        outcome: "rejected",
-        category: commandError instanceof NativeAudioHostCommandError ? "command-rejected"
-          : diagnosticStage === "spool-admission" ? "admission-failed"
-            : diagnosticStage === "native-configure" ? "native-configure-failed"
-              : diagnosticStage === "confirm-ready" ? "readiness-validation-failed" : "binding-changed",
-        phase,
-        elapsedMs: Math.max(0, Math.round(performance.now() - configureStartedAt)),
-      })
-      // Ambiguous configure/admission and all durable sources remain retained.
-      return nativeSessionFailure(commandError)
-    } finally { recordingAdmissionPending = false }
+    const request = envelope.success && envelope.data.transactionToken === undefined && event.senderFrame === event.sender.mainFrame
+      ? { configuration: nativeSessionRecordingConfiguration(envelope.data.value), projectId: envelope.data.value.projectId,
+        projectGeneration: envelope.data.value.projectGeneration, spoolImportVersion: envelope.data.value.spoolImportVersion }
+      : undefined
+    return recordingSessionOwner.configure({ rendererGeneration: generation, hostGeneration: audioLifecycle.powerGeneration,
+      senderAllowed: () => audioHostAllowed(event), fail: nativeSessionFailure }, supervisor, request)
   })
   ipcMain.handle(sessionStartRecordingChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const binding = nativeSessionEnvelopeSchema(z.object({ projectId: projectIdSchemaV1,
       projectGeneration: unsigned32Schema, generation: unsigned32Schema, sessionId: z.bigint().positive() }).strict()).safeParse(value)
-    if (!supervisor || !recordingBinding?.ready || recordingBinding.rendererGeneration !== generation
-      || !recordingSpoolRegistry?.isCurrent({ rendererGeneration: generation,
-        projectId: recordingBinding.projectId, projectGeneration: recordingBinding.projectGeneration })
-      || !binding.success || binding.data.transactionToken !== undefined
-      || binding.data.value.projectId !== recordingBinding.projectId
-      || binding.data.value.projectGeneration !== recordingBinding.projectGeneration
-      || binding.data.value.generation !== recordingBinding.captureGeneration
-      || binding.data.value.sessionId !== recordingBinding.sessionId
-      || event.senderFrame !== event.sender.mainFrame) return nativeSessionFailure()
-    if (captureInhibited) {
-      recordingStartDiagnostic.observeCaptureBlocked()
-      return { ok: false, error: "diagnostic-capture-blocked" }
-    }
-    try {
-      await supervisor.startRecording()
-      const result = { ok: true }
-      recordingStartDiagnostic.observeStart(result)
-      return result
-    } catch {
-      const result = nativeSessionFailure()
-      recordingStartDiagnostic.observeStart(result)
-      return result
-    }
+    const request = binding.success && binding.data.transactionToken === undefined && event.senderFrame === event.sender.mainFrame
+      ? binding.data.value : undefined
+    return recordingSessionOwner.start({ rendererGeneration: generation, fail: nativeSessionFailure }, supervisor, request)
   })
   ipcMain.handle(sessionStopRecordingChannel, async (event, value) => {
     const supervisor = sessionSupervisorFor(event)
     const envelope = nativeSessionEnvelopeSchema(z.number().int().safe().min(0).optional()).safeParse(value)
-    if (!supervisor || !envelope.success || envelope.data.transactionToken !== undefined) return nativeSessionFailure()
-    try {
-      const binding = recordingBinding
-      if (!binding?.completion) {
-        await supervisor.stopRecording(envelope.data.value)
-        await supervisor.waitForRecordingOutcome()
-      }
-      if (!binding?.completion) throw new Error("Native recording Complete proof is unavailable.")
-      await binding.completion
-      return { ok: true as const }
-    } catch (error) {
-      return nativeSessionFailure(error)
-    }
+    const request = envelope.success && envelope.data.transactionToken === undefined ? { endFrame: envelope.data.value } : undefined
+    return recordingSessionOwner.stop({ fail: nativeSessionFailure }, supervisor, request)
   })
   const spoolScopeSchema = z.object({ projectId: projectIdSchemaV1, projectGeneration: unsigned32Schema }).strict()
   const spoolTakeIdSchema = z.string().uuid()
   const spoolFor = (event: Electron.IpcMainInvokeEvent) => {
-    if (!audioHostAllowed(event) || event.senderFrame !== event.sender.mainFrame || !recordingSpoolRegistry)
+    if (!audioHostAllowed(event) || event.senderFrame !== event.sender.mainFrame)
       throw new Error("Recording spool is unavailable.")
-    return recordingSpoolRegistry
+    return recordingSessionOwner.spool()
   }
   ipcMain.handle(recordingSpoolListChannel, async (event, value) => {
     const request = z.object({ scope: spoolScopeSchema, cursor: spoolTakeIdSchema.optional() }).strict().parse(value)
@@ -2374,7 +2270,7 @@ const prepareQuit = async () => {
   await audioHostSupervisor?.waitForRecordingFinish()
   // Native Complete releases writer ownership; main's durable identity proof
   // must also finish before normal process exit invalidates renderer recovery.
-  await recordingSpoolRegistry?.waitForSettlement()
+  await recordingSessionOwner.waitForSettlement()
   await audioHostSupervisor?.teardown()
   await nativeVst3EditorSessionManager?.teardownAll()
   await closeSocket()
@@ -2470,10 +2366,9 @@ else {
     if (recordingOrderEvidence) process.stdout.on("error", () => undefined)
     const recordingStartup = await initializeRecordingSpoolRegistry({ userData: app.getPath("userData"),
       verifyDirectory: nativeFileCapabilityHelper.statDirectory, observeRelease: recordingOrderEvidence?.observeRelease })
-    recordingSpoolRegistry = recordingStartup.registry
-    recordingRegistryFailure = recordingStartup.error
-    if (recordingSpoolRegistry) recordingOrderEvidence?.ready()
-    if (recordingRegistryFailure) console.error("[recording-spool] recording storage unavailable; DAW startup continues", recordingRegistryFailure)
+    recordingSessionOwner.attachRegistry(recordingStartup.registry)
+    if (recordingStartup.registry) recordingOrderEvidence?.ready()
+    if (recordingStartup.error) console.error("[recording-spool] recording storage unavailable; DAW startup continues", recordingStartup.error)
     audioHostSupervisor = audioHostPath ? createNativeAudioHostSupervisor(audioHostPath) : undefined
     // Only a lost host ends the native session. One plug-in's fault, miss or restart is that instance's business.
     const publishNativeSessionLoss = (error: string) => {
@@ -2567,39 +2462,7 @@ else {
     const recordingBenchmark = createBenchmarkRecordingTelemetry()
     removeAudioHostRecordingStatusListener = audioHostSupervisor?.onRecordingStatus((status) => {
       recordingBenchmark.recordStatus(status)
-      // Native identities stay in main. Never spread the private decoder result.
-      const { fileDevice: _fileDevice, fileInode: _fileInode, ...rendererStatus } = status
-      const binding = recordingBinding
-      if (binding && status.generation === binding.captureGeneration && status.sessionId === binding.sessionId) {
-        recordingStartDiagnostic.observe({
-          kind: "readiness",
-          configured: status.configured,
-          active: status.active,
-          sampleRateHz: status.spool?.sampleRateHz,
-          channelCount: status.spool?.channelCount,
-          spool: status.spool,
-        })
-      }
-      if (binding && status.generation === binding.captureGeneration && status.sessionId === binding.sessionId
-        && status.spool?.state === 2 && recordingSpoolRegistry) {
-        binding.completion ??= recordingSpoolRegistry.complete(binding.takeId, status)
-        void binding.completion.then(() => {
-          sendRendererMessage(recordingStatusChannel, rendererStatus)
-        }).catch(() => {
-          // Native source remains retained; no renderer-readable capability is
-          // granted when main cannot persist and independently verify Complete.
-          sendRendererMessage(recordingFailureChannel, { generation: binding.captureGeneration,
-            sessionId: binding.sessionId, message: "Native recording source verification failed; native source retained." })
-        })
-      } else {
-        sendRendererMessage(recordingStatusChannel, rendererStatus)
-        if (binding && status.generation === binding.captureGeneration && status.sessionId === binding.sessionId
-          && (status.spool?.state === 3 || status.spool?.state === 4) && recordingSpoolRegistry) {
-          void recordingSpoolRegistry.resolveTerminal(binding.takeId, status).catch((error) => {
-            console.warn("[recording-spool] terminal source remains unresolved", error)
-          })
-        }
-      }
+      recordingSessionOwner.onStatus(status)
     })
     removeAudioHostMeterBatchListener = audioHostSupervisor?.onMeterBatch((batch: NativeHostMeterBatch) => {
       recordingBenchmark.recordTraffic("meter-batch", 32 + batch.entries.length * 24)

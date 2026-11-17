@@ -11,6 +11,7 @@ import {
   sessionSetSpectrumNodeChannel,
   sessionStopRecordingChannel,
 } from "@daw-browser/desktop-protocol/ipc-channels"
+import type { NativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeHostPcmAsset, NativeHostRecordingConfiguration } from "@daw-browser/audio-engine/native-host-wire"
 import type { DesktopBridge } from "../../src/types/desktop-bridge"
 import { nativeEditorCommand } from "../../src/components/timeline/external-plugin-editor"
@@ -114,7 +115,7 @@ test("keeps spectrum selection on the native session envelope contract", async (
 
 test("routes recording configure and stop through native session envelopes", async () => {
   const { session } = await darwinAudioHost()
-  const input: NativeHostRecordingConfiguration & { spoolImportVersion: 1 } = {
+  const input: NativeHostRecordingConfiguration & { spoolImportVersion: NativeRecordingSpoolImportVersion } = {
     projectId: "project", deviceUid: "device", generation: 1, sessionId: 1n, channelCount: 2, inputChannels: [0, 1],
     gain: 1, polarity: 1, punchStartFrame: 0, punchEndFrame: null, monitoring: false, targetNodeId: 1n, spoolImportVersion: 1,
   }
@@ -188,14 +189,17 @@ test("validates recording IPC through production native session envelopes in the
   const stopHandler = main.slice(stopStart, controlStart)
 
   expect(configureHandler).toContain("nativeSessionEnvelopeSchema(nativeSessionRecordingConfigurationSchema).safeParse(value)")
-  expect(configureHandler).toContain("envelope.data.transactionToken !== undefined")
+  expect(configureHandler).toContain("envelope.data.transactionToken === undefined")
   expect(configureHandler).toContain("nativeSessionRecordingConfiguration(envelope.data.value)")
-  expect(configureHandler).toContain("await supervisor.configureRecording(configuration, { rootPath: take.rootPath")
+  expect(configureHandler).toContain("recordingSessionOwner.configure(")
+  expect(await readFile(new URL("./recording-session-owner.ts", import.meta.url), "utf8"))
+    .toContain("await supervisor.configureRecording(configuration, { rootPath: take.rootPath")
   expect(configureHandler).not.toContain("nativeSessionRecordingConfigurationSchema.safeParse(value)")
 
   expect(stopHandler).toContain("nativeSessionEnvelopeSchema(z.number().int().safe().min(0).optional()).safeParse(value)")
-  expect(stopHandler).toContain("envelope.data.transactionToken !== undefined")
-  expect(stopHandler).toContain("await supervisor.stopRecording(envelope.data.value)")
+  expect(stopHandler).toContain("envelope.data.transactionToken === undefined")
+  expect(stopHandler).toContain("{ endFrame: envelope.data.value }")
+  expect(stopHandler).toContain("recordingSessionOwner.stop(")
   expect(stopHandler).not.toContain("const endFrame = z.number().int().safe().min(0).optional().safeParse(value)")
 })
 

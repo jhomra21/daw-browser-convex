@@ -3,6 +3,8 @@ import { nativeExternalAttachmentPlanSchema, maxNativeExternalAttachments } from
 import { z } from "zod"
 
 export const nativeAudioHostProtocolVersion = 30
+export const nativeRecordingSpoolImportVersion = 1
+export type NativeRecordingSpoolImportVersion = typeof nativeRecordingSpoolImportVersion
 export const nativeAudioHostArtifactId = "daw-audio-host-macos/v10"
 export const nativeKeepLatencyDivergentMixedBusDiagnostic = 3
 export const nativeAudioHostFrameHeaderBytes = 16

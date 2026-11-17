@@ -109,6 +109,7 @@ import {
   nativeAudioHostMaximumMappedAssetRanges,
   nativeAudioHostMaximumPayloadBytes,
   nativeOfflineRenderPlanSchema,
+  type NativeRecordingSpoolImportVersion,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import type {
   NativeHostDeviceConfiguration,
@@ -422,7 +423,7 @@ const desktopBridge = {
         queueSourceEvents: (bytes: Uint8Array, transactionToken?: string) => invokeNativeSession(sessionQueueSourceEventsChannel, bytes, transactionToken),
         coordinateVstAttachments: (input: NativeVstAttachmentCoordinationInput, transactionToken?: string) => invokeNativeSession(sessionCoordinateVstAttachmentsChannel, input, transactionToken),
         setTransport: (input: NativeHostTransport, transactionToken?: string) => invokeNativeSession(sessionSetTransportChannel, input, transactionToken),
-        configureRecording: (input: NativeHostRecordingConfiguration & { spoolImportVersion: 1 }): ReturnType<DeclaredAudioHostBridge["session"]["configureRecording"]> =>
+        configureRecording: (input: NativeHostRecordingConfiguration & { spoolImportVersion: NativeRecordingSpoolImportVersion }): ReturnType<DeclaredAudioHostBridge["session"]["configureRecording"]> =>
           ipcRenderer.invoke(sessionConfigureRecordingChannel, { value: input, transactionToken: undefined }),
         startRecording: (binding?: Pick<NativeHostRecordingConfiguration, "projectId" | "projectGeneration" | "generation" | "sessionId">) =>
           invokeNativeSession(sessionStartRecordingChannel, binding),

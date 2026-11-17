@@ -34,6 +34,7 @@ import type {
 } from "@daw-browser/plugin-host-protocol"
 import type { ExportAudioFormat } from "@daw-browser/shared"
 
+import type { NativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeRevisionSession } from "@daw-browser/desktop-protocol/native-revision"
 import type { NativeInstrumentBudgetPolicy } from "../lib/desktop/native-instrument-budget-policy"
 type NativeSessionReply = { ok: true } | { ok: false; error: string }
@@ -239,7 +240,7 @@ type NativeSessionBridge = {
   queueSourceEvents(bytes: Uint8Array, transactionToken?: string): Promise<NativeSessionReply>
   coordinateVstAttachments(input: NativeVstAttachmentCoordinationInput, transactionToken?: string): Promise<NativeVstCoordinationReply>
   setTransport(input: NativeHostTransport, transactionToken?: string): Promise<NativeSessionReply>
-  configureRecording(input: NativeHostRecordingConfiguration & { spoolImportVersion: 1 }): Promise<
+  configureRecording(input: NativeHostRecordingConfiguration & { spoolImportVersion: NativeRecordingSpoolImportVersion }): Promise<
     { ok: true; takeId: string; sampleRateHz: number; channelCount: number } | { ok: false; error: string }
   >
   startRecording(binding?: Pick<NativeHostRecordingConfiguration, "projectId" | "projectGeneration" | "generation" | "sessionId">): Promise<NativeSessionReply>

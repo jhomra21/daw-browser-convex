@@ -938,8 +938,9 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
       const rows=timelineJourney.roomRows();
       rows.push({_id:'fixture:remote',_creationTime:1,targetType:'track',trackId:timelineJourney.remoteTrackId,type:'instrument',params:{kind:'synth',instanceId:'remote:first',params:{...timelineJourney.instrumentEvidence(timelineJourney.instrumentTrackId).instrument.params,filter:{...timelineJourney.instrumentEvidence(timelineJourney.instrumentTrackId).instrument.params.filter,frequencyHz:823}}}});
       window.setFixtureRoomEffects(rows);
+      // Same turn as the room rows: any local-view publication in between syncs this track to its absent local row and drops the room observation.
+      return timelineJourney.mirrorRoomInstrument("${remoteTrackId}");
     })()`)
-    await browser('eval', `timelineJourney.mirrorRoomInstrument("${remoteTrackId}")`)
     await browser('wait', '--fn', `timelineJourney.preparedInstrumentIdentity("${remoteTrackId}")?.instanceId === "remote:first"`)
     const remoteAfter = JSON.parse(JSON.parse(await browser('eval', `JSON.stringify({state:timelineJourney.snapshot(),boundary:timelineJourney.instrumentEvidence("${remoteTrackId}")})`)))
     await Bun.write(`${evidence}/26-room-first-insertion.json`, JSON.stringify({ remoteBefore, remoteAfter }, null, 2))

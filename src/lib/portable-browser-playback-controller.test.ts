@@ -2379,7 +2379,7 @@ test('B6f5 step5b R6 without a content fingerprint a Timeline revision bump stil
 type W8Note = NonNullable<RuntimeTrack['clips'][number]['midi']>['notes'][number]
 type W8Loop = typeof noLoop
 const w8Note = (id: string, beat: number, length = 1): W8Note => ({ id, beat, length, pitch: 60, velocity: 0.8 })
-const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loop?: W8Loop; audioStartSec?: number; clipSec?: number } = {}, options: { refuse?: () => boolean; failInstall?: () => boolean; failTransport?: (epoch: number, running: boolean) => boolean; audioContext?: AudioContext } = {}) => {
+const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loop?: W8Loop; audioStartSec?: number; clipSec?: number } = {}, options: { refuse?: () => boolean; failInstall?: () => boolean; failTransport?: (epoch: number, running: boolean) => boolean; unsupportedAdoption?: () => boolean; audioContext?: AudioContext } = {}) => {
   const state = { bpm: initial.bpm ?? 120, notes: initial.notes ?? [w8Note('note', 0)], audioStartSec: initial.audioStartSec, warped: false, projectGeneration: 0 }
   const calls: string[] = []
   const graphs: AudioCoreGraphSnapshot[] = []
@@ -2389,6 +2389,7 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
   const faults: string[] = []
   const scheduledSources: { sequence: number; startFrame: number }[][] = []
   let sessions = 0
+  let adoptionCompiles = 0
   let positionListener: ((message: Extract<PortableWasmStatusMessage, { type: 'transport-position' }>) => void) | undefined
   const compile = (transport: LivePlaybackTransport) => {
     const base = compilation()
@@ -2402,7 +2403,13 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
       mixer: { ...base.snapshot.mixer, graph: resolveLiveMixerGraph(tracks, base.snapshot.mixer.fx.trackFx) } } }
   }
   const controller = createPortableBrowserPlaybackController({
-    compileSnapshot: async (transport) => compile(transport),
+    compileSnapshot: async (transport, context) => {
+      if (context?.liveAdoption) {
+        adoptionCompiles += 1
+        if (options.unsupportedAdoption?.()) return { supported: false, reasons: ['not carried'] }
+      }
+      return compile(transport)
+    },
     fingerprintSnapshot: b6f5Fingerprint, getProjectGeneration: () => state.projectGeneration,
     getAudioContext: () => options.audioContext ?? context, select: async () => selected,
     createPreparedStretchRepository: c9StretchRepository,
@@ -2439,7 +2446,7 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
   const noteEvents = (schedule: PortableFrameSchedule | undefined, type: 'note-on' | 'note-off') =>
     (schedule?.events ?? []).flatMap((event) => event.type === type ? [{ noteId: event.noteId, frame: event.frame }] : [])
   const position = (frame: number, epoch = 1, sequence = 1) => positionListener?.({ version: 2, type: 'transport-position', sessionId: 1, epoch, sequence, running: true, frame })
-  return { state, controller, transport, noLoop, calls, graphs, publishes, installs, epochs, faults, scheduledSources, sessions: () => sessions, adopt, noteEvents, position }
+  return { state, controller, transport, noLoop, calls, graphs, publishes, installs, epochs, faults, scheduledSources, sessions: () => sessions, adoptionCompiles: () => adoptionCompiles, adopt, noteEvents, position }
 }
 const w8ShippedStarts = (f: { publishes: readonly B6f5Publish[] }) =>
   (f.publishes.at(-1)?.options?.sources?.ordinary ?? []).map((source) => source.startFrame)
@@ -2687,6 +2694,23 @@ test('W-FB-1 a refused publish and uncarried content answer failed, a missing fi
     const result = await bare.adoptSchedule(noLoop)
     expect({ result, errors: errors.length }).toEqual({ result: 'unavailable', errors: 1 })
   } finally { console.error = original; bare.dispose() }
+})
+
+test('W-FB unsupported adoption is not resubmitted at position reports', async () => {
+  const f = await w8Fixture({}, { unsupportedAdoption: () => true })
+  const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
+  const error = spyOn(console, 'error').mockImplementation(() => undefined)
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    f.state.bpm = 90
+    expect(await f.adopt(f.noLoop)).toBe('failed')
+    for (let report = 1; report <= 300; report += 1) {
+      f.position(48_000 + report)
+      await Bun.sleep(0)
+    }
+    expect({ compiles: f.adoptionCompiles(), warnings: warn.mock.calls.length, defects: error.mock.calls.length })
+      .toEqual({ compiles: 1, warnings: 0, defects: 0 })
+  } finally { warn.mockRestore(); error.mockRestore(); f.controller.dispose() }
 })
 
 // W-M3 guard: an audio clip edit that reaches the follow must never be adopted over the old sources. An adoption or an
@@ -3244,7 +3268,7 @@ const c9Tracks = (state: C9State): RuntimeTrack[] => [
   { id: 'audio-1', kind: 'audio', name: 'Audio 1', volume: 1, clips: state.clip1Present
     ? [{ id: 'clip-1', name: 'Clip 1', color: '#fff', startSec: state.clip1Start, duration: state.clip1Duration, sourceAssetKey: state.clip1Asset, audioWarp: state.clip1Warp }] : [] },
 ]
-const c9Fixture = async (options: { refusals?: number; clip1Warp?: C9Warp; clip1Duration?: number } = {}) => {
+const c9Fixture = async (options: { refusals?: number; releaseFailures?: number; clip1Warp?: C9Warp; clip1Duration?: number } = {}) => {
   const state: C9State = { volume: 1, refusals: options.refusals ?? 0, clip0Offset: 0, clip1Start: 5, clip1Present: true, clip1Asset: 'asset-b', inUse: new Set(), bpm: 120, clip1Warp: options.clip1Warp, clip1Duration: options.clip1Duration ?? 10 }
   // Stretch artifacts the controller leased and released; a lease is made once per artifact a preparation produces.
   const stretch = { leased: 0, released: 0 }
@@ -3253,6 +3277,7 @@ const c9Fixture = async (options: { refusals?: number; clip1Warp?: C9Warp; clip1
   const publishes: C9Publish[] = []
   const scheduled: PortableWasmPreparedSourceEventsOf[] = []
   const faults: string[] = []
+  let releaseFailures = options.releaseFailures ?? 0
   const base = createSession(calls, async () => undefined, undefined, true)
   const session = {
     ...base,
@@ -3269,6 +3294,10 @@ const c9Fixture = async (options: { refusals?: number; clip1Warp?: C9Warp; clip1
     },
     releaseAsset: async (assetId: string) => {
       calls.push(`release:${assetId}`)
+      if (releaseFailures > 0) {
+        releaseFailures -= 1
+        throw new Error('Portable playback asset release failed.')
+      }
       return { status: state.inUse.has(assetId) ? 'asset-in-use' as const : 'released' as const }
     },
   }
@@ -3520,6 +3549,20 @@ test('W-C9-asset-2 a release answered asset-in-use is asked again at the next po
     await f.report(110_000)
     await f.report(111_000)
     expect(c9Released(f.calls.slice(mark))).toEqual(['release:asset-b', 'release:asset-b', 'release:asset-b'])
+  } finally { f.controller.dispose() }
+})
+
+test('W-C9-asset-2 a thrown asset release remains due for the next position report', async () => {
+  const f = await c9Fixture({ releaseFailures: 1 })
+  try {
+    expect(await f.controller.start(f.transport)).toBe('started')
+    await f.report(96_000)
+    const mark = f.calls.length
+    f.state.clip1Asset = 'asset-c'
+    expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
+    await f.report(99_856)
+    await f.report(100_000)
+    expect(c9Released(f.calls.slice(mark))).toEqual(['release:asset-b', 'release:asset-b'])
   } finally { f.controller.dispose() }
 })
 

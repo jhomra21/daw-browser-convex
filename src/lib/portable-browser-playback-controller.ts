@@ -55,6 +55,8 @@ type PortableStartResult = "started" | "unavailable"
 // A locate the session cannot take without having failed (nothing was touched) is the caller's to rebuild.
 type PortableSeekResult = PortableStartResult | "rebuild"
 export type PortableAdoptionResult = "adopted" | "unchanged" | "failed" | "unavailable"
+// Content the session cannot carry at a seam fails without a resubmit; callers see it as "failed".
+type PortableAdoptionAttemptResult = PortableAdoptionResult | "unsupported"
 type PortablePreparedStretch = PortablePreparedStretchAsset | PortablePagedStretchAsset
 type PortableOrdinaryDescriptor = {
   asset: AudioAssetRef
@@ -463,7 +465,6 @@ const withSeamContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSna
   }
 }
 
-// `snapshot` as the tracks `other` also has play it: a track added or deleted is no edit of the tracks both sides play.
 const onSharedTracks = (snapshot: LivePlaybackSnapshot, other: LivePlaybackSnapshot): LivePlaybackSnapshot => {
   const shared = new Set(other.tracks.map((track) => track.id))
   const trackFx = snapshot.mixer.fx.trackFx && Object.fromEntries(Object.entries(snapshot.mixer.fx.trackFx).filter(([id]) => shared.has(id)))
@@ -514,7 +515,6 @@ const inSessionOrder = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapsh
 // The worklet rejects a schedule with more events than this.
 const maxScheduleEvents = 256
 
-// How far before the end of its schedule a session extends it.
 const scheduleLeadSec = (horizonSec: number) => Math.min(5, Math.max(0.05, horizonSec * 0.25))
 
 // Rendered frames between the last position report and the seam an adoption publishes at. The playing position is up to a
@@ -1281,11 +1281,11 @@ export const createPortableBrowserPlaybackController = (input: {
   let retiredStretch: readonly { assets: readonly PortablePreparedStretch[]; seamFrame: number }[] = []
   let nextLiveProcessorSequence = 0
   let adopting = false
-  let adoptionQueued: Promise<PortableAdoptionResult> | undefined
+  let adoptionQueued: Promise<PortableAdoptionAttemptResult> | undefined
   // The newest loop an adoption was asked for: the waiting adoption compiles with it, and so does a resubmit.
   let latestLoop: AdoptionLoop = { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 }
   let adoptionTail: Promise<unknown> = Promise.resolve()
-  let adoptionPublish: Promise<PortableAdoptionResult> | undefined
+  let adoptionPublish: Promise<PortableAdoptionAttemptResult> | undefined
   // Milliseconds from choosing a seam to the publish being posted or refused, for the adoptions this session made recently.
   let seamRoundTripsMs: readonly number[] = []
   // Synth sends past the adoption barrier and not yet answered; an adoption folds the values they carry once they settle.
@@ -1427,14 +1427,18 @@ export const createPortableBrowserPlaybackController = (input: {
       }
       activePreparations = activePreparations.filter((preparation) => !released.has(preparation.id))
     }
-    // After the preparations: a paged asset answers asset-in-use while one holds it. It is asked again at the next report.
+    // After the preparations: a paged asset answers asset-in-use while one holds it, and a release that throws is still
+    // owed. Both are asked again at the next report.
     const due = retiredAssets.filter((retired) => retired.seamFrame <= frame)
     retiredAssets = retiredAssets.filter((retired) => !due.includes(retired))
-    const answers = await Promise.all(due.map(async (retired) => ({
-      retired,
-      status: (await session.releaseAsset?.(retired.assetId, assetGeneration).catch(() => undefined))?.status,
-    })))
-    retiredAssets = [...retiredAssets, ...answers.filter((answer) => answer.status === "asset-in-use").map((answer) => answer.retired)]
+    const answers = await Promise.all(due.map(async (retired) => {
+      try {
+        return { retired, owed: (await session.releaseAsset?.(retired.assetId, assetGeneration))?.status === "asset-in-use" }
+      } catch {
+        return { retired, owed: true }
+      }
+    }))
+    retiredAssets = [...retiredAssets, ...answers.filter((answer) => answer.owed).map((answer) => answer.retired)]
     // The leases go with the assets: nothing reads the old artifacts once the position is past the seam.
     const expiredStretch = retiredStretch.filter((retired) => retired.seamFrame <= frame)
     retiredStretch = retiredStretch.filter((retired) => !expiredStretch.includes(retired))
@@ -1986,10 +1990,9 @@ export const createPortableBrowserPlaybackController = (input: {
 
   // Native adoption on the portable session: compile the newest desired state from a seam a quarter second ahead of the
   // rendered position, reconcile the notes sounding at the seam against the schedule they started in, then prepare,
-  // install and publish at exactly that frame on the same core. A publication that is refused or late is a failed
-  // adoption that a resubmit retries, as is what the session cannot carry. A paused session adopts the same way at the
-  // frame it stands on, with no lead and an immediate publish.
-  const adoptLive = async (loop: AdoptionLoop): Promise<PortableAdoptionResult> => {
+  // install and publish at exactly that frame on the same core. A refused or late publication is retryable; content the
+  // session cannot carry is unsupported. A paused session adopts the same way at the frame it stands on.
+  const adoptLive = async (loop: AdoptionLoop): Promise<PortableAdoptionAttemptResult> => {
     // A locate rebuilds the schedule the adoption would reconcile against; the follow adopts again after it.
     if (pendingSeeks > 0) return "unavailable"
     while (refreshPromise) await refreshPromise
@@ -2013,10 +2016,11 @@ export const createPortableBrowserPlaybackController = (input: {
     // A compile that throws has changed nothing, and an edit that cannot be installed leaves the old graph playing for
     // the next adoption to retry; a rebuild would end the take and gap the audio for an edit the user expects to hear
     // without either.
-    const failed = (): PortableAdoptionResult => current() ? "failed" : "unavailable"
+    const failed = (result: "failed" | "unsupported" = "failed"): PortableAdoptionAttemptResult =>
+      current() ? result : "unavailable"
     const sampleRate = audioContext.sampleRate
     const projectGeneration = safeProjectGeneration(activeProjectGeneration ?? 0)
-    const publishing = Promise.withResolvers<PortableAdoptionResult>()
+    const publishing = Promise.withResolvers<PortableAdoptionAttemptResult>()
     let attempt: AdoptionCache | undefined
     let committed = false
     adopting = true
@@ -2029,8 +2033,7 @@ export const createPortableBrowserPlaybackController = (input: {
         ...transport, ...effectiveLoopForStart(recording ? previous.transport : loop, arrangementNow, sampleRate), state: wasPlaying ? "playing" : "paused", playheadSec: arrangementNow / sampleRate,
       }, { liveAdoption: true })
       if (!current()) return "unavailable"
-      // Content the session cannot carry at a seam (`compileSnapshot`) is a failed adoption: it retries, and exhaustion is a defect.
-      if (!compilation.supported) return failed()
+      if (!compilation.supported) return failed("unsupported")
       const next = compilation.snapshot
       const desired = fingerprint(next)
       if (adoptionCache && adoptionCache.fingerprint !== desired) await disposeAdoptionCache(session)
@@ -2061,7 +2064,7 @@ export const createPortableBrowserPlaybackController = (input: {
         sampleRate, epoch, projectGeneration, horizonFrames / sampleRate, 1, resources.preparedStretchAssets, undefined, resources.ordinaryDescriptors, rawFrame)
       // The graph does not depend on the origin, so it is prepared first and the seam is chosen after that round trip.
       const provisional = compileFrom(positionFrame, arrangementNow, folded.transport, range.endFrame - positionFrame)
-      if (!provisional.supported) return failed()
+      if (!provisional.supported) return failed("unsupported")
       await session.prepareGraph(provisional.graph)
       if (!current()) return "unavailable"
       // The worklet resolves instrument zones and sources by asset id when it publishes, so what the edit added is
@@ -2108,10 +2111,15 @@ export const createPortableBrowserPlaybackController = (input: {
       const reusable = owned.preparations
       const oldWindowFrames = range.endFrame - seamFrame
       const startWindowFrames = oldWindowFrames > leadFrames ? oldWindowFrames : Math.round((input.scheduleHorizonSec ?? LIVE_SCHEDULE_HORIZON_SEC) * sampleRate)
+      let unsupported = false
       const fitted = await (async () => {
         for (let horizonFrames = startWindowFrames; horizonFrames > leadFrames; horizonFrames = Math.floor(horizonFrames / 2)) {
           const compiled = compileFrom(seamFrame, seamArrangement, scheduleLoop, horizonFrames)
-          if (!compiled.supported || JSON.stringify(compiled.graph) !== JSON.stringify(provisional.graph)) return undefined
+          if (!compiled.supported) {
+            unsupported = true
+            return undefined
+          }
+          if (JSON.stringify(compiled.graph) !== JSON.stringify(provisional.graph)) return undefined
           const reconciled = reconcileAtSeam({ previous: schedule, next: compiled.schedule, seamFrame, keepsVoices, hasTrack })
           if (reconciled.events.length > maxScheduleEvents) continue
           try {
@@ -2133,7 +2141,7 @@ export const createPortableBrowserPlaybackController = (input: {
         }
         return undefined
       })()
-      if (!fitted) return failed()
+      if (!fitted) return failed(unsupported ? "unsupported" : "failed")
       const { candidate, adopted, paged } = fitted
       // The commit keeps these preparations; a failed attempt leaves them to the resubmit.
       owned.preparations = paged.preparations
@@ -2149,7 +2157,7 @@ export const createPortableBrowserPlaybackController = (input: {
       // The sources travel with the publish: the worklet swaps them in with the graph, so no block plays one without the other.
       const sources = { epoch, ordinary, prepared: paged.events }
       recordSeamRoundTrip()
-      const published = session.publishGraph(candidate.graph.revision, wasPlaying ? { requireContinuity: true, publicationFrame: seamFrame, sources } : { requireContinuity: true, sources }).then((): PortableAdoptionResult => {
+      const published = session.publishGraph(candidate.graph.revision, wasPlaying ? { requireContinuity: true, publicationFrame: seamFrame, sources } : { requireContinuity: true, sources }).then((): PortableAdoptionAttemptResult => {
         if (active !== session) return "unavailable"
         // The compiled schedule, not the installed one: it still holds the note-on of a voice that continues from before
         // the seam, which the next reconcile needs to know that voice sounds.
@@ -2185,7 +2193,7 @@ export const createPortableBrowserPlaybackController = (input: {
         committed = true
         void releaseExpiredPreparations(session, positionFrame).catch(() => undefined)
         return "adopted"
-      }, (): PortableAdoptionResult => {
+      }, (): PortableAdoptionAttemptResult => {
         // A refusal, or a publication that came too late, leaves the worklet on the revision it plays; so does the session.
         // A late answer arrives after the seam: the time it took is what the seam had to cover, so the resubmit's seam
         // is chosen with it.
@@ -2212,7 +2220,7 @@ export const createPortableBrowserPlaybackController = (input: {
   }
 
   // At most one adoption runs and one waits; the waiting one compiles when it starts, so it carries the newest edit.
-  const adoptQueued = (loop: AdoptionLoop): Promise<PortableAdoptionResult> => {
+  const adoptQueued = (loop: AdoptionLoop): Promise<PortableAdoptionAttemptResult> => {
     latestLoop = loop
     if (adoptionQueued) return adoptionQueued
     const run = adoptionTail.then(() => {
@@ -2229,7 +2237,7 @@ export const createPortableBrowserPlaybackController = (input: {
   // defect: the edit stays in the project and the next adoption publishes it.
   const retryWaitReports = (resubmits: number) => Math.min(2 ** resubmits, 16 * (resubmits + 1))
 
-  const settleAdoption = (result: PortableAdoptionResult, resubmits: number) => {
+  const settleAdoption = (result: PortableAdoptionAttemptResult, resubmits: number) => {
     retries.delete("adoption")
     if (result !== "failed") return
     if (resubmits >= maxAdoptionResubmits) {
@@ -2246,13 +2254,13 @@ export const createPortableBrowserPlaybackController = (input: {
   const adoptSchedule = async (loop: AdoptionLoop): Promise<PortableAdoptionResult> => {
     const result = await adoptQueued(loop)
     settleAdoption(result, 0)
-    return result
+    return result === "unsupported" ? "failed" : result
   }
 
   const resubmitAdoption = async (resubmits: number) => {
     const result = await adoptQueued(latestLoop)
     settleAdoption(result, resubmits + 1)
-    if (result !== "failed") input.onAdoptionResubmitted?.(result)
+    if (result !== "failed" && result !== "unsupported") input.onAdoptionResubmitted?.(result)
   }
 
   // A locate in place, in native's order: stop at the new position and epoch (the core clears its sources there), free the

@@ -186,9 +186,9 @@ export const burstRows: BurstRow[] = [
 ]
 
 const packagedRows: Row[] = burstRows.flatMap(({ name, latencyClass, packaged }) => packaged ? [{ name, latencyClass, ...packaged }] : [])
-export const phase9Presets: Record<Preset, Row[]> = {
+export const phase9Presets = {
   cert: packagedRows.filter((row) => row.tier === undefined && row.calibration === undefined),
   extended: packagedRows,
-}
+} satisfies Record<Preset, Row[]>
 export const phase9Rows = packagedRows.map((row) => row.name)
 export const portableCampaignRows: PortableCampaignRow[] = burstRows.flatMap(({ name, latencyClass, portable }) => portable ? [{ row: name, class: latencyClass, ...portable }] : [])

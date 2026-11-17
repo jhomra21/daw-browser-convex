@@ -7,7 +7,7 @@ import { z } from "zod"
 import { ae08ControlCommitReceived } from "../../apps/desktop/ae08-evidence"
 import { ae08RendererMarks } from "@daw-browser/desktop-protocol/ipc-channels"
 import { prepareSplit, splitLine, type PrepareSplit } from "./ae-08-prepare-split"
-import { phase9Presets, phase9Rows, presetNamed, type LatencyClass, type Preset, type Row, type Settle } from "./ae-08-phase-9-rows"
+import { phase9Presets, phase9Rows, presetNamed, type Preset, type Row, type Settle } from "./ae-08-phase-9-rows"
 
 // AE-08 phase 9 matrix (plan §8 steps 1-2): one packaged launch per row class carries N alternating edits. This file owns
 // the burst schedule, settling on host evidence, publication spacing, fail-fast judging, pooled statistics,
@@ -20,8 +20,8 @@ import { phase9Presets, phase9Rows, presetNamed, type LatencyClass, type Preset,
 
 // What a run asks for: the preset names the rows' repetitions, and a flag overrides them for the rows it covers.
 export type Requested = { preset: Preset; repetitions?: number; vstRepetitions?: number }
-const defaultRepetitions: Record<"burst" | "vst-burst" | "launch", Record<Preset, number>> = {
-  burst: { cert: 30, extended: 100 }, "vst-burst": { cert: 20, extended: 100 }, launch: { cert: 15, extended: 100 } }
+const defaultRepetitions = {
+  burst: { cert: 30, extended: 100 }, "vst-burst": { cert: 20, extended: 100 }, launch: { cert: 15, extended: 100 } } satisfies Record<"burst" | "vst-burst" | "launch", Record<Preset, number>>
 // A single row is one pass whatever is asked.
 const requestedCount = (row: Row, requested: Requested) => row.repeat === "single" ? 1
   : (row.repeat === "vst-burst" ? requested.vstRepetitions : requested.repetitions) ?? row.repetitions?.[requested.preset] ?? defaultRepetitions[row.repeat][requested.preset]

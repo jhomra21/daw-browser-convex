@@ -1,7 +1,8 @@
 // AE-08 frozen LAT1 latency gates. Standalone judge for the publication timing of a packaged run, 48 kHz / 512-frame blocks.
 // It reads each row's host.jsonl (and phaseN-edits.json, and an optional latency-class.json) and gives a verdict per row.
 //
-//   bun tools/acceptance/ae-08-latency-gates.ts --run <phaseDir> [--out <file>]     phaseDir ends in phase<N>
+//   bun tools/acceptance/ae-08-latency-gates.ts --run <phaseDir> [--run <phaseDir>...] [--out <file>]     phaseDir ends in phase<N>
+//     (several --run directories pool their publications, so a phase 4 and a phase 9 run judge one spectral pool)
 //   bun tools/acceptance/ae-08-latency-gates.ts --self-test --c1 <phaseDir> [--c1 <phaseDir>...]
 //
 // FROZEN 2026-11-13 by the parent ruling on /tmp/ae08-lat1-gates-proposal.md §2, before any run it judges.
@@ -9,7 +10,8 @@
 //   C1 pre-LAT1: processor-owner-certification/phase4, /phase5 (negative control, every gate must fail)
 //   LAT1 certified: rc-p5c/phase4, /phase5; earlier LAT1 runs rc-p5a, rc-p5b (spread)
 // Only the parent changes a constant below, by a new ruling, and never after seeing the data it would judge.
-// The verdict is the worst row: FAIL, else INCOMPLETE (a row has no frozen limit yet), else PASS.
+// The verdict is the worst row: FAIL, else INCOMPLETE (a row has no frozen limit yet, or a pooled gate has fewer publications than
+// POOLED_MIN_N), else PASS.
 // One publication over its limit fails its row and the run continues; only a product error dialog, a host crash
 // or a freeze mismatch stops a campaign.
 //
@@ -68,6 +70,11 @@ const ASSET_UPLOAD = { fixedMs: 70, bytesPerMs: 320 * 1024 * 1024 / 1000 }
 // (PARENT-RULING-LAT1-PREP-OVERHEAD.md); those with spectral predecessors hold their own frozen 12 ms (measured p50 9 to 10 ms).
 // Evidence without the field on its graph-publish lines keeps the old single pool at 8 ms.
 const POOLED = { prepareToPublishP99Ms: 60, prepP50Ms: 8, spectralPrepP50Ms: 12, editToPublishP50Ms: 100 }
+// The fewest publications a pooled gate is judged on (parent ruling, addendum 36 item 4, from /tmp/ae08-phase9-budget-plan.md section 5):
+// a spectral run median exceeded its 12 ms limit 4.4 % of the time at n = 20 and 0.7 % at n = 40 on the stored publications, and a p99
+// of fewer than 100 samples is the maximum. A smaller pool gives INCOMPLETE for its gate, never PASS or FAIL.
+const POOLED_MIN_N = { spectralPrepP50: 40, prepP50: 100, prepareToPublishP99: 100, editToPublishP50: 100 }
+type PooledMinimums = typeof POOLED_MIN_N
 
 type Class = keyof typeof LIMITS
 type Gate = "inputs" | "lead" | "rebase" | "prepare-to-publish" | "prep-time" | "edit-to-publish" | "completion"
@@ -81,7 +88,9 @@ type Publication = {
   // Largest read-head delay change of the publication (0 when the pinned budget grows); undefined without host latency evidence.
   headMoveFrames: number | undefined
 }
-type Analysis = { publications: Publication[]; failures: Failure[]; rows: { row: string; status: Status }[]; status: Status }
+type Analysis = { publications: Publication[]; failures: Failure[]; incomplete: string[]; rows: { row: string; status: Status }[]
+  // Diagnostic only: each row's own prep p50 over the publications it adds to the pooled gates.
+  rowPrep: { row: string; publications: number; spectral: number; prepP50Ms: number }[]; status: Status }
 
 const inputFailure = (row: string, detail: string): Failure => ({ row, gate: "inputs", detail })
 
@@ -240,54 +249,72 @@ const judgePublication = (publication: Publication): Failure[] => {
   ]
 }
 
-const judgePooled = (publications: readonly Publication[]): Failure[] => {
+// The pooled populations: plain and raise publications, with the spectral ones split off for the prep gate.
+const poolOf = (publications: readonly Publication[]) => {
   const pooled = publications.filter((publication) => publication.class === "plain" || publication.class === "raise")
-  const editMs = pooled.flatMap((publication) => publication.editToPublishMs ?? [])
-  const stat = (values: readonly number[], fraction: number) => values.length ? percentile(values, fraction) : 0
-  const p99 = stat(pooled.map((publication) => publication.prepareToPublishMs), 0.99)
   const spectral = pooled.filter((publication) => (publication.spectralPredecessors ?? 0) > 0)
-  const rest = pooled.filter((publication) => !spectral.includes(publication))
-  const prepP50 = stat(rest.map((publication) => publication.prepMs), 0.5)
-  const spectralPrepP50 = stat(spectral.map((publication) => publication.prepMs), 0.5)
-  const editP50 = stat(editMs, 0.5)
-  const fail = (gate: Gate, detail: string): Failure => ({ row: "(pooled)", gate, detail })
-  return [
-    ...(p99 > POOLED.prepareToPublishP99Ms ? [fail("prepare-to-publish", `pooled p99 ${p99} > ${POOLED.prepareToPublishP99Ms} ms`)] : []),
-    ...(prepP50 > POOLED.prepP50Ms ? [fail("prep-time", `pooled prep p50 ${prepP50} > ${POOLED.prepP50Ms} ms`)] : []),
-    ...(spectralPrepP50 > POOLED.spectralPrepP50Ms ? [fail("prep-time", `pooled spectral prep p50 ${spectralPrepP50} > ${POOLED.spectralPrepP50Ms} ms`)] : []),
-    ...(editP50 > POOLED.editToPublishP50Ms ? [fail("edit-to-publish", `pooled p50 ${editP50} > ${POOLED.editToPublishP50Ms} ms`)] : []),
-  ]
+  return { pooled, spectral, rest: pooled.filter((publication) => !spectral.includes(publication)) }
 }
 
-const analyzeRun = async (run: string, phase: number): Promise<Analysis> => {
+type PoolVerdict = { failure?: Failure; incomplete?: string }
+const judgePooled = (publications: readonly Publication[], minimums: PooledMinimums) => {
+  const { pooled, spectral, rest } = poolOf(publications)
+  const judge = (gate: Gate, label: string, values: readonly number[], fraction: number, limitMs: number, minimum: number): PoolVerdict => {
+    if (values.length < minimum) return { incomplete: `${label}: ${values.length} publications, needs ${minimum}` }
+    const value = values.length ? percentile(values, fraction) : 0
+    return value > limitMs ? { failure: { row: "(pooled)", gate, detail: `${label} ${value} > ${limitMs} ms` } } : {}
+  }
+  const judged = [
+    judge("prepare-to-publish", "pooled p99", pooled.map((publication) => publication.prepareToPublishMs), 0.99, POOLED.prepareToPublishP99Ms, minimums.prepareToPublishP99),
+    judge("prep-time", "pooled prep p50", rest.map((publication) => publication.prepMs), 0.5, POOLED.prepP50Ms, minimums.prepP50),
+    judge("prep-time", "pooled spectral prep p50", spectral.map((publication) => publication.prepMs), 0.5, POOLED.spectralPrepP50Ms, minimums.spectralPrepP50),
+    judge("edit-to-publish", "pooled p50", pooled.flatMap((publication) => publication.editToPublishMs ?? []), 0.5, POOLED.editToPublishP50Ms, minimums.editToPublishP50),
+  ]
+  return { failures: judged.flatMap((entry) => entry.failure ?? []), incomplete: judged.flatMap((entry) => entry.incomplete ?? []) }
+}
+
+// One run directory's rows, each judged on its own publications. Several directories pool their publications, so a row name
+// carries its directory's parent (r1/two-tone) to keep two runs of the same fixture apart.
+const analyzeRows = async (run: string, prefix: string) => {
+  const phase = phaseOf(run)
   const names = (await readdir(run, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
-  const analyses = await Promise.all(names.map(async (row) => {
-    const hostText = await readText(join(run, row, "host.jsonl"))
+  const analyses = await Promise.all(names.map(async (directory) => {
+    const hostText = await readText(join(run, directory, "host.jsonl"))
     if (hostText === undefined) return undefined
-    const editsText = await readText(join(run, row, `phase${phase}-edits.json`))
-    const classText = await readText(join(run, row, "latency-class.json"))
+    const row = `${prefix}${directory}`
+    const editsText = await readText(join(run, directory, `phase${phase}-edits.json`))
+    const classText = await readText(join(run, directory, "latency-class.json"))
     const declared = classText === undefined ? undefined : classSchema.safeParse(JSON.parse(classText))
     if (declared && !declared.success) return { row, publications: [], failures: [inputFailure(row, "latency-class.json names an unknown class")] }
     const edits = editsText === undefined ? [] : editsSchema.parse(JSON.parse(editsText)).edits
-    const continuityText = await readText(join(run, row, "analysis.json"))
+    const continuityText = await readText(join(run, directory, "analysis.json"))
     const analysis = analyzeRow(row, parseHost(hostText), edits, declared?.data.class)
     if (continuityText !== undefined)
       analysis.failures.push(...assetEvidenceFailures(row, continuitySchema.parse(JSON.parse(continuityText)).assetPublicationFrame, analysis.publications))
     return { row, ...analysis }
   }))
-  const rows = analyses.flatMap((analysis) => analysis ?? [])
+  return analyses.flatMap((analysis) => analysis ?? [])
+}
+
+const analyzeRuns = async (runs: readonly string[], minimums: PooledMinimums): Promise<Analysis> => {
+  const rows = (await Promise.all(runs.map((run) => analyzeRows(run, runs.length > 1 ? `${basename(dirname(run))}/` : "")))).flat()
   const publications = rows.flatMap((analysis) => analysis.publications)
+  const pooled = judgePooled(publications, minimums)
   const failures = [
     ...(publications.length ? [] : [inputFailure("(run)", "no seam publications found")]),
     ...rows.flatMap((analysis) => [...analysis.failures, ...analysis.publications.flatMap(judgePublication)]),
-    ...judgePooled(publications),
+    ...pooled.failures,
   ]
   const rowStatus = (row: { row: string; publications: Publication[] }): Status =>
     failures.some((failure) => failure.row === row.row) ? "FAIL"
       : row.publications.some((publication) => LIMITS[publication.class].prepareToPublishMaxMs === undefined) ? "INCOMPLETE" : "PASS"
   const rowStatuses = rows.map((row) => ({ row: row.row, status: rowStatus(row) }))
-  const status: Status = failures.length ? "FAIL" : rowStatuses.some((entry) => entry.status === "INCOMPLETE") ? "INCOMPLETE" : "PASS"
-  return { publications, failures, rows: rowStatuses, status }
+  const rowPrep = rows.flatMap((row) => {
+    const { pooled: own, spectral } = poolOf(row.publications)
+    return own.length ? [{ row: row.row, publications: own.length, spectral: spectral.length, prepP50Ms: percentile(own.map((publication) => publication.prepMs), 0.5) }] : []
+  })
+  const status: Status = failures.length ? "FAIL" : rowStatuses.some((entry) => entry.status === "INCOMPLETE") || pooled.incomplete.length ? "INCOMPLETE" : "PASS"
+  return { publications, failures, incomplete: pooled.incomplete, rows: rowStatuses, rowPrep, status }
 }
 
 const phaseOf = (run: string) => {
@@ -361,7 +388,11 @@ const selfTest = async (c1Runs: readonly string[]) => {
   const raise: Spec = { raise: true, totalMs: 42, completeFrames: 2560 }
   const clean: readonly Spec[] = [{}, { totalMs: 36 }, raise, { raise: true, totalMs: 62, blocksBeforeBind: 3, completeFrames: 3584 }]
   const withClean = (...extra: Spec[]): readonly Spec[] => [...clean, ...extra]
-  const cases: { name: string; rows: [string, readonly Spec[], RowOptions?][]; status: Status; fails: Gate[] }[] = [
+  // The cases written before the minimums judge pools of 3 to 7 publications, so they run with none; the cases of the minimums name POOLED_MIN_N.
+  const NO_MINIMUM: PooledMinimums = { spectralPrepP50: 0, prepP50: 0, prepareToPublishP99: 0, editToPublishP50: 0 }
+  const many = (count: number, spec: Spec): Spec[] => Array.from({ length: count }, () => spec)
+  type Rows = [string, readonly Spec[], RowOptions?][]
+  const cases: { name: string; rows: Rows; second?: Rows; pools?: PooledMinimums; status: Status; fails: Gate[] }[] = [
     { name: "conforming: plain, single raise, merged k=3 raise, asset add", status: "PASS", fails: [],
       rows: [["two-tone", clean], ["add-paged-asset", [{ totalMs: 90, install: true }]]] },
     { name: "re-sent Publish at the same seam is not a rebase", status: "PASS", fails: [], rows: [["two-tone", withClean({ resend: true })]] },
@@ -456,14 +487,36 @@ const selfTest = async (c1Runs: readonly string[]) => {
       rows: [["spectral-raise", [{ raise: true, latency: { pinned: 4608, graph: 4608 }, spectral: 0, completeFrames: 2048 }], { startLatency: { pinned: 512, graph: 512 } }]] },
     { name: "old evidence with no latency or spectral fields keeps the 2048 allowance", status: "PASS", fails: [],
       rows: [["old-evidence", [{ raise: true, completeFrames: 2048 }]]] },
+    // The minimums (POOLED_MIN_N): spectral 40, non-spectral 100, p99 and edit p50 100.
+    { name: "minimums: a spectral pool of 10 over its 12 ms limit is INCOMPLETE, not judged", status: "INCOMPLETE", fails: [], pools: POOLED_MIN_N,
+      rows: [["two-tone", [...many(10, { prepMs: 13, spectral: 1 }), ...many(100, {})]]] },
+    { name: "minimums: a spectral pool of 39 is INCOMPLETE", status: "INCOMPLETE", fails: [], pools: POOLED_MIN_N,
+      rows: [["two-tone", [...many(39, { prepMs: 9, spectral: 1 }), ...many(100, {})]]] },
+    { name: "minimums: a spectral pool of 40 at prep p50 9 ms is judged and passes", status: "PASS", fails: [], pools: POOLED_MIN_N,
+      rows: [["two-tone", [...many(40, { prepMs: 9, spectral: 1 }), ...many(100, {})]]] },
+    { name: "minimums: a spectral pool of 40 at prep p50 13 ms is judged and fails", status: "FAIL", fails: ["prep-time"], pools: POOLED_MIN_N,
+      rows: [["two-tone", [...many(40, { prepMs: 13, spectral: 1 }), ...many(100, {})]]] },
+    { name: "minimums: a non-spectral pool of 99 is INCOMPLETE", status: "INCOMPLETE", fails: [], pools: POOLED_MIN_N,
+      rows: [["two-tone", [...many(40, { prepMs: 9, spectral: 1 }), ...many(99, {})]]] },
+    { name: "minimums: a non-spectral pool of 100 at prep p50 9 ms is judged and fails", status: "FAIL", fails: ["prep-time"], pools: POOLED_MIN_N,
+      rows: [["two-tone", [...many(40, { prepMs: 9, spectral: 1 }), ...many(100, { prepMs: 9 })]]] },
+    { name: "minimums: 99 publications leave the pooled p99 and edit p50 INCOMPLETE", status: "INCOMPLETE", fails: [], pools: { ...POOLED_MIN_N, spectralPrepP50: 0, prepP50: 0 },
+      rows: [["two-tone", many(99, {})]] },
+    { name: "minimums: a failing publication beats an INCOMPLETE pool", status: "FAIL", fails: ["prepare-to-publish"], pools: POOLED_MIN_N,
+      rows: [["two-tone", [{ totalMs: 75 }]]] },
+    { name: "two run directories pool their publications: 20 + 20 spectral and 100 plain pass", status: "PASS", fails: [], pools: POOLED_MIN_N,
+      rows: [["two-tone", [...many(20, { prepMs: 9, spectral: 1 }), ...many(100, {})]]], second: [["two-tone", many(20, { prepMs: 9, spectral: 1 })]] },
+    { name: "two run directories pool: 20 + 20 spectral at 13 ms fail the pooled gate", status: "FAIL", fails: ["prep-time"], pools: POOLED_MIN_N,
+      rows: [["two-tone", [...many(20, { prepMs: 13, spectral: 1 }), ...many(100, {})]]], second: [["two-tone", many(20, { prepMs: 13, spectral: 1 })]] },
+    { name: "the first of two run directories alone is INCOMPLETE", status: "INCOMPLETE", fails: [], pools: POOLED_MIN_N,
+      rows: [["two-tone", [...many(20, { prepMs: 9, spectral: 1 }), ...many(100, {})]]] },
   ]
   const root = await mkdtemp(join(tmpdir(), "ae08-latency-gates-"))
   let failed = 0
   const report = (ok: boolean, line: string) => { if (!ok) failed++; console.log(`${ok ? "ok  " : "BAD "} ${line}`) }
   try {
-    for (const [index, testCase] of cases.entries()) {
-      const run = join(root, `case-${index}`, "phase9")
-      for (const [row, specs, options] of testCase.rows) {
+    const writeRun = async (run: string, rows: Rows) => {
+      for (const [row, specs, options] of rows) {
         const synthetic = syntheticRow(specs, options)
         await mkdir(join(run, row), { recursive: true })
         await writeFile(join(run, row, "host.jsonl"), synthetic.host)
@@ -471,13 +524,17 @@ const selfTest = async (c1Runs: readonly string[]) => {
         if (synthetic.declare) await writeFile(join(run, row, "latency-class.json"), synthetic.declare)
         if (synthetic.continuity) await writeFile(join(run, row, "analysis.json"), synthetic.continuity)
       }
-      const analysis = await analyzeRun(run, 9)
+      return run
+    }
+    for (const [index, testCase] of cases.entries()) {
+      const runs = [await writeRun(join(root, `case-${index}`, "phase9"), testCase.rows), ...(testCase.second ? [await writeRun(join(root, `case-${index}-b`, "phase9"), testCase.second)] : [])]
+      const analysis = await analyzeRuns(runs, testCase.pools ?? NO_MINIMUM)
       const actual = [...new Set(analysis.failures.map((failure) => failure.gate))]
       report(analysis.status === testCase.status && actual.join() === testCase.fails.join(),
         `${testCase.name}: want ${testCase.status} [${testCase.fails}], got ${analysis.status} [${actual}]`)
     }
     for (const run of c1Runs) {
-      const analysis = await analyzeRun(run, phaseOf(run))
+      const analysis = await analyzeRuns([run], POOLED_MIN_N)
       const gates = [...new Set(analysis.failures.map((failure) => failure.gate))]
       report(analysis.status === "FAIL", `negative control ${run}: want FAIL, got ${analysis.status} [${gates}] (${analysis.failures.length} failures)`)
     }
@@ -496,14 +553,17 @@ const main = async () => {
     if (!c1Runs.length) throw new Error("--self-test needs the C1 evidence as a negative control: --c1 <phaseDir> [--c1 <phaseDir>...]")
     return process.exit(await selfTest(c1Runs) ? 0 : 1)
   }
-  const run = values("--run")[0]
-  if (!run) throw new Error("usage: ae-08-latency-gates.ts --run <phaseDir> [--out <file>] | --self-test --c1 <phaseDir>...")
-  const analysis = await analyzeRun(run, phaseOf(run))
-  const out = values("--out")[0] ?? join(run, "latency-gates.json")
+  const runs = values("--run")
+  const [first] = runs
+  if (!first) throw new Error("usage: ae-08-latency-gates.ts --run <phaseDir> [--run <phaseDir>...] [--out <file>] | --self-test --c1 <phaseDir>...")
+  const analysis = await analyzeRuns(runs, POOLED_MIN_N)
+  const out = values("--out")[0] ?? join(first, "latency-gates.json")
   await mkdir(dirname(out), { recursive: true })
-  await writeFile(out, `${JSON.stringify({ run, sampleRate: SAMPLE_RATE, blockSize: BLOCK, ...analysis }, null, 2)}\n`)
+  await writeFile(out, `${JSON.stringify({ runs, sampleRate: SAMPLE_RATE, blockSize: BLOCK, minimums: POOLED_MIN_N, ...analysis }, null, 2)}\n`)
   for (const row of analysis.rows) console.log(`${row.status} ${row.row}`)
+  for (const row of analysis.rowPrep) console.log(`prep p50 ${row.row}: ${row.prepP50Ms} ms over ${row.publications} publications (${row.spectral} spectral)`)
   for (const failure of analysis.failures) console.log(`FAIL ${failure.row} ${failure.gate}: ${failure.detail}`)
+  for (const pool of analysis.incomplete) console.log(`INCOMPLETE (pooled) ${pool}`)
   console.log(`${analysis.status} LAT1 gates: ${analysis.publications.length} publications -> ${out}`)
   process.exit(analysis.status === "PASS" ? 0 : 1)
 }

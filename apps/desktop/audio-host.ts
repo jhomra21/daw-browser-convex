@@ -1465,10 +1465,13 @@ export const createNativeAudioHostSupervisor = (
     }))
   }
   const logControlAck = (control: PendingControl, accepted = true) => {
-    if (!process.env.DAW_AE08_EVIDENCE_DIR) return
     const elapsedMs = performance.now() - control.dispatchedAt
-    // Hot-path acknowledgements are logged only when slow to avoid playback log and main-thread overhead.
-    if (isHotControlRequest(control.requestType) && elapsedMs < slowHotControlAckThresholdMs) return
+    // Hot acks are logged only when slow (a rare anomaly, always logged) to avoid playback log and main-thread overhead.
+    // Every other ack needs the evidence switch.
+    const shouldLog = isHotControlRequest(control.requestType)
+      ? elapsedMs >= slowHotControlAckThresholdMs
+      : Boolean(process.env.DAW_AE08_EVIDENCE_DIR)
+    if (!shouldLog) return
     console.info("[native-audio-host-control]", JSON.stringify({
       phase: "ack",
       requestId: control.requestId,

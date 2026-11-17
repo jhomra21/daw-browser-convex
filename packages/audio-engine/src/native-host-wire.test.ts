@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { audioCoreContractVersion, type AudioAssetRef, type AudioCoreGraphSnapshot } from "../../audio-core-contract/src/index"
 import { graphEnvelope } from "../../../public/audio-worklets/daw-portable-graph-envelope-v3.js"
-import { encodePortableGraphEnvelope, mapNativeSessionAssets, serializeNativeGraph, serializeNativeInstrumentEvents, serializeNativeInstrumentStates, serializeNativeProcessorEvents, serializeNativeProcessorStatePatch, serializeNativeScheduleWindow, serializeNativeSourceEvents, serializeNativeSpectrumSelection, serializeNativeVstParameterEvents } from "./native-host-wire"
+import { encodePortableGraphEnvelope, mapNativeSessionAssets, serializeNativeGraph, serializeNativeInstrumentEvents, serializeNativeInstrumentStates, serializeNativeProcessorEvents, serializeNativeProcessorStatePatch, serializeNativeScheduleWindow, serializeNativeSourceEvents, serializeNativeSpectrumSelection, serializeNativeVstParameterEvents, stampGraphRevision } from "./native-host-wire"
 
 const asset = (assetId: string, frameCount = 480): AudioAssetRef => ({
   version: audioCoreContractVersion,
@@ -412,6 +412,27 @@ test("prefixes each native graph envelope with a big-endian revision and payload
   expect(keptView.getUint32(8, false)).toBe(kept.byteLength - 12)
   // The native flag cannot leak into the portable/browser descriptor.
   expect(new DataView(encodePortableGraphEnvelope(snapshot).buffer).getUint32(0, true)).toBe(3)
+})
+
+test("stamping a runtime revision rewrites both revision fields of a serialized graph and nothing else", () => {
+  const snapshot: AudioCoreGraphSnapshot = {
+    version: audioCoreContractVersion,
+    revision: 7,
+    contractHash: "contract",
+    masterNodeId: "master",
+    assets: [],
+    nodes: [{ id: "master", kind: "master", inputLayout: "stereo", outputLayout: "stereo", processorOrder: [], latencyFrames: 0 }],
+    edges: [],
+  }
+  const bytes = serializeNativeGraph(snapshot)
+  const stamped = stampGraphRevision(bytes, 0x1234_5678)
+  const view = new DataView(stamped.buffer)
+
+  expect(view.getBigUint64(0, false)).toBe(0x1234_5678n)
+  expect(view.getUint32(16, true)).toBe(0x1234_5678)
+  expect(stamped.subarray(8, 16)).toEqual(bytes.subarray(8, 16))
+  expect(stamped.subarray(20)).toEqual(bytes.subarray(20))
+  expect(new DataView(bytes.buffer).getBigUint64(0, false)).toBe(7n)
 })
 
 test("keeps portable playback sources off the live input buses", () => {

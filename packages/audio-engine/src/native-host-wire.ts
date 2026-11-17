@@ -482,6 +482,14 @@ export const serializeNativeGraph = (snapshot: AudioCoreGraphSnapshot, keepLaten
   return frame
 }
 
+export const stampGraphRevision = (frame: Uint8Array, revision: number) => {
+  const stamped = new Uint8Array(frame)
+  const view = new DataView(stamped.buffer)
+  view.setBigUint64(0, BigInt(revision), false)
+  view.setUint32(nativeGraphFrameHeaderBytes + 4, revision, true)
+  return stamped
+}
+
 export type NativeProcessorStatePatch = {
   graphRevision: number
   nodeId: string

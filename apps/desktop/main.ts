@@ -165,6 +165,7 @@ import type {
   NativeScheduleProgress,
   NativeOfflineRenderPlan,
 } from "@daw-browser/audio-engine/native-host-wire"
+import { stampGraphRevision } from "@daw-browser/audio-engine/native-host-wire"
 import {
   decodeNativeExternalAttachmentPlan,
   maxVst3WorkerFrames,
@@ -1818,12 +1819,9 @@ const registerIpc = () => {
         let result
         if ("bytes" in parsed.data) {
           const revision = supervisor.allocateRuntimeRevision()
-          const bytes = Buffer.from(parsed.data.bytes)
-          bytes.writeBigUInt64BE(BigInt(revision), 0)
-          bytes.writeUInt32LE(revision, 16)
           ae08Evidence?.("revision-allocate", { pid: owner.pid ?? null, lifecycleGeneration: owner.generation,
             runtimeRevision: revision, projectRevision: parsed.data.projectRevision })
-          result = await supervisor.prepareGraphRevision(bytes, parsed.data.requestedPublicationFrame ?? 0n)
+          result = await supervisor.prepareGraphRevision(stampGraphRevision(parsed.data.bytes, revision), parsed.data.requestedPublicationFrame ?? 0n)
         } else {
           if (parsed.data.hostGeneration !== owner.generation) return nativeSessionFailure()
           const revision = parsed.data.revision

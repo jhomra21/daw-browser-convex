@@ -379,7 +379,6 @@ test("stamps a row with the project revision its own transaction produced and re
   expect(gate.revision).toBe(1);
   expect(await projectRevision(t, "project-1")).toBe(1);
 
-  // A no-op returns the row's own stamp and does not advance the project.
   expect(await setGate(-20)).toEqual({ status: "applied", effectId: gate._id, revision: 1 });
   expect(await projectRevision(t, "project-1")).toBe(1);
 
@@ -388,10 +387,8 @@ test("stamps a row with the project revision its own transaction produced and re
   });
   expect(utility).toMatchObject({ status: "applied", revision: 2 });
   expect(await projectRevision(t, "project-1")).toBe(2);
-  // The unrelated edit leaves the first row's stamp alone.
   expect((await effectRowByInstance(t, trackId, "gate-1")).revision).toBe(1);
 
-  // Two rows in one query carry their own stamps, not the query-wide maximum.
   const listed = await user.query(api.effects.listByRoom, { projectId: "project-1" });
   expect(listed.map((row) => [row.instanceId, row.revision]).sort()).toEqual([["gate-1", 1], ["utility-1", 2]]);
 
@@ -417,7 +414,6 @@ test("a legacy row without a revision stays unstamped on a no-op and is stamped 
   });
   expect(await projectRevision(t, "project-1")).toBe(1);
 
-  // The no-op reports revision 0 (committed, unordered) and does not invent a stamp or advance the project.
   expect(await user.mutation(api.effects.serverSetProcessorParams, {
     projectId: "project-1", trackId, effect: "gate", instanceId: "gate-1", params: gateParams,
   })).toEqual({ status: "applied", effectId: legacyId, revision: 0 });

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProjectAccess } from "./projectAccess";
 import { getTrackWriteAccess } from "./trackWrites";
 import { runSharedOperationOnce } from "./sharedOperationResults";
-import { advanceProjectRevision, assertEffectWriterRevisions, prospectiveRevision } from "./projectRows";
+import { withProjectEdit, type ProjectEdit } from "./projectRows";
 import { legacySynthParamsValidator, synthParamsValidator, trackInstrumentValidator } from "./synthValidators";
 import {
   normalizeEqParamsForUpdate,
@@ -233,17 +233,12 @@ type EffectWriteOutcome =
   | { status: 'invalid' }
   | { status: 'applied'; effectId: Id<'effects'>; revision: number }
 
-// The owner of a param write: advances the project once and checks the stamp the row writer derived is the revision it produced.
 const finishEffectWrite = async (
   ctx: any,
-  projectId: string,
+  _projectId: string,
   result: EffectRowWriteResult,
 ): Promise<EffectWriteOutcome> => {
   if (result.status === 'invalid') return { status: 'invalid' }
-  if (result.changed) {
-    const advanced = await advanceProjectRevision(ctx, projectId)
-    assertEffectWriterRevisions([result.revision], advanced.revision)
-  }
   return { status: 'applied', effectId: result.effectId, revision: result.revision }
 }
 
@@ -258,13 +253,9 @@ const finishLegacyEffectWrite = async (
 
 const finishEffectMutation = async <Value>(
   ctx: any,
-  projectId: string,
+  _projectId: string,
   result: { changed: boolean; value: Value; revision?: number },
 ) => {
-  if (result.changed) {
-    const advanced = await advanceProjectRevision(ctx, projectId)
-    assertEffectWriterRevisions(result.revision === undefined ? [] : [result.revision], advanced.revision)
-  }
   return result.value
 }
 
@@ -320,6 +311,7 @@ const areEffectParamsEqual = (
 
 export const upsertTrackEffectRow = async (
   ctx: any,
+  edit: ProjectEdit,
   input: {
     projectId: string
     trackId: Id<'tracks'>
@@ -328,7 +320,7 @@ export const upsertTrackEffectRow = async (
     instanceId?: string
   },
 ): Promise<EffectRowWriteResult> => {
-  const revision = await prospectiveRevision(ctx, input.projectId)
+  const revision = edit.revision
   const existing = (await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect())
     .sort((left: EffectOrderRow, right: EffectOrderRow) => (
       (left.index ?? 0) - (right.index ?? 0)
@@ -359,7 +351,10 @@ export const upsertTrackEffectRow = async (
         : []
     )))
   }
-  if (consolidated) await compactTrackProcessorIndexes(ctx, input.trackId, revision)
+  if (consolidated) {
+    edit.stamp()
+    await compactTrackProcessorIndexes(ctx, input.trackId, revision)
+  }
   if (row) {
     const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
     const sameContent = (row.type === input.type && stableEffectParams(row.params) === stableEffectParams(params))
@@ -367,17 +362,21 @@ export const upsertTrackEffectRow = async (
     if (sameContent) {
       if (!consolidated) return effectRowWriteResult('noop', row._id, row.revision ?? 0)
       // Removing its duplicates changed what the survivor stands for.
+      edit.stamp()
       await ctx.db.patch(row._id, { revision })
       return effectRowWriteResult('updated', row._id, revision)
     }
     if (row.type === 'instrument' && areEffectParamsEqual(input.type, row.params, params)) {
+      edit.stamp()
       await ctx.db.patch(row._id, { instanceId: input.instanceId, targetType: 'track', revision })
       return effectRowWriteResult('updated', row._id, revision)
     }
+    edit.stamp()
     await ctx.db.patch(row._id, { params, targetType: 'track', type: input.type, instanceId: input.instanceId, revision })
     return effectRowWriteResult('updated', row._id, revision)
   }
   const params = normalizeEffectParamsForUpdate(input.type, input.params)
+  edit.stamp()
   const effectId = await ctx.db.insert('effects', {
     projectId: input.projectId,
     targetType: 'track',
@@ -394,6 +393,7 @@ export const upsertTrackEffectRow = async (
 
 export const setTrackInstrumentRow = async (
   ctx: any,
+  edit: ProjectEdit,
   input: {
     projectId: string
     trackId: Id<'tracks'>
@@ -402,17 +402,18 @@ export const setTrackInstrumentRow = async (
 ): Promise<EffectRowWriteResult> => {
   const params = normalizeTrackInstrumentParams(input.instrument)
   if (!params) return invalidEffectWrite
-  return await upsertTrackEffectRow(ctx, { ...input, type: 'instrument', params })
+  return await upsertTrackEffectRow(ctx, edit, { ...input, type: 'instrument', params })
 }
 
 export const setArpeggiatorRow = async (
   ctx: any,
+  edit: ProjectEdit,
   input: {
     projectId: string
     trackId: Id<'tracks'>
     params: Parameters<typeof sanitizeArpParams>[0]
   },
-) => await upsertTrackEffectRow(ctx, {
+) => await upsertTrackEffectRow(ctx, edit, {
   projectId: input.projectId,
   trackId: input.trackId,
   type: 'arpeggiator',
@@ -421,6 +422,7 @@ export const setArpeggiatorRow = async (
 
 export const upsertMasterEffectRow = async (
   ctx: any,
+  edit: ProjectEdit,
   input: {
     projectId: string
     type: MasterAudioEffectType
@@ -428,7 +430,7 @@ export const upsertMasterEffectRow = async (
     instanceId?: string
   },
 ): Promise<EffectRowWriteResult> => {
-  const revision = await prospectiveRevision(ctx, input.projectId)
+  const revision = edit.revision
   const existing = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
   if (input.instanceId) {
     const audioRows = existing.filter((entry: EffectOrderRow) => isCanonicalAudioEffectKind(entry.type))
@@ -440,10 +442,12 @@ export const upsertMasterEffectRow = async (
   if (row) {
     const params = normalizeEffectParamsForUpdate(input.type, input.params, row.params)
     if (areEffectParamsEqual(input.type, row.params, params)) return effectRowWriteResult('noop', row._id, row.revision ?? 0)
+    edit.stamp()
     await ctx.db.patch(row._id, { params, targetType: 'master', revision })
     return effectRowWriteResult('updated', row._id, revision)
   }
   const params = normalizeEffectParamsForUpdate(input.type, input.params)
+  edit.stamp()
   const effectId = await ctx.db.insert('effects', {
     projectId: input.projectId,
     targetType: 'master',
@@ -470,7 +474,7 @@ const upsertTrackEffectForUser = async (
 ) => {
   const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
   if (!access || access.track.projectId !== input.projectId) return invalidEffectWrite
-  return await upsertTrackEffectRow(ctx, input)
+  return await withProjectEdit(ctx, input.projectId, (edit) => upsertTrackEffectRow(ctx, edit, input))
 }
 
 const setTrackInstrumentForUser = async (
@@ -484,7 +488,7 @@ const setTrackInstrumentForUser = async (
 ) => {
   const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
   if (!access || access.track.projectId !== input.projectId) return invalidEffectWrite
-  return await setTrackInstrumentRow(ctx, input)
+  return await withProjectEdit(ctx, input.projectId, (edit) => setTrackInstrumentRow(ctx, edit, input))
 }
 
 const setArpeggiatorForUser = async (
@@ -498,7 +502,7 @@ const setArpeggiatorForUser = async (
 ) => {
   const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
   if (!access || access.track.projectId !== input.projectId) return invalidEffectWrite
-  return await setArpeggiatorRow(ctx, input)
+  return await withProjectEdit(ctx, input.projectId, (edit) => setArpeggiatorRow(ctx, edit, input))
 }
 
 const upsertMasterEffectForUser = async (
@@ -512,7 +516,7 @@ const upsertMasterEffectForUser = async (
   },
 ) => {
   await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
-  return await upsertMasterEffectRow(ctx, input)
+  return await withProjectEdit(ctx, input.projectId, (edit) => upsertMasterEffectRow(ctx, edit, input))
 }
 
 const getTrackEffect = async (
@@ -560,13 +564,13 @@ type EffectOrderContext = {
   }
 }
 
-// Rows whose index moves are rewritten, so they carry the stamp of the transaction that moved them.
 const reorderRows = async (
   ctx: EffectOrderContext,
+  edit: ProjectEdit,
   rows: EffectOrderRow[],
   order: AudioEffectOrderItem[],
-  revision: number,
 ): Promise<ReorderRowsResult> => {
+  const revision = edit.revision;
   const audioRows = rows
     .filter((row) => isCanonicalAudioEffectKind(row.type))
     .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
@@ -588,12 +592,14 @@ const reorderRows = async (
   const nextIndex = (index: number) => index
   const changed = nextRows.some((row, index) => row.index !== index)
   if (!changed) return { changed: false }
+  edit.stamp()
   await Promise.all(nextRows.map((row, index) => row.index === nextIndex(index) ? undefined : ctx.db.patch(row._id, { index: nextIndex(index), revision })))
   return { changed: true, revision }
 }
 
 export const reorderAudioEffectRows = async (
   ctx: any,
+  edit: ProjectEdit,
   input: {
     projectId: string
     targetType: 'track' | 'master'
@@ -601,15 +607,14 @@ export const reorderAudioEffectRows = async (
     order: AudioEffectOrderItem[]
   },
 ): Promise<EffectRowReorderResult> => {
-  const revision = await prospectiveRevision(ctx, input.projectId)
   if (input.targetType === 'track') {
     const rows = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
-    const result = await reorderRows(ctx, rows.filter((row: EffectOrderRow) => row.targetType === 'track'), input.order, revision)
+    const result = await reorderRows(ctx, edit, rows.filter((row: EffectOrderRow) => row.targetType === 'track'), input.order)
     const status: 'applied' | 'noop' = result.changed ? 'applied' : 'noop'
     return { ...result, status }
   }
   const rows = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
-  const result = await reorderRows(ctx, rows, input.order, revision)
+  const result = await reorderRows(ctx, edit, rows, input.order)
   const status: 'applied' | 'noop' = result.changed ? 'applied' : 'noop'
   return { ...result, status }
 }
@@ -630,11 +635,12 @@ const reorderAudioEffectsForUser = async (
   } else {
     await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
   }
-  return await reorderAudioEffectRows(ctx, input)
+  return await withProjectEdit(ctx, input.projectId, (edit) => reorderAudioEffectRows(ctx, edit, input))
 }
 
 export const removeAudioEffectRow = async (
   ctx: any,
+  edit: ProjectEdit,
   input: {
     projectId: string
     targetType: 'track' | 'master'
@@ -643,7 +649,6 @@ export const removeAudioEffectRow = async (
     instanceId?: string
   },
 ): Promise<EffectRowRemoveResult> => {
-  const revision = await prospectiveRevision(ctx, input.projectId)
   const deleteEffectAutomation = async (instanceId: string, targetType: 'track' | 'master', trackId?: Id<'tracks'>) => {
     const automationRows = await ctx.db.query('automationEnvelopes').withIndex('by_project', (q: any) => q.eq('projectId', input.projectId)).collect()
     for (const envelope of automationRows) {
@@ -668,9 +673,10 @@ export const removeAudioEffectRow = async (
       ? rows.find((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.type === input.effect && entry.targetType === 'track') ?? null
       : rows.find((entry: EffectOrderRow) => entry.type === input.effect && entry.targetType === 'track' && !entry.instanceId) ?? null
     if (!row) return { changed: false, status: 'not-found' }
+    edit.stamp()
     await ctx.db.delete(row._id)
     if (row.instanceId) await deleteEffectAutomation(row.instanceId, 'track', input.trackId)
-    const compacted = await reorderRows(ctx, rows.filter((entry: EffectOrderRow) => entry._id !== row._id && entry.targetType === 'track'), [], revision)
+    const compacted = await reorderRows(ctx, edit, rows.filter((entry: EffectOrderRow) => entry._id !== row._id && entry.targetType === 'track'), [])
     return { changed: true, status: 'deleted', effectId: row._id, revision: compacted.changed ? compacted.revision : undefined }
   }
   const rows = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
@@ -678,9 +684,10 @@ export const removeAudioEffectRow = async (
     ? rows.find((entry: EffectOrderRow) => entry.instanceId === input.instanceId && entry.type === input.effect) ?? null
     : rows.find((entry: EffectOrderRow) => entry.type === input.effect && !entry.instanceId) ?? null
   if (!row) return { changed: false, status: 'not-found' }
+  edit.stamp()
   await ctx.db.delete(row._id)
   if (row.instanceId) await deleteEffectAutomation(row.instanceId, 'master')
-  const compacted = await reorderRows(ctx, rows.filter((entry: EffectOrderRow) => entry._id !== row._id), [], revision)
+  const compacted = await reorderRows(ctx, edit, rows.filter((entry: EffectOrderRow) => entry._id !== row._id), [])
   return { changed: true, status: 'deleted', effectId: row._id, revision: compacted.changed ? compacted.revision : undefined }
 }
 
@@ -695,6 +702,7 @@ async function compactTrackProcessorIndexes(ctx: any, trackId: Id<'tracks'>, rev
 
 export const removeTrackInstrumentRow = async (
   ctx: any,
+  edit: ProjectEdit,
   input: { projectId: string; trackId: Id<'tracks'> },
 ) => {
   const rows = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
@@ -718,20 +726,23 @@ export const removeTrackInstrumentRow = async (
     if (key && instanceIds.has(key.instanceId)) await ctx.db.delete(envelope._id)
   }
   for (const row of instruments) await ctx.db.delete(row._id)
-  const revision = await prospectiveRevision(ctx, input.projectId)
+  const revision = edit.revision
+  edit.stamp()
   const compactedRevision = await compactTrackProcessorIndexes(ctx, input.trackId, revision)
   return { changed: true, revision: compactedRevision }
 }
 
 export const removeArpeggiatorRow = async (
   ctx: any,
+  edit: ProjectEdit,
   input: { projectId: string; trackId: Id<'tracks'> },
 ) => {
   const rows = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
   const arpeggiators = rows.filter((entry: any) => entry.targetType === 'track' && entry.type === 'arpeggiator')
   if (arpeggiators.length === 0) return { changed: false }
   for (const row of arpeggiators) await ctx.db.delete(row._id)
-  const revision = await prospectiveRevision(ctx, input.projectId)
+  const revision = edit.revision
+  edit.stamp()
   const compactedRevision = await compactTrackProcessorIndexes(ctx, input.trackId, revision)
   return { changed: true, revision: compactedRevision }
 }
@@ -754,12 +765,10 @@ const removeTrackDeviceForUser = async (
     run: async () => {
       const access = await getTrackWriteAccess(ctx, trackId, userId)
       if (!access || access.track.projectId !== input.projectId) return { status: 'rejected' as const }
-      const result = input.device === 'instrument'
-        ? await removeTrackInstrumentRow(ctx, { projectId: input.projectId, trackId })
-        : await removeArpeggiatorRow(ctx, { projectId: input.projectId, trackId })
+      const result = await withProjectEdit(ctx, input.projectId, (edit) => input.device === 'instrument'
+        ? removeTrackInstrumentRow(ctx, edit, { projectId: input.projectId, trackId })
+        : removeArpeggiatorRow(ctx, edit, { projectId: input.projectId, trackId }))
       if (!result.changed) return { status: 'noop' as const }
-      const advanced = await advanceProjectRevision(ctx, input.projectId)
-      assertEffectWriterRevisions(result.revision === undefined ? [] : [result.revision], advanced.revision)
       return { status: 'applied' as const }
     },
   })
@@ -792,7 +801,7 @@ const removeAudioEffectForUser = async (
   } else {
     await requireMasterBusWriteAccess(ctx, input.projectId, input.userId)
   }
-  const result: EffectRowRemoveResult = await removeAudioEffectRow(ctx, input)
+  const result: EffectRowRemoveResult = await withProjectEdit(ctx, input.projectId, (edit) => removeAudioEffectRow(ctx, edit, input))
   return {
     changed: result.changed,
     value: result.status === 'deleted' ? deletedStatus() : notFoundStatus(),
@@ -1081,11 +1090,7 @@ export const reorderAudioEffects = mutation({
   handler: async (ctx, { projectId, targetType, trackId, order }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     if (targetType === 'track' && !trackId) return
-    const result = await reorderAudioEffectsForUser(ctx, { projectId, userId, targetType, trackId, order })
-    if (result.changed) {
-      const advanced = await advanceProjectRevision(ctx, projectId)
-      assertEffectWriterRevisions(result.revision === undefined ? [] : [result.revision], advanced.revision)
-    }
+    await reorderAudioEffectsForUser(ctx, { projectId, userId, targetType, trackId, order })
     return { status: 'applied' }
   },
 })
@@ -1361,18 +1366,10 @@ export const serverReorderAudioEffects = mutation({
       if (!trackId) return
       const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
       if (!normalizedTrackId) return
-      const result = await reorderAudioEffectsForUser(ctx, { projectId, userId, targetType, trackId: normalizedTrackId, order })
-      if (result.changed) {
-        const advanced = await advanceProjectRevision(ctx, projectId)
-        assertEffectWriterRevisions(result.revision === undefined ? [] : [result.revision], advanced.revision)
-      }
+      await reorderAudioEffectsForUser(ctx, { projectId, userId, targetType, trackId: normalizedTrackId, order })
       return { status: 'applied' }
     }
-    const result = await reorderAudioEffectsForUser(ctx, { projectId, userId, targetType, order })
-    if (result.changed) {
-      const advanced = await advanceProjectRevision(ctx, projectId)
-      assertEffectWriterRevisions(result.revision === undefined ? [] : [result.revision], advanced.revision)
-    }
+    await reorderAudioEffectsForUser(ctx, { projectId, userId, targetType, order })
     return { status: 'applied' }
   },
 })
@@ -1492,50 +1489,46 @@ export const serverRestoreChain = mutation({
             ? [effect.instanceId]
             : []
         )))
-        const revision = await prospectiveRevision(ctx, projectId)
-        const [automation, sidechains] = await Promise.all([
-          ctx.db.query('automationEnvelopes').withIndex('by_project_track', (q: any) => (
-            q.eq('projectId', projectId).eq('trackId', normalizedTrackId)
-          )).collect(),
-          ctx.db.query('sidechainRoutes').withIndex('by_target', (q: any) => q.eq('targetTrackId', normalizedTrackId)).collect(),
-        ])
-        for (const envelope of automation) {
-          if (removedAudioInstanceIds.has(envelope.effectInstanceId)) await ctx.db.delete(envelope._id)
-        }
-        for (const route of sidechains) {
-          if (route.projectId === projectId && removedAudioInstanceIds.has(route.effectInstanceId)) await ctx.db.delete(route._id)
-        }
-        for (const effect of existing) {
-          if (effect.targetType === 'track' && (isCanonicalAudioEffectKind(effect.type) || effect.type === 'instrument' || effect.type === 'synth' || effect.type === 'arpeggiator')) {
-            await ctx.db.delete(effect._id)
+        return await withProjectEdit(ctx, projectId, async (edit) => {
+          const revision = edit.revision
+          const [automation, sidechains] = await Promise.all([
+            ctx.db.query('automationEnvelopes').withIndex('by_project_track', (q: any) => (
+              q.eq('projectId', projectId).eq('trackId', normalizedTrackId)
+            )).collect(),
+            ctx.db.query('sidechainRoutes').withIndex('by_target', (q: any) => q.eq('targetTrackId', normalizedTrackId)).collect(),
+          ])
+          edit.stamp()
+          for (const envelope of automation) {
+            if (removedAudioInstanceIds.has(envelope.effectInstanceId)) await ctx.db.delete(envelope._id)
           }
-        }
-        for (const [index, effect] of audioEffects.entries()) {
-          const params = normalizeEffectParamsForUpdate(effect.kind, effect.params)
-          await ctx.db.insert('effects', {
-            projectId,
-            targetType: 'track',
-            trackId: normalizedTrackId,
-            index,
-            type: effect.kind,
-            instanceId: effect.id,
-            params,
-            createdAt: Date.now(),
-            revision,
-          })
-        }
-        const deviceWrites = [
-          ...instrument ? [await setTrackInstrumentRow(ctx, { projectId, trackId: normalizedTrackId, instrument })] : [],
-          ...sanitizedArpeggiator
-            ? [await upsertTrackEffectRow(ctx, { projectId, trackId: normalizedTrackId, type: 'arpeggiator', params: sanitizedArpeggiator })]
-            : [],
-        ]
-        const advanced = await advanceProjectRevision(ctx, projectId)
-        assertEffectWriterRevisions([
-          revision,
-          ...deviceWrites.flatMap((write) => write.status !== 'invalid' && write.changed ? [write.revision] : []),
-        ], advanced.revision)
-        return { status: 'applied' }
+          for (const route of sidechains) {
+            if (route.projectId === projectId && removedAudioInstanceIds.has(route.effectInstanceId)) await ctx.db.delete(route._id)
+          }
+          for (const effect of existing) {
+            if (effect.targetType === 'track' && (isCanonicalAudioEffectKind(effect.type) || effect.type === 'instrument' || effect.type === 'synth' || effect.type === 'arpeggiator')) {
+              await ctx.db.delete(effect._id)
+            }
+          }
+          for (const [index, effect] of audioEffects.entries()) {
+            const params = normalizeEffectParamsForUpdate(effect.kind, effect.params)
+            await ctx.db.insert('effects', {
+              projectId,
+              targetType: 'track',
+              trackId: normalizedTrackId,
+              index,
+              type: effect.kind,
+              instanceId: effect.id,
+              params,
+              createdAt: Date.now(),
+              revision,
+            })
+          }
+          if (instrument) await setTrackInstrumentRow(ctx, edit, { projectId, trackId: normalizedTrackId, instrument })
+          if (sanitizedArpeggiator) {
+            await upsertTrackEffectRow(ctx, edit, { projectId, trackId: normalizedTrackId, type: 'arpeggiator', params: sanitizedArpeggiator })
+          }
+          return { status: 'applied' }
+        })
       },
     })
   },

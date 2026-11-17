@@ -4,12 +4,13 @@ import { AUDIO_EFFECT_CONTRACTS } from "@daw-browser/shared";
 
 import { api } from "./_generated/api";
 import {
-  removeAudioEffectRow,
-  reorderAudioEffectRows,
-  setArpeggiatorRow,
-  setTrackInstrumentRow,
-  upsertTrackEffectRow,
+  removeAudioEffectRow as writeRemoveAudioEffectRow,
+  reorderAudioEffectRows as writeReorderAudioEffectRows,
+  setArpeggiatorRow as writeArpeggiatorRow,
+  setTrackInstrumentRow as writeTrackInstrumentRow,
+  upsertTrackEffectRow as writeTrackEffectRow,
 } from "./effects";
+import { withProjectEdit } from "./projectRows";
 import {
   deleteAutomationEnvelopeRow,
   setAutomationEnvelopeRow,
@@ -26,6 +27,17 @@ const modules = {
 const owner = "phase-3b1-owner";
 const newTest = () => convexTest(schema, modules);
 type TestConvex = ReturnType<typeof newTest>;
+
+const upsertTrackEffectRow = async (ctx: Parameters<typeof withProjectEdit>[0], input: Parameters<typeof writeTrackEffectRow>[2]) =>
+  await withProjectEdit(ctx, input.projectId, (edit) => writeTrackEffectRow(ctx, edit, input));
+const removeAudioEffectRow = async (ctx: Parameters<typeof withProjectEdit>[0], input: Parameters<typeof writeRemoveAudioEffectRow>[2]) =>
+  await withProjectEdit(ctx, input.projectId, (edit) => writeRemoveAudioEffectRow(ctx, edit, input));
+const reorderAudioEffectRows = async (ctx: Parameters<typeof withProjectEdit>[0], input: Parameters<typeof writeReorderAudioEffectRows>[2]) =>
+  await withProjectEdit(ctx, input.projectId, (edit) => writeReorderAudioEffectRows(ctx, edit, input));
+const setTrackInstrumentRow = async (ctx: Parameters<typeof withProjectEdit>[0], input: Parameters<typeof writeTrackInstrumentRow>[2]) =>
+  await withProjectEdit(ctx, input.projectId, (edit) => writeTrackInstrumentRow(ctx, edit, input));
+const setArpeggiatorRow = async (ctx: Parameters<typeof withProjectEdit>[0], input: Parameters<typeof writeArpeggiatorRow>[2]) =>
+  await withProjectEdit(ctx, input.projectId, (edit) => writeArpeggiatorRow(ctx, edit, input));
 
 const createProject = async (t: TestConvex, projectId: string) => {
   await t.withIdentity({ subject: owner }).mutation(api.projects.createOwnedRoom, { projectId });
@@ -49,7 +61,7 @@ const projectRevision = async (t: TestConvex, projectId: string) => await t.run(
   await ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).unique()
 )?.revision);
 
-test("phase 3B-1 device row helpers preserve rows without advancing revision", async () => {
+test("device row mutations stamp rows and advance the project once per edit", async () => {
   const t = newTest();
   const projectId = "phase-3b1-device-project";
   await createProject(t, projectId);
@@ -81,7 +93,7 @@ test("phase 3B-1 device row helpers preserve rows without advancing revision", a
     targetType: "track",
     trackId,
     order: [{ id: "gate-1", kind: "gate" }, { id: "utility-1", kind: "utility" }],
-  }))).toEqual({ changed: true, status: "applied", revision: 1 });
+  }))).toEqual({ changed: true, status: "applied", revision: 3 });
 
   expect(await t.run(async (ctx) => await setTrackInstrumentRow(ctx, {
     projectId,
@@ -131,7 +143,7 @@ test("phase 3B-1 device row helpers preserve rows without advancing revision", a
     effect: "utility",
     instanceId: "utility-1",
   }))).toMatchObject({ changed: true, status: "deleted", effectId: utility.effectId });
-  expect(await projectRevision(t, projectId)).toBe(0);
+  expect(await projectRevision(t, projectId)).toBe(6);
   expect(await t.run(async (ctx) => {
     const rows = await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", trackId)).collect();
     const arpeggiator = rows.find((row) => row.type === "arpeggiator");
@@ -172,7 +184,7 @@ test("phase 3B-1 device row helpers preserve rows without advancing revision", a
       state: { ...gateParams.state, thresholdDb: -20 },
     },
   });
-  expect(await projectRevision(t, projectId)).toBe(1);
+  expect(await projectRevision(t, projectId)).toBe(7);
 });
 
 test("device setters consolidate canonical, legacy, and duplicate device rows", async () => {
@@ -235,7 +247,7 @@ test("device setters consolidate canonical, legacy, and duplicate device rows", 
     ]);
 });
 
-test("phase 3B-1 automation row helpers stay revision-free while wrappers version writes", async () => {
+test("automation row helpers stay revision-free while owning mutations version writes", async () => {
   const t = newTest();
   const projectId = "phase-3b1-automation-project";
   await createProject(t, projectId);
@@ -262,11 +274,11 @@ test("phase 3B-1 automation row helpers stay revision-free while wrappers versio
   const created = await t.run(async (ctx) => await setAutomationEnvelopeRow(ctx, input));
   expect(created).toMatchObject({ changed: true, status: "created" });
   expect(created.envelopeId).toBeDefined();
-  expect(await projectRevision(t, projectId)).toBe(0);
+  expect(await projectRevision(t, projectId)).toBe(1);
 
   const noop = await t.run(async (ctx) => await setAutomationEnvelopeRow(ctx, input));
   expect(noop).toEqual({ changed: false, status: "noop", envelopeId: created.envelopeId });
-  expect(await projectRevision(t, projectId)).toBe(0);
+  expect(await projectRevision(t, projectId)).toBe(1);
 
   await t.withIdentity({ subject: owner }).mutation(api.automation.serverSetEnvelope, {
     ...input,
@@ -274,7 +286,7 @@ test("phase 3B-1 automation row helpers stay revision-free while wrappers versio
     points: [{ id: "point-1", timeSec: 0, value: -20, interpolation: "linear" }],
     updatedAt: 1,
   });
-  expect(await projectRevision(t, projectId)).toBe(1);
+  expect(await projectRevision(t, projectId)).toBe(2);
 
   expect(await t.run(async (ctx) => await deleteAutomationEnvelopeRow(ctx, {
     projectId,
@@ -283,7 +295,7 @@ test("phase 3B-1 automation row helpers stay revision-free while wrappers versio
     effectInstanceId: "gate-1",
     parameterId: "gate.thresholdDb",
   }))).toEqual({ changed: true, status: "deleted", envelopeId: created.envelopeId });
-  expect(await projectRevision(t, projectId)).toBe(1);
+  expect(await projectRevision(t, projectId)).toBe(2);
 });
 
 const effectRevisions = async (t: TestConvex, trackId: Parameters<typeof upsertTrackEffectRow>[1]["trackId"]) => {
@@ -295,27 +307,25 @@ const effectRevisions = async (t: TestConvex, trackId: Parameters<typeof upsertT
     .sort((left, right) => left[0].localeCompare(right[0]));
 };
 
-test("row helpers stamp the prospective project revision and never advance it", async () => {
+test("a project edit stamps all effect rows and advances the project once", async () => {
   const t = newTest();
   const projectId = "phase-3b1-stamp-project";
   await createProject(t, projectId);
   const trackId = await seedTrack(t, projectId);
 
-  // Two helper calls in one transaction share the one revision their owner will advance to.
-  const [utility, gate] = await t.run(async (ctx) => [
-    await upsertTrackEffectRow(ctx, {
+  const [utility, gate] = await t.run(async (ctx) => await withProjectEdit(ctx, projectId, async (edit) => [
+    await writeTrackEffectRow(ctx, edit, {
       projectId, trackId, type: "utility", instanceId: "utility-1", params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams(),
     }),
-    await upsertTrackEffectRow(ctx, {
+    await writeTrackEffectRow(ctx, edit, {
       projectId, trackId, type: "gate", instanceId: "gate-1", params: AUDIO_EFFECT_CONTRACTS.gate.createDefaultParams(),
     }),
-  ]);
+  ]));
   expect(utility).toMatchObject({ changed: true, status: "created", revision: 1 });
   expect(gate).toMatchObject({ changed: true, status: "created", revision: 1 });
-  expect(await projectRevision(t, projectId)).toBe(0);
+  expect(await projectRevision(t, projectId)).toBe(1);
   expect(await effectRevisions(t, trackId)).toEqual([["gate-1", 1], ["utility-1", 1]]);
 
-  // A no-op reports the row's own stamp and does not rewrite it.
   await t.run(async (ctx) => {
     const project = await ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).unique();
     if (project) await ctx.db.patch(project._id, { revision: 5 });
@@ -325,13 +335,12 @@ test("row helpers stamp the prospective project revision and never advance it", 
   }))).toMatchObject({ changed: false, status: "noop", revision: 1 });
   expect(await effectRevisions(t, trackId)).toEqual([["gate-1", 1], ["utility-1", 1]]);
 
-  // A reorder stamps exactly the rows whose index it wrote.
   expect(await t.run(async (ctx) => await reorderAudioEffectRows(ctx, {
     projectId, targetType: "track", trackId,
     order: [{ id: "gate-1", kind: "gate" }, { id: "utility-1", kind: "utility" }],
   }))).toEqual({ changed: true, status: "applied", revision: 6 });
   expect(await effectRevisions(t, trackId)).toEqual([["gate-1", 6], ["utility-1", 6]]);
-  expect(await projectRevision(t, projectId)).toBe(5);
+  expect(await projectRevision(t, projectId)).toBe(6);
 });
 
 test("a caller cannot supply the stamp a helper writes", async () => {

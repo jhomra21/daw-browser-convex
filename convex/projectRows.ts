@@ -3,6 +3,11 @@ import { hasActiveR2DeleteRows } from "./r2Deletes";
 
 type ProjectRowReadCtx = { db: DatabaseReader };
 
+export type ProjectEdit = {
+  revision: number;
+  stamp: () => number;
+};
+
 export function requireUnambiguousProjectOwnershipMarker(
   ownerships: ReadonlyArray<{ trackId?: unknown; clipId?: unknown }>,
 ) {
@@ -28,6 +33,27 @@ export async function requireProjectRow(
   const project = await getProjectRow(ctx, projectId);
   if (!project) throw new Error("Project not found.");
   return project;
+}
+
+export async function withProjectEdit<Value>(
+  ctx: MutationCtx,
+  projectId: string,
+  run: (edit: ProjectEdit) => Promise<Value>,
+): Promise<Value> {
+  const project = await requireProjectRow(ctx, projectId);
+  const revision = project.revision + 1;
+  let stamped = false;
+  try {
+    return await run({
+      revision,
+      stamp: () => {
+        stamped = true;
+        return revision;
+      },
+    });
+  } finally {
+    if (stamped) await ctx.db.patch(project._id, { revision, updatedAt: Date.now() });
+  }
 }
 
 export async function ensureOwnedProjectRow(
@@ -75,14 +101,6 @@ export async function ensureOwnedProjectRow(
   return { status: "created" as const, project: created };
 }
 
-// The revision the owning mutation's single advance will produce. Row writers stamp it; only the owner advances.
-export async function prospectiveRevision(
-  ctx: ProjectRowReadCtx,
-  projectId: string,
-) {
-  return (await requireProjectRow(ctx, projectId)).revision + 1;
-}
-
 export async function advanceProjectRevision(
   ctx: MutationCtx,
   projectId: string,
@@ -94,13 +112,4 @@ export async function advanceProjectRevision(
     updatedAt,
   });
   return { revision: project.revision + 1, updatedAt };
-}
-
-export function assertEffectWriterRevisions(
-  revisions: readonly number[],
-  ownerRevision: number,
-) {
-  if (revisions.some((revision) => revision !== ownerRevision)) {
-    throw new Error("Effect row stamp diverged from the owning project revision.");
-  }
 }

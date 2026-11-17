@@ -1886,14 +1886,12 @@ test("recovery restore, undo and redo stamp the rows they write with their own r
   expect(await projectRevisionOf(t)).toBe(1);
   expect(await effectStamps(t, trackId)).toEqual([]);
 
-  // Undo: the recovery recreates the row inside one transaction that advances the project once.
   await user.mutation(api.control.commitV1, {
     request: request([{ kind: "recovery.restore", recovery: { id: deleted.recoveries[0]?.id } }], "stamp-undo"),
   });
   expect(await projectRevisionOf(t)).toBe(2);
   expect(await effectStamps(t, trackId)).toEqual([["recover-utility", 2]]);
 
-  // Redo: remove again, then restore again; the new row carries the later revision.
   const restoredId = (await t.run(async (ctx) => (
     await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", trackId)).collect()
   )))[0]?._id;

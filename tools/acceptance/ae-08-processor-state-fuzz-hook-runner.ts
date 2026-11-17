@@ -36,6 +36,7 @@ export default async function runHookCampaign(argv = process.argv) {
     "src/lib/desktop/native-playback-controller.ts", "src/lib/local-effects.ts",
     "src/lib/desktop/native-publication-transaction.ts", "src/lib/desktop/native-schedule-publication.ts",
     "src/lib/desktop/native-observation.ts", "src/lib/desktop/native-recording-session.ts",
+    "src/lib/desktop/native-live-midi.ts",
     "src/lib/desktop/native-processor-state-owner.ts", "src/lib/desktop/native-built-in-parameter-mapper.ts",
     "src/lib/live-processor-control.ts", "src/components/timeline/create-processor-edit-registry.ts",
     "src/components/timeline/create-timeline-effect-commit.ts",

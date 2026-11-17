@@ -117,6 +117,7 @@ import {
   type ScheduleRevisionCandidate,
   type ScheduleSession,
 } from "./native-schedule-publication"
+import { createNativeLiveMidi } from "./native-live-midi"
 import { createNativeObservation } from "./native-observation"
 import { createNativeRecording } from "./native-recording-session"
 import { createNativeTimelinePageManager, nativeTimelinePageStagingBytes, type NativeTimelinePageManager, type NativeTimelineSource } from "./native-timeline-page-manager"
@@ -124,13 +125,6 @@ import { createSampledInstrumentRegionBudget, type SampledInstrumentRegionBudget
 import type { NativeInstrumentPreparation } from "./native-instrument-budget-policy"
 
 type NativePreviewAttempt = { orphanedAssetIds?: readonly number[] }
-
-export type NativeLiveMidiNoteHandle = {
-  backend: "native"
-  trackId: string
-  pitch: number
-  noteId: number
-}
 
 type NativePlaybackDiagnosticFailure = Error | string | null | undefined
 
@@ -355,14 +349,6 @@ export const nativePlaybackFaultText = (fault: NativePlaybackFault) => {
     case "session-stopped": return fault.message
   }
 }
-type LiveNoteReadiness = {
-  promise: Promise<void>
-  released: boolean
-  force: boolean
-  noteOnQueued: boolean
-  releaseQueued: boolean
-}
-
 const planarPageBytes = (
   planes: readonly Float32Array[],
   startFrame: number,
@@ -836,19 +822,25 @@ export const createNativePlaybackController = (input: {
   let maximumFramesPerBlock = 0
   let transportFrame = 0
   let loopAppliesAtTransportPosition = true
-  let nextLiveNoteId = 1
-  let nextLiveEventSequence = 1_000_000
-  let liveInstrumentQueueGeneration = 0
-  let liveInstrumentEventTail = Promise.resolve()
   let preparedTransportTransitionGeneration = 0
   let loopUpdateSequence = 0
   let pendingLoopUpdates = 0
   let drainingStatePatches = false
-  const liveNoteReadiness = new Map<number, LiveNoteReadiness>()
-  const releasedLiveNoteHandles = new WeakSet<NativeLiveMidiNoteHandle>()
-  let liveMidiTailOwned = false
+  const liveMidi = createNativeLiveMidi({
+    bridge: input.bridge,
+    state: () => ({
+      hostLost: hasNativeHostConnectionLoss(),
+      livePreviewActive,
+      sampleRate,
+      transportEpoch,
+      preparedTracks: preparedSnapshot?.tracks,
+      preparedNodes: preparedGraph?.nodes,
+    }),
+    observeControl: (operation) => observeRetirementControl(operation),
+    reportStopped: (message) => reportStopped(message),
+    ensureLivePreview: (playheadSec) => ensureLivePreview(playheadSec),
+  })
   let scheduleCoordinator: NativeScheduleCoordinator | undefined
-  const nativeLiveMidiResetListeners = new Set<() => void>()
   const nativeRecording = createNativeRecording({
     bridge: input.bridge,
     importRecordingSpool: input.importRecordingSpool,
@@ -1229,8 +1221,7 @@ export const createNativePlaybackController = (input: {
     nativeLatencyCompletionGeneration = 0n
     disposeKept(processorState.clear())
     scheduleCandidates.clear()
-    liveInstrumentQueueGeneration += 1
-    liveInstrumentEventTail = Promise.resolve()
+    liveMidi.restartQueue()
     if (!preservePendingStart) {
       pendingStart = undefined
       pendingStartMode = undefined
@@ -1262,9 +1253,7 @@ export const createNativePlaybackController = (input: {
     loopAppliesAtTransportPosition = true
     nativeSessionStarted = false
     livePreviewActive = false
-    for (const listener of nativeLiveMidiResetListeners) listener()
-    liveNoteReadiness.clear()
-    liveMidiTailOwned = false
+    liveMidi.reset()
     scheduleCoordinator?.dispose()
     scheduleCoordinator = undefined
     observation.clear()
@@ -1653,7 +1642,7 @@ export const createNativePlaybackController = (input: {
       prepared = false
       nativeSessionStarted = false
       livePreviewActive = false
-      liveInstrumentQueueGeneration += 1
+      liveMidi.supersedeEvents()
       preparedProjectGeneration = undefined
       preparedProjectId = undefined
       preparedSnapshot = undefined
@@ -2478,8 +2467,8 @@ export const createNativePlaybackController = (input: {
           .filter((node) => node.kind === "instrument")
           .map((node) => node.id) ?? []
         const releasePromises = instrumentNodeIds.map((nodeId) => {
-          const sequence = nextLiveEventSequence++
-          return queueLiveInstrumentEvent({
+          const sequence = liveMidi.nextEventSequence()
+          return liveMidi.queueEvent({
             nodeId,
             noteId: 1,
             sequence,
@@ -2608,34 +2597,6 @@ export const createNativePlaybackController = (input: {
     } finally { pendingLoopUpdates-- }
   }
 
-  const queueLiveInstrumentEvent = (event: NativeInstrumentEvent) => {
-    const bridge = input.bridge
-    if (!bridge || hasNativeHostConnectionLoss() || !livePreviewActive || sampleRate === 0) return Promise.resolve(false)
-    const generation = liveInstrumentQueueGeneration
-    const bytes = serializeNativeInstrumentEvents(transportEpoch, [event])
-    const queued = liveInstrumentEventTail.then(async () => {
-      if (
-        generation !== liveInstrumentQueueGeneration
-        || !input.bridge
-        || hasNativeHostConnectionLoss()
-        || !livePreviewActive
-        || sampleRate === 0
-      ) return false
-      try {
-        const reply = await observeRetirementControl(bridge.session.queueInstrumentEvents(bytes))
-        if (!reply.ok && generation === liveInstrumentQueueGeneration) reportStopped(reply.error)
-        return reply.ok
-      } catch (error: unknown) {
-        if (generation === liveInstrumentQueueGeneration && livePreviewActive) {
-          reportStopped(error instanceof Error ? error.message : "Native live MIDI event failed.")
-        }
-        return false
-      }
-    }).catch(() => undefined)
-    liveInstrumentEventTail = queued.then(() => undefined)
-    return queued
-  }
-
   const epochApplied = (epoch: number | undefined) => epoch === undefined || (latestScheduleProgress?.epoch ?? 0) >= epoch
 
   const queueBuiltInParameterEvents = async (request: {
@@ -2666,9 +2627,9 @@ export const createNativePlaybackController = (input: {
       try {
         if (parameters.length === 0) return { ok: true }
         const events: NativeInstrumentEvent[] = parameters.map(({ target, value }) => ({
-          nodeId: node.id, type: "parameter", noteId: 1, sequence: nextLiveEventSequence++, frameOffset: 0, channel: 0, note: target, value,
+          nodeId: node.id, type: "parameter", noteId: 1, sequence: liveMidi.nextEventSequence(), frameOffset: 0, channel: 0, note: target, value,
         }))
-        if (request.execution && !processorState.send(request.execution, request.execution.sequence, nextLiveEventSequence - 1))
+        if (request.execution && !processorState.send(request.execution, request.execution.sequence, liveMidi.lastEventSequence()))
           return { ok: false, kind: "not-sent", reason: "stale" }
         return await observeRetirementControl(bridge.session.queueInstrumentEvents(serializeNativeInstrumentEvents(transportEpoch, events)))
       } catch (error) {
@@ -3759,115 +3720,6 @@ export const createNativePlaybackController = (input: {
     while (await queuePreparedTransportTransition(runNextStatePatch)) continue
   }
 
-  const startLiveMidiNote = (note: {
-    trackId: string
-    pitch: number
-    velocity: number
-    playheadSec?: number
-  }): NativeLiveMidiNoteHandle | undefined => {
-    if (!input.bridge || hasNativeHostConnectionLoss() || !Number.isInteger(note.pitch) || note.pitch < 0 || note.pitch > 127
-      || !Number.isFinite(note.velocity) || note.velocity < 0 || note.velocity > 1) return undefined
-    if (preparedSnapshot && !preparedSnapshot.tracks.some((track) => track.id === note.trackId)) {
-      return undefined
-    }
-    if (preparedGraph && !preparedGraph.nodes.some((node) => (
-      node.id === note.trackId && node.kind === "instrument"
-    ))) {
-      return undefined
-    }
-    const noteId = nextLiveNoteId++
-    const wasReady = livePreviewActive
-    const queueNoteOn = () => queueLiveInstrumentEvent({
-        nodeId: note.trackId,
-        noteId,
-        sequence: nextLiveEventSequence++,
-        frameOffset: 0,
-        type: "live-note-on",
-        channel: 0,
-        note: note.pitch,
-        value: note.velocity,
-      })
-    const readiness: LiveNoteReadiness = {
-      promise: Promise.resolve(),
-      released: false,
-      force: false,
-      noteOnQueued: false,
-      releaseQueued: false,
-    }
-    const queueRelease = () => {
-      if (!readiness.noteOnQueued || readiness.releaseQueued) return
-      readiness.releaseQueued = true
-      void queueLiveInstrumentEvent({
-        nodeId: note.trackId,
-        noteId,
-        sequence: nextLiveEventSequence++,
-        frameOffset: 0,
-        type: "live-note-off",
-        channel: 0,
-        note: note.pitch,
-        value: 0,
-      }).finally(() => {
-        liveNoteReadiness.delete(noteId)
-      })
-    }
-    const queueAfterPreparation = async (result: NativeStartResult) => {
-      const instrument = preparedGraph?.nodes.find((node) => node.id === note.trackId)?.instrument
-      if (
-        result !== "started"
-        || readiness.force
-        || (!wasReady && instrument?.kind !== "synth")
-        || !preparedSnapshot?.tracks.some((track) => track.id === note.trackId)
-        || !preparedGraph?.nodes.some((node) => (
-          node.id === note.trackId && node.kind === "instrument"
-        ))
-      ) {
-        liveNoteReadiness.delete(noteId)
-        return
-      }
-      readiness.noteOnQueued = (await queueNoteOn()) === true
-      if (readiness.noteOnQueued) liveMidiTailOwned = true
-      if (readiness.released && readiness.noteOnQueued) queueRelease()
-      else liveNoteReadiness.delete(noteId)
-    }
-    readiness.promise = (livePreviewActive
-      ? queueAfterPreparation("started")
-      : ensureLivePreview(note.playheadSec ?? 0).then(queueAfterPreparation)
-    ).catch(() => {
-      liveNoteReadiness.delete(noteId)
-    })
-    liveNoteReadiness.set(noteId, readiness)
-    return { backend: "native", trackId: note.trackId, pitch: note.pitch, noteId }
-  }
-
-  const releaseLiveMidiNote = (handle: NativeLiveMidiNoteHandle, force = false) => {
-    if (handle.backend !== "native" || !input.bridge) return
-    if (releasedLiveNoteHandles.has(handle)) return
-    releasedLiveNoteHandles.add(handle)
-    const readiness = liveNoteReadiness.get(handle.noteId)
-    if (readiness) {
-      readiness.released = true
-      readiness.force = force
-      void readiness.promise
-      return
-    }
-    if (!livePreviewActive) return
-    void queueLiveInstrumentEvent({
-      nodeId: handle.trackId,
-      noteId: handle.noteId,
-      sequence: nextLiveEventSequence++,
-      frameOffset: 0,
-      type: "live-note-off",
-      channel: 0,
-      note: handle.pitch,
-      value: 0,
-    })
-  }
-
-  const subscribeNativeLiveMidiReset = (listener: () => void) => {
-    nativeLiveMidiResetListeners.add(listener)
-    return () => nativeLiveMidiResetListeners.delete(listener)
-  }
-
   const currentPositionSec = () => {
     if (sampleRate <= 0) return undefined
     const loop = preparedSnapshot && loopAppliesAtTransportPosition
@@ -3891,7 +3743,7 @@ export const createNativePlaybackController = (input: {
     isActive: () => active,
     isAvailable: () => input.bridge !== undefined && !hasNativeHostConnectionLoss(),
     canProcessLiveMidi: () => livePreviewActive,
-    hasLiveMidiTails: () => liveMidiTailOwned,
+    hasLiveMidiTails: liveMidi.hasTails,
     isPrepared: () => prepared,
     preparedInstrumentIdentity: (targetId: string) => {
       if (!preparedGraph) return undefined
@@ -3937,9 +3789,9 @@ export const createNativePlaybackController = (input: {
       // Compiled schedule candidates not yet published or disposed: a candidate that outlives its attempt keeps its stretched assets.
       liveScheduleCandidates: () => scheduleCandidates.size,
     },
-    startLiveMidiNote,
-    releaseLiveMidiNote,
-    subscribeNativeLiveMidiReset,
+    startLiveMidiNote: liveMidi.startNote,
+    releaseLiveMidiNote: liveMidi.releaseNote,
+    subscribeNativeLiveMidiReset: liveMidi.subscribeReset,
     subscribeTrackMeters: observation.subscribeTrackMeters,
     subscribeMasterMeter: observation.subscribeMasterMeter,
     subscribeSpectrum: observation.subscribeSpectrum,

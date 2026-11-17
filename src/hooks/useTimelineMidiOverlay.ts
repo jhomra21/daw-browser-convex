@@ -16,7 +16,7 @@ import { createLiveMidiArpeggiator, type LiveMidiArpeggiatorRelease } from '~/li
 import { createAuditionReleaseTimerOwnership } from '~/lib/audition-release-timer-ownership'
 
 import type { TimelineSelectionController } from './useTimelineSelectionState'
-import type { NativeLiveMidiNoteHandle } from '~/lib/desktop/native-playback-controller'
+import type { NativeLiveMidiNoteHandle } from '~/lib/desktop/native-live-midi'
 
 type UseTimelineMidiOverlayOptions = {
   audioEngine: AudioEngine

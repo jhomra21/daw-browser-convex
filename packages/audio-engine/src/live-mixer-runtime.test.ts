@@ -453,8 +453,47 @@ describe('track effect chain delivery', () => {
       workletBudget,
       transitionScheduler: timers.scheduler,
     })
-    return { audio, runtime, budget: counting.budget, begins: counting.begins, timers }
+    return { audio, runtime, budget: counting.budget, begins: counting.begins, refuseCommits: counting.refuseCommits, timers }
   }
+
+  test('a single-instance edit the budget refuses to commit is dropped and written again by the resend', async () => {
+    const { runtime, refuseCommits } = createChainRuntime()
+    await runtime.setTrackFxInstances('track-1', [compressorInstance(-24)])
+    refuseCommits(true)
+    expect(await runtime.setTrackFxInstances('track-1', [compressorInstance(-10)])).toBe('dropped')
+    refuseCommits(false)
+
+    expect(await runtime.setTrackFxInstances('track-1', [compressorInstance(-10)])).toBe('applied')
+  })
+
+  test('a chain over the worklet limit rejects and keeps the installed chain', async () => {
+    const f = createFxTransitionHarness('track')
+    try {
+      await f.set([eqInstance(0, 'e')])
+      const gates = Array.from({ length: 9 }, (_, index) => staticGateInstance(-40, 4, `g${index}`))
+      expect((await Promise.allSettled([f.set(gates)]))[0]?.status).toBe('rejected')
+      expect((await f.set([eqInstance(0, 'e')])).disposition).toBe('skipped')
+    } finally {
+      f.close()
+    }
+  })
+
+  test('a meter subscribed before the chain installs receives frames from the installed gate', async () => {
+    const f = createFxTransitionHarness('track')
+    const frames: number[] = []
+    const unsubscribe = f.track.subscribeTrackGateMeter('t', 'g', (frame) => frames.push(frame.gainReductionDb))
+    try {
+      await f.set([staticGateInstance(-40, 4, 'g')])
+      f.timers.run()
+      const onmessage = f.audio.workletNode(0)?.port.onmessage
+      if (!onmessage) throw new Error('No meter port callback.')
+      onmessage(new MessageEvent('message', { data: { type: 'meter', gainReductionDb: 5 } }))
+      expect(frames).toContain(5)
+    } finally {
+      unsubscribe()
+      f.close()
+    }
+  })
 
   test('re-applies the installed compressor value over an in-flight tick', async () => {
     const { audio, runtime } = createChainRuntime()

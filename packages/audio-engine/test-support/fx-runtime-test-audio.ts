@@ -299,6 +299,7 @@ export const createCountingBudget = (refuseCommit = false) => {
       commit: (...args: Parameters<typeof budget.commit>) => !refuseCommit && budget.commit(...args),
     },
     begins: () => begins,
+    refuseCommits: (refuse: boolean) => { refuseCommit = refuse },
   }
 }
 

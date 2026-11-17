@@ -222,8 +222,47 @@ describe('master effect chain delivery', () => {
     cleanups.push(audio.restore, runtime.close, timers.restore)
     const set = (instances: Parameters<typeof runtime.setFxInstances>[3]) =>
       runtime.setFxInstances(audio.context, audio.masterInput, audio.context.destination, instances)
-    return { audio, runtime, set, begins: counting.begins, timers }
+    return { audio, runtime, set, begins: counting.begins, refuseCommits: counting.refuseCommits, timers }
   }
+
+  test('a single-instance edit the budget refuses to commit is dropped and written again by the resend', async () => {
+    const { set, refuseCommits } = createChainRuntime()
+    await set([compressorInstance(-24)])
+    refuseCommits(true)
+    expect((await set([compressorInstance(-10)])).disposition).toBe('dropped')
+    refuseCommits(false)
+
+    expect((await set([compressorInstance(-10)])).disposition).toBe('applied')
+  })
+
+  test('a chain over the worklet limit rejects and keeps the installed chain', async () => {
+    const f = createFxTransitionHarness('master')
+    try {
+      await f.set([eqInstance(0, 'e')])
+      const gates = Array.from({ length: 9 }, (_, index) => staticGateInstance(-40, 4, `g${index}`))
+      expect((await Promise.allSettled([f.set(gates)]))[0]?.status).toBe('rejected')
+      expect((await f.set([eqInstance(0, 'e')])).disposition).toBe('skipped')
+    } finally {
+      f.close()
+    }
+  })
+
+  test('a meter subscribed before the chain installs receives frames from the installed gate', async () => {
+    const f = createFxTransitionHarness('master')
+    const frames: number[] = []
+    const unsubscribe = f.master.subscribeGateMeter('g', (frame) => frames.push(frame.gainReductionDb))
+    try {
+      await f.set([staticGateInstance(-40, 4, 'g')])
+      f.timers.run()
+      const onmessage = f.audio.workletNode(0)?.port.onmessage
+      if (!onmessage) throw new Error('No meter port callback.')
+      onmessage(new MessageEvent('message', { data: { type: 'meter', gainReductionDb: 5 } }))
+      expect(frames).toContain(5)
+    } finally {
+      unsubscribe()
+      f.close()
+    }
+  })
 
   test('re-applies the installed compressor value over an in-flight tick', async () => {
     const { audio, set, timers } = createChainRuntime()

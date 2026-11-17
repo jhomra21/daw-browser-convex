@@ -2308,27 +2308,22 @@
      "30000",
      "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts",
      "-t",
-     "B5c3 known-red simultaneous release"
+     "B5c3 simultaneous releases are each undoable"
     ],
     "alarmSeconds": 180,
-    "env": {
-     "DV01_B5_STRICT_HISTORY": "1"
-    },
+    "env": {},
     "evidence": true,
     "rc7Seconds": 0.38
    },
    "judge": {
     "kind": "tests",
-    "exit": 1,
+    "exit": 0,
     "counts": {
-     "pass": 0,
+     "pass": 2,
      "skip": 0,
-     "fail": 2
+     "fail": 0
     },
-    "fails": [
-     "B5c3 known-red simultaneous release, local track=false, closed and unselected",
-     "B5c3 known-red simultaneous release, local track=true, closed and unselected"
-    ],
+    "fails": [],
     "appended": null
    }
   },
@@ -3010,27 +3005,22 @@
      "30000",
      "/Users/juan/Documents/daw-browser-convex/src/hooks/useEffectsPanelAudioSync.test.ts",
      "-t",
-     "B5c3 known-red simultaneous release"
+     "B5c3 simultaneous releases are each undoable"
     ],
     "alarmSeconds": 180,
-    "env": {
-     "DV01_B5_STRICT_HISTORY": "1"
-    },
+    "env": {},
     "evidence": true,
     "rc7Seconds": 0.405
    },
    "judge": {
     "kind": "tests",
-    "exit": 1,
+    "exit": 0,
     "counts": {
-     "pass": 0,
+     "pass": 2,
      "skip": 0,
-     "fail": 2
+     "fail": 0
     },
-    "fails": [
-     "B5c3 known-red simultaneous release, local track=false, closed and unselected",
-     "B5c3 known-red simultaneous release, local track=true, closed and unselected"
-    ],
+    "fails": [],
     "appended": null
    }
   },

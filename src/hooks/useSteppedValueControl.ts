@@ -53,7 +53,6 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
   const wheelGesture = useParameterGesture({ idleMs: WHEEL_IDLE_MS })
   const visualValue = () => dragValue() ?? options.value()
   const normalizeValue = (value: number) => quantizeSteppedValue(value, options.min(), options.max(), options.step())
-  // Drag and key hold show their own value until the gesture ends, so the control never lags the pointer.
   const show = (value: number) => {
     const finalValue = normalizeValue(value)
     setDragValue(finalValue)
@@ -65,7 +64,6 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
   }
   const cancelGesture = (restore = true) => {
     gesture.cancel()
-    // Without an owner nothing restores the value for us.
     if (restore && !gesture.owned) options.onValueChange(gestureStartValue)
     setDragValue(null)
   }
@@ -99,7 +97,6 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
     if (options.disabled()) return
     // macOS can swallow keyup while Cmd is held, which would leave a keyboard hold open.
     if (event.metaKey || event.ctrlKey || event.altKey) return
-    // Escape abandons whatever this control holds open, whichever input source opened it.
     if (event.key === 'Escape' && (gesture.isOpen() || wheelGesture.isOpen()) && !drag.isDragging()) {
       event.preventDefault()
       event.stopPropagation()
@@ -146,7 +143,6 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
     const next = normalizeValue(visualValue() + (event.deltaY < 0 ? options.step() : -options.step()))
     wheelGesture.tick(() => options.onValueChange(next))
   }
-  // Reset and typed entry are one edit: open, move, close.
   const commitValue = (value: number) => {
     gesture.once(() => options.onValueChange(normalizeValue(value)))
   }

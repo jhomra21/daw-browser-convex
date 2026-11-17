@@ -28,7 +28,6 @@ type UseTimelineMidiOverlayOptions = {
   playheadSec: Accessor<number>
   selection: TimelineSelectionController
   activeRecordingTargetId?: Accessor<string | null>
-  // Clip shown in the docked MIDI editor (bottom panel Clip tab), or null when none is shown.
   dockedMidiClipId: Accessor<string | null>
   nativeLiveMidi?: {
     isActive: () => boolean
@@ -83,7 +82,6 @@ export function useTimelineMidiOverlay(
     return projectMidiProjectTracks(options.projectId(), options.tracks())
   })
   const trackIndex = createMemo(() => createTimelineTrackIndex(projectedTracks()))
-  // Derived, so a docked clip that is gone or lost its MIDI resolves to null.
   const midiEditorClipId = createMemo(() => {
     const clipId = options.dockedMidiClipId()
     return clipId && trackIndex().clipEntryById.get(clipId)?.clip.midi ? clipId : null

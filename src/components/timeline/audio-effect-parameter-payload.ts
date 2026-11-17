@@ -14,8 +14,6 @@ import {
 } from "@daw-browser/shared";
 import type { NativeBuiltInParameterPayload } from "~/lib/desktop/native-built-in-parameter-mapper";
 
-// The one builder of a typed parameter payload from a stored audio-effect value,
-// shared by the panel's writes and the Timeline's effective-projection capture.
 export const createAudioEffectParameterPayload = (
   interaction: { targetId: string; instanceId: string; kind: AudioEffectKind },
   from: JsonValue | undefined,

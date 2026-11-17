@@ -485,7 +485,6 @@ function changedMidiNoteFields(current: MidiEditorNote, target: MidiEditorNote) 
   return changes
 }
 
-// Undo moves each note to `before`, redo to `after`. A note present on only one side is deleted or inserted.
 function midiNoteReplayOperation(change: MidiNoteHistoryChange, direction: HistoryDirection): MidiEditorOperation {
   const target = pickDirectionalValue(direction, change.before, change.after)
   const current = pickDirectionalValue(direction, change.after, change.before)

@@ -577,7 +577,6 @@ const applyEffectsProjectionToFx = (fx: ExportFx, projection: ExportEffectsProje
   applyProjectedEffectRowsToFx(fx, projection.upsertDeviceRows)
 }
 
-/** Synchronous desired-model read for native adoption, without persistence I/O. */
 export const resolveDesiredPlaybackFx = (
   previous: ExportFx,
   projection: ExportEffectsProjection | undefined,

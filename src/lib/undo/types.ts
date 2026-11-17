@@ -285,7 +285,6 @@ export type HistoryEntry =
       }
     }
   | {
-      // Notes changed by one MIDI editor edit, keyed by note id. Undo and redo replay them as insert, update, and delete.
       type: 'clip-midi-notes'
       projectId: string
       data: {

@@ -508,7 +508,6 @@ function diffMidiNotesById(from: MidiEditorNote[], to: MidiEditorNote[]): MidiNo
     .filter(({ before, after }) => !(before && after && midiNotesEqual(before, after)))
 }
 
-// Returns undefined when no note changed, so the caller pushes no history entry.
 export function buildClipMidiNotesHistoryEntry(input: {
   projectId: string
   clip: Track['clips'][number]

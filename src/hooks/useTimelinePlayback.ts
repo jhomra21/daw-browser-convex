@@ -994,7 +994,11 @@ export function useTimelinePlayback(
       if (intent !== transportIntentToken) return
       if (seek === nativeSeekSequence) return handleStop()
       const located = untrack(playheadSec)
-      await handlePause()
+      const pause = handlePause()
+      const pausedIntent = transportIntentToken
+      const pausedSeek = nativeSeekSequence
+      await pause
+      if (pausedIntent !== transportIntentToken || pausedSeek !== nativeSeekSequence) return
       setPlayhead(located, untrack(lastTracks))
     }
   }

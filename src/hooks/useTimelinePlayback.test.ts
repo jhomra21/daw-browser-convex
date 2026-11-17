@@ -2711,6 +2711,38 @@ test.skipIf(isServer)('a reserved Stop does not stop a Play pressed after it', a
   })
 })
 
+// The locate that made the reservation repeat a Pause is older than any seek or Play that arrives while that Pause runs.
+test.skipIf(isServer)('a reserved Stop does not replay its locate over a seek made while its Pause runs', async () => {
+  await withOutputDeviceSwitch(async ({ mount }) => {
+    const playback = mount({ outputDeviceId: () => "coreaudio:A" })
+    playback.setPlayhead(2, [track])
+    await playback.handlePlay([track])
+    const stop = playback.reserveStop()
+    playback.setPlayhead(20, [track])
+    const stopped = stop()
+    playback.setPlayhead(30, [track])
+    await stopped
+    expect(playback.isPlaying()).toBeFalse()
+    expect(playback.playheadSec()).toBe(30)
+  })
+})
+
+test.skipIf(isServer)('a reserved Stop does not replay its locate after a Play pressed while its Pause runs', async () => {
+  await withOutputDeviceSwitch(async ({ mount }) => {
+    const playback = mount({ outputDeviceId: () => "coreaudio:A" })
+    playback.setPlayhead(2, [track])
+    await playback.handlePlay([track])
+    const stop = playback.reserveStop()
+    playback.setPlayhead(20, [track])
+    const stopped = stop()
+    playback.setPlayhead(30, [track])
+    const played = playback.handlePlay([track])
+    await Promise.all([stopped, played])
+    expect(playback.isPlaying()).toBeTrue()
+    expect(playback.playheadSec()).toBe(30)
+  })
+})
+
 // The plug-in state the move reads is refused by the host, as for a session whose worker cannot answer.
 const withRefusedVstStateMove = (resumePlayback: boolean) => withOutputDeviceSwitch(async ({ fixture, requested, faults, mount }) => {
   const [outputId, setOutputId] = createSignal("coreaudio:A")

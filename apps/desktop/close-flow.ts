@@ -9,6 +9,14 @@ type CloseFlow = {
   finishQuit: () => Promise<void>
 }
 
+// A renderer that cannot flush is a failed preparation, which the user may discard; it is not a close error.
+export const prepareForClose = async (steps: { flushRenderer: () => Promise<boolean>; captureEditors: () => Promise<void> }) => {
+  let flushed: boolean
+  try { flushed = await steps.flushRenderer() } catch { return false }
+  await steps.captureEditors()
+  return flushed
+}
+
 export const createCloseHandler = (flow: CloseFlow) => {
   let inProgress = false
   return async () => {

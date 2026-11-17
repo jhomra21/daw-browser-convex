@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { createCloseHandler } from "./close-flow"
+import { createCloseHandler, prepareForClose } from "./close-flow"
 
 describe("desktop close flow", () => {
   test("keeps the window open when preparation fails and discard is cancelled", async () => {
@@ -84,6 +84,49 @@ describe("desktop close flow", () => {
     })
     await close()
     expect(events).toEqual(["error"])
+  })
+  test("a rejected renderer flush offers Quit and Discard instead of reporting a close error", async () => {
+    const events: string[] = []
+    const close = createCloseHandler({
+      waitForRecording: async () => true,
+      onError: () => { events.push("error") },
+      prepare: () => prepareForClose({
+        flushRenderer: async () => { throw new Error("Renderer deadline exceeded.") },
+        captureEditors: async () => { events.push("capture") },
+      }),
+      confirmDiscard: async () => { events.push("discard"); return false },
+      beginQuit: () => { events.push("beginQuit") },
+      destroy: () => { events.push("destroy") },
+      finishQuit: async () => { events.push("finishQuit") },
+    })
+    await close()
+    expect(events).toEqual(["discard"])
+  })
+  test("an editor capture failure after a successful flush still reports a close error", async () => {
+    const events: string[] = []
+    const close = createCloseHandler({
+      waitForRecording: async () => true,
+      onError: () => { events.push("error") },
+      prepare: () => prepareForClose({
+        flushRenderer: async () => true,
+        captureEditors: async () => { throw new Error("capture failed") },
+      }),
+      confirmDiscard: async () => { events.push("discard"); return true },
+      beginQuit: () => {},
+      destroy: () => { events.push("destroy") },
+      finishQuit: async () => {},
+    })
+    await close()
+    expect(events).toEqual(["error"])
+  })
+  test("an unflushed renderer reply still captures editors and then fails preparation", async () => {
+    const events: string[] = []
+    const prepared = await prepareForClose({
+      flushRenderer: async () => false,
+      captureEditors: async () => { events.push("capture") },
+    })
+    expect(prepared).toBe(false)
+    expect(events).toEqual(["capture"])
   })
   test("rechecks a newly accepted Finish after renderer close preparation", async () => {
     const events: string[] = []

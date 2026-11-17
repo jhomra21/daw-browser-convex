@@ -107,7 +107,7 @@ import {
 } from "@daw-browser/desktop-protocol/ipc-channels"
 import { createDesktopFrameDecoder, encodeDesktopFrame } from "@daw-browser/desktop-protocol/socket"
 import { serializeDesktopReply } from "@daw-browser/desktop-protocol/reply-chunks"
-import { createCloseHandler } from "./close-flow"
+import { createCloseHandler, prepareForClose } from "./close-flow"
 import { initializeRecordingSpoolRegistry, recordingSpoolReleaseSchema } from "./recording-spool"
 import { createRecordingSessionOwner } from "./recording-session-owner"
 import { createRecordingSpoolOrderEvidence } from "./recording-spool-evidence"
@@ -2239,11 +2239,10 @@ const createWindow = () => {
         detail: "The project remains open. Recording sources have not been discarded." })
     },
     prepareQuit,
-    prepare: async () => {
-      const reply = await renderRequest("lifecycle.prepareToClose", {}, randomUUID(), 10_000)
-      await nativeVst3EditorSessionManager?.captureAll()
-      return closePreparationResultSchema.safeParse(reply.result).success
-    },
+    prepare: () => prepareForClose({
+      flushRenderer: async () => closePreparationResultSchema.safeParse((await renderRequest("lifecycle.prepareToClose", {}, randomUUID(), 10_000)).result).success,
+      captureEditors: async () => { await nativeVst3EditorSessionManager?.captureAll() },
+    }),
     confirmDiscard: async () => {
       const choice = await dialog.showMessageBox(window_!, {
         type: "warning",

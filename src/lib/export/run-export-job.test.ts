@@ -1087,14 +1087,23 @@ test("native export accounts shared live PCM plus distinct offline mappings and 
   }
   const identity = sampledInstrumentRegionIdentity(sample, sampledInstrumentRegion(sample.source, 0, 8))
   const bytes = buffer.length * 2 * 4
-  const mappedBytes = Math.ceil(bytes / 16_384) * 16_384
-  const staging = 2 * 1024 ** 2
-  for (const headroom of [mappedBytes + staging, mappedBytes + staging - 1]) {
-    const budget = createSampledInstrumentRegionBudget(bytes + mappedBytes + headroom)
+  const liveMapping = bytes
+  const exportCharges: number[] = []
+  const runExport = async (capacity: number) => {
+    exportCharges.length = 0
+    const budget = createSampledInstrumentRegionBudget(capacity)
     const live = budget.createScope('live')
     live.lease([{ key: identity, buffer, bytes }], true)
-    live.set('native-live', mappedBytes, () => { throw new Error('Audible mapping was evicted.') })
+    live.set('native-live', liveMapping, () => { throw new Error('Audible mapping was evicted.') })
     const scope = budget.createScope('export')
+    // The export's mapping and staging charges are read off the scope it allocates through.
+    const recordingScope = {
+      ...scope,
+      set: (key: string, charge: number, onEvict: () => void, physical?: AudioBuffer) => {
+        if (key.startsWith('native-export-')) exportCharges.push(charge)
+        scope.set(key, charge, onEvict, physical)
+      },
+    }
     const fx: ExportFx = {
       masterFxInstances: [], masterVolume: 1,
       trackFx: { instrument: {
@@ -1102,22 +1111,32 @@ test("native export accounts shared live PCM plus distinct offline mappings and 
         granularBuffer: { assetKey: identity, buffer, sourceStartFrame: 0, sourceIdentity: identity },
       } },
     }
+    let failure: unknown
+    let held: number | undefined
     try {
-      const preload = loadInstrumentExportBuffers(fx, new AbortController().signal, undefined, undefined, scope, true)
-      if (headroom === mappedBytes + staging) {
-        await preload
-        expect(budget.totalBytes()).toBe(bytes + mappedBytes * 2 + staging)
-      } else {
-        await expect(preload).rejects.toThrow('Not enough sample memory to export')
-      }
+      await loadInstrumentExportBuffers(fx, new AbortController().signal, undefined, undefined, recordingScope, true)
+      held = budget.totalBytes()
+    } catch (error) {
+      failure = error
     } finally {
       scope.release()
     }
-    expect(budget.totalBytes()).toBe(bytes + mappedBytes)
-    expect(live.isLeased(buffer)).toBe(true)
+    const afterExport = budget.totalBytes()
+    const liveStillLeased = live.isLeased(buffer)
     live.release()
-    expect(budget.totalBytes()).toBe(0)
+    return { failure, held, afterExport, liveStillLeased, afterLive: budget.totalBytes() }
   }
+  const measured = await runExport(1024 ** 4)
+  const exportCharge = exportCharges.reduce((sum, charge) => sum + charge, 0)
+  expect(exportCharges.length).toBeGreaterThan(1)
+  expect(measured.held).toBe(bytes + liveMapping + exportCharge)
+  const capacity = bytes + liveMapping + exportCharge
+  const exact = await runExport(capacity)
+  expect(exact).toMatchObject({ failure: undefined, held: capacity, afterExport: bytes + liveMapping, liveStillLeased: true, afterLive: 0 })
+  const pressured = await runExport(capacity - 1)
+  expect(pressured.failure).toBeInstanceOf(Error)
+  expect(String(pressured.failure)).toContain('Not enough sample memory to export')
+  expect(pressured).toMatchObject({ held: undefined, afterExport: bytes + liveMapping, liveStillLeased: true, afterLive: 0 })
 })
 
 test("shared sampler and granular export consumers charge one physical region at the granular weight", async () => {

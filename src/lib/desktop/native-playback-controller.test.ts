@@ -46,7 +46,7 @@ import { compilePortableSynthState } from "@daw-browser/audio-engine/mixer/graph
 import { nativeInstrumentContentKey, type LiveProcessorControlRequest, type LiveProcessorEditIdentity, type ProcessorDeliveryOutcome, type ProcessorDelivery } from "~/lib/live-processor-control"
 import type { ParameterSaveResult } from "~/components/timeline/effect-publication-result"
 import type { NativeRevisionSession, NativeRevisionReply, NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
-import { publishDurableEffectsOperation, flushSharedOutbox, readSharedOutboxOperation } from "~/lib/shared-outbox"
+import { publishDurableEffectsOperation, publishDurableSharedTimelineOperation, flushSharedOutbox, readSharedOutboxOperation } from "~/lib/shared-outbox"
 import { openLocalProjectDb } from "~/lib/local-project-db"
 import createControllerFixture from "../../../tools/acceptance/ae-08-processor-state-fuzz-fixture"
 import { decodeGraph, fields } from "../../../tools/acceptance/ae-08-processor-state-fuzz-oracle"
@@ -8939,10 +8939,7 @@ test("B6a1 retained schedule candidate survives latency and processor-patch prom
     fixture.bridge.session.revisions.prepare = async () => ({ ok: false, error: "asset-capacity-exceeded", kind: "refused" })
     const intent = migrationIntent("B6a1-retained")
     expect(await controller.adoptSchedule(intent, true)).toEqual({ status: "blocked", reason: "asset-capacity-exceeded" })
-    expect(controller.witness.adoption().retained).toBe(intent.key)
-    expect(controller.witness.liveScheduleCandidates()).toBe(1)
     const compiled = compilations
-    const structural = controller.witness.adoptionFields().structural
     let seam = 0n
     let revision = 0
     fixture.bridge.session.revisions.prepare = async (request) => {
@@ -8960,18 +8957,17 @@ test("B6a1 retained schedule candidate survives latency and processor-patch prom
     fixture.bridge.session.revisions.inspect = fixture.bridge.session.revisions.publish
     keep = new Set(["track"])
     expect(await controller.updateKeepLatency()).toEqual({ handled: true })
-    expect(controller.witness.adoptionFields().structural).toBe(structural)
-    expect(controller.witness.adoption().retained).toBe(intent.key)
+    // The refusal stands until a field it answers to moves, so an unprompted retry is answered without a new prepare.
+    const refused = { status: "blocked", reason: "asset-capacity-exceeded" } satisfies Awaited<ReturnType<typeof controller.adoptSchedule>>
+    expect(await controller.adoptSchedule(intent, false)).toEqual(refused)
     const first = createDefaultUtilityParams()
     expect(await controller.deliverProcessor(fixturePatchEdit({
       payload: { ...utilityCommit("utility:1", first, { ...first, gainDb: -6 }), edit: processorEdit(11) }, bpm: 120,
     })).settled).toEqual({ state: "applied" })
     expect(fixture.statePatchPayloads).toHaveLength(1)
-    expect(controller.witness.adoptionFields().structural).toBe(structural)
+    expect(await controller.adoptSchedule(intent, false)).toEqual(refused)
     expect(await controller.adoptSchedule(intent, true)).toEqual({ status: "adopted" })
     expect(compilations).toBe(compiled)
-    expect(controller.witness.adoption().retained).toBeUndefined()
-    expect(controller.witness.liveScheduleCandidates()).toBe(0)
   } finally { await controller.dispose() }
 })
 
@@ -8994,8 +8990,7 @@ test("B6a1 structural replacements discard retained schedule candidates", async 
       fixture.bridge.session.revisions.prepare = async () => ({ ok: false, error: "asset-capacity-exceeded", kind: "refused" })
       const intent = migrationIntent(`B6a1-${replacement}`)
       expect(await controller.adoptSchedule(intent, true)).toEqual({ status: "blocked", reason: "asset-capacity-exceeded" })
-      expect(controller.witness.adoption().retained).toBe(intent.key)
-      const compiled = compilations
+      let compiled = compilations
       const structural = controller.witness.adoptionFields().structural
       fixture.bridge.session.revisions.prepare = prepare
       acknowledgeStagedPublication(fixture)
@@ -9007,15 +9002,19 @@ test("B6a1 structural replacements discard retained schedule candidates", async 
       } else {
         await controller.dispose()
         if (replacement === "configure") {
-          const cleared = controller.witness.adoptionFields().structural
           expect(await controller.start(snapshotInput.transport)).toBe("started")
-          expect(controller.witness.adoptionFields().structural).toBeGreaterThan(cleared)
           expect(compilations).toBe(compiled + 1)
         }
       }
+      // The compile spy cannot see a stale candidate that is reused after loss or reset, and removing the bump
+      // after a published schedule leaves the old intent discarded by intent mismatch alone, so the generation
+      // itself is the only observation that kills that mutant.
       expect(controller.witness.adoptionFields().structural).toBeGreaterThan(structural)
-      expect(controller.witness.adoption().retained).toBeUndefined()
-      expect(controller.witness.liveScheduleCandidates()).toBe(0)
+      if (replacement === "schedule" || replacement === "configure") {
+        compiled = compilations
+        await controller.adoptSchedule(intent, true)
+        expect(compilations).toBe(compiled + 1)
+      }
     } finally { await controller.dispose() }
   }
 })
@@ -14505,26 +14504,22 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
       return allowed.has(value) ? Response.json({ status: "applied", effectId: "row", revision: 5 })
         : new Response("offline", { status: 503 })
     }, { preconnect: originalFetch.preconnect })
+    const utilityGain = (gainDb: number): Parameters<typeof publishDurableEffectsOperation>[0]["operation"] => ({ kind: "effects.setUtilityParams", payload: {
+      trackId: "track", instanceId: "utility:1", params: { version: 1, state: { ...createDefaultUtilityParams(), gainDb } },
+    } })
     const writes: { value: number; projectId: string; userId: string; entryId: string }[] = []
     const f = await mountedPanel(async (value, context) => {
       if (!context?.projectId || !context.userId) throw new Error("Missing captured admission scope")
-      const result = await publishDurableEffectsOperation({ projectId: context.projectId, userId: context.userId,
-        operation: { kind: "effects.setUtilityParams", payload: {
-          trackId: "track", instanceId: "utility:1", params: { version: 1, state: { ...createDefaultUtilityParams(), gainDb: value } },
-        } } })
+      const result = await publishDurableEffectsOperation({ projectId: context.projectId, userId: context.userId, operation: utilityGain(value) })
       if (result.kind !== "admitted") throw new Error("Expected durable admission")
       writes.push({ value, projectId: context.projectId, userId: context.userId, entryId: result.entryId })
       return result
     }, true, new Set(), undefined, { get projectId() { return projectId() }, get userId() { return projectId() === a ? "user-a" : "user-b" } })
-    const originalPut = IDBObjectStore.prototype.put
-    const consumed: string[] = []
-    const consumedRow = z.object({ key: z.string(), value: z.object({ consumed: z.literal(true) }) })
-    IDBObjectStore.prototype.put = function(value, key) {
-      const row = consumedRow.safeParse(value)
-      if (this.name === "syncState" && row.success) for (const write of writes) {
-        if (row.data.key === `shared-outbox-completion:${write.projectId}:${write.userId}:${write.entryId}`) consumed.push(write.entryId)
+    // History past the completion cap collects consumed completions only, so a completion that survives it was never consumed.
+    const collectHistory = async (scopeProjectId: string, userId: string) => {
+      for (let index = 0; index < 65; index += 1) {
+        await publishDurableSharedTimelineOperation({ projectId: scopeProjectId, userId, operation: utilityGain(0) })
       }
-      return originalPut.call(this, value, key)
     }
     try {
       f.panel.setForTarget("track", -1)
@@ -14554,7 +14549,6 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
       expect(f.panel.params()).toBe(-3)
       expect(f.heard()).toBe(-3)
       expect(f.histories).toEqual([])
-      expect(consumed).toEqual([])
       expect(await readSharedOutboxOperation(a, "user-a", oldProject.entryId)).toMatchObject({ status: "applied" })
       expect(await readSharedOutboxOperation(b, "user-b", oldLife.entryId)).toMatchObject({ status: "applied" })
       expect(await readSharedOutboxOperation(b, "user-b", current.entryId)).toMatchObject({ status: "pending" })
@@ -14565,15 +14559,19 @@ describe("DV01 boundary witnesses, section 6.1 controller", () => {
       await f.panel.flushPending()
       await flushSharedOutbox(b, "user-b", { retryFailed: true })
       await flushSharedOutbox(b, "user-b", { retryFailed: true })
-      expect(consumed).toEqual([current.entryId])
       expect(f.histories).toEqual(["0->-3"])
       expect(f.panel.readProvisionalForTarget("track")).toBeUndefined()
       expect(await f.panel.flushPending()).toEqual({ unanswered: [], admitted: [] })
+      allowed.add(0)
+      await collectHistory(a, "user-a")
+      await collectHistory(b, "user-b")
+      expect(await readSharedOutboxOperation(a, "user-a", oldProject.entryId)).toMatchObject({ status: "applied" })
+      expect(await readSharedOutboxOperation(b, "user-b", oldLife.entryId)).toMatchObject({ status: "applied" })
+      expect(await readSharedOutboxOperation(b, "user-b", current.entryId)).toEqual({ status: "missing" })
       promoted("P admitted old-project/remove-readd binding and exact consume-once", { writes: writes.map(write => ({ value: write.value, scope: write.projectId === a ? "A" : "B", user: write.userId })),
-        endedCompletionsConsumed: 0, currentCompletionsConsumed: consumed.length, finalHistory: f.histories, finalGain: f.heard() })
-    } finally { IDBObjectStore.prototype.put = originalPut; globalThis.fetch = originalFetch; await f.dispose() }
+        finalHistory: f.histories, finalGain: f.heard() })
+    } finally { globalThis.fetch = originalFetch; await f.dispose() }
   })
-
   test("3B1 real audio adapter carries each key revision and consumes a positive equal stamp", async () => {
     const projectId = `cloud-per-key-${crypto.randomUUID()}`
     const db = convexTest(schema, { "./_generated/api.ts": () => import("../../../convex/_generated/api") })

@@ -4,7 +4,7 @@ import { createComponent, createRenderEffect, createRoot, createSignal, Show, ty
 import { AudioEngine, type AudioEffectRuntimeInstance, type EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import { AUDIO_EFFECT_CONTRACTS, type AudioEffectInstance, type AudioEffectKind, type JsonValue } from "@daw-browser/shared";
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types";
-import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDeliveryOutcome } from "~/lib/live-processor-control";
+import type { DeliveryRegistration, ProcessorDeliveryOutcome } from "~/lib/live-processor-control";
 import type { EffectParamsCommitPayload } from "~/lib/undo/types";
 import type { SharedTimelineOperation } from "~/lib/shared-timeline-operations-api";
 import {
@@ -447,7 +447,6 @@ describe("effects panel instance engine synchronization", () => {
     });
     await createRoot(async (dispose) => {
       const engine = new SpyAudioEngine();
-      let latest: { signature: string; edit: LiveProcessorEditIdentity } | undefined;
       const previews: Array<{ sequence: number | undefined; gainDb: number }> = [];
       const flushes: Array<{ sequence: number | undefined; gainDb: number }> = [];
       const commits: EffectParamsCommitPayload[] = [];
@@ -455,22 +454,6 @@ describe("effects panel instance engine synchronization", () => {
       const { device } = createDevice(engine, {
         projectId,
         usesLegacyAudioEngine: false,
-        // The registry's rule: equal content on the member is the same write and keeps its identity.
-        allocateProcessorEdit: (payload) => {
-          const signature = JSON.stringify(payload.to);
-          if (latest?.signature === signature) return latest.edit;
-          const order = (latest?.edit.order ?? 0) + 1;
-          latest = {
-            signature,
-            edit: {
-              id: `test-edit-${order}`,
-              order,
-              target: { nodeId: payload.targetId, instanceId: payload.instanceId ?? "", kindId: 1, incarnation: 1 },
-              content: { params: payload.to },
-            },
-          };
-          return latest.edit;
-        },
         deliverProcessor: (edit, gesture): DeliveryRegistration => {
           const params = z.object({ state: z.object({ gainDb: z.number() }) }).parse(edit.content.params);
           if (gesture?.holds) {

@@ -1491,3 +1491,39 @@ test('an admitted effects result another drain records is kept past the history 
     fetchStub.restore()
   }
 })
+
+test('a completion is consumed once, and only by the project and user that admitted it', async () => {
+  const projectId = `outbox-effects-scope-${crypto.randomUUID()}`
+  let online = false
+  const fetchStub = stubFetch(() => online
+    ? new Response(JSON.stringify(typedResult(7)), { status: 200 })
+    : new Response('unavailable', { status: 503 }))
+  try {
+    const admit = async (id: string) => {
+      const published = await outbox.publishDurableEffectsOperation({ projectId, userId: 'user-1', operation: utilityOperation(id) })
+      if (published.kind !== 'admitted') throw new Error('Expected admission while offline.')
+      return published.entryId
+    }
+    const unread = await admit('utility-unread')
+    const consumed = await admit('utility-consumed')
+    online = true
+    await outbox.flushSharedOutbox(projectId, 'user-1', { retryFailed: true })
+    const awaited = { status: 'applied', result: decodedTypedResult(7), completionOwner: 'background' } satisfies Awaited<ReturnType<typeof outbox.readSharedOutboxOperation>>
+    const collectHistory = async (prefix: string) => {
+      for (let index = 0; index < 65; index += 1) {
+        await outbox.publishDurableSharedTimelineOperation({ projectId, userId: 'user-1', operation: utilityOperation(`${prefix}-${index}`) })
+      }
+    }
+    await outbox.consumeSharedOutboxCompletion(projectId, 'user-2', consumed)
+    await outbox.consumeSharedOutboxCompletion(`${projectId}-other`, 'user-1', consumed)
+    await collectHistory('foreign')
+    expect(await outbox.readSharedOutboxOperation(projectId, 'user-1', consumed)).toEqual(awaited)
+    await outbox.consumeSharedOutboxCompletion(projectId, 'user-1', consumed)
+    await outbox.consumeSharedOutboxCompletion(projectId, 'user-1', consumed)
+    await collectHistory('own')
+    expect(await outbox.readSharedOutboxOperation(projectId, 'user-1', consumed)).toEqual({ status: 'missing' })
+    expect(await outbox.readSharedOutboxOperation(projectId, 'user-1', unread)).toEqual(awaited)
+  } finally {
+    fetchStub.restore()
+  }
+})

@@ -40,30 +40,27 @@ export const mergeLaunches = (rows: readonly Row[]) => rows.reduce<Row[][]>((lau
 export const launchesFor = (rows: readonly Row[], repetitions: number) => mergeLaunches(rows)
   .flatMap((launch) => launch.every((row) => row.repeat === "launch") ? Array.from({ length: repetitions }, () => launch) : [launch])
 
-// Seconds per launch, per edit and per VST edit. The defaults are plan §8's assumptions (about 2 s to settle plus the 1 s oracle window
-// per edit, 20 s per VST insert) and the phase 8 smoke (about 10 s per launch plus import and reload); `--timings <evidence dir>`
-// replaces them with what a real phase 9 run measured (`measuredTimings`).
-export type Timings = { launchSeconds: number; stepSeconds: number; vstStepSeconds: number }
-export const assumedTimings: Timings = { launchSeconds: 25, stepSeconds: 3, vstStepSeconds: 20 }
+// Seconds per launch, per edit, per VST edit and per offline state export. The defaults were measured on the stored phase 9 campaigns
+// of the C2 rounds (/tmp/c2, c2gaps, ae08-cal, ae08-rec, ae08-jr and others: capturedSeconds against seconds per launch, and rows of 2,
+// 10 and 20 edits per step cost); they are tabled in /tmp/ae08-phase9-budget-plan.md section 1 and accepted in addendum 36 of
+// PARENT-RULING-C2-FAIL-ITEMS.md. `--timings <evidence dir>` replaces them with what a real phase 9 run measured (`measuredTimings`).
+export type Timings = { launchSeconds: number; stepSeconds: number; vstStepSeconds: number; exportSeconds: number }
+export const defaultTimings: Timings = { launchSeconds: 6.9, stepSeconds: 1.45, vstStepSeconds: 1.67, exportSeconds: 10 }
+// A row that repeats by launch runs one edit per launch, and its launch costs what the stored runs took in all.
+const launchRowSeconds = new Map([["delete-while-starting", 7.7], ["record-target-guard", 10.9], ["unaffected-input", 11.0], ["record-target-reroute", 11.4]])
 // The certifying budget of plan §13 answer 4.
 export const BUDGET_SECONDS = 70 * 60
-export const FALLBACK_VST_REPETITIONS = 10
 
-// A launch is one burst launch: its fixed cost plus the steps of its merged rows.
-export const wallSeconds = (launches: readonly Row[][], repetitions: number, vstRepetitions: number, timings: Timings = assumedTimings) =>
-  launches.reduce((total, launch) => total + timings.launchSeconds + launch.reduce((sum, row) =>
-    sum + burstSchedule(row, repetitionsFor(row, repetitions, vstRepetitions)).length * (row.repeat === "vst-burst" ? timings.vstStepSeconds : timings.stepSeconds), 0), 0)
-
-// The certifying run keeps the requested VST repetitions unless the budget would exceed 70 min; then only the VST burst rows drop
-// to 10 (the overnight run keeps its own count). Non-VST rows and aperiodic references are never shortened.
-export const chooseVstRepetitions = (launches: readonly Row[][], repetitions: number, requested: number, timings: Timings) => {
-  const minutes = (vstRepetitions: number) => wallSeconds(launches, repetitions, vstRepetitions, timings) / 60
-  const requestedMinutes = minutes(requested)
-  if (requestedMinutes <= BUDGET_SECONDS / 60 || requested <= FALLBACK_VST_REPETITIONS || !launches.some((launch) => launch.some((row) => row.repeat === "vst-burst")))
-    return { vstRepetitions: requested, why: `${requested} VST repetitions: ${requestedMinutes.toFixed(1)} min fits ${BUDGET_SECONDS / 60} min or no VST burst row is selected` }
-  return { vstRepetitions: FALLBACK_VST_REPETITIONS, why: `${requested} VST repetitions would take ${requestedMinutes.toFixed(1)} min, over ${BUDGET_SECONDS / 60} min: `
-    + `the VST burst rows drop to ${FALLBACK_VST_REPETITIONS} (${minutes(FALLBACK_VST_REPETITIONS).toFixed(1)} min); the overnight run keeps ${requested}` }
+// A launch is its fixed cost, the steps of its merged rows, and one offline export of the states of each row the analyzer compares.
+const launchSeconds = (launch: readonly Row[], repetitions: number, vstRepetitions: number, timings: Timings) => {
+  const [first] = launch
+  const whole = first?.repeat === "launch" ? launchRowSeconds.get(first.name) : undefined
+  return whole ?? timings.launchSeconds + launch.reduce((sum, row) =>
+    sum + burstSchedule(row, repetitionsFor(row, repetitions, vstRepetitions)).length * (row.repeat === "vst-burst" ? timings.vstStepSeconds : timings.stepSeconds)
+      + (row.judge === "states" ? timings.exportSeconds : 0), 0)
 }
+export const wallSeconds = (launches: readonly Row[][], repetitions: number, vstRepetitions: number, timings: Timings = defaultTimings) =>
+  launches.reduce((total, launch) => total + launchSeconds(launch, repetitions, vstRepetitions, timings), 0)
 
 // ---- Settling on host evidence ----
 const hostEventSchema = z.object({ event: z.string(), cause: z.string().default(""), wallMs: z.number().default(0),
@@ -365,6 +362,7 @@ export const breakdownLine = (entry: Awaited<ReturnType<typeof breakdownStored>>
 const steps = (count: number, settled: (index: number) => number | undefined = (index) => index * 4000 + 1500) =>
   Array.from({ length: count }, (_, position) => ({ index: position + 1, editWallMs: (position + 1) * 4000, settledWallMs: settled(position + 1) }))
 const check = (condition: boolean, message: string) => { if (!condition) throw new Error(`phase 9 matrix self-test: ${message}`) }
+const near = (actual: number, expected: number) => Math.abs(actual - expected) < 1e-9
 
 export const selfTest = async () => {
   // Fail-fast: edit 12 fails, and so would every edit after it (a corrupted slot).
@@ -462,13 +460,13 @@ export const selfTest = async () => {
   const built = phase9Matrix.filter((row) => row.fixture !== null && row.repeat !== "launch" && row.transport === undefined)
   const launches = mergeLaunches(built)
   check(launches.length > 0 && launches.length < built.length, `${built.length} rows merge into ${launches.length} launches`)
-  check(wallSeconds([[attach], [fft]], 10, 10) === 2 * assumedTimings.launchSeconds + 20 * assumedTimings.stepSeconds, "two launches of ten alternating edits cost two launches and twenty steps")
+  check(near(wallSeconds([[attach], [fft]], 10, 10), 2 * defaultTimings.launchSeconds + 20 * defaultTimings.stepSeconds), "two launches of ten alternating edits cost two launches and twenty steps")
   check(wallSeconds([], 10, 10) === 0, "no rows, no launches")
   // A row that repeats by launch is its own launch, once per repetition, judged on its own capture.
   const delete1 = find("delete-while-starting")
   check(mergeLaunches([delete1, { ...delete1, start: delete1.cycle.at(-1)?.state ?? "" }]).length === 2 && mergeLaunches([fft, delete1]).length === 2, "a launch-repeat row never merges")
   check(launchesFor([delete1], 5).length === 5 && launchesFor([fft], 5).length === 1, "a launch-repeat row gives one launch per repetition")
-  check(wallSeconds(launchesFor([delete1], 3), 3, 20) === 3 * (assumedTimings.launchSeconds + assumedTimings.stepSeconds), "a launch-repeat row costs one launch and one edit each time")
+  check(near(wallSeconds(launchesFor([delete1], 3), 3, 20), 3 * 7.7), "a launch-repeat row costs its measured launch each time")
   // A row whose edits drive the transport is one launch of its own, whatever the repetitions.
   const driven = [find("host-failure-during-play"), find("pause-stop-during-play-start")]
   check(driven.every((row) => row.transport === "driven" && row.settle === "returned"), "the transport rows are driven and settle when their edits return")
@@ -485,17 +483,13 @@ export const selfTest = async () => {
       `the six cancelled-start edits run in order and settle without host evidence: ${performed}`)
   } finally { await rm(drivenDirectory, { recursive: true }) }
   check(mergeLaunches([find("vst-insert"), { ...find("vst-remove-undo"), start: "vst-absent" }]).length === 2, "different preparation does not merge")
-  // Budget rule: only over 70 min do the VST burst rows drop to 10, and the reason is printed.
+  // The measured defaults: the whole matrix at 20 repetitions fits the budget, fewer VST repetitions cost less, and a launch of a
+  // `states` row adds its offline exports.
   const withVst = launchesFor(phase9Matrix, 20)
-  const slowVst = { ...assumedTimings, vstStepSeconds: 60 }
-  const dropped = chooseVstRepetitions(withVst, 20, 20, slowVst)
-  check(dropped.vstRepetitions === FALLBACK_VST_REPETITIONS && /over 70 min/.test(dropped.why), `a 60 s VST edit drops to 10, got ${JSON.stringify(dropped)}`)
-  const fits = chooseVstRepetitions(launchesFor(phase9Matrix, 5), 5, 20, { ...assumedTimings, vstStepSeconds: 1 })
-  check(fits.vstRepetitions === 20 && /fits 70 min/.test(fits.why), `a 1 s VST edit with 5 repetitions keeps 20, got ${JSON.stringify(fits)}`)
-  check(chooseVstRepetitions(mergeLaunches(built.filter((row) => row.repeat !== "vst-burst")), 20, 20, slowVst).vstRepetitions === 20, "no VST burst row selected, nothing to drop")
-  check(chooseVstRepetitions(withVst, 20, 10, slowVst).vstRepetitions === 10, "a request at or under 10 is never raised or cut")
-  check(wallSeconds(withVst, 20, 10, slowVst) < wallSeconds(withVst, 20, 20, slowVst), "fewer VST repetitions cost less wall time")
-  // Measured timings replace the assumptions: a step is its edit-to-settle time plus the 1 s window.
+  check(wallSeconds(withVst, 20, 20) < BUDGET_SECONDS, `the matrix at 20 repetitions is ${wallSeconds(withVst, 20, 20) / 60} min, over the budget`)
+  check(wallSeconds(withVst, 20, 10) < wallSeconds(withVst, 20, 20), "fewer VST repetitions cost less wall time")
+  check(near(wallSeconds([[find("tempo-burst")]], 10, 10), defaultTimings.launchSeconds + 10 * defaultTimings.stepSeconds + defaultTimings.exportSeconds), "a states row adds one export pass to its launch")
+  // Measured timings replace the defaults: a step is its edit-to-settle time plus the 1 s window.
   const measured = measuredTimings([{ vst: false, edits: [{ index: 1, wallMs: 0, settledWallMs: 1000 }, { index: 2, wallMs: 5000, settledWallMs: 7000 }] },
     { vst: true, edits: [{ index: 1, wallMs: 0, settledWallMs: 9000 }] }], [20, 30])
   check(measured.stepSeconds === 2.5 && measured.vstStepSeconds === 10 && measured.launchSeconds === 25, `measured timings, got ${JSON.stringify(measured)}`)
@@ -666,18 +660,19 @@ export const measuredTimings = (rows: readonly { vst: boolean; edits: readonly M
   return { ...(launch !== undefined && { launchSeconds: launch }), ...(stepSeconds !== undefined && { stepSeconds }), ...(vstStepSeconds !== undefined && { vstStepSeconds }) }
 }
 const timingsSchema = z.object({ launchSeconds: z.number().positive().optional(), stepSeconds: z.number().positive().optional(), vstStepSeconds: z.number().positive().optional() })
+// A run measures launches and steps; the offline export cost stays the default's.
 export const readTimings = async (file: string): Promise<Timings> => {
   const measured = timingsSchema.parse(JSON.parse(await readFile(file, "utf8")))
-  return { launchSeconds: measured.launchSeconds ?? assumedTimings.launchSeconds, stepSeconds: measured.stepSeconds ?? assumedTimings.stepSeconds,
-    vstStepSeconds: measured.vstStepSeconds ?? assumedTimings.vstStepSeconds }
+  return { launchSeconds: measured.launchSeconds ?? defaultTimings.launchSeconds, stepSeconds: measured.stepSeconds ?? defaultTimings.stepSeconds,
+    vstStepSeconds: measured.vstStepSeconds ?? defaultTimings.vstStepSeconds, exportSeconds: defaultTimings.exportSeconds }
 }
 
 const plan = async (args: string[]) => {
   const number = (flag: string, fallback: number) => args.includes(flag) ? Number(args[args.indexOf(flag) + 1]) : fallback
   const repetitions = number("--repetitions", 20), vstRepetitions = number("--vst-repetitions", 20)
   const timingsFile = args[args.indexOf("--timings") + 1]
-  const timings = args.includes("--timings") && timingsFile ? await readTimings(timingsFile) : assumedTimings
-  console.log(`timings: ${timings === assumedTimings ? "ASSUMED" : `measured, ${timingsFile}`} ${JSON.stringify(timings)}`)
+  const timings = args.includes("--timings") && timingsFile ? await readTimings(timingsFile) : defaultTimings
+  console.log(`timings: ${timings === defaultTimings ? "default (measured, plan section 1)" : `measured, ${timingsFile}`} ${JSON.stringify(timings)}`)
   const built = phase9Matrix.filter((row) => row.fixture !== null)
   for (const row of phase9Matrix) {
     const steps = burstSchedule(row, repetitionsFor(row, repetitions, vstRepetitions)).length
@@ -686,10 +681,8 @@ const plan = async (args: string[]) => {
   const launches = launchesFor(built, repetitions)
   console.log(`built rows: ${built.length}/${phase9Matrix.length}, launches after merging: ${launches.length}`)
   console.log(`wall time, built rows: ${(wallSeconds(launches, repetitions, vstRepetitions, timings) / 60).toFixed(1)} min`)
-  // The VST rows are not built, so the rule is applied to the whole matrix: this is the budget the certifying run would face.
   const everything = launchesFor(phase9Matrix, repetitions)
-  console.log(`wall time, all rows built: ${(wallSeconds(everything, repetitions, vstRepetitions, timings) / 60).toFixed(1)} min`)
-  console.log(`certifying VST repetitions: ${chooseVstRepetitions(everything, repetitions, vstRepetitions, timings).why}`)
+  console.log(`wall time, all rows built: ${(wallSeconds(everything, repetitions, vstRepetitions, timings) / 60).toFixed(1)} min of ${BUDGET_SECONDS / 60}`)
 }
 
 if (import.meta.main) {

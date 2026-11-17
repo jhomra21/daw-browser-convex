@@ -18,8 +18,8 @@ import { phase5Rows, runPhase5Fixture } from "./ae-08-phase-5-fixture"
 import { phase8Rows, runPhase8Fixture } from "./ae-08-phase-8-fixture"
 import { analyzePhase8Campaign } from "./analyze-ae-08-phase-8"
 import { contentSecondsFor, exportRowEvidence, runPhase9Launch, stateName, type Phase9Launch } from "./ae-08-phase-9-launch"
-import { assumedTimings, burstSchedule, chooseVstRepetitions, breakdownLine, breakdownStored, commitReceivedWallMs, judgeStored, launchesFor, measuredEditsSchema, measuredTimings, pooled,
-  readTimings, repetitionsFor, type Trial } from "./ae-08-phase-9-matrix"
+import { burstSchedule, breakdownLine, breakdownStored, commitReceivedWallMs, judgeStored, launchesFor, measuredEditsSchema, measuredTimings, pooled,
+  defaultTimings, readTimings, repetitionsFor, type Trial } from "./ae-08-phase-9-matrix"
 import { phase9Matrix, phase9Rows, phase9RowsWithCalibration } from "./ae-08-phase-9-rows"
 import { judgeRowCapture } from "./ae-08-phase-9-compare"
 import { checkDevices, seedPluginCatalog } from "./ae-08-phase-9-devices"
@@ -659,7 +659,7 @@ const assemble = async (directory: string, prefix = ""): Promise<Pcm> => {
   return { sampleRate, channels, samples }
 }
 
-const usage = "Usage: ae-08-live-graph.ts --phase 1|2|3|4|5|6|6i|7|8|9 [--out /absolute/dir] [--rows a,b,…] [--matrix] [--repetitions N] [--vst-repetitions N] [--judge-only /absolute/dir [--breakdown]] [--timings /absolute/phase9-timings.json] [--overnight]"
+const usage = "Usage: ae-08-live-graph.ts --phase 1|2|3|4|5|6|6i|7|8|9 [--out /absolute/dir] [--rows a,b,…] [--matrix] [--repetitions N] [--vst-repetitions N] [--judge-only /absolute/dir [--breakdown]] [--timings /absolute/phase9-timings.json]"
 const knownPhases = ["1", "2", "3", "4", "5", "6", "6i", "7", "8", "9"]
 const positiveInteger = (flag: string, value: string) => {
   const number = Number(value)
@@ -672,17 +672,12 @@ const positiveInteger = (flag: string, value: string) => {
 export const parseRunnerArgs = (args: string[]) => {
   const values = new Map<string, string>()
   let matrix = false
-  let overnight = false
   let breakdown = false
   for (let index = 0; index < args.length; index++) {
     const key = args[index]
     if (key === "--matrix") {
       matrix = true
       if (args[index + 1] === "full") index++
-      continue
-    }
-    if (key === "--overnight") {
-      overnight = true
       continue
     }
     if (key === "--breakdown") {
@@ -716,10 +711,9 @@ export const parseRunnerArgs = (args: string[]) => {
   if (judgeOnly !== undefined && (phase !== "9" || !path.isAbsolute(judgeOnly))) throw new Error("--judge-only /absolute/dir re-judges stored evidence for phase 9")
   const timings = values.get("--timings")
   if (timings !== undefined && (phase !== "9" || !path.isAbsolute(timings))) throw new Error("--timings /absolute/phase9-timings.json applies to phase 9")
-  if (overnight && phase !== "9") throw new Error("--overnight applies to phase 9")
   if (breakdown && judgeOnly === undefined) throw new Error("--breakdown reports the stored evidence named by --judge-only")
   if (phase === "9" && !matrix && !rows && judgeOnly === undefined) throw new Error("--phase 9 needs --matrix, --rows or --judge-only")
-  return { phase, out, rows, matrix, repetitions, vstRepetitions, judgeOnly, timings, overnight, breakdown }
+  return { phase, out, rows, matrix, repetitions, vstRepetitions, judgeOnly, timings, breakdown }
 }
 // Only a complete pass over every row can certify: the campaign analysis needs all rows (analyze-ae-08-continuity.ts). Phase 5 certifies
 // a single pass; phase 9 repeats each row by design.
@@ -757,11 +751,10 @@ const selfTest = () => {
   refused(["--phase", "5", "--out", "/tmp/x", "--judge-only", "/tmp/y"], /re-judges stored evidence for phase 9/)
   refused(["--phase", "9", "--judge-only", "relative"], /re-judges stored evidence for phase 9/)
   if (parseRunnerArgs(["--phase", "9", "--judge-only", "/tmp/y"]).judgeOnly !== "/tmp/y") throw new Error("--judge-only parse failed")
-  const timed = parseRunnerArgs(["--phase", "9", "--out", "/tmp/x", "--matrix", "--timings", "/tmp/t.json", "--overnight"])
-  if (timed.timings !== "/tmp/t.json" || !timed.overnight) throw new Error("--timings and --overnight parse failed")
+  const timed = parseRunnerArgs(["--phase", "9", "--out", "/tmp/x", "--matrix", "--timings", "/tmp/t.json"])
+  if (timed.timings !== "/tmp/t.json") throw new Error("--timings parse failed")
   refused(["--phase", "5", "--out", "/tmp/x", "--timings", "/tmp/t.json"], /applies to phase 9/)
   refused(["--phase", "9", "--out", "/tmp/x", "--matrix", "--timings", "relative.json"], /applies to phase 9/)
-  refused(["--phase", "8", "--out", "/tmp/x", "--overnight"], /applies to phase 9/)
   refused(["--phase", "9", "--out", "/tmp/x", "--matrix", "--breakdown"], /--breakdown reports the stored evidence/)
   if (!parseRunnerArgs(["--phase", "9", "--judge-only", "/tmp/y", "--breakdown"]).breakdown) throw new Error("--breakdown parse failed")
   const phase8 = parseRunnerArgs(["--phase", "8", "--out", "/tmp/x", "--rows", "paused-structural"])
@@ -811,10 +804,7 @@ const main = async () => {
       const selected = parsed.matrix ? phase9Matrix : phase9RowsWithCalibration.filter((row) => parsed.rows?.includes(row.name))
       const missing = selected.filter((row) => row.fixture === null)
       const launches = launchesFor(selected.filter((row) => row.fixture !== null), parsed.repetitions)
-      const timings = parsed.timings ? await readTimings(parsed.timings) : assumedTimings
-      // The budget rule needs measured timings; the overnight run keeps the requested count.
-      const budget = parsed.timings && !parsed.overnight ? chooseVstRepetitions(launches, parsed.repetitions, parsed.vstRepetitions, timings)
-        : { vstRepetitions: parsed.vstRepetitions, why: `${parsed.vstRepetitions} VST repetitions as requested (${parsed.overnight ? "overnight run" : "no measured timings"})` }
+      const timings = parsed.timings ? await readTimings(parsed.timings) : defaultTimings
       provenance.fixture = "Phase 9 matrix: one launch per row class carrying alternating edits, settled on host.jsonl publication evidence"
       provenance.ownedPids = []
       const rowsDirectory = path.join(out, "phase9")
@@ -824,9 +814,9 @@ const main = async () => {
         const replica = launches.slice(0, launch).filter((other) => other === launches[launch]).length
         return replica === 0 ? rowsDirectory : path.join(out, `phase9-r${replica + 1}`)
       }
-      await writeFile(path.join(out, "phase9-plan.json"), JSON.stringify({ vstRepetitions: budget.vstRepetitions, why: budget.why,
+      await writeFile(path.join(out, "phase9-plan.json"), JSON.stringify({ vstRepetitions: parsed.vstRepetitions,
         launches: launches.map((launch) => launch.map((row) => ({ row: row.name, class: row.latencyClass,
-          edits: burstSchedule(row, repetitionsFor(row, parsed.repetitions, budget.vstRepetitions)).length }))),
+          edits: burstSchedule(row, repetitionsFor(row, parsed.repetitions, parsed.vstRepetitions)).length }))),
         missing: missing.map((row) => ({ row: row.name, needs: row.needs })) }, null, 2))
       const campaign: { launch: number; seconds: number; capturedSeconds: number; failure?: string }[] = []
       const measuredRows: { vst: boolean; edits: z.infer<typeof measuredEditsSchema> }[] = []
@@ -834,8 +824,8 @@ const main = async () => {
       for (const [index, rows] of launches.entries()) {
         const first = rows[0]
         if (!first) continue
-        const launch: Phase9Launch = { rows, repetitions: parsed.repetitions, vstRepetitions: budget.vstRepetitions, directory: rowsFolder(index),
-          contentSeconds: contentSecondsFor(rows, parsed.repetitions, budget.vstRepetitions, timings) }
+        const launch: Phase9Launch = { rows, repetitions: parsed.repetitions, vstRepetitions: parsed.vstRepetitions, directory: rowsFolder(index),
+          contentSeconds: contentSecondsFor(rows, parsed.repetitions, parsed.vstRepetitions, timings) }
         const startedAt = Date.now()
         let failure: string | undefined
         let captured = 0

@@ -6,7 +6,7 @@ import { canFallbackToRepitchStretch, LIVE_SCHEDULE_HORIZON_SEC, type AudioEngin
 import type { Track } from '@daw-browser/timeline-core/types'
 import { createNativePlaybackController, nativePlaybackFaultText } from '~/lib/desktop/native-playback-controller'
 import { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
-import type { LivePlaybackCompileContext, LivePlaybackSnapshot, LivePlaybackSnapshotCompilation, LivePlaybackTransport } from '~/lib/live-playback-snapshot'
+import { playbackClipFingerprint, type LivePlaybackCompileContext, type LivePlaybackSnapshot, type LivePlaybackSnapshotCompilation, type LivePlaybackTransport } from '~/lib/live-playback-snapshot'
 import {
   createDesktopAudioLifecycleReconciler,
   type DesktopAudioLifecycle,
@@ -2156,15 +2156,7 @@ export function useTimelinePlayback(
         const buffer = "buffer" in clip && globalThis.AudioBuffer && clip.buffer instanceof AudioBuffer
           ? clip.buffer
           : undefined
-        // A clip's name, colour and waveform key reach no compile either (export, control and UI code read them). The
-        // fields are named, as a track's are, because a persisted row and a projected create order them differently.
-        const { id, historyRef, mediaStatus, startSec, duration, sourceAssetKey, sourceKind, sourceDurationSec, sourceSampleRate,
-          sourceChannelCount, leftPadSec, bufferOffsetSec, audioWarp, gain, fades, sampleUrl, midi, midiOffsetBeats } = clip
-        // An absent offset compiles as 0, and a persisted row carries 0 where a live create carries none.
-        return { id, historyRef, mediaStatus, startSec, duration, sourceAssetKey, sourceKind, sourceDurationSec, sourceSampleRate,
-          sourceChannelCount, leftPadSec: leftPadSec ?? 0, bufferOffsetSec: bufferOffsetSec ?? 0, audioWarp, gain, fades, sampleUrl, midi,
-          midiOffsetBeats: midiOffsetBeats ?? 0, buffer: readBufferFingerprint(buffer) } satisfies Record<keyof Omit<Track['clips'][number], 'name' | 'color' | 'waveformAssetKey'> | 'buffer',
-            Track['clips'][number][keyof Track['clips'][number]] | ReturnType<typeof readBufferFingerprint>>
+        return { ...playbackClipFingerprint(clip), buffer: readBufferFingerprint(buffer) }
       }),
     })),
   })

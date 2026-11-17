@@ -1332,9 +1332,14 @@ test.skipIf(isServer)('pending save hydration still reports real host loss and h
 
 test('fingerprints all playback-relevant audio clip compiler fields for paused preview', async () => {
   const source = await readFile(new URL("./useTimelinePlayback.ts", import.meta.url), "utf8")
+  const compiler = await readFile(new URL("../lib/live-playback-snapshot.ts", import.meta.url), "utf8")
   const fingerprint = source.slice(
     source.indexOf("const readNativePreviewTrackFingerprint"),
     source.indexOf("  const disposeNativePreview", source.indexOf("const readNativePreviewTrackFingerprint")),
+  )
+  const clipFingerprint = compiler.slice(
+    compiler.indexOf("export const playbackClipFingerprint"),
+    compiler.indexOf("type PlaybackSourceMetadata", compiler.indexOf("export const playbackClipFingerprint")),
   )
   // B6f5 step 5b: the track fields are the union of those the native and portable compiles read; a name or colour is not.
   const trackFields = fingerprint.match(/tracks\.map\(\(\{ ([^}]+) \}\) => \(\{/)?.[1]?.split(", ")
@@ -1345,7 +1350,8 @@ test('fingerprints all playback-relevant audio clip compiler fields for paused p
   expect(fingerprint).not.toContain("clip.id")
   // The compiles read an absent offset as 0 (`?? 0`), and a persisted row carries 0 where a live create carries none: the
   // two compile alike, so they fingerprint alike, or a commit's first store emission republishes an unchanged graph.
-  for (const field of ["leftPadSec", "bufferOffsetSec", "midiOffsetBeats"]) expect(fingerprint).toContain(`${field}: ${field} ?? 0`)
+  expect(fingerprint).toContain("...playbackClipFingerprint(clip)")
+  for (const field of ["leftPadSec", "bufferOffsetSec", "midiOffsetBeats"]) expect(clipFingerprint).toContain(`${field}: clip.${field} ?? 0`)
 })
 
 test('waits for audio clip hydration before native paused preview and retries after hydration', async () => {

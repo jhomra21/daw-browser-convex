@@ -5,7 +5,7 @@ import type { ExportEffectsProjection } from "~/lib/export/export-effect-rows"
 import { nativeInstrumentContentKey, type DesiredInstrument } from "~/lib/live-processor-control"
 import { createPortableGraphSnapshot } from "@daw-browser/audio-engine/mixer/graph-contract"
 import { compileLiveNativeInstrumentConfigurations } from "@daw-browser/audio-engine/live-native-projection"
-import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
+import type { RuntimeClip, RuntimeTrack } from "~/lib/timeline-runtime-types"
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types"
 import type { AutomationEnvelope, TrackInstrumentParams } from "@daw-browser/shared"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
@@ -87,6 +87,29 @@ export type LivePlaybackSnapshotInput = {
   renderState: ExportRenderStateSnapshot
   sidechainRoutes: readonly ExternalSidechainRoute[]
 }
+
+// A clip's name, colour and waveform key reach no compile (export, control and UI code read them), so they are left out.
+// An absent offset compiles as 0, and a persisted row carries 0 where a live create carries none.
+export const playbackClipFingerprint = (clip: RuntimeClip) => ({
+  id: clip.id,
+  historyRef: clip.historyRef,
+  mediaStatus: clip.mediaStatus,
+  startSec: clip.startSec,
+  duration: clip.duration,
+  sourceAssetKey: clip.sourceAssetKey,
+  sourceKind: clip.sourceKind,
+  sourceDurationSec: clip.sourceDurationSec,
+  sourceSampleRate: clip.sourceSampleRate,
+  sourceChannelCount: clip.sourceChannelCount,
+  leftPadSec: clip.leftPadSec ?? 0,
+  bufferOffsetSec: clip.bufferOffsetSec ?? 0,
+  audioWarp: clip.audioWarp,
+  gain: clip.gain,
+  fades: clip.fades,
+  sampleUrl: clip.sampleUrl,
+  midi: clip.midi,
+  midiOffsetBeats: clip.midiOffsetBeats ?? 0,
+}) satisfies Record<keyof Omit<RuntimeClip, 'name' | 'color' | 'waveformAssetKey' | 'buffer'>, RuntimeClip[keyof RuntimeClip]>
 
 type PlaybackSourceMetadata = {
   source: AudioSourceMetadata

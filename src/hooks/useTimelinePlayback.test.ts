@@ -1331,11 +1331,11 @@ test.skipIf(isServer)('pending save hydration still reports real host loss and h
 })
 
 test('fingerprints all playback-relevant audio clip compiler fields for paused preview', async () => {
-  const source = await readFile(new URL("./useTimelinePlayback.ts", import.meta.url), "utf8")
+  const source = await readFile(new URL("./playback-session-reconciliation.ts", import.meta.url), "utf8")
   const compiler = await readFile(new URL("../lib/live-playback-snapshot.ts", import.meta.url), "utf8")
   const fingerprint = source.slice(
     source.indexOf("const readNativePreviewTrackFingerprint"),
-    source.indexOf("  const disposeNativePreview", source.indexOf("const readNativePreviewTrackFingerprint")),
+    source.indexOf("  // The caller's memo may hand out", source.indexOf("const readNativePreviewTrackFingerprint")),
   )
   const clipFingerprint = compiler.slice(
     compiler.indexOf("export const playbackClipFingerprint"),

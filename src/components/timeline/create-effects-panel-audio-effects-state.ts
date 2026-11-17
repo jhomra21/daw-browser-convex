@@ -53,6 +53,7 @@ import type { ExportEffectRow, ExportEffectsProjection } from "~/lib/export/expo
 import type { NativeBuiltInParameterPayload } from "~/lib/processor-edit-semantics";
 import { isAbortError } from "~/lib/dom-errors";
 import { createAudioEffectParameterPayload } from "~/lib/audio-effect-parameter-payload";
+import { audioEffectForms } from "~/lib/audio-effect-kinds";
 import { createAudioEffectInstanceIdentityCache } from "~/components/timeline/create-effects-panel-instance-identity-cache";
 import { createParameterGestureOwner, type ParameterDrain, type ParameterGestureHandle } from "~/components/timeline/parameter-gesture-owner";
 import { effectAdmission, parameterSaveResult, type ParameterSaveResult } from "~/components/timeline/effect-publication-result";
@@ -676,42 +677,7 @@ export function createEffectsPanelAudioDevice(
       return await setLocalEffectInstance(projectId, targetId, localEffectForKind(targetId, kind), normalizeParamsForKind(kind, input), { instanceId });
     }
     if (!userId) return;
-    const persistModulationParams = async (trackId?: string) => {
-      const exactInstanceId = instanceId;
-      const publish = (payload: Extract<SharedTimelineOperation, { kind: "effects.setMasterModulationParams" }>["payload"]) => persistEffectOperation(projectId, userId, trackId
-        ? { kind: "effects.setModulationParams", payload: { ...payload, trackId } }
-        : { kind: "effects.setMasterModulationParams", payload });
-      if (kind === "autofilter") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(input), instanceId: exactInstanceId });
-      if (kind === "chorus") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(input), instanceId: exactInstanceId });
-      if (kind === "flanger") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(input), instanceId: exactInstanceId });
-      if (kind === "phaser") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(input), instanceId: exactInstanceId });
-      if (kind === "tremolo") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(input), instanceId: exactInstanceId });
-      if (kind === "autopan") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(input), instanceId: exactInstanceId });
-      if (kind === "ensemble") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(input), instanceId: exactInstanceId });
-      if (kind === "lofi") return publish({ effect: kind, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(input), instanceId: exactInstanceId });
-    };
-    if (targetId === "master") {
-      if (kind === "utility") return await persistEffectOperation(projectId, userId, { kind: "effects.setMasterUtilityParams", payload: { params: normalizeUtilityParamsEnvelope(input), instanceId } });
-      else if (kind === "gate") return await persistEffectOperation(projectId, userId, { kind: "effects.setMasterGateParams", payload: { params: normalizeGateParamsEnvelope(input), instanceId } });
-      else if (kind === "limiter") return await persistEffectOperation(projectId, userId, { kind: "effects.setMasterLimiterParams", payload: { params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(input), instanceId } });
-      else if (kind === "eq") return await persistEffectOperation(projectId, userId, { kind: "effects.setMasterEqParams", payload: { params: normalizeEqParams(input), instanceId } });
-      else if (kind === "compressor") return await persistEffectOperation(projectId, userId, { kind: "effects.setMasterCompressorParams", payload: { params: normalizeCompressorParams(input), instanceId } });
-      else if (kind === "saturator") return await persistEffectOperation(projectId, userId, { kind: "effects.setMasterSaturatorParams", payload: { params: normalizeSaturatorParams(input), instanceId } });
-      else if (kind === "delay") return await persistEffectOperation(projectId, userId, { kind: "effects.setMasterDelayParams", payload: { params: normalizeDelayParams(input), instanceId } });
-      else if (kind === "reverb") return await persistEffectOperation(projectId, userId, { kind: "effects.setMasterReverbParams", payload: { params: normalizeReverbParams(input), instanceId } });
-      else if (kind === "spectral") return await persistEffectOperation(projectId, userId, { kind: "effects.setMasterSpectralParams", payload: { params: AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(input), instanceId } });
-      else return await persistModulationParams();
-    }
-    if (kind === "utility") return await persistEffectOperation(projectId, userId, { kind: "effects.setUtilityParams", payload: { trackId: targetId, params: normalizeUtilityParamsEnvelope(input), instanceId } });
-    else if (kind === "gate") return await persistEffectOperation(projectId, userId, { kind: "effects.setGateParams", payload: { trackId: targetId, params: normalizeGateParamsEnvelope(input), instanceId } });
-    else if (kind === "limiter") return await persistEffectOperation(projectId, userId, { kind: "effects.setLimiterParams", payload: { trackId: targetId, params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(input), instanceId } });
-    else if (kind === "eq") return await persistEffectOperation(projectId, userId, { kind: "effects.setEqParams", payload: { trackId: targetId, params: normalizeEqParams(input), instanceId } });
-    else if (kind === "compressor") return await persistEffectOperation(projectId, userId, { kind: "effects.setCompressorParams", payload: { trackId: targetId, params: normalizeCompressorParams(input), instanceId } });
-    else if (kind === "saturator") return await persistEffectOperation(projectId, userId, { kind: "effects.setSaturatorParams", payload: { trackId: targetId, params: normalizeSaturatorParams(input), instanceId } });
-    else if (kind === "delay") return await persistEffectOperation(projectId, userId, { kind: "effects.setDelayParams", payload: { trackId: targetId, params: normalizeDelayParams(input), instanceId } });
-    else if (kind === "reverb") return await persistEffectOperation(projectId, userId, { kind: "effects.setReverbParams", payload: { trackId: targetId, params: normalizeReverbParams(input), instanceId } });
-    else if (kind === "spectral") return await persistEffectOperation(projectId, userId, { kind: "effects.setSpectralParams", payload: { trackId: targetId, params: AUDIO_EFFECT_CONTRACTS.spectral.normalizeParams(input), instanceId } });
-    else return await persistModulationParams(targetId);
+    return await persistEffectOperation(projectId, userId, audioEffectForms(kind, undefined, input).persist(targetId, instanceId));
   };
 
   const persistInstanceParams = async (projectId: string | undefined, userId: string | undefined, targetId: string, instanceId: string, kind: AudioEffectKind, params: EffectParamsInput): Promise<ParameterSaveResult> => {

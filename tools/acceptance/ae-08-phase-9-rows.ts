@@ -26,7 +26,8 @@ export type Step = { edits: string[]; state: string; entry?: "ghost" | "cut"; se
 // transport state each edit observed; they have no capture to compare.
 export type Judge = "states" | "sustained" | "delete" | "latency" | "lane" | "take" | "held" | "editor" | "fault" | "trust" | "host-loss" | "cancelled-start"
 export type PackagedRun = {
-  // burst: --repetitions edits. vst-burst: --vst-repetitions edits. single: one pass of the cycle. launch: one edit per launch, repeated --repetitions times.
+  // burst: the preset's (or --repetitions) edits. vst-burst: the preset's (or --vst-repetitions) edits. single: one pass of the cycle.
+  // launch: one edit per launch, repeated the preset's (or --repetitions) times.
   repeat: "burst" | "vst-burst" | "single" | "launch"
   // Loop-periodic rows (output in a state repeats every periodSec) get short per-state references; others get one full-length one.
   periodSec: number | null
@@ -46,10 +47,18 @@ export type PackagedRun = {
   // "driven": the row's edits start and stop the transport themselves, so the launch does not press Play, waits for no audio and
   // leaves the host as the row left it.
   transport?: "driven"
-  // A calibration row measures a constant of the latency gates (AE08-ASSET-LOAD-PLAN.md section 1). It runs only when named, never in
-  // `--matrix`.
+  // A calibration row measures a constant of the latency gates (AE08-ASSET-LOAD-PLAN.md section 1). It runs only when named or in the
+  // extended preset, never in the certifying one.
   calibration?: true
+  // A row of the extended preset only: the certifying preset leaves it out.
+  tier?: "extended"
+  // The repetitions this row takes in a preset when no flag names them; a preset leaves unset what the row's repeat kind defaults.
+  repetitions?: { cert?: number; extended?: number }
 }
+// `cert` is the certifying matrix (70 minutes), `extended` the overnight one.
+export type Preset = "cert" | "extended"
+// `--matrix` names a preset; `full` is the old name of the extended one.
+export const presetNamed = new Map<string, Preset>([["cert", "cert"], ["extended", "extended"], ["full", "extended"]])
 export type PortableRun = { from: string; to: string; latency: boolean }
 type BurstRow = { name: string; latencyClass: LatencyClass; packaged?: PackagedRun; portable?: PortableRun }
 export type Row = PackagedRun & { name: string; latencyClass: LatencyClass }
@@ -102,11 +111,13 @@ export const burstRows: BurstRow[] = [
     prepare: recording, judge: "take", settle: "refused", cycle: [{ edits: ["target-delete-refused"], state: "armed" }] } },
   { name: "unaffected-input", latencyClass: "plain", packaged: { repeat: "launch", periodSec: null, fixture: "phase5:raw-tempo", start: "recording", device: "blackhole",
     prepare: recording, judge: "take", cycle: [{ edits: ["silent-track-create"], state: "recording" }] } },
-  { name: "vst-insert", latencyClass: "vst-insert", packaged: { repeat: "vst-burst", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-absent", prepare: testPlugin,
+  // Its edits are those of vst-remove-undo in the other order and the insert publications carry the same class, so only the extended preset runs it.
+  { name: "vst-insert", latencyClass: "vst-insert", packaged: { repeat: "vst-burst", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-absent", prepare: testPlugin, tier: "extended",
     cycle: [{ edits: ["vst-insert"], state: "vst-present" }, { edits: ["vst-remove"], state: "vst-absent" }] } },
   // Removing an external plug-in is not an undo history entry (EffectsPanel removeExternalProcessor), so the plug-in comes back by a new insert.
+  // 40 steps give the 20 inserts the frozen vst-insert limit was sampled on.
   { name: "vst-remove-undo", latencyClass: "plain", packaged: { repeat: "vst-burst", periodSec: null, fixture: "phase5:raw-tempo", start: "vst-present", prepare: insertedTestPlugin,
-    cycle: [{ edits: ["vst-remove"], state: "vst-absent" }, { edits: ["vst-insert"], state: "vst-present" }] } },
+    repetitions: { cert: 40 }, cycle: [{ edits: ["vst-remove"], state: "vst-absent" }, { edits: ["vst-insert"], state: "vst-present" }] } },
   { name: "vst-latency-switch", latencyClass: "raise", packaged: { repeat: "vst-burst", periodSec: null, fixture: "phase5:raw-tempo", start: "latency-low", prepare: insertedTestPlugin,
     cycle: [{ edits: ["latency-high"], state: "latency-high" }, { edits: ["latency-low"], state: "latency-low" }] } },
   // Opening the editor publishes no graph: it settles on the host's vst-editor-state line. The edit after it must publish in place with the editor still open.
@@ -131,11 +142,11 @@ export const burstRows: BurstRow[] = [
   // later swap find both samples resident and log no asset line, so no step waits for one: each settles on its first publication.
   { name: "asset-swap-held-note", latencyClass: "asset", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-swap", start: "asset-changed", judge: "held",
     cycle: [{ edits: ["sampler-swap-asset"], state: "asset-copy" }, { edits: ["sampler-swap-back"], state: "asset-changed" }] } },
-  // The size calibration of the asset gate: 27 and 100 MiB swap to five never-loaded copies and back (run with --repetitions 10), 300 MiB
-  // swaps to one copy and back twice (--repetitions 4; the sample is above the resident cap, so every swap uploads).
-  ...[["27", 5], ["100", 5], ["300", 1]].map(([mib, copies]): BurstRow => ({ name: `asset-swap-calibration-${mib}`, latencyClass: "asset",
+  // The size calibration of the asset gate: 27 and 100 MiB swap to five never-loaded copies and back (10 edits), 300 MiB swaps to one copy
+  // and back twice (4 edits; the sample is above the resident cap, so every swap uploads).
+  ...[["27", 5, 10], ["100", 5, 10], ["300", 1, 4]].map(([mib, copies, edits]): BurstRow => ({ name: `asset-swap-calibration-${mib}`, latencyClass: "asset",
     packaged: { repeat: "burst", periodSec: null, fixture: `phase5:held-swap:${mib}:${copies}`, start: "asset-changed", judge: "held", calibration: true,
-      cycle: Array.from({ length: Number(copies) }, (_, index) => [{ edits: [`sampler-swap-asset-${index + 1}`], state: `asset-copy-${index + 1}` },
+      repetitions: { cert: Number(edits), extended: Number(edits) }, cycle: Array.from({ length: Number(copies) }, (_, index) => [{ edits: [`sampler-swap-asset-${index + 1}`], state: `asset-copy-${index + 1}` },
         { edits: ["sampler-swap-back"], state: "asset-changed" }]).flat() } })),
   { name: "held-note-sampler", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:held-sampler", start: "gain-full", judge: "held",
     cycle: [{ edits: ["sampler-gain-half"], state: "gain-half" }, { edits: ["sampler-gain-full"], state: "gain-full" }] } },
@@ -175,7 +186,9 @@ export const burstRows: BurstRow[] = [
 ]
 
 const packagedRows: Row[] = burstRows.flatMap(({ name, latencyClass, packaged }) => packaged ? [{ name, latencyClass, ...packaged }] : [])
-export const phase9Matrix = packagedRows.filter((row) => row.calibration === undefined)
+export const phase9Presets: Record<Preset, Row[]> = {
+  cert: packagedRows.filter((row) => row.tier === undefined && row.calibration === undefined),
+  extended: packagedRows,
+}
 export const phase9Rows = packagedRows.map((row) => row.name)
-export const phase9RowsWithCalibration = packagedRows
 export const portableCampaignRows: PortableCampaignRow[] = burstRows.flatMap(({ name, latencyClass, portable }) => portable ? [{ row: name, class: latencyClass, ...portable }] : [])

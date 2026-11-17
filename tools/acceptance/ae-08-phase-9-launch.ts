@@ -8,8 +8,8 @@ import { createAvailableDesktopHostClient } from "@daw-browser/desktop-protocol/
 import { command } from "../performance/30-track/v3-import-workload"
 import { deleteTrackThroughUi, dragUtilityGainKnob, exportReference, heldInstrumentTrack, heldSynthTrack, insertTargetTrack, pressHistoryKey, reorderTargetTrack, required,
   sampledInstrumentParams, selectFftSize, setupPhase5Fixture, sineSynthParams, waitForUi, waitImportedClip, waitNativeFrame, liveMidiTrack, type Phase5Context, type SampleAsset } from "./ae-08-phase-5-fixture"
-import { awaitPublicationComplete, burstSchedule, judgeStored, MIN_WINDOW_MS, parseHostLines, repetitionsFor, runBurst, type Perform, type Timings } from "./ae-08-phase-9-matrix"
-import { phase9Matrix, type Row } from "./ae-08-phase-9-rows"
+import { awaitPublicationComplete, burstSchedule, judgeStored, MIN_WINDOW_MS, parseHostLines, repetitionsFor, runBurst, type Perform, type Requested, type Timings } from "./ae-08-phase-9-matrix"
+import { phase9Presets, type Row } from "./ae-08-phase-9-rows"
 import { nativeUnavailableReported, takeFile } from "./ae-08-phase-9-compare"
 import { writeWav } from "./ae08-wav"
 import { blackhole, describeAudioInputScript, iacPort, makeTone, nativeInputDeviceSchema, playToneIntoBlackhole, selectAudioInputScript, selectMidiInputScript, sendMidiNote } from "./ae-08-phase-9-devices"
@@ -28,7 +28,7 @@ const spectralFrames = (fftSize: 512 | 4096) => getSpectralLatencyFrames(fftSize
 const silentTrack = "Silent publication target"
 // Native progress frames are lower bounds on what has been heard, so a window is closed this long after its second.
 const windowMarginMs = 250
-export type Phase9Launch = { rows: Row[]; repetitions: number; vstRepetitions: number; directory: string; contentSeconds: number }
+export type Phase9Launch = { rows: Row[]; requested: Requested; directory: string; contentSeconds: number }
 
 // The ids a performer needs from the project; `observe` reads them from a fresh snapshot, so a performer never holds a stale one.
 export type Observed = { spectralEffectId: string | undefined; limiterEffectId: string | undefined; externalEffectId: string | undefined; trackId: (name: string) => string | undefined; clipId: (name: string) => string | undefined
@@ -257,8 +257,8 @@ export const createPerformer = ({ context, runtime, playThenPause, transportStat
 }
 
 // The playing content must outlast the longest merged burst, with the assumed edit time doubled for slack and a tail for the last window.
-export const contentSecondsFor = (rows: readonly Row[], repetitions: number, vstRepetitions: number, timings: Timings) =>
-  Math.max(24, Math.ceil(rows.reduce((total, row) => total + burstSchedule(row, repetitionsFor(row, repetitions, vstRepetitions)).length
+export const contentSecondsFor = (rows: readonly Row[], requested: Requested, timings: Timings) =>
+  Math.max(24, Math.ceil(rows.reduce((total, row) => total + burstSchedule(row, repetitionsFor(row, requested)).length
     * 2 * (row.repeat === "vst-burst" ? timings.vstStepSeconds : timings.stepSeconds), 0)) + 30)
 
 // Phase 5 fixtures name a row ("phase5:effect-state"); a launch's merged rows share one.
@@ -353,7 +353,7 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
   for (const row of launch.rows) {
     const logged = await runBurst({ out, directory: path.join(launch.directory, row.name), row, perform, mark, sampleRate,
       frameAt: (wallMs) => Math.max(1, Math.round((wallMs - playWallMs) * sampleRate / 1000)),
-      repetitions: repetitionsFor(row, launch.repetitions, launch.vstRepetitions),
+      repetitions: repetitionsFor(row, launch.requested),
       afterSettle: async (settled) => { if (!driven) await mark("asset-inventory", { revision: settled.revision, installedAssets: await installedAssets() }) },
       hold: async (frame) => { if (!driven) await waitNativeFrame(context, frame) } })
     // The last edit's window needs its second (and the next row's first window starts after it), so hold until the transport
@@ -626,7 +626,7 @@ export const selfTest = async () => {
   check(rejected === "No phase 9 performer for no-such-edit", `an unknown edit is refused, got ${rejected}`)
 
   // One merged launch's host.jsonl is split per row at each row's first step, and each row is judged from its own part.
-  const [first, second] = [phase9Matrix.find((row) => row.name === "fft-transition"), phase9Matrix.find((row) => row.name === "raise-lower-burst")]
+  const [first, second] = [phase9Presets.cert.find((row) => row.name === "fft-transition"), phase9Presets.cert.find((row) => row.name === "raise-lower-burst")]
   if (!first || !second) throw new Error("phase 9 launch self-test: rows missing")
   const directory = await mkdtemp(path.join(tmpdir(), "ae08-phase9-export-"))
   try {

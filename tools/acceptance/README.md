@@ -57,5 +57,5 @@ An expected baseline continuity failure is a successful **evidence run**, not
 AE-08 feature certification. Capture/harness failures exit nonzero.
 
 `--phase N` is parsed, but phases after 1 are not implemented.
-`--matrix full --repetitions N --vst-repetitions N` is reserved for phase 9
-and fails explicitly.
+`--matrix cert|extended` (`full` is an alias of `extended`) is reserved for phase 9
+and fails explicitly. `--repetitions N --vst-repetitions N` override the preset's per-row repetitions.

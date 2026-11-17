@@ -18,9 +18,9 @@ import { phase5Rows, runPhase5Fixture } from "./ae-08-phase-5-fixture"
 import { phase8Rows, runPhase8Fixture } from "./ae-08-phase-8-fixture"
 import { analyzePhase8Campaign } from "./analyze-ae-08-phase-8"
 import { contentSecondsFor, exportRowEvidence, runPhase9Launch, stateName, type Phase9Launch } from "./ae-08-phase-9-launch"
-import { burstSchedule, breakdownLine, breakdownStored, commitReceivedWallMs, judgeStored, launchesFor, measuredEditsSchema, measuredTimings, pooled,
-  defaultTimings, readTimings, repetitionsFor, type Trial } from "./ae-08-phase-9-matrix"
-import { phase9Matrix, phase9Rows, phase9RowsWithCalibration } from "./ae-08-phase-9-rows"
+import { BUDGET_SECONDS, breakdownLine, breakdownStored, commitReceivedWallMs, judgeStored, launchesFor, measuredEditsSchema, measuredTimings, planRows, pooled,
+  defaultTimings, readTimings, wallSeconds, type Requested, type Trial } from "./ae-08-phase-9-matrix"
+import { phase9Presets, phase9Rows, presetNamed, type Preset } from "./ae-08-phase-9-rows"
 import { judgeRowCapture } from "./ae-08-phase-9-compare"
 import { checkDevices, seedPluginCatalog } from "./ae-08-phase-9-devices"
 import { readWav, writeWav, type Pcm } from "./ae08-wav"
@@ -659,25 +659,27 @@ const assemble = async (directory: string, prefix = ""): Promise<Pcm> => {
   return { sampleRate, channels, samples }
 }
 
-const usage = "Usage: ae-08-live-graph.ts --phase 1|2|3|4|5|6|6i|7|8|9 [--out /absolute/dir] [--rows a,b,…] [--matrix] [--repetitions N] [--vst-repetitions N] [--judge-only /absolute/dir [--breakdown]] [--timings /absolute/phase9-timings.json]"
+const usage = "Usage: ae-08-live-graph.ts --phase 1|2|3|4|5|6|6i|7|8|9 [--out /absolute/dir] [--rows a,b,…] [--matrix [cert|extended|full]] [--repetitions N] [--vst-repetitions N] [--judge-only /absolute/dir [--breakdown]] [--timings /absolute/phase9-timings.json]"
 const knownPhases = ["1", "2", "3", "4", "5", "6", "6i", "7", "8", "9"]
 const positiveInteger = (flag: string, value: string) => {
   const number = Number(value)
   if (!Number.isInteger(number) || number < 1) throw new Error(`${flag} needs a positive integer, got ${value}`)
   return number
 }
-// Only phases 5, 8 and 9 have rows to filter, only phases 5 and 9 repeat them, and only phases 6, 6i, 7 and 9 have VST rows. `--matrix` (optionally
-// spelled `--matrix full`) selects every row, so it contradicts `--rows`. Phase 9 names its rows with --matrix or --rows, or re-judges stored
+// Only phases 5, 8 and 9 have rows to filter, only phases 5 and 9 repeat them, and only phases 6, 6i, 7 and 9 have VST rows. `--matrix` selects a
+// preset (`cert` when bare, `extended`, or `full`, the old name of `extended`) and so every row of it, so it contradicts `--rows`. A
+// repetition flag overrides the preset's per-row repetitions. Phase 9 names its rows with --matrix or --rows, or re-judges stored
 // evidence with --judge-only, which launches nothing.
 export const parseRunnerArgs = (args: string[]) => {
   const values = new Map<string, string>()
-  let matrix = false
+  let matrix: Preset | undefined
   let breakdown = false
   for (let index = 0; index < args.length; index++) {
     const key = args[index]
     if (key === "--matrix") {
-      matrix = true
-      if (args[index + 1] === "full") index++
+      const named = presetNamed.get(args[index + 1] ?? "")
+      matrix = named ?? "cert"
+      if (named) index++
       continue
     }
     if (key === "--breakdown") {
@@ -702,10 +704,10 @@ export const parseRunnerArgs = (args: string[]) => {
   if (rows && (!phaseRows.length || rows.some((row) => !phaseRows.includes(row))))
     throw new Error(`--rows names phase 5 rows: ${phase5Rows.join(", ")}; phase 8 rows: ${phase8Rows.join(", ")}; or phase 9 rows: ${phase9Rows.join(", ")}`)
   const repetitionsValue = values.get("--repetitions")
-  const repetitions = repetitionsValue === undefined ? 1 : positiveInteger("--repetitions", repetitionsValue)
-  if (repetitions > 1 && !["5", "9"].includes(phase)) throw new Error("--repetitions repeats phase 5 and phase 9 rows")
+  const repetitions = repetitionsValue === undefined ? undefined : positiveInteger("--repetitions", repetitionsValue)
+  if (repetitions !== undefined && repetitions > 1 && !["5", "9"].includes(phase)) throw new Error("--repetitions repeats phase 5 and phase 9 rows")
   const vstValue = values.get("--vst-repetitions")
-  const vstRepetitions = vstValue === undefined ? 1 : positiveInteger("--vst-repetitions", vstValue)
+  const vstRepetitions = vstValue === undefined ? undefined : positiveInteger("--vst-repetitions", vstValue)
   if (vstValue !== undefined && !["6", "6i", "7", "9"].includes(phase)) throw new Error("--vst-repetitions repeats the VST rows of phases 6, 6i, 7 and 9")
   const judgeOnly = values.get("--judge-only")
   if (judgeOnly !== undefined && (phase !== "9" || !path.isAbsolute(judgeOnly))) throw new Error("--judge-only /absolute/dir re-judges stored evidence for phase 9")
@@ -718,7 +720,7 @@ export const parseRunnerArgs = (args: string[]) => {
 // Only a complete pass over every row can certify: the campaign analysis needs all rows (analyze-ae-08-continuity.ts). Phase 5 certifies
 // a single pass; phase 9 repeats each row by design.
 export const nonCertifyingReason = (parsed: ReturnType<typeof parseRunnerArgs>) =>
-  parsed.rows ? "filtered" : parsed.repetitions > 1 && parsed.phase !== "9" ? "repeated" : undefined
+  parsed.rows ? "filtered" : (parsed.repetitions ?? 1) > 1 && parsed.phase !== "9" ? "repeated" : undefined
 
 const selfTest = () => {
   const refused = (args: string[], message: RegExp) => {
@@ -729,6 +731,8 @@ const selfTest = () => {
   if (accepted.rows?.join() !== "held-note,raw-tempo" || accepted.repetitions !== 2 || !nonCertifyingReason(accepted)) throw new Error("Filtered parse failed")
   if (nonCertifyingReason(parseRunnerArgs(["--phase", "5", "--out", "/tmp/x", "--matrix"]))) throw new Error("A full single pass must certify")
   if (nonCertifyingReason(parseRunnerArgs(["--phase", "5", "--out", "/tmp/x", "--matrix", "full"]))) throw new Error("`--matrix full` must stay accepted")
+  const presets = ["--matrix", "--matrix cert", "--matrix extended", "--matrix full"].map((flags) => parseRunnerArgs(["--phase", "9", "--out", "/tmp/x", ...flags.split(" ")]))
+  if (presets.map((parsed) => parsed.matrix).join() !== "cert,cert,extended,extended" || presets[0]?.repetitions !== undefined) throw new Error("--matrix presets parse failed")
   if (parseRunnerArgs(["--phase", "6i", "--out", "/tmp/x", "--vst-repetitions", "3"]).vstRepetitions !== 3) throw new Error("6i parse failed")
   parseRunnerArgs(["--phase", "6", "--out", "/tmp/x"]); parseRunnerArgs(["--phase", "7", "--out", "/tmp/x"])
   refused(["--phase", "5", "--out", "/tmp/x", "--rows", "nope"], /--rows names phase 5 rows/)
@@ -801,9 +805,10 @@ const main = async () => {
   await writeFile(path.join(out, "provenance.json"), JSON.stringify(provenance, null, 2))
   try {
     if (phase === 9) {
-      const selected = parsed.matrix ? phase9Matrix : phase9RowsWithCalibration.filter((row) => parsed.rows?.includes(row.name))
+      const requested: Requested = { preset: parsed.matrix ?? "cert", repetitions: parsed.repetitions, vstRepetitions: parsed.vstRepetitions }
+      const selected = parsed.matrix ? phase9Presets[parsed.matrix] : phase9Presets.extended.filter((row) => parsed.rows?.includes(row.name))
       const missing = selected.filter((row) => row.fixture === null)
-      const launches = launchesFor(selected.filter((row) => row.fixture !== null), parsed.repetitions)
+      const launches = launchesFor(selected.filter((row) => row.fixture !== null), requested)
       const timings = parsed.timings ? await readTimings(parsed.timings) : defaultTimings
       provenance.fixture = "Phase 9 matrix: one launch per row class carrying alternating edits, settled on host.jsonl publication evidence"
       provenance.ownedPids = []
@@ -814,9 +819,9 @@ const main = async () => {
         const replica = launches.slice(0, launch).filter((other) => other === launches[launch]).length
         return replica === 0 ? rowsDirectory : path.join(out, `phase9-r${replica + 1}`)
       }
-      await writeFile(path.join(out, "phase9-plan.json"), JSON.stringify({ vstRepetitions: parsed.vstRepetitions,
-        launches: launches.map((launch) => launch.map((row) => ({ row: row.name, class: row.latencyClass,
-          edits: burstSchedule(row, repetitionsFor(row, parsed.repetitions, parsed.vstRepetitions)).length }))),
+      await writeFile(path.join(out, "phase9-plan.json"), JSON.stringify({ preset: requested.preset, repetitionFlag: requested.repetitions ?? null, vstRepetitionFlag: requested.vstRepetitions ?? null,
+        modeledMinutes: wallSeconds(launches, requested, timings) / 60, budgetMinutes: BUDGET_SECONDS / 60, launches: launches.length,
+        rows: planRows(launches, requested, timings).map(({ seconds, ...entry }) => ({ ...entry, modeledMinutes: seconds / 60 })),
         missing: missing.map((row) => ({ row: row.name, needs: row.needs })) }, null, 2))
       const campaign: { launch: number; seconds: number; capturedSeconds: number; failure?: string }[] = []
       const measuredRows: { vst: boolean; edits: z.infer<typeof measuredEditsSchema> }[] = []
@@ -824,8 +829,7 @@ const main = async () => {
       for (const [index, rows] of launches.entries()) {
         const first = rows[0]
         if (!first) continue
-        const launch: Phase9Launch = { rows, repetitions: parsed.repetitions, vstRepetitions: parsed.vstRepetitions, directory: rowsFolder(index),
-          contentSeconds: contentSecondsFor(rows, parsed.repetitions, parsed.vstRepetitions, timings) }
+        const launch: Phase9Launch = { rows, requested, directory: rowsFolder(index), contentSeconds: contentSecondsFor(rows, requested, timings) }
         const startedAt = Date.now()
         let failure: string | undefined
         let captured = 0
@@ -882,9 +886,10 @@ const main = async () => {
       provenance.fixture = "Eight public-control source/schedule seam rows plus the effect-state UI row (FFT, gain preview/flush, pause); 180s paged assets; native frame oracle plus offline references"
       provenance.ownedPids = []
       const rows: { row: string; failure?: string }[] = []
+      const repetitions = parsed.repetitions ?? 1
       for (const row of parsed.rows ?? phase5Rows) {
-        for (let repetition = 1; repetition <= parsed.repetitions; repetition++) {
-          const name = parsed.repetitions === 1 ? row : `${row}-r${repetition}`
+        for (let repetition = 1; repetition <= repetitions; repetition++) {
+          const name = repetitions === 1 ? row : `${row}-r${repetition}`
           try {
             const result = await run(path.join(out, name), true, row, 5)
             provenance.ownedPids.push(result.pid)

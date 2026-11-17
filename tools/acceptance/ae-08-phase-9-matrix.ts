@@ -7,7 +7,7 @@ import { z } from "zod"
 import { ae08ControlCommitReceived } from "../../apps/desktop/ae08-evidence"
 import { ae08RendererMarks } from "@daw-browser/desktop-protocol/ipc-channels"
 import { prepareSplit, splitLine, type PrepareSplit } from "./ae-08-prepare-split"
-import { phase9Matrix, phase9Rows, phase9RowsWithCalibration, type LatencyClass, type Row, type Settle } from "./ae-08-phase-9-rows"
+import { phase9Presets, phase9Rows, presetNamed, type LatencyClass, type Preset, type Row, type Settle } from "./ae-08-phase-9-rows"
 
 // AE-08 phase 9 matrix (plan §8 steps 1-2): one packaged launch per row class carries N alternating edits. This file owns
 // the burst schedule, settling on host evidence, publication spacing, fail-fast judging, pooled statistics,
@@ -16,10 +16,17 @@ import { phase9Matrix, phase9Rows, phase9RowsWithCalibration, type LatencyClass,
 // --phase 9) calls these; there is no second runner protocol.
 //
 //   bun tools/acceptance/ae-08-phase-9-matrix.ts --self-test
-//   bun tools/acceptance/ae-08-phase-9-matrix.ts --plan [--repetitions N] [--vst-repetitions N]
+//   bun tools/acceptance/ae-08-phase-9-matrix.ts --plan [--matrix cert|extended|full] [--repetitions N] [--vst-repetitions N]
 
-export const repetitionsFor = (row: Row, repetitions: number, vstRepetitions: number) =>
-  row.repeat === "single" || row.repeat === "launch" ? 1 : row.repeat === "vst-burst" ? vstRepetitions : repetitions
+// What a run asks for: the preset names the rows' repetitions, and a flag overrides them for the rows it covers.
+export type Requested = { preset: Preset; repetitions?: number; vstRepetitions?: number }
+const defaultRepetitions: Record<"burst" | "vst-burst" | "launch", Record<Preset, number>> = {
+  burst: { cert: 30, extended: 100 }, "vst-burst": { cert: 20, extended: 100 }, launch: { cert: 15, extended: 100 } }
+// A single row is one pass whatever is asked.
+const requestedCount = (row: Row, requested: Requested) => row.repeat === "single" ? 1
+  : (row.repeat === "vst-burst" ? requested.vstRepetitions : requested.repetitions) ?? row.repetitions?.[requested.preset] ?? defaultRepetitions[row.repeat][requested.preset]
+// The edits of one launch of the row: a row that repeats by launch has one cycle per launch.
+export const repetitionsFor = (row: Row, requested: Requested) => row.repeat === "burst" || row.repeat === "vst-burst" ? requestedCount(row, requested) : 1
 
 // A burst always ends on the row's start state: it is rounded up to whole cycles.
 export const burstSchedule = (row: Row, repetitions: number) =>
@@ -37,8 +44,11 @@ export const mergeLaunches = (rows: readonly Row[]) => rows.reduce<Row[][]>((lau
 }, [])
 
 // The launches of a run: a row that repeats by launch gives one launch per repetition.
-export const launchesFor = (rows: readonly Row[], repetitions: number) => mergeLaunches(rows)
-  .flatMap((launch) => launch.every((row) => row.repeat === "launch") ? Array.from({ length: repetitions }, () => launch) : [launch])
+export const launchesFor = (rows: readonly Row[], requested: Requested) => mergeLaunches(rows)
+  .flatMap((launch) => {
+    const [row] = launch
+    return row?.repeat === "launch" ? Array.from({ length: requestedCount(row, requested) }, () => launch) : [launch]
+  })
 
 // Seconds per launch, per edit, per VST edit and per offline state export. The defaults were measured on the stored phase 9 campaigns
 // of the C2 rounds (/tmp/c2, c2gaps, ae08-cal, ae08-rec, ae08-jr and others: capturedSeconds against seconds per launch, and rows of 2,
@@ -51,16 +61,22 @@ const launchRowSeconds = new Map([["delete-while-starting", 7.7], ["record-targe
 // The certifying budget of plan §13 answer 4.
 export const BUDGET_SECONDS = 70 * 60
 
-// A launch is its fixed cost, the steps of its merged rows, and one offline export of the states of each row the analyzer compares.
-const launchSeconds = (launch: readonly Row[], repetitions: number, vstRepetitions: number, timings: Timings) => {
-  const [first] = launch
-  const whole = first?.repeat === "launch" ? launchRowSeconds.get(first.name) : undefined
-  return whole ?? timings.launchSeconds + launch.reduce((sum, row) =>
-    sum + burstSchedule(row, repetitionsFor(row, repetitions, vstRepetitions)).length * (row.repeat === "vst-burst" ? timings.vstStepSeconds : timings.stepSeconds)
-      + (row.judge === "states" ? timings.exportSeconds : 0), 0)
+// What each row of a run costs. A launch is its fixed cost (charged to its first row), the steps of its merged rows, and one offline
+// export of the states of each row the analyzer compares; a row that repeats by launch costs its measured launch each time.
+export type PlannedRow = { row: string; repetitions: number; stepsPerLaunch: number; seconds: number }
+export const planRows = (launches: readonly Row[][], requested: Requested, timings: Timings = defaultTimings) => {
+  const planned = new Map<string, PlannedRow>()
+  for (const launch of launches) for (const [position, row] of launch.entries()) {
+    const stepsPerLaunch = burstSchedule(row, repetitionsFor(row, requested)).length
+    const steps = stepsPerLaunch * (row.repeat === "vst-burst" ? timings.vstStepSeconds : timings.stepSeconds) + (row.judge === "states" ? timings.exportSeconds : 0)
+    const seconds = (row.repeat === "launch" ? launchRowSeconds.get(row.name) : undefined) ?? (position === 0 ? timings.launchSeconds : 0) + steps
+    const before = planned.get(row.name)
+    planned.set(row.name, { row: row.name, repetitions: requestedCount(row, requested), stepsPerLaunch, seconds: (before?.seconds ?? 0) + seconds })
+  }
+  return [...planned.values()]
 }
-export const wallSeconds = (launches: readonly Row[][], repetitions: number, vstRepetitions: number, timings: Timings = defaultTimings) =>
-  launches.reduce((total, launch) => total + launchSeconds(launch, repetitions, vstRepetitions, timings), 0)
+export const wallSeconds = (launches: readonly Row[][], requested: Requested, timings: Timings = defaultTimings) =>
+  planRows(launches, requested, timings).reduce((total, entry) => total + entry.seconds, 0)
 
 // ---- Settling on host evidence ----
 const hostEventSchema = z.object({ event: z.string(), cause: z.string().default(""), wallMs: z.number().default(0),
@@ -429,7 +445,7 @@ export const selfTest = async () => {
   check(withSetup.edits === 360 && withSetup.setupFailures === 1 && !withSetup.boundsBelowOnePercent, "a setup failure is no trial and blocks the bound")
   // Schedule, repetitions, merging.
   const find = (name: string) => {
-    const row = phase9Matrix.find((candidate) => candidate.name === name)
+    const row = phase9Presets.extended.find((candidate) => candidate.name === name)
     if (!row) throw new Error(`phase 9 matrix self-test: row ${name} missing`)
     return row
   }
@@ -439,39 +455,48 @@ export const selfTest = async () => {
   check(burstSchedule(burst, 20).every((step) => step.edits.join() === "fft-4096,fft-512"), "a raise and a lower share one step")
   check(burstSchedule(find("undo-redo-burst"), 10).length === 12, "undo/redo rounds up to whole cycles")
   check(find("vst-insert").repeat === "vst-burst" && find("open-editor").repeat === "single", "VST repeat classes")
-  check(repetitionsFor(find("vst-insert"), 100, 20) === 20 && repetitionsFor(find("open-editor"), 100, 20) === 1
-    && repetitionsFor(fft, 100, 20) === 100, "repetitions per class")
+  const cert: Requested = { preset: "cert" }, extended: Requested = { preset: "extended" }
+  const flagged: Requested = { preset: "cert", repetitions: 100, vstRepetitions: 20 }
+  check(repetitionsFor(find("vst-insert"), flagged) === 20 && repetitionsFor(find("open-editor"), flagged) === 1 && repetitionsFor(fft, flagged) === 100, "flags override repetitions per class")
+  check(repetitionsFor(fft, cert) === 30 && repetitionsFor(fft, extended) === 100 && repetitionsFor(find("vst-remove-undo"), cert) === 40 && repetitionsFor(find("vst-remove-undo"), extended) === 100
+    && repetitionsFor(find("vst-latency-switch"), cert) === 20 && repetitionsFor(find("open-editor"), extended) === 1, "a preset gives each row its own repetitions: burst 30/100, vst-remove-undo 40/100, vst-latency-switch 20/100, single 1/1")
+  check(launchesFor([find("record-target-guard")], cert).length === 15 && launchesFor([find("record-target-guard")], extended).length === 100 && launchesFor([find("open-editor")], extended).length === 1, "launch rows run 15 / 100 launches, single rows one")
+  check(phase9Presets.extended.length === phase9Presets.cert.length + 4 && phase9Presets.cert.every((row) => row.tier === undefined && row.calibration === undefined)
+    && phase9Presets.extended.filter((row) => row.tier === "extended").map((row) => row.name).join() === "vst-insert", "the certifying preset leaves out vst-insert and the calibration rows")
   check(mergeLaunches([attach, fft, burst]).length === 1, "rows that end where the next starts share a launch")
   check(mergeLaunches([attach, { ...fft, start: "spectral-4096" }]).length === 2, "a row whose start state is not the previous end does not merge")
   check(mergeLaunches([attach, { ...fft, fixture: "phase5:held-note" }]).length === 2, "different fixtures do not merge")
   check(mergeLaunches([attach, { ...fft, latencyClass: "plain" }]).length === 2, "different latency classes do not merge")
   check(mergeLaunches([attach, { ...fft, device: "iac-midi" }]).length === 2, "different devices do not merge")
-  check(phase9Matrix.every((row) => (row.fixture === null) === (row.needs !== undefined)), "a row is missing exactly when it names what it needs")
+  check(phase9Presets.extended.every((row) => (row.fixture === null) === (row.needs !== undefined)), "a row is missing exactly when it names what it needs")
   check(new Set(phase9Rows).size === phase9Rows.length, "row names are distinct")
-  // The size calibration rows run only when named, and their swaps are the performers' (5 copies and back, or 1 and back twice).
-  const calibration = phase9RowsWithCalibration.filter((row) => row.calibration)
-  check(calibration.length === 3 && calibration.every((row) => phase9Rows.includes(row.name) && !phase9Matrix.includes(row)), "calibration rows are named but not in the matrix")
-  check(calibration.every((row) => launchesFor([row], 10).length === 1), "a calibration row is one burst launch")
+  // The size calibration rows run when named or in the extended preset, and their swaps are the performers' (5 copies and back, or 1 and back twice).
+  const calibration = phase9Presets.extended.filter((row) => row.calibration)
+  check(calibration.length === 3 && calibration.every((row) => phase9Rows.includes(row.name) && !phase9Presets.cert.includes(row)), "calibration rows are named and in the extended preset only")
+  check(calibration.every((row) => launchesFor([row], cert).length === 1), "a calibration row is one burst launch")
+  check(calibration.map((row) => repetitionsFor(row, extended)).join() === "10,10,4", `calibration rows take their own edit counts: ${calibration.map((row) => repetitionsFor(row, extended))}`)
   const [small, large] = [calibration.find((row) => row.name === "asset-swap-calibration-100"), calibration.find((row) => row.name === "asset-swap-calibration-300")]
   check(small !== undefined && small.fixture === "phase5:held-swap:100:5" && burstSchedule(small, 10).map((step) => step.edits[0]).join() === "sampler-swap-asset-1,sampler-swap-back,sampler-swap-asset-2,sampler-swap-back,sampler-swap-asset-3,sampler-swap-back,sampler-swap-asset-4,sampler-swap-back,sampler-swap-asset-5,sampler-swap-back",
     "the 100 MiB row swaps to five copies, each followed by a swap back")
   check(large !== undefined && large.fixture === "phase5:held-swap:300:1" && burstSchedule(large, 4).map((step) => step.edits[0]).join() === "sampler-swap-asset-1,sampler-swap-back,sampler-swap-asset-1,sampler-swap-back", "the 300 MiB row swaps to its one copy and back twice")
   // Launch plan: each merged launch is one burst launch, so a run costs one fixed launch cost per launch and the steps of its rows.
-  const built = phase9Matrix.filter((row) => row.fixture !== null && row.repeat !== "launch" && row.transport === undefined)
+  const built = phase9Presets.cert.filter((row) => row.fixture !== null && row.repeat !== "launch" && row.transport === undefined)
   const launches = mergeLaunches(built)
   check(launches.length > 0 && launches.length < built.length, `${built.length} rows merge into ${launches.length} launches`)
-  check(near(wallSeconds([[attach], [fft]], 10, 10), 2 * defaultTimings.launchSeconds + 20 * defaultTimings.stepSeconds), "two launches of ten alternating edits cost two launches and twenty steps")
-  check(wallSeconds([], 10, 10) === 0, "no rows, no launches")
+  const ten: Requested = { preset: "cert", repetitions: 10 }
+  check(near(wallSeconds([[attach], [fft]], ten), 2 * defaultTimings.launchSeconds + 20 * defaultTimings.stepSeconds), "two launches of ten alternating edits cost two launches and twenty steps")
+  check(wallSeconds([], ten) === 0, "no rows, no launches")
   // A row that repeats by launch is its own launch, once per repetition, judged on its own capture.
   const delete1 = find("delete-while-starting")
   check(mergeLaunches([delete1, { ...delete1, start: delete1.cycle.at(-1)?.state ?? "" }]).length === 2 && mergeLaunches([fft, delete1]).length === 2, "a launch-repeat row never merges")
-  check(launchesFor([delete1], 5).length === 5 && launchesFor([fft], 5).length === 1, "a launch-repeat row gives one launch per repetition")
-  check(near(wallSeconds(launchesFor([delete1], 3), 3, 20), 3 * 7.7), "a launch-repeat row costs its measured launch each time")
+  const five: Requested = { preset: "cert", repetitions: 5 }
+  check(launchesFor([delete1], five).length === 5 && launchesFor([fft], five).length === 1, "a launch-repeat row gives one launch per repetition")
+  check(near(wallSeconds(launchesFor([delete1], five), five), 5 * 7.7), "a launch-repeat row costs its measured launch each time")
   // A row whose edits drive the transport is one launch of its own, whatever the repetitions.
   const driven = [find("host-failure-during-play"), find("pause-stop-during-play-start")]
   check(driven.every((row) => row.transport === "driven" && row.settle === "returned"), "the transport rows are driven and settle when their edits return")
   check(mergeLaunches(driven).length === 2 && mergeLaunches([...driven, fft]).length === 3, "a driven row never merges")
-  check(launchesFor(driven, 20).length === 2, "a driven row is one launch however many repetitions")
+  check(launchesFor(driven, flagged).length === 2, "a driven row is one launch however many repetitions")
   // Its steps settle when the edit returns: no host evidence is awaited, and hold is asked for the spacing only.
   const drivenDirectory = await mkdtemp(path.join(tmpdir(), "ae08-phase9-driven-"))
   try {
@@ -483,12 +508,15 @@ export const selfTest = async () => {
       `the six cancelled-start edits run in order and settle without host evidence: ${performed}`)
   } finally { await rm(drivenDirectory, { recursive: true }) }
   check(mergeLaunches([find("vst-insert"), { ...find("vst-remove-undo"), start: "vst-absent" }]).length === 2, "different preparation does not merge")
-  // The measured defaults: the whole matrix at 20 repetitions fits the budget, fewer VST repetitions cost less, and a launch of a
+  // The measured defaults: the certifying preset fits the budget with the 1.3x margin, fewer VST repetitions cost less, and a launch of a
   // `states` row adds its offline exports.
-  const withVst = launchesFor(phase9Matrix, 20)
-  check(wallSeconds(withVst, 20, 20) < BUDGET_SECONDS, `the matrix at 20 repetitions is ${wallSeconds(withVst, 20, 20) / 60} min, over the budget`)
-  check(wallSeconds(withVst, 20, 10) < wallSeconds(withVst, 20, 20), "fewer VST repetitions cost less wall time")
-  check(near(wallSeconds([[find("tempo-burst")]], 10, 10), defaultTimings.launchSeconds + 10 * defaultTimings.stepSeconds + defaultTimings.exportSeconds), "a states row adds one export pass to its launch")
+  const certLaunches = launchesFor(phase9Presets.cert, cert)
+  const certMinutes = wallSeconds(certLaunches, cert) / 60
+  check(certMinutes > 25 && certMinutes * 1.3 < BUDGET_SECONDS / 60, `the certifying preset models ${certMinutes} min`)
+  check(wallSeconds(certLaunches, { preset: "cert", vstRepetitions: 10 }) < wallSeconds(certLaunches, cert), "fewer VST repetitions cost less wall time")
+  check(near(wallSeconds([[find("tempo-burst")]], ten), defaultTimings.launchSeconds + 10 * defaultTimings.stepSeconds + defaultTimings.exportSeconds), "a states row adds one export pass to its launch")
+  const plannedRows = planRows(certLaunches, cert)
+  check(plannedRows.length === phase9Presets.cert.length && plannedRows.find((entry) => entry.row === "record-target-guard")?.repetitions === 15, "the plan lists every row of the preset with its repetitions")
   // Measured timings replace the defaults: a step is its edit-to-settle time plus the 1 s window.
   const measured = measuredTimings([{ vst: false, edits: [{ index: 1, wallMs: 0, settledWallMs: 1000 }, { index: 2, wallMs: 5000, settledWallMs: 7000 }] },
     { vst: true, edits: [{ index: 1, wallMs: 0, settledWallMs: 9000 }] }], [20, 30])
@@ -667,26 +695,27 @@ export const readTimings = async (file: string): Promise<Timings> => {
     vstStepSeconds: measured.vstStepSeconds ?? defaultTimings.vstStepSeconds, exportSeconds: defaultTimings.exportSeconds }
 }
 
+const usage = "Usage: ae-08-phase-9-matrix.ts --self-test | --plan [--matrix cert|extended|full] [--repetitions N] [--vst-repetitions N] [--timings phase9-timings.json]"
 const plan = async (args: string[]) => {
-  const number = (flag: string, fallback: number) => args.includes(flag) ? Number(args[args.indexOf(flag) + 1]) : fallback
-  const repetitions = number("--repetitions", 20), vstRepetitions = number("--vst-repetitions", 20)
-  const timingsFile = args[args.indexOf("--timings") + 1]
-  const timings = args.includes("--timings") && timingsFile ? await readTimings(timingsFile) : defaultTimings
-  console.log(`timings: ${timings === defaultTimings ? "default (measured, plan section 1)" : `measured, ${timingsFile}`} ${JSON.stringify(timings)}`)
-  const built = phase9Matrix.filter((row) => row.fixture !== null)
-  for (const row of phase9Matrix) {
-    const steps = burstSchedule(row, repetitionsFor(row, repetitions, vstRepetitions)).length
-    console.log(`${row.name.padEnd(28)} ${row.latencyClass.padEnd(10)} ${String(steps).padStart(4)} edits  ${row.fixture ?? `MISSING: ${row.needs}`}`)
-  }
-  const launches = launchesFor(built, repetitions)
-  console.log(`built rows: ${built.length}/${phase9Matrix.length}, launches after merging: ${launches.length}`)
-  console.log(`wall time, built rows: ${(wallSeconds(launches, repetitions, vstRepetitions, timings) / 60).toFixed(1)} min`)
-  const everything = launchesFor(phase9Matrix, repetitions)
-  console.log(`wall time, all rows built: ${(wallSeconds(everything, repetitions, vstRepetitions, timings) / 60).toFixed(1)} min of ${BUDGET_SECONDS / 60}`)
+  const flag = (name: string) => args.includes(name) ? args[args.indexOf(name) + 1] : undefined
+  const preset = presetNamed.get(flag("--matrix") ?? "cert")
+  if (!preset) throw new Error(usage)
+  const [repetitions, vstRepetitions] = [flag("--repetitions"), flag("--vst-repetitions")]
+  const requested: Requested = { preset, ...(repetitions && { repetitions: Number(repetitions) }), ...(vstRepetitions && { vstRepetitions: Number(vstRepetitions) }) }
+  const timingsFile = flag("--timings")
+  const timings = timingsFile ? await readTimings(timingsFile) : defaultTimings
+  console.log(`preset: ${preset}, timings: ${timings === defaultTimings ? "default (measured, plan section 1)" : `measured, ${timingsFile}`} ${JSON.stringify(timings)}`)
+  const rows = phase9Presets[preset]
+  const launches = launchesFor(rows.filter((row) => row.fixture !== null), requested)
+  for (const entry of planRows(launches, requested, timings))
+    console.log(`${entry.row.padEnd(34)} ${String(entry.repetitions).padStart(4)} repetitions ${String(entry.stepsPerLaunch).padStart(4)} steps per launch ${(entry.seconds / 60).toFixed(1).padStart(5)} min`)
+  for (const row of rows.filter((entry) => entry.fixture === null)) console.log(`${row.name.padEnd(34)} MISSING: ${row.needs}`)
+  const minutes = wallSeconds(launches, requested, timings) / 60
+  console.log(`rows: ${rows.length}, launches after merging: ${launches.length}, modeled wall time ${minutes.toFixed(1)} min (${(minutes * 1.3).toFixed(1)} with a 1.3x margin) against ${BUDGET_SECONDS / 60}`)
 }
 
 if (import.meta.main) {
   if (Bun.argv[2] === "--self-test") await selfTest()
   else if (Bun.argv[2] === "--plan") await plan(Bun.argv.slice(3))
-  else throw new Error("Usage: ae-08-phase-9-matrix.ts --self-test | --plan [--repetitions N] [--vst-repetitions N] [--timings phase9-timings.json]")
+  else throw new Error(usage)
 }

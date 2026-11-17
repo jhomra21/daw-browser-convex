@@ -683,11 +683,13 @@ bool AttachVst(daw::audio_host_macos::AudioHost& host, const std::vector<std::ui
 }  // namespace
 
 int main() {
+  const char* evidence_directory = std::getenv("DAW_AE08_EVIDENCE_DIR");
   const rlimit coreLimit{.rlim_cur = 0, .rlim_max = 0};
   if (setrlimit(RLIMIT_CORE, &coreLimit) != 0) return EXIT_FAILURE;
   daw::audio_host_macos::RecordingSpoolService recording_spool;
   auto recording_status = std::make_shared<daw::audio_host_macos::RecordingStatusChannel>();
-  auto host = std::make_unique<daw::audio_host_macos::AudioHost>(&recording_spool, nullptr, recording_status);
+  auto host = std::make_unique<daw::audio_host_macos::AudioHost>(
+    &recording_spool, nullptr, recording_status, evidence_directory);
   std::unique_ptr<daw::audio_host_macos::AudioHost> staged_host;
   std::atomic<bool> recording_thread_running = false;
   std::atomic<bool> notification_thread_running = false;
@@ -906,7 +908,8 @@ int main() {
     }
     if (request->type == daw::audio_host_macos::ControlType::kTransactionBegin) {
       if (!payload.empty() || staged_host) return EXIT_FAILURE;
-      staged_host = std::make_unique<daw::audio_host_macos::AudioHost>(&recording_spool, nullptr, recording_status);
+      staged_host = std::make_unique<daw::audio_host_macos::AudioHost>(
+        &recording_spool, nullptr, recording_status, evidence_directory);
       if (!WriteAck(request->type, daw::audio_host_macos::ControlAckStatus::kAccepted)) return EXIT_FAILURE;
       continue;
     }
@@ -950,7 +953,7 @@ int main() {
           const auto prepared = active_session->PrepareGraphRevision(
             static_cast<std::uint32_t>(ReadU64(payload.data() + 8)),
             std::span(payload).subspan(8), ReadU64(payload.data()));
-          daw::acceptance::Step reply("graph-prepare-reply", "prepare-step");
+          daw::acceptance::Step reply(evidence_directory, "graph-prepare-reply", "prepare-step");
           if (!WriteGraphRevisionStatus(prepared)) return EXIT_FAILURE;
         }
         continue;
@@ -962,7 +965,7 @@ int main() {
         if (!active_session || payload.size() != 4) return EXIT_FAILURE;
         {
           // From the frame's decode to the reply written: the line's wall time less its duration is the receipt.
-          daw::acceptance::Step reply("graph-inspect-reply", "inspect-step");
+          daw::acceptance::Step reply(evidence_directory, "graph-inspect-reply", "inspect-step");
           if (!WriteGraphRevisionStatus(active_session->InspectGraphRevision(ReadU32(payload.data())))) return EXIT_FAILURE;
         }
         continue;

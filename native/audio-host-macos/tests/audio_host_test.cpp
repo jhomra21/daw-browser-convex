@@ -2045,10 +2045,8 @@ struct EvidenceLog {
     / ("ae08-evidence-" + std::to_string(getpid()));
   EvidenceLog() {
     std::filesystem::create_directory(directory);
-    setenv("DAW_AE08_EVIDENCE_DIR", directory.c_str(), 1);
   }
   ~EvidenceLog() {
-    unsetenv("DAW_AE08_EVIDENCE_DIR");
     std::filesystem::remove_all(directory);
   }
   // Lines of one event. The bridge thread writes after the callback returns, so wait for `count`.
@@ -2074,7 +2072,7 @@ struct EvidenceLog {
 
 void TestNativeVstRuntimeControlBounds() {
   EvidenceLog log;
-  daw::audio_host_macos::AudioHost host;
+  daw::audio_host_macos::AudioHost host(nullptr, nullptr, {}, log.directory.c_str());
   assert(host.Configure({
     .device_uid = "diagnostic",
     .sample_rate_hz = 48000,
@@ -3471,7 +3469,7 @@ void TestLatencyMoveCompletionQueuesTheNextRevision() {
 void TestPublishEvidenceCarriesTheAppliedLatency() {
   using daw::audio_host_macos::GraphRevisionStatusCode;
   EvidenceLog log;
-  daw::audio_host_macos::AudioHost host;
+  daw::audio_host_macos::AudioHost host(nullptr, nullptr, {}, log.directory.c_str());
   assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 22050,
     .max_frames_per_block = 128, .channel_count = 2, .revision = 1}));
   assert(host.PrepareAndPublishGraph(1, SpectralTransitionGraph(1, 512)));
@@ -5470,7 +5468,7 @@ void TestParameterBatchIsAllOrNothing() {
 // applied it, inline while stopped and on the callback's acknowledgement while running, and none for a refusal.
 void TestProcessorPatchWritesAnApplyLine() {
   EvidenceLog log;
-  daw::audio_host_macos::AudioHost host;
+  daw::audio_host_macos::AudioHost host(nullptr, nullptr, {}, log.directory.c_str());
   assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48000,
     .max_frames_per_block = 4, .channel_count = 2, .revision = 1}));
   assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.F, 0, true)));
@@ -5498,7 +5496,7 @@ void TestProcessorPatchWritesAnApplyLine() {
 // carries the sequence the callback applied, once per sequence.
 void TestManualParameterWriteWritesAnApplyLine() {
   EvidenceLog log;
-  daw::audio_host_macos::AudioHost host;
+  daw::audio_host_macos::AudioHost host(nullptr, nullptr, {}, log.directory.c_str());
   assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48000,
     .max_frames_per_block = 128, .channel_count = 2, .revision = 1}));
   assert(host.PrepareAndPublishGraph(1, GraphSnapshot(1, 1.F, 0, true)));
@@ -5682,7 +5680,7 @@ void TestLatencyReportPublishesWithoutStop() {
 void TestEditorStateReportIsAcceptanceEvidence() {
   EvidenceLog log;
   const NoPluginWorkers no_plugin;
-  daw::audio_host_macos::AudioHost host;
+  daw::audio_host_macos::AudioHost host(nullptr, nullptr, {}, log.directory.c_str());
   ConfigureDiagnosticHost(host);
   assert(host.AttachNativeVst(PlaybackVstAttachment(kFirstVstInstance, 17)));
   assert(host.StartDiagnosticMode());
@@ -6814,9 +6812,8 @@ int main() {
     const auto directory = std::filesystem::temp_directory_path()
       / ("ae08-tap-isolation-" + std::to_string(getpid()));
     std::filesystem::create_directory(directory);
-    setenv("DAW_AE08_EVIDENCE_DIR", directory.c_str(), 1);
     {
-      daw::audio_host_macos::AcceptanceOutputTap tap;
+      daw::audio_host_macos::AcceptanceOutputTap tap(directory.string());
       tap.Configure(48000, 2);
       std::array<float, 1024> left{}, right{};
       left.fill(0.25F); right.fill(-0.5F);
@@ -6824,7 +6821,6 @@ int main() {
       for (unsigned block = 0; block < 1025; ++block) tap.Push(planes, 1024);
       tap.Drain();
     }
-    unsetenv("DAW_AE08_EVIDENCE_DIR");
     const auto log = directory / ("native-" + std::to_string(getpid()) + ".jsonl");
     auto* file = std::fopen(log.c_str(), "rb");
     assert(file != nullptr);

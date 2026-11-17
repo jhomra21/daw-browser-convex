@@ -43,7 +43,7 @@ struct WorkerInstanceRequest {
 
 class Vst3Worker {
  public:
-  Vst3Worker();
+  explicit Vst3Worker(std::string evidence_directory = {});
   ~Vst3Worker();
   Vst3Worker(const Vst3Worker&) = delete;
   Vst3Worker& operator=(const Vst3Worker&) = delete;

@@ -7,15 +7,17 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <string>
 
 namespace daw::audio_host_macos {
 
-// Private acceptance diagnostic. One callback producer, existing RT bridge consumer.
+// Stereo-only private acceptance diagnostic. One callback producer, existing RT bridge consumer.
 // Storage is allocated/prefaulted before the device starts; never a recording target.
 class AcceptanceOutputTap {
  public:
   static constexpr std::uint64_t kCapacity = 1U << 20U;
-  AcceptanceOutputTap() : samples_(std::make_unique<float[]>(kCapacity * 2)) {
+  explicit AcceptanceOutputTap(std::string evidence_directory)
+    : samples_(std::make_unique<float[]>(kCapacity * 2)), evidence_directory_(std::move(evidence_directory)) {
     static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
     // Touch every page off-thread, including calloc-backed zero pages.
     volatile float* pages = samples_.get();
@@ -30,7 +32,7 @@ class AcceptanceOutputTap {
     if (file_) return;
     char name[4096];
     std::snprintf(name, sizeof(name), "%s/output-%d-%llu.wav",
-      std::getenv("DAW_AE08_EVIDENCE_DIR"), getpid(), static_cast<unsigned long long>(id_));
+      evidence_directory_.c_str(), getpid(), static_cast<unsigned long long>(id_));
     const auto descriptor = open(name, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
     if (descriptor >= 0) {
       file_ = fdopen(descriptor, "wb");
@@ -43,7 +45,8 @@ class AcceptanceOutputTap {
       if (std::fwrite(header.data(), 1, header.size(), file_) != header.size()) failed_ = true;
     }
     if (!supported_) failed_ = true;
-    acceptance::Event("capture-configure", supported_ ? ",\"supported\":true" : ",\"supported\":false");
+    acceptance::Event(evidence_directory_.c_str(), "capture-configure",
+      supported_ ? ",\"supported\":true" : ",\"supported\":false");
   }
 
   // DAW_REALTIME_CALLBACK_HELPER_BEGIN acceptance-output-tap
@@ -86,7 +89,7 @@ class AcceptanceOutputTap {
       std::snprintf(fields, sizeof(fields),
         ",\"sampleRate\":%u,\"captureId\":%llu,\"bufferedFrames\":%llu", rate_,
         static_cast<unsigned long long>(id_), static_cast<unsigned long long>(write - read));
-      acceptance::Event("capture-first-drain", fields);
+      acceptance::Event(evidence_directory_.c_str(), "capture-first-drain", fields);
       started_ = true;
     }
     while (read < write) {
@@ -109,7 +112,7 @@ class AcceptanceOutputTap {
         static_cast<unsigned long long>(id_), static_cast<unsigned long long>(value.offset),
         value.frames, static_cast<long long>(value.monotonic_ns), value.revision, value.epoch,
         static_cast<long long>(value.transport_frame));
-      acceptance::Event("capture-block", fields);
+      acceptance::Event(evidence_directory_.c_str(), "capture-block", fields);
       ++packet;
     }
     packet_read_.store(packet, std::memory_order_release);
@@ -141,9 +144,10 @@ class AcceptanceOutputTap {
       static_cast<unsigned long long>(id_),
       static_cast<unsigned long long>(written_),
       static_cast<unsigned long long>(overflow_.load()), failed_ ? "true" : "false");
-    acceptance::Event("capture-complete", fields);
+    acceptance::Event(evidence_directory_.c_str(), "capture-complete", fields);
   }
   std::unique_ptr<float[]> samples_;
+  std::string evidence_directory_;
   alignas(64) std::atomic<std::uint64_t> write_ = 0;
   alignas(64) std::atomic<std::uint64_t> read_ = 0;
   std::atomic<std::uint64_t> overflow_ = 0;

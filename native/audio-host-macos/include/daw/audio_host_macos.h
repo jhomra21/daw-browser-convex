@@ -601,7 +601,7 @@ class RecordingInputDevice {
 class AudioHost {
  public:
   explicit AudioHost(RecordingSpoolService* spool = nullptr, RecordingInputDevice* recording_device = nullptr,
-    std::shared_ptr<RecordingStatusChannel> recording_status = {});
+    std::shared_ptr<RecordingStatusChannel> recording_status = {}, const char* evidence_directory = nullptr);
   ~AudioHost();
   AudioHost(const AudioHost&) = delete;
   AudioHost& operator=(const AudioHost&) = delete;

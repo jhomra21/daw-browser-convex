@@ -241,12 +241,12 @@ bool WorkerRuntime::Start(
   const auto spawnResult = spawnConfigured
     ? posix_spawn(&child, configuration.executable.c_str(), &fileActions, &attributes, arguments.data(), environment)
     : EINVAL;
-  if (daw::acceptance::Enabled()) {
+  if (!configuration.evidence_directory.empty()) {
     char fields[256];
     std::snprintf(fields, sizeof(fields), ",\"workerPid\":%d,\"durationMs\":%.6f,\"result\":%d",
       child, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - spawnStarted).count(),
       spawnResult);
-    daw::acceptance::Event("worker-spawn", fields);
+    daw::acceptance::Event(configuration.evidence_directory.c_str(), "worker-spawn", fields);
   }
   if (attributesReady) posix_spawnattr_destroy(&attributes);
   if (actionsReady) posix_spawn_file_actions_destroy(&fileActions);

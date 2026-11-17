@@ -566,14 +566,15 @@ bool PrepareBusBuffers(
     && PrepareBusBuffers(component, Steinberg::Vst::kOutput, transport.outputChannels(), outputs, outputPointers);
 }
 
-bool SetupProcessing(Steinberg::Vst::IAudioProcessor& processor, const WorkerProcessSetup& setup, const char* const step) {
+bool SetupProcessing(Steinberg::Vst::IAudioProcessor& processor, const WorkerProcessSetup& setup,
+  const char* const step, const char* evidence_directory) {
   ProcessSetup processSetup{
     WorkerProcessModeToSteinberg(setup.mode),
     Steinberg::Vst::kSample32,
     static_cast<Steinberg::int32>(setup.maximumBlockFrames),
     setup.sampleRate,
   };
-  daw::acceptance::Step timing(step);
+  daw::acceptance::Step timing(evidence_directory, step);
   return processor.setupProcessing(processSetup) == Steinberg::kResultOk;
 }
 
@@ -598,6 +599,7 @@ bool IsValidWorkerState(const WorkerState& state) {
 
 class Vst3Worker::Implementation {
  public:
+  std::string evidence_directory;
   struct ActiveNote {
     bool active = false;
     Steinberg::int16 channel = 0;
@@ -639,12 +641,13 @@ class Vst3Worker::Implementation {
   bool processing = false;
   std::uint32_t processContextRequirementsFlags = 0;
 
-  Implementation() {
+  explicit Implementation(std::string directory) : evidence_directory(std::move(directory)) {
     notifications.reserve(128);
   }
 };
 
-Vst3Worker::Vst3Worker() : implementation_(new Implementation()) {}
+Vst3Worker::Vst3Worker(std::string evidence_directory)
+  : implementation_(new Implementation(std::move(evidence_directory))) {}
 
 Vst3Worker::~Vst3Worker() {
   Dispose();
@@ -669,7 +672,7 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
   }
   std::string error;
   {
-    daw::acceptance::Step timing("module-load");
+    daw::acceptance::Step timing(implementation_->evidence_directory.c_str(), "module-load");
     implementation_->module = VST3::Hosting::Module::create(request.eligibility.canonicalBundlePath, error);
   }
   if (!implementation_->module) return false;
@@ -687,7 +690,7 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
     ? WorkerPluginRole::kEffect
     : WorkerPluginRole::kInstrument;
   implementation_->module->getFactory().setHostContext(static_cast<IHostApplication*>(&implementation_->context));
-  daw::acceptance::Step initialization_timing("component-init");
+  daw::acceptance::Step initialization_timing(implementation_->evidence_directory.c_str(), "component-init");
   implementation_->component = implementation_->module->getFactory().createInstance<IComponent>(*classId);
   if (!implementation_->component || implementation_->component->initialize(static_cast<IHostApplication*>(&implementation_->context)) != Steinberg::kResultOk) {
     Dispose();
@@ -699,7 +702,7 @@ bool Vst3Worker::Instantiate(const WorkerInstanceRequest& request) {
     return false;
   }
   initialization_timing.Finish();
-  daw::acceptance::Step controller_timing("controller-init");
+  daw::acceptance::Step controller_timing(implementation_->evidence_directory.c_str(), "controller-init");
   implementation_->controller = Steinberg::FUnknownPtr<IEditController>(implementation_->component);
   implementation_->controllerIsComponent = static_cast<bool>(implementation_->controller);
   if (!implementation_->controller) {
@@ -810,7 +813,8 @@ std::optional<WorkerManifest> Vst3Worker::PreflightManifest(
   const auto inputBuses = inspectBuses(Steinberg::Vst::kInput);
   const auto outputBuses = inspectBuses(Steinberg::Vst::kOutput);
   if (!inputBuses || !outputBuses || outputBuses->empty()) return std::nullopt;
-  if (!SetupProcessing(*implementation_->processor, implementation_->setup, "preflight-setupProcessing")) return std::nullopt;
+  if (!SetupProcessing(*implementation_->processor, implementation_->setup, "preflight-setupProcessing",
+      implementation_->evidence_directory.c_str())) return std::nullopt;
   implementation_->processContextRequirements =
     Steinberg::FUnknownPtr<IProcessContextRequirements>(implementation_->processor);
   implementation_->processContextRequirementsFlags = implementation_->processContextRequirements
@@ -890,7 +894,8 @@ bool Vst3Worker::ConfigureTransport(WorkerTransport& transport, const WorkerStat
     return false;
   }
   if (!ConfigureBusArrangement(*implementation_->component, *implementation_->processor, transport)
-    || !SetupProcessing(*implementation_->processor, implementation_->setup, "setupProcessing")) {
+    || !SetupProcessing(*implementation_->processor, implementation_->setup, "setupProcessing",
+      implementation_->evidence_directory.c_str())) {
     return false;
   }
   if (WorkerProcessModeUsesEditorRuntime(implementation_->setup.mode) && implementation_->controller) {
@@ -910,20 +915,21 @@ bool Vst3Worker::ConfigureTransport(WorkerTransport& transport, const WorkerStat
     return false;
   }
   {
-    daw::acceptance::Step timing(initialState ? "setState" : "setState-not-required");
+    daw::acceptance::Step timing(implementation_->evidence_directory.c_str(),
+      initialState ? "setState" : "setState-not-required");
     if (initialState && !ApplyState(*initialState)) {
       implementation_->editorView = nullptr;
       return false;
     }
   }
   {
-    daw::acceptance::Step activation_timing("setActive");
+    daw::acceptance::Step activation_timing(implementation_->evidence_directory.c_str(), "setActive");
     if (implementation_->component->setActive(true) != Steinberg::kResultOk) {
       implementation_->editorView = nullptr;
       return false;
     }
     activation_timing.Finish();
-    daw::acceptance::Step processing_timing("setProcessing");
+    daw::acceptance::Step processing_timing(implementation_->evidence_directory.c_str(), "setProcessing");
     const auto processingResult = implementation_->processor->setProcessing(true);
     if (!IsAcceptedWorkerProcessingTransitionResult(processingResult)) {
       implementation_->editorView = nullptr;
@@ -1257,7 +1263,8 @@ bool Vst3Worker::ReactivateComponent(const WorkerState* const state, const bool 
       || !ConfigureBusArrangement(*implementation_->component, *implementation_->processor, *implementation_->transport)) {
       return false;
     }
-    if (!SetupProcessing(*implementation_->processor, implementation_->setup, "setupProcessing")) return false;
+    if (!SetupProcessing(*implementation_->processor, implementation_->setup, "setupProcessing",
+        implementation_->evidence_directory.c_str())) return false;
     if (!PrepareBusBuffers(
       *implementation_->component, *implementation_->transport, implementation_->inputs, implementation_->outputs,
       implementation_->inputPointers, implementation_->outputPointers

@@ -405,6 +405,7 @@ struct NativeVstWorkerAttachment {
   bool bound_prepared = false;
   bool bound_active = false;
   NativeVstAttachment metadata;
+  AcceptanceObserver* observer = nullptr;
   std::optional<Diagnostics::WorkerAutomation> worker_automation;
   bool offline = false;
   bool offline_started = false;
@@ -1085,11 +1086,11 @@ void ForwardWorkerDiagnostic(
   if (*kind == WorkerNotificationKind::kParameterEdit) {
     static_cast<void>(attachment->SetAutomationOverride(diagnostic.parameter_id));
   }
-  if (*kind == WorkerNotificationKind::kEditorState && daw::acceptance::Enabled()) {
+  if (*kind == WorkerNotificationKind::kEditorState && attachment->observer) {
     char fields[384];
     std::snprintf(fields, sizeof(fields), ",\"instanceId\":\"%s\",\"open\":%s",
       attachment->metadata.instance_id.c_str(), diagnostic.value != 0 ? "true" : "false");
-    daw::acceptance::Event("vst-editor-state", fields);
+    attachment->observer->Event("vst-editor-state", fields);
   }
   const std::lock_guard lock(sink.mutex);
   static_cast<void>(sink.notifications.Push(IdentifyWorkerNotification(
@@ -1391,8 +1392,8 @@ class RetiredAttachmentReaper {
 };
 
 struct AudioHost::Impl {
-  std::unique_ptr<AcceptanceObserver> observer = daw::acceptance::Enabled()
-    ? std::make_unique<AcceptanceObserver>() : nullptr;
+  // Each host owns its capture: a staged host replaces the active one while the old callback can still push to its tap.
+  std::unique_ptr<AcceptanceObserver> observer;
   std::atomic<std::int64_t> publication_frame = 0;
   // The core's pinned budget and the published graph's own latency, recorded where the publication happens so a
   // later move cannot change what its event reports. A lower while playing leaves the budget where it was.
@@ -1409,53 +1410,25 @@ struct AudioHost::Impl {
 
   void Evidence(const char* event, const char* cause = "", const std::uint32_t requested = 0,
     const char* detail = "") const {
-    if (!daw::acceptance::Enabled()) return;
-    char fields[768];
-    std::snprintf(fields, sizeof(fields),
-      ",\"cause\":\"%s\",\"revision\":%u,\"transportEpoch\":%u,\"frame\":%lld,"
-      "\"renderEpoch\":\"%llu\",\"publicationFrame\":%lld,\"publicationEpoch\":\"%llu\","
-      "\"requestedRevision\":%u,\"retirementEpoch\":\"%llu\"%s",
-      cause, active_revision.load(), applied_transport_epoch.load(),
-      static_cast<long long>(applied_transport_frame.load()),
-      static_cast<unsigned long long>(completed_render_epoch.load()),
-      static_cast<long long>(observer ? observer->publicationFrame() : 0),
-      static_cast<unsigned long long>(observer ? observer->publicationEpoch() : 0), requested,
-      static_cast<unsigned long long>(retired_after_epoch.load()), detail);
-    daw::acceptance::Event(event, fields);
+    if (!observer) return;
+    observer->Report(event, cause, active_revision.load(), applied_transport_epoch.load(),
+      applied_transport_frame.load(), completed_render_epoch.load(), observer->publicationFrame(),
+      observer->publicationEpoch(), requested, retired_after_epoch.load(), detail);
   }
   void PublicationEvidence(const char* cause) const {
     if (!observer) return;
-    char detail[128];
-    std::snprintf(detail, sizeof(detail), ",\"pinnedLatencyFrames\":%u,\"graphLatencyFrames\":%u,\"spectralPredecessors\":%u",
-      observer->pinnedLatency(), observer->graphLatency(), observer->spectralPredecessors());
-    Evidence("graph-publish", cause, 0, detail);
+    observer->PublicationCommitted(cause, active_revision.load(), applied_transport_epoch.load(),
+      applied_transport_frame.load(), completed_render_epoch.load(), observer->publicationFrame(),
+      observer->publicationEpoch(), retired_after_epoch.load());
   }
   // One line per prepared revision: the host's own stages and the core's sub-steps, in microseconds. `core` holds the
   // sub-steps that follow it, and a sub-step nested in another is counted in both (audio_core_native.h).
-  struct PrepareMarks {
-    std::chrono::steady_clock::time_point entered, controlled, before_core, after_core;
-  };
+  using PrepareMarks = AcceptanceObserver::PrepareMarks;
   void PrepareProfileEvidence(const std::uint32_t revision, const daw_audio_core_handle core, const PrepareMarks& marks) const {
-    if (!daw::acceptance::Enabled()) return;
-    const auto done = std::chrono::steady_clock::now();
-    char detail[512] = ",\"stepsUs\":\"";
-    std::size_t used = std::strlen(detail);
-    const auto add = [&](const char* step, const std::uint64_t microseconds) {
-      if (used + 48 >= sizeof(detail)) return;
-      used += static_cast<std::size_t>(std::snprintf(detail + used, sizeof(detail) - used, "%s=%llu;",
-        step, static_cast<unsigned long long>(microseconds)));
-    };
-    const auto between = [](const auto from, const auto to) {
-      return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(to - from).count());
-    };
-    add("vst-control", between(marks.entered, marks.controlled));
-    add("host-pre", between(marks.controlled, marks.before_core));
-    add("core", between(marks.before_core, marks.after_core));
-    for (const auto& step : daw::audio_core::LastPrepareProfile(core)) add(step.step, step.nanoseconds / 1000);
-    add("host-post", between(marks.after_core, done));
-    detail[used] = '"';
-    detail[used + 1] = '\0';
-    Evidence("prepare-profile", "", revision, detail);
+    if (!observer) return;
+    observer->ReportPrepare(revision, core, marks, applied_transport_epoch.load(),
+      applied_transport_frame.load(), completed_render_epoch.load(), observer->publicationFrame(),
+      observer->publicationEpoch(), retired_after_epoch.load());
   }
   enum class RecordingCommand : std::uint32_t { kNone, kStop, kCancel };
   enum class QueuedControlKind : std::uint8_t { kUrgent, kProcessor, kInstrument, kSource };
@@ -2334,10 +2307,9 @@ struct AudioHost::Impl {
         metadata.transport.maximum_events_per_block + metadata.initial_parameter_values.size()
       )),
     };
-    const char* evidence_directory = daw::acceptance::EvidenceDirectory();
     const daw::plugin_host::WorkerHostConfiguration worker_configuration{
       .executable = worker_executable,
-      .evidence_directory = evidence_directory != nullptr ? evidence_directory : "",
+      .evidence_directory = observer ? observer->evidenceDirectory() : "",
       .artifact = {
         .id = std::string(daw::plugin_host::kWorkerArtifactId),
         .version = std::string(daw::plugin_host::kWorkerArtifactVersion),
@@ -2354,7 +2326,7 @@ struct AudioHost::Impl {
       std::snprintf(fields, sizeof(fields), ",\"workerGeneration\":\"%llu\",\"nodeId\":\"%llu\"",
         static_cast<unsigned long long>(++observer->workerOrdinal),
         static_cast<unsigned long long>(metadata.graph_node_id));
-      daw::acceptance::Event("worker-supervisor-started", fields);
+      observer->Event("worker-supervisor-started", fields);
     }
     return true;
   }
@@ -2777,7 +2749,8 @@ void RecordingStatusChannel::Wake() {
 }
 
 AudioHost::AudioHost(RecordingSpoolService* spool, RecordingInputDevice* recording_device,
-  std::shared_ptr<RecordingStatusChannel> recording_status) : impl_(new Impl) {
+  std::shared_ptr<RecordingStatusChannel> recording_status, const char* evidence_directory) : impl_(new Impl) {
+  if (daw::acceptance::On(evidence_directory)) impl_->observer = std::make_unique<AcceptanceObserver>(evidence_directory);
   if (pipe(impl_->control_wake.data()) == 0) {
     bool ready = true;
     for (const auto descriptor : impl_->control_wake) {
@@ -2982,8 +2955,8 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
   const auto status = [this, revision](const GraphRevisionStatusCode code) {
     return impl_->GraphStatus(code, revision);
   };
-  const auto now = [] {
-    return daw::acceptance::Enabled() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+  const auto now = [this] {
+    return impl_->observer ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
   };
   Impl::PrepareMarks marks{.entered = now()};
   // The renderer prepares as soon as it hears a worker's latency report, which can be before the control loop has
@@ -3067,7 +3040,7 @@ GraphRevisionStatus AudioHost::PrepareGraphRevision(
     }
   }
   const daw_audio_core_handle prepared_core = impl_->active_core.load(std::memory_order_acquire);
-  daw::audio_core::SetPrepareProfiling(prepared_core, daw::acceptance::Enabled());
+  daw::audio_core::SetPrepareProfiling(prepared_core, impl_->observer != nullptr);
   marks.before_core = now();
   const auto prepare_result = daw_audio_core_prepare_graph_bytes(
     prepared_core, payload.data(), static_cast<std::uint32_t>(payload.size()));
@@ -3777,7 +3750,7 @@ ProcessorPatchStatus AudioHost::QueueProcessorStatePatch(const std::span<const s
   // A patch the core applied is the only line a state change that publishes no graph leaves, so it is the settle point.
   const auto applied_with_evidence = [&](const std::uint32_t result) {
     const auto status = applied_or_failed(result);
-    if (status.outcome == ProcessorPatchOutcome::kApplied && daw::acceptance::Enabled()) {
+    if (status.outcome == ProcessorPatchOutcome::kApplied && impl_->observer) {
       char detail[96];
       std::snprintf(detail, sizeof(detail), ",\"nodeId\":\"%llu\",\"instanceId\":%u,\"kind\":%u",
         static_cast<unsigned long long>(node_id), instance_id, kind);
@@ -5501,6 +5474,7 @@ bool AudioHost::AttachNativeVst(const NativeVstAttachment& attachment) {
   }
   if (impl_->native_vst_attachments.size() >= kMaximumNativeVstAttachments) return false;
   auto worker_attachment = std::make_unique<NativeVstWorkerAttachment>();
+  worker_attachment->observer = impl_->observer.get();
   worker_attachment->active_schedule_bank = &impl_->active_schedule_bank;
   worker_attachment->metadata = normalized;
   worker_attachment->notification_sink = &impl_->worker_notifications;
@@ -5601,11 +5575,11 @@ bool AudioHost::Start() {
     impl_->StopNativeVstWorkers();
     return false;
   }
-  if (daw::acceptance::Enabled()) {
+  if (impl_->observer) {
     char fields[256];
     std::snprintf(fields, sizeof(fields), ",\"deviceSession\":\"%d-%p\",\"sampleRate\":%u,\"blockSize\":%u",
       getpid(), impl_->device_session, impl_->config.sample_rate_hz, impl_->config.max_frames_per_block);
-    daw::acceptance::Event("device-session", fields);
+    impl_->observer->Event("device-session", fields);
   }
   return true;
 }

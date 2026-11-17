@@ -141,7 +141,8 @@ bool WritePreflightHello(const daw::plugin_host::WorkerHello& hello) {
 }  // namespace
 
 int main(const int argc, char* argv[]) {
-  daw::acceptance::Event("worker-process-entry");
+  const char* evidence_directory = std::getenv("DAW_AE08_EVIDENCE_DIR");
+  daw::acceptance::Event(evidence_directory, "worker-process-entry");
   const rlimit coreLimit{.rlim_cur = 0, .rlim_max = 0};
   if (setrlimit(RLIMIT_CORE, &coreLimit) != 0) return EXIT_FAILURE;
   const rlimit noFileLimit{.rlim_cur = kWorkerNoFileLimit, .rlim_max = kWorkerNoFileLimit};
@@ -175,7 +176,7 @@ int main(const int argc, char* argv[]) {
     transport.maximumFrames = setup.maximumBlockFrames;
     transport.inputChannels = setup.inputChannels;
     transport.outputChannels = setup.outputChannels;
-    daw::plugin_host::Vst3Worker plugin;
+    daw::plugin_host::Vst3Worker plugin(evidence_directory ? evidence_directory : "");
     const daw::plugin_host::WorkerInstanceRequest instance{
       .eligibility = {
         .canonicalBundlePath = argv[5],
@@ -239,7 +240,7 @@ int main(const int argc, char* argv[]) {
     return EXIT_FAILURE;
   }
 
-  daw::plugin_host::Vst3Worker plugin;
+  daw::plugin_host::Vst3Worker plugin(evidence_directory ? evidence_directory : "");
   if (!startup->noPluginTestMode) {
     const daw::plugin_host::WorkerInstanceRequest instance{
       .eligibility = startup->eligibility,
@@ -311,7 +312,7 @@ int main(const int argc, char* argv[]) {
   publishNotifications();
   publishEditorFeedback();
   transport->PublishHealth(daw::plugin_host::WorkerHealth::kReady);
-  daw::acceptance::Event("worker-ready");
+  daw::acceptance::Event(evidence_directory, "worker-ready");
   static_cast<void>(transport->PublishDiagnostic({.kind = daw::plugin_host::WorkerDiagnosticKind::kReady}));
   bool editorOpen = false;
   for (;;) {

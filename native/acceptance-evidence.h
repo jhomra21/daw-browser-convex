@@ -9,12 +9,11 @@
 namespace daw::acceptance {
 
 // Control/telemetry threads only. No plug-in paths, state or authentication data.
-inline bool Enabled() { return std::getenv("DAW_AE08_EVIDENCE_DIR") != nullptr; }
-inline const char* EvidenceDirectory() { return std::getenv("DAW_AE08_EVIDENCE_DIR"); }
+// Evidence is off without a directory; a forwarded unset value arrives as an empty one.
+inline bool On(const char* directory) { return directory != nullptr && *directory != '\0'; }
 
-inline void Event(const char* event, const char* fields = "") {
-  const auto* directory = std::getenv("DAW_AE08_EVIDENCE_DIR");
-  if (!directory) return;
+inline void Event(const char* directory, const char* event, const char* fields = "") {
+  if (!On(directory)) return;
   char file[4096];
   const auto length = std::snprintf(file, sizeof(file), "%s/native-%d.jsonl", directory, getpid());
   if (length <= 0 || static_cast<std::size_t>(length) >= sizeof(file)) return;
@@ -36,19 +35,21 @@ inline void Event(const char* event, const char* fields = "") {
 
 class Step {
  public:
-  explicit Step(const char* name, const char* event = "vst-startup-step") : name_(name), event_(event),
-    started_(Enabled() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{}) {}
+  explicit Step(const char* directory, const char* name, const char* event = "vst-startup-step")
+    : directory_(directory), name_(name), event_(event),
+    started_(On(directory) ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{}) {}
   ~Step() { Finish(); }
   void Finish() {
-    if (finished_ || !Enabled()) return;
+    if (finished_ || !On(directory_)) return;
     finished_ = true;
     const auto elapsed = std::chrono::duration<double, std::milli>(
       std::chrono::steady_clock::now() - started_).count();
     char fields[256];
     std::snprintf(fields, sizeof(fields), ",\"step\":\"%s\",\"durationMs\":%.6f", name_, elapsed);
-    Event(event_, fields);
+    Event(directory_, event_, fields);
   }
  private:
+  const char* directory_;
   const char* name_;
   const char* event_;
   std::chrono::steady_clock::time_point started_;

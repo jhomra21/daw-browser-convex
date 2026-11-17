@@ -1,6 +1,5 @@
 import { expect, spyOn, test } from "bun:test"
 import { createRecordingIpcDiagnostics, createRendererTrafficDiagnostics } from "./recording-ipc-diagnostics"
-import { beginRecordingDeliveryTrace, finishRecordingDeliveryTrace, recordRecordingTermination, resetRecordingDiagnostics } from "../../src/lib/recording/recording-diagnostics"
 import { createRecordingDeliveryTrace } from "../../src/lib/recording/recording-delivery-trace"
 import { createBenchmarkRecordingTelemetry } from "./benchmark-runtime"
 
@@ -20,34 +19,6 @@ test("terminal benchmark evidence is logged once without mutating the status", (
     telemetry.recordStatus({ ...active, active: false })
     expect(log).toHaveBeenCalledTimes(1)
   } finally { log.mockRestore() }
-})
-
-test("renderer opt-out allocates no live trace and reset preserves the completed fatal evidence", () => {
-  delete globalThis.__dawRecordingDeliveryTraceEnabled
-  expect(beginRecordingDeliveryTrace(1, 1n)).toBeNull()
-  globalThis.__dawRecordingDeliveryTraceEnabled = true
-  try {
-    resetRecordingDiagnostics()
-    beginRecordingDeliveryTrace(1, 1n)?.block(0, 17, 10)
-    recordRecordingTermination("writer-failure", "/private/token.wav")
-    recordRecordingTermination("controller-cleanup")
-    finishRecordingDeliveryTrace()
-    const completed = globalThis.__dawRecordingDeliveryEvidence
-    resetRecordingDiagnostics()
-    expect(globalThis.__dawRecordingDeliveryEvidence).toBe(completed)
-    expect(completed?.firstTermination?.cause).toBe("writer-failure")
-    expect(completed?.events.at(-1)?.kind).toBe("cleanup")
-    expect(JSON.stringify(completed)).not.toContain("/private")
-    beginRecordingDeliveryTrace(2, 2n)
-    expect(globalThis.__dawRecordingDeliveryEvidence).toBeNull()
-    finishRecordingDeliveryTrace()
-    expect(globalThis.__dawRecordingDeliveryEvidence?.observedFrames).toBe(0)
-  } finally {
-    finishRecordingDeliveryTrace()
-    delete globalThis.__dawRecordingDeliveryTraceEnabled
-    delete globalThis.__dawRecordingDeliveryEvidence
-    delete globalThis.__dawRecordingMainDeliveryEvidence
-  }
 })
 
 test("main benchmark opt-out produces no evidence", () => {

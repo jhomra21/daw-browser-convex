@@ -1,5 +1,4 @@
-import { createRecordingDeliveryEvidenceObserver, type RecordingDeliveryEvidenceObserver } from "./recording-delivery-evidence"
-import { createRecordingDeliveryTrace, type RecordingTerminationCause } from "./recording-delivery-trace"
+import type { RecordingTerminationCause } from "./recording-delivery-trace"
 import type { WriterTiming } from "../../../packages/audio-engine/src/recording/recording-protocol"
 export type { RecordingTerminationCause } from "./recording-delivery-trace"
 
@@ -79,27 +78,6 @@ const initialDiagnostics = (): RecordingDiagnostics => ({
 
 let snapshot = initialDiagnostics()
 let lastNativeBlockAt: number | null = null
-type ActiveDeliveryTrace = {
-  trace: ReturnType<typeof createRecordingDeliveryTrace>
-  observer: RecordingDeliveryEvidenceObserver
-}
-let deliveryTrace: ActiveDeliveryTrace | null = null
-export const beginRecordingDeliveryTrace = (generation: number, sessionId: bigint,
-  observer = createRecordingDeliveryEvidenceObserver(globalThis)) => {
-  if (!observer.enabled()) return null
-  observer.reset()
-  const trace = createRecordingDeliveryTrace(true, generation, sessionId, performance.timeOrigin + performance.now())
-  deliveryTrace = { trace, observer }
-  return trace
-}
-export const finishRecordingDeliveryTrace = () => {
-  if (!deliveryTrace) return
-  const now = performance.timeOrigin + performance.now()
-  deliveryTrace.trace.transition("cleanup", now)
-  const dump = deliveryTrace.trace.dump(now)
-  if (dump) deliveryTrace.observer.publishRenderer(dump)
-  deliveryTrace = null
-}
 const listeners = new Set<() => void>()
 export const recordingDiagnosticsSubscriberCount = () => listeners.size
 
@@ -122,13 +100,11 @@ const sanitizeError = (error: Error | string | undefined) =>
     .replace(/(?:[A-Za-z]:[\\/]|\/)[^\s]*/g, "<path>").slice(0, 256)
 
 export const recordRecordingTermination = (cause: RecordingTerminationCause, error?: Error | string) => {
-  deliveryTrace?.trace.transition(cause, performance.timeOrigin + performance.now())
   if (snapshot.termination) return
   updateRecordingDiagnostics({ termination: { cause, error: sanitizeError(error) } })
 }
 
 export const recordRecordingLifecycle = (state: string) => {
-  deliveryTrace?.trace.lifecycle(state, performance.timeOrigin + performance.now())
   updateRecordingDiagnostics({ lifecycleTransitions: [...snapshot.lifecycleTransitions.slice(-7), state.slice(0, 64)] })
 }
 
@@ -143,12 +119,6 @@ export const recordNativeRecordingStatus = (status: NonNullable<RecordingDiagnos
 }
 
 export const updateRecordingDiagnostics = (update: Partial<RecordingDiagnostics>) => {
-  if (deliveryTrace && update.writerOutstandingBuffers !== undefined) {
-    deliveryTrace.trace.writer(performance.timeOrigin + performance.now(), update.writerOutstandingBuffers,
-      update.writerReturnedBuffers ?? snapshot.writerReturnedBuffers, update.writerReturnMaxMs ?? 0,
-      update.writerReturnDeliveryMaxMs ?? 0, update.writerReturnDeliveryWorst?.returnedAtEpochMs ?? 0,
-      update.writerOldestOutstandingMs ?? 0)
-  }
   const deliveryMax = Math.max(snapshot.writerReturnDeliveryMaxMs, update.writerReturnDeliveryMaxMs ?? 0)
   snapshot = {
     ...snapshot,
@@ -171,7 +141,6 @@ export const updateRecordingDiagnostics = (update: Partial<RecordingDiagnostics>
 }
 
 export const resetRecordingDiagnostics = () => {
-  finishRecordingDeliveryTrace()
   snapshot = initialDiagnostics()
   lastNativeBlockAt = null
   for (const listener of listeners) listener()

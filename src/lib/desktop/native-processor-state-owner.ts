@@ -336,20 +336,54 @@ type AdoptionWaiting = {
   resolve: (outcome: AdoptionOutcome) => void
 }
 // `withdrawPublication` is set by the publication the attempt runs: it cancels it and answers false once native may hold it.
-export type AdoptionAttempt = AdoptionWaiting & { fields: AdoptionFields; withdrawPublication?: () => boolean; publication?: PublicationRecord }
-export type PublicationRecord = {
+export type AdoptionAttempt = AdoptionWaiting & { fields: AdoptionFields; withdrawPublication?: () => boolean; publication?: Publication }
+type PublicationPhase = "prepared" | "held" | "resolving" | "awaitingTransport" | "ended"
+export type Inspection =
+  | { status: "reply"; reply: NativeRevisionReply }
+  | { status: "unavailable" }
+  | { status: "failed"; error: Error }
+const resubmitBudget = 8
+// What the runner of a publication sees of it. Its phase, cohort and outcome move only through the state owner.
+export type Publication = {
+  readonly kind: "schedule" | "latency"
+  readonly phase: PublicationPhase
+  readonly cancelled: boolean
+  readonly terminal: Promise<AdoptionOutcome>
+  readonly outcome: AdoptionOutcome | undefined
+  readonly content: ReadonlyMap<string, InstalledContent & { lifetime?: number }>
+  readonly resubmits: number
+  readonly resubmitsSpent: boolean
+  cancel(): void
+  held(): void
+  resolving(): void
+  awaitingTransport(): void
+  // Throws once the budget of resubmits is spent.
+  resubmitted(): void
+  refresh(content: ReadonlyMap<string, InstalledContent & { lifetime?: number }>): void
+  inspect(): Promise<Inspection>
+  acknowledge(epoch: number): Promise<boolean>
+  awaitWake(): Promise<void>
+  stopAwaitingWake(): void
+  wakeTransport(): void
+  onProgress(listener: (progress: NativeScheduleProgress) => void): void
+  onWake(listener: () => void): void
+  onInspect(listener: () => Promise<Inspection>): void
+  onAcknowledge(listener: (epoch: number) => Promise<boolean>): void
+}
+type PublicationRecord = {
+  handle: Publication
   kind: "schedule" | "latency"
   resubmits: number
   progress?: (progress: NativeScheduleProgress) => void
   transportWake?: () => void
-  phase: "prepared" | "held" | "resolving" | "awaitingTransport" | "ended"
+  phase: PublicationPhase
   cancelled: boolean
   content: ReadonlyMap<string, InstalledContent & { lifetime?: number }>
   cohort: Map<Receipt, number>
   terminal: Promise<AdoptionOutcome>
   resolve: (outcome: AdoptionOutcome) => void
   outcome?: AdoptionOutcome
-  inspect?: () => Promise<NativeRevisionReply | undefined>
+  inspect?: () => Promise<Inspection>
   acknowledge?: (epoch: number) => Promise<boolean>
   wake?: () => void
 }
@@ -1045,8 +1079,10 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     record.cohort.set(receipt, receipt.attempts.length)
     receipt.attempts.push("pending")
   }
+  const records = new WeakMap<Publication, PublicationRecord>()
+  type PublicationEvidence = "promoted" | "cancelled" | "failed" | "uncertain" | "lost"
   const finishPublication = (record: PublicationRecord, finished: AdoptionOutcome,
-    evidence: "promoted" | "cancelled" | "failed" | "uncertain" | "lost", reason: ProcessorRefusal = "native-refused") => {
+    evidence: PublicationEvidence, reason: ProcessorRefusal = "native-refused") => {
     if (record.phase === "ended") return
     record.phase = "ended"
     if (publication === record) publication = undefined
@@ -1147,7 +1183,8 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
     abortCompiles()
     if (!publicationHeld) {
       const attempt = running
-      if (attempt?.publication) finishPublication(attempt.publication, { status: "superseded" }, "lost")
+      const record = attempt?.publication && records.get(attempt.publication)
+      if (record) finishPublication(record, { status: "superseded" }, "lost")
       running?.resolve({ status: "superseded" })
       running = undefined
       if (attempt) options.onTerminal?.()
@@ -1181,19 +1218,54 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
   }
 
   return {
-    capturePublication: (attempt: AdoptionAttempt | undefined, content: ReadonlyMap<string, InstalledContent>) => {
+    capturePublication: (attempt: AdoptionAttempt | undefined, content: ReadonlyMap<string, InstalledContent>): Publication => {
       if (publication) throw new Error("A publication already owns the native bank.")
       let resolve: (outcome: AdoptionOutcome) => void = () => {}
       const terminal = new Promise<AdoptionOutcome>(done => { resolve = done })
-      const record: PublicationRecord = { kind: attempt ? "schedule" : "latency", resubmits: 0, phase: "prepared", cancelled: false, terminal, resolve,
+      const handle: Publication = {
+        kind: attempt ? "schedule" : "latency",
+        get phase() { return record.phase },
+        get cancelled() { return record.cancelled },
+        terminal,
+        get outcome() { return record.outcome },
+        get content() { return record.content },
+        get resubmits() { return record.resubmits },
+        get resubmitsSpent() { return record.resubmits >= resubmitBudget },
+        cancel: () => { record.cancelled = true },
+        held: () => { record.phase = "held" },
+        resolving: () => { record.phase = "resolving" },
+        awaitingTransport: () => { record.phase = "awaitingTransport" },
+        resubmitted: () => {
+          if (record.resubmits >= resubmitBudget) throw new Error("Native publication resubmit budget exhausted.")
+          record.resubmits++
+        },
+        refresh: (next) => { record.content = next; refreshPublication(record) },
+        inspect: () => record.inspect?.() ?? Promise.resolve({ status: "unavailable" }),
+        acknowledge: (epoch) => record.acknowledge?.(epoch) ?? Promise.resolve(false),
+        awaitWake: () => new Promise<void>(resolveWake => { record.transportWake = resolveWake }),
+        stopAwaitingWake: () => { record.transportWake = undefined },
+        wakeTransport: () => record.transportWake?.(),
+        onProgress: (listener) => { record.progress = listener },
+        onWake: (listener) => { record.wake = listener },
+        onInspect: (listener) => { record.inspect = listener },
+        onAcknowledge: (listener) => { record.acknowledge = listener },
+      }
+      const record: PublicationRecord = { handle, kind: handle.kind, resubmits: 0, phase: "prepared", cancelled: false, terminal, resolve,
         content, cohort: new Map() }
+      records.set(handle, record)
       publication = record
-      if (attempt) attempt.publication = record
+      if (attempt) attempt.publication = handle
       refreshPublication(record)
-      return record
+      return handle
     },
-    finishPublication,
-    refreshPublication,
+    finishPublication: (handle: Publication, finished: AdoptionOutcome, evidence: PublicationEvidence, reason?: ProcessorRefusal) => {
+      const record = records.get(handle)
+      if (record) finishPublication(record, finished, evidence, reason)
+    },
+    reportProgress: (progress: NativeScheduleProgress) => {
+      publication?.transportWake?.()
+      publication?.progress?.(progress)
+    },
     retirement: () => retirement,
     holdRetirement: (held: RetirementObligation) => { retirement = held },
     observeRetirement: (reply: NativeRevisionReply) => {
@@ -1206,7 +1278,7 @@ export const createNativeProcessorStateOwner = <Candidate extends Disposable = D
         || (status.status !== "retired" && status.retiredRevision === held.binding.revision)) return
       finishRetirement(held)
     },
-    publication: () => publication,
+    publication: () => publication?.handle,
     cancelPublication: () => {
       const record = publication
       if (record && record.phase !== "ended") { record.cancelled = true; record.wake?.() }

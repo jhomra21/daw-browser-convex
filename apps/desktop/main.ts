@@ -114,6 +114,7 @@ import { createRecordingSpoolOrderEvidence } from "./recording-spool-evidence"
 import { createFileCapabilityManager } from "./file-capabilities"
 import { registerFileCapabilitiesIpc } from "./ipc/file-capabilities-ipc"
 import { registerApplicationMenuIpc } from "./ipc/application-menu-ipc"
+import { registerVstEditorStateAckIpc } from "./ipc/vst-editor-state-ack-ipc"
 import { createNativeFileCapabilityHelper } from "./native-file-capability-helper"
 import { createRequestCorrelation } from "./request-correlation"
 import { createPreparationRegistry } from "./preparation-registry"
@@ -1030,6 +1031,10 @@ const registerIpc = () => {
     ipcMain,
     applicationMenuStateAllowed,
     applicationMenuController,
+  })
+  registerVstEditorStateAckIpc({
+    ipcMain,
+    allowed: applicationMenuStateAllowed,
     takePendingEditorStateAck: (requestId) => {
       const pending = pendingEditorStateAcks.get(requestId)
       if (pending) pendingEditorStateAcks.delete(requestId)

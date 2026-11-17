@@ -33,8 +33,6 @@ import { createRendererLifecycleOwner } from "./renderer-lifecycle"
 import { registerNativeSessionTransportIpc } from "./ipc/native-session-transport-ipc"
 import { registerNativeSessionRecordingIpc } from "./ipc/native-session-recording-ipc"
 import type { RecordingSessionOwner } from "./ipc/native-session-recording-ipc"
-import { registerRendererNavigationCommit } from "./ipc/renderer-navigation-commit"
-import { executeNativeEditorRoute } from "./ipc/native-editor-routing"
 import { nativeSessionRequestAllowed } from "./ipc/native-session-access"
 import type { NativeSessionEvent, NativeSessionIpcHandler } from "./ipc/native-session-access"
 
@@ -350,24 +348,8 @@ test("scopes configuration identity to each native host process generation", () 
   expect(nativeHostConfigurationIdentityFor(advanced, { generation: 1 })).toBeUndefined()
 })
 
-test("prefers the isolated editor route over the playback host", async () => {
-  const calls: string[] = []
-  const result = await executeNativeEditorRoute({
-    isolated: async () => { calls.push("isolated"); return "isolated-result" },
-    playback: async () => { calls.push("playback"); return "playback-result" },
-  })
-  expect(result).toBe("isolated-result")
-  expect(calls).toEqual(["isolated"])
-  const fallback = await executeNativeEditorRoute({
-    isolated: undefined,
-    playback: async () => { calls.push("playback"); return "playback-result" },
-  })
-  expect(fallback).toBe("playback-result")
-  expect(calls).toEqual(["isolated", "playback"])
-})
 
 test("navigation commit activates the privileged native session IPC", async () => {
-  let didNavigate: ((event: { preventDefault: () => void; readonly defaultPrevented: boolean }, url: string) => void) | undefined
   const rendererLifecycle = createRendererLifecycleOwner()
   const mainFrame = { url: "daw://app/project" }
   const handlers = new Map<string, NativeSessionIpcHandler>()
@@ -385,20 +367,13 @@ test("navigation commit activates the privileged native session IPC", async () =
     supervisor: () => ({ setSpectrumNode: async (nodeId) => { spectrumCalls.push(nodeId) }, setTransport: async () => undefined }),
     fail: nativeSessionFailure,
   })
-  registerRendererNavigationCommit({
-    on: (event, listener) => {
-      if (event === "did-navigate") didNavigate = listener
-    },
-  }, rendererLifecycle.commitMainFrameNavigation)
-  const listener = didNavigate
-  if (!listener) throw new Error("Navigation commit handler was not registered")
   const spectrumHandler = handlers.get(sessionSetSpectrumNodeChannel)
   if (!spectrumHandler) throw new Error("Spectrum handler was not registered")
   const event: NativeSessionEvent = { sender: { id: 4, mainFrame }, senderFrame: mainFrame }
   const value = { value: 17n, transactionToken: undefined }
   expect(await spectrumHandler(event, value)).toEqual(nativeSessionFailure())
   rendererLifecycle.beginMainFrameNavigation(mainFrame.url)
-  listener({ preventDefault: () => undefined, defaultPrevented: false }, mainFrame.url)
+  rendererLifecycle.commitMainFrameNavigation(mainFrame.url)
   expect(await spectrumHandler(event, value)).toEqual({ ok: true })
   expect(spectrumCalls).toEqual([17n])
 })

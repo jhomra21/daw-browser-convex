@@ -7,7 +7,7 @@ import { nativeRecordingSpoolImportVersion } from "@daw-browser/desktop-protocol
 import type { NativeHostRecordingConfiguration } from "@daw-browser/audio-engine/native-host-wire"
 import { projectIdSchemaV1 } from "@daw-browser/desktop-protocol"
 import { z } from "zod"
-import { transactionTokenSchema, unsigned32Schema } from "../native-session-schemas"
+import { nativeSessionEnvelopeSchema, unsigned32Schema } from "../native-session-schemas"
 import type {
   RecordingConfigureRequest,
   RecordingStartRequest,
@@ -39,20 +39,14 @@ const recordingConfigurationSchema = z.object({
   value.inputChannels.length === value.channelCount
   && (value.punchEndFrame === null || value.punchEndFrame >= value.punchStartFrame)
 ))
-const sessionEnvelope = <Schema extends z.ZodType>(valueSchema: Schema) => z.object({
-  value: valueSchema,
-  transactionToken: transactionTokenSchema.optional(),
-}).passthrough().refine((value) => (
-  Object.hasOwn(value, "value") && Object.hasOwn(value, "transactionToken")
-))
-const configureEnvelope = sessionEnvelope(recordingConfigurationSchema)
-const startEnvelope = sessionEnvelope(z.object({
+const configureEnvelope = nativeSessionEnvelopeSchema(recordingConfigurationSchema)
+const startEnvelope = nativeSessionEnvelopeSchema(z.object({
   projectId: projectIdSchemaV1,
   projectGeneration: unsigned32Schema,
   generation: unsigned32Schema,
   sessionId: z.bigint().positive(),
 }).strict())
-const stopEnvelope = sessionEnvelope(z.number().int().safe().min(0).optional())
+const stopEnvelope = nativeSessionEnvelopeSchema(z.number().int().safe().min(0).optional())
 
 const recordingConfiguration = (value: z.infer<typeof recordingConfigurationSchema>): NativeHostRecordingConfiguration => ({
   projectId: value.projectId,

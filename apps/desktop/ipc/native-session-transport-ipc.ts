@@ -4,17 +4,11 @@ import {
 } from "@daw-browser/desktop-protocol/ipc-channels"
 import type { NativeHostTransport } from "@daw-browser/audio-engine/native-host-wire"
 import { z } from "zod"
-import { transactionTokenSchema, unsigned32Schema } from "../native-session-schemas"
+import { nativeSessionEnvelopeSchema, unsigned32Schema } from "../native-session-schemas"
 import type { NativeSessionEvent, NativeSessionIpcHandler } from "./native-session-access"
 import type { nativeSessionFailure } from "../audio-host"
 
-const sessionEnvelope = <Schema extends z.ZodType>(valueSchema: Schema) => z.object({
-  value: valueSchema,
-  transactionToken: transactionTokenSchema.optional(),
-}).passthrough().refine((value) => (
-  Object.hasOwn(value, "value") && Object.hasOwn(value, "transactionToken")
-))
-const spectrumEnvelope = sessionEnvelope(z.bigint().positive().nullable())
+const spectrumEnvelope = nativeSessionEnvelopeSchema(z.bigint().positive().nullable())
 const transportSchema = z.object({
   epoch: unsigned32Schema,
   running: z.boolean(),
@@ -41,7 +35,7 @@ const transportSchema = z.object({
   && (!Object.hasOwn(value, "cycleStartSec") || value.cycleStartSec !== undefined)
   && (!Object.hasOwn(value, "cycleEndSec") || value.cycleEndSec !== undefined)
 ))
-const transportEnvelope = sessionEnvelope(transportSchema)
+const transportEnvelope = nativeSessionEnvelopeSchema(transportSchema)
 
 export const registerNativeSessionTransportIpc = (dependencies: {
   ipcMain: { handle: (channel: string, listener: NativeSessionIpcHandler) => void }

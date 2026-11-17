@@ -7,7 +7,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import path from "node:path"
 import { pathToFileURL } from "node:url"
 import { z } from "zod"
-import { nativeEditorCommandSchema, transactionTokenSchema, unsigned32Schema, uuidSchema } from "./native-session-schemas"
+import { nativeEditorCommandSchema, nativeSessionEnvelopeSchema, unsigned32Schema, uuidSchema } from "./native-session-schemas"
 import {
   desktopFrameSchemaV1,
   desktopHelloSchemaV1,
@@ -112,8 +112,6 @@ import { registerApplicationMenuIpc } from "./ipc/application-menu-ipc"
 import { registerVstEditorStateAckIpc } from "./ipc/vst-editor-state-ack-ipc"
 import { registerNativeSessionTransportIpc } from "./ipc/native-session-transport-ipc"
 import { registerNativeSessionRecordingIpc } from "./ipc/native-session-recording-ipc"
-import { registerRendererNavigationCommit } from "./ipc/renderer-navigation-commit"
-import { executeNativeEditorRoute } from "./ipc/native-editor-routing"
 import { nativeSessionRequestAllowed, type NativeSessionEvent } from "./ipc/native-session-access"
 import { createNativeFileCapabilityHelper } from "./native-file-capability-helper"
 import { createRequestCorrelation } from "./request-correlation"
@@ -262,14 +260,6 @@ const nativeAttachmentCoordinationSchema = z.object({
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
   }).strict()).max(64).optional(),
 }).passthrough()
-const nativeSessionEnvelopeSchema = <Schema extends z.ZodType>(valueSchema: Schema) => (
-  z.object({
-    value: valueSchema,
-    transactionToken: transactionTokenSchema.optional(),
-  }).passthrough().refine((value) => (
-    Object.hasOwn(value, "value") && Object.hasOwn(value, "transactionToken")
-  ))
-)
 const nativeBytesEnvelopeSchema = nativeSessionEnvelopeSchema(z.instanceof(Uint8Array))
 const nativeUndefinedEnvelopeSchema = nativeSessionEnvelopeSchema(z.undefined())
 const nativeEditorEnvelopeSchema = nativeSessionEnvelopeSchema(nativeEditorCommandSchema)
@@ -1546,69 +1536,67 @@ const registerIpc = () => {
         height: value.height,
         anchor,
       }
-      const unavailable = { ok: false as const, error: "The native VST editor session is unavailable." }
-      // Plug-in editor UI and runtime state stay outside the realtime playback graph.
-      return await executeNativeEditorRoute({
-        isolated: manager ? async () => {
-          const status = await manager.execute(command)
-          if (command.command === "close") {
-            sendRendererMessage(vstEditorStateChannel, { projectId, instanceId: command.instanceId, open: false })
+      // Prefer the isolated editor host. A plug-in editor can allocate UI or
+      // runtime state outside the realtime graph, so its failure should remain
+      // independent from playback whenever the isolated manager is available.
+      if (manager) {
+        const status = await manager.execute(command)
+        // The editor session does not read an instance playback owns, so a close of one reaches the renderer as
+        // the closed event, which captures from the playback worker.
+        if (command.command === "close") sendRendererMessage(vstEditorStateChannel, { projectId, instanceId: command.instanceId, open: false })
+        return { ok: true as const, status }
+      }
+      if (activeHostCandidate) {
+        try {
+          if (activeHostCandidate.transactionOpen() && !envelope.data.transactionToken) {
+            throw new Error("The native audio host transaction token is required.")
           }
-          return { ok: true as const, status }
-        } : undefined,
-        playback: activeHostCandidate ? async () => {
-          try {
-            if (activeHostCandidate.transactionOpen() && !envelope.data.transactionToken) {
-              throw new Error("The native audio host transaction token is required.")
-            }
-            const boundProjectId = activeEditorProjectBindings.projectFor(command.instanceId)
-            if (boundProjectId !== undefined && boundProjectId !== projectId) {
-              throw new Error("The active native VST editor project binding changed.")
-            }
-            if (boundProjectId === undefined) throw new Error("The active native VST editor is not owned by a committed project binding.")
-            const ownership = await activeHostCandidate.executeVstEditorCommand(
-              nativeVstEditorOwnershipProbe(command.instanceId),
-              envelope.data.transactionToken,
-            )
-            if (!ownership.owned) throw new Error("The active native VST editor is not owned by the committed project binding.")
-            const {
-              projectId: _projectId,
-              initialState: _initialState,
-              requiresState: _requiresState,
-              captureState: _captureState,
-              ...nativeCommand
-            } = command
-            const capturedState = command.command === "close"
-              ? await activeHostCandidate.getVstState(command.instanceId)
-              : undefined
-            let status = command.command === "status"
-              ? ownership
-              : undefined
-            if (status === undefined) {
-              try {
-                status = await activeHostCandidate.executeVstEditorCommand(nativeCommand, envelope.data.transactionToken)
-              } catch (error) {
-                if (command.command !== "close") throw error
-                status = {
-                  ...ownership,
-                  success: false,
-                  open: false,
-                  closeError: error instanceof Error ? error.message : "The native editor close command failed.",
-                }
+          const boundProjectId = activeEditorProjectBindings.projectFor(command.instanceId)
+          if (boundProjectId !== undefined && boundProjectId !== projectId) {
+            throw new Error("The active native VST editor project binding changed.")
+          }
+          if (boundProjectId === undefined) throw new Error("The active native VST editor is not owned by a committed project binding.")
+          const ownership = await activeHostCandidate.executeVstEditorCommand(
+            nativeVstEditorOwnershipProbe(command.instanceId),
+            envelope.data.transactionToken,
+          )
+          if (!ownership.owned) throw new Error("The active native VST editor is not owned by the committed project binding.")
+          const {
+            projectId: _projectId,
+            initialState: _initialState,
+            requiresState: _requiresState,
+            captureState: _captureState,
+            ...nativeCommand
+          } = command
+          const capturedState = command.command === "close"
+            ? await activeHostCandidate.getVstState(command.instanceId)
+            : undefined
+          let status = command.command === "status"
+            ? ownership
+            : undefined
+          if (status === undefined) {
+            try {
+              status = await activeHostCandidate.executeVstEditorCommand(nativeCommand, envelope.data.transactionToken)
+            } catch (error) {
+              if (command.command !== "close") throw error
+              status = {
+                ...ownership,
+                success: false,
+                open: false,
+                closeError: error instanceof Error ? error.message : "The native editor close command failed.",
               }
             }
-            if (command.command !== "close") return { ok: true as const, status }
-            return { ok: true as const, status: { ...status, capturedState } }
-          } catch (error) {
-            console.error("[native-vst3] editor active route failed", {
-              error: sanitizeNativeVst3DiagnosticError(error instanceof Error ? error : undefined),
-            })
-            const diagnostics = await activeHostCandidate.diagnostics().catch(() => undefined)
-            if (diagnostics?.state === "running" || !manager) throw error
-            return unavailable
           }
-        } : undefined,
-      }) ?? unavailable
+          if (command.command !== "close") return { ok: true as const, status }
+          return { ok: true as const, status: { ...status, capturedState } }
+        } catch (error) {
+          console.error("[native-vst3] editor active route failed", {
+            error: sanitizeNativeVst3DiagnosticError(error instanceof Error ? error : undefined),
+          })
+          throw error
+        }
+      }
+      return { ok: false as const, error: "The native VST editor session is unavailable." }
     } catch (error) {
       console.error("[native-vst3] editor command failed", {
         error: sanitizeNativeVst3DiagnosticError(error instanceof Error ? error : undefined),
@@ -2067,7 +2055,9 @@ const createWindow = () => {
       if (invalidation) applyRendererInvalidation(invalidation, "Renderer reloaded.")
     }
   })
-  registerRendererNavigationCommit(window_.webContents, rendererLifecycle.commitMainFrameNavigation)
+  window_.webContents.on("did-navigate", (_event, url) => {
+    rendererLifecycle.commitMainFrameNavigation(url)
+  })
   window_.webContents.on("did-fail-load", (_event, _errorCode, _errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame) return
     rendererLifecycle.failMainFrameNavigation(validatedURL)

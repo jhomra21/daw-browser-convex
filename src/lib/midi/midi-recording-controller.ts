@@ -179,7 +179,7 @@ export const createMidiTrackRecordingController = (
     if (cancelledCleanupPromise) return cancelledCleanupPromise
     const retained = retainedCancelledClip
     if (!retained) return Promise.resolve({ ok: true })
-    const cleanup = (async () => {
+    const cleanup = (async (): Promise<CancelledClipCleanupResult> => {
       try {
         if (retained.local) {
           await createLocalTimelineRepository(retained.projectId).deleteClip(retained.clipId)

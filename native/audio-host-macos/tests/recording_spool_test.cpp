@@ -207,6 +207,7 @@ void FinishCore(const std::shared_ptr<RecordingSpoolSession>& session, std::uint
 }
 
 void ExactFormat() {
+  static_assert(DAW_AUDIO_RECORDING_CAPTURE_BLOCK_FRAMES == 2048u);
   Fixture fixture;
   auto io = std::make_shared<InjectedIo>();
   io->fault = InjectedIo::Fault::kShortEintr;
@@ -221,12 +222,14 @@ void ExactFormat() {
   Check(stat(fixture.Final().c_str(), &status) == 0 && (status.st_mode & 0777) == 0600, "file mode");
   Check(result->file_device == std::uint64_t(status.st_dev) && result->file_inode == std::uint64_t(status.st_ino), "file identity");
   std::vector<unsigned char> expected;
+  static_assert(sizeof(std::uint32_t) == 4 && sizeof(float) == 4);
   AppendBytes(expected, 3);
   for (float value : left) AppendBytes(expected, std::bit_cast<std::uint32_t>(value));
   for (float value : right) AppendBytes(expected, std::bit_cast<std::uint32_t>(value));
   AppendBytes(expected, 1);
   AppendBytes(expected, std::bit_cast<std::uint32_t>(left[0]));
   AppendBytes(expected, std::bit_cast<std::uint32_t>(right[0]));
+  Check(expected.size() == 40, "four-byte block headers and samples");
   Check(Read(fixture.Final()) == expected, "exact OPFS byte encoding");
   const auto publications = io->publications;
   Check(file.Finish({4, 40, 2}, fixture.cancelled), "double finish idempotent");

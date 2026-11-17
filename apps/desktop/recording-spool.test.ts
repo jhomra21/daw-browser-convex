@@ -260,14 +260,16 @@ test("a malformed per-take receipt or resolved manifest is retained as damaged w
 test("Complete refuses wrong formula, negotiated rate, scope and native identity", async () => {
   // A failed proof outcome is intentionally sticky for its take. Fresh takes
   // ensure each malformed field really reaches its own validation gate.
-  for (const variant of ["inode", "blocks", "rate", "frames"]) {
+  for (const variant of ["inode", "blocks", "rate", "frames", "oversized-block"]) {
     const f = await registryFixture()
     try {
       const bad = variant === "inode" ? { ...f.complete, fileInode: f.complete.fileInode + 1n }
         : variant === "blocks" ? { ...f.complete, spool: { ...f.complete.spool, writtenBlocks: 2 } }
         : variant === "rate" ? { ...f.complete, spool: { ...f.complete.spool, sampleRateHz: 44100 } }
-        : { ...f.complete, capturedFrames: 4 }
-      const message = variant === "inode" ? "identity" : variant === "blocks" ? "totals" : variant === "rate" ? "format" : "binding"
+        : variant === "frames" ? { ...f.complete, capturedFrames: 4 }
+        : { ...f.complete, capturedFrames: 2049, spool: { ...f.complete.spool, writtenFrames: 2049, writtenBytes: 16_396 } }
+      const message = variant === "inode" ? "identity" : variant === "blocks" || variant === "oversized-block" ? "totals"
+        : variant === "rate" ? "format" : "binding"
       await expect(f.registry.complete(f.takeId, bad)).rejects.toThrow(message)
       await expect(f.registry.complete(f.takeId, f.complete)).rejects.toThrow(message)
       expect(await readFile(f.source)).toEqual(f.bytes)

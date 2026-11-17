@@ -809,17 +809,23 @@ test("a plug-in whose trust was revoked is unresolved even when its verdict was 
 
 // native/plugin-host/src/worker-supervisor.h WorkerFaultOrigin, in bits 0..7 of a fault value.
 const faultOrigin = {
+  unknown: 0,
   childExit: 1,
   childSignal: 2,
   transportFault: 3,
   dispatchFailure: 4,
   callbackMissTermination: 5,
   startupFailure: 6,
+  startupException: 7,
   configureFailure: 8,
+  configureException: 9,
+  processFailure: 10,
   processException: 11,
   workerNotification: 12,
   unknownWorkerNotification: 13,
+  offlineCompletionFailure: 14,
   controlIoFailure: 15,
+  launchNotTrusted: 16,
 } as const
 
 test("only a crashed plug-in preflight is a plug-in failure; timeouts and staging errors are ours", async () => {
@@ -886,13 +892,26 @@ test("host notifications reach the renderer as typed instance events and never e
     kind, value, graphRevision: 10, graphNodeId: 1n, instanceId: first.instanceId,
   }, (defect) => { defects.push(defect) })
   expect(notify("latency", 4096)).toEqual({ kind: "latency", instanceId: first.instanceId, latencyFrames: 4096 })
-  expect(notify("fault", faultOrigin.childSignal | (11 << 8))).toEqual({ kind: "failed", instanceId: first.instanceId })
+  for (const origin of [
+    faultOrigin.childExit, faultOrigin.childSignal, faultOrigin.configureFailure,
+    faultOrigin.configureException, faultOrigin.processFailure, faultOrigin.processException,
+    faultOrigin.workerNotification,
+  ]) expect(notify("fault", origin | (11 << 8))).toEqual({ kind: "failed", instanceId: first.instanceId })
+  for (const origin of [
+    faultOrigin.unknown, faultOrigin.transportFault, faultOrigin.dispatchFailure,
+    faultOrigin.callbackMissTermination, faultOrigin.startupFailure, faultOrigin.startupException,
+    faultOrigin.unknownWorkerNotification, faultOrigin.offlineCompletionFailure, faultOrigin.controlIoFailure,
+  ]) expect(notify("fault", origin | (11 << 8))).toBeUndefined()
+  expect(notify("fault", faultOrigin.workerNotification)).toEqual({ kind: "failed", instanceId: first.instanceId })
   expect(notify("restart", 1)).toBeUndefined()
   expect(notify("buses", 0)).toBeUndefined()
-  expect(defects).toEqual([])
+  expect(defects).toHaveLength(9)
   expect(notify("fault", faultOrigin.transportFault)).toBeUndefined()
   expect(notify("miss", 0)).toBeUndefined()
-  expect(defects.map((defect) => defect.source)).toEqual(["worker-fault", "worker-miss"])
+  expect(defects.map((defect) => defect.source)).toEqual([
+    "worker-fault", "worker-fault", "worker-fault", "worker-fault", "worker-fault",
+    "worker-fault", "worker-fault", "worker-fault", "worker-fault", "worker-fault", "worker-miss",
+  ])
 })
 
 // The worker's refusal of its launch record is our trust gate, not a crash: it reaches the renderer's trust flow.

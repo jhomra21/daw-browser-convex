@@ -1401,13 +1401,6 @@ export const createNativeAudioHostSupervisor = (
   options: NativeAudioHostSupervisorOptions = {},
 ): NativeAudioHostSupervisor => {
   const evidence = options.evidence
-  const observeEvidence: HostEvidence = (event, fields) => {
-    try {
-      evidence?.(event, fields)
-    } catch {
-      return
-    }
-  }
   const defaultSpawnHost: SpawnHost = (executable) => spawn(executable, [], {
     env: { PATH: "/usr/bin:/bin", ...options.hostEnvironment },
     stdio: ["pipe", "pipe", "pipe"],
@@ -2158,7 +2151,7 @@ export const createNativeAudioHostSupervisor = (
         dispatchNext()
       } else if (frame.readUInt32BE(8) === diagnosticsType && pending?.reply.kind === "diagnostics") {
         const current = pending
-        const reply = current.reply
+        const reply = pending.reply
         const diagnostic = decodeDiagnostics(frame)
         if (!diagnostic) {
           rejectPending(new Error("The native audio host returned an invalid diagnostics response."))
@@ -2167,58 +2160,57 @@ export const createNativeAudioHostSupervisor = (
           clearTimeout(pending.deadline)
           pending = undefined
           dispatchNext()
-          if (reply.kind === "diagnostics") reply.resolve(diagnostic)
+          reply.resolve(diagnostic)
         }
       } else if (frame.readUInt32BE(8) === deviceListType && pending?.reply.kind === "outputDevice") {
         const current = pending
-        const reply = current.reply
+        const reply = pending.reply
         const device = decodeOutputDevice(frame)
         if (device === undefined) return lost("The native audio host returned an invalid device response.")
         logControlAck(current)
         clearTimeout(pending.deadline)
         pending = undefined
         dispatchNext()
-        if (reply.kind === "outputDevice") reply.resolve(device)
+        reply.resolve(device)
       } else if (frame.readUInt32BE(8) === recordingDeviceListType && pending?.reply.kind === "inputDevice") {
         const current = pending
-        const reply = current.reply
+        const reply = pending.reply
         const device = decodeInputDevice(frame)
         if (device === undefined) return lost("The native audio host returned an invalid input device response.")
         logControlAck(current)
         clearTimeout(pending.deadline)
         pending = undefined
         dispatchNext()
-        if (reply.kind === "inputDevice") reply.resolve(device)
+        reply.resolve(device)
       } else if (frame.readUInt32BE(8) === deviceInventoryType && pending?.reply.kind === "deviceInventory") {
         const current = pending
-        const reply = current.reply
+        const reply = pending.reply
         const devices = decodeDeviceInventory(frame)
         if (devices === undefined) return lost("The native audio host returned an invalid device inventory response.")
         logControlAck(current)
         clearTimeout(pending.deadline)
         pending = undefined
         dispatchNext()
-        if (reply.kind === "deviceInventory") reply.resolve(devices)
+        reply.resolve(devices)
       } else if (frame.readUInt32BE(8) === graphRevisionStatusType && pending?.reply.kind === "graphRevision") {
         const current = pending
-        const reply = current.reply
+        const reply = pending.reply
         const status = decodeGraphRevisionStatus(frame)
         if (!status) return lost("The native audio host returned an invalid graph revision status.")
-        if (reply.kind !== "graphRevision" || status.requestedRevision !== reply.requestedRevision) continue
+        if (status.requestedRevision !== reply.requestedRevision) continue
+        if (current.requestType === graphRevisionStatusType) evidence?.("inspect-reply-received", { pid: child?.pid ?? null, revision: status.requestedRevision })
         logControlAck(current)
         clearTimeout(pending.deadline)
         pending = undefined
         dispatchNext()
         reply.resolve(status)
-        if (current.requestType === graphRevisionStatusType) observeEvidence("inspect-reply-received", { pid: child?.pid ?? null, revision: status.requestedRevision })
       } else if (frame.readUInt32BE(8) === graphRevisionStatusType) {
         // A timed-out revision can reply after reconciliation was requested or
         // completed. It cannot settle another command or prove process loss.
         if (!decodeGraphRevisionStatus(frame)) return lost("The native audio host returned an invalid graph revision status.")
       } else if (frame.readUInt32BE(8) === vstStateType && pending?.reply.kind === "vstState") {
         const current = pending
-        const reply = current.reply
-        if (reply.kind !== "vstState") return lost("The native audio host returned an invalid VST state response.")
+        const reply = pending.reply
         const payload = frame.subarray(headerBytes)
         const rejectState = (message: string) => {
           clearTimeout(current.deadline)
@@ -2259,24 +2251,24 @@ export const createNativeAudioHostSupervisor = (
         if (!reply.cancelled) reply.resolve({ bytes, sha256 })
       } else if (frame.readUInt32BE(8) === vstEditorStatusType && pending?.reply.kind === "editor") {
         const current = pending
-        const reply = current.reply
+        const reply = pending.reply
         const status = decodeVstEditorStatus(frame)
         if (!status) return lost("The native audio host returned an invalid VST editor response.")
         logControlAck(current)
         clearTimeout(pending.deadline)
         pending = undefined
         dispatchNext()
-        if (reply.kind === "editor") reply.resolve(status)
+        reply.resolve(status)
       } else if (frame.readUInt32BE(8) === processorStatePatchStatusType && pending?.reply.kind === "patchStatus") {
         const current = pending
-        const reply = current.reply
+        const reply = pending.reply
         const status = decodeNativeProcessorPatchStatus(frame.subarray(headerBytes))
         if (!status) return lost("The native audio host returned an invalid processor patch status.")
         logControlAck(current)
         clearTimeout(current.deadline)
         pending = undefined
         dispatchNext()
-        if (reply.kind === "patchStatus") reply.resolve(status)
+        reply.resolve(status)
       } else if (frame.readUInt32BE(8) === ackType && pending?.reply.kind === "patchStatus") {
         // A patch is answered by a status frame; an ACK is never proof the patch was taken.
         return lost("The native audio host acknowledged a processor patch instead of reporting its status.")
@@ -2370,7 +2362,7 @@ export const createNativeAudioHostSupervisor = (
     if (pending) logControlWrite(pending, current, stdinBackpressure)
     // Main's account of an inspect's wait: what it queued behind (`queuedMs`, 0 when the control slot was free) and what is still queued.
     if (next.reply.kind === "graphRevision") {
-      observeEvidence("inspect-dispatch", { pid: current.pid ?? null, revision: next.reply.requestedRevision, queuedMs: Date.now() - next.enqueuedAt,
+      evidence?.("inspect-dispatch", { pid: current.pid ?? null, revision: next.reply.requestedRevision, queuedMs: Date.now() - next.enqueuedAt,
         queueDepth: urgentSends.length + refillSends.length + normalSends.length })
     }
   }
@@ -2573,7 +2565,7 @@ export const createNativeAudioHostSupervisor = (
         spawned = (spawnHost ?? defaultSpawnHost)(hostPath)
         runtimeRevision = 0
         child = spawned
-        observeEvidence("host-spawn", { pid: spawned.pid ?? null, lifecycleGeneration: generation, cause: "supervisor-start" })
+        evidence?.("host-spawn", { pid: spawned.pid ?? null, lifecycleGeneration: generation, cause: "supervisor-start" })
         console.error("[native-vst3] native audio host spawned", JSON.stringify({
           lifecycleGeneration,
           pid: spawned.pid ?? null,
@@ -2587,7 +2579,7 @@ export const createNativeAudioHostSupervisor = (
           lost("The native audio host could not start.", spawned)
         })
         spawned.once("close", (code, signal) => {
-          observeEvidence("host-exit", { pid: spawned?.pid ?? null, lifecycleGeneration: generation,
+          evidence?.("host-exit", { pid: spawned?.pid ?? null, lifecycleGeneration: generation,
             code, signal, cause: spawned ? evidenceTerminationCauses.get(spawned) ?? "crash" : "spawn-failure" })
           const requestType = pending?.requestType
           const pendingRequest = requestType === undefined
@@ -2632,7 +2624,7 @@ export const createNativeAudioHostSupervisor = (
         })
         await send(hostHelloType)
         if (child !== spawned || !hello) throw new Error("The native audio host did not complete its handshake.")
-        observeEvidence("hostHello", { pid: spawned.pid ?? null, lifecycleGeneration: generation })
+        evidence?.("hostHello", { pid: spawned.pid ?? null, lifecycleGeneration: generation })
         return hello
       })()
       startPromise = attempt
@@ -2682,7 +2674,7 @@ export const createNativeAudioHostSupervisor = (
       })
     },
     async configure(input, transactionToken) {
-      observeEvidence("structural-rebuild", { pid: child?.pid ?? null, lifecycleGeneration, cause: "device-configure" })
+      evidence?.("structural-rebuild", { pid: child?.pid ?? null, lifecycleGeneration, cause: "device-configure" })
       const payload = serializeDeviceConfiguration(input)
       if (!payload) throw new Error("The native audio host configuration is invalid.")
       await request(deviceConfigureType, payload, transactionToken)
@@ -2859,7 +2851,7 @@ export const createNativeAudioHostSupervisor = (
         }
         normalSends.push(queued)
       logControlEnqueue(vstStateGetType, queued.requestId, queued.enqueuedAt)
-        observeEvidence("vst-state-get", { pid: current.pid ?? null })
+        evidence?.("vst-state-get", { pid: current.pid ?? null })
         dispatchNext()
       })
       if (!signal) return requestPromise
@@ -2914,7 +2906,7 @@ export const createNativeAudioHostSupervisor = (
     async installAsset(input, transactionToken) {
       const payload = serializeAssetInstall(input)
       if (!payload) throw new Error("The native audio host asset is invalid.")
-      observeEvidence("asset-install", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId })
+      evidence?.("asset-install", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId })
       await request(assetInstallType, payload, transactionToken)
     },
     async createMappedAsset(input, transactionToken) {
@@ -2932,7 +2924,7 @@ export const createNativeAudioHostSupervisor = (
       payload.writeUInt32BE(input.sampleRateHz, 12)
       payload.writeUInt32BE(input.channelCount, 16)
       payload.writeBigUInt64BE(hash, 20)
-      observeEvidence("asset-install", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId })
+      evidence?.("asset-install", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId })
       await request(mappedAssetCreateType, payload, transactionToken)
     },
     async writeMappedAssetPage(input, transactionToken) {
@@ -2948,7 +2940,7 @@ export const createNativeAudioHostSupervisor = (
       pageHeader.writeUInt32BE(input.sessionAssetId, 0)
       pageHeader.writeBigUInt64BE(BigInt(input.startFrame), 4)
       pageHeader.writeUInt32BE(input.frameCount, 12)
-      observeEvidence("asset-page-write", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId, bytes: input.planarPcm.byteLength })
+      evidence?.("asset-page-write", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId, bytes: input.planarPcm.byteLength })
       await request(mappedAssetWritePageType, [pageHeader, input.planarPcm], transactionToken)
     },
     async prepareMappedAssetRange(sessionAssetId, startFrame, frameCount, transactionToken) {
@@ -3047,7 +3039,7 @@ export const createNativeAudioHostSupervisor = (
       const payload = nativeBinaryPayload(bytes, 56)
       if (!payload) throw new Error("The native schedule window payload is invalid.")
       // Header offsets 0 and 56 of serializeNativeScheduleWindow: the revision and the processor automation (lane) event count.
-      observeEvidence("schedule-window", { revision: payload.readUInt32LE(0), processorAutomationEvents: payload.readUInt32LE(56) })
+      evidence?.("schedule-window", { revision: payload.readUInt32LE(0), processorAutomationEvents: payload.readUInt32LE(56) })
       await request(scheduleWindowType, payload, transactionToken)
     },
     async reenableVstScheduleAutomation(bytes, transactionToken) {
@@ -3290,7 +3282,7 @@ export const createNativeAudioHostSupervisor = (
     recordingAdmissionAvailable: () => !recordingAdmitted && !recordingFinish?.pending,
     recordingFinalizationPending: () => recordingFinish?.pending === true,
     teardown() {
-      observeEvidence("host-teardown-request", { pid: child?.pid ?? null, lifecycleGeneration, cause: "application-shutdown" })
+      evidence?.("host-teardown-request", { pid: child?.pid ?? null, lifecycleGeneration, cause: "application-shutdown" })
       if (teardownPromise) return teardownPromise
       lifecycleGeneration += 1
       lifecycleIntentVersion += 1
@@ -3341,7 +3333,7 @@ export const createNativeAudioHostSupervisor = (
       return stopping
     },
     suspend() {
-      observeEvidence("host-suspend-request", { pid: child?.pid ?? null, lifecycleGeneration, cause: "quit-or-suspend" })
+      evidence?.("host-suspend-request", { pid: child?.pid ?? null, lifecycleGeneration, cause: "quit-or-suspend" })
       if (child && evidence) evidenceTerminationCauses.set(child, "quit")
       if (recordingSuspendPromise) return recordingSuspendPromise
       if (recordingFinish?.pending) {

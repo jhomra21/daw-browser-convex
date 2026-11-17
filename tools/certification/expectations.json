@@ -2924,37 +2924,6 @@
    }
   },
   {
-   "name": "rc1-g-native-live-graph-browser",
-   "group": "g3",
-   "isolated": false,
-   "trigger": "always",
-   "command": {
-    "argv": [
-     "bun",
-     "test",
-     "--conditions=browser",
-     "--timeout",
-     "30000",
-     "/Users/juan/Documents/daw-browser-convex/src/lib/desktop/native-live-graph.browser.test.ts"
-    ],
-    "alarmSeconds": 300,
-    "env": {},
-    "evidence": true,
-    "rc7Seconds": 1.596
-   },
-   "judge": {
-    "kind": "tests",
-    "exit": 0,
-    "counts": {
-     "pass": 1,
-     "skip": 0,
-     "fail": 0
-    },
-    "fails": [],
-    "appended": null
-   }
-  },
-  {
    "name": "rc1-i3-sync",
    "group": "g3",
    "isolated": false,

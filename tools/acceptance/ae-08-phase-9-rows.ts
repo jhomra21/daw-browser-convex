@@ -47,7 +47,7 @@ export type PackagedRun = {
   // leaves the host as the row left it.
   transport?: "driven"
   // A calibration row measures a constant of the latency gates (AE08-ASSET-LOAD-PLAN.md section 1). It runs only when named, never in
-  // `--matrix`, and its launch is a burst with no reference or calibration duplicate.
+  // `--matrix`.
   calibration?: true
 }
 export type PortableRun = { from: string; to: string; latency: boolean }

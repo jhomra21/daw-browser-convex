@@ -18,7 +18,7 @@ import { phase5Rows, runPhase5Fixture } from "./ae-08-phase-5-fixture"
 import { phase8Rows, runPhase8Fixture } from "./ae-08-phase-8-fixture"
 import { analyzePhase8Campaign } from "./analyze-ae-08-phase-8"
 import { contentSecondsFor, exportRowEvidence, runPhase9Launch, stateName, type Phase9Launch } from "./ae-08-phase-9-launch"
-import { assumedTimings, burstSchedule, chooseVstRepetitions, breakdownLine, breakdownStored, commitReceivedWallMs, judgeStored, launchesFor, launchPlan, measuredEditsSchema, measuredTimings, pooled,
+import { assumedTimings, burstSchedule, chooseVstRepetitions, breakdownLine, breakdownStored, commitReceivedWallMs, judgeStored, launchesFor, measuredEditsSchema, measuredTimings, pooled,
   readTimings, repetitionsFor, type Trial } from "./ae-08-phase-9-matrix"
 import { phase9Matrix, phase9Rows, phase9RowsWithCalibration } from "./ae-08-phase-9-rows"
 import { judgeRowCapture } from "./ae-08-phase-9-compare"
@@ -825,65 +825,50 @@ const main = async () => {
         return replica === 0 ? rowsDirectory : path.join(out, `phase9-r${replica + 1}`)
       }
       await writeFile(path.join(out, "phase9-plan.json"), JSON.stringify({ vstRepetitions: budget.vstRepetitions, why: budget.why,
-        order: launchPlan(launches), launches: launches.map((launch) => launch.map((row) => ({ row: row.name, class: row.latencyClass,
+        launches: launches.map((launch) => launch.map((row) => ({ row: row.name, class: row.latencyClass,
           edits: burstSchedule(row, repetitionsFor(row, parsed.repetitions, budget.vstRepetitions)).length }))),
         missing: missing.map((row) => ({ row: row.name, needs: row.needs })) }, null, 2))
-      const campaign: { launch: number; role: string; seconds: number; capturedSeconds: number; failure?: string }[] = []
+      const campaign: { launch: number; seconds: number; capturedSeconds: number; failure?: string }[] = []
       const measuredRows: { vst: boolean; edits: z.infer<typeof measuredEditsSchema> }[] = []
-      const bursts = new Map<number, { out: string; frames: number }>()
       const trials: Trial[] = []
-      for (const step of launchPlan(launches)) {
-        const rows = launches[step.launch] ?? []
-        const name = `launch-${step.launch + 1}-${step.role}`
-        const contentSeconds = contentSecondsFor(rows, parsed.repetitions, budget.vstRepetitions, timings)
+      for (const [index, rows] of launches.entries()) {
         const first = rows[0]
         if (!first) continue
-        const burst = bursts.get(step.launch)
-        const launch: Phase9Launch = step.role === "burst"
-          ? { role: "burst", rows, repetitions: parsed.repetitions, vstRepetitions: budget.vstRepetitions, directory: rowsFolder(step.launch), contentSeconds }
-          : { role: step.role, rows, frames: burst?.frames ?? 0, contentSeconds }
+        const launch: Phase9Launch = { rows, repetitions: parsed.repetitions, vstRepetitions: budget.vstRepetitions, directory: rowsFolder(index),
+          contentSeconds: contentSecondsFor(rows, parsed.repetitions, budget.vstRepetitions, timings) }
         const startedAt = Date.now()
         let failure: string | undefined
         let captured = 0
         try {
-          // A reference holds the burst's own length with no edits (the reference rule); calibration is a second such duplicate.
-          const result = await run(path.join(out, name), step.role === "burst", first.fixture?.slice("phase5:".length) ?? "", 9, launch)
+          const result = await run(path.join(out, `launch-${index + 1}`), true, first.fixture?.slice("phase5:".length) ?? "", 9, launch)
           provenance.ownedPids.push(result.pid)
           const actions = await events(path.join(result.out, "actions.jsonl"))
           const stamp = (event: string) => Number(actions.find((entry) => entry.event === event)?.wallMs)
           captured = (stamp("capture-end") - stamp("capture-start")) / 1000
           // A driven row kills or pauses the host itself and is judged on host evidence, so it may capture no audio.
           if (!rows.some((row) => row.transport === "driven")) await writeWav(path.join(result.out, "output.wav"), await assemble(result.out))
-          if (step.role === "burst") {
-            bursts.set(step.launch, { out: result.out, frames: Math.round(captured * 48000) })
-            await exportRowEvidence(result.out, rowsFolder(step.launch), rows)
-            const natives = (await readdir(result.out)).filter((entry) => /^native-\d+\.jsonl$/.test(entry))
-            for (const row of rows) {
-              const directory = path.join(rowsFolder(step.launch), row.name)
-              measuredRows.push({ vst: row.repeat === "vst-burst", edits: measuredEditsSchema.parse(JSON.parse(await readFile(path.join(directory, "phase9-edits.json"), "utf8")).edits) })
-              if (row.judge === undefined) continue
-              const captureEnd = (await events(path.join(directory, "actions.jsonl"))).find((entry) => entry.event === "capture-end")
-              const verdict = await judgeRowCapture({ launchOut: result.out, directory, row, natives, captureEndWallMs: Number(captureEnd?.wallMs),
-                stateFile: (state) => path.join(result.out, `${stateName(row.name, state)}.wav`) })
-              trials.push({ row: row.name, verdict })
-              await writeFile(path.join(directory, "verdict.json"), JSON.stringify(verdict, null, 2))
-            }
+          await exportRowEvidence(result.out, rowsFolder(index), rows)
+          const natives = (await readdir(result.out)).filter((entry) => /^native-\d+\.jsonl$/.test(entry))
+          for (const row of rows) {
+            const directory = path.join(rowsFolder(index), row.name)
+            measuredRows.push({ vst: row.repeat === "vst-burst", edits: measuredEditsSchema.parse(JSON.parse(await readFile(path.join(directory, "phase9-edits.json"), "utf8")).edits) })
+            if (row.judge === undefined) continue
+            const captureEnd = (await events(path.join(directory, "actions.jsonl"))).find((entry) => entry.event === "capture-end")
+            const verdict = await judgeRowCapture({ launchOut: result.out, directory, row, natives, captureEndWallMs: Number(captureEnd?.wallMs),
+              stateFile: (state) => path.join(result.out, `${stateName(row.name, state)}.wav`) })
+            trials.push({ row: row.name, verdict })
+            await writeFile(path.join(directory, "verdict.json"), JSON.stringify(verdict, null, 2))
           }
         } catch (error) {
           failure = error instanceof Error ? error.message : String(error)
           const active = await Bun.$`ps -axo command=`.text()
           if (active.split("\n").some((line) => line.trim().startsWith(`${executable} `))) throw error
         }
-        campaign.push({ launch: step.launch + 1, role: step.role, seconds: (Date.now() - startedAt) / 1000, capturedSeconds: captured, ...(failure && { failure }) })
+        campaign.push({ launch: index + 1, seconds: (Date.now() - startedAt) / 1000, capturedSeconds: captured, ...(failure && { failure }) })
         await writeFile(path.join(out, "phase9-campaign.json"), JSON.stringify({ phase: 9, rows: campaign }, null, 2))
         if (failure) break
       }
       await verifyPackagedArtifacts(resources, artifacts)
-      // Each row names the launch captures (output.wav per launch) that its windows are compared in.
-      // A launch whose burst failed has exported no row folders, and its failure is what the verdict reports.
-      for (const [index, launch] of launches.entries()) for (const row of campaign.some((entry) => entry.launch === index + 1 && entry.role === "burst" && !entry.failure) ? launch : [])
-        await writeFile(path.join(rowsFolder(index), row.name, "launch.json"), JSON.stringify(Object.fromEntries(
-          campaign.filter((entry) => entry.launch === index + 1).map((entry) => [entry.role, `launch-${entry.launch}-${entry.role}`]))))
       await writeFile(path.join(out, "phase9-timings.json"), JSON.stringify(measuredTimings(measuredRows,
         campaign.map((entry) => entry.seconds - entry.capturedSeconds)), null, 2))
       const failed = campaign.filter((entry) => entry.failure)
@@ -891,7 +876,7 @@ const main = async () => {
       const settledOnly = launches.flat().filter((row) => row.judge === undefined)
       const bound = pooled(trials)
       const reasons = [
-        ...failed.map((entry) => `${entry.role} launch ${entry.launch} failed`),
+        ...failed.map((entry) => `launch ${entry.launch} failed`),
         ...missing.map((row) => `${row.name} cannot run: ${row.needs}`),
         ...[...new Set(settledOnly.map((row) => row.name))].map((name) => `${name} has no per-window compare (settled and gated on host evidence only)`),
         ...trials.filter((trial) => trial.verdict.outcome !== "pass").map((trial) => `${trial.row}: ${trial.verdict.outcome} at edit ${trial.verdict.editIndex}: ${trial.verdict.detail}`),

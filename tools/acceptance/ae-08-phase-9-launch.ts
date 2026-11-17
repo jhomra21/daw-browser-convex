@@ -17,9 +17,8 @@ import { armRecordTarget, finishRecording, recordingTargetLockedReason, startRec
 import { createOutputDeviceSteps } from "./ae-08-phase-9-output-device"
 import { awaitTestPluginFailure, closeTestPluginEditor, insertTestPlugin, openTestPluginEditor, prepareTestPlugin, refuseUntrustedPlugin, removeTestPlugin, showUntrustedEffectsBrowser } from "./ae-08-phase-9-vst"
 
-// One packaged launch of phase 9: the row's phase 5 start state, then either a burst of its edits (settled on host evidence) or the
-// same timeline with no edits (a reference, or the calibration duplicate of one). Edits go through the public control actions or the
-// UI steps phase 5 already uses; there is no second protocol.
+// One packaged launch of phase 9: the row's phase 5 start state, then a burst of its edits (settled on host evidence). Edits go
+// through the public control actions or the UI steps phase 5 already uses; there is no second protocol.
 const sampleRate = 48000
 const warmupFrames = sampleRate * 2
 const ref = (id: string) => ({ source: "persisted", id })
@@ -29,13 +28,7 @@ const spectralFrames = (fftSize: 512 | 4096) => getSpectralLatencyFrames(fftSize
 const silentTrack = "Silent publication target"
 // Native progress frames are lower bounds on what has been heard, so a window is closed this long after its second.
 const windowMarginMs = 250
-// One native-progress wait is bounded by the page deadline (25 s). A no-edit launch is as long as its burst, so it waits in steps of
-// audio the deadline always covers.
-const referenceStepFrames = sampleRate * 10
-
-export type Phase9Launch =
-  | { role: "burst"; rows: Row[]; repetitions: number; vstRepetitions: number; directory: string; contentSeconds: number }
-  | { role: "reference" | "calibration"; rows: Row[]; frames: number; contentSeconds: number }
+export type Phase9Launch = { rows: Row[]; repetitions: number; vstRepetitions: number; directory: string; contentSeconds: number }
 
 // The ids a performer needs from the project; `observe` reads them from a fresh snapshot, so a performer never holds a stale one.
 export type Observed = { spectralEffectId: string | undefined; limiterEffectId: string | undefined; externalEffectId: string | undefined; trackId: (name: string) => string | undefined; clipId: (name: string) => string | undefined
@@ -348,33 +341,28 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
   const driven = launch.rows.some((row) => row.transport === "driven")
   // A recording row starts the transport by Start recording and plays its tone into BlackHole from the start of the burst, so its edit
   // lands inside the take.
-  const takeRow = launch.role === "burst" ? launch.rows.find((row) => row.judge === "take") : undefined
+  const takeRow = launch.rows.find((row) => row.judge === "take")
   const before = takeRow ? await startRecording(context) : driven ? undefined : (await runtime(["play"]), undefined)
   if (!driven) await waitNativeFrame(context, warmupFrames)
   if (prepare.includes("midi-hold")) await performPrepare(context, "midi-hold")
   const tone = takeRow ? playToneIntoBlackhole(path.join(out, "tone.wav"), toneSeconds).then(() => undefined, (error) => error instanceof Error ? error : new Error(String(error))) : undefined
-  if (launch.role === "burst") {
-    // Asset inventory: the installed-asset count the host reports, recorded before the burst and after each publication with that
-    // publication's revision.
-    const installedAssets = async () => diagnosticsSchema.parse(await runtime(["diagnostics-v2"])).native.diagnostics.installedAssets
-    if (!driven) await mark("asset-inventory", { revision: 0, installedAssets: await installedAssets() })
-    for (const row of launch.rows) {
-      const logged = await runBurst({ out, directory: path.join(launch.directory, row.name), row, perform, mark, sampleRate,
-        frameAt: (wallMs) => Math.max(1, Math.round((wallMs - playWallMs) * sampleRate / 1000)),
-        repetitions: repetitionsFor(row, launch.repetitions, launch.vstRepetitions),
-        afterSettle: async (settled) => { if (!driven) await mark("asset-inventory", { revision: settled.revision, installedAssets: await installedAssets() }) },
-        hold: async (frame) => { if (!driven) await waitNativeFrame(context, frame) } })
-      // The last edit's window needs its second (and the next row's first window starts after it), so hold until the transport
-      // has rendered that far. The transport started at frame 0 at playWallMs.
-      const lastSettled = logged.at(-1)?.settledWallMs
-      if (lastSettled !== undefined && !driven) await waitNativeFrame(context, Math.ceil((lastSettled + MIN_WINDOW_MS + windowMarginMs - playWallMs) * sampleRate / 1000))
-    }
-  } else for (let next = Math.min(referenceStepFrames, launch.frames); ; next = Math.min(next + referenceStepFrames, launch.frames)) {
-    await waitNativeFrame(context, next)
-    if (next === launch.frames) break
+  // Asset inventory: the installed-asset count the host reports, recorded before the burst and after each publication with that
+  // publication's revision.
+  const installedAssets = async () => diagnosticsSchema.parse(await runtime(["diagnostics-v2"])).native.diagnostics.installedAssets
+  if (!driven) await mark("asset-inventory", { revision: 0, installedAssets: await installedAssets() })
+  for (const row of launch.rows) {
+    const logged = await runBurst({ out, directory: path.join(launch.directory, row.name), row, perform, mark, sampleRate,
+      frameAt: (wallMs) => Math.max(1, Math.round((wallMs - playWallMs) * sampleRate / 1000)),
+      repetitions: repetitionsFor(row, launch.repetitions, launch.vstRepetitions),
+      afterSettle: async (settled) => { if (!driven) await mark("asset-inventory", { revision: settled.revision, installedAssets: await installedAssets() }) },
+      hold: async (frame) => { if (!driven) await waitNativeFrame(context, frame) } })
+    // The last edit's window needs its second (and the next row's first window starts after it), so hold until the transport
+    // has rendered that far. The transport started at frame 0 at playWallMs.
+    const lastSettled = logged.at(-1)?.settledWallMs
+    if (lastSettled !== undefined && !driven) await waitNativeFrame(context, Math.ceil((lastSettled + MIN_WINDOW_MS + windowMarginMs - playWallMs) * sampleRate / 1000))
   }
   if (prepare.includes("midi-hold")) await sendMidiNote("off", heldNote)
-  if (launch.role === "burst" && takeRow && before) {
+  if (takeRow && before) {
     const toneFailure = await tone
     if (toneFailure !== undefined) throw toneFailure
     const verdict = await finishRecording(context, { before, file: path.join(out, "take.wav") })
@@ -387,7 +375,7 @@ export const runPhase9Launch = async (context: Phase5Context, launch: Phase9Laun
   await runtime(["stop"])
   // One offline export per state of each compared row, with the project in that state: the references of judgeBurst. Each row's burst
   // ended on its start state, and one pass over its cycle returns it there.
-  if (launch.role === "burst") for (const row of launch.rows.filter((entry) => entry.judge === "states")) {
+  for (const row of launch.rows.filter((entry) => entry.judge === "states")) {
     const exported = new Set([row.start])
     await exportReference(context, stateName(row.name, row.start), launch.contentSeconds)
     // The transport is stopped: put the playhead at 0 so an import places its clip at 0, the start placedAt shifts from.

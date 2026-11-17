@@ -6,7 +6,7 @@ import type {
 import type { PluginCatalogData } from "./plugin-catalog"
 import { resolveVst3Attachment } from "./vst3-attachment"
 import { preflightNativeVst3Worker } from "./vst3-preflight"
-import type { PreflightAttachment } from "./native-vst3-coordinator"
+import type { ResolvedVst3Attachment } from "./audio-host"
 
 const effectWorkerTransport = {
   slotCount: 2,
@@ -36,7 +36,10 @@ export const preflightVst3Insertion = async (input: {
   sampleRateHz: number
   // The runtime's block size: staging preflights with it, so the verdict handed to `rememberVerdict` is the one staging needs.
   maximumFramesPerBlock: number
-  rememberVerdict: (attachment: PreflightAttachment, result: Extract<NativeVst3PreflightResult, { status: "available" }>) => void
+  rememberVerdict: (
+    attachment: ResolvedVst3Attachment & { stateRevision: number },
+    result: Extract<NativeVst3PreflightResult, { status: "available" }>,
+  ) => void
   preflight?: typeof preflightNativeVst3Worker
 }): Promise<NativeVst3InsertionPreflightResult> => {
   const classIsCataloged = input.catalog.entries.some((entry) => (
@@ -54,7 +57,7 @@ export const preflightVst3Insertion = async (input: {
     maximumFrames: input.maximumFramesPerBlock,
     inputChannels: instrument ? 0 : 2,
   }
-  const attachment: PreflightAttachment = {
+  const attachment: ResolvedVst3Attachment & { stateRevision: number } = {
     graphNodeId: 1n,
     stageIndex: 0,
     instanceId: input.request.instanceId,

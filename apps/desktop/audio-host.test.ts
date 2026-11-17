@@ -72,7 +72,7 @@ const f32 = (value) => {
 const hello = () => frame(2, Buffer.concat([
   u32(${nativeAudioHostProtocolVersion}), u32(0x3ff), u32(${audioCoreWasmAbiVersion}),
   string(process.env.MODE === "incompatible" ? "wrong" : "${processorContractHash}"),
-  string("${portableGraphContractHash}"), string("${nativeAudioHostArtifactId}"), u32(0), u32(1),
+  string("${portableGraphContractHash}"), string("${nativeAudioHostArtifactId}"), u32(0), u32(1), u32(4), u32(60000),
 ]))
 const device = () => frame(19, Buffer.concat([
   u32(1), string("coreaudio:fixture"), string("Fixture Output"), u32(48000), u32(2), u32(512), u32(1),
@@ -1776,7 +1776,7 @@ test("every request that names an attachment encodes its instance id the way the
   const fixture = await fixtureSupervisor()
   try {
     await fixture.supervisor.start()
-    await expect(fixture.supervisor.detachVst(instanceId)).resolves.toBeUndefined()
+    await expect(fixture.supervisor.detachVst(instanceId)).resolves.toEqual({ status: "detached" })
     await expect(fixture.supervisor.getVstState(instanceId)).resolves.toMatchObject({ sha256: "a".repeat(64) })
     await expect(fixture.supervisor.executeVstEditorCommand({ instanceId, command: "open", width: 640, height: 480 }))
       .resolves.toMatchObject({ success: true })

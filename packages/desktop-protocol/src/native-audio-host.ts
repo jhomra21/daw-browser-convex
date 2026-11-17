@@ -6,6 +6,10 @@ export const nativeAudioHostProtocolVersion = 30
 export const nativeRecordingSpoolImportVersion = 1
 export type NativeRecordingSpoolImportVersion = typeof nativeRecordingSpoolImportVersion
 export const nativeAudioHostArtifactId = "daw-audio-host-macos/v10"
+export type NativeAudioHostParkingLimits = {
+  maximumParkedInstances: number
+  parkedAgeMs: number
+}
 export const nativeKeepLatencyDivergentMixedBusDiagnostic = 3
 export const nativeAudioHostFrameHeaderBytes = 16
 export const nativeAudioHostMaximumPayloadBytes = 1_048_576

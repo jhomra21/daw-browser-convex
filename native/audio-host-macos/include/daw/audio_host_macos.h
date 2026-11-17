@@ -22,6 +22,8 @@ namespace daw::audio_host_macos {
 
 constexpr std::uint32_t kControlProtocolVersion = 30;
 constexpr std::size_t kMaximumControlPayloadBytes = 1'048'576;
+constexpr std::uint32_t kMaximumParkedNativeVsts = 4;
+constexpr std::uint32_t kParkedNativeVstAgeMs = 60'000;
 constexpr std::size_t kControlFrameHeaderBytes = 16;
 constexpr std::size_t kNativeGraphFrameHeaderBytes = 12;
 constexpr std::uint32_t kMaximumAssetChannels = 64;

@@ -39,6 +39,7 @@ import {
   nativeAudioHostVstAttachFingerprintBytes as vstAttachFingerprintBytes,
   nativeOfflineRenderPlanSchema,
 } from "@daw-browser/desktop-protocol/native-audio-host"
+import type { NativeAudioHostParkingLimits } from "@daw-browser/desktop-protocol/native-audio-host"
 import type {
   NativeHostDeviceConfiguration,
   NativeHostDiagnostics,
@@ -509,7 +510,7 @@ const serializeVstEditor = (input: {
   return Buffer.concat([output, instanceIdBytes])
 }
 
-export type AudioHostHello = {
+export type AudioHostHello = NativeAudioHostParkingLimits & {
   capabilities: number
   abiVersion: number
   processorContractHash: string
@@ -1181,10 +1182,13 @@ const readResponse = (bytes: Buffer): AudioHostHello | undefined => {
   const processorContractHash = readString()
   const graphContractHash = readString()
   const artifactId = readString()
-  if (!processorContractHash || !graphContractHash || !artifactId || offset + 8 !== bytes.byteLength) return undefined
+  if (!processorContractHash || !graphContractHash || !artifactId || offset + 16 !== bytes.byteLength) return undefined
   const parsedDeviceState = deviceState(bytes.readUInt32BE(offset))
   const parsedReadinessReason = readinessReason(bytes.readUInt32BE(offset + 4))
   if (!parsedDeviceState || !parsedReadinessReason) return undefined
+  const maximumParkedInstances = bytes.readUInt32BE(offset + 8)
+  const parkedAgeMs = bytes.readUInt32BE(offset + 12)
+  if (parkedAgeMs === 0) return undefined
   return {
     capabilities: bytes.readUInt32BE(headerBytes + 4),
     abiVersion: bytes.readUInt32BE(headerBytes + 8),
@@ -1193,6 +1197,8 @@ const readResponse = (bytes: Buffer): AudioHostHello | undefined => {
     artifactId,
     deviceState: parsedDeviceState,
     readinessReason: parsedReadinessReason,
+    maximumParkedInstances,
+    parkedAgeMs,
   }
 }
 
@@ -1333,7 +1339,7 @@ export type NativeAudioHostSupervisor = {
   rollbackTransaction(transactionToken: string): Promise<void>
   attachVst(input: ResolvedVst3Attachment, transactionToken?: string): Promise<void>
   getVstState(instanceId: string, transactionToken?: string, signal?: AbortSignal): Promise<{ bytes: Uint8Array; sha256: string }>
-  detachVst(instanceId: string, transactionToken?: string): Promise<void>
+  detachVst(instanceId: string, transactionToken?: string): Promise<{ status: "detached" | "refused" }>
   executeVstEditorCommand(input: { instanceId: string; command: NativeVstEditorCommand; width?: number; height?: number; anchor?: NativeVstEditorAnchor }, transactionToken?: string): Promise<NativeVstEditorStatus>
   installAsset(input: NativeHostPcmAsset, transactionToken?: string): Promise<void>
   createMappedAsset(input: NativeHostMappedAsset, transactionToken?: string): Promise<void>
@@ -2936,7 +2942,15 @@ export const createNativeAudioHostSupervisor = (
     async detachVst(instanceId, transactionToken) {
       const payload = serializeVstInstanceId(instanceId)
       if (!payload) throw new Error("The native VST attachment is invalid.")
-      await request(vstDetachType, payload, transactionToken)
+      try {
+        await request(vstDetachType, payload, transactionToken)
+        return { status: "detached" }
+      } catch (error) {
+        if (error instanceof NativeAudioHostCommandError && error.reason === "refused") {
+          return { status: "refused" }
+        }
+        throw error
+      }
     },
     async executeVstEditorCommand(input, transactionToken) {
       const payload = serializeVstEditor(input)

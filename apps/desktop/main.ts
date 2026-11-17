@@ -1720,7 +1720,9 @@ const registerIpc = () => {
     ) return nativeSessionFailure()
     const sessionValue = envelope.data.value
     let result: Awaited<ReturnType<typeof coordinateNativeVst3Attachments>>
-    const ledger = attachmentLedger.forHost(supervisor)
+    const hostHello = supervisor.status().hello
+    if (!hostHello) return nativeSessionFailure()
+    const ledger = attachmentLedger.forHost(supervisor, hostHello)
     try {
       result = await coordinateNativeVst3Attachments({
         serializedPlan: sessionValue.serializedPlan,

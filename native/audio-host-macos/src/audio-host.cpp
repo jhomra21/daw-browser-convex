@@ -2023,8 +2023,7 @@ struct AudioHost::Impl {
   std::array<std::atomic<std::uint32_t>, 2> automation_credit_totals{};
   // Set while the workers run, so an instance added to a live graph starts at once.
   std::optional<daw::plugin_host::WorkerProcessSetup::Mode> native_worker_mode;
-  static constexpr std::size_t kMaximumParkedNativeVsts = 4;
-  std::chrono::steady_clock::duration parked_age = std::chrono::seconds(60);
+  std::chrono::steady_clock::duration parked_age = std::chrono::milliseconds(kParkedNativeVstAgeMs);
   std::uint64_t superseded_vst_ordinal = 0;
   WorkerNotificationSink worker_notifications{};
   // Declared after the sink its attachments report to, so it is destroyed first.

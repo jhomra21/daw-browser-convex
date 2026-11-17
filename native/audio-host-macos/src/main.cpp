@@ -886,6 +886,8 @@ int main() {
       WriteString(response, "daw-audio-host-macos/v10");
       WriteU32(response, static_cast<std::uint32_t>(host->diagnostics().state));
       WriteU32(response, static_cast<std::uint32_t>(host->readinessReason()));
+      WriteU32(response, daw::audio_host_macos::kMaximumParkedNativeVsts);
+      WriteU32(response, daw::audio_host_macos::kParkedNativeVstAgeMs);
       if (!WriteFrame(daw::audio_host_macos::ControlType::kHostCapabilities, response)) return EXIT_FAILURE;
       continue;
     }

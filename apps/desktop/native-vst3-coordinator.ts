@@ -6,6 +6,7 @@ import {
   type NativeVst3PreflightResult,
 } from "@daw-browser/plugin-host-protocol"
 import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
+import type { NativeAudioHostParkingLimits } from "@daw-browser/desktop-protocol/native-audio-host"
 import {
   NativeAudioHostCommandError,
   type NativeAudioHostSupervisor,
@@ -19,6 +20,7 @@ import { preflightNativeVst3Worker } from "./vst3-preflight"
 type Attachment = NativeExternalAttachmentPlan["attachments"][number]
 export type PreflightAttachment = ResolvedVst3Attachment & { stateRevision: number }
 type CapturedVst3State = { bytes: Uint8Array; sha256: string }
+type ReleaseResult = { status: "parked" | "refused" }
 
 export type NativeVst3CoordinatorFailureCode =
   | "invalid-plan"
@@ -223,24 +225,12 @@ export const nativeVst3InstanceEvent = (
   }
 }
 
-const maximumParkedInstances = 4
-const parkedAgeMs = 60_000
-
 type AvailablePreflight = Extract<NativeVst3PreflightResult, { status: "available" }>
 type LedgerEntry = {
   plugin: string
   binding: string
-  load: string
-  baseLoad: string
   stateSha256: string | undefined
 }
-
-// What the host compares to take a parked instance back, so a match here means the host reuses it.
-const loadKey = (native: PreflightAttachment, stateSha256: string | undefined) => JSON.stringify([
-  native.classId, native.vendorId, native.canonicalBundlePath, native.canonicalExecutablePath,
-  native.bundleFingerprint, native.binaryFingerprint, native.role, native.inputLayout, native.outputLayout,
-  native.workerTransport, native.parameterIds, native.initialParameterValues, stateSha256 ?? "",
-])
 
 // What a preflight can learn: the worker loads this binary with this transport at this rate. It is given no state, and it only
 // echoes the state revision (a cached verdict takes the attachment's own), so neither is part of the key.
@@ -250,14 +240,12 @@ const verdictKey = (native: PreflightAttachment, sampleRateHz: number) => JSON.s
   native.workerTransport.outputChannels, native.workerTransport.maximumEventsPerBlock, sampleRateHz,
 ])
 
-const ledgerEntry = (attachment: Attachment, native: PreflightAttachment, stateSha256: string | undefined): LedgerEntry => ({
+const ledgerEntry = (attachment: Attachment, stateSha256: string | undefined): LedgerEntry => ({
   plugin: JSON.stringify([
     attachment.catalogIdentity, attachment.bundleFingerprint, attachment.binaryFingerprint, attachment.role,
     attachment.inputBuses, attachment.outputBuses, attachment.workerTransport,
   ]),
   binding: JSON.stringify([attachment.nativeGraphNodeId, attachment.stageIndex, attachment.sourceIndex ?? 0, attachment.bypassed]),
-  load: loadKey(native, stateSha256),
-  baseLoad: loadKey(native, undefined),
   stateSha256,
 })
 
@@ -267,14 +255,17 @@ export const createNativeVst3AttachmentLedger = (
   host: Pick<NativeAudioHostSupervisor, "detachVst">,
   now: () => number = Date.now,
   verdicts = new Map<string, AvailablePreflight>(),
+  parkingLimits: NativeAudioHostParkingLimits,
 ) => {
   const active = new Map<string, LedgerEntry>()
   const staged = new Map<string, LedgerEntry>()
-  const parked = new Map<string, { load: string; at: number }>()
+  const parked = new Map<string, { plugin: string; at: number }>()
   const liveCaptures = new Map<string, string>()
-  const parkedLoad = (instanceId: string) => {
+  const isParked = (instanceId: string, plugin: string) => {
     const entry = parked.get(instanceId)
-    return entry !== undefined && now() - entry.at < parkedAgeMs ? entry.load : undefined
+    return entry !== undefined
+      && entry.plugin === plugin
+      && now() - entry.at < parkingLimits.parkedAgeMs
   }
   return {
     // Splits a plan into new instances, changed instances (detached first), staged ones it dropped and active ones it removed.
@@ -286,9 +277,9 @@ export const createNativeVst3AttachmentLedger = (
         const current = holder.get(instanceId)
         if (current === undefined) attach.push(instanceId)
         else if (current.plugin !== entry.plugin || current.binding !== entry.binding) replace.push(instanceId)
-        else if (current.load !== entry.load) {
+        else if (current.stateSha256 !== entry.stateSha256) {
           // A state captured from the running instance is what it already holds: record it instead of reloading.
-          if (current.baseLoad === entry.baseLoad && liveCaptures.get(instanceId) === entry.stateSha256) holder.set(instanceId, entry)
+          if (liveCaptures.get(instanceId) === entry.stateSha256) holder.set(instanceId, entry)
           else replace.push(instanceId)
         }
       }
@@ -296,7 +287,7 @@ export const createNativeVst3AttachmentLedger = (
       const dropped = [...staged.keys()].filter((instanceId) => !entries.has(instanceId))
       return { attach, replace, removed, dropped: dropped.filter((instanceId) => !active.has(instanceId)) }
     },
-    parkedMatches: (instanceId: string, load: string) => parkedLoad(instanceId) === load,
+    isParked,
     verdict: (key: string) => verdicts.get(key),
     rememberVerdict: (key: string, result: AvailablePreflight) => { verdicts.set(key, result) },
     capturedFromLive: (instanceId: string, stateSha256: string) => { liveCaptures.set(instanceId, stateSha256) },
@@ -314,22 +305,25 @@ export const createNativeVst3AttachmentLedger = (
     // the detach no longer holds the instance (a worker that faulted or failed to spawn before it joined is retired when
     // the next revision publishes, while the plug-in's fault is reported on its device): nothing is parked and a
     // restoring plan loads it anew.
-    release: async (instanceId: string, transactionToken?: string) => {
-      const entry = active.get(instanceId)
-      if (entry === undefined) return
-      try {
-        await host.detachVst(instanceId, transactionToken)
-      } catch (error) {
-        if (!(error instanceof NativeAudioHostCommandError) || error.reason !== "refused") throw error
+    release: async (instanceId: string, transactionToken?: string): Promise<ReleaseResult | undefined> => {
+      const plugin = active.get(instanceId)?.plugin
+      if (plugin === undefined) return
+      const result = await host.detachVst(instanceId, transactionToken)
+      if (result.status === "refused") {
         active.delete(instanceId)
         liveCaptures.delete(instanceId)
-        return
+        return { status: "refused" }
       }
       active.delete(instanceId)
       liveCaptures.delete(instanceId)
       parked.delete(instanceId)
-      parked.set(instanceId, { load: entry.load, at: now() })
-      for (const oldest of [...parked.keys()].slice(0, Math.max(0, parked.size - maximumParkedInstances))) parked.delete(oldest)
+      parked.set(instanceId, { plugin, at: now() })
+      const excess = parked.size - parkingLimits.maximumParkedInstances
+      if (excess > 0) {
+        const oldest = [...parked.entries()].sort((left, right) => left[1].at - right[1].at).slice(0, excess)
+        for (const [oldestId] of oldest) parked.delete(oldestId)
+      }
+      return { status: "parked" }
     },
     // The revision is live: staged instances are active.
     published() {
@@ -356,7 +350,10 @@ export const createNativeVst3SessionLedger = () => {
       ledger = undefined
       verdicts = new Map()
     },
-    forHost: (host: Pick<NativeAudioHostSupervisor, "detachVst">) => ledger ??= createNativeVst3AttachmentLedger(host, Date.now, verdicts),
+    forHost: (
+      host: Pick<NativeAudioHostSupervisor, "detachVst">,
+      parkingLimits: NativeAudioHostParkingLimits,
+    ) => ledger ??= createNativeVst3AttachmentLedger(host, Date.now, verdicts, parkingLimits),
     // An insertion's preflight is the verdict staging the plug-in would learn.
     rememberVerdict: (attachment: PreflightAttachment, sampleRateHz: number, result: AvailablePreflight) => {
       verdicts.set(verdictKey(attachment, sampleRateHz), result)
@@ -427,9 +424,9 @@ const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3Coor
     resolved.push({ attachment, native })
   }
   const ledger = input.ledger
-  const entries = ledger && new Map(resolved.map(({ attachment, native }) => [
+  const entries = ledger && new Map(resolved.map(({ attachment }) => [
     attachment.instanceId,
-    ledgerEntry(attachment, native, input.capturedVstStates?.get(attachment.instanceId)?.sha256),
+    ledgerEntry(attachment, input.capturedVstStates?.get(attachment.instanceId)?.sha256),
   ]))
   const delta = ledger && entries ? ledger.reconcile(entries) : undefined
   const changed = delta && new Set([...delta.attach, ...delta.replace])
@@ -438,8 +435,7 @@ const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3Coor
   for (const candidate of pending) {
     const instanceId = candidate.attachment.instanceId
     const entry = entries?.get(instanceId)
-    // The host takes a parked instance back as it was preflighted, so there is nothing to load.
-    if (ledger && entry && ledger.parkedMatches(instanceId, entry.load)) continue
+    if (entry && ledger?.isParked(instanceId, entry.plugin)) continue
     const key = verdictKey(candidate.native, input.sampleRateHz)
     const cached = ledger?.verdict(key)
     const result = cached

@@ -13,7 +13,6 @@ import {
   type NativeVst3PreflightRequest,
   type NativeVst3PreflightResult,
 } from "@daw-browser/plugin-host-protocol"
-import { NativeAudioHostCommandError } from "./audio-host"
 import { parsePluginCatalogData, type PluginCatalogData } from "./plugin-catalog"
 import { preflightVst3Insertion } from "./vst3-insertion-preflight"
 import {
@@ -455,14 +454,16 @@ const ledgerHarness = (
   clock = { now: 0 },
   refused: ReadonlySet<string> = new Set(),
   retired: ReadonlySet<string> = new Set(),
+  parkingLimits = { maximumParkedInstances: 4, parkedAgeMs: 60_000 },
 ) => {
   const calls: string[] = []
   const ledger = createNativeVst3AttachmentLedger({
     detachVst: async (instanceId) => {
       calls.push(`detach:${instanceId}`)
-      if (retired.has(instanceId)) throw new NativeAudioHostCommandError(11)
+      if (retired.has(instanceId)) return { status: "refused" }
+      return { status: "detached" }
     },
-  }, () => clock.now)
+  }, () => clock.now, new Map(), parkingLimits)
   const stateBytes = new Uint8Array([1, 2, 3])
   const state = { bytes: stateBytes, sha256: createHash("sha256").update(stateBytes).digest("hex") }
   const run = (
@@ -652,6 +653,30 @@ test("only the four newest removed instances stay parked", async () => {
   expect(calls.filter((call) => call.startsWith("preflight:"))).toEqual([`preflight:${extras[0]!.instanceId}`])
 })
 
+test("the ledger uses parking limits reported by the native host", async () => {
+  const { calls, ledger, run, clock } = ledgerHarness(true, { now: 0 }, new Set(), new Set(), {
+    maximumParkedInstances: 2,
+    parkedAgeMs: 1_000,
+  })
+  const extras = [1, 2, 3].map(extraInstance)
+  await run([second, ...extras])
+  ledger.published()
+  await run([second])
+  ledger.published()
+  calls.length = 0
+  await run([second, ...extras], { sampleRateHz: 44_100 })
+  expect(calls.filter((call) => call.startsWith("preflight:"))).toEqual([
+    `preflight:${extras[0]!.instanceId}`,
+  ])
+  ledger.published()
+  await run([second])
+  ledger.published()
+  calls.length = 0
+  clock.now = 1_000
+  await run([second, ...extras], { sampleRateHz: 32_000 })
+  expect(calls.filter((call) => call.startsWith("preflight:"))).toEqual([`preflight:${extras[0]!.instanceId}`])
+})
+
 test("a second default insert of a plug-in reuses the verdict of the first", async () => {
   const { calls, run } = ledgerHarness(false)
   await run([first])
@@ -741,7 +766,7 @@ test("an inserted plug-in stages with no second preflight, and a changed fingerp
     workerPath: "/Resources/daw-vst3-worker",
     catalogStore: { load: async () => trusted },
     audioHost: host(calls),
-    ledger: session.forHost({ detachVst: async () => undefined }),
+    ledger: session.forHost({ detachVst: async () => ({ status: "detached" }) }, { maximumParkedInstances: 4, parkedAgeMs: 60_000 }),
     capturedVstStates: new Map(),
     requiredVstStateInstanceIds: new Set(),
     preflight: async ({ attachment: input }) => {
@@ -967,7 +992,7 @@ test("the session ledger reuses attachments across plans and starts clean for a 
     workerPath: "/Resources/daw-vst3-worker",
     catalogStore: { load: async () => catalog() },
     audioHost: host(calls),
-    ledger: session.forHost({ detachVst: async () => undefined }),
+    ledger: session.forHost({ detachVst: async () => ({ status: "detached" }) }, { maximumParkedInstances: 4, parkedAgeMs: 60_000 }),
     capturedVstStates: new Map(),
     requiredVstStateInstanceIds: new Set(),
     preflight: async () => available(first),

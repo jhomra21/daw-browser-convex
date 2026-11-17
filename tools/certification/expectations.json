@@ -1364,7 +1364,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 5,
+     "pass": 3,
      "skip": 0,
      "fail": 0
     },

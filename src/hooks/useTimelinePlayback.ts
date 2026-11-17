@@ -1193,6 +1193,22 @@ export function useTimelinePlayback(
     }).catch(() => undefined)
     return stop
   }
+  // Reserves the transport intent of a Stop that runs later, once a take has saved. A Play or Pause pressed meanwhile
+  // supersedes it; a locate only stops the transport, since the Stop's return to the start is older than the locate.
+  // A Pause reads the position the engine reached, which a locate still in flight has not moved, so the locate is repeated.
+  const reserveStop = () => {
+    const intent = transportIntentToken
+    const seek = nativeSeekSequence
+    // The returned Stop runs once from the recording transport, an imperative caller outside any tracked scope.
+    // eslint-disable-next-line solid/reactivity
+    return async () => {
+      if (intent !== transportIntentToken) return
+      if (seek === nativeSeekSequence) return handleStop()
+      const located = untrack(playheadSec)
+      await handlePause()
+      setPlayhead(located, untrack(lastTracks))
+    }
+  }
   const updateNativeLoop = (
     loop: Pick<ReturnType<typeof getLoopParams>, "enabled" | "start" | "end" | "isActive"> = getLoopParams(),
   ) => nativePlayback.updateLoop({
@@ -2505,6 +2521,7 @@ export function useTimelinePlayback(
     handlePlay,
     handlePause,
     handleStop,
+    reserveStop,
     updateNativeLoop,
     setPlayhead,
     rescheduleChangedClips: rescheduleAndTrackDeferred,

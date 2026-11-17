@@ -783,7 +783,7 @@ window.playScenarios = async () => {
         isPlaying: () => livePlayback?.isPlaying() ?? false,
         play: () => livePlayback.handlePlay([track]),
         pause: () => livePlayback.handlePause(),
-        stop: () => livePlayback.handleStop(),
+        reserveStop: () => livePlayback.reserveStop(),
       },
       armedTrack: () => recordingMode === 'midi'
         ? { id: 'track-midi', kind: 'instrument' }
@@ -1221,7 +1221,7 @@ window.playScenarios = async () => {
     return createRecordingTransportPolicy({
       audio: window.liveAudioRecording,
       midi: window.liveMidiRecording,
-      playback: { isPlaying: () => false, play: async () => {}, pause: () => {}, stop: () => {} },
+      playback: { isPlaying: () => false, play: async () => {}, pause: () => {}, reserveStop: () => () => {} },
       armedTrack: () => ({ id: 'track-audio', kind: 'audio' }),
       notify: (title, message) => window.audioNotices.push(title + ': ' + message),
       project: {
@@ -1270,7 +1270,7 @@ window.playScenarios = async () => {
     return createRecordingTransportPolicy({
       audio: window.liveAudioRecording,
       midi: window.liveMidiRecording,
-      playback: { isPlaying: () => false, play: async () => {}, pause: () => {}, stop: () => {} },
+      playback: { isPlaying: () => false, play: async () => {}, pause: () => {}, reserveStop: () => () => {} },
       armedTrack: () => ({ id: 'track-midi', kind: 'instrument' }),
       notify: message => window.liveMidiNotices.push(message),
       project: {
@@ -1567,7 +1567,7 @@ window.playScenarios = async () => {
         isPlaying: () => livePlayback.isPlaying(),
         play: () => livePlayback.handlePlay([track]),
         pause: () => livePlayback.handlePause(),
-        stop: () => livePlayback.handleStop(),
+        reserveStop: () => livePlayback.reserveStop(),
       },
       armedTrack: () => ({ id: 'track-midi', kind: 'instrument' }),
       notify: (title, message) => policyNotices.push(title + ': ' + message),
@@ -1592,6 +1592,48 @@ window.playScenarios = async () => {
     && !livePlayback.isPlaying()
     && !window.liveMidiRecording.hasPendingCleanup()
   disposeFakeAudio()
+
+  // A Stop pressed while the take saves reserves its intent at the press: a locate made meanwhile keeps its playhead.
+  const takeSaved = deferred()
+  let takeSaving = true
+  let disposeSaveAudio = () => {}
+  const saveAudioPolicy = createRoot(cleanup => {
+    disposeSaveAudio = cleanup
+    return createRecordingTransportPolicy({
+      audio: {
+        isRecording: () => takeSaving,
+        isStarting: () => false,
+        recordingTrackId: () => null,
+        toggleRecording: async () => ({ ok: true }),
+        stopRecording: async () => {
+          await takeSaved.promise
+          takeSaving = false
+        },
+      },
+      midi: window.liveMidiRecording,
+      playback: {
+        isPlaying: () => livePlayback.isPlaying(),
+        play: () => livePlayback.handlePlay([track]),
+        pause: () => livePlayback.handlePause(),
+        reserveStop: () => livePlayback.reserveStop(),
+      },
+      armedTrack: () => ({ id: 'track-audio', kind: 'audio' }),
+      notify: () => {},
+      project: {
+        id: () => 'cloud-project',
+        provisionalClipId: window.liveMidiProvisionalClip,
+        cancelImports: () => {},
+        navigate: () => {},
+      },
+    })
+  })
+  await saveAudioPolicy.play()
+  const stopWhileSaving = saveAudioPolicy.stop()
+  livePlayback.setPlayhead(20, [track])
+  takeSaved.resolve()
+  await stopWhileSaving
+  results['stop-after-take-save-keeps-playhead-moved-meanwhile'] = !livePlayback.isPlaying() && livePlayback.playheadSec() === 20
+  disposeSaveAudio()
 
   // Unmounting the real MIDI hook with a retained cleanup must not leak an unhandled rejection.
   const hookTrack = { id: 'track-hook-midi', kind: 'instrument', name: 'Hook MIDI', volume: 1, clips: [] }

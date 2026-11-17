@@ -738,6 +738,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     playheadSec,
     handlePause,
     handleStop,
+    reserveStop,
     updateNativeLoop,
     setPlayhead,
     requestPlay,
@@ -1697,7 +1698,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const recordingTransport = createRecordingTransportPolicy({
     audio: recordingControls,
     midi: midiRecording,
-    playback: { isPlaying, play: requestPlay, pause: handlePause, stop: handleStop },
+    playback: { isPlaying, play: requestPlay, pause: handlePause, reserveStop },
     armedTrack: () => renderTracks().find((track) => track.id === recordArmTrackId()),
     notify,
     project: {

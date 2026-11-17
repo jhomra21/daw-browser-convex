@@ -2671,6 +2671,48 @@ test.skipIf(isServer)('a saved output change moves a paused native session and k
   })
 })
 
+// A Stop pressed while a take saves reserves its transport intent at the press and runs when the save settles.
+// Ways it fails: it rewinds a playhead the user moved meanwhile, it stops a Play pressed meanwhile, or it no longer rewinds
+// when nothing moved.
+test.skipIf(isServer)('a reserved Stop returns a playing session to the start when nothing moved meanwhile', async () => {
+  await withOutputDeviceSwitch(async ({ mount }) => {
+    const playback = mount({ outputDeviceId: () => "coreaudio:A" })
+    playback.setPlayhead(2, [track])
+    await playback.handlePlay([track])
+    const stop = playback.reserveStop()
+    await stop()
+    expect(playback.isPlaying()).toBeFalse()
+    expect(playback.playheadSec()).toBe(0)
+  })
+})
+
+test.skipIf(isServer)('a reserved Stop stops the transport and keeps a playhead the user moved meanwhile', async () => {
+  await withOutputDeviceSwitch(async ({ mount }) => {
+    const playback = mount({ outputDeviceId: () => "coreaudio:A" })
+    playback.setPlayhead(2, [track])
+    await playback.handlePlay([track])
+    const stop = playback.reserveStop()
+    playback.setPlayhead(20, [track])
+    await stop()
+    expect(playback.isPlaying()).toBeFalse()
+    expect(playback.playheadSec()).toBe(20)
+  })
+})
+
+test.skipIf(isServer)('a reserved Stop does not stop a Play pressed after it', async () => {
+  await withOutputDeviceSwitch(async ({ mount }) => {
+    const playback = mount({ outputDeviceId: () => "coreaudio:A" })
+    playback.setPlayhead(2, [track])
+    await playback.handlePlay([track])
+    const stop = playback.reserveStop()
+    await playback.handlePause()
+    await playback.handlePlay([track])
+    await stop()
+    expect(playback.isPlaying()).toBeTrue()
+    expect(playback.playheadSec()).toBe(2)
+  })
+})
+
 // The plug-in state the move reads is refused by the host, as for a session whose worker cannot answer.
 const withRefusedVstStateMove = (resumePlayback: boolean) => withOutputDeviceSwitch(async ({ fixture, requested, faults, mount }) => {
   const [outputId, setOutputId] = createSignal("coreaudio:A")

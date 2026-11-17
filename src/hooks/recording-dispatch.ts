@@ -86,7 +86,7 @@ type RecordingTransportOptions = {
     isPlaying: () => boolean
     play: () => Promise<void>
     pause: () => void | Promise<void>
-    stop: () => void | Promise<void>
+    reserveStop: () => () => void | Promise<void>
   }
   armedTrack: RecordingDispatchOptions['armedTrack']
   notify: (title: string, message: string) => void
@@ -168,7 +168,7 @@ export const createRecordingTransportPolicy = (options: RecordingTransportOption
     }
   }
   const pause = () => finishTransport(playback.pause)
-  const stop = () => finishTransport(playback.stop)
+  const stop = () => finishTransport(playback.reserveStop())
   const canLeaveProject = async () => {
     if (disposed) return false
     transportGeneration += 1

@@ -118,10 +118,7 @@ export const nativeAudioHostMaximumInstrumentEvents = 256
 export const nativeAudioHostMaximumSourceEvents = 256
 export const nativeAudioHostMaximumScheduleInstanceIdBytes = 256
 export const nativeAudioHostScheduleWindowHeaderBytes = 72
-export const nativeAudioHostScheduleProgressBytes = 80
-export const nativeAudioHostScheduleProgressCapacityBytes = 88
-export const nativeAudioHostScheduleProgressLatencyBytes = 96
-export const nativeAudioHostScheduleProgressResolutionBytes = 112
+export const nativeAudioHostScheduleProgressBytes = 112
 export const nativeAudioHostProcessorPatchStatusBytes = 20
 /**
  * The status word of a control ACK (`ControlAckStatus`, audio_host_macos.h). `unavailable` is a negative ACK that

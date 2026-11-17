@@ -176,7 +176,7 @@ import {
   nativeAudioHostMappedAssetPageHeaderBytes,
   nativeAudioHostMaximumPayloadBytes,
   nativeRecordingSpoolImportVersion,
-  nativeAudioHostScheduleProgressResolutionBytes,
+  nativeAudioHostScheduleProgressBytes,
   nativeOfflineRenderPlanSchema,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import {
@@ -2491,7 +2491,7 @@ else {
     })
     removeAudioHostScheduleProgressListener = audioHostSupervisor?.onScheduleProgress((progress: NativeScheduleProgress) => {
       // The protocol-29 host always sends the full 112-byte frame; the older lengths are decode-only.
-      recordingBenchmark.recordTraffic("schedule-progress", 16 + nativeAudioHostScheduleProgressResolutionBytes)
+      recordingBenchmark.recordTraffic("schedule-progress", 16 + nativeAudioHostScheduleProgressBytes)
       sendRendererMessage(scheduleProgressChannel, progress)
     })
     protocol.handle("daw", (request) => {

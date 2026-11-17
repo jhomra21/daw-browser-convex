@@ -107,14 +107,17 @@ const meterBatch = () => frame(44, Buffer.concat([
 const scheduleProgress = () => frame(46, Buffer.concat([
   u32(9), u32(1), u64(1), u64(180), u64(240), u64(7), u64(3), u64(0), u64(0),
   u32(1), u32(128), u32(64), u32(32),
-  ...(process.env.MODE === "schedule-capacity" ? [u64(42)] : []),
-  ...(process.env.MODE === "schedule-latency" ? [u64(42), u64(7)] : []),
-  ...(process.env.MODE === "schedule-bad-length" ? [u32(42)] : []),
-  ...(process.env.MODE === "schedule-bad-length-104" ? [u64(42), u64(7), u64(0)] : []),
-  ...(process.env.MODE === "schedule-bad-length-120" ? [u64(42), u64(7), u64("9007199254740993"), u32(5), u32(0), u64(0)] : []),
-  ...(process.env.MODE === "schedule-resolution" ? [u64(42), u64(7), u64("9007199254740993"), u32(5), u32(0)] : []),
-  ...(process.env.MODE === "schedule-resolution-none" ? [u64(42), u64(7), u64(0), u32(0), u32(0)] : []),
-  ...(process.env.MODE === "schedule-bad-reserved" ? [u64(42), u64(7), u64("9007199254740993"), u32(5), u32(1)] : []),
+  ...({
+    "schedule-bad-length-80": [],
+    "schedule-bad-length-88": [u64(42)],
+    "schedule-bad-length-96": [u64(42), u64(7)],
+    "schedule-bad-length": [u32(42)],
+    "schedule-bad-length-104": [u64(42), u64(7), u64(0)],
+    "schedule-bad-length-120": [u64(42), u64(7), u64("9007199254740993"), u32(5), u32(0), u64(0)],
+    "schedule-resolution": [u64(42), u64(7), u64("9007199254740993"), u32(5), u32(0)],
+    "schedule-resolution-none": [u64(42), u64(7), u64(0), u32(0), u32(0)],
+    "schedule-bad-reserved": [u64(42), u64(7), u64("9007199254740993"), u32(5), u32(1)],
+  }[process.env.MODE] ?? [u64(0), u64(0), u64(0), u32(0), u32(0)]),
 ]))
 const patchStatus = (outcome, refusal, core, token) => frame(61, Buffer.concat([u32(outcome), u32(refusal), u32(core), u64(token)]))
 const patchStatusFor = (mode) => ({
@@ -1171,7 +1174,8 @@ test("cleans the offline completion watchdog on abort", async () => {
 })
 
 type ScheduleProgressMode =
-  | "schedule-capacity" | "schedule-latency" | "schedule-resolution" | "schedule-resolution-none"
+  | "schedule-resolution" | "schedule-resolution-none"
+  | "schedule-bad-length-80" | "schedule-bad-length-88" | "schedule-bad-length-96"
   | "schedule-bad-length" | "schedule-bad-length-104" | "schedule-bad-length-120" | "schedule-bad-reserved"
 type PatchStatusMode =
   | "patch-applied" | "patch-claimed" | "patch-refused-pending" | "patch-refused-stage" | "patch-bad-claim-token"
@@ -2171,6 +2175,8 @@ test("decodes schedule progress notifications", async () => {
       instrumentCredits: 128,
       sourceCredits: 64,
       automationCredits: 32,
+      admissionCapacityGeneration: 0n,
+      latencyCompletionGeneration: 0n,
     })
   } finally {
     await fixture.supervisor.teardown()
@@ -2179,7 +2185,8 @@ test("decodes schedule progress notifications", async () => {
 })
 
 for (const mode of [
-  "schedule-capacity", "schedule-latency", "schedule-resolution", "schedule-resolution-none",
+  "schedule-resolution", "schedule-resolution-none",
+  "schedule-bad-length-80", "schedule-bad-length-88", "schedule-bad-length-96",
   "schedule-bad-length", "schedule-bad-length-104", "schedule-bad-length-120", "schedule-bad-reserved",
 ] satisfies ScheduleProgressMode[]) {
   test(`strictly decodes progress trailer ${mode}`, async () => {
@@ -2198,13 +2205,7 @@ for (const mode of [
       await fixture.supervisor.start()
       await fixture.supervisor.diagnostics()
       expect(received).toHaveLength(1)
-      if (mode === "schedule-capacity") {
-        expect(received[0]).toMatchObject({ admissionCapacityGeneration: 42n })
-        expect(received[0]).not.toHaveProperty("latencyCompletionGeneration")
-      } else if (mode === "schedule-latency") {
-        expect(received[0]).toMatchObject({ admissionCapacityGeneration: 42n, latencyCompletionGeneration: 7n })
-        expect(received[0]).not.toHaveProperty("processorPatchResolved")
-      } else if (mode === "schedule-resolution") {
+      if (mode === "schedule-resolution") {
         // The token is above Number.MAX_SAFE_INTEGER and crosses the process boundary as decimal text.
         expect(received[0]).toMatchObject({
           admissionCapacityGeneration: 42n,

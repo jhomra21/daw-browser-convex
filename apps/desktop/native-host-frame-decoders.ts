@@ -4,9 +4,6 @@ import {
   nativeAudioHostMaximumMeterEntries as maximumMeterEntries,
   nativeAudioHostMaximumSpectrumBins as maximumSpectrumBins,
   nativeAudioHostScheduleProgressBytes,
-  nativeAudioHostScheduleProgressCapacityBytes,
-  nativeAudioHostScheduleProgressLatencyBytes,
-  nativeAudioHostScheduleProgressResolutionBytes,
 } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 import type {
@@ -191,10 +188,7 @@ export const decodeSpectrumFrame = (frame: Buffer): NativeHostSpectrumFrame | un
 }
 export const decodeScheduleProgress = (frame: Buffer): NativeScheduleProgress | undefined => {
   const payload = frame.subarray(headerBytes)
-  if (payload.byteLength !== nativeAudioHostScheduleProgressBytes
-    && payload.byteLength !== nativeAudioHostScheduleProgressCapacityBytes
-    && payload.byteLength !== nativeAudioHostScheduleProgressLatencyBytes
-    && payload.byteLength !== nativeAudioHostScheduleProgressResolutionBytes) return undefined
+  if (payload.byteLength !== nativeAudioHostScheduleProgressBytes) return undefined
   const revision = payload.readUInt32BE(0)
   const epoch = payload.readUInt32BE(4)
   const progressSequence = payload.readBigUInt64BE(8)
@@ -216,17 +210,13 @@ export const decodeScheduleProgress = (frame: Buffer): NativeScheduleProgress | 
     instrumentCredits: payload.readUInt32BE(68),
     sourceCredits: payload.readUInt32BE(72),
     automationCredits: payload.readUInt32BE(76),
+    admissionCapacityGeneration: payload.readBigUInt64BE(80),
+    latencyCompletionGeneration: payload.readBigUInt64BE(88),
   }
-  if (payload.byteLength >= nativeAudioHostScheduleProgressCapacityBytes)
-    progress.admissionCapacityGeneration = payload.readBigUInt64BE(nativeAudioHostScheduleProgressBytes)
-  if (payload.byteLength >= nativeAudioHostScheduleProgressLatencyBytes)
-    progress.latencyCompletionGeneration = payload.readBigUInt64BE(nativeAudioHostScheduleProgressCapacityBytes)
-  if (payload.byteLength === nativeAudioHostScheduleProgressResolutionBytes) {
-    if (payload.readUInt32BE(108) !== 0) return undefined
-    const resolvedToken = payload.readBigUInt64BE(nativeAudioHostScheduleProgressLatencyBytes)
-    if (resolvedToken !== 0n) {
-      progress.processorPatchResolved = { token: resolvedToken.toString(), result: payload.readUInt32BE(104) }
-    }
+  if (payload.readUInt32BE(108) !== 0) return undefined
+  const resolvedToken = payload.readBigUInt64BE(96)
+  if (resolvedToken !== 0n) {
+    progress.processorPatchResolved = { token: resolvedToken.toString(), result: payload.readUInt32BE(104) }
   }
   return progress
 }

@@ -1,0 +1,58 @@
+{
+ "name": "pr62-p06-p07-wasm-repin",
+ "sequence": 69,
+ "createdAt": "2026-11-17T20:36:46.470Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "value"
+   ],
+   "old": "931fa016dbd6242a609ef6750c266a174ef1cc1c4ce618d82003e729a3c01a94",
+   "new": "2a54ddbf231b352905d5c70277ee452a53606e26df582a8b862c834fb1d34c0e"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.wasm"
+   ],
+   "old": "a3b818f87a882eea493691d491289d3e406090077f0909a8fdce086d7b0708d8",
+   "new": "2e8d468ac9528fbe4ffd832c4b061f0f51d92bb46298248712109770bd2aba69"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm"
+   ],
+   "old": "a3b818f87a882eea493691d491289d3e406090077f0909a8fdce086d7b0708d8",
+   "new": "2e8d468ac9528fbe4ffd832c4b061f0f51d92bb46298248712109770bd2aba69"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.manifest.json"
+   ],
+   "old": "4a9bf72bcdcdf09e4efe95c42ac812d8b14e4dccd8904877c83125872539ba30",
+   "new": "f9d19f3509784104875182b3734117e0a96ac982ed9e07a5effe7686eae129d2"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "P06/P07 (pr62-cleanup picks of 86e5a5eb and cb23bcac; hand record, no --bless). audio_core.cpp splits source reconciliation into AdmitSampleSources (read-only) and CommitSampleSources (cannot fail), and adds DecodeGraphView over wasm_parse_graph for the native host; audio_core_native.h exports kMaximumSourceDeclarations and GraphView. The portable wasm was rebuilt in the main checkout with -- Configuring done (0.3s)\n-- Generating done (0.0s)\n-- Build files have been written to: /Users/juan/Documents/daw-browser-convex/native/build/audio-core-wasm\n[ 50%] Built target daw-audio-core\n[100%] Built target daw-audio-core-wasm\n[ 33%] Built target daw-audio-core\n[100%] Built target daw-audio-core-wasm-harness; the rebuilt artifact is byte-identical to the committed one (sha256 2e8d468ac9528fbe4ffd832c4b061f0f51d92bb46298248712109770bd2aba69). x-wasm-source-hash re-pinned to 2a54ddbf231b352905d5c70277ee452a53606e26df582a8b862c834fb1d34c0e output and the three artifact hashes. The watched manifest entries for audio_core.cpp, the wasm and its manifest stay for the final bless.",
+  "expectationsSha256": "29d6ca95452d574c07a23c0e04c558db126782dc8daf57712a89fabefc37d511"
+ }
+}

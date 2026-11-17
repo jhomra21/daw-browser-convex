@@ -22,7 +22,6 @@ import {
   type QueuedRequest,
 } from "./native-request-broker"
 
-export { NativeAudioHostNotSentError, encodeNativeAudioHostControlFrame, nativeAudioHostRequestName }
 import { audioCoreWasmAbiVersion } from "@daw-browser/audio-core-wasm"
 import { defaultDecodedAudioPageFrames } from "@daw-browser/audio-engine/media-pages"
 import {

@@ -10,9 +10,7 @@ import { maxVst3WorkerEventsPerBlock } from "@daw-browser/plugin-host-protocol"
 import {
   nativeHostConfigurationIdentityFor,
   createNativeAudioHostSupervisor,
-  encodeNativeAudioHostControlFrame,
   NativeAudioHostCommandError,
-  NativeAudioHostNotSentError,
   decodeNativeProcessorPatchStatus,
   nativeDeliveryFailureKind,
   nativeProcessorPatchReply,
@@ -27,6 +25,7 @@ import {
   type NativeAudioHostSupervisorOptions,
   type ResolvedVst3Attachment,
 } from "./audio-host"
+import { encodeNativeAudioHostControlFrame, NativeAudioHostNotSentError } from "./native-request-broker"
 import { createOfflinePcmAckTracker, deliverOfflinePcmChunk } from "./offline-pcm-ack"
 import { createAe08Evidence } from "./ae08-evidence"
 import {

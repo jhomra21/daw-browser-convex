@@ -20,11 +20,11 @@ import { publishDurableEffectsOperation, readSharedOutboxOperation, flushSharedO
 import { z } from "zod"
 import {
   NativeAudioHostCommandError,
-  NativeAudioHostNotSentError,
   decodeNativeProcessorPatchStatus,
   nativeDeliveryFailureKind,
   nativeProcessorPatchReply,
 } from "../../apps/desktop/audio-host"
+import { NativeAudioHostNotSentError } from "../../apps/desktop/native-request-broker"
 import {
   createNativeProcessorStateOwner,
   type Delivery,

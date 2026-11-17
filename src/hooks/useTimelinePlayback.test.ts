@@ -13,14 +13,14 @@ import { createParameterGestureOwner } from '../components/timeline/parameter-ge
 import { effectAdmission } from '../components/timeline/effect-publication-result'
 import { createPendingWorkOwner } from './useEffectsPanelAudioSync'
 import { createSamplerBufferSync } from '~/lib/sampler-buffer-sync'
-import { extractTimelineBindings } from '~/lib/timeline-source-test-support'
+import { awaitCompileInstruments, compileEffectsProjection, createApplyPortableProcessor, createInstrumentPlaybackChange, createMixedReorderCommitted, createSyncPlaybackBackend } from '~/components/timeline/timeline-playback-wiring'
 import { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { LiveProcessorEditIdentity } from '~/lib/live-processor-control'
-import { SYNTH_KIND_ID } from '~/lib/processor-edit-semantics'
 import { nativePlaybackFaultText, type NativePlaybackFault } from '~/lib/desktop/native-playback-controller'
 import { addInstanceLimit, clearInstanceLimits, clearVstInstanceFailures, instanceLimit, vstInstanceFailed } from '~/lib/desktop/vst-instance-failures'
-import type { AudioEffectRuntimeInstance, DeferredStretchWindow, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
+import type { AudioEffectRuntimeInstance, DeferredStretchWindow } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
+import type { TimelinePlaybackRebuildIntent } from '~/hooks/timeline-playback-types'
 import { createDefaultDelayParams, createDefaultDrumRackParams, createDefaultLimiterParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultSamplerParams, createDefaultUtilityParams, mergeSynthParams } from '@daw-browser/shared'
 import type { AutomationEnvelope, TrackInstrumentParams, UtilityParamsEnvelope } from '@daw-browser/shared'
 import type { AudioCoreGraphSnapshot } from '@daw-browser/audio-core-contract'
@@ -242,19 +242,6 @@ for (const transport of ["playing", "paused"]) {
 }
 
 test.each(["announce", "unsupported", "announce+sample"])("3B1 r2 actual playback preparation does not drain its %s owner", async (path) => {
-  const source = await readFile(new URL("../components/Timeline.tsx", import.meta.url), "utf8")
-  const { compilePrefix: prefix, structural, portable } = extractTimelineBindings(source)
-  const transpiler = new Bun.Transpiler({ loader: "ts" })
-  const compile: (effects: () => { flushPending: () => Promise<void>; awaitInstrumentReadiness: () => Promise<void>; snapshotEffectsProjection: () => number },
-    context?: LivePlaybackCompileContext) => Promise<number> = new Function(
-    transpiler.transformSync(`return async (effectsExportSnapshot, context) => { ${prefix} return effectsProjection; }`))()
-  const makeCallbacks = new Function("deps", transpiler.transformSync(`
-    const { mountedProjectGeneration, awaitPlaybackPreparation, preparedInstrument, isStructuralRebuildInProgress,
-      isPreparingPlayback, isPlaying, isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared,
-      syncPlaybackBackend, renderTracks, captureStructuralPlaybackIntent, notify, liveProcessorControl, SYNTH_KIND_ID } = deps;
-    let instrumentPlaybackChangeTail = Promise.resolve();
-    return ({ ${structural} ${portable} });
-  `))
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
   const fixture = createNativeHookBridge()
   Object.defineProperty(globalThis, "window", { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
@@ -293,27 +280,31 @@ test.each(["announce", "unsupported", "announce+sample"])("3B1 r2 actual playbac
           createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
             requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
             compileSnapshot: async (transport, context) => {
-              await compile(() => ({ flushPending: async () => { await owner.flushPending() },
-                awaitInstrumentReadiness: () => sampledWork.flushPending("project"),
-                snapshotEffectsProjection: () => owner.effective("track-1") ?? 0 }), context)
+              const effects = {
+                awaitInstrumentReadiness: async () => { await sampledWork.flushPending("project"); return undefined },
+                snapshotEffectsProjection: () => ({ replaceAudioEffectTargets: [], upsertDeviceRows: [] }),
+              }
+              compileEffectsProjection(effects, await awaitCompileInstruments(effects, context))
               compiled++
               return nativeRequiredSnapshot(transport)
             },
           },
         )
-        const callbacks: {
-          onStructuralPlaybackChange: (targetId: string, instrument: undefined) => Promise<void>
-          applyPortableProcessor: (edit: LiveProcessorEditIdentity) => Promise<EngineDisposition | undefined>
-        } = makeCallbacks({
-          mountedProjectGeneration: () => 0, awaitPlaybackPreparation: playback.awaitPlaybackPreparation,
-          preparedInstrument: playback.preparedInstrument, isStructuralRebuildInProgress: playback.isStructuralRebuildInProgress,
-          isPreparingPlayback: playback.isPreparingPlayback, isPlaying: playback.isPlaying,
+        const wiring = {
           isNativePlaybackPrepared: playback.isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared: () => false,
           syncPlaybackBackend: () => playback.restartTimelineSchedule([track], { rebuildBackend: true }),
-          renderTracks: () => [track], captureStructuralPlaybackIntent: () => ({}),
-          notify: (_title: string, message: string) => { throw new Error(message) },
-          liveProcessorControl: () => ({ flush: async () => ({ accepted: false, reason: "unsupported" }) }),
-        })
+          renderTracks: () => [track], captureStructuralPlaybackIntent: () => ({ resumePlayback: false, playheadSec: 0 }),
+        }
+        const callbacks = {
+          onStructuralPlaybackChange: createInstrumentPlaybackChange({
+            ...wiring, mountedProjectGeneration: () => 0, awaitPlaybackPreparation: playback.awaitPlaybackPreparation,
+            preparedInstrument: playback.preparedInstrument, isStructuralRebuildInProgress: playback.isStructuralRebuildInProgress,
+            isPreparingPlayback: playback.isPreparingPlayback, isPlaying: playback.isPlaying,
+          }),
+          applyPortableProcessor: createApplyPortableProcessor({
+            ...wiring, liveProcessorControl: () => ({ flush: async () => ({ accepted: false, reason: "unsupported" }) }),
+          }),
+        }
         const edit = createProcessorEditRegistry(() => 120).allocate({
           targetId: "track-1", instanceId: "utility", effect: "utility",
           from: { version: 1, state: createDefaultUtilityParams() },
@@ -7581,31 +7572,7 @@ const b6f5Automation: AutomationEnvelope = { id: 'automation-b6f5', projectId: '
 
 const b6f5UtilityInstance = (params: UtilityParamsEnvelope): AudioEffectRuntimeInstance => ({ id: 'utility-1', kind: 'utility', params })
 
-const b6f5Bindings = async () => {
-  const source = await readFile(new URL('../components/Timeline.tsx', import.meta.url), 'utf8')
-  const { portable, structural, mixedReorder, syncPlaybackBackend } = extractTimelineBindings(source)
-  const transpile = (code: string) => new Bun.Transpiler({ loader: 'ts' }).transformSync(code)
-  const makePortable = new Function('deps', transpile(`
-    const { liveProcessorControl, isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared, syncPlaybackBackend, renderTracks, SYNTH_KIND_ID } = deps;
-    return ({ ${portable} }).applyPortableProcessor;`))
-  const makeMixedReorder = new Function('deps', transpile(`
-    const { isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared, captureStructuralPlaybackIntent, syncPlaybackBackend,
-      renderTracks, notify } = deps;
-    return ({ ${mixedReorder} }).onMixedReorderCommitted;`))
-  const makeStructural = new Function('deps', transpile(`
-    const { mountedProjectGeneration, awaitPlaybackPreparation, preparedInstrument, isStructuralRebuildInProgress,
-      isPreparingPlayback, isPlaying, isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared,
-      syncPlaybackBackend, renderTracks, captureStructuralPlaybackIntent, notify } = deps;
-    let instrumentPlaybackChangeTail = Promise.resolve();
-    return ({ ${structural} }).onStructuralPlaybackChange;`))
-  const makeSync = new Function('deps', transpile(`
-    const { isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared, restartTimelineSchedule, rebuildPlaybackBackend,
-      captureStructuralPlaybackIntent, addInstanceLimit } = deps;
-    return (${syncPlaybackBackend});`))
-  return { makePortable, makeStructural, makeMixedReorder, makeSync }
-}
-
-const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<ReturnType<typeof b6f5Bindings>>) => {
+const mountB6f5 = (world: B6f5World, nativeEnabled: boolean) => {
   const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
   const audioContext = new AudioContext()
   let audioCreated = false
@@ -7666,7 +7633,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
   }, { projectGeneration: generation, compileSnapshot, reportFault: (message) => faults.push(message) })
   // Timeline.tsx:871-895 and :923-934, as written there.
-  type B6f5Intent = NonNullable<Parameters<typeof playback.restartTimelineSchedule>[1]>
+  type B6f5Intent = TimelinePlaybackRebuildIntent
   const captureStructuralPlaybackIntent = (): B6f5Intent => ({
     resumePlayback: playback.isPlaying(), playheadSec: playback.playheadSec(),
     owner: playback.isNativePlaybackPrepared() ? 'native' : playback.isPortableBrowserPlaybackPrepared() ? 'portable-browser' : undefined,
@@ -7680,20 +7647,19 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
     if (playback.isNativePlaybackPrepared() || playback.isPortableBrowserPlaybackPrepared()) return
     if (playback.isPlaying()) playback.restartTimelineSchedule(tracks()).catch((cause: unknown) => faults.push(`reschedule: ${String(cause)}`))
   }
-  const applyPortableProcessor: (edit: LiveProcessorEditIdentity) => Promise<EngineDisposition | undefined> = bindings.makePortable({
+  const applyPortableProcessor = createApplyPortableProcessor({
     liveProcessorControl: playback.liveProcessorControl, isNativePlaybackPrepared: playback.isNativePlaybackPrepared,
-    isPortableBrowserPlaybackPrepared: playback.isPortableBrowserPlaybackPrepared, syncPlaybackBackend, renderTracks: tracks, SYNTH_KIND_ID })
-  const announce: (targetId: string, instrument: TrackInstrumentParams | undefined) => Promise<void> = bindings.makeStructural({
+    isPortableBrowserPlaybackPrepared: playback.isPortableBrowserPlaybackPrepared, syncPlaybackBackend, renderTracks: tracks })
+  const announce = createInstrumentPlaybackChange({
     mountedProjectGeneration: generation, awaitPlaybackPreparation: playback.awaitPlaybackPreparation,
     preparedInstrument: playback.preparedInstrument, isStructuralRebuildInProgress: playback.isStructuralRebuildInProgress,
     isPreparingPlayback: playback.isPreparingPlayback, isPlaying: playback.isPlaying,
     isNativePlaybackPrepared: playback.isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared: playback.isPortableBrowserPlaybackPrepared,
     syncPlaybackBackend, renderTracks: tracks, captureStructuralPlaybackIntent,
-    notify: (title: string, message: string) => { faults.push(`${title}: ${message}`) },
   })
-  const onMixedReorderCommitted: (intent: B6f5Intent | undefined) => void = bindings.makeMixedReorder({
+  const onMixedReorderCommitted = createMixedReorderCommitted({
     isNativePlaybackPrepared: playback.isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared: playback.isPortableBrowserPlaybackPrepared,
-    captureStructuralPlaybackIntent, syncPlaybackBackend, renderTracks: tracks, notify: (title: string, message: string) => { faults.push(`${title}: ${message}`) } })
+    captureStructuralPlaybackIntent, syncPlaybackBackend, renderTracks: tracks })
   const work: Promise<unknown>[] = []
   // A structural edit with no live path: a Spectral fftSize change, which the core replaces at a seam.
   const addEffect = () => setSpectralFftSize(1024)
@@ -7833,7 +7799,6 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean, bindings: Awaited<R
 }
 
 const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5World, flushRaf: () => void) => Promise<void>, nativeEnabled: boolean) => {
-  const bindings = await b6f5Bindings()
   const previous = {
     window: Object.getOwnPropertyDescriptor(globalThis, 'window'),
     AudioContext: Object.getOwnPropertyDescriptor(globalThis, 'AudioContext'),
@@ -7917,7 +7882,7 @@ const runB6f5 = async (body: (live: ReturnType<typeof mountB6f5>, world: B6f5Wor
   try {
     await withFakeRaf((flushRaf) => createRoot(async (dispose) => {
       try {
-        await body(mountB6f5(world, nativeEnabled, bindings), world, flushRaf)
+        await body(mountB6f5(world, nativeEnabled), world, flushRaf)
       } finally {
         dispose()
       }
@@ -8901,31 +8866,9 @@ test('C0F Pause then Play after a staged live publication resumes warm through t
   } finally { await f.close() }
 })
 
-// C0g, step 5b: the clip entry names its fields, as the track entry does. A recorder around each clip sees which fields
-// the playback compiles read: compileLivePlaybackSnapshot, then, from its snapshot, the native projection (which projects
-// audio through projectPortableClipEvents) and the portable session (which schedules MIDI through the frame schedule). A
-// property read counts; a whole-object copy (a spread, a rest or structuredClone) does not. Every field a compile reads is
-// named, a named field no compile reads is one the hook reads itself, and no compile reads a name, colour or waveform key.
+// C0g, step 5b: a paused native preview recompiles exactly when what the playback compiles produce changes. Editing any
+// field that changes the compiled schedule makes the preview recompile; a name, colour or waveform key does neither.
 test('C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key', async () => {
-  const reads = new Set<string>()
-  const recorded = <Clip extends object>(clip: Clip): Clip => {
-    const values = new Map(Object.entries(clip))
-    let described: string | symbol | undefined
-    return new Proxy(clip, {
-      getOwnPropertyDescriptor: (target, key) => {
-        described = key
-        return Object.getOwnPropertyDescriptor(target, key)
-      },
-      get: (_target, key) => {
-        const field = [...values.keys()].find((name) => name === key)
-        if (field !== undefined && key !== described) {
-          reads.add(field)
-        }
-        described = undefined
-        return field === undefined ? undefined : values.get(field)
-      },
-    })
-  }
   const duration = 4 / 48_000
   const audio: Track<AudioBuffer> = { ...track, id: 'track-c0g-audio', clips: [{ id: 'clip-c0g-audio', historyRef: 'clip-c0g-audio',
     name: 'Audio', mediaStatus: undefined, startSec: 0, duration, sourceAssetKey: 'asset-c0g', waveformAssetKey: 'waveform:asset-c0g',
@@ -8936,20 +8879,22 @@ test('C0G the clip fingerprint names every clip field a playback compile reads, 
     historyRef: 'clip-c0g-midi', mediaStatus: undefined, sourceAssetKey: undefined, waveformAssetKey: undefined, sourceKind: undefined,
     sourceDurationSec: undefined, sourceSampleRate: undefined, sourceChannelCount: undefined, leftPadSec: 0, bufferOffsetSec: 0,
     audioWarp: undefined, gain: undefined, fades: undefined, sampleUrl: undefined, midiOffsetBeats: 0, buffer: null }] }
-  const compiled = compileLivePlaybackSnapshot({ revision: 1, bpm: 120,
-    transport: { state: "playing", playheadSec: 0, loopEnabled: false, loopStartSec: 0, loopEndSec: 0 },
-    tracks: [audio, instrument].map((entry) => ({ ...entry, clips: entry.clips.map(recorded) })),
-    renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: { [instrument.id]: { instances: [], instrument: b6f5Synth0 } } },
-      automationEnvelopes: [] }, sidechainRoutes: [] })
-  if (!compiled.supported) throw new Error(`C0G compile: ${compiled.reasons.join(' ')}`)
-  const snapshot = { ...compiled.snapshot, tracks: compiled.snapshot.tracks.map((entry) => ({ ...entry, clips: entry.clips.map(recorded) })) }
-  const native = compileLiveNativeProjection({ tracks: snapshot.tracks, bpm: 120, sampleRateHz: 48_000, revision: 1, epoch: 1,
-    firstSequence: 1, fx: snapshot.mixer.fx })
-  // The portable session compiles the MIDI track; its audio would need a decoded asset registry.
-  const portable = compilePreparedPortableLiveSession({ ...snapshot, tracks: snapshot.tracks.filter((entry) => entry.id === instrument.id) },
-    { assetRegistry: { projectGeneration: 1, assets: [] },
-    sampleRateHz: 48_000, transportEpoch: 1, timeOrigin: { timelineSec: 0, frame: 0 }, rangeEndSec: 4, sourceFirstSequence: 1 })
-  const compileRead = [...reads].filter((field) => field !== 'buffer').toSorted()
+  // What playback compiles from the tracks: the snapshot, and the native projection and portable session scheduled from it.
+  const compiledSchedule = (tracks: Track<AudioBuffer>[]) => {
+    const compiled = compileLivePlaybackSnapshot({ revision: 1, bpm: 120,
+      transport: { state: "playing", playheadSec: 0, loopEnabled: false, loopStartSec: 0, loopEndSec: 0 },
+      tracks, renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: { [instrument.id]: { instances: [], instrument: b6f5Synth0 } } },
+        automationEnvelopes: [] }, sidechainRoutes: [] })
+    if (!compiled.supported) return { snapshot: JSON.stringify(compiled.reasons), schedule: 'unsupported' }
+    const { snapshot } = compiled
+    const native = compileLiveNativeProjection({ tracks: snapshot.tracks, bpm: 120, sampleRateHz: 48_000, revision: 1, epoch: 1,
+      firstSequence: 1, fx: snapshot.mixer.fx })
+    // The portable session compiles the MIDI track; its audio would need a decoded asset registry.
+    const portable = compilePreparedPortableLiveSession({ ...snapshot, tracks: snapshot.tracks.filter((entry) => entry.id === instrument.id) },
+      { assetRegistry: { projectGeneration: 1, assets: [] },
+      sampleRateHz: 48_000, transportEpoch: 1, timeOrigin: { timelineSec: 0, frame: 0 }, rangeEndSec: 4, sourceFirstSequence: 1 })
+    return { snapshot: JSON.stringify({ ...snapshot, revision: 0 }), schedule: JSON.stringify({ native, portable }) }
+  }
   // A native paused preview recompiles exactly when the track fingerprint changes: edit one clip field of a paused preview
   // and see whether the hook compiles again.
   type AudioClip = Track<AudioBuffer>['clips'][number]
@@ -8970,7 +8915,7 @@ test('C0G the clip fingerprint names every clip field a playback compile reads, 
     ['gain', (clip) => ({ ...clip, gain: 0.5 })],
     ['fades', (clip) => ({ ...clip, fades: { fadeInSec: 0.1, fadeOutSec: 0, fadeInCurve: 0, fadeOutCurve: 0 } })],
     ['sampleUrl', (clip) => ({ ...clip, sampleUrl: 'https://r2.example/other.wav' })],
-    ['midi', (clip) => ({ ...clip, midi: b6f5cClip.midi })],
+    ['midi', (clip) => ({ ...clip, midi: clip.midi ? { ...clip.midi, notes: [] } : b6f5cClip.midi })],
     ['midiOffsetBeats', (clip) => ({ ...clip, midiOffsetBeats: 1 })],
     ['name', (clip) => ({ ...clip, name: 'Renamed clip' })],
     ['color', (clip) => ({ ...clip, color: '#123456' })],
@@ -9007,22 +8952,36 @@ test('C0G the clip fingerprint names every clip field a playback compile reads, 
       Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
     }
   }
+  const baseline = compiledSchedule([audio, instrument])
+  expect(baseline.schedule).not.toBe('unsupported')
+  // The edit lands on one track at a time, so clip ids stay unique.
+  const compiledAfter = (edit: (clip: AudioClip) => AudioClip) => {
+    const edited = (entry: Track<AudioBuffer>) => ({ ...entry, clips: entry.clips.map(edit) })
+    return [compiledSchedule([edited(audio), instrument]), compiledSchedule([audio, edited(instrument)])]
+  }
+  const changesCompile = (edit: (clip: AudioClip) => AudioClip) =>
+    compiledAfter(edit).some((after) => after.snapshot !== baseline.snapshot || after.schedule !== baseline.schedule)
+  const changesSchedule = (edit: (clip: AudioClip) => AudioClip) =>
+    compiledAfter(edit).some((after) => after.schedule !== baseline.schedule)
+  const compiles: Record<string, boolean> = {}
+  const scheduled: Record<string, boolean> = {}
   const recompiles: Record<string, boolean> = {}
-  for (const [field, edit] of edits) recompiles[field] = await recompilesOnEdit(edit)
-  const named = Object.keys(recompiles).filter((field) => recompiles[field])
-  expect({ native: native.supported, portable: portable.supported,
-    compileRead,
-    uncoveredReads: compileRead.filter((field) => !edits.has(field)),
-    unnamedReads: compileRead.filter((field) => !named.includes(field)),
-    namedUnread: named.filter((field) => !reads.has(field)),
-    excludedRead: ['name', 'color', 'waveformAssetKey'].filter((field) => reads.has(field)),
-    excludedNamed: ['name', 'color', 'waveformAssetKey'].filter((field) => named.includes(field)) })
-    .toEqual({ native: true, portable: true,
-      compileRead: ['audioWarp', 'bufferOffsetSec', 'duration', 'fades', 'gain', 'id', 'leftPadSec', 'midi', 'midiOffsetBeats', 'sampleUrl',
-        'sourceAssetKey', 'sourceChannelCount', 'sourceDurationSec', 'sourceKind', 'sourceSampleRate', 'startSec'],
-      uncoveredReads: [], unnamedReads: [],
-      // The hook reads these itself: mediaStatus gates hydration (hasPendingAudioClipHydration), historyRef names the clip.
-      namedUnread: ['historyRef', 'mediaStatus'], excludedRead: [], excludedNamed: [] })
+  for (const [field, edit] of edits) {
+    compiles[field] = changesCompile(edit)
+    scheduled[field] = changesSchedule(edit)
+    recompiles[field] = await recompilesOnEdit(edit)
+  }
+  const fields = [...edits.keys()]
+  const excluded = ['name', 'color', 'waveformAssetKey']
+  // The hook reads these itself: mediaStatus gates hydration (hasPendingAudioClipHydration), historyRef names the clip.
+  const hookOwned = ['historyRef', 'mediaStatus']
+  const scheduling = fields.filter((field) => !excluded.includes(field) && !hookOwned.includes(field))
+  expect({ uncompiled: scheduling.filter((field) => !compiles[field]),
+    unnamed: scheduling.filter((field) => !recompiles[field]),
+    hookOwnedUnnamed: hookOwned.filter((field) => !recompiles[field]),
+    excludedScheduled: excluded.filter((field) => scheduled[field]),
+    excludedNamed: excluded.filter((field) => recompiles[field]) })
+    .toEqual({ uncompiled: [], unnamed: [], hookOwnedUnnamed: [], excludedScheduled: [], excludedNamed: [] })
 })
 
 // C0g, step 5c: a clip whose waveform key or key order changes while playing plays what it played, so the playing
@@ -9087,8 +9046,6 @@ test('UD7n W-UD7n-5 a paused native edit is adopted in place: no dispose, no hos
 // AE-08 phase 8 step 10, item 3: a structural edit that cannot reach playback is logged for the developer and never
 // shown: the project keeps the edit and the next adoption retries it (UD 8).
 test('W-TL-1 a structural playback change that fails is logged with console.error and never notified', async () => {
-  const { makeStructural, makeMixedReorder } = await b6f5Bindings()
-  const notices: string[] = []
   const logged: unknown[][] = []
   const original = console.error
   console.error = (...args: unknown[]) => { logged.push(args) }
@@ -9096,17 +9053,16 @@ test('W-TL-1 a structural playback change that fails is logged with console.erro
   const deps = { mountedProjectGeneration: () => 0, awaitPlaybackPreparation: async () => {}, preparedInstrument: () => undefined,
     isStructuralRebuildInProgress: () => false, isPreparingPlayback: () => false, isPlaying: () => true,
     isNativePlaybackPrepared: () => true, isPortableBrowserPlaybackPrepared: () => false,
-    syncPlaybackBackend: async () => { throw failure }, renderTracks: () => [track], captureStructuralPlaybackIntent: () => ({ resumePlayback: true }),
-    notify: (title: string) => { notices.push(title) } }
+    syncPlaybackBackend: async () => { throw failure }, renderTracks: () => [track], captureStructuralPlaybackIntent: () => ({ resumePlayback: true, playheadSec: 0 }) }
   try {
-    await makeStructural(deps)(track.id, { kind: 'synth', instanceId: 'synth:replacement', params: createDefaultSynthParams() })
-    makeMixedReorder(deps)(undefined)
+    await createInstrumentPlaybackChange(deps)(track.id, { kind: 'synth', instanceId: 'synth:replacement', params: createDefaultSynthParams() })
+    createMixedReorderCommitted(deps)(undefined)
     await flushMicrotasks()
   } finally { console.error = original }
-  expect({ notices, logged: logged.map(([message, cause]) => [message, cause]) })
-    .toEqual({ notices: [], logged: [
+  expect(logged.map(([message, cause]) => [message, cause]))
+    .toEqual([
       ['[Timeline] failed to apply an instrument change to native playback', failure],
-      ['[Timeline] failed to apply an effect reorder to native playback', failure]] })
+      ['[Timeline] failed to apply an effect reorder to native playback', failure]])
 })
 
 // AE-08 phase 8 step 10, item 2: the Timeline's structural callers ask a prepared native session to adopt what they
@@ -9469,7 +9425,6 @@ test('UD7n W-S11d-C2 an unhydrated clip inserted into a paused portable session 
 // prepared is an edit the session adopts in place, never a rebuild. The device shows the E6 limitation.
 for (const playing of [true, false]) {
   test(`UD7n W-S11d-E1 a VST3 insert ${playing ? 'while playing' : 'while paused'} with only a browser session prepared rebuilds nothing and shows the limitation`, async () => {
-    const bindings = await b6f5Bindings()
     const info = spyOn(console, 'info').mockImplementation(() => undefined)
     const inserted = { ...insertedExternalProcessor(), targetId: track.id }
     try {
@@ -9479,14 +9434,13 @@ for (const playing of [true, false]) {
         const mark = live.mark()
         const session = live.liveSession()
         let rebuilds = 0
-        const sync = bindings.makeSync({
+        const sync = createSyncPlaybackBackend({
           isNativePlaybackPrepared: live.playback.isNativePlaybackPrepared,
           isPortableBrowserPlaybackPrepared: live.playback.isPortableBrowserPlaybackPrepared,
           restartTimelineSchedule: live.playback.restartTimelineSchedule,
           rebuildPlaybackBackend: () => { rebuilds += 1; return Promise.resolve() },
           captureStructuralPlaybackIntent: () => ({ resumePlayback: live.playback.isPlaying(), playheadSec: live.playback.playheadSec(),
             owner: 'portable-browser', projectId: 'project-a', projectGeneration: 1 }),
-          addInstanceLimit,
         })
         await sync(live.tracks(), { resumePlayback: live.playback.isPlaying(), playheadSec: live.playback.playheadSec(),
           owner: 'portable-browser', projectId: 'project-a', projectGeneration: 1,

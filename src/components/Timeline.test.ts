@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import "fake-indexeddb/auto";
 import { createRoot } from "solid-js";
 import { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
-import { createDefaultUtilityParams } from "@daw-browser/shared";
+import { createDefaultSynthParams, createDefaultUtilityParams, type TrackInstrumentParams } from "@daw-browser/shared";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { HistoryEntry, EffectParamsCommitPayload } from "~/lib/undo/types";
 import { setLocalEffectInstance, listLocalEffects } from "~/lib/local-effects";
@@ -11,6 +11,7 @@ import { createProcessorEditRegistry } from "./timeline/create-processor-edit-re
 import { createEffectsPanelAudioDevice } from "./timeline/create-effects-panel-audio-effects-state";
 import { createLocalEffectsView } from "./timeline/create-local-effects-view";
 import createTimelineEffectCommit from "./timeline/create-timeline-effect-commit";
+import { createInstrumentPlaybackChange } from "./timeline/timeline-playback-wiring";
 
 // Failure-first B6 seam inventory: stale/missing project history, captured
 // tracks, incorrect merge key/window, no-merge ignored, native refusal vetoing
@@ -88,14 +89,23 @@ test("B6 panel release records production history despite native refusal without
 });
 
 test("settles preparation before comparing instrument-ready callbacks with the prepared graph", async () => {
-  const source = await readFile(new URL("./Timeline.tsx", import.meta.url), "utf8");
-  const start = source.indexOf('onStructuralPlaybackChange: (targetId:');
-  const end = source.indexOf('\n      usesLegacyAudioEngine,', start);
-  const handler = source.slice(start, end);
-  expect(handler).toContain("await awaitPlaybackPreparation();");
-  expect(handler.indexOf("await awaitPlaybackPreparation();"))
-    .toBeLessThan(handler.indexOf("const previous = preparedInstrument(targetId);"));
-  expect(handler).toContain("if (JSON.stringify(previous) === JSON.stringify(instrument)) return;");
+  const instrument: TrackInstrumentParams = { kind: "synth", instanceId: "synth:1", params: createDefaultSynthParams() };
+  const preparation = Promise.withResolvers<void>();
+  const published: TrackInstrumentParams[] = [];
+  const rebuilds: (TrackInstrumentParams | undefined)[] = [];
+  const announce = createInstrumentPlaybackChange({
+    mountedProjectGeneration: () => 0, awaitPlaybackPreparation: () => preparation.promise,
+    preparedInstrument: () => published[0], isStructuralRebuildInProgress: () => false, isPreparingPlayback: () => false,
+    isPlaying: () => true, isNativePlaybackPrepared: () => true, isPortableBrowserPlaybackPrepared: () => false,
+    syncPlaybackBackend: async (_tracks, _intent, override) => { rebuilds.push(override?.instrument); },
+    renderTracks: () => [], captureStructuralPlaybackIntent: () => ({ resumePlayback: true, playheadSec: 0 }),
+  });
+  const announced = announce("track", instrument);
+  // The preparation the announce waits on is what publishes the instrument.
+  published.push(instrument);
+  preparation.resolve();
+  await announced;
+  expect(rebuilds).toEqual([]);
 });
 
 test("scopes effect history to the committed project and keeps patch failures silent", () => {

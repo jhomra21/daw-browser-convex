@@ -57,12 +57,18 @@ import { useMidiTrackRecording } from "~/hooks/useMidiTrackRecording";
 import { buildClipFadesHistoryEntry, buildClipMidiNotesHistoryEntry } from "~/lib/undo/builders";
 import type { MidiEditorNote } from "~/lib/midi-editor-grid";
 import createTimelineEffectCommit from "~/components/timeline/create-timeline-effect-commit";
-import type { LiveProcessorEditIdentity } from "~/lib/live-processor-control";
-import { SYNTH_KIND_ID } from "~/lib/processor-edit-semantics";
 import { createProcessorEditRegistry } from "~/components/timeline/create-processor-edit-registry";
 import { pickNativePlaybackInputs } from "~/components/timeline/native-playback-inputs";
+import {
+  awaitCompileInstruments,
+  compileEffectsProjection,
+  createApplyPortableProcessor,
+  createInstrumentPlaybackChange,
+  createMixedReorderCommitted,
+  createSyncPlaybackBackend,
+} from "~/components/timeline/timeline-playback-wiring";
 import { desktopAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
-import { addInstanceLimit, instanceLimit, vstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
+import { instanceLimit, vstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
 import { useTimelineMidiOverlay } from "~/hooks/useTimelineMidiOverlay";
@@ -481,14 +487,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     context: LivePlaybackCompileContext | undefined,
     automationPatches: () => ExportAutomationPatch[],
   ) => {
-    context?.mark?.("compile-start");
     const effects = effectsExportSnapshot();
-    // Every playback compile reads the canonical effects draft. Draining its
-    // owner could wait on a structural handoff that awaits this preparation.
-    const instrumentReadiness = await effects?.awaitInstrumentReadiness(context?.instrumentOverride);
-    context?.mark?.("compile-instruments-ready");
+    const instrumentReadiness = await awaitCompileInstruments(effects, context);
     try {
-      const effectsProjection = instrumentReadiness?.projection ?? effects?.snapshotEffectsProjection();
+      const effectsProjection = compileEffectsProjection(effects, instrumentReadiness);
       const processorStateSequence = processorEdits.sequence();
       const snapshotTracks = renderTracks();
       const snapshotBpm = bpm();
@@ -919,24 +921,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     return rebuild;
   };
 
-  // A prepared session, native or browser, playing or paused, adopts a structural edit in place; only a session still
-  // starting is rebuilt.
-  const syncPlaybackBackend = (
-    tracks: Track[],
-    intent?: TimelinePlaybackRebuildIntent,
-    instrumentOverride?: { targetId: Track["id"]; instrument: TrackInstrumentParams },
-  ) => {
-    if (!isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()) return rebuildPlaybackBackend(tracks, intent, instrumentOverride);
-    const inserted = intent?.externalProcessor?.processor;
-    // A browser session cannot host a VST3: it adopts the edit without it, and the device shows the limitation (E6).
-    if (inserted && !isNativePlaybackPrepared()) {
-      addInstanceLimit(inserted.instanceId, "The browser engine does not host VST3 plug-ins yet.");
-      console.info("[native-vst3] insertion not hosted by the browser engine; the session adopts the edit without it", {
-        instanceId: inserted.instanceId,
-      });
-    }
-    return restartTimelineSchedule(tracks, { ...(intent ?? captureStructuralPlaybackIntent()), instrumentOverride });
-  };
+  const syncPlaybackBackend = createSyncPlaybackBackend({
+    isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared, rebuildPlaybackBackend, restartTimelineSchedule,
+    captureStructuralPlaybackIntent,
+  });
 
   function rescheduleChangedClips(clipIds: string[]) {
     if (clipIds.length === 0) return;
@@ -2470,8 +2458,18 @@ const Timeline: Component<TimelineProps> = (props) => {
     }),
   );
 
-  // Serialize graph decisions with live flushes so the newest notification wins.
-  let instrumentPlaybackChangeTail = Promise.resolve();
+  const onStructuralPlaybackChange = createInstrumentPlaybackChange({
+    mountedProjectGeneration, awaitPlaybackPreparation, preparedInstrument, isStructuralRebuildInProgress,
+    isPreparingPlayback, isPlaying, isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared,
+    syncPlaybackBackend, renderTracks, captureStructuralPlaybackIntent,
+  });
+  const applyPortableProcessor = createApplyPortableProcessor({
+    liveProcessorControl, isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared, syncPlaybackBackend, renderTracks,
+  });
+  const onMixedReorderCommitted = createMixedReorderCommitted({
+    isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared, syncPlaybackBackend, renderTracks,
+    captureStructuralPlaybackIntent,
+  });
   const panelsProps = () => ({
     exportQueue,
     exportService,
@@ -2531,56 +2529,13 @@ const Timeline: Component<TimelineProps> = (props) => {
         bottomPanel.setOpen(true);
       },
       onEffectParamsCommitted: effectCommit.committed,
-      onStructuralPlaybackChange: (targetId: Track["id"], instrument: TrackInstrumentParams | undefined) => {
-        const generation = mountedProjectGeneration();
-        // This event queue reads current state imperatively, not reactively.
-        // eslint-disable-next-line solid/reactivity
-        return instrumentPlaybackChangeTail = instrumentPlaybackChangeTail.then(async () => {
-          await awaitPlaybackPreparation();
-          if (generation !== mountedProjectGeneration()) return;
-          const previous = preparedInstrument(targetId);
-          // Equality is safe only at rest: a queued B must not supersede a newer A.
-          if (!isStructuralRebuildInProgress() && !isPreparingPlayback()) {
-            if (JSON.stringify(previous) === JSON.stringify(instrument)) return;
-          }
-          if (!isPlaying() && !isNativePlaybackPrepared() && !isPortableBrowserPlaybackPrepared()
-            && !isStructuralRebuildInProgress()
-            && !isPreparingPlayback()) return;
-          // A prepared browser session, playing or paused, adopts an instrument edit or replacement through the hook's follow.
-          if (isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) return;
-          // A playing native session carries an edit to the same instrument as a published configuration: the schedule
-          // follow adopts it, so there is no graph to rebuild.
-          if (isPlaying() && previous && instrument && previous.kind === instrument.kind
-            && previous.instanceId === instrument.instanceId) return;
-          await syncPlaybackBackend(renderTracks(), captureStructuralPlaybackIntent(),
-            instrument ? { targetId, instrument } : undefined);
-        }).catch((cause: unknown) => {
-          console.error("[Timeline] failed to apply an instrument change to native playback", cause);
-        });
-      },
+      onStructuralPlaybackChange,
       usesLegacyAudioEngine,
       projectGeneration: mountedProjectGeneration,
       allocateProcessorEdit: processorEdits.allocate,
       deliverProcessor,
       joinPublication,
-      applyPortableProcessor: async (edit: LiveProcessorEditIdentity) => {
-        const control = liveProcessorControl();
-        if (!control) return undefined;
-        const result = await control.flush({
-          instanceId: edit.target.instanceId,
-          values: Object.entries(edit.content.values ?? {}).map(([parameterId, value]) => ({ parameterId, value })),
-          edit,
-        });
-        if (result.accepted) return "applied";
-        if (result.reason === "cancelled" || result.reason === "stale") return "superseded";
-        if (result.reason === "unavailable" || result.reason === "unprepared") return "dropped";
-        if (result.reason !== "unsupported") throw new Error(result.error ?? "The portable processor update failed.");
-        // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;
-        // a Synth edit is carried by the release announce.
-        if ((isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;
-        await syncPlaybackBackend(renderTracks());
-        return "applied";
-      },
+      applyPortableProcessor,
       onPreviewNote: auditionNote,
       enqueueNativeVstParameter: nativeVstParameterQueue?.enqueue,
       requestNativeVstStateCapture,
@@ -2620,15 +2575,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           console.error("[Timeline] failed to apply an external processor update to native playback", cause);
         });
       },
-      onMixedReorderCommitted: (playbackIntent: TimelinePlaybackRebuildIntent | undefined) => {
-        // A prepared browser session adopts the new effect order through the hook's follow.
-        if (isPortableBrowserPlaybackPrepared() && !isNativePlaybackPrepared()) return;
-        const intent = playbackIntent ?? captureStructuralPlaybackIntent();
-        if (!intent.resumePlayback && !isNativePlaybackPrepared()) return;
-        void syncPlaybackBackend(renderTracks(), intent).catch((cause: unknown) => {
-          console.error("[Timeline] failed to apply an effect reorder to native playback", cause);
-        });
-      },
+      onMixedReorderCommitted,
       automationEnvelopes: automation.envelopes(),
       onSelectAutomationParameter: (
         targetKey: Track["id"] | "master",

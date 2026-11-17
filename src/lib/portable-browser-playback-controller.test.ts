@@ -1,13 +1,11 @@
 import 'fake-indexeddb/auto'
 import { expect, spyOn, test } from 'bun:test'
-import { readFile } from 'node:fs/promises'
 import { createPreparedStretchArtifactRepository } from '@daw-browser/audio-engine/prepared-stretch-store'
-import { extractTimelineBindings } from '~/lib/timeline-source-test-support'
+import { createApplyPortableProcessor, createInstrumentPlaybackChange } from '~/components/timeline/timeline-playback-wiring'
 import { createProcessorEditRegistry } from '~/components/timeline/create-processor-edit-registry'
 import type { AudioEffectRuntimeInstance, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
 import type { AudioCoreGraphSnapshot } from '@daw-browser/audio-core-contract'
 import { nativeSynthStructureKey, type LiveProcessorEditIdentity } from '~/lib/live-processor-control'
-import { SYNTH_KIND_ID } from '~/lib/processor-edit-semantics'
 import {
   createDefaultCompressorParams,
   createDefaultDelayParams,
@@ -47,22 +45,8 @@ import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { LivePlaybackSnapshot, LivePlaybackTransport } from '~/lib/live-playback-snapshot'
 import { createPortableBrowserPlaybackController, type PortableAdoptionResult } from '~/lib/portable-browser-playback-controller'
 
-test("3B1 r3 extraction ignores stale commented callbacks and rejects missing or ambiguous bindings", async () => {
-  const source = await readFile(new URL("../components/Timeline.tsx", import.meta.url), "utf8")
-  const { portable } = extractTimelineBindings(source)
-  const live = 'applyPortableProcessor: async (_edit: LiveProcessorEditIdentity) => "dropped",'
-  const canary = `/* ${portable}\n      onPreviewNote: stale */\n` + source.replace(portable, live)
-  expect(extractTimelineBindings(canary).portable.trim()).toBe(live)
-  expect(() => extractTimelineBindings(source.replace(portable, ""))).toThrow()
-  expect(() => extractTimelineBindings(source + `\nconst duplicate = { ${portable} };`)).toThrow()
-})
-
 test.each(["synth", "master", "master-structural"])("3B1 r3 portable %s live gain stays live and Utility Swap is left to the schedule follow", async (schedule) => {
   const targetId = schedule === "synth" ? "synth" : "master"
-  const source = await readFile(new URL("../components/Timeline.tsx", import.meta.url), "utf8")
-  const { portable: handler } = extractTimelineBindings(source)
-  const makeCallback = new Function("liveProcessorControl", "isPortableBrowserPlaybackPrepared", "isNativePlaybackPrepared", "syncPlaybackBackend", "SYNTH_KIND_ID",
-    new Bun.Transpiler({ loader: "ts" }).transformSync(`return ({ ${handler} }).applyPortableProcessor;`))
   const calls: string[] = [], batches: unknown[] = []
   const graphs: Parameters<PortableWasmPlaybackSession["prepareGraph"]>[0][] = []
   const initial: UtilityParamsEnvelope = { version: 1, state: createDefaultUtilityParams() }
@@ -88,8 +72,11 @@ test.each(["synth", "master", "master-structural"])("3B1 r3 portable %s live gai
   })
   try {
     expect(await controller.start(snapshot().transport)).toBe("started")
-    const apply: (edit: LiveProcessorEditIdentity) => Promise<EngineDisposition | undefined> = makeCallback(
-      () => controller.liveProcessorControl, () => true, () => false, async () => { rebuilds++ }, SYNTH_KIND_ID)
+    const apply = createApplyPortableProcessor({
+      liveProcessorControl: () => controller.liveProcessorControl,
+      isPortableBrowserPlaybackPrepared: () => true, isNativePlaybackPrepared: () => false,
+      syncPlaybackBackend: async () => { rebuilds++ }, renderTracks: () => [],
+    })
     const registry = createProcessorEditRegistry(() => 120)
     const allocate = (to: UtilityParamsEnvelope) => targetId === "master"
       ? registry.allocate({ targetId, instanceId: "utility:r2", effect: "master-utility", from: initial, to })
@@ -1574,19 +1561,8 @@ const p1Initial: TrackInstrumentParams = { kind: 'synth', instanceId: 'synth:1',
 const p1Synth = (from: TrackInstrumentParams, update: SynthParamsUpdate): TrackInstrumentParams =>
   from.kind === 'synth' ? { ...from, params: mergeSynthParams(from.params, update) } : from
 const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number; failCompile?: number; initial?: TrackInstrumentParams; assetKeys?: readonly string[]; holdAdoptionCompile?: Promise<void>; holdPrepare?: Promise<void> } = {}) => {
-  const source = await readFile(new URL("../components/Timeline.tsx", import.meta.url), "utf8")
-  const { portable, structural } = extractTimelineBindings(source)
-  const transpile = (code: string) => new Bun.Transpiler({ loader: "ts" }).transformSync(code)
-  const makePortable = new Function("liveProcessorControl", "isPortableBrowserPlaybackPrepared", "isNativePlaybackPrepared", "syncPlaybackBackend", "renderTracks", "SYNTH_KIND_ID",
-    transpile(`return ({ ${portable} }).applyPortableProcessor;`))
-  const makeStructural = new Function("deps", transpile(`
-    const { mountedProjectGeneration, awaitPlaybackPreparation, preparedInstrument, isStructuralRebuildInProgress,
-      isPreparingPlayback, isPlaying, isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared,
-      syncPlaybackBackend, renderTracks, captureStructuralPlaybackIntent, notify } = deps;
-    let instrumentPlaybackChangeTail = Promise.resolve();
-    return ({ ${structural} }).onStructuralPlaybackChange;`))
   let projected: TrackInstrumentParams = options.initial ?? p1Initial, revision = 1, rebuilds = 0
-  const calls: string[] = [], batches: Array<readonly unknown[]> = [], notes: string[] = [], faults: string[] = []
+  const calls: string[] = [], batches: Array<readonly unknown[]> = [], faults: string[] = []
   const graphs: Parameters<PortableWasmPlaybackSession["prepareGraph"]>[0][] = []
   const snapshot = () => {
     const base = compilation()
@@ -1641,16 +1617,18 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
     revision++
     expect(await controller.rebuildPrepared(snapshot().transport)).toBe('started')
   }
-  const apply: (edit: LiveProcessorEditIdentity) => Promise<EngineDisposition | undefined> = makePortable(
-    () => controller.liveProcessorControl, () => controller.isPrepared(), () => false, rebuild, () => [track], SYNTH_KIND_ID)
-  const announce: (targetId: string, instrument: TrackInstrumentParams | undefined) => Promise<void> = makeStructural({
+  const apply = createApplyPortableProcessor({
+    liveProcessorControl: () => controller.liveProcessorControl, isPortableBrowserPlaybackPrepared: () => controller.isPrepared(),
+    isNativePlaybackPrepared: () => false, syncPlaybackBackend: rebuild, renderTracks: () => [track],
+  })
+  const announce = createInstrumentPlaybackChange({
     mountedProjectGeneration: () => 0, awaitPlaybackPreparation: async () => {},
     preparedInstrument: (targetId: string) => controller.preparedInstrument(targetId),
     isStructuralRebuildInProgress: () => false, isPreparingPlayback: () => controller.isPreparing(),
     isPlaying: () => true, isNativePlaybackPrepared: () => false,
     isPortableBrowserPlaybackPrepared: () => controller.isPrepared(),
     syncPlaybackBackend: rebuild, renderTracks: () => [track],
-    captureStructuralPlaybackIntent: () => ({}), notify: (title: string, message: string) => { notes.push(`${title}: ${message}`) },
+    captureStructuralPlaybackIntent: () => ({ resumePlayback: false, playheadSec: 0 }),
   })
   const registry = createProcessorEditRegistry(() => 120)
   // The persisted adapter projects each written value before its edit reaches playback.
@@ -1674,7 +1652,7 @@ const p1Fixture = async (options: { failBatches?: boolean; failPrepare?: number;
   }
   const structureOf = (instrument: TrackInstrumentParams) =>
     instrument.kind === 'synth' ? nativeSynthStructureKey(compilePortableSynthState(instrument.params)) : undefined
-  return { controller, apply, announce, edit, allocate, flush, setProjected: (instrument: TrackInstrumentParams) => { projected = instrument }, batches, graphs, notes, faults, rebuilds: () => rebuilds, sessionStructure, structureOf,
+  return { controller, apply, announce, edit, allocate, flush, setProjected: (instrument: TrackInstrumentParams) => { projected = instrument }, batches, graphs, faults, rebuilds: () => rebuilds, sessionStructure, structureOf,
     report, refused: () => refused, settled: () => settled, registered: () => registered }
 }
 
@@ -1699,7 +1677,7 @@ test.each<[string, SynthParamsUpdate]>([
     expect(await f.apply(f.edit(next))).toBe('applied')
     await f.announce('synth', next)
     expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
-    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes }).toEqual({ rebuilds: 0, graphs: 2, notes: [] })
+    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length }).toEqual({ rebuilds: 0, graphs: 2 })
     expect(f.sessionStructure()).toBe(f.structureOf(next))
   } finally { f.controller.dispose() }
 })
@@ -1719,8 +1697,8 @@ test('P1 a live Synth drag is heard once per frame and its release does not rebu
       .toEqual({ results: Array(20).fill('applied'), frameBatches: Array(20).fill(1), rebuilds: 0 })
     expect(await f.apply(f.edit(current))).toBe('applied')
     await f.announce('synth', current)
-    expect({ batches: f.batches.length, rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes })
-      .toEqual({ batches: 21, rebuilds: 0, graphs: 1, notes: [] })
+    expect({ batches: f.batches.length, rebuilds: f.rebuilds(), graphs: f.graphs.length })
+      .toEqual({ batches: 21, rebuilds: 0, graphs: 1 })
     expect(f.controller.preparedInstrument('synth')).toEqual(current)
   } finally { f.controller.dispose() }
 })
@@ -1738,7 +1716,7 @@ test('P1 live then non-live Synth edits in one gesture keep the last live state 
     expect(await f.apply(f.edit(after))).toBe('applied')
     await f.announce('synth', after)
     expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
-    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes }).toEqual({ rebuilds: 0, graphs: 2, notes: [] })
+    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length }).toEqual({ rebuilds: 0, graphs: 2 })
     expect(f.sessionStructure()).toBe(f.structureOf(after))
     expect(f.controller.preparedInstrument('synth')).toEqual(after)
   } finally { f.controller.dispose() }
@@ -1757,7 +1735,7 @@ test.each<[string, TrackInstrumentParams, TrackInstrumentParams]>([
     await f.announce('synth', next)
     f.setProjected(next)
     expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
-    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes }).toEqual({ rebuilds: 0, graphs: 2, notes: [] })
+    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length }).toEqual({ rebuilds: 0, graphs: 2 })
     expect(f.controller.preparedInstrument('synth')).toEqual(next)
   } finally { f.controller.dispose() }
 })
@@ -1783,8 +1761,8 @@ test('P1 a Sampler zone edit and a sample swap with real buffers are adopted on 
       f.setProjected(next)
       results.push(await f.controller.adoptSchedule(noLoop))
     }
-    expect({ results, rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes, registered: f.registered() })
-      .toEqual({ results: ['adopted', 'adopted', 'adopted'], rebuilds: 0, graphs: 4, notes: [], registered: ['asset-a', 'asset-b'] })
+    expect({ results, rebuilds: f.rebuilds(), graphs: f.graphs.length, registered: f.registered() })
+      .toEqual({ results: ['adopted', 'adopted', 'adopted'], rebuilds: 0, graphs: 4, registered: ['asset-a', 'asset-b'] })
     expect(f.controller.preparedInstrument('synth')).toEqual(steps[2])
   } finally { f.controller.dispose() }
 })
@@ -1796,7 +1774,7 @@ test('P1 a failed adoption of an instrument edit keeps the playing graph, never 
     expect(await f.apply(f.edit(next))).toBe('applied')
     await f.announce('synth', next)
     expect(await f.controller.adoptSchedule(noLoop)).toBe('failed')
-    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes }).toEqual({ rebuilds: 0, graphs: 1, notes: [] })
+    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length }).toEqual({ rebuilds: 0, graphs: 1 })
     expect(f.controller.isActive()).toBeTrue()
     expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
     expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length }).toEqual({ rebuilds: 0, graphs: 2 })
@@ -1811,7 +1789,7 @@ test('M4 an instrument compile that throws keeps the playing graph, never rebuil
     expect(await f.apply(f.edit(next))).toBe('applied')
     await f.announce('synth', next)
     expect(await f.controller.adoptSchedule(noLoop)).toBe('failed')
-    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length, notes: f.notes }).toEqual({ rebuilds: 0, graphs: 1, notes: [] })
+    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length }).toEqual({ rebuilds: 0, graphs: 1 })
     expect(f.controller.isActive()).toBeTrue()
     expect(await f.controller.adoptSchedule(noLoop)).toBe('adopted')
     expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length }).toEqual({ rebuilds: 0, graphs: 2 })
@@ -1828,7 +1806,7 @@ test('UD 8 a transient staging failure is retried at the next block boundary and
     expect(f.graphs.length).toBe(1)
     await f.report()
     await Bun.sleep(0)
-    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length, settled: f.settled(), notes: f.notes }).toEqual({ rebuilds: 0, graphs: 2, settled: 1, notes: [] })
+    expect({ rebuilds: f.rebuilds(), graphs: f.graphs.length, settled: f.settled() }).toEqual({ rebuilds: 0, graphs: 2, settled: 1 })
     expect(f.sessionStructure()).toBe(f.structureOf(next))
   } finally { f.controller.dispose() }
 })
@@ -1846,8 +1824,8 @@ test('UD 8 a persistent staging failure stops after 8 resubmits with a defect lo
     // Waits grow as min(2^r, 16(r+1)) reports: 1, 2, 4, ... 128 over eight resubmits.
     await f.report(300)
     await Bun.sleep(0)
-    expect({ refused: f.refused(), graphs: f.graphs.length, rebuilds: f.rebuilds(), notes: f.notes, active: f.controller.isActive() })
-      .toEqual({ refused: 9, graphs: 1, rebuilds: 0, notes: [], active: true })
+    expect({ refused: f.refused(), graphs: f.graphs.length, rebuilds: f.rebuilds(), active: f.controller.isActive() })
+      .toEqual({ refused: 9, graphs: 1, rebuilds: 0, active: true })
     expect(logged.filter(line => line.startsWith('warn')).length).toBe(8)
     expect(logged.filter(line => line.startsWith('error')).length).toBe(1)
     // The exhausted retry is also the user's notice: the edit is not playing.

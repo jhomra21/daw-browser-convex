@@ -1,6 +1,5 @@
 import { afterEach, beforeAll, expect, test } from "bun:test";
 import "fake-indexeddb/auto";
-import { readFile } from "node:fs/promises";
 import { batch, createComponent, createRoot, createSignal, untrack } from "solid-js";
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
@@ -12,7 +11,6 @@ import { createEffectsPanelController, hydrateInstrumentBuffers, type EffectsPan
 import { deleteLocalEffect, getLocalEffect, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects";
 import { ParameterGestureHolder } from "~/components/timeline/parameter-gesture-owner";
 import type { Track } from "@daw-browser/timeline-core/types";
-import type { ExportEffectsProjection } from "~/lib/export/export-effect-rows";
 import { compileLivePlaybackSnapshot } from "~/lib/live-playback-snapshot";
 import type { LocalAssetBytesResult } from "~/lib/local-assets";
 import { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
@@ -24,7 +22,7 @@ import { createSampledInstrumentRegionBudget } from "~/lib/sampled-instrument-re
 import { sampledInstrumentRegion, sampledInstrumentRegionIdentity, type SampledInstrumentBuffer } from "@daw-browser/audio-engine/sampled-instrument-region";
 import { createGranularRuntime, type GranularWorkletControlMessage } from "../../packages/audio-engine/src/granular-runtime";
 import { createPendingWorkOwner } from "~/hooks/useEffectsPanelAudioSync";
-import { extractTimelineBindings } from "~/lib/timeline-source-test-support";
+import { awaitCompileInstruments, compileEffectsProjection, createInstrumentPlaybackChange } from "~/components/timeline/timeline-playback-wiring";
 import { createAudioPcmSourceDescriptor } from "@daw-browser/audio-engine/media-pages";
 import { createNativeTimelinePageManager } from "~/lib/desktop/native-timeline-page-manager";
 import { createFxTestAudio } from "../../packages/audio-engine/test-support/fx-runtime-test-audio";
@@ -1687,16 +1685,16 @@ test.each([NaN, Infinity, -Infinity])("3B1 r5 sampler loader rejects non-finite 
 });
 
 
+// The start of the Timeline's live playback compile, on the effects snapshot the panel published.
+const compileProjection = async (snapshot: () => EffectsPanelExportSnapshot) => {
+  const effects = snapshot();
+  const readiness = await awaitCompileInstruments(effects, undefined);
+  const projection = compileEffectsProjection(effects, readiness);
+  if (!projection) throw new Error("Missing compiled effects projection");
+  return { projection, readiness };
+};
+
 test.each(["sampler-row", "granular-row", "sampler-draft"])("3B1 r2b compile waits for held %s decode without draining the panel owner", async (schedule) => {
-  const source = await readFile(new URL("../components/Timeline.tsx", import.meta.url), "utf8");
-  const { compilePrefix: prefix } = extractTimelineBindings(source);
-  const compileProjection: (snapshot: () => EffectsPanelExportSnapshot) => Promise<{
-    projection: ExportEffectsProjection;
-    readiness: Awaited<ReturnType<EffectsPanelExportSnapshot["awaitInstrumentReadiness"]>>;
-  }> =
-    new Function(new Bun.Transpiler({ loader: "ts" }).transformSync(
-      `return async (effectsExportSnapshot, context) => { ${prefix} return { projection: effectsProjection, readiness: instrumentReadiness }; }`,
-    ))();
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
   const projectId = `project:3b1-r2b-${crypto.randomUUID()}`;
@@ -1793,22 +1791,6 @@ test.each(["sampler-row", "granular-row", "sampler-draft"])("3B1 r2b compile wai
 
 test.each(["sampler", "granular", "sampler-change"])("3B1 r3 queued %s successor loads without an early engine install", async (schedule) => {
   const kind = schedule === "granular" ? "granular" : "sampler";
-  const source = await readFile(new URL("../components/Timeline.tsx", import.meta.url), "utf8");
-  const { compilePrefix: prefix, structural: handler } = extractTimelineBindings(source);
-  const compileProjection: (snapshot: () => EffectsPanelExportSnapshot) => Promise<{
-    projection: ExportEffectsProjection;
-    readiness: Awaited<ReturnType<EffectsPanelExportSnapshot["awaitInstrumentReadiness"]>>;
-  }> =
-    new Function(new Bun.Transpiler({ loader: "ts" }).transformSync(
-      `return async (effectsExportSnapshot, context) => { ${prefix} return { projection: effectsProjection, readiness: instrumentReadiness }; }`,
-    ))();
-  const makeCallback = new Function("deps", new Bun.Transpiler({ loader: "ts" }).transformSync(`
-    const { mountedProjectGeneration, awaitPlaybackPreparation, preparedInstrument, isStructuralRebuildInProgress,
-      isPreparingPlayback, isPlaying, isNativePlaybackPrepared, isPortableBrowserPlaybackPrepared,
-      syncPlaybackBackend, renderTracks, captureStructuralPlaybackIntent, notify } = deps;
-    let instrumentPlaybackChangeTail = Promise.resolve();
-    return ({ ${handler} }).onStructuralPlaybackChange;
-  `));
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
   const projectId = `project:3b1-r3-successor-${crypto.randomUUID()}`;
@@ -1836,14 +1818,14 @@ test.each(["sampler", "granular", "sampler-change"])("3B1 r3 queued %s successor
   const client = new QueryClient();
   const announced = Promise.withResolvers<void>(), preparation = Promise.withResolvers<void>();
   let armed = false, dispose = () => {};
-  const structural: (id: string, instrument: TrackInstrumentParams | undefined) => Promise<void> = makeCallback({
+  const structural = createInstrumentPlaybackChange({
     mountedProjectGeneration: () => 0,
     awaitPlaybackPreparation: async () => { if (armed) { announced.resolve(); await preparation.promise; } },
     preparedInstrument: () => undefined, isStructuralRebuildInProgress: () => false,
     isPreparingPlayback: () => armed, isPlaying: () => false,
     isNativePlaybackPrepared: () => false, isPortableBrowserPlaybackPrepared: () => false,
     syncPlaybackBackend: async () => {}, renderTracks: () => [track],
-    captureStructuralPlaybackIntent: () => ({}), notify: () => {},
+    captureStructuralPlaybackIntent: () => ({ resumePlayback: false, playheadSec: 0 }),
   });
   let panel: EffectsPanelController | undefined;
   let snapshot: EffectsPanelExportSnapshot | undefined;

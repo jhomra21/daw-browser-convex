@@ -1206,6 +1206,16 @@ export const nativeDeliveryFailureKind = (thrown: unknown) => {
   return thrown === undefined || thrown instanceof NativeAudioHostNotSentError ? "unavailable" as const : "unconfirmed" as const
 }
 
+/** The renderer reply for a failed native session command. `thrown` is a catch-clause value; omit it when nothing was sent. */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- the argument is a catch-clause value, classified here at the boundary
+export const nativeSessionFailure = (thrown?: unknown) => ({
+  ok: false as const,
+  kind: nativeDeliveryFailureKind(thrown),
+  error: thrown instanceof NativeAudioHostCommandError
+    ? `The native audio session rejected ${thrown.requestName} request ${thrown.requestType}.${thrown.detail === undefined ? "" : ` ${thrown.detail}`}`
+    : "The native audio session is unavailable.",
+})
+
 /** The renderer reply for a patch status. A u64 token can exceed Number.MAX_SAFE_INTEGER, so it crosses IPC as decimal text. */
 export const nativeProcessorPatchReply = (status: NativeProcessorPatchStatus) => {
   if (status.outcome === "applied") return { ok: true as const, outcome: "applied" as const }

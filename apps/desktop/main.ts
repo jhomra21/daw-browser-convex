@@ -138,9 +138,8 @@ import {
   createNativeAudioHostSupervisor,
   renderNativeOffline,
   probeNativeAudioOutputDevice,
-  NativeAudioHostCommandError,
-  nativeDeliveryFailureKind,
   nativeProcessorPatchReply,
+  nativeSessionFailure,
   nativeVstEditorOwnershipProbe,
   packagedAudioHostPath,
   type NativeVstEditorAnchor,
@@ -1387,17 +1386,6 @@ const registerIpc = () => {
       return { ok: false, error: "The native audio host is unavailable." }
     }
   })
-  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- the argument is a catch-clause value, classified at the boundary
-  const nativeSessionFailure = (thrown?: unknown) => {
-    const error = thrown instanceof NativeAudioHostCommandError ? thrown : undefined
-    return {
-      ok: false as const,
-      kind: nativeDeliveryFailureKind(thrown),
-      error: error
-        ? `The native audio session rejected ${error.requestName} request ${error.requestType}.${error.detail === undefined ? "" : ` ${error.detail}`}`
-        : "The native audio session is unavailable.",
-    }
-  }
   const sessionSupervisorFor = (event: Electron.IpcMainInvokeEvent) => (
     audioHostAllowed(event) ? audioHostSupervisor : undefined
   )
@@ -1837,7 +1825,6 @@ const registerIpc = () => {
             : operation === "rollback" ? await supervisor.rollbackGraphRevision(revision)
             : await supervisor.retireGraphRevision(revision)
         }
-        // The ledger takes what the published graph staged as active, and drops what a rollback left staged.
         if (result.status === "published") attachmentLedger.published()
         if (operation === "rollback") attachmentLedger.rolledBack()
         const current = supervisor.status()

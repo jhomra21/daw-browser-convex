@@ -4163,8 +4163,9 @@ export const createNativePlaybackController = (input: {
           scheduledRetention(previousGraph, graph, { before: previous, after: snapshot },
             new Set(addedInstruments.map(({ nodeId }) => nodeId))))
         // A paused edit takes its tempo from the transport command that re-primes the schedule.
-        if (!paused && (snapshot.bpm !== previous.bpm
-          || JSON.stringify(snapshot.timeSignature) !== JSON.stringify(previous.timeSignature))) {
+        const transportRestated = !paused && (snapshot.bpm !== previous.bpm
+          || JSON.stringify(snapshot.timeSignature) !== JSON.stringify(previous.timeSignature))
+        if (transportRestated) {
           // The existing transport command stages context against the prepared
           // bank when it reuses the running transition. Native applies it only
           // after successful publication on that exact callback seam.
@@ -4255,8 +4256,12 @@ export const createNativePlaybackController = (input: {
         // spends no resubmit, so the rebase growth and budget start from zero; two attempts bound it. A hydration longer
         // than the provisional lead has native past the seam, which Inspect reports as rebase-required: that seam binds
         // later, to the same lead, instead of publishing at a seam that was already reached.
+        // With no await since the prepare reply (the transport restatement, the asset hydration and the states call are the
+        // awaits), an inspect would read no fresher progress than that reply carries: the first attempt reads the reply.
+        const replyIsLatest = !transportRestated && addedAssets.length === 0 && addedInstruments.length === 0
         for (let attempt = 0; attempt < 2; attempt++) {
-          const fresh = await inspect(binding, true, hydrationMark && (() => hydrationMark("bind-progress-reply")))
+          const fresh = attempt === 0 && replyIsLatest ? ready
+            : await inspect(binding, true, hydrationMark && (() => hydrationMark("bind-progress-reply")))
           hydrationMark?.("bind-progress-read")
           if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
           if (!fresh?.ok || (fresh.revision.status !== "prepared" && fresh.revision.status !== "rebase-required")

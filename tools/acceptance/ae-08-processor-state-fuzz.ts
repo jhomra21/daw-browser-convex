@@ -275,9 +275,9 @@ async function runSeed(seed: number, plant: Defect | undefined, trace?: SeedTrac
     if (!action) throw new Error(`No reply ${name}`)
     await act(action)
   }
-  // The seam is bound once after Prepare: a fresh Inspect, then a Publish native answers by rebinding, which does not arm it.
+  // The seam is bound once after Prepare, from the Prepare reply's progress (nothing is awaited between them in these
+  // scenarios, so there is no Inspect): a Publish native answers by rebinding, which does not arm it.
   const bindSeam = async () => {
-    await executeNamed("inspect"); await deliverNamed("inspect")
     await executeNamed("publish"); await deliverNamed("publish")
   }
   if (replay) {

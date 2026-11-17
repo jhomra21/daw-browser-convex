@@ -1086,7 +1086,7 @@ const step7LatencyFixture = async (attachment = false, sampleRateHz = 48_000, ma
   const fixture = createBridge("runtime-revision-progress", false, false, "failed", sampleRateHz, false, maximumFrames)
   let keep = new Set<string>()
   const from = { ...createDefaultSpectralParams(), fftSize: 512 } satisfies ReturnType<typeof createDefaultSpectralParams>
-  const snapshot: LivePlaybackSnapshotInput = { ...input(),
+  let snapshot: LivePlaybackSnapshotInput = { ...input(),
     tracks: [sourceTrack(), { ...sourceTrack(), id: "parallel", clips: [] }],
     renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: { track: { instances: [
       { id: "spectral:1", kind: "spectral", params: { version: 1, state: from } },
@@ -1114,7 +1114,13 @@ const step7LatencyFixture = async (attachment = false, sampleRateHz = 48_000, ma
     running: true, scheduleComplete: false, instrumentCredits: 256, sourceCredits: 256, automationCredits: 256,
     latencyCompletionGeneration: completion,
   })
-  return { fixture, controller, fft, update, progress, close: async () => { fixture.emitLoss("STEP7 cleanup"); await controller.dispose() } }
+  const addInstrument = () => {
+    snapshot = { ...snapshot, renderState: { ...snapshot.renderState, fx: { ...snapshot.renderState.fx,
+      trackFx: { ...snapshot.renderState.fx.trackFx, track: { instances: snapshot.renderState.fx.trackFx?.track?.instances ?? [],
+        instrument: { kind: "synth", instanceId: "synth:2", params: createDefaultSynthParams() } } } } } }
+  }
+  return { fixture, controller, fft, update, progress, addInstrument,
+    close: async () => { fixture.emitLoss("STEP7 cleanup"); await controller.dispose() } }
 }
 const step7KeptNodes = (bytes: Uint8Array) => {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
@@ -16805,19 +16811,19 @@ describe("LAT1 late seam binding", () => {
     step7Watch(h.f.controller.adoptSchedule(migrationIntent("LAT1-1")))
     try {
       await step7Turns()
-      expect(h.events.map(event => event.kind).slice(0, 3)).toEqual(["prepare", "inspect", "publish"])
+      expect(h.events.map(event => event.kind).slice(0, 2)).toEqual(["prepare", "publish"])
       expect(h.publishes().map(event => [event.frame, event.armed])).toEqual([[h.events[0]?.frame, true]])
     } finally { await h.f.close() }
   })
 
-  test("LAT1 4, 8, 13: the seam binds to fresh native progress plus 3 blocks, after hydration and before any staging", async () => {
+  test("LAT1 4, 8, 13: with nothing awaited after the prepare reply, the seam binds to that reply's progress plus 3 blocks with no inspect, before any staging", async () => {
     const h = await lat1Run()
     step7Watch(h.f.controller.adoptSchedule(migrationIntent("LAT1-4")))
     try {
       await step7Turns()
       const prepare = h.events[0]
       const bind = h.publishes()[0]
-      expect(h.events.map(event => event.kind).slice(0, 3)).toEqual(["prepare", "inspect", "publish"])
+      expect(h.events.map(event => event.kind).slice(0, 2)).toEqual(["prepare", "publish"])
       expect(bind?.armed).toBe(false)
       const bound = bind?.frame ?? 0n
       expect(bound).toBe((prepare?.progress ?? 0n) + 3n * 512n)
@@ -16836,7 +16842,7 @@ describe("LAT1 late seam binding", () => {
     try {
       await step7Turns()
       const progress = h.events[0]?.progress ?? 0n
-      expect(h.events.map(event => event.kind).slice(0, 5)).toEqual(["prepare", "inspect", "publish", "inspect", "publish"])
+      expect(h.events.map(event => event.kind).slice(0, 4)).toEqual(["prepare", "publish", "inspect", "publish"])
       expect(h.publishes().map(event => [event.frame, event.armed])).toEqual([
         [progress + 3n * 512n, false], [progress + 13n * 512n, false], [progress + 13n * 512n, true]])
       expect(answer.answers).toBe(0)
@@ -16850,8 +16856,19 @@ describe("LAT1 late seam binding", () => {
     step7Watch(h.f.controller.adoptSchedule(migrationIntent("LAT1-2-confirm")))
     try {
       await step7Turns()
-      expect(h.events.map(event => event.kind).slice(0, 3)).toEqual(["prepare", "inspect", "publish"])
+      expect(h.events.map(event => event.kind).slice(0, 2)).toEqual(["prepare", "publish"])
       expect(h.publishes().map(event => [event.frame, event.armed])).toEqual([[h.events[0]?.frame, true]])
+    } finally { await h.f.close() }
+  })
+
+  test("LAT1 4: a publication that adds an instrument reads native progress with an inspect after the states call", async () => {
+    const h = await lat1Run()
+    h.f.addInstrument()
+    step7Watch(h.f.controller.adoptSchedule(migrationIntent("LAT1-4-instrument")))
+    try {
+      await step7Turns()
+      expect(h.events.map(event => event.kind).slice(0, 3)).toEqual(["prepare", "inspect", "publish"])
+      expect(h.publishes()[0]?.frame).toBe((h.events[0]?.progress ?? 0n) + 3n * 512n)
     } finally { await h.f.close() }
   })
 
@@ -16887,6 +16904,8 @@ describe("LAT1 late seam binding", () => {
     for (const { name: cancel, retained, run } of lat1Cancels)
       test(`LAT1 3: a ${cancel} while the bind's ${hold} reply is in flight ends the publication with nothing armed`, async () => {
         const h = await lat1Run()
+        // The first bind reads the prepare reply; a refused bind makes the second attempt inspect.
+        if (hold === "inspect") h.native.refuseBinds = 1
         const gate = Promise.withResolvers<void>()
         const reached = Promise.withResolvers<void>()
         let holding = true
@@ -16925,7 +16944,7 @@ describe("LAT1 late seam binding", () => {
       await step7Turns()
       const progress = h.events[0]?.progress ?? 0n
       const provisional = h.events[0]?.frame ?? 0n
-      expect(h.events.map(event => event.kind).slice(0, 5)).toEqual(["prepare", "inspect", "publish", "inspect", "publish"])
+      expect(h.events.map(event => event.kind).slice(0, 4)).toEqual(["prepare", "publish", "inspect", "publish"])
       expect(h.publishes().map(event => [event.frame, event.armed])).toEqual([
         [progress + 3n * 512n, false], [progress + 4n * 512n, false], [provisional, true]])
       expect(rollbacks(h.f)).toBe(0)

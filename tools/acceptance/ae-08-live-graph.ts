@@ -860,7 +860,8 @@ const main = async () => {
         }
         campaign.push({ launch: index + 1, seconds: (Date.now() - startedAt) / 1000, capturedSeconds: captured, ...(failure && { failure }) })
         await writeFile(path.join(out, "phase9-campaign.json"), JSON.stringify({ phase: 9, rows: campaign }, null, 2))
-        if (failure) break
+        // The certifying run ends at its first failed launch; the extended one is long enough to be worth finishing, and its verdict lists every failure.
+        if (failure && requested.preset === "cert") break
       }
       await verifyPackagedArtifacts(resources, artifacts)
       await writeFile(path.join(out, "phase9-timings.json"), JSON.stringify(measuredTimings(measuredRows,

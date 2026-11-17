@@ -20,7 +20,6 @@ import { preflightNativeVst3Worker } from "./vst3-preflight"
 type Attachment = NativeExternalAttachmentPlan["attachments"][number]
 export type PreflightAttachment = ResolvedVst3Attachment & { stateRevision: number }
 type CapturedVst3State = { bytes: Uint8Array; sha256: string }
-type ReleaseResult = { status: "parked" | "refused" }
 
 export type NativeVst3CoordinatorFailureCode =
   | "invalid-plan"
@@ -305,25 +304,17 @@ export const createNativeVst3AttachmentLedger = (
     // the detach no longer holds the instance (a worker that faulted or failed to spawn before it joined is retired when
     // the next revision publishes, while the plug-in's fault is reported on its device): nothing is parked and a
     // restoring plan loads it anew.
-    release: async (instanceId: string, transactionToken?: string): Promise<ReleaseResult | undefined> => {
+    release: async (instanceId: string, transactionToken?: string) => {
       const plugin = active.get(instanceId)?.plugin
       if (plugin === undefined) return
-      const result = await host.detachVst(instanceId, transactionToken)
-      if (result.status === "refused") {
-        active.delete(instanceId)
-        liveCaptures.delete(instanceId)
-        return { status: "refused" }
-      }
+      const { status } = await host.detachVst(instanceId, transactionToken)
       active.delete(instanceId)
       liveCaptures.delete(instanceId)
+      if (status === "refused") return
+      // Deleted first so the Map's insertion order stays the parking order the eviction below relies on.
       parked.delete(instanceId)
       parked.set(instanceId, { plugin, at: now() })
-      const excess = parked.size - parkingLimits.maximumParkedInstances
-      if (excess > 0) {
-        const oldest = [...parked.entries()].sort((left, right) => left[1].at - right[1].at).slice(0, excess)
-        for (const [oldestId] of oldest) parked.delete(oldestId)
-      }
-      return { status: "parked" }
+      for (const oldest of [...parked.keys()].slice(0, Math.max(0, parked.size - parkingLimits.maximumParkedInstances))) parked.delete(oldest)
     },
     // The revision is live: staged instances are active.
     published() {

@@ -673,8 +673,8 @@ test("the ledger uses parking limits reported by the native host", async () => {
   ledger.published()
   calls.length = 0
   clock.now = 1_000
-  await run([second, ...extras], { sampleRateHz: 32_000 })
-  expect(calls.filter((call) => call.startsWith("preflight:"))).toEqual([`preflight:${extras[0]!.instanceId}`])
+  await run([second, extras[2]!], { sampleRateHz: 32_000 })
+  expect(calls.filter((call) => call.startsWith("preflight:"))).toEqual([`preflight:${extras[2]!.instanceId}`])
 })
 
 test("a second default insert of a plug-in reuses the verdict of the first", async () => {

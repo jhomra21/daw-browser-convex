@@ -8,6 +8,7 @@ import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 import type { SampledInstrumentRegionBudget } from '~/lib/sampled-instrument-region-budget'
 import type { NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
 import type { NativePlaybackFault } from '~/lib/desktop/native-playback-controller'
+import type { PlaybackAcceptanceObserver } from '~/lib/desktop/acceptance-observer'
 
 type Options = {
   audioEngine: AudioEngine
@@ -37,6 +38,7 @@ type Options = {
     reportFault?: (fault: NativePlaybackFault, options?: { retainPlayback: true }) => void
     instrumentBudget?: SampledInstrumentRegionBudget
     onInstrumentPreparation?: (trackIds: readonly string[], status: NativeInstrumentPreparation) => void
+    acceptance?: PlaybackAcceptanceObserver
   }
   portableBrowserPlayback?: {
     projectGeneration?: Accessor<number>

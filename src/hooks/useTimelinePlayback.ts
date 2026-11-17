@@ -14,6 +14,7 @@ import {
 import { createSpectrumFrameDelivery } from './spectrum-frame-delivery'
 import { rejectedLiveProcessorControl } from '~/lib/live-processor-control'
 import type { DesktopBridge } from '~/types/desktop-bridge'
+import type { PlaybackAcceptanceObserver } from '~/lib/desktop/acceptance-observer'
 import type { AudioPcmSourceResolver } from '~/lib/audio-pcm-source-resolver'
 
 type LoopOptions = {
@@ -46,6 +47,7 @@ type NativePlaybackOptions = {
   playbackInputs?: Accessor<object>
   getDesiredProcessorState?: Parameters<typeof createNativePlaybackController>[0]["getDesiredProcessorState"]
   getProcessorTarget?: Parameters<typeof createNativePlaybackController>[0]["getProcessorTarget"]
+  acceptance?: PlaybackAcceptanceObserver
 }
 
 type PortableBrowserPlaybackOptions = {
@@ -178,7 +180,8 @@ export function useTimelinePlayback(
     ? desktopAudioHostBridge
     : undefined
   const requiresNativeAudio = nativeOptions?.requiresNativeAudio === true
-  const externalNativeSession = globalThis.window?.dawDesktop?.acceptanceExternalNativeSession === true
+  const acceptance = nativeOptions?.acceptance
+  const externalNativeSession = acceptance?.ownsNativeSession === false
   const hasAudioLifecycle = audioHostBridge !== undefined
     && audioHostBridge.onLifecycle !== undefined
     && audioHostBridge.getLifecycle !== undefined
@@ -294,7 +297,11 @@ export function useTimelinePlayback(
     getProcessorTarget: nativeOptions?.getProcessorTarget,
     resolveSource: nativeOptions?.resolveAudioSource,
     reportUnavailable: requiresNativeAudio,
-    externalSessionOwner: externalNativeSession,
+    observer: acceptance && {
+      adoption: acceptance.adoption,
+      mark: acceptance.mark,
+      externalSessionOwner: externalNativeSession,
+    },
     instrumentBudget: nativeOptions?.instrumentBudget,
     onInstrumentPreparation: nativeOptions?.onInstrumentPreparation,
     fingerprintSnapshot: loopOptions?.getTracks ? (snapshot) => readScheduleSnapshotFingerprint(snapshot) : undefined,

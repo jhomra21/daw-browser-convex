@@ -29,7 +29,7 @@ import { parseExternalAutomationParameterId, valueAtAutomationTime } from "@daw-
 import type { LivePlaybackSnapshot } from "~/lib/live-playback-snapshot"
 import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 import { maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
-import { ae08Mark, type Ae08RendererMark } from "./ae08-marks"
+import type { PlaybackAcceptanceObserver } from "./acceptance-observer"
 import type { NativeTimelinePageManager } from "./native-timeline-page-manager"
 import { NativePlaybackAbortError } from "./native-playback-abort"
 import { nativeMappedSourceCoverage } from "~/lib/native-source-coverage"
@@ -80,7 +80,7 @@ export type NativeScheduleCoordinator = {
    * Aborting `signal` detaches from the preparation at once; page decodes already running stay shared with the page manager.
    */
   prepareCandidatePages: (snapshot: LivePlaybackSnapshot, graph: AudioCoreGraphSnapshot, fromFrame: number, seamFrame: number,
-    resources: NativeCandidateResources, signal: AbortSignal, mark?: (name: Ae08RendererMark) => void) => Promise<void>
+    resources: NativeCandidateResources, signal: AbortSignal, mark?: (name: string) => void) => Promise<void>
   prime: (frame: number, transactionToken?: string) => Promise<void>
   onProgress: (progress: NativeScheduleProgress) => void
   waitForAccepted: (minimumFrame: number) => Promise<void>
@@ -353,7 +353,7 @@ export const scheduleEndFrameFor = (
 const capacityError = (message: string) => new Error(`Native schedule capacity exceeded: ${message}`)
 
 type PagePreparingCoordinator = NativeScheduleCoordinator & {
-  preparePages: (fromFrame: number, seamFrame: number, mark?: (name: Ae08RendererMark) => void) => Promise<void>
+  preparePages: (fromFrame: number, seamFrame: number, mark?: (name: string) => void) => Promise<void>
 }
 
 const buildNativeScheduleCoordinator = (input: {
@@ -369,6 +369,7 @@ const buildNativeScheduleCoordinator = (input: {
   preparedStretchAssets?: readonly (PortablePreparedStretchAsset | PreparedStretchProjectionMetadata)[]
   nativePcmChunkDescriptors?: readonly NativePcmChunkDescriptor[]
   pageManager?: NativeSchedulePageManager
+  mark?: PlaybackAcceptanceObserver["mark"]
   projectGeneration?: number
   startFrame: number
   preparedPublicationFrame?: number
@@ -1035,11 +1036,11 @@ const buildNativeScheduleCoordinator = (input: {
 
   const compileRefillWindow = (start: number, end: number) => {
     const key = () => `${start}-${end}`
-    ae08Mark("refill-compile-start", key)
+    input.mark?.("refill-compile-start", key)
     try {
       return compileDiagnosedWindow(start, end)
     } finally {
-      ae08Mark("refill-compile-end", key)
+      input.mark?.("refill-compile-end", key)
     }
   }
 

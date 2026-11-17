@@ -34,7 +34,7 @@ import {
   createDirectControlInvoker,
   type ControlInvoker,
 } from "@daw-browser/control"
-import { ae08Mark } from "~/lib/desktop/ae08-marks"
+import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer"
 import { getRecordingDiagnostics } from "~/lib/recording/recording-diagnostics"
 import { flushLocalProjectPendingWrites } from "~/lib/local-project-pending-writes"
 import { resetAudioEngine } from "~/lib/audio-engine-singleton"
@@ -353,6 +353,7 @@ export const registerAttachedHostController = (controller: TimelineHostControlle
 }
 
 export const createAttachedHostController = (input: {
+  acceptance?: PlaybackAcceptanceObserver
   projectId: Accessor<string>
   mountedProjectGeneration: Accessor<number>
   isPlaying: Accessor<boolean>
@@ -450,7 +451,7 @@ export const createAttachedHostController = (input: {
       const commit = request_.operation === "control.commit" ? controlCommitRequestSchemaV1.safeParse(request_.input) : undefined
       return commit?.success ? commit.data.idempotencyKey : undefined
     }
-    ae08Mark("control-handler-entry", commitKey)
+    input.acceptance?.mark("control-handler-entry", commitKey)
     if (!request_.trustedActorSubject) {
       return {
         id: request_.id,
@@ -502,10 +503,10 @@ export const createAttachedHostController = (input: {
           mountedProjectGeneration: mountedGeneration,
           signal: request_.signal,
         })
-        ae08Mark("control-reload-before-done", commitKey)
+        input.acceptance?.mark("control-reload-before-done", commitKey)
       }
       const result = await invokeCanonicalControl(invoker, request_.operation, requestInput)
-      ae08Mark("control-commit-done", commitKey)
+      input.acceptance?.mark("control-commit-done", commitKey)
       if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
         return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectError(request_, mountedProjectId) }
       }
@@ -544,7 +545,7 @@ export const createAttachedHostController = (input: {
                 // is reported. A superseded delivery was replaced by a newer value for the same parameter.
                 const results = await Promise.all(deliveries)
                 const refused = results.some((result) => result.delivery === "rejected")
-                ae08Mark(refused ? "control-parameters-undelivered" : "control-parameters-delivered", commitKey)
+                input.acceptance?.mark(refused ? "control-parameters-undelivered" : "control-parameters-delivered", commitKey)
                 if (refused) input.reportUndeliveredNativeVstParameters?.()
                 // The plug-in's live state moved; persist it like any other committed edit.
                 for (const instanceId of new Set(results.filter((result) => result.delivery === "delivered").map((result) => result.instanceId))) {
@@ -554,7 +555,7 @@ export const createAttachedHostController = (input: {
             }
           }
         } catch {
-          ae08Mark("control-parameters-undelivered", commitKey)
+          input.acceptance?.mark("control-parameters-undelivered", commitKey)
           input.reportUndeliveredNativeVstParameters?.()
         }
       }
@@ -573,7 +574,7 @@ export const createAttachedHostController = (input: {
             if (request_.signal.aborted) return { id: request_.id, error: controlUnavailable() }
             return { id: request_.id, error: committedButNotReconciled() }
           }
-          ae08Mark("control-store-emitted", commitKey)
+          input.acceptance?.mark("control-store-emitted", commitKey)
         }
       }
       const rendererProtocolVersion = (

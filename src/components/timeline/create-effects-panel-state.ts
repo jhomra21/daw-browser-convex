@@ -4,6 +4,7 @@ import {
   onCleanup,
   type Accessor,
 } from "solid-js";
+import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import type { ParameterGestureHandle } from "~/components/timeline/parameter-gesture-owner";
 import { createPersistedEffectState } from "~/components/timeline/create-persisted-effect-state";
 import { createLocalEffectsView } from "~/components/timeline/create-local-effects-view";
@@ -68,6 +69,7 @@ export const publishEffects = async (projectId: string, userId: string, operatio
 );
 
 type EffectsPanelContext = {
+  acceptance?: PlaybackAcceptanceObserver;
   audioEngine: Accessor<AudioEngine>;
   projectId: Accessor<string | undefined>;
   userId: Accessor<string | undefined>;
@@ -298,6 +300,7 @@ export function createEffectsPanelInstrumentDevice(
   };
 
   const arpState = createPersistedEffectState<ArpRow, ArpeggiatorParams>({
+    acceptance: context.acceptance,
     audioEngine: context.audioEngine,
     usesLegacyAudioEngine: context.usesLegacyAudioEngine,
     targetId: getTrackTargetId,
@@ -340,6 +343,7 @@ export function createEffectsPanelInstrumentDevice(
   });
 
   const instrumentState = createPersistedEffectState<InstrumentRow, TrackInstrumentParams>({
+    acceptance: context.acceptance,
     audioEngine: context.audioEngine,
     usesLegacyAudioEngine: context.usesLegacyAudioEngine,
     targetId: getTrackTargetId,

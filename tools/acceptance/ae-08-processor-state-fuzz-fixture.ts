@@ -271,7 +271,7 @@ export default function createControllerFixture(
         return { ...lease, release: async () => { stretchLeases.released++; await lease.release() } }
       } }
     } }),
-    bridge, onProcessorDispatch: ({ editId, sequence }) => dispatches.push({ editId, sequence }), getProjectId: () => "fixture-project", getProjectGeneration: () => 1,
+    bridge, observer: { processorDispatch: ({ editId, sequence }) => dispatches.push({ editId, sequence }) }, getProjectId: () => "fixture-project", getProjectGeneration: () => 1,
     fingerprintSnapshot: (snapshot) => {
       const tag = contentTags.get(snapshot)
       return tag === undefined ? `distinct:${++distinctSnapshots}` : `content:${tag}`
@@ -282,7 +282,7 @@ export default function createControllerFixture(
       if (history) observeDesired()
       compileCount++
       compileContexts.push(context?.instrumentOverride?.targetId)
-      compileKeys.push(controller.adoptionWitness().running)
+      compileKeys.push(controller.witness.adoption().running)
       const compiled = compileLivePlaybackSnapshot({ ...snapshot(desired, contextVolume(context?.instrumentOverride?.targetId)),
         processorStateSequence: compilationFloor ?? stateSequence(desired),
         transport: compileLoop ? { ...transportValue, loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } : transportValue })
@@ -332,7 +332,7 @@ export default function createControllerFixture(
       handoffTurns = undefined
       void (async () => {
         for (let turn = 0; turn < turns; turn++) await Promise.resolve()
-        handoffDroppedRunning = controller.adoptionWitness().running !== undefined
+        handoffDroppedRunning = controller.witness.adoption().running !== undefined
         controller.dropAdoptionIntents()
       })()
     }
@@ -582,7 +582,7 @@ export default function createControllerFixture(
     else if (action.kind === "split-render") h.splitRender = action.value !== 0
     else if (action.kind === "compile-floor") compilationFloor = action.value
     else if (action.kind === "capture-ownership") {
-      ownershipWitness = JSON.stringify(controller.adoptionWitness()); expectedPrepareCount = h.counts.get("prepare") ?? 0
+      ownershipWitness = JSON.stringify(controller.witness.adoption()); expectedPrepareCount = h.counts.get("prepare") ?? 0
     }
     else if (action.kind === "compile-loop") compileLoop = action.value !== 0
     else if (action.kind === "compile-unsupported") compileUnsupported = action.value !== 0
@@ -846,7 +846,7 @@ export default function createControllerFixture(
     if (mode === "abort-no-block") {
       checked("I7")
       const outcome = z.object({ status: z.string() }).safeParse(waiters.find((waiter) => waiter.name === "schedule-adoption")?.result)
-      const blocked = controller.adoptionWitness().blocked
+      const blocked = controller.witness.adoption().blocked
       record({ witness: mode, outcome: outcome.success ? outcome.data.status : undefined, blocked })
       if (blocked || !outcome.success || !["adopted", "unchanged"].includes(outcome.data.status))
         fail("I7", `An adoption cancelled by a seek ended ${outcome.success ? outcome.data.status : "unsettled"}${blocked ? " with a refusal on record" : ""}`, "live", "compile-abort-block")
@@ -877,7 +877,7 @@ export default function createControllerFixture(
     if (mode === "transport-mismatch") {
       checked("I7")
       const outcome = z.object({ status: z.string() }).safeParse(waiters.find((waiter) => waiter.name === "schedule-adoption")?.result)
-      const blocked = controller.adoptionWitness().blocked
+      const blocked = controller.witness.adoption().blocked
       const compiles = compileCount - mark.compiles
       const moved = h.epoch === mark.epoch + 1 && (h.counts.get("transport") ?? 0) > mark.transports
       record({ witness: mode, outcome: outcome.success ? outcome.data.status : undefined, blocked, compiles, moved })
@@ -893,7 +893,7 @@ export default function createControllerFixture(
       // compiles nothing, and nothing is left behind (4: dropped while its compile is held, in the step another intent is
       // asked for; the held compile and the new one are the two compiles, and the new ask is adopted): every caller answered, no attempt running, no refusal on record.
       checked("I7")
-      const witness = controller.adoptionWitness()
+      const witness = controller.witness.adoption()
       const compiles = compileCount - mark.compiles - ([0, 0, 1, 1, 2][minimumCallbacks] ?? 0)
       const unsettled = waiters.filter((waiter) => waiter.name.startsWith("schedule-adoption") && !waiter.settled).length
       const replacement = minimumCallbacks === 3 ? outcomeOf("B///loop")?.status : minimumCallbacks === 4 ? outcomeOf("C///loop")?.status : "adopted"
@@ -1001,7 +1001,7 @@ export default function createControllerFixture(
       checked("I7")
       const compiles = compileCount - mark.compiles
       const prepares = (h.counts.get("prepare") ?? 0) - mark.prepares
-      const witness = controller.adoptionWitness()
+      const witness = controller.witness.adoption()
       const promoted = (h.active?.revision ?? 0) !== mark.revision
       record({ witness: mode, value: minimumCallbacks, compiles, prepares, promoted, adoption: witness, contexts: compileContexts })
       if (minimumCallbacks === 0 || minimumCallbacks === 1) afterRefusal = { compiles, prepares }
@@ -1063,7 +1063,7 @@ export default function createControllerFixture(
       // compiles anew: the old lease is released exactly once and the new one is held.
       checked("I5"); checked("I7")
       const leases = stretchLeases
-      const witness = controller.adoptionWitness()
+      const witness = controller.witness.adoption()
       const attempts = (h.counts.get("asset") ?? 0) - mark.attempts
       const compiles = compileCount - mark.compiles
       if (mode === "leases-parked") {
@@ -1086,7 +1086,7 @@ export default function createControllerFixture(
       // A latency held back by a recovery attempt or an unpublished candidate starts once its holder ends (the attempt
       // settles, the candidate is disposed), though no progress frame follows to look again.
       checked("I4")
-      record({ witness: mode, started: minimumCallbacks === 1, adoption: controller.adoptionWitness() })
+      record({ witness: mode, started: minimumCallbacks === 1, adoption: controller.witness.adoption() })
       if (minimumCallbacks !== 1)
         fail("I4", "A latency held back never started once its holder ended", "live", "latency-starvation")
       return
@@ -1100,7 +1100,7 @@ export default function createControllerFixture(
       // (processor state and PDC) and left every lease balanced. It compiles once when the attachment's latency moved
       // (that edit invalidated the retained candidate) and never otherwise: a second compile is a second wake.
       checked("I1"); checked("I4"); checked("I7")
-      const witness = controller.adoptionWitness()
+      const witness = controller.witness.adoption()
       const owned = waiters.some((waiter) => waiter.name.startsWith("schedule-adoption") || waiter.name === "adoption")
       const attempts = (h.counts.get("asset") ?? 0) - mark.attempts
       const compiles = compileCount - mark.compiles
@@ -1137,8 +1137,8 @@ export default function createControllerFixture(
         fail("I7", `Clip capacity returning bought ${attempts} attempt(s) and ${compiles} compile(s) of the parked schedule, native ${promoted ? "published" : "did not publish"} it${owned && (witness.blocked || witness.retained) ? " and the owner still holds it" : ""}`,
           "live", "parked-wake")
       // The refused attempt's candidate, invalid by now when the attachment's latency moved the graph, is disposed rather than left staged.
-      if (controller.liveScheduleCandidates() !== 0)
-        fail("I5", `A compiled schedule candidate outlived the recovery that published or replaced it: ${controller.liveScheduleCandidates()}`, "live", "parked-wake")
+      if (controller.witness.liveScheduleCandidates() !== 0)
+        fail("I5", `A compiled schedule candidate outlived the recovery that published or replaced it: ${controller.witness.liveScheduleCandidates()}`, "live", "parked-wake")
       if (promoted && !reached)
         fail("I1", `The recovered schedule did not carry the latest latency: ${JSON.stringify({ actual, graph, desired, attachmentLatency })}`, "live", "parked-rebase-stale")
       return
@@ -1711,7 +1711,7 @@ export default function createControllerFixture(
       checked("I6")
       if ((h.counts.get("prepare") ?? 0) !== expectedPrepareCount)
         fail("I6", "Cheap patches reopened persistent adoption attempt")
-      record({ event: "retry-ownership", before: ownershipWitness, after: JSON.stringify(controller.adoptionWitness()),
+      record({ event: "retry-ownership", before: ownershipWitness, after: JSON.stringify(controller.witness.adoption()),
         hookRetryDecision: "deferred-to-A2" })
     }
     if (mode === "quiescent") {
@@ -1838,8 +1838,8 @@ export default function createControllerFixture(
         owners: [...lease.owners].map((bank) => ({ revision: bank.revision, epoch: bank.epoch })) })),
       rejectionClasses, metrics: { minimumCoverageBlocks, candidateStatuses, populatedOwnershipChecks }, drainWitness, counts: Object.fromEntries(h.counts), checks: Object.fromEntries(checks), published: h.published }),
     pending: () => waiters.filter((waiter) => !waiter.settled),
-    adoptionRunning: () => controller.adoptionWitness().running !== undefined,
-    adoptionRetained: () => controller.adoptionWitness().retained !== undefined,
+    adoptionRunning: () => controller.witness.adoption().running !== undefined,
+    adoptionRetained: () => controller.witness.adoption().retained !== undefined,
     stretchLeases: () => ({ ...stretchLeases }),
     nativeWork: () => h.controls.length > 0 || h.patch !== undefined || h.transport !== undefined
       || h.publicationPending || h.reclaimable() || h.progressSequence > h.deliveredProgressSequence,

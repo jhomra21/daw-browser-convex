@@ -7,7 +7,6 @@ import {
 } from '@daw-browser/desktop-protocol/native-audio-host'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import type { PreparedStretchArtifactRepository } from '@daw-browser/audio-engine/prepared-stretch-store'
-import type { Ae08RendererMark } from './ae08-marks'
 import { NativePlaybackAbortError } from './native-playback-abort'
 
 export type NativeTimelineSource = {
@@ -29,7 +28,7 @@ export type NativeTimelinePageManager = {
   ensureRanges: (
     ranges: readonly { sourceAssetKey: string; startFrame: number; endFrame: number }[],
     signal?: AbortSignal,
-    mark?: (name: Ae08RendererMark) => void,
+    mark?: (name: string) => void,
   ) => Promise<void>
   readPage: (
     sourceAssetKey: string,
@@ -51,10 +50,10 @@ type RangePreparer = (
   frameCount: number,
   signal?: AbortSignal,
 ) => Promise<void>
-type Mark = (name: Ae08RendererMark) => void
+type Mark = (name: string) => void
 const markedRequest = async (
   mark: Mark | undefined,
-  names: readonly [request: Ae08RendererMark, reply: Ae08RendererMark],
+  names: readonly [request: string, reply: string],
   send: () => Promise<void>,
 ) => {
   mark?.(names[0])

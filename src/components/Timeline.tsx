@@ -60,6 +60,7 @@ import createTimelineEffectCommit from "~/components/timeline/create-timeline-ef
 import { SYNTH_KIND_ID, type LiveProcessorEditIdentity } from "~/lib/live-processor-control";
 import { createProcessorEditRegistry } from "~/components/timeline/create-processor-edit-registry";
 import { pickNativePlaybackInputs } from "~/components/timeline/native-playback-inputs";
+import { desktopAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import { addInstanceLimit, instanceLimit, vstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
 import type { EffectsPanelAudioEffects, EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller";
 import { useTimelinePreferences } from "~/hooks/useTimelinePreferences";
@@ -169,6 +170,7 @@ type TimelineProps = {
 const Timeline: Component<TimelineProps> = (props) => {
   // Electron audio is native-only; browser Web Audio is never a desktop fallback.
   const requiresNativeAudio = import.meta.env.VITE_DESKTOP === 'true';
+  const acceptance = desktopAcceptanceObserver(window.dawDesktop);
   const navigate = useNavigate();
   const exportQueue = createExportQueue();
   const importQueue = createImportJobQueue();
@@ -684,6 +686,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     createSignal<EffectsPanelAudioEffects["replayInstanceParams"]>();
   let historyActions: TimelineHistoryActions | undefined = undefined;
   const { pushHistory, handleUndo, handleRedo, canUndo, canRedo } = useTimelineHistory({
+    acceptance,
     projectId,
     userId,
     getTracks: renderTracks,
@@ -777,6 +780,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       return false;
     },
     nativePlayback: {
+      acceptance,
       enabled: () => requiresNativeAudio || appPreferences.audio.preferences().nativePlaybackEnabled,
       projectId,
       projectGeneration: mountedProjectGeneration,
@@ -963,6 +967,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   }
 
   const automation = useTimelineAutomationController({
+    acceptance,
     projectId,
     userId,
     tracks: renderTracks,
@@ -2083,6 +2088,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     }
   };
   const timelineBrowser = useTimelineBrowserController({
+    acceptance,
     projectId,
     userId,
     leftBrowser,
@@ -2270,6 +2276,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     });
     if (unsubscribeEditorState) onCleanup(unsubscribeEditorState);
     const unregisterHostController = registerAttachedHostController(createAttachedHostController({
+      acceptance,
       projectId,
       mountedProjectGeneration,
       isPlaying,
@@ -2474,6 +2481,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       closeSharedChat: bottomPanel.closeSharedChat,
     },
     effectsPanel: {
+      acceptance,
       isOpen: bottomPanel.open() && bottomPanel.mode() === "effects",
       showOpenButton: bottomPanel.mode() === "effects",
       shell: {

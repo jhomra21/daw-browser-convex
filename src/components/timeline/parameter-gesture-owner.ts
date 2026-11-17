@@ -3,7 +3,7 @@ import type { EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery } from "~/lib/live-processor-control";
 import { consumeSharedOutboxCompletion, readSharedOutboxOperation, subscribeToSharedOutboxSettlements, type DurableEffectsPublication } from "~/lib/shared-outbox";
 import { decodeEffectsOperationResult } from "~/lib/shared-timeline-operations-api";
-import { ae08UiMark } from "~/lib/desktop/ae08-marks";
+import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import { z } from "zod";
 
 const decodedEffectsResult = z.object({
@@ -49,6 +49,7 @@ export type ReleaseRecord<Target, Params> = {
   failure?: { stage: "apply" | "persist"; cause: unknown };
 };
 type ParameterGestureAdapter<Target, Params> = {
+  acceptance?: PlaybackAcceptanceObserver;
   key: (target: Target) => string;
   scope: () => GestureScope;
   exists: (target: Target) => boolean;
@@ -397,7 +398,7 @@ export function createParameterGestureOwner<Target, Params>(adapter: ParameterGe
     }
   };
   const release = (target: Target, key: string, lifetime: GestureLifetime, baseline: Params | undefined, latest: Params, token?: string) => {
-    ae08UiMark("ui-parameter-commit", () => key);
+    adapter.acceptance?.ui("ui-parameter-commit", () => key);
     const record: Rec = {
       target, key, lifetime, baseline, latest, edit: adapter.allocateEdit(target, baseline, latest),
       gesture: token ? { token, holds: false } : undefined, status: "queued",

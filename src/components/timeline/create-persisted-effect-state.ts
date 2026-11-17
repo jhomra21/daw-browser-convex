@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor } from 'solid-js'
+import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer"
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 import { isAbortError } from '~/lib/dom-errors'
 import type { AudioEngine, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
@@ -25,6 +26,7 @@ type PersistedEffectStateOptions<TRow, TParams> = {
   readQueryParams: (row: TRow) => TParams | undefined
   readQueryThrough?: (row: TRow) => number
   readVisibleParams?: (targetId: string) => TParams | undefined
+  acceptance?: PlaybackAcceptanceObserver
   createInitialParams: (targetId: string) => TParams | undefined
   serializeParams: (params: TParams) => string
   applyToEngine: (targetId: string, params: TParams, edit: LiveProcessorEditIdentity | undefined) => EngineDisposition | Promise<EngineDisposition>
@@ -115,6 +117,7 @@ export function createPersistedEffectState<TRow, TParams>(
 
   const committed = (targetId: string) => remoteByTarget()[keyForTarget(targetId)] ?? options.readVisibleParams?.(targetId)
   const owner = createParameterGestureOwner<string, TParams>({
+    acceptance: options.acceptance,
     key: keyForTarget,
     scope: () => {
       const context = currentContext()

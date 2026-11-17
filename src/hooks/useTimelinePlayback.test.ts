@@ -2822,13 +2822,14 @@ test('an acceptance-owned native session is never acquired or retired by the ren
   const [projectGeneration, setProjectGeneration] = createSignal(1)
   Object.defineProperty(globalThis, "window", {
     configurable: true,
-    value: { dawDesktop: { acceptanceExternalNativeSession: true, audioHost: fixture.audioHost } },
+    value: { dawDesktop: { audioHost: fixture.audioHost } },
   })
   try {
     const faults: string[] = []
     await createRoot(async (dispose) => {
       const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
         requiresNativeAudio: true,
+        acceptance: { ownsNativeSession: false, mark: () => undefined, ui: () => undefined, adoption: () => undefined },
         enabled: () => true,
         projectId: () => "project",
         projectGeneration,

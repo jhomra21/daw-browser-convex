@@ -1,7 +1,7 @@
 import { compileLiveNativeProjection, resolveMixerTiming, type LiveNativeProjection } from "@daw-browser/audio-engine/live-native-projection"
 import { effectiveLoopForStart } from "@daw-browser/audio-engine/loop-frame-schedule"
 import { NativePlaybackAbortError } from "./native-playback-abort"
-import { ae08AdoptionMarker, type Ae08RendererMark } from "./ae08-marks"
+import type { PlaybackAcceptanceObserver } from "./acceptance-observer"
 import { nativeExternalLatencyFrames as nativeOfflineExternalLatencyFrames } from "~/lib/export/native-offline-render-plan"
 import {
   nativeAudioHostMaximumInstalledAssets,
@@ -547,8 +547,6 @@ export const createNativePlaybackController = (input: {
   resolveSource?: AudioPcmSourceResolver
   createBuffer?: (channels: number, frames: number, sampleRate: number) => AudioBuffer
   reportFault?: (fault: NativePlaybackFault, options?: { retainPlayback: true }) => void
-  // Names the record behind each processor parameter batch for acceptance attribution; the fuzzer fixture is its only consumer.
-  onProcessorDispatch?: (event: { key: string; editId: string; attempt: number; sequence: bigint }) => void
   instrumentBudget?: SampledInstrumentRegionBudget
   onInstrumentPreparation?: (trackIds: readonly string[], status: NativeInstrumentPreparation) => void
   reportUnavailable?: boolean
@@ -558,8 +556,14 @@ export const createNativePlaybackController = (input: {
   // The content of a compiled schedule, for telling an unchanged one from a changed one; without it every compile is
   // taken as changed.
   fingerprintSnapshot?: (snapshot: LivePlaybackSnapshot) => string
-  // Acceptance only: another process owns the native session from startup, so this controller never acquires or retires it.
-  externalSessionOwner?: boolean
+  observer?: {
+    // Names the record behind each processor parameter batch for acceptance attribution.
+    processorDispatch?: (event: { key: string; editId: string; attempt: number; sequence: bigint }) => void
+    adoption?: PlaybackAcceptanceObserver["adoption"]
+    mark?: PlaybackAcceptanceObserver["mark"]
+    // Another process owns the native session from startup, so this controller never acquires or retires it.
+    externalSessionOwner?: boolean
+  }
 }) => {
   let active = false
   let prepared = false
@@ -1043,7 +1047,7 @@ export const createNativePlaybackController = (input: {
     create: () => Promise<void>
   }[], pageManager: ReturnType<typeof createNativeTimelinePageManager>,
   fullRegionRanges: readonly { sourceAssetKey: string; startFrame: number; endFrame: number }[],
-  signal?: AbortSignal, registerSources = true, mark?: (name: Ae08RendererMark) => void) => {
+  signal?: AbortSignal, registerSources = true, mark?: (name: string) => void) => {
     for (const resource of resources) {
       signal?.throwIfAborted()
       await resource.create()
@@ -1057,7 +1061,7 @@ export const createNativePlaybackController = (input: {
     mapping: { sessionAssetId: number },
     preparedStretchArtifactId: string | undefined,
     transactionToken?: string,
-    mark?: (name: Ae08RendererMark) => void,
+    mark?: (name: string) => void,
   ) => {
     if (!session.createMappedAsset) throw new Error("Native mapped asset hydration is unavailable.")
     mark?.("asset-create-request")
@@ -1430,6 +1434,7 @@ export const createNativePlaybackController = (input: {
       pageManager: nativeTimelinePageManager,
       projectGeneration: options.projectGeneration,
       startFrame: options.startFrame,
+      mark: input.observer?.mark,
       onFault: (error) => {
         if (sessionGeneration !== nativeSessionGeneration) return
         void disposeNativeSession(undefined, "native-fault").catch(() => undefined)
@@ -1629,7 +1634,7 @@ export const createNativePlaybackController = (input: {
     options?: { invalidateProjectArtifacts?: boolean; onStoppedPosition?: (seconds: number) => void },
     reason?: string,
   ) => {
-    if (input.externalSessionOwner) return Promise.resolve()
+    if (input.observer?.externalSessionOwner) return Promise.resolve()
     // Paused-preview maintenance can race the playing→paused signal change.
     // It never owns an active transport, including its publication/ACK handoff: it waits for that transition, and
     // disposes the session only if it is still paused then. A failed pause has already disposed it.
@@ -2417,7 +2422,7 @@ export const createNativePlaybackController = (input: {
   }
 
   const start = (transport: LivePlaybackTransport, compileContext?: LivePlaybackCompileContext): Promise<NativeStartResult> => {
-    if (destroyed || input.externalSessionOwner) return Promise.resolve("unavailable")
+    if (destroyed || input.observer?.externalSessionOwner) return Promise.resolve("unavailable")
     if (active) return Promise.resolve("started")
     if (pendingStart) {
       if (pendingStartMode === "play") return pendingStart
@@ -2529,7 +2534,7 @@ export const createNativePlaybackController = (input: {
   }
 
   const ensureLivePreview = (playheadSec: number, compileContext?: LivePlaybackCompileContext): Promise<NativeStartResult> => {
-    if (destroyed || input.externalSessionOwner) return Promise.resolve("unavailable")
+    if (destroyed || input.observer?.externalSessionOwner) return Promise.resolve("unavailable")
     if (!input.bridge) return Promise.resolve("unavailable")
     if (livePreviewActive) return Promise.resolve("started")
     if (pendingStart) {
@@ -2602,7 +2607,7 @@ export const createNativePlaybackController = (input: {
     instrumentPreparationRequestGeneration += 1
     const pending = pendingStart
     destroyPromise = (async () => {
-      if (!input.externalSessionOwner) await disposeNativeSession(undefined, "renderer-unmount")
+      if (!input.observer?.externalSessionOwner) await disposeNativeSession(undefined, "renderer-unmount")
       await pending?.catch(() => undefined)
       await stretchCache?.dispose()
       stretchCache = undefined
@@ -3119,7 +3124,7 @@ export const createNativePlaybackController = (input: {
           }
       if (request.execution && batch) {
         const { key, editId, attempt } = request.execution
-        input.onProcessorDispatch?.({ key, editId, attempt, sequence: BigInt(batch.sequence) })
+        input.observer?.processorDispatch?.({ key, editId, attempt, sequence: BigInt(batch.sequence) })
       }
       return await observeRetirementControl(bridge.session.queueParameterEvents(serializeNativeProcessorEvents(events, batch)))
     } catch (error) {
@@ -3525,7 +3530,7 @@ export const createNativePlaybackController = (input: {
   ) => {
       const candidate = payload.kind === "schedule" ? payload.candidate : undefined
       const attempt = payload.kind === "schedule" ? payload.attempt : undefined
-      ae08AdoptionMarker(attempt?.intent.key)?.("lane-admitted")
+      input.observer?.adoption?.(attempt?.intent.key)?.("lane-admitted")
       const intent = payload.kind === "schedule" ? payload.intent : stagedTransportIntent
       const abandonCandidate = async () => {
         await candidate?.dispose()
@@ -4020,7 +4025,7 @@ export const createNativePlaybackController = (input: {
         })
         // Native refuses a prepare while a patch claim is unreported (design 2.4.6): none is sent until the fence opens.
         await quietPublicationLane()
-        ae08AdoptionMarker(attempt?.intent.key)?.("fence-open")
+        input.observer?.adoption?.(attempt?.intent.key)?.("fence-open")
         if (!current() || record.cancelled) throw new NativePlaybackAbortError("ownership-invalidated")
         // The host attaches a plug-in this graph adds and starts its worker before the graph that binds it is prepared.
         // A removed one goes in the same plan, with no instance left in it, and is detached once the graph is live.
@@ -4081,7 +4086,7 @@ export const createNativePlaybackController = (input: {
         // Provisional: long enough for the prepare and hydration below. The seam binds late, after them.
         let seam = chooseFrame(BigInt(coordinator.currentFrame()), 16)
         let observed = sequence
-        ae08AdoptionMarker(attempt?.intent.key)?.("prepare-sent")
+        input.observer?.adoption?.(attempt?.intent.key)?.("prepare-sent")
         let ready = await prepareRevision({
           projectId, projectRevision: snapshot.revision, bytes: serializeNativeGraph(graph, serializedKeepLatencyNodeIds),
           requestedPublicationFrame: BigInt(seam),
@@ -4151,7 +4156,7 @@ export const createNativePlaybackController = (input: {
             requestedPublicationFrame: BigInt(seam),
           })
         }
-        ae08AdoptionMarker(attempt?.intent.key)?.("prepare-reply-received")
+        input.observer?.adoption?.(attempt?.intent.key)?.("prepare-reply-received")
         checked(ready)
         processorState.observeRetirement(ready)
         if (ready.revision.preparedRevision === ready.revision.requestedRevision) {
@@ -4182,7 +4187,7 @@ export const createNativePlaybackController = (input: {
             transportEpoch, true, 0, nextTransportTransitionId))))
         }
         let addedTimelineSources = false
-        const hydrationMark = ae08AdoptionMarker(attempt?.intent.key)
+        const hydrationMark = input.observer?.adoption?.(attempt?.intent.key)
         if (addedAssets.length > 0) {
           if (!pageManager || !session.createMappedAsset) throw new Error("Native mapped asset hydration is unavailable.")
           const regionalSources = new Map(projection.instrumentRegionSources?.map((source) => [source.sourceAssetKey, source.buffer]))
@@ -4554,7 +4559,7 @@ export const createNativePlaybackController = (input: {
       const kept = processorState.takeRetained(intent)
       const reusable = kept && isScheduleCandidateValid(kept) ? kept : undefined
       if (kept && !reusable) await kept.dispose()
-      const preparation = reusable ?? await prepareScheduleRevision({ ...intent.context, mark: ae08AdoptionMarker(intent.key) })
+      const preparation = reusable ?? await prepareScheduleRevision({ ...intent.context, mark: input.observer?.adoption?.(intent.key) })
       if (preparation.status === "retry") return preparation.transport ? { ...superseded, transport: preparation.transport } : superseded
       if (preparation.status === "failed") return { outcome: { status: "failed", reason: preparation.reason } }
       // A limitation settles the intent without the refusal the UD 8 retry reopens.
@@ -5056,12 +5061,14 @@ export const createNativePlaybackController = (input: {
     publishAttachmentLatency,
     adoptSchedule,
     dropAdoptionIntents,
-    // Read-only view of the adoption record for acceptance attribution; the fuzzer fixture is its only consumer.
-    adoptionWitness: processorState.adoptionWitness,
-    // The facts a refusal answers to, as they stand now, to show none has moved since it.
-    adoptionFieldsWitness: adoptionFields,
-    // Compiled schedule candidates not yet published or disposed: a candidate that outlives its attempt keeps its stretched assets.
-    liveScheduleCandidates: () => scheduleCandidates.size,
+    witness: {
+      // Read-only view of the adoption record for acceptance attribution.
+      adoption: processorState.adoptionWitness,
+      // The facts a refusal answers to, as they stand now, to show none has moved since it.
+      adoptionFields,
+      // Compiled schedule candidates not yet published or disposed: a candidate that outlives its attempt keeps its stretched assets.
+      liveScheduleCandidates: () => scheduleCandidates.size,
+    },
     startLiveMidiNote,
     releaseLiveMidiNote,
     subscribeNativeLiveMidiReset,

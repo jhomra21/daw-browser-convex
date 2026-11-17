@@ -2471,7 +2471,7 @@ describe("DV01 STEP6 public publication witnesses", () => {
       fixture.bridge.session.revisions.prepare = async () => ({ ok: false, kind: "refused", error: "asset-capacity-exceeded" })
       expect(await controller.adoptSchedule({ key: "parked", schedule: "parked", context: {},
         loop: { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 } })).toMatchObject({ status: "blocked" })
-      expect(controller.adoptionWitness().retained).toBeDefined()
+      expect(controller.witness.adoption().retained).toBeDefined()
       fixture.bridge.session.revisions.prepare = prepare
       fixture.bridge.session.revisions.publish = async () => { published.resolve(); return fixture.revisionReply("publish-pending") }
       // Native's latency-not-admitted callback preserves the bank. A subsequent
@@ -2479,7 +2479,7 @@ describe("DV01 STEP6 public publication witnesses", () => {
       // This boundary proof is not a modeled callback/resource-capacity claim.
       fixture.bridge.session.revisions.inspect = async () => fixture.revisionReply("prepared")
       fixture.bridge.session.revisions.rollback = async () => {
-        rolledBack.resolve(controller.adoptionWitness().retained !== undefined)
+        rolledBack.resolve(controller.witness.adoption().retained !== undefined)
         return fixture.revisionReply("rolled-back")
       }
       const patch = (fftSize: 2048 | 4096, processorStateSequence: number) => controller.deliverProcessor(fixturePatchEdit({
@@ -3701,10 +3701,10 @@ describe("DV01 instrument truth", () => {
         const outcome = await f.controller.adoptSchedule({ key: status, schedule: status, context: {},
           loop: { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 } })
         console.log("STEP6-EVIDENCE", JSON.stringify({ test: "native-terminal", status, outcome, rollbacks,
-          candidates: f.controller.liveScheduleCandidates() }))
+          candidates: f.controller.witness.liveScheduleCandidates() }))
         expect(outcome.status).toBe("failed")
         expect(rollbacks).toBeLessThanOrEqual(1)
-        expect(f.controller.liveScheduleCandidates()).toBe(0)
+        expect(f.controller.witness.liveScheduleCandidates()).toBe(0)
       } finally { await f.controller.dispose() }
     })
   }
@@ -3730,7 +3730,7 @@ describe("DV01 instrument truth", () => {
         status: "failed", reason: "Native live publication was publish-failed.",
       })
       expect(rollbacks).toBe(1)
-      expect(f.controller.liveScheduleCandidates()).toBe(0)
+      expect(f.controller.witness.liveScheduleCandidates()).toBe(0)
     } finally { await f.controller.dispose() }
   })
 
@@ -3749,7 +3749,7 @@ describe("DV01 instrument truth", () => {
       await f.controller.pause(0)
       expect(await adoption).toEqual({ status: "superseded" })
       expect(rollbacks).toBe(1)
-      expect(f.controller.liveScheduleCandidates()).toBe(0)
+      expect(f.controller.witness.liveScheduleCandidates()).toBe(0)
     } finally { await f.controller.dispose() }
   })
 
@@ -3993,7 +3993,7 @@ describe("DV01 instrument truth", () => {
       expect(f.fixture.statePatchPayloads).toHaveLength(patches)
       const native = f.fixture.revisionReply("published")
       expect(native.ok && native.revision.activeRevision).toBe(1)
-      expect(f.controller.adoptionWitness()).toMatchObject({ running: undefined, waiting: undefined, retained: undefined })
+      expect(f.controller.witness.adoption()).toMatchObject({ running: undefined, waiting: undefined, retained: undefined })
     } finally { release.resolve(); await f.controller.dispose() }
   })
 
@@ -4094,7 +4094,7 @@ describe("DV01 instrument truth", () => {
       expect(sends).toBe(1)
       release.resolve()
       await adoption; await turns()
-      console.log("STEP6-R1-TRANSIENT", JSON.stringify({ sends, answer: answer.value ?? "unanswered", witness: f.controller.adoptionWitness() }))
+      console.log("STEP6-R1-TRANSIENT", JSON.stringify({ sends, answer: answer.value ?? "unanswered", witness: f.controller.witness.adoption() }))
       expect(sends).toBe(2)
       expect(answer.value).toEqual({ state: "applied" })
     } finally { release.resolve(); await f.controller.dispose() }
@@ -4143,8 +4143,8 @@ describe("DV01 instrument truth", () => {
       expect(answer.value).toEqual({ state: "refused", reason: "native-refused" })
       expect(rollbacks).toBe(1)
       expect(preparedRevision).toBeUndefined()
-      expect(f.controller.liveScheduleCandidates()).toBe(0)
-      expect(f.controller.adoptionWitness()).toMatchObject({ running: undefined, retained: undefined })
+      expect(f.controller.witness.liveScheduleCandidates()).toBe(0)
+      expect(f.controller.witness.adoption()).toMatchObject({ running: undefined, retained: undefined })
     } finally { await f.controller.dispose() }
   })
 
@@ -4298,7 +4298,7 @@ describe("DV01 instrument truth", () => {
         expect(answer.value).toEqual({ state: "refused", reason: "invalid" })
         expect(rollbacks).toBe(1)
         expect(publishes).toBe(2)
-        expect(f.controller.adoptionWitness().running).toBeUndefined()
+        expect(f.controller.witness.adoption().running).toBeUndefined()
       } finally { await f.controller.dispose() }
     })
 
@@ -4374,13 +4374,13 @@ describe("DV01 instrument truth", () => {
         void adoption.then(value => { outcome = value })
         await turns()
         console.log("STEP6-R3-DEFINITE", JSON.stringify({ proof, outcome: outcome ?? "unanswered",
-          answer: answer.value ?? "unanswered", publishes, rollbacks, witness: f.controller.adoptionWitness() }))
+          answer: answer.value ?? "unanswered", publishes, rollbacks, witness: f.controller.witness.adoption() }))
         expect(outcome?.status).toBe(proof === "published" ? "adopted" : "failed")
         expect(answer.value).toEqual(proof === "published" ? { state: "applied" } : { state: "refused", reason: "native-refused" })
         expect(publishes).toBe(1)
         expect(rollbacks).toBe(proof === "published" ? 0 : 1)
-        expect(f.controller.liveScheduleCandidates()).toBe(0)
-        expect(f.controller.adoptionWitness()).toMatchObject({ running: undefined, retained: undefined })
+        expect(f.controller.witness.liveScheduleCandidates()).toBe(0)
+        expect(f.controller.witness.adoption()).toMatchObject({ running: undefined, retained: undefined })
       } finally {
         f.fixture.emitLoss("finish W40")
         if (adoption) await adoption
@@ -4421,14 +4421,14 @@ describe("DV01 instrument truth", () => {
         void adoption.then(value => { outcome = value })
         await turns()
         step7Evidence("W56-first-proof", { proof, outcome: outcome ?? "unanswered",
-          answer: answer.value ?? "unanswered", publishes, rollbacks, inspections, witness: f.controller.adoptionWitness() })
+          answer: answer.value ?? "unanswered", publishes, rollbacks, inspections, witness: f.controller.witness.adoption() })
         expect(outcome?.status).toBe(proof === "published" ? "adopted" : "failed")
         expect(answer.value).toEqual(proof === "published" ? { state: "applied" } : { state: "refused", reason: "native-refused" })
         expect(publishes).toBe(1)
         expect(inspections).toBe(proof === "published" ? 1 : 2)
         expect(rollbacks).toBe(proof === "published" ? 0 : 1)
-        expect(f.controller.liveScheduleCandidates()).toBe(0)
-        expect(f.controller.adoptionWitness()).toMatchObject({ running: undefined, retained: undefined })
+        expect(f.controller.witness.liveScheduleCandidates()).toBe(0)
+        expect(f.controller.witness.adoption()).toMatchObject({ running: undefined, retained: undefined })
       } finally {
         f.fixture.emitLoss("finish W56")
         if (adoption) await adoption
@@ -7555,7 +7555,7 @@ test("B6 unsent parameter record follows overlapping paused seek and start into 
       compiles++
       return compileLivePlaybackSnapshot({ ...base, transport })
     },
-    onProcessorDispatch: event => dispatches.push(event),
+    observer: { processorDispatch: event => dispatches.push(event) },
   })
   const turns = async () => { for (let turn = 0; turn < 100; turn++) await Promise.resolve() }
   const act = async (action: Parameters<typeof h.act>[0]) => {
@@ -7696,7 +7696,7 @@ test("B6 refused parameter record follows the paused domain into a differently p
     getProcessorTarget: registry.target,
     compileSnapshot: async (transport, context) => context?.liveAdoption
       ? heldCompilation.promise : compileLivePlaybackSnapshot({ ...base, transport }),
-    onProcessorDispatch: event => dispatches.push(event),
+    observer: { processorDispatch: event => dispatches.push(event) },
   })
   const turns = async () => { for (let turn = 0; turn < 100; turn++) await Promise.resolve() }
   const act = async (action: Parameters<typeof h.act>[0]) => {
@@ -8245,7 +8245,7 @@ test("B6a2 first parameter dispatch and refusal resend retain the allocated edit
   const controller = createObservedController({
     bridge: fixture.bridge,
     compileSnapshot: async () => compileLivePlaybackSnapshot(utilityPlaybackInput()),
-    onProcessorDispatch: event => dispatches.push(event),
+    observer: { processorDispatch: event => dispatches.push(event) },
   })
   try {
     expect(await controller.ensureLivePreview(0)).toBe("started")
@@ -8298,7 +8298,7 @@ test("B6a2 projected reconciliation retains registry identity rather than the pr
     fingerprintSnapshot: () => "same", getProcessorTarget: registry.target,
     compileSnapshot: async () => compileLivePlaybackSnapshot(base),
     getDesiredProcessorState: (snapshot, rate) => compileDesiredNativeProcessorState(snapshot, rate, 900),
-    onProcessorDispatch: event => dispatches.push(event.editId),
+    observer: { processorDispatch: event => dispatches.push(event.editId) },
   })
   try {
     expect(await controller.start(base.transport)).toBe("started")
@@ -8921,10 +8921,10 @@ test("B6a1 retained schedule candidate survives latency and processor-patch prom
     fixture.bridge.session.revisions.prepare = async () => ({ ok: false, error: "asset-capacity-exceeded", kind: "refused" })
     const intent = migrationIntent("B6a1-retained")
     expect(await controller.adoptSchedule(intent, true)).toEqual({ status: "blocked", reason: "asset-capacity-exceeded" })
-    expect(controller.adoptionWitness().retained).toBe(intent.key)
-    expect(controller.liveScheduleCandidates()).toBe(1)
+    expect(controller.witness.adoption().retained).toBe(intent.key)
+    expect(controller.witness.liveScheduleCandidates()).toBe(1)
     const compiled = compilations
-    const structural = controller.adoptionFieldsWitness().structural
+    const structural = controller.witness.adoptionFields().structural
     let seam = 0n
     let revision = 0
     fixture.bridge.session.revisions.prepare = async (request) => {
@@ -8942,18 +8942,18 @@ test("B6a1 retained schedule candidate survives latency and processor-patch prom
     fixture.bridge.session.revisions.inspect = fixture.bridge.session.revisions.publish
     keep = new Set(["track"])
     expect(await controller.updateKeepLatency()).toEqual({ handled: true })
-    expect(controller.adoptionFieldsWitness().structural).toBe(structural)
-    expect(controller.adoptionWitness().retained).toBe(intent.key)
+    expect(controller.witness.adoptionFields().structural).toBe(structural)
+    expect(controller.witness.adoption().retained).toBe(intent.key)
     const first = createDefaultUtilityParams()
     expect(await controller.deliverProcessor(fixturePatchEdit({
       payload: { ...utilityCommit("utility:1", first, { ...first, gainDb: -6 }), edit: processorEdit(11) }, bpm: 120,
     })).settled).toEqual({ state: "applied" })
     expect(fixture.statePatchPayloads).toHaveLength(1)
-    expect(controller.adoptionFieldsWitness().structural).toBe(structural)
+    expect(controller.witness.adoptionFields().structural).toBe(structural)
     expect(await controller.adoptSchedule(intent, true)).toEqual({ status: "adopted" })
     expect(compilations).toBe(compiled)
-    expect(controller.adoptionWitness().retained).toBeUndefined()
-    expect(controller.liveScheduleCandidates()).toBe(0)
+    expect(controller.witness.adoption().retained).toBeUndefined()
+    expect(controller.witness.liveScheduleCandidates()).toBe(0)
   } finally { await controller.dispose() }
 })
 
@@ -8976,9 +8976,9 @@ test("B6a1 structural replacements discard retained schedule candidates", async 
       fixture.bridge.session.revisions.prepare = async () => ({ ok: false, error: "asset-capacity-exceeded", kind: "refused" })
       const intent = migrationIntent(`B6a1-${replacement}`)
       expect(await controller.adoptSchedule(intent, true)).toEqual({ status: "blocked", reason: "asset-capacity-exceeded" })
-      expect(controller.adoptionWitness().retained).toBe(intent.key)
+      expect(controller.witness.adoption().retained).toBe(intent.key)
       const compiled = compilations
-      const structural = controller.adoptionFieldsWitness().structural
+      const structural = controller.witness.adoptionFields().structural
       fixture.bridge.session.revisions.prepare = prepare
       acknowledgeStagedPublication(fixture)
       if (replacement === "schedule") {
@@ -8989,15 +8989,15 @@ test("B6a1 structural replacements discard retained schedule candidates", async 
       } else {
         await controller.dispose()
         if (replacement === "configure") {
-          const cleared = controller.adoptionFieldsWitness().structural
+          const cleared = controller.witness.adoptionFields().structural
           expect(await controller.start(snapshotInput.transport)).toBe("started")
-          expect(controller.adoptionFieldsWitness().structural).toBeGreaterThan(cleared)
+          expect(controller.witness.adoptionFields().structural).toBeGreaterThan(cleared)
           expect(compilations).toBe(compiled + 1)
         }
       }
-      expect(controller.adoptionFieldsWitness().structural).toBeGreaterThan(structural)
-      expect(controller.adoptionWitness().retained).toBeUndefined()
-      expect(controller.liveScheduleCandidates()).toBe(0)
+      expect(controller.witness.adoptionFields().structural).toBeGreaterThan(structural)
+      expect(controller.witness.adoption().retained).toBeUndefined()
+      expect(controller.witness.liveScheduleCandidates()).toBe(0)
     } finally { await controller.dispose() }
   }
 })

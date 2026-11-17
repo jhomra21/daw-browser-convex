@@ -33,11 +33,12 @@ import {
 } from "~/lib/desktop/native-vst3-insertion";
 import type { ExternalProcessor } from "@daw-browser/external-plugins";
 import { hasVst3TrustAcknowledgement, vst3ScanHealthLabel } from "~/lib/external-plugin-ui";
-import { ae08UiMark } from "~/lib/desktop/ae08-marks";
+import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import { autoHealStaleVst3Catalog } from "~/lib/desktop/vst3-catalog-auto-heal";
 import type { TimelinePlaybackRebuildIntent } from "./useTimelinePlayback";
 
 type Options = {
+  acceptance?: PlaybackAcceptanceObserver;
   projectId: Accessor<string>;
   userId: Accessor<string>;
   leftBrowser: TimelineLeftBrowserState;
@@ -691,7 +692,7 @@ export function useTimelineBrowserController(options: Options): Accessor<Timelin
       options.onExternalPluginInsertionResult?.("VST3 insertion unavailable", availability.message);
       return;
     }
-    ae08UiMark("ui-device-insert", () => itemId);
+    options.acceptance?.ui("ui-device-insert", () => itemId);
     setInsertingExternalPluginId(itemId);
     try {
       const result = await insertNativeVst3Effect({

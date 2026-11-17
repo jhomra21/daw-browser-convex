@@ -7,7 +7,7 @@ import type { Track } from "@daw-browser/timeline-core/types";
 import type { NativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
 import { externalProcessorStatusLabel } from "~/lib/external-plugin-ui";
 import { vstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
-import { ae08UiMark } from "~/lib/desktop/ae08-marks";
+import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import {
   nativeEditorAnchorFromElement,
   nativeEditorAvailabilityMessage,
@@ -124,6 +124,7 @@ const ExternalPluginParameters: Component<ExternalPluginParametersProps> = (prop
 };
 
 export type ExternalPluginCardProps = {
+  acceptance?: PlaybackAcceptanceObserver;
   projectId?: string;
   processor: ExternalProcessor;
   enqueueParameter: NativeVstParameterQueue["enqueue"];
@@ -317,7 +318,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
               disabled={!props.canWrite}
               onClick={() => {
                 const { instanceId } = props.processor;
-                ae08UiMark("ui-editor-open", () => instanceId);
+                props.acceptance?.ui("ui-editor-open", () => instanceId);
                 void editor("open");
               }}
             >

@@ -1,4 +1,5 @@
 import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery, PublicationJoin } from "~/lib/live-processor-control";
+import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import { createEffect, createMemo, onCleanup, untrack, type Accessor } from "solid-js";
 import { isLocalId, type ArpeggiatorParams, type AudioEffectKind, type TrackInstrumentParams } from "@daw-browser/shared";
 import type { AudioEngine, EngineDisposition, SpectrumFrame } from "@daw-browser/audio-engine/audio-engine";
@@ -62,6 +63,7 @@ export const hydrateInstrumentBuffers = (
 };
 
 type EffectsPanelControllerOptions = {
+  acceptance?: PlaybackAcceptanceObserver;
   isOpen: Accessor<boolean>;
   selectedFXTarget: Accessor<Track["id"] | "master">;
   tracks: Accessor<Track[]>;
@@ -159,6 +161,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
   const pendingWorkOwner = createPendingWorkOwner();
   const instrument = createEffectsPanelInstrumentDevice(
     {
+      acceptance: options.acceptance,
       audioEngine: options.audioEngine,
       projectId: options.projectId,
       userId: options.userId,
@@ -195,6 +198,7 @@ export function createEffectsPanelController(options: EffectsPanelControllerOpti
   };
   const audioEffects = createEffectsPanelAudioDevice(
     {
+      acceptance: options.acceptance,
       audioEngine: options.audioEngine,
       tracks: options.tracks,
       projectId: options.projectId,

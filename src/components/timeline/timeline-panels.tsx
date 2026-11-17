@@ -1,4 +1,5 @@
 import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery, PublicationJoin } from "~/lib/live-processor-control";
+import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer"
 import { type Component, Show, Suspense, createEffect, lazy } from 'solid-js'
 import { Button } from '~/components/ui/button'
 import type { AudioEngine, EngineDisposition, SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
@@ -42,6 +43,7 @@ export type TimelinePanelsProps = {
     closeSharedChat: () => void
   }
   effectsPanel: {
+    acceptance?: PlaybackAcceptanceObserver
     isOpen: boolean
     showOpenButton: boolean
     shell: TimelineBottomPanelShellControls
@@ -195,6 +197,7 @@ const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
       </Show>
 
       <EffectsPanel
+        acceptance={panels().effectsPanel.acceptance}
         isOpen={panels().effectsPanel.isOpen}
         showOpenButton={panels().effectsPanel.showOpenButton}
         shell={panels().effectsPanel.shell}

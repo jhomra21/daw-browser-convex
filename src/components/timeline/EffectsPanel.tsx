@@ -81,7 +81,7 @@ import { reorderLocalMixedEffects } from "~/lib/local-effects";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import { selectExternalProcessorsForTarget } from "~/lib/external-plugin-ui";
 import { ExternalPluginCard, nativeEditorAnchorFromElement } from "~/components/timeline/external-plugin-card";
-import { ae08UiMark } from "~/lib/desktop/ae08-marks";
+import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import { instanceLimit } from "~/lib/desktop/vst-instance-failures";
 import type { NativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
 import type { MixedEffectOrderItem } from "~/lib/mixed-effect-order";
@@ -96,6 +96,7 @@ import { isDeviceInteractiveTarget } from "~/components/timeline/device-interact
 import { ParameterGestureProvider } from "~/components/effects/effect-parameter-interaction";
 
 type EffectsPanelProps = {
+  acceptance?: PlaybackAcceptanceObserver;
   isOpen: boolean;
   showOpenButton: boolean;
   shell: TimelineBottomPanelShellControls;
@@ -404,6 +405,7 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
 );
 
 type EffectsPanelEffectCardsProps = {
+  acceptance?: PlaybackAcceptanceObserver;
   projectId?: string;
   projectGeneration: number;
   audioEffects: EffectsPanelAudioEffects;
@@ -825,6 +827,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                 ref={(node) => { element = node; }}
               >
                 <ExternalPluginCard
+                  acceptance={props.acceptance}
                   projectId={props.projectId}
                   processor={processor()}
                   enqueueParameter={props.enqueueParameter}
@@ -902,6 +905,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                               menuItems={() => externalProcessorContextMenuItems(processor())}
                             >
                               <ExternalPluginCard
+                                acceptance={props.acceptance}
                                 projectId={props.projectId}
                                 processor={processor()}
                                 enqueueParameter={props.enqueueParameter}
@@ -1142,6 +1146,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const deliverProcessor = untrack(() => props.deliverProcessor);
   const joinPublication = untrack(() => props.joinPublication);
   const controller = createEffectsPanelController({
+    acceptance: untrack(() => props.acceptance),
     isOpen: () => props.isOpen,
     selectedFXTarget: () => props.selectedFXTarget,
     tracks: () => props.tracks,
@@ -1204,7 +1209,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
     const processor = externalProcessors().find((entry) => entry.instanceId === instanceId);
     if (!processor || processor.targetId !== props.selectedFXTarget) return;
     const playbackIntent = props.captureStructuralPlaybackIntent?.();
-    ae08UiMark("ui-device-remove", () => instanceId);
+    props.acceptance?.ui("ui-device-remove", () => instanceId);
     void deleteLocalExternalProcessor(projectId, instanceId)
       .then(() => untrack(() => props.onMixedReorderCommitted?.(playbackIntent)))
       .catch(() => undefined);
@@ -1337,6 +1342,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
                       />
                     </Show>
                     <EffectsPanelEffectCards
+                      acceptance={props.acceptance}
                       projectId={props.projectId}
                       projectGeneration={props.projectGeneration?.() ?? 0}
                       audioEffects={audioEffects}

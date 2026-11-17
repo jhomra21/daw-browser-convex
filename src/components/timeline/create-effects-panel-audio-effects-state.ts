@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, on, onCleanup, untrack, type Accessor } from "solid-js";
+import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import type { FunctionReturnType } from "convex/server";
 import type { AudioEffectRuntimeInstance, AudioEngine, EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import {
@@ -82,6 +83,7 @@ export const registerAudioEffectCardInteractionCleanup = (input: {
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
 
 type EffectsPanelAudioEffectsContext = {
+  acceptance?: PlaybackAcceptanceObserver;
   audioEngine: Accessor<AudioEngine>;
   tracks?: Accessor<Track[]>;
   projectId: Accessor<string | undefined>;
@@ -775,6 +777,7 @@ export function createEffectsPanelAudioDevice(
     )]);
   };
   const owner = createParameterGestureOwner<EffectTarget, AudioEffectParams>({
+    acceptance: context.acceptance,
     key: (target) => instanceKey(target.targetId, target.instanceId),
     scope: () => ({ projectId: context.projectId(), userId: context.userId(), generation: currentProjectGeneration() }),
     exists: (target) => currentOrderForTarget(target.targetId).some((entry) => entry.id === target.instanceId && entry.kind === target.kind),

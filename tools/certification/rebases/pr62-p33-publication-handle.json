@@ -1,0 +1,119 @@
+{
+ "name": "pr62-p33-publication-handle",
+ "sequence": 62,
+ "createdAt": "2026-11-17T17:22:04.599Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:106:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "    publication: () => publication,",
+   "new": "    publication: () => publication?.handle,"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:106:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "    publication: () => publication?.kind === \"latency\" ? undefined : publication,",
+   "new": "    publication: () => publication?.kind === \"latency\" ? undefined : publication?.handle,"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:107:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        } catch { return undefined }\n      }\n      record.inspect = inspect",
+   "new": "        } catch (error) { return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) } }\n      }\n      const inspect = ("
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:107:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "        } catch {\n          if (record.kind === \"latency\") { binding = undefined; await finish({ status: \"failed\", reason: \"Lost Inspect\" }, \"failed\") }\n          return undefined\n        }\n      }\n      record.inspect = inspect",
+   "new": "        } catch (error) {\n          if (record.kind === \"latency\") { binding = undefined; await finish({ status: \"failed\", reason: \"Lost Inspect\" }, \"failed\") }\n          return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) }\n        }\n      }\n      const inspect = ("
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-60:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "else record.phase = record.cancelled ? \"awaitingTransport\" : \"resolving\"",
+   "new": "else if (record.cancelled) record.awaitingTransport()\n        else record.resolving()"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-60:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "else await finish({ status: \"superseded\" }, \"cancelled\")",
+   "new": "else await finish({ status: \"superseded\" }, \"cancelled\")"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-63:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "else record.phase = record.cancelled ? \"awaitingTransport\" : \"resolving\"",
+   "new": "else if (record.cancelled) record.awaitingTransport()\n        else record.resolving()"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-63:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "else if (!rolledBack?.ok) await finish({ status: \"superseded\" }, \"cancelled\")\n        else record.phase = record.cancelled ? \"awaitingTransport\" : \"resolving\"",
+   "new": "else if (!rolledBack?.ok) await finish({ status: \"superseded\" }, \"cancelled\")\n        else if (record.cancelled) record.awaitingTransport()\n        else record.resolving()"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "P33 (pr62-cleanup 083dc407, 2c2273e4; hand record, no --bless). The publication record became private to the state owner: publication() now returns the record's handle, the controller's inspect catch moved into inspectRevision (which returns a failed Inspection instead of undefined, registered via record.onInspect), and the phase writes became record.awaitingTransport()/record.resolving() commands. Re-pointed, each mutation unchanged in meaning: rc2:106:0 hides a latency publication from publication(); rc2:107:0 on a lost Inspect of a latency publication drops the binding and finishes it failed (\\\"Lost Inspect\\\") before returning the failed Inspection; rc2:historical-60:0 replaces the not-rolled-back else branch with a superseded finish; rc2:historical-63:0 prepends a superseded finish when the rollback reply was lost. Measured with fast-cert --only of the four arms and their controls in main; expected counts and fails unchanged.",
+  "expectationsSha256": "f1d61f2a026e15f4f30e46a88e940837b374ebd12439bd075c8d88a10a09bba2"
+ }
+}

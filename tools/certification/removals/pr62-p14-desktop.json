@@ -1,0 +1,69 @@
+{
+ "ruling": "acceptance-reports/pr62-cleanup/PARENT-RULING-PR62-TEST-CLEANUP.md",
+ "removed": [
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "activates production native VST playback after graph and attachment acknowledgement"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "accepts serial attachments that share one native graph node"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "accounts for an instrument source and effect stages once in node latency"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "accepts sparse external stage indexes for validation by the mixed native compiler"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "production coordinator validates exact subset and acknowledgement gates"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "publishes latency changes as revision plus one with recomputed PDC metadata"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "applies tail metadata changes without publishing a graph revision"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "ignores stale worker notifications without touching the active graph"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "safely stops bus changes"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "fails closed if the native stop operation fails"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "rolls back failed revisions, stops playback, and never advances the acknowledged snapshot"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "stops on retirement failure after retaining the newly published revision"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "a plug-in's own crash or API error marks only that instance failed and never stops audio"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "our own IPC, timeout and lifecycle faults are logged as defects and never shown as a plug-in failure"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "a component restart never stops audio"
+  },
+  {
+   "file": "apps/desktop/native-vst3-coordinator.test.ts",
+   "test": "the session ledger starts per transaction, continues across live coordinations and tolerates a revision before any plan"
+  }
+ ]
+}

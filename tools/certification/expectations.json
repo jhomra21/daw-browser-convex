@@ -7007,8 +7007,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-processor-state-owner.ts",
-       "from": "    publication: () => publication,",
-       "to": "    publication: () => publication?.kind === \"latency\" ? undefined : publication,"
+       "from": "    publication: () => publication?.handle,",
+       "to": "    publication: () => publication?.kind === \"latency\" ? undefined : publication?.handle,"
       }
      ],
      "bounded": false,
@@ -7126,8 +7126,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "        } catch { return undefined }\n      }\n      record.inspect = inspect",
-       "to": "        } catch {\n          if (record.kind === \"latency\") { binding = undefined; await finish({ status: \"failed\", reason: \"Lost Inspect\" }, \"failed\") }\n          return undefined\n        }\n      }\n      record.inspect = inspect"
+       "from": "        } catch (error) { return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) } }\n      }\n      const inspect = (",
+       "to": "        } catch (error) {\n          if (record.kind === \"latency\") { binding = undefined; await finish({ status: \"failed\", reason: \"Lost Inspect\" }, \"failed\") }\n          return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) }\n        }\n      }\n      const inspect = ("
       }
      ],
      "bounded": false,
@@ -10725,7 +10725,7 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "else record.phase = record.cancelled ? \"awaitingTransport\" : \"resolving\"",
+       "from": "else if (record.cancelled) record.awaitingTransport()\n        else record.resolving()",
        "to": "else await finish({ status: \"superseded\" }, \"cancelled\")"
       }
      ],
@@ -11091,8 +11091,8 @@
      "changes": [
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "else record.phase = record.cancelled ? \"awaitingTransport\" : \"resolving\"",
-       "to": "else if (!rolledBack?.ok) await finish({ status: \"superseded\" }, \"cancelled\")\n        else record.phase = record.cancelled ? \"awaitingTransport\" : \"resolving\""
+       "from": "else if (record.cancelled) record.awaitingTransport()\n        else record.resolving()",
+       "to": "else if (!rolledBack?.ok) await finish({ status: \"superseded\" }, \"cancelled\")\n        else if (record.cancelled) record.awaitingTransport()\n        else record.resolving()"
       }
      ],
      "bounded": true,

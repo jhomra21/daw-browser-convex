@@ -369,7 +369,7 @@ export const setSharedOutboxRuntimeForTesting = (
 }
 
 const now = () => outboxRuntime.now()
-export const sharedOutboxRetryDelayMs = (attempts: number) => Math.min(60 * 1000, 2 ** Math.min(attempts, 6) * 1000)
+const sharedOutboxRetryDelayMs = (attempts: number) => Math.min(60 * 1000, 2 ** Math.min(attempts, 6) * 1000)
 export class SharedOutboxQueuedError extends Error {
   readonly operationId: string
 
@@ -696,6 +696,58 @@ const uploadSharedAudioClipAsset = async (payload: UploadedAudioClipPayload, ide
 export const readSharedOutboxSummary = async (projectId: string, userId: string): Promise<SharedOutboxSummary> => {
   return summarizeOutboxRows(await readOutboxRows(projectId), userId)
 }
+// The one-shot timer of a project's next delivery attempt. The deadline is the persisted head of the outbox, or the
+// backoff after a failed flush when that deadline cannot be read. `onRetryDue` fires once per armed deadline, and
+// `dispose` cancels the timer, so no attempt outlives its owner.
+export const createSharedOutboxRetry = (projectId: string, userId: string, onRetryDue: () => void) => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let version = 0
+  let failures = 0
+  let notBefore = 0
+  let disposed = false
+  const cancel = () => {
+    if (timer === undefined) return
+    outboxRuntime.cancel(timer)
+    timer = undefined
+  }
+  const arm = async () => {
+    const armed = ++version
+    let nextAttemptAt: number | undefined
+    try {
+      nextAttemptAt = (await readSharedOutboxRetryState(projectId, userId)).nextAttemptAt
+    } catch {
+      nextAttemptAt = notBefore || undefined
+    }
+    if (disposed || armed !== version) return
+    cancel()
+    if (nextAttemptAt === undefined && !notBefore) return
+    timer = outboxRuntime.schedule(() => {
+      timer = undefined
+      onRetryDue()
+    }, Math.max(0, Math.max(nextAttemptAt ?? 0, notBefore) - now()))
+  }
+  return {
+    // A flush finished: re-arm from the persisted deadline, with backoff when the flush itself failed.
+    settled: (delivered: boolean) => {
+      failures = delivered ? 0 : failures + 1
+      notBefore = delivered ? 0 : now() + sharedOutboxRetryDelayMs(failures)
+      return arm()
+    },
+    // The persisted outbox changed: the armed deadline may be stale.
+    refresh: () => {
+      version += 1
+      cancel()
+      void arm()
+    },
+    backingOff: () => notBefore !== 0,
+    dispose: () => {
+      disposed = true
+      version += 1
+      cancel()
+    },
+  }
+}
+
 export const readSharedOutboxRetryState = async (
   projectId: string,
   userId: string,

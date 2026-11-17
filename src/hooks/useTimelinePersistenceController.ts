@@ -3,7 +3,7 @@ import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { ClipBufferWriter, EnsureClipBuffer } from "~/lib/clip-buffer-cache";
 import { isLocalId } from "@daw-browser/shared";
 import type { LocalProjectMode } from "~/lib/local-project-db";
-import { flushSharedOutbox, readSharedOutboxRetryState, sharedOutboxRetryDelayMs } from "~/lib/shared-outbox";
+import { createSharedOutboxRetry, flushSharedOutbox } from "~/lib/shared-outbox";
 import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
@@ -85,53 +85,22 @@ export const useTimelinePersistenceController = (input: Input) => {
     const userId = input.userId();
     if (!projectId || isLocalId("project", projectId) || !userId) return;
     let active = true;
-    let retryTimer: number | undefined;
     let flushPromise: Promise<void> | undefined;
     let flushRequested = false;
-    let retryScheduleVersion = 0;
-    let flushFailures = 0;
-    let retryNotBefore = 0;
-    const cancelRetry = () => {
-      if (retryTimer === undefined) return;
-      window.clearTimeout(retryTimer);
-      retryTimer = undefined;
-    };
-    const scheduleRetry = async () => {
-      const version = ++retryScheduleVersion;
-      let retryState: Awaited<ReturnType<typeof readSharedOutboxRetryState>>;
-      try {
-        retryState = await readSharedOutboxRetryState(projectId, userId);
-      } catch {
-        retryState = { nextAttemptAt: retryNotBefore || undefined };
-      }
-      if (!active || version !== retryScheduleVersion) return;
-      cancelRetry();
-      if (retryState.nextAttemptAt === undefined && !retryNotBefore) return;
-      // Persisted deadlines drive retries; storage/lock failures add bounded backoff.
-      // Project cleanup cancels this one-shot timer, including failed metadata reads.
-      retryTimer = window.setTimeout(() => {
-        retryTimer = undefined;
-        void flush();
-      }, Math.max(0, Math.max(retryState.nextAttemptAt ?? 0, retryNotBefore) - Date.now()));
-    };
+    const retry = createSharedOutboxRetry(projectId, userId, () => { void flush(); });
     const flush = () => {
       if (flushPromise) {
         flushRequested = true;
         return flushPromise;
       }
       const operation = flushSharedOutbox(projectId, userId)
-        .then(() => {
-          flushFailures = 0;
-          retryNotBefore = 0;
-        }, () => {
-          flushFailures += 1;
-          retryNotBefore = Date.now() + sharedOutboxRetryDelayMs(flushFailures);
+        .then(() => retry.settled(true), () => {
           flushRequested = false;
+          return retry.settled(false);
         })
-        .then(scheduleRetry)
         .finally(() => {
           flushPromise = undefined;
-          if (flushRequested && active && !retryNotBefore) {
+          if (flushRequested && active && !retry.backingOff()) {
             flushRequested = false;
             void flush();
           }
@@ -139,19 +108,13 @@ export const useTimelinePersistenceController = (input: Input) => {
       flushPromise = operation;
       return operation;
     };
-    const refreshRetry = () => {
-      retryScheduleVersion += 1;
-      cancelRetry();
-      void scheduleRetry();
-    };
     const onOnline = () => { void flush(); };
     void flush();
     window.addEventListener("online", onOnline);
-    const unsubscribe = subscribeToLocalProjectChanges(projectId, refreshRetry);
+    const unsubscribe = subscribeToLocalProjectChanges(projectId, retry.refresh);
     onCleanup(() => {
       active = false;
-      retryScheduleVersion += 1;
-      cancelRetry();
+      retry.dispose();
       unsubscribe();
       window.removeEventListener("online", onOnline);
     });

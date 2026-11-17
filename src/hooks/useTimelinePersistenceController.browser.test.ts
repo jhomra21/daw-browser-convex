@@ -23,7 +23,11 @@ const timers = new Map()
 let timerSequence = 0
 const listeners = new Set()
 const calls = []
-const state = { nextAttemptAt: undefined, failure: undefined }
+const callWaiters = new Set()
+const recordCall = () => {
+  calls.push(Date.now())
+  for (const waiter of callWaiters) waiter()
+}
 let realMode = false
 let database
 let originalTransaction
@@ -45,8 +49,6 @@ window.syncProbe = {
     listeners.clear()
     calls.length = 0
     pendingFlushes = []
-    state.nextAttemptAt = undefined
-    state.failure = undefined
     timerReady = deferred()
     window.setTimeout = (callback, delay) => {
       const id = ++timerSequence
@@ -89,7 +91,28 @@ window.syncProbe = {
       return document.createElement('span')
     }, host)
   },
-  state: (value) => { state.nextAttemptAt = value },
+  state: async (value) => {
+    database ??= await openLocalProjectDb('shared-a')
+    if (value === undefined) return database.delete('syncState', 'shared-outbox:fake-entry')
+    await database.put('syncState', {
+      key: 'shared-outbox:fake-entry',
+      value: {
+        id: 'fake-entry', projectId: 'shared-a', userId: 'user', kind: 'tracks.setVolume',
+        payload: { trackId: 'track-1', volume: 0.5 }, status: 'pending', attempts: 0,
+        nextAttemptAt: value, sequence: 1, createdAt: value, updatedAt: value,
+      },
+      updatedAt: value,
+    })
+  },
+  waitCalls: (count) => new Promise((resolve) => {
+    const check = () => {
+      if (calls.length < count) return
+      callWaiters.delete(check)
+      resolve()
+    }
+    callWaiters.add(check)
+    check()
+  }),
   resolveFlush: (index) => pendingFlushes[index]?.resolve(),
   timerCount: () => timers.size,
   timerDelays: () => Array.from(timers.values()).map((timer) => timer.delay),
@@ -134,7 +157,7 @@ window.syncProbe = {
     published = deferred()
     publishGate = deferred()
     window.fetch = async () => {
-      calls.push(Date.now())
+      recordCall()
       published.resolve()
       await publishGate.promise
       return new Response(JSON.stringify({ status: 'applied' }), { status: 200 })
@@ -150,9 +173,8 @@ window.syncProbe = {
 }
 window.sharedOutboxFixture = {
   real: () => realMode,
-  read: async () => ({ nextAttemptAt: state.nextAttemptAt, failure: state.failure }),
   flush: () => {
-    calls.push(Date.now())
+    recordCall()
     const operation = deferred()
     pendingFlushes.push(operation)
     return operation.promise
@@ -183,7 +205,6 @@ window.sharedOutboxFixture = {
           if (id === `\0${fixtureId}.ts`) return source
           if (id === '\0stub:outbox.ts') return `export * from '${repositoryRoot}src/lib/shared-outbox.ts'
             import * as real from '${repositoryRoot}src/lib/shared-outbox.ts'
-            export const readSharedOutboxRetryState = (...args) => window.sharedOutboxFixture.real() ? real.readSharedOutboxRetryState(...args) : window.sharedOutboxFixture.read()
             export const flushSharedOutbox = (...args) => window.sharedOutboxFixture.real() ? real.flushSharedOutbox(...args) : window.sharedOutboxFixture.flush()`
           if (id === '\0stub:changes.ts') return `export * from '${repositoryRoot}src/lib/local-project-changes.ts'
             import * as real from '${repositoryRoot}src/lib/local-project-changes.ts'
@@ -239,13 +260,13 @@ test('shared outbox schedules pending deadlines and clears project timers', asyn
   try {
     await run('eval', 'syncProbe.mount()')
     expect(await read()).toMatchObject({ calls: 1 })
-    await run('eval', 'syncProbe.state(Date.now()); syncProbe.emitChange()')
+    await run('eval', '(async () => { await syncProbe.state(Date.now()); syncProbe.emitChange(); await syncProbe.waitTimer() })()')
     expect(await read()).toMatchObject({ calls: 1, timers: 1 })
     await run('eval', 'syncProbe.fireTimer()')
     expect(await read()).toMatchObject({ calls: 1, timers: 0 })
-    await run('eval', 'syncProbe.resolveFlush(0)')
+    await run('eval', 'syncProbe.resolveFlush(0); syncProbe.waitCalls(2)')
     expect(await read()).toMatchObject({ calls: 2 })
-    await run('eval', 'syncProbe.state(undefined); syncProbe.resolveFlush(1)')
+    await run('eval', '(async () => { await syncProbe.state(undefined); syncProbe.resolveFlush(1) })()')
     await run('eval', 'syncProbe.switchProject("shared-b")')
     expect(await read()).toMatchObject({ calls: 3, timers: 0 })
     await run('eval', 'syncProbe.unmount()')

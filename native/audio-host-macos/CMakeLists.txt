@@ -67,4 +67,7 @@ if(BUILD_TESTING)
     NAME daw-realtime-callback-static-guard
     COMMAND ${BUN_EXECUTABLE} test ${CMAKE_CURRENT_SOURCE_DIR}/tests/realtime_callback_guard.test.ts
   )
+  # Needs the signed test plug-in tools/acceptance/run-ae08-test-plugin.ts builds; without it ctest reports Skipped.
+  add_test(NAME daw-audio-host-macos-real-plugin-test COMMAND daw-audio-host-macos-test --real-plugin)
+  set_tests_properties(daw-audio-host-macos-real-plugin-test PROPERTIES SKIP_RETURN_CODE 77)
 endif()

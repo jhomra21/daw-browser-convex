@@ -2384,7 +2384,6 @@ struct AudioHost::Impl {
       && left.declared_tail_frames == right.declared_tail_frames && left.infinite_tail == right.infinite_tail
       && left.transport_latency_frames == right.transport_latency_frames;
   }
-  // A ready instance parks instead of retiring; the newest kMaximumParkedNativeVsts stay.
   void ParkNativeVst(NativeVstWorkerAttachment& attachment) {
     attachment.ownership = NativeVstWorkerAttachment::Ownership::kParked;
     attachment.parked_at = std::chrono::steady_clock::now();
@@ -2454,8 +2453,6 @@ struct AudioHost::Impl {
       automation_credit_totals[bank].store(credits, std::memory_order_release);
     }
   }
-  // The prepared revision became the active plan: staged instances it bound are now
-  // active, and a staged instance it could not bind (not ready) is retired.
   void AdoptPublishedNativeVsts() {
     for (auto& [instance_id, attachment] : native_vst_attachments) {
       static_cast<void>(instance_id);
@@ -2480,7 +2477,6 @@ struct AudioHost::Impl {
       || recording_config.target_node_id == 0) return std::nullopt;
     return recording_config.target_node_id;
   }
-  // The prepared revision was dropped: everything it staged is retired.
   void RollbackStagedNativeVsts() {
     for (auto& [instance_id, attachment] : native_vst_attachments) {
       static_cast<void>(instance_id);
@@ -3630,6 +3626,10 @@ void AudioHostTestAccess::UseNoPluginWorkers(const bool use) {
 
 void AudioHostTestAccess::SetParkedAge(AudioHost& host, const std::chrono::milliseconds age) {
   host.impl_->parked_age = age;
+}
+
+bool AudioHostTestAccess::ProcessorPatchPosted(AudioHost& host) {
+  return host.impl_->processor_patch_requested.load(std::memory_order_acquire) != 0;
 }
 
 void AudioHostTestAccess::UseWorkerExecutable(std::string path) {

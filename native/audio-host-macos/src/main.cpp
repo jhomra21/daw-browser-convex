@@ -31,18 +31,18 @@ bool ShouldLogReceivedControl(const daw::audio_host_macos::ControlType type) {
   return type == Type::kStop || type == Type::kTeardown;
 }
 
-bool ReadExact(std::istream& input, std::uint8_t* bytes, const std::size_t size) {
+enum class StdinRead { kComplete, kClosed, kFailed };
+
+StdinRead ReadExact(std::uint8_t* bytes, const std::size_t size) {
   std::size_t offset = 0;
   while (offset < size) {
     const auto count = read(STDIN_FILENO, bytes + offset, size - offset);
     if (count < 0 && errno == EINTR) continue;
-    if (count <= 0) {
-      if (count == 0) input.setstate(std::ios::eofbit);
-      return false;
-    }
+    if (count < 0) return StdinRead::kFailed;
+    if (count == 0) return StdinRead::kClosed;
     offset += static_cast<std::size_t>(count);
   }
-  return true;
+  return StdinRead::kComplete;
 }
 
 std::int64_t MonotonicNanoseconds() {
@@ -862,12 +862,13 @@ int main() {
     }
     if ((inputs[0].revents & (POLLIN | POLLHUP | POLLERR)) == 0) continue;
     std::array<std::uint8_t, daw::audio_host_macos::kControlFrameHeaderBytes> header{};
-    if (!ReadExact(std::cin, header.data(), header.size())) return std::cin.eof() ? EXIT_SUCCESS : EXIT_FAILURE;
+    const auto header_read = ReadExact(header.data(), header.size());
+    if (header_read != StdinRead::kComplete) return header_read == StdinRead::kClosed ? EXIT_SUCCESS : EXIT_FAILURE;
     const std::uint32_t length = ReadU32(header.data() + 12);
     if (length > daw::audio_host_macos::kMaximumControlPayloadBytes) return EXIT_FAILURE;
     std::vector<std::uint8_t> bytes(header.begin(), header.end());
     bytes.resize(header.size() + length);
-    if (length != 0 && !ReadExact(std::cin, bytes.data() + header.size(), length)) return EXIT_FAILURE;
+    if (length != 0 && ReadExact(bytes.data() + header.size(), length) != StdinRead::kComplete) return EXIT_FAILURE;
     const auto request = daw::audio_host_macos::DecodeControlFrame(bytes);
     if (!request) return EXIT_FAILURE;
     if (ShouldLogReceivedControl(request->type)) {

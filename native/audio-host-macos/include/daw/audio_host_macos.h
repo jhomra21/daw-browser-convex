@@ -581,6 +581,8 @@ namespace daw::audio_host_macos {
 struct AudioHostTestAccess {
   enum class Ownership { kAbsent, kStaged, kActive, kParked, kRetired };
   static void SetParkedAge(AudioHost& host, std::chrono::milliseconds age);
+  // Whether a processor patch request is posted and the callback has not taken it yet.
+  static bool ProcessorPatchPosted(AudioHost& host);
   static Ownership AttachmentOwnership(AudioHost& host, std::string_view instance_id);
   static void UseNoPluginWorkers(bool use);
   static void UseWorkerExecutable(std::string path);

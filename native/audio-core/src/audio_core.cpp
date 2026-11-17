@@ -1412,7 +1412,6 @@ bool order_graph_nodes(GraphRevision &graph) {
   return true;
 }
 
-// Edge and processor ranges in request order for live and ghost entries.
 void build_graph_ranges(GraphRevision &graph) {
   const uint32_t node_total = graph.total_node_count();
   const uint32_t edge_total = graph.total_edge_count();
@@ -2286,7 +2285,6 @@ void advance_mixer_block(MixerBlock &mixer, uint32_t frame) {
   }
 }
 
-// Callback, after a node's block: what its events set holds for later blocks.
 void latch_mixer_block(Core &core, const MixerBlock &mixer) {
   Core::MixerLatch &latch = core.mixer_latches[mixer.slot];
   for (uint32_t index = 0; index < kMixerParameterCount; ++index) {
@@ -2295,8 +2293,6 @@ void latch_mixer_block(Core &core, const MixerBlock &mixer) {
   latch.mask = static_cast<uint8_t>(latch.mask | mixer.written);
 }
 
-// Whether any live node's fader is soloed, per frame of the block, into
-// mixer_solo_frames. False, writing nothing, when none is soloed in the block.
 bool resolve_mixer_solo(Core &core, const GraphRevision &graph, uint32_t frame_count) {
   bool soloed = false;
   for (uint32_t node = 0; node < graph.node_count; ++node) {
@@ -4191,8 +4187,6 @@ float graph_tap_sample(
   return source;
 }
 
-// The gain an edge applies `at` frames into the move a publish started
-// (begin_edge_ramps): from where it stood toward its own, then exactly its own.
 float edge_ramp_gain(const Core::EdgeRamp &ramp, float gain, uint32_t at) {
   if (at >= ramp.frames) return gain;
   const float progress = static_cast<float>(at) / static_cast<float>(ramp.frames);
@@ -6879,7 +6873,6 @@ extern "C" void daw_audio_core_destroy(daw_audio_core_handle core) {
 }
 
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
-// Adds the time of its scope to a prepare step (audio_core_native.h). Profiling off, it never reads the clock.
 class PrepareScope {
  public:
   PrepareScope(Core &core, const char *step) : core_(core.prepare_profiling ? &core : nullptr), step_(step) {

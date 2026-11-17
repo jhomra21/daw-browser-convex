@@ -1399,12 +1399,18 @@ test('the shared graph fixtures execute through the bounded Wasm runner', async 
           }
         }
       }
-      // Graph edits land on partition boundaries, so there is no unpartitioned render to compare.
-      if (fixture.blockPartitions && !fixture.graphEdits) {
+      if (fixture.blockPartitions) {
+        // A graph edit lands before the block that starts at its frame, so the reference keeps one block per
+        // stretch between edits; without edits it is a single block.
+        const editBoundaries = [0, ...(fixture.graphEdits ?? []).map((edit) => edit.frame), fixture.frames]
+        const referencePartitions = editBoundaries
+          .slice(1)
+          .map((end, index) => end - (editBoundaries[index] ?? 0))
+          .filter((length) => length > 0)
         const referenceBytes = encodePortableGraphParityFixture({
           ...fixture,
-          maxFramesPerBlock: fixture.frames,
-          blockPartitions: undefined,
+          maxFramesPerBlock: Math.max(...referencePartitions),
+          blockPartitions: fixture.graphEdits ? referencePartitions : undefined,
         })
         new Uint8Array(exports.memory.buffer, fixtureOffset, referenceBytes.byteLength).set(referenceBytes)
         expect(exports.daw_audio_core_run_graph_fixture(fixtureOffset, referenceBytes.byteLength, pointersOffset)).toBe(0)

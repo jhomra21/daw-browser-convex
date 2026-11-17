@@ -3615,9 +3615,15 @@ void TestDeviceLossTerminatesPendingTransition() {
   // Complete more reader epochs, but not the multi-second transition.
   assert(host.ProcessPlanar(input, output, 128));
   assert(host.ProcessPlanar(input, output, 128));
-  // Drain any callback progress before establishing the device-loss edge.
-  std::this_thread::sleep_for(std::chrono::milliseconds(20));
-  host.DrainScheduleProgress();
+  // The bridge publishes callback progress asynchronously: drain through the last block's before establishing the
+  // device-loss edge, so only the loss can wake the wait below.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  const auto last_frame = static_cast<std::uint64_t>(host.diagnostics().transport_frame);
+  for (std::uint64_t published = 0; published < last_frame;) {
+    assert(std::chrono::steady_clock::now() < deadline);
+    if (const auto frame = host.DrainScheduleProgress()) published = frame->rendered_through_frame;
+    else std::this_thread::yield();
+  }
   std::atomic<bool> running{true};
   auto fault = std::async(std::launch::async, [&] { return host.WaitForScheduleProgress(&running); });
   const auto before = host.diagnostics();
@@ -5284,14 +5290,20 @@ struct PatchRig {
   }
 };
 
+// Returns once the request is posted, so the next block the caller processes is the one that takes it.
 std::future<ProcessorPatchStatus> QueuePatchAsync(PatchRig& rig, const std::vector<std::uint8_t>& patch) {
-  return std::async(std::launch::async, [&rig, &patch] { return rig.host.QueueProcessorStatePatch(patch); });
+  auto reply = std::async(std::launch::async, [&rig, &patch] { return rig.host.QueueProcessorStatePatch(patch); });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  while (!daw::audio_host_macos::AudioHostTestAccess::ProcessorPatchPosted(rig.host)) {
+    assert(std::chrono::steady_clock::now() < deadline);
+    std::this_thread::yield();
+  }
+  return reply;
 }
 
 ProcessorPatchStatus ClaimPatch(PatchRig& rig, const float gain_db) {
   const auto patch = ProcessorStatePatch(2, gain_db);
   auto reply = QueuePatchAsync(rig, patch);
-  std::this_thread::sleep_for(std::chrono::milliseconds(20));
   rig.Process();  // the callback takes the request and holds it
   assert(reply.wait_for(std::chrono::seconds(3)) == std::future_status::ready);
   const auto status = reply.get();
@@ -5563,12 +5575,10 @@ void TestPatchStatusBranchesAreValid() {
     ProcessorPatchOutcome::kRefused, ProcessorPatchRefusal::kNotClaimed);
   const auto patch = ProcessorStatePatch(2, 6.F);
   auto acknowledged = QueuePatchAsync(rig, patch);
-  std::this_thread::sleep_for(std::chrono::milliseconds(20));
   rig.Process();
   expect(acknowledged.get(), ProcessorPatchOutcome::kApplied, ProcessorPatchRefusal::kNone);
   daw::audio_host_macos::SetTestPatchClaimDiscard(true);
   auto failed = QueuePatchAsync(rig, patch);
-  std::this_thread::sleep_for(std::chrono::milliseconds(20));
   rig.Process();
   const auto apply_failed = failed.get();
   expect(apply_failed, ProcessorPatchOutcome::kRefused, ProcessorPatchRefusal::kApplyFailed);
@@ -6260,9 +6270,9 @@ void TestRetireDuringPublicationKeepsTheWorkerTheCallbackReads() {
   host.Stop();
 }
 
-// Host tests against the AE-08 test plug-in. They run only when a driver names a built and
-// signed bundle with its fingerprints (DAW_AE08_TEST_PLUGIN_BUNDLE, _BUNDLE_FINGERPRINT,
-// _BINARY_FINGERPRINT); the plug-in is never built or installed by default.
+// Host tests against the AE-08 test plug-in, run as `daw-audio-host-macos-test --real-plugin`. They need a
+// driver that names a built and signed bundle with its fingerprints (DAW_AE08_TEST_PLUGIN_BUNDLE,
+// _BUNDLE_FINGERPRINT, _BINARY_FINGERPRINT); the plug-in is never built or installed by default.
 namespace plugin {
 constexpr std::string_view kFirst = "b0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f1";
 constexpr std::string_view kSecond = "c0c4db1e-bd48-46d4-a4bc-f5ad1fe6c6f2";
@@ -6598,7 +6608,10 @@ void MeasureInserts() {
     const std::string id = "b0c4db1e-bd48-46d4-a4bc-" + std::to_string(100000000000ULL + insert);
     const auto attached = Clock::now();
     assert(rig.host.AttachNativeVst(Attachment(id, 1)));
-    while (rig.host.NativeVstHealth(id) != NativeVstWorkerHealth::kReady) std::this_thread::sleep_for(std::chrono::microseconds(500));
+    while (rig.host.NativeVstHealth(id) != NativeVstWorkerHealth::kReady) {
+      assert(Clock::now() - attached < std::chrono::seconds(10));
+      std::this_thread::sleep_for(std::chrono::microseconds(500));
+    }
     const auto ready = Clock::now();
     const std::uint32_t revision = 3 + 2 * insert;
     assert(rig.host.PrepareGraphRevision(revision, Graph(revision, {kBlock, 0})).code == GraphRevisionStatusCode::kPrepared);
@@ -6609,7 +6622,10 @@ void MeasureInserts() {
     assert(AudioHostTestAccess::AttachmentOwnership(rig.host, id) == Ownership::kActive);
     loading.push_back(milliseconds(ready - attached));
     binding.push_back(milliseconds(bound - ready));
-    while (rig.host.RetireGraphRevision(revision - 1).code != GraphRevisionStatusCode::kRetired) rig.Render();
+    for (unsigned blocks = 0; rig.host.RetireGraphRevision(revision - 1).code != GraphRevisionStatusCode::kRetired; ++blocks) {
+      assert(blocks < 3000);
+      rig.Render();
+    }
     assert(rig.host.DetachVstReference(id));
     rig.Publish(revision + 1, {0, 0});
   }
@@ -6659,66 +6675,43 @@ void TestStateReadReflectsQueuedParameter() {
   }
   rig.host.Stop();
 }
+
+// ctest's SKIP_RETURN_CODE for this run: without a bundle the tests are reported as skipped, not as passed.
+constexpr int kSkipped = 77;
+
+int RunRealPluginTests() {
+  if (std::getenv("DAW_AE08_TEST_PLUGIN_BUNDLE") == nullptr) {
+    std::fprintf(stderr, "skipped: DAW_AE08_TEST_PLUGIN_BUNDLE names no built test plug-in\n");
+    return kSkipped;
+  }
+  TestIoChangedRestartFaultsWhenBusesNoLongerFit();
+  TestComponentRestartResetsUpTheWorker();
+  TestLatencySwitchPublishesWithoutStop();
+  TestCrashMutesOnlyThatInstance();
+  TestDelayedReadyAcrossAPublication();
+  TestStateReadReflectsQueuedParameter();
+  return 0;
+}
 }  // namespace plugin
 
-int main() {
+int main(const int argc, const char* const argv[]) {
+  if (argc == 2 && std::strcmp(argv[1], "--real-plugin") == 0) return plugin::RunRealPluginTests();
   if (std::getenv("DAW_AE08_MEASURE_INSERTS")) {
     plugin::MeasureInserts();
     return 0;
   }
-  if (std::getenv("DAW_AE08_TEST_PLUGIN_BUNDLE")) {
-    plugin::TestIoChangedRestartFaultsWhenBusesNoLongerFit();
-    plugin::TestComponentRestartResetsUpTheWorker();
-    plugin::TestLatencySwitchPublishesWithoutStop();
-    plugin::TestCrashMutesOnlyThatInstance();
-    plugin::TestDelayedReadyAcrossAPublication();
-    plugin::TestStateReadReflectsQueuedParameter();
-    return 0;
-  }
-  if (std::getenv("DAW_AE08_RETIRE_ONLY")) {
-    TestRetireDuringPublicationKeepsTheWorkerTheCallbackReads();
-    TestRetiringASlowWorkerDoesNotBlockTheCommandLoop();
-    TestUndoBeforePublicationBindsNothing();
-    TestRapidInsertUndoBurstKeepsEveryInstanceOwned();
-    TestParkedInstanceRejoinsWithoutAReload();
-    TestUndoBeforeTheDeletePublishesKeepsTheLiveBinding();
-    TestParkedInstanceThatChangedIsLoadedAgain();
-    TestRejoinInsideTheRetireWindowKeepsWhatTheCallbackReads();
-    TestParkingIsBoundedByCountAndAge();
-    return 0;
-  }
-  if (const auto* mode = std::getenv("DAW_AE08_OBSERVATION_ONLY")) {
-    TestCheckpoint4ObservationHandoff(*mode); return 0;
-  }
   for (const char mode : {'a', 'b', 'c', 'd', 'e', 'f'}) TestCheckpoint4ObservationHandoff(mode);
-  if (const auto* mode = std::getenv("DAW_AE08_SOURCE_WIRE_ORIGIN_ONLY")) {
-    TestCheckpoint3WireOrigin(static_cast<unsigned>(std::strtoul(mode, nullptr, 10))); return 0;
-  }
   for (const unsigned mode : {0U, 1U, 2U, 3U, 4U}) TestCheckpoint3WireOrigin(mode);
-  if (std::getenv("DAW_AE08_SOURCE_RAPID_NODE_ONLY")) { TestCheckpoint3RapidNodeReaddition(); return 0; }
-  if (std::getenv("DAW_AE08_SOURCE_ORIGINS_ONLY")) { TestCheckpoint3FractionalOrigins(); return 0; }
-  if (std::getenv("DAW_AE08_SOURCE_ENDPOINT_ONLY")) { TestCheckpoint3FractionalEndpoint(); return 0; }
   TestCheckpoint3RapidNodeReaddition();
   TestCheckpoint3FractionalOrigins();
   TestCheckpoint3FractionalEndpoint();
-  if (std::getenv("DAW_AE08_SOURCE_NODE_READD_ONLY")) { TestCheckpoint3RemovedSourceNodeReaddition(); return 0; }
   TestCheckpoint3RemovedSourceNodeReaddition();
-  if (std::getenv("DAW_AE08_SOURCE_FRACTION_ONLY")) { TestCheckpoint3FractionalSourceSeam(); return 0; }
-  if (std::getenv("DAW_AE08_SOURCE_CAPACITY_ONLY")) { TestCheckpoint3SourceSeamCapacity(); return 0; }
-  if (const auto* failure = std::getenv("DAW_AE08_SOURCE_SEAM_ONLY")) {
-    TestCheckpoint3SourceSeam(*failure); return 0;
-  }
   for (const char failure : {'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'}) TestCheckpoint3SourceSeam(failure);
   for (const char failure : {'a', 'b', 'c', 'd', 'e'})
     for (const unsigned cancellation : {1U, 2U}) TestCheckpoint3SourceSeam(failure, cancellation);
   TestCheckpoint3SourceSeamCapacity();
   TestCheckpoint3FractionalSourceSeam();
-  if (std::getenv("DAW_AE08_ASSET_EPOCH_ONLY")) { TestReaderCompletionControlsAssetReclamation(); return 0; }
-  if (std::getenv("DAW_AE08_ASSET_INSTRUMENT_ONLY")) { TestCheckpoint3StagedInstrumentAssets(); return 0; }
   TestReaderCompletionControlsAssetReclamation();
-  if (const auto* failure = std::getenv("DAW_AE08_ASSET_ONLY")) {
-    TestCheckpoint3Assets(*failure); return 0;
-  }
   for (const char failure : {'a', 'b', 'c', 'd', 'e', 'f'}) TestCheckpoint3Assets(failure);
   TestCheckpoint3StagedInstrumentAssets();
   TestReleasedAssetReclaimsAfterOneEpochWithNoPreparedBank();
@@ -6727,13 +6720,10 @@ int main() {
   TestCheckpoint2SaturatedNoteOffSeam(true);
   TestCheckpoint2SaturatedRebaseProgress();
   TestCheckpoint2OutOfOrderChunksAndCancellation();
-  if (std::getenv("DAW_AE08_SATURATION_ONLY")) return 0;
   TestCheckpoint2RemovedTargetCancelsPendingLiveControl();
   TestCheckpoint2RebaseAndShortBlocks();
   TestCheckpoint2CapacityAndPreparedTargets();
-  if (std::getenv("DAW_AE08_VST_BANK_ONLY")) { TestVstAutomationSegmentsReclaimWithinEpoch(); return 0; }
   TestCheckpoint2HeldNoteSeam();
-  if (std::getenv("DAW_AE08_SEEK_ONLY")) { TestCheckpoint2SeekCancelsUnpublished(); return 0; }
   TestCheckpoint2LateFrame();
   TestCheckpoint2SeekCancelsUnpublished();
   TestCheckpoint2FuturePublication();
@@ -6741,14 +6731,12 @@ int main() {
   TestCheckpoint2StagedBank();
   TestActiveScheduleRefillsDuringGraphPreparation();
   TestPrepareAutoRetiresCompletedRevision();
-  if (std::getenv("DAW_AE08_PHASE5_ONLY") != nullptr) return 0;
   TestStopBeforeFirstCallbackDoesNotPublishEmptyProgress();
   TestDeviceLossTerminatesPendingTransition();
   TestKeepLatencyDiagnosticReply();
   TestLatencyMoveCompletionQueuesTheNextRevision();
   TestPublishEvidenceCarriesTheAppliedLatency();
   TestPausedPublicationReconcilesScheduledTargets();
-  if (std::getenv("DAW_AE08_LATENCY_ONLY") != nullptr) return 0;
   if (std::getenv("DAW_PHASE2_VALIDATION_BENCHMARK") != nullptr) {
     MeasureInstrumentValidation();
     return 0;
@@ -6758,11 +6746,6 @@ int main() {
     DAW_AUDIO_INSTRUMENT_KIND_GRANULAR}) TestPagedInstrumentOutput(kind, 0.98F, 1, true);
   TestInstrumentRejectionBurstRendersValidSubset();
   TestOfflineExportRejectsInjectedInstrumentFailure();
-  if (std::getenv("DAW_R24_BURST_ONLY") != nullptr) return 0;
-  if (std::getenv("DAW_R23_REJECTION_ONLY") != nullptr) {
-    TestPermanentInstrumentRejectionRecovers();
-    return 0;
-  }
   TestInstrumentAdmissionAndVoiceStealing();
   TestPermanentInstrumentRejectionRecovers();
   TestMixedInstrumentSequenceDomains();

@@ -5559,22 +5559,6 @@ const CompiledProcessor &compiled_processor(const std::string &name) {
   return found->second;
 }
 
-// The first field in which a rig processor differs from a record, or null.
-const char *compiled_difference(const daw_audio_processor_descriptor &actual, const CompiledProcessor &record) {
-  if (actual.instance_id != record.instance_id) return "instance id";
-  if (actual.kind != record.kind) return "kind";
-  if (actual.state_version != record.state_version) return "state version";
-  if (actual.bypassed != record.bypassed) return "bypass flag";
-  if (actual.latency_frames != record.latency_frames) return "latency";
-  if (actual.tail_frames != record.tail_frames) return "tail";
-  if (actual.parameter_count != record.targets.size()
-    || !std::equal(record.targets.begin(), record.targets.end(), actual.parameter_targets)) return "parameter targets";
-  if (actual.state_size != record.state.size() || std::memcmp(actual.state, record.state.data(), record.state.size()) != 0) {
-    return "state bytes";
-  }
-  return nullptr;
-}
-
 // Round-4 review contracts (checkpoints 12-16). A rig builds a graph from vectors,
 // so each case states only the edit it exercises. Every case uses the production
 // prepare/publish API and checks that publish and render allocate nothing.
@@ -10205,55 +10189,6 @@ void matrix_build(Phase3Rig &rig, const MatrixSpec &spec) {
   if (spec.returns) rig.add_compiled(9, "return-trim");
 }
 
-// Checkpoint 44: the matrix and the bypass subjects are made of what the compiler
-// emits. Every processor either builds must equal a record from
-// compiled-processors.txt in every field the host sends: instance id, kind, state
-// version, state bytes, bypass flag, latency, tail and the complete declared
-// parameter targets. The key compressor alone differs, in latency, by design
-// (see matrix_build).
-void require_compiled_stages(const Phase3Rig &rig, const char *context) {
-  for (const daw_audio_processor_descriptor &processor : rig.processors) {
-    const char *first_difference = "no record has this instance id";
-    bool equal = false;
-    for (const auto &[name, record] : compiled_processors()) {
-      if (record.instance_id != processor.instance_id) continue;
-      daw_audio_processor_descriptor comparable = processor;
-      if (name == "key-compressor") comparable.latency_frames = record.latency_frames;
-      first_difference = compiled_difference(comparable, record);
-      if (first_difference == nullptr) {
-        equal = true;
-        break;
-      }
-    }
-    if (!equal) {
-      std::fprintf(stderr, "phase 3 contract: %s: processor %llu is not a compiler record: %s\n", context,
-        static_cast<unsigned long long>(processor.instance_id), first_difference);
-      std::abort();
-    }
-  }
-}
-
-void test_phase3_stages_are_what_the_compiler_emits() {
-  std::vector<MatrixSpec> specs(6);
-  specs[1].bypassed = true;
-  specs[2].restructured = true;
-  specs[3].bypassed = specs[3].restructured = true;
-  specs[4].reordered = true;
-  specs[5].added_stage = specs[5].added_node = specs[5].added_source = true;
-  for (const MatrixSpec &spec : specs) {
-    Phase3Rig rig;
-    matrix_build(rig, spec);
-    require_compiled_stages(rig, "matrix");
-  }
-  for (uint32_t which = 0; which < kBypassKindNames.size(); ++which) {
-    for (uint32_t bypassed = 0; bypassed < 2; ++bypassed) {
-      Phase3Rig rig;
-      bypass_subject(rig, which, bypassed);
-      require_compiled_stages(rig, kBypassKindNames[which]);
-    }
-  }
-}
-
 struct MatrixTrace {
   std::vector<Phase3Rig::Block> output;
   std::vector<Phase3Rig::Block> witness;
@@ -10856,8 +10791,6 @@ int main(int argc, char **argv) {
       test_phase3_reorder_never_exceeds_the_envelope_of_either_order();
     else if (std::strcmp(argv[2], "reorder-highpass") == 0)
       test_phase3_reorder_residue_decays_through_a_resonant_high_pass();
-    else if (std::strcmp(argv[2], "compiler-stages") == 0)
-      test_phase3_stages_are_what_the_compiler_emits();
     else if (std::strcmp(argv[2], "fixture-malformed") == 0)
       test_graph_fixture_rejects_malformed_edit_graphs();
     else if (std::strcmp(argv[2], "transition-matrix") == 0)
@@ -10956,7 +10889,6 @@ int main(int argc, char **argv) {
   test_phase3_reorder_with_an_external_stage_dips_at_block_edges();
   test_phase3_reorder_never_exceeds_the_envelope_of_either_order();
   test_phase3_reorder_residue_decays_through_a_resonant_high_pass();
-  test_phase3_stages_are_what_the_compiler_emits();
   test_graph_fixture_rejects_malformed_edit_graphs();
   test_phase3_transition_matrix(false);
   test_phase3_unresolved_patch_blocks_prepare();

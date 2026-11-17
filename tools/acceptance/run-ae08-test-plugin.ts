@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Runs the environment-gated AE-08 real-plug-in host tests against the failure-injection test VST3.
+// Runs the AE-08 real-plug-in host tests (`--real-plugin`) against the failure-injection test VST3.
 // Everything lives in /tmp: the bundle is ad-hoc signed there and is never installed into a VST3 folder.
 import { homedir } from "node:os"
 import path from "node:path"
@@ -26,7 +26,7 @@ await run(["codesign", "--force", "--sign", "-", bundle])
 await run(["codesign", "--verify", "--strict", bundle])
 
 const binary = new Bun.CryptoHasher("sha256").update(await Bun.file(path.join(bundle, "Contents/MacOS/ae08-test-effect")).bytes()).digest("hex")
-await run([hostTest], {
+await run([hostTest, "--real-plugin"], {
   DAW_AE08_TEST_PLUGIN_BUNDLE: bundle,
   DAW_AE08_TEST_PLUGIN_BUNDLE_FINGERPRINT: await fingerprintVst3Bundle(bundle),
   DAW_AE08_TEST_PLUGIN_BINARY_FINGERPRINT: binary,

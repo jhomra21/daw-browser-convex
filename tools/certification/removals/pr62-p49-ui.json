@@ -1,0 +1,19 @@
+{
+ "ruling": "acceptance-reports/pr62-cleanup/PARENT-RULING-PR62-TEST-CLEANUP.md",
+ "removed": [
+  { "file": "src/components/Timeline.test.ts", "test": "persists captured editor state using its bound project after navigation" },
+  { "file": "src/components/Timeline.test.ts", "test": "opens an inserted VST editor only after the matching playback rebuild" },
+  { "file": "src/components/Timeline.test.ts", "test": "keeps arrangement and clip selection clicks from seeking during playback" },
+  { "file": "src/hooks/useTimelineMidiOverlay.test.ts", "test": "routes all live MIDI through the shared arpeggiator before backend dispatch" },
+  { "file": "src/hooks/useTimelineMidiOverlay.test.ts", "test": "native-required MIDI ingress stays silent while native preparation is pending" },
+  { "file": "src/hooks/useTimelineMidiOverlay.test.ts", "test": "hardware MIDI falls through when native readiness or handle is unavailable" },
+  { "file": "src/hooks/useTimelineMidiOverlay.test.ts", "test": "only suspended lifecycle blocks MIDI and lifecycle readiness gates native MIDI" },
+  { "file": "src/hooks/useTimelineMidiOverlay.test.ts", "test": "derives the live MIDI editor target from the docked clip without a close path" },
+  { "file": "src/hooks/useTimelineMidiOverlay.test.ts", "test": "reconciles router-owned held notes when native preview ownership is rebuilt" },
+  { "file": "src/hooks/useTimelineMidiOverlay.test.ts", "test": "resets live ownership on target and arpeggiator configuration changes" },
+  { "file": "src/hooks/useTimelineMidiOverlay.test.ts", "test": "scopes arpeggiator notifications and force-cleans lifecycle ownership" },
+  { "file": "src/hooks/useTimelineMidiOverlay.test.ts", "test": "retains held live sources for same-target arp and BPM changes" },
+  { "file": "src/components/timeline/create-effects-panel-device-collapse.test.ts", "test": "keeps the fold contract at the shell and panel boundaries" },
+  { "file": "src/components/timeline/create-effects-panel-device-collapse.test.ts", "test": "shows the native limitation notice on the device or track the routing belongs to" }
+ ]
+}

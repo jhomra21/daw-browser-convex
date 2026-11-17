@@ -483,14 +483,12 @@ const validateInstrumentAssetBudget = (
 
 type AttachmentPlan = NonNullable<LivePlaybackSnapshot["nativeExternalAttachmentPlan"]>
 
-const planWithWorkerFrames = (plan: AttachmentPlan, maximumFrames: number): AttachmentPlan =>
-  ({
-    ...plan,
-    attachments: plan.attachments.map((attachment) => ({
-      ...attachment,
-      workerTransport: { ...attachment.workerTransport, maximumFrames },
-    })),
-  })
+// A compile carries the plan's default worker block size; the session runs every worker at the device's.
+const planWithWorkerFrames = (plan: AttachmentPlan, maximumFrames: number): AttachmentPlan => ({
+  ...plan,
+  attachments: plan.attachments.map((attachment) => ({
+    ...attachment, workerTransport: { ...attachment.workerTransport, maximumFrames } })),
+})
 
 // What the host must be told about for a graph. A declared latency is not one: it reaches native through
 // `publishAttachmentLatency`.

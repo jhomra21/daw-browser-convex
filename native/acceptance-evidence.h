@@ -10,6 +10,7 @@ namespace daw::acceptance {
 
 // Control/telemetry threads only. No plug-in paths, state or authentication data.
 inline bool Enabled() { return std::getenv("DAW_AE08_EVIDENCE_DIR") != nullptr; }
+inline const char* EvidenceDirectory() { return std::getenv("DAW_AE08_EVIDENCE_DIR"); }
 
 inline void Event(const char* event, const char* fields = "") {
   const auto* directory = std::getenv("DAW_AE08_EVIDENCE_DIR");

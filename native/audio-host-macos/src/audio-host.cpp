@@ -8,7 +8,7 @@
 #include "worker-control-protocol.h"
 #include "worker-control-service.h"
 #include "worker-supervisor.h"
-#include "acceptance-output-tap.h"
+#include "acceptance-observer.h"
 
 #include <mach-o/dyld.h>
 
@@ -1391,28 +1391,21 @@ class RetiredAttachmentReaper {
 };
 
 struct AudioHost::Impl {
-  std::unique_ptr<AcceptanceOutputTap> acceptance_tap = daw::acceptance::Enabled()
-    ? std::make_unique<AcceptanceOutputTap>() : nullptr;
-  std::atomic<std::int64_t> acceptance_publication_frame = 0;
-  std::atomic<std::uint64_t> acceptance_publication_epoch = 0;
+  std::unique_ptr<AcceptanceObserver> observer = daw::acceptance::Enabled()
+    ? std::make_unique<AcceptanceObserver>() : nullptr;
+  std::atomic<std::int64_t> publication_frame = 0;
   // The core's pinned budget and the published graph's own latency, recorded where the publication happens so a
   // later move cannot change what its event reports. A lower while playing leaves the budget where it was.
-  std::atomic<std::uint32_t> acceptance_pinned_latency = 0;
-  std::atomic<std::uint32_t> acceptance_graph_latency = 0;
-  // Spectral stages hold a latency move's completion, so the gate needs to know the published graph has them.
-  std::atomic<std::uint32_t> acceptance_spectral_predecessors = 0;
   void RecordPublicationLatency() {
+    if (!observer) return;
     const auto core = active_core.load(std::memory_order_acquire);
-    acceptance_pinned_latency.store(daw::audio_core::InspectLatencyTransition(core).budget, std::memory_order_relaxed);
-    acceptance_graph_latency.store(daw::audio_core::PublishedGraphLatency(core), std::memory_order_relaxed);
-    acceptance_spectral_predecessors.store(daw::audio_core::PublishedGraphSpectralPredecessors(core), std::memory_order_relaxed);
+    observer->SetPublicationLatency(
+      daw::audio_core::InspectLatencyTransition(core).budget,
+      daw::audio_core::PublishedGraphLatency(core),
+      daw::audio_core::PublishedGraphSpectralPredecessors(core));
   }
-  std::uint64_t acceptance_observed_processor_sequence = 0;
-  std::uint32_t acceptance_observed_epoch = UINT32_MAX;
-  bool acceptance_observed_running = false;
   // Evidence-only ordinal. WorkerControlService::workerGeneration is a private
   // transport authentication value and must never be written to artifacts.
-  std::uint64_t acceptance_worker_ordinal = 0;
 
   void Evidence(const char* event, const char* cause = "", const std::uint32_t requested = 0,
     const char* detail = "") const {
@@ -1425,16 +1418,16 @@ struct AudioHost::Impl {
       cause, active_revision.load(), applied_transport_epoch.load(),
       static_cast<long long>(applied_transport_frame.load()),
       static_cast<unsigned long long>(completed_render_epoch.load()),
-      static_cast<long long>(acceptance_publication_frame.load()),
-      static_cast<unsigned long long>(acceptance_publication_epoch.load()), requested,
+      static_cast<long long>(observer ? observer->publicationFrame() : 0),
+      static_cast<unsigned long long>(observer ? observer->publicationEpoch() : 0), requested,
       static_cast<unsigned long long>(retired_after_epoch.load()), detail);
     daw::acceptance::Event(event, fields);
   }
   void PublicationEvidence(const char* cause) const {
-    if (!daw::acceptance::Enabled()) return;
+    if (!observer) return;
     char detail[128];
     std::snprintf(detail, sizeof(detail), ",\"pinnedLatencyFrames\":%u,\"graphLatencyFrames\":%u,\"spectralPredecessors\":%u",
-      acceptance_pinned_latency.load(), acceptance_graph_latency.load(), acceptance_spectral_predecessors.load());
+      observer->pinnedLatency(), observer->graphLatency(), observer->spectralPredecessors());
     Evidence("graph-publish", cause, 0, detail);
   }
   // One line per prepared revision: the host's own stages and the core's sub-steps, in microseconds. `core` holds the
@@ -2054,6 +2047,7 @@ struct AudioHost::Impl {
   static constexpr std::uint32_t kRealtimePublishAcknowledged = 1U << 0U;
   static constexpr std::uint32_t kRealtimeProcessorPatchAcknowledged = 1U << 2U;
   static constexpr std::uint32_t kRealtimeRecordingStatus = 1U << 1U;
+  static constexpr std::uint32_t kRealtimeAcceptanceCapture = 1U << 7U;
   std::atomic<std::uint32_t> realtime_bridge_pending = 0;
   std::atomic<bool> realtime_bridge_running = false;
   std::mutex realtime_bridge_wait_mutex;
@@ -2145,7 +2139,7 @@ struct AudioHost::Impl {
       .prepared_revision = prepared_revision.load(std::memory_order_acquire),
       .retired_revision = retired_revision.load(std::memory_order_acquire),
       .render_epoch = completed_render_epoch.load(std::memory_order_acquire),
-      .publication_frame = acceptance_publication_frame.load(std::memory_order_acquire),
+      .publication_frame = publication_frame.load(std::memory_order_acquire),
       .requested_publication_frame = requested_publication_frame,
       .progress_frame = static_cast<std::uint64_t>(applied_transport_frame.load(std::memory_order_acquire)),
       .transport_epoch = transport_epoch.load(std::memory_order_acquire),
@@ -2173,6 +2167,10 @@ struct AudioHost::Impl {
     schedule_progress_wait.notify_all();
   }
 
+  void DrainAcceptanceCapture() {
+    if (observer && observer->tap()) observer->tap()->Drain();
+  }
+
   // Non-realtime only. Before the first callback there is no populated revision/epoch to
   // report; the first real progress snapshot carries the counters this change touched.
   void PublishScheduleProgressChange() {
@@ -2194,7 +2192,7 @@ struct AudioHost::Impl {
       while (realtime_bridge_running.load(std::memory_order_acquire)) {
         const std::uint32_t pending = realtime_bridge_pending.exchange(0, std::memory_order_acq_rel);
         if ((pending & kRealtimeAssetReaders) != 0) WakeAssetControl();
-        if ((pending & (1U << 7U)) != 0 && acceptance_tap) acceptance_tap->Drain();
+        if ((pending & kRealtimeAcceptanceCapture) != 0) DrainAcceptanceCapture();
         if ((pending & kRealtimePublishAcknowledged) != 0) PublicationEvidence("block-boundary");
         if ((pending & kRealtimeInstrumentRejected) != 0) report_instrument_rejections();
         if ((pending & kRealtimeLatencyCompleted) != 0) {
@@ -2210,18 +2208,18 @@ struct AudioHost::Impl {
         if ((pending & NativeMeterObserver::kMeterReadyBit) != 0) meter_wait.notify_all();
         if ((pending & (1U << 4U)) != 0) spectrum_wait.notify_all();
         if ((pending & (kRealtimeScheduleProgress | kRealtimeLatencyCompleted)) != 0) {
-          if (acceptance_tap
-            && (acceptance_observed_epoch != schedule_progress_epoch.load()
-              || acceptance_observed_running != schedule_progress_running.load())) {
-            acceptance_observed_epoch = schedule_progress_epoch.load();
-            acceptance_observed_running = schedule_progress_running.load();
+          if (observer
+            && (observer->observedEpoch != schedule_progress_epoch.load()
+              || observer->observedRunning != schedule_progress_running.load())) {
+            observer->observedEpoch = schedule_progress_epoch.load();
+            observer->observedRunning = schedule_progress_running.load();
             Evidence("transport");
           }
           // A live parameter write, such as a manual override of an automated one, publishes no graph: the callback's
           // applied sequence is the only sign it landed. Reset to zero by a stop, which is not an application.
           const auto processor_sequence = schedule_progress_processor.load(std::memory_order_acquire);
-          if (acceptance_tap && processor_sequence != acceptance_observed_processor_sequence) {
-            acceptance_observed_processor_sequence = processor_sequence;
+          if (observer && processor_sequence != observer->observedProcessorSequence) {
+            observer->observedProcessorSequence = processor_sequence;
             if (processor_sequence != 0) {
               char detail[64];
               std::snprintf(detail, sizeof(detail), ",\"appliedProcessorSequence\":\"%llu\"",
@@ -2242,7 +2240,7 @@ struct AudioHost::Impl {
       }
       const std::uint32_t pending = realtime_bridge_pending.exchange(0, std::memory_order_acq_rel);
       if ((pending & kRealtimeInstrumentRejected) != 0) report_instrument_rejections();
-      if (acceptance_tap) acceptance_tap->Drain();
+      DrainAcceptanceCapture();
       if ((pending & kRealtimePublishAcknowledged) != 0) publish_wait.notify_all();
       if ((pending & kRealtimeProcessorPatchAcknowledged) != 0) {
         publish_wait.notify_all();
@@ -2336,8 +2334,10 @@ struct AudioHost::Impl {
         metadata.transport.maximum_events_per_block + metadata.initial_parameter_values.size()
       )),
     };
+    const char* evidence_directory = daw::acceptance::EvidenceDirectory();
     const daw::plugin_host::WorkerHostConfiguration worker_configuration{
       .executable = worker_executable,
+      .evidence_directory = evidence_directory != nullptr ? evidence_directory : "",
       .artifact = {
         .id = std::string(daw::plugin_host::kWorkerArtifactId),
         .version = std::string(daw::plugin_host::kWorkerArtifactVersion),
@@ -2349,10 +2349,10 @@ struct AudioHost::Impl {
       attachment->worker.Stop();
       return false;
     }
-    if (daw::acceptance::Enabled()) {
+    if (observer) {
       char fields[256];
       std::snprintf(fields, sizeof(fields), ",\"workerGeneration\":\"%llu\",\"nodeId\":\"%llu\"",
-        static_cast<unsigned long long>(++acceptance_worker_ordinal),
+        static_cast<unsigned long long>(++observer->workerOrdinal),
         static_cast<unsigned long long>(metadata.graph_node_id));
       daw::acceptance::Event("worker-supervisor-started", fields);
     }
@@ -2857,7 +2857,8 @@ bool AudioHost::Configure(const HostConfig& config) {
   impl_->prepared_core = 0;
   impl_->prepared_continuity = GraphRevisionContinuity::kNotEvaluated;
   impl_->config = config;
-  if (impl_->acceptance_tap) impl_->acceptance_tap->Configure(config.sample_rate_hz, config.channel_count);
+  if (impl_->observer && impl_->observer->tap())
+    impl_->observer->tap()->Configure(config.sample_rate_hz, config.channel_count);
   impl_->Evidence("device-configure");
   impl_->schedule_progress_has_notification = false;
   impl_->schedule_progress_notified_frame = 0;
@@ -3462,8 +3463,10 @@ GraphRevisionStatus AudioHost::PublishGraphRevision(const std::uint32_t revision
     if (!publish_at_boundary()) return status(GraphRevisionStatusCode::kPublishFailed);
     publish_asset_handles();
     if (!replacing_graph) impl_->retired_revision.store(0, std::memory_order_release);
-    impl_->acceptance_publication_frame.store(impl_->applied_transport_frame.load());
-    impl_->acceptance_publication_epoch.store(impl_->completed_render_epoch.load());
+    const auto publication_frame = impl_->applied_transport_frame.load();
+    const auto publication_epoch = impl_->completed_render_epoch.load();
+    impl_->publication_frame.store(publication_frame, std::memory_order_release);
+    if (impl_->observer) impl_->observer->SetPublicationPosition(publication_frame, publication_epoch);
     impl_->RecordPublicationLatency();
     impl_->PublicationEvidence("configured-boundary");
     return status(GraphRevisionStatusCode::kPublished);
@@ -3557,7 +3560,7 @@ GraphRevisionStatus AudioHost::RollbackGraphRevision(const std::uint32_t revisio
     .prepared_revision = impl_->prepared_revision.load(std::memory_order_acquire),
     .retired_revision = impl_->retired_revision.load(std::memory_order_acquire),
     .render_epoch = impl_->completed_render_epoch.load(std::memory_order_acquire),
-    .publication_frame = impl_->acceptance_publication_frame.load(std::memory_order_acquire),
+    .publication_frame = impl_->publication_frame.load(std::memory_order_acquire),
     .requested_publication_frame = impl_->requested_publication_frame.load(std::memory_order_acquire),
     .progress_frame = static_cast<std::uint64_t>(impl_->applied_transport_frame.load(std::memory_order_acquire)),
     .transport_epoch = impl_->transport_epoch.load(std::memory_order_acquire),
@@ -3591,7 +3594,7 @@ GraphRevisionStatus AudioHost::RetireGraphRevision(const std::uint32_t revision)
     .prepared_revision = impl_->prepared_revision.load(std::memory_order_acquire),
     .retired_revision = impl_->retired_revision.load(std::memory_order_acquire),
     .render_epoch = impl_->completed_render_epoch.load(std::memory_order_acquire),
-    .publication_frame = impl_->acceptance_publication_frame.load(std::memory_order_acquire),
+    .publication_frame = impl_->publication_frame.load(std::memory_order_acquire),
     .requested_publication_frame = impl_->requested_publication_frame.load(std::memory_order_acquire),
     .progress_frame = static_cast<std::uint64_t>(impl_->applied_transport_frame.load(std::memory_order_acquire)),
     .transport_epoch = impl_->transport_epoch.load(std::memory_order_acquire),
@@ -5702,9 +5705,9 @@ void AudioHost::Stop(const std::string& reason) {
 
 void AudioHost::Teardown() {
   Stop();
-  if (impl_->acceptance_tap) {
+  if (impl_->observer && impl_->observer->tap()) {
     impl_->StopRealtimeBridge();
-    impl_->acceptance_tap.reset();
+    impl_->observer->FinishCapture();
     impl_->StartRealtimeBridge();
   }
   const daw_audio_core_handle active_core = impl_->active_core.exchange(0, std::memory_order_acq_rel);
@@ -5882,8 +5885,10 @@ bool AudioHost::ProcessPlanar(
           impl_->active_schedule_bank.store(
             1U - impl_->active_schedule_bank.load(std::memory_order_relaxed), std::memory_order_release);
         }
-        impl_->acceptance_publication_frame.store(impl_->applied_transport_frame.load(std::memory_order_relaxed));
-        impl_->acceptance_publication_epoch.store(impl_->completed_render_epoch.load(std::memory_order_relaxed));
+        const auto publication_frame = impl_->applied_transport_frame.load(std::memory_order_relaxed);
+        const auto publication_epoch = impl_->completed_render_epoch.load(std::memory_order_relaxed);
+        impl_->publication_frame.store(publication_frame, std::memory_order_release);
+        if (impl_->observer) impl_->observer->SetPublicationPosition(publication_frame, publication_epoch);
         impl_->RecordPublicationLatency();
         impl_->RetirePreviousPlan(impl_->active_revision.exchange(requested_revision, std::memory_order_acq_rel));
         impl_->prepared_core = 0;
@@ -6253,9 +6258,9 @@ bool AudioHost::ProcessPlanar(
         std::memory_order_release
       );
     }
-    if (impl_->acceptance_tap) {
-      impl_->acceptance_tap->Push(output_slice.data(), frames, block.graph_revision, applied_epoch, block_start_frame);
-      impl_->SignalRealtimeBridge(1U << 7U);
+    if (impl_->observer && impl_->observer->tap()) {
+      impl_->observer->tap()->Push(output_slice.data(), frames, block.graph_revision, applied_epoch, block_start_frame);
+      impl_->SignalRealtimeBridge(Impl::kRealtimeAcceptanceCapture);
     }
     impl_->schedule_progress_revision.store(
       impl_->active_revision.load(std::memory_order_acquire),

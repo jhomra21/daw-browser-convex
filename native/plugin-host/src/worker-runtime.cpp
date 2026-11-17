@@ -234,9 +234,8 @@ bool WorkerRuntime::Start(
     && posix_spawn_file_actions_addclose(&fileActions, wake.readDescriptor()) == 0;
   pid_t child = -1;
   std::string evidence_environment;
-  if (const auto* directory = std::getenv("DAW_AE08_EVIDENCE_DIR")) {
-    evidence_environment = std::string("DAW_AE08_EVIDENCE_DIR=") + directory;
-  }
+  if (!configuration.evidence_directory.empty())
+    evidence_environment = "DAW_AE08_EVIDENCE_DIR=" + configuration.evidence_directory;
   char* const environment[] = {evidence_environment.empty() ? nullptr : evidence_environment.data(), nullptr};
   const auto spawnStarted = std::chrono::steady_clock::now();
   const auto spawnResult = spawnConfigured

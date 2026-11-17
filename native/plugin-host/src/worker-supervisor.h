@@ -67,6 +67,7 @@ struct WorkerArtifactIdentity {
 
 struct WorkerHostConfiguration {
   std::string executable;
+  std::string evidence_directory;
   WorkerArtifactIdentity artifact;
 };
 

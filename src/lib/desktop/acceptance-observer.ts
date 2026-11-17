@@ -14,6 +14,11 @@ export type PlaybackAcceptanceObserver = {
   adoption: (intentKey: string | undefined) => ((name: string) => void) | undefined
 }
 
+// Observation must never throw into, or gate, the product path that reports it.
+const contained = (observe: () => void) => {
+  try { observe() } catch { /* evidence is best-effort */ }
+}
+
 const fnv1a = (text: string) => {
   let hash = 0x811c9dc5
   for (let index = 0; index < text.length; index++) hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193)
@@ -22,7 +27,7 @@ const fnv1a = (text: string) => {
 
 // The bridge offers `acceptance` only when the app runs with DAW_AE08_EXTERNAL_NATIVE_SESSION or DAW_AE08_EVIDENCE_DIR, and
 // `acceptance.mark` only with the latter. Without an observer a call site pays one optional chain and no key runs.
-export const desktopAcceptanceObserver = (bridge: DesktopBridge | undefined): PlaybackAcceptanceObserver | undefined => {
+export const desktopAcceptanceObserver = (bridge: Pick<DesktopBridge, "acceptance"> | undefined): PlaybackAcceptanceObserver | undefined => {
   const acceptance = bridge?.acceptance
   if (!acceptance) return undefined
   const { mark } = acceptance
@@ -30,16 +35,18 @@ export const desktopAcceptanceObserver = (bridge: DesktopBridge | undefined): Pl
     ownsNativeSession: !acceptance.externalNativeSession,
     mark: (name, key) => {
       if (!mark) return
-      const value = key()
-      if (value !== undefined) mark(name, value)
+      contained(() => {
+        const value = key()
+        if (value !== undefined) mark(name, value)
+      })
     },
     ui: (name, target) => {
-      if (mark) mark(name, fnv1a(target()))
+      if (mark) contained(() => mark(name, fnv1a(target())))
     },
     adoption: (intentKey) => {
       if (!mark || intentKey === undefined) return undefined
       const key = fnv1a(intentKey)
-      return (name) => mark(name, key)
+      return (name) => contained(() => mark(name, key))
     },
   }
 }

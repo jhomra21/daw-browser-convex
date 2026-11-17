@@ -305,7 +305,9 @@ const desktopBridge = {
     ? {
       externalNativeSession: process.env.DAW_AE08_EXTERNAL_NATIVE_SESSION === "1",
       mark: process.env.DAW_AE08_EVIDENCE_DIR
-        ? (name: string, key: string) => ipcRenderer.send(ae08RendererMarkChannel, [name, key])
+        ? (name: string, key: string) => {
+          try { ipcRenderer.send(ae08RendererMarkChannel, [name, key]) } catch { /* evidence is best-effort */ }
+        }
         : undefined,
     }
     : undefined,

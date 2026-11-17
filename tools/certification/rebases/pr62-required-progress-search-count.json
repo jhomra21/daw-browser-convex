@@ -1,0 +1,26 @@
+{
+ "name": "pr62-required-progress-search-count",
+ "sequence": 75,
+ "createdAt": "2026-11-17T21:36:51.554Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=search:124-settled-call-sites",
+    "expect",
+    "matches"
+   ],
+   "old": 27,
+   "new": 30
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "Required schedule-progress generations (pr62-cleanup a373ce2f; hand record, no --bless). search:124-settled-call-sites counts lines matching advanceScheduleSettledEpoch|nativeLatencyCompletionGeneration|latencyCompletionGeneration across the controller, publication, processor-state owner, hook and the processor-state fuzz sources. NativeScheduleProgress.latencyCompletionGeneration became required, so tools/acceptance/ae-08-processor-state-fuzz-fixture.ts gained three progress literals carrying `latencyCompletionGeneration: 0n`; the controller's two reads changed in place (the `?? 0n` and `!== undefined` went) and ae-08-processor-state-fuzz-host.ts replaced one matching line with one. No call site was added or removed. Measured by CERT 15 (base fbc6ab60): 27 -> 30, exit 0.",
+  "expectationsSha256": "5e4901ead4ecb0b7d35cd2dd673210386505a43507df6664116c36090cae5b3f"
+ }
+}

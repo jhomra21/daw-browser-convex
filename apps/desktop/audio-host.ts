@@ -1253,8 +1253,18 @@ export const runAudioHostDiagnostic = async (hostPath: string): Promise<{ ok: tr
   })
 }
 
+type Reply =
+  | { kind: "ack"; expectedAckType: NativeHostRequestType; resolve: () => void }
+  | { kind: "diagnostics"; resolve: (value: NativeHostDiagnostics) => void }
+  | { kind: "outputDevice"; resolve: (value: NativeOutputDevice | null) => void }
+  | { kind: "inputDevice"; resolve: (value: NativeInputDevice | null) => void }
+  | { kind: "deviceInventory"; resolve: (value: NativeAudioDevice[]) => void }
+  | { kind: "graphRevision"; requestedRevision: number; resolve: (value: NativeGraphRevisionStatus) => void }
+  | { kind: "vstState"; instanceId: string; resolve: (value: { bytes: Uint8Array; sha256: string }) => void; cancelled: boolean }
+  | { kind: "editor"; resolve: (value: NativeVstEditorStatus) => void }
+  | { kind: "patchStatus"; resolve: (value: NativeProcessorPatchStatus) => void }
+
 type PendingControl = {
-  resolve: () => void
   reject: (error: Error) => void
   deadline: ReturnType<typeof setTimeout>
   requestType: NativeHostRequestType
@@ -1263,18 +1273,7 @@ type PendingControl = {
   dispatchedAt: number
   reason?: string
   stdinBackpressure?: boolean
-  expectedAckType?: NativeHostRequestType
-  diagnosticsResolve?: (value: NativeHostDiagnostics) => void
-  devicesResolve?: (value: NativeOutputDevice | null) => void
-  inputDeviceResolve?: (value: NativeInputDevice | null) => void
-  deviceInventoryResolve?: (value: NativeAudioDevice[]) => void
-  graphRevisionResolve?: (value: NativeGraphRevisionStatus) => void
-  graphRequestedRevision?: number
-  patchStatusResolve?: (value: NativeProcessorPatchStatus) => void
-  editorResolve?: (value: NativeVstEditorStatus) => void
-  stateResolve?: (value: { bytes: Uint8Array; sha256: string }) => void
-  stateInstanceId?: string
-  stateCancelled?: boolean
+  reply: Reply
 }
 
 const patchRefusals: readonly (NativeProcessorPatchRefusal | undefined)[] = [
@@ -1529,15 +1528,8 @@ export const createNativeAudioHostSupervisor = (
     requestId: number
     enqueuedAt: number
     reason?: string
-    resolve: () => void
     reject: (error: Error) => void
-    editorResolve?: (status: NativeVstEditorStatus) => void
-    patchStatusResolve?: (status: NativeProcessorPatchStatus) => void
-    graphRevisionResolve?: (status: NativeGraphRevisionStatus) => void
-    graphRequestedRevision?: number
-    stateResolve?: (value: { bytes: Uint8Array; sha256: string }) => void
-    stateInstanceId?: string
-    stateCancelled?: boolean
+    reply: Reply
   }
   const urgentSends: QueuedSend[] = []
   const normalSends: QueuedSend[] = []
@@ -2157,16 +2149,16 @@ export const createNativeAudioHostSupervisor = (
           return lost("The native audio host returned an incompatible protocol response.")
         }
         hello = parsed
-        if (pending) {
+        if (pending?.reply.kind === "ack") {
           logControlAck(pending)
           clearTimeout(pending.deadline)
-          pending.resolve()
+          pending.reply.resolve()
         }
         pending = undefined
         dispatchNext()
-      } else if (frame.readUInt32BE(8) === diagnosticsType && pending?.diagnosticsResolve) {
+      } else if (frame.readUInt32BE(8) === diagnosticsType && pending?.reply.kind === "diagnostics") {
         const current = pending
-        const resolve = pending.diagnosticsResolve
+        const reply = current.reply
         const diagnostic = decodeDiagnostics(frame)
         if (!diagnostic) {
           rejectPending(new Error("The native audio host returned an invalid diagnostics response."))
@@ -2175,57 +2167,58 @@ export const createNativeAudioHostSupervisor = (
           clearTimeout(pending.deadline)
           pending = undefined
           dispatchNext()
-          resolve(diagnostic)
+          if (reply.kind === "diagnostics") reply.resolve(diagnostic)
         }
-      } else if (frame.readUInt32BE(8) === deviceListType && pending?.devicesResolve) {
+      } else if (frame.readUInt32BE(8) === deviceListType && pending?.reply.kind === "outputDevice") {
         const current = pending
-        const resolve = pending.devicesResolve
+        const reply = current.reply
         const device = decodeOutputDevice(frame)
         if (device === undefined) return lost("The native audio host returned an invalid device response.")
         logControlAck(current)
         clearTimeout(pending.deadline)
         pending = undefined
         dispatchNext()
-        resolve(device)
-      } else if (frame.readUInt32BE(8) === recordingDeviceListType && pending?.inputDeviceResolve) {
+        if (reply.kind === "outputDevice") reply.resolve(device)
+      } else if (frame.readUInt32BE(8) === recordingDeviceListType && pending?.reply.kind === "inputDevice") {
         const current = pending
-        const resolve = pending.inputDeviceResolve
+        const reply = current.reply
         const device = decodeInputDevice(frame)
         if (device === undefined) return lost("The native audio host returned an invalid input device response.")
         logControlAck(current)
         clearTimeout(pending.deadline)
         pending = undefined
         dispatchNext()
-        resolve(device)
-      } else if (frame.readUInt32BE(8) === deviceInventoryType && pending?.deviceInventoryResolve) {
+        if (reply.kind === "inputDevice") reply.resolve(device)
+      } else if (frame.readUInt32BE(8) === deviceInventoryType && pending?.reply.kind === "deviceInventory") {
         const current = pending
-        const resolve = pending.deviceInventoryResolve
+        const reply = current.reply
         const devices = decodeDeviceInventory(frame)
         if (devices === undefined) return lost("The native audio host returned an invalid device inventory response.")
         logControlAck(current)
         clearTimeout(pending.deadline)
         pending = undefined
         dispatchNext()
-        resolve(devices)
-      } else if (frame.readUInt32BE(8) === graphRevisionStatusType && pending?.graphRevisionResolve) {
-        const resolve = pending.graphRevisionResolve
+        if (reply.kind === "deviceInventory") reply.resolve(devices)
+      } else if (frame.readUInt32BE(8) === graphRevisionStatusType && pending?.reply.kind === "graphRevision") {
         const current = pending
+        const reply = current.reply
         const status = decodeGraphRevisionStatus(frame)
         if (!status) return lost("The native audio host returned an invalid graph revision status.")
-        if (status.requestedRevision !== pending.graphRequestedRevision) continue
+        if (reply.kind !== "graphRevision" || status.requestedRevision !== reply.requestedRevision) continue
         logControlAck(current)
         clearTimeout(pending.deadline)
         pending = undefined
         dispatchNext()
-        resolve(status)
+        reply.resolve(status)
         if (current.requestType === graphRevisionStatusType) observeEvidence("inspect-reply-received", { pid: child?.pid ?? null, revision: status.requestedRevision })
       } else if (frame.readUInt32BE(8) === graphRevisionStatusType) {
         // A timed-out revision can reply after reconciliation was requested or
         // completed. It cannot settle another command or prove process loss.
         if (!decodeGraphRevisionStatus(frame)) return lost("The native audio host returned an invalid graph revision status.")
-      } else if (frame.readUInt32BE(8) === vstStateType && pending?.stateResolve) {
+      } else if (frame.readUInt32BE(8) === vstStateType && pending?.reply.kind === "vstState") {
         const current = pending
-        const resolve = current.stateResolve
+        const reply = current.reply
+        if (reply.kind !== "vstState") return lost("The native audio host returned an invalid VST state response.")
         const payload = frame.subarray(headerBytes)
         const rejectState = (message: string) => {
           clearTimeout(current.deadline)
@@ -2249,7 +2242,7 @@ export const createNativeAudioHostSupervisor = (
         const start = instanceEnd + 8
         const sha256 = payload.subarray(start + stateBytes).toString("utf8")
         if (
-          instanceId !== current.stateInstanceId
+          instanceId !== reply.instanceId
           || hashBytes !== 64
           || stateBytes > 512 * 1024
           || payload.byteLength !== start + stateBytes + hashBytes
@@ -2263,28 +2256,28 @@ export const createNativeAudioHostSupervisor = (
         clearTimeout(pending.deadline)
         pending = undefined
         dispatchNext()
-        if (!current.stateCancelled) resolve?.({ bytes, sha256 })
-      } else if (frame.readUInt32BE(8) === vstEditorStatusType && pending?.editorResolve) {
+        if (!reply.cancelled) reply.resolve({ bytes, sha256 })
+      } else if (frame.readUInt32BE(8) === vstEditorStatusType && pending?.reply.kind === "editor") {
         const current = pending
-        const resolve = current.editorResolve
+        const reply = current.reply
         const status = decodeVstEditorStatus(frame)
-        if (!status || !resolve) return lost("The native audio host returned an invalid VST editor response.")
+        if (!status) return lost("The native audio host returned an invalid VST editor response.")
         logControlAck(current)
         clearTimeout(pending.deadline)
         pending = undefined
         dispatchNext()
-        resolve(status)
-      } else if (frame.readUInt32BE(8) === processorStatePatchStatusType && pending?.patchStatusResolve) {
+        if (reply.kind === "editor") reply.resolve(status)
+      } else if (frame.readUInt32BE(8) === processorStatePatchStatusType && pending?.reply.kind === "patchStatus") {
         const current = pending
-        const resolve = current.patchStatusResolve
+        const reply = current.reply
         const status = decodeNativeProcessorPatchStatus(frame.subarray(headerBytes))
-        if (!status || !resolve) return lost("The native audio host returned an invalid processor patch status.")
+        if (!status) return lost("The native audio host returned an invalid processor patch status.")
         logControlAck(current)
         clearTimeout(current.deadline)
         pending = undefined
         dispatchNext()
-        resolve(status)
-      } else if (frame.readUInt32BE(8) === ackType && pending?.patchStatusResolve) {
+        if (reply.kind === "patchStatus") reply.resolve(status)
+      } else if (frame.readUInt32BE(8) === ackType && pending?.reply.kind === "patchStatus") {
         // A patch is answered by a status frame; an ACK is never proof the patch was taken.
         return lost("The native audio host acknowledged a processor patch instead of reporting its status.")
       } else if (
@@ -2293,8 +2286,8 @@ export const createNativeAudioHostSupervisor = (
         && frame.byteLength <= headerBytes + 8 + 256
         && pending
         && (
-          (pending.expectedAckType !== undefined && frame.readUInt32BE(headerBytes) === pending.expectedAckType)
-          || (pending.stateResolve && frame.readUInt32BE(headerBytes) === vstStateGetType)
+          (pending.reply.kind === "ack" && frame.readUInt32BE(headerBytes) === pending.reply.expectedAckType)
+          || (pending.reply.kind === "vstState" && frame.readUInt32BE(headerBytes) === vstStateGetType)
         )
       ) {
         const current = pending
@@ -2309,18 +2302,21 @@ export const createNativeAudioHostSupervisor = (
         clearTimeout(current.deadline)
         pending = undefined
         dispatchNext()
-        if (accepted) current.resolve()
-        else current.reject(new NativeAudioHostCommandError(
-          frame.readUInt32BE(headerBytes),
-          frame.byteLength > headerBytes + 8
-            ? frame.subarray(headerBytes + 8).toString("utf8")
-            : frame.readUInt32BE(headerBytes) === vstStateGetType
-            ? "The native audio host could not capture VST state."
-            : frame.readUInt32BE(headerBytes) === midiEventsType
-              ? "The native audio host rejected instrument events: invalid graph target, parameter range, or queue capacity."
-              : undefined,
-          status === nativeAudioHostAckStatus.unavailable ? "unavailable" : "refused",
-        ))
+        if (accepted) {
+          if (current.reply.kind === "ack") current.reply.resolve()
+        } else {
+          current.reject(new NativeAudioHostCommandError(
+            frame.readUInt32BE(headerBytes),
+            frame.byteLength > headerBytes + 8
+              ? frame.subarray(headerBytes + 8).toString("utf8")
+              : frame.readUInt32BE(headerBytes) === vstStateGetType
+              ? "The native audio host could not capture VST state."
+              : frame.readUInt32BE(headerBytes) === midiEventsType
+                ? "The native audio host rejected instrument events: invalid graph target, parameter range, or queue capacity."
+                : undefined,
+            status === nativeAudioHostAckStatus.unavailable ? "unavailable" : "refused",
+          ))
+        }
       } else return lost("The native audio host rejected a control request.")
     }
   }
@@ -2350,7 +2346,7 @@ export const createNativeAudioHostSupervisor = (
     // Native transition admission replies pending immediately. This deadline
     // covers a missing control reply, never the duration of rendered warmup,
     // and starts at dispatch, not at enqueue.
-    const deadline = next.graphRevisionResolve
+    const deadline = next.reply.kind === "graphRevision"
       ? setTimeout(() => {
         rejectPending(new Error("Native graph revision reply timed out; inspect revision status."))
       }, 2_000)
@@ -2358,74 +2354,23 @@ export const createNativeAudioHostSupervisor = (
         () => controlTimedOut("The native audio host control request timed out.", current),
         nativeAudioHostControlWatchdogMs,
       )
-    pending = next.graphRevisionResolve
-      ? {
-        resolve: () => undefined,
-        reject: next.reject,
-        deadline,
-        requestType: next.type,
-        requestId: next.requestId,
-        enqueuedAt: next.enqueuedAt,
-        dispatchedAt,
-        reason: next.reason,
-        graphRevisionResolve: next.graphRevisionResolve,
-        graphRequestedRevision: next.graphRequestedRevision,
-      }
-      : next.stateResolve
-      ? {
-        resolve: () => undefined,
-        reject: next.reject,
-        deadline,
-        requestType: next.type,
-        requestId: next.requestId,
-        enqueuedAt: next.enqueuedAt,
-        dispatchedAt,
-        reason: next.reason,
-        stateResolve: next.stateResolve,
-        stateInstanceId: next.stateInstanceId,
-      }
-      : next.editorResolve
-      ? {
-        resolve: () => undefined,
-        reject: next.reject,
-        deadline,
-        requestType: next.type,
-        requestId: next.requestId,
-        enqueuedAt: next.enqueuedAt,
-        dispatchedAt,
-        reason: next.reason,
-        editorResolve: next.editorResolve,
-      }
-      : next.patchStatusResolve
-      ? {
-        resolve: () => undefined,
-        reject: next.reject,
-        deadline,
-        requestType: next.type,
-        requestId: next.requestId,
-        enqueuedAt: next.enqueuedAt,
-        dispatchedAt,
-        reason: next.reason,
-        patchStatusResolve: next.patchStatusResolve,
-      }
-      : {
-        resolve: next.resolve,
-        reject: next.reject,
-        deadline,
-        requestType: next.type,
-        requestId: next.requestId,
-        enqueuedAt: next.enqueuedAt,
-        dispatchedAt,
-        reason: next.reason,
-        expectedAckType: next.type,
-      }
+    pending = {
+      reject: next.reject,
+      deadline,
+      requestType: next.type,
+      requestId: next.requestId,
+      enqueuedAt: next.enqueuedAt,
+      dispatchedAt,
+      reason: next.reason,
+      reply: next.reply,
+    }
     const stdinBackpressure = !current.stdin.write(frame)
     if (next.type === recordingStopType && recordingFinish) recordingFinish.dispatched = true
     if (pending) pending.stdinBackpressure = stdinBackpressure
     if (pending) logControlWrite(pending, current, stdinBackpressure)
     // Main's account of an inspect's wait: what it queued behind (`queuedMs`, 0 when the control slot was free) and what is still queued.
-    if (next.type === graphRevisionStatusType && next.graphRequestedRevision !== undefined) {
-      observeEvidence("inspect-dispatch", { pid: current.pid ?? null, revision: next.graphRequestedRevision, queuedMs: Date.now() - next.enqueuedAt,
+    if (next.reply.kind === "graphRevision") {
+      observeEvidence("inspect-dispatch", { pid: current.pid ?? null, revision: next.reply.requestedRevision, queuedMs: Date.now() - next.enqueuedAt,
         queueDepth: urgentSends.length + refillSends.length + normalSends.length })
     }
   }
@@ -2460,10 +2405,11 @@ export const createNativeAudioHostSupervisor = (
       return
     }
     const queued: QueuedSend = {
-      type, payload, owner, allowDuringTeardown, resolve, reject,
+      type, payload, owner, allowDuringTeardown, reject,
       requestId: ++nextControlRequestId,
       enqueuedAt: Date.now(),
       reason,
+      reply: { kind: "ack", expectedAckType: type, resolve },
     }
     if (type === transportType || type === midiEventsType || type === stopType || type === teardownType
       || type === vstScheduleAutomationEnableType) {
@@ -2534,9 +2480,8 @@ export const createNativeAudioHostSupervisor = (
         allowDuringTeardown: false,
         requestId: ++nextControlRequestId,
         enqueuedAt: Date.now(),
-        resolve: () => undefined,
         reject,
-        editorResolve: resolve,
+        reply: { kind: "editor", resolve },
       }
       normalSends.push(queued)
       logControlEnqueue(vstEditorType, queued.requestId, queued.enqueuedAt)
@@ -2561,9 +2506,8 @@ export const createNativeAudioHostSupervisor = (
         allowDuringTeardown: false,
         requestId: ++nextControlRequestId,
         enqueuedAt: Date.now(),
-        resolve: () => undefined,
         reject,
-        patchStatusResolve: resolve,
+        reply: { kind: "patchStatus", resolve },
       }
       normalSends.push(queued)
       logControlEnqueue(processorStatePatchType, queued.requestId, queued.enqueuedAt)
@@ -2588,12 +2532,14 @@ export const createNativeAudioHostSupervisor = (
         allowDuringTeardown: false,
         requestId: ++nextControlRequestId,
         enqueuedAt: Date.now(),
-        resolve: () => undefined,
         reject,
-        graphRevisionResolve: resolve,
-        graphRequestedRevision: type === graphPrepareType
-          ? Number(payload.readBigUInt64BE(8))
-          : payload.readUInt32BE(0),
+        reply: {
+          kind: "graphRevision",
+          resolve,
+          requestedRevision: type === graphPrepareType
+            ? Number(payload.readBigUInt64BE(8))
+            : payload.readUInt32BE(0),
+        },
       }
       normalSends.push(queued)
       logControlEnqueue(type, queued.requestId, queued.enqueuedAt)
@@ -2667,7 +2613,7 @@ export const createNativeAudioHostSupervisor = (
               const closing = pending
               pending = undefined
               clearTimeout(closing.deadline)
-              closing.resolve()
+              if (closing.reply.kind === "ack") closing.reply.resolve()
             }
             return
           }
@@ -2908,10 +2854,8 @@ export const createNativeAudioHostSupervisor = (
           allowDuringTeardown: false,
           requestId: ++nextControlRequestId,
           enqueuedAt: Date.now(),
-          resolve: () => undefined,
           reject,
-          stateResolve: resolve,
-          stateInstanceId: instanceId,
+          reply: { kind: "vstState", resolve, instanceId, cancelled: false },
         }
         normalSends.push(queued)
       logControlEnqueue(vstStateGetType, queued.requestId, queued.enqueuedAt)
@@ -2930,8 +2874,8 @@ export const createNativeAudioHostSupervisor = (
             reject(abortError)
             return
           }
-          if (pending?.stateResolve && pending.stateInstanceId === instanceId) {
-            pending.stateCancelled = true
+          if (pending?.reply.kind === "vstState" && pending.reply.instanceId === instanceId) {
+            pending.reply.cancelled = true
             pending.reject(abortError)
           }
           reject(abortError)
@@ -3144,12 +3088,11 @@ export const createNativeAudioHostSupervisor = (
         pending = {
           deadline,
           reject,
-          resolve: () => undefined,
           requestType: deviceListType,
           requestId,
           enqueuedAt,
           dispatchedAt,
-          devicesResolve: resolve,
+          reply: { kind: "outputDevice", resolve },
         }
         const currentPending = pending
         logControlEnqueue(deviceListType, requestId, enqueuedAt)
@@ -3181,12 +3124,11 @@ export const createNativeAudioHostSupervisor = (
         pending = {
           deadline,
           reject,
-          resolve: () => undefined,
           requestType: recordingDeviceQueryType,
           requestId,
           enqueuedAt,
           dispatchedAt,
-          inputDeviceResolve: resolve,
+          reply: { kind: "inputDevice", resolve },
         }
         const currentPending = pending
         logControlEnqueue(recordingDeviceQueryType, requestId, enqueuedAt)
@@ -3214,12 +3156,11 @@ export const createNativeAudioHostSupervisor = (
         pending = {
           deadline,
           reject,
-          resolve: () => undefined,
           requestType: deviceInventoryQueryType,
           requestId,
           enqueuedAt,
           dispatchedAt,
-          deviceInventoryResolve: resolve,
+          reply: { kind: "deviceInventory", resolve },
         }
         const currentPending = pending
         logControlEnqueue(deviceInventoryQueryType, requestId, enqueuedAt)
@@ -3266,12 +3207,11 @@ export const createNativeAudioHostSupervisor = (
         pending = {
           deadline,
           reject,
-          resolve: () => undefined,
           requestType: diagnosticsType,
           requestId,
           enqueuedAt,
           dispatchedAt,
-          diagnosticsResolve: resolve,
+          reply: { kind: "diagnostics", resolve },
         }
         const currentPending = pending
         logControlEnqueue(diagnosticsType, requestId, enqueuedAt)

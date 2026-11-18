@@ -1,4 +1,3 @@
-import type { TrackInstrumentParams } from "@daw-browser/shared"
 import { createEffect, createSignal, onCleanup, untrack } from 'solid-js'
 
 import { LIVE_SCHEDULE_HORIZON_SEC, type AudioEngine, type SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
@@ -1878,9 +1877,6 @@ export function useTimelinePlayback(
     preparedInstrument: (targetId: string) => nativePlayback.isPrepared()
       ? nativePlayback.preparedInstrument(targetId)
       : portableBrowserPlayback.preparedInstrument(targetId),
-    rememberInstrumentParameters: (targetId: string, instrument: TrackInstrumentParams) => {
-      if (!nativePlayback.isPrepared()) portableBrowserPlayback.rememberInstrumentParameters(targetId, instrument)
-    },
     deliverProcessor: nativePlayback.deliverProcessor,
     joinPublication: nativePlayback.joinPublication,
     liveProcessorControl: () => portableBrowserPlayback.isPrepared() || portableBrowserPlayback.isPreparing()

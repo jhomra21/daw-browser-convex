@@ -431,7 +431,7 @@ export const runTierThree = async (
   await browserCommand(session, ["eval", `(()=>{const button=document.querySelector(${JSON.stringify(`button[aria-label="Arm track ${audioIndex} for recording"]`)});if(!(button instanceof HTMLButtonElement))throw new Error('Audio track record-arm control is unavailable.');button.click();return true})()`])
   const record = async () => {
   const recordingBefore = await diagnostics("before-recording")
-  await browserCommand(session, ["eval", `(async()=>{delete window.__dawRecordingDeliveryEvidence;delete window.__dawRecordingMainDeliveryEvidence;const clock=await ${deliveryClockScript};window.__tier3RecordingDeliveryClock=clock;window.__dawRecordingDeliveryTraceEnabled=clock!==null;return true})()`])
+  await browserCommand(session, ["eval", `(async()=>{delete window.__dawRecordingMainDeliveryEvidence;const clock=await ${deliveryClockScript};window.__tier3RecordingDeliveryClock=clock;window.__dawRecordingDeliveryTraceEnabled=clock!==null;return true})()`])
   await browserCommand(session, ["eval", taskSourceProbeScript()])
   if (aroundRecording) await browserCommand(session, ["eval", `(()=>{const evidence={supported:false,truncated:false,intervals:[]};window.__tier3LongTasks=evidence;if(!PerformanceObserver.supportedEntryTypes?.includes('longtask'))return;const observer=new PerformanceObserver((list)=>{for(const entry of list.getEntries()){if(evidence.intervals.length===64){evidence.truncated=true;continue}evidence.intervals.push({startEpochMs:performance.timeOrigin+entry.startTime,endEpochMs:performance.timeOrigin+entry.startTime+entry.duration})}});observer.observe({type:'longtask'});evidence.supported=true;window.__tier3LongTaskObserver=observer})()`])
   await browserCommand(session, ["find", "role", "button", "click", "--name", "Start recording"])
@@ -518,7 +518,7 @@ export const runTierThree = async (
     stallCorrelation: longTasks ? correlateRecordingStall(recordingDuring.recording.writerReturnDeliveryWorst, longTasks) : "unknown" }
   }
   const collectRecordingDelivery = async () => parseRecordingDeliveryEvidence(
-    await browserCommand(session, ["eval", `(async()=>{const clockAfter=await ${deliveryClockScript};const evidence={trace:window.__dawRecordingDeliveryEvidence??null,mainTrace:window.__dawRecordingMainDeliveryEvidence??null,clockBefore:window.__tier3RecordingDeliveryClock??null,clockAfter};delete window.__dawRecordingDeliveryTraceEnabled;delete window.__dawRecordingDeliveryEvidence;delete window.__dawRecordingMainDeliveryEvidence;delete window.__tier3RecordingDeliveryClock;return JSON.stringify(evidence)})()`]))
+    await browserCommand(session, ["eval", `(async()=>{const clockAfter=await ${deliveryClockScript};const evidence={trace:null,mainTrace:window.__dawRecordingMainDeliveryEvidence??null,clockBefore:window.__tier3RecordingDeliveryClock??null,clockAfter};delete window.__dawRecordingDeliveryTraceEnabled;delete window.__dawRecordingMainDeliveryEvidence;delete window.__tier3RecordingDeliveryClock;return JSON.stringify(evidence)})()`]))
   const saveRecordingDelivery = async (evidence: RecordingDeliveryEvidence) => {
     // Independent of run.ts's abbreviated failure message/console tail. Private,
     // bounded scalar evidence survives renderer reload and every failure gate.

@@ -8235,16 +8235,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 0,
+      "pass": 1,
       "skip": 0,
-      "fail": 1
+      "fail": 0
      },
-     "fails": [
-      "STEP7B3 real paused structural edit during held publication then queued start that replaces the preview"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -54647,16 +54645,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 4,
      "counts": {
-      "pass": 4,
+      "pass": 5,
       "skip": 0,
-      "fail": 1
+      "fail": 0
      },
-     "fails": [
-      "STEP7B3 real paused structural edit during held publication that replaces the preview"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,

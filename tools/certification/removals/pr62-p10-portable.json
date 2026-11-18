@@ -1,0 +1,11 @@
+{
+ "ruling": "acceptance-reports/pr62-cleanup/PARENT-RULING-PR62-TEST-CLEANUP.md",
+ "removed": [
+  { "file": "packages/audio-engine/src/portable-wasm-host.test.ts", "test": "both hosts preserve a full scheduled block and acknowledge live parameters only after rendering" },
+  { "file": "packages/audio-engine/src/portable-wasm-host.test.ts", "test": "both hosts replay pending and applied parameter values under a new epoch" },
+  { "file": "packages/audio-engine/src/portable-wasm-host.test.ts", "test": "the portable Wasm host exposes the same explicit API to worklet and Worker callers" },
+  { "file": "packages/audio-engine/src/portable-wasm-host.test.ts", "test": "v1 and v2 portable hosts pass curved fade values and defaults to Wasm" },
+  { "file": "packages/audio-engine/src/portable-wasm-host.test.ts", "test": "portable Wasm hosts enforce the 24-parameter contract in every parameter validation path" },
+  { "file": "packages/audio-engine/src/portable-wasm-worklet.test.ts", "test": "both hosts keep live instrument merging and acknowledgement allocation-free" }
+ ]
+}

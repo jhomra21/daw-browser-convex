@@ -1,6 +1,7 @@
 import { assertDefined, type AutomationEnvelope } from '@daw-browser/shared'
 import { connectFxChain, createGainTransitionOwner, disconnectAudioNodes, type FxChainStageConfig, type GainTransitionOwner, type GainTransitionScheduler } from './effects/chain'
 import type { CompressorChainState } from './effects/compressor-chain-state'
+import type { EqChainState } from './effects/eq-chain-state'
 import type { CompressorMeterListener } from './effects/compressor-worklet'
 import type { DelayChainState } from './effects/delay-chain-state'
 import type { ReverbChainState } from './effects/reverb-chain-state'
@@ -118,10 +119,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     chainAdmissions.set(trackId, created)
     return created
   }
-  const instanceEqChains = new Map<string, Map<string, BiquadFilterNode[]>>()
-  const instanceEqNodesByBand = new Map<string, Map<string, Map<string, BiquadFilterNode>>>()
-  const instanceEqSignatures = new Map<string, Map<string, string>>()
-  const instanceEqTopologySignatures = new Map<string, Map<string, string>>()
+  const instanceEqChains = new Map<string, Map<string, EqChainState>>()
   const instanceCompressorChains = new Map<string, Map<string, CompressorChainState>>()
   const instanceReverbChains = new Map<string, Map<string, ReverbChainState>>()
   const instanceSaturatorChains = new Map<string, Map<string, SaturatorChainState>>()
@@ -140,10 +138,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   const dirtyStaticGainTargets = new Set<string>()
 
   const currentTrackResources = (trackId: string): InstanceResources => ({
-    eq: instanceEqChains.get(trackId) ?? new Map(),
-    eqByBand: instanceEqNodesByBand.get(trackId) ?? new Map(),
-    eqSignatures: instanceEqSignatures.get(trackId) ?? new Map(),
-    eqTopologySignatures: instanceEqTopologySignatures.get(trackId) ?? new Map(),
+    eqs: instanceEqChains.get(trackId) ?? new Map(),
     compressors: instanceCompressorChains.get(trackId) ?? new Map(),
     reverbs: instanceReverbChains.get(trackId) ?? new Map(),
     saturators: instanceSaturatorChains.get(trackId) ?? new Map(),
@@ -156,10 +151,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   }
 
   const publishTrackResources = (trackId: string, resources: InstanceResources) => {
-    replaceNestedMap(instanceEqChains, trackId, resources.eq)
-    replaceNestedMap(instanceEqNodesByBand, trackId, resources.eqByBand)
-    replaceNestedMap(instanceEqSignatures, trackId, resources.eqSignatures)
-    replaceNestedMap(instanceEqTopologySignatures, trackId, resources.eqTopologySignatures)
+    replaceNestedMap(instanceEqChains, trackId, resources.eqs)
     replaceNestedMap(instanceCompressorChains, trackId, resources.compressors)
     replaceNestedMap(instanceReverbChains, trackId, resources.reverbs)
     replaceNestedMap(instanceSaturatorChains, trackId, resources.saturators)
@@ -284,12 +276,8 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     compressorMeterSubscriptions.get(trackId)?.delete(instanceId)
     gateMeterSubscriptions.get(trackId)?.get(instanceId)?.()
     gateMeterSubscriptions.get(trackId)?.delete(instanceId)
-    const eq = instanceEqChains.get(trackId)?.get(instanceId)
-    if (eq) disconnectAudioNodes(eq)
+    instanceEqChains.get(trackId)?.get(instanceId)?.close()
     instanceEqChains.get(trackId)?.delete(instanceId)
-    instanceEqNodesByBand.get(trackId)?.delete(instanceId)
-    instanceEqSignatures.get(trackId)?.delete(instanceId)
-    instanceEqTopologySignatures.get(trackId)?.delete(instanceId)
     instanceCompressorChains.get(trackId)?.get(instanceId)?.close()
     instanceCompressorChains.get(trackId)?.delete(instanceId)
     instanceReverbChains.get(trackId)?.get(instanceId)?.close()
@@ -318,9 +306,6 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     }
     for (const id of ids) closeInstanceState(trackId, id)
     instanceEqChains.delete(trackId)
-    instanceEqNodesByBand.delete(trackId)
-    instanceEqSignatures.delete(trackId)
-    instanceEqTopologySignatures.delete(trackId)
     instanceCompressorChains.delete(trackId)
     instanceReverbChains.delete(trackId)
     instanceSaturatorChains.delete(trackId)
@@ -336,7 +321,7 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
   ): FxChainStageConfig[] => instances.map((instance) => ({
     id: instance.id,
     kind: instance.kind,
-    eqNodes: instance.kind === 'eq' ? resources.eq.get(instance.id) : undefined,
+    eqNodes: instance.kind === 'eq' ? resources.eqs.get(instance.id)?.nodes() : undefined,
     compressorChain: instance.kind === 'compressor' ? resources.compressors.get(instance.id)?.chain() : undefined,
     saturatorChain: instance.kind === 'saturator' ? resources.saturators.get(instance.id)?.chain() : undefined,
     delayChain: instance.kind === 'delay' ? resources.delays.get(instance.id)?.chain() : undefined,
@@ -617,9 +602,6 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
     trackFx.clear()
     for (const trackId of Array.from(instanceEqChains.keys())) closeTrackInstanceStates(trackId)
     instanceEqChains.clear()
-    instanceEqNodesByBand.clear()
-    instanceEqSignatures.clear()
-    instanceEqTopologySignatures.clear()
     instanceCompressorChains.clear()
     instanceReverbChains.clear()
     instanceSaturatorChains.clear()
@@ -758,20 +740,20 @@ export function createLiveMixerRuntime(options: LiveMixerRuntimeOptions) {
       if (parameterId === 'volume') return [{ param: trackNodes.gain.gain, valueToAudioValue: (value) => value }]
       if (effectInstanceId) {
         return [
-          ...resolveEqAutomationBindings(instanceEqNodesByBand.get(trackId)?.get(effectInstanceId) ?? new Map(), parameterId),
+          ...resolveEqAutomationBindings(instanceEqChains.get(trackId)?.get(effectInstanceId)?.nodesByBand() ?? new Map(), parameterId),
           ...resolveSaturatorAutomationBindings(instanceSaturatorChains.get(trackId)?.get(effectInstanceId), parameterId),
           ...resolveDelayAutomationBindings(instanceDelayChains.get(trackId)?.get(effectInstanceId), parameterId),
           ...resolveReverbAutomationBindings(instanceReverbChains.get(trackId)?.get(effectInstanceId), parameterId),
           ...resolveStaticWorkletAutomationBinding(instanceStaticWorkletChains.get(trackId)?.get(effectInstanceId), parameterId),
         ]
       }
-      const eqInstances = instanceEqNodesByBand.get(trackId) ?? new Map()
+      const eqInstances = instanceEqChains.get(trackId) ?? new Map()
       const saturatorInstances = instanceSaturatorChains.get(trackId) ?? new Map()
       const delayInstances = instanceDelayChains.get(trackId) ?? new Map()
       const reverbInstances = instanceReverbChains.get(trackId) ?? new Map()
       const eqNodes = new Map<string, BiquadFilterNode>()
-      for (const nodesByBand of eqInstances.size === 1 ? eqInstances.values() : []) {
-        for (const [bandId, node] of nodesByBand) eqNodes.set(bandId, node)
+      for (const state of eqInstances.size === 1 ? eqInstances.values() : []) {
+        for (const [bandId, node] of state.nodesByBand()) eqNodes.set(bandId, node)
       }
       return [
         ...resolveEqAutomationBindings(eqNodes, parameterId),

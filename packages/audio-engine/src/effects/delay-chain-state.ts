@@ -25,7 +25,6 @@ export function createDelayChainState(): DelayChainState {
       // Disabling only makes the chain's output dry: it stays in the routing and keeps
       // running on its input, so enabling it again brings back the echo of recent audio.
       const topologyChanged = pingPong !== null && pingPong !== normalized.pingPong
-      // The signature names what the nodes hold only once every write has landed.
       signature = null
       params = normalized
       if (topologyChanged && delay) {

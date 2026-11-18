@@ -1,6 +1,6 @@
-import { normalizeCompressorParams, normalizeEqParams, serializeNormalizedEqParams, type EqParams } from '@daw-browser/shared'
-import { createCompressorNodeChain, disconnectAudioNodes } from './effects/chain'
-import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
+import { normalizeCompressorParams } from '@daw-browser/shared'
+import { createCompressorNodeChain } from './effects/chain'
+import { createEqChainState, type EqChainState } from './effects/eq-chain-state'
 import { createCompressorChainState, type CompressorChainState } from './effects/compressor-chain-state'
 import { createDelayChainState, type DelayChainState } from './effects/delay-chain-state'
 import { createReverbChainState, type ReverbChainState } from './effects/reverb-chain-state'
@@ -17,10 +17,7 @@ const isStaticWorkletInstance = (
 ): instance is Extract<EffectInstance, { kind: StaticWorkletKind }> => isStaticWorkletKind(instance.kind)
 
 export type InstanceResources = {
-  eq: Map<string, BiquadFilterNode[]>
-  eqByBand: Map<string, Map<string, BiquadFilterNode>>
-  eqSignatures: Map<string, string>
-  eqTopologySignatures: Map<string, string>
+  eqs: Map<string, EqChainState>
   compressors: Map<string, CompressorChainState>
   reverbs: Map<string, ReverbChainState>
   saturators: Map<string, SaturatorChainState>
@@ -29,10 +26,7 @@ export type InstanceResources = {
 }
 
  const snapshotResources = (resources: InstanceResources): InstanceResources => ({
-  eq: new Map(resources.eq),
-  eqByBand: new Map(resources.eqByBand),
-  eqSignatures: new Map(resources.eqSignatures),
-  eqTopologySignatures: new Map(resources.eqTopologySignatures),
+  eqs: new Map(resources.eqs),
   compressors: new Map(resources.compressors),
   reverbs: new Map(resources.reverbs),
   saturators: new Map(resources.saturators),
@@ -41,10 +35,7 @@ export type InstanceResources = {
 })
 
  const removeResources = (resources: InstanceResources, id: string) => {
-  resources.eq.delete(id)
-  resources.eqByBand.delete(id)
-  resources.eqSignatures.delete(id)
-  resources.eqTopologySignatures.delete(id)
+  resources.eqs.delete(id)
   resources.compressors.delete(id)
   resources.reverbs.delete(id)
   resources.saturators.delete(id)
@@ -54,8 +45,7 @@ export type InstanceResources = {
 
 export const closeResources = (resources: InstanceResources, ids: Iterable<string>) => {
   for (const id of new Set(ids)) {
-    const eq = resources.eq.get(id)
-    if (eq) disconnectAudioNodes(eq)
+    resources.eqs.get(id)?.close()
     resources.compressors.get(id)?.close()
     resources.reverbs.get(id)?.close()
     resources.saturators.get(id)?.close()
@@ -66,7 +56,7 @@ export const closeResources = (resources: InstanceResources, ids: Iterable<strin
 }
 
 const heldIds = (resources: InstanceResources) => [
-  ...resources.eq.keys(), ...resources.compressors.keys(), ...resources.reverbs.keys(),
+  ...resources.eqs.keys(), ...resources.compressors.keys(), ...resources.reverbs.keys(),
   ...resources.saturators.keys(), ...resources.delays.keys(), ...resources.staticWorklets.keys(),
 ]
 
@@ -119,8 +109,8 @@ type Candidate = {
   resources: InstanceResources
   ownedIds: Set<string>
   requiresRoutingRebuild: boolean
-  // Deferred: the nodes of an EQ whose topology is unchanged are written at the commit, never before it.
-  eqParamUpdates: Array<{ instance: EffectInstance; nodes: BiquadFilterNode[]; params: EqParams }>
+  // Writes a chain state defers to the commit, never before it.
+  writesAfterCommit: Array<{ instance: EffectInstance; write: () => void }>
   // Instances whose parameters were written to the nodes that already held them.
   writtenInPlace: EffectInstance[]
 }
@@ -129,7 +119,7 @@ type StaticWorkletChainHolder = {
   chain: StaticWorkletNodeChain | undefined
 }
 
-type InPlaceEdit = Pick<Candidate, 'requiresRoutingRebuild' | 'eqParamUpdates' | 'writtenInPlace'>
+type InPlaceEdit = Pick<Candidate, 'requiresRoutingRebuild' | 'writesAfterCommit' | 'writtenInPlace'>
 
 const noIds: ReadonlySet<string> = new Set()
 
@@ -150,12 +140,9 @@ export const createEffectChainTransaction = (host: EffectChainHost) => {
   ): Promise<boolean> => {
     const forgetLive = () => host.liveParams().delete(instance.id)
     if (instance.kind === 'eq') {
-      const params = normalizeEqParams(instance.params)
-      const priorParams = prior?.kind === 'eq' ? normalizeEqParams(prior.params) : undefined
-      const priorNodes = resources.eq.get(instance.id)
-      if (!priorParams || !priorNodes || getEqTopologySignature(priorParams) !== getEqTopologySignature(params)) return false
-      resources.eqSignatures.set(instance.id, serializeNormalizedEqParams(params))
-      edit.eqParamUpdates.push({ instance, nodes: priorNodes, params })
+      const write = prior?.kind === 'eq' ? resources.eqs.get(instance.id)?.writesAfterCommit(instance.params) : undefined
+      if (!write) return false
+      edit.writesAfterCommit.push({ instance, write })
       return true
     }
     if (isStaticWorkletInstance(instance)) {
@@ -172,9 +159,8 @@ export const createEffectChainTransaction = (host: EffectChainHost) => {
       forgetLive()
       const params = normalizeCompressorParams(instance.params)
       const result = await state.set(ctx, params)
-      // The state keeps a faulted chain when its replacement cannot be built and still reports success. A newer request
-      // owns the chain by now and cancelled the construction this one awaited: it reports the outcome, not this check.
-      if (!stale() && params.enabled && state.chain()?.state !== 'active') throw new Error('Failed to recover compressor chain.')
+      // A newer request owns the chain by now and cancelled the construction this one awaited: it reports the outcome.
+      if (!stale() && result.unavailable) throw new Error('Failed to recover compressor chain.')
       edit.requiresRoutingRebuild = result.requiresRoutingRebuild || edit.requiresRoutingRebuild
       edit.writtenInPlace.push(instance)
       return true
@@ -212,18 +198,18 @@ export const createEffectChainTransaction = (host: EffectChainHost) => {
   const recordCommittedParams = (
     instances: readonly EffectInstance[],
     createdIds: ReadonlySet<string>,
-    edit: Pick<Candidate, 'eqParamUpdates' | 'writtenInPlace'>,
+    edit: Pick<Candidate, 'writesAfterCommit' | 'writtenInPlace'>,
   ) => {
     const held = host.liveParams()
     const ids = new Set(instances.map((instance) => instance.id))
     for (const id of held.keys()) if (!ids.has(id)) held.delete(id)
     for (const instance of instances) if (createdIds.has(instance.id)) held.set(instance.id, instance.params)
     for (const instance of edit.writtenInPlace) held.set(instance.id, instance.params)
-    for (const update of edit.eqParamUpdates) {
+    for (const { instance, write } of edit.writesAfterCommit) {
       // The proof leaves before the nodes are written: a write that throws partway leaves them holding no named value.
-      held.delete(update.instance.id)
-      applyEqNodeParams(update.nodes, update.params)
-      held.set(update.instance.id, update.instance.params)
+      held.delete(instance.id)
+      write()
+      held.set(instance.id, instance.params)
     }
   }
 
@@ -254,15 +240,7 @@ export const createEffectChainTransaction = (host: EffectChainHost) => {
       return true
     }
     if (instance.kind === 'eq') {
-      const params = normalizeEqParams(instance.params)
-      const nodes = createEqNodes(ctx, params, host.eqChannelCount(ctx))
-      resources.eq.set(instance.id, nodes)
-      resources.eqByBand.set(instance.id, new Map(params.bands.filter((band) => band.enabled).flatMap((band, index) => {
-        const node = nodes[index]
-        return node ? [[band.id, node]] : []
-      })))
-      resources.eqSignatures.set(instance.id, serializeNormalizedEqParams(params))
-      resources.eqTopologySignatures.set(instance.id, getEqTopologySignature(params))
+      resources.eqs.set(instance.id, createEqChainState(ctx, instance.params, host.eqChannelCount(ctx)))
       candidate.requiresRoutingRebuild = true
       return true
     }
@@ -276,7 +254,7 @@ export const createEffectChainTransaction = (host: EffectChainHost) => {
         state.close()
         return false
       }
-      if (instance.params.enabled && !state.chain()) throw new Error('Failed to construct compressor chain.')
+      if (result.unavailable === 'absent') throw new Error('Failed to construct compressor chain.')
       resources.compressors.set(instance.id, state)
       candidate.requiresRoutingRebuild = result.changed || candidate.requiresRoutingRebuild
       return true
@@ -335,7 +313,7 @@ export const createEffectChainTransaction = (host: EffectChainHost) => {
     // nodes that hold it, before any resource snapshot, whole-chain loop, meter rebind or retirement scan.
     const [edited] = changed
     if (!publicationPending && edited && changed.length === 1 && sameChainOrder) {
-      const edit: InPlaceEdit = { requiresRoutingRebuild: false, eqParamUpdates: [], writtenInPlace: [] }
+      const edit: InPlaceEdit = { requiresRoutingRebuild: false, writesAfterCommit: [], writtenInPlace: [] }
       let applied: boolean
       try {
         applied = await applyParamsInPlace(ctx, edited, previousById.get(edited.id), live, edit, stale)
@@ -369,7 +347,7 @@ export const createEffectChainTransaction = (host: EffectChainHost) => {
       ownedIds: new Set(),
       requiresRoutingRebuild: previous?.length !== normalized.length ||
         previous.some((instance, index) => instance.id !== normalized[index]?.id || instance.kind !== normalized[index]?.kind),
-      eqParamUpdates: [],
+      writesAfterCommit: [],
       writtenInPlace: [],
     }
     const discard = () => {

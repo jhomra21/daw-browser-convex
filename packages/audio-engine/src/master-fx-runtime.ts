@@ -1,5 +1,6 @@
 import { connectFxChain, createGainTransitionOwner, disconnectAudioNodes, type FxChainStageConfig, type GainTransitionOwner, type GainTransitionScheduler } from './effects/chain'
 import type { CompressorChainState } from './effects/compressor-chain-state'
+import type { EqChainState } from './effects/eq-chain-state'
 import type { DelayChainState } from './effects/delay-chain-state'
 import type { ReverbChainState } from './effects/reverb-chain-state'
 import type { SaturatorChainState } from './effects/saturator-chain-state'
@@ -47,10 +48,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   let routingGain: GainNode | null = null
   let releaseRoutingGain: () => void = () => undefined
   let routingTransitionOwner: GainTransitionOwner | null = null
-  const instanceEqChains = new Map<string, BiquadFilterNode[]>()
-  const instanceEqNodesByBand = new Map<string, Map<string, BiquadFilterNode>>()
-  const instanceEqSignatures = new Map<string, string>()
-  const instanceEqTopologySignatures = new Map<string, string>()
+  const instanceEqChains = new Map<string, EqChainState>()
   const instanceCompressorChains = new Map<string, CompressorChainState>()
   const instanceReverbChains = new Map<string, ReverbChainState>()
   const instanceSaturatorChains = new Map<string, SaturatorChainState>()
@@ -65,10 +63,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   let graphPublicationPending = false
 
   const currentResources = (): InstanceResources => ({
-    eq: instanceEqChains,
-    eqByBand: instanceEqNodesByBand,
-    eqSignatures: instanceEqSignatures,
-    eqTopologySignatures: instanceEqTopologySignatures,
+    eqs: instanceEqChains,
     compressors: instanceCompressorChains,
     reverbs: instanceReverbChains,
     saturators: instanceSaturatorChains,
@@ -87,10 +82,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   }
 
   const publishResources = (resources: InstanceResources) => {
-    replaceMap(instanceEqChains, resources.eq)
-    replaceMap(instanceEqNodesByBand, resources.eqByBand)
-    replaceMap(instanceEqSignatures, resources.eqSignatures)
-    replaceMap(instanceEqTopologySignatures, resources.eqTopologySignatures)
+    replaceMap(instanceEqChains, resources.eqs)
     replaceMap(instanceCompressorChains, resources.compressors)
     replaceMap(instanceReverbChains, resources.reverbs)
     replaceMap(instanceSaturatorChains, resources.saturators)
@@ -103,12 +95,8 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     compressorMeterSubscriptions.delete(instanceId)
     gateMeterSubscriptions.get(instanceId)?.()
     gateMeterSubscriptions.delete(instanceId)
-    const eq = instanceEqChains.get(instanceId)
-    if (eq) disconnectAudioNodes(eq)
+    instanceEqChains.get(instanceId)?.close()
     instanceEqChains.delete(instanceId)
-    instanceEqNodesByBand.delete(instanceId)
-    instanceEqSignatures.delete(instanceId)
-    instanceEqTopologySignatures.delete(instanceId)
     instanceCompressorChains.get(instanceId)?.close()
     instanceCompressorChains.delete(instanceId)
     instanceReverbChains.get(instanceId)?.close()
@@ -160,7 +148,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   ): FxChainStageConfig[] => instances.map((instance) => ({
     id: instance.id,
     kind: instance.kind,
-    eqNodes: instance.kind === 'eq' ? resources.eq.get(instance.id) : undefined,
+    eqNodes: instance.kind === 'eq' ? resources.eqs.get(instance.id)?.nodes() : undefined,
     compressorChain: instance.kind === 'compressor' ? resources.compressors.get(instance.id)?.chain() : undefined,
     saturatorChain: instance.kind === 'saturator' ? resources.saturators.get(instance.id)?.chain() : undefined,
     delayChain: instance.kind === 'delay' ? resources.delays.get(instance.id)?.chain() : undefined,
@@ -377,7 +365,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       if (parameterId === 'volume') return masterGain ? [{ param: masterGain.gain, valueToAudioValue: (value) => value }] : []
       if (effectInstanceId) {
         return [
-          ...resolveEqAutomationBindings(instanceEqNodesByBand.get(effectInstanceId) ?? new Map(), parameterId),
+          ...resolveEqAutomationBindings(instanceEqChains.get(effectInstanceId)?.nodesByBand() ?? new Map(), parameterId),
           ...resolveSaturatorAutomationBindings(instanceSaturatorChains.get(effectInstanceId), parameterId),
           ...resolveDelayAutomationBindings(instanceDelayChains.get(effectInstanceId), parameterId),
           ...resolveReverbAutomationBindings(instanceReverbChains.get(effectInstanceId), parameterId),
@@ -385,8 +373,8 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
         ]
       }
       const eqNodes = new Map<string, BiquadFilterNode>()
-      for (const nodesByBand of instanceEqNodesByBand.size === 1 ? instanceEqNodesByBand.values() : []) {
-        for (const [bandId, node] of nodesByBand) eqNodes.set(bandId, node)
+      for (const state of instanceEqChains.size === 1 ? instanceEqChains.values() : []) {
+        for (const [bandId, node] of state.nodesByBand()) eqNodes.set(bandId, node)
       }
       return [
         ...resolveEqAutomationBindings(eqNodes, parameterId),

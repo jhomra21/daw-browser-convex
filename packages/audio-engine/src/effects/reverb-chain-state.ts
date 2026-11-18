@@ -49,7 +49,6 @@ export function createReverbChainState(): ReverbChainState {
         }
       }
 
-      // The signature names what the node holds only once every write has landed.
       signature = null
       if (!reverb) {
         const created = await createReverbNodeChain(ctx, params)

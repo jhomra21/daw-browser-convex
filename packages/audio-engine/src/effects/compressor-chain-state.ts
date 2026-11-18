@@ -4,7 +4,9 @@ import { readCompressorMeterFrame, setCompressorMeteringEnabled, type Compressor
 
 export type CompressorChainState = {
   chain: () => CompressorNodeChain | null
-  set: (ctx: BaseAudioContext, params: CompressorParamsLite) => Promise<{ changed: boolean; requiresRoutingRebuild: boolean }>
+  // `unavailable` is present only when the params ask for a compressor and none is running: no chain could be built
+  // ('absent'), or the chain that ran failed and its replacement could not be built ('faulted').
+  set: (ctx: BaseAudioContext, params: CompressorParamsLite) => Promise<{ changed: boolean; requiresRoutingRebuild: boolean; unavailable?: 'absent' | 'faulted' }>
   subscribeMeter: (listener: CompressorMeterListener) => () => void
   isIdle: () => boolean
   close: () => void
@@ -31,52 +33,58 @@ export function createCompressorChainState(
     setCompressorMeteringEnabled(chain.workletNode, meterListeners.size > 0)
   }
 
+  const apply = async (ctx: BaseAudioContext, params: CompressorParamsLite) => {
+    pendingSets++
+    try {
+      const normalized = normalizeCompressorParams(params)
+      const nextSignature = serializeCompressorParams(normalized)
+      // Every request outdates the construction an earlier one still awaits, an equal one that returns early included.
+      const currentToken = ++token
+      const wasFaulted = compressor?.state === 'faulted'
+      if (!wasFaulted && signature === nextSignature) return { changed: false, requiresRoutingRebuild: false }
+      if (wasFaulted) signature = null
+      const requiresRoutingRebuild = wasFaulted || (enabled !== normalized.enabled && (enabled !== null || normalized.enabled))
+      if (!normalized.enabled) {
+        if (compressor) {
+          disconnectCompressorChain(compressor)
+          compressor = null
+        }
+        lastFrame = null
+        signature = nextSignature
+        enabled = false
+        return { changed: true, requiresRoutingRebuild }
+      }
+      if (!compressor || wasFaulted) {
+        const previous = compressor
+        const next = await createChain(ctx, normalized).catch(() => null)
+        if (!next) {
+          return { changed: false, requiresRoutingRebuild: false }
+        }
+        if (currentToken !== token) {
+          disconnectCompressorChain(next)
+          return { changed: false, requiresRoutingRebuild: false }
+        }
+        compressor = next
+        bindMeterPort(compressor)
+        lastFrame = null
+        if (previous) disconnectCompressorChain(previous)
+      } else {
+        applyCompressorNodeChainParams(compressor, normalized)
+      }
+      signature = nextSignature
+      enabled = true
+      return { changed: true, requiresRoutingRebuild }
+    } finally {
+      pendingSets--
+    }
+  }
+
   return {
     chain: () => compressor,
     set: async (ctx, params) => {
-      pendingSets++
-      try {
-        const normalized = normalizeCompressorParams(params)
-        const nextSignature = serializeCompressorParams(normalized)
-        // Every request outdates the construction an earlier one still awaits, an equal one that returns early included.
-        const currentToken = ++token
-        const wasFaulted = compressor?.state === 'faulted'
-        if (!wasFaulted && signature === nextSignature) return { changed: false, requiresRoutingRebuild: false }
-        if (wasFaulted) signature = null
-        const requiresRoutingRebuild = wasFaulted || (enabled !== normalized.enabled && (enabled !== null || normalized.enabled))
-        if (!normalized.enabled) {
-          if (compressor) {
-            disconnectCompressorChain(compressor)
-            compressor = null
-          }
-          lastFrame = null
-          signature = nextSignature
-          enabled = false
-          return { changed: true, requiresRoutingRebuild }
-        }
-        if (!compressor || wasFaulted) {
-          const previous = compressor
-          const next = await createChain(ctx, normalized).catch(() => null)
-          if (!next) {
-            return { changed: false, requiresRoutingRebuild: false }
-          }
-          if (currentToken !== token) {
-            disconnectCompressorChain(next)
-            return { changed: false, requiresRoutingRebuild: false }
-          }
-          compressor = next
-          bindMeterPort(compressor)
-          lastFrame = null
-          if (previous) disconnectCompressorChain(previous)
-        } else {
-          applyCompressorNodeChainParams(compressor, normalized)
-        }
-        signature = nextSignature
-        enabled = true
-        return { changed: true, requiresRoutingRebuild }
-      } finally {
-        pendingSets--
-      }
+      const result = await apply(ctx, params)
+      if (!normalizeCompressorParams(params).enabled || compressor?.state === 'active') return result
+      return { ...result, unavailable: compressor ? 'faulted' : 'absent' }
     },
     subscribeMeter: (listener) => {
       const hadListeners = meterListeners.size > 0

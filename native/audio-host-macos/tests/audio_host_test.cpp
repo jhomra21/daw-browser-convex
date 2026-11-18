@@ -919,6 +919,7 @@ void TestOfflineTerminalIsPublishedBeforeStop() {
       return true;
     },
     [&] {
+      // A delay that makes a stop running ahead of the terminal observable.
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
       events.push_back("stop");
       return false;
@@ -1052,6 +1053,15 @@ void TestPausedProcessDoesNotAdvanceTransportFrame() {
   host.Stop();
 }
 
+// Returns once a queued patch request is posted, so the next block processed is the one that takes it.
+void AwaitPatchPosted(daw::audio_host_macos::AudioHost& host) {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  while (!daw::audio_host_macos::AudioHostTestAccess::ProcessorPatchPosted(host)) {
+    assert(std::chrono::steady_clock::now() < deadline);
+    std::this_thread::yield();
+  }
+}
+
 void TestProcessorStatePatchTimeoutCancelsAndReusesSlot() {
   daw::audio_host_macos::AudioHost host;
   assert(host.Configure({
@@ -1085,7 +1095,7 @@ void TestProcessorStatePatchTimeoutCancelsAndReusesSlot() {
   auto applied = std::async(std::launch::async, [&host, &second_patch] {
     return host.QueueProcessorStatePatch(second_patch);
   });
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  AwaitPatchPosted(host);
   assert(host.ProcessPlanar(input, output, 4));
   assert(applied.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
   assert(applied.get().outcome == daw::audio_host_macos::ProcessorPatchOutcome::kApplied);
@@ -5235,6 +5245,59 @@ void SetTestPatchClaimHook(void (*hook)());
 void SetTestPatchAckHook(void (*hook)(std::uint64_t, std::uint32_t));
 void SetTestPatchClaimHold(bool hold);
 void SetTestPatchClaimDiscard(bool discard);
+void SetTestDeviceStart(bool (*start)(AudioHost*, void**));
+}
+
+namespace {
+struct DeviceOpenObservation {
+  bool processed = false;
+  daw::audio_host_macos::LifecycleState lifecycle{};
+  float output = 0.F;
+} device_open;
+
+// CoreAudio may run the IO callback before the start call returns; this stand-in does the same.
+bool OpenDeviceWithImmediateCallback(daw::audio_host_macos::AudioHost* host, void**) {
+  std::array<float, 4> input_left{1.F, 1.F, 1.F, 1.F}, input_right{1.F, 1.F, 1.F, 1.F};
+  std::array<float, 4> output_left{}, output_right{};
+  const std::array<const float*, 2> input{input_left.data(), input_right.data()};
+  const std::array<float*, 2> output{output_left.data(), output_right.data()};
+  device_open.processed = host->ProcessPlanar(input, output, 4);
+  device_open.lifecycle = host->lifecycleState();
+  device_open.output = output_left[0];
+  return true;
+}
+
+bool RefuseDevice(daw::audio_host_macos::AudioHost*, void**) { return false; }
+
+void ConfigureHostWithGraph(daw::audio_host_macos::AudioHost& host) {
+  assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48000,
+    .max_frames_per_block = 4, .channel_count = 2, .revision = 1}));
+  assert(host.PrepareAndPublishGraph(2, GraphSnapshot(2, 1.F, 0, true)));
+  assert(host.SetTransport(1, false, 0));
+}
+
+void TestStartPublishesRunningBeforeTheDeviceOpens() {
+  using daw::audio_host_macos::LifecycleState;
+  device_open = {};
+  daw::audio_host_macos::AudioHost host;
+  ConfigureHostWithGraph(host);
+  daw::audio_host_macos::SetTestDeviceStart(&OpenDeviceWithImmediateCallback);
+  const bool started = host.Start();
+  daw::audio_host_macos::SetTestDeviceStart(nullptr);
+  assert(started);
+  assert(device_open.processed && device_open.lifecycle == LifecycleState::kRunning);
+  assert(device_open.output > 0.99F && device_open.output < 1.01F);
+  const auto diagnostics = host.diagnostics();
+  assert(diagnostics.callbacks == 1 && diagnostics.rejected_blocks == 0);
+  host.Stop();
+
+  daw::audio_host_macos::AudioHost refused;
+  ConfigureHostWithGraph(refused);
+  daw::audio_host_macos::SetTestDeviceStart(&RefuseDevice);
+  const bool refused_start = refused.Start();
+  daw::audio_host_macos::SetTestDeviceStart(nullptr);
+  assert(!refused_start && refused.lifecycleState() == LifecycleState::kConfigured);
+}
 }
 
 namespace {
@@ -5293,11 +5356,7 @@ struct PatchRig {
 // Returns once the request is posted, so the next block the caller processes is the one that takes it.
 std::future<ProcessorPatchStatus> QueuePatchAsync(PatchRig& rig, const std::vector<std::uint8_t>& patch) {
   auto reply = std::async(std::launch::async, [&rig, &patch] { return rig.host.QueueProcessorStatePatch(patch); });
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
-  while (!daw::audio_host_macos::AudioHostTestAccess::ProcessorPatchPosted(rig.host)) {
-    assert(std::chrono::steady_clock::now() < deadline);
-    std::this_thread::yield();
-  }
+  AwaitPatchPosted(rig.host);
   return reply;
 }
 
@@ -5372,6 +5431,7 @@ void TestPatchClaimsAreSerializedUntilReported() {
   };
   expect_blocked();
   rig.Process();  // acknowledged, not yet reported
+  // A window, not a wait: the claim must stay blocking while the bridge has had time to run.
   std::this_thread::sleep_for(std::chrono::milliseconds(30));
   expect_blocked();
   assert(AwaitResolution(rig.host, first.token).processor_patch_resolved_result == DAW_AUDIO_CORE_OK);
@@ -5389,7 +5449,7 @@ PatchRig* hook_rig = nullptr;
 std::optional<ScheduleProgress> frame_drained_before_record;
 void AckBeforeRecordHook() {
   hook_rig->Process();  // releases the hold: the ack lands before the claim is recorded
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));  // let the bridge publish it
+  assert(hook_rig->host.WaitForScheduleProgress(nullptr));
   frame_drained_before_record = hook_rig->host.DrainScheduleProgress();
 }
 
@@ -6137,8 +6197,14 @@ void TestParkingIsBoundedByCountAndAge() {
   assert(OwnershipOf(host, "id-0") == Ownership::kAbsent);
   for (std::size_t index = 1; index < ids.size(); ++index) assert(OwnershipOf(host, ids[index]) == Ownership::kParked);
   AudioHostTestAccess::SetParkedAge(host, std::chrono::milliseconds(50));
-  std::this_thread::sleep_for(std::chrono::milliseconds(80));
-  host.ProcessNativeVstControl();
+  const auto expiry = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  const auto parked = [&] {
+    return std::any_of(ids.begin(), ids.end(), [&](const auto& id) { return OwnershipOf(host, id) != Ownership::kAbsent; });
+  };
+  while (parked() && std::chrono::steady_clock::now() < expiry) {
+    host.ProcessNativeVstControl();
+    std::this_thread::yield();
+  }
   for (const auto& id : ids) assert(OwnershipOf(host, id) == Ownership::kAbsent);
   host.Stop();
 }
@@ -6378,6 +6444,7 @@ float Input(const std::size_t frame) {
 struct Rig {
   daw::audio_host_macos::AudioHost host;
   std::vector<float> output;
+  bool silent = false;
 
   void Configure() {
     assert(host.Configure({
@@ -6396,7 +6463,7 @@ struct Rig {
   void Render(const unsigned blocks = 1) {
     for (unsigned block = 0; block < blocks; ++block) {
       std::array<float, kBlock> in{}, left{}, right{};
-      for (std::size_t frame = 0; frame < kBlock; ++frame) in[frame] = Input(output.size() + frame);
+      for (std::size_t frame = 0; frame < kBlock; ++frame) in[frame] = silent ? 0.F : Input(output.size() + frame);
       const std::array<const float*, 2> planes_in{in.data(), in.data()};
       const std::array<float*, 2> planes_out{left.data(), right.data()};
       assert(host.ProcessPlanar(planes_in, planes_out, kBlock));
@@ -6509,6 +6576,24 @@ void TestIoChangedRestartFaultsWhenBusesNoLongerFit() {
   rig.Render(5);
   assert(rig.host.NativeVstHealth(kFirst) == NativeVstWorkerHealth::kFaulted);
   assert(rig.Running());
+  rig.host.Stop();
+}
+
+// The test plug-in reports no tail, and the input goes silent: a host that skipped quiet blocks
+// would never submit the one that makes the plug-in crash.
+void TestSilentInputStillReachesThePlugin() {
+  Rig rig;
+  rig.Configure();
+  assert(rig.host.AttachNativeVst(Attachment(kFirst, 1)));
+  rig.Start({kBlock, 0});
+  assert(rig.Wait(kFirst, NativeVstWorkerHealth::kReady));
+  rig.Render(30);
+  rig.silent = true;
+  rig.Render(60);
+  assert(rig.Level(10) == 0.0);
+  rig.Set(kFirst, kFault, kStepOne);
+  for (unsigned guard = 0; guard < 500 && rig.host.NativeVstHealth(kFirst) == NativeVstWorkerHealth::kReady; ++guard) rig.Render();
+  assert(rig.host.NativeVstHealth(kFirst) == NativeVstWorkerHealth::kFaulted);
   rig.host.Stop();
 }
 
@@ -6688,6 +6773,7 @@ int RunRealPluginTests() {
   TestComponentRestartResetsUpTheWorker();
   TestLatencySwitchPublishesWithoutStop();
   TestCrashMutesOnlyThatInstance();
+  TestSilentInputStillReachesThePlugin();
   TestDelayedReadyAcrossAPublication();
   TestStateReadReflectsQueuedParameter();
   return 0;
@@ -6829,6 +6915,7 @@ int main(const int argc, const char* const argv[]) {
   TestStaleUrgentInstrumentEventIsDiscardedAfterTransportEpochAdvance();
   TestPausedProcessDoesNotAdvanceTransportFrame();
   TestProcessorStatePatchTimeoutCancelsAndReusesSlot();
+  TestStartPublishesRunningBeforeTheDeviceOpens();
   TestPatchClaimResolvesWhilePausedAndQuiet();
   TestPatchClaimsAreSerializedUntilReported();
   TestPatchClaimAckBeforeRecordStillReports();

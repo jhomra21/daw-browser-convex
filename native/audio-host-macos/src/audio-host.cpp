@@ -95,8 +95,17 @@ std::atomic<bool> test_no_plugin_workers{false};
 // Replaces the worker executable (a child that is slow to exit). Set from the test thread
 // before any attach; the command thread is that same thread.
 std::string test_worker_executable;
+// Stands in for the CoreAudio device: runs inside Start where the device would start its IO callback.
+std::atomic<bool (*)(AudioHost*, void**)> test_device_start{nullptr};
 #endif
 #endif
+
+bool OpenOutputDevice(const HostConfig& config, AudioHost* host, void** session) {
+#if defined(DAW_AUDIO_HOST_TEST_PATCH_CLAIM) && DAW_AUDIO_HOST_TEST_PATCH_CLAIM == 1
+  if (const auto start = test_device_start.load(std::memory_order_acquire)) return start(host, session);
+#endif
+  return StartCoreAudioDevice(config.device_uid, config.sample_rate_hz, config.channel_count, host, session);
+}
 
 template <std::size_t Size>
 Diagnostics::DurationQuantiles DurationQuantiles(
@@ -3611,6 +3620,10 @@ void SetTestPatchClaimDiscard(const bool discard) {
   test_patch_claim_discard.store(discard, std::memory_order_release);
 }
 
+void SetTestDeviceStart(bool (*const start)(AudioHost*, void**)) {
+  test_device_start.store(start, std::memory_order_release);
+}
+
 void AudioHostTestAccess::UseNoPluginWorkers(const bool use) {
   test_no_plugin_workers.store(use, std::memory_order_release);
 }
@@ -5538,12 +5551,7 @@ bool AudioHost::Start() {
   // being started. Publish the running state before opening the device so
   // that the first callback is processed rather than counted as rejected.
   impl_->state.store(LifecycleState::kRunning, std::memory_order_release);
-  if (!StartCoreAudioDevice(
-    impl_->config.device_uid,
-    impl_->config.sample_rate_hz,
-    impl_->config.channel_count,
-    this,
-    &impl_->device_session)) {
+  if (!OpenOutputDevice(impl_->config, this, &impl_->device_session)) {
     impl_->state.store(LifecycleState::kConfigured, std::memory_order_release);
     impl_->StopNativeVstWorkers();
     return false;

@@ -1337,6 +1337,7 @@ test('fingerprints all playback-relevant audio clip compiler fields for paused p
   const previousWindow = globalThis.window
   const [tracks, setTracks] = createSignal([audioTrack(new TestAudioBuffer())])
   const fixture = createNativeHookBridge(undefined, undefined, undefined, undefined, "failed", true)
+  const reload = createProjectReload()
   let compiles = 0
   const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]["transport"]) => {
     compiles += 1
@@ -1349,7 +1350,7 @@ test('fingerprints all playback-relevant audio clip compiler fields for paused p
     createRoot((cleanup) => {
       dispose = cleanup
       return useTimelinePlayback(createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine, { getTracks: () => tracks() }, {
-        requiresNativeAudio: true, enabled: () => true, projectId: () => "project", compileSnapshot,
+        requiresNativeAudio: true, enabled: () => true, projectId: () => "project", projectGeneration: reload.projectGeneration, compileSnapshot,
       })
     })
     await flushMicrotasks()
@@ -1370,6 +1371,11 @@ test('fingerprints all playback-relevant audio clip compiler fields for paused p
       leftPad: await recompiledBy({ leftPadSec: 0.5 }),
       bufferOffset: await recompiledBy({ bufferOffsetSec: 0.25 }),
     }).toEqual({ renamed: false, zeroOffsets: false, moved: true, gain: true, leftPad: true, bufferOffset: true })
+    // A project reload disposes the paused preview and prepares it again, whatever the edits left.
+    const beforeReload = compiles
+    reload.reload()
+    for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
+    expect(compiles).toBeGreaterThan(beforeReload)
     dispose()
   } finally {
     Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
@@ -8536,6 +8542,7 @@ test('B6f5 renaming a track while paused on native does not recompile the paused
   const [tracks, setTracks] = createSignal([audioTrack(new TestAudioBuffer())])
   const fixture = createNativeHookBridge(undefined, undefined, undefined, undefined, "failed", true)
   const faults: string[] = []
+  const reload = createProjectReload()
   let compiles = 0
   const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]["transport"]) => {
     compiles += 1
@@ -8548,7 +8555,7 @@ test('B6f5 renaming a track while paused on native does not recompile the paused
     const playback = createRoot((cleanup) => {
       dispose = cleanup
       return useTimelinePlayback(createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine, { getTracks: () => tracks() }, {
-        requiresNativeAudio: true, enabled: () => true, projectId: () => "project", compileSnapshot,
+        requiresNativeAudio: true, enabled: () => true, projectId: () => "project", projectGeneration: reload.projectGeneration, compileSnapshot,
         reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
       })
     })
@@ -8560,8 +8567,12 @@ test('B6f5 renaming a track while paused on native does not recompile the paused
     const renamed = { compiles: compiles - prepared.compiles, begins: fixture.calls.filter((call) => call === "begin").length - prepared.begins }
     setTracks((current) => current.map((entry) => ({ ...entry, volume: 0.25 })))
     await flushMicrotasks()
-    expect({ prepared: prepared.prepared, renamed, volumeRecompiled: compiles - prepared.compiles - renamed.compiles > 0, faults })
-      .toEqual({ prepared: true, renamed: { compiles: 0, begins: 0 }, volumeRecompiled: true, faults: [] })
+    const beforeReload = compiles
+    // A project reload disposes the paused preview and prepares it again.
+    reload.reload()
+    for (let turn = 0; turn < 200; turn += 1) await Promise.resolve()
+    expect({ prepared: prepared.prepared, renamed, volumeRecompiled: beforeReload - prepared.compiles - renamed.compiles > 0, reloadedPreview: compiles > beforeReload && playback.isNativePlaybackPrepared(), faults })
+      .toEqual({ prepared: true, renamed: { compiles: 0, begins: 0 }, volumeRecompiled: true, reloadedPreview: true, faults: [] })
     dispose()
   } finally {
     Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
@@ -9008,6 +9019,7 @@ test('C0G the clip fingerprint names every clip field a playback compile reads, 
     const previousWindow = globalThis.window
     const [tracks, setTracks] = createSignal([audioTrack(new TestAudioBuffer())])
     const fixture = createNativeHookBridge(undefined, undefined, undefined, undefined, "failed", true)
+    const reload = createProjectReload()
     let compiles = 0
     const compileSnapshot = async (transport: Parameters<typeof compileLivePlaybackSnapshot>[0]["transport"]) => {
       compiles += 1
@@ -9020,7 +9032,7 @@ test('C0G the clip fingerprint names every clip field a playback compile reads, 
       createRoot((cleanup) => {
         dispose = cleanup
         return useTimelinePlayback(createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine, { getTracks: () => tracks() }, {
-          requiresNativeAudio: true, enabled: () => true, projectId: () => "project", compileSnapshot,
+          requiresNativeAudio: true, enabled: () => true, projectId: () => "project", projectGeneration: reload.projectGeneration, compileSnapshot,
           reportFault: () => undefined,
         })
       })
@@ -9029,7 +9041,12 @@ test('C0G the clip fingerprint names every clip field a playback compile reads, 
       const prepared = compiles
       setTracks((current) => current.map((entry) => ({ ...entry, clips: entry.clips.map(edit) })))
       for (let turn = 0; turn < 40; turn += 1) await flushMicrotasks()
-      return compiles > prepared
+      const recompiled = compiles > prepared
+      // Whatever the edit did, a project reload disposes the paused preview and prepares it again.
+      reload.reload()
+      for (let turn = 0; turn < 40; turn += 1) await flushMicrotasks()
+      expect(compiles).toBeGreaterThan(prepared + (recompiled ? 1 : 0))
+      return recompiled
     } finally {
       dispose()
       Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })

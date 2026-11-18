@@ -2149,56 +2149,61 @@ struct AudioHost::Impl {
     NotifyScheduleProgress();
   }
 
+  void ReportInstrumentRejections() {
+    std::fprintf(stderr, "[native-instrument] permanent event rejection {total:%llu,firstNode:%llu,firstSequence:%llu}; valid subset rendered\n",
+      static_cast<unsigned long long>(rejected_instrument_count.load(std::memory_order_acquire)),
+      static_cast<unsigned long long>(rejected_instrument_node.load(std::memory_order_relaxed)),
+      static_cast<unsigned long long>(rejected_instrument_sequence.load(std::memory_order_relaxed)));
+    Evidence("instrument-event-rejected", "permanent-core-validation-failure");
+  }
+
+  // The running loop and the final drain after it both dispatch here.
+  void DispatchRealtimeBridge(const std::uint32_t pending, const bool final_drain) {
+    if ((pending & kRealtimeAssetReaders) != 0) WakeAssetControl();
+    // The capture tap can hold samples whose pending bit was consumed by an earlier drain; the last drain empties it.
+    if (final_drain || (pending & kRealtimeAcceptanceCapture) != 0) DrainAcceptanceCapture();
+    if ((pending & kRealtimePublishAcknowledged) != 0) PublicationEvidence("block-boundary");
+    if ((pending & kRealtimeInstrumentRejected) != 0) ReportInstrumentRejections();
+    if ((pending & kRealtimeLatencyCompleted) != 0) Evidence("latency-move-complete", "reader-epoch");
+    if ((pending & kRealtimePublishAcknowledged) != 0) publish_wait.notify_all();
+    if ((pending & kRealtimeProcessorPatchAcknowledged) != 0) {
+      publish_wait.notify_all();
+      // The ack of a claimed patch is reported on a progress frame even while paused and quiet.
+      PublishScheduleProgressChange();
+    }
+    if ((pending & kRealtimeRecordingStatus) != 0) NotifyRecordingStatus();
+    if ((pending & NativeMeterObserver::kMeterReadyBit) != 0) meter_wait.notify_all();
+    if ((pending & (1U << 4U)) != 0) spectrum_wait.notify_all();
+    if ((pending & (kRealtimeScheduleProgress | kRealtimeLatencyCompleted)) != 0) {
+      if (observer
+        && (observer->observedEpoch != schedule_progress_epoch.load()
+          || observer->observedRunning != schedule_progress_running.load())) {
+        observer->observedEpoch = schedule_progress_epoch.load();
+        observer->observedRunning = schedule_progress_running.load();
+        Evidence("transport");
+      }
+      // A live parameter write, such as a manual override of an automated one, publishes no graph: the callback's
+      // applied sequence is the only sign it landed. Reset to zero by a stop, which is not an application.
+      const auto processor_sequence = schedule_progress_processor.load(std::memory_order_acquire);
+      if (observer && processor_sequence != observer->observedProcessorSequence) {
+        observer->observedProcessorSequence = processor_sequence;
+        if (processor_sequence != 0) {
+          char detail[64];
+          std::snprintf(detail, sizeof(detail), ",\"appliedProcessorSequence\":\"%llu\"",
+            static_cast<unsigned long long>(processor_sequence));
+          Evidence("processor-sequence-applied", "block-boundary", 0, detail);
+        }
+      }
+      NotifyScheduleProgress();
+    }
+  }
+
   void StartRealtimeBridge() {
     realtime_bridge_running.store(true, std::memory_order_release);
     realtime_bridge_thread = std::thread([this] {
-      const auto report_instrument_rejections = [this] {
-        std::fprintf(stderr, "[native-instrument] permanent event rejection {total:%llu,firstNode:%llu,firstSequence:%llu}; valid subset rendered\n",
-          static_cast<unsigned long long>(rejected_instrument_count.load(std::memory_order_acquire)),
-          static_cast<unsigned long long>(rejected_instrument_node.load(std::memory_order_relaxed)),
-          static_cast<unsigned long long>(rejected_instrument_sequence.load(std::memory_order_relaxed)));
-        Evidence("instrument-event-rejected", "permanent-core-validation-failure");
-      };
       while (realtime_bridge_running.load(std::memory_order_acquire)) {
         const std::uint32_t pending = realtime_bridge_pending.exchange(0, std::memory_order_acq_rel);
-        if ((pending & kRealtimeAssetReaders) != 0) WakeAssetControl();
-        if ((pending & kRealtimeAcceptanceCapture) != 0) DrainAcceptanceCapture();
-        if ((pending & kRealtimePublishAcknowledged) != 0) PublicationEvidence("block-boundary");
-        if ((pending & kRealtimeInstrumentRejected) != 0) report_instrument_rejections();
-        if ((pending & kRealtimeLatencyCompleted) != 0) {
-          Evidence("latency-move-complete", "reader-epoch");
-        }
-        if ((pending & kRealtimePublishAcknowledged) != 0) publish_wait.notify_all();
-        if ((pending & kRealtimeProcessorPatchAcknowledged) != 0) {
-          publish_wait.notify_all();
-          // The ack of a claimed patch is reported on a progress frame even while paused and quiet.
-          PublishScheduleProgressChange();
-        }
-        if ((pending & kRealtimeRecordingStatus) != 0) NotifyRecordingStatus();
-        if ((pending & NativeMeterObserver::kMeterReadyBit) != 0) meter_wait.notify_all();
-        if ((pending & (1U << 4U)) != 0) spectrum_wait.notify_all();
-        if ((pending & (kRealtimeScheduleProgress | kRealtimeLatencyCompleted)) != 0) {
-          if (observer
-            && (observer->observedEpoch != schedule_progress_epoch.load()
-              || observer->observedRunning != schedule_progress_running.load())) {
-            observer->observedEpoch = schedule_progress_epoch.load();
-            observer->observedRunning = schedule_progress_running.load();
-            Evidence("transport");
-          }
-          // A live parameter write, such as a manual override of an automated one, publishes no graph: the callback's
-          // applied sequence is the only sign it landed. Reset to zero by a stop, which is not an application.
-          const auto processor_sequence = schedule_progress_processor.load(std::memory_order_acquire);
-          if (observer && processor_sequence != observer->observedProcessorSequence) {
-            observer->observedProcessorSequence = processor_sequence;
-            if (processor_sequence != 0) {
-              char detail[64];
-              std::snprintf(detail, sizeof(detail), ",\"appliedProcessorSequence\":\"%llu\"",
-                static_cast<unsigned long long>(processor_sequence));
-              Evidence("processor-sequence-applied", "block-boundary", 0, detail);
-            }
-          }
-          NotifyScheduleProgress();
-        }
+        DispatchRealtimeBridge(pending, false);
         if (pending != 0) continue;
         // CoreAudio callbacks cannot wake scheduler primitives. This bounded
         // non-realtime bridge observes callback atomics within 100 microseconds.
@@ -2208,20 +2213,7 @@ struct AudioHost::Impl {
             || realtime_bridge_pending.load(std::memory_order_acquire) != 0;
         });
       }
-      const std::uint32_t pending = realtime_bridge_pending.exchange(0, std::memory_order_acq_rel);
-      if ((pending & kRealtimeInstrumentRejected) != 0) report_instrument_rejections();
-      DrainAcceptanceCapture();
-      if ((pending & kRealtimePublishAcknowledged) != 0) publish_wait.notify_all();
-      if ((pending & kRealtimeProcessorPatchAcknowledged) != 0) {
-        publish_wait.notify_all();
-        PublishScheduleProgressChange();
-      }
-      if ((pending & kRealtimeRecordingStatus) != 0) NotifyRecordingStatus();
-      if ((pending & NativeMeterObserver::kMeterReadyBit) != 0) meter_wait.notify_all();
-      if ((pending & (1U << 4U)) != 0) spectrum_wait.notify_all();
-      if ((pending & (kRealtimeScheduleProgress | kRealtimeLatencyCompleted)) != 0) {
-        NotifyScheduleProgress();
-      }
+      DispatchRealtimeBridge(realtime_bridge_pending.exchange(0, std::memory_order_acq_rel), true);
     });
   }
 

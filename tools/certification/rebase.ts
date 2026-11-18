@@ -123,6 +123,9 @@ const live = pass("live")
 const arms = getAt(baseline, ["mutations", "arms"])
 const changes: Rebase["changes"] = []
 const seedRecordChanges: Rebase["changes"] = []
+// The traced pair (campaigns a and b) observes seeds 1-100 twice; their determinism check already holds both equal, so a seed
+// record field moves once, and two different values for it refuse the run.
+const seedRecordChangeAt = new Map<string, Rebase["changes"][number]>()
 const refused: { job: string; path: string[]; reasons: string[] }[] = []
 const liveObserved = observations(live)
 if (reverted) {
@@ -157,7 +160,15 @@ for (const entry of liveObserved) {
   if (seedRecord) for (const invariant of unexercisedFor(entry.path)) if (z.object({ exercised: z.array(z.string()) }).safeParse(entry.value).data?.exercised.includes(invariant) === false) unexercisedLost.add(`${entry.path[1]}:${Number(entry.path[2]?.slice(1)) + 1}:${invariant}`)
   if (reasons.length > 0) refused.push({ job: entry.job, path: entry.path, reasons })
   // A seed record's changes are paths into seed-records.json, so they leave the `seedRecords` segment behind.
-  if (seedRecord) seedRecordChanges.push(...moved.map((change) => ({ ...change, path: change.path.slice(1) })))
+  if (seedRecord) for (const change of moved) {
+    const at = change.path.slice(1)
+    const seen = seedRecordChangeAt.get(at.join("\t"))
+    if (seen && !sameJson(seen.new, change.new)) fail(`seed record ${at.join(" / ")} was observed with two values`)
+    if (seen) continue
+    const moves = { ...change, path: at }
+    seedRecordChangeAt.set(at.join("\t"), moves)
+    seedRecordChanges.push(moves)
+  }
   else changes.push(...moved)
 }
 const unusedNowPassing = nowPassingNames.filter(({ test }) => !nowPassingUsed.has(leafName(test)))
